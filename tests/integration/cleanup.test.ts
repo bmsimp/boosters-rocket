@@ -8,7 +8,8 @@ import { accountingLink, auditLog, family, familyMoney, jobRun, parentAuthentica
 import * as schema from "@/lib/db/schema";
 import { getTableName, is } from "drizzle-orm";
 import { PgTable } from "drizzle-orm/pg-core";
-import { cleanUp, runCleanup, describeCleanup, CLEANED_TABLES, KEPT_TABLES, CLEANUP_JOB, RETIRED_SETTINGS, FINISHED_WRITES_DAYS, JOB_HISTORY_DAYS, REMINDER_CLAIM_DAYS, type CleanupCounts } from "@/lib/jobs/cleanup";
+import { cleanUp, runCleanup, describeCleanup, sweepExpiredChallenges, CHALLENGE_SWEEP_JOB, CLEANED_TABLES, KEPT_TABLES, CLEANUP_JOB, RETIRED_SETTINGS, FINISHED_WRITES_DAYS, JOB_HISTORY_DAYS, REMINDER_CLAIM_DAYS, type CleanupCounts } from "@/lib/jobs/cleanup";
+import { CHALLENGE_SWEEP_MARK, markJob, readMark } from "@/lib/jobs/marks";
 import { runDueJobs } from "@/lib/jobs/runner";
 import { RATE_LIMITS } from "@/lib/parents/rate-limit";
 import { CODE_TTL_MS, RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
@@ -379,5 +380,40 @@ describe("a run of the clean-up", () => {
     expect(describeCleanup({ staffSessions: 2, parentSessions: 1, signinCodes: 3, signinLinks: 0, unfinishedAuthenticators: 0, spentBackupCodes: 0, rememberedDevices: 0, rateLimitEvents: 4, emailChanges: 1, familyMoney: 1, jobRuns: 5, reminderClaims: 0, writeQueue: 0, verifications: 0, retiredSettings: 0 }))
       .toBe("Removed 2 expired staff sessions, 1 expired parent session, 3 sign-in codes, 4 rate-limit records, 1 expired email change, 1 set of figures for a family no longer in the roster and 5 old job records.");
     expect(describeCleanup({ ...NOTHING, reminderClaims: 3 })).toBe("Removed 3 reminder records older than a year.");
+  });
+});
+
+describe("the sweep of expired passkey challenges at every wake (slice SI-7a)", () => {
+  beforeEach(async () => { await resetDb(); });
+  const challenge = (id: string, expiresAt: Date) => ({ id, identifier: "passkey-challenge", value: "v", expiresAt });
+  const left = () => ids(db.select({ id: parentAuthVerification.id }).from(parentAuthVerification));
+
+  it("removes a challenge that ran out a second ago and keeps one at its end and one with a second left, and nothing of the staff door's", async () => {
+    await db.insert(parentAuthVerification).values([challenge("gone", at(-SEC)), challenge("edge", NOW), challenge("kept", at(SEC))]);
+    await db.insert(staffAuthVerification).values({ id: "staff-gone", identifier: "state", value: "v", expiresAt: at(-SEC) });
+    expect(await sweepExpiredChallenges(NOW)).toBe(1);
+    expect(await left()).toEqual(["edge", "kept"]);
+    expect(await ids(db.select({ id: staffAuthVerification.id }).from(staffAuthVerification))).toEqual(["staff-gone"]);
+    expect(await sweepExpiredChallenges(NOW)).toBe(0);
+  });
+
+  it("runs at every wake, not only when the daily clean-up is due, and is in the wake's answer and its mark only when it removed some", async () => {
+    // The daily clean-up has just run, so it isn't due at this wake.
+    expect(await runDueJobs()).toEqual({ ran: [] });
+    expect(await readMark(CHALLENGE_SWEEP_MARK)).toBeNull();
+    await db.insert(parentAuthVerification).values([challenge("gone", new Date(Date.now() - SEC)), challenge("kept", new Date(Date.now() + 5 * 60 * SEC))]);
+    const auditedBefore = (await db.select().from(auditLog)).length;
+    expect(await runDueJobs()).toEqual({ ran: [{ job: CHALLENGE_SWEEP_JOB, ok: true }] });
+    expect(await left()).toEqual(["kept"]);
+    expect((await readMark(CHALLENGE_SWEEP_MARK))?.did).toEqual({ challenges: 1 });
+    // Nothing of it is audited: the rows are the library's.
+    expect((await db.select().from(auditLog)).length).toBe(auditedBefore);
+  });
+
+  it("after a sweep that failed, marks the next one that works even when it removed nothing, so the Health page's clean-up line clears", async () => {
+    expect(await runDueJobs()).toEqual({ ran: [] });
+    await markJob(CHALLENGE_SWEEP_MARK, "threw");
+    expect(await runDueJobs()).toEqual({ ran: [] });
+    expect(await readMark(CHALLENGE_SWEEP_MARK)).toMatchObject({ failedLast: false, did: null });
   });
 });

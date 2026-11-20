@@ -24,6 +24,7 @@ import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
 import { stepPersonFor } from "../helpers/parent-door";
 import { seedDevice, seedPassword } from "../helpers/signin-links";
 import { seedAuthenticator } from "../helpers/authenticator";
+import { seedPasskey } from "../helpers/passkey";
 
 /**
  * The emailed code, which since the sign-in release's slice SI-3b is the second step of a sign-in on a new device: sent
@@ -86,6 +87,21 @@ describe("sending the second step's code", () => {
     expect(mail.attempted).toEqual([]);
     expect(await db.select().from(signinCode)).toEqual([]);
     expect((await audits("signin.code_refused")).map((a) => a.after)).toEqual([{ reason: "has_second_factor" }]);
+  });
+
+  it("sends nothing at the door to a person with a passkey, and the step goes on to it (slice SI-7a); asking again sends the code, until SI-7b", async () => {
+    const p = await ana();
+    await seedPasskey(p.id);
+    const r = await sendSecondStepCode(await stepOf(), IP, T0);
+    await r.delivery;
+    expect([r.ended, r.passkey, r.app]).toEqual([false, true, undefined]);
+    expect(mail.attempted).toEqual([]);
+    expect(await db.select().from(signinCode)).toEqual([]);
+    expect((await audits("signin.code_refused")).map((a) => a.after)).toEqual([{ reason: "has_second_factor" }]);
+    const again = await sendSecondStepCode(await stepOf(), IP, T0, "change");
+    await again.delivery;
+    expect([again.ended, again.passkey, again.app]).toEqual([false, undefined, undefined]);
+    expect(mail.outbox.map((m) => m.to)).toEqual(["ana@example.com"]);
   });
 
   it("an unfinished app set-up is no second step: the code is sent as before", async () => {

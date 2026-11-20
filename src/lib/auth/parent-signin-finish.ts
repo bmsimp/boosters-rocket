@@ -1,10 +1,13 @@
-// The one way a parent's sign-in is finished (the sign-in release, slices SI-3a, SI-3b and SI-6a). Every way in ends here
-// (a password and an emailed code, a password and an authenticator app's code or a backup code, a password on a
-// remembered device, a set-up link's password), and nowhere else is a
+// The one way a parent's sign-in is finished (the sign-in release, slices SI-3a, SI-3b, SI-6a and SI-7a). Every way in ends here
+// (a password and an emailed code, a password and an authenticator app's code, a backup code or a passkey, a passkey
+// alone, a password on a remembered device, a set-up link's password), and nowhere else is a
 // parent session made or its cookie set: tests/unit/one-way-in.test.ts reads every source file under src/ and fails for
 // anything that does either outside this module (the cookies of the pending step and the device are set through
 // parent-signin-step.ts, which this module calls), and for a call of the finish from anywhere but the parent code
-// plugin (parent-code-plugin.ts), whose endpoints are the only callers. So no way in can skip the checks below. Server only.
+// plugin (parent-code-plugin.ts), whose endpoints are the only callers. So no way in can skip the checks below. Since
+// slice SI-7a the session is made inside the finish's scope (whileFinishing(), finish-scope.ts), and the parent
+// instance refuses any session made outside it, so no library route (the passkey library's own sign-in among them) makes
+// one either. Server only.
 import "server-only";
 import type { GenericEndpointContext } from "better-auth";
 import { setSessionCookie } from "better-auth/cookies";
@@ -17,10 +20,12 @@ import { recordStrongSignin } from "@/lib/parents/devices";
 import { PARENT_SESSION_COOKIE_SECONDS } from "@/lib/parents/sessions";
 import { landingPath, withReturnPath } from "./return-path";
 import { clearPendingStep, readDeviceToken, setDeviceCookie } from "./parent-signin-step";
+import { whileFinishing } from "./finish-scope";
 
 /**
  * What the sign-in proved: a password and an emailed code, a password and an authenticator app's code or a backup code
- * (since slice SI-6a), a password and a remembered device, or a set-up link (signin-codes.ts). A code of any kind alone
+ * (since slice SI-6a), a password and a passkey, or a passkey alone (since slice SI-7a: a passkey is two steps in one,
+ * open question 35), a password and a remembered device, or a set-up link (signin-codes.ts). A code of any kind alone
  * is no proof: there is no such kind.
  */
 export type { SigninProof } from "@/lib/parents/signin-codes";
@@ -32,7 +37,8 @@ const REFUSED: SigninFinish = { ok: false };
 /**
  * Finishes a sign-in whose proof has been checked, in this order, which must not change:
  * 1. the person's sign-in account (`parent_auth_user`) and Better Auth's user for it, refused when there is none;
- * 2. the session, made with no family chosen (`familyId: null`). It is stored before the last check and before
+ * 2. the session, made with no family chosen (`familyId: null`), inside the finish's scope (whileFinishing(): the
+ *    parent instance refuses a session made anywhere else, slice SI-7a). It is stored before the last check and before
  *    anything is audited as a sign-in, so an address change, a block or a password reset that lands at this moment
  *    cannot leave a session behind;
  * 3. the last check (signinStands(), signin-codes.ts), which reads under the person's lock that the address is still
@@ -42,10 +48,11 @@ const REFUSED: SigninFinish = { ok: false };
  *    sign-in audited; a session ended in the meantime, or a person left with no row that counts, is refused with no
  *    cookie;
  * 5. the strong step (recordStrongSignin(), src/lib/parents/devices.ts): in one transaction, the device remembered (a
- *    new one for a code's, an app's, a backup code's or a link's sign-in, unless the browser's device cookie names a
- *    live device of this person, which is renewed, so Strict's app step on a remembered device makes no copy of it; the
- *    one used renewed for a remembered device's) and, only when the sign-in itself proved a second step (the emailed code, the app or a backup code, or a
- *    set-up link), the session's `strong_at` set: a password on a
+ *    new one for a code's, an app's, a backup code's, a passkey's or a link's sign-in, unless the browser's device
+ *    cookie names a live device of this person, which is renewed, so Strict's app step on a remembered device makes no
+ *    copy of it; the one used renewed for a remembered device's) and, only when the sign-in itself proved a second step
+ *    (the emailed code, the app, a backup code or a passkey, after a password or, for a passkey, alone, or a set-up
+ *    link), the session's `strong_at` set: a password on a
  *    remembered device leaves it null; refused (a block, or the session ended, or the device gone), the session is
  *    deleted and no cookie is set;
  * 6. the cookies: the session's, sent this once with the longest life browsers allow (PARENT_SESSION_COOKIE_SECONDS,
@@ -62,7 +69,7 @@ export async function finishParentSignin(ctx: GenericEndpointContext,
   const [u] = await db.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, o.parentId));
   const user = u ? await ctx.context.internalAdapter.findUserById(u.id) : null;
   if (!user) return REFUSED;
-  const session = await ctx.context.internalAdapter.createSession(user.id, false, { familyId: null });
+  const session = await whileFinishing(() => ctx.context.internalAdapter.createSession(user.id, false, { familyId: null }));
   if (!(await signinStands(o.parentId, o.email, o.ip, o.proof))) {
     await ctx.context.internalAdapter.deleteSession(session.token);
     return REFUSED;

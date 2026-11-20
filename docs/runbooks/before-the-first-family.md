@@ -157,8 +157,9 @@ What the page can't do is walk the portal's own screens. Do these in the sandbox
 4. **A parent edits their details.** On a phone, as that parent: Family, **Update my details**, change the phone and
    the address, save.
    **Pass:** the page says "Saved.", the details box on Family and Home shows the new phone, and the audit log has a
-   `parent.details.save` row with before and after that reads well. Nothing is sent to QuickBooks for it yet (a
-   later update sends it on). Then open the edit page in two tabs, save a change in one and then another change in
+   `parent.details.save` row with before and after that reads well. Within a minute or two (the worker's next wake),
+   the parent's own record in QuickBooks shows the new phone and address, and the audit log has a
+   `roster.customer.contact` row for it; Reconciliation shows nothing waiting for it. Then open the edit page in two tabs, save a change in one and then another change in
    the other: the second says the details changed while you were editing, so nothing was saved, and shows them as they
    stand. **If not:** note what was saved where.
 5. **A payment requirement.** In Seasons, give a payment requirement its product (**Read the list from QuickBooks**
@@ -456,6 +457,11 @@ The proof-of-concept host has no Documenso. Forms need a full installation from 
     [backups, "Checking a backup can be restored"](backups.md#checking-a-backup-can-be-restored) says. If you want it
     proven end to end, start a second Documenso against the restored database.
     **Pass:** each says `Restored ...`. **If not:** its message and exit code.
+19. **Settle the portal's address before parents are offered passkeys.** A passkey belongs to `APP_URL`'s host name:
+    once parents have added passkeys, changing the address stops every one, and locks out each parent whose only
+    second step is a passkey until an Admin resets their sign-in ([a first installation, part 3](first-install.md#3-fill-in-the-settings)).
+    **Pass:** the address in `deploy/.env` is the one the club will keep. **If not:** change it now, before any parent
+    has a passkey.
 
 The Documenso verification's own owner checks (its section 9, in `docs/superpowers/specs/2026-11-15-documenso-verification.md`)
 are here: its 1 and 2 (signing on an iPhone and on Android) and 4 (the phone's address on the certificate page) are
@@ -522,8 +528,16 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    linked to (or on a parent record under it), and otherwise **Several possible** or **No match**. Don't press
    **Create a family from this** or **Create in QuickBooks and link** for a family that reads Suggested or Several
    possible: either makes a second family or customer, and nothing links the two yet; and the
-   count of customers with no family matches Reconciliation's list. **If not:** note the family, the status it read and
-   what you expected; a suggestion that names the wrong customer is the most important to report.
+   count of customers with no family matches Reconciliation's list. A linked family whose records differ from the
+   books' copy reads **Linked, with differences** instead, still saying how its link was made, and its row's opening
+   lists each difference with the portal's value and the books': a family you brought in has the Parent customers
+   QuickBooks holds under it counted until its guardians are linked to them; rename a student in QuickBooks, refresh
+   the roster, and that family shows both names; a student moved to another family in QuickBooks shows where
+   QuickBooks has them, in the words the family's page uses; a change waiting or kept on Reconciliation is named in
+   Reconciliation's words with a link there. Under the status filter, Carried over and Linked, with differences can
+   count the same family, and the page says so. **If not:** note the family, the status it read and
+   what you expected; a suggestion that names the wrong customer is the most important to report, then a difference
+   that isn't one (both values the same) or one the page misses.
 
 ## 7. A pilot with a few families
 

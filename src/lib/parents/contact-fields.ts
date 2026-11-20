@@ -19,9 +19,9 @@ export type ContactForm = { values: ContactValues; version: string };
  * this was written, so these are chosen to sit at or under what QuickBooks is known to take: 30 for a phone number
  * (the limit QuickBooks itself reports for one), and for the address well under its 500 a line, 255 for a city,
  * state or country and 30 for a postal code. The owner's sandbox check confirms a phone of 30 characters is accepted
- * (CUSTOMER_UPDATE in src/lib/quickbooks/client.ts). Since stage 3's slice 11a the values are the portal's own and
- * nothing on the parent's save is sent to QuickBooks (S11b sends each change on); a value the take-in brought from
- * QuickBooks can be longer than these (fieldErrors()).
+ * (CUSTOMER_UPDATE in src/lib/quickbooks/client.ts). Since stage 3's slice 11a the values are the portal's own, and
+ * since slice 11b each change a parent saves is sent on to QuickBooks after the save, by the write queue's worker; a
+ * value the take-in brought from QuickBooks can be longer than these (fieldErrors()).
  */
 export const CONTACT_FIELDS: readonly { name: ContactField; label: string; max: number }[] = [
   { name: "phone", label: "Phone", max: 30 },
@@ -76,6 +76,27 @@ export function asShown(value: string): string {
 
 /** A mailing address as the form holds it: every field of ContactValues but the phone. */
 export type AddressValues = Omit<ContactValues, "phone">;
+
+/** One part of a detail in the normal form detailKey() compares by. */
+const normalPart = (v: string | null | undefined) => asShown(v ?? "").replace(/\s+/gu, " ").trim().toLowerCase();
+
+/**
+ * A phone (a string) or a mailing address, in the one normal form every comparison of a phone or an address with
+ * QuickBooks' uses (stage 3's slices 11a and 11b): the take-in, deciding whether a person's records agree
+ * (./contact-take-in.ts), and a parent's change sent on, deciding whether QuickBooks still holds what the portal
+ * last knew it held (src/lib/roster/writes.ts). Each part as the form shows it (asShown()), runs of white space as one
+ * space, letter case ignored. Null for none: an empty phone, or an address whose parts are all empty. Two details are
+ * the same when their keys are. Pure.
+ */
+export function detailKey(detail: string | Partial<AddressValues> | null | undefined): string | null {
+  if (detail === null || detail === undefined) return null;
+  if (typeof detail === "string") {
+    const phone = normalPart(detail);
+    return phone === "" ? null : phone;
+  }
+  const parts = [detail.line1, detail.line2, detail.city, detail.region, detail.postalCode, detail.country].map(normalPart);
+  return parts.every((p) => p === "") ? null : JSON.stringify(parts);
+}
 /** Nothing of one address field is kept past this: QuickBooks holds at most 500 a line, and address lines 2 to 5 are joined. */
 const MAX_ADDRESS_KEPT = 2_000;
 

@@ -97,8 +97,9 @@ describe("one way in", () => {
   it("the finish is called only by the parent code plugin's endpoints", () => {
     const callers = files.filter((f) => f !== FINISH && /\bfinishParentSignin\s*\(/.test(code(read(f))));
     expect(callers, `Only ${PLUGIN} may call finishParentSignin() (AGENTS.md, "Sign-in release").`).toEqual([PLUGIN]);
-    // The password on a remembered device, the password and code, and the set-up link's server-only endpoint all finish through it.
-    expect(code(read(PLUGIN)).match(/\bfinishParentSignin\s*\(/g)).toHaveLength(3);
+    // The password on a remembered device, a second step (the code, the app or a passkey, through finishSecondStep()), a
+    // passkey alone (slice SI-7a) and the set-up link's server-only endpoint all finish through it.
+    expect(code(read(PLUGIN)).match(/\bfinishParentSignin\s*\(/g)).toHaveLength(4);
   });
 
   it("a set-up link's sign-in is started only by the link's form action, and only the copy names the server-only endpoint", () => {
@@ -119,10 +120,26 @@ describe("one way in", () => {
     expect(code(read(SETUP_COOKIE))).not.toMatch(/br_parent/);
   });
 
-  it("the parent Better Auth instance has the parent code plugin and no other, so no library route makes a session", () => {
-    // A plugin's routes run in node_modules, where the scans above can't read: one added here (a passkey's, say) could
-    // make a session with no last check. Adding one is a decision, and its sign-in goes through the finish.
-    expect([...code(read(PARENT_AUTH)).matchAll(/\bplugins\s*:\s*\[([^\]]*)\]/g)].map((m) => m[1]!.trim())).toEqual(["parentCodePlugin()"]);
+  it("the parent Better Auth instance has the parent code plugin and the passkey library's, and no other", () => {
+    // A plugin's routes run in node_modules, where the scans above can't read: one added here could make a session with
+    // no last check. Adding one is a decision (the passkey library's was slice SI-7a's), its sign-in goes through the
+    // finish, and the guard below refuses any session it makes itself.
+    const s = code(read(PARENT_AUTH));
+    expect([...s.matchAll(/\bplugins\s*:\s*\[([^\]]*)\]/g)].map((m) => m[1]!.trim())).toEqual(["parentCodePlugin(), parentPasskeys()"]);
+    // parentPasskeys() is the passkey library's plugin, and nothing else.
+    expect(s).toMatch(/const\s+parentPasskeys\s*=\s*\(\)\s*=>\s*passkey\(\{/);
+    expect(s).toMatch(/import\s*\{\s*passkey\s*\}\s*from\s*"@better-auth\/passkey"/);
+  });
+
+  it("the parent instance refuses every session made outside the finish, and only the finish enters its scope", () => {
+    // The guard (slice SI-7a, the lead's decision 3): the session create hook asks isFinishing() and nothing else, so no
+    // library route (the passkey library's own verify-authentication among them) makes a session.
+    expect(code(read(PARENT_AUTH))).toMatch(/create\s*:\s*\{\s*before\s*:\s*async\s*\(\s*\)\s*=>\s*\(\s*isFinishing\(\)\s*\?\s*undefined\s*:\s*false\s*\)\s*\}/);
+    const entering = files.filter((f) => f !== "src/lib/auth/finish-scope.ts" && /\bwhileFinishing\s*\(/.test(code(read(f))));
+    expect(entering, "Only the finish may enter the finish's scope.").toEqual([FINISH]);
+    const finish = code(read(FINISH));
+    expect(finish).toMatch(/whileFinishing\(\s*\(\)\s*=>\s*ctx\.context\.internalAdapter\.createSession\(\s*user\.id,\s*false,\s*\{\s*familyId:\s*null\s*\}\s*\)\s*\)/);
+    expect(finish.match(/\bwhileFinishing\s*\(/g)).toHaveLength(1);
   });
 
   it("the finish still makes the session, asks signinStands() and completeParentSignin(), records the strong sign-in, and sets the cookie, in that order", () => {

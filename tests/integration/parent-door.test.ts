@@ -30,6 +30,8 @@ import { DOOR_IP, DOOR_PASSWORD, appStep, codeMailed, codeStep, cookieNamed, pas
 import { appCode, seedAuthenticator, seedBackupCodes } from "../helpers/authenticator";
 import { seedCode, seedPassword } from "../helpers/signin-links";
 import { SIGNINS_ON, seedParentSettings, storeShape } from "../helpers/roster-cache";
+import { ORIGIN, RP_ID, passkeyOptions, passkeyStep, postPasskey, seedPasskey } from "../helpers/passkey";
+import { assertionFor, makePasskeyKey } from "../helpers/passkey-keys";
 
 const IP = DOOR_IP;
 const staff = { actor: { door: "staff" as const, id: null, label: "board" }, ip: null };
@@ -405,12 +407,15 @@ describe("the parent door", () => {
     expect((o.session as { cookieCache?: { enabled?: boolean } } | undefined)?.cookieCache?.enabled ?? false).toBe(false);
     expect(o.advanced?.ipAddress?.ipAddressHeaders).toEqual(["x-booster-client-ip"]); // written by the portal itself: tests/integration/client-address.test.ts
     expect(o.emailAndPassword?.enabled).toBe(false);
-    // In front of the database limits, an in-memory cap per IP on the door's four routes (on when NODE_ENV is production;
-    // /portal-app/check since slice SI-6a, under the code check's own limit per IP, code_check_ip).
+    // In front of the database limits, an in-memory cap per IP on the door's five routes (on when NODE_ENV is production;
+    // /portal-app/check since slice SI-6a and /portal-passkey/check since SI-7a, under the code check's own limit per IP,
+    // code_check_ip), and on the passkey library's challenge, which writes a row for every visitor who asks (SI-7a's
+    // second read: the passkey check's own cap).
     // A minute of it allows what the database allows in 15, so it is never the first limit a full room meets.
     expect(o.rateLimit?.customRules).toEqual({
       "/portal-password/check": { window: 60, max: 180 }, "/portal-code/resend": { window: 60, max: 60 }, "/portal-code/check": { window: 60, max: 180 },
-      "/portal-app/check": { window: 60, max: 180 },
+      "/portal-app/check": { window: 60, max: 180 }, "/portal-passkey/check": { window: 60, max: 180 },
+      "/passkey/generate-authenticate-options": { window: 60, max: 180 },
     });
     expect((o.rateLimit as { enabled?: boolean } | undefined)?.enabled).toBeUndefined(); // Better Auth's default: on only in production
   });
@@ -455,8 +460,11 @@ describe("the parent door", () => {
 
   it("leaves a parent only the endpoints the portal uses", async () => {
     const auth = await getParentAuth();
-    // The door's four endpoints: since slice SI-6a, /portal-app/check takes an authenticator app's code or a backup code.
-    const reachable = ["/get-session", "/sign-out", "/portal-password/check", "/portal-code/resend", "/portal-code/check", "/portal-app/check", "/ok", "/error"];
+    // The door's five endpoints: since slice SI-6a, /portal-app/check takes an authenticator app's code or a backup code,
+    // and since SI-7a /portal-passkey/check a passkey; and the passkey library's challenge, which takes no query and no
+    // body. The library's six other paths are disabled (its own sign-in makes a session; adding passkeys is SI-7b's).
+    const reachable = ["/get-session", "/sign-out", "/portal-password/check", "/portal-code/resend", "/portal-code/check", "/portal-app/check",
+      "/portal-passkey/check", "/passkey/generate-authenticate-options", "/ok", "/error"];
     // Path-parameter routes can't be listed in disabledPaths (it matches exact paths). Neither can do anything here:
     // there are no social providers to call back to, and /reset-password/:token only redirects with a reset row of
     // Better Auth's own verification table, which the portal never writes: a person's password is set and reset by the
@@ -465,6 +473,49 @@ describe("the parent door", () => {
     const paths = Object.values(auth.api).map((e) => (e as { path?: string }).path).filter((p): p is string => !!p);
     const disabled = new Set(auth.options.disabledPaths ?? []);
     expect(paths.filter((p) => !disabled.has(p)).sort()).toEqual([...reachable, ...parameterized].sort());
+  });
+
+  it("disables every path of the passkey library but its challenge", async () => {
+    const disabled = new Set((await getParentAuth()).options.disabledPaths ?? []);
+    for (const path of ["/passkey/verify-authentication", "/passkey/generate-register-options", "/passkey/verify-registration",
+      "/passkey/list-user-passkeys", "/passkey/delete-passkey", "/passkey/update-passkey"]) expect([path, disabled.has(path)]).toEqual([path, true]);
+    expect(disabled.has("/passkey/generate-authenticate-options")).toBe(false);
+  });
+
+  it("the passkey library's own verify path answers 404 over HTTP, and through auth.api with a valid assertion makes no session and sets no cookie", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
+    const key = await seedPasskey(a.id);
+    const options = await passkeyOptions();
+    const assertion = assertionFor(key, options.body.challenge, { origin: ORIGIN, rpId: RP_ID });
+    // Over HTTP: not found, whatever it is sent.
+    expect((await post("/passkey/verify-authentication", { response: assertion }, options.challengeCookie)).status).toBe(404);
+    // In process, as a later caller might: the library verifies, writes its counter, asks for a session, and the guard
+    // refuses it before any row exists, so it throws before it sets any cookie.
+    const auth = await getParentAuth();
+    const res = await auth.api.verifyPasskeyAuthentication({ body: { response: assertion as never },
+      headers: new Headers({ cookie: options.challengeCookie, origin: env.APP_URL }), asResponse: true });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.headers.getSetCookie().filter((l) => /session_token=[^;]/.test(l))).toEqual([]);
+    expect(await db.select().from(parentAuthSession)).toEqual([]);
+    expect((await db.select().from(auditLog)).filter((x) => x.action === "signin" || x.action === "signin.second_step")).toEqual([]);
+    // And the finish still makes one: the same person's passkey at the portal's own door.
+    expect((await passkeyStep(key, { counter: 2 })).body).toEqual({ ok: true, next: "/" });
+    expect(await db.select().from(parentAuthSession)).toHaveLength(1);
+  });
+
+  it("signs nobody in at /portal-passkey/check with no assertion, a forged one, or one for no options", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
+    const key = await seedPasskey(a.id);
+    const options = await passkeyOptions();
+    for (const body of [{}, { response: null }, { response: "x" }, { response: { id: "x" } }, { response: { ...assertionFor(key, options.body.challenge, { origin: ORIGIN, rpId: RP_ID }), extra: 1 } }]) {
+      const res = await post("/portal-passkey/check", body, options.challengeCookie);
+      expect(await res.json()).toEqual({ ok: false, error: "rejected" });
+    }
+    expect((await passkeyStep(key, { signWith: makePasskeyKey() })).body).toEqual({ ok: false, error: "rejected" });
+    expect((await postPasskey(assertionFor(key, "bm8tb3B0aW9ucy13ZXJlLWFza2Vk", { origin: ORIGIN, rpId: RP_ID }))).body).toEqual({ ok: false, error: "rejected" });
+    expect(await db.select().from(parentAuthSession)).toEqual([]);
   });
 
   it("keeps Better Auth's password routes shut for a person who has a password", async () => {

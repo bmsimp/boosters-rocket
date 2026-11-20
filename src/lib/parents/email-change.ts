@@ -288,9 +288,9 @@ class NotFinished extends Error { constructor(readonly why: "session_ended" | "b
  * the change made in QuickBooks, sends nothing, and finishes the app's side, before or after the refresh asked for has
  * run (loadMyRecordForMyEmailChange()), until the link expires.
  *
- * The person's password, and (since the sign-in release's slice SI-6a) their authenticator app and backup codes, stay
- * as they are: a change of sign-in email forgets remembered devices and keeps the app (open question 36; passkeys too,
- * from SI-7).
+ * The person's password, and (since the sign-in release's slices SI-6a and SI-7a) their authenticator app, backup codes
+ * and passkeys, stay as they are: a change of sign-in email forgets remembered devices and keeps the app and the
+ * passkeys (open question 36).
  *
  * A token is spent when the change is made, or when it can never succeed. After a failure that changed nothing
  * (QuickBooks out of reach or busy, the record changed meanwhile, an answer the portal can't tell about) it works

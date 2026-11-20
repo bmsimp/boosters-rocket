@@ -14,9 +14,9 @@ export type LinkToMail = { mail: "setup" | "reset" } | { mail: null; reason: "st
  * - Strict (open questions 23 and 34): no set-up link is mailed on request, since under Strict a first password comes
  *   with a second factor the club sees set up (`strict_no_setup`); and a reset link only to a guardian who already has
  *   a second factor, a passkey or an authenticator app, so that a reset by email alone never opens an account
- *   (`strict_no_factor` otherwise). Since slice SI-6a an authenticator app in force counts (its caller reads it,
- *   password-request.ts); SI-7 adds passkeys. Nothing can set an app up until SI-6b, so until then nobody under Strict
- *   is mailed, and the page tells everyone that a guardian who can't sign in asks the club.
+ *   (`strict_no_factor` otherwise). Since slice SI-6a an authenticator app in force counts, and since SI-7a a passkey
+ *   (its caller reads both, hasSecondFactor(), passkeys.ts). The page tells everyone that a guardian who can't sign in
+ *   asks the club.
  */
 export function whichLinkToMail(o: { level: RequestLevel; hasPassword: boolean; hasSecondFactor: boolean }): LinkToMail {
   if (o.level === "standard") return { mail: o.hasPassword ? "reset" : "setup" };

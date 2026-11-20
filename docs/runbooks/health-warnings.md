@@ -27,6 +27,11 @@ installation with. `docker compose ps` shows what is running, and `docker compos
 - **"Not yet run"** on a new installation is normal: it runs once a day.
 - **"The last clean-up couldn't finish."** The worker tries again in 15 minutes. If it keeps failing, the note under the
   line has the reason; check the worker line too.
+- **"The worker's sweep of expired passkey sign-in requests ... failed at its last try."** Besides the daily clean-up,
+  the worker removes expired passkey sign-in requests at every wake, so that they never pile up beyond about five
+  minutes' worth. Until a sweep works again they wait for the daily clean-up instead. It tries again each minute, and
+  the line clears at the first sweep that works. If it stays, check the worker line and the database line, and
+  `docker compose logs worker`.
 
 ## QuickBooks
 
@@ -54,10 +59,12 @@ installation with. `docker compose ps` shows what is running, and `docker compos
   - "The roster hasn't been refreshed from QuickBooks in more than 2 days": the worker isn't running (see Worker).
   - "The membership shape names a customer type QuickBooks no longer has": someone renamed or removed a customer type in
     QuickBooks. **Settings**, **QuickBooks**, **Change**, step 3: choose the shape again.
-  - "Changes waiting for QuickBooks (staff roster changes and volunteer buy-out invoices): N waiting to reach
-    QuickBooks": changes staff made, or buy-out invoices a guardian asked for, that QuickBooks couldn't take yet (it was
-    busy or unreachable). They are tried again on their own, after 1, 5, 15 and 60 minutes, then every 6 hours.
-    Nothing to do unless they stay.
+  - "Changes waiting for QuickBooks (staff roster changes, parents' phones and mailing addresses, and volunteer buy-out
+    invoices): N waiting to reach QuickBooks": changes staff made, a guardian's new phone or mailing address (a parent's
+    sent on at the worker's next wake; a staff member's tried at once, and otherwise left for the worker about a
+    minute later), or buy-out invoices a guardian asked for, that QuickBooks hasn't taken yet (it was busy or
+    unreachable, or the worker hasn't woken since). They are tried again on their own, after 1, 5, 15 and 60 minutes,
+    then every 6 hours. Nothing to do unless they stay.
   - "... stuck and waiting for someone to try them again or give them up on the Reconciliation page": a change failed
     8 times or for 24 hours, or QuickBooks may already have it. Open **Reconciliation** (the line's link). For each,
     look at the customer in QuickBooks, then **Try again now** if it isn't there, or **Give up** if it is (or isn't
@@ -202,7 +209,11 @@ The emails the worker sends the day before each volunteer shift, and 14 and 3 da
 - **"Needs attention"**, with "The latest sign-ins have no address: the proxy in front of the portal doesn't send the
   header ...". `CLIENT_IP_HEADER` in `deploy/.env` names a header your proxy doesn't set. Find the one it does set
   ([a proxy of your own](first-install.md#a-proxy-of-your-own)), put it in `.env`, and `docker compose up -d app`.
-  With this installation's own proxy it is `x-forwarded-for`.
+  With this installation's own proxy it is `x-forwarded-for`. Until it is mended, no limit per address works: the
+  portal's sign-in limits that count by address are skipped, and the caps the sign-in library keeps on each sign-in
+  request (a passkey sign-in's first request among them, which any visitor may make) count every visitor together, so
+  one stranger sending many requests can make every parent wait a minute to sign in. The expired passkey requests
+  don't pile up: the worker deletes them at every wake, so there are never more than about five minutes' worth.
 - **"Needs attention"**, with "Welcome emails are waiting because mail is failing: ...". The last welcome email (or
   link to choose a password) the worker tried to send failed, so until one goes it tries one person a minute instead of
   five, and the people counted wait their turn. Mend the mail first: the [Outgoing mail](#outgoing-mail) line, and

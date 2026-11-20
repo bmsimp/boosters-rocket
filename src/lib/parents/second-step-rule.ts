@@ -9,14 +9,14 @@ export type StepLevel = "standard" | "strict";
  * The second step to ask for, or none and why (the reason goes in the `signin.password_refused` row only):
  * - `emailed_code`: a 6-digit code mailed to the person's sign-in address (signin_code, ./signin-codes.ts);
  * - `second_factor`: the person's own second factor: since slice SI-6a their authenticator app in force (its code or a
- *   backup code, /portal-app/check), which the password step reads (hasAuthenticator(), ./authenticator.ts); SI-7 adds
- *   passkeys.
+ *   backup code, /portal-app/check), and since slice SI-7a a passkey (/portal-passkey/check), which the password step
+ *   reads (hasAuthenticator(), ./authenticator.ts, and hasPasskey(), ./passkeys.ts).
  */
 export type SecondStep = { step: "emailed_code" | "second_factor" } | { step: null; reason: "strict_no_factor" };
 
 /**
  * - A person with a second factor of their own is asked for it at either level, never for the emailed code (open
- *   question 24: an authenticator-app holder never gets the code).
+ *   question 24: a holder of an authenticator app or a passkey never gets the code).
  * - Standard: otherwise the emailed code.
  * - Strict: an emailed code is never a second step (it proves only the mailbox, which the password's reset proves
  *   too), so a person with no second factor has none and is not signed in by password (`strict_no_factor`). A device

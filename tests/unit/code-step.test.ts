@@ -84,11 +84,25 @@ describe("the code step kept on the device", () => {
     expect(JSON.parse(store.data[CODE_STEP_KEY]!)).toEqual({ sentAt: T, next: "/forms", kind: "app" });
   });
 
-  it.each([["no kind (an older build's)", undefined], ["a kind it doesn't know", "passkey"], ["a kind that is not text", 1], ["the code's own", "code"]])(
+  it("keeps the passkey step with whether the app is offered beside it, so a reload draws it again (slice SI-7a)", () => {
+    for (const app of [true, false]) {
+      const store = memoryStore();
+      saveCodeStep(store, { sentAt: T, next: "/forms", kind: "passkey", app });
+      expect(loadCodeStep(store, T + 1000)).toEqual({ sentAt: T, next: "/forms", kind: "passkey", app });
+    }
+  });
+
+  it.each([["no kind (an older build's)", undefined], ["a kind it doesn't know", "security-key"], ["a passkey's kind with no app bit", "passkey"],
+    ["a kind that is not text", 1], ["the code's own", "code"]])(
     "reads a step with %s as the code step", (_what, kind) => {
       const store = memoryStore({ [CODE_STEP_KEY]: JSON.stringify({ sentAt: T, next: null, kind }) });
       expect(loadCodeStep(store, T + 1000)).toEqual({ sentAt: T, next: null, kind: "code" });
     });
+
+  it("reads a passkey step whose app bit is not true or false as the code step", () => {
+    const store = memoryStore({ [CODE_STEP_KEY]: JSON.stringify({ sentAt: T, next: null, kind: "passkey", app: "yes" }) });
+    expect(loadCodeStep(store, T + 1000)).toEqual({ sentAt: T, next: null, kind: "code" });
+  });
 
   it("does without a store that is missing or throws", () => {
     for (const store of [null, brokenStore]) {

@@ -19,13 +19,13 @@ import QuickBooksSetupPage from "@/app/staff/(app)/settings/quickbooks/setup/pag
 import { writeAudit } from "@/lib/audit/log";
 import { QUICKBOOKS_USE, QUICKBOOKS_WRITE_ACTION } from "@/lib/quickbooks/what-it-does";
 import { GET as liveness } from "@/app/api/health/route";
-import { healthReport, BACKUP_OLD_MS, MONEY_OLD_MS, SIGNIN_ADDRESS_LOOKBACK_MS, WORKER_LATE_MS, type HealthLine } from "@/lib/health/report";
+import { healthReport, BACKUP_OLD_MS, MONEY_OLD_MS, SIGNIN_ADDRESS_LOOKBACK_MS, SWEEP_FAILED, WORKER_LATE_MS, type HealthLine } from "@/lib/health/report";
 import { env } from "@/env";
 import { BACKUP_KEY } from "@/lib/health/backup";
 import { BUILD_VERSION } from "@/lib/health/version";
 import { runDueJobs, WAKE_KEY } from "@/lib/jobs/runner";
 import { CLEANUP_JOB } from "@/lib/jobs/cleanup";
-import { BUYOUT_CHECK_MARK, markJob, readMark, REMINDERS_MARK, WELCOME_MARK } from "@/lib/jobs/marks";
+import { BUYOUT_CHECK_MARK, CHALLENGE_SWEEP_MARK, markJob, readMark, REMINDERS_MARK, WELCOME_MARK } from "@/lib/jobs/marks";
 import { BUYOUT_CHECK_LATE_MS } from "@/lib/health/job-lines";
 import { getMailStatus, patchMailStatus } from "@/lib/mail/settings";
 import { ADMIN_ONLY } from "@/lib/permissions/registry";
@@ -245,8 +245,9 @@ describe("the health page", () => {
     }
     expect(QUICKBOOKS_USE.reads).toMatch(/families and members.*what each family owes/);
     expect(QUICKBOOKS_USE.writes).toMatch(/email address a parent signs in with.*new families, students, parents and members.*inactive.*never deletes/);
-    // A guardian's phone and mailing address are the portal's own (stage 3's slice 11a): nothing of them is sent there yet.
-    expect(QUICKBOOKS_USE.writes).not.toMatch(/phone|mailing address/);
+    // A guardian's phone and mailing address are the portal's own (stage 3's slice 11a), and sent on after the portal
+    // saves a parent's change (slice 11b), never over details the portal didn't know of.
+    expect(QUICKBOOKS_USE.writes).toMatch(/phone and mailing address, on their own record.*after the portal saves a change a parent or staff make to them, and never over details QuickBooks holds that the portal didn't know of/);
     expect(QUICKBOOKS_USE.reads).toMatch(/phone and mailing address are the portal's own: it takes them in once/);
     // A buy-out invoice carries the chooser's sign-in address so it can be paid online, and nothing is emailed (2026-11-17).
     expect(QUICKBOOKS_USE.writes).toMatch(/pay instead of volunteering.*sign-in email address as its bill-to address, so it can be paid online; nothing is emailed/);
@@ -303,6 +304,21 @@ describe("the health page", () => {
   it("says when the last clean-up failed", async () => {
     await db.insert(jobRun).values({ job: CLEANUP_JOB, startedBy: "worker", finishedAt: new Date(), outcome: "failed", detail: "The clean-up couldn't finish. Nothing was removed. (unexpected)" });
     expect(line(await healthReport(), "cleanup")).toMatchObject({ state: "attention", times: [{ label: "Last tried" }] });
+  });
+
+  it("says on the clean-up line when the sweep of expired passkey challenges at every wake last failed, until one works (slice SI-7a)", async () => {
+    await markJob(CHALLENGE_SWEEP_MARK, "threw");
+    const failedAt = (await readMark(CHALLENGE_SWEEP_MARK))!.failedAt;
+    expect(line(await healthReport(), "cleanup")).toMatchObject({ state: "attention", word: "Needs attention", says: SWEEP_FAILED,
+      times: [{ label: "Last ran", at: null }, { label: "Challenge sweep last failed", at: failedAt }] });
+    // The daily clean-up failing too: its own words, and the sweep's beside them.
+    await db.insert(jobRun).values({ job: CLEANUP_JOB, startedBy: "worker", finishedAt: new Date(), outcome: "failed", detail: "The clean-up couldn't finish. Nothing was removed. (unexpected)" });
+    expect(line(await healthReport(), "cleanup")).toMatchObject({ state: "attention", says: "The last clean-up couldn't finish. The worker tries again in 15 minutes.",
+      notes: ["The clean-up couldn't finish. Nothing was removed. (unexpected)", SWEEP_FAILED] });
+    await db.delete(jobRun);
+    // A sweep that works, even one that removed nothing, clears it.
+    await markJob(CHALLENGE_SWEEP_MARK, { counts: { challenges: 0 }, failed: 0 });
+    expect(line(await healthReport(), "cleanup")).toMatchObject({ state: "off", word: "Not yet run", notes: [], times: [{ label: "Last ran", at: null }] });
   });
 
   it("says when the reminders before a due date last looked, what they sent, and when the last one failed", async () => {

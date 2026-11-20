@@ -83,7 +83,7 @@ export async function missingForSignins(): Promise<string[]> {
 /**
  * Parent sign-ins switched on or off by an Admin. Off ends all of everyone's sign-in: welcome emails go off too, owed
  * welcomes are cleared, and every unused code, unused set-up or reset link, remembered device and session goes. The
- * passwords stay, and so (since the sign-in release's slice SI-6a) do the authenticator apps and backup codes, so
+ * passwords stay, and so (since the sign-in release's slices SI-6a and SI-7a) do the authenticator apps, backup codes and passkeys, so
  * switching sign-ins on again lets the same people in the same way. On needs working mail (missingForSignins()) and
  * opens or closes no guardian row.
  */

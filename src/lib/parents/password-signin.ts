@@ -19,6 +19,7 @@ import { takeIpLimit, type PasswordProof } from "./signin-codes";
 import { deviceOfAddress, rememberedDevice } from "./devices";
 import { secondStepFor } from "./second-step-rule";
 import { hasAuthenticator } from "./authenticator";
+import { hasPasskey } from "./passkeys";
 
 /** The most an address field may hold as sent, as on the request page (password-request.ts). */
 export const MOST_TYPED_ADDRESS = 320;
@@ -114,7 +115,9 @@ export type PasswordRefusal = "rate_limited" | "not_an_address" | "signins_off" 
  * checked against, the remembered device the request's device cookie names for this person, or null (none, expired,
  * forgotten, another person's, or any under Strict), when the second step is to be asked, which second step that is
  * (`step`: the emailed code, or, since slice SI-6a, the person's own second factor, their authenticator app, for a
- * person who has one in force: open question 24), and when the check finished (`at`: what follows,
+ * person who has one in force, and since slice SI-7a at the door a passkey: open question 24), which second factors they
+ * have (`factors`: at the door, both; asking again, which names its own count, the app alone until slice SI-7b, so a
+ * passkey holder with no app is asked again with the emailed code), and when the check finished (`at`: what follows,
  * the pending step and its code, is timed from it, so a wait for a turn never shortens them). Every refusal is
  * `{ ok: false }`, with `limited` when it was over a limit or turned away from a full wait, which the page may say in
  * words of its own: each is decided before the person or their password is read, by what the visitor sent alone (the
@@ -122,7 +125,7 @@ export type PasswordRefusal = "rate_limited" | "not_an_address" | "signins_off" 
  * and one that isn't.
  */
 export type PasswordCheck = { ok: true; person: { id: string; email: string }; password: PasswordProof; device: { deviceId: string } | null;
-  step: "emailed_code" | "second_factor"; at: Date }
+  step: "emailed_code" | "second_factor"; factors: { passkey: boolean; app: boolean }; at: Date }
   | { ok: false; limited: boolean };
 const REFUSED: PasswordCheck = { ok: false, limited: false };
 
@@ -182,9 +185,9 @@ async function audit(reason: PasswordRefusal, who: { id: string; email: string }
  *     (`password_try_email`, counted under hashTriedAddress(), never the address (what was typed, lower-cased, when it
  *     is no address), whatever it names); not taken while the IP address is over its limit;
  * (e) the reads, the same whoever the address names: the parents' settings (the door and the level), the person by
- *     address with their sign-in account and their `credential` row, their rows that count, and (since slice SI-6a)
- *     whether they have an authenticator app in force (hasAuthenticator()), each read for a fixed nobody when the
- *     address is nobody's;
+ *     address with their sign-in account and their `credential` row, their rows that count, (since slice SI-6a)
+ *     whether they have an authenticator app in force (hasAuthenticator()) and (since slice SI-7a) a passkey
+ *     (hasPasskey(), passkeys.ts), each read for a fixed nobody when the address is nobody's;
  * (f) verifyPassword() in its turn against the row's hash, or, with no person or no password, against a fixed dummy
  *     hash, outside any transaction, so the time doesn't tell; a try turned away there by a full wait, or whose request
  *     was given up while it waited, gives its place back (its password was never checked) and is answered as in (b)
@@ -226,7 +229,7 @@ export async function checkPasswordSignin(rawEmail: unknown, password: unknown, 
   }
 
   const [settings, person] = await Promise.all([getParentSettings(), personWithPassword(email)]);
-  const [rows, hasApp] = await Promise.all([enterableGuardianRows(person?.id ?? NOBODY), hasAuthenticator(person?.id ?? NOBODY)]);
+  const [rows, hasApp, hasKey] = await Promise.all([enterableGuardianRows(person?.id ?? NOBODY), hasAuthenticator(person?.id ?? NOBODY), hasPasskey(person?.id ?? NOBODY)]);
   const counts = rows.length > 0;
   const hash = person?.authUserId && person.hash ? person.hash : null;
   const against = hash ?? await DUMMY_HASH;
@@ -241,8 +244,11 @@ export async function checkPasswordSignin(rawEmail: unknown, password: unknown, 
   const right = checked.result && hash !== null;
 
   const who = person ? { id: person.id, email: person.email } : null;
-  // The person's own second factor: since SI-6a their authenticator app in force; SI-7 adds passkeys.
-  const secondStep = secondStepFor({ level: settings.level, hasSecondFactor: hasApp }).step;
+  // The person's own second factor: since SI-6a their authenticator app in force, and since SI-7a, at the door, a
+  // passkey. Asking again (the caller that names its own count) counts the app alone until slice SI-7b, on purpose: a
+  // passkey holder with no app is asked again for the password and the emailed code, as a person with no passkey is.
+  const factors = { app: hasApp, passkey: count === undefined && hasKey };
+  const secondStep = secondStepFor({ level: settings.level, hasSecondFactor: factors.app || factors.passkey }).step;
   const reason: PasswordRefusal | null = !email ? "not_an_address"
     : parentDoorClosed(settings) ? "signins_off"
     : !person ? "unknown_email"
@@ -262,11 +268,11 @@ export async function checkPasswordSignin(rawEmail: unknown, password: unknown, 
   await giveBackRateLimit(place.placeId);
   const proof: PasswordProof = { credentialId: person.credentialId, credentialUpdatedAt: person.updatedAt };
   // Under Strict a remembered device is no second step (it proved only the mailbox): whoever gets this far there has an
-  // app, and is asked for it on every device.
+  // app or, at the door, a passkey, and is asked for it on every device.
   const remembered = settings.level === "strict" ? null : await rememberedDevice(person.id, typeof device === "string" ? device : null, at);
   if (!remembered) {
     await writeAudit({ actor: parentActor(person), action: "signin.second_step_asked", targetType: "parent", targetId: person.id,
       after: { step: secondStep }, ip });
   }
-  return { ok: true, person: { id: person.id, email: person.email }, password: proof, device: remembered, step: secondStep, at };
+  return { ok: true, person: { id: person.id, email: person.email }, password: proof, device: remembered, step: secondStep, factors, at };
 }

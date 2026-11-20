@@ -52,6 +52,7 @@ export const CLEANED_TABLES = ["staff_auth_session", "parent_auth_session", "sig
 export const KEPT_TABLES: Record<string, string> = {
   staff_auth_user: "Better Auth's staff accounts", staff_auth_account: "Better Auth's staff accounts",
   parent_auth_user: "Better Auth's parent accounts", parent_auth_account: "Better Auth's parent accounts",
+  parent_auth_passkey: "a guardian's own passkeys, kept until they remove one (SI-7b) or a staff reset removes them (SI-9), and gone with the person; the passkey library's challenges live in parent_auth_verification, deleted when expired",
   setting: "the portal's settings, replaced in place; only a retired feature's (RETIRED_SETTINGS) is deleted",
   auth_provider: "the staff sign-in set-up", provider_certificate: "the staff sign-in set-up, rotated by an Admin",
   staff_user: "staff accounts, removed by an Admin", role: "roles", role_rule: "roles", role_assignment: "roles",
@@ -223,4 +224,21 @@ export async function runCleanup(now: Date = new Date()): Promise<{ ok: boolean;
     await db.update(jobRun).set({ finishedAt: new Date(), outcome: "failed", detail: "The clean-up couldn't finish. Nothing was removed. (unexpected)" }).where(eq(jobRun.id, run!.id));
     return { ok: false, counts: null };
   }
+}
+
+/** The job name of the sweep below, in a wake's answer, and the key of its mark (./marks.ts). */
+export const CHALLENGE_SWEEP_JOB = "parents.challenges_swept";
+
+/**
+ * Better Auth's parent verification rows past their expiry, at every wake of the worker, beside the daily clean-up's
+ * delete of the same rows (the sign-in release, slice SI-7a). The passkey library's challenge, which any visitor may ask
+ * for (/passkey/generate-authenticate-options), writes one for each ask, living 300 seconds; with no client address
+ * (CLIENT_IP_HEADER none) no cap per address can hold it, so this sweep is what bounds the table, to about five minutes
+ * of requests and one wake. Strictly past expiry, as cleanUp() deletes them: a row whose time is now or later stays.
+ * One delete, counted by the database and returning no row. The rows are the library's, not the club's: nothing of
+ * them is audited (the daily clean-up's count of them still is). `now` is the real time outside a test.
+ */
+export async function sweepExpiredChallenges(now: Date = new Date()): Promise<number> {
+  const r = await db.delete(parentAuthVerification).where(lt(parentAuthVerification.expiresAt, now));
+  return r.count;
 }

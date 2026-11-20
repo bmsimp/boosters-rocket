@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { REASK_WINDOW_MS, proofCountsBesideApp, provedRecently } from "@/lib/parents/reask-rule";
+import { REASK_WINDOW_MS, newestFactorSince, proofCountsBesideNewestFactor, provedRecently } from "@/lib/parents/reask-rule";
 
 /**
  * Asking again (the sign-in release, slice SI-5a; open question 28): a change of how a parent signs in goes ahead
@@ -29,22 +29,42 @@ describe("provedRecently", () => {
 });
 
 /**
- * A proof made before the person's authenticator app came into force no longer counts (the sign-in release, slice
- * SI-6b's second read): it may have been made with the emailed code the app has replaced, in another session.
+ * A proof made before the person's newest second factor came into force no longer counts (the sign-in release, slice
+ * SI-6b's second read for the authenticator app, extended in slice SI-7a to the newest of the app and the passkeys): it
+ * may have been made with the emailed code the factor has replaced, in another session.
  */
-describe("proofCountsBesideApp", () => {
-  const appSince = new Date("2026-11-19T12:00:00Z");
-  const at = (ms: number) => new Date(appSince.getTime() + ms);
+describe("proofCountsBesideNewestFactor", () => {
+  const since = new Date("2026-11-19T12:00:00Z");
+  const at = (ms: number) => new Date(since.getTime() + ms);
 
-  it("counts every proof of a person with no app in force", () => {
-    expect(proofCountsBesideApp(at(-60 * 60_000), null)).toBe(true);
+  it("counts every proof of a person with no second factor", () => {
+    expect(proofCountsBesideNewestFactor(at(-60 * 60_000), null)).toBe(true);
   });
-  it("counts a proof made when the app came into force or after it", () => {
-    expect(proofCountsBesideApp(appSince, appSince)).toBe(true);
-    expect(proofCountsBesideApp(at(1), appSince)).toBe(true);
+  it("counts a proof made when the newest factor came into force or after it", () => {
+    expect(proofCountsBesideNewestFactor(since, since)).toBe(true);
+    expect(proofCountsBesideNewestFactor(at(1), since)).toBe(true);
   });
-  it("refuses a proof made before the app came into force, however recent", () => {
-    expect(proofCountsBesideApp(at(-1), appSince)).toBe(false);
-    expect(proofCountsBesideApp(at(-2 * 60_000), appSince)).toBe(false);
+  it("refuses a proof made before the newest factor came into force, however recent", () => {
+    expect(proofCountsBesideNewestFactor(at(-1), since)).toBe(false);
+    expect(proofCountsBesideNewestFactor(at(-2 * 60_000), since)).toBe(false);
+  });
+});
+
+describe("newestFactorSince", () => {
+  const app = new Date("2026-11-19T12:00:00Z");
+  const passkey = new Date("2026-11-19T12:05:00Z");
+
+  it("is null with neither, and the one there is with one", () => {
+    expect(newestFactorSince(null, null)).toBeNull();
+    expect(newestFactorSince(app, null)).toBe(app);
+    expect(newestFactorSince(null, passkey)).toBe(passkey);
+  });
+  it("is the later of the app and the newest passkey", () => {
+    expect(newestFactorSince(app, passkey)).toBe(passkey);
+    expect(newestFactorSince(passkey, app)).toBe(passkey);
+    // A proof between the two counts beside the app alone, and not beside the passkey added after it.
+    const between = new Date("2026-11-19T12:02:00Z");
+    expect(proofCountsBesideNewestFactor(between, app)).toBe(true);
+    expect(proofCountsBesideNewestFactor(between, newestFactorSince(app, passkey))).toBe(false);
   });
 });

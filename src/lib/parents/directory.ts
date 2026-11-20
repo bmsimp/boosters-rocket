@@ -1,5 +1,8 @@
 // Privacy: `listPeople` and `getPerson` return other families' names or a block reason. Use them only on pages behind
 // `Parents.ReadWrite`, never behind `Roster.Read`. `familySignins` returns one family's own guardians, for its page.
+// `personContact` and `familyContact` return a person's or a family's phone and mailing address (stage 3's slice 11c):
+// only for a person's page, or a family's page to a reader holding Roster.Family.ReadWrite or Parents.ReadWrite, each
+// audited before it shows anything; never on a list page.
 // Beside them, the accounting links screen (/staff/links, src/lib/accounting/mapping.ts) lists every family's open
 // guardians' names and sign-in addresses in one list, behind the linking permission with Roster.Read; never a block
 // reason. Of the sign-in state it says only that a blocked person can't sign in (as a family's own page, behind
@@ -12,6 +15,7 @@ import { familyLabel } from "@/app/components/family-label";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { linksOf } from "@/lib/families/links";
 import { recordNameWords } from "@/lib/families/words";
+import { formVersion, type ContactForm } from "./contact-fields";
 
 export type AccessKind = "can" | "cannot" | "blocked";
 /**
@@ -185,4 +189,33 @@ export async function familySignins(familyId: AppFamilyId): Promise<FamilySignin
   return links.map(({ g, p }): FamilySignin => ({ guardianId: g.id, parentId: p.id, name: p.name, email: p.email, hasPassword: passwords.has(p.id),
     ...accessWords({ status: g.status, reason: g.disabledReason, blocked: p.blocked, hasPassword: passwords.has(p.id), family: standing(g.familyId) }), ...rowActions(g) }))
     .sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }) || a.email.localeCompare(b.email) || (a.guardianId < b.guardianId ? -1 : 1));
+}
+
+/** The details columns of a person's or a family's row. */
+const detailColumns = (t: typeof parent | typeof family) => ({ phone: t.phone, addressLine1: t.addressLine1, addressLine2: t.addressLine2, addressCity: t.addressCity,
+  addressRegion: t.addressRegion, addressPostalCode: t.addressPostalCode, addressCountry: t.addressCountry, contactVersion: t.contactVersion });
+type DetailRow = { phone: string | null; addressLine1: string | null; addressLine2: string | null; addressCity: string | null; addressRegion: string | null;
+  addressPostalCode: string | null; addressCountry: string | null; contactVersion: number };
+const formOfRow = (whose: "person" | "family", r: DetailRow): ContactForm => ({ version: formVersion(whose, r.contactVersion),
+  values: { phone: r.phone ?? "", line1: r.addressLine1 ?? "", line2: r.addressLine2 ?? "", city: r.addressCity ?? "", region: r.addressRegion ?? "",
+    postalCode: r.addressPostalCode ?? "", country: r.addressCountry ?? "" } });
+
+/**
+ * A person's phone and mailing address as the portal holds them (`parent`'s columns), with the version the staff form
+ * sends back (`p:<n>`), for the person's page (stage 3's slice 11c), which is behind Parents.ReadWrite and audited
+ * (`parent.read`) before it shows them. Null for no such person.
+ */
+export async function personContact(parentId: string): Promise<ContactForm | null> {
+  if (!/^[0-9a-f-]{36}$/i.test(parentId)) return null;
+  const [r] = await db.select(detailColumns(parent)).from(parent).where(eq(parent.id, parentId));
+  return r ? formOfRow("person", r) : null;
+}
+/**
+ * A family record's phone and mailing address as the portal holds them (`family`'s columns, books with no parent type),
+ * with the version the staff form sends back (`f:<n>`), for the family's page (stage 3's slice 11c), which shows them
+ * only to a reader holding Roster.Family.ReadWrite or Parents.ReadWrite, after its `roster.family.read`. Null for none.
+ */
+export async function familyContact(familyId: AppFamilyId): Promise<ContactForm | null> {
+  const [r] = await db.select(detailColumns(family)).from(family).where(eq(family.id, familyId));
+  return r ? formOfRow("family", r) : null;
 }

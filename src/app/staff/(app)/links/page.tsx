@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireStaffAlso, requireStaffPage } from "@/lib/guards";
-import { filterLinkRows, loadAccountingLinks, statusCounts, type LinkRow, type LinkStatus, type LinksState, type OwnLink } from "@/lib/accounting/mapping";
+import { filterLinkRows, filtersOf, loadAccountingLinks, statusCounts, type LinkMade, type LinkRow, type LinkStatus, type LinksState, type OwnLink } from "@/lib/accounting/mapping";
+import { differenceKinds, differenceWords, noteSentence, type Difference } from "@/lib/accounting/differences";
 import { NOT_A_FAMILY_WORDS, parseLinksFilter, SEARCH_MAX, STATUS_KEYS, STATUS_WORDS, type StatusKey } from "@/lib/accounting/status";
 import type { Holder } from "@/lib/accounting/match";
 import { DataTable, type Column } from "@/app/components/data-table";
@@ -14,25 +15,32 @@ export const dynamic = "force-dynamic";
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-/** Why nothing can be suggested now, in words. */
+/** Why nothing can be suggested now, in words. Differences aren't checked in any of these states either. */
 const WHY_NOT_CHECKED: Record<Exclude<LinksState, "listed">, string> = {
-  no_company: "The portal hasn't read the club's books yet, so no family's link can be checked and nothing is suggested. Each family is listed as not checked.",
-  other_company: "QuickBooks is connected to a different company than the one the roster was read from, so no link is read and nothing is suggested. Each family is listed as not checked. An Admin can see why under Settings, QuickBooks.",
-  no_shape: "The membership shape isn't chosen, or names a customer type the books no longer have, so the portal can't tell which customers are families. Links are shown as they are, but nothing is suggested, and a family with no link is listed as not checked. An Admin can choose the shape under Settings, QuickBooks.",
+  no_company: "The portal hasn't read the club's books yet, so no family's link can be checked and nothing is suggested. Each family is listed as not checked. Differences between the portal and the books aren't checked either.",
+  other_company: "QuickBooks is connected to a different company than the one the roster was read from, so no link is read and nothing is suggested. Each family is listed as not checked. Differences between the portal and the books aren't checked either. An Admin can see why under Settings, QuickBooks.",
+  no_shape: "The membership shape isn't chosen, or names a customer type the books no longer have, so the portal can't tell which customers are families. Links are shown as they are, but nothing is suggested, and a family with no link is listed as not checked. Differences between the portal and the books aren't checked either. An Admin can choose the shape under Settings, QuickBooks.",
 };
 
 /** The icon a status carries beside its words: a link that stands, something to look at, or nothing checked. */
 const ICON: Record<StatusKey, "done" | "todo" | "waived"> = {
-  carried_over: "done", linked: "done", suggested: "todo", several: "todo", no_match: "todo", not_a_family: "todo", customer_gone: "todo", not_checked: "waived",
+  carried_over: "done", linked: "done", with_differences: "todo", suggested: "todo", several: "todo", no_match: "todo", not_a_family: "todo", customer_gone: "todo", not_checked: "waived",
 };
 
 const holderWords = (h: Holder) => (h.on.kind === "family" ? `${h.address}, on this customer` : `${h.address}, on ${h.on.name} under it`);
 
+/** How a link was made, in words: carried over from the roster, or by whose press. */
+function MadeDetail({ made }: { made: LinkMade }) {
+  return made.key === "carried_over" ? <>Carried over from the roster by the portal, on <LocalTime iso={made.at} />. Nobody has confirmed it since.</>
+    : <>{made.origin === "confirmed" ? "Confirmed with “Create a family from this”" : "Made in the books from the portal"}{made.by ? ` by ${made.by}` : ""}, on <LocalTime iso={made.at} />.</>;
+}
+
 /** What a status means for the row, in words. Every name and address is the books' text or a person's, shown as text. */
 function StatusDetail({ status, row }: { status: LinkStatus; row: LinkRow }) {
   switch (status.key) {
-    case "carried_over": return <>Carried over from the roster by the portal, on <LocalTime iso={status.at} />. Nobody has confirmed it since.</>;
-    case "linked": return <>{status.origin === "confirmed" ? "Confirmed with “Create a family from this”" : "Made in the books from the portal"}{status.by ? ` by ${status.by}` : ""}, on <LocalTime iso={status.at} />.</>;
+    case "carried_over": case "linked": return <MadeDetail made={status} />;
+    // Both things: how the link was made, and how many differences of what kinds (listed in the row's opening).
+    case "with_differences": return <><MadeDetail made={status.made} /> {plural(row.differences.length, "difference", "differences")} with the books: {differenceKinds(row.differences).join(", ")}.</>;
     case "customer_gone": return <>The customer this family is linked to isn&apos;t in the books&apos; copy any more. The link is kept as it is.</>;
     case "not_a_family": return <>The linked customer is still in the books, but isn&apos;t a family there now: {status.reasons.map((r) => NOT_A_FAMILY_WORDS[r]).join("; ")}. The link is kept as it is.</>;
     case "suggested": return <>A guardian&apos;s sign-in address matches: {status.holders.map(holderWords).join("; ")}.</>;
@@ -51,16 +59,35 @@ function StatusDetail({ status, row }: { status: LinkStatus; row: LinkRow }) {
 const ownLinkWords = (l: OwnLink) => (l.state === "linked" ? `linked to ${l.customer}` : l.state === "gone" ? "linked to a customer that isn't in the books' copy any more"
   : l.state === "none" ? "no link of its own" : "its link can't be checked now");
 
-/** The row's opening: the family's active students and its open guardians, each with their own link. */
+/** Reconciliation's list of changes, where a change the queue holds is shown with what can be done about it. */
+const RECONCILIATION_CHANGES = "/staff/reconciliation#writes-h";
+
+/**
+ * One difference, with both values as text, and the change on the write queue that explains it, in the queue's own
+ * words with a link to Reconciliation's list (never its buttons). Nothing here settles it.
+ */
+function DifferenceLine({ d }: { d: Difference }) {
+  const w = differenceWords(d);
+  const notes = d.kind === "guardians_unlinked" ? d.queue.map((q) => `For ${q.count} of them: ${noteSentence(q.note)}`)
+    : d.kind === "student_customer" || d.kind === "parent_customers" || d.queue === null ? [] : [noteSentence(d.queue)];
+  return (
+    <li>{w.what}. In the portal: {w.portal}. In the books: {w.books}.
+      {notes.length > 0 && <> {notes.join(" ")} <Link href={RECONCILIATION_CHANGES}>{notes.length === 1 ? "See the change on Reconciliation" : "See the changes on Reconciliation"}</Link></>}</li>
+  );
+}
+
+/** The row's opening: the family's active students and its open guardians, each with their own link, then its differences. */
 function Opening({ row }: { row: LinkRow }) {
   return (
-    <details className="more"><summary>Students and guardians<span className="visually-hidden">: {row.name}</span></summary>
+    <details className="more"><summary>{row.differences.length > 0 ? "Students, guardians and differences" : "Students and guardians"}<span className="visually-hidden">: {row.name}</span></summary>
       <p>{row.students.length === 0 ? "No active students." : "Students:"}</p>
       {row.students.length > 0 && <ul>{row.students.map((s) => <li key={String(s.id)}>{s.name}: {ownLinkWords(s.link)}</li>)}</ul>}
       <p>{row.guardians.length === 0 ? "No guardians." : "Guardians:"}</p>
       {row.guardians.length > 0 && <ul>{row.guardians.map((g) => <li key={g.id}>{g.name} ({g.email}){g.blocked ? ", can't sign in, so this address isn't matched" : ""}: {ownLinkWords(g.link)}</li>)}</ul>}
       {row.status.key === "several" && <><p>Possible customers:</p><ul>{row.status.candidates.map((c, i) => <li key={i}>{c.name}{c.email ? ` (${c.email})` : ""}</li>)}</ul></>}
       {row.status.key === "several" && row.status.alsoMatches.length > 0 && <p>Also matched by: {row.status.alsoMatches.join(", ")}.</p>}
+      {row.differences.length > 0 && <><p>Where the portal and the books differ:</p><ul>{row.differences.map((d, i) => <DifferenceLine key={i} d={d} />)}</ul></>}
+      {row.inactiveUnrecorded > 0 && <p>The books also have {plural(row.inactiveUnrecorded, "inactive student customer", "inactive student customers")} under this family with no student record in the portal.</p>}
     </details>
   );
 }
@@ -80,6 +107,8 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
   const filter = parseLinksFilter(await searchParams);
   const view = await loadAccountingLinks();
   const counts = statusCounts(view.rows);
+  // A carried-over family with differences is found under two filters (filtersOf()), so the counts overlap by this many.
+  const overlap = view.rows.filter((r) => filtersOf(r).length > 1).length;
   const rows = filterLinkRows(view.rows, filter);
   const filtered = filter.status !== null || filter.q !== "";
   const columns: Column<LinkRow>[] = [
@@ -94,7 +123,8 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
     <main className="wrap single">
       <h1 className="page-title">Accounting links</h1>
       <p className="lede">Every family in the portal, beside the customer in the books it is linked to, or the one that looks like its own.
-        This page only shows: nothing here links a family or changes anything.</p>
+        This page only shows: nothing here links a family or changes anything.
+        For a family whose link stands, it also lists where the portal and the books differ, and settles none of it.</p>
 
       <section className="box" aria-labelledby="links-how-h"><h2 id="links-how-h">How links are made today</h2>
         <p>A customer is suggested only when one of the family&apos;s guardians signs in with an address that is, exactly, on a customer no family is linked to:
@@ -103,6 +133,9 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
         <p>Nothing in the portal can yet link a family it has already to a customer the books have already, so a suggestion can&apos;t be acted on for now.
           Today a link comes only with something new. &ldquo;Create a family from this&rdquo;, on Reconciliation, makes a new family in the portal from a customer no family is linked to.
           &ldquo;Create in QuickBooks and link&rdquo;, on a family&apos;s page, makes a new customer in the books for a family that has none, and so does adding a family under Families, when someone who may link families adds it while the books are connected.</p>
+        <p>For each family whose link stands, the portal compares the names, whether each is active, the family each student is under, and the students and Parent customers only one side has,
+          against its copy of the books{view.readAt ? <>, from its last read of them on <LocalTime iso={view.readAt} /></> : ", though it hasn't read the books yet"}.
+          A family whose link was carried over and that has differences is found under both Carried over and Linked, with differences, and counted under both.</p>
         <Notice tone="warning" live="none">Don&apos;t use either for a family that reads Suggested or Several possible: &ldquo;Create a family from this&rdquo; on its customer would make a second family beside it,
           and &ldquo;Create in QuickBooks and link&rdquo; on its page would make a second customer in the books.</Notice>
         {view.noFamily !== null && (
@@ -124,6 +157,8 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
           <label className="field"><span>Family name or email address</span><input name="q" type="search" maxLength={SEARCH_MAX} defaultValue={filter.q} autoComplete="off" /></label>
           <div className="matrix-filter-go"><button type="submit" className="btn btn-line">Show</button>{filtered && <Link href="/staff/links">Show every family</Link>}</div>
         </form>
+        {overlap > 0 && <p>{overlap === 1 ? "1 family whose link was carried over has differences, so it is counted under both Carried over and Linked, with differences."
+          : `${overlap} families whose links were carried over have differences, so each is counted under both Carried over and Linked, with differences.`}</p>}
         {filter.tooLong && <Notice tone="warning" live="none">That search was too long, so nothing was searched for. Try a shorter part of a name or an address, up to {SEARCH_MAX} characters.</Notice>}
         {view.rows.length === 0 ? <Notice tone="info" live="none">The portal has no active families yet.</Notice>
           : rows.length === 0 ? <Notice tone="info">No family matches that.</Notice>

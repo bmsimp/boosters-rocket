@@ -20,6 +20,7 @@ import { SIGNINS_ON, seedParentSettings } from "../helpers/roster-cache";
 import { DOOR_IP, DOOR_PASSWORD, codeMailed, codeStep, cookieNamed, cookiesSet, passwordStep, postDoor, setCookieLine } from "../helpers/parent-door";
 import { deviceRows, seedDevice, seedPassword } from "../helpers/signin-links";
 import { seedAuthenticator } from "../helpers/authenticator";
+import { seedPasskey } from "../helpers/passkey";
 
 /**
  * The parent door as the sign-in release's slice SI-3b made it: the address and the password at /portal-password/check;
@@ -297,6 +298,30 @@ describe("the password step", () => {
     expect(await answerTo("ana@example.com", DOOR_PASSWORD, `br_parent.device=${token}`)).toEqual([200, REFUSED, []]);
     expect((await audits("signin.password_refused")).map((r) => r.after)).toEqual([{ reason: "strict_no_factor" }]);
     expect(await sessions()).toEqual([]);
+  });
+
+  it("under Strict, a guardian with a passkey is asked for it, on a remembered device too, and sent no code (slice SI-7a)", async () => {
+    const ana = await seedAna();
+    const { token } = await seedDevice(ana.id);
+    await seedPasskey(ana.id);
+    await seedParentSettings({ level: "strict" });
+    for (const cookie of [undefined, `br_parent.device=${token}`]) {
+      const res = await postDoor("/portal-password/check", { email: "ana@example.com", password: DOOR_PASSWORD }, { cookie });
+      expect(await res.json()).toEqual({ ok: true, step: "passkey", app: false });
+      expect(cookieNamed(res, "signin_step")).not.toBe("");
+      expect(cookieNamed(res, "session_token")).toBe("");
+    }
+    expect(await audits("signin.password_refused")).toEqual([]);
+    expect(await db.select().from(signinCode)).toEqual([]);
+  });
+
+  it("under Standard a remembered device still finishes the sign-in for a passkey holder, and a new one asks for the passkey (slice SI-7a)", async () => {
+    const ana = await seedAna();
+    const { token } = await seedDevice(ana.id);
+    await seedPasskey(ana.id);
+    expect(await (await postDoor("/portal-password/check", { email: "ana@example.com", password: DOOR_PASSWORD }, { cookie: `br_parent.device=${token}` })).json()).toEqual({ ok: true, next: "/" });
+    expect(await (await postDoor("/portal-password/check", { email: "ana@example.com", password: DOOR_PASSWORD })).json()).toEqual({ ok: true, step: "passkey", app: false });
+    expect(await db.select().from(signinCode)).toEqual([]);
   });
 
   it("under Strict, a guardian with an authenticator app in force is asked for the app, on a remembered device too, and sent no code (slice SI-6a)", async () => {

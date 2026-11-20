@@ -1,6 +1,7 @@
 // What the worker last did in jobs that keep no job_run row of their own, for the Health page
 // (src/lib/health/job-lines.ts, report.ts): the volunteer reminders, which look every wake, the daily check of the
-// buy-out invoices, which follows each read of every family, and the welcome emails, whose mark also decides how many a
+// buy-out invoices, which follows each read of every family, the sweep of expired passkey challenges at each wake (whose
+// failure the clean-up line reports), and the welcome emails, whose mark also decides how many a
 // wake tries while mail is failing (sendOwedWelcomes(), src/lib/parents/welcome.ts). Counts and times only: never an
 // address, a name or an id.
 import { eq, sql } from "drizzle-orm";
@@ -10,6 +11,8 @@ import { setting } from "@/lib/db/schema";
 export const REMINDERS_MARK = "worker.mark.volunteer_reminders";
 export const BUYOUT_CHECK_MARK = "worker.mark.buyout_check";
 export const WELCOME_MARK = "worker.mark.welcomes";
+/** The worker's sweep of expired passkey challenges at each wake (sweepExpiredChallenges(), ./cleanup.ts): how many it removed. */
+export const CHALLENGE_SWEEP_MARK = "worker.mark.challenge_sweep";
 
 export type JobMark = {
   /** When the job last ran, whatever it did. */

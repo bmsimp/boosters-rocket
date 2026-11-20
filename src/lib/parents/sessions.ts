@@ -117,6 +117,11 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   roster lock at most three seconds, as the confirm does, and gives up changing nothing: a roster read holds it
  *   through its whole QuickBooks read, and the person's row must not be held that long, since a code request waits for
  *   it (FOR KEY SHARE, below);
+ * - saveDetails() (contact-edits.ts, a parent's save of their phone and mailing address, stage 3's slice 11b) takes the
+ *   person's row (or, in books with no parent type, the family's) by its one conditional update, then, through
+ *   queueContactChange() (contact-queue.ts), the record's open contact items FOR UPDATE SKIP LOCKED (never waited for),
+ *   then closes those it may and inserts its own items (a key share on each membership's family row, by the foreign
+ *   key); it takes no roster lock and no "being sent" lock, and waits for none;
  * - setSignins(false) (switches.ts) takes FOR UPDATE, in id order, the row of every person it will touch (an owed
  *   welcome, an unused code, an unused link, a device, a session), then clears the owed welcomes, then deletes the
  *   unused codes, then the unused links, then the devices, then the sessions; setWelcome() takes the rows whose welcome it changes the same way before it changes them;
@@ -180,7 +185,16 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   codes delete and insert the backup codes alone; turning it off deletes the app row, then the backup codes. None of
  *   them touches a device or a session. A try at the second step (verifySecondFactor(), above) holds the person's row
  *   FOR KEY SHARE, which a press's FOR UPDATE waits for and is waited for by, before it reads the app or a code, so a
- *   try sees an app as it was before a press or after it, never midway.
+ *   try sees an app as it was before a press or after it, never midway;
+ * - a person's passkeys (`parent_auth_passkey`, since slice SI-7a, read and written by the portal only in passkeys.ts;
+ *   the passkey library writes a passkey's counter itself, outside any portal transaction, as it verifies): a passkey's
+ *   check at the door (checkPasskeySignin(), passkey-signin.ts) calls this, then sets the passkey's `last_used_at` by
+ *   one conditional update (still the person's) and reads their newest "Sign out everywhere" row; a sign-in's last
+ *   check (signinStands()) reads the passkey unlocked under the person's row. Nothing that ends all of a person's
+ *   sign-in removes them, as for the app (a block, a reset, a password change, Sign out everywhere, a change of sign-in
+ *   email, sign-ins switched off, a change of company, a last membership closed, turning the app off). A later writer
+ *   that takes them (SI-7b's presses, SI-9's staff reset) takes them after the person's row, beside the app and backup
+ *   codes, before their devices.
  */
 export async function lockedPerson(tx: Tx, parentId: string): Promise<{ email: string; blocked: boolean } | null> {
   const [p] = await tx.select({ email: parent.email, blocked: parent.blocked }).from(parent).where(eq(parent.id, parentId)).for("key share");
