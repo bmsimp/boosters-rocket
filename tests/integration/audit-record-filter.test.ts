@@ -176,6 +176,25 @@ describe("the audit page's filter for one family or student", () => {
     expect(await tagged(`student:${kai}`)).toEqual(["kai-left-chen"]);
   });
 
+  it("finds a confirm on the accounting links screen under its family and under each student it linked, and never under another student", async () => {
+    // Stage 4's slice M3a: the row targets the family and names the students it linked only in its body.
+    const confirm = (t: string, familyId: string, studentId: string, customerQboId: string) => bodied("accounting.link.confirm", "family", familyId,
+      { after: { familyId, customerQboId: "10", realmId: "4620000000000001", chosen: "suggested", studentsLinked: [{ studentId, customerQboId }], studentsLeft: [], studentCustomersLeft: [], tag: t } });
+    await confirm("rivera-confirm", rivera, leo, "12");
+    await confirm("chen-confirm", chen, kai, "22");
+    // A confirm that linked no student, and one naming Leo only among the students it left: neither is Leo's.
+    await bodied("accounting.link.confirm", "family", chen, { after: { familyId: chen, studentsLinked: [], studentsLeft: [leo], tag: "chen-left-leo" } });
+    const tagged = async (record: string) => (await auditPage(parseAuditFilters({ record }))).rows
+      .map((r) => (r.after as { tag?: string } | null)?.tag).filter((t): t is string => t !== undefined).sort();
+    expect(await tagged(`student:${leo}`)).toEqual(["rivera-confirm"]);
+    expect(await tagged(leo)).toEqual(["rivera-confirm"]);
+    expect(await tagged(`student:${kai}`)).toEqual(["chen-confirm"]);
+    expect(await tagged(`family:${rivera}`)).toEqual(["rivera-confirm"]);
+    expect(await tagged(`family:${chen}`)).toEqual(["chen-confirm", "chen-left-leo"]);
+    // A family search by a student's id finds nothing of the student's confirm.
+    expect(await tagged(`family:${leo}`)).toEqual([]);
+  });
+
   it("finds a family's roster page reads written while the page was addressed by its customer, and those written since, by its record", async () => {
     // Before stage 3's third slice: the roster page read under the customer. Since: under the app's own family.
     await row("roster.family.read", "qbo_customer", "10");
