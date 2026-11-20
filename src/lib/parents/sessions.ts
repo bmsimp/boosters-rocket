@@ -135,7 +135,8 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * - the second step's code (sendSecondStepCode(), signin-codes.ts, since slice SI-3b) calls this, then reads the
  *   password unlocked, before it touches a code; and a sign-in's strong step (recordStrongSignin(), devices.ts), after
  *   completeParentSignin(), calls this, then makes or renews the person's device, then updates the session row (stamping
- *   `strong_at` for a new device only: a code's or a set-up link's sign-in): the person's row, their devices, their sessions;
+ *   `strong_at` for every sign-in that proved a second step, on a new device or a renewed one): the person's row, their
+ *   devices, their sessions;
  * - asking again (askAgainCode(), asking-again.ts, since slice SI-5a), once the door's own checks have taken the code,
  *   calls this, then stamps `strong_at` on the session that asked and no other: the person's row, their sessions;
  * - a password change in sign-in settings (changeMyPassword(), signin-settings.ts, since SI-5a) takes the row FOR

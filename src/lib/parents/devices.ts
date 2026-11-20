@@ -93,8 +93,9 @@ class Undone extends Error {}
  * same person (since SI-6a's second read: under Strict an app holder is asked for the app on a remembered device too),
  * whose row is renewed instead, as below, so one browser stays one device; or, for a remembered one, moves its row's last use and expiry on, audited
  * `signin.device_used` (refused when the row is gone, or no longer the cookie's); then sets the session's `device_id` to
- * that device's row (since SI-5b, for every proof), and, for a new device only (an emailed code's, an app's, a backup code's or a set-up link's sign-in,
- * which proved the password and a second step), its `strong_at` to now. A sign-in
+ * that device's row (since SI-5b, for every proof), and, for every sign-in that proved the password and a second step
+ * (an emailed code's, an app's, a backup code's or a set-up link's, on a new device or on the renewed one above), its
+ * `strong_at` to now. A password-only sign-in
  * on a remembered device leaves it as it is: it proved only the password at that moment, the device standing in for the
  * code, and a change of how the parent signs in asks for the second step itself (asking-again.ts; the lead's decision
  * of SI-5a, which reverses SI-3b's stamp for it). Its session row is still updated, so a session ended meanwhile is
@@ -150,8 +151,9 @@ export async function recordStrongSignin(o: { parentId: string; email: string; s
         deviceId = row.id;
       }
       // Last, in the lock order: the session. A session ended since the read above takes the device's write back with it.
-      // `strong_at` is set only for a sign-in that proved the password and a second step itself: the emailed code, or a
-      // set-up link (a new device). A sign-in on a remembered device proved only the password at that moment, so its
+      // `strong_at` is set only for a sign-in that proved the password and a second step itself (`remember`: the emailed
+      // code, the app, a backup code or a set-up link), on a new device or on the one its cookie named and the branch
+      // above renewed. A password-only sign-in on a remembered device proved only the password at that moment, so its
       // session keeps `strong_at` as it is (null, being new) and opens no window for a change (asking-again.ts).
       // `device_id` (since SI-5b) names the device the session was made on, whichever the proof: the session's renewal
       // renews it while the session is used (renewParentSession(), ./sessions.ts), and the sign-in settings mark it.

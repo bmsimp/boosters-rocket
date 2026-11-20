@@ -122,6 +122,8 @@ describe("who is asked for the app (open question 24)", () => {
     const earlier = new Date(Date.now() - 86_400_000);
     await db.update(parentDevice).set({ lastUsedAt: earlier }).where(eq(parentDevice.id, row!.id));
     // The same browser: the remembered device stands in for nothing under Strict, so the app is asked for again.
+    const firstSessions = (await sessions()).map((s) => s.id);
+    const beforeSecond = Date.now();
     const second = await passwordStep("ana@example.com", { cookie: device });
     expect(second.body).toEqual({ ok: true, step: "app" });
     const done = await appStep(appCode(ana.app!.secret, Date.now(), 1), `${second.pending}; ${device}`);
@@ -131,6 +133,10 @@ describe("who is asked for the app (open question 24)", () => {
     expect(rows[0]!.lastUsedAt.getTime()).toBeGreaterThan(earlier.getTime());
     expect(cookieNamed(done.res, "device")).toBe(device);
     expect((await sessions()).map((s) => s.deviceId)).toEqual([row!.id, row!.id]);
+    // The second session proved the app on the renewed device, so it is strong, as a new device's would be.
+    const secondSession = (await sessions()).filter((s) => !firstSessions.includes(s.id));
+    expect(secondSession).toHaveLength(1);
+    expect(secondSession[0]!.strongAt!.getTime()).toBeGreaterThanOrEqual(beforeSecond - 1000);
     expect((await audits("signin.device_remembered")).map((r) => (r.after as { deviceId: string }).deviceId)).toEqual([row!.id]);
     expect((await audits("signin.device_used")).map((r) => (r.after as { deviceId: string }).deviceId)).toEqual([row!.id]);
   });
