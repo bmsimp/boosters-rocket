@@ -99,6 +99,20 @@ export async function customerOfStudent(studentId: AppStudentId, tx?: Tx): Promi
 }
 
 /**
+ * The customer this guardian row (a membership) is linked to, or null (stage 3's slice 9h): its own `guardian_id` link,
+ * by the same company rule as customerOfStudent() (none while QuickBooks is connected to another company). Several rows
+ * may be linked to one customer, so whether that customer is the row's own Parent customer is the staff side's to
+ * decide, from the roster cache (src/lib/roster/writes.ts).
+ */
+export async function customerOfGuardian(guardianId: string, tx?: Tx): Promise<string | null> {
+  const realmId = await recordsCompany(tx);
+  if (realmId === null) return null;
+  const [l] = await (tx ?? db).select({ customerId: accountingLink.customerId }).from(accountingLink)
+    .where(and(eq(accountingLink.guardianId, guardianId), eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId)));
+  return l?.customerId ?? null;
+}
+
+/**
  * Records and their customers in both directions, by kind: a customer may have a family record and a student record,
  * and each map holds one kind only, so a family's id is never looked up among the students' customers.
  */

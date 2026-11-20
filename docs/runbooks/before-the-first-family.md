@@ -109,7 +109,7 @@ sandbox company and the club's Microsoft 365 mail, but no Documenso.
 The portal's requests to QuickBooks were written from Intuit's documentation, and none had been sent to a real company.
 One page now sends each of them to the connected company and says, request by request, whether QuickBooks answered as
 the portal expects: **Check the portal's requests** (`/staff/settings/quickbooks/check`), under Settings, QuickBooks.
-In a sandbox company it reads and also changes: it makes two test families, a student and a parent named "Booster
+In a sandbox company it reads and also changes: it makes two test families, a student and a parent (and a second parent, if QuickBooks takes the name again under the other family) named "Booster
 Rocket check" with the date, tries every change on them, makes and voids a $1.00 invoice, and leaves them inactive. In
 the club's real books it only reads.
 
@@ -119,7 +119,10 @@ the club's real books it only reads.
    (reads and changes)"; no row under **Changing (sandbox only)** reads "Not tried"; and Health's QuickBooks line says
    when the requests were last checked. A "Noted" row is a fact the check recorded, not a failure: "Pay links on
    invoices" is noted when the check's own invoice comes back without a Pay link, and "A Pay link on a buy-out
-   invoice" notes whether a bill-to email address is what gives one (see Results, 2026-11-17).
+   invoice" notes whether a bill-to email address is what gives one (see Results, 2026-11-17). A new row, "Making a
+   parent with a name already used under another family", makes a parent under the second test family with the first
+   test parent's name: it is always "Noted", since either answer is fine; it tells the portal which one this company's
+   QuickBooks gives (a second customer of the same name, or a refusal as a name in use).
    **If not:** "Finished, but some changes weren't tried" means the check couldn't try every change: each "Not tried"
    row says why (a roster read under way: run it again in a minute; no customer type or no product or service in the
    company: add one in QuickBooks, then run it again). For any other result, each row that didn't answer as expected says what it found, what that means for the club, and (for the

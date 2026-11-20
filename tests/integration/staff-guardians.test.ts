@@ -206,7 +206,7 @@ describe("staff manage a family's guardians", () => {
       expect((await rowsOf((await personOf("ivy@example.com"))!.id))[0]).toMatchObject({ familyId: hand!.id, familyQboId: "40" });
       // Removed and reinstated: the row that names no customer comes back as it was.
       expect(await removeGuardian(row!.id, "Moved away.", staffOp)).toMatchObject({ ok: true });
-      expect(await reinstateGuardian(row!.id, staffOp)).toEqual({ ok: true });
+      expect(await reinstateGuardian(row!.id, staffOp)).toEqual({ ok: true, quickbooks: [] });
       expect((await rowsOf(hal.id))[0]).toMatchObject({ id: row!.id, familyQboId: null, status: "invited", disabledReason: null });
       // Its audit row names the customer the row names (none), not the family's link made since.
       const reinstated = (await audits("parent.access.granted")).filter((a) => a.targetId === row!.id && (a.after as { reinstated?: boolean }).reinstated === true);
@@ -418,7 +418,7 @@ describe("staff manage a family's guardians", () => {
       // The last open row: every session ends.
       const [other] = await db.select().from(guardian).where(and(eq(guardian.parentId, ana.id), eq(guardian.familyQboId, "20")));
       await seedParentSession(user!.id);
-      expect(await removeGuardian(other!.id, "Moved away.", staffOp)).toEqual({ ok: true, sessionsEnded: 2 });
+      expect(await removeGuardian(other!.id, "Moved away.", staffOp)).toEqual({ ok: true, sessionsEnded: 2, quickbooks: [] });
       expect(await sessionsOf(user!.id)).toEqual([]);
       expect(await enterableGuardianRows(ana.id)).toEqual([]);
     });
@@ -496,7 +496,7 @@ describe("staff manage a family's guardians", () => {
       await addGuardian(rivera, { name: "Ana", email: "ana@example.com" }, staffOp);
       const [row] = await rowsOf((await personOf("ana@example.com"))!.id);
       await removeGuardian(row!.id, "By mistake.", staffOp);
-      expect(await reinstateGuardian(row!.id, staffOp)).toEqual({ ok: true });
+      expect(await reinstateGuardian(row!.id, staffOp)).toEqual({ ok: true, quickbooks: [] });
       expect((await db.select().from(guardian).where(eq(guardian.id, row!.id)))[0]).toMatchObject({ status: "invited", disabledReason: null });
       expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
     });

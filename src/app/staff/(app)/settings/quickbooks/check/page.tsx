@@ -36,7 +36,8 @@ function Found({ r }: { r: CheckResult }) {
 }
 
 function Results({ run, group, caption }: { run: RunView; group: "reads" | "writes"; caption: string }) {
-  const rows = EXPECTATIONS.filter((x) => x.group === group).map((x) => ({ x, r: run.results.find((r) => r.key === x.key) ?? { key: x.key, outcome: "not_run" as const, code: "stopped", learned: {} } }));
+  // A run holds the results of the steps it had: one the check learned since is shown as not part of it, never as stopped.
+  const rows = EXPECTATIONS.filter((x) => x.group === group).map((x) => ({ x, r: run.results.find((r) => r.key === x.key) ?? { key: x.key, outcome: "not_run" as const, code: "added_since", learned: {} } }));
   return (
     <DataTable caption={caption} className="check-results" rowKey={(row) => row.x.key} rows={rows} columns={[
       { key: "request", header: "Request", rowHeader: true, cell: (row) => row.x.title },

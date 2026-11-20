@@ -12,6 +12,8 @@ export const QUICKBOOKS_USE = {
     + "each only when that parent changes it in the portal; "
     + "and, for staff allowed to change the roster, new families, students, parents and members, their names, a student's family, and making a customer inactive "
     + "(a family together with everyone under it, and never anyone with any balance, owed or a credit). "
+    + "Where the club's books have parents of their own, a guardian staff add to a linked family gets a parent record under it, with their name and sign-in email address, unless QuickBooks already has a customer of that name there; "
+    + "it is renamed with them, and made inactive when they are removed only when it has no balance the portal can read, owed or a credit. "
     + "And one kind of invoice: when a guardian chooses to pay instead of volunteering, it creates that invoice, and voids it if they switch back before paying anything on it. "
     + "The invoice carries that guardian's sign-in email address as its bill-to address, so it can be paid online; nothing is emailed, by the portal or by QuickBooks. "
     + "It never deletes anything, never changes any other invoice, and never touches payments. "

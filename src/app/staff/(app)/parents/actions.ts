@@ -62,6 +62,17 @@ const NAME_FIELD_MAX = 200, EMAIL_FIELD_MAX = 320, NOTE_MAX = 2000;
 const BUSY_WORDS = "The roster is being read from QuickBooks just now, so nothing was changed. Try again in a minute.";
 const WAITING_WORDS = "Making this family in QuickBooks is still waiting on the queue, so nobody can be added to it for now. Once it has gone through, or been given up on the Reconciliation page, try again.";
 const MAKING_WORDS = "This family is being made in QuickBooks at this moment, so nobody can be added to it. Try again in a minute.";
+// The family being changed in QuickBooks at this moment (made inactive with everyone under it, or renamed): stage 3's slice 9h.
+const CHANGING_WORDS = "This family is being changed in QuickBooks at this moment, so nobody can be added to it. Try again in a minute.";
+// A change to the guardian's own Parent customer in QuickBooks waiting or stuck on the queue (stage 3's slice 9h).
+const QBO_PENDING_WORDS = "A change to this guardian's Parent customer in QuickBooks is waiting or stuck on the Reconciliation page, so nothing was changed. Once it has gone through, or been given up there, try again.";
+// Someone holds the guardian row's "being sent" lock at this moment: another staff member's change to them being saved,
+// or a change to their Parent customer on its way to QuickBooks. Each refusal says its own cause.
+const BEING_CHANGED_WORDS = "This guardian is being changed at this moment (by someone else here, or a change to their Parent customer on its way to QuickBooks), so nothing was changed. Try again in a minute.";
+// Another add of the same address to the same family got there first.
+const RACED_WORDS = "Someone else changed this guardian at the same moment, so nothing was changed. Reload the page to see where they stand, then try again if you need to.";
+/** What became of the Parent customer in QuickBooks, after the portal's own sentence (stage 3's slice 9h). */
+const withQuickBooks = (said: string, quickbooks: string[]) => [said, ...quickbooks].join(" ");
 const OTHER_COMPANY_WORDS = "QuickBooks is connected to a different company from the one this roster was read from, so the portal can't tell which customer this family is linked to, and nobody was added. An Admin can sort that out under QuickBooks.";
 const ADD_REFUSED = {
   invalid_name: "Give the guardian's name, up to 100 characters.",
@@ -70,10 +81,14 @@ const ADD_REFUSED = {
   inactive: "This family is inactive in the portal, so nobody can be added to it.",
   waiting: WAITING_WORDS,
   making: MAKING_WORDS,
+  changing: CHANGING_WORDS,
   other_company: OTHER_COMPANY_WORDS,
   blocked: "The person with this address is blocked. Unblock them on their page first.",
   already: "The person with this address is already one of this family's guardians.",
   busy: BUSY_WORDS,
+  qbo_pending: QBO_PENDING_WORDS,
+  being_changed: BEING_CHANGED_WORDS,
+  raced: RACED_WORDS,
 } as const;
 
 /** An add that found the address held by a person already: nothing was written, and staff are asked whether it is them. */
@@ -95,9 +110,9 @@ export const addGuardianAction = staffAction(R, async (ctx, familyId: string, na
   refresh();
   // Said of a person who held the address already, between their name and what follows it.
   const known = r.person === "existing" ? ", who already had a sign-in with this address (their name is unchanged)" : "";
-  return { ok: true, message: r.outcome === "reinstated"
+  return { ok: true, message: withQuickBooks(r.outcome === "reinstated"
     ? `${r.name}${known}${known ? "," : ""} was a guardian of this family before: their sign-in for it is back. They sign in with this address and a code while parent sign-ins are on.`
-    : `Added ${r.name}${known}. They sign in with this address and a code while parent sign-ins are on, and are sent a welcome email if they have never had one and welcome emails are on.` };
+    : `Added ${r.name}${known}. They sign in with this address and a code while parent sign-ins are on, and are sent a welcome email if they have never had one and welcome emails are on.`, r.quickbooks) };
 });
 
 export const removeGuardianAction = staffAction(R, async (ctx, guardianId: string, note: string): Promise<Done> => {
@@ -110,7 +125,7 @@ export const removeGuardianAction = staffAction(R, async (ctx, guardianId: strin
     return NOT_FROM_PAGE;
   }
   refresh();
-  return { ok: true, message: "Removed. They can't sign in to this family any more, and are signed out of it." };
+  return { ok: true, message: withQuickBooks("Removed. They can't sign in to this family any more, and are signed out of it.", r.quickbooks) };
 });
 
 const REINSTATE_REFUSED = {
@@ -120,9 +135,12 @@ const REINSTATE_REFUSED = {
   inactive: "This family is inactive in the portal, so nobody can sign in to it.",
   waiting: WAITING_WORDS.replace("nobody can be added to it for now", "this sign-in can't be brought back for now"),
   making: MAKING_WORDS.replace("nobody can be added to it", "this sign-in can't be brought back just now"),
+  changing: CHANGING_WORDS.replace("nobody can be added to it", "this sign-in can't be brought back just now"),
   other_company: OTHER_COMPANY_WORDS.replace("and nobody was added", "and this sign-in wasn't brought back"),
   other_customer: "This sign-in was made for a different customer in QuickBooks than this family's own, so it can't be brought back here.",
   busy: BUSY_WORDS,
+  qbo_pending: QBO_PENDING_WORDS,
+  being_changed: BEING_CHANGED_WORDS,
 } as const;
 
 export const reinstateGuardianAction = staffAction(R, async (ctx, guardianId: string): Promise<Done> => {
@@ -134,14 +152,20 @@ export const reinstateGuardianAction = staffAction(R, async (ctx, guardianId: st
     return { ok: false, errors: [REINSTATE_REFUSED[r.reason]] };
   }
   refresh();
-  return { ok: true, message: "Reinstated. Their sign-in for this family is back." };
+  return { ok: true, message: withQuickBooks("Reinstated. Their sign-in for this family is back.", r.quickbooks) };
 });
 
 export const renamePersonAction = staffAction(P, async (ctx, parentId: string, name: string): Promise<Done> => {
   if (!personId(parentId) || !str(name, NAME_FIELD_MAX)) return NOT_FROM_PAGE;
   const r = await renamePerson(parentId, name, op(ctx));
-  if (!r.ok) return r.reason === "invalid" ? { ok: false, errors: ["Give their name, up to 100 characters."] } : { ok: false, errors: ["That person isn't in the portal any more."] };
+  if (!r.ok) {
+    if (r.reason === "busy") return { ok: false, errors: [BUSY_WORDS] };
+    if (r.reason === "qbo_pending") return { ok: false, errors: ["A change to one of this person's Parent customers in QuickBooks is waiting or stuck on the Reconciliation page, so their name wasn't changed. Once it has gone through, or been given up there, try again."] };
+    if (r.reason === "being_changed") return { ok: false, errors: ["This person is being changed at this moment (by someone else here, or a change to one of their Parent customers on its way to QuickBooks), so their name wasn't changed. Try again in a minute."] };
+    if (r.reason === "raced") return { ok: false, errors: ["This person's memberships changed at that same moment, so their name wasn't changed. Reload the page and try again."] };
+    return r.reason === "invalid" ? { ok: false, errors: ["Give their name, up to 100 characters."] } : { ok: false, errors: ["That person isn't in the portal any more."] };
+  }
   if (!r.changed) return { ok: true, message: "That is their name already." };
   refresh();
-  return { ok: true, message: "Saved. Their name is changed in the portal." };
+  return { ok: true, message: withQuickBooks("Saved. Their name is changed in the portal.", r.quickbooks) };
 });
