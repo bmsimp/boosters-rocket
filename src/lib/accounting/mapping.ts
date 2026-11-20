@@ -108,22 +108,25 @@ const COLLATOR = new Intl.Collator("en", { sensitivity: "base" });
 const byName = <T extends { name: string; id: unknown }>(a: T, b: T) => COLLATOR.compare(a.name, b.name) || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0);
 
 /**
- * Every active family record, with its status and, for a link that stands, its differences. Each table is read once,
- * whatever the number of families: the roster's company and the connection, the shape and the customer types, the last
+ * Every active family record, with its status and, for a link that stands, its differences. The screen's own reads
+ * touch each table once, whatever the number of families: the roster's company and the connection, the shape and the customer types, the last
  * successful roster read, the cache's customers, the family creates on the write queue, the active families, every
  * student record with a family (active or not), the open guardian rows with their people, the links of the records'
  * company (the roster's, while the books aren't connected to another; another company's links are never read), the
  * names of the staff members those links name, and, only in the `listed` state, the write queue's open items
- * (loadOpenWrites(), with no family and no amounts). The rest is worked out here.
+ * (loadOpenWrites(), with no family and no amounts). loadOpenWrites() then reads some of those tables again, a fixed
+ * number of times and never per family (below). The rest is worked out here.
  *
  * Queries per view, whatever the number of families: ten at once (the roster's company, the connection, the shape, the
  * types, the last good read, the customers, the family creates, the families, the students, the guardian rows), then
- * the links and the queue's open items together, then the staff names when a link names one: 12 or 13 with an empty queue.
- * loadOpenWrites() makes one query for its items and, when there are any, up to 20 more of its own (the cache's
- * customers again, the family records the items are filed under and their links, the names of refused students and
- * guardians, and a move's families, links and money note: each lookup through a link reads the roster's company and
- * the connection first), so at most 33 in all. On four hundred families with two thousand customers that is the same
- * 12 to 33 queries; memory holds the two thousand cached customers (twice, while the queue holds items, as
+ * the links and the queue's open items together, then the staff names when a link names one. With no company named,
+ * or the books connected to another company, no link and no queue item is read: 10. With the shape missing or broken,
+ * the links but not the queue: 11 or 12. Listed with an empty queue: 12 or 13. loadOpenWrites() makes one query for
+ * its items and, when there are any, up to 20 more of its own, re-reads of tables the screen has read already (the
+ * cache's customers again, the family records the items are filed under and their links, the names of refused
+ * students and guardians with their people, and a move's families, links and money note: each lookup through a link
+ * reads the roster's company and the connection first), so at most 33 in all: 10 to 33 a view. On four hundred
+ * families with two thousand customers that is the same 10 to 33 queries; memory holds the two thousand cached customers (twice, while the queue holds items, as
  * loadOpenWrites() reads its own), the records, guardian rows and links (a few thousand small rows), and the rows
  * rendered are the four hundred families, each opening listing its students, guardians and differences.
  */
