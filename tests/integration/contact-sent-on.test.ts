@@ -155,6 +155,10 @@ describe("a parent's save queues the change for each record it goes to (items 1 
     // Ana's own record in the Chen family too: Mei Chen's customer, 21, stands for it here.
     await seedGuardian({ parentId: a.ana.id, familyQboId: "20", sourceQboId: "21", status: "active" });
     await syncAppRecords();
+    // That record holds the phone the portal knows for her, as her records agreed at the take-in: an empty one there
+    // would be a difference the portal never knew of, and kept (AGENTS.md's rough edge for the mapping screen).
+    inQuickBooks(stub, "21").PrimaryPhone = { FreeFormNumber: "555-0101" };
+    await db.update(qboCustomer).set({ phone: "555-0101" }).where(eq(qboCustomer.qboId, "21"));
     await saveMyContact(a.ctx, form({ phone: NEW_PHONE }, "p:1"));
     expect((await items()).map((i) => [i.targetQboId, String(i.familyId)]).sort()).toEqual([["11", String(rivera)], ["21", String(chen)]].sort());
     await wake();
