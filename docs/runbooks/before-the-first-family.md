@@ -423,8 +423,22 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
     asks for the passkey (the device may still offer it, and the portal refuses it with "That passkey didn't work");
     the second Admin's home page shows "Sign-in resets this week" with who reset whose sign-in and when, and the first
     Admin's doesn't. **If not:** note what happened, and where.
+43. **The passkey offer on Home.** As a test parent with no passkey: on the iPhone in the installed app, sign out,
+    then sign in with the password and the emailed code. Home shows "Sign in with Face ID or your fingerprint next
+    time?" after the greeting, with **Turn on** and **Not now**; press **Turn on** and unlock with Face ID or the
+    passcode. Do the same on Android in the installed app (the fingerprint or the screen lock), and on a computer in a
+    browser, where the box asks "Sign in with a passkey next time?" and names Windows Hello and a password manager.
+    Then, as a second test parent with no passkey, sign in with the password and the emailed code on three different
+    devices, pressing **Not now** on each, and sign in the same way on a fourth.
+    **Pass:** a phone shows the phone's words and a computer the computer's; **Turn on** asks for nothing but the
+    device's own unlock, then says "Done. Next time you sign in here, use your passkey.", and for a parent with no
+    authenticator app shows the ten backup codes once; Sign-in settings then lists it as "Passkey added" with its date,
+    and Home never offers a passkey to that parent again; a sign-in on a remembered device (the password alone) shows no
+    offer; **Not now** says "No problem. We'll leave it for now.", the third says "No problem. We won't ask again. You
+    can add a passkey any time under Sign-in settings." with a link there, and the fourth device's sign-in shows no
+    offer. **If not:** note the phone or computer, the browser or installed app, and what Home showed.
 
-Checks 30 to 41 are what Playwright's own authenticator can't show (`tests/e2e/passkey-signin.spec.ts` and
+Checks 30 to 41 and 43 are what Playwright's own authenticator can't show (`tests/e2e/passkey-signin.spec.ts` and
 `tests/e2e/passkeys.spec.ts` say so in their heads): a real authenticator, a password manager, a synced passkey, a
 phone by its QR code, a security key, the installed app, Safari and Firefox. The browser's own passkey suggestions on
 the email field are not checked: the portal doesn't start them.
