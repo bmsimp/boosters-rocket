@@ -261,6 +261,44 @@ export const parentDevice = pgTable("parent_device", {
   index("parent_device_parent_ix").on(t.parentId),
 ]);
 
+/**
+ * A person's authenticator app (the sign-in release, slice SI-6a; open questions 24, 25 and 35 of the app-owned
+ * families spec): at most one per person, being set up or in force. The secret it makes its codes from, sealed with the
+ * portal's own box (secretBox(), src/lib/crypto/secret-box.ts, under SETTINGS_ENCRYPTION_KEY, its key id beside it),
+ * bound to this row and person, so a copy moved to another row or person doesn't open; never the secret itself.
+ * `confirmed_at` is null while a set-up is unfinished, and the app is in force, a second step, only once it is set.
+ * `last_used_step` is the newest 30-second step a code was taken for, null until one is: a code is taken only for a
+ * newer step, so it works once. Read and written only by src/lib/parents/authenticator.ts. It goes with the person; the
+ * daily clean-up deletes an unfinished set-up older than its life (AUTHENTICATOR_SETUP_LIFE_MS). Since SI-6a it is a
+ * second step at the door and in asking again; SI-6b sets it up on the sign-in settings and turns it off, and the
+ * staff reset (SI-9) removes it. Nothing else that ends a person's sign-in removes it.
+ */
+export const parentAuthenticator = pgTable("parent_authenticator", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "cascade" }),
+  secretCiphertext: text("secret_ciphertext").notNull(),
+  secretKeyId: text("secret_key_id").notNull(),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+  lastUsedStep: bigint("last_used_step", { mode: "number" }),
+  createdAt: created(),
+}, (t) => [uniqueIndex("parent_authenticator_parent_uq").on(t.parentId)]);
+
+/**
+ * A person's backup codes (the sign-in release, slice SI-6a; open question 25): each works once as a second step in
+ * place of the authenticator app (and, from SI-7, a passkey). Only the keyed hash of a code is stored (hashBackupCode(),
+ * src/lib/parents/backup-codes.ts), never the code; a code is spent by setting `used_at`. Read and written only by
+ * src/lib/parents/authenticator.ts; made (ten at a time, shown once) by SI-6b. It goes with the person. The daily
+ * clean-up deletes a spent one once a code's life has passed since it was spent, as a spent sign-in code is kept: the
+ * sign-in that spent it reads it again at its last check (signinStands(), signin-codes.ts).
+ */
+export const parentBackupCode = pgTable("parent_backup_code", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "cascade" }),
+  codeHash: text("code_hash").notNull(),
+  createdAt: created(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+}, (t) => [index("parent_backup_code_parent_ix").on(t.parentId)]);
+
 /** One row per counted event; rate-limit.ts counts rows in a sliding window (spec §1 Rate limits). */
 export const rateLimitEvent = pgTable("rate_limit_event", {
   id: bigserial("id", { mode: "number" }).primaryKey(),

@@ -4,7 +4,7 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: as
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, family, familyMoney, jobRun, parentAuthSession, parentAuthVerification, parentDevice, parentEmailChange, parentSigninToken, rateLimitEvent, setting, signinCode, staffAuthSession, staffAuthUser, staffAuthVerification, writeQueue } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, familyMoney, jobRun, parentAuthenticator, parentAuthSession, parentBackupCode, parentAuthVerification, parentDevice, parentEmailChange, parentSigninToken, rateLimitEvent, setting, signinCode, staffAuthSession, staffAuthUser, staffAuthVerification, writeQueue } from "@/lib/db/schema";
 import * as schema from "@/lib/db/schema";
 import { getTableName, is } from "drizzle-orm";
 import { PgTable } from "drizzle-orm/pg-core";
@@ -12,6 +12,7 @@ import { cleanUp, runCleanup, describeCleanup, CLEANED_TABLES, KEPT_TABLES, CLEA
 import { runDueJobs } from "@/lib/jobs/runner";
 import { RATE_LIMITS } from "@/lib/parents/rate-limit";
 import { CODE_TTL_MS, RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
+import { AUTHENTICATOR_SETUP_LIFE_MS } from "@/lib/parents/authenticator";
 import { EMAIL_CHANGE_TTL_MS } from "@/lib/parents/email-change";
 import { ROSTER_JOB } from "@/lib/roster/refresh";
 import { resetDb, seedParent, seedParentSession } from "../helpers/db";
@@ -26,7 +27,7 @@ const MONEY_COMPANY = "4620000000000001";
 const NOW = new Date("2026-11-15T12:00:00.000Z");
 const at = (ms: number) => new Date(NOW.getTime() + ms);
 const SEC = 1000, DAY = 86_400_000;
-const NOTHING: CleanupCounts = { staffSessions: 0, parentSessions: 0, signinCodes: 0, signinLinks: 0, rememberedDevices: 0, rateLimitEvents: 0, emailChanges: 0, familyMoney: 0, jobRuns: 0, reminderClaims: 0, writeQueue: 0, verifications: 0, retiredSettings: 0 };
+const NOTHING: CleanupCounts = { staffSessions: 0, parentSessions: 0, signinCodes: 0, signinLinks: 0, unfinishedAuthenticators: 0, spentBackupCodes: 0, rememberedDevices: 0, rateLimitEvents: 0, emailChanges: 0, familyMoney: 0, jobRuns: 0, reminderClaims: 0, writeQueue: 0, verifications: 0, retiredSettings: 0 };
 const clean = (now = NOW) => db.transaction((tx) => cleanUp(tx, now));
 
 async function staffSession(id: string, expiresAt: Date) {
@@ -55,6 +56,9 @@ describe("the daily clean-up deletes only what is past use", () => {
     await db.insert(signinCode).values({ parentId: ana.id, codeHash: "h", expiresAt: at(CODE_TTL_MS), createdAt: NOW });
     await db.insert(parentSigninToken).values({ parentId: ana.id, purpose: "setup", tokenHash: "link", expiresAt: at(7 * DAY) });
     await db.insert(parentDevice).values({ parentId: ana.id, tokenHash: "device", expiresAt: at(90 * DAY) });
+    // An app in force and an unspent backup code, however old: neither has a life of its own.
+    await db.insert(parentAuthenticator).values({ parentId: ana.id, secretCiphertext: "sealed", secretKeyId: "k", confirmedAt: at(-400 * DAY), createdAt: at(-400 * DAY) });
+    await db.insert(parentBackupCode).values({ parentId: ana.id, codeHash: "backup", createdAt: at(-400 * DAY) });
     await db.insert(rateLimitEvent).values({ kind: "code_send_ip", subject: "203.0.113.7", at: NOW });
     await db.insert(parentEmailChange).values({ parentId: ana.id, newEmail: "new@example.com", tokenHash: "tok", expiresAt: at(EMAIL_CHANGE_TTL_MS) });
     await db.insert(jobRun).values({ job: ROSTER_JOB, startedAt: NOW, finishedAt: NOW, outcome: "ok", startedBy: "worker" });
@@ -135,6 +139,39 @@ describe("the daily clean-up deletes only what is past use", () => {
     expect(await ids(db.select({ id: parentDevice.id }).from(parentDevice))).toEqual([edge, kept].sort());
     expect([edge, kept]).not.toContain(gone);
     expect(describeCleanup({ ...NOTHING, rememberedDevices: 2 })).toBe("Removed 2 expired remembered devices.");
+  });
+
+  it("authenticator apps: an unfinished set-up older than its life goes, one a second younger or at its edge stays, and an app in force stays however old", async () => {
+    // One app per person (slice SI-6a), so each row below is another person's.
+    const people = await Promise.all(["a", "b", "c", "d"].map((n) => seedParent({ name: n })));
+    const app = async (i: number, v: { createdAt: Date; confirmedAt?: Date }) =>
+      String((await db.insert(parentAuthenticator).values({ parentId: people[i]!.id, secretCiphertext: `sealed${i}`, secretKeyId: "k", ...v })
+        .returning({ id: parentAuthenticator.id }))[0]!.id);
+    const gone = await app(0, { createdAt: at(-AUTHENTICATOR_SETUP_LIFE_MS - SEC) });
+    const edge = await app(1, { createdAt: at(-AUTHENTICATOR_SETUP_LIFE_MS) });
+    const young = await app(2, { createdAt: at(-AUTHENTICATOR_SETUP_LIFE_MS + SEC) });
+    const inForce = await app(3, { createdAt: at(-400 * DAY), confirmedAt: at(-400 * DAY + 60_000) });
+    expect(await clean()).toEqual({ ...NOTHING, unfinishedAuthenticators: 1 });
+    expect(await ids(db.select({ id: parentAuthenticator.id }).from(parentAuthenticator))).toEqual([edge, young, inForce].sort());
+    expect([edge, young, inForce]).not.toContain(gone);
+    expect(describeCleanup({ ...NOTHING, unfinishedAuthenticators: 1 })).toBe("Removed 1 unfinished authenticator app set-up.");
+  });
+
+  it("backup codes: one spent over a code's life ago goes, one spent since or at the edge stays, and an unspent one stays however old", async () => {
+    // A spent backup code is kept for a code's life, as a spent sign-in code is: the sign-in that spent it reads it again
+    // at its last check (signinStands()).
+    const ana = await seedParent({ name: "Ana" });
+    const code = async (codeHash: string, usedAt: Date | null) =>
+      String((await db.insert(parentBackupCode).values({ parentId: ana.id, codeHash, createdAt: at(-100 * DAY), usedAt })
+        .returning({ id: parentBackupCode.id }))[0]!.id);
+    const gone = await code("b-gone", at(-CODE_TTL_MS - SEC));
+    const edge = await code("b-edge", at(-CODE_TTL_MS));
+    const young = await code("b-young", at(-CODE_TTL_MS + SEC));
+    const unspent = await code("b-unspent", null);
+    expect(await clean()).toEqual({ ...NOTHING, spentBackupCodes: 1 });
+    expect(await ids(db.select({ id: parentBackupCode.id }).from(parentBackupCode))).toEqual([edge, young, unspent].sort());
+    expect([edge, young, unspent]).not.toContain(gone);
+    expect(describeCleanup({ ...NOTHING, spentBackupCodes: 2 })).toBe("Removed 2 used backup codes.");
   });
 
   it("rate-limit records: only those outside their kind's window, an unknown kind after the longest window", async () => {
@@ -339,7 +376,7 @@ describe("a run of the clean-up", () => {
   it("says what it removed in plain words", () => {
     expect(describeCleanup(NOTHING)).toBe("Nothing to remove.");
     expect(describeCleanup({ ...NOTHING, staffSessions: 1 })).toBe("Removed 1 expired staff session.");
-    expect(describeCleanup({ staffSessions: 2, parentSessions: 1, signinCodes: 3, signinLinks: 0, rememberedDevices: 0, rateLimitEvents: 4, emailChanges: 1, familyMoney: 1, jobRuns: 5, reminderClaims: 0, writeQueue: 0, verifications: 0, retiredSettings: 0 }))
+    expect(describeCleanup({ staffSessions: 2, parentSessions: 1, signinCodes: 3, signinLinks: 0, unfinishedAuthenticators: 0, spentBackupCodes: 0, rememberedDevices: 0, rateLimitEvents: 4, emailChanges: 1, familyMoney: 1, jobRuns: 5, reminderClaims: 0, writeQueue: 0, verifications: 0, retiredSettings: 0 }))
       .toBe("Removed 2 expired staff sessions, 1 expired parent session, 3 sign-in codes, 4 rate-limit records, 1 expired email change, 1 set of figures for a family no longer in the roster and 5 old job records.");
     expect(describeCleanup({ ...NOTHING, reminderClaims: 3 })).toBe("Removed 3 reminder records older than a year.");
   });

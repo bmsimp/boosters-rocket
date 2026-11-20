@@ -309,6 +309,13 @@
       "when": 1795140148650,
       "tag": "0043_session_device",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1795148083978,
+      "tag": "0044_authenticator_app",
+      "breakpoints": true
     }
   ]
 }
