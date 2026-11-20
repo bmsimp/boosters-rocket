@@ -472,8 +472,10 @@ describe("the page", () => {
     let html = list(await renderPage(AccountingLinksPage, { searchParams: { status: "suggested" } }));
     expect(tableRows(html).map((r) => r[0])).toEqual(["The Patels"]);
     expect(html).toContain("1 family of 3 shown");
-    expect(html).toContain('<option value="" selected="">Every status (3)</option>'); // no status asked for: React marks the empty option
+    expect(html).toContain('<option value="">Every status (3)</option>'); // a status asked for: React marks that option alone
     expect(html).toContain('<option value="carried_over">Carried over (2)</option>');
+    // With no guardian seeded, the Riveras' Ana Rivera and the Chens' Mei Chen are Parent customers no guardian is linked to.
+    expect(html).toContain('<option value="with_differences">Linked, with differences (2)</option>');
     expect(html).toContain('<option value="suggested" selected="">Suggested (1)</option>');
     expect(html).toContain('<option value="not_checked">Not checked (0)</option>');
     html = list(await renderPage(AccountingLinksPage, { searchParams: { status: ["suggested", "x"], q: ["patel"] } }));
