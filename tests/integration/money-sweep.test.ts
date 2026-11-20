@@ -16,6 +16,7 @@ import { runMoneyAndItems } from "@/lib/jobs/money-job";
 import { askForMoneyRun, MONEY_JOB, moneyRunView, RUN_KEY, runMoneyJob, STOPS_AT_ONE_FAMILY } from "@/lib/money/sweep";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import { familyFromCustomer } from "@/lib/roster/no-family";
+import { customerAimedAt } from "@/lib/accounting/link-writes";
 import { resetDb, seedStaff } from "../helpers/db";
 import { connectCompany, familyRecordOf, invoiceQueries, moneyRow, stubInvoice as inv } from "../helpers/money";
 import { MONEY_REALM } from "../helpers/parent";
@@ -204,7 +205,7 @@ describe("the worker's read of every family", () => {
     expect((await audits("money.read_all")).at(-1)!.after).toEqual({ families: 4, read: 3, couldNotRead: 1, passedOverWithNoRecord: 1 });
 
     const treasurer = await seedStaff({ email: "treasurer@club.org" });
-    expect(await familyFromCustomer("25", { actor: { door: "staff", id: treasurer.id, label: treasurer.email }, ip: null, permission: "Accounting.Link.ReadWrite", staffUserId: treasurer.id, mayChangeFamilies: false }))
+    expect(await familyFromCustomer("25", { actor: { door: "staff", id: treasurer.id, label: treasurer.email }, ip: null, permission: "Accounting.Link.ReadWrite", staffUserId: treasurer.id, mayChangeFamilies: false }, customerAimedAt))
       .toMatchObject({ ok: true });
     expect(await runMoneyJob({ paceMs: 0, now: later(26 * HOUR) })).toEqual({ ran: true, finished: true, ok: true });
     expect(invoiceQueries(stub).join(" ")).toContain("'25'");
