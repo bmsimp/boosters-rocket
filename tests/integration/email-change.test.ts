@@ -37,7 +37,7 @@ vi.mock("@/lib/parents/sessions", async (original) => {
 
 import { asc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, parent, parentAuthAccount, parentAuthSession, parentAuthUser, parentDevice, parentEmailChange, qboCustomer, rateLimitEvent, signinCode } from "@/lib/db/schema";
+import { auditLog, guardian, parent, parentAuthAccount, parentAuthSession, parentAuthUser, parentDevice, parentEmailChange, qboCustomer, rateLimitEvent, signinCode, writeQueue } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import { EMAIL_COPY, confirmMyEmailChange, findMyEmailChange } from "@/lib/parents/email-change";
 import { addGuardian, removeGuardian } from "@/lib/parents/guardians";
@@ -93,6 +93,12 @@ const linkTo = (to: string) => {
   return /\/family\/email\/([A-Za-z0-9_-]{43})/.exec(mail.text)![1]!;
 };
 const aCode = (parentId: string) => db.insert(signinCode).values({ parentId, codeHash: "an-unused-code", expiresAt: new Date(Date.now() + 600_000) });
+/**
+ * What the confirms queued for the worker to send on (stage 3's slice S11e): each item's target and request, by target.
+ * Nothing is ever sent from the confirm itself: no test here runs the worker, so the stub is asked nothing.
+ */
+const queued = async () => (await db.select().from(writeQueue)).map((i) => ({ state: i.state, sent: i.sent, target: i.targetQboId, familyId: i.familyId, request: i.request }))
+  .sort((a, b) => String(a.target).localeCompare(String(b.target)));
 const DONE = (email: string) => ({ ok: true, message: EMAIL_COPY.done(email), signedOut: true });
 const OFFER = `<a class="btn btn-line" href="/family/email">Change my sign-in email</a>`;
 
@@ -339,8 +345,13 @@ describe("confirming: the portal alone", () => {
     expect(await confirmEmailChangeAction(token)).toEqual({ ok: false, errors: [EMAIL_COPY.linkNoGood] });
 
     // One row, against the person, in the transaction that made the change.
+    // Stage 3's slice S11e: the new address is queued, in that transaction, for her own Parent customer, and the row names it.
+    const items = await queued();
+    expect(items).toEqual([{ state: "waiting", sent: false, target: R_PARENT, familyId: r.identity.familyId,
+      request: { op: "email", role: "parent", qboId: R_PARENT, syncToken: expect.any(String), from: RIVERA.parent.email, to: NEW, guardianId: r.identity.guardianId } }]);
+    const [itemId] = (await db.select({ id: writeQueue.id }).from(writeQueue)).map((i) => i.id);
     expect(await auditsOf("parent.email.save")).toEqual([{ action: "parent.email.save", targetType: "parent", targetId: r.identity.parentId, before: { email: RIVERA.parent.email },
-      after: { email: NEW, familyId: String(r.identity.familyId), sessionsEnded: 1, linksDeleted: 2, devicesForgotten: 1 } }]);
+      after: { email: NEW, familyId: String(r.identity.familyId), sessionsEnded: 1, linksDeleted: 2, devicesForgotten: 1, queueIds: [itemId] } }]);
     // Nothing decided access: no sign-in was opened, moved or closed.
     for (const action of ["parent.email.changed", "parent.access.granted", "parent.access.moved", "parent.access.ended", "parent.hold.opened"]) {
       expect((await audits()).map((a) => a.action)).not.toContain(action);
@@ -387,6 +398,10 @@ describe("confirming: the portal alone", () => {
     expect(await cachedEmail(R_PARENT)).toBe("someone.else@family-r.example");
     expect(await cachedEmail(C_PARENT)).toBe(CHENOWETH.parent.email);
     expect(stub.apiCalls()).toEqual([]);
+    // Queued (stage 3's slice S11e): one for Rosalind's own Parent customer, whatever its field holds now (the worker
+    // settles that); none for the Chenoweth parent record she shares with Cordelia's open row, which is nobody's own;
+    // none for the person with no record of their own.
+    expect((await queued()).map((i) => [i.target, i.request.op === "email" ? i.request.to : null])).toEqual([[R_PARENT, NEW]]);
   });
 
   it("books with no parent type: the family's field is left as it was, and only this parent's address changes", async () => {
@@ -399,6 +414,9 @@ describe("confirming: the portal alone", () => {
     expect(await confirmEmailChangeAction(linkTo("home.new@noparent.example"))).toEqual(DONE("home.new@noparent.example"));
     expect(await cachedEmail("7310")).toBe("home@noparent.example; work@noparent.example");
     expect((await person(home.identity.parentId)).email).toBe("home.new@noparent.example");
+    // Queued for the family's own customer, as this membership's (stage 3's slice S11e): only her address is to change there.
+    expect(await queued()).toEqual([{ state: "waiting", sent: false, target: "7310", familyId: home.identity.familyId,
+      request: { op: "email", role: "family", qboId: "7310", syncToken: expect.any(String), from: "home@noparent.example", to: "home.new@noparent.example", guardianId: home.identity.guardianId } }]);
     expect(await sessionsOf(home.identity.parentId)).toEqual([]);
     // The other parent signs in as before.
     expect((await person(work.identity.parentId)).email).toBe("work@noparent.example");
@@ -416,6 +434,8 @@ describe("confirming: the portal alone", () => {
     expect((await person(m.identity.parentId)).email).toBe("marisol.new@flat.example");
     expect(await cachedEmail("7410")).toBe("marisol@flat.example");
     expect(stub.apiCalls()).toEqual([]);
+    // Queued for the member's own customer (stage 3's slice S11e).
+    expect((await queued()).map((i) => [i.target, i.request.op === "email" ? i.request.role : null])).toEqual([["7410", "member"]]);
   });
 
   it("takes no roster lock: a confirm made while a roster read holds it finishes", async () => {
