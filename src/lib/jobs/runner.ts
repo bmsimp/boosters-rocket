@@ -7,6 +7,7 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster, ROSTER_JOB } from "@/lib/roster/refresh";
 import { sendOwedWelcomes } from "@/lib/parents/welcome";
 import { rosterRefreshAsked } from "@/lib/parents/refresh-ask";
+import { TAKE_IN_JOB, takeInContactDetails } from "@/lib/parents/contact-take-in";
 import { CLEANUP_JOB, removedInAll, runCleanup } from "./cleanup";
 import { BUYOUT_CHECK_MARK, markJob, REMINDERS_MARK } from "./marks";
 import { MONEY_JOB } from "@/lib/money/sweep";
@@ -84,6 +85,15 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
     if (due.sent + due.failed > 0) ran.push({ job: DUE_REMINDERS_JOB, ok: due.failed === 0 });
   } catch {
     ran.push({ job: DUE_REMINDERS_JOB, ok: false });
+  }
+  // A guardian's phone and mailing address taken into the portal, once, after the first successful roster read since
+  // migration 0044 (src/lib/parents/contact-take-in.ts). It reads the roster cache and asks QuickBooks nothing, so it
+  // goes before the connection check, at the wake after that read. Guarded like the steps above; in this wake's answer
+  // only on the wake it ran.
+  try {
+    if ((await takeInContactDetails()).ran) ran.push({ job: TAKE_IN_JOB, ok: true });
+  } catch {
+    ran.push({ job: TAKE_IN_JOB, ok: false });
   }
   const conn = await connectionView();
   // Not connected, or connected but only an Admin connecting again can fix it: nothing to run, nothing to record,

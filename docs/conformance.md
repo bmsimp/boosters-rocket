@@ -20,7 +20,7 @@ QuickBooks, **Check the portal's requests** (`/staff/settings/quickbooks/check`,
 
 | Section | Built | Partly built | Missing | Changed or dropped |
 |---|---|---|---|---|
-| §2 In v1 | 10 | 0 | 0 | 0 |
+| §2 In v1 | 9 | 0 | 0 | 1 |
 | §6 Roster management | 15 | 0 | 0 | 6 |
 | §8 Money | 24 | 0 | 0 | 0 |
 | §9 Forms | 23 | 0 | 0 | 2 |
@@ -30,7 +30,7 @@ QuickBooks, **Check the portal's requests** (`/staff/settings/quickbooks/check`,
 | §13 Audit log | 10 | 1 | 0 | 0 |
 | §14 Operations | 9 | 3 | 0 | 2 |
 | Owner's decisions of 2026-11-14 | 5 | 0 | 0 | 0 |
-| **All** | **148** | **5** | **0** | **10** |
+| **All** | **147** | **5** | **0** | **11** |
 
 Nothing the specs ask for is missing outright. The five partly built rows, and what each lacks, are listed at the foot
 of this page with a rough size; the changes the step made are under "Fixed in this step", and the roadmap's Known gaps
@@ -43,7 +43,7 @@ are checked one by one after that.
 | 2.1 | Parent and staff sign-in | Parents sign in with the portal's own emailed code (email-code spec), not Entra External ID; staff by Microsoft or Google | Built | `src/lib/auth/`; `tests/integration/parent-door.test.ts`, `signin-codes.test.ts`, `providers.test.ts`, `tests/e2e/parent-sign-in.spec.ts` |
 | 2.2 | Family roster managed in the portal, stored in QuickBooks | The membership shape decides which customers QuickBooks lists as families (QuickBooks spec §1), while the families themselves are the app's own records, which since stage 3's slice 9c neither a shape save nor a roster read changes; staff create, rename, move and make inactive from the roster pages (parents spec as changed by step 5). Since stage 3's sixth slice the roster pages list the app's own family and student records, with what QuickBooks holds joined from the roster cache, and the staff season, volunteering and forms pages read the app's active families (`loadSeasonFamilies()`). Since stage 3's slice 10 a family customer added in QuickBooks comes into the portal by "Create a family from this" on Reconciliation, for staff with the linking permission (`Accounting.Link.ReadWrite`): the family and its students, linked to their customers and confirmed by that staff member. Since slice 9d a family staff add is the portal's own record first, made in QuickBooks only by a holder of that permission (at once, or later with "Create in QuickBooks and link"), and a family with no link is kept in the portal only | Built | §6 below; `roster-queries.test.ts` "rosterFamilies: the app's family records, each with what QuickBooks holds for its customer, in the roster's order"; `season-families.test.ts`; `customers-with-no-family.test.ts`; `families-by-hand.test.ts` |
 | 2.3 | Balance, open invoices, a Pay link per invoice | | Built | §8.2 below |
-| 2.4 | Parent contact edits written back to QuickBooks | Owner decision 3: phone and address of the parent's own record; email by confirmed link | Built | §6.2 below |
+| 2.4 | Parent contact edits written back to QuickBooks | Owner decision 3: phone and address of the parent's own record; email by confirmed link. Since stage 3's slice 11a of the app-owned families spec the phone and address are the portal's own, saved in the portal first (that spec's section 5), and S11b sends each change on: until then only the email is written back | Changed | §6.2 below |
 | 2.5 | Commitment forms signed in Documenso, with completion tracking | Owner decision 2; the Documenso verification corrects §9 | Built | §9 below |
 | 2.6 | Season steps with four kinds of requirement, shown as the ruler | | Built | §10 below |
 | 2.7 | Volunteer sign-up, reminders, check-in, credit, buy-outs | | Built | §11 below |
@@ -76,8 +76,8 @@ For a linked family, making someone inactive (and a parent's changes) go to Quic
 
 | # | Spec says | Override | State | Proof |
 |---|---|---|---|---|
-| 6.2.1 | Phone and address written straight to QuickBooks, audited | Owner decision 3; §6.2's note of 2026-11-15: the parent's own record (a Parent sub-customer, or the shared family or member record, which the page says), read live when the page opens | Built | `src/lib/parents/contact-edits.ts`; `tests/integration/contact-edits.test.ts` "layered, with a parent type", "layered, with no parent type", "flat", "the address goes as one billing address, and the audit row holds it before and after" |
-| 6.2.2 | Another guardian's edits stay in the portal | Nothing is kept in the portal: a sign-in made by hand has no record and is told to ask the club | Changed | `contact-edits.test.ts` "a sign-in made by hand has no QuickBooks record of its own" |
+| 6.2.1 | Phone and address written straight to QuickBooks, audited | Owner decision 3; §6.2's note of 2026-11-15; since stage 3's slice 11a the app-owned families spec's section 5 and open question 6: saved in the portal first, on the person in books with a parent type and on the family (shared, which the page says) in books with none, audited (`parent.details.save`); sent to QuickBooks by S11b, not yet. Taken in once from each person's own record by the take-in (`src/lib/parents/contact-take-in.ts`) | Changed | `src/lib/parents/contact-edits.ts`; `tests/integration/contact-edits.test.ts` "layered, with a parent type", "layered with no parent type", "flat", "the address is saved as one, and the audit row holds it before and after"; `contact-take-in.test.ts` |
+| 6.2.2 | Another guardian's edits stay in the portal | Since stage 3's slice 11a every guardian's edits stay in the portal, a guardian staff added with no QuickBooks record included | Built | `contact-edits.test.ts` "a guardian staff added, with no QuickBooks record of their own, sees and changes their own details" |
 | 6.2.3 | Email: a single-use, expiring, hashed link to the new address and a notice to the old | The request is asked in the session's own family, the app's record (`parent_email_change.family_id`, since stage 3's fifth slice), and is live only there | Built | `src/lib/parents/email-change.ts`; `tests/integration/email-change.test.ts` "stores the request, mails a link to the new address and a notice to the old", "replaces an earlier request that wasn't used" |
 | 6.2.4 | On confirmation: sign-in identity, then QuickBooks, then the portal | Email-code spec §6: no Graph step. QuickBooks first, then the person's own address changed by the confirmation itself (stage 3's slice 7a), ending their sessions; an address another person holds is refused before anything is sent; a lost answer is finished by the next try without sending again | Built | `email-change.test.ts` "own Parent record: the one address is changed in QuickBooks, then the person, and the old address signs in nowhere", "an address %s signs in with is refused before anything is sent, and nothing changes", "an answer that never came", "the roster is busy"; the two other shapes |
 | 6.2.5 | A later step that fails goes to the write queue and the reconciliation screen | Never queued: the parent is waiting (AGENTS.md, Writes to QuickBooks). A busy roster leaves the cache and asks the worker for a refresh | Changed | `email-change.test.ts` "the roster is busy: QuickBooks has the change, the cache is left alone and a refresh asked for", "an answer that never came" |
@@ -86,7 +86,7 @@ For a linked family, making someone inactive (and a parent's changes) go to Quic
 
 | # | Spec says | Override | State | Proof |
 |---|---|---|---|---|
-| 6.3.1 | Every update sends the cached SyncToken; a stale one is answered with the current values and nothing is overwritten | | Built | `contact-edits.test.ts` "changed in the moment between the read and the write: QuickBooks refuses, the record is read again"; `roster-writes.test.ts` "is refused by QuickBooks (5010), read again, shown with its current values, and not queued"; `email-change.test.ts` "a record changed in QuickBooks meanwhile" |
+| 6.3.1 | Every update sends the cached SyncToken; a stale one is answered with the current values and nothing is overwritten | A parent's phone and address carry the portal's own version (`contact_version`) since stage 3's slice 11a | Built | `contact-edits.test.ts` "a version that is not the row's", "two saves from forms shown the same version"; `roster-writes.test.ts` "is refused by QuickBooks (5010), read again, shown with its current values, and not queued"; `email-change.test.ts` "a record changed in QuickBooks meanwhile" |
 | 6.3.2 | The worker refreshes the roster cache nightly | QuickBooks spec §4: due 24 hours after the last good run, retried every 15 minutes | Built | `src/lib/jobs/runner.ts`; `tests/integration/jobs-runner.test.ts` "retries a failed job, but no more often than every 15 minutes"; `roster-refresh.test.ts` |
 | 6.3.3 | Differences it can't explain are flagged on a reconciliation screen | Needs attention (QuickBooks spec §5) and `/staff/reconciliation`; its sign-in rule (`signin_unknown`) holds a sign-in to its membership's family record's customer (`guardian.family_id`); the flags the sign-in rules from QuickBooks made went with them, and so did `inactive_with_signin`, since nobody can enter an inactive family (stage 3's slice 7a). For staff who may link families to accounting it also lists the customers QuickBooks calls a family that no family is linked to, each with "Create a family from this" (stage 3's slice 10, `src/lib/roster/no-family.ts`) | Built | `tests/unit/roster-attention.test.ts`; `roster-pages.test.ts` "shows Needs attention with plain words"; `roster-write-pages.test.ts` "the Reconciliation page (Roster.Read)"; `customers-with-no-family.test.ts` "the action and the Reconciliation section" |
 | 6.3.4 | A refresh never puts an older copy over what a write just stored | AGENTS.md (the cache changes only from QuickBooks' answer, under the roster lock) | Built | `email-change.test.ts` "a refresh that stored a later version while the confirmation waited keeps it"; `contact-edits.test.ts` "a roster refresh under way: QuickBooks has the change, the cache is left alone and the worker asked to read the roster again" (fixed in this step) |
@@ -343,14 +343,14 @@ more of them; the roadmap's own Known gaps section is the current list.
 | Step 2 review | Payments and Home ask the family first (`loadMyFamily()`, the app's record since stage 3's fourth slice); `loadFamilyMoney()` alone does not | Still true | `figuresToShow()` in `src/lib/money/family-money.ts` |
 | Step 2 review | Figures go "not current" when the portal is only busy | Still true | `src/lib/money/family-money.ts` |
 | Step 2 review | A code step left on a shared device | Still true | The device keeps it for the code's 10 minutes, by design |
-| Step 3 | A roster refresh can put an old phone back in the cache | Partly true: behind for minutes, not a day | `890e0b9`: while a refresh runs the save leaves the cache and asks for another; the one under way still stores what it read |
+| Step 3 | A roster refresh can put an old phone back in the cache | No longer true | Since stage 3's slice 11a a parent's phone is the portal's own and the save writes no cache; nothing a parent sees reads the cache's phone |
 | Step 3 | The field limits for a parent's phone and address are guesses | Still true | Sandbox check |
 | Step 3 | Coverage is everyone or a chosen list; no due-date reminders; no deleting a season; no reordering requirements | Partly true | Reordering: `a82ee6b`. Due-date reminders exist for forms and volunteering since step 5, not for payment or checklist items. No season delete; coverage waits on the owner |
 | Step 3 | Better Auth's verification rows are never cleaned up | No longer true | `d0702d5`; `cleanup.test.ts` "Better Auth's verification rows, both doors" |
 | Step 3 | Opening the audit log is not audited | Still true | Owner decision |
 | Step 3 | The backup test needs `pg_dump` 16 on the CI runner | No longer true, not yet seen on GitHub | `0610b80`: CI runs the tools inside the Postgres service's container (`BR_TEST_DB_CONTAINER`) |
 | Step 3 | A header the proxy doesn't send puts the staff door in one bucket | Still true | By design; the Health page says so |
-| Step 3 | An untouched address part that is too long is sent again | Still true | `saveMyContact()` sends the whole address |
+| Step 3 | An untouched address part that is too long is sent again | Not sent since stage 3's slice 11a: `saveMyContact()` saves the whole address in the portal alone; S11b decides what is sent | `src/lib/parents/contact-edits.ts` |
 | Step 4 | The Documenso webhook has only met the stub | Still true | Owner check |
 | Step 4 | Forms are shown, not kept | No longer true | Closed by step 5 (the entry says so) |
 | Step 4 | The consent records no address locally | Still true | Local only |

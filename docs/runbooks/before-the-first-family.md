@@ -156,10 +156,11 @@ What the page can't do is walk the portal's own screens. Do these in the sandbox
    day. **If not:** note what Payments showed.
 4. **A parent edits their details.** On a phone, as that parent: Family, **Update my details**, change the phone and
    the address, save.
-   **Pass:** the customer in QuickBooks shows the change, the details box shows the new phone, and the audit log has a
-   `parent.contact.save` row with before and after that reads well. Then open the edit page, change the same customer
-   in QuickBooks, and save in the portal: the page says the details changed in the club's books while you were editing,
-   so nothing was saved, and shows them as they stand. **If not:** note what was saved where.
+   **Pass:** the page says "Saved.", the details box on Family and Home shows the new phone, and the audit log has a
+   `parent.details.save` row with before and after that reads well. Nothing is sent to QuickBooks for it yet (a
+   later update sends it on). Then open the edit page in two tabs, save a change in one and then another change in
+   the other: the second says the details changed while you were editing, so nothing was saved, and shows them as they
+   stand. **If not:** note what was saved where.
 5. **A payment requirement.** In Seasons, give a payment requirement its product (**Read the list from QuickBooks**
    first), and make an invoice for that product in QuickBooks.
    **Pass:** the parent's Season page says "Not paid yet" with the amount; pay the invoice in QuickBooks, then on
