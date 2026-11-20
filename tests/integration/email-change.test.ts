@@ -124,7 +124,7 @@ describe("asking for the change", () => {
     const [row] = await requests();
     // Asked in the session's own family, the app's record: no QuickBooks id is stored, of the family or of any record
     // (stage 3's slice 11d: the address is the person's, and no QuickBooks record is read to ask).
-    expect(row).toMatchObject({ parentId: r.identity.parentId, guardianId: r.identity.guardianId, familyId: r.identity.familyId, recordQboId: null, newEmail: NEW, usedAt: null });
+    expect(row).toMatchObject({ parentId: r.identity.parentId, guardianId: r.identity.guardianId, familyId: r.identity.familyId, newEmail: NEW, usedAt: null });
     expect(row).not.toHaveProperty("familyQboId");
     expect(row!.tokenHash).toMatch(/^[0-9a-f]{64}$/);
     expect(row!.tokenHash).not.toContain(token);
@@ -186,8 +186,8 @@ describe("asking for the change", () => {
     await syncAppRecords();
     asParent(r.identity);
     expect(await asking(NEW)).toEqual({ ok: true, message: EMAIL_COPY.sent(NEW) });
-    expect((await requests()).map((q) => [q.parentId, q.newEmail, q.recordQboId]).sort()).toEqual([
-      [hand.identity.parentId, "hand.moved@family-r-new.example", null], [r.identity.parentId, NEW, null]].sort());
+    expect((await requests()).map((q) => [q.parentId, q.newEmail]).sort()).toEqual([
+      [hand.identity.parentId, "hand.moved@family-r-new.example"], [r.identity.parentId, NEW]].sort());
     expect(stub.apiCalls()).toEqual([]);
   });
 
@@ -244,7 +244,7 @@ describe("the link's page, and who is offered the change", () => {
 
   it("shows the words of an expired link for any other token, and nothing of it", async () => {
     const { r, c } = await seedContactFamilies(stub);
-    const theirs = await seedEmailChange({ parentId: c.identity.parentId, guardianId: c.identity.guardianId, familyQboId: C_FAMILY, recordQboId: null, newEmail: "cordelia.moved@family-c-new.example" });
+    const theirs = await seedEmailChange({ parentId: c.identity.parentId, guardianId: c.identity.guardianId, familyQboId: C_FAMILY, newEmail: "cordelia.moved@family-c-new.example" });
     asParent(r.identity);
     for (const token of [theirs.token, emailChangeToken(), "not-a-token", "../../etc"]) {
       const page = await renderPage(ConfirmEmailPage, { params: { token } });
@@ -665,8 +665,8 @@ describe("confirming with a token that isn't the session's own: one refusal, not
     const { r, c } = await seedContactFamilies(stub);
     const other = await seedParentIn({ familyQboId: R_FAMILY, name: "Hand Made", email: "hand.made@family-r.example" });
     const tokens = {
-      familyB: (await seedEmailChange({ parentId: c.identity.parentId, guardianId: c.identity.guardianId, familyQboId: C_FAMILY, recordQboId: null, newEmail: "cordelia.moved@family-c-new.example" })).token,
-      otherPerson: (await seedEmailChange({ parentId: other.identity.parentId, guardianId: other.identity.guardianId, familyQboId: R_FAMILY, recordQboId: null, newEmail: "hand.moved@family-r-new.example" })).token,
+      familyB: (await seedEmailChange({ parentId: c.identity.parentId, guardianId: c.identity.guardianId, familyQboId: C_FAMILY, newEmail: "cordelia.moved@family-c-new.example" })).token,
+      otherPerson: (await seedEmailChange({ parentId: other.identity.parentId, guardianId: other.identity.guardianId, familyQboId: R_FAMILY, newEmail: "hand.moved@family-r-new.example" })).token,
       junk: "x".repeat(43), short: "abc", missing: emailChangeToken(),
     };
     const rows = await requests();
@@ -692,7 +692,7 @@ describe("confirming with a token that isn't the session's own: one refusal, not
 
   it("the session's own person, with a request that is expired, used, made under another family or link, or from before the link was kept", async () => {
     const { r, c } = await seedContactFamilies(stub);
-    const own = { parentId: r.identity.parentId, guardianId: r.identity.guardianId, familyQboId: R_FAMILY, recordQboId: null, newEmail: NEW };
+    const own = { parentId: r.identity.parentId, guardianId: r.identity.guardianId, familyQboId: R_FAMILY, newEmail: NEW };
     const variants: Record<string, Partial<Parameters<typeof seedEmailChange>[0]>> = {
       expired: { expiresAt: new Date(Date.now() - 1000) },
       used: { usedAt: new Date(Date.now() - 1000) },

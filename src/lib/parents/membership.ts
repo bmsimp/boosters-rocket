@@ -33,8 +33,6 @@ export type MembershipRow = Pick<typeof guardian.$inferSelect,
 export type CloseMembership = {
   reason: DisabledReason;
   actor: Actor;
-  /** Drops the row's `source_qbo_id` too, so another row can carry it; the audit row keeps what it was. */
-  dropSource?: boolean;
   /** Added to the audit row's `after`: what led to the close. */
   cause?: string;
   /** Added to the audit row's `after`: staff's own note on why, kept for staff only (a parent never reads it). */
@@ -63,8 +61,7 @@ export type CloseMembership = {
 export async function closeMembership(tx: Tx, row: MembershipRow, o: CloseMembership): Promise<{ wasOpen: boolean; sessionsEnded: number }> {
   const wasOpen = row.status !== "disabled";
   const was = row.status === "disabled" ? row.statusBeforeDisable : row.status;
-  const droppedSource = row.sourceQboId;
-  const set = { status: "disabled" as const, disabledReason: o.reason, statusBeforeDisable: was, ...(o.dropSource ? { sourceQboId: null } : {}) };
+  const set = { status: "disabled" as const, disabledReason: o.reason, statusBeforeDisable: was };
   await tx.update(guardian).set({ ...set, updatedAt: new Date() }).where(eq(guardian.id, row.id));
   // The caller's object is the row as it is now, so what it decides next (another close, the person's last open row) reads it.
   Object.assign(row, set);
@@ -82,9 +79,8 @@ export async function closeMembership(tx: Tx, row: MembershipRow, o: CloseMember
   if (!openElsewhere) sessionsEnded += await endParentSessions(row.parentId, tx);
   // A document already made for them keeps a working signing link: their unfinished forms for this family start again.
   const formsReset = wasOpen ? await formsForGoneSigner(tx, { parentId: row.parentId, family: row.familyId, reason: "access_ended", actor: o.actor, ip: o.ip ?? null }) : 0;
-  // A dropped source is gone from the row: the audit row keeps what it was.
   await writeAudit({ actor: o.actor, action: "parent.access.ended", permission: o.permission, targetType: "guardian", targetId: row.id, ip: o.ip ?? null,
-    before: o.dropSource ? { status: was, sourceQboId: droppedSource } : { status: was },
+    before: { status: was },
     after: { parentId: row.parentId, familyId: row.familyId === null ? null : String(row.familyId), familyQboId: row.familyQboId, reason: o.reason, sessionsEnded,
       ...(requestsDeleted ? { requestsDeleted } : {}), ...(linksDeleted ? { linksDeleted } : {}), ...(devicesForgotten ? { devicesForgotten } : {}), ...(formsReset ? { formsReset } : {}), ...(o.cause === undefined ? {} : { cause: o.cause }), ...(o.note === undefined ? {} : { note: o.note }) } }, tx);
   return { wasOpen, sessionsEnded };

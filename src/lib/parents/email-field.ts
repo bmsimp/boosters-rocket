@@ -46,18 +46,6 @@ export function replaceAddressInField(field: string | null, from: string, to: st
 }
 
 /**
- * Whether a field already reads as the change made: the new address is in it and the old one is nowhere in it. After
- * a write whose answer was lost, the next try finds this and takes the change as made, rather than sending it again.
- * `firstOnly` is for a record whose sign-in is its first address alone (OwnRecord.signsInBy, ./my-family.ts): the new one must be first.
- */
-export function fieldHasChange(field: string | null, from: string, to: string, firstOnly: boolean): boolean {
-  const old = normalizeEmail(from), next = normalizeEmail(to);
-  if (!old || !next || old === next) return false;
-  const usable = parseEmailField(field).usable;
-  return !usable.includes(old) && (firstOnly ? usable[0] === next : usable.includes(next));
-}
-
-/**
  * Whether `email` signs in through a record whose email field is `field`, by the record's own rule (OwnRecord.signsInBy,
  * ./my-family.ts): its first usable address alone on a parent's own record or a flat member's, any of them on a
  * family's record in a club with no parent type. The one rule for it: a record is the person's own, by ownRecordIn(),

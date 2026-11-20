@@ -309,17 +309,15 @@ export const rateLimitEvent = pgTable("rate_limit_event", {
  * The token is stored hashed. A request belongs to the person, the link (`guardian_id`) and the family it was asked
  * under; it is confirmed only by that person, signed in to that family through that link. The family is the app's own
  * record (`family_id`, the session's family when it was asked; migration 0037 carried each request's QuickBooks family
- * over to it and 0038 dropped `family_qbo_id`). `record_qbo_id`, the QuickBooks record a change was written to until
- * stage 3's slice 11d, is written null since and read by nothing (stage 3's last slice drops it). The link and family
- * were added after the table (0016, 0037): a row without them is never confirmed. A change of company deletes every
- * row, before the app's records it names.
+ * over to it and 0038 dropped `family_qbo_id`). It names no QuickBooks record: the address is the person's. The link
+ * and family were added after the table (0016, 0037): a row without them is never confirmed. A change of company
+ * deletes every row, before the app's records it names.
  */
 export const parentEmailChange = pgTable("parent_email_change", {
   id: uuid("id").primaryKey().defaultRandom(),
   parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "cascade" }),
   guardianId: uuid("guardian_id").references(() => guardian.id, { onDelete: "cascade" }),
   familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
-  recordQboId: text("record_qbo_id"),
   newEmail: text("new_email").notNull(),
   tokenHash: text("token_hash").notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
@@ -330,34 +328,6 @@ export const parentEmailChange = pgTable("parent_email_change", {
   uniqueIndex("parent_email_change_one_live").on(t.parentId).where(sql`used_at IS NULL`),
   index("parent_email_change_family_ix").on(t.familyId),
 ]);
-
-/**
- * One row per email address that is, or was, under more than one family (spec §1 Held addresses). The three sets hold
- * family QuickBooks IDs: approved by staff as the same person, rejected as not the same person, and already announced
- * to staff by email. The IDs belong to the connected company; a company change deletes every row.
- */
-export const heldAddress = pgTable("held_address", {
-  email: text("email").primaryKey(),                   // trimmed + lower-cased
-  approvedFamilyQboIds: jsonb("approved_family_qbo_ids").$type<string[]>().notNull().default([]),
-  rejectedFamilyQboIds: jsonb("rejected_family_qbo_ids").$type<string[]>().notNull().default([]),
-  announcedFamilyQboIds: jsonb("announced_family_qbo_ids").$type<string[]>().notNull().default([]),
-  note: text("note"),
-  decidedBy: uuid("decided_by"),                       // staff_user.id
-  decidedAt: timestamp("decided_at", { withTimezone: true }),
-  createdAt: created(),
-  updatedAt: updated(),
-});
-
-/** "This family in the previous QuickBooks company is this family in the connected one" (spec §6). Kept for good. */
-export const familyMatch = pgTable("family_match", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  oldRealmId: text("old_realm_id").notNull(),
-  oldFamilyQboId: text("old_family_qbo_id").notNull(),
-  newRealmId: text("new_realm_id").notNull(),
-  newFamilyQboId: text("new_family_qbo_id").notNull(),
-  decidedBy: uuid("decided_by"),
-  decidedAt: timestamp("decided_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [uniqueIndex("family_match_old_uq").on(t.oldRealmId, t.oldFamilyQboId)]);
 
 export type QboEnvironment = "sandbox" | "production";
 
