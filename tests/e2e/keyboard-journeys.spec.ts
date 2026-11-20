@@ -770,7 +770,9 @@ test.describe("13. the passkey offer on Home, by keyboard: reached, Not now, the
     if (offerDevice) await sql`DELETE FROM parent_device WHERE id = ${offerDevice}`;
     await resetPasskeyOffer(sql);
   };
-  test.beforeAll(async () => { await resetPasskeyOffer(sql); });
+  // Not now takes a place under the settings' presses (signin_settings_parent): the journeys before it may have used them.
+  // A session a run cut off midway left goes first.
+  test.beforeAll(async () => { await removeOfferSession(); await clearZeldaCounts(sql); });
   test.afterAll(removeOfferSession);
 
   test("Tab reaches Turn on, then Not now; Enter answers, the focus lands on the answer, and Tab goes on through Home", async ({ context, page }) => {
