@@ -1,6 +1,8 @@
 import type { RosterWrite } from "@/lib/db/schema";
 import { NO_TOKEN } from "@/lib/quickbooks/client";
 import { detailKey } from "@/lib/parents/contact-fields";
+import { fieldSignsIn } from "@/lib/parents/email-field";
+import { parseEmailField } from "@/lib/parents/emails";
 import { nameKey } from "./names";
 
 /**
@@ -52,7 +54,7 @@ export function afterFailedTry(tries: number, createdAt: Date, now: Date): { sta
  * A customer as the roster cache holds it, for the check before a queued write is sent again: with its phone and
  * billing address, which a parent's change of them (stage 3's slice 11b) is compared with.
  */
-export type CachedCustomer = { qboId: string; displayName: string; active: boolean; parentQboId: string | null; typeQboId: string | null; syncToken: string } & Partial<DetailColumns>;
+export type CachedCustomer = { qboId: string; displayName: string; active: boolean; parentQboId: string | null; typeQboId: string | null; syncToken: string; email?: string | null } & Partial<DetailColumns>;
 /** A customer's phone and billing address, as the roster cache's columns hold them (or the portal's own, `parent` and `family`). */
 export type DetailColumns = { phone: string | null; addressLine1: string | null; addressLine2: string | null; addressCity: string | null; addressRegion: string | null;
   addressPostalCode: string | null; addressCountry: string | null };
@@ -97,6 +99,33 @@ export function contactDiffers(held: HeldContact, w: Pick<ContactWrite, "change"
   });
 }
 
+type EmailWrite = Extract<RosterWrite, { op: "email" }>;
+/**
+ * Which address of a customer's email field a person signs in through, by the record's rule (OwnRecord.signsInBy,
+ * src/lib/parents/my-family.ts; fieldSignsIn()): the first usable address alone on a Parent customer's own record or a
+ * flat member's, any of them on a family's record in books with no parent type.
+ */
+export const emailRuleOf = (w: Pick<EmailWrite, "role">): "first" | "every" => (w.role === "family" ? "every" : "first");
+/** The addresses a change of sign-in email may find in QuickBooks in place of the new one: its before-value, then each earlier change's that may have been sent. */
+export const emailBefores = (w: Pick<EmailWrite, "from" | "to" | "orFrom">): string[] =>
+  [...new Set([w.from, ...(w.orFrom ?? [])].map((a) => a.trim().toLowerCase()))].filter((a) => a !== "" && a !== w.to.trim().toLowerCase());
+/**
+ * How a customer's email field (`field`, as QuickBooks holds it or the cache keeps it) stands against a change of a
+ * person's sign-in email (stage 3's slice S11e), by the record's rule (emailRuleOf()): `in_place`, the new address
+ * signs in through it and none of the addresses it replaces does; `sendable`, one of those (`held`: `from`, or an
+ * entry of `orFrom`) signs in through it, so that one is replaced by the new address and nothing else is touched;
+ * `differs`, otherwise: something the portal never knew of there, never sent over.
+ */
+export function emailStands(field: string | null, w: Pick<EmailWrite, "role" | "from" | "to" | "orFrom">): { is: "in_place" } | { is: "sendable"; held: string } | { is: "differs" } {
+  const rule = emailRuleOf(w);
+  const befores = emailBefores(w);
+  if (fieldSignsIn(field, w.to, rule) && !befores.some((a) => fieldSignsIn(field, a, rule))) return { is: "in_place" };
+  const held = befores.find((a) => fieldSignsIn(field, a, rule));
+  return held === undefined ? { is: "differs" } : { is: "sendable", held };
+}
+/** Whether an email field holds this address anywhere in it, whatever the record's rule. */
+export const fieldHolds = (field: string | null, email: string) => parseEmailField(field).usable.includes(email.trim().toLowerCase());
+
 /**
  * What a queued write is, by a roster read since its last try. Only for one QuickBooks may already have made:
  * - a create whose customer is there (the same name, under the same family, of the same type) is `done`;
@@ -119,6 +148,10 @@ export function beforeResend(w: RosterWrite, cache: readonly CachedCustomer[]): 
     const stands = contactStands(heldInCache(now), w);
     return stands === "in_place" ? { is: "done", qboId: now.qboId } : stands === "differs" || now.syncToken !== w.syncToken ? { is: "stuck", code: "moved_on" } : { is: "send" };
   }
+  // A person's sign-in email (stage 3's slice S11e): in place when the cache's field holds the new address by the
+  // record's rule and none it replaces; anything else is settled by the field read live (`moved_on`), since the cache
+  // keeps a field lower-cased and trimmed, and a field sent is always made from one read as QuickBooks holds it.
+  if (w.op === "email") return emailStands(now.email ?? null, w).is === "in_place" ? { is: "done", qboId: now.qboId } : { is: "stuck", code: "moved_on" };
   const inPlace = w.op === "rename" ? now.displayName === w.name
     : w.op === "move" ? now.parentQboId === w.toFamilyQboId
       : !now.active;

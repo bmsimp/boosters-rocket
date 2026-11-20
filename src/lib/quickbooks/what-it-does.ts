@@ -13,6 +13,8 @@ export const QUICKBOOKS_USE = {
   writes: "It changes only what someone asks it to there: "
     + "a guardian's phone and mailing address, on their own record (or, where the club's books have no parents of their own, the family's), after the portal saves a change a parent or staff make to them, "
     + "and never over details QuickBooks holds that the portal didn't know of; "
+    + "the address a parent signs in with, in the email field of each record of theirs (their own record in each family, or, where the club's books have no parents of their own, the family's), after the portal changes it, "
+    + "replacing only the address the portal knew there and never over an address it didn't know of; "
     + "and, for staff allowed to change the roster, new families, students, parents and members, their names, a student's family, and making a customer inactive "
     + "(a family together with everyone under it, and never anyone with any balance, owed or a credit). "
     + "Where the club's books have parents of their own, a guardian staff add to a linked family gets a parent record under it, with their name and sign-in email address, unless QuickBooks already has a customer of that name there; "
@@ -25,7 +27,7 @@ export const QUICKBOOKS_USE = {
 
 /** The audit actions of those changes, for the pages that say when one was last made. */
 export const QUICKBOOKS_WRITE_ACTION: readonly string[] = [
-  "parent.contact.save", "roster.customer.contact",
+  "parent.contact.save", "roster.customer.contact", "roster.customer.email",
   "roster.customer.create", "roster.customer.rename", "roster.student.move", "roster.customer.deactivate", "roster.write.done",
   "volunteer.buyout.invoiced", "volunteer.buyout.voided",
 ];
