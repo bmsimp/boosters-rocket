@@ -14,7 +14,7 @@ vi.mock("@/lib/parents/breach-endpoints", () => ({ breachEndpoints: () => ({ ran
 import { and, eq, sql } from "drizzle-orm";
 import { verifyPassword } from "better-auth/crypto";
 import { db } from "@/lib/db/client";
-import { auditLog, parent, parentAuthAccount, parentAuthSession, parentAuthUser, parentDevice, parentEmailChange, parentSigninToken, rateLimitEvent, signinCode } from "@/lib/db/schema";
+import { auditLog, parent, parentAuthAccount, parentAuthenticator, parentAuthSession, parentAuthUser, parentDevice, parentEmailChange, parentSigninToken, rateLimitEvent, signinCode } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import { askAgainCode, currentPassword, sessionProvedRecently } from "@/lib/parents/asking-again";
 import { recordStrongSignin } from "@/lib/parents/devices";
@@ -237,6 +237,35 @@ describe("asking again", () => {
     // Nothing was mailed to them: an app holder is never sent the emailed code.
     await new Promise((r) => setImmediate(r));
     expect(outbox.filter((m) => m.to === FAMILY_A.parent.email)).toEqual([]);
+  });
+
+  it("an app holder's late, forged or over-long try reads the app's words, never an email's; with no app, the emailed code's", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await withPassword(a);
+    const app = await seedAuthenticator(a.identity.parentId);
+    asParent(a.identity);
+    const first = await askAgainPasswordAction(PROVEN_PASSWORD);
+    if (!first.ok) throw new Error("unreachable");
+    const late = new Date(Date.now() + CODE_TTL_MS + 60_000);
+    const forged = `${Date.now() + 60_000}.${"A".repeat(43)}`;
+    const tries = (code: string) => [
+      // The step's 10 minutes are over.
+      () => askAgainCode(ctxOf(a.identity), first.stamp, code, late),
+      // A stamp of the right shape that this session never got.
+      () => askAgainCode(ctxOf(a.identity), forged, code),
+      // More than the field can hold.
+      () => askAgainCode(ctxOf(a.identity), first.stamp, "1".repeat(21)),
+    ];
+    for (const t of tries(appCode(app.secret, late))) {
+      const answer = await t();
+      expect(answer).toEqual({ ok: false, errors: [COPY.appRejected] });
+      expect(JSON.stringify(answer)).not.toMatch(/email/i);
+    }
+    expect(await strongAtOf(a.identity.sessionId)).toBeNull();
+    // With no app in force, the same tries read the emailed code's words, as before.
+    await db.delete(parentAuthenticator).where(eq(parentAuthenticator.parentId, a.identity.parentId));
+    for (const t of tries("123456")) expect(await t()).toEqual({ ok: false, errors: [COPY.codeRejected] });
+    expect(await strongAtOf(a.identity.sessionId)).toBeNull();
   });
 
   const counted = (kind: "password_reask_parent" | "password_try_email" | "password_try_device", subject: string) =>

@@ -166,7 +166,8 @@ export async function askAgainPassword(ctx: Asker, password: unknown, now = new 
 /**
  * The second step: the code, with the stamp the first step gave. The stamp is read for this session and person
  * (readStamp()); with none, the code signs nothing (refuseCodeWithoutStep(), counted and audited as the door counts a
- * code with no pending step). Then the door's checks, called as they are: for a person with an authenticator app in
+ * code with no pending step), and, like a code over the field's length, refused in the app's words for a person with an
+ * app in force (COPY.appRejected, which says to start again with the password) and the emailed code's otherwise. Then the door's checks, called as they are: for a person with an authenticator app in
  * force (since slice SI-6a), verifySecondFactor() for the stamp's person and password (the app's code or a backup code,
  * with its limits, replay guard and rows), otherwise verifySigninCode() (its 10 minutes, 5 tries, `code_check_ip` and
  * rows); and signinStands() for that password and what was spent. Then, in one transaction in the order above
@@ -175,9 +176,13 @@ export async function askAgainPassword(ctx: Asker, password: unknown, now = new 
  * (`emailed_code`, `authenticator` or `backup_code`). Every refusal is one answer, and over a limit the door's words.
  */
 export async function askAgainCode(ctx: Asker, stamp: unknown, code: unknown, now = new Date()): Promise<ProvedAnswer> {
-  if (typeof code !== "string" || code.length > MOST_SENT_CODE) return CODE_REFUSED;
+  // Refused before any step is read (a code no field could send, a stamp that is no stamp or past its end): the words
+  // of the step the person would be asked for. The session names the person already, so this tells nobody anything,
+  // and an app holder, who was never emailed anything, is never told to look for an email.
+  const refused = async () => (await hasAuthenticator(ctx.parentId)) ? APP_REFUSED : CODE_REFUSED;
+  if (typeof code !== "string" || code.length > MOST_SENT_CODE) return refused();
   const step = await readStamp(stamp, ctx, now);
-  if (!step) return (await refuseCodeWithoutStep(ctx.ip, now)) === "rate_limited" ? TOO_MANY : CODE_REFUSED;
+  if (!step) return (await refuseCodeWithoutStep(ctx.ip, now)) === "rate_limited" ? TOO_MANY : refused();
   const proved = await proveSecondStep(step, code, ctx.ip, now);
   if (!proved.ok) return proved.limited ? TOO_MANY : proved.app ? APP_REFUSED : CODE_REFUSED;
   if (!(await signinStands(step.parentId, step.email, ctx.ip, { password: step.password, ...proved.proof }, now))) return proved.app ? APP_REFUSED : CODE_REFUSED;
