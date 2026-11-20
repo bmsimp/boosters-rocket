@@ -140,7 +140,7 @@ export type LinksView = {
  * its buttons, and never its money note: the screen says nothing of money.
  */
 export const queueFactOf = (i: QueueView): QueueFact => ({
-  state: i.state, words: i.state === "refused" ? keptWordsFor(i.write, i.lastCode, i.holds) : waitingWords(i),
+  state: i.state, words: i.state === "refused" ? keptWordsFor(i.write, i.lastCode, i.holds, undefined, i.joined) : waitingWords(i),
   op: i.write.op, role: "role" in i.write ? i.write.role : null, qboId: "qboId" in i.write ? i.write.qboId : null,
   studentId: i.studentId === null ? null : String(i.studentId), guardianId: guardianOf(i.write),
 });

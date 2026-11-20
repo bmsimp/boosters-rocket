@@ -20,7 +20,7 @@ import { loadFamilyMoney } from "@/lib/money/family-money";
 import { familyFromCustomer } from "@/lib/roster/no-family";
 import { loadOpenWrites, runWriteQueue } from "@/lib/roster/queue";
 import { refreshRoster } from "@/lib/roster/refresh";
-import { addFamily, changeInPortal, createInQuickBooksAndLink, MAKING_LOCK, moveStudent, NO_FAMILY_CUSTOMER } from "@/lib/roster/writes";
+import { addFamily, changeInPortal, createInQuickBooksAndLink, keptWordsFor, MAKING_LOCK, moveStudent, NO_FAMILY_CUSTOMER } from "@/lib/roster/writes";
 import { ROSTER_LOCK, SHAPE_KEY } from "@/lib/roster/shape";
 import { ROSTER_MOVED, rosterTagOf } from "@/lib/seasons/roster-lock";
 import { confirmLinkAction, leaveUnlinkedAction, undoLeaveUnlinkedAction } from "@/app/staff/(app)/links/actions";
@@ -536,12 +536,16 @@ describe("after a confirm", () => {
     const leo = (await db.select({ id: accountingLink.studentId }).from(accountingLink).where(and(eq(accountingLink.customerId, "12"), isNotNull(accountingLink.studentId))))[0]!.id!;
     expect(await moveStudent(String(leo), String(patels), tag, op)).toMatchObject({ ok: true });
     let [kept] = (await loadOpenWrites()).filter((i) => i.write.op === "move");
-    expect(kept).toMatchObject({ state: "refused", lastCode: NO_FAMILY_CUSTOMER, notOffered: "create_family_first" });
+    expect(kept).toMatchObject({ state: "refused", lastCode: NO_FAMILY_CUSTOMER, notOffered: "create_family_first", joined: null });
+    expect(keptWordsFor(kept!.write, kept!.lastCode, kept!.holds, kept!.differs, kept!.joined)).toContain("Create the family in QuickBooks first");
     const stamp = rowOf(await loadAccountingLinks(), "The Patels").confirm!.stamp;
     const r = await linkFamilyToCustomer({ familyId: String(patels), customerId: "70", chosen: "suggested", stamp }, tag, linkOp());
     expect(r).toMatchObject({ ok: true, message: expect.stringContaining("A student's move into this family, kept on Reconciliation only because the family had no customer in the books, can now be sent from there.") });
     [kept] = (await loadOpenWrites()).filter((i) => i.write.op === "move");
-    expect(kept).toMatchObject({ state: "refused", notOffered: null, mayResend: true });
+    expect(kept).toMatchObject({ state: "refused", notOffered: null, mayResend: true, joined: "sendable" });
+    // The kept row's words go by what is so now: the family has its customer, and the move can be sent.
+    expect(keptWordsFor(kept!.write, kept!.lastCode, kept!.holds, kept!.differs, kept!.joined)).toBe("The portal held it back when it was saved: the family the student was moved to had no customer in QuickBooks then."
+      + " It has one now, so the portal's move can be sent with “Send the portal's value” on the Reconciliation page.");
     // Leo's own link is his record's: never moved or touched by the confirm.
     expect(await studentLinkOf(leo)).toMatchObject({ customerId: "12", origin: "carried_over" });
   });
@@ -558,7 +562,9 @@ describe("after a confirm", () => {
     expect(r).toMatchObject({ ok: true });
     expect((r as { message: string }).message).not.toContain("can now be sent");
     const [kept] = (await loadOpenWrites()).filter((i) => i.write.op === "move");
-    expect(kept).toMatchObject({ state: "refused", lastCode: NO_FAMILY_CUSTOMER, notOffered: "inactive" });
+    expect(kept).toMatchObject({ state: "refused", lastCode: NO_FAMILY_CUSTOMER, notOffered: "inactive", joined: "not_offered" });
+    // The family has its customer now, said as so, and nothing says the move can be sent (the row's notice says why not).
+    expect(keptWordsFor(kept!.write, kept!.lastCode, kept!.holds, kept!.differs, kept!.joined)).toBe("The portal held it back when it was saved: the family the student was moved to had no customer in QuickBooks then. It has one now.");
   });
 
   it("says where an inactive student customer left goes once the family is linked: counted on its row, never among its differences", () => {

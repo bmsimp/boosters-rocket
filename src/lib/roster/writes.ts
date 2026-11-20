@@ -2828,14 +2828,22 @@ export function keptRefusalWords(code: string | null, holds: string | null): str
   return "QuickBooks refused it: QuickBooks wouldn't take it.";
 }
 
+/** For a kept move whose family joined has a customer in QuickBooks now: whether the move can be sent (QueueView.joined). */
+export type JoinedNow = "sendable" | "not_offered" | null;
 /**
  * Why a move the portal kept didn't go through, in words, for every code a kept move can hold (slice 9f), saying who
  * stopped it: never the code itself. `holds`: where QuickBooks has the student now, by the portal's name of that family
- * where it has a record, else the customer's name in QuickBooks, said as text.
+ * where it has a record, else the customer's name in QuickBooks, said as text. `joined`: the family the student was
+ * moved to has a customer in QuickBooks now (QueueView.joined), and whether the move can be sent, so a move kept for its
+ * having none is told by what is so now.
  */
-export function keptMoveWords(code: string | null, holds: string | null): string {
+export function keptMoveWords(code: string | null, holds: string | null, joined: JoinedNow = null): string {
   const now = holds ? ` QuickBooks has the student under “${holds}” now.` : "";
   if (code === NO_FAMILY_CUSTOMER) {
+    if (joined !== null) {
+      return `The portal held it back when it was saved: the family the student was moved to had no customer in QuickBooks then. It has one now${joined === "sendable"
+        ? ", so the portal's move can be sent with “Send the portal's value” on the Reconciliation page." : "."}`;
+    }
     return "The portal held it back: the family the student was moved to has no customer in QuickBooks yet, so there is nowhere to put them there. Create the family in QuickBooks first, with “Create in QuickBooks and link” on the family's page, then send the move.";
   }
   if (code === "fault_5010" || code === "moved_on" || code === NO_LINK_VERSION || code === PLACE_DIFFERS) {
@@ -2885,9 +2893,10 @@ const valueRefused = (code: string) => { const m = /^fault_(\d{1,6})$/.exec(code
 /**
  * Why a change the portal kept didn't go through, in words, by what it was: a move's (keptMoveWords()), a parent's
  * details' (keptContactWords(), field by field with `differs` where the caller has it), or any other's (keptRefusalWords()).
+ * `joined`: for a move, whether the family joined has a customer in QuickBooks now, and the move can be sent (QueueView.joined).
  */
-export const keptWordsFor = (w: RosterWrite | QueuedWrite, code: string | null, holds: string | null, differs?: readonly ContactDiffer[] | null) =>
-  w.op === "move" ? keptMoveWords(code, holds) : w.op === "contact" ? keptContactWords(code, w, differs) : keptRefusalWords(code, holds);
+export const keptWordsFor = (w: RosterWrite | QueuedWrite, code: string | null, holds: string | null, differs?: readonly ContactDiffer[] | null, joined: JoinedNow = null) =>
+  w.op === "move" ? keptMoveWords(code, holds, joined) : w.op === "contact" ? keptContactWords(code, w, differs) : keptRefusalWords(code, holds);
 /**
  * Whose invoices each family sees while a move hasn't reached the portal's copy of QuickBooks (open question 14:
  * invoices follow once QuickBooks takes the move), in words for staff: `seenBy`, the portal's name of the family that
