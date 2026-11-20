@@ -38,8 +38,11 @@ function aimShown(customerId: string, aim: CustomerAim): NonNullable<NoFamilyRow
   const has = one ? "a family the portal has already" : "families the portal has already";
   if (aim.why === "given_up") {
     const f = aim.families[0];
-    return { words: `The portal saved ${f.name} first, and QuickBooks made this customer for it before making it was given up, so it isn't made a family here.`,
-      href: aim.pickable ? pickStep(String(f.id), customerId) : "/staff/links", label: "Pick it for that family on Accounting links" };
+    const said = `The portal saved ${f.name} first, and QuickBooks made this customer for it before making it was given up, so it isn't made a family here.`;
+    if (aim.pickable) return { words: said, href: pickStep(String(f.id), customerId), label: "Pick it for that family on Accounting links" };
+    // That family's row is Suggested for another customer, so it offers no Pick until it is left unlinked.
+    return { words: `${said} Accounting links suggests another customer for that family: confirm that one there if it is the family's, or, if this one is, leave the family unlinked there first, then pick this one for it.`,
+      href: "/staff/links?status=suggested", label: "See that family's row on Accounting links" };
   }
   if (aim.why === "suggested") return { words: `Accounting links suggests it for ${names}, ${has}, so it isn't made a family here.`, href: "/staff/links?status=suggested", label: "Link it on Accounting links" };
   return { words: `Accounting links lists it as a possible customer of ${names}, ${has}, so it isn't made a family here.`,
@@ -65,7 +68,9 @@ export async function CustomersWithNoFamily({ mayChangeFamilies, aims }: { mayCh
     return {
       key: c.qboId, name: c.name,
       students: c.students === 0 ? "None" : `${plural(c.students, "student", "students")}${c.inactiveStudents ? `, ${c.inactiveStudents} inactive` : ""}`,
-      makes: whatItMakes(c), act: aim === undefined ? familyFromCustomerAction.bind(null, c.qboId) : null, aim: aim === undefined ? null : aimShown(c.qboId, aim),
+      // A customer meant for a family the portal has makes nothing here: it is linked to that family on Accounting links.
+      makes: aim === undefined ? whatItMakes(c) : "Nothing here: it is linked to a family on Accounting links.",
+      act: aim === undefined ? familyFromCustomerAction.bind(null, c.qboId) : null, aim: aim === undefined ? null : aimShown(c.qboId, aim),
     };
   });
   return (

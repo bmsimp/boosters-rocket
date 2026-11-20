@@ -436,10 +436,10 @@ describe("a customer meant for a family the portal has (stage 4's slice M3a2)", 
     const before = await made();
     expect(await familyFromCustomer("70", asLinker(staff), customerAimedAt)).toEqual({ ok: false, errors: [NO_FAMILY_COPY.suggestedFor(["The Patels"])] });
     for (const id of ["75", "76"]) expect(await familyFromCustomer(id, asLinker(staff), customerAimedAt), id).toEqual({ ok: false, errors: [NO_FAMILY_COPY.suggestedFor(["The Okafors"])] });
-    expect(await familyFromCustomer("90", asLinker(staff), customerAimedAt)).toEqual({ ok: false, errors: [NO_FAMILY_COPY.givenUpFor("The Quiets")] });
+    expect(await familyFromCustomer("90", asLinker(staff), customerAimedAt)).toEqual({ ok: false, errors: [NO_FAMILY_COPY.givenUpFor("The Quiets", true)] });
     expect(await made()).toEqual(before);
     expect(NO_FAMILY_COPY.suggestedFor(["The Patels"])).toBe("Accounting links suggests this customer for, or lists it as a possible customer of, The Patels, a family the portal has already, so no second family was made. Link the two on Accounting links.");
-    expect(NO_FAMILY_COPY.givenUpFor("The Quiets")).toBe("The portal saved The Quiets first, and QuickBooks made this customer for it before making it was given up, so no second family was made. Pick it for that family on Accounting links.");
+    expect(NO_FAMILY_COPY.givenUpFor("The Quiets", true)).toBe("The portal saved The Quiets first, and QuickBooks made this customer for it before making it was given up, so no second family was made. If it is that family's, pick it for that family on Accounting links.");
   });
 
   it("names two families or more that a customer is listed for, up to a handful", async () => {
@@ -507,6 +507,9 @@ describe("a customer meant for a family the portal has (stage 4's slice M3a2)", 
     const html = await renderPage(ReconciliationPage);
     const list = section(html, "no-family-h");
     expect(rowNamed(list, "<b>Patel</b> Family")![3]).toBe("Accounting links suggests it for The Patels, a family the portal has already, so it isn't made a family here. Link it on Accounting links: <b>Patel</b> Family");
+    // Its "What it makes" cell says it makes nothing here, never what the press it isn't offered would make.
+    expect(rowNamed(list, "<b>Patel</b> Family")![2]).toBe("Nothing here: it is linked to a family on Accounting links.");
+    expect(rowNamed(list, "Plain Family")![2]).toBe("A family, linked to this customer.");
     expect(list).toContain('href="/staff/links?status=suggested"');
     expect(list).toContain("&lt;b&gt;Patel&lt;/b&gt; Family");
     expect(list).not.toContain("<b>Patel</b>");
@@ -525,5 +528,73 @@ describe("a customer meant for a family the portal has (stage 4's slice M3a2)", 
     expect(await familyFromCustomerAction("70")).toEqual({ ok: false, errors: [NO_FAMILY_COPY.suggestedFor(["The Patels"])] });
     expect(revalidatedPaths()).toContain("/staff/reconciliation");
     expect(await familyLinksOf("70")).toEqual([]);
+  });
+
+  it("for a given-up create's customer whose family saved first is Suggested for another customer, says to confirm that one or leave the family unlinked first, and the refusal says so", async () => {
+    tag = await connectRoster(stub);
+    await addInQuickBooks(qc("70", "Patel Family", "1", mail("asha@example.com")), qc("90", "Quiet Family", "1"));
+    // The Quiets' guardian signs in with the address on Patel Family, so their row is Suggested for 70; their own
+    // create, given up after a try QuickBooks took, made Quiet Family (90). Their row offers no Pick a different customer.
+    const quiets = await unlinked("The Quiets");
+    await guardianIn(quiets, "Asha Quiet", "asha@example.com");
+    await seedQueued({ op: "create", role: "family", name: "Quiet Family", typeQboId: "1", familyQboId: null, email: null }, { familyId: quiets, sent: true, state: "given_up", lastTriedAt: new Date() });
+    const linker = await staffWith("treasurer@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Accounting.Link.ReadWrite"]);
+    expect(await familyFromCustomer("90", asLinker(linker), customerAimedAt)).toEqual({ ok: false, errors: [NO_FAMILY_COPY.givenUpFor("The Quiets", false)] });
+    expect(NO_FAMILY_COPY.givenUpFor("The Quiets", false)).toBe("The portal saved The Quiets first, and QuickBooks made this customer for it before making it was given up, so no second family was made."
+      + " Accounting links suggests another customer for that family: confirm that one there if it is the family's, or, if this one is, leave the family unlinked there first, then pick this one for it.");
+    asStaff(linker);
+    const html = await renderPage(ReconciliationPage);
+    const list = section(html, "no-family-h");
+    expect(rowNamed(list, "Quiet Family")![3]).toBe("The portal saved The Quiets first, and QuickBooks made this customer for it before making it was given up, so it isn't made a family here."
+      + " Accounting links suggests another customer for that family: confirm that one there if it is the family's, or, if this one is, leave the family unlinked there first, then pick this one for it."
+      + " See that family's row on Accounting links: Quiet Family");
+    expect(list).not.toContain(`pick=${String(quiets)}`);
+    const madeAnyway = section(html, "made-anyway-h").replaceAll("<!-- -->", "").replaceAll("&#x27;", "'");
+    expect(madeAnyway).toContain("It isn't offered to bring in under Customers with no family: Accounting links suggests another customer for the family the portal saved first."
+      + " If that one is the family's, confirm it there; if this one is, leave the family unlinked there first, then pick this one for it; if it isn't wanted, make it inactive in QuickBooks.");
+    expect(madeAnyway).toContain('href="/staff/links?status=suggested"');
+    expect(madeAnyway).not.toContain(`pick=${String(quiets)}`);
+    // Left unlinked, the family's row offers Pick: the words and the link point at its confirm step, and the refusal says to pick it.
+    expect(await leaveUnlinked(String(quiets), tag, asLinker(linker))).toMatchObject({ ok: true });
+    expect(await familyFromCustomer("90", asLinker(linker), customerAimedAt)).toEqual({ ok: false, errors: [NO_FAMILY_COPY.givenUpFor("The Quiets", true)] });
+    const after = await renderPage(ReconciliationPage);
+    expect(rowNamed(section(after, "no-family-h"), "Quiet Family")![3]).toBe("The portal saved The Quiets first, and QuickBooks made this customer for it before making it was given up, so it isn't made a family here. Pick it for that family on Accounting links: Quiet Family");
+    expect(section(after, "made-anyway-h")).toContain(`href="/staff/links?pick=${String(quiets)}&amp;customer=90#links-pick-h"`);
+    expect(await familyLinksOf("90")).toEqual([]);
+  });
+
+  it("makes the family for a given-up create's customer once the family saved first is inactive, or linked to another customer", async () => {
+    await connectRoster(stub);
+    await addInQuickBooks(qc("90", "Quiet Family", "1"), qc("91", "Oak Family", "1"), qc("95", "Oak Household", "1"));
+    const quiets = await unlinked("The Quiets");
+    await seedQueued({ op: "create", role: "family", name: "Quiet Family", typeQboId: "1", familyQboId: null, email: null }, { familyId: quiets, sent: true, state: "given_up", lastTriedAt: new Date() });
+    const oaks = await unlinked("The Oaks");
+    await seedQueued({ op: "create", role: "family", name: "Oak Family", typeQboId: "1", familyQboId: null, email: null }, { familyId: oaks, sent: true, state: "given_up", lastTriedAt: new Date() });
+    const linker = await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
+    expect(await familyFromCustomer("90", asLinker(linker), customerAimedAt)).toEqual({ ok: false, errors: [NO_FAMILY_COPY.givenUpFor("The Quiets", true)] });
+    expect(await familyFromCustomer("91", asLinker(linker), customerAimedAt)).toEqual({ ok: false, errors: [NO_FAMILY_COPY.givenUpFor("The Oaks", true)] });
+    // The Quiets made inactive in the portal; the Oaks linked to Oak Household: neither is a family the customer is meant for now.
+    await db.update(family).set({ active: false }).where(eq(family.id, quiets));
+    await db.insert(accountingLink).values({ system: "quickbooks", realmId: REALM, customerId: "95", familyId: oaks, origin: "confirmed", linkedBy: linker.id });
+    expect(await familyFromCustomer("90", asLinker(linker), customerAimedAt)).toMatchObject({ ok: true });
+    expect(await familyFromCustomer("91", asLinker(linker), customerAimedAt)).toMatchObject({ ok: true });
+    for (const id of ["90", "91"]) expect(await familyLinksOf(id), id).toHaveLength(1);
+    expect((await familyLinksOf("90"))[0]!.familyId).not.toBe(quiets);
+    expect((await familyLinksOf("91"))[0]!.familyId).not.toBe(oaks);
+  });
+
+  it("tells staff who may not link families the same thing about a given-up create's customer, with no link to Accounting links and nothing about making the family inactive", async () => {
+    await connectRoster(stub);
+    await addInQuickBooks(qc("90", "Quiet Family", "1"));
+    const quiets = await unlinked("The Quiets");
+    await seedQueued({ op: "create", role: "family", name: "Quiet Family", typeQboId: "1", familyQboId: null, email: null }, { familyId: quiets, sent: true, state: "given_up", lastTriedAt: new Date() });
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    const html = await renderPage(ReconciliationPage);
+    expect(section(html, "no-family-h")).toBe("");
+    const madeAnyway = section(html, "made-anyway-h").replaceAll("<!-- -->", "").replaceAll("&#x27;", "'");
+    expect(madeAnyway).toContain("It isn't offered to bring in under Customers with no family: if it is the family the portal saved first, pick it for that family on Accounting links;"
+      + " if it isn't wanted, make it inactive in QuickBooks. Someone who may link families to accounting does this on Accounting links.");
+    expect(madeAnyway).not.toContain("saved first inactive");
+    expect(madeAnyway).not.toContain('href="/staff/links');
   });
 });

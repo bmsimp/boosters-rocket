@@ -7,6 +7,7 @@ import { isUuid } from "@/lib/seasons/ids";
 import { loadBalances } from "@/lib/money/balances";
 import { linksOfCustomers } from "@/lib/families/links";
 import { readCustomerAims, type CustomerAim } from "@/lib/accounting/mapping";
+import { handful } from "@/lib/roster/no-family";
 import { LocalTime } from "@/app/components/local-time";
 import { DataTable, type Column } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
@@ -178,21 +179,33 @@ function Refused({ items, canChange, compared, mayCompare }: { items: QueueView[
  * change stays given up, so nothing in the portal is linked to the customer QuickBooks made, and no second one is made
  * for the record. A family's or member's, while the family the portal saved first is active with no family link, is
  * picked for that family on Accounting links (stage 4's slice M3a2: "Create a family from this" refuses it, `aims`),
- * with a link to its confirm step where it can be reached; otherwise it is brought in from Customers with no family. A
+ * with a link to its confirm step where it can be reached, or, where that family's row is Suggested for another
+ * customer and offers no Pick, once it is left unlinked there; one the screen suggests for, or lists for, another
+ * family is linked there; otherwise it is brought in from Customers with no family. Every reader is told the same, and
+ * only a holder of the linking permission is given the link to Accounting links, which only they can open. A
  * student's sits under its family, so it is linked to the student here ("Link the student to it", for staff who may
  * change families and link them to accounting). Names are QuickBooks text, shown as text only.
  */
 function MadeAfterGivingUp({ items, linking, canChange, rosterTag, aims }: { items: GivenUpMadeView[]; linking: boolean; canChange: boolean; rosterTag: string; aims: ReadonlyMap<string, CustomerAim> | null }) {
-  const bringIn = linking ? "Bring it in with “Create a family from this” under Customers with no family below"
-    : "Someone who may link families to accounting can bring it in from Customers with no family on this page, or pick it on Accounting links for a family the portal saved first";
   const family = (m: GivenUpMadeView) => {
     const aim = aims?.get(m.customerQboId);
-    const ours = aim?.why === "given_up" && m.familyId !== null && String(aim.families[0].id) === String(m.familyId);
-    if (!linking || aim === undefined) return `A ${m.role} customer that no ${m.role} in the portal is linked to. ${bringIn}, then make the ${m.role} the portal saved first inactive on its page; if it isn't wanted, make it inactive in QuickBooks.`;
-    const at = ours && aim.why === "given_up" && aim.pickable && /^\d{1,20}$/.test(m.customerQboId)
-      ? `/staff/links?pick=${encodeURIComponent(String(m.familyId))}&customer=${m.customerQboId}#links-pick-h` : "/staff/links";
-    return <>A {m.role} customer that no {m.role} in the portal is linked to. It isn&apos;t offered to bring in under Customers with no family: {ours ? `if it is the ${m.role} the portal saved first, pick it for that ${m.role} on Accounting links` : "Accounting links aims it at a family the portal has, and it is linked there"}; if it isn&apos;t wanted, make it inactive in QuickBooks.
-      {" "}<Link href={at}>{ours ? "Pick it on Accounting links" : "See it on Accounting links"}<span className="visually-hidden">: {m.name}</span></Link></>;
+    const stop = "if it isn't wanted, make it inactive in QuickBooks.";
+    // Aimed at nobody: the family saved first is inactive or linked already (or nothing can be suggested now), so it is brought in.
+    if (aim === undefined) {
+      return `A ${m.role} customer that no ${m.role} in the portal is linked to. ${linking ? "Bring it in with “Create a family from this” under Customers with no family below"
+        : "Someone who may link families to accounting can bring it in from Customers with no family on this page"}, then make the ${m.role} the portal saved first inactive on its page; ${stop}`;
+    }
+    const ours = aim.why === "given_up" && m.familyId !== null && String(aim.families[0].id) === String(m.familyId);
+    const pick = ours && aim.why === "given_up" && aim.pickable;
+    const what = !ours ? `Accounting links suggests it for, or lists it as a possible customer of, ${handful(aim.families.map((f) => f.name))}, ${aim.families.length === 1 ? "a family" : "families"} the portal has: link it there to the family it is; ${stop}`
+      : pick ? `if it is the ${m.role} the portal saved first, pick it for that ${m.role} on Accounting links; ${stop}`
+      : `Accounting links suggests another customer for the ${m.role} the portal saved first. If that one is the ${m.role}'s, confirm it there; if this one is, leave the ${m.role} unlinked there first, then pick this one for it; ${stop}`;
+    const at = !ours ? `/staff/links?status=${aim.why === "several" ? "several" : "suggested"}`
+      : pick && /^\d{1,20}$/.test(m.customerQboId) ? `/staff/links?pick=${encodeURIComponent(String(m.familyId))}&customer=${m.customerQboId}#links-pick-h`
+      : "/staff/links?status=suggested";
+    return <>A {m.role} customer that no {m.role} in the portal is linked to. It isn&apos;t offered to bring in under Customers with no family: {what}
+      {" "}{linking ? <Link href={at}>{pick ? "Pick it on Accounting links" : "See it on Accounting links"}<span className="visually-hidden">: {m.name}</span></Link>
+        : "Someone who may link families to accounting does this on Accounting links."}</>;
   };
   const student = (m: GivenUpMadeView) => {
     const say = "A student customer that no student in the portal is linked to. If it is the student the portal saved first, link the two; if it isn't wanted, make it inactive in QuickBooks.";
@@ -245,8 +258,9 @@ export default async function ReconciliationPage({ searchParams }: { searchParam
   // Customers no family is linked to, with "Create a family from this": only for staff who may link families to accounting.
   const linking = can(ctx.effective, "Accounting.Link.ReadWrite");
   // Which customers no family is linked to are meant for a family the portal has (stage 4's slice M3a2), read once for
-  // both sections that say so: only for staff who may link families, who are shown them.
-  const aims = linking ? await readCustomerAims() : null;
+  // both sections that say so: for staff who may link families, who are shown Customers with no family, and for anyone
+  // shown a family's or member's create made after it was given up, whose words go by it.
+  const aims = linking || madeAnyway.some((m) => m.role !== "student") ? await readCustomerAims() : null;
   const stuck = writes.filter((w) => w.state === "stuck"), waiting = writes.filter((w) => w.state === "waiting"), refused = writes.filter((w) => w.state === "refused");
   // The customers with a family page (the roster's families, or members in flat books), each by its family record, found
   // through the family kind of link in one lookup for the list: a customer with none links nowhere.
@@ -278,7 +292,7 @@ export default async function ReconciliationPage({ searchParams }: { searchParam
 
       <BuyoutsToLook showAmounts={money} canChange={canChange} />
 
-      {aims !== null && <CustomersWithNoFamily mayChangeFamilies={canChange} aims={aims} />}
+      {linking && aims !== null && <CustomersWithNoFamily mayChangeFamilies={canChange} aims={aims} />}
 
       <section className="box" aria-labelledby="attention-h"><h2 id="attention-h">Needs attention in the roster{roster.attention.length ? ` (${roster.attention.length})` : ""}</h2>
         {!roster.roster ? <Notice tone="warning" live="none">The roster can&apos;t be shown right now. <Link href="/staff/roster">Open the roster</Link> to see why.</Notice>
