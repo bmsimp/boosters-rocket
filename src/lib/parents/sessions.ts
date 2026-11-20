@@ -66,7 +66,8 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * - confirmMyEmailChange() (email-change.ts) takes both address locks and the row FOR UPDATE, spends its request and
  *   changes the address, then deletes the person's other requests, then their unused codes, then their unused links,
  *   then their devices, then their sessions, and only then, in a savepoint, the roster lock and the app's records;
- * - requestMyEmailChange() takes the row FOR UPDATE, then replaces the person's unused request;
+ * - requestMyEmailChange() takes the row FOR UPDATE, then (since slice SI-5a) reads the asking session's `strong_at`
+ *   unlocked, refusing unless it proved itself within the window, then replaces the person's unused request;
  * - blockPerson() (people.ts) takes the row FOR UPDATE, then deletes the unused requests, then the codes, then the
  *   unused links, then the devices, then the sessions; renamePerson() (people.ts) takes the row FOR UPDATE and touches nothing that hangs on it;
  * - the staff writes of guardians.ts take the parents' settings lock shared first (setSignins() and setWelcome() take
@@ -107,7 +108,15 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * - the second step's code (sendSecondStepCode(), signin-codes.ts, since slice SI-3b) calls this, then reads the
  *   password unlocked, before it touches a code; and a sign-in's strong step (recordStrongSignin(), devices.ts), after
  *   completeParentSignin(), calls this, then makes or renews the person's device, then stamps the session's
- *   `strong_at`: the person's row, their devices, their sessions.
+ *   `strong_at`: the person's row, their devices, their sessions;
+ * - asking again (askAgainCode(), asking-again.ts, since slice SI-5a), once the door's own checks have taken the code,
+ *   calls this, then stamps `strong_at` on the session that asked and no other: the person's row, their sessions;
+ * - a password change in sign-in settings (changeMyPassword(), signin-settings.ts, since SI-5a) takes the row FOR
+ *   UPDATE, reads the session's `strong_at` and the `credential` row unlocked under it (every writer of a password
+ *   holds the person's row), then, as a reset does, deletes the unused codes and those spent within a code's life, then
+ *   the unspent links, then replaces the password, then forgets the devices, then ends every session, this one included;
+ * - "Sign out everywhere" (signOutEverywhere(), signin-settings.ts, since SI-5a, `parent.sessions.end_all`) takes the
+ *   row FOR UPDATE, then forgets the devices, then ends every session; it keeps the password, the codes and the links.
  */
 export async function lockedPerson(tx: Tx, parentId: string): Promise<{ email: string; blocked: boolean } | null> {
   const [p] = await tx.select({ email: parent.email, blocked: parent.blocked }).from(parent).where(eq(parent.id, parentId)).for("key share");

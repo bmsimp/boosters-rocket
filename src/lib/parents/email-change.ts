@@ -29,6 +29,7 @@ import { takeRateLimit } from "./rate-limit";
 import { askForRosterRefresh } from "./refresh-ask";
 import { deleteUnusedSigninCodes, deleteUnusedSigninLinks, endParentSessions, enterableGuardianRows, forgetDevices, lockEmail, parentActor } from "./sessions";
 import { getParentSettings } from "./settings";
+import { sessionProvedRecently } from "./asking-again";
 
 /** How long the link mailed to the new address works. */
 export const EMAIL_CHANGE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -42,6 +43,8 @@ export const EMAIL_COPY = {
   askTheClub: "Your sign-in email can't be changed here. Please ask the club and they'll change it for you.",
   invalid: "Please enter a whole email address, like name@example.com.",
   same: "That's the address you sign in with now.",
+  /** Asked without a recent proof (asking again, slice SI-5a): nothing is stored or mailed. */
+  proveFirst: "Before you change your sign-in email, please show it's you with your password and a code we email you. You can do that on this page, or in Sign-in settings on the Family page.",
   sent: (email: string) => `We've sent a link to ${email}. Open it within 24 hours to finish the change. Until then, keep signing in with the address you use now.`,
   notSent: "We couldn't send the email just now, so nothing has changed. Please try again in a little while.",
   tooManyAsks: "You've asked to change your sign-in email a few times in the last hour. Please wait a little while before trying again.",
@@ -130,16 +133,21 @@ export async function requestMyEmailChange(ctx: ParentCtx, input: unknown): Prom
 
   const token = randomBytes(32).toString("base64url");
   const actor = actorOf(ctx);
-  await db.transaction(async (tx) => {
+  const asked = await db.transaction(async (tx) => {
     // The person's row first, as every change of a person's sign-in does: two asks at once end with one live request.
     await tx.select({ id: parent.id }).from(parent).where(eq(parent.id, ctx.parentId)).for("update");
+    // Asking again (open question 28; the sign-in release, slice SI-5a): only a session that proved the password and
+    // the second step within the last 10 minutes asks, read here, before anything is stored or mailed.
+    if (!(await sessionProvedRecently(tx, ctx))) return false;
     await tx.delete(parentEmailChange).where(and(eq(parentEmailChange.parentId, ctx.parentId), isNull(parentEmailChange.usedAt)));
     // The request is asked in the session's own family (the app's family record the gate gave it).
     await tx.insert(parentEmailChange).values({ parentId: ctx.parentId, guardianId: ctx.guardianId, familyId: ctx.familyId, recordQboId: record.qboId,
       newEmail: email, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + EMAIL_CHANGE_TTL_MS) });
     await writeAudit({ actor, action: "parent.email.request", targetType: "qbo_customer", targetId: record.qboId, before: { email: ctx.email },
       after: { email, familyId: String(ctx.familyId) }, ip: ctx.ip }, tx);
+    return true;
   });
+  if (!asked) return refused("not_proved", [EMAIL_COPY.proveFirst], record);
   const brand = await currentBrand();
   const sent = await sendMail(emailChangeConfirmMessage(brand, email, { link: emailChangeLink(token) }), { purpose: "email_change_confirm", actor, ip: ctx.ip });
   if (!sent.ok) return { ok: false, errors: [EMAIL_COPY.notSent] };
