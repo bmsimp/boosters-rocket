@@ -79,8 +79,8 @@ async function waiting(): Promise<boolean> {
   return value !== null && value.noted;
 }
 
-type TakeInSetting = { noted: boolean; readAskedAt: number | null; raw: unknown };
-const settingValue = async (): Promise<unknown> => (await db.select({ value: setting.value }).from(setting).where(eq(setting.key, TAKE_IN_KEY)))[0]?.value;
+type TakeInSetting = { noted: boolean; addressesReadAt: string | null; readAskedAt: number | null; raw: unknown };
+const settingValue = async (tx: Tx | typeof db = db): Promise<unknown> => (await tx.select({ value: setting.value }).from(setting).where(eq(setting.key, TAKE_IN_KEY)))[0]?.value;
 /** The setting while the take-in has not run (null once it has, or where there is none): whether a read that kept the addresses is noted. */
 function readSetting(raw: unknown): TakeInSetting | null {
   const value = raw as { after?: unknown; addressesReadAt?: unknown; readAskedAt?: unknown; doneAt?: unknown } | undefined;
@@ -89,7 +89,8 @@ function readSetting(raw: unknown): TakeInSetting | null {
   if (Number.isNaN(after)) return null;
   const read = typeof value.addressesReadAt === "string" ? Date.parse(value.addressesReadAt) : NaN;
   const asked = typeof value.readAskedAt === "string" ? Date.parse(value.readAskedAt) : NaN;
-  return { noted: !Number.isNaN(read) && read > after, readAskedAt: Number.isNaN(asked) ? null : asked, raw };
+  const noted = !Number.isNaN(read) && read > after;
+  return { noted, addressesReadAt: noted ? (value.addressesReadAt as string) : null, readAskedAt: Number.isNaN(asked) ? null : asked, raw };
 }
 
 /**
@@ -146,6 +147,8 @@ export function takeInWaitWords(wait: TakeInWait): string {
 }
 
 export type TakeInPlan = {
+  /** The note the plan was made under (`addressesReadAt`, as stored): the write claims `doneAt` only while it still stands. */
+  notedAt: string;
   people: { id: string; given: Given }[];
   families: { id: AppFamilyId; given: Given }[];
   counts: { peopleWithNoRecord: number; peopleDisagreeing: number };
@@ -153,13 +156,18 @@ export type TakeInPlan = {
 
 /**
  * What each person and family is to be given, read under the roster lock held shared so no roster read replaces the
- * cache between the reads; null when the take-in must wait (the cache names no company, QuickBooks is connected to
+ * cache, and no shape save the shape, between the reads; null when the take-in must wait (the note that a read kept the
+ * addresses is not there, read again under the lock, since a shape save withdraws it under the roster lock held
+ * exclusively and may have committed since the caller looked; the cache names no company, QuickBooks is connected to
  * another, or the shape doesn't hold). It takes no person's row lock: the writes come after, in a transaction of their
  * own (the lock order above lockedPerson(), src/lib/parents/sessions.ts, takes a person's rows before the roster lock).
  */
 export async function planContactTakeIn(): Promise<TakeInPlan | null> {
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`);
+    const note = readSetting(await settingValue(tx));
+    if (note === null || note.addressesReadAt === null) return null;
+    const notedAt = note.addressesReadAt;
     const [source, other, shape, types] = await Promise.all([getRosterSource(tx), connectedToAnotherCompany(tx), getShape(tx),
       tx.select({ qboId: qboCustomerType.qboId, name: qboCustomerType.name, active: qboCustomerType.active }).from(qboCustomerType)]);
     if (source === null || other || shape === null || missingTypes(shape, types).length > 0) return null;
@@ -171,20 +179,21 @@ export async function planContactTakeIn(): Promise<TakeInPlan | null> {
     const under = new Map<string, Cached[]>();
     for (const c of cache) if (c.parentQboId !== null) under.set(c.parentQboId, [...(under.get(c.parentQboId) ?? []), c]);
     const familyRows = (customer: string): Cached[] => [...(byId.has(customer) ? [byId.get(customer)!] : []), ...(under.get(customer) ?? [])];
-    return whoseDetails(shape) === "person" ? planPeople(tx, shape, familyRows) : planFamilies(tx, byId);
+    const plan = whoseDetails(shape) === "person" ? await planPeople(tx, shape, familyRows) : await planFamilies(tx, byId);
+    return { notedAt, ...plan };
   });
 }
 
 
 /** Books with a parent type: each person not yet given details, from the records their open guardian rows sign in from. */
-async function planPeople(tx: Tx, shape: MembershipShape, familyRows: (customer: string) => Cached[]): Promise<TakeInPlan> {
+async function planPeople(tx: Tx, shape: MembershipShape, familyRows: (customer: string) => Cached[]): Promise<Omit<TakeInPlan, "notedAt">> {
   const people = await tx.select({ id: parent.id, email: parent.email }).from(parent).where(eq(parent.contactVersion, 0)).orderBy(asc(parent.id));
   const rows = people.length === 0 ? [] : await tx.select({ parentId: guardian.parentId, familyId: guardian.familyId, familyQboId: guardian.familyQboId, sourceQboId: guardian.sourceQboId })
     .from(guardian).innerJoin(family, eq(family.id, guardian.familyId))
     .where(and(ne(guardian.status, "disabled"), eq(family.active, true), inArray(guardian.parentId, people.map((p) => p.id))));
   const families = [...new Set(rows.map((r) => r.familyId).filter((f): f is AppFamilyId => f !== null))];
   const links = await linksOf({ families, students: [] }, tx);
-  const out: TakeInPlan = { people: [], families: [], counts: { peopleWithNoRecord: 0, peopleDisagreeing: 0 } };
+  const out: Omit<TakeInPlan, "notedAt"> = { people: [], families: [], counts: { peopleWithNoRecord: 0, peopleDisagreeing: 0 } };
   for (const person of people) {
     // The records the person's sign-in comes from, by the rule myOwnRecord() gives each of their rows (ownRecordIn()):
     // only one whose email field holds their sign-in address, so nobody is given another person's phone or address.
@@ -207,10 +216,10 @@ async function planPeople(tx: Tx, shape: MembershipShape, familyRows: (customer:
 }
 
 /** Books with no parent type: each active linked family not yet given details, from its own customer (the family, or the member). */
-async function planFamilies(tx: Tx, byId: Map<string, Cached>): Promise<TakeInPlan> {
+async function planFamilies(tx: Tx, byId: Map<string, Cached>): Promise<Omit<TakeInPlan, "notedAt">> {
   const families = await tx.select({ id: family.id }).from(family).where(and(eq(family.active, true), eq(family.contactVersion, 0))).orderBy(asc(family.id));
   const links = await linksOf({ families: families.map((f) => f.id), students: [] }, tx);
-  const out: TakeInPlan = { people: [], families: [], counts: { peopleWithNoRecord: 0, peopleDisagreeing: 0 } };
+  const out: Omit<TakeInPlan, "notedAt"> = { people: [], families: [], counts: { peopleWithNoRecord: 0, peopleDisagreeing: 0 } };
   for (const f of families) {
     const customer = links.customerOfFamily.get(f.id);
     const row = customer === undefined ? undefined : byId.get(customer);
@@ -245,15 +254,18 @@ export async function takeInContactDetails(): Promise<TakeInResult> {
 
 /**
  * The take-in's writes, from what planContactTakeIn() read (apart from it so that a test can save a parent's details
- * between the two): the setting's `doneAt` claimed, each person's and family's details only while their
+ * between the two): the setting's `doneAt` claimed, only while the note the plan was made under still stands (a shape
+ * save that committed since withdrew it, and the plan may give details by the old shape's rule), each person's and family's details only while their
  * `contact_version` is still 0, and its audit row, in one transaction.
  */
 export async function writeContactTakeIn(planned: TakeInPlan): Promise<TakeInResult> {
   return db.transaction(async (tx) => {
     const now = new Date();
     const claimed = await tx.update(setting).set({ value: sql`${setting.value} || ${JSON.stringify({ doneAt: now.toISOString() })}::jsonb`, updatedAt: now })
-      .where(and(eq(setting.key, TAKE_IN_KEY), sql`${setting.value}->'doneAt' is null`)).returning({ key: setting.key });
-    if (claimed.length === 0) return { ran: false } as const; // another wake ran it meanwhile
+      .where(and(eq(setting.key, TAKE_IN_KEY), sql`${setting.value}->'doneAt' is null`, sql`${setting.value}->>'addressesReadAt' = ${planned.notedAt}`))
+      .returning({ key: setting.key });
+    // Another wake ran it meanwhile, or a shape save withdrew the note: it waits for a read under the saved shape.
+    if (claimed.length === 0) return { ran: false } as const;
     const counts = { peopleGivenPhone: 0, peopleGivenAddress: 0, peopleDisagreeing: planned.counts.peopleDisagreeing, peopleWithNoRecord: planned.counts.peopleWithNoRecord,
       peopleSavedMeanwhile: 0, familiesGivenDetails: 0, familiesSavedMeanwhile: 0 };
     for (const p of planned.people) {

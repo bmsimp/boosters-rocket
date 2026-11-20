@@ -359,4 +359,24 @@ describe("the roster read the take-in waits for", () => {
     expect(await takeInContactDetails()).toMatchObject({ ran: true, counts: { peopleGivenPhone: 1, peopleWithNoRecord: 0 } });
     expect(await personDetails(ana.id)).toEqual({ values: { ...NO_DETAILS, phone: "555-0101" }, version: 1 });
   });
+
+  it("a shape save that commits after the take-in looked, or between its read and its write, makes it wait: it never marks itself done by the withdrawn note", async () => {
+    await connectRoster(stub, { shape: { kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: null } });
+    const { ana } = await seedAnaRivera();
+    await db.insert(setting).values({ key: TAKE_IN_KEY, value: { after: new Date(Date.now() - 60_000).toISOString() } });
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
+    // The plan is made under the old shape, then an Admin names the Parent type before the write.
+    const planned = await planContactTakeIn();
+    expect(planned).not.toBeNull();
+    await saveShape(FZN_SHAPE, { actor: WORKER.actor, ip: null });
+    expect(await writeContactTakeIn(planned!)).toEqual({ ran: false });
+    expect((await takeInValue()).doneAt).toBeUndefined();
+    expect(await takeIns()).toEqual([]);
+    // A plan asked for after the save (as one queued behind its lock) reads the note again under the lock: none.
+    expect(await planContactTakeIn()).toBeNull();
+    // The read under the saved shape lets it run, and gives Ana her record's phone.
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
+    expect(await takeInContactDetails()).toMatchObject({ ran: true, counts: { peopleGivenPhone: 1, peopleWithNoRecord: 0 } });
+    expect(await personDetails(ana.id)).toEqual({ values: { ...NO_DETAILS, phone: "555-0101" }, version: 1 });
+  });
 });
