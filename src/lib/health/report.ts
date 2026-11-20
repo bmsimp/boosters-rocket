@@ -10,6 +10,7 @@ import { loadRosterPage } from "@/lib/roster/queries";
 import { queueCounts } from "@/lib/roster/queue";
 import { mailFailing, mailSummary } from "@/lib/mail/settings";
 import { getParentSettings } from "@/lib/parents/settings";
+import { takeInWaitingFor, takeInWaitWords } from "@/lib/parents/contact-take-in";
 import { readBreachMark, type BreachMark } from "@/lib/parents/breach-mark";
 import { BREACH_TIMEOUT_MS, type BreachNotChecked } from "@/lib/parents/breach-check";
 import { apiFailing as formsApiFailing, formsSummary } from "@/lib/forms/settings";
@@ -138,11 +139,15 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
   // them back, or they couldn't be sent): the portal keeps its value, and a person decides. The staff home's Today box says the same.
   if (writes.refused) queueNote.push(`${writes.refused === 1 ? "1 change is" : `${writes.refused} changes are`} kept in the portal that QuickBooks didn't take: the portal keeps its own value until someone sends it again or gives it up on the Reconciliation page.`);
   const queueFix = { href: "/staff/reconciliation", label: "Open Reconciliation" };
+  // While the one-time take-in of guardians' phones and addresses (src/lib/parents/contact-take-in.ts) has not run: what it
+  // waits for, on this line, where each of its causes lives. Nothing once it has run.
+  const takeInWait = await takeInWaitingFor(conn);
+  const takeInNote = takeInWait === null ? [] : [takeInWaitWords(takeInWait)];
   if (!conn.configured) {
-    lines.push({ key: "quickbooks", title: "QuickBooks", state: "off", word: "Not set up", says: "Not set up. Families, students and what they owe come from QuickBooks, so parents see none of it yet.", times: [], notes: [], fix: qboFix });
+    lines.push({ key: "quickbooks", title: "QuickBooks", state: "off", word: "Not set up", says: "Not set up. Families, students and what they owe come from QuickBooks, so parents see none of it yet.", times: [], notes: takeInNote, fix: qboFix });
   } else if (!conn.connected) {
     lines.push({ key: "quickbooks", title: "QuickBooks", state: "attention", word: "Not connected", says: "Not connected. The Intuit app's keys are saved, but the portal can't read the roster or what families owe, and parents can't change the email they sign in with, until an Admin connects.",
-      times: rosterTimes, notes: [...queueNote, use], fix: qboFix });
+      times: rosterTimes, notes: [...queueNote, ...takeInNote, use], fix: qboFix });
   } else {
     // The check of the portal's own requests (src/lib/quickbooks/sandbox-check/): when it last ran, and whether every request answered as expected.
     const checkFailed = checked?.outcome === "not_as_expected";
@@ -151,7 +156,7 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
     lines.push({
       key: "quickbooks", title: "QuickBooks", state: attention ? "attention" : "ok", word: attention ? "Needs attention" : "Connected",
       times: [...rosterTimes, { label: "Requests last checked", at: checked?.at ?? null }],
-      notes: [...problems.map((p) => p.text), ...queueNote, lastCheckWords(checked), use], fix: problems.length ? qboFix : writes.stuck || writes.refused ? queueFix : checkFix,
+      notes: [...problems.map((p) => p.text), ...queueNote, ...takeInNote, lastCheckWords(checked), use], fix: problems.length ? qboFix : writes.stuck || writes.refused ? queueFix : checkFix,
       says: `Connected to ${conn.companyName ?? "a QuickBooks company"}${conn.environment === "sandbox" ? " (an Intuit sandbox, not the club's real books)" : ""}.`,
     });
   }

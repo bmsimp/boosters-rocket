@@ -5,7 +5,8 @@ import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { family, guardian, parent, qboCustomer, qboCustomerType, setting } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
-import { getShape, missingTypes, ROSTER_LOCK, type MembershipShape } from "@/lib/roster/shape";
+import { getShape, missingTypes, ROSTER_LOCK, shapeHolds, type MembershipShape } from "@/lib/roster/shape";
+import { TAKE_IN_KEY } from "./take-in-setting";
 import { getRosterSource } from "@/lib/roster/source";
 import { connectedToAnotherCompany, linksOf } from "@/lib/families/links";
 import type { AppFamilyId } from "@/lib/families/ids";
@@ -18,10 +19,14 @@ import { ownRecordIn, whoseDetails, type CachedRecord } from "./my-family";
  * cache, each person (books with a parent type) or family (books with none) is given the details their own QuickBooks
  * record holds, as the roster cache keeps them. After it, nothing QuickBooks holds changes a phone or an address in the
  * portal (stage 4 shows the difference). Its setting is written by migration 0044 as `{ after }`, the migration's
- * time; the roster read adds `addressesReadAt` (noteAddressesKept()), and the take-in `doneAt` once it has run.
+ * time; a roster read made under a shape that holds adds `addressesReadAt` (noteAddressesKept()), and a shape save
+ * withdraws it (withdrawAddressesNote(), ./take-in-setting.ts); the worker's own ask for such a read adds
+ * `readAskedAt` (takeInAsksForARead()); and the take-in `doneAt` once it has run.
  */
-export const TAKE_IN_KEY = "parents.contact_take_in";
+export { TAKE_IN_KEY };
 export const TAKE_IN_JOB = "parents.contact_take_in";
+/** How often, at most, the take-in asks the worker for a roster read while none has kept the addresses: a broken connection is not hammered. */
+export const TAKE_IN_ASK_EVERY_MS = 3_600_000;
 
 type Cached = CachedRecord & {
   addressLine1: string | null; addressLine2: string | null; addressCity: string | null; addressRegion: string | null;
@@ -55,9 +60,12 @@ function agreed<T>(values: (T | null)[], key: (v: T) => string): T | null | "dis
  * read is not enough by itself: the build before migration 0044 answers the roster read the migration asks for too,
  * and while it still runs beside the migrated database (scripts/poc/deploy.sh migrates before it replaces the app) its
  * read leaves every address empty, so the take-in would run once over a cache that holds none. Nothing once the
- * take-in has run, or where the migration wrote no setting.
+ * take-in has run, or where the migration wrote no setting. Nor while the shape doesn't hold (none, or one naming a
+ * type the read didn't find in QuickBooks): such a read kept the addresses only of the types it names, so once an
+ * Admin chooses a shape that holds the take-in waits for a read made under it (a shape save withdraws a note too).
  */
 export async function noteAddressesKept(tx: Tx, readAt: Date): Promise<void> {
+  if (!(await shapeHolds(tx))) return;
   await tx.update(setting).set({ value: sql`${setting.value} || ${JSON.stringify({ addressesReadAt: readAt.toISOString() })}::jsonb`, updatedAt: new Date() })
     .where(and(eq(setting.key, TAKE_IN_KEY), sql`${setting.value}->'doneAt' is null`));
 }
@@ -67,11 +75,74 @@ export async function noteAddressesKept(tx: Tx, readAt: Date): Promise<void> {
  * addresses (noteAddressesKept()) started after the migration's time.
  */
 async function waiting(): Promise<boolean> {
-  const [row] = await db.select({ value: setting.value }).from(setting).where(eq(setting.key, TAKE_IN_KEY));
-  const value = row?.value as { after?: unknown; addressesReadAt?: unknown; doneAt?: unknown } | undefined;
-  if (!value || value.doneAt !== undefined || typeof value.after !== "string" || typeof value.addressesReadAt !== "string") return false;
-  const after = Date.parse(value.after), read = Date.parse(value.addressesReadAt);
-  return !Number.isNaN(after) && !Number.isNaN(read) && read > after;
+  const value = readSetting(await settingValue());
+  return value !== null && value.noted;
+}
+
+type TakeInSetting = { noted: boolean; readAskedAt: number | null; raw: unknown };
+const settingValue = async (): Promise<unknown> => (await db.select({ value: setting.value }).from(setting).where(eq(setting.key, TAKE_IN_KEY)))[0]?.value;
+/** The setting while the take-in has not run (null once it has, or where there is none): whether a read that kept the addresses is noted. */
+function readSetting(raw: unknown): TakeInSetting | null {
+  const value = raw as { after?: unknown; addressesReadAt?: unknown; readAskedAt?: unknown; doneAt?: unknown } | undefined;
+  if (!value || typeof value !== "object" || value.doneAt !== undefined || typeof value.after !== "string") return null;
+  const after = Date.parse(value.after);
+  if (Number.isNaN(after)) return null;
+  const read = typeof value.addressesReadAt === "string" ? Date.parse(value.addressesReadAt) : NaN;
+  const asked = typeof value.readAskedAt === "string" ? Date.parse(value.readAskedAt) : NaN;
+  return { noted: !Number.isNaN(read) && read > after, readAskedAt: Number.isNaN(asked) ? null : asked, raw };
+}
+
+/**
+ * Whether the worker is to read the roster at this wake for the take-in, the one place that decides it (called by
+ * runDueJobs(), src/lib/jobs/runner.ts, while QuickBooks is connected): while the take-in has not run and no read
+ * that kept the addresses is noted, a read is treated as asked for, whatever the build before migration 0044 answered
+ * to the migration's own ask (its read keeps no address and notes nothing). So the first wake of this build reads at
+ * once, and while reads fail, or succeed under a shape that doesn't hold, it asks again no more often than once an
+ * hour (TAKE_IN_ASK_EVERY_MS). Each ask is claimed in the setting (`readAskedAt`), so two wakes at once ask once.
+ */
+export async function takeInAsksForARead(now: Date = new Date()): Promise<boolean> {
+  const value = readSetting(await settingValue());
+  if (value === null || value.noted) return false;
+  if (value.readAskedAt !== null && now.getTime() - value.readAskedAt < TAKE_IN_ASK_EVERY_MS) return false;
+  const claimed = await db.update(setting).set({ value: sql`${setting.value} || ${JSON.stringify({ readAskedAt: now.toISOString() })}::jsonb`, updatedAt: new Date() })
+    .where(and(eq(setting.key, TAKE_IN_KEY), sql`${setting.value} = ${JSON.stringify(value.raw)}::jsonb`)).returning({ key: setting.key });
+  return claimed.length > 0;
+}
+
+/**
+ * What the take-in is waiting for: QuickBooks connected, the connection mended, QuickBooks connected to the roster's
+ * company, the membership shape, or a roster read; or only the worker's next wake, after a read that kept the addresses.
+ */
+export type TakeInWait = "connect" | "mend" | "other_company" | "shape" | "read" | "next_wake";
+
+/**
+ * Why the take-in has not run yet, for the Health page's QuickBooks line (src/lib/health/report.ts); null once it has
+ * run, or where migration 0044 wrote no setting. `conn` is the connection as that page read it.
+ */
+export async function takeInWaitingFor(conn: { configured: boolean; connected: boolean; needsAdmin: boolean }): Promise<TakeInWait | null> {
+  const value = readSetting(await settingValue());
+  if (value === null) return null;
+  if (await connectedToAnotherCompany()) return "other_company";
+  const holds = await shapeHolds();
+  // A read under this shape kept the addresses: the take-in reads the cache, not QuickBooks, at the next wake.
+  if (value.noted && holds && (await getRosterSource()) !== null) return "next_wake";
+  if (!conn.configured || !conn.connected) return "connect";
+  if (conn.needsAdmin) return "mend";
+  return holds ? "read" : "shape";
+}
+
+const WAIT_WORDS: Record<TakeInWait, string> = {
+  connect: "It copies them once an Admin connects QuickBooks and the roster has been read.",
+  mend: "It copies them once an Admin connects QuickBooks again, as above, and the roster has been read.",
+  other_company: "It copies them once QuickBooks is connected to the company the roster was read from, as above, and the roster has been read.",
+  shape: "It copies them once the membership shape names only customer types QuickBooks has, at the roster read after the shape is saved.",
+  read: "It copies them after the worker's next successful read of the roster, which it tries at once and then once an hour until one works.",
+  next_wake: "The roster has been read, so the worker copies them when it next wakes, within a minute.",
+};
+
+/** The Health page's note while the take-in has not run, in words. */
+export function takeInWaitWords(wait: TakeInWait): string {
+  return `Parents' phones and mailing addresses haven't been copied from QuickBooks into the portal yet. ${WAIT_WORDS[wait]} Meanwhile a parent can type their own on their Family page, and the copy never replaces what a parent has typed.`;
 }
 
 export type TakeInPlan = {

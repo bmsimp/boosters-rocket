@@ -12,7 +12,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, buyout, jobRun, qboConnection, role, roleAssignment, roleRule, setting, writeQueue } from "@/lib/db/schema";
+import { auditLog, buyout, jobRun, qboConnection, qboCustomerType, role, roleAssignment, roleRule, setting, writeQueue } from "@/lib/db/schema";
 import HealthPage from "@/app/staff/(app)/health/page";
 import QuickBooksSettingsPage from "@/app/staff/(app)/settings/quickbooks/page";
 import QuickBooksSetupPage from "@/app/staff/(app)/settings/quickbooks/setup/page";
@@ -271,6 +271,33 @@ describe("the health page", () => {
     const off = line(await healthReport(), "quickbooks");
     expect(off.says).toMatch(/can't read the roster or what families owe, and parents can't change the email they sign in with/);
     expect(off.notes).toEqual([`${QUICKBOOKS_USE.reads} ${QUICKBOOKS_USE.writes}`]);
+  });
+
+  it("says on the QuickBooks line, while the one-time copy of parents' phones and addresses hasn't run, what it waits for, and nothing once it has", async () => {
+    const notes = async () => line(await healthReport(NOW), "quickbooks").notes.join(" ");
+    const said = "Parents' phones and mailing addresses haven't been copied from QuickBooks into the portal yet.";
+    const meanwhile = "Meanwhile a parent can type their own on their Family page, and the copy never replaces what a parent has typed.";
+    // No setting (a database migration 0044 never wrote it into): nothing.
+    expect(await notes()).not.toContain(said);
+    await put("parents.contact_take_in", { after: ago(60_000) });
+    // Not set up, then connected but with no shape, then with a shape and a read still to come.
+    expect(await notes()).toContain(`${said} It copies them once an Admin connects QuickBooks and the roster has been read. ${meanwhile}`);
+    await seedConnected(stub);
+    expect(await notes()).toContain("It copies them once the membership shape names only customer types QuickBooks has, at the roster read after the shape is saved.");
+    await put("membership.shape", { kind: "flat", memberTypeIds: ["1"] });
+    await put("roster.source", { realmId: "9130000000000001" });
+    await db.insert(qboCustomerType).values({ qboId: "1", name: "Family", active: true });
+    expect(await notes()).toContain("It copies them after the worker's next successful read of the roster, which it tries at once and then once an hour until one works.");
+    // The connection only an Admin can mend.
+    await db.update(qboConnection).set({ lastError: "Intuit refused the refresh. (invalid_grant)", lastErrorAt: new Date() });
+    expect(await notes()).toContain("It copies them once an Admin connects QuickBooks again");
+    await db.update(qboConnection).set({ lastError: null, lastErrorAt: null });
+    // A read that kept the addresses: only the next wake. The line's state is not changed by the note.
+    await put("parents.contact_take_in", { after: ago(60_000), addressesReadAt: ago(30_000) });
+    expect(await notes()).toContain("The roster has been read, so the worker copies them when it next wakes, within a minute.");
+    // Done: nothing.
+    await put("parents.contact_take_in", { after: ago(60_000), addressesReadAt: ago(30_000), doneAt: ago(10_000) });
+    expect(await notes()).not.toContain(said);
   });
 
   it("says when the last clean-up failed", async () => {

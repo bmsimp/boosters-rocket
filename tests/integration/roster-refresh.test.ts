@@ -93,6 +93,7 @@ describe("the roster refresh", () => {
 
   it("marks, for the take-in of contact details, that this build's read kept the billing addresses, and only a successful read while it waits", async () => {
     const takeIn = async () => (await db.select({ value: setting.value }).from(setting).where(eq(setting.key, TAKE_IN_KEY)))[0]?.value as Record<string, unknown> | undefined;
+    await saveShape(FZN_SHAPE, staffOp);
     // No setting (a database migration 0044 never wrote it into): nothing is made.
     await refreshRoster(worker);
     expect(await takeIn()).toBeUndefined();
@@ -111,6 +112,26 @@ describe("the roster refresh", () => {
     await db.update(setting).set({ value: done }).where(eq(setting.key, TAKE_IN_KEY));
     await refreshRoster(worker);
     expect(await takeIn()).toEqual(done);
+  });
+
+  it("marks nothing for the take-in from a read made under a shape that doesn't hold, and a shape save withdraws the mark", async () => {
+    const takeIn = async () => (await db.select({ value: setting.value }).from(setting).where(eq(setting.key, TAKE_IN_KEY)))[0]?.value as Record<string, unknown> | undefined;
+    const after = new Date(Date.now() - 60_000).toISOString();
+    await db.insert(setting).values({ key: TAKE_IN_KEY, value: { after } });
+    // No shape at all: the read keeps nobody's contact details, so it marks nothing.
+    expect(await refreshRoster(worker)).toMatchObject({ ok: true });
+    expect(await takeIn()).toEqual({ after });
+    // A shape naming a Parent type QuickBooks doesn't have: that type's rows keep nothing either.
+    await saveShape({ kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: "GONE" }, staffOp);
+    expect(await refreshRoster(worker)).toMatchObject({ ok: true });
+    expect(await takeIn()).toEqual({ after });
+    // A shape that holds: the read marks it.
+    await saveShape(FZN_SHAPE, staffOp);
+    expect(await refreshRoster(worker)).toMatchObject({ ok: true });
+    expect(await takeIn()).toEqual({ after, addressesReadAt: (await lastRun()).startedAt.toISOString() });
+    // A shape save, before any read under it: the mark goes in the save's own transaction.
+    await saveShape({ kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: null }, staffOp);
+    expect(await takeIn()).toEqual({ after });
   });
 
   it("stores a customer QuickBooks sends twice once, and counts what it stored", async () => {

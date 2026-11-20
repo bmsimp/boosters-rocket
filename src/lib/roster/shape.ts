@@ -4,6 +4,7 @@ import { db, type Tx } from "@/lib/db/client";
 import { familyMoney, setting, qboCustomerType, qboCustomer } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import type { QboOp } from "@/lib/quickbooks/connection";
+import { withdrawAddressesNote } from "@/lib/parents/take-in-setting";
 
 export const SHAPE_KEY = "membership.shape";
 /** Postgres advisory lock held for the length of a refresh and of a shape save, so neither overlaps the other (spec §2 Refreshing). */
@@ -103,7 +104,9 @@ export function describeShape(s: MembershipShape, types: TypeRow[]): string {
 
 /**
  * Saves the shape and, in the same transaction, drops email, phone and billing address from every customer the new shape doesn't name
- * (spec §1 Rules) and forgets what each family was last seen to owe (`family_money`), money's own rule. It changes none
+ * (spec §1 Rules), withdraws the take-in's note that a roster read kept the billing addresses (withdrawAddressesNote(),
+ * so the take-in waits for a read made under this shape) and forgets what each family was last seen to owe
+ * (`family_money`), money's own rule. It changes none
  * of the app's own records (stage 3's slice 9c: they stand alone, whatever the shape calls each customer). It leaves
  * the parents' settings alone: "Families with no active student" is simply not in force while the shape names no
  * students (studentsRuleInForce(), src/lib/parents/sessions.ts).
@@ -121,6 +124,9 @@ export async function saveShape(input: MembershipShape, o: QboOp): Promise<void>
     const named = shapeTypeIds(shape);
     await tx.update(qboCustomer).set({ email: null, phone: null, ...NO_ADDRESS_COLUMNS })
       .where(named.length ? or(isNull(qboCustomer.typeQboId), notInArray(qboCustomer.typeQboId, named)) : undefined);
+    // The cache holds no contact details yet for a type the shape names now and didn't before: the take-in of a
+    // guardian's phone and address waits for a roster read made under this shape (src/lib/parents/contact-take-in.ts).
+    await withdrawAddressesNote(tx);
     // The shape decides whose invoices are a family's, so what each family was last seen to owe was added up under the
     // old one. It goes, and each family's figures are read from QuickBooks again when its parent next looks.
     await tx.delete(familyMoney);

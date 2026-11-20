@@ -7,7 +7,7 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster, ROSTER_JOB } from "@/lib/roster/refresh";
 import { sendOwedWelcomes } from "@/lib/parents/welcome";
 import { rosterRefreshAsked } from "@/lib/parents/refresh-ask";
-import { TAKE_IN_JOB, takeInContactDetails } from "@/lib/parents/contact-take-in";
+import { TAKE_IN_JOB, takeInAsksForARead, takeInContactDetails } from "@/lib/parents/contact-take-in";
 import { CLEANUP_JOB, removedInAll, runCleanup } from "./cleanup";
 import { BUYOUT_CHECK_MARK, markJob, REMINDERS_MARK } from "./marks";
 import { MONEY_JOB } from "@/lib/money/sweep";
@@ -112,8 +112,12 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
       ran.push({ job: TOKEN_JOB, ok: false });
     }
   }
-  // Daily, or sooner when a parent's change of sign-in address went to QuickBooks while the roster was busy (refresh-ask.ts).
-  if ((await due(ROSTER_JOB, now)) || (await rosterRefreshAsked(now))) {
+  // Daily, or sooner when a parent's change of sign-in address went to QuickBooks while the roster was busy (refresh-ask.ts),
+  // or while the take-in of contact details waits for a read that keeps the billing addresses: at the first wake of this
+  // build, whatever the build before it answered, then at most once an hour (takeInAsksForARead(), asked first so that
+  // every read made while it waits counts toward its hour).
+  const forTakeIn = await takeInAsksForARead(now);
+  if (forTakeIn || (await due(ROSTER_JOB, now)) || (await rosterRefreshAsked(now))) {
     const r = await refreshRoster({ startedBy: "worker", actor: WORKER_ACTOR, ip: null });
     if (r.ok || r.reason === "failed") ran.push({ job: ROSTER_JOB, ok: r.ok });
   }

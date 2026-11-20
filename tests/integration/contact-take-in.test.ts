@@ -13,8 +13,11 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: as
 
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, family, parent, qboCustomer, setting } from "@/lib/db/schema";
-import { TAKE_IN_JOB, TAKE_IN_KEY, noteAddressesKept, planContactTakeIn, takeInContactDetails, writeContactTakeIn } from "@/lib/parents/contact-take-in";
+import { auditLog, family, jobRun, parent, qboCustomer, setting } from "@/lib/db/schema";
+import { TAKE_IN_ASK_EVERY_MS, TAKE_IN_JOB, TAKE_IN_KEY, noteAddressesKept, planContactTakeIn, takeInContactDetails, writeContactTakeIn } from "@/lib/parents/contact-take-in";
+import { refreshRoster } from "@/lib/roster/refresh";
+import { saveShape } from "@/lib/roster/shape";
+import { ROSTER_JOB } from "@/lib/roster/source";
 import { runDueJobs } from "@/lib/jobs/runner";
 import type { ContactValues } from "@/lib/parents/contact-fields";
 import { NO_DETAILS, familyDetails, personDetails, setPersonDetails } from "../helpers/contact";
@@ -23,6 +26,8 @@ import { FAMILY_A, FAMILY_B, MONEY_REALM, seedParentIn, seedSignedInParent } fro
 import { seedConnected, startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { addToCache, fam, par, seedRosterRead, seedShape, storeShape, stu } from "../helpers/roster-cache";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
+import { connectRoster, seedAnaRivera, WORKER } from "../helpers/roster-writes";
+import { FZN_SHAPE } from "../helpers/qbo-stub";
 import { SOURCE_KEY } from "@/lib/roster/source";
 
 let stub: QboStub;
@@ -290,5 +295,68 @@ describe("the take-in waits, and does nothing, until it can be trusted", () => {
     await seedRosterRead();
     expect(await takeInContactDetails()).toEqual({ ran: false });
     expect(await takeIns()).toEqual([]);
+  });
+});
+
+describe("the roster read the take-in waits for", () => {
+  const takeInValue = async () => (await db.select({ value: setting.value }).from(setting).where(eq(setting.key, TAKE_IN_KEY)))[0]!.value as Record<string, unknown>;
+  const rosterRuns = async () => db.select().from(jobRun).where(eq(jobRun.job, ROSTER_JOB)).orderBy(asc(jobRun.id));
+  /** Connected to the FZN company, its roster read, then migration 0044's setting, and a successful read by the build before it: no mark. */
+  async function afterTheOldBuildsRead() {
+    await connectRoster(stub);
+    await db.insert(setting).values({ key: TAKE_IN_KEY, value: { after: new Date(Date.now() - 60_000).toISOString() } });
+    // The build before 0044 answers the migration's ask: a successful run after the take-in's time, which marks nothing.
+    await seedRosterRead();
+    expect(Object.keys(await takeInValue())).toEqual(["after"]);
+  }
+
+  it("is read at the new build's first wake, whatever the build before it answered, and asked for no more once one kept the addresses", async () => {
+    await afterTheOldBuildsRead();
+    const before = (await rosterRuns()).length;
+    // Nothing else asks for a read: the last one finished just now, and no parent's email change waits on one.
+    await runDueJobs();
+    const runs = await rosterRuns();
+    expect(runs).toHaveLength(before + 1);
+    expect(runs.at(-1)).toMatchObject({ outcome: "ok", startedBy: "worker" });
+    expect((await takeInValue()).addressesReadAt).toBe(runs.at(-1)!.startedAt.toISOString());
+    // Marked: the next wake reads nothing more for it (and the take-in runs).
+    await runDueJobs();
+    expect(await rosterRuns()).toHaveLength(before + 1);
+  });
+
+  it("when that read fails, is asked for again only once an hour has passed", async () => {
+    await afterTheOldBuildsRead();
+    const before = (await rosterRuns()).length;
+    stub.oddRosterAnswer = { customers: { QueryResponse: "nothing" } };
+    const start = new Date();
+    await runDueJobs(start);
+    expect((await rosterRuns()).map((r) => r.outcome).slice(before)).toEqual(["failed"]);
+    // Inside the hour: no read.
+    await runDueJobs(new Date(start.getTime() + TAKE_IN_ASK_EVERY_MS - 60_000));
+    expect(await rosterRuns()).toHaveLength(before + 1);
+    // Past it, with QuickBooks answering again: read, and marked.
+    stub.oddRosterAnswer = null;
+    await runDueJobs(new Date(start.getTime() + TAKE_IN_ASK_EVERY_MS + 60_000));
+    const runs = await rosterRuns();
+    expect(runs.map((r) => r.outcome).slice(before)).toEqual(["failed", "ok"]);
+    expect((await takeInValue()).addressesReadAt).toBe(runs.at(-1)!.startedAt.toISOString());
+  });
+
+  it("after a shape save, is one made under the saved shape: the take-in then gives the newly named type's people their details", async () => {
+    // Books with no parent type at first: the cache keeps no Parent customer's email or phone.
+    await connectRoster(stub, { shape: { kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: null } });
+    const { ana } = await seedAnaRivera();
+    await db.insert(setting).values({ key: TAKE_IN_KEY, value: { after: new Date(Date.now() - 60_000).toISOString() } });
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
+    expect((await takeInValue()).addressesReadAt).toBeDefined();
+    // An Admin names the Parent type: the save keeps no Parent customer's details yet, so the mark goes with it.
+    await saveShape(FZN_SHAPE, { actor: WORKER.actor, ip: null });
+    expect((await takeInValue()).addressesReadAt).toBeUndefined();
+    expect(await takeInContactDetails()).toEqual({ ran: false });
+    expect(await personDetails(ana.id)).toEqual({ values: NO_DETAILS, version: 0 });
+    // The read under the saved shape keeps Ana's record's phone, and the take-in gives it to her.
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
+    expect(await takeInContactDetails()).toMatchObject({ ran: true, counts: { peopleGivenPhone: 1, peopleWithNoRecord: 0 } });
+    expect(await personDetails(ana.id)).toEqual({ values: { ...NO_DETAILS, phone: "555-0101" }, version: 1 });
   });
 });
