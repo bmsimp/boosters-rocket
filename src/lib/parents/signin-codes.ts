@@ -2,7 +2,10 @@
 // remember, and never a way in by itself. A code is sent only after the right password (/portal-password/check), or
 // again for a pending step (/portal-code/resend), and checked only for the person a pending step names
 // (/portal-code/check): src/lib/auth/parent-code-plugin.ts and parent-signin-step.ts. Its own rules stay as spec §1 made
-// them: 6 digits, 10 minutes, 5 tries, one code a minute, and the limits per address and per IP address.
+// them: 6 digits, 10 minutes, 5 tries, one code a minute, and the limits per address and per IP address. Since slice
+// SI-6a it is the second step only for a person with no authenticator app in force (open question 24): one who has an
+// app is asked for its code or a backup code instead (verifySecondFactor(), below, at /portal-app/check), is sent no
+// code, and a code mailed before the app was in force signs them in nowhere (signinStands()).
 import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
 import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
@@ -13,10 +16,12 @@ import { env } from "@/env";
 import { mailWorking } from "@/lib/mail/settings";
 import { sendMail, currentBrand } from "@/lib/mail/send";
 import { changeCodeMessage, signinCodeMessage } from "@/lib/mail/messages";
-import { takeRateLimit, type RateLimitTake } from "./rate-limit";
+import { giveBackRateLimit, rateLimitCount, takeRateLimit, takeRateLimitPlace, type RateLimitTake } from "./rate-limit";
 import { enterableGuardianRows, lockedPerson, parentActor } from "./sessions";
 import { getParentSettings, parentDoorClosed, type ParentSettings } from "./settings";
 import { secondStepFor } from "./second-step-rule";
+import { authenticatorStands, backupCodeStands, hasAuthenticator, takeAuthenticatorCode, takeBackupCode } from "./authenticator";
+import { isBackupCodeShape } from "./backup-codes";
 
 export const CODE_TTL_MS = 10 * 60 * 1000;
 export const CODE_MAX_TRIES = 5;
@@ -47,11 +52,14 @@ export type PasswordProof = { credentialId: string; credentialUpdatedAt: Date };
 export type LinkSigninProof = { linkId: string; credentialId: string; credentialUpdatedAt: Date };
 
 /**
- * What a sign-in proved, and the only three ways in (the sign-in release, slice SI-3b): a password and an emailed code
- * (the code's row id, verifySigninCode()), a password and a device the portal remembers for the person (the device's
- * row id), or a set-up link (choosePasswordFromLink()). There is no proof of a code alone: a code signs nobody in.
+ * What a sign-in proved, and the only ways in (the sign-in release, slices SI-3b and SI-6a): a password and an emailed
+ * code (the code's row id, verifySigninCode()), a password and the person's authenticator app (the app's row id) or one
+ * of their backup codes (the spent code's row id, verifySecondFactor()), a password and a device the portal remembers
+ * for the person (the device's row id), or a set-up link (choosePasswordFromLink()). There is no proof of a code alone,
+ * an app's code alone or a backup code alone: none of them signs anybody in.
  */
-export type SigninProof = { password: PasswordProof; codeId: string } | { password: PasswordProof; deviceId: string } | { link: LinkSigninProof };
+export type SigninProof = { password: PasswordProof; codeId: string } | { password: PasswordProof; authenticatorId: string }
+  | { password: PasswordProof; backupCodeId: string } | { password: PasswordProof; deviceId: string } | { link: LinkSigninProof };
 
 /**
  * Who a pending step names (src/lib/auth/parent-signin-step.ts): the person, the address the password was proved with,
@@ -63,7 +71,7 @@ export type StepPerson = { parentId: string; email: string; password: PasswordPr
 export type CodeUse = "sign_in" | "change";
 
 type Refusal = "blocked" | "no_enabled_guardian" | "rate_limited" | "mail_failed" | "signins_off" | "address_changed" | "password_changed"
-  | "strict_no_factor" | "step_ending";
+  | "strict_no_factor" | "step_ending" | "has_second_factor";
 const ANON: Actor = { door: "parent", id: null, label: null };
 /**
  * The per-IP limit, or "taken" when the visitor's address is unknown. With no address (CLIENT_IP_HEADER is none, or the
@@ -73,13 +81,18 @@ const ANON: Actor = { door: "parent", id: null, label: null };
 export const takeIpLimit = (kind: "code_send_ip" | "code_check_ip" | "password_try_ip", ip: string | null, now: Date): Promise<RateLimitTake> =>
   ip === null ? Promise.resolve("taken") : takeRateLimit(kind, ip, now);
 /**
- * Why the door can't go on for anyone now, or null: sign-ins off, or a level whose second step is not the emailed code
- * (under Strict an emailed code is never a second step, secondStepFor(), so a pending step made at Standard goes no
- * further once an Admin stores Strict). `hasSecondFactor: false`, as the password step passes it, until SI-6 and SI-7.
+ * Why the emailed code can't be this person's second step now, or null: sign-ins off; a level whose second step for
+ * them is none (under Strict an emailed code is never a second step, secondStepFor(), so a pending step made at Standard
+ * goes no further once an Admin stores Strict: `strict_no_factor`); or, since slice SI-6a, an authenticator app of their
+ * own in force (`hasSecondFactor`, which the caller reads: hasAuthenticator()), whose code or a backup code is their
+ * second step at either level (open question 24), so the emailed code is never theirs (`has_second_factor`: the pending
+ * step goes on, to /portal-app/check). SI-7 adds passkeys to `hasSecondFactor`.
  */
-const doorStops = (settings: ParentSettings): "signins_off" | "strict_no_factor" | null =>
-  parentDoorClosed(settings) ? "signins_off"
-    : secondStepFor({ level: settings.level, hasSecondFactor: false }).step !== "emailed_code" ? "strict_no_factor" : null;
+function doorStops(settings: ParentSettings, hasSecondFactor: boolean): "signins_off" | "strict_no_factor" | "has_second_factor" | null {
+  if (parentDoorClosed(settings)) return "signins_off";
+  const step = secondStepFor({ level: settings.level, hasSecondFactor }).step;
+  return step === null ? "strict_no_factor" : step === "second_factor" ? "has_second_factor" : null;
+}
 const DONE = { delivery: Promise.resolve(), ended: false };
 const ENDED = { delivery: Promise.resolve(), ended: true };
 
@@ -111,7 +124,8 @@ const samePassword = (stored: Date | null, proof: PasswordProof) => stored !== n
  * the step's end or CODE_TTL_MS from now, whichever is sooner, and its mail says how many whole minutes that is; with
  * less than LEAST_CODE_LIFE_MS of the step left none is sent (`step_ending`), since it would be dead before it was read.
  * `ended` says the step can't go on (blocked, the address or the password changed, no row that counts, sign-ins off,
- * Strict), and the caller clears the pending step. Each refusal is `signin.code_refused` with its reason (over a limit,
+ * Strict), and the caller clears the pending step. A person with an authenticator app in force (since slice SI-6a) is
+ * sent nothing (`has_second_factor`, not ended: their second step is the app's, /portal-app/check). Each refusal is `signin.code_refused` with its reason (over a limit,
  * once per full window); a code mailed is `signin.code_sent`. `use` is what the code is for, which its mail says: a
  * sign-in on a device the portal doesn't know (`sign_in`, the door's: signinCodeMessage()), or a change to how the
  * person signs in, asked for in a session already signed in (`change`, asking again's: changeCodeMessage(), which says
@@ -128,8 +142,8 @@ export async function sendSecondStepCode(person: StepPerson, ip: string | null, 
   const expiresAt = new Date(Math.min(now.getTime() + CODE_TTL_MS, person.endsAt?.getTime() ?? Infinity));
   if (expiresAt.getTime() - now.getTime() < LEAST_CODE_LIFE_MS) { await refuse("step_ending", who, ip); return DONE; }
   if (!(await mailWorking())) { await refuse("mail_failed", who, ip, { detail: "mail_not_working" }); return DONE; }
-  const stops = doorStops(await getParentSettings());
-  if (stops) { await refuse(stops, who, ip); return ENDED; }
+  const stops = doorStops(await getParentSettings(), await hasAuthenticator(person.parentId));
+  if (stops) { await refuse(stops, who, ip); return stops === "has_second_factor" ? DONE : ENDED; }
   const [p] = await db.select().from(parent).where(eq(parent.id, person.parentId));
   if (!p || p.email !== email) { await refuse("address_changed", who, ip); return ENDED; }
   if (p.blocked) { await refuse("blocked", who, ip); return ENDED; }
@@ -192,7 +206,8 @@ const REJECTED_ENDED: VerifyResult = { ok: false, reason: "rejected", ended: tru
  * checks per IP address per 15 minutes. Before the code is looked at, the step must still be able to go on: the person
  * still at the address and not blocked, and, when the step's password is given (the door always gives it), their
  * `credential` row still the one it proved. A block and a reset delete the person's codes too, so without this their
- * step would be refused only as a missing code and linger to its end. Each refusal is audited (`signin.code_expired`,
+ * step would be refused only as a missing code and linger to its end. Since slice SI-6a, too, the person has no
+ * authenticator app in force (`has_second_factor`: their step is the app's, and the step goes on). Each refusal is audited (`signin.code_expired`,
  * `signin.code_wrong`, `signin.refused`), and the caller answers it as one refusal.
  */
 export async function verifySigninCode(step: { parentId: string; email: string; password?: PasswordProof }, rawCode: string, ip: string | null, now = new Date()): Promise<VerifyResult> {
@@ -210,6 +225,12 @@ export async function verifySigninCode(step: { parentId: string; email: string; 
   if (p.blocked) {
     await writeAudit({ actor: parentActor(p), action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason: "blocked" }, ip });
     return REJECTED_ENDED;
+  }
+  // A person with an authenticator app in force (slice SI-6a) is never signed in by an emailed code, one mailed before
+  // the app included: it is not looked at, and so not spent, and their pending step goes on to the app (not ended).
+  if (await hasAuthenticator(p.id)) {
+    await writeAudit({ actor: parentActor(p), action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason: "has_second_factor" }, ip });
+    return REJECTED;
   }
   const code = rawCode.replace(/[\s-]/g, "");
 
@@ -243,14 +264,118 @@ export async function verifySigninCode(step: { parentId: string; email: string; 
   // The code was right; the person must still be allowed in now (they may have been blocked or removed since it was
   // sent). Whether the address and the password are still theirs is settled last of all, once the session exists
   // (signinStands).
+  // A person whose authenticator app came into force while the code was being checked (slice SI-6a) is not signed in by
+  // it either: the code is spent, and their pending step goes on to the app (`has_second_factor`, not ended); one that
+  // comes into force after this is caught by signinStands() (`second_factor_in_force`).
   const [fresh] = await db.select().from(parent).where(eq(parent.id, p.id));
-  const reason = doorStops(await getParentSettings())
+  const reason = doorStops(await getParentSettings(), await hasAuthenticator(p.id))
     ?? (!fresh || fresh.blocked ? "blocked" : (await enterableGuardianRows(p.id)).length === 0 ? "no_enabled_guardian" : null);
   if (reason) {
     await writeAudit({ actor: parentActor(p), action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason }, ip });
-    return REJECTED_ENDED;
+    return reason === "has_second_factor" ? REJECTED : REJECTED_ENDED;
   }
   return { ok: true, codeId: outcome.spent };
+}
+
+/** Which of the person's second steps a try was: their authenticator app's code, or one of their backup codes. */
+export type SecondFactor = "authenticator" | "backup_code";
+/**
+ * A right second step, spent: the app's row (its code taken for its step) or the backup code's row (spent), which the
+ * last check of the sign-in reads again (signinStands()). A refusal says whether the pending step has ended, as
+ * verifySigninCode()'s does.
+ */
+export type SecondFactorResult = { ok: true; factor: SecondFactor; proof: { authenticatorId: string } | { backupCodeId: string } }
+  | { ok: false; reason: "rejected" | "rate_limited"; ended: boolean };
+const FACTOR_REJECTED: SecondFactorResult = { ok: false, reason: "rejected", ended: false };
+const FACTOR_REJECTED_ENDED: SecondFactorResult = { ok: false, reason: "rejected", ended: true };
+const FACTOR_LIMITED: SecondFactorResult = { ok: false, reason: "rate_limited", ended: false };
+const SIX_DIGITS = /^\d{6}$/;
+
+/**
+ * The second step of a person with an authenticator app in force (the sign-in release, slice SI-6a; open question 24),
+ * at the door (/portal-app/check) and in asking again (askAgainCode(), asking-again.ts), for the person a pending step
+ * or a stamp names (never a typed address), in this order:
+ * (a) the check's limit per IP address (`code_check_ip`, takeIpLimit(): skipped with no address), its first refusal
+ *     audited naming nobody;
+ * (b) the try's place under the person (`second_step_parent`, 5 wrong in 15 minutes, keyed by the person's id), taken
+ *     before their app or codes are read, so tries sent at once can't slip past; its first refusal audited
+ *     `signin.refused` (`rate_limited`, `limit: "second_step"`); a right code gives the place back;
+ * (c) as verifySigninCode() does before it looks at a code: the person still at the address, not blocked, and their
+ *     `credential` row still the one the step proved (each ends the step);
+ * (d) the code by its shape (spaces dropped): six digits is the app's, read against its sealed secret for the step now
+ *     and the one before and after, and taken only for a step newer than the newest taken (takeAuthenticatorCode(),
+ *     authenticator.ts: no replay, and two tries at once take it once); ten characters of the backup codes' alphabet,
+ *     with or without their dash and in any case, is a backup code, found by its keyed hash among the person's unspent
+ *     ones and spent (takeBackupCode(): it works once, and only beside an app in force); anything else is a wrong try.
+ *     Each in one transaction with its row: `signin.second_step` (`factor`, and for a backup code how many are `left`),
+ *     or `signin.second_step_wrong` (`factor`, the try's number in the window, `try`, and why, `reason`: `wrong`,
+ *     `replayed` or `no_app`), or, for an app whose secret won't open, `signin.refused` (`second_factor_unreadable`);
+ * (e) the door's own checks again (sign-ins on, not blocked, a row that counts), each `signin.refused` ending the step.
+ * Every refusal is one answer to the browser, over a limit the over-limit one; the reasons are in the rows alone, and
+ * no row holds the code, the secret or a hash.
+ */
+export async function verifySecondFactor(step: { parentId: string; email: string; password: PasswordProof }, rawCode: string, ip: string | null, now = new Date()): Promise<SecondFactorResult> {
+  const byIp = await takeIpLimit("code_check_ip", ip, now);
+  if (byIp !== "taken") {
+    if (byIp === "first_refusal") await refuse("rate_limited", null, ip, { limit: "check_ip" });
+    return FACTOR_LIMITED;
+  }
+  const who = { id: step.parentId, email: step.email };
+  const place = await takeRateLimitPlace("second_step_parent", step.parentId, now);
+  if (place.take !== "taken") {
+    if (place.take === "first_refusal") {
+      await writeAudit({ actor: parentActor(who), action: "signin.refused", targetType: "parent", targetId: step.parentId,
+        after: { reason: "rate_limited", limit: "second_step" }, ip });
+    }
+    return FACTOR_LIMITED;
+  }
+  const [p] = await db.select().from(parent).where(eq(parent.id, step.parentId));
+  if (!p || p.email !== normalizeEmail(step.email)) {
+    await writeAudit({ actor: parentActor(who), action: "signin.refused", targetType: "parent", targetId: step.parentId, after: { reason: "address_changed" }, ip });
+    return FACTOR_REJECTED_ENDED;
+  }
+  if (p.blocked) {
+    await writeAudit({ actor: parentActor(p), action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason: "blocked" }, ip });
+    return FACTOR_REJECTED_ENDED;
+  }
+  const typed = rawCode.replace(/\s+/g, "");
+  const factor: SecondFactor = !SIX_DIGITS.test(typed) && isBackupCodeShape(typed) ? "backup_code" : "authenticator";
+  const tries = await rateLimitCount("second_step_parent", p.id, now);
+
+  const outcome = await db.transaction(async (tx) => {
+    if (!samePassword(await credentialNow(tx, p.id, step.password.credentialId), step.password)) return "password_changed" as const;
+    const took = factor === "backup_code" ? await takeBackupCode(tx, p.id, typed, now)
+      : SIX_DIGITS.test(typed) ? await takeAuthenticatorCode(tx, p.id, typed, now) : { miss: "wrong" as const };
+    if ("miss" in took) {
+      if (took.miss === "unreadable") {
+        await writeAudit({ actor: parentActor(p), action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason: "second_factor_unreadable" }, ip }, tx);
+      } else {
+        await writeAudit({ actor: parentActor(p), action: "signin.second_step_wrong", targetType: "parent", targetId: p.id,
+          after: { factor, try: tries, reason: took.miss }, ip }, tx);
+      }
+      return "missed" as const;
+    }
+    await writeAudit({ actor: parentActor(p), action: "signin.second_step", targetType: "parent", targetId: p.id,
+      after: "left" in took ? { factor, left: took.left } : { factor }, ip }, tx);
+    return "backupCodeId" in took ? { backupCodeId: took.backupCodeId } : { authenticatorId: took.authenticatorId };
+  });
+  if (outcome === "password_changed") {
+    await writeAudit({ actor: parentActor(p), action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason: outcome }, ip });
+    return FACTOR_REJECTED_ENDED;
+  }
+  if (outcome === "missed") return FACTOR_REJECTED;
+  // A right code is never counted against the parent.
+  await giveBackRateLimit(place.placeId);
+  // The person must still be allowed in now; whether the address, the password and what was spent still stand is
+  // settled last of all, once the session exists (signinStands()). Under Strict the app is a second step (question 35).
+  const [fresh] = await db.select().from(parent).where(eq(parent.id, p.id));
+  const reason = parentDoorClosed(await getParentSettings()) ? "signins_off"
+    : !fresh || fresh.blocked ? "blocked" : (await enterableGuardianRows(p.id)).length === 0 ? "no_enabled_guardian" : null;
+  if (reason) {
+    await writeAudit({ actor: parentActor(p), action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason }, ip });
+    return FACTOR_REJECTED_ENDED;
+  }
+  return { ok: true, factor, proof: outcome };
 }
 
 /**
@@ -277,13 +402,19 @@ export async function refuseCodeWithoutStep(ip: string | null, now = new Date())
  * this one is stored where it can see it. For every kind of proof, the person's `credential` row is still the one the
  * password was checked against, or the set-up link wrote, by its id and its `updated_at` (`password_changed`
  * otherwise): a reset, or a staff reset, that committed since has replaced the password. Then what else it spent:
- * - a code (from verifySigninCode()): its row is still there (`code_gone` otherwise). A reset that committed first is
+ * - a code (from verifySigninCode()): the person has no authenticator app in force (`second_factor_in_force`
+ *   otherwise, since slice SI-6a: a code mailed before the app came into force, for a pending step made before it in
+ *   another tab, never gets in), and its row is still there (`code_gone` otherwise). A reset that committed first is
  *   caught above as `password_changed`, since it replaces the `credential` row; it also deletes the person's codes
  *   spent within a code's life (choosePasswordFromLink(), password-set.ts), so `code_gone` is a second line behind it.
  *   "Sign out everywhere" (signOutEverywhere(), signin-settings.ts) replaces no password and deletes those codes too, so
  *   a sign-in whose code was spent before the press and whose session is made after it is refused here as `code_gone`.
  *   The daily clean-up keeps a spent code until a code's life has passed since it was spent (cleanUp(), cleanup.ts), so
  *   it never takes one this soon.
+ * - an authenticator app's code (from verifySecondFactor(), since SI-6a): the app's row is still there, the person's
+ *   and in force (`second_factor_gone` otherwise: turned off, SI-6b, or removed by the staff reset, SI-9, since).
+ * - a backup code (from verifySecondFactor()): its row is still there, the person's and spent (`backup_code_gone`
+ *   otherwise: made again since, SI-6b, or removed by the staff reset); the clean-up keeps a spent one a code's life.
  * - a remembered device: its row is still there, the person's and unexpired (`device_gone` otherwise: a block, a reset
  *   or anything else that ends all of a person's sign-in forgets every device).
  * - a set-up link: the link's row is still there and spent (`link_gone` otherwise).
@@ -296,8 +427,15 @@ export async function signinStands(parentId: string, rawEmail: string, ip: strin
     const password = "link" in proof ? proof.link : proof.password;
     if (!samePassword(await credentialNow(tx, parentId, password.credentialId), password)) return { live, spent: "password_changed" as const };
     if ("codeId" in proof) {
+      if (await hasAuthenticator(parentId, tx)) return { live, spent: "second_factor_in_force" as const };
       const [code] = await tx.select({ id: signinCode.id }).from(signinCode).where(and(eq(signinCode.id, proof.codeId), eq(signinCode.parentId, parentId)));
       return { live, spent: code !== undefined ? null : "code_gone" as const };
+    }
+    if ("authenticatorId" in proof) {
+      return { live, spent: (await authenticatorStands(tx, parentId, proof.authenticatorId)) ? null : "second_factor_gone" as const };
+    }
+    if ("backupCodeId" in proof) {
+      return { live, spent: (await backupCodeStands(tx, parentId, proof.backupCodeId)) ? null : "backup_code_gone" as const };
     }
     if ("deviceId" in proof) {
       const [device] = await tx.select({ id: parentDevice.id }).from(parentDevice)

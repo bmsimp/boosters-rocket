@@ -71,7 +71,7 @@ export async function deviceOfAddress(email: string, device: string | { deviceId
 
 /** The device cookie to set: its token, and when the device's row ends. */
 export type DeviceCookie = { token: string; expiresAt: Date };
-/** What a strong sign-in remembers: a new device (a code's or a set-up link's sign-in), or the remembered one it used, by its row and its cookie's token. */
+/** What a strong sign-in remembers: a new device (an emailed code's, an authenticator app's or a backup code's (since SI-6a), or a set-up link's sign-in), or the remembered one it used, by its row and its cookie's token. */
 export type StrongDevice = { remember: true } | { deviceId: string; token: string | null };
 
 class Undone extends Error {}
@@ -84,7 +84,7 @@ class Undone extends Error {}
  * writes nothing; then, for a new device, makes a `parent_device` row (a new token, only its hash stored, 90 days)
  * audited `signin.device_remembered`, or, for a remembered one, moves its row's last use and expiry on, audited
  * `signin.device_used` (refused when the row is gone, or no longer the cookie's); then sets the session's `device_id` to
- * that device's row (since SI-5b, for every proof), and, for a new device only (a code's or a set-up link's sign-in,
+ * that device's row (since SI-5b, for every proof), and, for a new device only (an emailed code's, an app's, a backup code's or a set-up link's sign-in,
  * which proved the password and a second step), its `strong_at` to now. A sign-in
  * on a remembered device leaves it as it is: it proved only the password at that moment, the device standing in for the
  * code, and a change of how the parent signs in asks for the second step itself (asking-again.ts; the lead's decision

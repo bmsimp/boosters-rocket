@@ -418,6 +418,12 @@ const PARENT_CODE_ELSEWHERE = [
   "src/lib/parents/asking-again.ts",
   "src/lib/parents/reask-rule.ts",
   "src/lib/parents/signin-settings-copy.ts",
+  // The authenticator app and backup codes as the second step, at the door's /portal-app/check and in asking again
+  // (slice SI-6a): the time-based code, the backup codes' form and hash, and the one module that reads and writes the
+  // person's app and codes. Each reads the one person a pending step or a session names.
+  "src/lib/parents/totp.ts",
+  "src/lib/parents/backup-codes.ts",
+  "src/lib/parents/authenticator.ts",
 ];
 
 /**

@@ -23,6 +23,7 @@ import { resetDb, seedParent, seedGuardian, seedGuardianInFamily, seedWorkingMai
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
 import { stepPersonFor } from "../helpers/parent-door";
 import { seedDevice, seedPassword } from "../helpers/signin-links";
+import { seedAuthenticator } from "../helpers/authenticator";
 
 /**
  * The emailed code, which since the sign-in release's slice SI-3b is the second step of a sign-in on a new device: sent
@@ -74,6 +75,24 @@ describe("sending the second step's code", () => {
     expect(mail.outbox.every((m) => m.to === "ana@example.com")).toBe(true);
     expect((await audits("signin.code_refused")).at(-1)).toMatchObject({ actorLabel: "ana@example.com", after: { reason: "rate_limited", limit: "email" } });
   }, 30_000);
+
+  it("sends nothing to a person with an authenticator app in force, and the step goes on to the app (slice SI-6a)", async () => {
+    const p = await ana();
+    await seedAuthenticator(p.id);
+    const r = await sendSecondStepCode(await stepOf(), IP, T0);
+    await r.delivery;
+    expect(r.ended).toBe(false);
+    expect(mail.attempted).toEqual([]);
+    expect(await db.select().from(signinCode)).toEqual([]);
+    expect((await audits("signin.code_refused")).map((a) => a.after)).toEqual([{ reason: "has_second_factor" }]);
+  });
+
+  it("an unfinished app set-up is no second step: the code is sent as before", async () => {
+    const p = await ana();
+    await seedAuthenticator(p.id, { confirmed: false });
+    await send();
+    expect(mail.outbox.map((m) => m.to)).toEqual(["ana@example.com"]);
+  });
 
   it("never puts the code in a log line, the audit log or the mail status when the send fails", async () => {
     await ana();
@@ -263,6 +282,16 @@ describe("checking a code", () => {
     expect(await check("ana@example.com", code, IP, at(1000))).toMatchObject({ ok: true });
     expect(await check("ana@example.com", code, IP, at(2000))).toMatchObject({ ok: false, reason: "rejected" });
     expect((await audits("signin.code_expired"))[0]).toMatchObject({ after: { reason: "no_code" } });
+  });
+
+  it("a code sent before the person's authenticator app came into force is refused, not spent, and the step goes on (slice SI-6a)", async () => {
+    const p = await ana();
+    await send("ana@example.com");
+    const code = codeOf(mail.outbox[0]!);
+    await seedAuthenticator(p.id);
+    expect(await check("ana@example.com", code, IP, at(1000))).toEqual({ ok: false, reason: "rejected", ended: false });
+    expect((await audits("signin.refused")).map((a) => a.after)).toEqual([{ reason: "has_second_factor" }]);
+    expect((await db.select().from(signinCode)).map((c) => c.usedAt)).toEqual([null]);
   });
 
   it("works once even when two checks race", async () => {

@@ -1,5 +1,6 @@
-// The one way a parent's sign-in is finished (the sign-in release, slices SI-3a and SI-3b). Every way in ends here (a
-// password and an emailed code, a password on a remembered device, a set-up link's password), and nowhere else is a
+// The one way a parent's sign-in is finished (the sign-in release, slices SI-3a, SI-3b and SI-6a). Every way in ends here
+// (a password and an emailed code, a password and an authenticator app's code or a backup code, a password on a
+// remembered device, a set-up link's password), and nowhere else is a
 // parent session made or its cookie set: tests/unit/one-way-in.test.ts reads every source file under src/ and fails for
 // anything that does either outside this module (the cookies of the pending step and the device are set through
 // parent-signin-step.ts, which this module calls), and for a call of the finish from anywhere but the parent code
@@ -18,8 +19,9 @@ import { landingPath, withReturnPath } from "./return-path";
 import { clearPendingStep, readDeviceToken, setDeviceCookie } from "./parent-signin-step";
 
 /**
- * What the sign-in proved: a password and an emailed code, a password and a remembered device, or a set-up link
- * (signin-codes.ts). A code alone is no proof: there is no such kind.
+ * What the sign-in proved: a password and an emailed code, a password and an authenticator app's code or a backup code
+ * (since slice SI-6a), a password and a remembered device, or a set-up link (signin-codes.ts). A code of any kind alone
+ * is no proof: there is no such kind.
  */
 export type { SigninProof } from "@/lib/parents/signin-codes";
 
@@ -40,8 +42,9 @@ const REFUSED: SigninFinish = { ok: false };
  *    sign-in audited; a session ended in the meantime, or a person left with no row that counts, is refused with no
  *    cookie;
  * 5. the strong step (recordStrongSignin(), src/lib/parents/devices.ts): in one transaction, the device remembered (a
- *    new one for a code's or a link's sign-in, the one used renewed for a remembered device's) and, only when the
- *    sign-in itself proved a second step (a code or a set-up link), the session's `strong_at` set: a password on a
+ *    new one for a code's, an app's, a backup code's or a link's sign-in, the one used renewed for a remembered
+ *    device's) and, only when the sign-in itself proved a second step (the emailed code, the app or a backup code, or a
+ *    set-up link), the session's `strong_at` set: a password on a
  *    remembered device leaves it null; refused (a block, or the session ended, or the device gone), the session is
  *    deleted and no cookie is set;
  * 6. the cookies: the session's, sent this once with the longest life browsers allow (PARENT_SESSION_COOKIE_SECONDS,

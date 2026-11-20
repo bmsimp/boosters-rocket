@@ -75,7 +75,11 @@ describe("database rate limits", () => {
       // per typed address (counted under a keyed hash of it; a right password gives its place back), or, on a device the
       // portal remembers for the person, 5 wrong tries per device in its place, and a flood stop per IP address, as the
       // code check.
-      password_try_email: { max: 5, ...window }, password_try_device: { max: 5, ...window }, password_try_ip: { max: 180, ...window } });
+      password_try_email: { max: 5, ...window }, password_try_device: { max: 5, ...window }, password_try_ip: { max: 180, ...window },
+      // An authenticator app's code or a backup code as the second step (verifySecondFactor(), signin-codes.ts; the
+      // sign-in release, slice SI-6a): 5 wrong tries per person, the one a pending step or a stamp names, as the emailed
+      // code's 5 tries (a right code gives its place back); the per-IP flood stop is the code check's.
+      second_step_parent: { max: 5, ...window } });
     // A parent's own phone and address (src/lib/parents/contact-edits.ts), counted per person: a handful of saves an
     // hour, each a write to the club's QuickBooks, and the reads the edit page makes as it opens.
     expect(contact_save_parent).toEqual({ max: 6, windowMs: 60 * 60 * 1000 });

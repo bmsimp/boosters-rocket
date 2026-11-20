@@ -2,7 +2,7 @@ import type { BetterAuthPlugin } from "better-auth";
 import { createAuthEndpoint } from "better-auth/api";
 import { z } from "zod";
 import { clientIpFrom } from "@/lib/request";
-import { refuseCodeWithoutStep, sendSecondStepCode, verifySigninCode } from "@/lib/parents/signin-codes";
+import { refuseCodeWithoutStep, sendSecondStepCode, verifySecondFactor, verifySigninCode } from "@/lib/parents/signin-codes";
 import { checkPasswordSignin, MOST_TYPED_ADDRESS, MOST_TYPED_PASSWORD } from "@/lib/parents/password-signin";
 import { MAX_RETURN_PATH } from "./return-path";
 import { finishParentSignin } from "./parent-signin-finish";
@@ -16,8 +16,10 @@ const LIMITED = { ok: false, error: "rate_limited" } as const;
 /**
  * The portal's parent door (spec §1, and the sign-in release, slice SI-3b). A sign-in is the address and the password,
  * checked by portal code (checkPasswordSignin(), src/lib/parents/password-signin.ts), then, on a device the portal
- * doesn't remember for the person, the emailed code (signin-codes.ts), through a pending step that only a right password
- * makes (parent-signin-step.ts): a code with no pending step this server signed signs nobody in. Better Auth only makes
+ * doesn't remember for the person, the second step, through a pending step that only a right password makes
+ * (parent-signin-step.ts): the emailed code (signin-codes.ts), or, since slice SI-6a, for a person with an authenticator
+ * app in force, its code or a backup code (verifySecondFactor()); a code of either kind with no pending step this server
+ * signed signs nobody in. Better Auth only makes
  * the session and its cookie, in the one finish every sign-in goes through (finishParentSignin(),
  * parent-signin-finish.ts), which only this plugin's endpoints call. The endpoints are named off /sign-in, so the
  * library's own rule of 3 tries in 10 seconds for /sign-in paths never meets them (their caps are customRules in
@@ -46,12 +48,18 @@ export const parentCodePlugin = () => ({
         const done = await finishParentSignin(ctx, { parentId: r.person.id, email: r.person.email, proof: { password: r.password, deviceId: r.device.deviceId }, ip, next: ctx.body.next });
         return ctx.json(done.ok ? { ok: true, next: done.next } : REJECTED);
       }
-      // Any other device: the second step. Its answer never says what happened to the mail (spec §12 invariant 9), and
-      // doesn't wait for it.
+      // Any other device: the second step. The step and its first code end together (pendingStepEnd()).
+      const endsAt = pendingStepEnd(now);
+      if (r.step === "second_factor") {
+        // A person with an authenticator app in force (the sign-in release, slice SI-6a; open question 24) is never sent
+        // the emailed code: the same pending step is set, and their app's code or a backup code is checked at
+        // /portal-app/check.
+        await setPendingStep(ctx, { parentId: r.person.id, email: r.person.email, ...r.password, endsAt }, now);
+        return ctx.json({ ok: true, step: "app" });
+      }
+      // The emailed code. Its answer never says what happened to the mail (spec §12 invariant 9), and doesn't wait for it.
       // A code that could not be sent because the step can't go on (a block or an address change landing just now) sets
       // no pending step; the answer is the same.
-      // The step and its first code end together (pendingStepEnd()).
-      const endsAt = pendingStepEnd(now);
       const { delivery, ended } = await sendSecondStepCode({ parentId: r.person.id, email: r.person.email, password: r.password, endsAt }, ip, now);
       void delivery;
       if (!ended) await setPendingStep(ctx, { parentId: r.person.id, email: r.person.email, ...r.password, endsAt }, now);
@@ -90,6 +98,31 @@ export const parentCodePlugin = () => ({
       // Everything after the code is checked is the one finish every sign-in goes through (parent-signin-finish.ts).
       const done = await finishParentSignin(ctx, { parentId: step.parentId, email: step.email, ip, next: ctx.body.next,
         proof: { password: { credentialId: step.credentialId, credentialUpdatedAt: step.credentialUpdatedAt }, codeId: r.codeId } });
+      if (!done.ok) clearPendingStep(ctx); // the code is spent: the step can't go on
+      return ctx.json(done.ok ? { ok: true, next: done.next } : REJECTED);
+    }),
+    // The second step of a person with an authenticator app in force (the sign-in release, slice SI-6a): the app's
+    // six-digit code, or one of their backup codes, for the pending step's person alone, as /portal-code/check takes the
+    // emailed code. With no pending step it signs nobody in (refuseCodeWithoutStep(), counted and audited as a code with
+    // none is). The check (verifySecondFactor(), signin-codes.ts) has its own limits, replay guard and rows; a right one
+    // goes through the one finish with its proof, so the device is remembered and the session proved strong.
+    portalAppCheck: createAuthEndpoint("/portal-app/check", {
+      method: "POST", body: z.object({ code: z.string().max(20), next: z.string().max(MAX_RETURN_PATH).optional() }),
+    }, async (ctx) => {
+      const ip = ipOf(ctx);
+      const now = new Date();
+      const step = await readPendingStep(ctx, now);
+      if (!step) {
+        const why = await refuseCodeWithoutStep(ip, now);
+        return ctx.json({ ok: false, error: why });
+      }
+      const password = { credentialId: step.credentialId, credentialUpdatedAt: step.credentialUpdatedAt };
+      const r = await verifySecondFactor({ parentId: step.parentId, email: step.email, password }, ctx.body.code, ip, now);
+      if (!r.ok) {
+        if (r.ended) clearPendingStep(ctx);
+        return ctx.json({ ok: false, error: r.reason });
+      }
+      const done = await finishParentSignin(ctx, { parentId: step.parentId, email: step.email, ip, next: ctx.body.next, proof: { password, ...r.proof } });
       if (!done.ok) clearPendingStep(ctx); // the code is spent: the step can't go on
       return ctx.json(done.ok ? { ok: true, next: done.next } : REJECTED);
     }),

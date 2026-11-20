@@ -21,7 +21,7 @@ export const DOOR_PASSWORD = "the parents' long test password";
 
 type Mail = { to: string; subject: string };
 /** What a door endpoint answered. */
-export type DoorBody = { ok: boolean; next?: string; step?: "code"; error?: string };
+export type DoorBody = { ok: boolean; next?: string; step?: "code" | "app"; error?: string };
 /** Request headers beside the content type and origin; by default the client-IP header with DOOR_IP. */
 type Headers = Record<string, string>;
 
@@ -83,6 +83,15 @@ export async function passwordStep(email: string, o: { password?: string; next?:
 /** The code step with a Cookie header (the pending step's, normally): its response and body. */
 export async function codeStep(code: string, cookie: string, o: { next?: string; headers?: Headers } = {}) {
   const res = await postDoor("/portal-code/check", { code, ...(o.next ? { next: o.next } : {}) }, { cookie, headers: o.headers });
+  return { res, body: (await res.json()) as DoorBody };
+}
+
+/**
+ * The app step with a Cookie header (the pending step's, normally): an authenticator app's code or a backup code at
+ * /portal-app/check (the sign-in release, slice SI-6a). Its response and body.
+ */
+export async function appStep(code: string, cookie: string, o: { next?: string; headers?: Headers } = {}) {
+  const res = await postDoor("/portal-app/check", { code, ...(o.next ? { next: o.next } : {}) }, { cookie, headers: o.headers });
   return { res, body: (await res.json()) as DoorBody };
 }
 

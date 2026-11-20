@@ -5,7 +5,7 @@ import { rateLimitEvent } from "@/lib/db/schema";
 export type RateLimitKind = "code_send_email" | "code_send_ip" | "code_check_ip" | "contact_save_parent" | "contact_open_parent" | "form_open_parent"
   | "volunteer_checkin_parent" | "volunteer_signup_parent" | "email_request_parent" | "email_confirm_parent" | "buyout_parent"
   | "password_link_ip" | "password_link_token" | "password_ask_email" | "password_ask_ip" | "password_try_email" | "password_try_device"
-  | "password_try_ip" | "password_reask_parent" | "password_change_parent" | "signin_settings_parent";
+  | "password_try_ip" | "password_reask_parent" | "password_change_parent" | "signin_settings_parent" | "second_step_parent";
 const WINDOW_MS = 15 * 60 * 1000;
 /**
  * Guessing is stopped per code (5 tries, 10 minutes: signin-codes.ts) and per address (3 codes in 15 minutes). The two
@@ -59,6 +59,14 @@ export const RATE_LIMITS: Record<RateLimitKind, { max: number; windowMs: number 
   // (password_try_ip), the code's limits (code_send_*, code_check_ip and its five tries) are the door's, and the set-up
   // link offered here is the request page's (password_ask_*).
   password_reask_parent: { max: 5, windowMs: WINDOW_MS },
+  // An authenticator app's code or a backup code as the second step (verifySecondFactor(), signin-codes.ts; the sign-in
+  // release, slice SI-6a), at the door and in asking again, counted per person, the one a pending step or a stamp names
+  // (never a typed address: only a right password makes either). A six-digit code has a million values and three are
+  // live at once (a step either way), so 5 wrong tries in 15 minutes, as the emailed code's 5 tries, keeps a guess
+  // at about one in sixty thousand a quarter of an hour; a right code gives its place back (giveBackRateLimit()), so a
+  // parent's own codes never use one up. Taken before the person's app or codes are read, so tries sent at once can't
+  // slip past. The per-IP flood stop is the code check's (code_check_ip).
+  second_step_parent: { max: 5, windowMs: WINDOW_MS },
   password_change_parent: { max: 10, windowMs: 60 * 60 * 1000 },
   signin_settings_parent: { max: 10, windowMs: 60 * 60 * 1000 },
   // A parent's own phone and address (contact-edits.ts), counted per person. Each save is a write to the club's
@@ -130,6 +138,14 @@ export async function takeRateLimitPlace(kind: RateLimitKind, subject: string, n
     await tx.update(rateLimitEvent).set({ refusalAudited: true }).where(eq(rateLimitEvent.id, oldest.id));
     return { take: "first_refusal" as const, placeId: null };
   });
+}
+
+/** How many events of (kind, subject) the window holds now: a try's number, for its audit row (verifySecondFactor()). */
+export async function rateLimitCount(kind: RateLimitKind, subject: string, now = new Date()): Promise<number> {
+  const since = new Date(now.getTime() - RATE_LIMITS[kind].windowMs);
+  const [{ n }] = (await db.select({ n: count() }).from(rateLimitEvent)
+    .where(and(eq(rateLimitEvent.kind, kind), eq(rateLimitEvent.subject, subject), gt(rateLimitEvent.at, since)))) as [{ n: number }];
+  return n;
 }
 
 /**

@@ -50,6 +50,7 @@ function buildParentAuth() {
       "/portal-password/check": { window: 60, max: RATE_LIMITS.password_try_ip.max },
       "/portal-code/resend": { window: 60, max: RATE_LIMITS.code_send_ip.max },
       "/portal-code/check": { window: 60, max: RATE_LIMITS.code_check_ip.max },
+      "/portal-app/check": { window: 60, max: RATE_LIMITS.code_check_ip.max },
     } },
     account: { accountLinking: { enabled: false } },
     // The visitor's address comes from the portal's one reading of it (client-address.ts), not from a header named here.
