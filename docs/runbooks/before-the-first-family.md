@@ -356,6 +356,16 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
     **Pass:** the installed app asks for the authenticator app's code, not an emailed one, and the code works there;
     after the turn-off, both say the app is off and the next new device gets an emailed code. **If not:** note which
     showed what.
+29. **Away from the page for over a minute, and back.** On the iPhone in the installed app, and on Android in Chrome
+    and in the installed app: **Set up an authenticator app**, then leave for the authenticator app and stay there for
+    more than a minute (time it) before coming back to the portal and typing the app's code. Then, with the ten backup
+    codes on the screen, leave for Notes (or a password manager), paste them, wait more than a minute and come back.
+    Coming back after a minute or more makes the portal read the page again; what the set-up and the codes showed is
+    kept in the open page, so it should still be there, unless the phone closed the page while it was in the background.
+    **Pass:** each time, the QR code, the key and the code field are still shown when you come back, and the code
+    finishes the set-up; the ten backup codes are still shown. **If not:** note the phone, browser or installed app,
+    how long you were away and what the page showed instead (a page that starts over has lost the set-up: the app's
+    entry from it won't work; a page that lost the codes can make new ones with **Make new backup codes**).
 
 The phone checks that sign a form need Documenso, so they are in part 4.
 
