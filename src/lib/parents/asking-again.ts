@@ -24,8 +24,9 @@ import type { ParentCtx } from "@/lib/guards";
 import { MOST_TYPED_PASSWORD, checkPasswordSignin } from "./password-signin";
 import { CODE_TTL_MS, refuseCodeWithoutStep, sendSecondStepCode, signinStands, verifySecondFactor, verifySigninCode, type PasswordProof, type SecondFactorProof, type StepPerson } from "./signin-codes";
 import { authenticatorInForceSince, hasAuthenticator } from "./authenticator";
+import { newestPasskeySince } from "./passkeys";
 import { lockedPerson, parentActor } from "./sessions";
-import { proofCountsBesideApp, provedRecently } from "./reask-rule";
+import { newestFactorSince, proofCountsBesideNewestFactor, provedRecently } from "./reask-rule";
 import { SIGNIN_SETTINGS_COPY as COPY } from "./signin-settings-copy";
 
 /** Who is asking: the session and its person, from the guard (ParentCtx) and never from the browser. */
@@ -36,8 +37,10 @@ type Reader = Pick<typeof db, "select">;
 /**
  * The session's own proof of the password and a second step, as `strong_at` holds it, when it still counts, or null:
  * none yet, no such session of this person (ended, or another's), or (since slice SI-6b's second read) a proof made
- * before the person's authenticator app came into force (proofCountsBesideApp(), ./reask-rule.ts, against
- * authenticatorInForceSince()). `strong_at` is set only by a proof the session made itself: a sign-in with the emailed
+ * before the person's newest second factor came into force (proofCountsBesideNewestFactor(), ./reask-rule.ts, against
+ * newestFactorSince() of authenticatorInForceSince() and, since slice SI-7a, newestPasskeySince(), passkeys.ts).
+ * Asking again itself takes no passkey until slice SI-7b, on purpose (a passkey holder with no app is asked for the
+ * password and the emailed code, as today: signin-codes.ts, `use: "change"`); only this rule counts a passkey now. `strong_at` is set only by a proof the session made itself: a sign-in with the emailed
  * code or a set-up link (recordStrongSignin(), devices.ts), or asking again (askAgainCode(), below). A sign-in on a
  * remembered device proved only the password at that moment, and sets none. Every reader of whether a session proved
  * itself reads it here (sessionProvedRecently(), the page's loadMySignin(), and each change under the person's row), so
@@ -49,7 +52,8 @@ export async function sessionStrongAt(q: Reader, s: { sessionId: string; parentI
       inArray(parentAuthSession.userId, q.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, s.parentId)))));
   const strongAt = row?.strongAt ?? null;
   if (strongAt === null) return null;
-  return proofCountsBesideApp(strongAt, await authenticatorInForceSince(s.parentId, q)) ? strongAt : null;
+  const newest = newestFactorSince(await authenticatorInForceSince(s.parentId, q), await newestPasskeySince(s.parentId, q));
+  return proofCountsBesideNewestFactor(strongAt, newest) ? strongAt : null;
 }
 
 /**
@@ -207,7 +211,7 @@ export async function askAgainCode(ctx: Asker, stamp: unknown, code: unknown, no
   if (!step) return (await refuseCodeWithoutStep(ctx.ip, now)) === "rate_limited" ? TOO_MANY : refused();
   const proved = await proveSecondStep(step, code, ctx.ip, now);
   if (!proved.ok) return proved.limited ? TOO_MANY : proved.app ? (proved.ended ? APP_STEP_OVER : APP_REFUSED) : CODE_REFUSED;
-  if (!(await signinStands(step.parentId, step.email, ctx.ip, { password: step.password, ...proved.proof }, now))) return proved.app ? APP_REFUSED : CODE_REFUSED;
+  if (!(await signinStands(step.parentId, step.email, ctx.ip, { password: step.password, ...proved.proof }, now, "change"))) return proved.app ? APP_REFUSED : CODE_REFUSED;
   const stamped = await db.transaction(async (tx) => {
     const live = await lockedPerson(tx, ctx.parentId);
     if (!live || live.blocked || live.email !== step.email) return false;
@@ -240,6 +244,6 @@ async function proveSecondStep(step: StepPerson & { step: "code" | "app" }, code
     const r = await verifySecondFactor(who, code, ip, now);
     return r.ok ? { ok: true, app: true, step: r.factor, proof: r.proof } : { ok: false, app: true, limited: r.reason === "rate_limited", ended: r.ended };
   }
-  const r = await verifySigninCode(who, code, ip, now);
+  const r = await verifySigninCode(who, code, ip, now, "change");
   return r.ok ? { ok: true, app: false, step: "emailed_code", proof: { codeId: r.codeId } } : { ok: false, app: false, limited: r.reason === "rate_limited", ended: r.ended };
 }
