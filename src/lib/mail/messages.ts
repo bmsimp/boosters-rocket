@@ -165,13 +165,16 @@ export function passwordResetMessage(b: Brand, to: string, o: { link: string; li
  * changeMyPassword(), src/lib/parents/signin-settings.ts), to the address read under their lock: that it was changed
  * and every device signed out, what to do if it wasn't them (set a new one from "Set up or reset my password" at
  * `passwordPage`, APP_URL and /sign-in/password written out, and tell the club), and that the club never asks for a
- * password. No link that acts, no token, and no family, student or other person named.
+ * password; and, when the club has a treasurer's address (`contact`), where to write, since the reader is signed out
+ * everywhere and can't look it up in the portal. No link that acts, no token, and no family, student or other person
+ * named.
  */
-export function passwordChangedMessage(b: Brand, to: string, o: { passwordPage: string }): MailMessage {
+export function passwordChangedMessage(b: Brand, to: string, o: { passwordPage: string; contact: string | null }): MailMessage {
   const lines: Line[] = [
     `The password you use to sign in to ${b.clubName} with this email address was changed just now, and every phone and computer signed in to the portal was signed out.`,
     "If you changed it, there's nothing more to do. Sign in again with your new password.",
     `If you didn't change it, please set a new password straight away from "Set up or reset my password" at ${o.passwordPage}, and tell the club.`,
+    ...(o.contact ? [`You can write to the club at ${o.contact}.`] : []),
     NEVER_ASKS(b),
   ];
   return { to, subject: `Your ${b.clubName} password was changed`, text: text(lines), html: html(b, lines) };

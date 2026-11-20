@@ -22,6 +22,7 @@ import { MOST_SENT } from "./password-set";
 import { takeRateLimit } from "./rate-limit";
 import { deleteUnusedSigninCodes, deleteUnusedSigninLinks, endParentSessions, forgetDevices, parentActor } from "./sessions";
 import { getParentSettings } from "./settings";
+import { getClubSettings } from "@/lib/settings/club";
 import { CODE_TTL_MS } from "./signin-codes";
 import { currentPassword, sessionProvedRecently, sessionStrongAt } from "./asking-again";
 import { provedRecently } from "./reask-rule";
@@ -51,7 +52,7 @@ const sent = (v: unknown): v is string => typeof v === "string" && v.length <= M
 const PROVE_AGAIN: SettingsResult = { ok: false, errors: [COPY.proveAgain] };
 
 /** Why a change found under the person's lock can't go on: the window run out, blocked, no password, or another one. */
-type NotChanged = "not_proved" | "blocked" | "no_password" | "password_changed" | "gone";
+type NotChanged = "not_proved" | "strict" | "blocked" | "no_password" | "password_changed" | "gone";
 
 /**
  * Changing the password, signed in and proved within the window (open questions 26 and 28). In this order:
@@ -63,7 +64,7 @@ type NotChanged = "not_proved" | "blocked" | "no_password" | "password_changed" 
  *     code in the audit row;
  * (f) hashPassword(), outside any transaction;
  * (g) one transaction in the order above lockedPerson() (sessions.ts): the person's row FOR UPDATE, then, read under it,
- *     the window again on this session, the person not blocked, and their `credential` row still there and not
+ *     the window again on this session, the club not at Strict (refused in the Strict words), the person not blocked, and their `credential` row still there and not
  *     replaced since this session proved itself (its `updated_at` no later than `strong_at`: every writer of a password
  *     holds the person's row); then, as a reset does (writePassword(), password-set.ts), their unused sign-in codes and
  *     those spent within a code's life, their unspent links (a held one included), the `credential` row replaced, every
@@ -94,6 +95,9 @@ export async function changeMyPassword(ctx: Me, raw: { password: unknown; again:
       const now = new Date(); // read once the person's row is held
       const strongAt = await sessionStrongAt(tx, ctx);
       if (!provedRecently(strongAt, now)) return "not_proved" as const;
+      // Under Strict nothing is changed here yet (the page says so): a proof made at Standard before the club moved on
+      // is no way past it.
+      if ((await getParentSettings(tx)).level === "strict") return "strict" as const;
       if (me.blocked) return "blocked" as const;
       const had = await currentPassword(tx, ctx.parentId);
       if (!had) return "no_password" as const;
@@ -114,11 +118,13 @@ export async function changeMyPassword(ctx: Me, raw: { password: unknown; again:
     // The hash is a parameter of the write, and a failed query's error carries its parameters: never let it reach a log.
     throw new Error("password_change_failed");
   }
+  if (changed === "strict") return { ok: false, errors: [COPY.strict] };
   if (typeof changed === "string") return PROVE_AGAIN;
 
   const to = changed.to;
   void (async () => {
-    const message = passwordChangedMessage(await currentBrand(), to, { passwordPage: `${portalAddress()}/sign-in/password` });
+    const [brand, club] = await Promise.all([currentBrand(), getClubSettings()]);
+    const message = passwordChangedMessage(brand, to, { passwordPage: `${portalAddress()}/sign-in/password`, contact: club.treasurerEmail });
     await sendMail(message, { purpose: "password_changed", actor: parentActor({ id: ctx.parentId, email: to }), ip: ctx.ip });
   })().catch(() => undefined); // a send that fails is audited by sendMail() (mail.failed); nothing here may surface
   return { ok: true, message: COPY.changed };
