@@ -11,7 +11,7 @@ import { NO_CHANGES, appRecordsByCustomer, syncAppRecords, whatAFreshRunWouldCha
 
 /**
  * Migration 0023 fills the app's own records in SQL from what the database holds, so that stage 2's migrations find
- * them however soon they run after it (AGENTS.md, The app's own records). The fill must make exactly what the
+ * them however soon they run after it (docs/agents/app-records.md). The fill must make exactly what the
  * TypeScript import makes from nothing (importRecordsFromRoster(), src/lib/families/roster-import.ts, which since stage
  * 3's slice 10 the portal runs only narrowed to one family, from "Create a family from this" in
  * src/lib/roster/no-family.ts, and stage 4's import will run whole): here each is run on the

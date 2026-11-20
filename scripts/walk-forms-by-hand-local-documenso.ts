@@ -9,7 +9,7 @@
  *   3. Zelda opens Forms, chooses "Sign for Xochitl", agrees to sign electronically, signs in the embedded frame, and
  *      the page reads the form as signed (it asks Documenso itself; a local Documenso can't reach the portal's webhook).
  *
- * Before: build and seed as for the browser suite (AGENTS.md, Tests: e2e in a worktree), and start the app on E2E_PORT
+ * Before: build and seed as for the browser suite (docs/agents/testing.md: e2e in a worktree), and start the app on E2E_PORT
  * with the same variables. The local Documenso is the one step 4 verified (compose project br-documenso-spike, at
  * http://localhost:3500, not changed by this script). Its account file holds the API token and template ids; it lives
  * outside the repository and is read here at run time, never copied:

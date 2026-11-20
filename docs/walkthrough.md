@@ -31,7 +31,7 @@ parent sign-ins switched on (`parents.spec.ts`), the install hint and the servic
 The browser suite never reaches a Documenso. The local one step 4 verified (compose project `br-documenso-spike`,
 `http://localhost:3500`) is walked by hand:
 
-1. In this worktree, export the variables of a browser run in a worktree (AGENTS.md, Tests), then `pnpm build`,
+1. In this worktree, export the variables of a browser run in a worktree (docs/agents/testing.md), then `pnpm build`,
    `pnpm tsx scripts/seed-e2e.ts`, and start the app with them: `NODE_EXTRA_CA_CERTS=$PWD/.e2e/sink-cert.pem pnpm start -p $E2E_PORT`.
 2. With the same variables:
    `DOCUMENSO_ACCOUNT=<the local Documenso's account.json> WALK_OUT=<a folder for pictures> WALK_WIDTH=390 pnpm tsx scripts/walk-forms-by-hand-local-documenso.ts`

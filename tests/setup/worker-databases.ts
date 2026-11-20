@@ -176,7 +176,7 @@ export async function makeScratchDatabase(purpose: ScratchPurpose, o: { fileUrl?
     if (exists && comment !== mark) {
       throw new Error(`The tests refuse to run: a test would make the scratch database "${scratch.name}", and a database of that name exists that this run did not make `
         + `(it does not carry the run's comment). A scratch database is emptied and dropped. If nothing needs it, drop it: DROP DATABASE "${scratch.name}". `
-        + `Or give your own databases names that no scratch database has (AGENTS.md, Tests).`);
+        + `Or give your own databases names that no scratch database has (docs/agents/testing.md).`);
     }
     if (exists) await admin.unsafe(`DROP DATABASE ${ident(scratch.name)} WITH (FORCE)`);
     await create(admin, scratch.name, mark);
