@@ -157,8 +157,9 @@ What the page can't do is walk the portal's own screens. Do these in the sandbox
 4. **A parent edits their details.** On a phone, as that parent: Family, **Update my details**, change the phone and
    the address, save.
    **Pass:** the page says "Saved.", the details box on Family and Home shows the new phone, and the audit log has a
-   `parent.details.save` row with before and after that reads well. Nothing is sent to QuickBooks for it yet (a
-   later update sends it on). Then open the edit page in two tabs, save a change in one and then another change in
+   `parent.details.save` row with before and after that reads well. Within a minute or two (the worker's next wake),
+   the parent's own record in QuickBooks shows the new phone and address, and the audit log has a
+   `roster.customer.contact` row for it; Reconciliation shows nothing waiting for it. Then open the edit page in two tabs, save a change in one and then another change in
    the other: the second says the details changed while you were editing, so nothing was saved, and shows them as they
    stand. **If not:** note what was saved where.
 5. **A payment requirement.** In Seasons, give a payment requirement its product (**Read the list from QuickBooks**
