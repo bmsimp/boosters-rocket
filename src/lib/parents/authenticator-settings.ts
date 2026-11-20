@@ -30,14 +30,22 @@ type Me = Pick<ParentCtx, "parentId" | "sessionId" | "email" | "ip">;
 
 /** The set-up's first answer: the key to type, grouped in fours for reading, and the QR code's squares, once. */
 export type SetupAnswer = { ok: true; message: string; key: string; qr: QrSquares } | { ok: false; errors: string[] };
-/** An answer that shows the backup codes, once, as they are made. */
-export type CodesAnswer = { ok: true; message: string; codes: string[] } | { ok: false; errors: string[] };
+/**
+ * An answer that shows the backup codes, once, as they are made. A confirm's refusal that leaves nothing to finish (the
+ * set-up ran out, was replaced or was finished in another window, or the window since the proof ran out) says so with
+ * `setupOver`, so the page drops the dead QR code and key and draws the set-up press, or the app, again.
+ */
+export type CodesAnswer = { ok: true; message: string; codes: string[] } | { ok: false; errors: string[]; setupOver?: true };
 export type TurnOffAnswer = { ok: true; message: string } | { ok: false; errors: string[] };
 
 const PROVE_AGAIN = { ok: false as const, errors: [COPY.proveAgain] };
 const TOO_MANY_PRESSES = { ok: false as const, errors: [COPY.tooManyPresses] };
 const TOO_MANY_TRIES = { ok: false as const, errors: [COPY.tooManyTries] };
 const WRONG = { ok: false as const, errors: [COPY.appSetupWrong] };
+/** The confirm's refusals that leave nothing to finish: the page goes back to the set-up press (or the app, drawn again). */
+const SETUP_TIMED_OUT = { ok: false as const, errors: [COPY.appSetupTimedOut], setupOver: true as const };
+const SETUP_GONE = { ok: false as const, errors: [COPY.appSetupGone], setupOver: true as const };
+const SETUP_DONE_ELSEWHERE = { ok: false as const, errors: [COPY.appSetupDoneElsewhere], setupOver: true as const };
 /** The most a code field may hold as sent, as at the door's app step. */
 const MOST_SENT_CODE = 20;
 
@@ -105,17 +113,20 @@ export async function startMyAuthenticator(ctx: Me, now?: Date): Promise<SetupAn
  *     anything but six digits is a wrong try); the person's unfinished set-up, younger than its life, confirmed by one
  *     conditional update when the code matches the step now or one either way (confirmAuthenticator(), authenticator.ts:
  *     two confirms at once make one app); a wrong code, or no set-up to confirm, is `parent.authenticator.confirm_wrong`
- *     (`factor`, `try`, `reason` `wrong` or `no_setup`), and a secret that won't open is
+ *     (`factor`, `try`, `reason` `wrong`, `no_setup`, or `already_on` when an app is in force, finished in another
+ *     window or by the other of two confirms at once), and a secret that won't open is
  *     `parent.authenticator.confirm_refused` (`setup_unreadable`), never a throw. Taken: the person's unused emailed
  *     codes deleted (an emailed code's proof is refused beside an app in force anyway, signinStands()), ten backup codes
  *     made, any older ones deleted (makeBackupCodes()), with `parent.authenticator.on` and `parent.backup_codes.make`
  *     (counts only);
  * (d) a right code gives its place back, and so does a secret that won't open (no guess was possible), as at the door.
- * The answer carries the ten codes, once. Devices stay remembered, no session is made or ended, `strong_at` stays.
+ * The answer carries the ten codes, once. Devices stay remembered, no session is made or ended, `strong_at` stays. A
+ * refusal that leaves nothing to finish (the window run out, no set-up, an app in force already) carries `setupOver`,
+ * each in its own words, saying to delete the dead entry the app saved.
  */
 export async function confirmMyAuthenticator(ctx: Me, code: unknown, now?: Date): Promise<CodesAnswer> {
   if (typeof code !== "string" || code.length > MOST_SENT_CODE) return WRONG;
-  if (!(await sessionProvedRecently(db, ctx, now))) return PROVE_AGAIN;
+  if (!(await sessionProvedRecently(db, ctx, now))) return SETUP_TIMED_OUT;
   const actor = parentActor({ id: ctx.parentId, email: ctx.email });
   const place = await takeRateLimitPlace("second_step_parent", ctx.parentId, now);
   if (place.take !== "taken") {
@@ -137,9 +148,11 @@ export async function confirmMyAuthenticator(ctx: Me, code: unknown, now?: Date)
           after: { reason: "setup_unreadable" }, ip: ctx.ip }, tx);
         return "unreadable" as const;
       }
+      // No set-up to confirm beside an app in force: finished in another window, or by the other of two confirms at once.
+      const reason = took.miss === "no_setup" && (await hasAuthenticator(ctx.parentId, tx)) ? "already_on" as const : took.miss;
       await writeAudit({ actor: who, action: "parent.authenticator.confirm_wrong", targetType: "parent", targetId: ctx.parentId,
-        after: { factor: "authenticator", try: place.number ?? 0, reason: took.miss }, ip: ctx.ip }, tx);
-      return took.miss;
+        after: { factor: "authenticator", try: place.number ?? 0, reason }, ip: ctx.ip }, tx);
+      return reason;
     }
     const codesDeleted = await deleteUnusedSigninCodes(ctx.parentId, tx);
     const made = await makeBackupCodes(tx, ctx.parentId, me.at);
@@ -150,8 +163,9 @@ export async function confirmMyAuthenticator(ctx: Me, code: unknown, now?: Date)
     return { codes: made.codes };
   });
   if (typeof done !== "string" || done === "unreadable") await giveBackRateLimit(place.placeId);
-  if (done === "not_proved") return PROVE_AGAIN;
-  if (done === "no_setup") return { ok: false, errors: [COPY.appSetupGone] };
+  if (done === "not_proved") return SETUP_TIMED_OUT;
+  if (done === "no_setup") return SETUP_GONE;
+  if (done === "already_on") return SETUP_DONE_ELSEWHERE;
   if (typeof done === "string") return WRONG;
   return { ok: true, message: COPY.appOn, codes: done.codes };
 }

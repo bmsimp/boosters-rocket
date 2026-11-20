@@ -57,7 +57,8 @@ export const startAuthenticatorAction = parentAction(async (ctx) => startMyAuthe
 
 export const confirmAuthenticatorAction = parentAction(async (ctx, code: string) => {
   const result = await confirmMyAuthenticator(ctx, code as unknown);
-  if (result.ok) for (const path of ["/family/sign-in", "/family/email", "/family"]) revalidatePath(path);
+  // An app finished in another window changes what the page draws too.
+  if (result.ok || result.setupOver) for (const path of ["/family/sign-in", "/family/email", "/family"]) revalidatePath(path);
   return result;
 });
 

@@ -98,10 +98,18 @@ export const SIGNIN_SETTINGS_COPY = {
   appConfirmLede: "Then enter the 6-digit code the app shows for this portal, to finish.",
   appConfirmCode: "Code from your authenticator app",
   appConfirm: "Finish setting up",
-  /** The set-up lives only in this page: a reload or leaving it starts again with a new key. */
-  appSetupLost: "If you leave or reload this page before you finish, nothing is kept, and you'll start again with a new QR code.",
+  /**
+   * The set-up lives only in this page, and is finished only within the asking-again window (10 minutes from the proof,
+   * not from the press): a reload, or running out of time, starts again with a new key, and the app's first entry is dead.
+   */
+  appSetupLost: "Please finish within 10 minutes of showing it's you. Switching to your authenticator app and back to this page is fine. If you reload this page or take longer, nothing is kept: you'll start again with a new QR code, and the entry your app saved this time won't work, so delete it from the app.",
   appSetupWrong: "That code didn't work. Check that it's the newest code the app shows for this portal, and try again.",
-  appSetupGone: "That set-up has run out. Please press \"Set up an authenticator app\" to start again.",
+  /** The set-up ran out, or another window began a new one: the box goes back to its set-up press. */
+  appSetupGone: "That set-up has run out, so nothing was kept. Please delete this portal's entry from your authenticator app, since it won't work, then press \"Set up an authenticator app\" to start again.",
+  /** The 10 minutes since the proof ran out before the set-up was finished: the box goes back to its set-up press. */
+  appSetupTimedOut: "It's been more than 10 minutes since you showed it's you, so this set-up can't be finished, and nothing was kept. Please delete this portal's entry from your authenticator app, since it won't work, then reload this page, show it's you again and start over.",
+  /** Another window finished a set-up first: the page is drawn again with the app on. */
+  appSetupDoneElsewhere: "Your authenticator app is already set up, perhaps in another window, so there's nothing to finish here. If your app saved a second entry for this portal just now, delete it: only the first one works.",
   appAlreadyOn: "You already have an authenticator app set up. Please reload this page.",
   appNotOn: "You don't have an authenticator app set up right now. Please reload this page.",
   appOn: "Your authenticator app is set up.",
@@ -172,6 +180,9 @@ const WITH_APP = {
   everyDeviceForgotten: "Every device is forgotten. The next time you sign in on any device, this one included, we'll ask for the code from your authenticator app.",
 } as const;
 
+// Under Strict (stored by nothing until SI-10) a remembered device asks for the second step too (password-signin.ts),
+// so `how`, `devicesLede` and their kin, here and in SIGNIN_SETTINGS_COPY, promise what Strict doesn't keep: SI-10 adds
+// Strict's versions and picks them by the level as well.
 export type HowWords = { [K in keyof typeof WITH_APP]: string };
 /** The sentences of how the parent signs in on a new device: the app's for a guardian with one in force, the emailed code's otherwise. */
 export function howYouSignIn(app: boolean): HowWords {

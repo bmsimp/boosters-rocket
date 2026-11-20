@@ -12,6 +12,7 @@ import type { ParentIdentity } from "@/lib/auth/resolve";
 import { currentPassword } from "@/lib/parents/asking-again";
 import { confirmMyAuthenticator, groupKey, remakeMyBackupCodes, startMyAuthenticator, turnOffMyAuthenticator } from "@/lib/parents/authenticator-settings";
 import { authenticatorKeyUri, qrSquares } from "@/lib/parents/authenticator-qr";
+import { sealAuthenticatorSecret } from "@/lib/parents/authenticator";
 import { hashBackupCode, normalizeBackupCode } from "@/lib/parents/backup-codes";
 import { checkPasswordSignin } from "@/lib/parents/password-signin";
 import { takeRateLimit, takeRateLimitPlace } from "@/lib/parents/rate-limit";
@@ -73,7 +74,8 @@ describe("every press is asked again first", () => {
     asParent(a.identity);
     const NOT_PROVED = { ok: false, errors: [COPY.proveAgain] };
     expect(await startAuthenticatorAction()).toEqual(NOT_PROVED);
-    expect(await confirmAuthenticatorAction("123456")).toEqual(NOT_PROVED);
+    // The confirm's own words: the set-up can't be finished, and the box goes back to its press.
+    expect(await confirmAuthenticatorAction("123456")).toEqual({ ok: false, errors: [COPY.appSetupTimedOut], setupOver: true });
     expect(await authenticatorRows(a.identity.parentId)).toEqual([]);
     const app = await seedAuthenticator(a.identity.parentId);
     await seedBackupCodes(a.identity.parentId, 3);
@@ -241,10 +243,41 @@ describe("setting it up", () => {
     const now = new Date();
     const { secret } = await started(a.identity, now);
     await db.update(parentAuthenticator).set({ createdAt: new Date(now.getTime() - 31 * 60_000) }).where(eq(parentAuthenticator.parentId, a.identity.parentId));
-    expect(await confirmMyAuthenticator(ctxOf(a.identity), appCode(secret, now), now)).toEqual({ ok: false, errors: [COPY.appSetupGone] });
+    expect(await confirmMyAuthenticator(ctxOf(a.identity), appCode(secret, now), now)).toEqual({ ok: false, errors: [COPY.appSetupGone], setupOver: true });
     expect((await authenticatorRows(a.identity.parentId))[0]!.confirmedAt).toBeNull();
     expect(await backupCodeRows(a.identity.parentId)).toEqual([]);
     expect((await audits("parent.authenticator.confirm_wrong")).map((r) => (r.after as { reason: string }).reason)).toEqual(["no_setup"]);
+  });
+
+  it("a confirm after the app was finished in another window says so, in words of its own, and the page goes on to draw the app", async () => {
+    const a = await provedParent();
+    const now = new Date();
+    const first = await started(a.identity, now);
+    expect(await confirmMyAuthenticator(ctxOf(a.identity), appCode(first.secret, now), now)).toMatchObject({ ok: true });
+    asParent(a.identity);
+    // The first window still draws its set-up, and presses Finish with a code of the same secret.
+    expect(await confirmAuthenticatorAction(appCode(first.secret, now, 1))).toEqual({ ok: false, errors: [COPY.appSetupDoneElsewhere], setupOver: true });
+    expect((await audits("parent.authenticator.confirm_wrong")).map((r) => (r.after as { reason: string }).reason)).toEqual(["already_on"]);
+    expect(await authenticatorRows(a.identity.parentId)).toHaveLength(1);
+    expect(await backupCodeRows(a.identity.parentId)).toHaveLength(10);
+    // The page drawn again shows the app on, with its press for new codes.
+    expect(await renderPage(SignInSettingsPage)).toContain(COPY.appOn);
+  });
+
+  it("a set-up whose secret won't open is one refusal with its short code, never a throw, and gives its place back", async () => {
+    const a = await provedParent();
+    const now = new Date();
+    const { secret } = await started(a.identity, now);
+    // Sealed for another row: its aad doesn't match, so it won't open.
+    const wrongSeal = sealAuthenticatorSecret("00000000-0000-4000-8000-000000000000", a.identity.parentId, secret);
+    await db.update(parentAuthenticator).set({ secretCiphertext: wrongSeal.ciphertext, secretKeyId: wrongSeal.keyId }).where(eq(parentAuthenticator.parentId, a.identity.parentId));
+    expect(await confirmMyAuthenticator(ctxOf(a.identity), appCode(secret, now), now)).toEqual({ ok: false, errors: [COPY.appSetupWrong] });
+    expect((await audits("parent.authenticator.confirm_refused")).map((r) => r.after)).toEqual([{ reason: "setup_unreadable" }]);
+    expect(await audits("parent.authenticator.confirm_wrong")).toEqual([]);
+    expect(await placesOf(a.identity.parentId)).toBe(0);
+    expect((await authenticatorRows(a.identity.parentId))[0]!.confirmedAt).toBeNull();
+    expect(await backupCodeRows(a.identity.parentId)).toEqual([]);
+    expect(await audits("parent.authenticator.on")).toEqual([]);
   });
 
   it("two confirms at once make one app and ten backup codes", async () => {
@@ -254,7 +287,8 @@ describe("setting it up", () => {
     const code = appCode(secret, now);
     const both = await Promise.all([confirmMyAuthenticator(ctxOf(a.identity), code, now), confirmMyAuthenticator(ctxOf(a.identity), code, now)]);
     expect(both.filter((r) => r.ok)).toHaveLength(1);
-    expect(both.filter((r) => !r.ok)).toEqual([{ ok: false, errors: [COPY.appSetupGone] }]);
+    // The second waits for the first's row lock, then finds the app in force.
+    expect(both.filter((r) => !r.ok)).toEqual([{ ok: false, errors: [COPY.appSetupDoneElsewhere], setupOver: true }]);
     expect(await authenticatorRows(a.identity.parentId)).toHaveLength(1);
     expect(await backupCodeRows(a.identity.parentId)).toHaveLength(10);
     expect(await audits("parent.authenticator.on")).toHaveLength(1);
@@ -427,11 +461,34 @@ describe("one parent never reaches another's app", () => {
       expect(await authenticatorRows(a.identity.parentId)).toHaveLength(1);
 
       expect(await theirs()).toEqual(before);
+
+      // A's every write runs while theirs are there: A confirms the set-up, makes new codes and turns the app off, each
+      // deleting or updating by A alone (a filter that lost its person would take theirs with it). The presses above used
+      // up A's counts, which this part is not about.
+      await db.delete(rateLimitEvent).where(eq(rateLimitEvent.subject, a.identity.parentId));
+      const confirmed = await confirmAuthenticatorAction(appCode(mine.key.replace(/ /g, ""), Date.now()));
+      if (!confirmed.ok) throw new Error(`A's own set-up should be confirmed: ${confirmed.errors.join(" ")}`);
+      for (const c of confirmed.codes) expect([...theirCodes.b, ...theirCodes.second]).not.toContain(c);
+      const remade = await newBackupCodesAction();
+      expect(remade.ok).toBe(true);
+      expect(await theirs()).toEqual(before);
+      expect(await turnOffAuthenticatorAction()).toEqual({ ok: true, message: COPY.turnedOff });
+      expect(await authenticatorRows(a.identity.parentId)).toEqual([]);
+      expect(await backupCodeRows(a.identity.parentId)).toEqual([]);
+      expect(await theirs()).toEqual(before);
+      // And a set-up started again, by A alone, replaces only A's.
+      expect((await startAuthenticatorAction()).ok).toBe(true);
+      expect(await theirs()).toEqual(before);
+
       const page = await renderPage(SignInSettingsPage);
       for (const v of [theirApps.b.secret, theirApps.second.secret, theirApps.b.id, theirApps.second.id, ...theirCodes.b, ...theirCodes.second]) expect(page).not.toContain(v);
-      expect(await audits("parent.authenticator.on")).toEqual([]);
-      expect(await audits("parent.backup_codes.make")).toEqual([]);
-      expect(await audits("parent.authenticator.off")).toEqual([]);
+      // Every row of these presses names A alone.
+      for (const action of ["parent.authenticator.on", "parent.backup_codes.make", "parent.authenticator.off", "parent.authenticator.setup_started"]) {
+        expect((await audits(action)).map((r) => r.targetId), action).toEqual((await audits(action)).map(() => a.identity.parentId));
+      }
+      expect(await audits("parent.authenticator.on")).toHaveLength(1);
+      expect(await audits("parent.backup_codes.make")).toHaveLength(2);
+      expect(await audits("parent.authenticator.off")).toHaveLength(1);
     });
   }
 });
