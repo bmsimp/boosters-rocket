@@ -8,6 +8,7 @@ import { loadRosterPage, familyEntry, type RecordStudent } from "@/lib/roster/qu
 import { familyRecordAt } from "@/lib/families/address";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { familyCover, guardianCustomers, guardianStandings, isDetailsSend, moveTargets, studentsBeingMade, versionsOf } from "@/lib/roster/writes";
+import { endedLinksHeld } from "@/lib/accounting/ended-links";
 import { comparableContacts, loadOpenWrites } from "@/lib/roster/queue";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { familyContact, familySignins, type FamilySignin } from "@/lib/parents/directory";
@@ -191,10 +192,19 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   const beingMade = await studentsBeingMade(fam.students.filter((s) => s.active).map((s) => s.id));
   const hereStudents = fam.students.filter((s) => s.active && !s.linked && !beingMade.has(String(s.id)));
   const studentType = page.shape?.kind === "layered" && page.shape.studentTypeId !== null;
+  // What an unlink left (stage 4's slice M3b2): the family's, and each active student's with no link, ended link whose
+  // customer the books still hold, read once (endedLinksHeld(): two queries, none when both lists are empty). Guardians'
+  // are said by their standings (guardianStandings()).
+  const held = await endedLinksHeld({ families: fam.linked ? [] : [familyId], students: fam.students.filter((s) => s.active && !s.linked).map((s) => s.id) });
+  const heldFamily = held.families.get(familyId) ?? null;
   // "Create in QuickBooks and link": for an active family with no link, or with active students with none (where the
   // books have a student type) under a customer QuickBooks holds as an active family, to staff who may change families
-  // and link them to accounting (createInQuickBooksAndLink() refuses one under an inactive customer).
-  const toMake = !fam.linked || (studentType && hereStudents.length > 0 && customer !== null && customer.active);
+  // and link them to accounting (createInQuickBooksAndLink() refuses one under an inactive customer). Never for a family
+  // or a student whose customer from before an unlink is still in the books: they are linked again on Accounting links
+  // (the action refuses the family and leaves such a student out all the same).
+  const toCreate = hereStudents.filter((s) => !held.students.has(s.id));
+  const notOffered = hereStudents.flatMap((s) => { const was = held.students.get(s.id); return was ? [{ name: s.name, customer: was.customerName }] : []; });
+  const toMake = (!fam.linked && heldFamily === null) || (studentType && toCreate.length > 0 && customer !== null && customer.active);
   const inQuickBooks: Family | null = customer === null ? null
     : { customer, students: fam.students.flatMap((s) => (s.customer ? [s.customer] : [])), parents: fam.parents };
   // Students whose record is inactive are offered nothing that would send. One QuickBooks has under another family is
@@ -233,7 +243,11 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
       <h1 className="page-title">{fam.name}</h1>
       <p className="lede">{entry.kind === "family" ? "A family" : "A member"} the portal keeps{customer ? <>, linked to its customer in QuickBooks{customer.active ? "" : ", which is inactive there"}</>
         : fam.linked ? `, linked to a customer QuickBooks doesn't list as a ${entry.kind} now`
-        : making ? ", not linked to QuickBooks yet: its customer is being made there" : ", not linked to QuickBooks: it is in the portal only, and a change to it is saved here only"}. <Link href="/staff/roster">Back to the roster</Link></p>
+        : making ? ", not linked to QuickBooks yet: its customer is being made there"
+        : heldFamily ? <>, not linked to QuickBooks: it was linked to &ldquo;{heldFamily.customerName}&rdquo; there until it was unlinked, &ldquo;{heldFamily.customerName}&rdquo; is still in the books, and a change to it is saved here only</>
+        : ", not linked to QuickBooks: it is in the portal only, and a change to it is saved here only"}.{heldFamily
+          ? (can(ctx.effective, "Accounting.Link.ReadWrite") ? <> <Link href="/staff/links">Link it again on Accounting links</Link>.</>
+            : " Someone who may link families to accounting links it again on Accounting links.") : null} <Link href="/staff/roster">Back to the roster</Link></p>
       <DisconnectedNotice page={page} admin={admin} />
       {entry.kind === "family" ? (
         <>
@@ -263,7 +277,7 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
       {changesHere && page.shape && <PortalChanges familyId={String(familyId)} name={fam.name} noun={entry.kind} unlinked={!fam.linked}
         addStudents={offers(page.shape, "add_student")} students={hereStudents.map((s) => ({ id: String(s.id), name: s.name }))} rosterTag={rosterTag} />}
       {changesHere && toMake && <CreateInQuickBooks familyId={String(familyId)} name={fam.name} noun={entry.kind} unlinked={!fam.linked}
-        students={studentType ? hereStudents.map((s) => s.name) : []} rosterTag={rosterTag} ready={page.connected && page.roster !== null}
+        students={studentType ? toCreate.map((s) => s.name) : []} notOffered={studentType ? notOffered : []} rosterTag={rosterTag} ready={page.connected && page.roster !== null}
         may={can(ctx.effective, "Accounting.Link.ReadWrite")}
         types={page.shape?.kind === "flat" ? page.shape.memberTypeIds.map((t) => ({ qboId: t, name: page.types.find((x) => x.qboId === t)?.name ?? "A member type" })) : []} />}
       {page.shape && <WhatChanges shape={page.shape} canChange={canChange} unlinked={!fam.linked} />}
