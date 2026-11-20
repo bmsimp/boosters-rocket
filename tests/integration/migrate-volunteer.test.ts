@@ -173,7 +173,7 @@ describe("migrations 0026 and 0027: volunteering names the app's own families an
         // Left the roster: an inactive record that was never under a family the cache held, as 0023 made it.
         ["Gone Kid", "F1", "S-GONE", false, null],
         // Moved: the place stays the Ash family's and names the student's own record, which is in the Birch family now,
-        // so neither family counts it (AGENTS.md, Volunteering).
+        // so neither family counts it (docs/agents/volunteering.md).
         ["Moved Kid", "F1", "S3", true, "F2"],
       ]);
       const byName = new Map(rows.map((r) => [r.filler_name as string, r.id as string]));
