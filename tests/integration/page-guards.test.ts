@@ -356,6 +356,8 @@ function staffOnlyImportProblems(file: string, source = read(file)): string[] {
 const PARENT_CODE_ELSEWHERE = [
   "src/lib/parents/my-family.ts",
   "src/lib/parents/contact-edits.ts",
+  // The queueing of a parent's change of their details, in the save's transaction, to be sent on by the worker (stage 3's slice 11b).
+  "src/lib/parents/contact-queue.ts",
   "src/lib/parents/contact-fields.ts",
   "src/lib/parents/email-change.ts",
   "src/lib/parents/email-field.ts",
