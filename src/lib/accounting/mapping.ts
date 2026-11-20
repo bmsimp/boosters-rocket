@@ -18,16 +18,16 @@ import { QUICKBOOKS, type AppFamilyId, type AppStudentId } from "@/lib/families/
 import { otherCompany } from "@/lib/families/links";
 import { recordNameWords } from "@/lib/families/words";
 import { buildRoster, type Cust } from "@/lib/roster/model";
-import { familyCreatesOnTheQueue, noFamilyPool } from "@/lib/roster/no-family";
+import { familyCreatesFiled, noFamilyPool } from "@/lib/roster/no-family";
 import { loadOpenWrites, waitingWords, type QueueView } from "@/lib/roster/queue";
-import { guardianOf, keptWordsFor, madeAfterGivingUp } from "@/lib/roster/writes";
+import { guardianOf, keptWordsFor, madeAfterGivingUp, type MadeAfterGivingUp } from "@/lib/roster/writes";
 import { byRosterOrder, rosterShown } from "@/lib/roster/queries";
 import { getShape, missingTypes } from "@/lib/roster/shape";
 import { getRosterSource, ROSTER_JOB } from "@/lib/roster/source";
 import { differencesOf, type Difference, type LinkedStudent, type QueueFact } from "./differences";
 import { suggestCustomers, type Holder, type Suggestion } from "./match";
 import { pairKeys, proposeStudents, type Proposals } from "./proposals";
-import { linkStamp, type Chosen } from "./stamp";
+import { bulkStamp, linkStamp, reviewStamp, type Chosen } from "./stamp";
 import { linkStanding, searchMatches, STATUS_KEYS, type LinksFilter, type NotAFamilyReason, type StatusKey } from "./status";
 
 /**
@@ -79,6 +79,40 @@ export type LinkStatus =
 export type OwnLink = { state: "linked"; customer: string } | { state: "gone" } | { state: "none" } | { state: "unread" };
 /** A link press as the page binds it: the customer, how it was chosen, what it would link and leave, and the stamp. */
 export type LinkOffer = { customerId: string; chosen: Chosen; proposals: Proposals; stamp: string };
+/**
+ * A carried-over link confirmed as reviewed (slice M3a2, the lead's choice 7; open question 2): the family's link, and
+ * the family's carried-over student links it confirms with it (`confirms`: of an active student record of the family,
+ * to a customer the roster lists directly under the family's customer) and those it leaves carried over (`leaves`: of
+ * an inactive record, `inactive`; to a customer the books' copy doesn't hold, `gone`; or to one it holds that isn't a
+ * student customer directly under the family's customer, `elsewhere`: of another type now, at the top of the tree or
+ * under another customer, which the screen shows as a difference), each by the record's name, and the stamp that seals
+ * them (reviewStamp()).
+ */
+export type ReviewLeftWhy = "inactive" | "gone" | "elsewhere";
+/** Why a carried-over student link is left carried over by Confirm this link, in the row's opening and the press's answer alike. */
+export const REVIEW_LEFT_WORDS: Record<ReviewLeftWhy, string> = {
+  inactive: "inactive in the portal",
+  gone: "its customer isn't in the books' copy now",
+  elsewhere: "its customer isn't a student customer directly under this one in the books now",
+};
+export type ReviewOffer = {
+  linkId: string; customerId: string;
+  confirms: { linkId: string; studentId: AppStudentId; name: string }[];
+  leaves: { linkId: string; studentId: AppStudentId; name: string; why: ReviewLeftWhy }[];
+  stamp: string;
+};
+/** At most this many families are linked by one press of Confirm all exact email matches (the lead's decision 3 for slice M3a2). */
+export const BULK_MAX = 200;
+/** A Suggested row the filter shows, as the bulk press links it: the family, its name in words, its suggested customer and the row's own offer. */
+export type SuggestedShown = { familyId: AppFamilyId; familyKey: string; name: string; customerId: string; offer: LinkOffer };
+/**
+ * Confirm all exact email matches, for the rows a filter shows (slice M3a2): how many Suggested rows it takes and the
+ * stamp sealing them (null when it takes none, or more than BULK_MAX, when the button isn't offered), and how many
+ * Suggested rows the filter shows that it leaves out (`waiting`: the family's own create in the books is waiting or
+ * stuck on the queue, or it has a family link of another company, so a press would refuse it; its row's own Confirm
+ * says why).
+ */
+export type BulkOffer = { count: number; stamp: string | null; waiting: number };
 export type LinkRow = {
   familyId: AppFamilyId;
   /** The family's name, or words saying the portal knows none (recordNameWords()). */
@@ -100,6 +134,8 @@ export type LinkRow = {
    * and those it would leave, and the stamp that seals them. Null for any other row, and in any state but `listed`.
    */
   confirm: LinkOffer | null;
+  /** Confirm this link (slice M3a2): a carried-over link whose customer stands, in the `listed` state; null for any other row. */
+  review: ReviewOffer | null;
   /**
    * What else the row offers (slice M3a): Leave unlinked (a Suggested, Several possible or No match row, listed), Pick a
    * different customer (Several possible, No match or Left unlinked, listed), Undo (every Left unlinked row, any state).
@@ -132,6 +168,8 @@ export type LinksView = {
   pool: PoolCustomer[] | null;
   /** The confirm step of a Pick or a Several possible candidate, from this view's reads: no query of its own. */
   step: (familyId: string, customerId: string) => ConfirmStep;
+  /** Confirm all exact email matches for the rows this filter shows (suggestedRowsShown()), from this view's reads; null when it shows no Suggested row, or in any state but `listed`. */
+  bulk: (filter: Pick<LinksFilter, "status" | "q">) => BulkOffer | null;
 };
 
 /**
@@ -158,27 +196,28 @@ const group = <T>(items: readonly T[], keyOf: (t: T) => string) => {
  * The screen's reads, in the caller's transaction or none (`tx`), and what is worked out from them for the suggestions
  * and the link presses: each table read once, whatever the number of families. Ten reads at once (the roster's company,
  * the connection, the shape, the customer types, the last successful roster read, the cache's customers, the family
- * creates on the write queue, every family record with its Left unlinked mark, every student record, the open guardian
- * rows with their people), then the links: those of the records' company (the roster's, while the books aren't
- * connected to another; none while there is none), and beside them which student records have a student link of any
- * other company, by their ids alone (a link press never links a record linked anywhere), in one query. No row is
+ * creates on the write queue with the family each is filed under, every family record with its Left unlinked mark, every
+ * student record, the open guardian rows with their people), then the links: those of the records' company (the
+ * roster's, while the books aren't connected to another; none while there is none), and beside them which family and
+ * student records have a link of any other company, by their ids alone (a link press never links a record linked
+ * anywhere), in one query. No row is
  * locked here: a press holds the roster lock exclusively before it calls this (./link-writes.ts), which keeps out the
  * writers that take it, shared or exclusive: roster reads, link writes, family creates and their
  * finish, a guardian's add, removal and reinstatement, and every change to a student or family record. Some writers of
  * what is read here don't take it, and may commit between these reads: blocking a person (parent.blocked), a parent's
  * confirmed change of sign-in email (parent.email, which waits for the roster lock only to write the cache, and commits
- * without it past its wait) and giving up a queue item (write_queue.state, read by familyCreatesOnTheQueue()). None of
+ * without it past its wait) and giving up a queue item (write_queue.state, read by familyCreatesFiled()). None of
  * them can make a press link anything but the customer and the student pairs its page sealed (linkStampHolds()); they
  * only change which suggestion the press works out again, and a press whose row now reads otherwise is refused as one
  * that changed. A reader that needs these to hold still has to lock them itself.
  */
 export async function readLinkBasics(tx?: Tx) {
   const q = tx ?? db;
-  const [source, connection, shape, typeRows, okRuns, customerRows, creates, everyFamily, everyStudent, guardians] = await Promise.all([
+  const [source, connection, shape, typeRows, okRuns, customerRows, filed, everyFamily, everyStudent, guardians] = await Promise.all([
     getRosterSource(tx), getConnection(tx), getShape(tx),
     q.select({ qboId: qboCustomerType.qboId, name: qboCustomerType.name, active: qboCustomerType.active }).from(qboCustomerType),
     q.select({ id: jobRun.id, finishedAt: jobRun.finishedAt }).from(jobRun).where(and(eq(jobRun.job, ROSTER_JOB), eq(jobRun.outcome, "ok"))).orderBy(desc(jobRun.id)).limit(1),
-    q.select().from(qboCustomer), familyCreatesOnTheQueue(tx),
+    q.select().from(qboCustomer), familyCreatesFiled(tx),
     // Every family record: the rows are the active ones, and a student record's family is named from any of them.
     q.select({ id: family.id, name: family.name, active: family.active, leftAt: family.accountingLeftUnlinkedAt, leftBy: family.accountingLeftUnlinkedBy }).from(family),
     // Every student record, active or not, with a family or in none: the opening lists a family's active ones, and the
@@ -194,10 +233,14 @@ export async function readLinkBasics(tx?: Tx) {
   const state: LinksState = source === null ? "no_company" : elsewhere ? "other_company"
     : shape === null || missingTypes(shape, typeRows).length > 0 ? "no_shape" : "listed";
   const linkRows = realm === null ? []
-    : await q.select().from(accountingLink).where(and(eq(accountingLink.system, QUICKBOOKS), or(eq(accountingLink.realmId, realm), isNotNull(accountingLink.studentId))));
-  // Only the records' company's links are used as links; another company's student links only say which records are linked somewhere.
+    : await q.select().from(accountingLink).where(and(eq(accountingLink.system, QUICKBOOKS), or(eq(accountingLink.realmId, realm), isNotNull(accountingLink.studentId), isNotNull(accountingLink.familyId))));
+  // Only the records' company's links are used as links; another company's family and student links only say which records are linked somewhere.
   const links = linkRows.filter((l) => l.realmId === realm);
   const studentLinkedAnywhere = new Set(linkRows.flatMap((l) => (l.studentId === null ? [] : [String(l.studentId)])));
+  const familyLinkedAnywhere = new Set(linkRows.flatMap((l) => (l.familyId === null ? [] : [String(l.familyId)])));
+  const creates = filed.map((c) => c.write);
+  // The families whose own create is waiting or stuck on the queue, filed under them: a link press refuses them (familyToLink()).
+  const createQueuedFor = new Set(filed.flatMap((c) => (c.familyId === null ? [] : [c.familyId])));
 
   const customers: Cust[] = customerRows.map((c) => ({ qboId: c.qboId, displayName: c.displayName, active: c.active, parentQboId: c.parentQboId, typeQboId: c.typeQboId, email: c.email, phone: c.phone }));
   const customerById = new Map(customers.map((c) => [c.qboId, c]));
@@ -224,6 +267,9 @@ export async function readLinkBasics(tx?: Tx) {
     : suggestCustomers(unlinked.filter((f) => !leftOf.has(String(f.id))).map((f) => ({ key: String(f.id), addresses: addressesOf.get(String(f.id)) ?? [] })), roster, poolIds);
   const studentsUnder = new Map(roster === null || roster.kind === "flat" ? [] : roster.families.map((f) => [f.customer.qboId, f.students]));
   const pairsStudents = shape !== null && shape.kind === "layered" && shape.studentTypeId !== null;
+  // The customers the roster lists as families (members in flat books): a family's own link stands only to one of them (linkStanding()).
+  const listedAsFamily = roster === null ? null : new Set(roster.kind === "flat" ? roster.members.map((m) => m.qboId) : roster.families.map((f) => f.customer.qboId));
+  const studentLinkOfRecord = new Map(links.flatMap((l) => (l.studentId === null ? [] : [[String(l.studentId), l] as const])));
   /**
    * The students a link of this family to this customer would link with it, and those it would leave (./proposals.ts):
    * the family's student records (active, with no student link of any company) against the student customers the roster
@@ -252,9 +298,32 @@ export async function readLinkBasics(tx?: Tx) {
     return "picked";
   };
 
+  /**
+   * Confirm this link, for a family whose family link of the records' company is carried over (slice M3a2): only in the
+   * `listed` state and while its customer stands (linkStanding(): neither gone nor not a family now, which are slice
+   * M3b's). With it go the family's carried-over student links of an active student record whose customer the roster
+   * lists directly under the family's customer; every other carried-over student link of the family's records is left
+   * carried over (an inactive record's, or one to a customer elsewhere in the books). By the record's name, then id.
+   */
+  const reviewOf = (familyKey: string): ReviewOffer | null => {
+    const link = linkOfFamily.get(familyKey);
+    if (state !== "listed" || link === undefined || link.origin !== "carried_over") return null;
+    if (linkStanding(customerById.get(link.customerId), { cacheHasCustomers: customers.length > 0, listedAsFamily }).is !== "stands") return null;
+    const under = new Set((studentsUnder.get(link.customerId) ?? []).map((c) => c.qboId));
+    const carried = [...(studentsOf.get(familyKey) ?? [])]
+      .sort((x, y) => COLLATOR.compare(x.name ?? "", y.name ?? "") || (String(x.id) < String(y.id) ? -1 : String(x.id) > String(y.id) ? 1 : 0))
+      .flatMap((s) => { const l = studentLinkOfRecord.get(String(s.id)); return l !== undefined && l.origin === "carried_over" ? [{ s, l }] : []; });
+    const confirms = carried.filter(({ s, l }) => s.active && under.has(l.customerId)).map(({ s, l }) => ({ linkId: l.id, studentId: s.id, name: recordNameWords(s.name, "student") }));
+    const confirming = new Set(confirms.map((c) => c.linkId));
+    const leaves = carried.filter(({ l }) => !confirming.has(l.id))
+      .map(({ s, l }) => ({ linkId: l.id, studentId: s.id, name: recordNameWords(s.name, "student"),
+        why: (!s.active ? "inactive" : customerById.has(l.customerId) ? "elsewhere" : "gone") as ReviewLeftWhy }));
+    return { linkId: link.id, customerId: link.customerId, confirms, leaves, stamp: reviewStamp(familyKey, link.id, link.customerId, confirms.map((c) => c.linkId)) };
+  };
+
   return { source, connection, shape, typeRows, okRuns, customerRows, customers, customerById, tokenOf, roster, realm, state, everyFamily, families, everyStudent, students,
     guardians, links, linkOfFamily, familyOfCustomer, customerOfStudent, customerOfGuardian, studentLinked, pool, poolIds, studentsOf, guardiansOf, addressesOf, leftOf,
-    unlinked, suggestions, proposalsFor, offerFor, chosenFor };
+    unlinked, suggestions, listedAsFamily, proposalsFor, offerFor, chosenFor, reviewOf, createQueuedFor, familyLinkedAnywhere };
 }
 export type LinkBasics = Awaited<ReturnType<typeof readLinkBasics>>;
 
@@ -277,6 +346,8 @@ export type LinkBasics = Awaited<ReturnType<typeof readLinkBasics>>;
  * people, families and cache rows (4), the move money note (6), the families joined's links (3), and a kept contact
  * change's checks (14). So at most 39 for the queue and 51 a view: 10 to 51. The confirm step and the chooser read
  * nothing more but what a family's create given up after a try left (madeAfterGivingUp(): 4 to 8, the page's own).
+ * Since slice M3a2 the rows' Confirm this link (reviewOf()) and Confirm all exact email matches (bulk(), by
+ * suggestedRowsShown()) are worked out from the same reads, with no query of their own.
  * On four hundred families with two thousand customers that is the same number of queries; memory holds the two
  * thousand cached customers (twice, while the queue holds items, as loadOpenWrites() reads its own), the records,
  * guardian rows and links (a few thousand small rows), and the rows rendered are the four hundred families, each
@@ -301,7 +372,7 @@ export async function loadAccountingLinks(): Promise<LinksView> {
   }));
   const compare = roster === null || shape === null ? null : differencesOf({ shape, roster, customers, studentRecords,
     guardianLinked: new Set(links.flatMap((l) => (l.guardianId === null ? [] : [l.customerId]))), queue: queue.map(queueFactOf) });
-  const listedAsFamily = roster === null ? null : new Set(roster.kind === "flat" ? roster.members.map((m) => m.qboId) : roster.families.map((f) => f.customer.qboId));
+  const listedAsFamily = b.listedAsFamily;
 
   // Each family's active students, grouped once, so the rows' work grows with the club, not its square.
   const activeStudentsOf = group(b.students.filter((s) => s.active), (s) => String(s.familyId));
@@ -329,7 +400,7 @@ export async function loadAccountingLinks(): Promise<LinksView> {
         .sort(byRosterOrder).map((s) => ({ id: s.id, name: s.name, link: own(customerOfStudent.get(String(s.id))) })),
       guardians: (guardiansOf.get(key) ?? []).map((g) => ({ id: g.id, name: g.name, email: g.email, blocked: g.blocked, link: own(customerOfGuardian.get(g.id)) }))
         .sort(byName),
-      differences: [] as Difference[], inactiveUnrecorded: 0, confirm: null, offers: none,
+      differences: [] as Difference[], inactiveUnrecorded: 0, confirm: null, review: null, offers: none,
     };
     if (link !== undefined) {
       const customer = customerById.get(link.customerId);
@@ -346,7 +417,7 @@ export async function loadAccountingLinks(): Promise<LinksView> {
         guardians: (guardiansOf.get(key) ?? []).map((g) => ({ id: g.id, customerId: customerOfGuardian.get(g.id) ?? null })),
       });
       const status: LinkStatus = found !== null && found.differences.length > 0 ? { key: "with_differences", made } : made;
-      return { ...base, customer: shownCustomer, status, differences: found?.differences ?? [], inactiveUnrecorded: found?.inactiveUnrecorded ?? 0 };
+      return { ...base, customer: shownCustomer, status, differences: found?.differences ?? [], inactiveUnrecorded: found?.inactiveUnrecorded ?? 0, review: b.reviewOf(key) };
     }
     // Left unlinked, in every state: the matcher was never given it (readLinkBasics()).
     const left = leftOf.get(key);
@@ -367,12 +438,9 @@ export async function loadAccountingLinks(): Promise<LinksView> {
     return { ...base, customer: null, status: { key: "no_match", noGuardians: base.guardians.length === 0 }, offers: { leave: true, pick: true, undo: false } };
   });
 
-  // The families whose rows aim at each customer (a suggestion or a candidate), by name, for the confirm step's warning.
-  const aimedBy = new Map<string, string[]>();
-  for (const [key, s] of suggestions ?? []) {
-    const aims = s.kind === "suggested" ? [s.candidate.customerId] : s.kind === "several" ? s.candidates.map((c) => c.customerId) : [];
-    for (const c of aims) aimedBy.set(c, [...(aimedBy.get(c) ?? []), key]);
-  }
+  // The families whose rows aim at each customer (a suggestion or a candidate), for the confirm step's warning: the one
+  // rule "Create a family from this" refuses by too (aimIndex()).
+  const aimedBy = aimIndex(b);
   const poolShown: PoolCustomer[] | null = pool === null ? null : pool.map((c) => ({ qboId: c.qboId, name: c.name, email: customerById.get(c.qboId)?.email ?? null }));
   const rowOf = new Map(rows.map((r) => [String(r.familyId), r]));
   const step = (familyId: string, customerId: string): ConfirmStep => {
@@ -385,7 +453,14 @@ export async function loadAccountingLinks(): Promise<LinksView> {
     const parents = roster === null || roster.kind === "flat" || shape === null || shape.kind === "flat" || shape.parentTypeId === null ? null
       : (roster.families.find((f) => f.customer.qboId === customerId)?.parents ?? []).map((c) => ({ qboId: c.qboId, name: c.displayName, active: c.active }));
     return { ok: true, familyId: row.familyId, family: row.name, customer, parents, offer: b.offerFor(key, customerId, chosen),
-      alsoFor: (aimedBy.get(customerId) ?? []).filter((k) => k !== key).map((k) => familyName.get(k)!).sort((x, y) => COLLATOR.compare(x, y)) };
+      alsoFor: (aimedBy.get(customerId) ?? []).map((a) => a.familyKey).filter((k) => k !== key).map((k) => familyName.get(k)!).sort((x, y) => COLLATOR.compare(x, y)) };
+  };
+  const bulk = (filter: Pick<LinksFilter, "status" | "q">): BulkOffer | null => {
+    const all = suggestedRowsOf(b, filter);
+    if (all.length === 0) return null;
+    const taken = all.filter((r) => !r.held);
+    return { count: taken.length, waiting: all.length - taken.length,
+      stamp: taken.length === 0 || taken.length > BULK_MAX ? null : bulkStamp(filter, taken.length, bulkKeys(taken)) };
   };
 
   return {
@@ -397,7 +472,7 @@ export async function loadAccountingLinks(): Promise<LinksView> {
     familyPages: rosterShown({ connected: Boolean(b.connection?.realmId && b.connection.refreshTokenCiphertext), connectedRealmId: b.connection?.realmId ?? null, source: b.source,
       hasCache: b.typeRows.length > 0 || b.customerRows.length > 0, shape, readOnce: b.okRuns.length > 0, typeRows: b.typeRows }),
     readAt: b.okRuns[0]?.finishedAt?.toISOString() ?? null,
-    pool: poolShown, step,
+    pool: poolShown, step, bulk,
   };
 }
 
@@ -436,7 +511,111 @@ export function statusCounts(rows: readonly LinkRow[]): Record<StatusKey, number
  * family's name, its open guardians' sign-in addresses (a blocked person's too, so staff can find their family), or the
  * linked or suggested customer's name or email field.
  */
-export function filterLinkRows(rows: readonly LinkRow[], filter: LinksFilter): LinkRow[] {
-  return rows.filter((r) => (filter.status === null || filtersOf(r).includes(filter.status))
-    && searchMatches(filter.q, [r.name, ...r.guardians.map((g) => g.email), r.customer?.name ?? null, r.customer?.email ?? null]));
+export function filterLinkRows(rows: readonly LinkRow[], filter: Pick<LinksFilter, "status" | "q">): LinkRow[] {
+  return rows.filter((r) => shownBy(filter, filtersOf(r), rowTexts(r.name, r.guardians.map((g) => g.email), r.customer)));
+}
+
+/**
+ * The one rule of what a filter shows (slice M3a2), for the list (filterLinkRows()) and the bulk press
+ * (suggestedRowsShown()) alike: a row found under the filter's status (every row when none), whose texts the search
+ * matches (searchMatches(), ignoring case).
+ */
+const shownBy = (filter: Pick<LinksFilter, "status" | "q">, filters: readonly StatusKey[], texts: readonly (string | null)[]) =>
+  (filter.status === null || filters.includes(filter.status)) && searchMatches(filter.q, texts);
+/** The texts a row's search reads: the family's name in words, its open guardians' sign-in addresses (a blocked person's too), and the customer's name and email field. */
+const rowTexts = (name: string, guardianEmails: readonly string[], customer: CustomerShown | null): (string | null)[] =>
+  [name, ...guardianEmails, customer?.name ?? null, customer?.email ?? null];
+
+/**
+ * The Suggested rows a filter shows (slice M3a2: Confirm all exact email matches), worked out from the screen's reads
+ * alone, so the page's button and the press read the same rows by the same rule: each active family with no family
+ * link of the records' company, not left unlinked, whose suggestion is `suggested`, found under the filter as its row
+ * is (filtersOf() of a Suggested row is `suggested` alone) by the texts its row's search reads (rowTexts(): the
+ * family's name in words, its open guardians' sign-in addresses, the suggested customer's name and email field). Each
+ * with its row's own offer (offerFor(..., "suggested")), in the roster's order (byRosterOrder(), a family with no link
+ * breaking a tie of names by its record's id). None but in the `listed` state, where suggestions are worked out.
+ * `held`: a row a press would refuse whatever happened meanwhile (familyToLink() in ./link-writes.ts), as the family's
+ * own create is waiting or stuck on the queue (filed under it), or it has a family link of another company: still
+ * Suggested on the list, its own Confirm saying why, but left out of the bulk press, its count and its stamp.
+ */
+function suggestedRowsOf(b: LinkBasics, filter: Pick<LinksFilter, "status" | "q">): (SuggestedShown & { held: boolean })[] {
+  const suggestions = b.suggestions;
+  if (b.state !== "listed" || suggestions === null) return [];
+  return b.families.flatMap((f): (SuggestedShown & { held: boolean })[] => {
+    const key = String(f.id);
+    const s = suggestions.get(key);
+    if (b.linkOfFamily.has(key) || b.leftOf.has(key) || s === undefined || s.kind !== "suggested") return [];
+    const name = recordNameWords(f.name, "family");
+    const texts = rowTexts(name, (b.guardiansOf.get(key) ?? []).map((g) => g.email), { name: s.candidate.name, email: s.candidate.email });
+    if (!shownBy(filter, ["suggested"], texts)) return [];
+    return [{ familyId: f.id, familyKey: key, name, customerId: s.candidate.customerId, offer: b.offerFor(key, s.candidate.customerId, "suggested"),
+      held: b.createQueuedFor.has(key) || b.familyLinkedAnywhere.has(key) }];
+  }).sort((x, y) => byRosterOrder({ id: x.familyId, name: x.name, customerId: null }, { id: y.familyId, name: y.name, customerId: null }));
+}
+/** The Suggested rows a filter shows that a bulk press takes (Confirm all exact email matches): those of suggestedRowsOf() not `held`. */
+export function suggestedRowsShown(b: LinkBasics, filter: Pick<LinksFilter, "status" | "q">): SuggestedShown[] {
+  return suggestedRowsOf(b, filter).flatMap(({ held, ...r }) => (held ? [] : [r]));
+}
+/** The rows as the bulk stamp seals them: each `<family id>=<customer id>|<the row's pairKeys(), joined>`. */
+export const bulkKeys = (rows: readonly SuggestedShown[]): string[] => rows.map((r) => `${r.familyKey}=${r.customerId}|${pairKeys(r.offer.proposals).join(",")}`);
+
+/**
+ * The families whose rows aim at each customer: a Suggested row's suggestion (`suggested`) and each of a Several
+ * possible row's candidates (`several`), by the screen's own suggestions (a Left unlinked family is given to no
+ * matcher, so it aims at nothing). The confirm step's warning and "Create a family from this"'s refusal both read it.
+ */
+export function aimIndex(b: Pick<LinkBasics, "suggestions">): Map<string, { familyKey: string; how: "suggested" | "several" }[]> {
+  const out = new Map<string, { familyKey: string; how: "suggested" | "several" }[]>();
+  for (const [familyKey, s] of b.suggestions ?? []) {
+    if (s.kind === "none") continue;
+    const aims = s.kind === "suggested" ? [s.candidate.customerId] : s.candidates.map((c) => c.customerId);
+    for (const c of aims) out.set(c, [...(out.get(c) ?? []), { familyKey, how: s.kind }]);
+  }
+  return out;
+}
+/** The families whose rows aim at one customer (aimIndex()). */
+export const familiesAimingAt = (b: Pick<LinkBasics, "suggestions">, customerId: string) => aimIndex(b).get(customerId) ?? [];
+
+/**
+ * Why a customer no family is linked to is meant for a family the portal has already (slice M3a2), so "Create a family
+ * from this" would make a second family: the screen's rows suggest it (`suggested`) or list it as a candidate
+ * (`several`) for these families (familiesAimingAt()); or a create of an active family with no family link, given up
+ * after a try, made it (`given_up`: madeAfterGivingUp(), the family the portal saved first; `pickable` when that
+ * family's row offers Pick a different customer for it, so its confirm step can be reached). Each family by its app id
+ * and its name in words, by name. Nothing outside the `listed` state.
+ */
+export type CustomerAim =
+  | { why: "suggested" | "several"; families: { id: AppFamilyId; name: string }[] }
+  | { why: "given_up"; families: [{ id: AppFamilyId; name: string }]; pickable: boolean };
+export function customerAims(b: LinkBasics, made: readonly MadeAfterGivingUp[]): Map<string, CustomerAim> {
+  // `pickable` is chosenFor()'s answer alone: it is null for a Suggested row (whose only customer is its suggestion), the
+  // one row that offers no Pick a different customer; a Several possible, No match or Left unlinked row offers it.
+  const out = new Map<string, CustomerAim>();
+  if (b.state !== "listed") return out;
+  const familyOf = new Map(b.families.map((f) => [String(f.id), f]));
+  const named = (key: string) => ({ id: familyOf.get(key)!.id, name: recordNameWords(familyOf.get(key)!.name, "family") });
+  for (const [customerId, aims] of aimIndex(b)) {
+    const families = aims.filter((a) => familyOf.has(a.familyKey)).map((a) => named(a.familyKey)).sort((x, y) => COLLATOR.compare(x.name, y.name));
+    if (families.length > 0) out.set(customerId, { why: aims.some((a) => a.how === "suggested") ? "suggested" : "several", families });
+  }
+  for (const m of made) {
+    if (m.role === "student" || m.familyId === null || out.has(m.customerQboId)) continue;
+    const key = String(m.familyId);
+    if (!familyOf.has(key) || b.linkOfFamily.has(key)) continue;
+    out.set(m.customerQboId, { why: "given_up", families: [named(key)], pickable: b.chosenFor(key, m.customerQboId) !== null });
+  }
+  return out;
+}
+/**
+ * The aims of every customer, read in the caller's transaction or one of its own: readLinkBasics()'s reads (10 or 11)
+ * and, in the `listed` state, madeAfterGivingUp()'s (4 to 8), a fixed number whatever the number of customers.
+ * Reconciliation shows them, and "Create a family from this" refuses by them under its own roster lock
+ * (customerAimedAt(), ./link-writes.ts).
+ */
+export async function readCustomerAims(tx?: Tx): Promise<Map<string, CustomerAim>> {
+  const run = async (t: Tx) => {
+    const b = await readLinkBasics(t);
+    return b.state !== "listed" ? new Map<string, CustomerAim>() : customerAims(b, await madeAfterGivingUp(t));
+  };
+  return tx ? run(tx) : db.transaction(run);
 }

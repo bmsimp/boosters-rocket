@@ -15,9 +15,9 @@ import { accountingLink, auditLog, family, familyMoney, guardian, parent, qboCon
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
 import { AccessDenied } from "@/lib/guards";
 import { loadAccountingLinks, type LinkRow, type LinksView } from "@/lib/accounting/mapping";
-import { confirmedWords, LINK_COPY, leaveUnlinked, linkFamilyToCustomer, undoLeaveUnlinked } from "@/lib/accounting/link-writes";
+import { confirmedWords, customerAimedAt, LINK_COPY, leaveUnlinked, linkFamilyToCustomer, undoLeaveUnlinked } from "@/lib/accounting/link-writes";
 import { loadFamilyMoney } from "@/lib/money/family-money";
-import { familyFromCustomer } from "@/lib/roster/no-family";
+import { familyFromCustomer, NO_FAMILY_COPY } from "@/lib/roster/no-family";
 import { loadOpenWrites, runWriteQueue } from "@/lib/roster/queue";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { addFamily, changeInPortal, createInQuickBooksAndLink, keptWordsFor, MAKING_LOCK, moveStudent, NO_FAMILY_CUSTOMER } from "@/lib/roster/writes";
@@ -403,11 +403,19 @@ async function clearedInAudit(familyId: AppFamilyId): Promise<boolean> {
 describe("never a wrong link", () => {
   connected();
   it("refuses a customer linked to another family between the page and the press, by Create a family from this or by a second confirm", async () => {
+    // Since slice M3a2 "Create a family from this" refuses a customer a row aims at (the Patels' suggestion, 70), so a
+    // customer taken by it between the page and the press is one no row aims at: Lone Family (95), which The Loners,
+    // a No match row, pick from the pool.
     const patels = await seedPatels();
-    const row = rowOf(await loadAccountingLinks(), "The Patels");
-    expect(await familyFromCustomer("70", { ...linkOp(), mayChangeFamilies: false })).toMatchObject({ ok: true });
-    expect(await linkFamilyToCustomer({ familyId: String(patels), customerId: "70", chosen: "suggested", stamp: row.confirm!.stamp }, tag, linkOp()))
+    await readAgain(qc("95", "Lone Family", "1"));
+    const loners = await unlinkedFamily("The Loners");
+    const step = (await loadAccountingLinks()).step(String(loners), "95");
+    expect(step).toMatchObject({ ok: true, offer: { chosen: "picked" }, alsoFor: [] });
+    expect(await familyFromCustomer("70", { ...linkOp(), mayChangeFamilies: false }, customerAimedAt)).toEqual({ ok: false, errors: [NO_FAMILY_COPY.suggestedFor(["The Patels"])] });
+    expect(await familyFromCustomer("95", { ...linkOp(), mayChangeFamilies: false }, customerAimedAt)).toMatchObject({ ok: true });
+    expect(await linkFamilyToCustomer({ familyId: String(loners), customerId: "95", chosen: "picked", stamp: (step as { offer: { stamp: string } }).offer.stamp }, tag, linkOp()))
       .toEqual({ ok: false, errors: [LINK_COPY.customerTaken] });
+    expect(await linksOfFamily(loners)).toEqual([]);
     expect(await linksOfFamily(patels)).toEqual([]);
     expect(await auditsOf("accounting.link.confirm")).toEqual([]);
 

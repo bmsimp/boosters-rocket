@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { requireStaffAlso, requireStaffPage } from "@/lib/guards";
-import { filterLinkRows, filtersOf, givenUpCustomersOf, loadAccountingLinks, statusCounts, type ConfirmStep, type LinkMade, type LinkOffer, type LinkRow, type LinkStatus, type LinksState, type LinksView, type OwnLink } from "@/lib/accounting/mapping";
+import { BULK_MAX, filterLinkRows, filtersOf, givenUpCustomersOf, loadAccountingLinks, REVIEW_LEFT_WORDS, statusCounts, type BulkOffer, type ConfirmStep, type LinkMade, type LinkOffer, type LinkRow, type LinkStatus, type LinksState, type LinksView, type OwnLink, type ReviewOffer } from "@/lib/accounting/mapping";
 import { differenceKinds, differenceWords, noteSentence, type Difference } from "@/lib/accounting/differences";
-import { NOT_A_FAMILY_WORDS, parseLinksFilter, searchMatches, SEARCH_MAX, STATUS_KEYS, STATUS_WORDS, type StatusKey } from "@/lib/accounting/status";
+import { NOT_A_FAMILY_WORDS, parseLinksFilter, searchMatches, SEARCH_MAX, STATUS_KEYS, STATUS_WORDS, type LinksFilter, type StatusKey } from "@/lib/accounting/status";
 import type { Holder } from "@/lib/accounting/match";
 import type { Proposals } from "@/lib/accounting/proposals";
 import { recordNameWords } from "@/lib/families/words";
@@ -12,7 +12,7 @@ import { LocalTime } from "@/app/components/local-time";
 import { Notice } from "@/app/components/notice";
 import { StateWords } from "@/app/components/state-words";
 import { familyPage } from "@/app/staff/(app)/family-pages";
-import { confirmLinkAction, leaveUnlinkedAction, undoLeaveUnlinkedAction } from "./actions";
+import { confirmAllAction, confirmLinkAction, leaveUnlinkedAction, reviewLinkAction, undoLeaveUnlinkedAction } from "./actions";
 import { LinkAnswers, LinkAnswersShown, LinkPress } from "./link-press";
 
 export const metadata = { title: "Accounting links" };
@@ -42,7 +42,7 @@ const holderWords = (h: Holder) => (h.on.kind === "family" ? `${h.address}, on t
 /** How a link was made, in words: carried over from the roster, or by whose press. */
 function MadeDetail({ made }: { made: LinkMade }) {
   return made.key === "carried_over" ? <>Carried over from the roster by the portal, on <LocalTime iso={made.at} />. Nobody has confirmed it since.</>
-    : made.origin === "confirmed" ? <>Confirmed{made.by ? ` by ${made.by}` : ""}, with Confirm on this page or &ldquo;Create a family from this&rdquo;, on <LocalTime iso={made.at} />.</>
+    : made.origin === "confirmed" ? <>Confirmed{made.by ? ` by ${made.by}` : ""}, on this page or with &ldquo;Create a family from this&rdquo;, on <LocalTime iso={made.at} />.</>
     : <>Made in the books from the portal{made.by ? ` by ${made.by}` : ""}, on <LocalTime iso={made.at} />.</>;
 }
 
@@ -128,15 +128,63 @@ function Opening({ row, tag }: { row: LinkRow; tag: string }) {
       {row.differences.length > 0 && <><p>Where the portal and the books differ:</p><ul>{row.differences.map((d, i) => <DifferenceLine key={i} d={d} />)}</ul></>}
       {row.inactiveUnrecorded > 0 && <p>The books also have {plural(row.inactiveUnrecorded, "inactive student customer", "inactive student customers")} under this family with no student record in the portal.</p>}
       {row.confirm !== null && row.customer !== null && <><p>Confirming links it to &ldquo;{row.customer.name}&rdquo;. Nothing is sent to the books.</p><ProposalsShown proposals={row.confirm.proposals} /><p>{LINK_EFFECT}</p></>}
+      {row.review !== null && <ReviewShown review={row.review} />}
       {row.offers.pick && <p className="link-line"><Link href={pickHref(id)}>Pick a different customer<span className="visually-hidden">: {row.name}</span></Link></p>}
-      {(row.confirm !== null || row.offers.leave || row.offers.undo) && (
+      {(row.confirm !== null || row.review !== null || row.offers.leave || row.offers.undo) && (
         <div className="row-actions">
           {row.confirm !== null && <ConfirmPress familyId={id} about={row.name} offer={row.confirm} tag={tag} />}
+          {row.review !== null && <LinkPress label="Confirm this link" busy="Confirming…" about={row.name} act={reviewLinkAction.bind(null, id, row.review.linkId, tag, row.review.stamp)} />}
           {row.offers.leave && <LinkPress label="Leave unlinked" busy="Leaving it unlinked…" about={row.name} act={leaveUnlinkedAction.bind(null, id, tag)} />}
           {row.offers.undo && <LinkPress label="Undo Left unlinked" busy="Undoing…" about={row.name} act={undoLeaveUnlinkedAction.bind(null, id, tag)} />}
         </div>
       )}
     </details>
+  );
+}
+
+/**
+ * What Confirm this link records, for a carried-over link (slice M3a2): that a staff member checked it, that nothing is
+ * sent, and which of the family's carried-over student links it confirms with it and which it leaves, by name.
+ */
+function ReviewShown({ review }: { review: ReviewOffer }) {
+  return (
+    <>
+      <p>Confirm this link records it as checked by you, so it no longer reads as carried over. Nothing is sent to the books.</p>
+      <p>{review.confirms.length === 0 ? "No student's link is confirmed with it." : "Confirmed with it, each carried over to a student customer directly under this customer:"}</p>
+      {review.confirms.length > 0 && <ul>{review.confirms.map((c) => <li key={c.linkId}>{c.name}</li>)}</ul>}
+      {review.leaves.length > 0 && <><p>Left carried over, as the portal and the books don&apos;t agree on them:</p>
+        <ul>{review.leaves.map((l) => <li key={l.linkId}>{l.name} ({REVIEW_LEFT_WORDS[l.why]})</li>)}</ul></>}
+    </>
+  );
+}
+
+/**
+ * Confirm all exact email matches (slice M3a2): for the Suggested rows the filter shows now, in the `listed` state, a
+ * press bound to the filter as parsed, the count, the roster tag and the stamp sealing those rows, and nothing else;
+ * with more than BULK_MAX, no press but a notice to narrow the list. A Suggested row a press would refuse whatever
+ * happened meanwhile (the family's own create waiting or stuck on the queue) isn't counted, and a notice says so.
+ */
+function BulkPress({ bulk, filter, tag }: { bulk: BulkOffer; filter: LinksFilter; tag: string }) {
+  const held = bulk.waiting === 0 ? null : (
+    <Notice tone="info" live="none">{bulk.waiting === 1 ? "1 Suggested row this list shows isn't" : `${bulk.waiting} Suggested rows this list shows aren't`} counted
+      in Confirm all exact email matches, as a press can&apos;t link {bulk.waiting === 1 ? "it" : "them"} now: making the family in the books is still waiting on the queue, until that has gone through
+      or been given up on Reconciliation, or the family is linked to a customer of another company. Each row&apos;s own Confirm says which.</Notice>
+  );
+  if (bulk.count === 0) return held;
+  if (bulk.stamp === null) {
+    return <>{held}<Notice tone="info" live="none">This list shows {bulk.count} Suggested rows. Up to {BULK_MAX} can be confirmed at once, so narrow the list with the search first.</Notice></>;
+  }
+  return (
+    <div className="stack">
+      {held}
+      <p>Confirm all exact email matches links each of the {plural(bulk.count, "family", "families")} this list shows as Suggested to the customer filled in on its row, with the students its row&apos;s opening lists by name.
+        Only the rows this filter shows now are linked: if the list has changed by the time you press, nothing is linked and it is shown again. Nothing is sent to the books.</p>
+      <p>Once linked, each family&apos;s guardians see its customer&apos;s open invoices and Pay links, and those of the students and parents the books hold directly under it, the next time they open Home or Payments. A link can&apos;t be removed in the portal yet, so look the rows over first.</p>
+      <div className="row-actions">
+        <LinkPress label={`Confirm all exact email matches (${bulk.count})`} busy="Linking…" about="Confirm all exact email matches"
+          act={confirmAllAction.bind(null, filter.status ?? "", filter.q, bulk.count, tag, bulk.stamp)} />
+      </div>
+    </div>
   );
 }
 
@@ -201,7 +249,9 @@ function PickPart({ view, familyId, customerId, cq, tag, made }: { view: LinksVi
  * active family, its link to its customer in the books and how that link stands, or the customer that looks like its
  * own, with a status on each row, a filter by status and a search. Since slice M3a a family with no link is linked here
  * (Confirm its suggestion or a candidate, or Pick a different customer), or left unlinked, and nothing is sent to the
- * books; each press is audited, in its own transaction (src/lib/accounting/link-writes.ts). For holders of the linking
+ * books; each press is audited, in its own transaction (src/lib/accounting/link-writes.ts). Since slice M3a2 the
+ * Suggested rows the filter shows are confirmed in one press (Confirm all exact email matches), and a carried-over link
+ * is confirmed as reviewed in its row (Confirm this link). For holders of the linking
  * permission (Accounting.Link.ReadWrite, not Admin-only), who also need Roster.Read, checked here and refused as the
  * guard refuses (requireStaffAlso()): a role written with patterns can hold the first without the second. The page
  * lists many families, so neither the page, a row's opening, the chooser nor the confirm step is audited as a read of
@@ -220,6 +270,8 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
   // A carried-over family with differences is found under two filters (filtersOf()), so the counts overlap by this many.
   const overlap = view.rows.filter((r) => filtersOf(r).length > 1).length;
   const rows = filterLinkRows(view.rows, filter);
+  // Confirm all exact email matches, over the Suggested rows this filter shows, by the press's own rule (suggestedRowsShown()).
+  const bulk = view.bulk(filter);
   const filtered = filter.status !== null || filter.q !== "";
   const pick = typeof sp.pick === "string" && sp.pick.length <= 64 ? sp.pick : null;
   const customer = typeof sp.customer === "string" && sp.customer.length <= 64 ? sp.customer : null;
@@ -256,8 +308,10 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
           <p>For each family whose link stands, the portal compares the names, whether each is active, the family each student is under, and the students and Parent customers only one side has,
             against its copy of the books{view.readAt ? <>, from its last read of them on <LocalTime iso={view.readAt} /></> : ", though it hasn't read the books yet"}.
             A family whose link was carried over and that has differences is found under both Carried over and Linked, with differences, and counted under both.</p>
+          <p>Confirm all exact email matches, above the list, links every Suggested row the list shows, up to {BULK_MAX} at once, each as its own Confirm would.
+            A link carried over from the roster is confirmed in its row&apos;s opening with Confirm this link, which records it as checked by you.</p>
           <Notice tone="warning" live="none">For a family this page suggests a customer for, or lists possible customers of, link it here with Confirm.
-            &ldquo;Create a family from this&rdquo; on Reconciliation, for that customer, would still make a second family beside the one the portal has, so don&apos;t use it for one.
+            Reconciliation refuses &ldquo;Create a family from this&rdquo; for a customer this page suggests or lists for a family the portal has, or that a given-up change of a family the portal saved first made.
             And &ldquo;Create in QuickBooks and link&rdquo; on the family&apos;s page would make a second customer in the books for a family whose customer is already there.</Notice>
           {view.noFamily !== null && (
             <p>{view.noFamily === 0 ? "Every active customer the books list as a family at the top level, under no other customer, is linked to a family in the portal, or is about to be by a change on Reconciliation."
@@ -282,6 +336,7 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
           </form>
           {overlap > 0 && <p>{overlap === 1 ? "1 family whose link was carried over has differences, so it is counted under both Carried over and Linked, with differences."
             : `${overlap} families whose links were carried over have differences, so each is counted under both Carried over and Linked, with differences.`}</p>}
+          {bulk !== null && <BulkPress bulk={bulk} filter={filter} tag={tag} />}
           {filter.tooLong && <Notice tone="warning" live="none">That search was too long, so nothing was searched for. Try a shorter part of a name or an address, up to {SEARCH_MAX} characters.</Notice>}
           {view.rows.length === 0 ? <Notice tone="info" live="none">The portal has no active families yet.</Notice>
             : rows.length === 0 ? <Notice tone="info">No family matches that.</Notice>

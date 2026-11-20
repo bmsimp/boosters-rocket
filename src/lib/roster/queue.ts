@@ -873,7 +873,7 @@ function givenUpNext(item: Item): string {
   // next roster read this page lists a customer it made (madeAfterGivingUp()), and no second one is made for it.
   const readFirst = "After the next roster read, this page says whether QuickBooks made its customer anyway: if it did, nothing is linked to it, and a second one isn't made";
   if ((w.role === "family" || w.role === "member") && item.familyId !== null) {
-    return `The ${w.role} the portal saved first stays in the portal, unlinked. ${readFirst} (“Create a family from this” under Customers with no family brings it in); if it didn't, press “Create in QuickBooks and link” on the ${w.role}'s page.`;
+    return `The ${w.role} the portal saved first stays in the portal, unlinked. ${readFirst} (picking it for the ${w.role} on the Accounting links page ties the two together); if it didn't, press “Create in QuickBooks and link” on the ${w.role}'s page.`;
   }
   if (w.role === "student" && item.studentId !== null) {
     return `The student the portal saved first stays in the portal, unlinked. ${readFirst} (“Link the student to it” there links the student to it); if it didn't, press “Create in QuickBooks and link” on their family's page.`;
