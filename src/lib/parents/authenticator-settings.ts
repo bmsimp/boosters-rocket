@@ -335,7 +335,7 @@ export async function turnOffMyAuthenticator(ctx: Me, now?: Date): Promise<TurnO
     if (!(await hasAuthenticator(ctx.parentId, tx))) return "off" as const;
     const gone = await removeAuthenticator(tx, ctx.parentId, { keepBackupCodes: passkey });
     await writeAudit({ actor: parentActor({ id: ctx.parentId, email: me.email }), action: "parent.authenticator.off", targetType: "parent", targetId: ctx.parentId,
-      after: { backupCodesDeleted: gone.backupCodes, passkeyStays: passkey }, ip: ctx.ip }, tx);
+      after: passkey ? { backupCodesDeleted: gone.backupCodes, passkeyStays: true } : { backupCodesDeleted: gone.backupCodes }, ip: ctx.ip }, tx);
     return passkey ? "off_beside_passkey" as const : "off_now" as const;
   });
   if (done === "not_proved") return PROVE_AGAIN;

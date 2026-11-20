@@ -4,10 +4,10 @@ import { db } from "@/lib/db/client";
 import { parentAuthPasskey, parentAuthUser } from "@/lib/db/schema";
 import { env } from "@/env";
 import { cookieNamed, getDoor, postDoor, type DoorBody } from "./parent-door";
-import { assertionFor, makePasskeyKey, type AssertionJSON, type PasskeyKey } from "./passkey-keys";
+import { assertionFor, makePasskeyKey, registrationFor, type AssertionJSON, type PasskeyKey, type RegistrationJSON } from "./passkey-keys";
 
 /**
- * A guardian's passkey in a test (the sign-in release, slice SI-7a): nothing a parent can press adds one until SI-7b,
+ * A guardian's passkey in a test (the sign-in release, slice SI-7a; since SI-7b a parent adds one too, addPasskey() below),
  * so it is seeded as the passkey library stores one (its COSE public key, standard base64; the credential id,
  * base64url), and signed with by the software authenticator of ./passkey-keys.ts. The relying party is the test's
  * APP_URL (its host and its origin), as the parent instance names it.
@@ -72,4 +72,48 @@ export async function postPasskey(assertion: AssertionJSON | unknown, o: { cooki
   const query = [o.next ? `next=${encodeURIComponent(o.next)}` : "", o.alone ? "alone=1" : "", o.query ?? ""].filter(Boolean).join("&");
   const res = await postDoor(`/portal-passkey/check${query ? `?${query}` : ""}`, { response: assertion }, { cookie: o.cookie });
   return { res, body: (await res.json()) as DoorBody };
+}
+
+/*
+ * Adding a passkey and asking again with one (the sign-in release, slice SI-7b), as the sign-in settings' ceremonies
+ * send them: the library's registration options (GET /passkey/generate-register-options, with the parent's session
+ * cookie), a registration answer for their challenge (registrationFor(), ./passkey-keys.ts) posted to the portal's
+ * /portal-passkey/add with the session and challenge cookies and the name beside it; and an assertion for the library's
+ * challenge posted to /portal-passkey/again with the parent's session.
+ */
+
+/** The library's registration options, as the sign-in settings ask for them: the answer, its status and the challenge cookie. */
+export async function registerOptions(o: { cookie?: string; query?: string } = {}) {
+  const res = await getDoor(`/passkey/generate-register-options${o.query ?? ""}`, { cookie: o.cookie });
+  const text = await res.text();
+  let body: { challenge?: string; user?: { name?: string; displayName?: string }; excludeCredentials?: { id: string }[]; authenticatorSelection?: Record<string, unknown> } = {};
+  try { body = JSON.parse(text) as typeof body; } catch { body = {}; }
+  return { res, body, challengeCookie: cookieNamed(res, "better-auth-passkey") };
+}
+
+/** One post to /portal-passkey/add: the registration answer (or anything), the name when given, with a Cookie header. */
+export async function postAdd(response: RegistrationJSON | unknown, o: { cookie?: string; name?: unknown; body?: unknown } = {}) {
+  const body = o.body ?? (o.name === undefined ? { response } : { response, name: o.name });
+  const res = await postDoor("/portal-passkey/add", body, { cookie: o.cookie });
+  return { res, body: (await res.json()) as { ok: boolean; codes?: string[]; error?: string } };
+}
+
+/**
+ * A passkey added for the session `cookie` carries, as the settings page adds one: the options, a registration answer
+ * for `key` (a new one unless given) with the switches, posted with the name. Its answer, and the key.
+ */
+export async function addPasskey(cookie: string, o: { key?: PasskeyKey; name?: unknown; flags?: number; origin?: string; rpId?: string } = {}) {
+  const key = o.key ?? makePasskeyKey();
+  const options = await registerOptions({ cookie });
+  const registration = registrationFor(key, options.body.challenge ?? "bm8tb3B0aW9ucw", { origin: o.origin ?? ORIGIN, rpId: o.rpId ?? RP_ID, flags: o.flags });
+  const sent = await postAdd(registration, { cookie: [cookie, options.challengeCookie].filter(Boolean).join("; "), name: o.name });
+  return { ...sent, key, options };
+}
+
+/** Asking again with a passkey for the session `cookie` carries: the library's challenge, an assertion by `key`, posted to /portal-passkey/again. */
+export async function passkeyAgain(key: PasskeyKey, cookie: string, o: PasskeyTry = {}) {
+  const options = await passkeyOptions({ cookie });
+  const assertion = assertionFor(key, options.body.challenge, { origin: o.origin ?? ORIGIN, rpId: o.rpId ?? RP_ID, flags: o.flags, counter: o.counter, signWith: o.signWith, id: o.id });
+  const res = await postDoor("/portal-passkey/again", { response: assertion }, { cookie: [cookie, options.challengeCookie].filter(Boolean).join("; ") });
+  return { res, body: (await res.json()) as { ok: boolean; error?: string }, options };
 }

@@ -1111,7 +1111,7 @@ describe("the authenticator app box (slice SI-6b)", () => {
   });
 });
 
-describe("a passkey and asking again (slice SI-7a: only the newest-factor rule; asking again takes a passkey from SI-7b)", () => {
+describe("a passkey and asking again (slice SI-7a's newest-factor rule; since SI-7b asking again takes the passkey)", () => {
   it("a passkey added after a session's proof makes the session asked again", async () => {
     const a = await seedSignedInParent(FAMILY_A);
     await proveRecently(a.identity, PROVEN_PASSWORD, new Date(Date.now() - 5_000));
@@ -1128,25 +1128,37 @@ describe("a passkey and asking again (slice SI-7a: only the newest-factor rule; 
     expect(await sessionProvedRecently(db, a.identity)).toBe(true);
   });
 
-  it("a passkey holder with no app is asked again, by design until SI-7b, as a person with no passkey is: the password, then the emailed code, which is taken", async () => {
+  it("a passkey holder with no app is asked again with the passkey (slice SI-7b): the password sends no code and answers the passkey's step, and a code is taken nowhere", async () => {
     const a = await seedSignedInParent(FAMILY_A);
     await withPassword(a);
-    await seedPasskey(a.identity.parentId);
-    const { stamp, code } = await passwordThenCode(a.identity);
-    expect(await askAgainCodeAction(stamp, code)).toEqual({ ok: true, message: COPY.proved });
-    expect((await audits("signin.proved_again")).map((r) => r.after)).toEqual([{ step: "emailed_code" }]);
-    expect(await sessionProvedRecently(db, a.identity)).toBe(true);
-  });
-
-  it("a holder of a passkey and an app is asked again for the app, as SI-6a made it", async () => {
-    const a = await seedSignedInParent(FAMILY_A);
-    await withPassword(a);
-    const app = await seedAuthenticator(a.identity.parentId);
     await seedPasskey(a.identity.parentId);
     asParent(a.identity);
     const first = await askAgainPasswordAction(PROVEN_PASSWORD);
-    if (!first.ok || first.step !== "app") throw new Error("the app's step should be asked for");
+    expect(first).toMatchObject({ ok: true, step: "passkey", app: false, message: COPY.passkeyAsked });
+    if (!first.ok) throw new Error("the passkey's step should be asked for");
+    expect(await codesOf(a.identity.parentId)).toEqual([]);
+    const r = await askAgainCodeAction(first.stamp, "123456");
+    expect(r.ok).toBe(false);
+    expect(await audits("signin.proved_again")).toEqual([]);
+    expect(await sessionProvedRecently(db, a.identity)).toBe(false);
+    // A stamp that can't be read answers in the words of a person with a factor of their own, never "look for an email".
+    expect(await askAgainCodeAction("not-a-stamp", "123456")).toEqual({ ok: false, errors: [COPY.appRejected] });
+  });
+
+  it("a holder of a passkey and an app gets the passkey's step, whose stamp takes the app's code and a backup code (slice SI-7b)", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await withPassword(a);
+    const app = await seedAuthenticator(a.identity.parentId);
+    const [backup] = await seedBackupCodes(a.identity.parentId);
+    await seedPasskey(a.identity.parentId);
+    asParent(a.identity);
+    const first = await askAgainPasswordAction(PROVEN_PASSWORD);
+    if (!first.ok || first.step !== "passkey" || !first.app) throw new Error("the passkey's step, with the app beside it, should be asked for");
+    expect(first.message).toBe(COPY.passkeyOrAppAsked);
     expect(await askAgainCodeAction(first.stamp, appCode(app.secret))).toEqual({ ok: true, message: COPY.proved });
+    const again = await askAgainPasswordAction(PROVEN_PASSWORD);
+    if (!again.ok) throw new Error("the password should be right");
+    expect(await askAgainCodeAction(again.stamp, backup!)).toEqual({ ok: true, message: COPY.proved });
     expect(await codesOf(a.identity.parentId)).toEqual([]);
   });
 });

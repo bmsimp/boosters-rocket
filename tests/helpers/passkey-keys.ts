@@ -70,3 +70,44 @@ export function assertionFor(key: PasskeyKey, challenge: string, o: { origin: st
     response: { clientDataJSON: clientData.toString("base64url"), authenticatorData: authData.toString("base64url"), signature: signature.toString("base64url"), userHandle: key.userHandle },
   };
 }
+
+/** Flags of a registration's authenticator data: user present, user verified, and attested credential data (0x40). */
+export const REGISTERED = 0x45;
+
+export type RegistrationJSON = {
+  id: string; rawId: string; type: "public-key"; authenticatorAttachment?: string;
+  response: { clientDataJSON: string; attestationObject: string; transports?: string[] };
+};
+
+/** A CBOR head of a major type and a length, as far as two bytes of length. */
+function cborHead(major: number, length: number): Buffer {
+  if (length < 24) return Buffer.from([(major << 5) | length]);
+  if (length < 256) return Buffer.from([(major << 5) | 24, length]);
+  return Buffer.from([(major << 5) | 25, length >> 8, length & 0xff]);
+}
+const cborText = (s: string) => Buffer.concat([cborHead(3, Buffer.byteLength(s)), Buffer.from(s)]);
+const cborBytes = (b: Buffer) => Buffer.concat([cborHead(2, b.length), b]);
+
+/**
+ * A registration answer for `challenge` (the registration options' answer's, base64url), for `key`, as a browser's
+ * `navigator.credentials.create()` answers through the passkey library's ceremony (startRegistration()'s JSON, with
+ * `clientExtensionResults` split off as its client does), with attestation `none` (the sign-in release, slice SI-7b):
+ * clientDataJSON of type webauthn.create with the challenge and the origin, and an attestation object written by hand
+ * in CBOR, `{ fmt: "none", attStmt: {}, authData }`, whose authenticator data is the SHA-256 of the relying party id,
+ * the flags (user present, user verified and attested credential data unless told), a zero counter, and the attested
+ * credential data: a zero AAGUID, the credential id's length and the id, and the COSE key as the library stores it.
+ * The switches: other flags (0x41 for a passkey whose user wasn't verified), another origin or relying party id.
+ */
+export function registrationFor(key: PasskeyKey, challenge: string, o: { origin: string; rpId: string; flags?: number }): RegistrationJSON {
+  const clientData = Buffer.from(JSON.stringify({ type: "webauthn.create", challenge, origin: o.origin, crossOrigin: false }));
+  const credentialId = Buffer.from(key.id, "base64url");
+  const idLength = Buffer.alloc(2);
+  idLength.writeUInt16BE(credentialId.length);
+  const authData = Buffer.concat([createHash("sha256").update(o.rpId).digest(), Buffer.from([o.flags ?? REGISTERED]), Buffer.alloc(4),
+    Buffer.alloc(16), idLength, credentialId, Buffer.from(key.publicKey, "base64")]);
+  const attestation = Buffer.concat([cborHead(5, 3), cborText("fmt"), cborText("none"), cborText("attStmt"), cborHead(5, 0), cborText("authData"), cborBytes(authData)]);
+  return {
+    id: key.id, rawId: key.id, type: "public-key", authenticatorAttachment: "platform",
+    response: { clientDataJSON: clientData.toString("base64url"), attestationObject: attestation.toString("base64url"), transports: ["internal", "hybrid"] },
+  };
+}

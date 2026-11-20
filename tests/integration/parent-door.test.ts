@@ -9,7 +9,7 @@ import { fromBrowser } from "../helpers/page-request";
 
 import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, family, guardian, parent, parentAuthAccount, parentAuthenticator, parentAuthSession, parentBackupCode, parentAuthUser, parentAuthVerification, rateLimitEvent, signinCode, student } from "@/lib/db/schema";
+import { auditLog, family, guardian, parent, parentAuthAccount, parentAuthenticator, parentAuthPasskey, parentAuthSession, parentBackupCode, parentAuthUser, parentAuthVerification, rateLimitEvent, signinCode, student } from "@/lib/db/schema";
 import { hashPassword, verifyPassword } from "better-auth/crypto";
 import { getParentAuth } from "@/lib/auth/parent-auth";
 import { getParentState } from "@/lib/auth/identity";
@@ -30,8 +30,8 @@ import { DOOR_IP, DOOR_PASSWORD, appStep, codeMailed, codeStep, cookieNamed, pas
 import { appCode, seedAuthenticator, seedBackupCodes } from "../helpers/authenticator";
 import { seedCode, seedPassword } from "../helpers/signin-links";
 import { SIGNINS_ON, seedParentSettings, storeShape } from "../helpers/roster-cache";
-import { ORIGIN, RP_ID, passkeyOptions, passkeyStep, postPasskey, seedPasskey } from "../helpers/passkey";
-import { assertionFor, makePasskeyKey } from "../helpers/passkey-keys";
+import { ORIGIN, RP_ID, passkeyOptions, passkeyStep, postPasskey, registerOptions, seedPasskey } from "../helpers/passkey";
+import { assertionFor, makePasskeyKey, registrationFor } from "../helpers/passkey-keys";
 
 const IP = DOOR_IP;
 const staff = { actor: { door: "staff" as const, id: null, label: "board" }, ip: null };
@@ -416,6 +416,10 @@ describe("the parent door", () => {
       "/portal-password/check": { window: 60, max: 180 }, "/portal-code/resend": { window: 60, max: 60 }, "/portal-code/check": { window: 60, max: 180 },
       "/portal-app/check": { window: 60, max: 180 }, "/portal-passkey/check": { window: 60, max: 180 },
       "/passkey/generate-authenticate-options": { window: 60, max: 180 },
+      // Adding a passkey and asking again with one (slice SI-7b): the registration options and the add at the code
+      // request's cap, asking again at the code check's.
+      "/passkey/generate-register-options": { window: 60, max: 60 }, "/portal-passkey/add": { window: 60, max: 60 },
+      "/portal-passkey/again": { window: 60, max: 180 },
     });
     expect((o.rateLimit as { enabled?: boolean } | undefined)?.enabled).toBeUndefined(); // Better Auth's default: on only in production
   });
@@ -462,9 +466,12 @@ describe("the parent door", () => {
     const auth = await getParentAuth();
     // The door's five endpoints: since slice SI-6a, /portal-app/check takes an authenticator app's code or a backup code,
     // and since SI-7a /portal-passkey/check a passkey; and the passkey library's challenge, which takes no query and no
-    // body. The library's six other paths are disabled (its own sign-in makes a session; adding passkeys is SI-7b's).
+    // body. Since slice SI-7b the library's registration options (behind the portal's onRequest), the portal's own add
+    // and asking again with a passkey. The library's five other paths are disabled (its own sign-in makes a session;
+    // its registration is run in process by the add; listing, naming and removing are the portal's own).
     const reachable = ["/get-session", "/sign-out", "/portal-password/check", "/portal-code/resend", "/portal-code/check", "/portal-app/check",
-      "/portal-passkey/check", "/passkey/generate-authenticate-options", "/ok", "/error"];
+      "/portal-passkey/check", "/passkey/generate-authenticate-options", "/passkey/generate-register-options", "/portal-passkey/add",
+      "/portal-passkey/again", "/ok", "/error"];
     // Path-parameter routes can't be listed in disabledPaths (it matches exact paths). Neither can do anything here:
     // there are no social providers to call back to, and /reset-password/:token only redirects with a reset row of
     // Better Auth's own verification table, which the portal never writes: a person's password is set and reset by the
@@ -475,11 +482,47 @@ describe("the parent door", () => {
     expect(paths.filter((p) => !disabled.has(p)).sort()).toEqual([...reachable, ...parameterized].sort());
   });
 
-  it("disables every path of the passkey library but its challenge", async () => {
+  it("disables every path of the passkey library but its challenge and (since SI-7b) its registration options", async () => {
     const disabled = new Set((await getParentAuth()).options.disabledPaths ?? []);
-    for (const path of ["/passkey/verify-authentication", "/passkey/generate-register-options", "/passkey/verify-registration",
+    for (const path of ["/passkey/verify-authentication", "/passkey/verify-registration",
       "/passkey/list-user-passkeys", "/passkey/delete-passkey", "/passkey/update-passkey"]) expect([path, disabled.has(path)]).toEqual([path, true]);
     expect(disabled.has("/passkey/generate-authenticate-options")).toBe(false);
+    expect(disabled.has("/passkey/generate-register-options")).toBe(false);
+    // Freshness is the portal's own window: the library's fresh-session middleware is skipped (slice SI-7b).
+    expect((await getParentAuth()).options.session?.freshAge).toBe(0);
+  });
+
+  it("refuses the registration options, making no challenge row, without a session or without a recent proof (slice SI-7b)", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
+    await seedPassword(a.authUserId, DOOR_PASSWORD);
+    expect((await registerOptions()).res.status).toBe(404);
+    // A cookie the library can't read as a session (unsigned): the same answer. A session with no recent proof is
+    // refused the same way (tests/integration/passkey-settings.test.ts signs one in through the door).
+    expect((await registerOptions({ cookie: "br_parent.session_token=not-signed" })).res.status).toBe(404);
+    expect(await db.select().from(parentAuthVerification)).toEqual([]);
+  });
+
+  it("adds nothing at /portal-passkey/add with no session, a forged answer or an answer for no options, and the library's verify path answers 404 over HTTP (slice SI-7b)", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
+    const key = makePasskeyKey();
+    for (const body of [{}, { response: null }, { response: registrationFor(key, "bm8tb3B0aW9ucw", { origin: ORIGIN, rpId: RP_ID }) }]) {
+      expect(await (await post("/portal-passkey/add", body)).json()).toEqual({ ok: false, error: "rejected" });
+    }
+    expect((await post("/passkey/verify-registration", { response: registrationFor(key, "bm8tb3B0aW9ucw", { origin: ORIGIN, rpId: RP_ID }) })).status).toBe(404);
+    expect(await db.select().from(parentAuthPasskey)).toEqual([]);
+  });
+
+  it("does nothing at /portal-passkey/again with no session (slice SI-7b)", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
+    const key = await seedPasskey(a.id);
+    const options = await passkeyOptions();
+    const res = await post("/portal-passkey/again", { response: assertionFor(key, options.body.challenge, { origin: ORIGIN, rpId: RP_ID }) }, options.challengeCookie);
+    expect(await res.json()).toEqual({ ok: false, error: "rejected" });
+    expect(await db.select().from(parentAuthSession)).toEqual([]);
+    expect((await db.select().from(auditLog)).filter((x) => x.action === "signin.proved_again")).toEqual([]);
   });
 
   it("the passkey library's own verify path answers 404 over HTTP, and through auth.api with a valid assertion makes no session and sets no cookie", async () => {
