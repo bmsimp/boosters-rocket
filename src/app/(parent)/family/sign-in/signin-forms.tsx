@@ -78,8 +78,9 @@ export function AskAgain({ email, proved, lede, children }: { email: string; pro
   // in it is seldom read out, so the field that takes the focus carries them.
   const sentId = useId();
   useEffect(() => { if (moved.current) field.current?.focus(); }, [step]);
-
-  if (step === "proved") return <>{children}</>;
+  // A proof made elsewhere on the page (the devices box's own asking again) reaches here as `proved` once the page is
+  // drawn again: a password step not yet answered gives way to the change, so it never asks for what was just shown.
+  if (step === "proved" || (step === "password" && proved)) return <>{children}</>;
   if (step === "arrived") return <Said message={COPY.proved}>{children}</Said>;
 
   const checkPassword = async () => {

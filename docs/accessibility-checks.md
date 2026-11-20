@@ -193,7 +193,8 @@ the spec nor by hand yet.
   seeded one) puts "That device is forgotten…" in a status line that takes the focus, and its row goes.
 - Not walked yet: without a recent proof the devices are listed with no buttons and the devices box asks again itself
   (the password, then the code); once proved there, its own "Thank you, that's you." takes the focus and the buttons
-  come. A parent with no password, or a club at Strict, reads why nothing can be forgotten here instead.
+  come, and the password box above, its password step not yet answered, draws the change form in its place. A parent
+  with no password, or a club at Strict, reads why nothing can be forgotten here instead.
 - Not walked yet: Start again goes back to the password field; a wrong password is an alert with the focus left in the
   field.
 - Not walked yet: a change that is made, and "Sign out everywhere", replace every form of the page with what happened,
