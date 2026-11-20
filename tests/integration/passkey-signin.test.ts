@@ -140,7 +140,7 @@ describe("who is asked for the passkey (open question 24)", () => {
     expect((await passkeyStep(ana.key!, { cookie: pending })).body).toEqual({ ok: true, next: "/" });
   });
 
-  it("a code mailed before the passkey is refused at the sign-in's last check at the door, and taken by asking again", async () => {
+  it("a code mailed before the passkey is refused at the sign-in's last check, at the door and (since SI-7b) in asking again", async () => {
     const ana = await seedHolder("Ana", { passkey: false });
     const step = await stepPersonFor("ana@example.com");
     const codeId = await seedCode(ana.id, { usedAt: new Date() });
@@ -148,8 +148,8 @@ describe("who is asked for the passkey (open question 24)", () => {
     await seedPasskey(ana.id);
     expect(await signinStands(ana.id, "ana@example.com", DOOR_IP, { password: step.password, codeId })).toBe(false);
     expect((await audits("signin.refused")).map((r) => r.after)).toEqual([{ reason: "second_factor_in_force" }]);
-    // Asking again counts the app alone until slice SI-7b, by design.
-    expect(await signinStands(ana.id, "ana@example.com", DOOR_IP, { password: step.password, codeId }, new Date(), "change")).toBe(true);
+    // Since slice SI-7b asking again counts a passkey too: a holder is never signed anything by an emailed code.
+    expect(await signinStands(ana.id, "ana@example.com", DOOR_IP, { password: step.password, codeId }, new Date(), "change")).toBe(false);
   });
 
   it("under Strict a passkey alone signs in, and a holder's password asks for the passkey", async () => {
