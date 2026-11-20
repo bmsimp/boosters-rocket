@@ -484,7 +484,8 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    that had families before) offers **Confirm this link** in its row, which records it as checked by you. A linked family's row
    offers **Unlink from the books**: unlink a test family you linked, and its row reads Suggested or No match again,
    its guardians' Home and Payments say the club hasn't connected their payments yet, and Balances counts it in one
-   line; link it again with **Confirm** or **Pick a different customer**, and its money is read afresh. Reconciliation
+   line; link it again with **Confirm** (a Suggested row), or, for another customer, **Leave unlinked** and then **Pick a
+   different customer**, and its money is read afresh. Reconciliation
    refuses **Create a family from this** for a customer Accounting links suggests or lists for a family the portal has,
    and its row names that family and links to Accounting links; don't press **Create in QuickBooks and link** for a
    family whose customer is already in the books (it would make a second customer); and the

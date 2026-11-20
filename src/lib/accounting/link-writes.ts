@@ -420,8 +420,8 @@ const OPEN_ITEM = ["waiting", "stuck", "refused"] as const;
  * or out of it, or any other change that blocks others (blocksOthers) filed under it or a student record of it, naming
  * one of its guardian rows, or targeting one of the customers its links name, waiting, stuck or kept; and the family's
  * "being made" or "being sent" lock, or the "being sent" lock of a student record or guardian row of it, held (each tried
- * shared, held to the transaction's end). A parent's change of their details or sign-in email refuses nothing: its own
- * next try gives it up unsent, as its family is no longer linked (`family_off`). Then each link is moved to
+ * shared, held to the transaction's end). A parent's change of their details or sign-in email refuses nothing: a waiting
+ * one's own next try gives it up unsent, as its family is no longer linked; a stuck or kept one stays on Reconciliation. Then each link is moved to
  * `accounting_link_ended` as it was (its id, origin, `linked_at`, `linked_by`) with the press's time, the staff member
  * and `unlinked`, and deleted; the guardian rows' `family_qbo_id` set null; the money row deleted under the family's
  * money lock, after the roster lock (the one order: nothing that holds the money lock takes the roster lock); and one
@@ -482,14 +482,18 @@ export async function unlinkFamily(raw: { familyId: unknown; linkId: unknown; st
     if (making === "sending") return no(LINK_COPY.unlinkBusy);
     for (const id of [familyKey, ...studentIds.map(String), ...rowIds]) if (!(await recordSendingFree(tx, id))) return no(LINK_COPY.unlinkBusy);
     // A parent's change of their details or sign-in email filed under the family: it refuses nothing, and is said.
-    const details = (await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(open, eq(writeQueue.familyId, familyId),
-      sql`${writeQueue.request}->>'op' in ('contact', 'email')`))).length;
+    // Only a waiting one is tried again by itself (runWriteQueue()); a stuck or kept one waits on Reconciliation.
+    const detailItems = await tx.select({ state: writeQueue.state }).from(writeQueue).where(and(open, eq(writeQueue.familyId, familyId),
+      sql`${writeQueue.request}->>'op' in ('contact', 'email')`));
+    const details = { waiting: detailItems.filter((d) => d.state === "waiting").length, held: detailItems.filter((d) => d.state !== "waiting").length };
 
-    // The links move to the history as they were, then go; then the rows' customer, the money, and the audit row.
-    const endedAt = new Date();
+    // The links move to the history as they were, then go; then the rows' customer, the money, and the audit row. The
+    // time they ended is the database's, as the insert starts (statement_timestamp(), one for every row), past every lock
+    // above: the clock audit_log.at and linked_at are written by, so the audit filter's windows compare like with like.
     const ended = [link, ...studentLinks, ...guardianLinks];
-    await tx.insert(accountingLinkEnded).values(ended.map((l) => ({ id: l.id, system: l.system, realmId: l.realmId, customerId: l.customerId, familyId: l.familyId,
-      studentId: l.studentId, guardianId: l.guardianId, origin: l.origin, linkedAt: l.linkedAt, linkedBy: l.linkedBy, endedAt, endedBy: o.staffUserId, endedHow: "unlinked" as const })));
+    const [{ endedAt }] = await tx.insert(accountingLinkEnded).values(ended.map((l) => ({ id: l.id, system: l.system, realmId: l.realmId, customerId: l.customerId, familyId: l.familyId,
+      studentId: l.studentId, guardianId: l.guardianId, origin: l.origin, linkedAt: l.linkedAt, linkedBy: l.linkedBy, endedAt: sql`statement_timestamp()`, endedBy: o.staffUserId,
+      endedHow: "unlinked" as const }))).returning({ endedAt: accountingLinkEnded.endedAt }) as [{ endedAt: Date }, ...{ endedAt: Date }[]];
     await tx.delete(accountingLink).where(inArray(accountingLink.id, ended.map((l) => l.id)));
     const cleared = (await tx.update(guardian).set({ familyQboId: null, updatedAt: endedAt })
       .where(and(eq(guardian.familyId, familyId), isNotNull(guardian.familyQboId))).returning({ id: guardian.id })).length;
@@ -518,19 +522,25 @@ export async function unlinkFamily(raw: { familyId: unknown; linkId: unknown; st
  * What staff read after an unlink, each sentence true by the code: the link ended and those of the students (by name)
  * and guardians (a count) with it; the figures forgotten and what the guardians read now (loadFamilyMoney()'s
  * `notConnected`); the paid buy-outs kept, "Paid instead" by their own state; a parent's changes of their details on
- * their way, given up at their next try (`family_off`); that nothing was sent and the customer stays; that the row now
- * shows what the page suggests for it; and, where the customer is in the pool now, that Reconciliation lists it.
+ * their way: a waiting one given up unsent at its next try (contactStopFrom(): `family_off` for a guardian's,
+ * `not_the_family` for a family's), a stuck or kept one left on Reconciliation, which runWriteQueue() never tries by
+ * itself; that nothing was sent and, for a customer the books' copy holds, that it stays; that the row now shows what
+ * the page suggests for it, Pick a different customer only once the row offers it (never on a Suggested row); and,
+ * where the customer is in the pool now, that Reconciliation lists it.
  */
-export function unlinkedWords(s: { family: string; customer: string | null; students: string[]; guardianLinks: number; paidKept: number; listedWithNoFamily: boolean; details: number }): string {
+export function unlinkedWords(s: { family: string; customer: string | null; students: string[]; guardianLinks: number; paidKept: number; listedWithNoFamily: boolean;
+  details: { waiting: number; held: number } }): string {
   const parts = [s.customer === null ? `${s.family} is no longer linked to its customer in the books, which the books' copy doesn't hold now.` : `${s.family} is no longer linked to “${s.customer}” in the books.`];
   if (s.students.length) parts.push(`${s.students.length === 1 ? "Its student's link ended with it" : "Its students' links ended with it"}: ${list(s.students)}.`);
   if (s.guardianLinks > 0) parts.push(s.guardianLinks === 1 ? "A guardian's own link to a Parent customer ended with it too." : `${s.guardianLinks} guardians' own links to Parent customers ended with it too.`);
   parts.push("Its stored figures were forgotten, and its guardians now read that the club hasn't connected their payments to the portal yet, with no invoices, Pay or buy-out offer, until it is linked again.");
   if (s.paidKept > 0) parts.push(s.paidKept === 1 ? "Its paid buy-out is kept, and still reads Paid instead." : `Its ${s.paidKept} paid buy-outs are kept, and still read Paid instead.`);
-  if (s.details > 0) parts.push(s.details === 1 ? "A guardian's change of their details on its way to the books is given up at its next try, as the family is no longer linked."
-    : `${s.details} changes of guardians' details on their way to the books are given up at their next try, as the family is no longer linked.`);
-  parts.push("Nothing was sent to the books, and the customer stays there as it is.");
-  parts.push("Its row on this page now shows what the page suggests for it: link it again there, with Confirm or Pick a different customer.");
+  if (s.details.waiting > 0) parts.push(s.details.waiting === 1 ? "A guardian's change of their details on its way to the books is given up unsent at its next try, as the family is no longer linked."
+    : `${s.details.waiting} changes of guardians' details on their way to the books are given up unsent at their next try, as the family is no longer linked.`);
+  if (s.details.held > 0) parts.push(s.details.held === 1 ? "A guardian's change of their details that is stuck or kept stays on the Reconciliation page, where it can be given up: nothing is sent from it while the family has no link."
+    : `${s.details.held} changes of guardians' details that are stuck or kept stay on the Reconciliation page, where they can be given up: nothing is sent from them while the family has no link.`);
+  parts.push(s.customer === null ? "Nothing was sent to the books." : "Nothing was sent to the books, and the customer stays there as it is.");
+  parts.push("Its row on this page now shows what the page suggests for it: link it again there, with Confirm, or with Pick a different customer once the row offers it (a Suggested row offers it once it is left unlinked).");
   if (s.listedWithNoFamily) parts.push("Reconciliation now lists the customer under Customers with no family, where “Create a family from this” would make a second family, unless this page suggests it for a family.");
   return parts.join(" ");
 }

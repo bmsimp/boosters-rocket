@@ -11,11 +11,15 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, accountingLinkEnded, auditLog, family, familyMoney, guardian, setting, student, writeQueue, type RosterWrite } from "@/lib/db/schema";
+import { accountingLink, accountingLinkEnded, auditLog, family, familyMoney, guardian, qboConnection, setting, student, writeQueue, type RosterWrite } from "@/lib/db/schema";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { AccessDenied } from "@/lib/guards";
 import { loadAccountingLinks, type LinkRow, type LinksView } from "@/lib/accounting/mapping";
-import { customerAimedAt, leaveUnlinked, LINK_COPY, linkFamilyToCustomer, unlinkFamily } from "@/lib/accounting/link-writes";
+import { confirmAllSuggested, customerAimedAt, leaveUnlinked, LINK_COPY, linkFamilyToCustomer, unlinkedWords, unlinkFamily } from "@/lib/accounting/link-writes";
+import { writeAudit } from "@/lib/audit/log";
+import { auditPage, parseAuditFilters } from "@/lib/audit/query";
+import { runWriteQueue } from "@/lib/roster/queue";
+import { SOURCE_KEY } from "@/lib/roster/source";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { addFamily, MAKING_LOCK, SENDING_LOCK } from "@/lib/roster/writes";
 import { familyFromCustomer } from "@/lib/roster/no-family";
@@ -27,6 +31,7 @@ import { resetDb, seedParent, untilALockIsAwaited } from "../helpers/db";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { asOp, connectRoster, REALM, seedAnaRivera, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
+import { takeInDone } from "../helpers/contact";
 
 /**
  * Unlink from the books (stage 4's slice M3b of the app-owned families spec; section 4, "Every link, unlink, import and
@@ -260,10 +265,25 @@ describe("refused, keeping nothing", () => {
     expect(await press(fresh)).toEqual({ ok: false, errors: [LINK_COPY.familyGone] });
     expect(await everything()).toEqual(now);
     await db.update(family).set({ active: true }).where(eq(family.id, chen));
+    // Not listed: the books connected to another company, offering no press.
+    await db.update(qboConnection).set({ realmId: "9130000000000999" });
+    expect((await loadAccountingLinks()).rows.every((x) => x.unlink === null)).toBe(true);
+    now = await everything();
+    expect(await press(fresh)).toEqual({ ok: false, errors: [LINK_COPY.other_company] });
+    expect(await everything()).toEqual(now);
+    await db.update(qboConnection).set({ realmId: REALM });
     // Not listed: no shape.
+    const shape = (await db.select().from(setting).where(eq(setting.key, SHAPE_KEY)))[0]!;
     await db.delete(setting).where(eq(setting.key, SHAPE_KEY));
     now = await everything();
     expect(await press(fresh)).toEqual({ ok: false, errors: [LINK_COPY.no_shape] });
+    expect(await everything()).toEqual(now);
+    await db.insert(setting).values({ key: SHAPE_KEY, value: shape.value });
+    // Not listed: the roster names no company, offering no press; a page then carries the tag "none".
+    await db.delete(setting).where(eq(setting.key, SOURCE_KEY));
+    expect((await loadAccountingLinks()).rows.every((x) => x.unlink === null)).toBe(true);
+    now = await everything();
+    expect(await press(fresh, "none")).toEqual({ ok: false, errors: [LINK_COPY.no_company] });
     expect(await everything()).toEqual(now);
   });
 
@@ -344,14 +364,51 @@ describe("refused, keeping nothing", () => {
     expect(await db.select().from(accountingLinkEnded)).toEqual([]);
   });
 
-  it("a parent's change of their details on its way refuses nothing, and the unlink leaves it as it was", async () => {
+  it("a parent's change of their details on its way refuses nothing; the unlink leaves it as it was, and its next try gives it up unsent", async () => {
+    // The take-in has run, so the worker may try a parent's change at all (contactSendsMayGo()).
+    await takeInDone();
     const anaRow = (await db.select().from(guardian).where(eq(guardian.familyId, rivera)))[0]!;
     const contact: RosterWrite = { op: "contact", role: "parent", qboId: "11", syncToken: "0", change: { phone: "555-0102" }, was: { phone: "555-0101" }, guardianId: anaRow.id };
     const item = await seedQueued(contact, { state: "waiting", familyId: rivera });
     const r = await unlinkRow("Rivera Family");
     expect(r).toMatchObject({ ok: true });
-    expect((r as { message: string }).message).toContain("A guardian's change of their details on its way to the books is given up at its next try, as the family is no longer linked.");
+    const message = (r as { message: string }).message;
+    expect(message).toContain("A guardian's change of their details on its way to the books is given up unsent at its next try, as the family is no longer linked.");
+    expect(message).not.toContain("where it can be given up");
     expect((await db.select().from(writeQueue).where(eq(writeQueue.id, item.id)))[0]).toMatchObject({ state: "waiting", request: contact });
+    // The worker's next wake: given up, as the guardian's family is no longer linked, and nothing sent.
+    stub.calls.length = 0;
+    await runWriteQueue(new Date(Date.now() + 2 * 60_000));
+    expect((await db.select().from(writeQueue).where(eq(writeQueue.id, item.id)))[0]).toMatchObject({ state: "given_up" });
+    const givenUp = await db.select().from(auditLog).where(eq(auditLog.action, "roster.write.given_up"));
+    expect(givenUp.map((a) => (a.after as { why?: string }).why)).toEqual(["family_off"]);
+    expect(stub.apiCalls()).toEqual([]);
+  });
+
+  it("a stuck or kept change of details refuses nothing either, and the answer says it waits on Reconciliation, never that it is tried again", async () => {
+    const anaRow = (await db.select().from(guardian).where(eq(guardian.familyId, rivera)))[0]!;
+    const contact: RosterWrite = { op: "contact", role: "parent", qboId: "11", syncToken: "0", change: { phone: "555-0102" }, was: { phone: "555-0101" }, guardianId: anaRow.id };
+    await seedQueued(contact, { state: "refused", familyId: rivera });
+    const r = await unlinkRow("Rivera Family");
+    expect(r).toMatchObject({ ok: true });
+    const message = (r as { message: string }).message;
+    expect(message).toContain("A guardian's change of their details that is stuck or kept stays on the Reconciliation page, where it can be given up: nothing is sent from it while the family has no link.");
+    expect(message).not.toContain("next try");
+  });
+});
+
+describe("the answer's words", () => {
+  const base = { family: "Ash Family", students: [], guardianLinks: 0, paidKept: 0, listedWithNoFamily: false, details: { waiting: 0, held: 0 } };
+  it("never says a customer the books' copy doesn't hold stays there", () => {
+    const gone = unlinkedWords({ ...base, customer: null });
+    expect(gone).toContain("Ash Family is no longer linked to its customer in the books, which the books' copy doesn't hold now.");
+    expect(gone).toContain("Nothing was sent to the books.");
+    expect(gone).not.toContain("stays there");
+    expect(unlinkedWords({ ...base, customer: "Ash Family" })).toContain("Nothing was sent to the books, and the customer stays there as it is.");
+  });
+  it("offers Pick a different customer only once the row offers it, as a Suggested row offers it once left unlinked", () => {
+    expect(unlinkedWords({ ...base, customer: "Ash Family" }))
+      .toContain("link it again there, with Confirm, or with Pick a different customer once the row offers it (a Suggested row offers it once it is left unlinked).");
   });
 });
 
@@ -450,6 +507,20 @@ describe("a relink: an unlink, then a link as Confirm or Pick a different custom
     expect(await db.select().from(accountingLinkEnded).where(eq(accountingLinkEnded.familyId, chen))).toMatchObject([{ customerId: "20" }]);
   });
 
+  it("by Confirm all exact email matches: the bulk press links the unlinked family again, as M3a links it", async () => {
+    const before = await linksOfFamily(rivera);
+    expect(await unlinkRow("Rivera Family")).toMatchObject({ ok: true });
+    const view = await loadAccountingLinks();
+    expect(rowOf(view, "Rivera Family").status.key).toBe("suggested");
+    const offer = view.bulk({ status: null, q: "" });
+    expect(offer).toMatchObject({ count: 1, stamp: expect.any(String) });
+    expect(await confirmAllSuggested({ status: "", q: "", count: offer!.count, stamp: offer!.stamp }, tag, linkOp())).toMatchObject({ ok: true });
+    const [familyLink] = await db.select().from(accountingLink).where(eq(accountingLink.familyId, rivera));
+    expect(familyLink).toMatchObject({ customerId: "10", origin: "confirmed", linkedBy: linker.id });
+    expect(before.map((l) => l.id)).not.toContain(familyLink!.id);
+    expect((await db.select().from(accountingLinkEnded)).map((e) => e.id).sort()).toEqual(before.map((l) => l.id).sort());
+  });
+
   it("\"Create a family from this\" for the old customer: refused while this page aims it at the family, a second family once it doesn't", async () => {
     expect(await unlinkRow("Rivera Family")).toMatchObject({ ok: true });
     const op = { ...linkOp(), mayChangeFamilies: false };
@@ -461,5 +532,45 @@ describe("a relink: an unlink, then a link as Confirm or Pick a different custom
     expect((await db.select().from(family)).length).toBe(was + 1);
     // The Riveras keep no link; the new family has the customer's.
     expect(await db.select().from(accountingLink).where(eq(accountingLink.familyId, rivera))).toEqual([]);
+  });
+});
+
+/**
+ * The audit page's record filter (src/lib/audit/query.ts, customersOfRecord()) over the times the presses themselves
+ * store: the unlink's ended_at (the database's statement_timestamp(), past its locks) and a link's linked_at, against
+ * audit_log.at, all from the database's clock. A row naming the old customer is the family's while it was linked to it,
+ * and the next family's from the unlink on; a family relinked to the same customer finds every row naming it.
+ */
+describe("the audit page's record filter, through a real unlink and link", () => {
+  const note = (tagged: string) => writeAudit({ actor: linkOp().actor, action: "season.progress.family.read", targetType: "qbo_customer", targetId: "10", after: { tag: tagged } });
+  const tagsOf = async (familyId: AppFamilyId) => (await auditPage(parseAuditFilters({ record: `family:${String(familyId)}` }))).rows
+    .map((r) => (r.after as { tag?: string } | null)?.tag).filter((t): t is string => t !== undefined).sort();
+
+  it("a row naming the old customer is the unlinked family's before its unlink, and the next family's after it", async () => {
+    await note("while-rivera");
+    expect(await unlinkRow("Rivera Family")).toMatchObject({ ok: true });
+    await note("between");
+    const hand = asOp(await staffWith("adder@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    expect(await addFamily({ role: "family", name: "Birch Family", typeQboId: null }, tag, { ...hand, mayLink: false })).toMatchObject({ ok: true });
+    // The Riveras' row suggests 10 for them (Ana's address): left unlinked, so the customer may go to Birch.
+    expect(await leaveUnlinked(String(rivera), tag, linkOp())).toMatchObject({ ok: true });
+    const birch = rowOf(await loadAccountingLinks(), "Birch Family").familyId;
+    const step = (await loadAccountingLinks()).step(String(birch), "10");
+    expect(step.ok).toBe(true);
+    const offer = (step as Extract<typeof step, { ok: true }>).offer;
+    expect(await linkFamilyToCustomer({ familyId: String(birch), customerId: "10", chosen: offer.chosen, stamp: offer.stamp }, tag, linkOp())).toMatchObject({ ok: true });
+    await note("while-birch");
+    expect(await tagsOf(rivera)).toEqual(["while-rivera"]);
+    expect(await tagsOf(birch)).toEqual(["between", "while-birch"]);
+  });
+
+  it("a family relinked to the same customer finds every row naming it, before, between and after", async () => {
+    await note("before");
+    expect(await unlinkRow("Rivera Family")).toMatchObject({ ok: true });
+    await note("between");
+    const row = rowOf(await loadAccountingLinks(), "Rivera Family");
+    expect(await linkFamilyToCustomer({ familyId: String(rivera), customerId: "10", chosen: "suggested", stamp: row.confirm!.stamp }, tag, linkOp())).toMatchObject({ ok: true });
+    await note("after");
+    expect(await tagsOf(rivera)).toEqual(["after", "before", "between"]);
   });
 });

@@ -771,6 +771,32 @@ describe("how the requirement reads, on the parent's pages", () => {
     expect(posts()).toEqual([]);
   });
 
+  it("an unlink is refused, keeping nothing, while a buy-out for one of the family's student records isn't settled, even one another family chose", async () => {
+    const p = await buyoutFamily(stub);
+    const req = await seedBuyoutRequirement({ appliesTo: "student", title: "Concession shifts QR80" });
+    const staff = await staffWith("linker@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
+    const op = { actor: { door: "staff" as const, id: staff.id, label: staff.email }, ip: null, permission: "Accounting.Link.ReadWrite", staffUserId: staff.id };
+    const familyId = String(p.identity.familyId);
+    const leo = await recordOfCustomer(STUDENT, "student");
+    // Chosen by the family itself, then by the Chenoweth family for the student whose record is now this family's: the
+    // second is refused by its student record alone (buyout.student_id), its family_id being the other family's.
+    for (const chooser of [FAMILY, "8010"]) {
+      for (const state of ["being_invoiced", "invoiced", "being_voided", "stuck"] as const) {
+        const b = await seedBuyout({ requirementId: req, familyQboId: chooser, subjectQboId: STUDENT, chosenBy: p.identity.parentId, state });
+        expect(b.studentId).toBe(leo);
+        if (chooser !== FAMILY) expect(String(b.familyId)).not.toBe(familyId);
+        const row = (await loadAccountingLinks()).rows.find((r) => String(r.familyId) === familyId)!;
+        const links = await db.select().from(accountingLink).orderBy(accountingLink.id);
+        expect(await unlinkFamily({ familyId, linkId: row.unlink!.linkId, stamp: row.unlink!.stamp }, await currentRosterTag(), op), `${chooser}, ${state}`)
+          .toEqual({ ok: false, errors: [LINK_COPY.buyoutUnsettled(1, "“Concession shifts QR80”")] });
+        expect(await db.select().from(accountingLink).orderBy(accountingLink.id)).toEqual(links);
+        expect(await db.select().from(buyout).where(eq(buyout.id, b.id))).toMatchObject([{ state }]);
+        await db.delete(buyout).where(eq(buyout.id, b.id));
+      }
+    }
+    expect(posts()).toEqual([]);
+  });
+
   it("with a paid buy-out the unlink goes through: Volunteer reads 'Paid instead' with no pay-instead link, the pay-instead page is Not found, and nothing is posted", async () => {
     const p = await buyoutFamily(stub);
     const req = await seedBuyoutRequirement({ title: "Concession shifts QR78" });
