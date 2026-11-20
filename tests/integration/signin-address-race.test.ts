@@ -3,10 +3,11 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vites
 /**
  * A sign-in that meets a change of address half way (parents spec, the two gaps it listed as known). The change is a
  * parent's own confirmed change of sign-in email (confirmMyEmailChange(), src/lib/parents/email-change.ts), the one way a
- * person's address changes since the reconcile went, run for real against the QuickBooks stub and held at the one
- * moment that matters: after it has written the new address and before it deletes the person's codes and ends their
- * sessions. A second step's code (since the sign-in release's slice SI-3b, sent only for a right password, to the
- * person a pending step names), or a code check, then runs against it for real, on its own database connection, and the
+ * person's address changes since the reconcile went, made in the portal alone (stage 3's slice 11d: nothing of QuickBooks
+ * is read or written) and held at the one moment that matters: after it has written the new address and before it
+ * deletes the person's codes and ends their sessions. A second step's code (since the sign-in release's slice SI-3b,
+ * sent only for a right password, to the person a pending step names), or a code check, then runs against it for real,
+ * on its own database connection, and the
  * change is let go once the other side is waiting on a lock.
  *
  * Before the fix each of these went wrong: the code was mailed to the old address and worked with the new one; with an
@@ -77,7 +78,7 @@ async function stepFor(email: string): Promise<StepPerson> {
 }
 const send = async (email: string, now: Date) => (await sendSecondStepCode(await stepFor(email), IP, now)).delivery;
 const check = (email: string, code: string, now: Date) => verifySigninCode({ parentId: r.identity.parentId, email }, code, IP, now);
-/** The parent's own confirmed change, from OLD to NEW, written to QuickBooks and then to the portal. */
+/** The parent's own confirmed change, from OLD to NEW, made in the portal alone, from the session the parent confirms in. */
 async function confirmTheChange() {
   const { token } = await seedEmailChange({ parentId: r.identity.parentId, guardianId: r.identity.guardianId, familyId: r.identity.familyId,
     recordQboId: RIVERA.parent.qboId, newEmail: NEW });
@@ -155,8 +156,8 @@ describe("a sign-in that meets a change of address", () => {
     // Her right password with the old address, at the door: the pending step, and the code mailed to the old address.
     const { pending } = await passwordStep(OLD, { headers: { "cf-connecting-ip": IP } });
     const code = await codeMailed(outbox, OLD, 0);
-    // The parent is signed out of the browser the code is checked in. The session the change is confirmed in stays: the
-    // confirm checks under the person's lock that its own session still exists, and changes nothing when it doesn't.
+    // The parent is signed out of the browser the code is checked in; the session the change is confirmed in stays, as the
+    // confirm reads it again under the person's row (and the change then ends it).
     await db.delete(parentAuthSession).where(ne(parentAuthSession.id, r.identity.sessionId));
     const change = await addressChangeUnderWay();
     const checking = codeStep(code, pending, { headers: { "cf-connecting-ip": IP } });

@@ -16,7 +16,7 @@ import { countsFor, shiftCredit, type Filler } from "./rules";
  * How much each family or student is signed up for toward each of these volunteer requirements, keyed by `pairKey`
  * (src/lib/seasons/kinds.ts passes its own in): every place they hold, on a shift and an event still on, that counts
  * toward the requirement for them, is not checked in yet and hasn't ended. A place a student fills counts only while
- * the student's own record is active and in the family the place was taken from (AGENTS.md, Volunteering): a student
+ * the student's own record is active and in the family the place was taken from (docs/agents/volunteering.md): a student
  * who left the roster, or moved, takes the place out of every count. With `asked` (a parent's own family and
  * students) only sign-ups made from that family are read; null is everyone, for staff.
  */

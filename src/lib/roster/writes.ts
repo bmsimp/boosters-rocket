@@ -18,6 +18,7 @@ import { lockRosterAs, rosterTagOf, ROSTER_MOVED } from "@/lib/seasons/roster-lo
 import { connectedToAnotherCompany, customerOfFamily, customerOfGuardian, customerOfStudent, familyLinkState, familyLinkedTo, linksOf, linksOfCustomers, recordsCompany, studentLinkedTo } from "@/lib/families/links";
 import { asAppFamilyId, asAppStudentId, QUICKBOOKS, type AppFamilyId, type AppStudentId } from "@/lib/families/ids";
 import { recordNameWords } from "@/lib/families/words";
+import { clearLeftUnlinked } from "@/lib/families/left-unlinked";
 import { isUuid } from "@/lib/seasons/ids";
 import { askForRosterRefresh, ROSTER_ASK_KEY } from "@/lib/parents/refresh-ask";
 import { studentsRuleInForce } from "@/lib/parents/sessions";
@@ -514,7 +515,8 @@ export type OwnRecordChange =
   | { kind: "family"; familyId: string; made: true; linkId: string }
   | { kind: "student"; studentId: string; familyId: string; made: true; linkId: string }
   /** The portal's own record, saved before its customer was made (stage 3's slice 9d), linked to the new customer. */
-  | { kind: "family"; familyId: string; linked: true; linkId: string }
+  /** `leftUnlinkedCleared`: the accounting links screen's Left unlinked mark was set on it, and this cleared it (stage 4's slice M3a). */
+  | { kind: "family"; familyId: string; linked: true; linkId: string; leftUnlinkedCleared?: true }
   | { kind: "student"; studentId: string; linked: true; linkId: string }
   | { kind: "family"; familyId: string; set: { name?: string; active?: boolean } }
   | { kind: "student"; studentId: string; set: { name?: string; active?: boolean; familyId?: string } }
@@ -577,7 +579,9 @@ export async function changeOwnRecord(tx: Tx, w: RosterWrite, customerId: string
         if ((await customerOfFamily(o.familyId, tx)) !== null) return null;
         const [link] = await tx.insert(accountingLink).values({ system: QUICKBOOKS, realmId: o.realmId, customerId, familyId: o.familyId, origin: "created", linkedBy: o.linkedBy, ...aligned })
           .returning({ id: accountingLink.id });
-        return { kind: "family", familyId: String(o.familyId), linked: true, linkId: link!.id };
+        // A family staff left unlinked on the accounting links screen has a link now: the mark goes with it (stage 4's slice M3a).
+        const cleared = await clearLeftUnlinked(tx, o.familyId);
+        return { kind: "family", familyId: String(o.familyId), linked: true, linkId: link!.id, ...(cleared ? { leftUnlinkedCleared: true as const } : {}) };
       }
       const [made] = await tx.insert(family).values({ name: w.name, active: true }).returning({ id: family.id });
       const [link] = await tx.insert(accountingLink).values({ system: QUICKBOOKS, realmId: o.realmId, customerId, familyId: made!.id, origin: "created", linkedBy: o.linkedBy, ...aligned })
@@ -1813,6 +1817,12 @@ async function saveAndSend(id: AppFamilyId, ask: AddFamilyAsk, rosterTag: string
   if (r.ok && r.queued) {
     return { ok: true, queued: true, message: `${name} is saved in the portal. QuickBooks couldn't take it just now, so making it there is waiting to reach QuickBooks: the portal tries again in a minute, then less often, and links the ${noun} to it once QuickBooks has it. You'll find it on the Reconciliation page until then.` };
   }
+  if (r.ok && r.message !== WRITE_COPY.doneNotShown) {
+    // Taken in at once: linked, unless another family was linked to the new customer while the answer was on its way.
+    const customer = await customerMadeFor(name);
+    const elsewhere = customer === null ? null : await linkedElsewhereWords(saved.familyId, customer, name);
+    if (elsewhere) return { ok: true, unlinked: true, status: "attention", message: `${name} is saved in the portal. ${elsewhere}` };
+  }
   if (r.ok) {
     return { ok: true, message: r.message === WRITE_COPY.doneNotShown ? `${name} is saved in the portal and made in QuickBooks. The portal links the two once it has read QuickBooks again, usually within a few minutes.`
       : `${name} is saved in the portal, made in QuickBooks and linked to its new customer.` };
@@ -1950,6 +1960,27 @@ async function sendCreateStep(write: CreateWrite, filed: Filed, said: string, re
   return { ok: true, cached, customerQboId: typeof answer.Id === "string" ? answer.Id.slice(0, 64) : null };
 }
 
+/** The customer of that name in the cache: QuickBooks takes a name once, so it is the one a create's answer was taken in as. */
+async function customerMadeFor(name: string): Promise<string | null> {
+  const rows = await db.select({ qboId: qboCustomer.qboId, displayName: qboCustomer.displayName }).from(qboCustomer);
+  return rows.find((r) => nameKey(r.displayName) === nameKey(name))?.qboId ?? null;
+}
+
+/**
+ * Whether a family's create, taken in at once, left the family linked to the customer QuickBooks made for it. While the
+ * create is on its way the customer has no link, so a roster read can put it among the customers with no family and staff
+ * can link another family to it (the accounting links screen's Confirm, or "Create a family from this"); changeOwnRecord()
+ * then links nothing. Answered as the words that say so, naming the family linked to it, or null while the family's own
+ * link to that customer stands.
+ */
+async function linkedElsewhereWords(familyId: AppFamilyId, customerQboId: string, said: string): Promise<string | null> {
+  if ((await customerOfFamily(familyId)) === customerQboId) return null;
+  const other = await familyLinkedTo(customerQboId);
+  const [f] = other === null ? [] : await db.select({ name: family.name }).from(family).where(eq(family.id, other));
+  const whose = f ? `another family in the portal, ${recordNameWords(f.name, "family")}, was linked to it while its answer was on its way` : "the portal couldn't link the two";
+  return `QuickBooks made a customer for ${said}, but ${whose}, so ${said} was left unlinked and nothing more was made for it in QuickBooks. Check in QuickBooks which household that customer is before anything else is made for ${said}.`;
+}
+
 /** What "Create in QuickBooks and link" answers: the result to show, and whether anything may have changed (the pages are then made again). */
 export type LinkAnswer = { result: WriteResult; changed: boolean };
 
@@ -1985,18 +2016,19 @@ async function createAndLinkHolding(familyId: string, typeQboId: string | null, 
       after: { outcome, made: made.map((m) => ({ kind: m.kind, id: m.id, customerQboId: m.customerQboId })), notMade,
         ...(stopped ? { stoppedAt: { kind: stopped.kind, id: stopped.id }, code: stopped.code.slice(0, 40), ...(stopped.maybe ? { maybe: true } : {}) } : {}) } });
   /** Stopped at `at`, with the students from `from` on not made (the one stopped at among them, unless it may have been made). */
-  const stop = async (at: Step, from: number, code: string, words: string, maybe: boolean): Promise<LinkAnswer> => {
+  /** `elsewhere`: the family's customer was made, but another family was linked to it first, so pressing again would only make a second. */
+  const stop = async (at: Step, from: number, code: string, words: string, maybe: boolean, elsewhere = false): Promise<LinkAnswer> => {
     // The one stopped at may have been made (`maybe`): it is in neither list, the audit row's nor the words'.
     const later = p.students.slice(from).filter((s) => !(maybe && at.kind === "student" && String(s.id) === at.id));
-    const notMade = [...(at.kind === "family" && !maybe ? [String(p.familyId)] : []), ...later.map((s) => String(s.id))];
+    const notMade = [...(at.kind === "family" && !maybe && !elsewhere ? [String(p.familyId)] : []), ...later.map((s) => String(s.id))];
     await summary("stopped", { ...at, code, maybe }, notMade);
     const notYet = later.map(studentWords);
-    return { changed: made.length > 0 || maybe, result: { ok: false, errors: [
-      made.length ? `Made in QuickBooks and linked: ${listed(made.map((m) => m.name))}.` : "Nothing was made in QuickBooks.",
+    return { changed: made.length > 0 || maybe || elsewhere, result: { ok: false, errors: [
+      made.length ? `Made in QuickBooks and linked: ${listed(made.map((m) => m.name))}.` : elsewhere ? "Nothing was linked." : "Nothing was made in QuickBooks.",
       words,
       ...(notYet.length ? [`Not made in QuickBooks yet: ${listed(notYet)}.`] : []),
-      maybe ? "Once the roster has been read again, press “Create in QuickBooks and link” again to carry on with whatever is still unlinked."
-        : "Press “Create in QuickBooks and link” again to carry on with whatever is still unlinked.",
+      ...(elsewhere ? [] : [maybe ? "Once the roster has been read again, press “Create in QuickBooks and link” again to carry on with whatever is still unlinked."
+        : "Press “Create in QuickBooks and link” again to carry on with whatever is still unlinked."]),
     ] } };
   };
 
@@ -2011,6 +2043,10 @@ async function createAndLinkHolding(familyId: string, typeQboId: string | null, 
       // the next roster read. Its students wait for that.
       return stop(at, 0, "not_linked_yet", `QuickBooks made ${p.familyName}, but the portal links the two only after its next read of QuickBooks, usually within a few minutes.`, true);
     }
+    // Its students go under that customer only while the family's own link to it stands: another family may have been
+    // linked to it while the answer was on its way, and changeOwnRecord() then linked nothing.
+    const elsewhere = await linkedElsewhereWords(p.familyId, sent.customerQboId, p.familyName);
+    if (elsewhere) return stop(at, 0, "customer_has_family", elsewhere, false, true);
     made.push({ ...at, customerQboId: sent.customerQboId, name: p.familyName });
     sentNames.push(p.familyWrite.name);
     familyCustomer = sent.customerQboId;
@@ -2820,14 +2856,22 @@ export function keptRefusalWords(code: string | null, holds: string | null): str
   return "QuickBooks refused it: QuickBooks wouldn't take it.";
 }
 
+/** For a kept move whose family joined has a customer in QuickBooks now: whether the move can be sent (QueueView.joined). */
+export type JoinedNow = "sendable" | "not_offered" | null;
 /**
  * Why a move the portal kept didn't go through, in words, for every code a kept move can hold (slice 9f), saying who
  * stopped it: never the code itself. `holds`: where QuickBooks has the student now, by the portal's name of that family
- * where it has a record, else the customer's name in QuickBooks, said as text.
+ * where it has a record, else the customer's name in QuickBooks, said as text. `joined`: the family the student was
+ * moved to has a customer in QuickBooks now (QueueView.joined), and whether the move can be sent, so a move kept for its
+ * having none is told by what is so now.
  */
-export function keptMoveWords(code: string | null, holds: string | null): string {
+export function keptMoveWords(code: string | null, holds: string | null, joined: JoinedNow = null): string {
   const now = holds ? ` QuickBooks has the student under “${holds}” now.` : "";
   if (code === NO_FAMILY_CUSTOMER) {
+    if (joined !== null) {
+      return `The portal held it back when it was saved: the family the student was moved to had no customer in QuickBooks then. It has one now${joined === "sendable"
+        ? ", so the portal's move can be sent with “Send the portal's value” on the Reconciliation page." : "."}`;
+    }
     return "The portal held it back: the family the student was moved to has no customer in QuickBooks yet, so there is nowhere to put them there. Create the family in QuickBooks first, with “Create in QuickBooks and link” on the family's page, then send the move.";
   }
   if (code === "fault_5010" || code === "moved_on" || code === NO_LINK_VERSION || code === PLACE_DIFFERS) {
@@ -2877,9 +2921,10 @@ const valueRefused = (code: string) => { const m = /^fault_(\d{1,6})$/.exec(code
 /**
  * Why a change the portal kept didn't go through, in words, by what it was: a move's (keptMoveWords()), a parent's
  * details' (keptContactWords(), field by field with `differs` where the caller has it), or any other's (keptRefusalWords()).
+ * `joined`: for a move, whether the family joined has a customer in QuickBooks now, and the move can be sent (QueueView.joined).
  */
-export const keptWordsFor = (w: RosterWrite | QueuedWrite, code: string | null, holds: string | null, differs?: readonly ContactDiffer[] | null) =>
-  w.op === "move" ? keptMoveWords(code, holds) : w.op === "contact" ? keptContactWords(code, w, differs) : keptRefusalWords(code, holds);
+export const keptWordsFor = (w: RosterWrite | QueuedWrite, code: string | null, holds: string | null, differs?: readonly ContactDiffer[] | null, joined: JoinedNow = null) =>
+  w.op === "move" ? keptMoveWords(code, holds, joined) : w.op === "contact" ? keptContactWords(code, w, differs) : keptRefusalWords(code, holds);
 /**
  * Whose invoices each family sees while a move hasn't reached the portal's copy of QuickBooks (open question 14:
  * invoices follow once QuickBooks takes the move), in words for staff: `seenBy`, the portal's name of the family that

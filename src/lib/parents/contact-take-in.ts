@@ -201,7 +201,7 @@ async function planPeople(tx: Tx, shape: MembershipShape, familyRows: (customer:
   const links = await linksOf({ families, students: [] }, tx);
   const out: Omit<TakeInPlan, "notedAt"> = { people: [], families: [], counts: { peopleWithNoRecord: 0, peopleDisagreeing: 0 } };
   for (const person of people) {
-    // The records the person's sign-in comes from, by the rule myOwnRecord() gives each of their rows (ownRecordIn()):
+    // The records the person's sign-in comes from, by the rule ownRecordIn() gives each of their rows:
     // only one whose email field holds their sign-in address, so nobody is given another person's phone or address.
     const records = new Map<string, Cached>();
     for (const row of rows.filter((r) => r.parentId === person.id)) {

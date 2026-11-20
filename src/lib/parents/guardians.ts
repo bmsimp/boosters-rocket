@@ -15,11 +15,11 @@
 // (lockedPerson()): the parents' settings lock, shared, first (a switch takes it before the people it touches, so a
 // welcome switched on or off meanwhile is seen as it ends); then the person's own: for an add, the address lock and the
 // `parent` row that holds the address; for a remove or a reinstate, the `parent` row alone (their address isn't
-// changed or claimed); then the roster lock, as a parent's email confirm takes it after the same person's locks (were
-// the roster lock held while waiting for the person, that confirm, holding the person and asking for the roster, would
-// close a cycle Postgres ends by aborting one of the two); then the guardian row, and what hangs on the person (their
-// requests, codes and sessions) last. The roster lock is waited for at most three seconds, as the email confirm waits
-// for it (a roster read holds it through its whole QuickBooks read, and the person's row held meanwhile would hold up
+// changed or claimed); then the roster lock, as renamePerson() (people.ts) and the other writes here take it after the same person's
+// locks (were the roster lock held while waiting for the person, one of them, holding the person and asking for the
+// roster, would close a cycle Postgres ends by aborting one of the two; the email confirm took the roster after the
+// person too until stage 3's slice 11d, and takes no roster lock now); then the guardian row, and what hangs on the
+// person (their requests, codes and sessions) last. The roster lock is waited for at most three seconds (a roster read holds it through its whole QuickBooks read, and the person's row held meanwhile would hold up
 // that person's code request and the daily clean-up): when it is busy, nothing has been written and the answer is
 // `busy`. A guardian row names the family itself in `family_id` (a person is in a family record once, the unique index
 // of migration 0040): nothing else gives a row its family since stage 3's slice 9c (no roster read brings the records
@@ -47,7 +47,7 @@ export const PERSON_NAME_MAX = 100;
 const EMAIL_MAX = 320;
 /** The longest note staff may keep when removing a guardian. */
 export const REMOVE_NOTE_MAX = 500;
-/** How long a staff guardian write waits for the roster lock before it answers `busy`: the email confirm's three seconds. */
+/** How long a staff guardian write (and renamePerson()) waits for the roster lock before it answers `busy`: three seconds. */
 export const ROSTER_WAIT_MS = 3000;
 /** How long the roster lock is waited for; a test may shorten or lengthen it. */
 export type Waits = { rosterWaitMs?: number };
