@@ -313,8 +313,8 @@
     {
       "idx": 44,
       "version": "7",
-      "when": 1795148083978,
-      "tag": "0044_authenticator_app",
+      "when": 1795144777896,
+      "tag": "0044_contact_details_additive",
       "breakpoints": true
     }
   ]

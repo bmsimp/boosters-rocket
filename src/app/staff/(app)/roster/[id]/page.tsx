@@ -7,7 +7,7 @@ import { writeAudit } from "@/lib/audit/log";
 import { loadRosterPage, familyEntry, type RecordStudent } from "@/lib/roster/queries";
 import { familyRecordAt } from "@/lib/families/address";
 import type { AppFamilyId } from "@/lib/families/ids";
-import { familyCover, moveTargets, studentsBeingMade, versionsOf } from "@/lib/roster/writes";
+import { familyCover, guardianCustomers, guardianStandings, moveTargets, studentsBeingMade, versionsOf } from "@/lib/roster/writes";
 import { loadOpenWrites } from "@/lib/roster/queue";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { familySignins, type FamilySignin } from "@/lib/parents/directory";
@@ -48,7 +48,8 @@ function People({ id, title, noun, people, contact, empty }: { id: string; title
     { key: "name", header: noun, rowHeader: true, cell: (p) => p.name },
     ...(contact ? [
       { key: "email", header: "Email", cell: (p: Person) => p.customer?.email ?? "No email address" },
-      { key: "phone", header: "Phone", cell: (p: Person) => p.customer?.phone ?? "No phone number" },
+      // QuickBooks' own copy, from the roster cache: since stage 3's slice 11a the phone a parent sees and changes is the portal's.
+      { key: "phone", header: "Phone in QuickBooks", cell: (p: Person) => p.customer?.phone ?? "No phone number" },
     ] : []),
     { key: "status", header: "In QuickBooks", cell: (p) => p.standing ?? standing(p.customer) },
   ];
@@ -67,11 +68,14 @@ function People({ id, title, noun, people, contact, empty }: { id: string; title
  * guardian can't be added now, or null when one can: the action checks it again, under the roster lock. A family with
  * no link takes guardians too (stage 3's slice 9d).
  */
-function SignIns({ familyId, signins, links, changes, addable }: { familyId: AppFamilyId; signins: FamilySignin[]; links: boolean; changes: boolean; addable: string | null }) {
+function SignIns({ familyId, signins, links, changes, addable, inQuickBooks }: { familyId: AppFamilyId; signins: FamilySignin[]; links: boolean; changes: boolean; addable: string | null;
+  inQuickBooks: Map<string, string> }) {
   const columns: Column<FamilySignin>[] = [
     { key: "name", header: "Person", rowHeader: true, cell: (s) => (links ? <Link href={`/staff/parents/${s.parentId}`}>{s.name}</Link> : s.name) },
     { key: "email", header: "Email", cell: (s) => s.email },
     { key: "words", header: "Sign-in", cell: (s) => s.words },
+    // Where QuickBooks stands for the guardian's own Parent customer (stage 3's slice 9h), in words.
+    { key: "quickbooks", header: "In QuickBooks", cell: (s) => inQuickBooks.get(s.guardianId) ?? "Nothing in QuickBooks for this membership." },
     ...(changes ? [{ key: "change", header: "Change", quiet: true, cell: (s: FamilySignin) => <GuardianChange name={s.name} guardianId={s.guardianId} open={s.open} reinstatable={s.reinstatable} /> }] : []),
   ];
   return (
@@ -85,7 +89,7 @@ function SignIns({ familyId, signins, links, changes, addable }: { familyId: App
           <h3>Add a guardian</h3>
           {addable !== null ? <Notice tone="info" live="none">{addable}</Notice> : (
             <>
-              <p>They sign in with this address and a password they choose from a link the portal emails them: the welcome email brings one while welcome emails are on, and Resend welcome email on their page, or Set up or reset my password on the sign-in page, sends one at any time. If the address already belongs to someone in the portal, you are shown who it is and asked whether this is the same person before anything changes: one address is one person, who may be a guardian of several families.</p>
+              <p>They sign in with this address and a password they choose from a link the portal emails them: the welcome email brings one while welcome emails are on, and Resend welcome email on their page, or Set up or reset my password on the sign-in page, sends one at any time. If the address already belongs to someone in the portal, you are shown who it is and asked whether this is the same person before anything changes: one address is one person, who may be a guardian of several families. Where the club&apos;s books have parents of their own and this family is linked, the guardian then gets their own Parent customer under the family in QuickBooks, with their name and this address, unless QuickBooks already has a customer of that name here.</p>
               <AddGuardianForm act={addGuardianAction.bind(null, String(familyId))} />
             </>
           )}
@@ -133,6 +137,9 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   const links = can(ctx.effective, "Parents.ReadWrite");
   const changesGuardians = can(ctx.effective, "Roster.Family.ReadWrite");
   const signins = await familySignins(familyId);
+  const signinStandings = await guardianStandings(signins.map((s) => ({ guardianId: s.guardianId, familyId, name: s.name, open: s.open })));
+  // The Parent customers a portal guardian is linked to (stage 3's slice 9h): shown as theirs, with no forms here.
+  const ofGuardians = await guardianCustomers(fam.parents.map((p) => p.qboId), familyId);
   const waiting = await loadOpenWrites({ familyId, showAmounts: can(ctx.effective, "Finance.Balance.Read") });
   // Changes are offered to staff who may make them, while QuickBooks is connected: a linked record's rename and
   // make-inactive send its kind and the app's id, the family action the family's app id and a stamp of whom it covers,
@@ -167,6 +174,7 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
     ...fam.students.flatMap((s): [string, { kind: "student"; id: string; name: string }][] => (s.customer ? [[s.customer.qboId, { kind: "student", id: String(s.id), name: s.name }]] : [])),
   ] : []);
   const edit = canChange && inQuickBooks ? { rosterTag, versions: await versionsOf(records.map((r) => r.qboId)), familyId: String(familyId), records: linkedRecords,
+    guardianCustomers: ofGuardians,
     blocked: new Set(open.map((w) => (w.write.op === "create" || !("qboId" in w.write) ? null : w.write.qboId)).filter((x): x is string => x !== null)),
     // A student with a move QuickBooks refused that the portal kept (slice 9f) isn't made inactive until it is sent or
     // given up (deactivateLinked() refuses it): their make-inactive is not offered, and the page says why.
@@ -196,7 +204,11 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
       {entry.kind === "family" ? (
         <>
           <People id="entry-students-h" title="Students" noun="Student" people={fam.students.map((s) => ({ key: String(s.id), name: s.name, customer: s.customer, standing: studentStanding(s) }))} contact={false} empty="The portal holds no students for this family." />
-          <People id="entry-parents-h" title="Parents in QuickBooks" noun="Parent" people={fam.parents.map(ofCustomer)} contact empty="QuickBooks lists no parents under this family." />
+          <People id="entry-parents-h" title="Parents in QuickBooks" noun="Parent" contact empty="QuickBooks lists no parents under this family."
+            people={fam.parents.map((c) => ({ ...ofCustomer(c), standing: `${standing(c)}: ${ofGuardians.get(c.qboId) === "own" ? "a portal guardian's own, changed through them under Portal sign-ins and on their page"
+              : ofGuardians.get(c.qboId) === "other" ? "linked to a portal guardian, but not one guardian's own under this family (several share it, or theirs is another family), so the portal sends nothing for it: change it in QuickBooks, and the mapping screen will sort it out"
+              : ofGuardians.get(c.qboId) === "removed" ? "the own Parent customer of a guardian removed from this family, left active in QuickBooks (a removal makes it inactive only when its balance allows): adding them back under Portal sign-ins uses it again"
+              : "not a portal guardian; adding the person under Portal sign-ins doesn't use it, and the mapping screen will offer to link it"}` }))} />
         </>
       ) : (
         <People id="entry-member-h" title="In QuickBooks" noun="Member" people={customer ? [ofCustomer(customer)] : []} contact empty="QuickBooks lists no customer for this member." />
@@ -220,7 +232,7 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
         may={can(ctx.effective, "Accounting.Link.ReadWrite")}
         types={page.shape?.kind === "flat" ? page.shape.memberTypeIds.map((t) => ({ qboId: t, name: page.types.find((x) => x.qboId === t)?.name ?? "A member type" })) : []} />}
       {page.shape && <WhatChanges shape={page.shape} canChange={canChange} unlinked={!fam.linked} />}
-      <SignIns familyId={familyId} signins={signins} links={links} changes={changesGuardians}
+      <SignIns familyId={familyId} signins={signins} links={links} changes={changesGuardians} inQuickBooks={signinStandings}
         addable={!fam.active ? "This family is inactive in the portal, so nobody can be added to it."
           : making ? "Making this family in QuickBooks is still waiting on the queue, so nobody can be added to it for now." : null} />
       <Freshness page={page} admin={admin} />

@@ -166,7 +166,7 @@ test("a parent's visit: sign in by password and emailed code, read and do what t
     await shot(page, "p11-switch-back");
   });
 
-  await test.step("opens their details from Family; the club's books can't be reached from this run", async () => {
+  await test.step("opens their details from Family, in a form that holds the portal's own", async () => {
     await tab("Family").click();
     await expect(page).toHaveURL(/\/family$/);
     await noSidewaysScroll(page);
@@ -174,9 +174,8 @@ test("a parent's visit: sign in by password and emailed code, read and do what t
     await page.getByRole("link", { name: "Update my details" }).click();
     await expect(page).toHaveURL(/\/family\/details$/);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Update your details");
-    // The record's id is not digits, so the page never asks QuickBooks for it, and offers no form to send.
-    await expect(page.locator("main")).toContainText("can't be changed here just yet");
-    await expect(page.getByRole("button", { name: /Save/ })).toHaveCount(0);
+    // Her phone and address are the portal's own (stage 3's slice 11a): the form holds them, and nothing is sent here.
+    await expect(page.getByRole("button", { name: "Save my details" })).toBeVisible();
     await shot(page, "p13-details");
   });
 

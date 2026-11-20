@@ -92,6 +92,20 @@ installation with. `docker compose ps` shows what is running, and `docker compos
     company. Until the mapping screen ships, the portal refuses a company other than the one its families were read
     from anyway: see [Reconnecting QuickBooks: Connecting a different
     company](quickbooks-reconnect.md#connecting-a-different-company).
+- In any state, "Parents' phones and mailing addresses haven't been copied from QuickBooks into the portal yet": since
+  the update that made a guardian's phone and mailing address the portal's own, the worker copies them once from each
+  parent's own record in QuickBooks ([Updates: Parents' phones and addresses](updates.md#parents-phones-and-addresses)).
+  The note says what the copy waits for, and the rest of this line says why:
+  - "once an Admin connects QuickBooks", "once an Admin connects QuickBooks again" or "once QuickBooks is connected to
+    the company the roster was read from": mend the connection as the entries above say.
+  - "once the membership shape names only customer types QuickBooks has": **Settings**, **QuickBooks**, **Change**,
+    step 3: choose the shape again. The copy waits for the roster read made under the shape saved, which saving it
+    starts.
+  - "after the worker's next successful read of the roster": the worker reads it at once and then once an hour until
+    a read works. If it says so for more than an hour, look at the last roster refresh's note above.
+  - "when it next wakes": the read is done; the copy runs within a minute, and the note goes.
+  Meanwhile parents see no phone or address of theirs and can type their own on their Family page, which the copy
+  never replaces. The note goes once the copy has run.
 
 ## Every family's invoices
 

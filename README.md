@@ -11,8 +11,8 @@ QuickBooks Online.
   keeps a copy for speed; it never holds its own version of the books. The families, students and
   sign-ins are the portal's own records, each linked to its customer in QuickBooks; a change made
   in QuickBooks doesn't change them. It
-  writes back only what someone asks it to: a parent's own phone, mailing address and sign-in
-  email, the roster changes staff make (new families, students and parents, names, a student's
+  writes back only what someone asks it to: a parent's own sign-in email (a parent's phone and
+  mailing address are the portal's own), the roster changes staff make (new families, students and parents, names, a student's
   family, making a customer inactive), and the one invoice it ever makes, for a guardian who
   chooses to pay instead of volunteering. It never deletes anything and never touches a payment.
 - **Commitment forms are signed in [Documenso](https://github.com/documenso/documenso)**, which

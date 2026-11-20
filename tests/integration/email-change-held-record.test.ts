@@ -7,9 +7,10 @@ import { asParent, renderPage } from "../helpers/signed-in";
  *  (c) QuickBooks took the parent's own change, the portal's side failed, and a roster read put the new address in the
  *      cache: the link still finishes the change (loadMyRecordForMyEmailChange(), src/lib/parents/my-family.ts);
  *  (d) the club gave the record to another person at that same address, name and phone and all.
- * What a parent is shown as their own, and may edit, goes by their sign-in address alone (loadMyFamily(),
- * loadMyRecord()): in both, the pages show the parent's own name and sign-in address, nothing of the record, and offer
- * no edit of it, and a save sent anyway changes nothing.
+ * Whether a parent may change their sign-in email goes by their sign-in address alone (loadMyRecord()): in both, the
+ * pages offer no change of it. What a parent is shown as their own details is the portal's own (loadMyFamily()'s `me`,
+ * stage 3's slice 11a): their name, their sign-in address and the phone the portal holds, nothing of the record, and a
+ * save changes the portal's own details only, never the record.
  */
 const stubBase = vi.hoisted(() => ({ url: "" }));
 vi.mock("@/lib/quickbooks/endpoints", async (original) => {
@@ -21,7 +22,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, parent, qboCustomer } from "@/lib/db/schema";
-import { CONTACT_COPY, loadMyContact } from "@/lib/parents/contact-edits";
+import { loadMyContact } from "@/lib/parents/contact-edits";
 import { canChangeMyEmail, confirmMyEmailChange, findMyEmailChange } from "@/lib/parents/email-change";
 import { loadMyFamily, loadMyRecord } from "@/lib/parents/my-family";
 import { saveDetailsAction } from "@/app/(parent)/family/details/actions";
@@ -60,11 +61,10 @@ async function recordReads(o: { name?: string; phone?: string }) {
   await syncAppRecords();
 }
 
-/** The parent's own name and sign-in address, as a sign-in with no record shows them, and no edit of a record. */
+/** The parent's own name and sign-in address, and the portal's own details: no change of the sign-in email, and nothing of the record. */
 function showsOnlyTheirOwn(html: string) {
   expect(html).toContain(`<dt>Name</dt><dd>${r.identity.name}</dd><dt>Email</dt><dd>${OLD}</dd>`);
-  expect(html).toContain("For now, the club makes changes for you.");
-  expect(html).not.toMatch(/<form\b|<input\b|Save my details|Update my details|href="\/family\/details"|href="\/family\/email"/);
+  expect(html).not.toMatch(/href="\/family\/email"|Change my sign-in email/);
   expect(html).not.toContain(NEW);
 }
 
@@ -78,10 +78,10 @@ describe("a record whose email field reads as the parent's own unconfirmed chang
 
   it("given to another person by the club, shows the parent nothing of that person and offers no edit", async () => {
     await recordReads(Q);
-    // What the pages are given to show: no record of theirs, so nothing of the record reaches a component.
-    expect((await loadMyFamily(ctx()))?.me).toBeNull();
+    // What the pages are given to show: the portal's own details, and no record of theirs, so nothing of the record reaches a component.
+    expect((await loadMyFamily(ctx()))?.me).toEqual({ name: r.identity.name, email: OLD, phone: RIVERA.parent.phone, edits: "own" });
     expect(await loadMyRecord(ctx())).toBeNull();
-    expect(await loadMyContact(ctx())).toEqual({ state: "none" });
+    expect(await loadMyContact(ctx())).toMatchObject({ state: "ok", form: { values: { phone: RIVERA.parent.phone }, version: "p:0" } });
     expect(await canChangeMyEmail(ctx())).toBe(false);
     asParent(r.identity);
     for (const page of [FamilyPage, FamilyDetailsPage]) {
@@ -94,26 +94,25 @@ describe("a record whose email field reads as the parent's own unconfirmed chang
     expect(customerReads()).toEqual([]);
   });
 
-  it("given to another person by the club, takes no save sent anyway, and says to ask the club", async () => {
+  it("given to another person by the club, a save changes the portal's own details and nothing of the record", async () => {
     await recordReads(Q);
     asParent(r.identity);
-    const result = await saveDetailsAction(contactForm({ ...shownTo(RIVERA), phone: "512-555-0999" }, "1"));
-    expect(result).toEqual({ ok: false, errors: [CONTACT_COPY.askTheClub] });
-    // Not the words for books that can't be reached: there is no record of theirs to reach.
-    expect(CONTACT_COPY.askTheClub).not.toBe(CONTACT_COPY.tryLater);
+    const result = await saveDetailsAction(contactForm({ ...shownTo(RIVERA), line1: "", city: "", region: "", postalCode: "", phone: "512-555-0999" }, "p:0"));
+    expect(result).toMatchObject({ ok: true, current: { values: { phone: "512-555-0999" }, version: "p:1" } });
+    expect((await db.select({ phone: parent.phone }).from(parent).where(eq(parent.id, r.identity.parentId)))[0]!.phone).toBe("512-555-0999");
     // Nothing was asked of QuickBooks, and nothing changed there or in the cache.
     expect(stub.apiCalls().filter((c) => c.path.includes("/customer"))).toEqual([]);
     expect(posts()).toEqual([]);
     expect(inQuickBooks(stub, R_PARENT).PrimaryPhone).toEqual({ FreeFormNumber: Q.phone });
     expect((await db.select({ phone: qboCustomer.phone }).from(qboCustomer).where(eq(qboCustomer.qboId, R_PARENT)))[0]!.phone).toBe(Q.phone);
-    expect((await audits()).filter((a) => a.action === "parent.contact.save.failed").map((a) => a.after)).toEqual([{ code: "no_record" }]);
+    expect((await audits()).filter((a) => a.action === "parent.details.save").map((a) => [a.targetType, a.targetId])).toEqual([["parent", r.identity.parentId]]);
     expect((await audits()).filter((a) => a.action === "parent.contact.save")).toEqual([]);
   });
 
   it("made by QuickBooks taking the parent's change, shows their own name and address until the live link finishes it", async () => {
     await recordReads({});
-    expect((await loadMyFamily(ctx()))?.me).toBeNull();
-    expect(await loadMyContact(ctx())).toEqual({ state: "none" });
+    expect((await loadMyFamily(ctx()))?.me).toMatchObject({ email: OLD, edits: "own" });
+    expect(await loadMyContact(ctx())).toMatchObject({ state: "ok" });
     asParent(r.identity);
     showsOnlyTheirOwn(await renderPage(FamilyPage));
     // The link mailed to the new address still asks, and confirming finishes the portal's side, sending nothing.

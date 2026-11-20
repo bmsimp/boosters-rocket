@@ -82,6 +82,27 @@ know yet, a code too). After the update:
    ("Set up or reset my password" on the sign-in page), at the Standard level every club has until a later release
    offers Strict.
 
+## Parents' phones and addresses
+
+The update that makes a guardian's phone and mailing address the portal's own (rather than read from QuickBooks each
+time) copies them in once, by itself:
+
+- **What and when.** The worker copies each parent's phone and mailing address from their own record in QuickBooks
+  (or, in books with no Parent customers, each family's from the family's own customer), once, after the first
+  roster read the new version makes. It asks for that read itself at its first wake after the update, and again once
+  an hour while a read fails. It needs QuickBooks connected to the company the roster was read from and a membership
+  shape that names only customer types QuickBooks has; after a shape is saved, it waits for the read made under it.
+  The Health page's **QuickBooks** line says, while the copy hasn't run, what it is waiting for
+  ([Health page warnings: QuickBooks](health-warnings.md#quickbooks)).
+- **Until then** parents see no phone or address on Home or Family. They can type their own on their Family page
+  (**Update my details**), and the copy never replaces what a parent has typed.
+- **A person whose records disagree.** A parent with records in two families that hold two different phones, or two
+  different addresses (or one that holds one and one that holds none), is given none of that one: they type their own.
+  Nobody is given a phone or address from a record whose email field doesn't hold the address they sign in with.
+- **What was copied** is recorded once, as counts only, in the audit log: **Audit**, the row "Phones and mailing
+  addresses taken into the portal from QuickBooks' records, once, with counts" from the worker (how many were given a phone, an address, whose records disagreed, who had no
+  record of their own). After it, a change made in QuickBooks no longer reaches what parents see.
+
 ## When the start stops for a backup
 
 A new version often has changes to make to the portal's database. Before the `migrate` step makes them to a database

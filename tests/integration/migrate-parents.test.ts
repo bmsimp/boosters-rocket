@@ -15,6 +15,18 @@ import { dropScratchDatabase, makeScratchDatabase } from "../setup/worker-databa
 const DATABASE_WORK = 300_000;
 const { name: NAME, url: DB_URL } = scratchDatabase("migrate_parents");
 let oldFolder = "";
+let throughFolder = "";
+
+/** A copy of the migrations folder holding only the migrations up to `last` (by index). */
+function migrationsUpTo(last: number): string {
+  const folder = mkdtempSync(path.join(tmpdir(), "br-migrate-"));
+  cpSync("drizzle", folder, { recursive: true });
+  const journal = path.join(folder, "meta", "_journal.json");
+  const j = JSON.parse(readFileSync(journal, "utf8")) as { entries: { idx: number }[] };
+  j.entries = j.entries.filter((e) => e.idx <= last);
+  writeFileSync(journal, JSON.stringify(j));
+  return folder;
+}
 
 async function migrateWith(folder: string) {
   const pg = postgres(DB_URL, { max: 1, onnotice: () => {} });
@@ -26,12 +38,7 @@ describe("migration to person records", { timeout: 60_000 }, () => {
   beforeAll(async () => {
     await makeScratchDatabase("migrate_parents"); // marked as this run's: a database of that name the run didn't make is refused
     // The database as it was before this plan: migrations up to 0003 only.
-    oldFolder = mkdtempSync(path.join(tmpdir(), "br-migrate-"));
-    cpSync("drizzle", oldFolder, { recursive: true });
-    const journal = path.join(oldFolder, "meta", "_journal.json");
-    const j = JSON.parse(readFileSync(journal, "utf8")) as { entries: { idx: number }[] };
-    j.entries = j.entries.filter((e) => e.idx <= 3);
-    writeFileSync(journal, JSON.stringify(j));
+    oldFolder = migrationsUpTo(3);
     await migrateWith(oldFolder);
 
     const pg = postgres(DB_URL, { max: 1, onnotice: () => {} });
@@ -45,12 +52,16 @@ describe("migration to person records", { timeout: 60_000 }, () => {
     await pg`INSERT INTO setting (key, value) VALUES ('setup.state', ${pg.json({ status: "open", step: "parent", adminEmail: null, finishedAt: null })})`;
     await pg.end();
 
-    await migrateWith(path.resolve("drizzle"));
+    // Up to 0043: migration 0044 (stage 3's slice 11a) clears every phone this one copied, since the take-in fills the
+    // person's phone from their own record (tests/integration/migrate-contact-details.test.ts).
+    throughFolder = migrationsUpTo(43);
+    await migrateWith(throughFolder);
   }, DATABASE_WORK);
 
   afterAll(async () => {
     await dropScratchDatabase(NAME);
     rmSync(oldFolder, { recursive: true, force: true });
+    rmSync(throughFolder, { recursive: true, force: true });
   }, DATABASE_WORK);
 
   const q = async <T>(f: (pg: postgres.Sql) => Promise<T>) => {

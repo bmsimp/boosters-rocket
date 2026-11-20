@@ -1,20 +1,23 @@
 // Privacy: the one query a parent page reads its family through. It takes the session's ParentCtx and nothing else,
 // reads only the rows of that family, and returns that family alone. The family's name and students are the app's own
-// records (ctx.familyId, src/lib/families/session-family.ts), with no link and no roster cache; only the person's own
-// QuickBooks record (`me`, and the record the parent's two writes change) is still read from the roster cache, through
-// the family's own link and the guardian row's source. It never imports the staff-only modules
-// (src/lib/roster/queries.ts, the staff functions of ./directory.ts): tests/integration/page-guards.test.ts scans this file.
+// records (ctx.familyId, src/lib/families/session-family.ts), with no link and no roster cache, and so are the contact
+// details a parent sees (`me`: the person's own, or the family's in books with no parent type; stage 3's slice 11a).
+// Only the person's own QuickBooks record that the change of sign-in email writes (loadMyRecord()) is still read from
+// the roster cache, through the family's own link and the guardian row's source. It never imports the staff-only
+// modules (src/lib/roster/queries.ts, the staff functions of ./directory.ts): tests/integration/page-guards.test.ts
+// scans this file.
 import "server-only";
-import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
-import { db } from "@/lib/db/client";
-import { guardian, jobRun, parentEmailChange, qboConnection, qboCustomer, qboCustomerType } from "@/lib/db/schema";
+import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { db, type Tx } from "@/lib/db/client";
+import { family, guardian, parent, parentEmailChange, qboConnection, qboCustomer, qboCustomerType } from "@/lib/db/schema";
 import type { ParentCtx } from "@/lib/guards";
-import { getShape, missingTypes } from "@/lib/roster/shape";
-import { ROSTER_JOB, getRosterSource } from "@/lib/roster/source";
+import { getShape, missingTypes, type MembershipShape } from "@/lib/roster/shape";
+import { getRosterSource } from "@/lib/roster/source";
 import type { AppStudentId } from "@/lib/families/ids";
 import { customerOfFamily } from "@/lib/families/links";
 import { sessionFamily } from "@/lib/families/session-family";
 import { recordNameWords } from "@/lib/families/words";
+import type { ContactValues } from "./contact-fields";
 import { fieldHasChange, fieldSignsIn } from "./email-field";
 
 /**
@@ -22,32 +25,32 @@ import { fieldHasChange, fieldSignsIn } from "./email-field";
  * by `id`, never by name.
  */
 export type MyStudent = { id: AppStudentId; name: string };
-/** A contact record as QuickBooks has it. The email field is shown as written there; it can hold more than one address. */
+/** A contact record: the name, the email and the phone. On a QuickBooks record the email field is shown as written there; it can hold more than one address. */
 export type MyContact = {
   name: string; email: string | null; phone: string | null;
   /**
-   * Set on a QuickBooks record whose phone and address the signed-in person may change from the portal
-   * (./contact-edits.ts): "own" for a parent's own record, "family" for the family's record, which every parent of
-   * that family signs in through and shares. Not set on details the portal made up from the sign-in itself.
+   * Whose phone and address the signed-in person may change from the portal (./contact-edits.ts): "own" for the
+   * person's own, "family" for the family's, which every parent of that family shares (books with no parent type).
    */
   edits?: "own" | "family";
 };
+/** What a parent's pages show of their contact details: the person's name and sign-in address, and the phone they change. */
+export type MyDetailsShown = MyContact & { email: string; edits: "own" | "family" };
 export type MyFamily = {
   /** The family's name as its record holds it, in words when the portal knows none (in a flat club, the member's own name). */
   name: string;
   /** The family's active students, by name. Null when the membership shape lists no students: the page says nothing rather than guess. */
   students: MyStudent[] | null;
   /**
-   * The signed-in person's own QuickBooks record, when their sign-in came from one in this family and its email field
-   * still holds the address they sign in with; otherwise null.
+   * The signed-in person's name and sign-in address with the phone the portal holds for them: their own, or, in books
+   * with no parent type, their family's (whoseDetails()). The portal's own records alone (stage 3's slice 11a): every
+   * guardian the gate lets in has it, whether or not QuickBooks holds a record of them.
    */
-  me: MyContact | null;
-  /** When the roster was last read from QuickBooks successfully. */
-  rosterReadAt: string | null;
+  me: MyDetailsShown;
 };
 /**
- * The signed-in person's own QuickBooks record, for the code that reads and changes it in QuickBooks
- * (./contact-edits.ts). The id is for the server only: it is never given to a page or a client component.
+ * The signed-in person's own QuickBooks record, for the code that changes their sign-in email in it
+ * (./email-change.ts). The id is for the server only: it is never given to a page or a client component.
  */
 export type MyRecord = {
   qboId: string; parentQboId: string | null; contact: MyContact & { edits: "own" | "family" };
@@ -63,10 +66,50 @@ export type MyRecord = {
   typeQboIds: readonly string[];
 };
 
-type Row = { qboId: string; displayName: string; active: boolean; parentQboId: string | null; typeQboId: string | null; email: string | null; phone: string | null };
-type Mine = { row: Row } & Pick<MyRecord, "signsInBy" | "typeQboIds">;
+/**
+ * Whose contact details a parent sees and changes (open question 6 of the app-owned families spec): the family's while
+ * the stored membership shape says the club's books have no parent type (flat, or layered with no parent type), where
+ * every guardian of the family shares one set; the person's otherwise, a missing shape included, one set whatever
+ * families they are in. Pure.
+ */
+export function whoseDetails(shape: MembershipShape | null): "person" | "family" {
+  return shape !== null && (shape.kind === "flat" || shape.parentTypeId === null) ? "family" : "person";
+}
 
-const contact = (r: Row, edits: "own" | "family"): MyContact & { edits: "own" | "family" } => ({ name: r.displayName, email: r.email, phone: r.phone, edits });
+/** The contact details the portal holds for a person or a family, as its columns hold them. */
+type DetailColumns = {
+  phone: string | null; addressLine1: string | null; addressLine2: string | null; addressCity: string | null;
+  addressRegion: string | null; addressPostalCode: string | null; addressCountry: string | null; contactVersion: number;
+};
+const DETAIL_COLUMNS = (t: typeof parent | typeof family) => ({
+  phone: t.phone, addressLine1: t.addressLine1, addressLine2: t.addressLine2, addressCity: t.addressCity,
+  addressRegion: t.addressRegion, addressPostalCode: t.addressPostalCode, addressCountry: t.addressCountry, contactVersion: t.contactVersion,
+});
+/** The columns as the form holds them: what isn't set is an empty string. */
+const valuesOf = (r: DetailColumns): ContactValues => ({
+  phone: r.phone ?? "", line1: r.addressLine1 ?? "", line2: r.addressLine2 ?? "", city: r.addressCity ?? "",
+  region: r.addressRegion ?? "", postalCode: r.addressPostalCode ?? "", country: r.addressCountry ?? "",
+});
+
+/**
+ * The contact details a parent sees and changes, from the portal's own records alone: whose they are (whoseDetails()),
+ * the person's name and sign-in address, the values, and the version they were read at (`contact_version`). The
+ * person's are read by ctx.parentId, the family's by ctx.familyId, each only while the family's record is active (null otherwise).
+ * Nothing of the roster cache or QuickBooks is read. With `tx`, read inside that transaction (the save).
+ */
+export type MyDetails = { whose: "person" | "family"; name: string; email: string; values: ContactValues; version: number };
+export async function readMyDetails(ctx: ParentCtx, shape: MembershipShape | null, tx?: Tx): Promise<MyDetails | null> {
+  const q = tx ?? db;
+  const whose = whoseDetails(shape);
+  // The family's record is read either way: nothing is shown or changed from a session whose family isn't active.
+  const [[person], [theFamily]] = await Promise.all([
+    q.select({ name: parent.name, ...DETAIL_COLUMNS(parent) }).from(parent).where(eq(parent.id, ctx.parentId)),
+    q.select(DETAIL_COLUMNS(family)).from(family).where(and(eq(family.id, ctx.familyId), eq(family.active, true))),
+  ]);
+  const held = whose === "family" ? theFamily : person;
+  if (!person || !theFamily || !held) return null;
+  return { whose, name: person.name, email: ctx.email, values: valuesOf(held), version: held.contactVersion };
+}
 
 /**
  * The signed-in parent's family, or null when its record is not active: the page says the club hasn't finished
@@ -74,22 +117,24 @@ const contact = (r: Row, edits: "own" | "family"): MyContact & { edits: "own" | 
  * ctx.familyId alone. Students are listed only while the membership shape says who is a student (a layered shape with
  * a student type); otherwise `students` is null.
  *
- * `me` is the person's own QuickBooks record as the roster cache holds it, with the same safety checks as the staff
- * roster (loadRosterPage), narrowly: while QuickBooks is connected, a cache read from another company, or one that
- * doesn't say which, gives none; so does a membership shape that is missing or names a customer type QuickBooks no
- * longer has, and a family with no link to its customer, or one the cache doesn't hold active as a family. Only the
- * family's own customer and its direct sub-customers are read. Inactive records are left out. A record is the person's
- * own only while its email field, as the cache holds it, still holds the address they sign in with, by the rule the
- * writes check QuickBooks' own answer by (fieldSignsIn(), ./email-field.ts): a record the club has given another
- * person's address is not shown to them, and they have no record of their own here.
+ * `me` is the person's name and sign-in address with the phone the portal holds (the person's own, or the family's in
+ * books with no parent type): the portal's own records alone, for every guardian the gate let in. Neither the roster
+ * cache nor QuickBooks decides what a parent sees here or may edit.
  */
 export async function loadMyFamily(ctx: ParentCtx): Promise<MyFamily | null> {
-  return (await read(ctx))?.family ?? null;
+  const [records, shape] = await Promise.all([sessionFamily(ctx.familyId), getShape()]);
+  if (records === null) return null;
+  const students = shape?.kind === "layered" && shape.studentTypeId !== null ? records.students.map((s) => ({ id: s.id, name: s.name })) : null;
+  const details = await readMyDetails(ctx, shape);
+  const edits = whoseDetails(shape) === "family" ? "family" : "own";
+  const me: MyDetailsShown = { name: details?.name ?? ctx.name, email: ctx.email, phone: details?.values.phone || null, edits };
+  return { name: recordNameWords(records.name, "family"), students, me };
 }
 
 /**
- * The record `me` was read from, by the same rules and from the session alone: null when loadMyFamily() shows no
- * family, or shows one with no `me` (a sign-in made by hand, or a link that names a record that isn't theirs).
+ * The person's own QuickBooks record that the change of sign-in email writes (./email-change.ts), by the rules
+ * ownRecordIn() gives, from the session alone: null when the family's record is not active, or the person has no
+ * record of their own here (a sign-in made by hand, or a link that names a record that isn't theirs).
  */
 export async function loadMyRecord(ctx: ParentCtx): Promise<MyRecord | null> {
   return recordOf(ctx, "signs_in");
@@ -121,32 +166,73 @@ async function recordOf(ctx: ParentCtx, holding: Holding): Promise<MyRecord | nu
   return { qboId: own.mine.row.qboId, parentQboId: own.mine.row.parentQboId, contact: own.contact, signsInBy: own.mine.signsInBy, typeQboIds: own.mine.typeQboIds };
 }
 
-async function read(ctx: ParentCtx): Promise<{ family: MyFamily } | null> {
-  const [records, shape, [lastOk]] = await Promise.all([
-    sessionFamily(ctx.familyId),
-    getShape(),
-    db.select({ finishedAt: jobRun.finishedAt }).from(jobRun).where(and(eq(jobRun.job, ROSTER_JOB), eq(jobRun.outcome, "ok"))).orderBy(desc(jobRun.id)).limit(1),
-  ]);
-  if (records === null) return null;
-  const rosterReadAt = lastOk?.finishedAt?.toISOString() ?? null;
-  const students = shape?.kind === "layered" && shape.studentTypeId !== null ? records.students.map((s) => ({ id: s.id, name: s.name })) : null;
-  // What the parent is shown as their own goes by their sign-in address alone, never by a change they have asked for.
-  const own = await myOwnRecord(ctx, shape, "signs_in");
-  return { family: { name: recordNameWords(records.name, "family"), students, me: own?.contact ?? null, rosterReadAt } };
+/** A customer of the roster cache as ownRecordIn() reads it. */
+export type CachedRecord = { qboId: string; displayName: string; active: boolean; parentQboId: string | null; typeQboId: string | null; email: string | null; phone: string | null };
+/** A guardian row's own QuickBooks record, by ownRecordIn()'s rule. */
+export type OwnRecord<R extends CachedRecord> = {
+  row: R;
+  /** "own" for a parent's own record, "family" for a family's or a flat member's, which every guardian of it signs in through. */
+  edits: "own" | "family";
+  signsInBy: MyRecord["signsInBy"];
+  typeQboIds: readonly string[];
+  /** Whether its email field holds the person's sign-in address, by the record's own rule (fieldSignsIn()). */
+  signsIn: boolean;
+};
+
+/**
+ * The QuickBooks record a guardian row's sign-in comes from, by the membership shape, from the roster cache's rows of
+ * the family's own linked customer and those directly under it (`rows`), and the row's `source_qbo_id`. Pure: the one
+ * rule for whose record a cached customer is, read by myOwnRecord() (a parent's change of sign-in email) and by the
+ * take-in of contact details (./contact-take-in.ts), so the two can't disagree.
+ * - Flat: the member itself, of a member type, when the row's source is it.
+ * - Layered: the family customer of the family type, active; and the row's source an active customer of the parent type
+ *   directly under it, or, when the books have no parent type, the family customer itself.
+ * Null whenever any of it doesn't hold. `signsIn` says whether the record's email field holds `email` by the record's
+ * rule: the first address on a parent's own record or a flat member's, any of them on a family's with no parent type.
+ * A record whose field doesn't hold it is not the person's; only the email change may still take it, by their own
+ * live request (heldByMyChange()).
+ */
+export function ownRecordIn<R extends CachedRecord>(shape: MembershipShape, familyQboId: string, rows: readonly R[], sourceQboId: string | null, email: string): OwnRecord<R> | null {
+  // By its ID, never by position: the rows come back in no order.
+  const top = rows.find((r) => r.qboId === familyQboId);
+  if (!top || !top.active) return null;
+  if (sourceQboId === null) return null;
+
+  if (shape.kind === "flat") {
+    // The member is its own family: its own record and nothing under it.
+    if (top.typeQboId === null || !shape.memberTypeIds.includes(top.typeQboId)) return null;
+    if (sourceQboId !== familyQboId) return null;
+    // Every address on a member's record signs in through it, so its details are shared like a family's.
+    return { row: top, edits: "family", signsInBy: "first", typeQboIds: shape.memberTypeIds, signsIn: fieldSignsIn(top.email, email, "first") };
+  }
+
+  if (top.typeQboId !== shape.familyTypeId) return null;
+  // The record a guardian row came from (its `source_qbo_id`): a parent directly under the family, or, when
+  // QuickBooks has no parent type, the family customer itself. A link that names anything else is ignored.
+  if (shape.parentTypeId === null) {
+    if (sourceQboId !== familyQboId) return null;
+    return { row: top, edits: "family", signsInBy: "every", typeQboIds: [shape.familyTypeId], signsIn: fieldSignsIn(top.email, email, "every") };
+  }
+  const mine = rows.find((r) => r.parentQboId === familyQboId && r.active && r.typeQboId !== shape.familyTypeId && r.qboId === sourceQboId && r.typeQboId === shape.parentTypeId);
+  if (!mine) return null;
+  return { row: mine, edits: "own", signsInBy: "first", typeQboIds: [shape.parentTypeId], signsIn: fieldSignsIn(mine.email, email, "first") };
 }
 
-type Shape = NonNullable<Awaited<ReturnType<typeof getShape>>>;
+const contact = (r: CachedRecord, edits: "own" | "family"): MyContact & { edits: "own" | "family" } => ({ name: r.displayName, email: r.email, phone: r.phone, edits });
 
 /**
  * The person's own QuickBooks record in this family, from the roster cache: found through the family's own link (its
- * customer, in the records' company) and the source of the guardian row the session chose, by the rules loadMyFamily()
- * gives, and only while its email field holds the person's sign-in address (fieldSignsIn()). Nothing rewrites a row's
- * source when the club re-addresses or reuses a record, so the field is what says the record is still theirs. Null
- * whenever any of it doesn't hold. With `holding` "signs_in_or_my_live_change", asked only by
- * loadMyRecordForMyEmailChange(), a field that reads as the change the person's own live email change request asks
- * for counts too (heldByMyChange()).
+ * customer, in the records' company) and the source of the guardian row the session chose, by ownRecordIn()'s rule,
+ * with the same safety checks as the staff roster (loadRosterPage), narrowly: while QuickBooks is connected, a cache
+ * read from another company, or one that doesn't say which, gives none; so does a membership shape that is missing or
+ * names a customer type QuickBooks no longer has, and a family with no link to its customer, or one the cache doesn't
+ * hold active as a family. Only the family's own customer and its direct sub-customers are read. It is theirs only
+ * while its email field holds the person's sign-in address (fieldSignsIn()). Nothing rewrites a row's source when the
+ * club re-addresses or reuses a record, so the field is what says the record is still theirs. With `holding`
+ * "signs_in_or_my_live_change", asked only by loadMyRecordForMyEmailChange(), a field that reads as the change the
+ * person's own live email change request asks for counts too (heldByMyChange()).
  */
-async function myOwnRecord(ctx: ParentCtx, shape: Shape | null, holding: Holding): Promise<{ contact: MyContact & { edits: "own" | "family" }; mine: Mine } | null> {
+async function myOwnRecord(ctx: ParentCtx, shape: MembershipShape | null, holding: Holding): Promise<{ contact: MyContact & { edits: "own" | "family" }; mine: { row: CachedRecord } & Pick<MyRecord, "signsInBy" | "typeQboIds"> } | null> {
   if (!shape) return null;
   const familyId = await customerOfFamily(ctx.familyId);
   if (familyId === null) return null;
@@ -167,31 +253,10 @@ async function myOwnRecord(ctx: ParentCtx, shape: Shape | null, holding: Holding
   if (connected && source !== conn!.realmId) return null;
   if (missingTypes(shape, types).length) return null;
 
-  // By its ID, never by position: the rows come back in no order.
-  const family = rows.find((r) => r.qboId === familyId);
-  if (!family || !family.active) return null;
-  const sourceId = link?.sourceQboId ?? null;
-  if (sourceId === null) return null;
-
-  if (shape.kind === "flat") {
-    // The member is its own family: its own record and nothing under it.
-    if (family.typeQboId === null || !shape.memberTypeIds.includes(family.typeQboId)) return null;
-    // Every address on a member's record signs in through it, so its details are shared like a family's.
-    return sourceId === familyId && (fieldSignsIn(family.email, ctx.email, "first") || (holding === "signs_in_or_my_live_change" && (await heldByMyChange(ctx, family, true))))
-      ? { contact: contact(family, "family"), mine: { row: family, signsInBy: "first", typeQboIds: shape.memberTypeIds } } : null;
-  }
-
-  if (family.typeQboId !== shape.familyTypeId) return null;
-  const under = rows.filter((r) => r.parentQboId === familyId && r.active && r.typeQboId !== shape.familyTypeId);
-  // The record a guardian row came from (its `source_qbo_id`): a parent directly under the family, or, when
-  // QuickBooks has no parent type, the family customer itself. A link that names anything else is ignored.
-  const mine = shape.parentTypeId === null ? (sourceId === familyId ? family : undefined)
-    : under.find((r) => r.qboId === sourceId && r.typeQboId === shape.parentTypeId);
-  if (!mine) return null;
-  const signsInBy = shape.parentTypeId === null ? "every" : "first";
-  if (!fieldSignsIn(mine.email, ctx.email, signsInBy) && !(holding === "signs_in_or_my_live_change" && (await heldByMyChange(ctx, mine, signsInBy === "first")))) return null;
-  return { contact: contact(mine, shape.parentTypeId === null ? "family" : "own"),
-    mine: shape.parentTypeId === null ? { row: mine, signsInBy, typeQboIds: [shape.familyTypeId] } : { row: mine, signsInBy, typeQboIds: [shape.parentTypeId] } };
+  const own = ownRecordIn(shape, familyId, rows, link?.sourceQboId ?? null, ctx.email);
+  if (!own) return null;
+  if (!own.signsIn && !(holding === "signs_in_or_my_live_change" && (await heldByMyChange(ctx, own.row, own.signsInBy === "first")))) return null;
+  return { contact: contact(own.row, own.edits), mine: { row: own.row, signsInBy: own.signsInBy, typeQboIds: own.typeQboIds } };
 }
 
 /**

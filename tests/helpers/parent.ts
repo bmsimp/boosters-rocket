@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { familyMoney, parentAuthAccount, parentAuthSession, parentAuthUser, setting, type StoredInvoice } from "@/lib/db/schema";
+import { familyMoney, parent, parentAuthAccount, parentAuthSession, parentAuthUser, setting, type StoredInvoice } from "@/lib/db/schema";
 import { resolveParentSession, type ParentIdentity } from "@/lib/auth/resolve";
 import { chooseFamily } from "@/lib/parents/family-choice";
 import { formatMoney } from "@/lib/money/cents";
@@ -86,6 +86,22 @@ export const FAMILY_B: ParentFamilySpec = {
 };
 
 const unique = (values: string[]) => [...new Set(values)];
+
+/**
+ * Each standard family's person's mailing address, the portal's own (stage 3's slice 11a), given on their person row by
+ * seedTwoFamilies(): every part an unmistakable string, so the parent isolation gate fails a page that shows the other's.
+ */
+export const PERSON_ADDRESS = {
+  [FAMILY_A.parent.qboId]: { line1: "7011 Quillfeather Road", line2: "Quillfeather Annex 7012", city: "Quillfeather Springs", region: "QF", postalCode: "QF-70113", country: "Quillfeatheria" },
+  [FAMILY_B.parent.qboId]: { line1: "8021 Wrenhallow Drive", line2: "Wrenhallow Annex 8022", city: "Wrenhallow Crossing", region: "WH", postalCode: "WH-80223", country: "Wrenhallowland" },
+} as const;
+/** Gives the family's person their mailing address on their person row, and returns its strings as markers (all but the short region). */
+async function givePersonAddress(spec: ParentFamilySpec, parentId: string): Promise<string[]> {
+  const a = PERSON_ADDRESS[spec.parent.qboId]!;
+  await db.update(parent).set({ addressLine1: a.line1, addressLine2: a.line2, addressCity: a.city, addressRegion: a.region, addressPostalCode: a.postalCode, addressCountry: a.country })
+    .where(eq(parent.id, parentId));
+  return [a.line1, a.line2, a.city, a.postalCode, a.country];
+}
 
 /** The QuickBooks company the seeded money was "read" from: the one seedConnected() connects (tests/helpers/qbo-stub.ts). */
 export const MONEY_REALM = "9130000000000001";
@@ -192,6 +208,9 @@ async function appIdsOf(spec: ParentFamilySpec): Promise<string[]> {
 export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededParent }> {
   const a = await seedSignedInParent(FAMILY_A);
   const b = await seedSignedInParent(FAMILY_B);
+  // Each person's phone (on their row already) and mailing address, the portal's own: /family/details shows them.
+  a.markers.push(...(await givePersonAddress(FAMILY_A, a.identity.parentId)));
+  b.markers.push(...(await givePersonAddress(FAMILY_B, b.identity.parentId)));
   // Each family's invoices and total, stored as fresh figures: the money box and the Payments page show them as they are.
   await seedFamilyMoney(FAMILY_A);
   await seedFamilyMoney(FAMILY_B);

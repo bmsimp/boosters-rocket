@@ -16,6 +16,7 @@ import { accessState } from "../access-state";
 import { familyPage } from "@/app/staff/(app)/family-pages";
 import { lifeWords } from "@/lib/parents/link-delivery";
 import { LINK_LIFE_MS } from "@/lib/parents/signin-links";
+import { guardianStandings } from "@/lib/roster/writes";
 
 export const metadata = { title: "Parent" };
 export const dynamic = "force-dynamic";
@@ -31,6 +32,8 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   const canSignIn = !p.blocked && p.families.some((f) => f.kind === "can");
   // Removing and reinstating give or end the person's sign-in for a family: Roster.Family.ReadWrite's, beside this page's own.
   const changesGuardians = can(ctx.effective, "Roster.Family.ReadWrite");
+  // Where QuickBooks stands for each membership's own Parent customer (stage 3's slice 9h), in words; QuickBooks text as text.
+  const inQuickBooks = await guardianStandings(p.families.filter((f) => !f.previousCompany).map((f) => ({ guardianId: f.guardianId, familyId: f.familyId, name: p.name, open: f.open })));
   return (
     <main className="wrap single">
       <h1 className="page-title">{p.name}</h1>
@@ -47,6 +50,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
               { key: "family", header: "Family", rowHeader: true, cell: (f) => (f.previousCompany || f.familyId === null || !f.pageStands ? f.familyName
                 : <Link href={familyPage(f.familyId)}>{f.familyName}</Link>) },
               { key: "access", header: "Sign-in", cell: (f) => <StateWords state={accessState(f.kind, p.hasPassword)} words={f.words} /> },
+              { key: "quickbooks", header: "In QuickBooks", cell: (f) => inQuickBooks.get(f.guardianId) ?? "Nothing in QuickBooks for this membership." },
               ...(changesGuardians ? [{ key: "change", header: "Change", quiet: true, cell: (f: PersonFamily) => <GuardianChange name={f.familyName} guardianId={f.guardianId} open={f.open} reinstatable={f.reinstatable} /> }] : []),
             ]} />
         )}
@@ -57,7 +61,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           <dt>Welcome email</dt><dd>{p.welcomedAt ? <>Sent <LocalTime iso={p.welcomedAt} />{p.welcomeOwed ? ". An email with a link to choose a password is waiting to be sent" : null}</>
             : p.welcomeOwed ? "Waiting to be sent" : "Not sent"}</dd>
         </dl>
-        <p className="hint">The name and sign-in email are the portal&apos;s own. A parent changes their own sign-in email from the Family page; a change made in QuickBooks doesn&apos;t change them. A guardian is added to a family from that family&apos;s page.</p>
+        <p className="hint">The name and sign-in email are the portal&apos;s own. A parent changes their own sign-in email from the Family page; a change made in QuickBooks doesn&apos;t change them. A guardian is added to a family from that family&apos;s page. Where the club&apos;s books have parents of their own, each membership has its own Parent customer in QuickBooks under the family: a new name here is sent to each, and removing them makes theirs inactive only when it has no balance the portal can read, owed or a credit.</p>
       </section>
 
       <section className="box" aria-labelledby="pn-h"><h2 id="pn-h">Name</h2>

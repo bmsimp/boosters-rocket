@@ -70,9 +70,9 @@ export const RATE_LIMITS: Record<RateLimitKind, { max: number; windowMs: number 
   second_step_parent: { max: 5, windowMs: WINDOW_MS },
   password_change_parent: { max: 10, windowMs: 60 * 60 * 1000 },
   signin_settings_parent: { max: 10, windowMs: 60 * 60 * 1000 },
-  // A parent's own phone and address (contact-edits.ts), counted per person. Each save is a write to the club's
-  // QuickBooks, and nobody changes their address more than a few times an hour. Opening the edit page reads the record
-  // from QuickBooks each time, so that is bounded too, well above what editing takes.
+  // A parent's own phone and address (contact-edits.ts), counted per person: nobody changes their address more than a
+  // few times an hour. Since stage 3's slice 11a opening the edit page reads the portal alone and takes no count, so
+  // contact_open_parent is unused (S12 removes it).
   contact_save_parent: { max: 6, windowMs: 60 * 60 * 1000 },
   contact_open_parent: { max: 30, windowMs: WINDOW_MS },
   // Opening a form to sign, and checking how one stands (src/lib/forms/signing.ts), counted per person: each asks the
