@@ -247,7 +247,7 @@ describe("the health page", () => {
     expect(QUICKBOOKS_USE.writes).toMatch(/email address a parent signs in with.*new families, students, parents and members.*inactive.*never deletes/);
     // A guardian's phone and mailing address are the portal's own (stage 3's slice 11a), and sent on after the portal
     // saves a parent's change (slice 11b), never over details the portal didn't know of.
-    expect(QUICKBOOKS_USE.writes).toMatch(/phone and mailing address, on their own record.*after the portal saves a change a parent makes to them, and never over details QuickBooks holds that the portal didn't know of/);
+    expect(QUICKBOOKS_USE.writes).toMatch(/phone and mailing address, on their own record.*after the portal saves a change a parent or staff make to them, and never over details QuickBooks holds that the portal didn't know of/);
     expect(QUICKBOOKS_USE.reads).toMatch(/phone and mailing address are the portal's own: it takes them in once/);
     // A buy-out invoice carries the chooser's sign-in address so it can be paid online, and nothing is emailed (2026-11-17).
     expect(QUICKBOOKS_USE.writes).toMatch(/pay instead of volunteering.*sign-in email address as its bill-to address, so it can be paid online; nothing is emailed/);
