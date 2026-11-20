@@ -48,6 +48,14 @@ async function mayAskRegisterOptions(request: Request): Promise<boolean> {
   return who !== null && mayAddPasskey(who);
 }
 const LIMITED = { ok: false, error: "rate_limited" } as const;
+/**
+ * The passkey step's answer: `app` when the person's authenticator app is offered beside the passkey (its code or a
+ * backup code, /portal-app/check), and, since slice SI-7b, `backup: true` for a person with a passkey and no app who
+ * holds unspent backup codes (made with their first passkey), so the page offers a backup-code field there too, taken
+ * by the same check (verifySecondFactor(), `step: backup_code`). Said only after a right password, so it tells a
+ * visitor nothing of an address they don't hold.
+ */
+const passkeyStepAnswer = (app: boolean, backup: boolean) => ({ ok: true, step: "passkey", app, ...(!app && backup ? { backup: true } : {}) });
 
 /**
  * The end of a second step that went through, the emailed code's (/portal-code/check), since slice SI-6a the
@@ -120,19 +128,20 @@ export const parentCodePlugin = () => ({
         // A person with an authenticator app in force (the sign-in release, slice SI-6a; open question 24), or a passkey
         // (slice SI-7a), is never sent the emailed code: the same pending step is set, and they are asked for all they
         // have, the passkey first (/portal-passkey/check), with their app's code or a backup code beside it when they
-        // have an app too (`app`, /portal-app/check).
+        // have an app too (`app`, /portal-app/check), or, since slice SI-7b, one of their backup codes beside a passkey
+        // alone when they hold unspent ones (`backup`, the same check: passkeyStepAnswer()).
         await setPendingStep(ctx, { parentId: r.person.id, email: r.person.email, ...r.password, endsAt }, now);
-        return ctx.json(r.factors.passkey ? { ok: true, step: "passkey", app: r.factors.app } : { ok: true, step: "app" });
+        return ctx.json(r.factors.passkey ? passkeyStepAnswer(r.factors.app, r.factors.backup) : { ok: true, step: "app" });
       }
       // The emailed code. Its answer never says what happened to the mail (spec §12 invariant 9), and doesn't wait for it.
       // A code that could not be sent because the step can't go on (a block or an address change landing just now) sets
       // no pending step; the answer is the same.
       // An app or a passkey that came into force after the password's reads (the send reads them again under the
       // person's lock) sends nothing, and that is asked for instead, with the same pending step.
-      const { delivery, ended, app, passkey } = await sendSecondStepCode({ parentId: r.person.id, email: r.person.email, password: r.password, endsAt }, ip, now);
+      const { delivery, ended, app, passkey, backup } = await sendSecondStepCode({ parentId: r.person.id, email: r.person.email, password: r.password, endsAt }, ip, now);
       void delivery;
       if (!ended) await setPendingStep(ctx, { parentId: r.person.id, email: r.person.email, ...r.password, endsAt }, now);
-      return ctx.json(passkey ? { ok: true, step: "passkey", app: app === true } : { ok: true, step: app ? "app" : "code" });
+      return ctx.json(passkey ? passkeyStepAnswer(app === true, backup === true) : { ok: true, step: app ? "app" : "code" });
     }),
     // The code again, for the pending step's person; nothing the browser sends names anyone. Always the same answer. The
     // step is not extended: the code resent ends when it does (sendSecondStepCode(), which says so in its mail and sends

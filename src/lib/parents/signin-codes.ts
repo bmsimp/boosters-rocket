@@ -23,7 +23,7 @@ import { giveBackRateLimit, takeRateLimit, takeRateLimitPlace, type RateLimitTak
 import { enterableGuardianRows, lockedPerson, parentActor } from "./sessions";
 import { getParentSettings, parentDoorClosed, type ParentSettings } from "./settings";
 import { secondStepFor } from "./second-step-rule";
-import { authenticatorStands, backupCodeStands, hasAuthenticator, takeAuthenticatorCode, takeBackupCode } from "./authenticator";
+import { authenticatorStands, backupCodeStands, hasAuthenticator, takeAuthenticatorCode, takeBackupCode, unspentBackupCodes } from "./authenticator";
 import { readSecondStepCode } from "./backup-codes";
 import { hasPasskey, hasSecondFactor, passkeyStands } from "./passkeys";
 
@@ -142,18 +142,20 @@ function doorStops(settings: ParentSettings, hasSecondFactor: boolean): "signins
  * What sendSecondStepCode() answers its caller: the mail on its way (never awaited by the caller), whether the pending
  * step has ended, and, when nothing was sent because the person has a second factor that stands in for the code
  * (secondFactorFor()), which: `app` for an authenticator app in force (slice SI-6a), `passkey` at the door for a passkey
- * (slice SI-7a, with `app` beside it when they have both), so the caller asks for it instead, even when it came into
- * force after the caller chose the step.
+ * (slice SI-7a, with `app` beside it when they have both, and since slice SI-7b `backup` beside a passkey alone when
+ * they hold unspent backup codes), so the caller asks for it instead, even when it came into force after the caller
+ * chose the step.
  */
-export type CodeSend = { delivery: Promise<void>; ended: boolean; app?: true; passkey?: true };
+export type CodeSend = { delivery: Promise<void>; ended: boolean; app?: true; passkey?: true; backup?: true };
 const DONE: CodeSend = { delivery: Promise.resolve(), ended: false };
 const ENDED: CodeSend = { delivery: Promise.resolve(), ended: true };
 /** Nothing sent, for a person whose second factor stands in for the code: which one they have, read for the answer. */
 async function factorInstead(parentId: string, use: CodeUse): Promise<CodeSend> {
   void use;
-  const [app, passkey] = await Promise.all([hasAuthenticator(parentId), hasPasskey(parentId)]);
+  const [app, passkey, backupLeft] = await Promise.all([hasAuthenticator(parentId), hasPasskey(parentId), unspentBackupCodes(parentId)]);
   // Neither read now (turned off again just after the read that stopped the send): the app's step, as SI-6a answered.
-  return { delivery: Promise.resolve(), ended: false, ...(app || !passkey ? { app: true as const } : {}), ...(passkey ? { passkey: true as const } : {}) };
+  return { delivery: Promise.resolve(), ended: false, ...(app || !passkey ? { app: true as const } : {}), ...(passkey ? { passkey: true as const } : {}),
+    ...(passkey && !app && backupLeft > 0 ? { backup: true as const } : {}) };
 }
 
 
@@ -383,7 +385,7 @@ const FACTOR_LIMITED: SecondFactorResult = { ok: false, reason: "rate_limited", 
  *     Each in one transaction with its row: `signin.second_step` (`factor`, and for a backup code how many are `left`),
  *     or `signin.second_step_wrong` (`factor`, the try's number among the window's live tries, `try`, counted under
  *     the limit's lock as its place was taken, and why, `reason`: `wrong`,
- *     `replayed` or `no_app`: since slice SI-6b, a person with no app in force, whatever was typed, the app turned off
+ *     `replayed` or `no_app`: since slice SI-6b, a person with no app in force (and since SI-7b no passkey), whatever was typed, the app turned off
  *     since the password asked for it, a try still counted that ends the step, so the parent starts again with their
  *     password and is asked for the emailed code), or, for an app whose secret won't open, `signin.refused` (`second_factor_unreadable`),
  *     answered as the one refusal with its place given back; a backup code is still taken then, as it opens no secret;
@@ -423,12 +425,13 @@ export async function verifySecondFactor(step: { parentId: string; email: string
     if (!samePassword(await credentialNow(tx, p.id, step.password.credentialId), step.password)) return "password_changed" as const;
     const signedOutSeen = await newestSignOutEverywhere(tx, p.id);
     // No app in force (turned off since the password asked for it, slice SI-6b): the step can't go on, whatever was
-    // typed; since slice SI-7b a backup code stands beside a passkey too (made with a first passkey), so for one the
-    // step ends only with neither an app nor a passkey.
-    const standing = typed.kind === "backup" ? await hasSecondFactor(p.id, tx) : await hasAuthenticator(p.id, tx);
+    // typed; since slice SI-7b a backup code stands beside a passkey too (made with a first passkey), so the step ends
+    // only with neither an app nor a passkey, and for a passkey holder with no app (whose field takes a backup code
+    // alone) anything else typed is a wrong try that keeps the step, as a wrong backup code is.
+    const standing = await hasSecondFactor(p.id, tx);
     const took = !standing ? { miss: "no_app" as const }
       : typed.kind === "backup" ? await takeBackupCode(tx, p.id, typed.code, now)
-      : typed.kind === "app" ? await takeAuthenticatorCode(tx, p.id, typed.code, now) : { miss: "wrong" as const };
+      : typed.kind === "app" && await hasAuthenticator(p.id, tx) ? await takeAuthenticatorCode(tx, p.id, typed.code, now) : { miss: "wrong" as const };
     if ("miss" in took) {
       if (took.miss === "unreadable") {
         // No guess against the secret was possible: the try gives its place back (below), so a secret that won't open

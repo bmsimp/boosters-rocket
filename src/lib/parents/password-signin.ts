@@ -18,7 +18,7 @@ import { getParentSettings, parentDoorClosed } from "./settings";
 import { takeIpLimit, type PasswordProof } from "./signin-codes";
 import { deviceOfAddress, rememberedDevice } from "./devices";
 import { secondStepFor } from "./second-step-rule";
-import { hasAuthenticator } from "./authenticator";
+import { hasAuthenticator, unspentBackupCodes } from "./authenticator";
 import { hasPasskey } from "./passkeys";
 
 /** The most an address field may hold as sent, as on the request page (password-request.ts). */
@@ -116,7 +116,8 @@ export type PasswordRefusal = "rate_limited" | "not_an_address" | "signins_off" 
  * forgotten, another person's, or any under Strict), when the second step is to be asked, which second step that is
  * (`step`: the emailed code, or, since slice SI-6a, the person's own second factor, their authenticator app, for a
  * person who has one in force, and since slice SI-7a at the door a passkey: open question 24), which second factors they
- * have (`factors`: both, at the door and, since slice SI-7b, in asking again), and when the check finished (`at`: what follows,
+ * have (`factors`: both, at the door and, since slice SI-7b, in asking again, and whether they hold unspent backup
+ * codes, `backup`), and when the check finished (`at`: what follows,
  * the pending step and its code, is timed from it, so a wait for a turn never shortens them). Every refusal is
  * `{ ok: false }`, with `limited` when it was over a limit or turned away from a full wait, which the page may say in
  * words of its own: each is decided before the person or their password is read, by what the visitor sent alone (the
@@ -124,7 +125,7 @@ export type PasswordRefusal = "rate_limited" | "not_an_address" | "signins_off" 
  * and one that isn't.
  */
 export type PasswordCheck = { ok: true; person: { id: string; email: string }; password: PasswordProof; device: { deviceId: string } | null;
-  step: "emailed_code" | "second_factor"; factors: { passkey: boolean; app: boolean }; at: Date }
+  step: "emailed_code" | "second_factor"; factors: { passkey: boolean; app: boolean; backup: boolean }; at: Date }
   | { ok: false; limited: boolean };
 const REFUSED: PasswordCheck = { ok: false, limited: false };
 
@@ -228,7 +229,8 @@ export async function checkPasswordSignin(rawEmail: unknown, password: unknown, 
   }
 
   const [settings, person] = await Promise.all([getParentSettings(), personWithPassword(email)]);
-  const [rows, hasApp, hasKey] = await Promise.all([enterableGuardianRows(person?.id ?? NOBODY), hasAuthenticator(person?.id ?? NOBODY), hasPasskey(person?.id ?? NOBODY)]);
+  const [rows, hasApp, hasKey, backupLeft] = await Promise.all([enterableGuardianRows(person?.id ?? NOBODY), hasAuthenticator(person?.id ?? NOBODY),
+    hasPasskey(person?.id ?? NOBODY), unspentBackupCodes(person?.id ?? NOBODY)]);
   const counts = rows.length > 0;
   const hash = person?.authUserId && person.hash ? person.hash : null;
   const against = hash ?? await DUMMY_HASH;
@@ -245,8 +247,9 @@ export async function checkPasswordSignin(rawEmail: unknown, password: unknown, 
   const who = person ? { id: person.id, email: person.email } : null;
   // The person's own second factor: since SI-6a their authenticator app in force, and since SI-7a a passkey, at the
   // door and, since SI-7b, in asking again too (the caller that names its own count): a passkey holder is asked for the
-  // passkey, never emailed a code.
-  const factors = { app: hasApp, passkey: hasKey };
+  // passkey, never emailed a code. `backup`: whether they hold unspent backup codes (made with an app, or since SI-7b
+  // with a first passkey), which work in place of the passkey at its step (verifySecondFactor()).
+  const factors = { app: hasApp, passkey: hasKey, backup: backupLeft > 0 };
   const secondStep = secondStepFor({ level: settings.level, hasSecondFactor: factors.app || factors.passkey }).step;
   const reason: PasswordRefusal | null = !email ? "not_an_address"
     : parentDoorClosed(settings) ? "signins_off"

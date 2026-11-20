@@ -10,8 +10,8 @@ import { safeReturnPath } from "@/lib/auth/return-path";
  * (sendSecondStepCode()), so this lives as long as the step does. It is removed on sign-in and on "Start again", and
  * dropped once the step's life is over. Since slice SI-6a it keeps which second step it was too (`kind`): the emailed
  * code (`code`), or the parent's authenticator app (`app`), and since slice SI-7a their passkey (`passkey`, with `app`
- * when the app is offered beside it), so a reload draws the same step; a step kept by an older build, with no kind, is
- * the code step.
+ * when the app is offered beside it, and since slice SI-7b `backup` when a backup code is offered beside a passkey
+ * alone), so a reload draws the same step; a step kept by an older build, with no kind, is the code step.
  *
  * localStorage, not sessionStorage: an installed app that is reloaded starts a new session. No imports from the server
  * side: the sign-in form (a client component) uses this file.
@@ -21,8 +21,11 @@ export const CODE_STEP_KEY = "booster.signin.code-step";
 export const CODE_STEP_LIFE_MS = 10 * 60 * 1000;
 /** Which second step: the emailed code, the parent's authenticator app (its code, or a backup code), or their passkey. */
 export type CodeStepKind = "code" | "app" | "passkey";
-/** `app`, for the passkey step: whether the app's code or a backup code is offered beside the passkey. */
-export type CodeStep = { sentAt: number; next: string | null; kind: CodeStepKind; app?: boolean };
+/**
+ * For the passkey step: `app`, whether the app's code or a backup code is offered beside the passkey, and `backup`
+ * (slice SI-7b), whether a backup code alone is, for a parent with no app who holds unspent backup codes.
+ */
+export type CodeStep = { sentAt: number; next: string | null; kind: CodeStepKind; app?: boolean; backup?: boolean };
 export type CodeStepStore = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 /** The browser's store, or null where it is switched off (some private modes throw on touching it). */
@@ -46,14 +49,15 @@ export function loadCodeStep(store: CodeStepStore | null, now: number): CodeStep
   try {
     const raw = store?.getItem(CODE_STEP_KEY);
     if (!raw) return null;
-    const v = JSON.parse(raw) as { sentAt?: unknown; next?: unknown; kind?: unknown; app?: unknown } | null;
+    const v = JSON.parse(raw) as { sentAt?: unknown; next?: unknown; kind?: unknown; app?: unknown; backup?: unknown } | null;
     const live = typeof v === "object" && v !== null && typeof v.sentAt === "number" && Number.isFinite(v.sentAt) && v.sentAt <= now && now - v.sentAt < CODE_STEP_LIFE_MS;
     if (!live) { clearCodeStep(store); return null; }
     // Anything but the app's kind or a well-formed passkey's (with its `app` bit) is the code step: a value of an older
     // build, or one tampered with, draws nothing new.
     const step = { sentAt: v!.sentAt as number, next: safeReturnPath(v!.next) };
     if (v!.kind === "app") return { ...step, kind: "app" };
-    if (v!.kind === "passkey" && typeof v!.app === "boolean") return { ...step, kind: "passkey", app: v!.app };
+    // `backup` is read only as `true` (anything else, an older build's step included, is no backup-code field).
+    if (v!.kind === "passkey" && typeof v!.app === "boolean") return { ...step, kind: "passkey", app: v!.app, ...(v!.backup === true ? { backup: true } : {}) };
     return { ...step, kind: "code" };
   } catch {
     clearCodeStep(store);

@@ -100,6 +100,9 @@ const BEFORE_SIGN_IN: Target[] = [
   // fuller of its two forms). Nobody seeded has a passkey, so the device's kept step draws it; nothing is pressed.
   { label: "/sign-in (passkey step)", address: "/sign-in", signedIn: false,
     deviceStore: { "booster.signin.code-step": JSON.stringify({ sentAt: 0, next: null, kind: "passkey", app: true }) } },
+  // And with a backup code beside it alone (slice SI-7b): a parent with a passkey, no app and unspent backup codes.
+  { label: "/sign-in (passkey step, backup code)", address: "/sign-in", signedIn: false,
+    deviceStore: { "booster.signin.code-step": JSON.stringify({ sentAt: 0, next: null, kind: "passkey", app: false, backup: true }) } },
   { label: "/choose-family", address: "/choose-family", signedIn: true },
   { label: "/refused", address: "/refused", signedIn: false },
   // The pages a set-up or reset link opens: the form, with a live link (never submitted here), and the one message for a

@@ -28,6 +28,14 @@ export const PASSKEY_REJECTED = "That passkey didn't work. Try it again, or sign
 export const PASSKEY_ASKED = "To finish signing in on this device, use your passkey. Your phone or computer will ask for your face, fingerprint or PIN.";
 export const PASSKEY_OR_APP = "Or enter the 6-digit code from your authenticator app, or one of your backup codes.";
 export const PASSKEY_ONLY = "If you don't have your passkey with you, ask the club for help.";
+/**
+ * Beside the passkey for a guardian with no authenticator app who holds unspent backup codes (slice SI-7b: they get ten
+ * with their first passkey), in one field labelled BACKUP_CODE_LABEL; every refusal there is BACKUP_REJECTED.
+ */
+export const PASSKEY_OR_BACKUP = "If you don't have your passkey with you, enter one of your backup codes instead. If you have neither, ask the club for help.";
+export const BACKUP_CODE_LABEL = "Backup code";
+/** One answer for a wrong or used backup code beside a passkey alone, or a second step that has ended. */
+export const BACKUP_REJECTED = "That code didn't work. Enter a backup code you haven't used yet, use your passkey, or start again with your email and password.";
 export const PASSKEY_USE = "Use your passkey";
 /**
  * The passkey step's own words where it can't go on or didn't: never "sign in with your email and password", since the

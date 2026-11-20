@@ -180,7 +180,8 @@ describe("adding a passkey (/portal-passkey/add)", () => {
     expect((await addPasskey(s.cookie)).body.ok).toBe(true);
     expect(await sessionsOf(ana.authUserId)).toEqual(before);
     const mailed = outbox.length;
-    expect((await passwordStep(ana.email)).body).toEqual({ ok: true, step: "passkey", app: false });
+    // The first passkey came with backup codes, which the passkey step offers beside it (slice SI-7b).
+    expect((await passwordStep(ana.email)).body).toEqual({ ok: true, step: "passkey", app: false, backup: true });
     expect(outbox.length).toBe(mailed);
   });
 

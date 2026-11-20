@@ -14,7 +14,7 @@ import { resetDb, seedParent, seedGuardianInFamily, seedWorkingMail } from "../h
 import { SIGNINS_ON, seedParentSettings } from "../helpers/roster-cache";
 import { DOOR_IP, DOOR_PASSWORD, appStep, codeStep, cookieNamed, getDoor, passwordStep, postDoor, stepPersonFor } from "../helpers/parent-door";
 import { deviceRows, seedCode, seedDevice, seedPassword } from "../helpers/signin-links";
-import { appCode, seedAuthenticator, seedBackupCodes, wrongAppCode } from "../helpers/authenticator";
+import { appCode, backupCodeRows, seedAuthenticator, seedBackupCodes, wrongAppCode } from "../helpers/authenticator";
 import { ORIGIN, RP_ID, passkeyOptions, passkeyRows, passkeyStep, postPasskey, seedPasskey } from "../helpers/passkey";
 import { assertionFor, makePasskeyKey } from "../helpers/passkey-keys";
 
@@ -125,6 +125,43 @@ describe("who is asked for the passkey (open question 24)", () => {
     const [backup] = await seedBackupCodes(ana.id, 1);
     expect((await appStep(appCode(app.secret), await atThePasskey("ana@example.com", true))).body).toEqual({ ok: true, next: "/" });
     expect((await appStep(backup!, await atThePasskey("ana@example.com", true))).body).toEqual({ ok: true, next: "/" });
+  });
+
+  it("a holder with no app who holds unspent backup codes is offered one beside the passkey, which signs in and is spent (slice SI-7b)", async () => {
+    const ana = await seedHolder("Ana");
+    const [code] = await seedBackupCodes(ana.id, 2);
+    const { body, pending } = await passwordStep("ana@example.com");
+    expect(body).toEqual({ ok: true, step: "passkey", app: false, backup: true });
+    expect((await appStep(code!, pending)).body).toEqual({ ok: true, next: "/" });
+    expect((await audits("signin.second_step")).map((r) => r.after)).toEqual([{ factor: "backup_code", left: 1 }]);
+    expect((await backupCodeRows(ana.id)).filter((c) => c.usedAt !== null)).toHaveLength(1);
+    expect((await sessions())[0]!.strongAt).not.toBeNull();
+    expect(await codesOf(ana.id)).toEqual([]);
+    expect(outbox).toEqual([]);
+  });
+
+  it("beside a passkey alone, a spent backup code, an app's code and anything else get the one refusal and keep the step, whose passkey still finishes it (slice SI-7b)", async () => {
+    const ana = await seedHolder("Ana");
+    const [spent] = await seedBackupCodes(ana.id, 2);
+    expect((await appStep(spent!, (await passwordStep("ana@example.com")).pending)).body).toEqual({ ok: true, next: "/" });
+    const { body, pending } = await passwordStep("ana@example.com");
+    expect(body).toEqual({ ok: true, step: "passkey", app: false, backup: true });
+    for (const typed of [spent!, "123456", "not a code"]) {
+      const { res, body: refused } = await appStep(typed, pending);
+      expect(refused).toEqual(REFUSED);
+      expect(res.headers.getSetCookie().some((l) => /signin_step=;/.test(l))).toBe(false);
+    }
+    expect((await audits("signin.second_step_wrong")).map((r) => (r.after as { reason: string }).reason)).toEqual(["wrong", "wrong", "wrong"]);
+    expect((await backupCodeRows(ana.id)).filter((c) => c.usedAt !== null)).toHaveLength(1);
+    expect((await passkeyStep(ana.key!, { cookie: pending })).body).toEqual({ ok: true, next: "/" });
+  });
+
+  it("a holder with no app and no backup codes left is offered no backup-code field (slice SI-7b)", async () => {
+    const ana = await seedHolder("Ana");
+    const [only] = await seedBackupCodes(ana.id, 1);
+    expect((await passwordStep("ana@example.com")).body).toEqual({ ok: true, step: "passkey", app: false, backup: true });
+    expect((await appStep(only!, (await passwordStep("ana@example.com")).pending)).body).toEqual({ ok: true, next: "/" });
+    expect((await passwordStep("ana@example.com")).body).toEqual({ ok: true, step: "passkey", app: false });
   });
 
   it("the code endpoints send and take nothing for a holder at the door", async () => {

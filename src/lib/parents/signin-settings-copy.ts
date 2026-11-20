@@ -140,8 +140,8 @@ export const SIGNIN_SETTINGS_COPY = {
   /** Under Strict the app is the guardian's only second step until passkeys come (SI-7): it stays. */
   turnOffStrict: "For now, your authenticator app can't be turned off here, since the club asks everyone for a second step and the app is your only one. Add a passkey first, or ask the club if you need it changed.",
   /** Turning the app off beside a passkey (slice SI-7b): the backup codes stay, and the passkey is the second step. */
-  turnOffWordsBesidePasskey: "If you turn off your authenticator app, your passkey stays your second step. Your backup codes stay too, and work in place of your passkey when this page asks you to show it's you.",
-  turnedOffBesidePasskey: "Your authenticator app is turned off. Your passkey is still your second step, and your backup codes still work in place of it when this page asks you to show it's you.",
+  turnOffWordsBesidePasskey: "If you turn off your authenticator app, your passkey stays your second step. Your backup codes stay too, and work in place of your passkey when you sign in and when this page asks you to show it's you.",
+  turnedOffBesidePasskey: "Your authenticator app is turned off. Your passkey is still your second step, and your backup codes still work in place of it when you sign in and when this page asks you to show it's you.",
   // Passkeys (slice SI-7b): adding, naming, listing and removing them, and their backup codes.
   passkeysTitle: "Passkeys",
   passkeysWhat: "A passkey lets your phone or computer sign you in with your face, fingerprint or PIN, with no password to type. It can be kept on a phone, a computer, a password manager or a security key, and you can add more than one.",
@@ -184,10 +184,11 @@ export const SIGNIN_SETTINGS_COPY = {
   /** The backup codes made with a first passkey of a guardian with no app (open question 25). */
   passkeyCodesMade: "Your passkey is added, and here are your backup codes.",
   /**
-   * Beside a passkey and no app (open question 25): what the codes do today. They are taken in place of the passkey when
-   * this page asks again; the sign-in page's passkey step (SI-7a's) takes none yet, so nothing here promises a way in.
+   * Beside a passkey and no app (open question 25): what the codes do. They are taken in place of the passkey at the
+   * sign-in page's passkey step (its backup-code field, offered while the person holds unspent ones) and when this page
+   * asks again, so they are the way in when the passkey's device is lost.
    */
-  backupCodesKeepPasskey: "Each backup code works once, in place of your passkey, when you're signed in and this page asks you to show it's you. Keep them somewhere safe that isn't on the device that holds your passkey, like on paper or in a password manager on another device. We won't show them again.",
+  backupCodesKeepPasskey: "Each backup code works once, in place of your passkey, when you sign in and when this page asks you to show it's you. If you lose the phone or computer that holds your passkey, they're how you get in, so keep them somewhere safe that isn't on that device, like on paper or in a password manager on another device. We won't show them again.",
   // Asking again with a passkey (slice SI-7b): the passkey alone, or the password and then the second step.
   usePasskey: "Use your passkey",
   orPassword: "Or enter your password",
