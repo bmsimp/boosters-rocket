@@ -186,6 +186,13 @@ export const EXPECTATIONS = [
     ifNot: "Staff couldn't add a parent from the roster pages.", codeChange: true, where: "CUSTOMER_WRITES.create in src/lib/quickbooks/client.ts",
   },
   {
+    key: "duplicate_name_other_parent", group: "writes", title: "Making a parent with a name already used under another family",
+    expects: "The portal doesn't know yet whether QuickBooks takes a second customer with the same name under a different family, or refuses it as a name already in use (code 6240). Either is fine: when a guardian is added, the portal compares nothing but the family's own customers before it sends, and QuickBooks' answer decides. If QuickBooks takes it, a person who is a guardian in two families gets a Parent customer under each. If it refuses, the second family's Parent customer is kept on the Reconciliation page with the words for a name already in use, and its ways out are renaming the person or giving it up.",
+    learned: (l) => (l.code === "accepted" ? "QuickBooks made a second customer with the same name under the other family." : `QuickBooks answered with ${codeWords(l.code)}.`),
+    ifNot: "Nothing in the portal is wrong either way: this tells the portal which of the two answers this company's QuickBooks gives.", codeChange: false,
+    where: "queueForGuardian() in src/lib/roster/writes.ts (the guardian's Parent customer create)",
+  },
+  {
     key: "contact_stale", group: "writes", title: "A phone change from an old version of the record",
     expects: "QuickBooks refuses it with code 5010 and changes nothing, so nobody's change is overwritten.",
     learned: (l) => `QuickBooks answered with ${codeWords(l.code)}${yes(l.unchanged) ? " and changed nothing" : " and changed the record"}.`,

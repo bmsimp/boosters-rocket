@@ -353,6 +353,15 @@ class Check {
       const under = ref(p.ParentRef) === m.famA!.id, emailKept = emailOf(p) === email, copiedContact = Boolean(phoneOf(p) || addressOf(p).Line1);
       this.set("create_parent", m.parent && under && emailKept && p.BillWithParent !== true ? "as_expected" : "not_as_expected", { under, emailKept, copiedContact });
     });
+    // A parent of the same name under the second family (stage 3's slice 9h): whether QuickBooks takes it or refuses it
+    // as a taken name (6240) settles what a guardian in two families gets, and either answer is fine. Listed before it is
+    // made, as every record of the check is (checkCreateCustomer()); one QuickBooks makes is made inactive with the
+    // others, a parent before any family (closeRecords()), so family B goes after it.
+    await this.step("duplicate_name_other_parent", [m.famB, m.parent], async () => {
+      const code = await this.answerTo(() => checkCreateCustomer(run, { kind: "parent", name: m.parent!.name, typeQboId: typeIds.parent, familyQboId: m.famB!.id, email: `check-parent-b-${mark}@example.com` }));
+      // Any answer is learned, not judged: nothing in the portal depends on which (the expectation says so).
+      this.set("duplicate_name_other_parent", "learned", { code });
+    });
     await this.step("contact_stale", [m.famA], async () => {
       const cur = await this.read(m.famA!.id);
       const code = await this.answerTo(() => checkUpdateContact(run, target("family", m.famA!), older(tokenOf(cur)), { phone: "555-0199" }));
