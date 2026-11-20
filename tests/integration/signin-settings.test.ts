@@ -16,7 +16,7 @@ import { verifyPassword } from "better-auth/crypto";
 import { db } from "@/lib/db/client";
 import { auditLog, parentAuthAccount, parentAuthSession, parentAuthUser, parentDevice, parentSigninToken, rateLimitEvent, signinCode } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
-import { askAgainCode } from "@/lib/parents/asking-again";
+import { askAgainCode, sessionProvedRecently } from "@/lib/parents/asking-again";
 import { hashTriedAddress } from "@/lib/parents/password-signin";
 import { PASSWORD_COPY } from "@/lib/parents/password-copy";
 import { SIGNIN_SETTINGS_COPY as COPY } from "@/lib/parents/signin-settings-copy";
@@ -137,6 +137,11 @@ describe("the page", () => {
     expect(page).toContain(COPY.setupButton);
     expect(page).not.toContain(`type="password"`);
     expect(page).toContain(COPY.everywhereButton);
+    // Nothing tells them they sign in with a password they don't have: how they sign in again says to choose one first.
+    expect(page).toContain(html(COPY.howNoPassword));
+    expect(page).not.toContain(html(COPY.how));
+    expect(page).toContain(html(COPY.everywhereThenNoPassword));
+    expect(page).not.toContain(html(COPY.everywhereThen));
   });
 
   it("under Strict: nothing to change here yet, in words; signing out everywhere still offered", async () => {
@@ -148,6 +153,9 @@ describe("the page", () => {
     expect(page).toContain(html(COPY.strict));
     expect(page).not.toContain(`type="password"`);
     expect(page).toContain(COPY.everywhereButton);
+    // The words say the email can't be changed here, so no link offers it.
+    expect(page).not.toContain(`href="/family/email"`);
+    expect(page).not.toContain(COPY.changeEmail);
   });
 });
 
@@ -224,6 +232,39 @@ describe("changing the password", () => {
     asParent(a.identity);
     const before = await credentialOf(a.identity.parentId);
     expect(await changePasswordAction(NEW_PASSWORD, NEW_PASSWORD)).toEqual({ ok: false, errors: [COPY.proveAgain] });
+    expect(await credentialOf(a.identity.parentId)).toEqual(before);
+    expect(await sessionsOf(a.identity.parentId)).toHaveLength(1);
+    expect(await audits("parent.password.changed")).toEqual([]);
+  });
+
+  it("a remembered device's sign-in opens no window: the page asks again, and the change and an email change are refused", async () => {
+    // As recordStrongSignin() leaves a password sign-in on a remembered device: the device made earlier, its last use
+    // and the session's strong_at the one instant. The device stood in for the code, and is never a second step here.
+    const a = await seedSignedInParent(FAMILY_A);
+    const at = new Date(Date.now() - 1000);
+    await proveRecently(a.identity, PROVEN_PASSWORD, at);
+    const device = await seedDevice(a.identity.parentId);
+    await db.update(parentDevice).set({ createdAt: new Date(at.getTime() - 86_400_000), lastUsedAt: at }).where(eq(parentDevice.id, device.id));
+    asParent(a.identity);
+    expect(await renderPage(SignInSettingsPage)).toContain(html(COPY.askAgainForPassword));
+    expect(await sessionProvedRecently(db, a.identity)).toBe(false); // what requestMyEmailChange() reads under the lock
+    const before = await credentialOf(a.identity.parentId);
+    expect(await changePasswordAction(NEW_PASSWORD, NEW_PASSWORD)).toEqual({ ok: false, errors: [COPY.proveAgain] });
+    expect(await credentialOf(a.identity.parentId)).toEqual(before);
+    expect(await audits("parent.password.changed")).toEqual([]);
+    // A new device made at that instant (a code's or a set-up link's sign-in) is a proof, and so is asking again.
+    await db.update(parentDevice).set({ createdAt: at }).where(eq(parentDevice.id, device.id));
+    expect(await sessionProvedRecently(db, a.identity)).toBe(true);
+    expect(await renderPage(SignInSettingsPage)).toMatch(/autocomplete="new-password"/i);
+  });
+
+  it("under Strict is refused even with a recent proof, in the Strict words, changing nothing", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await proveRecently(a.identity);
+    await seedParentSettings({ level: "strict" });
+    asParent(a.identity);
+    const before = await credentialOf(a.identity.parentId);
+    expect(await changePasswordAction(NEW_PASSWORD, NEW_PASSWORD)).toEqual({ ok: false, errors: [COPY.strict] });
     expect(await credentialOf(a.identity.parentId)).toEqual(before);
     expect(await sessionsOf(a.identity.parentId)).toHaveLength(1);
     expect(await audits("parent.password.changed")).toEqual([]);

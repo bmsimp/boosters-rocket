@@ -18,6 +18,7 @@ import { accountingLink, auditLog, guardian, parent, parentAuthSession, parentAu
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import { EMAIL_COPY, confirmMyEmailChange, findMyEmailChange } from "@/lib/parents/email-change";
 import { rosterRefreshAsked } from "@/lib/parents/refresh-ask";
+import { SIGNIN_SETTINGS_COPY } from "@/lib/parents/signin-settings-copy";
 import { SOURCE_KEY } from "@/lib/roster/source";
 import { confirmEmailChangeAction, requestEmailChangeAction } from "@/app/(parent)/family/email/actions";
 import FamilyPage from "@/app/(parent)/family/page";
@@ -119,6 +120,15 @@ describe("asking for the change", () => {
     await proveRecently(r.identity);
     expect(await asking(NEW)).toEqual({ ok: true, message: EMAIL_COPY.sent(NEW) });
     expect((await requests()).map((x) => x.newEmail)).toEqual([NEW]);
+    // Under Strict a proof made at Standard is no way past the words that say it can't be changed here yet: refused,
+    // the live request left as it was, nothing mailed.
+    await seedParentSettings({ level: "strict" });
+    await proveRecently(r.identity);
+    const mailed = outbox.length;
+    expect(await asking("another.new@example.org")).toEqual({ ok: false, errors: [SIGNIN_SETTINGS_COPY.strict] });
+    expect((await requests()).map((x) => x.newEmail)).toEqual([NEW]);
+    expect(outbox.length).toBe(mailed);
+    expect((await audits()).filter((a) => a.action === "parent.email.request.failed").map((a) => a.after).at(-1)).toEqual({ code: "strict" });
   });
 
   it("answers the same whatever the new address is, known to the portal and to QuickBooks or not", async () => {

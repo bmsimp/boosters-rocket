@@ -194,10 +194,18 @@ describe("mail messages", () => {
 
   // The notice after a password changed in sign-in settings (slice SI-5a; src/lib/parents/signin-settings.ts).
   describe("the notice that a password was changed", () => {
-    const m = passwordChangedMessage(b, "ana@example.com", { passwordPage });
+    const m = passwordChangedMessage(b, "ana@example.com", { passwordPage, contact: "treasurer@boosters.example.org" });
     /** The words of the mail's HTML body, with its markup taken out and its escaping undone. */
     const htmlWords = m.html.replace(/<div style="background[^>]*>[^<]*<\/div>/, "").replace(/<[^>]+>/g, "\n").split("\n").map((l) => l.trim()).filter(Boolean)
       .map((l) => l.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&"));
+    it("says where to write to the club when it has an address, and leaves the line out when it has none", () => {
+      // The reader is signed out everywhere, so the mail itself says where to tell the club.
+      expect(m.text).toContain("You can write to the club at treasurer@boosters.example.org.");
+      expect(m.html).toContain("You can write to the club at treasurer@boosters.example.org.");
+      const none = passwordChangedMessage(b, "ana@example.com", { passwordPage, contact: null });
+      expect(`${none.text}${none.html}`).not.toContain("You can write to the club");
+      expect(none.text.trim().split("\n\n")).toHaveLength(m.text.trim().split("\n\n").length - 1);
+    });
     it("goes to the address, says the password changed and every device was signed out, and where to set a new one", () => {
       expect(m.to).toBe("ana@example.com");
       expect(m.subject).toBe("Your FZN <Band> Boosters password was changed");

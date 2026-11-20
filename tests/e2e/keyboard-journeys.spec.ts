@@ -430,7 +430,8 @@ test.describe("10. sign-in settings, by keyboard: asking again, then the change 
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Sign-in settings");
 
     // The password: its field, then Continue; the code step's field takes the focus.
-    const password = page.getByLabel("Your password");
+    // The field alone: its box is a region headed "Your password" too, which getByLabel() would also find.
+    const password = page.getByRole("main").locator('input[name="password"][autocomplete="current-password"]');
     await tabTo(page, password);
     await page.keyboard.type(E2E_SIGNIN.password);
     await page.keyboard.press("Tab");
