@@ -35,8 +35,9 @@ const RUN_LOCK = 7461003;
 /**
  * A family that couldn't be read for one of these reasons is counted and passed over; anything else stops the run, to
  * carry on next time. `no_record`: a family of the roster with no family record of the app's own in the roster's
- * company, so there is no row to keep its figures in (the records are made in the same transaction as every change
- * to the cache, so this is a moment's gap at most); QuickBooks is asked nothing, and nothing is stamped.
+ * company, so there is no row to keep its figures in (since stage 3's slice 9c a family customer added in the books
+ * has no record until staff make one from it, "Create a family from this", so this can last); QuickBooks is asked
+ * nothing, and nothing is stamped.
  */
 const PASS_OVER = new Set(["bad_answer", "fault", "bad_id", "not_a_family", "http_400", "no_record"]);
 /**
