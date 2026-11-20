@@ -316,6 +316,13 @@
       "when": 1795144777896,
       "tag": "0044_contact_details_additive",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1795152917846,
+      "tag": "0045_authenticator_app",
+      "breakpoints": true
     }
   ]
 }
