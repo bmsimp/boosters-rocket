@@ -146,8 +146,9 @@ describe("the daily clean-up deletes only what is past use", () => {
       // A parent's own contact edits are counted in the same table, a save over an hour: each kind goes by its own window.
       { kind: "contact_save_parent", subject: "p-1", at: at(-w - SEC) },           // past the sign-in window, inside its own: stays
       { kind: "contact_save_parent", subject: "p-1", at: at(-RATE_LIMITS.contact_save_parent.windowMs - SEC) }, // gone
-      { kind: "contact_open_parent", subject: "p-1", at: at(-RATE_LIMITS.contact_open_parent.windowMs + SEC) }, // stays
-      { kind: "contact_open_parent", subject: "p-1", at: at(-RATE_LIMITS.contact_open_parent.windowMs - SEC) }, // gone
+      // A kind RATE_LIMITS names no more (contact_open_parent, retired) goes as an unknown one does, after the longest window.
+      { kind: "contact_open_parent", subject: "p-1", at: at(-longest + SEC) },     // stays
+      { kind: "contact_open_parent", subject: "p-1", at: at(-longest - SEC) },     // gone
     ]).returning({ id: rateLimitEvent.id });
     expect(RATE_LIMITS.contact_save_parent.windowMs).toBeGreaterThan(w);
     expect(await clean()).toEqual({ ...NOTHING, rateLimitEvents: 5 });

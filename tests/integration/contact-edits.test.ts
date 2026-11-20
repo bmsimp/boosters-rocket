@@ -357,7 +357,7 @@ describe("what the browser sends is checked, and how often", () => {
   it("opening the page takes no rate limit and writes no audit row: it asks QuickBooks nothing", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
-    for (let i = 0; i < RATE_LIMITS.contact_open_parent.max + 3; i++) expect(await renderPage(FamilyDetailsPage)).toContain("Save my details");
+    for (let i = 0; i < 33; i++) expect(await renderPage(FamilyDetailsPage)).toContain("Save my details");
     expect(await db.select().from(rateLimitEvent)).toEqual([]);
     expect(await audits()).toEqual([]);
     expect(stub.apiCalls()).toEqual([]);
