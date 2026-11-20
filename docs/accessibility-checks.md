@@ -245,6 +245,23 @@ codes shown, the app on, and asking again for the app's code) in every mode at 3
 - Not walked yet: the sign-in page's app step when the app was turned off meanwhile goes back to the password step,
   with the refusal's words and that they start again, and asking again goes back to its password field the same way.
 
+### 12. Passkeys: adding, naming, asking again with one, removing (`/family/sign-in`)
+
+Added with the sign-in release's slice SI-7b. Not yet a journey of `tests/e2e/keyboard-journeys.spec.ts` (left for the
+slice's follow-up): `tests/e2e/passkeys.spec.ts` walks it by pointer with Playwright's authenticator, and these are
+the stops to walk by keyboard alone until the journey is written.
+
+- The "Passkeys" box asks again on its own for a parent with no passkey (the password, Continue, the emailed code);
+  once proved, its "Thank you, that's you." takes the focus, then the name field ("A name for it (optional)", described
+  by its help line) and **Add a passkey**.
+- After the add, the words "Your passkey is added, and here are your backup codes." take the focus; the ten codes are
+  selectable text and **Copy the backup codes** copies them all and says so in a status line.
+- **Rename** on a passkey (its name spoken after the word) draws its field, which takes the focus, then **Save the
+  name** and **Cancel**; the answer takes the focus.
+- For a holder, asking again offers **Use your passkey** first, then the password field beside it; a proof redraws
+  the page, and **Remove** (its passkey's name spoken after it) is reached with the words for the last one after it.
+- A busy button keeps the focus (`aria-disabled`), and every answer takes the focus.
+
 ### On a phone: the tab bar and the focus
 
 - Walking the pages with Tab at 360 wide, a control the focus scrolled to at the foot of the screen was left partly

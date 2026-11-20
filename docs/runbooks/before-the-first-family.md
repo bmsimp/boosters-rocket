@@ -367,6 +367,58 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
     finishes the set-up; the ten backup codes are still shown. **If not:** note the phone, browser or installed app,
     how long you were away and what the page showed instead (a page that starts over has lost the set-up: the app's
     entry from it won't work; a page that lost the codes can make new ones with **Make new backup codes**).
+30. **A passkey on the iPhone, in Safari and in the installed app.** As a test parent: Family, **Sign-in settings**,
+    show it's you, then under **Passkeys** type a name and **Add a passkey**; unlock with Face ID or the passcode.
+    Then sign out, and on the sign-in page **Sign in with a passkey**. Do it once in Safari and once in the installed
+    app.
+    **Pass:** the passkey is listed with its name, "Not used yet", then a last-used time after the sign-in; the first
+    passkey shows ten backup codes once; signing in asks for no address and no password. **If not:** note the browser
+    or app and what the phone or the page said.
+31. **A passkey on Android, in Chrome and in the installed app,** the same as check 30 (fingerprint or the screen
+    lock). Then add a passkey in Chrome and try to sign in with it in the installed app.
+    **Pass:** each adds and signs in; note whether the installed app offered the passkey made in Chrome (whether the two
+    count as one device for passkeys), and whether **Remembered devices** lists them as one device or two. **If not:**
+    note what was offered.
+32. **A passkey on a Windows PC with Windows Hello,** in Edge and in Chrome, and **on a Mac,** in Safari and in Chrome
+    (Touch ID or the Mac's password).
+    **Pass:** each browser adds a passkey and signs in with it alone. **If not:** note the browser and what it said.
+33. **Bitwarden's passkey,** on a desktop browser with the Bitwarden extension and on a phone with Bitwarden as its
+    password manager: **Add a passkey** with the name "Bitwarden", and choose Bitwarden when the browser asks where to
+    keep it.
+    **Pass:** Bitwarden keeps it under the portal's address, with the parent's sign-in email as its user name (never
+    the passkey's name), and signs in with it. **If not:** note what Bitwarden showed.
+34. **What a password manager shows.** In the phone's or computer's saved passkeys (iCloud Keychain, Google Password
+    Manager, Windows, Bitwarden), find the passkey you added.
+    **Pass:** it is under the portal's own address, named by the parent's sign-in email. **If not:** note what it shows.
+35. **A synced passkey on a second device.** Add a passkey on one iPhone or Android phone signed in to iCloud Keychain
+    or Google Password Manager, then on a second device signed in to the same account, **Sign in with a passkey**.
+    **Pass:** the second device offers the synced passkey and signs in with it. **If not:** note the two devices.
+36. **A phone's passkey on a computer, by its QR code** (open question 24). On a computer that holds no passkey of the
+    parent's, **Sign in with a passkey**, choose to use a phone, and scan the QR code with the phone that holds it.
+    **Pass:** the computer is signed in. **If not:** note the computer, the browser and what the phone said.
+37. **A hardware security key** (a YubiKey or similar, with a PIN set): add one as a passkey, then sign in with it on
+    another computer.
+    **Pass:** it adds and signs in, asking for the key's PIN. **If not:** note the key and what was asked.
+38. **Firefox,** on a computer and on Android: add a passkey and sign in with it.
+    **Pass:** both work. **If not:** note what Firefox said.
+39. **Removing a passkey the device still holds.** Remove a passkey on **Sign-in settings** (show it's you first), then
+    on the device that holds it, **Sign in with a passkey**.
+    **Pass:** the device still offers it, and the portal refuses it with "That passkey didn't work"; the parent signs
+    in with their password instead, and, with no other passkey or app, is emailed a code. **If not:** note what happened.
+40. **Asking again with a passkey.** Signed in more than 10 minutes, on **Sign-in settings** press **Use your passkey**
+    in the password box, then change the password.
+    **Pass:** the passkey alone shows it's you, with no code emailed. **If not:** note what was asked.
+41. **A change of sign-in email keeps the passkeys working, and a change of `APP_URL` drops them.** Change a test
+    parent's sign-in email, then sign in with their passkey. Then, on a test host only, change `APP_URL` to another
+    address and try the passkey again.
+    **Pass:** after the email change the passkey still signs in (the password manager may still show the old address
+    as the user name); after the address change no passkey works (each is bound to the old address), and the parent
+    signs in with their password and the second step. **If not:** note what happened.
+
+These checks are what Playwright's own authenticator can't show (`tests/e2e/passkey-signin.spec.ts` and
+`tests/e2e/passkeys.spec.ts` say so in their heads): a real authenticator, a password manager, a synced passkey, a
+phone by its QR code, a security key, the installed app, Safari and Firefox. The browser's own passkey suggestions on
+the email field are not checked: the portal doesn't start them.
 
 The phone checks that sign a form need Documenso, so they are in part 4.
 
