@@ -29,7 +29,7 @@ const ICON: Record<StatusKey, "done" | "todo" | "waived"> = {
 const holderWords = (h: Holder) => (h.on.kind === "family" ? `${h.address}, on this customer` : `${h.address}, on ${h.on.name} under it`);
 
 /** What a status means for the row, in words. Every name and address is the books' text or a person's, shown as text. */
-function StatusDetail({ status }: { status: LinkStatus }) {
+function StatusDetail({ status, row }: { status: LinkStatus; row: LinkRow }) {
   switch (status.key) {
     case "carried_over": return <>Carried over from the roster by the portal, on <LocalTime iso={status.at} />. Nobody has confirmed it since.</>;
     case "linked": return <>{status.origin === "confirmed" ? "Confirmed with “Create a family from this”" : "Made in the books from the portal"}{status.by ? ` by ${status.by}` : ""}, on <LocalTime iso={status.at} />.</>;
@@ -41,6 +41,7 @@ function StatusDetail({ status }: { status: LinkStatus }) {
       : <>The one customer that holds a guardian&apos;s sign-in address also holds an address of {status.alsoMatches.length === 1 ? "another family's guardian" : "other families' guardians"}, so it isn&apos;t filled in for any of them.</>;
     case "no_match": return status.noGuardians
       ? <>This family has no guardians yet, so there is no address to match.</>
+      : row.addresses.length === 0 ? <>None of this family&apos;s guardians can sign in, so there is no address to match.</>
       : <>No customer with no family holds any of its guardians&apos; sign-in addresses.</>;
     case "not_checked": return <>The books can&apos;t be checked now, so nothing is suggested.</>;
   }
@@ -57,7 +58,7 @@ function Opening({ row }: { row: LinkRow }) {
       <p>{row.students.length === 0 ? "No active students." : "Students:"}</p>
       {row.students.length > 0 && <ul>{row.students.map((s) => <li key={String(s.id)}>{s.name}: {ownLinkWords(s.link)}</li>)}</ul>}
       <p>{row.guardians.length === 0 ? "No guardians." : "Guardians:"}</p>
-      {row.guardians.length > 0 && <ul>{row.guardians.map((g) => <li key={g.id}>{g.name} ({g.email}): {ownLinkWords(g.link)}</li>)}</ul>}
+      {row.guardians.length > 0 && <ul>{row.guardians.map((g) => <li key={g.id}>{g.name} ({g.email}){g.blocked ? ", can't sign in, so this address isn't matched" : ""}: {ownLinkWords(g.link)}</li>)}</ul>}
       {row.status.key === "several" && <><p>Possible customers:</p><ul>{row.status.candidates.map((c, i) => <li key={i}>{c.name}{c.email ? ` (${c.email})` : ""}</li>)}</ul></>}
       {row.status.key === "several" && row.status.alsoMatches.length > 0 && <p>Also matched by: {row.status.alsoMatches.join(", ")}.</p>}
     </details>
@@ -83,10 +84,10 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
   const filtered = filter.status !== null || filter.q !== "";
   const columns: Column<LinkRow>[] = [
     { key: "family", header: "Family", rowHeader: true, sorted: "ascending", cell: (r) => (view.familyPages ? <Link href={familyPage(r.familyId)}>{r.name}</Link> : r.name) },
-    { key: "addresses", header: "Guardians' sign-in addresses", cell: (r) => (r.addresses.length === 0 ? "None yet" : r.addresses.join(", ")) },
+    { key: "addresses", header: "Guardians' sign-in addresses", cell: (r) => (r.addresses.length > 0 ? r.addresses.join(", ") : r.guardians.length === 0 ? "None yet" : "None that can sign in") },
     { key: "customer", header: "Customer in the books", cell: (r) => (r.customer === null ? (r.status.key === "not_checked" ? "Not checked now" : "None")
       : <>{r.customer.name}<span className="when">{r.customer.email ?? "No email address"}</span></>) },
-    { key: "status", header: "Status", cell: (r) => <><StateWords state={ICON[r.status.key]} words={STATUS_WORDS[r.status.key]} /><span className="when"><StatusDetail status={r.status} /></span></> },
+    { key: "status", header: "Status", cell: (r) => <><StateWords state={ICON[r.status.key]} words={STATUS_WORDS[r.status.key]} /><span className="when"><StatusDetail status={r.status} row={r} /></span></> },
     { key: "more", header: "Students and guardians", cell: (r) => <Opening row={r} /> },
   ];
   return (
@@ -97,7 +98,8 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
 
       <section className="box" aria-labelledby="links-how-h"><h2 id="links-how-h">How links are made today</h2>
         <p>A customer is suggested only when one of the family&apos;s guardians signs in with an address that is, exactly, on a customer no family is linked to:
-          in its own email field, or on a parent record under it. A name never suggests a customer, and a customer another family is linked to is never suggested.</p>
+          in its own email field, or on a parent record under it. A name never suggests a customer, and a customer another family is linked to is never suggested.
+          A guardian who can&apos;t sign in, because they are blocked, is listed under the family, but their address is never matched.</p>
         <p>Nothing in the portal can yet link a family it has already to a customer the books have already, so a suggestion can&apos;t be acted on for now.
           Today a link comes only with something new. &ldquo;Create a family from this&rdquo;, on Reconciliation, makes a new family in the portal from a customer no family is linked to.
           &ldquo;Create in QuickBooks and link&rdquo;, on a family&apos;s page, makes a new customer in the books for a family that has none, and so does adding a family under Families, when someone who may link families adds it while the books are connected.</p>

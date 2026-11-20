@@ -2,7 +2,9 @@
 // section 4, "The mapping screen"): every active family of the portal, its link to its customer in the books and how
 // that link stands, or the customer that looks like its own. It reads every family's guardians' sign-in addresses and
 // every customer of the roster cache, so it is staff code only, never imported by a parent page (STAFF_ONLY_IMPORTS in
-// tests/integration/page-guards.test.ts). It reads and never writes: nothing is stored, sent or audited.
+// tests/integration/page-guards.test.ts). It reads and never writes: nothing is stored, sent or audited. A blocked
+// person's address never counts toward a suggestion: they can't sign in with it, so it is left out of what the matcher
+// is given and of the row's addresses, and the person is listed in the row's opening as one who can't sign in.
 import { and, eq, inArray, isNotNull, ne } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, family, guardian, jobRun, parent, qboCustomer, qboCustomerType, staffUser, student } from "@/lib/db/schema";
@@ -53,13 +55,14 @@ export type LinkRow = {
   familyId: AppFamilyId;
   /** The family's name, or words saying the portal knows none (recordNameWords()). */
   name: string;
-  /** Its open guardians' sign-in addresses, each once, in order. */
+  /** The sign-in addresses of its open guardians who aren't blocked, each once, in order: exactly what was matched. */
   addresses: string[];
   /** The linked customer as the cache holds it, or the one suggested; null for none. */
   customer: CustomerShown | null;
   status: LinkStatus;
   students: { id: AppStudentId; name: string; link: OwnLink }[];
-  guardians: { id: string; name: string; email: string; link: OwnLink }[];
+  /** Its open guardians; `blocked`: the person is blocked, so they can't sign in and their address isn't matched. */
+  guardians: { id: string; name: string; email: string; blocked: boolean; link: OwnLink }[];
 };
 export type LinksView = {
   state: LinksState;
@@ -89,7 +92,7 @@ export async function loadAccountingLinks(): Promise<LinksView> {
     db.select().from(qboCustomer), familyCreatesOnTheQueue(),
     db.select({ id: family.id, name: family.name }).from(family).where(eq(family.active, true)),
     db.select({ id: student.id, familyId: student.familyId, name: student.name }).from(student).where(and(eq(student.active, true), isNotNull(student.familyId))),
-    db.select({ id: guardian.id, familyId: guardian.familyId, name: parent.name, email: parent.email }).from(guardian).innerJoin(parent, eq(guardian.parentId, parent.id))
+    db.select({ id: guardian.id, familyId: guardian.familyId, name: parent.name, email: parent.email, blocked: parent.blocked }).from(guardian).innerJoin(parent, eq(guardian.parentId, parent.id))
       .where(and(ne(guardian.status, "disabled"), isNotNull(guardian.familyId))),
   ]);
   const elsewhere = otherCompany(source, connection?.realmId);
@@ -121,7 +124,8 @@ export async function loadAccountingLinks(): Promise<LinksView> {
   };
   const studentsOf = group(students, (s) => String(s.familyId));
   const guardiansOf = group(guardians, (g) => String(g.familyId));
-  const addressesOf = new Map([...guardiansOf].map(([key, gs]) => [key, [...new Set(gs.map((g) => g.email))].sort()]));
+  // Only an address its person can sign in with: a blocked person's is never matched, nor shown among the row's addresses.
+  const addressesOf = new Map([...guardiansOf].map(([key, gs]) => [key, [...new Set(gs.filter((g) => !g.blocked).map((g) => g.email))].sort()]));
   // What the Families pages break a tie of names by (rosterFamilies()): a family's linked customer where the roster lists
   // it as a family, and a student's where the roster lists it under that family's; with no roster, where the cache holds it.
   const studentsListedUnder = new Map(roster === null || roster.kind === "flat" ? [] : roster.families.map((f) => [f.customer.qboId, new Set(f.students.map((c) => c.qboId))]));
@@ -145,7 +149,7 @@ export async function loadAccountingLinks(): Promise<LinksView> {
       familyId: f.id, name: familyName.get(key)!, addresses: addressesOf.get(key) ?? [],
       students: (studentsOf.get(key) ?? []).map((s) => ({ id: s.id, name: recordNameWords(s.name, "student"), customerId: studentTie(familyTie(link?.customerId), customerOfStudent.get(String(s.id))) }))
         .sort(byRosterOrder).map((s) => ({ id: s.id, name: s.name, link: own(customerOfStudent.get(String(s.id))) })),
-      guardians: (guardiansOf.get(key) ?? []).map((g) => ({ id: g.id, name: g.name, email: g.email, link: own(customerOfGuardian.get(g.id)) }))
+      guardians: (guardiansOf.get(key) ?? []).map((g) => ({ id: g.id, name: g.name, email: g.email, blocked: g.blocked, link: own(customerOfGuardian.get(g.id)) }))
         .sort(byName),
     };
     if (link !== undefined) {
@@ -164,7 +168,7 @@ export async function loadAccountingLinks(): Promise<LinksView> {
       return { ...base, customer: null, status: { key: "several", why: s.why, candidates: s.candidates.map(shown),
         alsoMatches: s.why === "shared" ? s.alsoMatches.map((k) => familyName.get(k)!) : [] } };
     }
-    return { ...base, customer: null, status: { key: "no_match", noGuardians: base.addresses.length === 0 } };
+    return { ...base, customer: null, status: { key: "no_match", noGuardians: base.guardians.length === 0 } };
   });
 
   return {
@@ -187,9 +191,10 @@ export function statusCounts(rows: readonly LinkRow[]): Record<StatusKey, number
 
 /**
  * The rows a filter shows: of its status (every status when none), and matching its search, ignoring case, in the
- * family's name, its guardians' sign-in addresses, or the linked or suggested customer's name or email field.
+ * family's name, its open guardians' sign-in addresses (a blocked person's too, so staff can find their family), or the
+ * linked or suggested customer's name or email field.
  */
 export function filterLinkRows(rows: readonly LinkRow[], filter: LinksFilter): LinkRow[] {
   return rows.filter((r) => (filter.status === null || r.status.key === filter.status)
-    && searchMatches(filter.q, [r.name, ...r.addresses, r.customer?.name ?? null, r.customer?.email ?? null]));
+    && searchMatches(filter.q, [r.name, ...r.guardians.map((g) => g.email), r.customer?.name ?? null, r.customer?.email ?? null]));
 }

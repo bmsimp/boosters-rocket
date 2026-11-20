@@ -11,7 +11,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, family, guardian, qboConnection, qboCustomerType, setting } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, guardian, parent, qboConnection, qboCustomerType, setting } from "@/lib/db/schema";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { filterLinkRows, loadAccountingLinks, type LinkRow, type LinksView } from "@/lib/accounting/mapping";
 import { parseLinksFilter } from "@/lib/accounting/status";
@@ -68,8 +68,8 @@ async function unlinkedFamily(name: string, role: "family" | "member" = "family"
 }
 /** An open guardian row of this person in this family record (the person made once, by their address). */
 const people = new Map<string, string>();
-async function guardianIn(familyId: AppFamilyId, name: string, email: string, status: "invited" | "active" | "disabled" = "invited") {
-  const parentId = people.get(email) ?? (await seedParent({ name, email })).id;
+async function guardianIn(familyId: AppFamilyId, name: string, email: string, status: "invited" | "active" | "disabled" = "invited", o: { blocked?: boolean } = {}) {
+  const parentId = people.get(email) ?? (await seedParent({ name, email, blocked: o.blocked ?? false })).id;
   people.set(email, parentId);
   await db.insert(guardian).values({ parentId, familyId, familyQboId: null, status, disabledReason: status === "disabled" ? "removed" : null });
 }
@@ -235,6 +235,26 @@ describe("suggestions for families with no link", () => {
     expect((await statusOf("The Patels"))).toEqual({ key: "no_match", noGuardians: true });
     await db.update(family).set({ active: false }).where(eq(family.id, patels));
     expect((await loadAccountingLinks()).rows.map((r) => r.name)).not.toContain("The Patels");
+  });
+
+  it("never matches a blocked person's address: No match while they are the only one, Suggested once unblocked or beside a guardian who can sign in", async () => {
+    await readAgain(qc("70", "Patel Family", "1", mail("asha@example.com, ravi@example.com")));
+    const patels = await unlinkedFamily("The Patels");
+    await guardianIn(patels, "Asha Patel", "asha@example.com", "invited", { blocked: true });
+    let row = rowOf(await loadAccountingLinks(), "The Patels");
+    expect(row.status).toEqual({ key: "no_match", noGuardians: false });
+    expect(row.addresses).toEqual([]);
+    expect(row.guardians.map((g) => ({ name: g.name, blocked: g.blocked }))).toEqual([{ name: "Asha Patel", blocked: true }]);
+    // A guardian who can sign in, with an address on the same customer: Suggested, by their address alone.
+    await guardianIn(patels, "Ravi Patel", "ravi@example.com");
+    row = rowOf(await loadAccountingLinks(), "The Patels");
+    expect(row.status).toEqual({ key: "suggested", holders: [{ address: "ravi@example.com", on: { kind: "family" } }] });
+    expect(row.addresses).toEqual(["ravi@example.com"]);
+    // Unblocked, Asha's address is matched again.
+    await db.update(parent).set({ blocked: false }).where(eq(parent.email, "asha@example.com"));
+    row = rowOf(await loadAccountingLinks(), "The Patels");
+    expect(row.status).toMatchObject({ key: "suggested", holders: [{ address: "asha@example.com" }, { address: "ravi@example.com" }] });
+    expect(row.addresses).toEqual(["asha@example.com", "ravi@example.com"]);
   });
 
   it("never suggests a customer a waiting family create would be found as", async () => {
@@ -407,6 +427,19 @@ describe("the page", () => {
     const recon = await renderPage(ReconciliationPage);
     const at = recon.indexOf('id="no-family-h"');
     expect(recon.slice(at, recon.indexOf("</section>", at))).toContain('href="/staff/links"');
+    expect(whole).toContain("A guardian who can&#x27;t sign in, because they are blocked, is listed under the family, but their address is never matched.");
+  });
+
+  it("lists a blocked guardian in the row's opening as one who can't sign in, never among the addresses matched, and says why nothing matches", async () => {
+    tag = await connectRoster(stub);
+    await readAgain(qc("70", "Patel Family", "1", mail("asha@example.com")));
+    const patels = await unlinkedFamily("The Patels");
+    await guardianIn(patels, "Asha Patel", "asha@example.com", "invited", { blocked: true });
+    await asAdmin();
+    const patel = rowNamed(withoutIds(list(await renderPage(AccountingLinksPage))), "The Patels")!;
+    expect(patel.slice(1)).toEqual(["None that can sign in", "None",
+      "No matchNone of this family's guardians can sign in, so there is no address to match.",
+      "Students and guardians: The PatelsNo active students.Guardians:Asha Patel (asha@example.com), can't sign in, so this address isn't matched: no link of its own"]);
   });
 
   it("renders the books' text as text", async () => {
