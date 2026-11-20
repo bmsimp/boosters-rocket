@@ -122,11 +122,19 @@ const holdParentSettings = (tx: Tx) => tx.execute(sql`select pg_advisory_xact_lo
  * or the window has run out since the page.
  */
 async function provedUnderLock(tx: Tx, ctx: Me, now?: Date): Promise<{ email: string; at: Date } | null> {
+  const me = await heldPerson(tx, ctx, now);
+  return me && (await windowStands(tx, ctx, me.at)) ? me : null;
+}
+
+/** The person's row, FOR UPDATE, and the clock read once it is held (or `now`); null when the person is gone or blocked. */
+async function heldPerson(tx: Tx, ctx: Me, now?: Date): Promise<{ email: string; at: Date } | null> {
   const [me] = await tx.select({ email: parent.email, blocked: parent.blocked }).from(parent).where(eq(parent.id, ctx.parentId)).for("update");
   if (!me || me.blocked) return null;
-  const at = now ?? new Date(); // read once the person's row is held
-  return provedRecently(await sessionStrongAt(tx, ctx), at) ? { email: me.email, at } : null;
+  return { email: me.email, at: now ?? new Date() };
 }
+
+/** This session's window at `at`, read under the person's row (a proof from before an app in force doesn't count: sessionStrongAt()). */
+const windowStands = async (tx: Tx, ctx: Me, at: Date) => provedRecently(await sessionStrongAt(tx, ctx), at);
 
 /**
  * "Set up an authenticator app", the first press (decision 2 of SI-6b). It takes no argument. In this order:
@@ -181,8 +189,9 @@ export async function startMyAuthenticator(ctx: Me, now?: Date): Promise<SetupAn
  * (c) the try's place under the person (`second_step_parent`, SI-6a's count, so set-up tries and sign-in tries share its
  *     5 wrong in 15 minutes), taken before the code is checked; its first refusal audited
  *     `parent.authenticator.confirm_refused` (`rate_limited`);
- * (d) one transaction: the person's row FOR UPDATE, the window again under it (and the person not blocked), where the
- *     stamped set-up stands again (anything but `current` is (a)'s answer, its place given back); the code by its shape
+ * (d) one transaction: the person's row FOR UPDATE (and the person not blocked), where the stamped set-up stands again
+ *     (anything but `current` is (a)'s answer, its place given back), then the window again under it (in that order,
+ *     since an app finished meanwhile leaves this session's proof older than the app); the code by its shape
  *     (readSecondStepCode(): spaces and dashes dropped, so "123 456" and "123-456", as apps show it, are taken; anything
  *     but six digits is a wrong try); that set-up, and no other, confirmed by one conditional update when the code
  *     matches the step now or one either way (confirmAuthenticator(), authenticator.ts: two confirms at once make one
@@ -218,11 +227,14 @@ export async function confirmMyAuthenticator(ctx: Me, code: unknown, stamp: unkn
   }
   const typed = readSecondStepCode(code);
   const done = await db.transaction(async (tx) => {
-    const me = await provedUnderLock(tx, ctx, now);
+    // The set-up's standing before the window, as at (a): an app finished by the other of two confirms at once leaves
+    // this session's proof older than the app, so the window would say it ran out when the set-up is the thing that's over.
+    const me = await heldPerson(tx, ctx, now);
     if (!me) return "not_proved" as const;
-    const who = parentActor({ id: ctx.parentId, email: me.email });
     const setup = await setupStanding(tx, ctx, rowMac, me.at);
     if (setup.standing !== "current") return over(setup.standing, tx);
+    if (!(await windowStands(tx, ctx, me.at))) return "not_proved" as const;
+    const who = parentActor({ id: ctx.parentId, email: me.email });
     const took = typed.kind === "app" ? await confirmAuthenticator(tx, ctx.parentId, setup.id, typed.code, me.at) : { miss: "wrong" as const };
     if ("miss" in took) {
       if (took.miss === "unreadable") {

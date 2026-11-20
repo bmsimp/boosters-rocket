@@ -552,13 +552,13 @@ describe("one parent never reaches another's app", () => {
       const before = await theirs();
 
       asParent(a.identity);
-      // Their codes, and values of the wrong type and size, at A's confirm: A has no set-up, so nothing is confirmed.
+      // Their codes, and values of the wrong type and size, at A's confirm (each sent as the stamp too): A has no set-up, so nothing is confirmed.
       for (const v of [appCode(theirApps.b.secret, now), appCode(theirApps.second.secret, now), theirCodes.b[0]!, theirCodes.second[0]!]) {
-        const r = await confirmAuthenticatorAction(v);
+        const r = await confirmAuthenticatorAction(v, v);
         expect(r.ok, v).toBe(false);
       }
       const odd = [undefined, null, 123456, {}, [], "x".repeat(5000), b.identity.parentId, theirApps.b.id, theirApps.second.id] as unknown as string[];
-      for (const v of odd) expect(await confirmAuthenticatorAction(v), String(v)).toEqual({ ok: false, errors: [COPY.appSetupWrong] });
+      for (const v of odd) expect(await confirmAuthenticatorAction(v, v), String(v)).toEqual({ ok: false, errors: [COPY.appSetupWrong] });
       // The presses take no id: one sent is never read, and what they act on is A's own (A has no app to replace or remove).
       const withArg = <T,>(action: () => Promise<T>) => action as unknown as (x: unknown) => Promise<T>;
       for (const v of [b.identity.parentId, theirApps.b.id, theirApps.second.id, second.identity.sessionId]) {
