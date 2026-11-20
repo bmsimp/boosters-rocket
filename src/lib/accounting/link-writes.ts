@@ -356,7 +356,8 @@ export async function reviewCarriedOver(raw: { familyId: unknown; linkId: unknow
       before: { familyId: familyKey, customerQboId: link.customerId, realmId: link.realmId, link: was(link), studentLinks: students.map(studentOf) },
       after: { familyId: familyKey, customerQboId: link.customerId, realmId: link.realmId, chosen: "reviewed",
         link: { id: link.id, origin: "confirmed", linkedAt: now.toISOString(), linkedBy: o.staffUserId },
-        studentLinks: students.map((s) => ({ id: s.id, origin: "confirmed", linkedAt: now.toISOString(), linkedBy: o.staffUserId, studentId: String(s.studentId), customerQboId: s.customerId })),
+        // Named as a confirm names the students it linked, so the audit page's record filter finds the row under each (confirmRowsOf()).
+        studentsLinked: students.map((s) => ({ id: s.id, origin: "confirmed", linkedAt: now.toISOString(), linkedBy: o.staffUserId, studentId: String(s.studentId), customerQboId: s.customerId })),
         studentLinksLeft: offer.leaves.map((l) => l.linkId) } }, tx);
     return { ok: true, message: reviewedWords({ family: recordNameWords(f.name, "family"), customer: b.customerById.get(link.customerId)?.displayName ?? link.customerId,
       confirmed: offer.confirms.map((c) => c.name), left: offer.leaves.map((l) => ({ name: l.name, why: l.why })) }) };

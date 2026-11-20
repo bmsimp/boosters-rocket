@@ -116,7 +116,7 @@ describe("Confirm this link", () => {
       studentLinks: [{ id: before.student.id, origin: "carried_over", linkedAt: before.student.linkedAt.toISOString(), linkedBy: null, studentId: String(amy), customerQboId: "81" }] });
     expect(audit!.after).toEqual({ familyId: String(oaks), customerQboId: "80", realmId: REALM, chosen: "reviewed",
       link: { id: before.family.id, origin: "confirmed", linkedAt: after.family.linkedAt.toISOString(), linkedBy: linker.id },
-      studentLinks: [{ id: before.student.id, origin: "confirmed", linkedAt: after.student.linkedAt.toISOString(), linkedBy: linker.id, studentId: String(amy), customerQboId: "81" }],
+      studentsLinked: [{ id: before.student.id, origin: "confirmed", linkedAt: after.student.linkedAt.toISOString(), linkedBy: linker.id, studentId: String(amy), customerQboId: "81" }],
       studentLinksLeft: [] });
 
     const now = await loadAccountingLinks();
