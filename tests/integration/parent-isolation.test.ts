@@ -84,7 +84,9 @@ const MUST_SHOW: Record<string, (family: SeededParent) => string[]> = {
   // One form: its title, the student it is for, and that it is signed.
   // The question a link puts, with the address it would change to, and the address the parent signs in with now.
   "/family/email/[token]": (family) => [`Use ${family.emailChange!.newEmail} to sign in from now on?`, family.spec.parent.email],
-  "/family/email": (family) => [family.spec.parent.email, "Send me a link"],
+  // The address the parent signs in with now, and, since the sign-in release's slice SI-5a, what comes before the new
+  // address: the seeded parents have no password yet, so the offer of a link to choose one.
+  "/family/email": (family) => [family.spec.parent.email, "Email me a link to choose a password"],
   "/forms/[id]": (family) => ["Uniform agreement", family.spec.students[1]!.name, "nothing more to do for this form", `${family.spec.parent.name} (you)`],
 };
 /** The family as the roster cache has it: its name, its students, and the parent's own name, address and number. */

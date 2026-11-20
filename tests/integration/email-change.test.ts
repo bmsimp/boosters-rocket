@@ -28,7 +28,7 @@ import { inQuickBooks, ofType, qbCustomer, seedContactFamilies, under } from "..
 import { resetDb, seedGuardian, seedParent, seedParentSession, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
 import { emailChangeToken, seedEmailChange } from "../helpers/email-change";
 import { CHENOWETH, RIVERA, connectCompany } from "../helpers/money";
-import { identityNow, seedParentIn } from "../helpers/parent";
+import { PROVEN_PASSWORD, identityNow, proveRecently, seedParentIn } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { holdTheRosterLock } from "../helpers/reconcile";
 import { addToCache, seedParentSettings, seedShape, stu } from "../helpers/roster-cache";
@@ -67,6 +67,7 @@ describe("asking for the change", () => {
   it("stores the request, mails a link to the new address and a notice to the old, and changes nothing else", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
+    await proveRecently(r.identity);
     expect(await asking(`  ${NEW.toUpperCase()} `)).toEqual({ ok: true, message: EMAIL_COPY.sent(NEW) });
 
     expect(outbox.map((m) => m.to).sort()).toEqual([NEW, RIVERA.parent.email].sort());
@@ -100,9 +101,30 @@ describe("asking for the change", () => {
     expect(await sessionsOf(r.identity.parentId)).toHaveLength(1);
   });
 
+  it("asks again: refused, storing and mailing nothing, unless this session proved itself in the last 10 minutes (open question 28)", async () => {
+    const { r } = await seedContactFamilies(stub);
+    asParent(r.identity);
+    // A session from before the password release (no proof), one that proved itself 11 minutes ago, and one whose proof
+    // is stamped ahead of the clock: each refused in words that point to sign-in settings.
+    expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.proveFirst] });
+    await proveRecently(r.identity, PROVEN_PASSWORD, new Date(Date.now() - 11 * 60_000));
+    expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.proveFirst] });
+    await proveRecently(r.identity, PROVEN_PASSWORD, new Date(Date.now() + 60_000));
+    expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.proveFirst] });
+    expect(EMAIL_COPY.proveFirst).toContain("Sign-in settings");
+    expect(outbox).toEqual([]);
+    expect(await requests()).toEqual([]);
+    expect((await audits()).map((a) => [a.action, a.targetId, a.after])).toEqual(Array.from({ length: 3 }, () => ["parent.email.request.failed", R_PARENT, { code: "not_proved" }]));
+    // Proved just now: asked, as before.
+    await proveRecently(r.identity);
+    expect(await asking(NEW)).toEqual({ ok: true, message: EMAIL_COPY.sent(NEW) });
+    expect((await requests()).map((x) => x.newEmail)).toEqual([NEW]);
+  });
+
   it("answers the same whatever the new address is, known to the portal and to QuickBooks or not", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
+    await proveRecently(r.identity);
     for (const email of [CHENOWETH.parent.email, "nobody.anywhere@example.org"]) {
       outbox.length = 0;
       expect(await asking(email)).toEqual({ ok: true, message: EMAIL_COPY.sent(email) });
@@ -113,6 +135,7 @@ describe("asking for the change", () => {
   it("replaces an earlier request that wasn't used: only the newest link works", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
+    await proveRecently(r.identity);
     await asking("first.try@family-r-new.example");
     const first = linkTo("first.try@family-r-new.example");
     await asking(NEW);
@@ -158,6 +181,7 @@ describe("asking for the change", () => {
   it("is rate-limited per person, and audits the first refusal only", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
+    await proveRecently(r.identity);
     for (let i = 0; i < 5; i++) expect(await asking(`try.${i}@family-r-new.example`)).toMatchObject({ ok: true });
     expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.tooManyAsks] });
     expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.tooManyAsks] });
@@ -170,6 +194,7 @@ describe("the link's page", () => {
   it("asks, and opening it changes nothing", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
+    await proveRecently(r.identity);
     await asking(NEW);
     const token = linkTo(NEW);
     const page = await renderPage(ConfirmEmailPage, { params: { token } });
@@ -199,6 +224,13 @@ describe("the link's page", () => {
     asParent(r.identity);
     expect(await renderPage(FamilyPage)).toContain(`<a class="btn btn-line" href="/family/email">Change my sign-in email</a>`);
     expect(await renderPage(FamilyDetailsPage)).toContain(`<a class="btn btn-line" href="/family/email">Change my sign-in email</a>`);
+    // With no password, a link to choose one first; with one and no recent proof, asking again; then the new address.
+    expect(await renderPage(FamilyEmailPage)).toContain("Email me a link to choose a password");
+    await proveRecently(r.identity, PROVEN_PASSWORD, new Date(Date.now() - 11 * 60_000));
+    const asksAgain = await renderPage(FamilyEmailPage);
+    expect(asksAgain).toContain("Before you change your sign-in email, please show it&#x27;s you");
+    expect(asksAgain).not.toContain("Send me a link");
+    await proveRecently(r.identity);
     expect(await renderPage(FamilyEmailPage)).toContain("Send me a link");
     asParent(hand.identity);
     for (const page of [FamilyPage, FamilyDetailsPage]) expect(await renderPage(page)).not.toContain("Change my sign-in email");
@@ -225,6 +257,7 @@ describe("confirming: QuickBooks first, then the portal", () => {
     await holdLink(r.identity.parentId, "setup");
     await seedDevice(r.identity.parentId);
     asParent(r.identity);
+    await proveRecently(r.identity);
     await asking(NEW);
     const token = linkTo(NEW);
     const before = copyOf(stub.customers);
@@ -284,6 +317,7 @@ describe("confirming: QuickBooks first, then the portal", () => {
   it("two presses of the button at once make one change, audited once", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
+    await proveRecently(r.identity);
     await asking(NEW);
     const token = linkTo(NEW);
     const results = await Promise.all([confirmEmailChangeAction(token), confirmEmailChangeAction(token)]);
@@ -303,6 +337,7 @@ describe("confirming: QuickBooks first, then the portal", () => {
     stub.customers = [qbCustomer("7310", "Noparent Family", { ...ofType("F"), PrimaryEmailAddr: { Address: "home@noparent.example; Work@Noparent.example" } }),
       qbCustomer("7311", "Nico Noparent", { ...under("7310"), ...ofType("S") })];
     asParent(home.identity);
+    await proveRecently(home.identity);
     await asking("home.new@noparent.example");
     expect(await confirmEmailChangeAction(linkTo("home.new@noparent.example"))).toEqual({ ok: true, message: EMAIL_COPY.done("home.new@noparent.example"), signedOut: true });
     // Every other character of the field as it was: the other parent's address, its case, the separator.
@@ -324,6 +359,7 @@ describe("confirming: QuickBooks first, then the portal", () => {
     const other = qbCustomer("7420", "Other Member", { ...ofType("M"), PrimaryEmailAddr: { Address: "other@flat.example" } });
     stub.customers = [qbCustomer("7410", "Marisol Thackeray", { ...ofType("M"), PrimaryEmailAddr: { Address: "marisol@flat.example" } }), copyOf(other)];
     asParent(m.identity);
+    await proveRecently(m.identity);
     await asking("marisol.new@flat.example");
     expect(await confirmEmailChangeAction(linkTo("marisol.new@flat.example"))).toEqual({ ok: true, message: EMAIL_COPY.done("marisol.new@flat.example"), signedOut: true });
     expect(inQuickBooks(stub, "7410").PrimaryEmailAddr).toEqual({ Address: "marisol.new@flat.example" });
@@ -342,6 +378,7 @@ describe("confirming: QuickBooks first, then the portal", () => {
     if (who === "no family") await seedParent({ name: "Somebody Else", email: NEW });
     await aCode(r.identity.parentId);
     asParent(r.identity);
+    await proveRecently(r.identity);
     await asking(taken);
     const token = linkTo(taken);
     stub.calls.length = 0;
@@ -367,6 +404,7 @@ describe("confirming: QuickBooks first, then the portal", () => {
     const { r } = await seedContactFamilies(stub);
     await aCode(r.identity.parentId);
     asParent(r.identity);
+    await proveRecently(r.identity);
     await asking(NEW);
     const token = linkTo(NEW);
     let other: string | null = null;
@@ -396,6 +434,7 @@ describe("confirming: QuickBooks first, then the portal", () => {
   it("a second confirmation that races one that ended with the address taken is told the same, and nobody is signed out", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
+    await proveRecently(r.identity);
     await asking(NEW);
     const token = linkTo(NEW);
     let first: Promise<unknown> | null = null, other: string | null = null;
@@ -420,6 +459,7 @@ describe("confirming: what goes wrong changes nothing in the portal", () => {
     const seeded = await seedContactFamilies(stub);
     await aCode(seeded.r.identity.parentId);
     asParent(seeded.r.identity);
+    await proveRecently(seeded.r.identity);
     await asking(NEW);
     return { ...seeded, token: linkTo(NEW) };
   };
@@ -628,6 +668,7 @@ describe("confirming with a token that isn't the session's own: one refusal, not
     const { r } = await seedContactFamilies(stub);
     // Rivera's parent asks in the Rivera family, then is made a parent of the Chenoweth family too and signs in to it.
     asParent(r.identity);
+    await proveRecently(r.identity);
     expect(await asking(NEW)).toMatchObject({ ok: true });
     const token = linkTo(NEW);
     await seedGuardian({ parentId: r.identity.parentId, familyQboId: C_FAMILY, status: "active", sourceQboId: C_PARENT });

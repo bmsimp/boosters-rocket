@@ -62,7 +62,8 @@ describe("database rate limits", () => {
     // 3 codes to one address; 60 requests and 180 checks from one IP address, which a school's shared Wi-Fi needs on a
     // registration night (spec §1 Rate limits). All in 15 minutes.
     const window = { windowMs: 15 * 60 * 1000 };
-    const { contact_save_parent, contact_open_parent, form_open_parent, volunteer_checkin_parent, volunteer_signup_parent, email_request_parent, email_confirm_parent, buyout_parent, ...signIn } = RATE_LIMITS;
+    const { contact_save_parent, contact_open_parent, form_open_parent, volunteer_checkin_parent, volunteer_signup_parent, email_request_parent, email_confirm_parent, buyout_parent,
+      password_change_parent, signin_settings_parent, ...signIn } = RATE_LIMITS;
     expect(signIn).toEqual({ code_send_email: { max: 3, ...window }, code_send_ip: { max: 60, ...window }, code_check_ip: { max: 180, ...window },
       // Choosing a password from a set-up or reset link (src/lib/parents/password-set.ts): a flood per IP address, as
       // the code request's, and the tries one link may take (a token can't be guessed).
@@ -95,5 +96,10 @@ describe("database rate limits", () => {
     // Paying instead of volunteering, and switching back (src/lib/buyouts/writes.ts), counted per person: each press
     // may make or void an invoice in the club's QuickBooks.
     expect(buyout_parent).toEqual({ max: 10, windowMs: 60 * 60 * 1000 });
+    // A parent's sign-in settings (src/lib/parents/signin-settings.ts; the sign-in release, slice SI-5a), counted per
+    // person: a password change, each try a breach-service call and a 32 MiB hash, and signing out everywhere, each a
+    // write and an audit row. Asking again uses the door's own limits, and the set-up link offered there the request page's.
+    expect(password_change_parent).toEqual({ max: 10, windowMs: 60 * 60 * 1000 });
+    expect(signin_settings_parent).toEqual({ max: 10, windowMs: 60 * 60 * 1000 });
   });
 });

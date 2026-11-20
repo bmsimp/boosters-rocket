@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { signinCodeMessage, welcomeMessage, emailChangeConfirmMessage, emailChangeNoticeMessage, testMessage, signedFormCopyMessage, formReminderMessage, volunteerSignupMessage,
-  passwordSetupMessage, passwordResetMessage, choosePasswordMessage } from "@/lib/mail/messages";
+  passwordSetupMessage, passwordResetMessage, choosePasswordMessage, passwordChangedMessage } from "@/lib/mail/messages";
 
 const b = { clubName: "FZN <Band> Boosters", color: "#5b2a86" };
 
@@ -187,6 +187,32 @@ describe("mail messages", () => {
     });
     it("names no family, student or other person, and escapes the club's name", () => {
       expect(`${m.text}${m.html.replace(/font-family:/g, "")}`).not.toMatch(/family|student|guardian/i); // the inline CSS property is not wording
+      expect(m.html).toContain("FZN &lt;Band&gt; Boosters");
+      expect(m.html).not.toContain("<Band>");
+    });
+  });
+
+  // The notice after a password changed in sign-in settings (slice SI-5a; src/lib/parents/signin-settings.ts).
+  describe("the notice that a password was changed", () => {
+    const m = passwordChangedMessage(b, "ana@example.com", { passwordPage });
+    /** The words of the mail's HTML body, with its markup taken out and its escaping undone. */
+    const htmlWords = m.html.replace(/<div style="background[^>]*>[^<]*<\/div>/, "").replace(/<[^>]+>/g, "\n").split("\n").map((l) => l.trim()).filter(Boolean)
+      .map((l) => l.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&"));
+    it("goes to the address, says the password changed and every device was signed out, and where to set a new one", () => {
+      expect(m.to).toBe("ana@example.com");
+      expect(m.subject).toBe("Your FZN <Band> Boosters password was changed");
+      expect(m.text).toContain("was changed just now, and every phone and computer signed in to the portal was signed out.");
+      expect(m.text).toContain(`If you didn't change it, please set a new password straight away from "Set up or reset my password" at ${passwordPage}, and tell the club.`);
+      expect(m.text).toContain("FZN <Band> Boosters will never ask you for your password, by email or by phone.");
+    });
+    it("holds the request page's whole address and no link that acts: no token, no set-up or reset link", () => {
+      expect(m.text).toContain("https://portal.example.org/sign-in/password,");
+      expect(`${m.text}${m.html}`).not.toMatch(/\/sign-in\/(set-up|reset)\//);
+      expect(m.html).not.toMatch(/<a\s/);
+    });
+    it("says the same in its text and its HTML, names no family, student or other person, and escapes the club's name", () => {
+      expect(htmlWords).toEqual(m.text.trim().split("\n\n"));
+      expect(`${m.text}${m.html.replace(/font-family:/g, "")}`).not.toMatch(/family|student|guardian/i);
       expect(m.html).toContain("FZN &lt;Band&gt; Boosters");
       expect(m.html).not.toContain("<Band>");
     });
