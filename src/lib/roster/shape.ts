@@ -40,10 +40,11 @@ export function shapeTypeIds(s: MembershipShape | null): string[] {
 }
 
 /**
- * Whether a shape lets a family have students: a layered one that names a student type. Only then does the portal keep
- * students (it adds, renames, moves and makes inactive one only then, shapeOperations() in ./operations.ts, and "Create
- * a family from this" makes student records only then), so a shape without one leaves records the portal can no longer
- * change, which must not decide who signs in: the Admin's "Families with no active student" is in force only then
+ * Whether a shape lets a family have students: a layered one that names a student type. Only then does the portal add
+ * a student, move one or change a linked one (shapeOperations() in ./operations.ts), and "Create a family from this"
+ * makes student records only then, so a shape without one leaves records the portal adds none to (an unlinked one can
+ * still be renamed or made inactive there), which must not decide who signs in: the Admin's "Families with no active
+ * student" is in force only then
  * (studentsRuleInForce(), src/lib/parents/sessions.ts), and is switched on only then (src/lib/parents/switches.ts).
  */
 export const shapeNamesStudents = (s: MembershipShape | null): boolean => s?.kind === "layered" && s.studentTypeId !== null;
@@ -110,7 +111,7 @@ export function describeShape(s: MembershipShape, types: TypeRow[]): string {
  * (`family_money`), money's own rule. It changes none
  * of the app's own records (stage 3's slice 9c: they stand alone, whatever the shape calls each customer). It leaves
  * the parents' settings alone: "Families with no active student" is simply not in force while the shape names no
- * students (studentsRuleInForce(), src/lib/parents/sessions.ts), since the portal keeps students only while it does.
+ * students (studentsRuleInForce(), src/lib/parents/sessions.ts), since the portal adds and moves students only while it does.
  * It waits for a running refresh first, and no refresh starts until it commits. The caller still starts
  * a refresh afterward to bring the rest of the cache up to date. A shape `getShape` wouldn't read back is refused (it
  * throws): saved, it would show as "no shape" while its audit row said otherwise.

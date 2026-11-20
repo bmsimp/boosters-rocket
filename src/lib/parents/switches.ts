@@ -122,8 +122,8 @@ export const STUDENTS_RULE_NOT_IN_USE = "On, but not in use: the membership shap
  * ./sessions.ts) from the app's own student records, so a family with no active student stops counting at once, a
  * session already open in one is sent back on its next request, and switching it off lets them in again. No row is
  * closed or reopened. It is switched on only while the membership shape names a student type (shapeNamesStudents()):
- * only then does the portal keep students (it adds, renames, moves and makes inactive one only then, shapeOperations()),
- * so only then may they decide who signs in. That reads the stored shape, never QuickBooks. A shape saved later without students leaves the stored value alone: it is simply not in force
+ * only then does the portal add a student, move one or change a linked one (shapeOperations()), so only then may
+ * students decide who signs in. That reads the stored shape, never QuickBooks. A shape saved later without students leaves the stored value alone: it is simply not in force
  * while the shape names no students (studentsRuleInForce(), ./sessions.ts), and is again once a shape with students
  * is saved.
  */
@@ -144,7 +144,7 @@ export async function closedForNoStudents(): Promise<number> {
 
 /**
  * Whether "Families with no active student" can be switched on now (setRequireStudents()): while the shape names a
- * student type, the only time the portal keeps students (shapeOperations()).
+ * student type, the only time the portal adds, moves or changes a linked student (shapeOperations()).
  */
 export async function studentsRuleUsable(): Promise<boolean> {
   return shapeNamesStudents(await getShape());
