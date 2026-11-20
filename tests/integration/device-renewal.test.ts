@@ -91,6 +91,18 @@ describe("renewal by use", () => {
     expect(await deviceRow(expired.id)).toEqual(before);
   });
 
+  it("leaves a device renewed in the last day as it is (a password sign-in on it today), while the session is renewed", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    const now = new Date();
+    const today = await seedDevice(a.identity.parentId, { createdAt: new Date(now.getTime() - 30 * DAY), lastUsedAt: new Date(now.getTime() - 2 * 3_600_000),
+      expiresAt: new Date(now.getTime() + DEVICE_LIFE_MS - 2 * 3_600_000) });
+    const before = await deviceRow(today.id);
+    await nameDevice(a.identity.sessionId, today.id);
+    expect(await renew(a.identity.sessionId, now)).toBe(true);
+    expect((await sessionRow(a.identity.sessionId))!.expiresAt.getTime()).toBe(now.getTime() + PARENT_SESSION_SECONDS * 1000);
+    expect(await deviceRow(today.id)).toEqual(before);
+  });
+
   it("writes nothing when the session isn't due its renewal (renewed less than a day ago)", async () => {
     const a = await seedSignedInParent(FAMILY_A);
     const device = await tenDaysOld(a.identity.parentId);

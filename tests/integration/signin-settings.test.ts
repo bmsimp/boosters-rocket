@@ -601,6 +601,10 @@ describe("remembered devices", () => {
     expect((await devicesOf(a.identity.parentId)).map((d) => d.id)).toEqual([mine.id]);
     expect(await deviceIdOf(a.identity.sessionId)).toBe(mine.id);
     expect((await audits("parent.devices.forgotten")).map((r) => [r.targetId, r.after])).toEqual([[a.identity.parentId, { devicesForgotten: 2, thisDeviceKept: true }]]);
+    // A session naming a device past its end (its row not yet cleaned up) keeps no remembered device, and says so.
+    await db.update(parentDevice).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(parentDevice.id, mine.id));
+    expect(await forgetOtherDevicesAction()).toEqual({ ok: true, message: COPY.otherDevicesForgotten });
+    expect((await audits("parent.devices.forgotten")).map((r) => r.after)[1]).toEqual({ devicesForgotten: 0, thisDeviceKept: false });
     // A session that names none forgets them all.
     await nameDevice(a.identity.sessionId, null);
     expect(await forgetOtherDevicesAction()).toEqual({ ok: true, message: COPY.otherDevicesForgotten });
@@ -674,6 +678,14 @@ describe("one parent never reaches another's devices", () => {
     await nameDevice(a.identity.sessionId, bOther.id);
     const [row] = await db.select().from(parentAuthSession).where(eq(parentAuthSession.id, a.identity.sessionId));
     expect(await renewParentSession({ id: row!.id, expiresAt: row!.expiresAt })).toBe(true);
+
+    // Not counted against: A asking again in a session naming B's device by hand is counted against A, never B's device.
+    await withPassword(a);
+    await nameDevice(a.identity.sessionId, theirs.id);
+    const triesOn = (kind: "password_reask_parent" | "password_try_device", subject: string) => db.select().from(rateLimitEvent).where(and(eq(rateLimitEvent.kind, kind), eq(rateLimitEvent.subject, subject)));
+    expect(await askAgainPasswordAction("not the password at all")).toEqual({ ok: false, errors: [COPY.passwordRejected] });
+    expect(await triesOn("password_try_device", theirs.id)).toEqual([]);
+    expect(await triesOn("password_reask_parent", a.identity.parentId)).toHaveLength(1);
 
     expect(await theirRows()).toEqual(before);
     expect((await audits("parent.device.forgotten")).length).toBe(0);
