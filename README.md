@@ -70,7 +70,7 @@ Open http://localhost:3000. The setup page asks for the code, then walks through
 sign-in, outgoing mail and the first Admin. `.env.example` says what each value in `.env` is for.
 
 Checks: `pnpm lint`, `pnpm typecheck`, `pnpm test` (unit and integration tests against the local
-Postgres) and `pnpm e2e` (browser tests; see `AGENTS.md` for how to run them).
+Postgres) and `pnpm e2e` (browser tests; see `docs/agents/testing.md` for how to run them).
 
 ## Run it for a club
 

@@ -338,7 +338,7 @@ said about the rest of part 2 (payments and buy-outs).
 
 Each ships whole and is tested on GitHub's CI. No club is installed yet, so the in-between states matter on the
 proof-of-concept host and in CI; a club that installs before stage 4 runs each stage in turn, so each must hold on its
-own. The migration rules in AGENTS.md apply: new migrations from `0023`, one agent at a time, never a rename in one
+own. The migration rules in `docs/agents/database.md` apply: new migrations from `0023`, one agent at a time, never a rename in one
 step (an additive migration, then a finishing one), never an applied one edited. What guards each stage, and the
 builder's detail, are in Appendix C.
 

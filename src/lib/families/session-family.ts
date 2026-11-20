@@ -41,7 +41,7 @@ export async function sessionFamily(familyId: AppFamilyId, tx?: Tx): Promise<Ses
 
 /**
  * Of these student records, the ones still active and in this family: a place a student fills, and credit for one,
- * belongs to the family it was made from only while that is so (AGENTS.md, Volunteering). A write that names a student
+ * belongs to the family it was made from only while that is so (docs/agents/volunteering.md). A write that names a student
  * the page sent checks it here, inside its transaction: a student's id is the app's, the same in every family, so it is
  * always looked up within the family.
  */
