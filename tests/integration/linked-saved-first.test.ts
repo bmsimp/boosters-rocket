@@ -620,11 +620,12 @@ describe("only a send of the portal's own moves a link's version", () => {
     expect((await refreshRoster(WORKER)).ok).toBe(true);
     expect(await cached("12")).toMatchObject({ syncToken: "3", displayName: "Leonardo Rivera" });
     expect(await linkRows()).toEqual(before);
-    // A read-again: a make-inactive sent with a version QuickBooks has moved on from reads the record again into the cache.
+    // A read-again: a Parent customer's make-inactive sent with a version QuickBooks has moved on from reads the record again
+    // into the cache (a linked student's goes by the record and its link since slice 9g).
     stub.quirks.balances = true; // a customer read by id carries its Balance, which a make-inactive reads first
-    inStub("12").SyncToken = "9";
-    expect(await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "3" }, tag, op)).toMatchObject({ ok: false, errors: [WRITE_COPY.changed] });
-    expect(await cached("12")).toMatchObject({ syncToken: "9" });
+    inStub("11").SyncToken = "9";
+    expect(await askRosterWrite({ op: "deactivate", qboId: "11", syncToken: "3" }, tag, op)).toMatchObject({ ok: false, errors: [WRITE_COPY.changed] });
+    expect(await cached("11")).toMatchObject({ syncToken: "9" });
     expect(await auditsOf("roster.customer.read_again")).toHaveLength(1);
     expect(await linkRows()).toEqual(before);
     // A shape saved again.

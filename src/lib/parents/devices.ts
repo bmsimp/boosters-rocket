@@ -9,7 +9,7 @@
 // page that lists and forgets devices.
 import "server-only";
 import { createHmac, randomBytes } from "node:crypto";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { parent, parentAuthSession, parentDevice } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
@@ -69,8 +69,12 @@ class Undone extends Error {}
  * devices, their sessions. It reads that the person is not blocked and the session row still exists, and otherwise
  * writes nothing; then, for a new device, makes a `parent_device` row (a new token, only its hash stored, 90 days)
  * audited `signin.device_remembered`, or, for a remembered one, moves its row's last use and expiry on, audited
- * `signin.device_used` (refused when the row is gone, or no longer the cookie's); and sets the session's `strong_at` to
- * now. A refusal is audited `signin.refused` with its reason, and the caller ends the session with no cookie. The
+ * `signin.device_used` (refused when the row is gone, or no longer the cookie's); and, for a new device only (a code's or a
+ * set-up link's sign-in, which proved the password and a second step), sets the session's `strong_at` to now. A sign-in
+ * on a remembered device leaves it as it is: it proved only the password at that moment, the device standing in for the
+ * code, and a change of how the parent signs in asks for the second step itself (asking-again.ts; the lead's decision
+ * of SI-5a, which reverses SI-3b's stamp for it). Its session row is still updated, so a session ended meanwhile is
+ * seen. A refusal is audited `signin.refused` with its reason, and the caller ends the session with no cookie. The
  * token is returned for the cookie alone.
  */
 export async function recordStrongSignin(o: { parentId: string; email: string; sessionId: string; device: StrongDevice; ip: string | null; now?: Date }):
@@ -106,7 +110,12 @@ export async function recordStrongSignin(o: { parentId: string; email: string; s
         made = { token, expiresAt };
       }
       // Last, in the lock order: the session. A session ended since the read above takes the device's write back with it.
-      const stamped = await tx.update(parentAuthSession).set({ strongAt: now }).where(eq(parentAuthSession.id, o.sessionId)).returning({ id: parentAuthSession.id });
+      // `strong_at` is set only for a sign-in that proved the password and a second step itself: the emailed code, or a
+      // set-up link (a new device). A sign-in on a remembered device proved only the password at that moment, so its
+      // session keeps `strong_at` as it is (null, being new) and opens no window for a change (asking-again.ts).
+      const stamped = await tx.update(parentAuthSession)
+        .set({ strongAt: "remember" in o.device ? now : sql`${parentAuthSession.strongAt}` })
+        .where(eq(parentAuthSession.id, o.sessionId)).returning({ id: parentAuthSession.id });
       if (stamped.length === 0) { refused = "session_ended"; throw new Undone(); }
       return made;
     });

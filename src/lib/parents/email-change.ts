@@ -11,7 +11,7 @@ import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 import { and, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { guardian, parent, parentAuthUser, parentEmailChange, qboConnection } from "@/lib/db/schema";
+import { guardian, parent, parentAuthSession, parentAuthUser, parentEmailChange, qboConnection } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import type { ParentCtx } from "@/lib/guards";
 import { env } from "@/env";
@@ -29,6 +29,8 @@ import { takeRateLimit } from "./rate-limit";
 import { askForRosterRefresh } from "./refresh-ask";
 import { deleteUnusedSigninCodes, deleteUnusedSigninLinks, endParentSessions, enterableGuardianRows, forgetDevices, lockEmail, parentActor } from "./sessions";
 import { getParentSettings } from "./settings";
+import { sessionProvedRecently } from "./asking-again";
+import { SIGNIN_SETTINGS_COPY } from "./signin-settings-copy";
 
 /** How long the link mailed to the new address works. */
 export const EMAIL_CHANGE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -42,6 +44,8 @@ export const EMAIL_COPY = {
   askTheClub: "Your sign-in email can't be changed here. Please ask the club and they'll change it for you.",
   invalid: "Please enter a whole email address, like name@example.com.",
   same: "That's the address you sign in with now.",
+  /** Asked without a recent proof (asking again, slice SI-5a): nothing is stored or mailed. */
+  proveFirst: "Before you change your sign-in email, please show it's you with your password and a code we email you. Please reload this page and do that first, or do it in Sign-in settings on the Family page.",
   sent: (email: string) => `We've sent a link to ${email}. Open it within 24 hours to finish the change. Until then, keep signing in with the address you use now.`,
   notSent: "We couldn't send the email just now, so nothing has changed. Please try again in a little while.",
   tooManyAsks: "You've asked to change your sign-in email a few times in the last hour. Please wait a little while before trying again.",
@@ -51,6 +55,8 @@ export const EMAIL_COPY = {
   tryLater: "We couldn't reach the club's books just now, so nothing was changed. Please open the link again in a little while.",
   changed: "Your details changed in the club's books just now, so nothing was changed. Please open the link again to try once more.",
   unsure: "We couldn't tell whether the change was made. Please open the link again in a little while to check.",
+  /** The session that confirmed was signed out, or the person blocked, while the change was on its way (slice SI-5a). */
+  notMade: "Your sign-in email wasn't changed, because you were signed out while it was being made. If you still want to change it, please sign in again and ask once more.",
   booksChanged: "The club's books have changed since you asked, so nothing was changed. Please ask the club to change your sign-in email.",
   cantHere: "That change can't be made here, so nothing was changed. Please ask the club to change your sign-in email.",
   notAccepted: "The club's books wouldn't take that address, so nothing was changed. Please ask the club for help.",
@@ -130,16 +136,24 @@ export async function requestMyEmailChange(ctx: ParentCtx, input: unknown): Prom
 
   const token = randomBytes(32).toString("base64url");
   const actor = actorOf(ctx);
-  await db.transaction(async (tx) => {
+  const asked = await db.transaction(async (tx) => {
     // The person's row first, as every change of a person's sign-in does: two asks at once end with one live request.
     await tx.select({ id: parent.id }).from(parent).where(eq(parent.id, ctx.parentId)).for("update");
+    // Asking again (open question 28; the sign-in release, slice SI-5a): only a session that proved the password and
+    // the second step within the last 10 minutes asks, read here, before anything is stored or mailed.
+    if (!(await sessionProvedRecently(tx, ctx))) return "not_proved" as const;
+    // Under Strict nothing can be asked again yet (the page says so), and a proof made at Standard is no way past it.
+    if ((await getParentSettings(tx)).level === "strict") return "strict" as const;
     await tx.delete(parentEmailChange).where(and(eq(parentEmailChange.parentId, ctx.parentId), isNull(parentEmailChange.usedAt)));
     // The request is asked in the session's own family (the app's family record the gate gave it).
     await tx.insert(parentEmailChange).values({ parentId: ctx.parentId, guardianId: ctx.guardianId, familyId: ctx.familyId, recordQboId: record.qboId,
       newEmail: email, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + EMAIL_CHANGE_TTL_MS) });
     await writeAudit({ actor, action: "parent.email.request", targetType: "qbo_customer", targetId: record.qboId, before: { email: ctx.email },
       after: { email, familyId: String(ctx.familyId) }, ip: ctx.ip }, tx);
+    return true as const;
   });
+  if (asked === "not_proved") return refused("not_proved", [EMAIL_COPY.proveFirst], record);
+  if (asked === "strict") return refused("strict", [SIGNIN_SETTINGS_COPY.strict], record);
   const brand = await currentBrand();
   const sent = await sendMail(emailChangeConfirmMessage(brand, email, { link: emailChangeLink(token) }), { purpose: "email_change_confirm", actor, ip: ctx.ip });
   if (!sent.ok) return { ok: false, errors: [EMAIL_COPY.notSent] };
@@ -227,6 +241,8 @@ const lockNotAvailable = (e: unknown): boolean => pgCode(e) === "55P03";
 /** Postgres ended the transaction to break a deadlock (40P01), or for a serialization failure (40001): worth one more try. */
 const worthAnotherTry = (e: unknown): boolean => pgCode(e) === "40P01" || pgCode(e) === "40001";
 class NotThisCompany extends Error {}
+/** The confirm's finish found, under the person's row, that it may not change the address: why, for the audit row. */
+class NotFinished extends Error { constructor(readonly why: "session_ended" | "blocked" | "person_gone") { super(why); } }
 
 /**
  * Confirms the change the link was mailed for. `token` comes from the browser, untrusted: it must be a live request of
@@ -247,8 +263,12 @@ class NotThisCompany extends Error {}
  * person: an address another person signs in with is refused before anything is sent.
  *
  * Then the portal, only after QuickBooks has said yes, in one transaction. First the person, in the order ./sessions.ts
- * gives (lockedPerson()): both address locks, then the person's row, then the request is spent and their own address
- * changes (`parent.email` and their sign-in account's), then their other links go, then their unused sign-in codes,
+ * gives (lockedPerson()): both address locks, then the person's row, then the request is spent, then, read again under
+ * that row, the person not blocked and the session that confirms still there (ended meanwhile by Sign out everywhere, a
+ * password change, a block or any other end, the change stops: the portal keeps the old address, a roster refresh is
+ * asked for, the outcome is recorded as below with its own code, `session_ended` or `blocked`, and the one who pressed
+ * is told the change wasn't made), then their own address changes (`parent.email` and their sign-in account's), then
+ * their other links go, then their unused sign-in codes,
  * then their sessions end, so the old address signs in nowhere from that moment. Only then, in a savepoint, the roster
  * lock (waiting a few seconds at most): the roster cache takes QuickBooks' answer (and nothing else: the app's own
  * records stand alone since stage 3's slice 9c), or, when the lock isn't free, the cache is left alone and the worker
@@ -374,10 +394,17 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
     // at most: the clear (clearParentAccess()) holds the roster lock as it takes the people's rows, though nothing the
     // portal runs reaches it until stage 4.
     for (const address of [oldEmail, newEmail].sort()) await lockEmail(tx, address);
-    await tx.select({ id: parent.id }).from(parent).where(eq(parent.id, ctx.parentId)).for("update");
+    const [me] = await tx.select({ blocked: parent.blocked }).from(parent).where(eq(parent.id, ctx.parentId)).for("update");
     // A change this call found made, on a request already spent, was finished by the confirmation that spent it: a second
     // press of the button, say. Nothing more is done or audited for it. A write this call sent is always audited.
     if (!(await spend(row.id, tx)) && !wrote) return null;
+    // What the parent did to stop it, read again under their row (the guard read it only as the confirm began, before
+    // the seconds of QuickBooks' read and write): a session ended since (Sign out everywhere, a password change, a
+    // block, any end of it) or a block means the address is not changed in the portal, whatever QuickBooks now holds.
+    // Thrown, so the spend above goes back with the rest.
+    if (!me || me.blocked) throw new NotFinished(me ? "blocked" : "person_gone");
+    const [session] = await tx.select({ id: parentAuthSession.id }).from(parentAuthSession).where(eq(parentAuthSession.id, ctx.sessionId));
+    if (!session) throw new NotFinished("session_ended");
     // Someone else came to hold the new address since it was checked: the person keeps the address they have, and
     // signs in with it as before, though QuickBooks now holds the new one (the audit row says so, for staff to put the
     // record right). The parent is told the outcome, never why.
@@ -430,13 +457,17 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
     // QuickBooks holds the new address and the app could not take it: recorded on its own, the refresh asked for, and
     // the parent told the portal can't tell yet. The request was not spent, so the link finishes the app's side while
     // it lives, after that refresh too: the record stays the person's while their live request names the address the
-    // cached field then holds (loadMyRecordForMyEmailChange(), ./my-family.ts).
-    const failed = typeof pgCode(e) === "string" ? `app_failed_${String(pgCode(e)).slice(0, 8)}` : "app_failed";
+    // cached field then holds (loadMyRecordForMyEmailChange(), ./my-family.ts). A finish stopped because the session
+    // ended or the person was blocked meanwhile (NotFinished) is recorded the same way with its own code, and the one
+    // who pressed is told the change wasn't made: Sign out everywhere, a password change and a block delete the
+    // person's unused requests too, so its link is gone with it.
+    const stopped = e instanceof NotFinished ? e.why : null;
+    const failed = stopped ?? (typeof pgCode(e) === "string" ? `app_failed_${String(pgCode(e)).slice(0, 8)}` : "app_failed");
     await db.transaction(async (tx) => {
       await askForRosterRefresh(tx);
       await audit(tx, { field: answer?.field ?? null, portal: "refresh_asked", code: failed, app: "unchanged", quickbooks: "holds_new_address" });
     });
-    return { ok: false, errors: [EMAIL_COPY.unsure] };
+    return { ok: false, errors: [stopped ? EMAIL_COPY.notMade : EMAIL_COPY.unsure] };
   }
 
   // The new address can never be the person's here, so nothing is promised and nobody was signed out: the words are

@@ -4,7 +4,7 @@ import postgres from "postgres";
 import { startMailSink, type MailSink } from "../helpers/mail-sink";
 import { e2eMailPort } from "./run-config";
 import { focusStop } from "./a11y-checks";
-import { PARENT_SESSION_FAMILY, parentSessionCookie } from "./parent-session";
+import { PARENT_SESSION_FAMILY, PARENT_SESSION_TOKEN, parentSessionCookie } from "./parent-session";
 import { E2E_VOLUNTEER } from "./volunteer-seed";
 import { E2E_EMAIL, emailTokenHash } from "./email-seed";
 import { codeFor } from "./journey-helpers";
@@ -330,7 +330,7 @@ test.describe("7. the email change, by keyboard", () => {
   // As tests/e2e/family-email.spec.ts sets it up: offered to a parent in one family while parent sign-ins are on. Her
   // record's id is not digits, so the confirmation is refused before anything is sent to QuickBooks.
   const NEW = "zelda.keys@e2e-moving.example";
-  let saved: { setting: unknown[]; link: { status: string; disabled_reason: string | null; status_before_disable: string | null } };
+  let saved: { setting: unknown[]; link: { status: string; disabled_reason: string | null; status_before_disable: string | null }; strongAt: Date | null };
   const zelda = async () => (await sql`SELECT id, email FROM parent WHERE email = 'zelda@example.com'`)[0]!;
 
   test.beforeAll(async () => {
@@ -338,13 +338,19 @@ test.describe("7. the email change, by keyboard", () => {
     saved = {
       setting: [...await sql`SELECT value FROM setting WHERE key = 'parents.settings'`],
       link: (await sql`SELECT status, disabled_reason, status_before_disable FROM guardian WHERE parent_id = ${p.id} AND family_qbo_id = 'E2E-FAMILY-2'`)[0] as typeof saved.link,
+      strongAt: ((await sql`SELECT strong_at FROM parent_auth_session WHERE token = ${PARENT_SESSION_TOKEN}`)[0]?.strong_at ?? null) as Date | null,
     };
     const on = { signin: true, everEnabled: true, welcome: false, requireActiveStudents: false };
     await sql`INSERT INTO setting (key, value) VALUES ('parents.settings', ${sql.json(on)}) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
     await sql`UPDATE guardian SET status = 'disabled', disabled_reason = 'not_in_quickbooks', status_before_disable = ${saved.link.status} WHERE parent_id = ${p.id} AND family_qbo_id = 'E2E-FAMILY-2'`;
+    // A change of sign-in email is asked for only by a session that proved itself in the last 10 minutes (asking
+    // again, slice SI-5a): the seeded session is stamped as just proved, a few seconds back so the database's clock
+    // never puts it ahead of the app's, and put back after. Asking again by keyboard is journey 10's.
+    await sql`UPDATE parent_auth_session SET strong_at = now() - interval '5 seconds' WHERE token = ${PARENT_SESSION_TOKEN}`;
   });
 
   test.afterAll(async () => {
+    await sql`UPDATE parent_auth_session SET strong_at = ${saved.strongAt} WHERE token = ${PARENT_SESSION_TOKEN}`;
     const p = await zelda();
     if (saved.setting.length) await sql`UPDATE setting SET value = ${sql.json((saved.setting[0] as { value: never }).value)} WHERE key = 'parents.settings'`;
     else await sql`DELETE FROM setting WHERE key = 'parents.settings'`;
@@ -393,6 +399,68 @@ test.describe("7. the email change, by keyboard", () => {
     await expect(page.getByRole("main").getByRole("alert")).toContainText("nothing was changed");
     await expect(yes).toBeFocused();
     expect((await zelda()).email).toBe("zelda@example.com");
+    ringsShown();
+  });
+});
+
+test.describe("10. sign-in settings, by keyboard: asking again, then the change form", () => {
+  // Asking again (slice SI-5a) stamps the seeded session's strong_at, and the code it mails is spent: both are put back
+  // as they were. The change form is reached and never sent, and Sign out everywhere is never pressed, so Zelda's
+  // password, her device and the seeded session stay as seeded.
+  let strongAt: Date | null = null;
+  test.beforeAll(async () => {
+    strongAt = ((await sql`SELECT strong_at FROM parent_auth_session WHERE token = ${PARENT_SESSION_TOKEN}`)[0]?.strong_at ?? null) as Date | null;
+    await sql`UPDATE parent_auth_session SET strong_at = NULL WHERE token = ${PARENT_SESSION_TOKEN}`;
+  });
+  test.afterAll(async () => {
+    await sql`UPDATE parent_auth_session SET strong_at = ${strongAt} WHERE token = ${PARENT_SESSION_TOKEN}`;
+    await sql`DELETE FROM signin_code WHERE parent_id IN (SELECT id FROM parent WHERE email = 'zelda@example.com')`;
+  });
+
+  test("Family to Sign-in settings, the password, the emailed code, and the change form's fields and button", async ({ context, page }) => {
+    // The door's own counts (asking again uses them), as the sign-in journeys clear them.
+    await sql`DELETE FROM rate_limit_event`;
+    await sql`DELETE FROM signin_code WHERE parent_id IN (SELECT id FROM parent WHERE email = 'zelda@example.com')`;
+    sink.messages.length = 0;
+    await context.addCookies([parentSessionCookie()]);
+    await page.goto("/family");
+    await tabTo(page, page.getByRole("region", { name: "Your account" }).getByRole("link", { name: "Sign-in settings" }));
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/family\/sign-in$/);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Sign-in settings");
+
+    // The password: its field, then Continue; the code step's field takes the focus.
+    // The field alone: its box is a region headed "Your password" too, which getByLabel() would also find.
+    const password = page.getByRole("main").locator('input[name="password"][autocomplete="current-password"]');
+    await tabTo(page, password);
+    await page.keyboard.type(E2E_SIGNIN.password);
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("button", { name: "Continue" })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("main").getByRole("status")).toContainText("We've emailed you a 6-digit code.");
+    const code = page.getByLabel("6-digit code");
+    await expect(code).toBeFocused();
+    // A wrong code is an alert, and the focus stays in the field.
+    await page.keyboard.type("000000");
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("main").getByRole("alert")).toHaveText("That code didn't work. Check the newest email from us and try again, or start again with your password.");
+    await expect(page.getByRole("button", { name: "Confirm" })).toBeVisible(); // no longer Checking…
+    await expect(code).toBeFocused();
+    await page.keyboard.press("ControlOrMeta+A");
+    await page.keyboard.type(await codeFor(sql, sink, "zelda@example.com"));
+    await page.keyboard.press("Enter");
+
+    // Proved: the thank-you takes the focus, and the change form follows it.
+    await expect(page.getByRole("status").filter({ hasText: "Thank you, that's you." })).toBeFocused();
+    await tabTo(page, page.getByLabel("New password", { exact: true }));
+    await page.keyboard.press("Tab");
+    await expect(page.getByLabel("New password again")).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("button", { name: "Change my password" })).toBeFocused();
+    // Not pressed: the run never changes Zelda's password. Sign out everywhere follows, and is never pressed either.
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("button", { name: "Sign out everywhere" })).toBeFocused();
+    await tabsOut(page);
     ringsShown();
   });
 });

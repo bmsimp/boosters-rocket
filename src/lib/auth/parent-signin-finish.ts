@@ -40,9 +40,10 @@ const REFUSED: SigninFinish = { ok: false };
  *    sign-in audited; a session ended in the meantime, or a person left with no row that counts, is refused with no
  *    cookie;
  * 5. the strong step (recordStrongSignin(), src/lib/parents/devices.ts): in one transaction, the device remembered (a
- *    new one for a code's or a link's sign-in, the one used renewed for a remembered device's) and the session's
- *    `strong_at` set; refused (a block, or the session ended, or the device gone), the session is deleted and no cookie
- *    is set;
+ *    new one for a code's or a link's sign-in, the one used renewed for a remembered device's) and, only when the
+ *    sign-in itself proved a second step (a code or a set-up link), the session's `strong_at` set: a password on a
+ *    remembered device leaves it null; refused (a block, or the session ended, or the device gone), the session is
+ *    deleted and no cookie is set;
  * 6. the cookies: the session's, sent this once with the longest life browsers allow (PARENT_SESSION_COOKIE_SECONDS,
  *    400 days), since it has to outlive the session row, which use renews (sessions.ts); the device's, for its 90 days;
  *    and the pending step's, cleared;

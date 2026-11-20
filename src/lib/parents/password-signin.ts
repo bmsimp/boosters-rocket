@@ -121,6 +121,15 @@ export type PasswordRefusal = "rate_limited" | "not_an_address" | "signins_off" 
 export type PasswordCheck = { ok: true; person: { id: string; email: string }; password: PasswordProof; device: { deviceId: string } | null; at: Date }
   | { ok: false; limited: boolean };
 const REFUSED: PasswordCheck = { ok: false, limited: false };
+
+/**
+ * The count a try is held to when its caller names one, in place of the door's (the device the cookie names, else the
+ * address): asking again (asking-again.ts; the sign-in release, slice SI-5a) counts a signed-in parent's tries against
+ * their own person (`password_reask_parent`, keyed by the person's id), so a stranger who keeps the address's count
+ * full at the door can't stop them proving it's them, and their wrong tries there don't fill the door's. The door names
+ * none.
+ */
+export type TryCount = { kind: "password_reask_parent"; subject: string };
 const LIMITED: PasswordCheck = { ok: false, limited: true };
 
 type Found = { id: string; email: string; blocked: boolean; authUserId: string | null; credentialId: string | null; hash: string | null; updatedAt: Date | null };
@@ -157,7 +166,8 @@ async function audit(reason: PasswordRefusal, who: { id: string; email: string }
  *     (audited once per window, `limit: "busy"`, naming nobody);
  * (c) the limit per IP address (`password_try_ip`; skipped when the address is unknown: every visitor would share one count);
  * (d) the address, read with normalizeEmail(), and the try's place, taken before the person or the password is read so
- *     tries sent at once can't slip past: against the remembered device when the request carries a device cookie that
+ *     tries sent at once can't slip past: against the caller's own count when it names one (`count`, TryCount: asking
+ *     again's, by the person; no device is read for it), otherwise against the remembered device when the request carries a device cookie that
  *     names an unexpired device of the person who holds the address (deviceOfAddress(), read only when a cookie of a
  *     device token's shape is there; `password_try_device`, keyed by the device's row), otherwise against the address
  *     (`password_try_email`, counted under hashTriedAddress(), never the address (what was typed, lower-cased, when it
@@ -173,7 +183,7 @@ async function audit(reason: PasswordRefusal, who: { id: string; email: string }
  *     account, no password, a wrong password (`signin.password_wrong`), blocked, no row that counts, and the second step
  *     the club's level asks for (secondStepFor(): under Strict, nothing with no second factor, `strict_no_factor`, on a
  *     remembered device too, which proved only the mailbox). Each is audited once, in its own write
- *     (`signin.password_refused` with its reason, and for over a limit, `limit` (`ip`, `email` or `device`), once per
+ *     (`signin.password_refused` with its reason, and for over a limit, `limit` (`ip`, `email`, `device` or `reask`), once per
  *     full window, naming nobody). A refused try keeps its place;
  * (h) for a right password that goes on, its place given back (so only wrong and refused tries are counted, and a
  *     parent's own right password never uses one up), and the remembered device the cookie names for this person,
@@ -182,17 +192,20 @@ async function audit(reason: PasswordRefusal, who: { id: string; email: string }
  * Over a limit, or turned away by a full wait, the answer is `limited`; every other refusal is the one refusal.
  * A password, a hash, the device token and the typed address (for an address that is nobody's) appear in no row.
  */
-export async function checkPasswordSignin(rawEmail: unknown, password: unknown, deviceToken: string | null, ip: string | null, now = new Date(), signal?: AbortSignal): Promise<PasswordCheck> {
+export async function checkPasswordSignin(rawEmail: unknown, password: unknown, deviceToken: string | null, ip: string | null, now = new Date(), signal?: AbortSignal,
+  count?: TryCount): Promise<PasswordCheck> {
   if (typeof rawEmail !== "string" || rawEmail.length > MOST_TYPED_ADDRESS || typeof password !== "string" || password.length > MOST_TYPED_PASSWORD) return REFUSED;
   if (signal?.aborted) return REFUSED;
   if (waitIsFull()) { await turnedAwayBusy(ip, now); return LIMITED; }
   const byIp: RateLimitTake = await takeIpLimit("password_try_ip", ip, now);
   const email = normalizeEmail(rawEmail);
-  const ownDevice = byIp === "taken" && email ? await deviceOfAddress(email, deviceToken, now) : null;
+  const ownDevice = byIp === "taken" && email && !count ? await deviceOfAddress(email, deviceToken, now) : null;
   const place: RateLimitPlace = byIp !== "taken" ? { take: "refused", placeId: null }
+    : count ? await takeRateLimitPlace(count.kind, count.subject, now)
     : ownDevice ? await takeRateLimitPlace("password_try_device", ownDevice.deviceId, now)
     : await takeRateLimitPlace("password_try_email", hashTriedAddress(email ?? rawEmail.trim().toLowerCase()), now);
-  const over = byIp !== "taken" ? { take: byIp, limit: "ip" } : place.take !== "taken" ? { take: place.take, limit: ownDevice ? "device" : "email" } : null;
+  const over = byIp !== "taken" ? { take: byIp, limit: "ip" }
+    : place.take !== "taken" ? { take: place.take, limit: count ? "reask" : ownDevice ? "device" : "email" } : null;
   if (over) {
     if (over.take === "first_refusal") await audit("rate_limited", null, ip, { limit: over.limit });
     return LIMITED;

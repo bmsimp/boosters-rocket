@@ -197,12 +197,14 @@ export async function familyOfSession(authUserId: string, familyQboId: string): 
  * A live parent session row, as Better Auth would store it. Its family is the app's own record (`familyId`), or the one
  * a family's QuickBooks id comes to (familyOfSession()); neither, a session still choosing.
  */
-export async function seedParentSession(authUserId: string, o: { familyQboId?: string | null; familyId?: AppFamilyId | null; expiresAt?: Date } = {}) {
+export async function seedParentSession(authUserId: string, o: { familyQboId?: string | null; familyId?: AppFamilyId | null; expiresAt?: Date; strongAt?: Date | null } = {}) {
   const id = crypto.randomUUID();
   const token = crypto.randomUUID();
   const familyId = o.familyId ?? (o.familyQboId ? await familyOfSession(authUserId, o.familyQboId) : null);
+  // `strongAt`: when the session last proved the password and the second step (a sign-in, or asking again: slice
+  // SI-5a). Null, as for a session made before the password release, unless given.
   await db.insert(parentAuthSession).values({ id, token, userId: authUserId, familyId,
-    expiresAt: o.expiresAt ?? new Date(Date.now() + 7 * 86_400_000) });
+    expiresAt: o.expiresAt ?? new Date(Date.now() + 7 * 86_400_000), strongAt: o.strongAt ?? null });
   return { id, token };
 }
 

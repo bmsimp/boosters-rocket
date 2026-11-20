@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { signinCodeMessage, welcomeMessage, emailChangeConfirmMessage, emailChangeNoticeMessage, testMessage, signedFormCopyMessage, formReminderMessage, volunteerSignupMessage,
-  passwordSetupMessage, passwordResetMessage, choosePasswordMessage } from "@/lib/mail/messages";
+import { changeCodeMessage, signinCodeMessage, welcomeMessage, emailChangeConfirmMessage, emailChangeNoticeMessage, testMessage, signedFormCopyMessage, formReminderMessage, volunteerSignupMessage,
+  passwordSetupMessage, passwordResetMessage, choosePasswordMessage, passwordChangedMessage } from "@/lib/mail/messages";
 
 const b = { clubName: "FZN <Band> Boosters", color: "#5b2a86" };
 
@@ -32,6 +32,29 @@ describe("mail messages", () => {
         expect(part).not.toContain("10 minutes");
       }
     }
+  });
+  it("the code for a change asked in a session says what it's for, and what to do if it wasn't them, and nothing of a device", () => {
+    // Asking again (the sign-in release, slice SI-5a): the parent is signed in already, so a device the portal doesn't
+    // know has nothing to do with it. The sign-in code's mail (above) is unchanged.
+    const settingsPage = "https://portal.example.org/family/sign-in";
+    const m = changeCodeMessage(b, "ana@example.com", "482913", { settingsPage, minutes: 10 });
+    expect(m.to).toBe("ana@example.com");
+    // The subject carries the code with the sign-in code's words, which the test helpers read.
+    expect(m.subject).toBe("Your FZN <Band> Boosters sign-in code: 482913, to confirm a change");
+    expect(m.text).toBe([
+      "Your FZN <Band> Boosters sign-in code is 482913.",
+      "Someone signed in to the FZN <Band> Boosters portal as you has asked to change how you sign in. This code confirms that change. It expires in 10 minutes.",
+      `If that wasn't you, don't share this code. Sign out everywhere from Sign-in settings at ${settingsPage}, or ask the club for help.`,
+    ].join("\n\n") + "\n");
+    for (const part of [m.text, m.html]) {
+      expect(part).toContain("482913");
+      expect(part).not.toMatch(/device|entered correctly|reset my password/i);
+      // The one address it names is Sign-in settings; no image, and no link tag.
+      expect(part.match(/https?:\/\/[^\s<"]+/g)).toEqual([`${settingsPage},`]);
+      expect(part).not.toMatch(/<a\b|<img\b/i);
+    }
+    expect(m.html).toContain("If that wasn&#39;t you, don&#39;t share this code.");
+    expect(changeCodeMessage(b, "ana@example.com", "482913", { settingsPage, minutes: 1 }).text).toContain("It expires in 1 minute.");
   });
   it("escapes the club name in HTML and uses the club color", () => {
     const m = signinCodeMessage(b, "ana@example.com", "482913", { passwordPage, minutes: 10 });
@@ -187,6 +210,40 @@ describe("mail messages", () => {
     });
     it("names no family, student or other person, and escapes the club's name", () => {
       expect(`${m.text}${m.html.replace(/font-family:/g, "")}`).not.toMatch(/family|student|guardian/i); // the inline CSS property is not wording
+      expect(m.html).toContain("FZN &lt;Band&gt; Boosters");
+      expect(m.html).not.toContain("<Band>");
+    });
+  });
+
+  // The notice after a password changed in sign-in settings (slice SI-5a; src/lib/parents/signin-settings.ts).
+  describe("the notice that a password was changed", () => {
+    const m = passwordChangedMessage(b, "ana@example.com", { passwordPage, contact: "treasurer@boosters.example.org" });
+    /** The words of the mail's HTML body, with its markup taken out and its escaping undone. */
+    const htmlWords = m.html.replace(/<div style="background[^>]*>[^<]*<\/div>/, "").replace(/<[^>]+>/g, "\n").split("\n").map((l) => l.trim()).filter(Boolean)
+      .map((l) => l.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&"));
+    it("says where to write to the club when it has an address, and leaves the line out when it has none", () => {
+      // The reader is signed out everywhere, so the mail itself says where to tell the club.
+      expect(m.text).toContain("You can write to the club at treasurer@boosters.example.org.");
+      expect(m.html).toContain("You can write to the club at treasurer@boosters.example.org.");
+      const none = passwordChangedMessage(b, "ana@example.com", { passwordPage, contact: null });
+      expect(`${none.text}${none.html}`).not.toContain("You can write to the club");
+      expect(none.text.trim().split("\n\n")).toHaveLength(m.text.trim().split("\n\n").length - 1);
+    });
+    it("goes to the address, says the password changed and every device was signed out, and where to set a new one", () => {
+      expect(m.to).toBe("ana@example.com");
+      expect(m.subject).toBe("Your FZN <Band> Boosters password was changed");
+      expect(m.text).toContain("was changed just now, and every phone and computer signed in to the portal was signed out.");
+      expect(m.text).toContain(`If you didn't change it, please set a new password straight away from "Set up or reset my password" at ${passwordPage}, and tell the club.`);
+      expect(m.text).toContain("FZN <Band> Boosters will never ask you for your password, by email or by phone.");
+    });
+    it("holds the request page's whole address and no link that acts: no token, no set-up or reset link", () => {
+      expect(m.text).toContain("https://portal.example.org/sign-in/password,");
+      expect(`${m.text}${m.html}`).not.toMatch(/\/sign-in\/(set-up|reset)\//);
+      expect(m.html).not.toMatch(/<a\s/);
+    });
+    it("says the same in its text and its HTML, names no family, student or other person, and escapes the club's name", () => {
+      expect(htmlWords).toEqual(m.text.trim().split("\n\n"));
+      expect(`${m.text}${m.html.replace(/font-family:/g, "")}`).not.toMatch(/family|student|guardian/i);
       expect(m.html).toContain("FZN &lt;Band&gt; Boosters");
       expect(m.html).not.toContain("<Band>");
     });

@@ -41,6 +41,24 @@ export function signinCodeMessage(b: Brand, to: string, code: string, o: { passw
 }
 
 /**
+ * The code that confirms a change to how a parent signs in, asked for in a session that is already signed in (asking
+ * again, the sign-in release, slice SI-5a; sendSecondStepCode() with `change`, src/lib/parents/signin-codes.ts): that
+ * someone signed in to the portal as them asked to change how they sign in, that this code confirms it, and, if it
+ * wasn't them, not to share it and to sign out everywhere from Sign-in settings (`settingsPage`: APP_URL and
+ * /family/sign-in) or ask the club. Nothing about a device the portal doesn't know: the change is asked in a session.
+ * The subject carries the code with the sign-in code's words (tests/e2e/journey-helpers.ts and the vitest helpers read
+ * it). `minutes` as for the sign-in code.
+ */
+export function changeCodeMessage(b: Brand, to: string, code: string, o: { settingsPage: string; minutes: number }): MailMessage {
+  const lines = [
+    `Your ${b.clubName} sign-in code is ${code}.`,
+    `Someone signed in to the ${b.clubName} portal as you has asked to change how you sign in. This code confirms that change. It expires in ${o.minutes === 1 ? "1 minute" : `${o.minutes} minutes`}.`,
+    `If that wasn't you, don't share this code. Sign out everywhere from Sign-in settings at ${o.settingsPage}, or ask the club for help.`,
+  ];
+  return { to, subject: `Your ${b.clubName} sign-in code: ${code}, to confirm a change`, text: text(lines), html: html(b, lines, code) };
+}
+
+/**
  * A set-up link as the welcome and the press's mail carry it (the sign-in release, slice SI-4): its address, how long it
  * works in words (lifeWords() of LINK_LIFE_MS.setup), and whether the club is at Strict, where "Set up or reset my
  * password" mails no set-up link (whichLinkToMail(), `strict_no_setup`), so the mail says to ask the club instead.
@@ -158,6 +176,26 @@ export function passwordResetMessage(b: Brand, to: string, o: { link: string; li
     DID_NOT_ASK,
   ];
   return { to, subject: `Reset your ${b.clubName} password`, text: text(lines), html: html(b, lines) };
+}
+
+/**
+ * The notice after a parent changed their password in sign-in settings (the sign-in release, slice SI-5a;
+ * changeMyPassword(), src/lib/parents/signin-settings.ts), to the address read under their lock: that it was changed
+ * and every device signed out, what to do if it wasn't them (set a new one from "Set up or reset my password" at
+ * `passwordPage`, APP_URL and /sign-in/password written out, and tell the club), and that the club never asks for a
+ * password; and, when the club has a treasurer's address (`contact`), where to write, since the reader is signed out
+ * everywhere and can't look it up in the portal. No link that acts, no token, and no family, student or other person
+ * named.
+ */
+export function passwordChangedMessage(b: Brand, to: string, o: { passwordPage: string; contact: string | null }): MailMessage {
+  const lines: Line[] = [
+    `The password you use to sign in to ${b.clubName} with this email address was changed just now, and every phone and computer signed in to the portal was signed out.`,
+    "If you changed it, there's nothing more to do. Sign in again with your new password.",
+    `If you didn't change it, please set a new password straight away from "Set up or reset my password" at ${o.passwordPage}, and tell the club.`,
+    ...(o.contact ? [`You can write to the club at ${o.contact}.`] : []),
+    NEVER_ASKS(b),
+  ];
+  return { to, subject: `Your ${b.clubName} password was changed`, text: text(lines), html: html(b, lines) };
 }
 
 /* ---- Volunteering (v1 spec §11.3). Each goes to the guardian who took the place, and says only what is theirs: the

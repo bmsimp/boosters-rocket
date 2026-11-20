@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { familyMoney, parentAuthSession, setting, type StoredInvoice } from "@/lib/db/schema";
+import { familyMoney, parentAuthAccount, parentAuthSession, parentAuthUser, setting, type StoredInvoice } from "@/lib/db/schema";
 import { resolveParentSession, type ParentIdentity } from "@/lib/auth/resolve";
 import { chooseFamily } from "@/lib/parents/family-choice";
 import { formatMoney } from "@/lib/money/cents";
@@ -13,6 +13,10 @@ import { seedTwoFamilyForms, type FamilyForms } from "./forms";
 import { seedTwoFamilyEmailChanges, type FamilyEmailChange } from "./email-change";
 import { seedTwoFamilyBuyouts, type FamilyBuyout } from "./buyouts";
 import { recordOfCustomer, syncAppRecords } from "./app-records";
+import { seedPassword } from "./signin-links";
+
+/** The password proveRecently() gives a person who has none: the door helper's (DOOR_PASSWORD, tests/helpers/parent-door.ts). */
+export const PROVEN_PASSWORD = "the parents' long test password";
 
 /**
  * Signed-in parents for tests: the family as QuickBooks lists it (in the roster cache), the portal person, their link
@@ -247,6 +251,24 @@ export async function identityNow(sessionId: string): Promise<ParentIdentity> {
   const state = await resolveParentSession({ id: s.id, userId: s.userId, familyId: s.familyId });
   if (state.status !== "ok") throw new Error(`identityNow: the portal would not sign this session in (session state "${state.status}")`);
   return state.identity;
+}
+
+/**
+ * Gives the seeded parent a password, unless they have one, and stamps their session as having proved the password and
+ * the second step just now (`strong_at`, as a sign-in or asking again stamps it: slice SI-5a), so a change of how they
+ * sign in (their password, their sign-in email) goes ahead without asking again for the next 10 minutes.
+ */
+export async function proveRecently(identity: ParentIdentity, password = PROVEN_PASSWORD, at = new Date()): Promise<void> {
+  const [user] = await db.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, identity.parentId));
+  if (!user) throw new Error(`proveRecently: ${identity.email} has no sign-in account`);
+  const credential = and(eq(parentAuthAccount.userId, user.id), eq(parentAuthAccount.providerId, "credential"));
+  const has = await db.select({ id: parentAuthAccount.id }).from(parentAuthAccount).where(credential);
+  // The password was chosen a moment before the proof, by the test's own clock (a change refuses a password replaced
+  // since the proof, and the database's clock may run a little ahead of the test's).
+  const chosen = new Date(at.getTime() - 1000);
+  if (has.length === 0) await seedPassword(user.id, password, chosen);
+  else await db.update(parentAuthAccount).set({ updatedAt: chosen }).where(credential);
+  await db.update(parentAuthSession).set({ strongAt: at }).where(eq(parentAuthSession.id, identity.sessionId));
 }
 
 /**

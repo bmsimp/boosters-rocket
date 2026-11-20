@@ -26,9 +26,13 @@ export async function holdLink(parentId: string, purpose: LinkPurpose, now = new
 /** A token of a token's shape that names no link. */
 export const unknownToken = () => randomBytes(32).toString("base64url");
 
-/** A password for a person, kept as Better Auth's sign-up keeps one: the `credential` row of `parent_auth_account`. */
-export async function seedPassword(authUserId: string, password: string): Promise<void> {
-  await db.insert(parentAuthAccount).values({ id: randomUUID(), accountId: authUserId, providerId: "credential", userId: authUserId, password: await hashPassword(password) });
+/**
+ * A password for a person, kept as Better Auth's sign-up keeps one: the `credential` row of `parent_auth_account`. With
+ * `at`, one made and last changed then (by the test's clock, not the database's).
+ */
+export async function seedPassword(authUserId: string, password: string, at?: Date): Promise<void> {
+  await db.insert(parentAuthAccount).values({ id: randomUUID(), accountId: authUserId, providerId: "credential", userId: authUserId, password: await hashPassword(password),
+    ...(at ? { createdAt: at, updatedAt: at } : {}) });
 }
 
 /** The person's `credential` rows (a person never has more than one). */

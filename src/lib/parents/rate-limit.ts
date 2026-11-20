@@ -5,7 +5,7 @@ import { rateLimitEvent } from "@/lib/db/schema";
 export type RateLimitKind = "code_send_email" | "code_send_ip" | "code_check_ip" | "contact_save_parent" | "contact_open_parent" | "form_open_parent"
   | "volunteer_checkin_parent" | "volunteer_signup_parent" | "email_request_parent" | "email_confirm_parent" | "buyout_parent"
   | "password_link_ip" | "password_link_token" | "password_ask_email" | "password_ask_ip" | "password_try_email" | "password_try_device"
-  | "password_try_ip";
+  | "password_try_ip" | "password_reask_parent" | "password_change_parent" | "signin_settings_parent";
 const WINDOW_MS = 15 * 60 * 1000;
 /**
  * Guessing is stopped per code (5 tries, 10 minutes: signin-codes.ts) and per address (3 codes in 15 minutes). The two
@@ -45,6 +45,20 @@ export const RATE_LIMITS: Record<RateLimitKind, { max: number; windowMs: number 
   password_try_email: { max: 5, windowMs: WINDOW_MS },
   password_try_device: { max: 5, windowMs: WINDOW_MS },
   password_try_ip: { max: 180, windowMs: WINDOW_MS },
+  // A parent's sign-in settings (signin-settings.ts; the sign-in release, slice SI-5a), counted per person. Changing the
+  // password: each try may ask the breach service and make a 32 MiB hash, so it is held to 10 an hour, far more than a
+  // parent choosing a new password takes, mistyped or refused a few times. Signing out everywhere (and from SI-5b,
+  // forgetting a device): each press is a write and an audit row, and the first press ends the session that made it,
+  // so 10 an hour is far more than anyone needs. Asking again counts a signed-in parent's password tries against their
+  // own person (`password_reask_parent`, keyed by the person's id; checkPasswordSignin()'s TryCount): 5 wrong tries in
+  // 15 minutes, as at the door, a right password giving its place back, and never against the address's count, so a
+  // stranger who keeps `password_try_email` full at the door can't stop the parent proving it's them, and a thief holding
+  // only the session can't fill the door's count from here. The per-IP flood stop (password_try_ip), the code's limits
+  // (code_send_*, code_check_ip and its five tries) are the door's, and the set-up link offered here is the request
+  // page's (password_ask_*).
+  password_reask_parent: { max: 5, windowMs: WINDOW_MS },
+  password_change_parent: { max: 10, windowMs: 60 * 60 * 1000 },
+  signin_settings_parent: { max: 10, windowMs: 60 * 60 * 1000 },
   // A parent's own phone and address (contact-edits.ts), counted per person. Each save is a write to the club's
   // QuickBooks, and nobody changes their address more than a few times an hour. Opening the edit page reads the record
   // from QuickBooks each time, so that is bounded too, well above what editing takes.

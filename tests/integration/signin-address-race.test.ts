@@ -36,7 +36,7 @@ vi.mock("@/lib/parents/sessions", async (original) => {
   };
 });
 
-import { eq, sql } from "drizzle-orm";
+import { eq, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, parent, parentAuthSession, parentAuthUser, signinCode } from "@/lib/db/schema";
 import { confirmMyEmailChange } from "@/lib/parents/email-change";
@@ -155,7 +155,9 @@ describe("a sign-in that meets a change of address", () => {
     // Her right password with the old address, at the door: the pending step, and the code mailed to the old address.
     const { pending } = await passwordStep(OLD, { headers: { "cf-connecting-ip": IP } });
     const code = await codeMailed(outbox, OLD, 0);
-    await db.delete(parentAuthSession);   // the parent is signed out of the browser the code is checked in
+    // The parent is signed out of the browser the code is checked in. The session the change is confirmed in stays: the
+    // confirm checks under the person's lock that its own session still exists, and changes nothing when it doesn't.
+    await db.delete(parentAuthSession).where(ne(parentAuthSession.id, r.identity.sessionId));
     const change = await addressChangeUnderWay();
     const checking = codeStep(code, pending, { headers: { "cf-connecting-ip": IP } });
     await change.finish();
