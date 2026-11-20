@@ -3,9 +3,9 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vites
 /**
  * A sign-in that meets a change of address half way (parents spec, the two gaps it listed as known). The change is a
  * parent's own confirmed change of sign-in email (confirmMyEmailChange(), src/lib/parents/email-change.ts), the one way a
- * person's address changes since the reconcile went, run for real against the QuickBooks stub and held at the one
- * moment that matters: after it has written the new address and before it deletes the person's codes and ends their
- * sessions. A code request, or a code check, then runs against it for real, on its own database connection, and the
+ * person's address changes since the reconcile went, made in the portal alone (stage 3's slice 11d: nothing of QuickBooks
+ * is read or written) and held at the one moment that matters: after it has written the new address and before it
+ * deletes the person's codes and ends their sessions. A code request, or a code check, then runs against it for real, on its own database connection, and the
  * change is let go once the other side is waiting on a lock.
  *
  * Before the fix each of these went wrong: the code was mailed to the old address and worked with the new one; with an
@@ -35,7 +35,7 @@ vi.mock("@/lib/parents/sessions", async (original) => {
   };
 });
 
-import { eq, sql } from "drizzle-orm";
+import { eq, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, parent, parentAuthSession, signinCode } from "@/lib/db/schema";
 import { getParentAuth } from "@/lib/auth/parent-auth";
@@ -68,7 +68,7 @@ async function someoneWaitsForALock(): Promise<boolean> {
 }
 
 let r: SeededParent;
-/** The parent's own confirmed change, from OLD to NEW, written to QuickBooks and then to the portal. */
+/** The parent's own confirmed change, from OLD to NEW, made in the portal alone, from the session the parent confirms in. */
 async function confirmTheChange() {
   const { token } = await seedEmailChange({ parentId: r.identity.parentId, guardianId: r.identity.guardianId, familyId: r.identity.familyId,
     recordQboId: RIVERA.parent.qboId, newEmail: NEW });
@@ -144,7 +144,9 @@ describe("a sign-in that meets a change of address", () => {
   it("makes no session from a code that was proved with the old address while the change was under way", async () => {
     await (await requestSigninCode(OLD, IP, new Date())).delivery;
     const code = codeOf(outbox[0]!);
-    await db.delete(parentAuthSession);   // the parent is signed out of the browser the code is checked in
+    // The parent is signed out of the browser the code is checked in; the session the change is confirmed in stays, as the
+    // confirm reads it again under the person's row (and the change then ends it).
+    await db.delete(parentAuthSession).where(ne(parentAuthSession.id, r.identity.sessionId));
     const change = await addressChangeUnderWay();
     const auth = await getParentAuth();
     const checking = auth.handler(new Request(`${env.APP_URL}/api/auth/parent/portal-code/verify`, {
