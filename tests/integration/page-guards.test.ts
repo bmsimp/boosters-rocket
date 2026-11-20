@@ -161,6 +161,7 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/parents/people", names: "all", why: "staff block and rename people: a rename starts sends to QuickBooks for each membership's Parent customer (stage 3's slice 9h)" },
   { module: "@/lib/accounting/mapping", names: "all", why: "the accounting links screen reads every family's guardians' sign-in addresses and every customer of the roster cache (stage 4's slice M1)" },
   { module: "@/lib/accounting/link-writes", names: "all", why: "the accounting links screen's presses link any family to any customer, reading every family's guardians and every customer of the roster cache to check it (stage 4's slice M3a)" },
+  { module: "@/lib/accounting/ended-links", names: "all", why: "the links an unlink ended whose customer is still in the books: it reads any family's, student's and guardian row's history and the roster cache (stage 4's slice M3b2)" },
   { module: "@/lib/parents/contact-take-in", names: "all", why: "the take-in of contact details reads every person, guardian row, family and cached customer at once (stage 3's slice 11a)" },
 ];
 

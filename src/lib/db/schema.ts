@@ -247,9 +247,12 @@ export const accountingLink = pgTable("accounting_link", {
  * as `linked_by` has none) and how (`unlinked`: Unlink from the books on the accounting links screen, which ends a
  * family's link with every link of its student records and guardian rows, src/lib/accounting/link-writes.ts). No unique
  * index: a customer may have been several records' in turn, and a record several customers'. Nothing but an unlink writes
- * it, and nothing but the audit filter (customersOfRecord(), src/lib/audit/query.ts) and a change of company's clear,
- * which deletes every row (clearAppRecords()), reads it: a link that exists is in `accounting_link`, and every reader of
- * the links that are reads that table alone.
+ * it, and it is read only by the audit filter (customersOfRecord(), src/lib/audit/query.ts), a change of company's clear,
+ * which deletes every row (clearAppRecords()), and, since stage 4's slice M3b2, endedLinksHeld()
+ * (src/lib/accounting/ended-links.ts): a record's latest ended link whose customer the books still hold, so that no press
+ * makes a second customer for it ("Create in QuickBooks and link", the family create prepare() sends, a guardian's
+ * Parent customer) and a family's page and the Families list say so. A link that exists is in `accounting_link`, and
+ * every reader of the links that are reads that table alone.
  */
 export const accountingLinkEnded = pgTable("accounting_link_ended", {
   id: uuid("id").primaryKey(),                         // the ended link's own id, so audit rows naming a link id still name a row
