@@ -18,6 +18,7 @@ import { lockRosterAs, rosterTagOf, ROSTER_MOVED } from "@/lib/seasons/roster-lo
 import { connectedToAnotherCompany, customerOfFamily, customerOfGuardian, customerOfStudent, familyLinkState, familyLinkedTo, linksOf, linksOfCustomers, recordsCompany, studentLinkedTo } from "@/lib/families/links";
 import { asAppFamilyId, asAppStudentId, QUICKBOOKS, type AppFamilyId, type AppStudentId } from "@/lib/families/ids";
 import { recordNameWords } from "@/lib/families/words";
+import { clearLeftUnlinked } from "@/lib/families/left-unlinked";
 import { isUuid } from "@/lib/seasons/ids";
 import { askForRosterRefresh, ROSTER_ASK_KEY } from "@/lib/parents/refresh-ask";
 import { studentsRuleInForce } from "@/lib/parents/sessions";
@@ -513,7 +514,8 @@ export type OwnRecordChange =
   | { kind: "family"; familyId: string; made: true; linkId: string }
   | { kind: "student"; studentId: string; familyId: string; made: true; linkId: string }
   /** The portal's own record, saved before its customer was made (stage 3's slice 9d), linked to the new customer. */
-  | { kind: "family"; familyId: string; linked: true; linkId: string }
+  /** `leftUnlinkedCleared`: the accounting links screen's Left unlinked mark was set on it, and this cleared it (stage 4's slice M3a). */
+  | { kind: "family"; familyId: string; linked: true; linkId: string; leftUnlinkedCleared?: true }
   | { kind: "student"; studentId: string; linked: true; linkId: string }
   | { kind: "family"; familyId: string; set: { name?: string; active?: boolean } }
   | { kind: "student"; studentId: string; set: { name?: string; active?: boolean; familyId?: string } }
@@ -576,7 +578,9 @@ export async function changeOwnRecord(tx: Tx, w: RosterWrite, customerId: string
         if ((await customerOfFamily(o.familyId, tx)) !== null) return null;
         const [link] = await tx.insert(accountingLink).values({ system: QUICKBOOKS, realmId: o.realmId, customerId, familyId: o.familyId, origin: "created", linkedBy: o.linkedBy, ...aligned })
           .returning({ id: accountingLink.id });
-        return { kind: "family", familyId: String(o.familyId), linked: true, linkId: link!.id };
+        // A family staff left unlinked on the accounting links screen has a link now: the mark goes with it (stage 4's slice M3a).
+        const cleared = await clearLeftUnlinked(tx, o.familyId);
+        return { kind: "family", familyId: String(o.familyId), linked: true, linkId: link!.id, ...(cleared ? { leftUnlinkedCleared: true as const } : {}) };
       }
       const [made] = await tx.insert(family).values({ name: w.name, active: true }).returning({ id: family.id });
       const [link] = await tx.insert(accountingLink).values({ system: QUICKBOOKS, realmId: o.realmId, customerId, familyId: made!.id, origin: "created", linkedBy: o.linkedBy, ...aligned })

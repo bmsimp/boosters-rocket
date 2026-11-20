@@ -122,6 +122,12 @@ export const parent = pgTable("parent", {
  * details, the portal's own since stage 3's slice 11a, for books with no parent type (flat, or layered with no parent
  * type: open question 6), where every guardian of the family shares them; as on `parent`, filled once by the take-in
  * and 0 until anyone sets them.
+ * `accounting_left_unlinked_at` and `_by` (stage 4's slice M3a, migration 0045) are the accounting links screen's "Left
+ * unlinked" mark: when a staff member with the linking permission said this family is to stay with no customer in the
+ * books for now, and who (`staff_user.id`, with no foreign key, as `accounting_link.linked_by` has none). While it is
+ * set the screen suggests no customer for the family and it takes no part in another family's suggestion. Undo clears
+ * both, and so does every path that gives the family a link, in the transaction that makes it
+ * (src/lib/families/left-unlinked.ts). `_by` is set only while `_at` is.
  */
 export const family = pgTable("family", {
   id: uuid("id").primaryKey().defaultRandom().$type<AppFamilyId>(),
@@ -130,9 +136,13 @@ export const family = pgTable("family", {
   phone: text("phone"),
   ...mailingAddress(),
   contactVersion: integer("contact_version").notNull().default(0),
+  accountingLeftUnlinkedAt: timestamp("accounting_left_unlinked_at", { withTimezone: true }),
+  accountingLeftUnlinkedBy: uuid("accounting_left_unlinked_by"), // staff_user.id of who left it unlinked
   createdAt: created(),
   updatedAt: updated(),
-});
+}, (t) => [
+  check("family_left_unlinked_by_with_at", sql`${t.accountingLeftUnlinkedBy} is null or ${t.accountingLeftUnlinkedAt} is not null`),
+]);
 
 /**
  * A student, with the portal's own id: made by migration 0023 (or the import) from a student customer directly under a
