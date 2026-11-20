@@ -1,0 +1,119 @@
+name: focused
+# A focused test run, by hand only: typecheck and lint, then only the test files named, on the branch it is dispatched
+# on (gh workflow run focused.yml --ref <branch> -f vitest="tests/unit/a.test.ts tests/integration/b.test.ts" -f e2e="",
+# or scripts/focused-run.sh). It lets a slice's own tests run on a work-in-progress branch before its one pull
+# request; it never replaces that pull request's full run of ci.yml. Its job is ci.yml's test job cut down: the same
+# runner, Postgres service, setup steps and env. The inputs are read only through env and checked in the script, never
+# written into one.
+on:
+  workflow_dispatch:
+    inputs:
+      vitest:
+        description: "Vitest files, separated by spaces (tests/unit/... or tests/integration/..., ending .test.ts)"
+        required: false
+        default: ""
+        type: string
+      e2e:
+        description: "Playwright specs, separated by spaces (tests/e2e/..., ending .spec.ts); builds and seeds first"
+        required: false
+        default: ""
+        type: string
+concurrency:
+  group: focused-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ${{ (github.actor == 'dependabot[bot]' || github.event.pull_request.user.login == 'dependabot[bot]') && fromJSON('["ubuntu-latest"]') || fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18
+        env: { POSTGRES_USER: booster, POSTGRES_PASSWORD: booster, POSTGRES_DB: booster_test }
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U booster" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check the files asked for
+        shell: bash
+        env:
+          VITEST_FILES: ${{ inputs.vitest }}
+          E2E_FILES: ${{ inputs.e2e }}
+        run: |
+          set -euo pipefail
+          # Spaces, tabs and line breaks all separate files.
+          read -ra vitest_files <<< "$(printf '%s' "${VITEST_FILES:-}" | tr -s '[:space:]' ' ')"
+          read -ra e2e_files <<< "$(printf '%s' "${E2E_FILES:-}" | tr -s '[:space:]' ' ')"
+          total=$(( ${#vitest_files[@]} + ${#e2e_files[@]} ))
+          if [ "$total" -eq 0 ]; then
+            echo "Name at least one test file: the vitest input, the e2e input, or both." >&2
+            exit 1
+          fi
+          if [ "$total" -gt 40 ]; then
+            echo "At most 40 files in all; $total were named." >&2
+            exit 1
+          fi
+          check() {
+            local file="$1" pattern="$2" what="$3"
+            if [[ "$file" == *..* ]] || ! [[ "$file" =~ $pattern ]]; then
+              echo "Not a $what file this run takes: $file" >&2
+              exit 1
+            fi
+            if [ ! -f "$file" ]; then
+              echo "No such file on this branch: $file" >&2
+              exit 1
+            fi
+          }
+          : > "$RUNNER_TEMP/vitest-files"
+          : > "$RUNNER_TEMP/e2e-files"
+          for file in "${vitest_files[@]}"; do
+            check "$file" '^tests/(unit|integration)/[A-Za-z0-9._/-]+\.test\.ts$' "vitest"
+            printf '%s\n' "$file" >> "$RUNNER_TEMP/vitest-files"
+          done
+          for file in "${e2e_files[@]}"; do
+            check "$file" '^tests/e2e/[A-Za-z0-9._/-]+\.spec\.ts$' "Playwright"
+            printf '%s\n' "$file" >> "$RUNNER_TEMP/e2e-files"
+          done
+          echo "Vitest: ${#vitest_files[@]} file(s). Playwright: ${#e2e_files[@]} spec(s)."
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version-file: .nvmrc, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - name: Unit and integration tests
+        shell: bash
+        env:
+          BR_TEST_WORKERS: "2"
+          BR_TEST_DB_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          mapfile -t files < "$RUNNER_TEMP/vitest-files"
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No vitest files named."
+            exit 0
+          fi
+          pnpm vitest run "${files[@]}"
+      - name: E2E
+        shell: bash
+        env:
+          DATABASE_URL: postgres://booster:booster@localhost:5433/booster_test
+          APP_URL: http://localhost:3100
+          BETTER_AUTH_SECRET: ci-fake-secret-ci-fake-secret-1234567890
+          SETTINGS_ENCRYPTION_KEY: Y2ktZmFrZS1rZXktY2ktZmFrZS1rZXktY2ktZmFrZSE=
+          SETUP_STATUS_CACHE_MS: "0"
+        run: |
+          set -euo pipefail
+          mapfile -t specs < "$RUNNER_TEMP/e2e-files"
+          if [ "${#specs[@]}" -eq 0 ]; then
+            echo "No Playwright specs named."
+            exit 0
+          fi
+          pnpm build
+          node scripts/check-client-bundle.mjs
+          pnpm exec playwright install --with-deps chromium
+          pnpm db:migrate
+          pnpm tsx scripts/seed-e2e.ts
+          pnpm e2e "${specs[@]}"

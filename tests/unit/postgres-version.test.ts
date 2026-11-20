@@ -38,6 +38,7 @@ describe("Postgres's version", () => {
       imageOf(service(deploy, "db")),
       imageOf(service(deploy, "backup")),
       /services:\s+postgres:\s+image:\s*(\S+)/.exec(read(".github/workflows/ci.yml"))?.[1] ?? "",
+      /services:\s+postgres:\s+image:\s*(\S+)/.exec(read(".github/workflows/focused.yml"))?.[1] ?? "",
       / (postgres:\S+) >\/dev\/null/.exec(read("scripts/smoke-image.sh"))?.[1] ?? "",
     ];
     for (const image of named) expect(image, image).toMatch(new RegExp(`^postgres:${MAJOR}(\\.\\d+)?(@sha256:[0-9a-f]{64})?$`));
