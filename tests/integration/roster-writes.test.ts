@@ -620,6 +620,7 @@ describe("nobody with a balance is made inactive (the owner's decision of 2026-1
   });
 
   it("a linked student or member is never made inactive by a customer's id and a page's version: only by the record", async () => {
+    stub.calls.length = 0; // the roster read in beforeEach asked its own queries
     expect(await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op)).toEqual({ ok: false, errors: [LINKED_DEACTIVATE] });
     expect(stub.apiCalls()).toEqual([]);
     expect(await offStudent("12")).toEqual({ ok: true, message: "Made inactive in QuickBooks." });
