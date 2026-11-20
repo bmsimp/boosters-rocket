@@ -18,6 +18,7 @@ import { DisconnectedNotice, Freshness } from "../freshness";
 import { CreateInQuickBooks, FamilyChanges, MemberChanges, MoveStudents, PortalChanges, Waiting, WhatChanges, type MovableStudent } from "../changes";
 import { moveAction } from "../write-actions";
 import { offers } from "@/lib/roster/operations";
+import { placeWords } from "@/lib/roster/place";
 import type { Cust, Family } from "@/lib/roster/model";
 import { DataTable, type Column } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
@@ -30,9 +31,11 @@ export const dynamic = "force-dynamic";
 const standing = (c: Cust | null) => (c === null ? "No customer" : c.active ? "Active" : "Inactive");
 /**
  * A student record's standing in QuickBooks: its customer's under this family; or, for a record whose linked customer
- * QuickBooks lists elsewhere (since stage 3's slice 9c the two can disagree), where that is. QuickBooks text, as text.
+ * QuickBooks has elsewhere (since stage 3's slice 9c the two can disagree), where that is, in the words the accounting
+ * links screen says it in too (placeWords(), src/lib/roster/place.ts): under another family, under no customer, under
+ * one that is no family here, no longer a student customer, or gone. QuickBooks text, as text.
  */
-const studentStanding = (s: RecordStudent) => (s.customer ? standing(s.customer) : s.elsewhere ? `Under ${s.elsewhere.familyName} in QuickBooks`
+const studentStanding = (s: RecordStudent) => (s.customer ? standing(s.customer) : s.place ? placeWords(s.place)
   : s.linked ? "Not under a family in QuickBooks" : "No customer");
 
 /** One row of a people table: a record's name (a student's) or a customer's (a parent's, a member's), with what QuickBooks holds for them. */

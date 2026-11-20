@@ -4,6 +4,7 @@ import { qboCustomer, qboCustomerType, jobRun, guardian, parent, family, student
 import { connectionView, getConnection } from "@/lib/quickbooks/connection";
 import { getShape, missingTypes, describeShape, type MembershipShape, type TypeRow } from "./shape";
 import { buildRoster, type Cust, type Roster } from "./model";
+import { placesOf, type StudentPlace } from "./place";
 import { needsAttention, type AttentionItem, type SignIn } from "./attention";
 import { ROSTER_JOB, getRosterSource } from "./source";
 import { linksOf } from "@/lib/families/links";
@@ -12,6 +13,8 @@ import { recordNameWords } from "@/lib/families/words";
 
 export type RosterPage = {
   connected: boolean; shape: MembershipShape | null; shapeWords: string | null; brokenTypes: string[]; roster: Roster | null;
+  /** The cache's customers the roster was built from (none without a roster), carried so a page places its students without reading them again. */
+  customers: Cust[];
   attention: AttentionItem[]; signIns: SignIn[]; types: TypeRow[];
   lastRun: { at: string; ok: boolean; detail: string | null } | null; lastOkAt: string | null;
 };
@@ -68,16 +71,17 @@ export async function loadRosterPage(): Promise<RosterPage> {
   ]);
   const hasCache = typeRows.length > 0 || anyCustomer.length > 0;
   if (anotherCompanysCache({ connected: conn.connected, connectedRealmId: c?.realmId ?? null, source: from, hasCache })) {
-    return { connected: true, shape: null, shapeWords: null, brokenTypes: [], roster: null, attention: [], signIns: people, types: [], lastRun: null, lastOkAt: null };
+    return { connected: true, shape: null, shapeWords: null, brokenTypes: [], roster: null, customers: [], attention: [], signIns: people, types: [], lastRun: null, lastOkAt: null };
   }
   const brokenTypes = brokenShapeTypes(shape, lastOk !== undefined, typeRows);
-  const roster = shape && !brokenTypes.length ? buildRoster(shape, await customers()) : null;
+  const cached = shape && !brokenTypes.length ? await customers() : [];
+  const roster = shape && !brokenTypes.length ? buildRoster(shape, cached) : null;
   // A cache that names no company has no records' company to hold a sign-in's family to (every link names one), so the
   // sign-in rule waits for a read that records it, rather than flag every open sign-in as attached to no family.
   // QuickBooks' own tidy rules still run.
   const judged = from === null ? [] : people;
   return {
-    connected: conn.connected, shape, shapeWords: shape ? describeShape(shape, typeRows) : null, brokenTypes, roster,
+    connected: conn.connected, shape, shapeWords: shape ? describeShape(shape, typeRows) : null, brokenTypes, roster, customers: cached,
     attention: roster && shape ? needsAttention(roster, shape, judged) : [], signIns: people, types: typeRows,
     lastRun: last ? { at: (last.finishedAt ?? last.startedAt).toISOString(), ok: last.outcome === "ok", detail: last.detail } : null,
     lastOkAt: lastOk?.finishedAt?.toISOString() ?? null,
@@ -100,11 +104,13 @@ export async function previewShape(shape: MembershipShape): Promise<ShapePreview
  * or the roster lists that customer elsewhere or not at all). `linked`: the record has a student link at all.
  * `elsewhere`: the linked customer, where the roster lists it under another family (since stage 3's slice 9c the
  * portal and QuickBooks can disagree where a student is: a move made in QuickBooks alone, or, since slice 9f, a move
- * saved in the portal first that QuickBooks hasn't taken), with that family's customer and its name in QuickBooks. Names are the record's (recordNameWords()
- * when the portal knows none).
+ * saved in the portal first that QuickBooks hasn't taken), with that family's customer and its name in QuickBooks.
+ * `place`: where the books have the linked customer, against the family's own customer, by the one rule both the
+ * family's page and the accounting links screen say it by (placesOf(), ./place.ts); null with no link. Names are the
+ * record's (recordNameWords() when the portal knows none).
  */
 export type RecordStudent = { id: AppStudentId; name: string; active: boolean; customer: Cust | null; linked: boolean;
-  elsewhere: { customer: Cust; familyQboId: string; familyName: string } | null };
+  elsewhere: { customer: Cust; familyQboId: string; familyName: string } | null; place: StudentPlace | null };
 /**
  * A family as the app keeps it (`family`), with what QuickBooks holds for it: its customer through the family link, as
  * the roster lists it as a family (a member, in flat books; `customer`, null when it has none, or the roster doesn't
@@ -154,6 +160,8 @@ export async function rosterFamilies(page: RosterPage, only?: AppFamilyId): Prom
   const listedUnder = new Map<string, { customer: Cust; familyQboId: string; familyName: string }>(roster.kind === "flat" ? []
     : roster.families.flatMap((f) => f.students.map((c): [string, { customer: Cust; familyQboId: string; familyName: string }] =>
       [c.qboId, { customer: c, familyQboId: f.customer.qboId, familyName: f.customer.displayName }])));
+  // Where the books have each linked student's customer, from the customers the page's roster was built from: no new read.
+  const placeOf = page.shape === null ? null : placesOf(page.shape, roster, page.customers);
   const under = new Map<string, typeof students>();
   for (const s of students) if (s.familyId !== null) under.set(String(s.familyId), [...(under.get(String(s.familyId)) ?? []), s]);
   const out: RecordFamily[] = [];
@@ -166,7 +174,8 @@ export async function rosterFamilies(page: RosterPage, only?: AppFamilyId): Prom
       const customer = studentCustomer === undefined ? undefined : there?.students.find((c) => c.qboId === studentCustomer);
       const away = customer || studentCustomer === undefined ? undefined : listedUnder.get(studentCustomer);
       return !s.active && !customer ? [] : [{ id: s.id, name: recordNameWords(s.name, "student"), active: s.active, customer: customer ?? null,
-        linked: studentCustomer !== undefined, elsewhere: away && away.familyQboId !== customerId ? away : null }];
+        linked: studentCustomer !== undefined, elsewhere: away && away.familyQboId !== customerId ? away : null,
+        place: studentCustomer === undefined || placeOf === null ? null : placeOf(studentCustomer, customerId ?? null) }];
     });
     out.push({ id: f.id, name: recordNameWords(f.name, "family"), active: f.active, customer: there?.customer ?? null, linked: customerId !== undefined,
       students: mine.sort(byName), parents: there?.parents ?? [] });

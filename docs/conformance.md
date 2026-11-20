@@ -32,8 +32,8 @@ QuickBooks, **Check the portal's requests** (`/staff/settings/quickbooks/check`,
 | §13 Audit log | 10 | 1 | 0 | 0 |
 | §14 Operations | 9 | 3 | 0 | 2 |
 | Owner's decisions of 2026-11-14 | 5 | 0 | 0 | 0 |
-| App-owned families: the mapping screen | 10 | 0 | 9 | 0 |
-| **All** | **157** | **5** | **9** | **11** |
+| App-owned families: the mapping screen | 11 | 0 | 9 | 0 |
+| **All** | **158** | **5** | **9** | **11** |
 
 Nothing the v1 spec asks for is missing outright. The nine missing rows are the app-owned families spec's mapping screen,
 which stage 4 is building one slice at a time: each row names the slice that builds it. The five partly built rows, and what each lacks, are listed at the foot
@@ -315,13 +315,13 @@ Section 4 of `docs/superpowers/specs/2026-11-18-app-owned-families-design.md`, "
 | L.2 | One row per family, a status on each row | Built | `src/lib/accounting/mapping.ts` (`loadAccountingLinks()`); `accounting-links.test.ts` "reads a link from the roster as carried over" |
 | L.3 | A row shows the family, its guardians' emails, the suggested or linked customer's name and email, and a status | Built | `accounting-links.test.ts` "draws each row with its family, addresses, customer and status" |
 | L.4 | A row opens to show the students and guardians and their own links | Built | `accounting-links.test.ts` "draws each row ...", "reads a link from the roster as carried over" |
-| L.5 | Statuses: Suggested, Several possible, No match, Linked, Carried over, Customer gone | Built | `src/lib/accounting/status.ts`; `accounting-links.test.ts` (each status), `accounting-match.test.ts` |
+| L.5 | Statuses: Suggested, Several possible, No match, Linked, Carried over, Linked, with differences, Customer gone | Built | `src/lib/accounting/status.ts`; `accounting-links.test.ts` (each status), `accounting-match.test.ts` |
 | L.6 | An exact match is the same address once trimmed and lower-cased; the suggestion is the family-level customer (the member in flat books); a match on a parent record suggests the family above it | Built | `src/lib/accounting/match.ts`; `accounting-match.test.ts`, `accounting-links.test.ts` "suggests a customer whose own field holds a guardian's address, and one whose Parent customer does" |
 | L.7 | Filters by status, and a search by name or email | Built | `parseLinksFilter()`, `filterLinkRows()`; `accounting-links.test.ts` "filters by a status key and searches", "filters by status with each status's count" |
 | L.8 | Carried-over links recorded as carried over from the roster on its date, with no person named, with their own status and filter (open question 2) | Built | `accounting-links.test.ts` "reads a link from the roster as carried over, on its date" |
 | L.9 | A customer gone is "Customer gone", the link kept and never relinked by itself (open question 13) | Built | `accounting-links.test.ts` "tells a customer gone from the books, and keeps the link as it is" |
 | L.10 | The screen says so when the books can't be read for it, rather than failing (section 7) | Built | `accounting-links.test.ts` "when the books can't be checked" (three states: each family with no link reads Not checked; with no company or another company, every family does) and "says why nothing is suggested while the books can't be checked" (each state's words) |
-| L.11 | "Linked, with differences" (and an inactive customer shown as a difference, open question 13) | Missing | M2. Today a linked customer that isn't a family now reads "Not a family now" |
+| L.11 | "Linked, with differences" (and an inactive customer shown as a difference, open question 13) | Built | M2: `src/lib/accounting/differences.ts` (`differencesOf()`: names, whether each is active, where the books have each student, a student customer under the family whose record the portal has elsewhere (in another family, in no family, or inactive, told in that family's row whatever the record's own row says), students and Parent customers on one side only, and the queue's words for an item that explains one), `mapping.ts` (`loadAccountingLinks()`, `filtersOf()`), `status.ts` (`linkStanding()`: inactive alone is no longer Not a family now), `src/lib/roster/place.ts` (one place rule and its words, shared with a family's page); `accounting-differences.test.ts`, `roster-place.test.ts`, `accounting-links.test.ts` "differences, for a link that stands" and "tells a linked customer that isn't a family now apart from one that is gone" |
 | L.12 | "Left unlinked", kept out of the bulk button | Missing | M3a |
 | L.13 | Bulk confirm | Missing | M3a |
 | L.14 | Confirm the suggestion, or pick another customer | Missing | M3a. Today nothing links a family the portal has to a customer the books have: "Create a family from this" (Reconciliation) makes a new family, and "Create in QuickBooks and link" (a family's page) or an add on Families by someone who may link makes a new customer; the screen warns that either, for a Suggested or Several possible row, makes a second |
@@ -330,6 +330,7 @@ Section 4 of `docs/superpowers/specs/2026-11-18-app-owned-families-design.md`, "
 | L.17 | Unlink, and an admin picks again for a customer gone (open question 13) | Missing | M3b |
 | L.18 | Settle a difference: take the books' value, or send the app's | Missing | M4, M5 |
 | L.19 | The optional, reviewed import | Missing | M6 |
+| L.20 | Differences in a guardian's or family's email, phone and mailing address (section 5) | Missing | A later slice, behind an audited view: how those are kept and sent is being rebuilt elsewhere. M2 compares the structural fields only |
 
 ## What is partly built or missing, and what it would take
 
