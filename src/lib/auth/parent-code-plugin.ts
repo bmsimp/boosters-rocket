@@ -158,8 +158,11 @@ export const parentCodePlugin = () => ({
       const ip = ipOf(ctx);
       const now = new Date();
       const step = await readPendingStep(ctx, now);
+      // `next` from the query string: absent, or a string of at most MAX_RETURN_PATH; anything else is the one refusal,
+      // uncounted, as a body the other endpoints' schemas refuse is.
       const rawNext = ctx.query?.next;
-      const next = typeof rawNext === "string" && rawNext.length <= MAX_RETURN_PATH ? rawNext : undefined;
+      if (rawNext !== undefined && (typeof rawNext !== "string" || rawNext.length > MAX_RETURN_PATH)) return ctx.json(REJECTED);
+      const next = typeof rawNext === "string" ? rawNext : undefined;
       const headers = ctx.headers ?? ctx.request?.headers ?? new Headers();
       const r = await checkPasskeySignin(ctx.body.response,
         step ? { parentId: step.parentId, email: step.email, password: { credentialId: step.credentialId, credentialUpdatedAt: step.credentialUpdatedAt } } : null,
