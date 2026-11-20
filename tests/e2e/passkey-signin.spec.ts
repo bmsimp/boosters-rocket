@@ -1,4 +1,4 @@
-import { test, expect, type Browser, type Page } from "@playwright/test";
+import { test, expect, type Browser, type BrowserContextOptions, type Page } from "@playwright/test";
 import postgres from "postgres";
 import { makePasskeyKey } from "../helpers/passkey-keys";
 import { E2E_SIGNIN } from "./signin-seed";
@@ -11,7 +11,8 @@ import { PASSKEY_ASKED, PASSKEY_BUTTON, PASSKEY_ONLY, PASSKEY_USE } from "../../
  * passkey" on a browser that has nothing of hers, typing no address, and on another her password asks for the passkey,
  * which finishes the sign-in. The browser's authenticator is Playwright's own (`context.credentials`: a script it
  * injects that answers navigator.credentials.get(), no DevTools protocol, so it runs in both projects, phone and
- * desktop), holding a key this spec made by the software authenticator's keys (tests/helpers/passkey-keys.ts), whose
+ * desktop, each drawn at its own project's size: the context made by hand takes the test's option fixtures), holding
+ * a key this spec made by the software authenticator's keys (tests/helpers/passkey-keys.ts), whose
  * public key it stores in a passkey row of Zelda's as the passkey library stores one. The page runs the library's own
  * ceremony, and the spec watches its one verify request reach the portal's check, never the library's verify path.
  * Nothing of it stays: the passkey row, the sessions and devices its sign-ins made and Zelda's counts are removed
@@ -55,11 +56,18 @@ test.afterAll(async () => {
 const counterNow = async () => Number((await sql`SELECT counter FROM parent_auth_passkey WHERE credential_id = ${key.id}`)[0]?.counter ?? 0);
 
 /**
- * A browser with nothing of Zelda's but her passkey in its authenticator, installed before the page first touches
- * navigator.credentials, at the sign-in page; and every request path it makes.
+ * What the project sets for a browser context (playwright.config.ts: the phone's or the desktop's viewport), which a
+ * context made by hand from the `browser` fixture doesn't get by itself: the test passes its own option fixtures.
  */
-async function browserWithPasskey(browser: Browser, baseURL: string): Promise<{ page: Page; paths: string[]; close: () => Promise<void> }> {
-  const context = await browser.newContext({ baseURL });
+type ProjectContext = Pick<BrowserContextOptions, "baseURL" | "viewport" | "isMobile" | "hasTouch" | "deviceScaleFactor" | "userAgent" | "locale" | "colorScheme">;
+
+/**
+ * A browser with nothing of Zelda's but her passkey in its authenticator, installed before the page first touches
+ * navigator.credentials, at the sign-in page, drawn at the project's size; and every request path it makes.
+ */
+async function browserWithPasskey(browser: Browser, project: ProjectContext): Promise<{ page: Page; paths: string[]; close: () => Promise<void> }> {
+  const baseURL = project.baseURL!;
+  const context = await browser.newContext(project);
   await context.credentials.install();
   await context.credentials.create(new URL(baseURL).hostname, { id: key.id, privateKey: key.pkcs8, publicKey: key.spki, userHandle: key.userHandle, signCount: await counterNow() });
   const page = await context.newPage();
@@ -76,8 +84,10 @@ function wentToThePortal(paths: string[]) {
   expect(paths).not.toContain("/api/auth/parent/passkey/verify-authentication");
 }
 
-test("Sign in with a passkey signs Zelda in on a new browser with no address typed", async ({ browser, baseURL }) => {
-  const { page, paths, close } = await browserWithPasskey(browser, baseURL!);
+test("Sign in with a passkey signs Zelda in on a new browser with no address typed", async ({ browser, baseURL, viewport, isMobile, hasTouch, deviceScaleFactor, userAgent, locale, colorScheme }, testInfo) => {
+  const { page, paths, close } = await browserWithPasskey(browser, { baseURL, viewport, isMobile, hasTouch, deviceScaleFactor, userAgent, locale, colorScheme });
+  // The project's own size: the phone pass is drawn at the phone's width.
+  expect(page.viewportSize()).toEqual(testInfo.project.use.viewport);
   await expect(page.getByLabel("Email")).toHaveValue("");
   await page.getByRole("button", { name: PASSKEY_BUTTON }).click();
   // Two families: the chooser, as after any sign-in.
@@ -87,8 +97,9 @@ test("Sign in with a passkey signs Zelda in on a new browser with no address typ
   await close();
 });
 
-test("her password on a new browser asks for the passkey, never an emailed code, and the passkey finishes it", async ({ browser, baseURL }) => {
-  const { page, paths, close } = await browserWithPasskey(browser, baseURL!);
+test("her password on a new browser asks for the passkey, never an emailed code, and the passkey finishes it", async ({ browser, baseURL, viewport, isMobile, hasTouch, deviceScaleFactor, userAgent, locale, colorScheme }, testInfo) => {
+  const { page, paths, close } = await browserWithPasskey(browser, { baseURL, viewport, isMobile, hasTouch, deviceScaleFactor, userAgent, locale, colorScheme });
+  expect(page.viewportSize()).toEqual(testInfo.project.use.viewport);
   await page.getByLabel("Email").fill(ZELDA_EMAIL);
   await page.getByLabel("Password").fill(E2E_SIGNIN.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
