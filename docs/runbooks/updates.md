@@ -156,6 +156,9 @@ version. Merge it like any change, then update as above. Documenso is the one to
 3. A dependency update never moves Postgres to a new major version: `.github/dependabot.yml` is told not to offer one
    (the build's lead chose this, so that a move is always a release of its own with the section below). It may move
    Postgres within its version (18.7 to 18.8, say): that is an ordinary update.
+4. `better-auth` and `@better-auth/passkey` are updated together, to the same version: the passkey package asks for
+   the `better-auth` of its own version. Dependabot offers them in separate pull requests, so merge neither alone:
+   put both on one branch at the same version and merge that.
 
 ## Moving to a new major version of Postgres
 

@@ -568,21 +568,29 @@ What the lead verified in the installed library (better-auth 1.7.25, 2026-11-18)
   library makes backup codes when the app is turned on, so offering them
   with a passkey alone (Open questions, 25) is the portal's own work.
 - **Passkeys** are a separate package of the same project, `@better-auth/passkey`, published at 1.7.25: the one new
-  dependency, which the owner asked for by asking for passkeys. It is not installed. Its documentation says a user may
+  dependency, which the owner asked for by asking for passkeys. Installed since the sign-in release's slice SI-7a, at
+  exactly 1.7.25. Its documentation says a user may
   have several, each with an optional name that can be changed, listed and deleted by id; that a name not given
   defaults to the user's email or id, so the portal names each passkey itself *(proposed)*; that a passkey is tied to
-  the site's `rpID` and `origin` (the portal's address); that security keys are allowed; and that its sign-in is
-  `/sign-in/passkey`. Read in the installed two-factor plugin (`signInPaths` in its `index.mjs`): its challenge runs
-  only on `/sign-in/email`, `/sign-in/username` and `/sign-in/phone-number`, so it never challenges a passkey sign-in,
-  which suits a passkey counting as the second step (Open questions, 35). Both `/sign-in/passkey` and `/sign-in/email`
-  make a session inside the library, outside the checks the portal's code sign-in runs today in
-  `parent-code-plugin.ts` (`signinStands()`, `completeParentSignin()` and its `signin` audit row). Every library
-  sign-in route is therefore wrapped or hooked so that the block, the family choice and the `signin` row run exactly as
-  for the code today. Not verified: its table's exact columns, and how it behaves inside the installed app on each phone.
+  the site's `rpID` and `origin` (the portal's address); and that security keys are allowed. Its sign-in is
+  `POST /passkey/verify-authentication`, after `GET /passkey/generate-authenticate-options` (read in the installed
+  package's `dist/index.mjs`, which says so as the library's own plugins do; an earlier draft of this note named
+  `/sign-in/passkey`, which the package has no route for). Read in the installed two-factor plugin (`signInPaths` in
+  its `index.mjs`): its challenge runs only on `/sign-in/email`, `/sign-in/username` and `/sign-in/phone-number`, so it
+  would never challenge a passkey sign-in (the portal adds no two-factor plugin). The package's
+  `/passkey/verify-authentication` makes a session inside the library, outside the checks the portal's sign-in runs, so
+  since SI-7a the parent instance refuses every session not made inside the portal's one finish (a
+  `databaseHooks.session.create.before` guard), the path is disabled for browsers, and the portal's own
+  `/portal-passkey/check` runs the package's verification in process and then the one finish, so the block, the family
+  choice and the `signin` row run exactly as for every other sign-in. Its table's columns, as the installed package
+  names them: `name`, `publicKey` (the COSE key, standard base64), `userId`, `credentialID` (base64url, indexed, not
+  unique), `counter`, `deviceType`, `backedUp`, `transports` (comma-joined), `createdAt` and `aaguid`
+  (`parent_auth_passkey`, with the portal's unique index on the credential id and its own `last_used_at`). Not
+  verified: how it behaves on real devices and inside the installed app on each phone (the owner's checks).
 
 **New tables, by what they hold.** One row per guardian for two-factor (the app's secret, the backup codes, wrong
 tries and a lock time) and a flag on the auth user that it is on; one row per passkey (its name, public key and
-credential id, the authenticator model, when added; the exact columns not verified); remembered devices in the
+credential id, the authenticator model, when added; the columns as Appendix A names them since SI-7a); remembered devices in the
 existing verification table; set-up and reset tokens either there, with the library told to store identifiers hashed,
 or in a portal table of their own, hashed and single use like the code *(proposed)*; the reset and set-up emails sent
 without waiting, as the code's is; the club's level in the parent settings. `signin_code` stays, for the second step
