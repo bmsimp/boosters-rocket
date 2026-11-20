@@ -115,7 +115,9 @@ export type PoolCustomer = { qboId: string; name: string; email: string | null }
  * offers no Pick), or the customer isn't one no family is linked to (`customer`).
  */
 export type ConfirmStep =
-  | { ok: true; familyId: AppFamilyId; family: string; customer: PoolCustomer; offer: LinkOffer; alsoFor: string[] }
+  | { ok: true; familyId: AppFamilyId; family: string; customer: PoolCustomer; offer: LinkOffer; alsoFor: string[];
+      /** The Parent customers the roster lists directly under the customer, in the roster's order, so staff can tell whose household it is; null in books with no parent type. */
+      parents: { qboId: string; name: string; active: boolean }[] | null }
   | { ok: false; why: "family" | "customer" };
 export type LinksView = {
   state: LinksState;
@@ -380,7 +382,9 @@ export async function loadAccountingLinks(): Promise<LinksView> {
     const customer = poolShown?.find((c) => c.qboId === customerId);
     if (customer === undefined) return { ok: false, why: "customer" };
     const key = String(row.familyId);
-    return { ok: true, familyId: row.familyId, family: row.name, customer, offer: b.offerFor(key, customerId, chosen),
+    const parents = roster === null || roster.kind === "flat" || shape === null || shape.kind === "flat" || shape.parentTypeId === null ? null
+      : (roster.families.find((f) => f.customer.qboId === customerId)?.parents ?? []).map((c) => ({ qboId: c.qboId, name: c.displayName, active: c.active }));
+    return { ok: true, familyId: row.familyId, family: row.name, customer, parents, offer: b.offerFor(key, customerId, chosen),
       alsoFor: (aimedBy.get(customerId) ?? []).filter((k) => k !== key).map((k) => familyName.get(k)!).sort((x, y) => COLLATOR.compare(x, y)) };
   };
 

@@ -53,6 +53,8 @@ const qc = (Id: string, DisplayName: string, typeId: string | null, extra: Recor
 });
 const under = (id: string) => ({ ParentRef: { value: id }, Job: true });
 const mail = (address: string) => ({ PrimaryEmailAddr: { Address: address } });
+/** What the links page says beside every Confirm (src/app/staff/(app)/links/page.tsx), as the text of the page reads it. */
+const LINK_EFFECT = "Once linked, this family's guardians see this customer's open invoices and Pay links, and those of the students and parents the books hold directly under it, the next time they open Home or Payments, and a pay-instead choice for the family bills it. The link can't be removed in the portal yet, so check it is the right household.";
 
 /** Customers added or changed in QuickBooks, then read by a roster read (which makes no record of them). */
 async function readAgain(...customers: ReturnType<typeof qc>[]) {
@@ -424,7 +426,7 @@ describe("the page", () => {
       "SuggestedA guardian's sign-in address matches: asha@example.com, on this customer.",
       // Since slice M3a a Suggested row's opening says what Confirm links, and offers it and Leave unlinked.
       "Students and guardians: The PatelsNo active students.Guardians:Asha Patel (asha@example.com): no link of its own"
-        + "Confirming links it to “Patel Family”. Nothing is sent to the books.No student would be linked with it.Confirm: The PatelsLeave unlinked: The Patels"]);
+        + "Confirming links it to “Patel Family”. Nothing is sent to the books.No student would be linked with it." + LINK_EFFECT + "Confirm: The PatelsLeave unlinked: The Patels"]);
     expect(withoutIds(html)).toContain('href="/staff/roster/<id>"');
     expect(html).toContain("<details class=\"more\"><summary>Students and guardians<span class=\"visually-hidden\">: The Patels</span></summary>");
     expect((await db.select().from(auditLog)).length).toBe(audits);

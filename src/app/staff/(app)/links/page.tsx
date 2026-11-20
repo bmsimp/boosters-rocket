@@ -108,6 +108,9 @@ function ProposalsShown({ proposals }: { proposals: Proposals }) {
   );
 }
 
+/** What a link does on the parents' side, and that it can't be taken back here yet: said beside every Confirm. */
+const LINK_EFFECT = "Once linked, this family's guardians see this customer's open invoices and Pay links, and those of the students and parents the books hold directly under it, the next time they open Home or Payments, and a pay-instead choice for the family bills it. The link can't be removed in the portal yet, so check it is the right household.";
+
 /** The address of the chooser for a family, or of its confirm step for a customer. */
 const pickHref = (familyId: string, customerId?: string) => `/staff/links?pick=${encodeURIComponent(familyId)}${customerId ? `&customer=${encodeURIComponent(customerId)}` : ""}#${PICK}`;
 
@@ -124,7 +127,7 @@ function Opening({ row, tag }: { row: LinkRow; tag: string }) {
       {row.status.key === "several" && row.status.alsoMatches.length > 0 && <p>Also matched by: {row.status.alsoMatches.join(", ")}.</p>}
       {row.differences.length > 0 && <><p>Where the portal and the books differ:</p><ul>{row.differences.map((d, i) => <DifferenceLine key={i} d={d} />)}</ul></>}
       {row.inactiveUnrecorded > 0 && <p>The books also have {plural(row.inactiveUnrecorded, "inactive student customer", "inactive student customers")} under this family with no student record in the portal.</p>}
-      {row.confirm !== null && row.customer !== null && <><p>Confirming links it to &ldquo;{row.customer.name}&rdquo;. Nothing is sent to the books.</p><ProposalsShown proposals={row.confirm.proposals} /></>}
+      {row.confirm !== null && row.customer !== null && <><p>Confirming links it to &ldquo;{row.customer.name}&rdquo;. Nothing is sent to the books.</p><ProposalsShown proposals={row.confirm.proposals} /><p>{LINK_EFFECT}</p></>}
       {row.offers.pick && <p className="link-line"><Link href={pickHref(id)}>Pick a different customer<span className="visually-hidden">: {row.name}</span></Link></p>}
       {(row.confirm !== null || row.offers.leave || row.offers.undo) && (
         <div className="row-actions">
@@ -172,8 +175,11 @@ function PickPart({ view, familyId, customerId, cq, tag, made }: { view: LinksVi
           <h3>Link {step.family} to &ldquo;{step.customer.name}&rdquo;?</h3>
           <p>{CHOSEN_WORDS[step.offer.chosen]} Its email field in the books: {step.customer.email ?? "none"}.</p>
           {step.alsoFor.length > 0 && <Notice tone="warning" live="none">This page also suggests this customer for, or lists it as a possible customer of, {step.alsoFor.join(", ")}. A customer can be linked to only one family: link it to the one it really is.</Notice>}
+          {step.parents !== null && (step.parents.length === 0 ? <p>The books hold no Parent customers directly under it.</p>
+            : <><p>Parent customers the books hold directly under it:</p><ul>{step.parents.map((c) => <li key={c.qboId}>{c.name}{c.active ? "" : " (inactive in the books)"}</li>)}</ul></>)}
           <ProposalsShown proposals={step.offer.proposals} />
           <p>Nothing is sent to the books. The family&apos;s guardians&apos; own records in the books aren&apos;t linked by this.</p>
+          <p>{LINK_EFFECT}</p>
           <div className="row-actions"><ConfirmPress familyId={id} about={row.name} offer={step.offer} tag={tag} /></div>
         </div>
       )}
