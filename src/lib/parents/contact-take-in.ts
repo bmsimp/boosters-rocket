@@ -10,7 +10,7 @@ import { TAKE_IN_KEY } from "./take-in-setting";
 import { getRosterSource } from "@/lib/roster/source";
 import { connectedToAnotherCompany, linksOf } from "@/lib/families/links";
 import type { AppFamilyId } from "@/lib/families/ids";
-import { asShown, type AddressValues } from "./contact-fields";
+import { asShown, detailKey, type AddressValues } from "./contact-fields";
 import { ownRecordIn, whoseDetails, type CachedRecord } from "./my-family";
 
 /**
@@ -42,16 +42,17 @@ function addressOf(r: Cached): AddressValues | null {
   return Object.values(a).some(Boolean) ? a : null;
 }
 const phoneOf = (r: Cached): string | null => asShown(r.phone ?? "") || null;
-const addressKey = (a: AddressValues) => JSON.stringify([a.line1, a.line2, a.city, a.region, a.postalCode, a.country]);
 
 /**
- * One detail across a person's records: the value every one of them holds, where they all hold the same; `disagree`
+ * One detail across a person's records: the value every one of them holds, where they all hold the same by the one
+ * normal form a phone or an address is compared by (detailKey(), shared with the change sent on to QuickBooks, so a
+ * detail copied here is never held back there for a difference of spacing, letter case or an empty line); `disagree`
  * when they don't, a record that holds none beside one that holds one included (left empty, for the person to set:
  * the club may have left it out of that record on purpose); null when none holds one.
  */
-function agreed<T>(values: (T | null)[], key: (v: T) => string): T | null | "disagree" {
+function agreed<T extends string | AddressValues>(values: (T | null)[]): T | null | "disagree" {
   if (values.length === 0) return null;
-  return new Set(values.map((v) => (v === null ? null : key(v)))).size === 1 ? values[0]! : "disagree";
+  return new Set(values.map((v) => detailKey(v))).size === 1 ? values[0]! : "disagree";
 }
 
 /**
@@ -205,8 +206,8 @@ async function planPeople(tx: Tx, shape: MembershipShape, familyRows: (customer:
       if (own && own.signsIn && own.edits === "own") records.set(own.row.qboId, own.row);
     }
     if (records.size === 0) { out.counts.peopleWithNoRecord++; continue; }
-    const phone = agreed([...records.values()].map(phoneOf), (v) => v);
-    const address = agreed([...records.values()].map(addressOf), addressKey);
+    const phone = agreed([...records.values()].map(phoneOf));
+    const address = agreed([...records.values()].map(addressOf));
     const disagreed = phone === "disagree" || address === "disagree";
     if (disagreed) out.counts.peopleDisagreeing++;
     const given: Given = { phone: phone === "disagree" ? null : phone, address: address === "disagree" ? null : address };
