@@ -28,7 +28,7 @@ vi.mock("@/lib/parents/authenticator", async (importOriginal) => {
 import { and, eq, sql } from "drizzle-orm";
 import { verifyPassword } from "better-auth/crypto";
 import { db } from "@/lib/db/client";
-import { auditLog, parent, parentAuthAccount, parentAuthenticator, parentAuthSession, parentAuthUser, parentDevice, parentEmailChange, parentSigninToken, rateLimitEvent, signinCode } from "@/lib/db/schema";
+import { auditLog, parent, parentAuthAccount, parentAuthenticator, parentAuthPasskey, parentAuthSession, parentAuthUser, parentDevice, parentEmailChange, parentSigninToken, rateLimitEvent, signinCode } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import { askAgainCode, currentPassword, sessionProvedRecently } from "@/lib/parents/asking-again";
 import { removeAuthenticator } from "@/lib/parents/authenticator";
@@ -39,7 +39,7 @@ import { takeRateLimit } from "@/lib/parents/rate-limit";
 import { changeMyPassword } from "@/lib/parents/signin-settings";
 import { confirmMyAuthenticator, remakeMyBackupCodes, startMyAuthenticator, turnOffMyAuthenticator } from "@/lib/parents/authenticator-settings";
 import { renewParentSession } from "@/lib/parents/sessions";
-import { SIGNIN_SETTINGS_COPY as COPY, SIGNIN_WITH_APP_COPY as WITH_APP } from "@/lib/parents/signin-settings-copy";
+import { SIGNIN_SETTINGS_COPY as COPY, SIGNIN_WITH_APP_COPY as WITH_APP, howYouSignIn } from "@/lib/parents/signin-settings-copy";
 import { CODE_TTL_MS, signinStands } from "@/lib/parents/signin-codes";
 import SignInSettingsPage from "@/app/(parent)/family/sign-in/page";
 import FamilyPage from "@/app/(parent)/family/page";
@@ -1111,7 +1111,7 @@ describe("the authenticator app box (slice SI-6b)", () => {
   });
 });
 
-describe("a passkey and asking again (slice SI-7a: only the newest-factor rule; asking again takes a passkey from SI-7b)", () => {
+describe("a passkey and asking again (slice SI-7a's newest-factor rule; since SI-7b asking again takes the passkey)", () => {
   it("a passkey added after a session's proof makes the session asked again", async () => {
     const a = await seedSignedInParent(FAMILY_A);
     await proveRecently(a.identity, PROVEN_PASSWORD, new Date(Date.now() - 5_000));
@@ -1128,25 +1128,142 @@ describe("a passkey and asking again (slice SI-7a: only the newest-factor rule; 
     expect(await sessionProvedRecently(db, a.identity)).toBe(true);
   });
 
-  it("a passkey holder with no app is asked again, by design until SI-7b, as a person with no passkey is: the password, then the emailed code, which is taken", async () => {
+  it("a passkey holder with no app is asked again with the passkey (slice SI-7b): the password sends no code and answers the passkey's step, and a code is taken nowhere", async () => {
     const a = await seedSignedInParent(FAMILY_A);
     await withPassword(a);
-    await seedPasskey(a.identity.parentId);
-    const { stamp, code } = await passwordThenCode(a.identity);
-    expect(await askAgainCodeAction(stamp, code)).toEqual({ ok: true, message: COPY.proved });
-    expect((await audits("signin.proved_again")).map((r) => r.after)).toEqual([{ step: "emailed_code" }]);
-    expect(await sessionProvedRecently(db, a.identity)).toBe(true);
-  });
-
-  it("a holder of a passkey and an app is asked again for the app, as SI-6a made it", async () => {
-    const a = await seedSignedInParent(FAMILY_A);
-    await withPassword(a);
-    const app = await seedAuthenticator(a.identity.parentId);
     await seedPasskey(a.identity.parentId);
     asParent(a.identity);
     const first = await askAgainPasswordAction(PROVEN_PASSWORD);
-    if (!first.ok || first.step !== "app") throw new Error("the app's step should be asked for");
-    expect(await askAgainCodeAction(first.stamp, appCode(app.secret))).toEqual({ ok: true, message: COPY.proved });
+    expect(first).toMatchObject({ ok: true, step: "passkey", app: false, backupCodes: false, message: COPY.passkeyAsked });
+    if (!first.ok) throw new Error("the passkey's step should be asked for");
     expect(await codesOf(a.identity.parentId)).toEqual([]);
+    const r = await askAgainCodeAction(first.stamp, "123456");
+    expect(r.ok).toBe(false);
+    expect(await audits("signin.proved_again")).toEqual([]);
+    expect(await sessionProvedRecently(db, a.identity)).toBe(false);
+    // A stamp that can't be read answers in the words of a person with a factor of their own, never "look for an email".
+    expect(await askAgainCodeAction("not-a-stamp", "123456")).toEqual({ ok: false, errors: [COPY.appRejected] });
+  });
+
+  it("a holder of a passkey and an app gets the passkey's step, whose stamp takes the app's code and a backup code (slice SI-7b)", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await withPassword(a);
+    const app = await seedAuthenticator(a.identity.parentId);
+    const [backup] = await seedBackupCodes(a.identity.parentId);
+    await seedPasskey(a.identity.parentId);
+    asParent(a.identity);
+    const first = await askAgainPasswordAction(PROVEN_PASSWORD);
+    if (!first.ok || first.step !== "passkey" || !first.app) throw new Error("the passkey's step, with the app beside it, should be asked for");
+    expect(first.message).toBe(COPY.passkeyOrAppAsked);
+    expect(await askAgainCodeAction(first.stamp, appCode(app.secret))).toEqual({ ok: true, message: COPY.proved });
+    const again = await askAgainPasswordAction(PROVEN_PASSWORD);
+    if (!again.ok) throw new Error("the password should be right");
+    expect(await askAgainCodeAction(again.stamp, backup!)).toEqual({ ok: true, message: COPY.proved });
+    expect(await codesOf(a.identity.parentId)).toEqual([]);
+  });
+
+  it("a passkey holder with no app who holds unspent backup codes is offered one beside the passkey, which proves this session (slice SI-7b)", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await withPassword(a);
+    const [backup] = await seedBackupCodes(a.identity.parentId);
+    await seedPasskey(a.identity.parentId);
+    asParent(a.identity);
+    const first = await askAgainPasswordAction(PROVEN_PASSWORD);
+    expect(first).toMatchObject({ ok: true, step: "passkey", app: false, backupCodes: true, message: COPY.passkeyOrBackupAsked });
+    if (!first.ok) throw new Error("the passkey's step should be asked for");
+    expect(await codesOf(a.identity.parentId)).toEqual([]);
+    expect(await askAgainCodeAction(first.stamp, backup!)).toEqual({ ok: true, message: COPY.proved });
+    expect((await audits("signin.proved_again")).map((r) => r.after)).toEqual([{ step: "backup_code" }]);
+    expect(await sessionProvedRecently(db, a.identity)).toBe(true);
+  });
+});
+
+describe("the Passkeys box, drawn (slice SI-7b)", () => {
+  /** The passkeys box alone: from its heading to the page's way back to Family. */
+  const passkeysBox = (page: string) => page.slice(page.indexOf(`id="passkeys-h"`), page.indexOf("Back to Family"));
+  const AAGUID = "ea9b8d66-4d01-1d21-3ce4-b6b48cb575d4";
+  /** Two passkeys of the person: one named and used, one with no name and never used, each with an AAGUID stored. */
+  async function twoPasskeys(parentId: string) {
+    const named = await seedPasskey(parentId);
+    const unnamed = await seedPasskey(parentId);
+    await db.update(parentAuthPasskey).set({ name: "Bitwarden", lastUsedAt: new Date(Date.now() - 60_000) }).where(eq(parentAuthPasskey.id, named.rowId));
+    await db.update(parentAuthPasskey).set({ aaguid: AAGUID });
+    return [named, unnamed];
+  }
+  const secretsOf = (keys: { id: string; publicKey: string }[]) => [...keys.flatMap((k) => [k.id, k.publicKey]), AAGUID, "internal,hybrid", "multiDevice"];
+
+  it("proved: both listed with their names and times, Rename and Remove on each, new backup codes and the add, and nothing of the device", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    const keys = await twoPasskeys(a.identity.parentId);
+    await seedBackupCodes(a.identity.parentId);
+    await proveRecently(a.identity);
+    asParent(a.identity);
+    const whole = await renderPage(SignInSettingsPage);
+    const box = passkeysBox(whole);
+    expect(box).toContain(html(COPY.passkeysWhat));
+    expect(box).toContain("<strong>Bitwarden</strong>");
+    expect(box).toContain(COPY.passkeyNoName);
+    expect(box).toContain(COPY.passkeyNotUsed);
+    expect(box.match(/>Rename</g)).toHaveLength(2);
+    expect(box.match(/>Remove</g)).toHaveLength(2);
+    expect(box).toContain(COPY.newCodes);
+    expect(box).toContain(COPY.backupCodesLeft);
+    expect(box).toContain(COPY.passkeyAdd);
+    expect(box).not.toContain(html(COPY.passkeyRemoveLastWords));
+    for (const v of secretsOf(keys)) expect(whole).not.toContain(v);
+    expect(whole).toContain(html(howYouSignIn({ app: false, passkey: true }).how));
+  });
+
+  it("not proved: listed with Rename, no Remove, no add, and asking again offers the passkey first", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await withPassword(a);
+    const keys = await twoPasskeys(a.identity.parentId);
+    asParent(a.identity);
+    const whole = await renderPage(SignInSettingsPage);
+    const box = passkeysBox(whole);
+    expect(box.match(/>Rename</g)).toHaveLength(2);
+    expect(box).not.toContain(">Remove<");
+    expect(box).not.toContain(COPY.passkeyAdd);
+    expect(box).toContain(html(howYouSignIn({ app: false, passkey: true }).askAgainForPasskeys));
+    expect(box).toContain(COPY.usePasskey);
+    for (const v of secretsOf(keys)) expect(whole).not.toContain(v);
+  });
+
+  it("under Strict the last second factor offers no Remove, says why, and keeps the add beside it", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    const k = await seedPasskey(a.identity.parentId);
+    await seedParentSettings({ level: "strict" });
+    await proveRecently(a.identity);
+    asParent(a.identity);
+    const box = passkeysBox(await renderPage(SignInSettingsPage));
+    expect(box).toContain(html(COPY.passkeyRemoveStrict));
+    expect(box).not.toContain(">Remove<");
+    expect(box).toContain(COPY.passkeyAdd);
+    expect(box).not.toContain(k.id);
+  });
+
+  it("beside an app: the last one's words name the app, and the box leaves the backup codes to the app's box", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await seedAuthenticator(a.identity.parentId);
+    await seedBackupCodes(a.identity.parentId);
+    await seedPasskey(a.identity.parentId);
+    await proveRecently(a.identity);
+    asParent(a.identity);
+    const box = passkeysBox(await renderPage(SignInSettingsPage));
+    expect(box).toContain(html(COPY.passkeyRemoveLastAppWords));
+    expect(box).toContain(">Remove<");
+    expect(box).not.toContain(COPY.newCodes);
+    expect(box).not.toContain(COPY.backupCodesLeft);
+  });
+
+  it("with no passkey: the sentence of what one is, none listed, and the add once proved", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await proveRecently(a.identity);
+    asParent(a.identity);
+    const box = passkeysBox(await renderPage(SignInSettingsPage));
+    expect(box).toContain(html(COPY.passkeysWhat));
+    expect(box).toContain(html(COPY.passkeysNone));
+    expect(box).toContain(COPY.passkeyAdd);
+    expect(box).not.toContain(COPY.newCodes);
   });
 });

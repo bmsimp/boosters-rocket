@@ -245,6 +245,31 @@ codes shown, the app on, and asking again for the app's code) in every mode at 3
 - Not walked yet: the sign-in page's app step when the app was turned off meanwhile goes back to the password step,
   with the refusal's words and that they start again, and asking again goes back to its password field the same way.
 
+### 12. Passkeys: adding, naming, asking again with one, removing (`/family/sign-in`)
+
+Added with the sign-in release's slice SI-7b. Journey 12 of `tests/e2e/keyboard-journeys.spec.ts` walks it by keyboard
+alone with Playwright's own authenticator (`tests/e2e/passkeys.spec.ts` walks it by pointer, and signs in with the
+passkey on a fresh browser); what a real phone's or computer's prompt does is on the owner's list
+(`docs/runbooks/before-the-first-family.md`).
+
+- Walked: the "Passkeys" box asks again on its own for a parent with no passkey (the password, Continue, the emailed
+  code); once proved, the box's own "Thank you, that's you." takes the focus (drawn by the box, since the asking gives
+  way to the change at once), then the name field ("A name for it (optional)", described by its help line) and **Add a
+  passkey**.
+- Walked: after the add, the words "Your passkey is added, and here are your backup codes." take the focus; the ten codes
+  are selectable text, and **Copy the backup codes** copies the ten alone, one per line, and says "Copied.".
+- Walked: **Rename** on a passkey (its name spoken after the word) draws its field, which takes the focus, then **Save
+  the name** and **Cancel**; Cancel gives the focus back to that passkey's **Rename**; a saved name's answer takes the
+  focus.
+- Walked: for a holder, asking again offers **Use your passkey** first, then the password field beside it; a proof's
+  thanks takes the focus, and **Remove** (its passkey's name spoken after it), with the words for the last one, is
+  reached with Shift+Tab; its answer takes the focus, and Tab leaves the page.
+- Not walked yet: after the password, a holder with no app is asked for the passkey alone, and the words of that step
+  take the focus (there is no field), or, holding unspent backup codes, the backup code's field does; a refused or
+  cancelled passkey is an alert with the focus left on its button; a browser or password manager that already holds a
+  passkey for the parent is answered in words that say so.
+- A busy button keeps the focus (`aria-disabled`), and every answer takes the focus.
+
 ### On a phone: the tab bar and the focus
 
 - Walking the pages with Tab at 360 wide, a control the focus scrolled to at the foot of the screen was left partly

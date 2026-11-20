@@ -53,6 +53,8 @@ const qc = (Id: string, DisplayName: string, typeId: string | null, extra: Recor
 });
 const under = (id: string) => ({ ParentRef: { value: id }, Job: true });
 const mail = (address: string) => ({ PrimaryEmailAddr: { Address: address } });
+/** What the links page says beside every Confirm (src/app/staff/(app)/links/page.tsx), as the text of the page reads it. */
+const LINK_EFFECT = "Once linked, this family's guardians see this customer's open invoices and Pay links, and those of the students and parents the books hold directly under it, the next time they open Home or Payments, and a pay-instead choice for the family bills it. The link can't be removed in the portal yet, so check it is the right household.";
 
 /** Customers added or changed in QuickBooks, then read by a roster read (which makes no record of them). */
 async function readAgain(...customers: ReturnType<typeof qc>[]) {
@@ -422,17 +424,20 @@ describe("the page", () => {
     const patel = rowNamed(html, "The Patels")!;
     expect(patel.slice(1)).toEqual(["asha@example.com", "Patel Familyasha@example.com",
       "SuggestedA guardian's sign-in address matches: asha@example.com, on this customer.",
-      "Students and guardians: The PatelsNo active students.Guardians:Asha Patel (asha@example.com): no link of its own"]);
+      // Since slice M3a a Suggested row's opening says what Confirm links, and offers it and Leave unlinked.
+      "Students and guardians: The PatelsNo active students.Guardians:Asha Patel (asha@example.com): no link of its own"
+        + "Confirming links it to “Patel Family”. Nothing is sent to the books.No student would be linked with it." + LINK_EFFECT + "Confirm: The PatelsLeave unlinked: The Patels"]);
     expect(withoutIds(html)).toContain('href="/staff/roster/<id>"');
     expect(html).toContain("<details class=\"more\"><summary>Students and guardians<span class=\"visually-hidden\">: The Patels</span></summary>");
     expect((await db.select().from(auditLog)).length).toBe(audits);
     // The customers with no family stay on Reconciliation, linked from here, counted by the pool's own rule, and the
-    // page says a suggestion can't be acted on yet, and that either button would make a second family or customer.
+    // page says a family the portal has is linked here, and that either button would make a second family or customer.
     const whole = await renderPage(AccountingLinksPage);
     expect(whole).toContain('href="/staff/reconciliation#no-family-h"');
     expect(whole).toContain("1 active customer the books list as a family at the top level, under no other customer, has no family in the portal.");
-    expect(whole).toContain("so a suggestion can&#x27;t be acted on for now.");
-    expect(whole).toContain("would make a second family beside it");
+    expect(whole).toContain("A family the portal has is linked here: Confirm its suggestion, or one of its possible customers, or pick a different customer from those no family is linked to.");
+    expect(whole).toContain("would still make a second family beside the one the portal has");
+    expect(whole).toContain("would make a second customer in the books for a family whose customer is already there.");
     // And Reconciliation's section links back here.
     const recon = await renderPage(ReconciliationPage);
     const at = recon.indexOf('id="no-family-h"');
@@ -449,7 +454,8 @@ describe("the page", () => {
     const patel = rowNamed(list(await renderPage(AccountingLinksPage)), "The Patels")!;
     expect(patel.slice(1)).toEqual(["None that can sign in", "None",
       "No matchNone of this family's guardians can sign in, so there is no address to match.",
-      "Students and guardians: The PatelsNo active students.Guardians:Asha Patel (asha@example.com), can't sign in, so this address isn't matched: no link of its own"]);
+      "Students and guardians: The PatelsNo active students.Guardians:Asha Patel (asha@example.com), can't sign in, so this address isn't matched: no link of its own"
+        + "Pick a different customer: The PatelsLeave unlinked: The Patels"]);
   });
 
   it("renders the books' text as text", async () => {
@@ -726,7 +732,7 @@ describe("differences, for a link that stands (slice M2)", () => {
     expect(html).toContain("1 family whose link was carried over has differences, so it is counted under both Carried over and Linked, with differences.");
     expect(whole).toContain("A family whose link was carried over and that has differences is found under both Carried over and Linked, with differences, and counted under both.");
     // Each row says how its link was made, beside its differences.
-    expect(rowNamed(html, "Patel Family")![3]).toMatch(/^Linked, with differencesConfirmed with “Create a family from this” by treasurer, on .+\. 1 difference with the books: names\.$/);
+    expect(rowNamed(html, "Patel Family")![3]).toMatch(/^Linked, with differencesConfirmed by treasurer, with Confirm on this page or “Create a family from this”, on .+\. 1 difference with the books: names\.$/);
     expect(rowNamed(html, "Chen Family")![3]).toMatch(/^Linked, with differencesCarried over from the roster by the portal, on .+\. Nobody has confirmed it since\. 1 difference with the books: Parent customers or guardians on one side only\.$/);
     const filtered = list(await renderPage(AccountingLinksPage, { searchParams: { status: "carried_over" } }));
     expect(tableRows(filtered).map((r) => r[0])).toEqual(["Chen Family", "Rivera Family"]);

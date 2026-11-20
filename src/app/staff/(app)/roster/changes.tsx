@@ -72,7 +72,7 @@ export function Waiting({ items, compare = new Set<string>() }: { items: QueueVi
           <p>These changes are saved in the portal, but they didn&apos;t go through to QuickBooks (QuickBooks refused them, the portal held them back as QuickBooks has something else, or they couldn&apos;t be sent), so QuickBooks still has something else. They don&apos;t stop other changes, except that a student&apos;s move kept here stops either of its two families being made inactive until it is sent or given up. On the <a href="/staff/reconciliation">Reconciliation page</a>, someone who may change families can send the portal&apos;s value again or give it up.</p>
           <DataTable caption="Each change that didn't go through, and why" captionHidden rows={refused} rowKey={(i) => i.id} columns={[
             { key: "change", header: "Change", rowHeader: true, cell: (i) => <>{i.words}{i.moneyNote ? <span className="when">{i.moneyNote}</span> : null}</> },
-            { key: "why", header: "Why", cell: (i) => <>{keptWordsFor(i.write, i.lastCode, i.holds, i.differs)}{i.write.op === "contact" && compare.has(i.id)
+            { key: "why", header: "Why", cell: (i) => <>{keptWordsFor(i.write, i.lastCode, i.holds, i.differs, i.joined)}{i.write.op === "contact" && compare.has(i.id)
               ? <a className="link-line" href={`/staff/reconciliation?compare=${i.id}#writes-h`}>Compare the two</a> : null}</> },
             { key: "asked", header: "Asked", cell: (i) => <><LocalTime iso={i.askedAt} />{i.askedBy ? ` by ${i.askedBy}` : ""}</> },
           ]} />

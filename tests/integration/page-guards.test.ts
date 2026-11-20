@@ -161,6 +161,7 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/parents/guardians", names: "all", why: "staff add, remove and reinstate guardians: it gives any address a sign-in for any family" },
   { module: "@/lib/parents/people", names: "all", why: "staff block and rename people: a rename starts sends to QuickBooks for each membership's Parent customer (stage 3's slice 9h)" },
   { module: "@/lib/accounting/mapping", names: "all", why: "the accounting links screen reads every family's guardians' sign-in addresses and every customer of the roster cache (stage 4's slice M1)" },
+  { module: "@/lib/accounting/link-writes", names: "all", why: "the accounting links screen's presses link any family to any customer, reading every family's guardians and every customer of the roster cache to check it (stage 4's slice M3a)" },
   { module: "@/lib/parents/contact-take-in", names: "all", why: "the take-in of contact details reads every person, guardian row, family and cached customer at once (stage 3's slice 11a)" },
 ];
 
@@ -363,8 +364,6 @@ const PARENT_CODE_ELSEWHERE = [
   "src/lib/parents/contact-fields.ts",
   "src/lib/parents/email-change.ts",
   "src/lib/parents/email-field.ts",
-  // The confirmed address taken into the roster cache, and nothing else (stage 3's slice 9c: no record keeping).
-  "src/lib/roster/cache-email.ts",
   // The names of the person's own families, from the app's records, for the chooser and the frame.
   "src/lib/parents/my-family-names.ts",
   "src/lib/seasons/my-season.ts",
@@ -440,6 +439,9 @@ const PARENT_CODE_ELSEWHERE = [
   "src/lib/parents/passkey-signin.ts",
   "src/lib/auth/passkey-check.ts",
   "src/lib/auth/finish-scope.ts",
+  // Adding, naming and removing passkeys on /family/sign-in (slice SI-7b): the presses and the add's work at
+  // /portal-passkey/add, each for the session's own person alone, a passkey's id looked for only among theirs.
+  "src/lib/parents/passkey-settings.ts",
 ];
 
 /**

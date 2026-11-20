@@ -83,7 +83,7 @@ describe("migration 0044: a guardian's phone and mailing address are the portal'
     otherSettings = await settingsBut();
     auditBefore = await audit();
     startedAt = Date.now();
-    await migrateWith(path.resolve("drizzle"));
+    await migrateWith(migrationsUpTo(44)); // through 0044 only: later migrations add their own columns (0045 two to family)
   }, DATABASE_WORK);
 
   afterAll(async () => {

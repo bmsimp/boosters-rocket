@@ -30,7 +30,8 @@ import { isDeviceId } from "./devices";
 import { provedRecently } from "./reask-rule";
 import { portalAddress } from "./link-delivery";
 import { SIGNIN_SETTINGS_COPY as COPY, howYouSignIn } from "./signin-settings-copy";
-import { authenticatorShown, hasAuthenticator } from "./authenticator";
+import { authenticatorShown, hasAuthenticator, unspentBackupCodes } from "./authenticator";
+import { hasPasskey, passkeysOf } from "./passkeys";
 
 type Me = Pick<ParentCtx, "parentId" | "sessionId" | "email" | "ip">;
 export type SettingsResult = { ok: true; message: string } | { ok: false; errors: string[] };
@@ -51,7 +52,16 @@ export type MyDevice = { id: string; thisOne: boolean; createdAt: string; lastUs
  * can be asked again until SI-6 and SI-7), and (since SI-5b) the person's remembered devices that are still unexpired,
  * newest use first, the one this session names marked. A session from before SI-5b names none, and none is marked.
  */
-export type MySignin = { email: string; canChangeEmail: boolean; hasPassword: boolean; provedRecently: boolean; strict: boolean; devices: MyDevice[]; app: MyApp | null };
+export type MySignin = { email: string; canChangeEmail: boolean; hasPassword: boolean; provedRecently: boolean; strict: boolean; devices: MyDevice[]; app: MyApp | null;
+  hasPasskey: boolean; passkeys: MyPasskey[]; backupCodesLeft: number };
+
+/**
+ * One of the person's passkeys as the page lists it (slice SI-7b), and all it is given: the row's id (the value of its
+ * rename and remove presses), its name (null with none: drawn as "Passkey added" and its date), when it was added, and
+ * when last used (null: "Not used yet"), as ISO strings for LocalTime. Never a credential id, a public key, a counter,
+ * an AAGUID, transports or the device type.
+ */
+export type MyPasskey = { id: string; name: string | null; createdAt: string; lastUsedAt: string | null };
 
 /**
  * The person's authenticator app as the page shows it (slice SI-6b), or null with none in force: when it was set up, as
@@ -67,9 +77,12 @@ export async function loadMySignin(ctx: ParentCtx, now = new Date()): Promise<My
       .where(and(eq(parentDevice.parentId, ctx.parentId), gt(parentDevice.expiresAt, now))).orderBy(desc(parentDevice.lastUsedAt), parentDevice.id),
     authenticatorShown(ctx.parentId),
   ]);
+  const [passkeys, backupCodesLeft] = await Promise.all([passkeysOf(ctx.parentId), unspentBackupCodes(ctx.parentId)]);
   return { email: ctx.email, canChangeEmail, hasPassword: password !== null, provedRecently: provedRecently(strongAt, now), strict: settings.level === "strict",
     devices: devices.map((d) => ({ id: d.id, thisOne: d.id === thisDevice, createdAt: d.createdAt.toISOString(), lastUsedAt: d.lastUsedAt.toISOString() })),
-    app: app ? { since: app.since.toISOString(), backupCodesLeft: app.backupCodesLeft } : null };
+    app: app ? { since: app.since.toISOString(), backupCodesLeft: app.backupCodesLeft } : null,
+    hasPasskey: passkeys.length > 0, backupCodesLeft,
+    passkeys: passkeys.map((k) => ({ id: k.id, name: k.name, createdAt: k.createdAt.toISOString(), lastUsedAt: k.lastUsedAt?.toISOString() ?? null })) };
 }
 
 const sent = (v: unknown): v is string => typeof v === "string" && v.length <= MOST_SENT;
@@ -234,15 +247,15 @@ export async function forgetMyDevice(ctx: Me, deviceId: unknown): Promise<Settin
       .where(and(eq(parentDevice.id, deviceId), eq(parentDevice.parentId, ctx.parentId), gt(parentDevice.expiresAt, me.now)))
       .returning({ id: parentDevice.id });
     if (gone.length === 0) return "not_theirs" as const;
-    const app = await hasAuthenticator(ctx.parentId, tx);
+    const factors = { app: await hasAuthenticator(ctx.parentId, tx), passkey: await hasPasskey(ctx.parentId, tx) };
     await writeAudit({ actor: parentActor({ id: ctx.parentId, email: me.email }), action: "parent.device.forgotten", targetType: "parent", targetId: ctx.parentId,
       after: { deviceId: gone[0]!.id, thisDevice: thisOne }, ip: ctx.ip }, tx);
-    return app ? "forgotten_app" as const : "forgotten" as const;
+    return factors;
   });
   if (done === "not_proved") return PROVE_AGAIN;
   if (done === "not_theirs") return NOT_FROM_PAGE;
-  // What the next sign-in on it asks for: the code from their authenticator app (slice SI-6b), or the code we email.
-  return { ok: true, message: howYouSignIn(done === "forgotten_app").deviceForgotten };
+  // What the next sign-in on it asks for: their passkey (slice SI-7b), the code from their authenticator app (SI-6b), or the code we email.
+  return { ok: true, message: howYouSignIn(done).deviceForgotten };
 }
 
 /**
@@ -269,12 +282,12 @@ export async function forgetMyOtherDevices(ctx: Me): Promise<SettingsResult> {
       .where(and(eq(parentDevice.id, kept), eq(parentDevice.parentId, ctx.parentId), gt(parentDevice.expiresAt, me.now))) : [];
     await writeAudit({ actor: parentActor({ id: ctx.parentId, email: me.email }), action: "parent.devices.forgotten", targetType: "parent", targetId: ctx.parentId,
       after: { devicesForgotten: gone.length, thisDeviceKept: stillTheirs !== undefined }, ip: ctx.ip }, tx);
-    return { kept: stillTheirs !== undefined, app: await hasAuthenticator(ctx.parentId, tx) };
+    return { kept: stillTheirs !== undefined, app: await hasAuthenticator(ctx.parentId, tx), passkey: await hasPasskey(ctx.parentId, tx) };
   });
   if (!done) return PROVE_AGAIN;
   // With none kept the page couldn't say which device was in use ("Forget every device"): the answer says every one is
   // gone, the one in use included; and what the next sign-in asks for, by whether they have an app (slice SI-6b).
-  const words = howYouSignIn(done.app);
+  const words = howYouSignIn(done);
   return { ok: true, message: done.kept ? words.otherDevicesForgotten : words.everyDeviceForgotten };
 }
 

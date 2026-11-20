@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { signinFailure, TOO_MANY_TRIES, SIGNIN_NETWORK_FAILED, SIGNIN_LEDE, PASSWORD_REJECTED, CODE_SENT, CODE_REJECTED, CODE_STEP_ENDED, APP_STEP_ENDED,
-  PASSKEY_ASKED, PASSKEY_BUTTON, PASSKEY_CANCELLED, PASSKEY_EXPLAINED, PASSKEY_ONLY, PASSKEY_OR_APP, PASSKEY_REJECTED, PASSKEY_STEP_ENDED, PASSKEY_UNSUPPORTED, passkeyElsewhere,
+  PASSKEY_ASKED, PASSKEY_BUTTON, PASSKEY_CANCELLED, PASSKEY_EXPLAINED, PASSKEY_ONLY, PASSKEY_OR_APP, PASSKEY_OR_BACKUP, BACKUP_CODE_LABEL, BACKUP_REJECTED, PASSKEY_REJECTED, PASSKEY_STEP_ENDED, PASSKEY_UNSUPPORTED, passkeyElsewhere,
   PASSKEY_STEP_CANCELLED, PASSKEY_STEP_FAILED, PASSKEY_STEP_REJECTED, PASSKEY_STEP_UNSUPPORTED, passkeyStepElsewhere } from "@/lib/parents/signin-copy";
 
 describe("what the sign-in page says when a request fails", () => {
@@ -27,8 +27,13 @@ describe("the sign-in page's words (the sign-in release, slice SI-3b)", () => {
     expect(passkeyElsewhere("https://portal.example.org")).toBe("Passkeys work only at https://portal.example.org. You can still sign in here with your email and password.");
   });
   it("asks for the passkey at the second step without saying anything was emailed", () => {
-    for (const words of [PASSKEY_ASKED, PASSKEY_OR_APP, PASSKEY_ONLY, PASSKEY_STEP_ENDED]) expect(words).not.toMatch(/we(?:'ve)? emailed|sent you|new one/i);
+    for (const words of [PASSKEY_ASKED, PASSKEY_OR_APP, PASSKEY_ONLY, PASSKEY_OR_BACKUP, PASSKEY_STEP_ENDED]) expect(words).not.toMatch(/we(?:'ve)? emailed|sent you|new one/i);
     expect(PASSKEY_ONLY).toMatch(/ask the club for help/);
+  });
+  it("beside a passkey alone, offers a backup code in words that name no authenticator app (slice SI-7b)", () => {
+    for (const words of [PASSKEY_OR_BACKUP, BACKUP_CODE_LABEL, BACKUP_REJECTED]) expect(words).not.toMatch(/authenticator|app/i);
+    expect(PASSKEY_OR_BACKUP).toMatch(/backup codes/);
+    expect(BACKUP_CODE_LABEL).toBe("Backup code");
   });
   it("at the passkey step never offers the email and password, which lead back to the same step", () => {
     const atStep = [PASSKEY_STEP_UNSUPPORTED, passkeyStepElsewhere("https://portal.example.org"), PASSKEY_STEP_CANCELLED, PASSKEY_STEP_REJECTED, PASSKEY_STEP_FAILED];

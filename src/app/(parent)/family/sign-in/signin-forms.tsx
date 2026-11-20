@@ -1,6 +1,11 @@
 "use client";
 import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { safely } from "@/app/components/action-error";
+import { parentAuthClient } from "@/lib/auth/client";
+import { passkeysWorkIn, readCeremony, type CeremonyOutcome } from "@/app/sign-in/passkey-ceremony";
+import { PASSKEY_STEP_UNSUPPORTED, passkeyStepElsewhere } from "@/lib/parents/signin-copy";
+import { toPortalAgain } from "./passkey-adding";
 import { LocalTime } from "@/app/components/local-time";
 import { PASSWORD_COPY } from "@/lib/parents/password-copy";
 import { SIGNIN_SETTINGS_COPY as COPY, howYouSignIn } from "@/lib/parents/signin-settings-copy";
@@ -19,7 +24,7 @@ const Tick = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" st
 const Username = ({ email }: { email: string }) => <input type="email" name="username" autoComplete="username" value={email} readOnly hidden />;
 
 /** Words that take the focus once they are drawn: the answer to a press whose form has gone. */
-function Said({ message, children }: { message: string; children?: ReactNode }) {
+export function Said({ message, children }: { message: string; children?: ReactNode }) {
   const line = useRef<HTMLParagraphElement>(null);
   useEffect(() => { line.current?.focus(); }, []);
   return (
@@ -64,9 +69,29 @@ export function SignInSettingsFrame({ children }: { children: ReactNode }) {
  * page read for this session; `children` is the change itself, drawn once proved. Given only what it shows: the address
  * (for a password manager's username field) and the words of its lede. Between the two steps it keeps the stamp the
  * server answered with, which names nothing, and sends it back with the code.
+ *
+ * Since slice SI-7b, for a parent with a passkey (`passkey`), "Use your passkey" comes first, the password beside it:
+ * the passkey library's ceremony, its verify request sent to the portal's /portal-passkey/again (toPortalAgain()),
+ * which proves this session alone. After the password such a parent is asked for the passkey again (the server's
+ * `step: "passkey"`), with the app's code or a backup code beside it when they have an app, or a backup code alone when
+ * they hold unspent ones and no app (`backupCodes`). `portalOrigin` is APP_URL's
+ * origin, where passkeys work: reached at any other address, the form says so in place of the button.
  */
-export function AskAgain({ email, proved, lede, children }: { email: string; proved: boolean; lede: string; children: ReactNode }) {
-  const [step, setStep] = useState<"password" | "code" | "app" | "proved" | "arrived">(proved ? "proved" : "password");
+export function AskAgain({ email, proved, lede, children, passkey = false, portalOrigin = "" }: { email: string; proved: boolean; lede: string; children: ReactNode;
+  passkey?: boolean; portalOrigin?: string }) {
+  const [step, setStep] = useState<"password" | "code" | "app" | "passkey" | "proved" | "arrived">(proved ? "proved" : "password");
+  // At the passkey's step after the password: what is taken beside it, the app's code or a backup code (`app`), a
+  // backup code alone (`codes`), or nothing.
+  const [beside, setBeside] = useState<"app" | "codes" | null>(null);
+  // Where a passkey can be used from this page: here, not in this browser, or not at this address (read once drawn).
+  const [keysHere, setKeysHere] = useState<"here" | "unsupported" | "elsewhere">("here");
+  useEffect(() => {
+    if (!passkey) return;
+    // Known only in the browser, after mount: drawn as "here" first, so the server's page and the first draw agree.
+    /* eslint-disable-next-line react-hooks/set-state-in-effect */
+    setKeysHere(!passkeysWorkIn(window as unknown as Parameters<typeof passkeysWorkIn>[0]) ? "unsupported" : window.location.origin !== portalOrigin ? "elsewhere" : "here");
+  }, [passkey, portalOrigin]);
+  const router = useRouter();
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [stamp, setStamp] = useState("");
@@ -74,11 +99,13 @@ export function AskAgain({ email, proved, lede, children }: { email: string; pro
   const [errors, setErrors] = useState<string[] | null>(null);
   // Moving between the steps draws the other form, so its field takes the focus (not on first drawing).
   const field = useRef<HTMLInputElement>(null);
+  // The passkey's step with nothing beside it has no field: its words take the focus instead.
+  const stepLine = useRef<HTMLParagraphElement>(null);
   const moved = useRef(false);
   // The code field is described by the words that say a code was emailed: a live region drawn with its words already
   // in it is seldom read out, so the field that takes the focus carries them.
   const sentId = useId();
-  useEffect(() => { if (moved.current) field.current?.focus(); }, [step]);
+  useEffect(() => { if (moved.current) (field.current ?? stepLine.current)?.focus(); }, [step]);
   // A proof that stops counting while the page is open (since slice SI-6b's second read: an authenticator app set up
   // on this page, which leaves every earlier proof of the person behind) reaches here as `proved` turning false once
   // the page is drawn again: a change drawn for that proof gives way to the password, so the page never offers a press
@@ -98,9 +125,29 @@ export function AskAgain({ email, proved, lede, children }: { email: string; pro
     const r = await safely(() => askAgainPasswordAction(password), { ok: false as const, errors: [COPY.failed] });
     setBusy(false);
     if (!r.ok) { setErrors(r.errors); return; }
-    // The server says which second step: the code it emailed, or (slice SI-6a) the parent's authenticator app.
-    moved.current = true; setStamp(r.stamp); setPassword(""); setCode(""); setStep(r.step === "app" ? "app" : "code");
+    // The server says which second step: the code it emailed, (slice SI-6a) the parent's authenticator app, or (slice
+    // SI-7b) their passkey, with the app beside it when they have one.
+    moved.current = true; setStamp(r.stamp); setPassword(""); setCode("");
+    if (r.step === "passkey") { setBeside(r.app ? "app" : r.backupCodes ? "codes" : null); setStep("passkey"); return; }
+    setStep(r.step === "app" ? "app" : "code");
   };
+  // A passkey (slice SI-7b): the library's ceremony, its verify request sent to the portal's asking again. A proof
+  // redraws the page from the server, so every box of it sees this session proved.
+  const provePasskey = async () => {
+    setBusy(true); setErrors(null);
+    let outcome: CeremonyOutcome<{ ok: boolean }>;
+    try {
+      outcome = readCeremony<{ ok: boolean }>(await parentAuthClient.signIn.passkey({ fetchOptions: toPortalAgain(window.location.origin) }));
+    } catch {
+      outcome = { kind: "failed", status: null };
+    }
+    setBusy(false);
+    if (outcome.kind === "answer" && outcome.body.ok) { setStamp(""); setCode(""); setStep("arrived"); router.refresh(); return; }
+    setErrors([outcome.kind === "cancelled" ? COPY.passkeyAgainCancelled : outcome.kind === "answer" ? COPY.passkeyAgainRejected : COPY.failed]);
+  };
+  const passkeyPress = passkey && (keysHere === "here"
+    ? <button type="button" className="btn" aria-disabled={busy || undefined} onClick={() => { if (!busy) void provePasskey(); }}>{busy ? COPY.checking : COPY.usePasskey}</button>
+    : <p className="help">{keysHere === "elsewhere" ? passkeyStepElsewhere(portalOrigin) : PASSKEY_STEP_UNSUPPORTED}</p>);
   const checkCode = async () => {
     setBusy(true); setErrors(null);
     const r: Result & { ended?: true } = await safely(() => askAgainCodeAction(stamp, code), FAILED);
@@ -117,6 +164,9 @@ export function AskAgain({ email, proved, lede, children }: { email: string; pro
     return (
       <form className="stack" onSubmit={(e) => { e.preventDefault(); if (!busy) void checkPassword(); }}>
         <p>{lede}</p>
+        {/* A passkey holder's passkey first (slice SI-7b), the password beside it. */}
+        {passkeyPress}
+        {passkey && <p>{COPY.orPassword}</p>}
         <Username email={email} />
         <label className="field"><span>{COPY.yourPassword}</span>
           <input ref={field} name="password" type="password" required autoComplete="current-password" maxLength={1024} value={password} onChange={(e) => setPassword(e.target.value)} />
@@ -127,12 +177,24 @@ export function AskAgain({ email, proved, lede, children }: { email: string; pro
       </form>
     );
   }
+  // The passkey's step after the password (slice SI-7b): the passkey, and beside it an app's code or a backup code.
+  if (step === "passkey" && !beside) {
+    return (
+      <div className="stack">
+        <p ref={stepLine} role="status" tabIndex={-1}>{COPY.passkeyAsked}</p>
+        {passkeyPress}
+        {errors && <Errors errors={errors} />}
+        <button type="button" className="btn btn-line" onClick={startAgain}>{COPY.startAgain}</button>
+      </div>
+    );
+  }
   // The app's step takes a backup code in the same field, so its keyboard is a text one, not digits alone.
-  const app = step === "app";
+  const app = step === "app" || step === "passkey";
   return (
     <form className="stack" onSubmit={(e) => { e.preventDefault(); if (!busy) void checkCode(); }}>
-      <p role="status" id={sentId}>{app ? COPY.appAsked : COPY.codeSent}</p>
-      <label className="field"><span>{app ? COPY.appCode : COPY.code}</span>
+      <p role="status" id={sentId}>{step === "passkey" ? (beside === "app" ? COPY.passkeyOrAppAsked : COPY.passkeyOrBackupAsked) : app ? COPY.appAsked : COPY.codeSent}</p>
+      {step === "passkey" && passkeyPress}
+      <label className="field"><span>{step === "passkey" && beside === "codes" ? COPY.backupCode : app ? COPY.appCode : COPY.code}</span>
         {app
           ? <input ref={field} name="code" aria-describedby={sentId} inputMode="text" autoCapitalize="characters" autoCorrect="off" spellCheck={false}
             autoComplete="one-time-code" maxLength={20} required value={code} onChange={(e) => setCode(e.target.value)} />
@@ -150,8 +212,8 @@ export function AskAgain({ email, proved, lede, children }: { email: string; pro
  * change that was made signs the parent out everywhere, this device too, so the answer brings the way to sign in again.
  * `app`: whether the parent has an authenticator app (slice SI-6b), for the words of how they sign in again.
  */
-export function ChangePasswordForm({ email, app }: { email: string; app: boolean }) {
-  const words = howYouSignIn(app);
+export function ChangePasswordForm({ email, app, passkey = false }: { email: string; app: boolean; passkey?: boolean }) {
+  const words = howYouSignIn({ app, passkey });
   const [password, setPassword] = useState("");
   const [again, setAgain] = useState("");
   const [busy, setBusy] = useState(false);
@@ -257,9 +319,10 @@ const sameMinutes = (a: ListedDevice, b: ListedDevice) => a.createdAt.slice(0, 1
  * device". A session whose own device was just forgotten in this box knows the rest are the others, and keeps "Forget
  * every other device" without that sentence.
  */
-export function RememberedDevices({ devices, proved, canAsk, cantAsk, email, app }: { devices: ListedDevice[]; proved: boolean; canAsk: boolean; cantAsk: string; email: string; app: boolean }) {
-  // What the next sign-in on a forgotten device asks for: the code from their authenticator app (slice SI-6b), or ours.
-  const words = howYouSignIn(app);
+export function RememberedDevices({ devices, proved, canAsk, cantAsk, email, app, passkey = false, portalOrigin = "" }: { devices: ListedDevice[]; proved: boolean;
+  canAsk: boolean; cantAsk: string; email: string; app: boolean; passkey?: boolean; portalOrigin?: string }) {
+  // What the next sign-in on a forgotten device asks for: their passkey (slice SI-7b), the code from their authenticator app (slice SI-6b), or ours.
+  const words = howYouSignIn({ app, passkey });
   // Proved here, by the asking below: it gives way to its thanks, drawn above the list, and the buttons come after it.
   // Proved in another box of the page, the page is drawn again with `proved` (the proof revalidates it), and the
   // asking here simply goes.
@@ -336,7 +399,7 @@ export function RememberedDevices({ devices, proved, canAsk, cantAsk, email, app
           onClick={() => void forget("others")}>{busy === "others" ? COPY.forgetBusy : knowsThisOne ? COPY.forgetOthers : COPY.forgetAll}</button>
       )}
       {!canForget && listed.length > 0 && (canAsk
-        ? <AskAgain email={email} proved={false} lede={words.askAgainForDevices}><WhenDrawn then={() => setProvedHere(true)} /></AskAgain>
+        ? <AskAgain email={email} proved={false} lede={words.askAgainForDevices} passkey={passkey} portalOrigin={portalOrigin}><WhenDrawn then={() => setProvedHere(true)} /></AskAgain>
         : <p>{cantAsk}</p>)}
     </div>
   );

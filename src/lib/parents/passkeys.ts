@@ -7,9 +7,9 @@
 // (passkeyNamed(), by that id alone, which is unique here: read before the library verifies, and again by the library's
 // `afterVerification`, src/lib/auth/passkey-check.ts, for the id it verified; whether its person is the pending step's
 // is the door's own check, `other_person` in passkey-signin.ts), and, in the door's own transaction, that the passkey that verified is still the person's, with its `last_used_at` set. Adding,
-// naming, listing and removing passkeys are SI-7b's. Server only.
+// naming, listing and removing passkeys (slice SI-7b) are read and written here too, below. Server only.
 import "server-only";
-import { and, eq, inArray, max } from "drizzle-orm";
+import { and, asc, count, eq, inArray, max, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { parentAuthPasskey, parentAuthUser } from "@/lib/db/schema";
 import { hasAuthenticator } from "./authenticator";
@@ -87,12 +87,95 @@ export function readablePublicKey(stored: string): boolean {
 }
 
 /**
- * Whether the person has a second factor of their own at the door (open question 24): an authenticator app in force
+ * Whether the person has a second factor of their own (open question 24): an authenticator app in force
  * (hasAuthenticator(), authenticator.ts) or a passkey. Strict's readers count it so too (doorStops(), signin-codes.ts,
- * and the request page's rule, password-request.ts). Asking again counts the app alone until slice SI-7b makes it take
- * a passkey: signin-codes.ts tells the two apart by the code's use.
+ * and the request page's rule, password-request.ts), and since slice SI-7b asking again does, at the door's rule: a
+ * holder is never emailed a code anywhere.
  */
 export async function hasSecondFactor(parentId: string, q: Reader = db): Promise<boolean> {
   const [app, passkey] = await Promise.all([hasAuthenticator(parentId, q), hasPasskey(parentId, q)]);
   return app || passkey;
+}
+
+/*
+ * Adding, naming, listing and removing (the sign-in release, slice SI-7b; section 6 of the spec, "Several passkeys per
+ * guardian, each named, listed and removable"). The library inserts a new passkey's row itself, as it verifies the
+ * browser's answer (verify-registration, run in process by the portal's /portal-passkey/add, passkey-settings.ts),
+ * outside any portal transaction; everything after that is the portal's, here, each write in the caller's transaction,
+ * which holds the person's row (lockedPerson(), sessions.ts) and writes the audit row.
+ */
+
+/** The most a passkey's name may hold, as typed (decision 2 of SI-7b). */
+export const MOST_PASSKEY_NAME = 50;
+
+/**
+ * A passkey's name as the portal keeps it, or null when what was sent isn't one: a string, trimmed, at most
+ * MOST_PASSKEY_NAME characters by Unicode code point, with no line break or other control character. Empty (or only
+ * spaces) is no name (`""`), drawn as "Passkey added" and its date.
+ */
+export function readPasskeyName(raw: unknown): string | null {
+  if (typeof raw !== "string" || raw.length > MOST_PASSKEY_NAME * 4) return null;
+  const name = raw.trim();
+  if ([...name].length > MOST_PASSKEY_NAME || /[\p{Cc}\p{Zl}\p{Zp}]/u.test(name)) return null;
+  return name;
+}
+
+/** A passkey as the person's sign-in settings list it: its row's id, its name (null with none), when it was added and last used. */
+export type ListedPasskey = { id: string; name: string | null; createdAt: Date; lastUsedAt: Date | null };
+
+/** The person's passkeys, oldest first: never a credential id, a public key, a counter, an AAGUID, transports or the device type. */
+export async function passkeysOf(parentId: string, q: Reader = db): Promise<ListedPasskey[]> {
+  return q.select({ id: parentAuthPasskey.id, name: parentAuthPasskey.name, createdAt: parentAuthPasskey.createdAt, lastUsedAt: parentAuthPasskey.lastUsedAt })
+    .from(parentAuthPasskey).where(inArray(parentAuthPasskey.userId, usersOf(q, parentId)))
+    .orderBy(asc(parentAuthPasskey.createdAt), asc(parentAuthPasskey.id));
+}
+
+/** How many passkeys the person has. */
+export async function passkeyCount(parentId: string, q: Reader = db): Promise<number> {
+  const [row] = await q.select({ n: count() }).from(parentAuthPasskey).where(inArray(parentAuthPasskey.userId, usersOf(q, parentId)));
+  return Number(row?.n ?? 0);
+}
+
+/**
+ * How many of the person's other passkeys were added before this one (by `created_at`, then the row's id): none makes
+ * it their first (the add's backup codes, decision 2 of SI-7b). Read under the person's row FOR UPDATE, after the
+ * library's insert, so two adds whose inserts both land before either is recorded still find exactly one first.
+ */
+export async function passkeysAddedBefore(q: Reader, parentId: string, passkeyId: string): Promise<number> {
+  const [row] = await q.select({ n: count() }).from(parentAuthPasskey)
+    .where(and(inArray(parentAuthPasskey.userId, usersOf(q, parentId)),
+      sql`(${parentAuthPasskey.createdAt}, ${parentAuthPasskey.id}) < (SELECT p.created_at, p.id FROM parent_auth_passkey p WHERE p.id = ${passkeyId})`));
+  return Number(row?.n ?? 0);
+}
+
+/** Whether a credential id is held by a passkey already (anyone's): the library's answer for it is refused before its insert. */
+export async function credentialTaken(credentialId: string, q: Reader = db): Promise<boolean> {
+  const [row] = await q.select({ id: parentAuthPasskey.id }).from(parentAuthPasskey).where(eq(parentAuthPasskey.credentialID, credentialId)).limit(1);
+  return row !== undefined;
+}
+
+/** One of the person's own passkeys, by its row's id, with its name; null when it isn't theirs (or isn't one at all). */
+export async function passkeyOfPerson(q: Reader, parentId: string, passkeyId: string): Promise<{ id: string; name: string | null } | null> {
+  const [row] = await q.select({ id: parentAuthPasskey.id, name: parentAuthPasskey.name }).from(parentAuthPasskey)
+    .where(and(eq(parentAuthPasskey.id, passkeyId), inArray(parentAuthPasskey.userId, usersOf(q, parentId))));
+  return row ?? null;
+}
+
+/** A passkey of the person's named (null for no name), in the caller's transaction; false when it isn't theirs. */
+export async function namePasskey(tx: Tx, parentId: string, passkeyId: string, name: string | null): Promise<boolean> {
+  const rows = await tx.update(parentAuthPasskey).set({ name })
+    .where(and(eq(parentAuthPasskey.id, passkeyId), inArray(parentAuthPasskey.userId, usersOf(tx, parentId))))
+    .returning({ id: parentAuthPasskey.id });
+  return rows.length > 0;
+}
+
+/**
+ * A passkey of the person's removed, in the caller's transaction; false when it isn't theirs. A sign-in that verified
+ * it just before and whose session is made after is refused at its last check (signinStands(): `passkey_gone`).
+ */
+export async function removePasskey(tx: Tx, parentId: string, passkeyId: string): Promise<boolean> {
+  const rows = await tx.delete(parentAuthPasskey)
+    .where(and(eq(parentAuthPasskey.id, passkeyId), inArray(parentAuthPasskey.userId, usersOf(tx, parentId))))
+    .returning({ id: parentAuthPasskey.id });
+  return rows.length > 0;
 }

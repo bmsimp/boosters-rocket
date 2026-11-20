@@ -1,0 +1,7 @@
+# Audit
+
+What this covers: the audit page's record filter. The rules of `AGENTS.md` still apply.
+
+## The record filter
+
+- Audit: the audit page's record filter (`src/lib/audit/query.ts`) matches the target exactly, except for an app family or student (`family:<id>`, `student:<id>`, or the id alone): it also finds the rows that named that record's QuickBooks customers (its links in the roster's company), and the ticks' and waivers' rows keyed `<requirement>:<customer>` or `<requirement>:<id>`, so one search shows the rows written before an area moved to the app's ids and those written since (open question 17; old rows are never rewritten; `tests/integration/audit-record-filter.test.ts`). A customer's number is matched only under a target type that names a customer of the record's kind (`CUSTOMER_TARGET_TYPES`: `qbo_customer` and `family` for a family, `qbo_customer` and `student` for a student), never a job run's, a product's or a check's that happens to share it. A student's move is found under the student by its rows' target and under both its families, the family left and the family joined, by the records and customers its rows name in their body (`moveRowsOf()`: `roster.record.moved`, `roster.student.move.followed`, older ones by the families' customers, and `roster.student.move`), as a guardian's and a buy-out's rows are found by theirs. A confirm on the accounting links screen (`accounting.link.confirm`, targeting the family) is found under each student it linked by the student ids its body names (`after.studentsLinked`, `confirmRowsOf()`).

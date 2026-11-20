@@ -4,6 +4,7 @@ import { parentAction } from "@/lib/guards";
 import { askAgainCode, askAgainPassword } from "@/lib/parents/asking-again";
 import { askMySetupLink, changeMyPassword, forgetMyDevice, forgetMyOtherDevices, signOutEverywhere } from "@/lib/parents/signin-settings";
 import { confirmMyAuthenticator, remakeMyBackupCodes, startMyAuthenticator, turnOffMyAuthenticator } from "@/lib/parents/authenticator-settings";
+import { removeMyPasskey, renameMyPasskey } from "@/lib/parents/passkey-settings";
 
 /**
  * A parent's sign-in settings (src/lib/parents/signin-settings.ts) and asking again (src/lib/parents/asking-again.ts).
@@ -71,6 +72,24 @@ export const newBackupCodesAction = parentAction(async (ctx) => {
 
 export const turnOffAuthenticatorAction = parentAction(async (ctx) => {
   const result = await turnOffMyAuthenticator(ctx);
+  if (result.ok) for (const path of ["/family/sign-in", "/family/email", "/family"]) revalidatePath(path);
+  return result;
+});
+
+/*
+ * Passkeys (slice SI-7b; src/lib/parents/passkey-settings.ts). Adding is the portal's own endpoint, /portal-passkey/add
+ * (src/lib/auth/parent-code-plugin.ts), since the ceremony's cookies are the auth instance's. Renaming and removing take
+ * the passkey's row id from the page, the value of its buttons, looked for only among the session's own person's
+ * passkeys; the name is checked there for its type and size. Both change what the page draws, and are revalidated.
+ */
+export const renamePasskeyAction = parentAction(async (ctx, passkeyId: string, name: string) => {
+  const result = await renameMyPasskey(ctx, passkeyId as unknown, name as unknown);
+  if (result.ok) revalidatePath("/family/sign-in");
+  return result;
+});
+
+export const removePasskeyAction = parentAction(async (ctx, passkeyId: string) => {
+  const result = await removeMyPasskey(ctx, passkeyId as unknown);
   if (result.ok) for (const path of ["/family/sign-in", "/family/email", "/family"]) revalidatePath(path);
   return result;
 });

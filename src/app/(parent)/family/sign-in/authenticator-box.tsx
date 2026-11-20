@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { safely } from "@/app/components/action-error";
 import { LocalTime } from "@/app/components/local-time";
-import { SIGNIN_SETTINGS_COPY as COPY } from "@/lib/parents/signin-settings-copy";
+import { SIGNIN_SETTINGS_COPY as COPY, howYouSignIn } from "@/lib/parents/signin-settings-copy";
 import { confirmAuthenticatorAction, newBackupCodesAction, startAuthenticatorAction, turnOffAuthenticatorAction } from "./actions";
 import { AskAgain } from "./signin-forms";
 
@@ -12,7 +12,7 @@ const Errors = ({ errors }: { errors: string[] }) => <ul role="alert" className=
 const Tick = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M4 12.5l5 5 11-11" /></svg>;
 
 /** A press that copies `text`, and only it, saying in words whether it did. */
-function CopyButton({ text, label }: { text: string; label: string }) {
+export function CopyButton({ text, label }: { text: string; label: string }) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
   const copy = async () => {
     try { await navigator.clipboard.writeText(text); setState("copied"); } catch { setState("failed"); }
@@ -46,9 +46,12 @@ type Busy = "start" | "confirm" | "codes" | "off" | null;
  * place of turning off). Backup codes are shown once, as they are made, from the press's answer, in this component's
  * state: the page drawn again never holds them. Given only what it shows: the address for AskAgain's username field,
  * whether a password is chosen, whether the session proved itself, whether the club is at Strict, and the app's two
- * facts.
+ * facts. Since slice SI-7b also whether they have a passkey (`passkey`), and APP_URL's origin for asking again with it:
+ * beside a passkey, turning the app off keeps the backup codes and is allowed under Strict, and the words say so.
  */
-export function AuthenticatorBox({ email, app, proved, hasPassword, strict }: { email: string; app: ShownApp | null; proved: boolean; hasPassword: boolean; strict: boolean }) {
+export function AuthenticatorBox({ email, app, proved, hasPassword, strict, passkey = false, portalOrigin = "" }: { email: string; app: ShownApp | null; proved: boolean;
+  hasPassword: boolean; strict: boolean; passkey?: boolean; portalOrigin?: string }) {
+  const words = howYouSignIn({ app: app !== null, passkey });
   const [setup, setSetup] = useState<Setup | null>(null);
   const [codes, setCodes] = useState<{ message: string; list: string[] } | null>(null);
   const [answer, setAnswer] = useState<Result | null>(null);
@@ -104,7 +107,8 @@ export function AuthenticatorBox({ email, app, proved, hasPassword, strict }: { 
       {answer.ok ? <p role="status" className="paid-up"><Tick />{answer.message}</p> : <Errors errors={answer.errors} />}
     </div>
   );
-  const on = app && <AppOn app={app} email={email} proved={proved} strict={strict} busy={busy} answered={codes ? null : answered} newCodes={newCodes} turnOff={turnOff} />;
+  const on = app && <AppOn app={app} email={email} proved={proved} strict={strict} busy={busy} answered={codes ? null : answered} newCodes={newCodes} turnOff={turnOff}
+    passkey={passkey} portalOrigin={portalOrigin} lede={words.askAgainForAppChange} />;
 
   // The backup codes, once, as they were made, above the app's box.
   if (codes) {
@@ -161,7 +165,7 @@ export function AuthenticatorBox({ email, app, proved, hasPassword, strict }: { 
       {!hasPassword ? <p>{COPY.appNeedsPassword}</p>
         : strict ? <p>{COPY.appStrictOff}</p>
         : (
-          <AskAgain email={email} proved={proved} lede={COPY.askAgainForApp}>
+          <AskAgain email={email} proved={proved} lede={words.askAgainForApp} passkey={passkey} portalOrigin={portalOrigin}>
             <button type="button" className="btn" aria-disabled={busy !== null || undefined} onClick={() => void start()}>
               {busy === "start" ? COPY.appSetUpBusy : COPY.appSetUp}
             </button>
@@ -172,8 +176,8 @@ export function AuthenticatorBox({ email, app, proved, hasPassword, strict }: { 
 }
 
 /** The app in force: since when, the backup codes left, and, asked again, new codes and turning it off (Strict: words). */
-function AppOn({ app, email, proved, strict, busy, answered, newCodes, turnOff }: { app: ShownApp; email: string; proved: boolean; strict: boolean;
-  busy: Busy; answered: ReactNode; newCodes: () => Promise<void>; turnOff: () => Promise<void> }) {
+function AppOn({ app, email, proved, strict, busy, answered, newCodes, turnOff, passkey, portalOrigin, lede }: { app: ShownApp; email: string; proved: boolean; strict: boolean;
+  busy: Busy; answered: ReactNode; newCodes: () => Promise<void>; turnOff: () => Promise<void>; passkey: boolean; portalOrigin: string; lede: string }) {
   return (
     <div className="stack">
       <p className="paid-up"><Tick />{COPY.appOn}</p>
@@ -183,14 +187,15 @@ function AppOn({ app, email, proved, strict, busy, answered, newCodes, turnOff }
       </dl>
       {app.backupCodesLeft === 0 && <p>{COPY.backupCodesNone}</p>}
       {answered}
-      <AskAgain email={email} proved={proved} lede={COPY.askAgainForAppChange}>
+      <AskAgain email={email} proved={proved} lede={lede} passkey={passkey} portalOrigin={portalOrigin}>
         <div className="stack">
           <button type="button" className="btn btn-line" aria-disabled={busy !== null || undefined} onClick={() => void newCodes()}>
             {busy === "codes" ? COPY.newCodesBusy : COPY.newCodes}
           </button>
-          {strict ? <p>{COPY.turnOffStrict}</p> : (
+          {/* Under Strict the app stays while it is the only second step; beside a passkey (slice SI-7b) it can go. */}
+          {strict && !passkey ? <p>{COPY.turnOffStrict}</p> : (
             <>
-              <p>{COPY.turnOffWords}</p>
+              <p>{passkey ? COPY.turnOffWordsBesidePasskey : COPY.turnOffWords}</p>
               <button type="button" className="btn btn-line" aria-disabled={busy !== null || undefined} onClick={() => void turnOff()}>
                 {busy === "off" ? COPY.turnOffBusy : COPY.turnOff}
               </button>

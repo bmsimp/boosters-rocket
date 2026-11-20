@@ -89,23 +89,24 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   writer of a person's links holds that row, and the code check of signin-codes.ts touches no link. A new writer of
  *   both that does not take the person's row first must take the link before the codes too. mintSigninLink() takes the row FOR UPDATE, then replaces the unspent links
  *   of its purpose, a held one included;
- * - confirmMyEmailChange() (email-change.ts) takes both address locks and the row FOR UPDATE, spends its request, reads
- *   (since slice SI-5a) under the row that the person isn't blocked and its own session still exists, stopping with the
- *   address unchanged otherwise, and changes the address, then deletes the person's other requests, then their unused codes, then their unused links,
- *   then their devices, then their sessions, and only then, in a savepoint, the roster lock and the app's records;
+ * - confirmMyEmailChange() (email-change.ts) takes both address locks and the row FOR UPDATE, spends its request,
+ *   reads (since slice SI-5a) under the row that the person isn't blocked and its own session still exists (stopping
+ *   with the address unchanged otherwise), and changes the address, then deletes the person's other requests, then
+ *   their unused codes, then their unused links, then their devices, then their sessions; it takes no roster lock and
+ *   touches no app records or roster cache (since stage 3's slice 11d);
  * - requestMyEmailChange() takes the row FOR UPDATE, then (since slice SI-5a) reads the asking session's `strong_at`
  *   unlocked, refusing unless it proved itself within the window, then replaces the person's unused request;
  * - blockPerson() (people.ts) takes the row FOR UPDATE, then deletes the unused requests, then the codes, then the
  *   unused links, then the devices, then the sessions; renamePerson() (people.ts) takes the row FOR UPDATE, then the
  *   roster lock shared (at most three seconds, as the guardian writes below), and touches nothing that hangs on it;
  * - the staff writes of guardians.ts take the parents' settings lock shared first (setSignins() and setWelcome() take
- *   it before the people they touch), then the person's locks, and only then the roster lock shared, as the email
- *   confirm takes the roster after the person's locks: a write that held the roster lock while it waited for a person
- *   the confirm holds, as the confirm asked for the roster, would be a deadlock, which Postgres ends by aborting one of
- *   them (its check runs after a second, before the confirm's three-second wait is up). No roster read waits for a
- *   person's row, so waiting for the roster while holding one is safe against it; the change-of-company clear, which
- *   holds the roster as it takes everyone's rows, could meet these writes and the confirm alike, though nothing the
- *   portal runs reaches it until stage 4. So addGuardian() takes the address lock, then the row FOR UPDATE, then the
+ *   it before the people they touch), then the person's locks, and only then the roster lock shared, as renamePerson()
+ *   and each other guardian write take the roster after the person's locks: a write that held the roster lock while it
+ *   waited for a person another of them holds, as that one asked for the roster, would be a deadlock, which Postgres
+ *   ends by aborting one of them. (The email confirm took the roster after the person too until stage 3's slice 11d;
+ *   it takes no roster lock now.) No roster read waits for a person's row, so waiting for the roster while holding one
+ *   is safe against it; the change-of-company clear, which holds the roster as it takes everyone's rows, could meet
+ *   these writes, though nothing the portal runs reaches it until stage 4. So addGuardian() takes the address lock, then the row FOR UPDATE, then the
  *   roster lock, then makes the person if there is none, then takes their guardian row in the family FOR UPDATE;
  *   removeGuardian() and reinstateGuardian() take the row FOR UPDATE (no address lock: the address isn't changed or
  *   claimed), then the roster lock, then the guardian row FOR UPDATE, and removeGuardian() then deletes the person's
@@ -114,7 +115,7 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   Parent customer change in that transaction, after the roster lock, and sends nothing in it: every send is after the
  *   commit, holding only the guardian row's "being sent" advisory lock, taken before the transaction and only ever
  *   tried, never waited for. Each waits for the
- *   roster lock at most three seconds, as the confirm does, and gives up changing nothing: a roster read holds it
+ *   roster lock at most three seconds, as renamePerson() does, and gives up changing nothing: a roster read holds it
  *   through its whole QuickBooks read, and the person's row must not be held that long, since a code request waits for
  *   it (FOR KEY SHARE, below);
  * - saveDetails() (contact-edits.ts, a parent's save of their phone and mailing address, stage 3's slice 11b) takes the
@@ -193,8 +194,23 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   check (signinStands()) reads the passkey unlocked under the person's row. Nothing that ends all of a person's
  *   sign-in removes them, as for the app (a block, a reset, a password change, Sign out everywhere, a change of sign-in
  *   email, sign-ins switched off, a change of company, a last membership closed, turning the app off). A later writer
- *   that takes them (SI-7b's presses, SI-9's staff reset) takes them after the person's row, beside the app and backup
- *   codes, before their devices.
+ *   that takes them (SI-9's staff reset) takes them after the person's row, beside the app and backup codes, before
+ *   their devices;
+ * - a person's passkeys in sign-in settings (passkey-settings.ts, since slice SI-7b): adding one is the passkey
+ *   library's insert of the row first, as it verifies, outside any transaction of the portal's and before the
+ *   person's row is taken; then one transaction that takes the person's row FOR UPDATE (not this function's KEY SHARE:
+ *   the add's record and a remove each decide by the person's passkeys, their first or their last, so two of them go
+ *   one at a time, as SI-6b's presses do), reads the new row (still theirs) and names it, counts their passkeys and
+ *   those added before it, reads their app, and for a first passkey with no app deletes their backup codes and inserts
+ *   ten new ones (a failure there deletes the row the library inserted, in a transaction of its own that takes the
+ *   person's row FOR UPDATE first); renaming one calls this, then reads and updates the passkey; removing one takes the
+ *   parents' settings lock shared (the club's level is read), then the person's row FOR UPDATE, reads the session's
+ *   `strong_at` under it, reads the passkey, their app and their passkeys' count, then deletes the passkey and, with
+ *   its last one and no app, their backup codes.
+ *   Asking again with a passkey (provePasskeyAgain(), asking-again.ts) calls this, sets the passkey's `last_used_at`,
+ *   then updates the session's `strong_at`. Turning the app off beside a passkey (authenticator-settings.ts) reads
+ *   whether they have a passkey under the person's row and keeps their backup codes. None of them touches a device, and
+ *   only asking again touches a session.
  */
 export async function lockedPerson(tx: Tx, parentId: string): Promise<{ email: string; blocked: boolean } | null> {
   const [p] = await tx.select({ email: parent.email, blocked: parent.blocked }).from(parent).where(eq(parent.id, parentId)).for("key share");

@@ -3,14 +3,14 @@ import { passkey } from "@better-auth/passkey";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db } from "@/lib/db/client";
 import { recordSignout } from "./signin-audit";
-import { PASSKEY_CHALLENGE_PATH, parentCodePlugin } from "./parent-code-plugin";
+import { PASSKEY_CHALLENGE_PATH, PASSKEY_REGISTER_PATH, parentCodePlugin } from "./parent-code-plugin";
 import { PARENT_SESSION_SECONDS } from "@/lib/parents/sessions";
 import { RATE_LIMITS } from "@/lib/parents/rate-limit";
 import { parentAuthUser, parentAuthSession, parentAuthAccount, parentAuthVerification, parentAuthPasskey } from "@/lib/db/schema";
 import { env } from "@/env";
 import { clientAddress, stampingHandler } from "./client-address";
 import { isFinishing } from "./finish-scope";
-import { afterPasskeyVerified } from "./passkey-check";
+import { afterPasskeyVerified, afterRegistrationVerified } from "./passkey-check";
 
 /**
  * Every Better Auth route a parent doesn't need. Several write (/update-user, the revoke routes, /unlink-account) and
@@ -26,16 +26,23 @@ import { afterPasskeyVerified } from "./passkey-check";
  * sign-in release's slice SI-2 a person may have a password, but it is set and reset by the portal's own links,
  * src/lib/parents/signin-links.ts and password-set.ts, and emailAndPassword stays off, so /sign-in/email, /reset-password
  * and the rest answer 404 with a password present too: tests/integration/parent-door.test.ts). The passkey library's
- * other six routes are here too (slice SI-7a): its own verify-authentication makes a session itself (the door runs it in
- * process instead, src/lib/auth/passkey-check.ts, where the guard below refuses its session), and adding, listing,
- * naming and removing passkeys are slice SI-7b's.
+ * other routes are here too (slice SI-7a): its own verify-authentication makes a session itself (the door runs it in
+ * process instead, src/lib/auth/passkey-check.ts, where the guard below refuses its session); its verify-registration
+ * is run in process by the portal's /portal-passkey/add (slice SI-7b), never over HTTP; and listing, naming and
+ * removing are the portal's own (passkey-settings.ts), so its list, update and delete paths stay off. Since slice SI-7b
+ * the library's registration options (/passkey/generate-register-options) are reachable, behind the portal plugin's
+ * onRequest (parent-code-plugin.ts), which refuses them, with this list's own 404 and no challenge row made, unless the
+ * request carries a live parent session that may add a passkey now (mayAddPasskey(), passkey-settings.ts), and with
+ * any query at all (the library would take a `name` query as the passkey's user name). Of the library's own routes,
+ * /list-sessions and /unlink-account run its fresh-session middleware too, and /delete-user reads `freshAge` itself
+ * (deleteUser(), better-auth's update-user.mjs); freshAge 0 skips both checks, and all three are here.
  */
 export const PARENT_DISABLED_PATHS = [
   "/sign-in/social", "/sign-up/email", "/sign-in/email", "/reset-password", "/request-password-reset", "/verify-password",
   "/verify-email", "/send-verification-email", "/change-email", "/change-password", "/update-session", "/update-user",
   "/delete-user", "/delete-user/callback", "/list-sessions", "/revoke-session", "/revoke-sessions", "/revoke-other-sessions",
   "/link-social", "/list-accounts", "/unlink-account", "/refresh-token", "/get-access-token", "/account-info",
-  "/passkey/verify-authentication", "/passkey/generate-register-options", "/passkey/verify-registration",
+  "/passkey/verify-authentication", "/passkey/verify-registration",
   "/passkey/list-user-passkeys", "/passkey/delete-passkey", "/passkey/update-passkey",
 ];
 
@@ -52,7 +59,12 @@ const portal = () => new URL(env.APP_URL);
  * a discoverable credential is required, so no address is ever asked (open question 30) and a passkey is two steps in
  * one (question 35); attestation is none (the library's, fixed); no authenticator attachment, so a phone, a computer, a
  * password manager and a security key are all taken. `afterVerification` records the passkey the library verified for
- * the door (afterPasskeyVerified()), and the session the library then asks for is refused by the guard below.
+ * the door (afterPasskeyVerified()), and the session the library then asks for is refused by the guard below. Since
+ * slice SI-7b a registration (run in process by /portal-passkey/add) needs the session the request carries
+ * (`registration.requireSession`, the library's default, left as it is), and `registration.afterVerification`
+ * (afterRegistrationVerified()) refuses one outside the portal's add, one not user-verified and a credential already
+ * added, before the library inserts the row. The options' user name and display name are the session user's email
+ * (the library's: the person's sign-in address); the portal never sends a `name` query, and the onRequest refuses one.
  */
 const parentPasskeys = () => passkey({
   rpID: portal().hostname,
@@ -60,6 +72,7 @@ const parentPasskeys = () => passkey({
   origin: portal().origin,
   authenticatorSelection: { residentKey: "required", requireResidentKey: true, userVerification: "required" },
   authentication: { afterVerification: afterPasskeyVerified },
+  registration: { afterVerification: afterRegistrationVerified },
 });
 
 /**
@@ -108,6 +121,12 @@ function buildParentAuth() {
       // address (CLIENT_IP_HEADER none) no cap per address can work: the worker's sweep of expired challenges at every
       // wake (sweepExpiredChallenges(), src/lib/jobs/cleanup.ts) bounds the table to about five minutes of requests.
       [PASSKEY_CHALLENGE_PATH]: { window: 60, max: RATE_LIMITS.code_check_ip.max },
+      // Adding a passkey (slice SI-7b): the library's registration options, which write a challenge row only for a
+      // signed-in parent who proved it's them in the last 10 minutes, and the portal's add, at the code request's cap;
+      // asking again with a passkey at the code check's.
+      [PASSKEY_REGISTER_PATH]: { window: 60, max: RATE_LIMITS.code_send_ip.max },
+      "/portal-passkey/add": { window: 60, max: RATE_LIMITS.code_send_ip.max },
+      "/portal-passkey/again": { window: 60, max: RATE_LIMITS.code_check_ip.max },
     } },
     account: { accountLinking: { enabled: false } },
     // The visitor's address comes from the portal's one reading of it (client-address.ts), not from a header named here.
@@ -131,9 +150,13 @@ function buildParentAuth() {
     // (family-choice.ts), and the gate clears it (src/lib/auth/resolve.ts). It is returned, as every field is unless
     // `returned: false`, which would hide it from api.getSession() too, where the gate reads it (identity.ts): so
     // /get-session answers the session's own family id, or null, beside its expiry and its user.
+    // `freshAge: 0` (slice SI-7b): the library's fresh-session middleware, which the passkey registration runs and which
+    // would otherwise refuse a session made more than a day ago, is skipped. Freshness is the portal's own window
+    // (sessionProvedRecently(), asking-again.ts), read before the options and again at the add.
     session: {
       expiresIn: PARENT_SESSION_SECONDS,
       disableSessionRefresh: true,
+      freshAge: 0,
       additionalFields: { familyId: { type: "string", required: false, input: false } },
     },
     // Every sign-in user belongs to a person record, set when the person is made. input: false: a parent can't change the

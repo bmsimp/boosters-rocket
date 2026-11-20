@@ -1,18 +1,18 @@
-// The statuses of the accounting links screen (stage 4's slices M1 and M2 of docs/superpowers/specs/2026-11-18-app-owned-families-design.md,
+// The statuses of the accounting links screen (stage 4's slices M1, M2 and M3a of docs/superpowers/specs/2026-11-18-app-owned-families-design.md,
 // section 4, "Statuses"), worked out at each view and stored nowhere. Pure: it reads nothing.
 import type { Cust } from "@/lib/roster/model";
 
 /**
- * Each status's fixed key, in the order the screen offers them. "Left unlinked" (a mark a later slice stores) is not
- * here yet.
+ * Each status's fixed key, in the order the screen offers them. `left_unlinked` (slice M3a) is a family staff chose to
+ * leave with no customer for now: the mark stored on the family (`family.accounting_left_unlinked_at`).
  */
-export const STATUS_KEYS = ["suggested", "several", "no_match", "carried_over", "linked", "with_differences", "not_a_family", "customer_gone", "not_checked"] as const;
+export const STATUS_KEYS = ["suggested", "several", "no_match", "left_unlinked", "carried_over", "linked", "with_differences", "not_a_family", "customer_gone", "not_checked"] as const;
 export type StatusKey = (typeof STATUS_KEYS)[number];
 export const isStatusKey = (s: unknown): s is StatusKey => typeof s === "string" && (STATUS_KEYS as readonly string[]).includes(s);
 
 /** A status in words: what the row and the filter say. */
 export const STATUS_WORDS: Record<StatusKey, string> = {
-  suggested: "Suggested", several: "Several possible", no_match: "No match", carried_over: "Carried over", linked: "Linked",
+  suggested: "Suggested", several: "Several possible", no_match: "No match", left_unlinked: "Left unlinked", carried_over: "Carried over", linked: "Linked",
   with_differences: "Linked, with differences", not_a_family: "Not a family now", customer_gone: "Customer gone", not_checked: "Not checked",
 };
 

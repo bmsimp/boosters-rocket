@@ -122,6 +122,12 @@ export const parent = pgTable("parent", {
  * details, the portal's own since stage 3's slice 11a, for books with no parent type (flat, or layered with no parent
  * type: open question 6), where every guardian of the family shares them; as on `parent`, filled once by the take-in
  * and 0 until anyone sets them.
+ * `accounting_left_unlinked_at` and `_by` (stage 4's slice M3a, migration 0045) are the accounting links screen's "Left
+ * unlinked" mark: when a staff member with the linking permission said this family is to stay with no customer in the
+ * books for now, and who (`staff_user.id`, with no foreign key, as `accounting_link.linked_by` has none). While it is
+ * set the screen suggests no customer for the family and it takes no part in another family's suggestion. Undo clears
+ * both, and so does every path that gives the family a link, in the transaction that makes it
+ * (src/lib/families/left-unlinked.ts). `_by` is set only while `_at` is.
  */
 export const family = pgTable("family", {
   id: uuid("id").primaryKey().defaultRandom().$type<AppFamilyId>(),
@@ -130,9 +136,13 @@ export const family = pgTable("family", {
   phone: text("phone"),
   ...mailingAddress(),
   contactVersion: integer("contact_version").notNull().default(0),
+  accountingLeftUnlinkedAt: timestamp("accounting_left_unlinked_at", { withTimezone: true }),
+  accountingLeftUnlinkedBy: uuid("accounting_left_unlinked_by"), // staff_user.id of who left it unlinked
   createdAt: created(),
   updatedAt: updated(),
-});
+}, (t) => [
+  check("family_left_unlinked_by_with_at", sql`${t.accountingLeftUnlinkedBy} is null or ${t.accountingLeftUnlinkedAt} is not null`),
+]);
 
 /**
  * A student, with the portal's own id: made by migration 0023 (or the import) from a student customer directly under a
@@ -339,13 +349,13 @@ export const rateLimitEvent = pgTable("rate_limit_event", {
 
 /**
  * A parent's own change of sign-in address, waiting for the link mailed to the new address (src/lib/parents/email-change.ts).
- * The token is stored hashed. A request belongs to the person, the link (`guardian_id`) and the family it was asked under
- * and the QuickBooks record it would change; it is confirmed only by that person, signed in to that family through that
- * link, while that is still their record. The family is the app's own record (`family_id`, the session's family when it
- * was asked; migration 0037 carried each request's QuickBooks family over to it and 0038 dropped `family_qbo_id`);
- * which QuickBooks record it writes (`record_qbo_id`) is still decided when it is asked. The link and family were added
- * after the table (0016, 0037): a row without them is never confirmed. The record's id names a customer of the
- * connected company: a change of company deletes every row, before the app's records it names.
+ * The token is stored hashed. A request belongs to the person, the link (`guardian_id`) and the family it was asked
+ * under; it is confirmed only by that person, signed in to that family through that link. The family is the app's own
+ * record (`family_id`, the session's family when it was asked; migration 0037 carried each request's QuickBooks family
+ * over to it and 0038 dropped `family_qbo_id`). `record_qbo_id`, the QuickBooks record a change was written to until
+ * stage 3's slice 11d, is written null since and read by nothing (stage 3's last slice drops it). The link and family
+ * were added after the table (0016, 0037): a row without them is never confirmed. A change of company deletes every
+ * row, before the app's records it names.
  */
 export const parentEmailChange = pgTable("parent_email_change", {
   id: uuid("id").primaryKey().defaultRandom(),

@@ -16,7 +16,7 @@ export const otherCompany = (source: string | null, connected: string | null | u
  * answers nothing while QuickBooks is connected to a different company, so another company's link never answers.
  * Stage 2's areas read them: a parent's season finds the session's app family through familyLinkedTo(), and the code
  * that crosses into what is still keyed by QuickBooks ids translates through linksOf() and linksOfCustomers() (the
- * boundaries are listed in AGENTS.md, Seasons). Each reads only the links it is asked for, so parent code may import
+ * boundaries are listed in docs/agents/seasons.md). Each reads only the links it is asked for, so parent code may import
  * this module (PARENT_CODE_ELSEWHERE in tests/integration/page-guards.test.ts).
  */
 export async function recordsCompany(tx?: Tx): Promise<string | null> {

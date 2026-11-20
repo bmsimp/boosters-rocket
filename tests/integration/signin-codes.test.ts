@@ -89,7 +89,7 @@ describe("sending the second step's code", () => {
     expect((await audits("signin.code_refused")).map((a) => a.after)).toEqual([{ reason: "has_second_factor" }]);
   });
 
-  it("sends nothing at the door to a person with a passkey, and the step goes on to it (slice SI-7a); asking again sends the code, until SI-7b", async () => {
+  it("sends nothing to a person with a passkey, and the step goes on to it, at the door (slice SI-7a) and in asking again (SI-7b)", async () => {
     const p = await ana();
     await seedPasskey(p.id);
     const r = await sendSecondStepCode(await stepOf(), IP, T0);
@@ -100,8 +100,9 @@ describe("sending the second step's code", () => {
     expect((await audits("signin.code_refused")).map((a) => a.after)).toEqual([{ reason: "has_second_factor" }]);
     const again = await sendSecondStepCode(await stepOf(), IP, T0, "change");
     await again.delivery;
-    expect([again.ended, again.passkey, again.app]).toEqual([false, undefined, undefined]);
-    expect(mail.outbox.map((m) => m.to)).toEqual(["ana@example.com"]);
+    expect([again.ended, again.passkey, again.app]).toEqual([false, true, undefined]);
+    expect(mail.outbox).toEqual([]);
+    expect(await db.select().from(signinCode)).toEqual([]);
   });
 
   it("an unfinished app set-up is no second step: the code is sent as before", async () => {

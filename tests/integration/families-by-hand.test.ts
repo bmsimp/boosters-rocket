@@ -305,6 +305,50 @@ describe("Create in QuickBooks and link", () => {
     expect(stubNamed("Oak Family")).toHaveLength(1);
   });
 
+  it("a family whose new customer is linked to another family while its answer is on its way stops there: no student made or linked, and the words say so", async () => {
+    const oak = await unlinkedFamily("Oak Family", ["Amy Oak"]);
+    const [amy] = await studentsOf(oak);
+    const [other] = await db.insert(family).values({ name: "Another Oak", active: true }).returning({ id: family.id });
+    // Between the send and the answer: the customer QuickBooks is about to make (the stub's next Id) is linked to another
+    // family, as a roster read and a Confirm on the accounting links screen could do while the answer is slow.
+    let made = "";
+    stub.onApiRequest = async (call) => {
+      if (call.method !== "POST") return;
+      stub.onApiRequest = null;
+      made = String(Math.max(0, ...stub.customers.map((c) => Number(c.Id)).filter((n) => !Number.isNaN(n))) + 1);
+      await db.insert(accountingLink).values({ system: "quickbooks", realmId: REALM, customerId: made, familyId: other!.id, origin: "confirmed", linkedBy: op.staffUserId });
+    };
+    const r = await createInQuickBooksAndLink(String(oak), null, tag, op);
+    expect(stubNamed("Oak Family")[0]!.Id).toBe(made);
+    expect(r).toEqual({ changed: true, result: { ok: false, errors: ["Nothing was linked.",
+      "QuickBooks made a customer for Oak Family, but another family in the portal, Another Oak, was linked to it while its answer was on its way, so Oak Family was left unlinked and nothing more was made for it in QuickBooks. Check in QuickBooks which household that customer is before anything else is made for Oak Family.",
+      "Not made in QuickBooks yet: Amy Oak."] } });
+    // The family's create alone was sent: no student customer made, nothing linked to Oak's records, nothing queued.
+    expect(posts()).toHaveLength(1);
+    expect(stubNamed("Amy Oak")).toHaveLength(0);
+    expect(await linkOfFamily(oak)).toBeUndefined();
+    expect(await linkOfStudent(amy!.id)).toBeUndefined();
+    expect((await familyLinks()).filter((l) => l.customerId === made).map((l) => l.familyId)).toEqual([other!.id]);
+    expect(await db.select().from(writeQueue)).toEqual([]);
+    expect((await auditsOf("roster.family.created_in_quickbooks"))[0]!.after).toMatchObject({ outcome: "stopped", code: "customer_has_family", made: [], notMade: [String(amy!.id)] });
+  });
+
+  it("adding a family: a new customer linked to another family while its answer is on its way leaves the family unlinked, said in words", async () => {
+    const [other] = await db.insert(family).values({ name: "Another Oak", active: true }).returning({ id: family.id });
+    let made = "";
+    stub.onApiRequest = async (call) => {
+      if (call.method !== "POST") return;
+      stub.onApiRequest = null;
+      made = String(Math.max(0, ...stub.customers.map((c) => Number(c.Id)).filter((n) => !Number.isNaN(n))) + 1);
+      await db.insert(accountingLink).values({ system: "quickbooks", realmId: REALM, customerId: made, familyId: other!.id, origin: "confirmed", linkedBy: op.staffUserId });
+    };
+    expect(await addFamily({ role: "family", name: "Oak Family", typeQboId: null }, tag, linker())).toEqual({ ok: true, unlinked: true, status: "attention",
+      message: "Oak Family is saved in the portal. QuickBooks made a customer for Oak Family, but another family in the portal, Another Oak, was linked to it while its answer was on its way, so Oak Family was left unlinked and nothing more was made for it in QuickBooks. Check in QuickBooks which household that customer is before anything else is made for Oak Family." });
+    expect(stubNamed("Oak Family")[0]!.Id).toBe(made);
+    expect(await linkOfFamily((await familyNamed("Oak Family"))!.id)).toBeUndefined();
+    expect(posts()).toHaveLength(1);
+  });
+
   it("a lost answer is held on the queue as possibly made, never sent again from here, and the family waits for it", async () => {
     const oak = await unlinkedFamily("Oak Family");
     stub.loseUpdateAnswer = true;

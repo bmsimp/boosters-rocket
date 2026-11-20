@@ -2,8 +2,9 @@ import { normalizeEmail } from "@/lib/email";
 import { parseEmailField } from "./emails";
 
 /**
- * A QuickBooks email field changed for one address (src/lib/parents/email-change.ts). Pure: it reads nothing and
- * changes nothing.
+ * A QuickBooks email field changed for one address. Pure: it reads nothing and changes nothing. Until stage 3's slice
+ * 11d a parent's confirmed change of sign-in email (src/lib/parents/email-change.ts) wrote it to their record first;
+ * since then that change is the portal's alone, and slice S11e sends it on with these rules.
  *
  * A field can hold several addresses, separated by commas, semicolons or spaces in any mix (parseEmailField). The
  * change replaces one address, wherever it stands and however it is written (`Ana@Example.com` is `ana@example.com`),
@@ -47,7 +48,7 @@ export function replaceAddressInField(field: string | null, from: string, to: st
 /**
  * Whether a field already reads as the change made: the new address is in it and the old one is nowhere in it. After
  * a write whose answer was lost, the next try finds this and takes the change as made, rather than sending it again.
- * `firstOnly` is for a record whose sign-in is its first address alone (MyRecord.signsInBy, ./my-family.ts): the new one must be first.
+ * `firstOnly` is for a record whose sign-in is its first address alone (OwnRecord.signsInBy, ./my-family.ts): the new one must be first.
  */
 export function fieldHasChange(field: string | null, from: string, to: string, firstOnly: boolean): boolean {
   const old = normalizeEmail(from), next = normalizeEmail(to);
@@ -57,10 +58,10 @@ export function fieldHasChange(field: string | null, from: string, to: string, f
 }
 
 /**
- * Whether `email` signs in through a record whose email field is `field`, by the record's own rule (MyRecord.signsInBy,
+ * Whether `email` signs in through a record whose email field is `field`, by the record's own rule (OwnRecord.signsInBy,
  * ./my-family.ts): its first usable address alone on a parent's own record or a flat member's, any of them on a
- * family's record in a club with no parent type. The one rule for it: a parent's record is theirs to see
- * (myOwnRecord()), to change (./contact-edits.ts) and to change the address of (./email-change.ts) only while it holds.
+ * family's record in a club with no parent type. The one rule for it: a record is the person's own, by ownRecordIn(),
+ * only while it holds, which the take-in of contact details (./contact-take-in.ts) goes by.
  */
 export function fieldSignsIn(field: string | null, email: string, signsInBy: "first" | "every"): boolean {
   const usable = parseEmailField(field).usable;

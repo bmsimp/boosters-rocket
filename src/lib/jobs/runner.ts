@@ -124,7 +124,7 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
       ran.push({ job: TOKEN_JOB, ok: false });
     }
   }
-  // Daily, or sooner when a parent's change of sign-in address went to QuickBooks while the roster was busy (refresh-ask.ts),
+  // Daily, or sooner when a staff roster write asked for one (refresh-ask.ts),
   // or while the take-in of contact details waits for a read that keeps the billing addresses: at the first wake of this
   // build, whatever the build before it answered, then at most once an hour (takeInAsksForARead(), asked first so that
   // every read made while it waits counts toward its hour).

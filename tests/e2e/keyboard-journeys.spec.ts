@@ -331,22 +331,21 @@ test("a parent's journeys by keyboard alone: sign in, Home to Payments, a form, 
 });
 
 test.describe("7. the email change, by keyboard", () => {
-  // As tests/e2e/family-email.spec.ts sets it up: offered to a parent in one family while parent sign-ins are on. Her
-  // record's id is not digits, so the confirmation is refused before anything is sent to QuickBooks.
+  // As tests/e2e/family-email.spec.ts sets it up: offered while parent sign-ins are on, and another person holds the
+  // new address, so the confirmation is refused and changes nothing (a change made would end Zelda's sessions, which
+  // the later journeys sign in with: since stage 3's slice 11d it is the portal's alone).
   const NEW = "zelda.keys@e2e-moving.example";
-  let saved: { setting: unknown[]; link: { status: string; disabled_reason: string | null; status_before_disable: string | null }; strongAt: Date | null };
+  let saved: { setting: unknown[]; strongAt: Date | null };
   const zelda = async () => (await sql`SELECT id, email FROM parent WHERE email = 'zelda@example.com'`)[0]!;
 
   test.beforeAll(async () => {
-    const p = await zelda();
     saved = {
       setting: [...await sql`SELECT value FROM setting WHERE key = 'parents.settings'`],
-      link: (await sql`SELECT status, disabled_reason, status_before_disable FROM guardian WHERE parent_id = ${p.id} AND family_qbo_id = 'E2E-FAMILY-2'`)[0] as typeof saved.link,
       strongAt: ((await sql`SELECT strong_at FROM parent_auth_session WHERE token = ${PARENT_SESSION_TOKEN}`)[0]?.strong_at ?? null) as Date | null,
     };
     const on = { signin: true, everEnabled: true, welcome: false, requireActiveStudents: false };
     await sql`INSERT INTO setting (key, value) VALUES ('parents.settings', ${sql.json(on)}) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
-    await sql`UPDATE guardian SET status = 'disabled', disabled_reason = 'not_in_quickbooks', status_before_disable = ${saved.link.status} WHERE parent_id = ${p.id} AND family_qbo_id = 'E2E-FAMILY-2'`;
+    await sql`INSERT INTO parent (name, email) VALUES ('Someone Else', ${NEW})`;
     // A change of sign-in email is asked for only by a session that proved itself in the last 10 minutes (asking
     // again, slice SI-5a): the seeded session is stamped as just proved, a few seconds back so the database's clock
     // never puts it ahead of the app's, and put back after. Asking again by keyboard is journey 10's.
@@ -358,11 +357,10 @@ test.describe("7. the email change, by keyboard", () => {
     const p = await zelda();
     if (saved.setting.length) await sql`UPDATE setting SET value = ${sql.json((saved.setting[0] as { value: never }).value)} WHERE key = 'parents.settings'`;
     else await sql`DELETE FROM setting WHERE key = 'parents.settings'`;
-    await sql`UPDATE guardian SET status = ${saved.link.status}, disabled_reason = ${saved.link.disabled_reason}, status_before_disable = ${saved.link.status_before_disable}
-            WHERE parent_id = ${p.id} AND family_qbo_id = 'E2E-FAMILY-2'`;
+    await sql`DELETE FROM parent WHERE email = ${NEW}`;
     // The request names the family it was asked in by the app's record, the one Zelda's row in it names.
     const [link] = await sql`SELECT id, family_id FROM guardian WHERE parent_id = ${p.id} AND family_qbo_id = ${PARENT_SESSION_FAMILY}`;
-    await sql`DELETE FROM parent_email_change WHERE parent_id = ${p.id} AND used_at IS NULL`;
+    await sql`DELETE FROM parent_email_change WHERE parent_id = ${p.id} AND (used_at IS NULL OR new_email = ${NEW})`;
     await sql`INSERT INTO parent_email_change (parent_id, guardian_id, family_id, record_qbo_id, new_email, token_hash, expires_at)
             VALUES (${p.id}, ${link!.id}, ${link!.family_id}, 'E2E-P1', ${E2E_EMAIL.own.newEmail}, ${emailTokenHash(E2E_EMAIL.own.token)}, now() + interval '7 days')`;
   });
@@ -392,7 +390,7 @@ test.describe("7. the email change, by keyboard", () => {
     await expect(send).toBeFocused(); // busy was aria-disabled, so the button kept the focus
     await tabsOut(page);
 
-    // The link from the email: its one button, refused before anything is sent, keeps the focus with the alert.
+    // The link from the email: its one button, refused as the address is another person's, keeps the focus with the alert.
     await expect.poll(() => sink.messages.filter((m) => m.to.includes(NEW)).length, { timeout: 15_000 }).toBe(1);
     const raw = sink.messages.find((m) => m.to.includes(NEW))!.raw.replace(/=\r?\n/g, "").replace(/=3D/g, "=");
     const link = new RegExp(`${baseURL}/family/email/[A-Za-z0-9_-]{43}`).exec(raw)![0];
@@ -652,6 +650,104 @@ test.describe("11. the authenticator app, by keyboard: asking again, the set-up,
     await expect(off).toBeFocused();
     await expect(box.getByRole("button", { name: "Set up an authenticator app", exact: true })).toBeVisible();
     expect(await sql`SELECT id FROM parent_authenticator WHERE parent_id = (SELECT id FROM parent WHERE email = 'zelda@example.com')`).toHaveLength(0);
+    await tabsOut(page);
+    ringsShown();
+  });
+});
+
+test.describe("12. passkeys, by keyboard: asking again, adding one, the backup codes copied, renaming and cancelling, asking again with it, removing it", () => {
+  // A passkey is added for Zelda here, with Playwright's own authenticator (`context.credentials`, installed before the
+  // page touches navigator.credentials), through the page's own presses, and removed by keyboard as the journey's last
+  // step; her passkeys, backup codes and counts are removed before and after too, for a run cut off midway (the seed
+  // gives nobody a passkey), and the seeded session's proof is put back as it was.
+  let putProofBack: () => Promise<void> = async () => undefined;
+  const zeldasPasskeys = () => sql`SELECT id FROM parent_auth_passkey WHERE user_id = (SELECT id FROM parent_auth_user WHERE parent_id = (SELECT id FROM parent WHERE email = 'zelda@example.com'))`;
+  const removeZeldasPasskeys = () => sql`DELETE FROM parent_auth_passkey WHERE user_id = (SELECT id FROM parent_auth_user WHERE parent_id = (SELECT id FROM parent WHERE email = 'zelda@example.com'))`;
+  test.beforeAll(async () => {
+    await removeZeldasPasskeys();
+    await removeZeldaSecondSteps(sql);
+    await clearZeldaCounts(sql);
+    putProofBack = await keepZeldaProof(sql);
+  });
+  test.afterAll(async () => {
+    await removeZeldasPasskeys();
+    await removeZeldaSecondSteps(sql);
+    await clearZeldaCounts(sql);
+    await putProofBack();
+  });
+
+  test("the password and the emailed code, a name and Add, the backup codes copied, Rename then Cancel and Save, Use your passkey, then Remove", async ({ context, page }) => {
+    test.setTimeout(120_000);
+    await sql`DELETE FROM rate_limit_event`;
+    await setZeldaProof(sql, false);
+    sink.messages.length = 0;
+    await context.credentials.install();
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await context.addCookies([parentSessionCookie()]);
+    await page.goto("/family/sign-in");
+    const box = page.getByRole("region", { name: "Passkeys" });
+
+    // Asking again inside the box: its password field, Continue, then the emailed code (no passkey or app yet). The
+    // box's own thanks takes the focus, and the name field is the next stop.
+    await tabTo(page, box.locator('input[name="password"][autocomplete="current-password"]'), { max: 80 });
+    await page.keyboard.type(E2E_SIGNIN.password);
+    await page.keyboard.press("Tab");
+    await expect(box.getByRole("button", { name: "Continue" })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(box.getByLabel("6-digit code")).toBeFocused();
+    await page.keyboard.type(await codeFor(sql, sink, "zelda@example.com"));
+    await page.keyboard.press("Enter");
+    await expect(box.getByRole("status").filter({ hasText: "Thank you, that's you." }).first()).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(box.getByLabel("A name for it (optional)")).toBeFocused();
+    await page.keyboard.type("Zelda keyboard key");
+    await page.keyboard.press("Tab");
+    await expect(box.getByRole("button", { name: "Add a passkey", exact: true })).toBeFocused();
+    await page.keyboard.press("Enter");
+
+    // Added: the words above the ten backup codes take the focus, and Copy copies the ten alone, one per line.
+    await expect(box.getByRole("status").filter({ hasText: "Your passkey is added, and here are your backup codes." })).toBeFocused();
+    const codes = (await box.getByRole("list", { name: "Your backup codes" }).getByRole("listitem").allTextContents()).map((c) => c.trim());
+    expect(codes).toHaveLength(10);
+    await tabTo(page, box.getByRole("button", { name: "Copy the backup codes" }));
+    await page.keyboard.press("Enter");
+    await expect(box.getByText("Copied.")).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(codes.join("\n"));
+    ringsShown();
+
+    // Rename: its field takes the focus; Cancel gives the focus back to Rename; Rename again, a new name, Enter: the
+    // answer takes the focus.
+    const rename = box.getByRole("button", { name: /^Rename/ });
+    await tabTo(page, rename);
+    await page.keyboard.press("Enter");
+    const field = box.getByLabel("New name");
+    await expect(field).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(box.getByRole("button", { name: "Save the name" })).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(box.getByRole("button", { name: "Cancel" })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(rename).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(field).toBeFocused();
+    await page.keyboard.press("ControlOrMeta+A");
+    await page.keyboard.type("Zelda renamed key");
+    await page.keyboard.press("Enter");
+    await expect(box.locator("div[tabindex='-1']").filter({ hasText: "The passkey's name is saved." })).toBeFocused();
+    await expect(box.locator(".passkey-name").getByText("Zelda renamed key")).toBeVisible();
+
+    // The add stamped no proof, so removing asks again: Use your passkey is reached, and its thanks takes the focus.
+    await tabTo(page, box.getByRole("button", { name: "Use your passkey" }));
+    await page.keyboard.press("Enter");
+    await expect(box.getByRole("status").filter({ hasText: "Thank you, that's you." }).first()).toBeFocused();
+
+    // Remove sits above the thanks, on the passkey, with the words for the last one: Shift+Tab reaches it, and its
+    // answer takes the focus.
+    await expect(box.getByText("This is your only passkey.")).toBeVisible();
+    await tabTo(page, box.getByRole("button", { name: /^Remove/ }), { back: true });
+    await page.keyboard.press("Enter");
+    await expect(box.locator("div[tabindex='-1']").filter({ hasText: "That passkey is removed" })).toBeFocused();
+    expect(await zeldasPasskeys()).toHaveLength(0);
     await tabsOut(page);
     ringsShown();
   });

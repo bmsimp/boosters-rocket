@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { APP_ASKED, APP_CODE_LABEL, APP_REJECTED, APP_STEP_ENDED, APP_STEP_OVER, CODE_SENT, CODE_REJECTED, CODE_STEP_ENDED, PASSWORD_REJECTED, SIGNIN_LEDE, TOO_MANY_TRIES, signinFailure,
-  PASSKEY_ASKED, PASSKEY_BUTTON, PASSKEY_CANCELLED, PASSKEY_EXPLAINED, PASSKEY_ONLY, PASSKEY_OR_APP, PASSKEY_REJECTED, PASSKEY_STEP_ENDED, PASSKEY_UNSUPPORTED, PASSKEY_USE,
+  PASSKEY_ASKED, PASSKEY_BUTTON, PASSKEY_CANCELLED, PASSKEY_EXPLAINED, PASSKEY_ONLY, PASSKEY_OR_APP, PASSKEY_OR_BACKUP, BACKUP_CODE_LABEL, BACKUP_REJECTED, PASSKEY_REJECTED, PASSKEY_STEP_ENDED, PASSKEY_UNSUPPORTED, PASSKEY_USE,
   PASSKEY_STEP_CANCELLED, PASSKEY_STEP_FAILED, PASSKEY_STEP_REJECTED, PASSKEY_STEP_UNSUPPORTED, passkeyElsewhere, passkeyStepElsewhere } from "@/lib/parents/signin-copy";
 import { parentAuthClient } from "@/lib/auth/client";
 import { CODE_STEP_LIFE_MS, clearCodeStep, deviceStore, loadCodeStep, saveCodeStep, type CodeStepKind } from "./code-step";
@@ -18,7 +18,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 class HttpStatus extends Error { constructor(readonly status: number) { super(`HTTP ${status}`); } }
 const failure = (e: unknown) => signinFailure(e instanceof HttpStatus ? e.status : null);
 
-type Answer = { ok: boolean; next?: string; step?: "code" | "app" | "passkey"; app?: boolean; error?: string; ended?: boolean };
+type Answer = { ok: boolean; next?: string; step?: "code" | "app" | "passkey"; app?: boolean; backup?: boolean; error?: string; ended?: boolean };
 /** Where passkeys can be used from this page: here, not in this browser at all, or not at this address. */
 type PasskeysHere = "here" | "unsupported" | "elsewhere";
 /** What went wrong, in words, with whether to show the way to set up or reset a password beside it. */
@@ -28,7 +28,8 @@ type Problem = { words: string; passwordLink: boolean };
  * Spec §1 The pages, as the sign-in release's slice SI-3b made them: the email and the password on one form, then, on a
  * device the portal doesn't remember, the 6-digit code it emails, or, since slice SI-6a, for a parent with an
  * authenticator app, the app's code or a backup code (the app step: nothing is emailed, so there is no Resend), and,
- * since slice SI-7a, for a parent with a passkey, the passkey (with the app's code beside it when they have an app too).
+ * since slice SI-7a, for a parent with a passkey, the passkey (with the app's code beside it when they have an app too,
+ * and since slice SI-7b a backup code beside it when they have no app and hold unspent backup codes).
  * The first screen also offers "Sign in with a passkey" to everyone, with no address asked (open question 30): the
  * passkey library's ceremony, whose one verify request goes to the portal's own check (./passkey-ceremony.ts). The page
  * never says whether the address is on file. `portalOrigin` is APP_URL's origin, where passkeys work; reached at
@@ -50,8 +51,10 @@ export function PasswordSignIn({ next, portalOrigin }: { next: string | null; po
   const [back, setBack] = useState(next);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
-  // At the passkey step: whether the app's code or a backup code is offered beside the passkey.
+  // At the passkey step: whether the app's code or a backup code is offered beside the passkey, or (slice SI-7b) a
+  // backup code alone, for a parent with no app who holds unspent ones.
   const [appBeside, setAppBeside] = useState(false);
+  const [backupBeside, setBackupBeside] = useState(false);
   // Known only in the browser, after mount: drawn as "here" first, so the server's page and the first draw agree.
   const [passkeys, setPasskeys] = useState<PasskeysHere>("here");
   useEffect(() => {
@@ -71,7 +74,7 @@ export function PasswordSignIn({ next, portalOrigin }: { next: string | null; po
     const saved = loadCodeStep(deviceStore(), Date.now());
     if (!saved) return;
     /* eslint-disable react-hooks/set-state-in-effect */
-    setStartedAt(saved.sentAt); setSentAt(saved.sentAt); setNow(Date.now()); setStep(saved.kind); setAppBeside(saved.app === true);
+    setStartedAt(saved.sentAt); setSentAt(saved.sentAt); setNow(Date.now()); setStep(saved.kind); setAppBeside(saved.app === true); setBackupBeside(saved.backup === true);
     if (!next) setBack(saved.next);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [next]);
@@ -89,10 +92,11 @@ export function PasswordSignIn({ next, portalOrigin }: { next: string | null; po
     return () => clearInterval(t);
   }, [step, startedAt, next]);
 
-  const toCodeStep = (kind: CodeStepKind, app = false) => {
+  const toCodeStep = (kind: CodeStepKind, app = false, backup = false) => {
     const t = Date.now();
-    saveCodeStep(deviceStore(), { sentAt: t, next: back, kind, ...(kind === "passkey" ? { app } : {}) });
-    moved.current = true; setStartedAt(t); setSentAt(t); setNow(t); setCode(""); setPassword(""); setAppBeside(app); setStep(kind);
+    const alone = kind === "passkey" && !app && backup;
+    saveCodeStep(deviceStore(), { sentAt: t, next: back, kind, ...(kind === "passkey" ? { app } : {}), ...(alone ? { backup: true } : {}) });
+    moved.current = true; setStartedAt(t); setSentAt(t); setNow(t); setCode(""); setPassword(""); setAppBeside(app); setBackupBeside(alone); setStep(kind);
   };
   // A step the server ended (it never says why): back to the password step, as when its time runs out.
   const stepOver = (words: string) => {
@@ -105,7 +109,7 @@ export function PasswordSignIn({ next, portalOrigin }: { next: string | null; po
     try {
       const r = await post<Answer>("/portal-password/check", { email, password, ...(back ? { next: back } : {}) });
       if (r.ok && r.next) { clearCodeStep(deviceStore()); window.location.assign(r.next); return; }
-      if (r.ok && r.step === "passkey") { toCodeStep("passkey", r.app === true); return; }
+      if (r.ok && r.step === "passkey") { toCodeStep("passkey", r.app === true, r.backup === true); return; }
       if (r.ok && (r.step === "code" || r.step === "app")) { toCodeStep(r.step); return; }
       // Too many tries is said as such, with no way to a reset: a reset ends every session and doesn't shorten the wait.
       setProblem(r.error === "rate_limited" ? { words: TOO_MANY_TRIES, passwordLink: false } : { words: PASSWORD_REJECTED, passwordLink: true });
@@ -124,13 +128,16 @@ export function PasswordSignIn({ next, portalOrigin }: { next: string | null; po
   };
   const check = async () => {
     setBusy(true); setProblem(null);
-    // The app's code or a backup code at the app step, or beside a passkey at the passkey step.
+    // The app's code or a backup code at the app step, or beside a passkey at the passkey step (a backup code alone
+    // there for a parent with no app, slice SI-7b): the same check, /portal-app/check.
     const app = step !== "code";
+    // The one answer for every refusal of the field: a backup code's own words where no app is offered.
+    const rejected = step === "passkey" && !appBeside && backupBeside ? BACKUP_REJECTED : APP_REJECTED;
     try {
       const r = await post<Answer>(app ? "/portal-app/check" : "/portal-code/check", { code, ...(back ? { next: back } : {}) });
       if (r.ok && r.next) { clearCodeStep(deviceStore()); window.location.assign(r.next); return; }
-      if (app && r.ended) { stepOver(APP_REJECTED); return; }
-      setProblem({ words: r.error === "rate_limited" ? TOO_MANY_TRIES : app ? APP_REJECTED : CODE_REJECTED, passwordLink: false });
+      if (app && r.ended) { stepOver(rejected); return; }
+      setProblem({ words: r.error === "rate_limited" ? TOO_MANY_TRIES : app ? rejected : CODE_REJECTED, passwordLink: false });
     } catch (e) { setProblem({ words: failure(e), passwordLink: false }); } finally { setBusy(false); }
   };
   // A passkey: the passkey library's ceremony (the browser's own prompt), its verify request sent to the portal's check,
@@ -192,17 +199,19 @@ export function PasswordSignIn({ next, portalOrigin }: { next: string | null; po
     );
   }
   if (step === "passkey") {
-    // The passkey first; the app's code or a backup code beside it for a parent who has an app too. No Resend: nothing is emailed.
+    // The passkey first; the app's code or a backup code beside it for a parent who has an app too, or a backup code
+    // alone for one with no app who holds unspent ones (slice SI-7b). No Resend: nothing is emailed.
+    const beside = appBeside || backupBeside;
     return (
       <div className="stack">
-        <p role="status" id="passkey-step-words">{PASSKEY_ASKED} {appBeside ? PASSKEY_OR_APP : PASSKEY_ONLY}</p>
+        <p role="status" id="passkey-step-words">{PASSKEY_ASKED} {appBeside ? PASSKEY_OR_APP : backupBeside ? PASSKEY_OR_BACKUP : PASSKEY_ONLY}</p>
         {passkeys === "here" ? (
           <button ref={firstButton} type="button" className="btn" aria-describedby="passkey-step-words" aria-disabled={busy || undefined}
             onClick={() => { if (!busy) void signInWithPasskey(); }}>{PASSKEY_USE}</button>
         ) : <p className="help">{passkeys === "elsewhere" ? passkeyStepElsewhere(portalOrigin) : PASSKEY_STEP_UNSUPPORTED}</p>}
-        {appBeside && (
+        {beside && (
           <form className="stack" onSubmit={(e) => { e.preventDefault(); if (!busy) void check(); }}>
-            <label className="field"><span>{APP_CODE_LABEL}</span>
+            <label className="field"><span>{appBeside ? APP_CODE_LABEL : BACKUP_CODE_LABEL}</span>
               <input name="code" aria-describedby="passkey-step-words" inputMode="text" autoCapitalize="characters" autoCorrect="off" spellCheck={false}
                 autoComplete="one-time-code" maxLength={20} required value={code} onChange={(e) => setCode(e.target.value)} />
             </label>

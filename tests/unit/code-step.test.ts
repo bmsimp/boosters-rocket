@@ -99,6 +99,16 @@ describe("the code step kept on the device", () => {
       expect(loadCodeStep(store, T + 1000)).toEqual({ sentAt: T, next: null, kind: "code" });
     });
 
+  it("keeps a passkey step's backup-code field, so a reload offers it again, and reads anything but true as none (slice SI-7b)", () => {
+    const store = memoryStore();
+    saveCodeStep(store, { sentAt: T, next: null, kind: "passkey", app: false, backup: true });
+    expect(loadCodeStep(store, T + 1000)).toEqual({ sentAt: T, next: null, kind: "passkey", app: false, backup: true });
+    for (const backup of [false, "yes", 1]) {
+      const odd = memoryStore({ [CODE_STEP_KEY]: JSON.stringify({ sentAt: T, next: null, kind: "passkey", app: false, backup }) });
+      expect(loadCodeStep(odd, T + 1000)).toEqual({ sentAt: T, next: null, kind: "passkey", app: false });
+    }
+  });
+
   it("reads a passkey step whose app bit is not true or false as the code step", () => {
     const store = memoryStore({ [CODE_STEP_KEY]: JSON.stringify({ sentAt: T, next: null, kind: "passkey", app: "yes" }) });
     expect(loadCodeStep(store, T + 1000)).toEqual({ sentAt: T, next: null, kind: "code" });

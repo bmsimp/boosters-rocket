@@ -170,7 +170,8 @@ function buyoutRowsOf(r: RecordNames): SQL {
  * A parent's sign-in rows (target "parent": `signin`, `signin.refused`, `signin.family_switch`) name the family entered
  * in their body, not their target: its customer before the session moved to the app's family (stage 3's fifth slice:
  * `familyQboId`, and a switch's `from` and `to`), its record since (`familyId`, and a switch's `from` and `to`). A change
- * of sign-in address (`parent.email.request`, `parent.email.save`, whose target is the QuickBooks record it changes)
+ * of sign-in address (`parent.email.request`, `parent.email.save`, whose target was the QuickBooks record it changed,
+ * and is the person since stage 3's slice 11d)
  * names the family it was asked in only since then (`familyId`): an older one is found by its record, when that is the
  * family's own customer (CUSTOMER_TARGET_TYPES). A membership given or ended (`parent.access.granted`,
  * `parent.access.ended`, whose target is the guardian row) and a person made by staff for a family (`parent.create`,
@@ -216,6 +217,17 @@ function moveRowsOf(r: RecordNames): SQL | undefined {
 }
 
 /**
+ * A confirm on the accounting links screen (`accounting.link.confirm`, stage 4's slice M3a) targets the family and names
+ * the students it linked only in its body (`after.studentsLinked`, each `{ studentId, customerQboId }`): a search for
+ * one of those students finds it there, as a move's rows are found by the families they name. The family finds it by
+ * its target.
+ */
+function confirmRowsOf(r: RecordNames): SQL | undefined {
+  if (r.kind === "family") return undefined;
+  return and(eq(auditLog.action, "accounting.link.confirm"), sql`(${auditLog.after}) -> 'studentsLinked' @> ${JSON.stringify([{ studentId: r.id }])}::jsonb`);
+}
+
+/**
  * The rows a family or student record's older names find:a row naming one of its customers under a target type that
  * names a customer of that kind (CUSTOMER_TARGET_TYPES), and a tick's or waiver's row, whose target is
  * "<requirement>:<subject>", naming the customer (before the seasons moved) or the record (since).
@@ -227,6 +239,7 @@ function recordsOlderNames(r: RecordNames): SQL | undefined {
     buyoutRowsOf(r),
     parentRowsOf(r),
     moveRowsOf(r),
+    confirmRowsOf(r),
     ...(r.families.length ? [and(inArray(auditLog.targetType, [...CUSTOMER_TARGET_TYPES.family]), inArray(auditLog.targetId, r.families))] : []),
     ...(r.students.length ? [and(inArray(auditLog.targetType, [...CUSTOMER_TARGET_TYPES.student]), inArray(auditLog.targetId, r.students))] : []),
     and(eq(auditLog.targetType, "requirement_progress"), or(...keys.map((k) => sql`${auditLog.targetId} like ${endsWithKey(k)} escape '\\'`))),

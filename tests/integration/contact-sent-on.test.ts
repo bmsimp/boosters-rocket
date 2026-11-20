@@ -156,7 +156,7 @@ describe("a parent's save queues the change for each record it goes to (items 1 
     await seedGuardian({ parentId: a.ana.id, familyQboId: "20", sourceQboId: "21", status: "active" });
     await syncAppRecords();
     // That record holds the phone the portal knows for her, as her records agreed at the take-in: an empty one there
-    // would be a difference the portal never knew of, and kept (AGENTS.md's rough edge for the mapping screen).
+    // would be a difference the portal never knew of, and kept (the rough edge for the mapping screen in docs/agents/quickbooks-writes.md).
     inQuickBooks(stub, "21").PrimaryPhone = { FreeFormNumber: "555-0101" };
     await db.update(qboCustomer).set({ phone: "555-0101" }).where(eq(qboCustomer.qboId, "21"));
     await saveMyContact(a.ctx, form({ phone: NEW_PHONE }, "p:1"));
