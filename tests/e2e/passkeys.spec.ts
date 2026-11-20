@@ -115,10 +115,10 @@ test("Zelda adds a passkey, reads her backup codes once, renames it, asks again 
     await fresh.close();
   }
 
-  // Removed, with the words for the last one, and the backup codes go with it.
+  // Removed, with the words for the last one, and the backup codes go with it. The proof the passkey made above still
+  // counts (a sign-in elsewhere moves its `last_used_at`, never when it came into force), so the box asks nothing.
   await page.reload();
-  await box.getByRole("button", { name: COPY.usePasskey }).click();
-  await expect(box.getByText("Thank you, that's you.")).toBeVisible();
+  await expect(box.getByRole("button", { name: COPY.usePasskey })).toHaveCount(0);
   await expect(box.getByText(COPY.passkeyRemoveLastWords)).toBeVisible();
   await box.getByRole("button", { name: /^Remove/ }).click();
   await expect(box.getByText(COPY.passkeyRemovedLast)).toBeVisible();

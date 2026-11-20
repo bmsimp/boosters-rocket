@@ -654,3 +654,101 @@ test.describe("11. the authenticator app, by keyboard: asking again, the set-up,
     ringsShown();
   });
 });
+
+test.describe("12. passkeys, by keyboard: asking again, adding one, the backup codes copied, renaming and cancelling, asking again with it, removing it", () => {
+  // A passkey is added for Zelda here, with Playwright's own authenticator (`context.credentials`, installed before the
+  // page touches navigator.credentials), through the page's own presses, and removed by keyboard as the journey's last
+  // step; her passkeys, backup codes and counts are removed before and after too, for a run cut off midway (the seed
+  // gives nobody a passkey), and the seeded session's proof is put back as it was.
+  let putProofBack: () => Promise<void> = async () => undefined;
+  const zeldasPasskeys = () => sql`SELECT id FROM parent_auth_passkey WHERE user_id = (SELECT id FROM parent_auth_user WHERE parent_id = (SELECT id FROM parent WHERE email = 'zelda@example.com'))`;
+  const removeZeldasPasskeys = () => sql`DELETE FROM parent_auth_passkey WHERE user_id = (SELECT id FROM parent_auth_user WHERE parent_id = (SELECT id FROM parent WHERE email = 'zelda@example.com'))`;
+  test.beforeAll(async () => {
+    await removeZeldasPasskeys();
+    await removeZeldaSecondSteps(sql);
+    await clearZeldaCounts(sql);
+    putProofBack = await keepZeldaProof(sql);
+  });
+  test.afterAll(async () => {
+    await removeZeldasPasskeys();
+    await removeZeldaSecondSteps(sql);
+    await clearZeldaCounts(sql);
+    await putProofBack();
+  });
+
+  test("the password and the emailed code, a name and Add, the backup codes copied, Rename then Cancel and Save, Use your passkey, then Remove", async ({ context, page }) => {
+    test.setTimeout(120_000);
+    await sql`DELETE FROM rate_limit_event`;
+    await setZeldaProof(sql, false);
+    sink.messages.length = 0;
+    await context.credentials.install();
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await context.addCookies([parentSessionCookie()]);
+    await page.goto("/family/sign-in");
+    const box = page.getByRole("region", { name: "Passkeys" });
+
+    // Asking again inside the box: its password field, Continue, then the emailed code (no passkey or app yet). The
+    // box's own thanks takes the focus, and the name field is the next stop.
+    await tabTo(page, box.locator('input[name="password"][autocomplete="current-password"]'), { max: 80 });
+    await page.keyboard.type(E2E_SIGNIN.password);
+    await page.keyboard.press("Tab");
+    await expect(box.getByRole("button", { name: "Continue" })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(box.getByLabel("6-digit code")).toBeFocused();
+    await page.keyboard.type(await codeFor(sql, sink, "zelda@example.com"));
+    await page.keyboard.press("Enter");
+    await expect(box.getByRole("status").filter({ hasText: "Thank you, that's you." }).first()).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(box.getByLabel("A name for it (optional)")).toBeFocused();
+    await page.keyboard.type("Zelda keyboard key");
+    await page.keyboard.press("Tab");
+    await expect(box.getByRole("button", { name: "Add a passkey", exact: true })).toBeFocused();
+    await page.keyboard.press("Enter");
+
+    // Added: the words above the ten backup codes take the focus, and Copy copies the ten alone, one per line.
+    await expect(box.getByRole("status").filter({ hasText: "Your passkey is added, and here are your backup codes." })).toBeFocused();
+    const codes = (await box.getByRole("list", { name: "Your backup codes" }).getByRole("listitem").allTextContents()).map((c) => c.trim());
+    expect(codes).toHaveLength(10);
+    await tabTo(page, box.getByRole("button", { name: "Copy the backup codes" }));
+    await page.keyboard.press("Enter");
+    await expect(box.getByText("Copied.")).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(codes.join("\n"));
+    ringsShown();
+
+    // Rename: its field takes the focus; Cancel gives the focus back to Rename; Rename again, a new name, Enter: the
+    // answer takes the focus.
+    const rename = box.getByRole("button", { name: /^Rename/ });
+    await tabTo(page, rename);
+    await page.keyboard.press("Enter");
+    const field = box.getByLabel("New name");
+    await expect(field).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(box.getByRole("button", { name: "Save the name" })).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(box.getByRole("button", { name: "Cancel" })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(rename).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(field).toBeFocused();
+    await page.keyboard.press("ControlOrMeta+A");
+    await page.keyboard.type("Zelda renamed key");
+    await page.keyboard.press("Enter");
+    await expect(box.locator("div[tabindex='-1']").filter({ hasText: "The passkey's name is saved." })).toBeFocused();
+    await expect(box.getByText("Zelda renamed key")).toBeVisible();
+
+    // The add stamped no proof, so removing asks again: Use your passkey is reached, and its thanks takes the focus.
+    await tabTo(page, box.getByRole("button", { name: "Use your passkey" }));
+    await page.keyboard.press("Enter");
+    await expect(box.getByRole("status").filter({ hasText: "Thank you, that's you." }).first()).toBeFocused();
+
+    // Remove sits above the thanks, on the passkey, with the words for the last one: Shift+Tab reaches it, and its
+    // answer takes the focus.
+    await expect(box.getByText("This is your only passkey.")).toBeVisible();
+    await tabTo(page, box.getByRole("button", { name: /^Remove/ }), { back: true });
+    await page.keyboard.press("Enter");
+    await expect(box.locator("div[tabindex='-1']").filter({ hasText: "That passkey is removed" })).toBeFocused();
+    expect(await zeldasPasskeys()).toHaveLength(0);
+    await tabsOut(page);
+    ringsShown();
+  });
+});

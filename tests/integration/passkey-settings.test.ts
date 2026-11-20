@@ -3,12 +3,26 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 type Msg = { to: string; subject: string; text: string; html: string };
 const outbox = vi.hoisted(() => [] as Msg[]);
 vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", buildSender: async () => async (m: Msg) => { outbox.push(m); } }));
+/**
+ * A fault injected from outside src/: while `skipTaken` is above 0, the portal's read of whether a credential is held
+ * already (credentialTaken(), called by the add's afterVerification) answers no, once per count, so a second add of one
+ * credential reaches the library's insert, which the unique index refuses, as two adds at once would.
+ */
+const fault = vi.hoisted(() => ({ skipTaken: 0 }));
+vi.mock("@/lib/parents/passkeys", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/parents/passkeys")>();
+  return { ...actual, credentialTaken: async (...args: Parameters<typeof actual.credentialTaken>) => {
+    if (fault.skipTaken > 0) { fault.skipTaken--; return false; }
+    return actual.credentialTaken(...args);
+  } };
+});
 
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, parent, parentAuthPasskey, parentAuthSession, parentAuthUser, parentAuthVerification, parentBackupCode } from "@/lib/db/schema";
 import { forgetUnrecordedPasskey, removeMyPasskey, renameMyPasskey } from "@/lib/parents/passkey-settings";
-import { turnOffMyAuthenticator } from "@/lib/parents/authenticator-settings";
+import { passkeysAddedBefore } from "@/lib/parents/passkeys";
+import { remakeMyBackupCodes, turnOffMyAuthenticator } from "@/lib/parents/authenticator-settings";
 import { changeMyPassword } from "@/lib/parents/signin-settings";
 import { sessionProvedRecently } from "@/lib/parents/asking-again";
 import { SIGNIN_SETTINGS_COPY as COPY } from "@/lib/parents/signin-settings-copy";
@@ -54,7 +68,7 @@ const sessionsOf = async (authUserId: string) => (await db.select({ id: parentAu
   .from(parentAuthSession).where(eq(parentAuthSession.userId, authUserId))).sort((a, b) => String(a.id).localeCompare(String(b.id)));
 const proveNow = (sessionId: string) => db.update(parentAuthSession).set({ strongAt: new Date() }).where(eq(parentAuthSession.id, sessionId));
 
-beforeEach(async () => { await resetDb(); outbox.length = 0; await seedWorkingMail(); await seedParentSettings(SIGNINS_ON); });
+beforeEach(async () => { await resetDb(); outbox.length = 0; fault.skipTaken = 0; await seedWorkingMail(); await seedParentSettings(SIGNINS_ON); });
 
 describe("the registration options (/passkey/generate-register-options)", () => {
   it("are refused, making no challenge row, without a session, without a recent proof, for a blocked person, with sign-ins off, and with any query", async () => {
@@ -297,5 +311,101 @@ describe("one person's passkeys, never another's (as family A's parent, with fam
     expect((await passkeyAgain(k, "")).body).toEqual({ ok: false, error: "rejected" });
     expect((await passkeyRows(ana.id))[0]!.lastUsedAt).toBeNull();
     expect(await audits("signin.proved_again")).toEqual([]);
+  });
+});
+
+describe("what the review of SI-7b found", () => {
+  it("a credential the unique index refuses (two adds of it at once, both past the portal's check) is answered as already added", async () => {
+    const ana = await seedPerson("Ana");
+    const s = await signedIn(ana);
+    const key = makePasskeyKey();
+    expect((await addPasskey(s.cookie, { key })).body.ok).toBe(true);
+    await proveNow(s.sessionId);
+    fault.skipTaken = 1;
+    expect((await addPasskey(s.cookie, { key })).body).toEqual({ ok: false, error: "already_added" });
+    expect(await passkeyRows(ana.id)).toHaveLength(1);
+    expect((await audits("parent.passkey.add_refused")).map((a) => a.reason)).toEqual(["already_added"]);
+  });
+
+  it("an add whose session's proof ran out between the options and the answer is asked to prove it again, and adds nothing", async () => {
+    const ana = await seedPerson("Ana");
+    const s = await signedIn(ana);
+    const options = await registerOptions({ cookie: s.cookie });
+    expect(options.res.status).toBe(200);
+    await db.update(parentAuthSession).set({ strongAt: null }).where(eq(parentAuthSession.id, s.sessionId));
+    const { registrationFor } = await import("../helpers/passkey-keys");
+    const { ORIGIN, RP_ID } = await import("../helpers/passkey");
+    const answer = registrationFor(makePasskeyKey(), options.body.challenge!, { origin: ORIGIN, rpId: RP_ID });
+    expect((await postAdd(answer, { cookie: [s.cookie, options.challengeCookie].filter(Boolean).join("; ") })).body).toEqual({ ok: false, error: "prove_again" });
+    expect(await passkeyRows(ana.id)).toEqual([]);
+    expect((await audits("parent.passkey.add_refused")).map((a) => a.reason)).toEqual(["not_allowed"]);
+  });
+
+  it("a passkey's first is the one none of theirs was added before, by when it was added and then its id, so two adds at once make one set of codes", async () => {
+    const ana = await seedPerson("Ana");
+    const at = new Date(Date.now() - 2 * 60 * 60_000);
+    const older = await seedPasskey(ana.id, { createdAt: at });
+    const twinA = await seedPasskey(ana.id, { createdAt: new Date(at.getTime() + 60_000) });
+    const twinB = await seedPasskey(ana.id, { createdAt: new Date(at.getTime() + 60_000) });
+    const [low, high] = [twinA.rowId, twinB.rowId].sort();
+    expect(await passkeysAddedBefore(db, ana.id, older.rowId)).toBe(0);
+    expect(await passkeysAddedBefore(db, ana.id, low!)).toBe(1);
+    expect(await passkeysAddedBefore(db, ana.id, high!)).toBe(2);
+    // Another person's passkeys never count.
+    const ben = await seedPerson("Ben", "F2");
+    const bens = await seedPasskey(ben.id, { createdAt: new Date(at.getTime() - 60_000) });
+    expect(await passkeysAddedBefore(db, ben.id, bens.rowId)).toBe(0);
+    expect(await passkeysAddedBefore(db, ana.id, older.rowId)).toBe(0);
+  });
+
+  it("under Strict, two removes of a person's two passkeys at once leave one: they go one at a time, and the second is the last", async () => {
+    const ana = await seedPerson("Ana");
+    const s = await signedIn(ana);
+    const one = await seedPasskey(ana.id);
+    const two = await seedPasskey(ana.id);
+    await seedParentSettings({ level: "strict" });
+    await proveNow(s.sessionId);
+    const answers = await Promise.all([removeMyPasskey(s.ctx, one.rowId), removeMyPasskey(s.ctx, two.rowId)]);
+    expect(answers.filter((r) => r.ok)).toEqual([{ ok: true, message: COPY.passkeyRemoved }]);
+    expect(answers.filter((r) => !r.ok)).toEqual([{ ok: false, errors: [COPY.passkeyRemoveStrict] }]);
+    expect(await passkeyRows(ana.id)).toHaveLength(1);
+  });
+
+  it("under Standard, two removes at once of a person's two passkeys take the backup codes with the last", async () => {
+    const ana = await seedPerson("Ana");
+    const s = await signedIn(ana);
+    const one = await seedPasskey(ana.id);
+    const two = await seedPasskey(ana.id);
+    await seedBackupCodes(ana.id);
+    await proveNow(s.sessionId);
+    const answers = await Promise.all([removeMyPasskey(s.ctx, one.rowId), removeMyPasskey(s.ctx, two.rowId)]);
+    expect(answers.map((r) => (r.ok ? r.message : "refused")).sort()).toEqual([COPY.passkeyRemoved, COPY.passkeyRemovedLast].sort());
+    expect(await passkeyRows(ana.id)).toEqual([]);
+    expect(await backupCodesOf(ana.id)).toEqual([]);
+  });
+
+  it("new backup codes are made beside a passkey alone (no app), shown once", async () => {
+    const ana = await seedPerson("Ana");
+    const s = await signedIn(ana);
+    await seedPasskey(ana.id);
+    await seedBackupCodes(ana.id);
+    await proveNow(s.sessionId);
+    const r = await remakeMyBackupCodes(s.ctx);
+    if (!r.ok) throw new Error("new backup codes should be made beside a passkey");
+    expect(r.message).toBe(COPY.newCodesMade);
+    expect(r.codes).toHaveLength(10);
+    expect(await backupCodesOf(ana.id)).toHaveLength(10);
+  });
+
+  it("/portal-passkey/again for a blocked person stamps nothing and marks no use", async () => {
+    const ana = await seedPerson("Ana");
+    const s = await signedIn(ana);
+    const k = await seedPasskey(ana.id);
+    await db.update(parentAuthSession).set({ strongAt: null }).where(eq(parentAuthSession.id, s.sessionId));
+    await db.update(parent).set({ blocked: true }).where(eq(parent.id, ana.id));
+    expect((await passkeyAgain(k, s.cookie)).body).toEqual({ ok: false, error: "rejected" });
+    expect(await audits("signin.proved_again")).toEqual([]);
+    expect((await sessionsOf(ana.authUserId)).map((r) => r.strongAt)).toEqual([null]);
+    expect((await passkeyRows(ana.id))[0]!.lastUsedAt).toBeNull();
   });
 });
