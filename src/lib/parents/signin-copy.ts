@@ -1,6 +1,10 @@
 // The sign-in page's fixed sentences (spec §1, and the sign-in release, slice SI-3b). No imports: the client component uses this file.
-/** The page's lede, above the form: what signing in is for, and that a new device takes a code too. */
-export const SIGNIN_LEDE = "Sign in with your email and password to see your students, what's owed, the forms to sign and the volunteer shifts. On a device we don't know yet, we'll also email you a code.";
+/**
+ * The page's lede, above the form: what signing in is for, and that a new device takes a code too. Drawn before anyone
+ * is known, so it says nothing of where the code comes from (an email, or since slice SI-6b a guardian's authenticator
+ * app): the step after the password says which.
+ */
+export const SIGNIN_LEDE = "Sign in with your email and password to see your students, what's owed, the forms to sign and the volunteer shifts. On a device we don't know yet, we'll also ask for a code.";
 /**
  * One answer for every refusal at the password step but too many tries (an address nobody holds, no password yet, a
  * wrong password, a blocked person, nobody the club lets in, sign-ins off), so the page can't tell anyone whether an
