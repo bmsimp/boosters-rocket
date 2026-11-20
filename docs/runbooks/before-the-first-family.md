@@ -460,6 +460,13 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    for the line.
 5. **The products and services:** on a payment requirement's page, **Read the list from QuickBooks**.
    **Pass:** the club's items are listed and a requirement can name its own. **If not:** note what the page said.
+6. **Read Accounting links against the real books** (`/staff/links`, Accounting links under Families; it takes the
+   permission to link families to accounting). It only shows: nothing on it links or changes anything.
+   **Pass:** every family you brought in reads **Linked**, confirmed by you, on the day you pressed; a family you added
+   by hand reads **Suggested** only where one of its guardians signs in with an address that really is on that
+   family's customer (or on a parent record under it), and otherwise **Several possible** or **No match**; and the
+   count of customers with no family matches Reconciliation's list. **If not:** note the family, the status it read and
+   what you expected; a suggestion that names the wrong customer is the most important to report.
 
 ## 7. A pilot with a few families
 
@@ -508,7 +515,9 @@ work another. Any time before the pilot.
    ships (open question 8 of the app-owned families spec) the club can't change it for them either: a change made in
    QuickBooks no longer changes anyone's sign-in address.
 6. The staff menu's groups (Families, Season, Money, Admin, with Reconciliation under Money and Settings as one entry)
-   and its labels ("Signed forms", "Volunteer credit", "Reconciliation"); setup asks for the club before the first
+   and its labels ("Signed forms", "Volunteer credit", "Reconciliation"); the mapping screen's name and place,
+   "Accounting links" under Families after Parents, shown to whoever may link families to accounting and see the
+   roster; setup asks for the club before the first
    Admin; a role saved from the checklist no longer takes up new permissions by itself.
 7. A buy-out is billed in the company's home currency with no due date sent; credit earned after a buy-out still counts
    toward the requirement but doesn't lower the invoice; a student moved in QuickBooks is no longer followed (stage 3's
