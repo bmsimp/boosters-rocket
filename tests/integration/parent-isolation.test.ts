@@ -6,6 +6,7 @@ import { createElement } from "react";
 import { resetDb } from "../helpers/db";
 import { moneyMarkers, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { familyRecord, studentRecord } from "../helpers/volunteer";
+import { relinkFamily } from "../helpers/links";
 
 /**
  * The gate every parent page passes through: one family never sees another's data.
@@ -220,5 +221,33 @@ describe("one family never sees another's data on a parent page", () => {
       const leaked = markersIn(outcome.html, other.markers);
       expect(leaked, `${file}, rendered for ${viewer.spec.family.name}, contains data of ${other.spec.family.name}: ${leaked.join(", ")}.`).toEqual([]);
     });
+  });
+});
+
+// Stage 4's slice M3b: a family unlinked from its customer and linked to another (relinkFamily(), tests/helpers/links.ts)
+// sees nothing of the other family on any parent page, nor any invoice of its own stored before; and the other family
+// sees nothing of it. Family B is the one relinked: its buy-out is paid, so its unlink goes through (A's is invoiced, which
+// refuses one). Nothing after the relink runs the import, which would make a second family for B's old customer.
+describe("a relinked family never sees another family's data, nor its own figures from before", () => {
+  let a: SeededParent, b: SeededParent;
+  beforeAll(async () => {
+    await resetDb();
+    ({ a, b } = await seedTwoFamilies());
+    await relinkFamily(b.identity.familyId, { qboId: "QBO-THIRD-9901", name: "Third Family", typeQboId: "F" });
+  }, 60_000);
+
+  it.each(pages.map((p) => [p.route, p.file] as const))("%s", async (route, file) => {
+    const page = await load(file);
+    const bOldInvoices = (b.spec.invoices ?? []).map((i) => i.number);
+    for (const [viewer, other] of [[a, b], [b, a]] as const) {
+      asParent(viewer.identity);
+      const outcome = await pageOutcome(page, { params: paramsFor(route, viewer) });
+      if (!("html" in outcome)) {
+        if (!isDynamic(route)) expect.fail(`${file} ${describeOutcome(outcome)} for ${viewer.spec.family.name}'s parent after B's relink; it must render.`);
+        continue;
+      }
+      expect(markersIn(outcome.html, other.markers), `${file} for ${viewer.spec.family.name} after B's relink`).toEqual([]);
+      if (viewer === b) expect(markersIn(outcome.html, bOldInvoices), `${file} shows B an invoice stored before its relink`).toEqual([]);
+    }
   });
 });

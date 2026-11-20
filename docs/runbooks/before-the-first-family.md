@@ -465,7 +465,7 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    **Pass:** the club's items are listed and a requirement can name its own. **If not:** note what the page said.
 6. **Read Accounting links against the real books** (`/staff/links`, Accounting links under Families; it takes the
    permission to link families to accounting). It sends nothing to the books: a family the portal has is linked there
-   to its customer, or left unlinked, and nothing else on it changes anything.
+   to its customer, left unlinked, or unlinked again, and nothing else on it changes anything.
    **Pass:** every family you brought in reads **Linked**, confirmed by you, on the day you pressed; a family you added
    on Families while QuickBooks was connected reads **Linked**, made in the books from the portal, by you; a family
    added with no customer (by someone who may not link families, or while QuickBooks was disconnected) reads
@@ -481,7 +481,10 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    of the suggestions until you undo it. With several Suggested rows, **Confirm all exact email matches** above the list
    links every Suggested row the filter shows, its count on the button, each as its own **Confirm** would; narrow the
    list with the status or the search first to link fewer. A link carried over from the roster (on an installation
-   that had families before) offers **Confirm this link** in its row, which records it as checked by you. Reconciliation
+   that had families before) offers **Confirm this link** in its row, which records it as checked by you. A linked family's row
+   offers **Unlink from the books**: unlink a test family you linked, and its row reads Suggested or No match again,
+   its guardians' Home and Payments say the club hasn't connected their payments yet, and Balances counts it in one
+   line; link it again with **Confirm** or **Pick a different customer**, and its money is read afresh. Reconciliation
    refuses **Create a family from this** for a customer Accounting links suggests or lists for a family the portal has,
    and its row names that family and links to Accounting links; don't press **Create in QuickBooks and link** for a
    family whose customer is already in the books (it would make a second customer); and the

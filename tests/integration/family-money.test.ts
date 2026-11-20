@@ -24,12 +24,16 @@ import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, auditLog, family, familyMoney, qboConnection, qboCustomer, setting } from "@/lib/db/schema";
-import { asAppFamilyId } from "@/lib/families/ids";
+import { asAppFamilyId, type AppFamilyId } from "@/lib/families/ids";
 import { loadFamilyMoney, MAX_LIVE_READS, readFamilyForRun, RELINKED, RETRY_AFTER_FAILURE_MS } from "@/lib/money/family-money";
 import { saveShape } from "@/lib/roster/shape";
+import { linkFamilyToCustomer, unlinkFamily } from "@/lib/accounting/link-writes";
+import { loadAccountingLinks } from "@/lib/accounting/mapping";
+import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import { calendarDayIn } from "@/lib/settings/club";
-import { resetDb } from "../helpers/db";
+import { resetDb, untilALockIsAwaited } from "../helpers/db";
+import { staffWith } from "../helpers/roster-writes";
 import { syncAppRecords } from "../helpers/app-records";
 import { ageMoney, connectCompany, familyRecordOf, invoiceQueries, moneyRow, setFreshSeconds, stubInvoice as inv } from "../helpers/money";
 import { FAMILY_A, MONEY_REALM, seedFamilyMoney } from "../helpers/parent";
@@ -938,5 +942,88 @@ describe("a read never keeps another link's invoices (stage 4's slice M3b)", () 
     expect(await readFamilyForRun(familyId, "10", { pace })).toEqual({ ok: false, code: RELINKED });
     expect(stub.apiCalls()).toEqual([]);
     expect(await db.select().from(familyMoney)).toEqual([]);
+  });
+});
+
+describe("an unlink and a relink never show a family another link's figures (stage 4's slice M3b)", () => {
+  beforeEach(() => { linkHook.after = null; });
+  let staff: Awaited<ReturnType<typeof staffWith>>;
+  const op = () => ({ actor: { door: "staff" as const, id: staff.id, label: staff.email }, ip: null, permission: "Accounting.Link.ReadWrite", staffUserId: staff.id });
+  /** Unlink from the books, as the family's row on Accounting links offers it now. */
+  const unlinkOf = async (familyId: AppFamilyId) => {
+    const row = (await loadAccountingLinks()).rows.find((r) => String(r.familyId) === String(familyId))!;
+    return unlinkFamily({ familyId: String(familyId), linkId: row.unlink!.linkId, stamp: row.unlink!.stamp }, await currentRosterTag(), op());
+  };
+  /** Pick a different customer, then Confirm, as the confirm step offers it now. */
+  const pick = async (familyId: AppFamilyId, customerId: string) => {
+    const step = (await loadAccountingLinks()).step(String(familyId), customerId);
+    if (!step.ok) throw new Error(`no confirm step for ${customerId}: ${step.why}`);
+    return linkFamilyToCustomer({ familyId: String(familyId), customerId, chosen: step.offer.chosen, stamp: step.offer.stamp }, await currentRosterTag(), op());
+  };
+  /** A family customer the books have that no family record is linked to: written to the cache with no import after it. */
+  const customerWithNoFamily = async (qboId: string, name: string) => {
+    await db.insert(qboCustomer).values({ qboId, displayName: name, active: true, parentQboId: null, typeQboId: "F", syncToken: "0" });
+    stub.customers.push({ Id: qboId, DisplayName: name, BalanceWithJobs: 0 });
+  };
+
+  it("an unlink forgets the figures at once, and the family reads as not connected, with nothing asked of QuickBooks", async () => {
+    await twoFamilies();
+    await connectCompany(stub);
+    staff = await staffWith("linker@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
+    stub.invoices = [inv("1", "10")];
+    const a = (await familyRecordOf("10"))!;
+    expect((await loadFamilyMoney(a)).figures).toMatchObject({ totalCents: 8500 });
+    expect(await db.select().from(familyMoney).where(eq(familyMoney.familyId, a))).toHaveLength(1);
+    expect(await unlinkOf(a)).toMatchObject({ ok: true });
+    expect(await db.select().from(familyMoney).where(eq(familyMoney.familyId, a))).toEqual([]);
+    const asked = invoiceQueries(stub).length;
+    expect(await loadFamilyMoney(a)).toMatchObject({ figures: null, notConnected: true });
+    expect(invoiceQueries(stub)).toHaveLength(asked);
+    expect(await db.select().from(familyMoney).where(eq(familyMoney.familyId, a))).toEqual([]);
+  });
+
+  it("relinked from one customer to another, a family reads the new one's invoices fresh, never the old one's; and the old customer, linked to another family, is read fresh for it", async () => {
+    await twoFamilies();
+    await connectCompany(stub);
+    staff = await staffWith("linker@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
+    await customerWithNoFamily("30", "Okafor Family");
+    stub.invoices = [inv("1", "10"), inv("9", "30", { Balance: 40 })];
+    const a = (await familyRecordOf("10"))!;
+    expect(numbers((await loadFamilyMoney(a)).figures!.open)).toEqual(["INV-1"]);
+    expect(await unlinkOf(a)).toMatchObject({ ok: true });
+    expect(await pick(a, "30")).toMatchObject({ ok: true });
+    const relinked = await loadFamilyMoney(a);
+    expect(relinked.figures).toMatchObject({ current: true, totalCents: 4000 });
+    expect(numbers(relinked.figures!.open)).toEqual(["INV-9"]);
+    // Birch, a family with no link, linked to the old customer 10: read fresh for it, never from A's row.
+    const [birch] = await db.insert(family).values({ name: "Birch Family", active: true }).returning();
+    const b: AppFamilyId = birch!.id;
+    expect(await pick(b, "10")).toMatchObject({ ok: true });
+    const asked = invoiceQueries(stub).length;
+    const theirs = await loadFamilyMoney(b);
+    expect(invoiceQueries(stub).length).toBe(asked + 1);
+    expect(numbers(theirs.figures!.open)).toEqual(["INV-1"]);
+    expect(numbers((await loadFamilyMoney(a)).figures!.open)).toEqual(["INV-9"]);
+  });
+
+  it("an unlink during a live read waits for the read, then forgets what it kept", async () => {
+    await twoFamilies();
+    await connectCompany(stub);
+    staff = await staffWith("linker@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
+    stub.invoices = [inv("1", "10")];
+    const a = (await familyRecordOf("10"))!;
+    const row = (await loadAccountingLinks()).rows.find((r) => String(r.familyId) === String(a))!;
+    const tag = await currentRosterTag();
+    let unlinking: Promise<unknown> | null = null;
+    // As QuickBooks is asked, the unlink starts; it waits for the family's money lock, which the read holds.
+    stub.onApiRequest = async () => {
+      if (unlinking) return;
+      unlinking = unlinkFamily({ familyId: String(a), linkId: row.unlink!.linkId, stamp: row.unlink!.stamp }, tag, op());
+      await untilALockIsAwaited();
+    };
+    await loadFamilyMoney(a);
+    expect(await unlinking).toMatchObject({ ok: true });
+    expect(await db.select().from(familyMoney).where(eq(familyMoney.familyId, a))).toEqual([]);
+    expect(await db.select().from(accountingLink).where(eq(accountingLink.familyId, a))).toEqual([]);
   });
 });
