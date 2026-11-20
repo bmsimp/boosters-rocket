@@ -35,6 +35,11 @@ const nextConfig: NextConfig = {
   // The Docker image sets NEXT_OUTPUT=standalone; local `pnpm start` and CI e2e keep the default output.
   ...(process.env.NEXT_OUTPUT === "standalone" ? { output: "standalone" as const } : {}),
   poweredByHeader: false,
+  // Two copies of @peculiar/x509 and its ASN.1 schema store are installed: ours (3.1.0, the staff sign-in certificate) and
+  // the passkey library's (1.14.3). Bundled into one chunk, a certificate's schema is looked
+  // up in the other copy's store and generating it fails ("Cannot get schema for 'sP' target"). Left to Node, each is
+  // loaded from its own package with its own store.
+  serverExternalPackages: ["@peculiar/x509", "@better-auth/passkey"],
   env: { BR_BUILD_VERSION: buildVersion() },
   async headers() {
     return [
