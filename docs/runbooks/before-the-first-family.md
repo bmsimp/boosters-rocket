@@ -471,8 +471,10 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    linked to (or on a parent record under it), and otherwise **Several possible** or **No match**. For such a family,
    open its row: a Suggested one lists the students **Confirm** would link with it (a name on exactly one student on
    each side) and those it would leave; press **Confirm** where the customer really is that family's, and it reads
-   **Linked**, confirmed by you, the students left shown among its differences, and its money is read at its next
-   page load. A Several possible or No match family takes **Pick a different customer**, from the customers no family
+   **Linked**, confirmed by you, or **Linked, with differences** while anything is left over: a student left is shown
+   among its differences (an inactive student customer left is only counted on the row), and, in books with a parent
+   type, so is each guardian whose own Parent customer isn't linked yet (Confirm never links a guardian's), which is
+   every confirmed Suggested family there. Its money is read at its next page load. A Several possible or No match family takes **Pick a different customer**, from the customers no family
    is linked to, with the same confirm step; **Leave unlinked** keeps a family with no customer in the books yet out
    of the suggestions until you undo it. Don't press **Create a family from this** for a customer Accounting links
    suggests or lists for a family the portal has (it would make a second family), nor **Create in QuickBooks and
