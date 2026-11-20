@@ -25,6 +25,14 @@ describe("proposeStudents", () => {
     expect(pairKeys(p)).toEqual([`${String(rec("1", "").id)}=12`, `${String(rec("2", "").id)}=13`]);
   });
 
+  it("pairs a name whose accent is written decomposed on one side with the same name composed on the other", () => {
+    // "José" as "Jose" and a combining acute accent (U+0301) in the portal, and as one "é" (U+00E9) in the books.
+    const decomposed = "Jose\u0301 Rivera", composed = "Jos\u00e9 rivera";
+    expect(decomposed).not.toBe("Jos\u00e9 Rivera");
+    const p = proposeStudents({ students: true, records: [rec("1", decomposed)], customers: [cust("13", composed)] });
+    expect(ids(p)).toEqual({ pairs: [`${decomposed}=${composed}`], recordsLeft: [], customersLeft: [] });
+  });
+
   it("leaves two records of one name, and the customer of that name, unpaired", () => {
     const p = proposeStudents({ students: true, records: [rec("1", "Sam Lee"), rec("2", "sam lee")], customers: [cust("30", "Sam Lee")] });
     expect(ids(p)).toEqual({ pairs: [], recordsLeft: ["Sam Lee", "sam lee"], customersLeft: ["Sam Lee"] });

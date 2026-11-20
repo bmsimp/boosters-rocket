@@ -15,7 +15,7 @@ import { accountingLink, auditLog, family, familyMoney, guardian, parent, qboCon
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
 import { AccessDenied } from "@/lib/guards";
 import { loadAccountingLinks, type LinkRow, type LinksView } from "@/lib/accounting/mapping";
-import { LINK_COPY, leaveUnlinked, linkFamilyToCustomer, undoLeaveUnlinked } from "@/lib/accounting/link-writes";
+import { confirmedWords, LINK_COPY, leaveUnlinked, linkFamilyToCustomer, undoLeaveUnlinked } from "@/lib/accounting/link-writes";
 import { loadFamilyMoney } from "@/lib/money/family-money";
 import { familyFromCustomer } from "@/lib/roster/no-family";
 import { loadOpenWrites, runWriteQueue } from "@/lib/roster/queue";
@@ -150,7 +150,8 @@ describe("Confirm on a Suggested row", () => {
     expect(r).toEqual({ ok: true, message: "The Patels is linked to “Patel Family” in the books. 2 students linked with it: Asha Patel and ravi patel."
       + " Left with no link: Mia Patel, of the portal's students. Left with no record in the portal: Dev Patel, of the student customers under it in the books."
       + " Whoever was left shows with the family's row on this page, among its differences. Nothing was sent to the books."
-      + " Its money is read from the books the next time it is looked at (on a parent's Home or Payments page, or its Balances page) or at the daily read of every family's invoices, while the books are connected."
+      + " Its money is read from the books the next time a parent opens Home or Payments, when someone presses “Read every family now” on Balances, or at the daily read of every family's invoices, while the books are connected;"
+      + " its Balances page shows the figures once one of those has read them."
       + " Its guardians' own records in the books aren't linked by this." });
     // Nothing asked of QuickBooks, and no record, guardian row, person, queue item or money row changed.
     expect(stub.apiCalls()).toEqual([]);
@@ -223,6 +224,27 @@ describe("Several possible and Pick a different customer", () => {
     expect(await linkFamilyToCustomer({ familyId: String(patels), customerId: "75", chosen: "several", stamp: offer.stamp }, tag, linkOp())).toMatchObject({ ok: true });
     expect((await linksOfFamily(patels)).map((l) => l.customerId)).toEqual(["75"]);
     expect((await auditsOf("accounting.link.confirm"))[0]!.after).toMatchObject({ chosen: "several", customerQboId: "75" });
+  });
+
+  it("presses Pick a different customer on a Several possible row, linking a customer of the pool that is none of its candidates", async () => {
+    await readAgain(qc("70", "Patel Family", "1", mail("asha@example.com")), qc("75", "Patel Household", "1", mail("ravi@example.com")), qc("90", "Quiet Family", "1"));
+    const patels = await unlinkedFamily("The Patels");
+    await guardianIn(patels, "Asha Patel", "asha@example.com");
+    await guardianIn(patels, "Ravi Patel", "ravi@example.com");
+    const view = await loadAccountingLinks();
+    expect(rowOf(view, "The Patels")).toMatchObject({ status: { key: "several" }, offers: { leave: true, pick: true, undo: false } });
+    const step = view.step(String(patels), "90");
+    expect(step).toMatchObject({ ok: true, offer: { chosen: "picked" } });
+    // The same step's stamp, sent as a candidate's, is refused: the way it was chosen is sealed.
+    const stamp = (step as { offer: { stamp: string } }).offer.stamp;
+    expect(await linkFamilyToCustomer({ familyId: String(patels), customerId: "90", chosen: "several", stamp }, tag, linkOp())).toEqual({ ok: false, errors: [LINK_COPY.rowChanged] });
+    expect(await linkFamilyToCustomer({ familyId: String(patels), customerId: "90", chosen: "picked", stamp }, tag, linkOp())).toMatchObject({ ok: true });
+    expect((await linksOfFamily(patels)).map((l) => l.customerId)).toEqual(["90"]);
+    const rows = (await auditsOf("accounting.link.confirm")).filter((a) => a.targetId === String(patels));
+    expect(rows.map((a) => a.after)).toMatchObject([{ chosen: "picked", customerQboId: "90" }]);
+    // Its two candidates stay in the pool, linked to no family.
+    expect(await familyLinksOf("70")).toEqual([]);
+    expect(await familyLinksOf("75")).toEqual([]);
   });
 
   it("picks for a No match row, and for a Several possible row, from the pool", async () => {
@@ -487,6 +509,9 @@ describe("never a wrong link", () => {
       });
     });
     expect(await press()).toEqual({ ok: false, errors: [LINK_COPY.createSending] });
+    // Leave unlinked is refused the same way while the family is being made, setting no mark.
+    expect(await leaveUnlinked(String(patels), tag, linkOp())).toEqual({ ok: false, errors: [LINK_COPY.createSending] });
+    expect(await markOf(patels)).toEqual({ at: null, by: null });
     release();
     await held;
     // Waiting on the queue, filed under the record (another name, so its customer isn't the one a create would be found as).
@@ -517,6 +542,31 @@ describe("after a confirm", () => {
     expect(kept).toMatchObject({ state: "refused", notOffered: null, mayResend: true });
     // Leo's own link is his record's: never moved or touched by the confirm.
     expect(await studentLinkOf(leo)).toMatchObject({ customerId: "12", origin: "carried_over" });
+  });
+
+  it("doesn't say a kept move can now be sent while the books have the moved student's customer inactive, since Reconciliation offers no press for it", async () => {
+    const patels = await seedPatels();
+    const leo = (await db.select({ id: accountingLink.studentId }).from(accountingLink).where(and(eq(accountingLink.customerId, "12"), isNotNull(accountingLink.studentId))))[0]!.id!;
+    expect(await moveStudent(String(leo), String(patels), tag, op)).toMatchObject({ ok: true });
+    // Leo's customer made inactive in QuickBooks, then a roster read: the cache has it inactive (the roster tag is the company's, so it holds).
+    stub.customers.find((c) => c.Id === "12")!.Active = false;
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
+    const stamp = rowOf(await loadAccountingLinks(), "The Patels").confirm!.stamp;
+    const r = await linkFamilyToCustomer({ familyId: String(patels), customerId: "70", chosen: "suggested", stamp }, tag, linkOp());
+    expect(r).toMatchObject({ ok: true });
+    expect((r as { message: string }).message).not.toContain("can now be sent");
+    const [kept] = (await loadOpenWrites()).filter((i) => i.write.op === "move");
+    expect(kept).toMatchObject({ state: "refused", lastCode: NO_FAMILY_CUSTOMER, notOffered: "inactive" });
+  });
+
+  it("says where an inactive student customer left goes once the family is linked: counted on its row, never among its differences", () => {
+    const base = { family: "The Patels", customer: "Patel Family", linked: [], recordsLeft: [], keptMoves: 0 };
+    expect(confirmedWords({ ...base, customersLeft: [{ name: "Ravi Patel", active: false }] })).toContain(
+      "Left with no record in the portal: Ravi Patel (inactive in the books), of the student customers under it in the books."
+      + " That inactive student customer is counted with the family's row on this page, not listed among its differences.");
+    const both = confirmedWords({ ...base, recordsLeft: ["Mia Patel"], customersLeft: [{ name: "Dev Patel", active: true }, { name: "Ravi Patel", active: false }] });
+    expect(both).toContain("Whoever was left shows with the family's row on this page: an inactive student customer in the books in a count there, everyone else among its differences.");
+    expect(both).not.toContain("Whoever was left shows with the family's row on this page, among its differences.");
   });
 });
 
@@ -590,6 +640,37 @@ describe("who may press, and the page", () => {
     // The words of the screen, each true now.
     expect(html).toContain("A family the portal has is linked here");
     expect(html).toContain("Nothing here is sent to the books.");
+    expect(await auditsOf("accounting.link.confirm")).toEqual([]);
+  });
+
+  it("draws a Several possible row's candidates, each to look at before linking, and says on the chooser what a create given up after a try left in the books", async () => {
+    await readAgain(qc("70", "Patel Family", "1", mail("asha@example.com")), qc("75", "Patel Household", "1", mail("ravi@example.com")), qc("90", "Quiet Family", "1"));
+    const patels = await unlinkedFamily("The Patels");
+    await guardianIn(patels, "Asha Patel", "asha@example.com");
+    await guardianIn(patels, "Ravi Patel", "ravi@example.com");
+    const quiet = await unlinkedFamily("The Quiets");
+    // The Quiets' own create, given up after a try the books may have taken: they have its customer, Quiet Family (90), with no family linked to it.
+    await seedQueued({ op: "create", role: "family", name: "Quiet Family", typeQboId: "1", familyQboId: null, email: null }, { familyId: quiet, sent: true, state: "given_up", lastTriedAt: new Date() });
+    asStaff(linker);
+    const list = (html: string) => { const at = html.indexOf('id="links-list-h"'); return html.slice(at, html.indexOf("</section>", at)); };
+    const pick = (html: string) => { const at = html.indexOf('id="links-pick-h"'); return at < 0 ? null : html.slice(at, html.indexOf("</section>", at)).replaceAll("<!-- -->", ""); };
+    const html = await renderPage(AccountingLinksPage);
+    const opening = rowNamed(list(html), "The Patels")![4]!;
+    expect(opening).toContain("Possible customers:Patel Family (asha@example.com) Look at it before linking: Patel FamilyPatel Household (ravi@example.com) Look at it before linking: Patel Household");
+    expect(opening).not.toContain("Confirm: The Patels");
+    expect(opening).toContain("Leave unlinked: The Patels");
+    expect(list(html)).toContain(`href="/staff/links?pick=${String(patels)}&amp;customer=70#links-pick-h"`);
+    expect(list(html)).toContain(`href="/staff/links?pick=${String(patels)}&amp;customer=75#links-pick-h"`);
+    // A candidate's confirm step says how it was chosen and holds Confirm.
+    const candidate = pick(await renderPage(AccountingLinksPage, { searchParams: { pick: String(patels), customer: "75" } }))!;
+    expect(candidate).toContain("Link The Patels to “Patel Household”?");
+    expect(candidate).toContain("Confirm<span class=\"visually-hidden\">: The Patels</span>");
+    // The Quiets' chooser says what their given-up create left, and lists that customer in the pool.
+    const chooser = pick(await renderPage(AccountingLinksPage, { searchParams: { pick: String(quiet) } }))!;
+    expect(chooser).toContain("Making this family in the books was given up after a try the books may have taken, and they have the customer “Quiet Family” from it, with no family linked to it. If it is this family, picking it ties the two together.");
+    expect(tableRows(chooser).map((r) => r[0]).sort()).toEqual(["Patel Familyasha@example.com", "Patel Householdravi@example.com", "Quiet FamilyNo email address"]);
+    // The Patels' chooser says nothing of it: the create was filed under The Quiets.
+    expect(pick(await renderPage(AccountingLinksPage, { searchParams: { pick: String(patels) } }))).not.toContain("was given up");
     expect(await auditsOf("accounting.link.confirm")).toEqual([]);
   });
 });

@@ -160,8 +160,15 @@ const group = <T>(items: readonly T[], keyOf: (t: T) => string) => {
  * rows with their people), then the links: those of the records' company (the roster's, while the books aren't
  * connected to another; none while there is none), and beside them which student records have a student link of any
  * other company, by their ids alone (a link press never links a record linked anywhere), in one query. No row is
- * locked here: a press holds the roster lock exclusively before it calls this, which keeps every writer of these
- * tables out (./link-writes.ts).
+ * locked here: a press holds the roster lock exclusively before it calls this (./link-writes.ts), which keeps out the
+ * writers that take it, shared or exclusive: roster reads, link writes, family creates and their
+ * finish, a guardian's add, removal and reinstatement, and every change to a student or family record. Some writers of
+ * what is read here don't take it, and may commit between these reads: blocking a person (parent.blocked), a parent's
+ * confirmed change of sign-in email (parent.email, which waits for the roster lock only to write the cache, and commits
+ * without it past its wait) and giving up a queue item (write_queue.state, read by familyCreatesOnTheQueue()). None of
+ * them can make a press link anything but the customer and the student pairs its page sealed (linkStampHolds()); they
+ * only change which suggestion the press works out again, and a press whose row now reads otherwise is refused as one
+ * that changed. A reader that needs these to hold still has to lock them itself.
  */
 export async function readLinkBasics(tx?: Tx) {
   const q = tx ?? db;

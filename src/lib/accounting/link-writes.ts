@@ -33,7 +33,11 @@ const no = (...errors: string[]): LinkDone => ({ ok: false, errors });
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 const list = (names: readonly string[]) => (names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
 
-/** Shown again as it is now: every refusal's last words, since the action reloads the screen. */
+/**
+ * Shown again as it is now: the last words of every refusal made once the arguments and the page's roster tag have been
+ * checked, since the action then shows the screen again. A value that isn't one the page sends (notFromPage) and a
+ * roster tag that differs (ROSTER_MOVED) say to reload instead.
+ */
 const AGAIN = "The row is shown again as it is now.";
 /** What staff read when a press doesn't go through. Nothing is ever linked or changed in these cases. */
 export const LINK_COPY = {
@@ -41,16 +45,16 @@ export const LINK_COPY = {
   familyGone: `This family isn't an active family in the portal now, so nothing was linked or changed. ${AGAIN}`,
   linkedAlready: `This family is linked to a customer in the books already, so nothing was linked. ${AGAIN}`,
   createWaiting: `Making this family in the books is still waiting on the queue, so nothing was linked or changed. Once it has gone through, or been given up on the Reconciliation page, try again. ${AGAIN}`,
-  createSending: "This family is being made in the books at this moment, so nothing was linked or changed. Try again in a minute.",
+  createSending: `This family is being made in the books at this moment, so nothing was linked or changed. Try again in a minute. ${AGAIN}`,
   customerTaken: `That customer is linked to another family now, so nothing was linked: a customer can be linked to only one family. ${AGAIN}`,
   notInPool: `That customer isn't one the books list as a family with no family in the portal now (it may have been made inactive, put under another customer, given another type, or be about to be linked by a change on Reconciliation), so nothing was linked. ${AGAIN}`,
   rowChanged: `This family's row has changed since the page was drawn (a student added, renamed, made inactive or moved on either side, or what is suggested for it), so nothing was linked. ${AGAIN} Look it over, then press again.`,
   studentTaken: `One of the students would have been linked to a customer or a record that is linked already, so nothing was linked. ${AGAIN}`,
   alreadyLeft: `This family is left unlinked already, so nothing was changed. ${AGAIN}`,
   notLeft: `This family isn't left unlinked now, so nothing was changed. ${AGAIN}`,
-  no_company: "The portal hasn't read the club's books yet, so nothing was linked.",
-  other_company: "QuickBooks is connected to a different company than the one the roster was read from, so nothing was linked. An Admin can see why under Settings, QuickBooks.",
-  no_shape: "The membership shape isn't chosen, or names a customer type the books no longer have, so the portal can't tell which customers are families. Nothing was linked. An Admin can choose it under Settings, QuickBooks.",
+  no_company: `The portal hasn't read the club's books yet, so nothing was linked. ${AGAIN}`,
+  other_company: `QuickBooks is connected to a different company than the one the roster was read from, so nothing was linked. An Admin can see why under Settings, QuickBooks. ${AGAIN}`,
+  no_shape: `The membership shape isn't chosen, or names a customer type the books no longer have, so the portal can't tell which customers are families. Nothing was linked. An Admin can choose it under Settings, QuickBooks. ${AGAIN}`,
 } as const satisfies Record<string, string> & Record<Exclude<LinksState, "listed">, string>;
 
 /** The unique indexes a confirm may meet, the last line against a wrong link: a family's, and a student's. */
@@ -121,12 +125,15 @@ export async function linkFamilyToCustomer(raw: { familyId: unknown; customerId:
           studentsLinked: proposals.pairs.map((p) => ({ studentId: String(p.studentId), customerQboId: p.customerQboId })),
           studentsLeft: proposals.recordsLeft.map((r) => String(r.id)), studentCustomersLeft: proposals.customersLeft.map((c) => c.qboId),
           linkIds: [familyLink!.id, ...studentLinks.map((l) => l.id)], ...(cleared ? { leftUnlinkedCleared: true } : {}) } }, tx);
-      // A student's move into this family kept only because it had no customer in the books (NO_FAMILY_CUSTOMER) can be sent now.
-      const [kept] = await tx.select({ n: sql<number>`count(*)::int` }).from(writeQueue).where(and(eq(writeQueue.state, "refused"), eq(writeQueue.lastCode, NO_FAMILY_CUSTOMER),
-        sql`${writeQueue.request}->>'op' = 'move'`, sql`${writeQueue.request}->>'toFamilyId' = ${familyKey}`));
+      // A student's move into this family kept only because it had no customer in the books (NO_FAMILY_CUSTOMER) can be
+      // sent now where Reconciliation offers it: only while the cache holds the student's customer active, the rule
+      // loadOpenWrites() (src/lib/roster/queue.ts) applies to a kept move before it asks whether the family joined is linked.
+      const keptMoves = await tx.select({ studentQboId: sql<string | null>`${writeQueue.request}->>'qboId'` }).from(writeQueue).where(and(eq(writeQueue.state, "refused"),
+        eq(writeQueue.lastCode, NO_FAMILY_CUSTOMER), sql`${writeQueue.request}->>'op' = 'move'`, sql`${writeQueue.request}->>'toFamilyId' = ${familyKey}`));
+      const sendable = keptMoves.filter((m) => m.studentQboId !== null && b.customerById.get(m.studentQboId)?.active === true).length;
       return { ok: true, message: confirmedWords({ family: recordNameWords(f.name, "family"), customer: b.customerById.get(customerId)?.displayName ?? customerId,
         linked: proposals.pairs.map((p) => p.recordName), recordsLeft: proposals.recordsLeft.map((r) => recordNameWords(r.name, "student")),
-        customersLeft: proposals.customersLeft.map((c) => c.name), keptMoves: kept?.n ?? 0 }) };
+        customersLeft: proposals.customersLeft.map((c) => ({ name: c.name, active: c.active })), keptMoves: sendable }) };
     });
   } catch (e) {
     const which = uniqueViolated(e);
@@ -138,19 +145,27 @@ export async function linkFamilyToCustomer(raw: { familyId: unknown; customerId:
 
 /**
  * What staff read after a confirm, each sentence true by the code: the link, the students linked and those left (shown
- * on the screen with the family's row afterwards: as differences, or an inactive student customer counted), that nothing
- * was sent, when its money is read (loadFamilyMoney() finds the link at the next load of a parent's Home or Payments, the
- * Balances pages and the daily money run read it, while the books are connected), that its guardians' own records in
- * the books aren't linked by it, and a kept move into it that can now be sent.
+ * on the screen with the family's row afterwards: a record left and an active student customer left as differences, an
+ * inactive student customer left only counted, differencesOf() in ./differences.ts), that nothing was sent, when its
+ * money is read from the books (loadFamilyMoney() finds the link at the next load of a parent's Home or Payments, and
+ * the money run reads it when staff ask for it on Balances or daily, while the books are connected; the Balances pages
+ * read nothing live, only the row one of those stored), that its guardians' own records in the books aren't linked by
+ * it, and a kept move into it that Reconciliation now offers to send.
  */
-export function confirmedWords(s: { family: string; customer: string; linked: string[]; recordsLeft: string[]; customersLeft: string[]; keptMoves: number }): string {
+export function confirmedWords(s: { family: string; customer: string; linked: string[]; recordsLeft: string[]; customersLeft: { name: string; active: boolean }[]; keptMoves: number }): string {
   const parts = [`${s.family} is linked to “${s.customer}” in the books.`];
   parts.push(s.linked.length ? `${plural(s.linked.length, "student", "students")} linked with it: ${list(s.linked)}.` : "No student was linked with it.");
   if (s.recordsLeft.length) parts.push(`Left with no link: ${list(s.recordsLeft)}, of the portal's students.`);
-  if (s.customersLeft.length) parts.push(`Left with no record in the portal: ${list(s.customersLeft)}, of the student customers under it in the books.`);
-  if (s.recordsLeft.length || s.customersLeft.length) parts.push("Whoever was left shows with the family's row on this page, among its differences.");
+  if (s.customersLeft.length) parts.push(`Left with no record in the portal: ${list(s.customersLeft.map((c) => (c.active ? c.name : `${c.name} (inactive in the books)`)))}, of the student customers under it in the books.`);
+  // A record left and an active student customer left are differences; an inactive student customer left is only counted (differencesOf()).
+  const differing = s.recordsLeft.length + s.customersLeft.filter((c) => c.active).length;
+  const inactive = s.customersLeft.length - s.customersLeft.filter((c) => c.active).length;
+  if (differing > 0) parts.push(inactive === 0 ? "Whoever was left shows with the family's row on this page, among its differences."
+    : "Whoever was left shows with the family's row on this page: an inactive student customer in the books in a count there, everyone else among its differences.");
+  else if (inactive > 0) parts.push(inactive === 1 ? "That inactive student customer is counted with the family's row on this page, not listed among its differences."
+    : "Those inactive student customers are counted with the family's row on this page, not listed among its differences.");
   parts.push("Nothing was sent to the books.");
-  parts.push("Its money is read from the books the next time it is looked at (on a parent's Home or Payments page, or its Balances page) or at the daily read of every family's invoices, while the books are connected.");
+  parts.push("Its money is read from the books the next time a parent opens Home or Payments, when someone presses “Read every family now” on Balances, or at the daily read of every family's invoices, while the books are connected; its Balances page shows the figures once one of those has read them.");
   parts.push("Its guardians' own records in the books aren't linked by this.");
   if (s.keptMoves > 0) parts.push(s.keptMoves === 1 ? "A student's move into this family, kept on Reconciliation only because the family had no customer in the books, can now be sent from there."
     : `${s.keptMoves} students' moves into this family, kept on Reconciliation only because the family had no customer in the books, can now be sent from there.`);

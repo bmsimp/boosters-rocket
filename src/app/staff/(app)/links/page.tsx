@@ -101,7 +101,9 @@ function ProposalsShown({ proposals }: { proposals: Proposals }) {
       {pairs.length > 0 && <ul>{pairs.map((p) => <li key={String(p.studentId)}>{p.recordName} with {p.customerName}{p.customerActive ? "" : " (inactive in the books)"}</li>)}</ul>}
       {recordsLeft.length > 0 && <><p>Left with no link, of the portal&apos;s students:</p><ul>{recordsLeft.map((r) => <li key={String(r.id)}>{recordNameWords(r.name, "student")}</li>)}</ul></>}
       {customersLeft.length > 0 && <><p>Left with no record in the portal, of the student customers under it in the books:</p><ul>{customersLeft.map((c) => <li key={c.qboId}>{c.name}{c.active ? "" : " (inactive in the books)"}</li>)}</ul></>}
-      {(recordsLeft.length > 0 || customersLeft.length > 0) && <p>Students left aren&apos;t linked by this press. Once the family is linked, they show with its row among its differences.</p>}
+      {(recordsLeft.length > 0 || customersLeft.length > 0) && <p>{customersLeft.some((c) => !c.active)
+        ? "Students left aren't linked by this press. Once the family is linked, they show with its row among its differences, but for a student customer inactive in the books, which is only counted there."
+        : "Students left aren't linked by this press. Once the family is linked, they show with its row among its differences."}</p>}
     </>
   );
 }
@@ -242,7 +244,7 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
             A guardian who can&apos;t sign in, because they are blocked, is listed under the family, but their address is never matched.</p>
           <p>A family the portal has is linked here: Confirm its suggestion, or one of its possible customers, or pick a different customer from those no family is linked to.
             Nothing is sent to the books: the press ties the family to its customer in the portal, with each of its students whose name is on exactly one student on each side.
-            Students left that way aren&apos;t linked, and show with the family&apos;s row among its differences. Leave unlinked keeps a family out of the suggestions until someone undoes it.</p>
+            Students left that way aren&apos;t linked, and show with the family&apos;s row among its differences, but for a student customer inactive in the books, which is only counted there. Leave unlinked keeps a family out of the suggestions until someone undoes it.</p>
           <p>A link also comes with something new. &ldquo;Create a family from this&rdquo;, on Reconciliation, makes a new family in the portal from a customer no family is linked to.
             &ldquo;Create in QuickBooks and link&rdquo;, on a family&apos;s page, makes a new customer in the books for a family that has none, and so does adding a family under Families, when someone who may link families adds it while the books are connected.</p>
           <p>For each family whose link stands, the portal compares the names, whether each is active, the family each student is under, and the students and Parent customers only one side has,
