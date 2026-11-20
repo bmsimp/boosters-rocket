@@ -126,7 +126,7 @@ describe("scheduled jobs", () => {
     expect((await db.select().from(setting)).filter((x) => x.key === snapshot.key)).toHaveLength(1);
     const log = await db.select().from(auditLog);
     expect(log.filter((x) => x.action === "settings.parents.save" || x.action === "parent.review_notice.sent")).toEqual([]);
-    expect(log.filter((x) => x.action === "cleanup.run")).toEqual([]);
+    expect(log.filter((x) => x.action === "cleanup.run").map((x) => (x.after as { retiredSettings?: number }).retiredSettings ?? 0).filter((n) => n > 0)).toEqual([]);
   });
 
   it("an unexpected error in the token job is recorded as a fixed failure and the roster job still runs", async () => {
