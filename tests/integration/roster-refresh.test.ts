@@ -106,12 +106,20 @@ describe("the roster refresh", () => {
     stub.oddRosterAnswer = null;
     expect(await refreshRoster(worker)).toMatchObject({ ok: true });
     const run = await lastRun();
-    expect(await takeIn()).toEqual({ after, addressesReadAt: run.startedAt.toISOString() });
-    // Once the take-in has run, a read changes nothing of its setting.
+    // `addressesSince`, the first read since the mark was last withdrawn, which a contact item counts its age from.
+    expect(await takeIn()).toEqual({ after, addressesReadAt: run.startedAt.toISOString(), addressesSince: run.startedAt.toISOString() });
+    // Once the take-in has run, a read still marks it, keeping `doneAt`, and a shape save still withdraws it: a
+    // parent's change of their details is sent on only while it stands (stage 3's slice 11b, contactSendsMayGo()).
     const done = { after, addressesReadAt: run.startedAt.toISOString(), doneAt: new Date().toISOString() };
     await db.update(setting).set({ value: done }).where(eq(setting.key, TAKE_IN_KEY));
     await refreshRoster(worker);
-    expect(await takeIn()).toEqual(done);
+    const since = (await lastRun()).startedAt.toISOString();
+    expect(await takeIn()).toEqual({ ...done, addressesReadAt: since, addressesSince: since });
+    // A later read moves the mark and keeps `addressesSince`; a shape save withdraws both.
+    await refreshRoster(worker);
+    expect(await takeIn()).toEqual({ ...done, addressesReadAt: (await lastRun()).startedAt.toISOString(), addressesSince: since });
+    await saveShape(FZN_SHAPE, staffOp);
+    expect(await takeIn()).toEqual({ after, doneAt: done.doneAt });
   });
 
   it("marks nothing for the take-in from a read made under a shape that doesn't hold, and a shape save withdraws the mark", async () => {
@@ -128,7 +136,8 @@ describe("the roster refresh", () => {
     // A shape that holds: the read marks it.
     await saveShape(FZN_SHAPE, staffOp);
     expect(await refreshRoster(worker)).toMatchObject({ ok: true });
-    expect(await takeIn()).toEqual({ after, addressesReadAt: (await lastRun()).startedAt.toISOString() });
+    const read = (await lastRun()).startedAt.toISOString();
+    expect(await takeIn()).toEqual({ after, addressesReadAt: read, addressesSince: read });
     // A shape save, before any read under it: the mark goes in the save's own transaction.
     await saveShape({ kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: null }, staffOp);
     expect(await takeIn()).toEqual({ after });

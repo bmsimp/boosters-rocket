@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import { asParent, asParentChoosing, asStaff, fromIp, renderPage, revalidatedPaths } from "../helpers/signed-in";
 
-// A parent's phone and address are the portal's own (stage 3's slice 11a): nothing here is sent to QuickBooks. The stub
-// is connected anyway, so a request that was sent would be seen (stub.apiCalls()), never reach Intuit.
+// A parent's phone and address are the portal's own (stage 3's slice 11a): the save sends nothing to QuickBooks, and
+// only queues each change for the worker to send on (slice 11b, tests/integration/contact-sent-on.test.ts). The stub is
+// connected anyway, so a request that was sent would be seen (stub.apiCalls()), never reach Intuit.
 const stubBase = vi.hoisted(() => ({ url: "" }));
 vi.mock("@/lib/quickbooks/endpoints", async (original) => {
   const m = await original<typeof import("@/lib/quickbooks/endpoints")>();
@@ -12,7 +13,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, family, parent, parentAuthSession, qboCustomer, rateLimitEvent } from "@/lib/db/schema";
+import { auditLog, family, parent, parentAuthSession, qboCustomer, rateLimitEvent, writeQueue } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import { CONTACT_COPY, loadMyContact } from "@/lib/parents/contact-edits";
 import { loadMyFamily } from "@/lib/parents/my-family";
@@ -22,9 +23,9 @@ import { rosterRefreshAsked } from "@/lib/parents/refresh-ask";
 import { saveDetailsAction } from "@/app/(parent)/family/details/actions";
 import FamilyPage from "@/app/(parent)/family/page";
 import FamilyDetailsPage from "@/app/(parent)/family/details/page";
-import { NO_DETAILS, contactForm, familyDetails, personDetails, seedContactFamilies, setFamilyDetails, setPersonDetails } from "../helpers/contact";
+import { NO_DETAILS, contactForm, familyDetails, personDetails, seedContactFamilies, setFamilyDetails, setPersonDetails, shownTo } from "../helpers/contact";
 import { resetDb, seedGuardian, seedStaff } from "../helpers/db";
-import { RIVERA } from "../helpers/money";
+import { CHENOWETH, RIVERA } from "../helpers/money";
 import { identityNow, seedParentIn, seedTwoFamilies } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { addToCache, fam, par, stu, storeShape } from "../helpers/roster-cache";
@@ -87,7 +88,7 @@ describe("a parent saves their phone and address in the portal", () => {
     expect(row).toMatchObject({ addressLine1: "7 Kestrel Way", addressLine2: "Unit B", addressCountry: null }); // an empty field is stored as null
     const none = { line1: "", line2: "", city: "", region: "", postalCode: "", country: "" };
     expect((await audits()).map((a) => ({ action: a.action, before: a.before, after: a.after }))).toEqual([
-      { action: "parent.details.save", before: { address: none }, after: { address: NEW_ADDRESS } }]);
+      { action: "parent.details.save", before: { address: none }, after: { address: NEW_ADDRESS, queueIds: [expect.any(String)] } }]);
     expect(stub.apiCalls()).toEqual([]);
   });
 
@@ -291,7 +292,8 @@ describe("what the browser sends is checked, and how often", () => {
     expect(await loadMyContact(ctxOf(r.identity))).toMatchObject({ state: "ok", form: { values: shown } });
     expect(await save({ ...shown, phone: NEW_PHONE })).toMatchObject({ ok: true, message: CONTACT_COPY.saved });
     expect(await personDetails(r.identity.parentId)).toEqual({ values: { ...shown, phone: NEW_PHONE }, version: 1 });
-    expect((await audits()).map((a) => [a.action, a.before, a.after])).toEqual([["parent.details.save", { phone: RIVERA.parent.phone }, { phone: NEW_PHONE }]]);
+    // Rivera's own Parent customer is linked to her row, so the change is queued to be sent on (stage 3's slice 11b).
+    expect((await audits()).map((a) => [a.action, a.before, a.after])).toEqual([["parent.details.save", { phone: RIVERA.parent.phone }, { phone: NEW_PHONE, queueIds: [expect.any(String)] }]]);
   });
 
   it("a field the parent did change is still checked, beside one too long that they left alone", async () => {
@@ -341,8 +343,11 @@ describe("what the browser sends is checked, and how often", () => {
     for (let i = 0; i < max; i++) expect(await save({ ...SHOWN, phone: `512-555-03${10 + i}` }, `p:${i}`)).toMatchObject({ ok: true });
     for (let i = 0; i < 3; i++) expect(await save({ ...SHOWN, phone: "512-555-0399" }, `p:${max}`)).toEqual({ ok: false, errors: [CONTACT_COPY.tooMany] });
     expect(await personDetails(r.identity.parentId)).toEqual({ values: { ...SHOWN, phone: `512-555-03${10 + max - 1}` }, version: max });
-    const log = await audits();
+    // Each save after the first also closes the change the one before it queued and never sent (stage 3's slice 11b:
+    // `roster.write.replaced`, in the save's transaction, before its own row); the details' own rows are read here.
+    const log = (await audits()).filter((a) => a.action.startsWith("parent.details."));
     expect(log.map((a) => a.action)).toEqual([...Array.from({ length: max }, () => "parent.details.save"), "parent.details.save.failed"]);
+    expect((await audits()).filter((a) => a.action === "roster.write.replaced")).toHaveLength(max - 1);
     expect(log.at(-1)).toMatchObject({ after: { code: "rate_limited" }, actorId: r.identity.parentId });
     // Counted per person: the other family's parent is not held up.
     asParent(c.identity);
@@ -372,6 +377,9 @@ describe("whose details come from the session and nothing else (v1 spec §12)", 
       expect(await personDetails(b.identity.parentId)).toEqual(theirPerson);
       expect(await familyDetails(b.identity.familyId)).toEqual(theirFamily);
       for (const row of await audits()) expect([String(a.identity.familyId), a.identity.parentId, null]).toContain(row.targetId);
+      // Nothing is queued to be sent to any record of B's (stage 3's slice 11b).
+      const queued = await db.select().from(writeQueue);
+      expect(queued.filter((q) => String(q.familyId) === String(b.identity.familyId) || ids.includes(q.targetQboId ?? ""))).toEqual([]);
     };
     asParent(a.identity);
     for (const [shape, whose] of [[null, "person"], [NO_PARENT_TYPE, "family"]] as const) {
@@ -394,6 +402,31 @@ describe("whose details come from the session and nothing else (v1 spec §12)", 
       expect(await save({ ...theirs.values, line2: ids.join(" ") }, v(before.version), naming(b.identity.parentId))).toMatchObject({ ok: true });
       expect(await mineNow()).toEqual({ values: { ...theirs.values, line2: ids.join(" ") }, version: before.version + 1 });
       await theirsUnchanged();
+    }
+    expect(stub.apiCalls()).toEqual([]);
+  });
+
+  it("with families whose QuickBooks ids are digits, as real ones are: A's saves with B's values and ids in every field queue items naming A's records and customers only", async () => {
+    const { r, c } = await seedContactFamilies(stub);
+    const theirIds = [c.identity.parentId, String(c.identity.familyId), c.identity.guardianId, CHENOWETH.parent.qboId, CHENOWETH.family.qboId];
+    const naming = (id: string) => Object.fromEntries(["id", "Id", "parentId", "personId", "familyId", "family", "guardianId", "customerId", "qboId", "recordId", "targetQboId"].map((name) => [name, id]));
+    asParent(r.identity);
+    // The person's details (books with a parent type), then the family's (books with none), each with B's shown values.
+    for (const [shape, whose] of [[null, "person"], [NO_PARENT_TYPE, "family"]] as const) {
+      if (shape) await storeShape(shape);
+      await db.delete(rateLimitEvent);
+      const at = whose === "person" ? (await personDetails(r.identity.parentId)).version : (await familyDetails(r.identity.familyId)).version;
+      expect(await save({ ...shownTo(CHENOWETH), line2: theirIds.join(" ") }, `${whose === "person" ? "p" : "f"}:${at}`, naming(c.identity.guardianId)), whose).toMatchObject({ ok: true });
+    }
+    const queued = await db.select().from(writeQueue);
+    // One for Rivera's own Parent customer, one for the Rivera family's own customer: never anything of Chenoweth's.
+    expect(queued.map((q) => q.targetQboId).sort()).toEqual([RIVERA.family.qboId, RIVERA.parent.qboId].sort());
+    for (const q of queued) {
+      expect(String(q.familyId)).toBe(String(r.identity.familyId));
+      const w = q.request as { qboId: string; guardianId?: string };
+      expect([RIVERA.family.qboId, RIVERA.parent.qboId]).toContain(w.qboId);
+      if (w.guardianId !== undefined) expect(w.guardianId).toBe(r.identity.guardianId);
+      for (const id of theirIds) expect([q.targetQboId, String(q.familyId), w.qboId, w.guardianId ?? ""]).not.toContain(id);
     }
     expect(stub.apiCalls()).toEqual([]);
   });

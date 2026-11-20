@@ -4,7 +4,7 @@
 // an add or reinstate, its make-inactive (under the balance rule) on a removal, queued in the guardian's own
 // transaction and sent after it commits, under the row's "being sent" lock (src/lib/roster/writes.ts,
 // queueForGuardian(), sendGuardianSaved()); nothing QuickBooks says changes who may sign in. A family's email field in
-// books with no parent type is S11's. Staff
+// books with no parent type is S11d's. Staff
 // only: called from src/app/staff/(app)/parents/actions.ts behind `Roster.Family.ReadWrite` (the lead's choice: giving
 // an address a family's sign-in goes with the permission that changes a family); never from parent code, which may not
 // import it (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts): it gives any address access to any family.

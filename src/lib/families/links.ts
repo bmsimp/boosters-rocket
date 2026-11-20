@@ -1,6 +1,6 @@
-import { and, eq, inArray, isNotNull, or, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, ne, or, type SQL } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { accountingLink } from "@/lib/db/schema";
+import { accountingLink, guardian } from "@/lib/db/schema";
 import { getConnection } from "@/lib/quickbooks/connection";
 import { getRosterSource } from "@/lib/roster/source";
 import { QUICKBOOKS, type AppFamilyId, type AppStudentId } from "./ids";
@@ -110,6 +110,41 @@ export async function customerOfGuardian(guardianId: string, tx?: Tx): Promise<s
   const [l] = await (tx ?? db).select({ customerId: accountingLink.customerId }).from(accountingLink)
     .where(and(eq(accountingLink.guardianId, guardianId), eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId)));
   return l?.customerId ?? null;
+}
+
+/**
+ * The guardian links of these rows (memberships) in the records' company (stage 3's slice 11b), by the company rule of
+ * customerOfGuardian(), each with the version the portal last aligned with (`syncedToken`, null for none) and how many
+ * open guardian rows are linked to its customer (`openRows`: a customer several open rows share is nobody's own). A
+ * row with no link is left out. For a parent's own change of their details, which takes the person's rows from the
+ * session: it reads those rows' links, and the open rows linked to the same customers.
+ */
+export async function guardianLinksOf(guardianIds: readonly string[], tx?: Tx): Promise<Map<string, { customerId: string; syncedToken: string | null; openRows: number }>> {
+  const out = new Map<string, { customerId: string; syncedToken: string | null; openRows: number }>();
+  if (!guardianIds.length) return out;
+  const realmId = await recordsCompany(tx);
+  if (realmId === null) return out;
+  const q = tx ?? db;
+  const mine = await q.select({ guardianId: accountingLink.guardianId, customerId: accountingLink.customerId, syncedToken: accountingLink.syncedToken }).from(accountingLink)
+    .where(and(eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId), inArray(accountingLink.guardianId, [...guardianIds])));
+  if (!mine.length) return out;
+  const shared = await q.select({ customerId: accountingLink.customerId, guardianId: guardian.id }).from(accountingLink).innerJoin(guardian, eq(guardian.id, accountingLink.guardianId))
+    .where(and(eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId), inArray(accountingLink.customerId, [...new Set(mine.map((m) => m.customerId))]),
+      ne(guardian.status, "disabled")));
+  for (const m of mine) {
+    if (m.guardianId === null) continue;
+    out.set(m.guardianId, { customerId: m.customerId, syncedToken: m.syncedToken, openRows: shared.filter((s) => s.customerId === m.customerId).length });
+  }
+  return out;
+}
+
+/** This app family's own link in the records' company, with the version the portal last aligned with (null for none), or null: customerOfFamily() with its version. */
+export async function familyLinkOf(familyId: AppFamilyId, tx?: Tx): Promise<{ customerId: string; syncedToken: string | null } | null> {
+  const realmId = await recordsCompany(tx);
+  if (realmId === null) return null;
+  const [l] = await (tx ?? db).select({ customerId: accountingLink.customerId, syncedToken: accountingLink.syncedToken }).from(accountingLink)
+    .where(and(eq(accountingLink.familyId, familyId), eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId)));
+  return l ?? null;
 }
 
 /**
