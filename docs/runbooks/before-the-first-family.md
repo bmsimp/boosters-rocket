@@ -171,7 +171,8 @@ What the page can't do is walk the portal's own screens. Do these in the sandbox
    parent who chose it (in the sandbox, QuickBooks gave a Pay link only to an invoice with an email address), and
    nothing is emailed: check that no email from QuickBooks reaches that parent.
    **If not:** Reconciliation lists a buy-out that needs a look; note what it says.
-7. **An email change on a phone.** As a parent: Family, **Change my sign-in email**, a new address you can read. Open
+7. **An email change on a phone.** As a parent: Family, **Change my sign-in email** (unless you signed in in the last
+   10 minutes, it asks for your password and the code it emails you first), a new address you can read. Open
    the emailed link on the phone while signed out.
    **Pass:** you sign in with the old address and land back on the question; confirming signs you out, and you sign in
    with the new address. **If not:** note where it went instead.
