@@ -47,11 +47,11 @@ test("a parent's visit: sign in by password and emailed code, read and do what t
     await shot(page, "p01-sign-in");
     await page.getByLabel("Email").fill("zelda@example.com");
     await page.getByLabel("Password").fill(E2E_SIGNIN.password);
-    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
     // A browser the portal doesn't know for her: the second step, the code it emails.
     await expect(page.getByRole("status")).toContainText("enter the 6-digit code we've emailed you");
     await page.getByLabel("6-digit code").fill(await codeFor(sql, sink, "zelda@example.com"));
-    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page).toHaveURL(/\/choose-family$/);
     await noSidewaysScroll(page);
     await shot(page, "p02-choose-family");

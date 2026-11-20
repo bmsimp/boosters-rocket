@@ -57,7 +57,11 @@ on staff pages too (both were "For later" in the section below).
 Since the sign-in release's slice SI-3b. `tests/e2e/keyboard-journeys.spec.ts` walks it by keyboard on every run;
 the hand walk below was made on the code door before it and has not been made again on the password form.
 
-- Tab order: Email, Password, Sign in, "Set up or reset my password", "Board and staff sign in here". On the code
+- Tab order: Email, Password, Sign in, Sign in with a passkey (since slice SI-7a; its sentence of what a passkey is is
+  its description), "Set up or reset my password", "Board and staff sign in here". The journey stops at Sign in, and
+  Zelda has no passkey, so it still meets the emailed code; the passkey's own step (Use your passkey, which takes the
+  focus, the app's code field beside it for a guardian with an app too, Start again) is checked in the browser by
+  `tests/e2e/parent-a11y.spec.ts` (`/sign-in (passkey step)`) and walked by `tests/e2e/passkey-signin.spec.ts`. On the code
   step (a device the portal doesn't remember): the code field, Sign in, Resend code (waiting, so skipped), Start
   again, then the same two links. The chooser: each family, then Sign out. Every stop has a ring in every mode (3px
   club text, 4px in high contrast, Highlight in forced colors).
