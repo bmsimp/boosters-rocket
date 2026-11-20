@@ -155,9 +155,12 @@ export const hasActiveStudent = (familyId: typeof family.id): SQL =>
 
 /**
  * Whether "Families with no active student" is in force: stored on, and the stored membership shape names a student
- * type (shapeNamesStudents()). With no student type the app holds no active student, so the rule would keep every
- * parent out: it is in force only while the shape names students, as it was before stage 3's slice 7a, and a value
- * stored on beside a shape without students is not used until a shape with students is saved. This is the one place
+ * type (shapeNamesStudents()). The portal keeps students only while the shape names a student type (it adds, renames,
+ * moves and makes inactive a student only then, shapeOperations()'s `noStudents`, and "Create a family from this"
+ * makes student records only then), so a shape saved without one leaves student records the portal can no longer
+ * change, which must not decide who signs in: the rule is in force only while the shape names students, as it was
+ * before stage 3's slice 7a, and a value stored on beside a shape without students is not used until a shape with
+ * students is saved. This is the one place
  * that decides it: the gate, the code request and check, the chooser, the welcome, the switches' counts, the staff
  * words and the reminders all go through it, through studentsRuleInForce(), which reads both as stored.
  */
