@@ -11,7 +11,7 @@ import { Notice } from "@/app/components/notice";
 import { WorthALook } from "../balances/worth-a-look";
 import { OneButton, TextAction } from "../seasons/forms";
 import { giveUpAction, linkMadeStudentAction, sendPortalValueAction, tryAgainAction } from "../roster/write-actions";
-import { EMAIL_TOO_LONG, GUARDIAN_RENAME_TAKEN, GUARDIAN_TAKEN_NAME, guardianOf, keptRefusalWords, NAME_UNUSABLE, keptWordsFor, portalValueStamp, TAKEN_NAME_KEPT } from "@/lib/roster/writes";
+import { CONTACT_NOT_OFFERED, EMAIL_TOO_LONG, GUARDIAN_RENAME_TAKEN, GUARDIAN_TAKEN_NAME, guardianOf, keptRefusalWords, NAME_UNUSABLE, keptWordsFor, portalValueStamp, TAKEN_NAME_KEPT } from "@/lib/roster/writes";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { BuyoutsToLook } from "./buyouts";
 import { CustomersWithNoFamily } from "./no-family";
@@ -81,6 +81,8 @@ const NOT_OFFERED: Record<NonNullable<QueueView["notOffered"]>, string> = {
   email_too_long: `${keptRefusalWords(EMAIL_TOO_LONG, null)} Give it up here: the guardian keeps their access in the portal.`,
   // One whose person's name QuickBooks can't take (nothing was sent): renaming the person takes its place.
   name_unusable: `${keptRefusalWords(NAME_UNUSABLE, null)} Or give it up here: the guardian keeps their access in the portal.`,
+  // A kept change of a parent's phone and address whose record is no longer the one it is for (stage 3's slice 11b).
+  ...CONTACT_NOT_OFFERED,
 };
 /**
  * What QuickBooks holds and what the portal holds of a kept change of a parent's phone and address (stage 3's slice
@@ -194,9 +196,9 @@ export default async function ReconciliationPage() {
       <p className="lede">Where the portal and QuickBooks don&apos;t agree yet, and what needs someone to look at it.</p>
 
       <section className="box" aria-labelledby="writes-h"><h2 id="writes-h">Changes waiting to reach QuickBooks</h2>
-        {writes.length === 0 ? <Notice tone="done" live="none">Nothing is waiting: every change staff made has reached QuickBooks.</Notice> : (
+        {writes.length === 0 ? <Notice tone="done" live="none">Nothing is waiting: every change staff and parents made has reached QuickBooks.</Notice> : (
           <>
-            <p>QuickBooks couldn&apos;t take these when they were asked for. The worker tries a waiting change again, at longer and longer gaps;
+            <p>QuickBooks couldn&apos;t take these when they were asked for, or they are a parent&apos;s phone and mailing address, which the worker sends on at its next wake. The worker tries a waiting change again, at longer and longer gaps;
               one QuickBooks may already have made is first looked for in a fresh copy of the roster, so nothing is made twice or overwritten.
               One QuickBooks took that the portal couldn&apos;t take in at the time waits here too, until the portal finishes it on its side.
               A stuck change waits for you: try it again, or give it up and make it in QuickBooks.

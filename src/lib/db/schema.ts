@@ -545,12 +545,14 @@ export type RosterWrite =
    * or `member` for a family's, in books with no parent type, sent to the family's own linked customer. `change` holds
    * the fields the save changed, as the portal holds them now (the address whole when any part changed); `was`, the same
    * fields as the portal held them before (or as an earlier change this one took the place of held them), which the
-   * cache and a live read are compared with; `orWas`, what an earlier change that may have been sent asked for, which
-   * QuickBooks may hold instead. `syncToken` is the link's own version (empty when it has none: then nothing is sent
-   * before a live read); `checked`, that it was sent with a version read live after the fields read as `was` or
-   * `orWas`, so its answer aligns the link. Only `Id`, `SyncToken` and the fields of `change` are sent.
+   * cache and a live read are compared with; `orWas`, what each earlier change that may have been sent asked for (one
+   * entry per change, any of which QuickBooks may hold instead). A change that took the place of earlier ones, or that
+   * follows one that may have been sent, carries every field they changed, so closing them loses nothing.
+   * `syncToken` is the link's own version (empty when it has none: then nothing is sent before a live read); `checked`,
+   * that it was sent with a version read live after the fields read as `was` or `orWas`, so its answer aligns the link.
+   * Only `Id`, `SyncToken` and the fields of `change` are sent.
    */
-  | { op: "contact"; role: "parent" | "family" | "member"; qboId: string; syncToken: string; change: ContactDetails; was: ContactDetails; orWas?: ContactDetails;
+  | { op: "contact"; role: "parent" | "family" | "member"; qboId: string; syncToken: string; change: ContactDetails; was: ContactDetails; orWas?: ContactDetails[];
       checked?: true; guardianId?: string };
 /** A phone and a mailing address as a contact item carries them (RosterWrite `contact`): each part a field of the portal's form. */
 export type ContactDetails = { phone?: string; address?: { line1: string; line2: string; city: string; region: string; postalCode: string; country: string } };

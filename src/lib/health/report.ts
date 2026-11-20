@@ -133,8 +133,8 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
   // What the portal reads and what it changes, in the words the QuickBooks settings page uses.
   const use = `${QUICKBOOKS_USE.reads} ${QUICKBOOKS_USE.writes}`;
   const qboFix = { href: "/staff/settings/quickbooks", label: "Open QuickBooks settings" };
-  // Staff changes QuickBooks hasn't taken yet (src/lib/roster/queue.ts): a stuck one waits for a person.
-  const queueNote: string[] = writes.waiting + writes.stuck === 0 ? [] : [`Changes waiting for QuickBooks (staff roster changes and volunteer buy-out invoices): ${writes.waiting} waiting to reach QuickBooks, ${writes.stuck} stuck${writes.stuck ? " and waiting for someone to try them again or give them up on the Reconciliation page" : ""}.`];
+  // Changes QuickBooks hasn't taken yet (src/lib/roster/queue.ts), staff's and parents': a stuck one waits for a person.
+  const queueNote: string[] = writes.waiting + writes.stuck === 0 ? [] : [`Changes waiting for QuickBooks (staff roster changes, parents' phones and mailing addresses, and volunteer buy-out invoices): ${writes.waiting} waiting to reach QuickBooks, ${writes.stuck} stuck${writes.stuck ? " and waiting for someone to try them again or give them up on the Reconciliation page" : ""}.`];
   // Changes saved in the portal first that didn't go through (stage 3's slice 9e: QuickBooks refused them, the portal held
   // them back, or they couldn't be sent): the portal keeps its value, and a person decides. The staff home's Today box says the same.
   if (writes.refused) queueNote.push(`${writes.refused === 1 ? "1 change is" : `${writes.refused} changes are`} kept in the portal that QuickBooks didn't take: the portal keeps its own value until someone sends it again or gives it up on the Reconciliation page.`);

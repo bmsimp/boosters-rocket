@@ -69,10 +69,12 @@ const pick = (d: ContactDetails, fields: readonly Field[]): ContactDetails =>
  * A later change takes the place of an earlier one, never refused: each contact change of the same customer and
  * membership that is kept refused, or waiting or stuck and never sent (`sent` false, conditioned in the update itself,
  * so a sender that has marked one as maybe sent keeps it; one a sender holds locked at this moment is left alone, read
- * as one that may have been sent), is closed as given up (`roster.write.replaced`), and the new item carries the newest
- * values of every field any of them changed and the oldest before-value of each among every open change of the record,
- * so it always says what QuickBooks last held by the portal's knowledge. One that may have been sent is left to finish,
- * and the new item also accepts what it asked for as what QuickBooks may hold (`orWas`). It takes no roster lock and no "being sent" lock, and waits for none.
+ * as one that may have been sent), is closed as given up (`roster.write.replaced`). One that may have been sent is left
+ * to finish, and the new item accepts what each such change asked for as what QuickBooks may hold (`orWas`, every one
+ * of them). The new item carries the portal's values now of every field any open change of the record asked for, the
+ * ones that may have been sent included (so closing them once it is done or kept loses nothing), and the oldest
+ * before-value of each among them, so it always says what QuickBooks last held by the portal's knowledge. It takes no
+ * roster lock and no "being sent" lock, and waits for none.
  */
 export async function queueContactChange(tx: Tx, of: DetailsOf, saved: { change: ContactDetails; was: ContactDetails; now: Required<ContactDetails> }, o: { actor: Actor; ip: string | null }): Promise<string[]> {
   const found = await targetsOf(tx, of);
@@ -98,25 +100,30 @@ export async function queueContactChange(tx: Tx, of: DetailsOf, saved: { change:
           before: { state: r.state, code: r.lastCode }, after: { state: "given_up", replacedBy: { op: "contact" } } }, tx);
       } else maybeSent.push(w);
     }
-    // Every field this save or a replaced change asked for, at the portal's value now; each before-value the oldest of
-    // every open change of the record (one that may have been sent included: what QuickBooks held before it, if it never
-    // landed), else the portal's value before this save.
-    const fields = FIELDS.filter((f) => saved.change[f] !== undefined || replaced.some((w) => w.change[f] !== undefined));
-    const was: ContactDetails = {};
+    // Every field this save or any open change of the record asked for (one that may have been sent included, so that
+    // once this one is done or kept and closes it, closeEarlierContacts(), nothing it asked for is lost), at the portal's
+    // value now; each before-value the oldest of every open change of the record (what QuickBooks held before them, if
+    // none landed), else the portal's value before this save.
     const oldestFirst = open.map((r) => r.request as ContactWrite);
+    const fields = FIELDS.filter((f) => saved.change[f] !== undefined || oldestFirst.some((w) => w.change[f] !== undefined));
+    const was: ContactDetails = {};
     for (const f of fields) {
       const first = oldestFirst.find((w) => w.was[f] !== undefined);
       const value = first ? first.was[f] : saved.was[f];
       if (value !== undefined) Object.assign(was, { [f]: value });
     }
-    // What QuickBooks may hold instead: the newest change that may have been sent, field by field, else a replaced one's own.
-    const orWas: ContactDetails = {};
-    for (const f of fields) {
-      const from = [...maybeSent].reverse().find((w) => w.change[f] !== undefined)?.change[f] ?? [...replaced].reverse().find((w) => w.orWas?.[f] !== undefined)?.orWas?.[f];
-      if (from !== undefined) Object.assign(orWas, { [f]: from });
-    }
+    // What QuickBooks may hold instead: what each change that may have been sent asked for, and what each open change
+    // already accepted so (its own `orWas`), every one of them, for the fields this one sends.
+    const seen = new Set<string>();
+    const orWas = [...maybeSent.map((w) => w.change), ...oldestFirst.flatMap((w) => w.orWas ?? [])].flatMap((d) => {
+      const e = pick(d, fields.filter((f) => d[f] !== undefined));
+      const key = JSON.stringify(e);
+      if (!Object.keys(e).length || seen.has(key)) return [];
+      seen.add(key);
+      return [e];
+    });
     const write: ContactWrite = { op: "contact", role: t.role, qboId: t.qboId, syncToken: t.syncToken, change: pick(saved.now, fields), was,
-      ...(Object.keys(orWas).length ? { orWas } : {}), ...(t.guardianId !== null ? { guardianId: t.guardianId } : {}) };
+      ...(orWas.length ? { orWas } : {}), ...(t.guardianId !== null ? { guardianId: t.guardianId } : {}) };
     const [item] = await tx.insert(writeQueue).values({
       realmId: found.realmId, request: write, targetQboId: t.qboId, familyId: t.familyId, studentId: null,
       state: "waiting", sent: false, tries: 0, lastCode: null, nextTryAt: new Date(), askedBy: null, askedByLabel: o.actor.label,

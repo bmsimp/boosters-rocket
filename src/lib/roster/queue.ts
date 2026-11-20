@@ -13,7 +13,7 @@ import { refreshRoster } from "./refresh";
 import { getRosterSource, ROSTER_JOB } from "./source";
 import { lockRosterAs, rosterTagOf } from "@/lib/seasons/roster-lock";
 import { alignAfterWrite, applyWritten, balanceUnread, BEING_SENT_NOW, changeOwnRecord, closeEarlierContacts, contactShown, CREDIT_BALANCE, CUSTOMER_HAS_GUARDIAN, EMAIL_TOO_LONG, FAMILY_HELD, guardianCustomerLinked, guardianOf, isSavedFirst, NAME_UNUSABLE, itemLockFree, madeAfterGivingUp, markMoveMoneyStale, moveMoneyNotes, REFRESH_ASK_KEY,
-  replaceRefusedCreates, sendWrite, tryDeactivate, trySavedItem, whileItemHeld, whoStopped, type MadeAfterGivingUp, type OwnRecordChange, type SavedTry } from "./writes";
+  replaceRefusedCreates, sendWrite, tryDeactivate, trySavedItem, whileItemHeld, whoStopped, contactStopNow, type ContactNotOffered, type MadeAfterGivingUp, type OwnRecordChange, type SavedTry } from "./writes";
 import { afterFailedTry, beforeResend, classify, heldInCache, type HeldContact } from "./write-rules";
 import { isBuyoutWrite, sendBuyoutWrite } from "@/lib/buyouts/writes";
 import { formatMoney } from "@/lib/money/cents";
@@ -399,11 +399,14 @@ export type QueueView = {
    * QuickBooks yet (`create_family_first`: the press would be refused until the family is made there and linked); a
    * guardian's Parent customer create kept for a taken name (`taken`), a name QuickBooks can't take (`name_unusable`)
    * or an address over its limit (`email_too_long`), whose ways out are a rename of the person or "Give up". A removed
-   * guardian's make-inactive is offered whatever the cache shows: inactive there, the press finishes it as found. The
-   * press checks it all again.
+   * guardian's make-inactive is offered whatever the cache shows: inactive there, the press finishes it as found. A
+   * kept change of a parent's phone and address whose record is no longer the one it is for (ContactNotOffered: the
+   * guardian removed or the family made inactive in the portal, the customer no longer theirs or the family's in
+   * QuickBooks, or the books no longer keeping the details there) isn't offered either, in its own words. The press
+   * checks it all again.
    */
   mayResend: boolean;
-  notOffered: "taken" | "inactive" | "not_on_roster" | "create_family_first" | "email_too_long" | "name_unusable" | null;
+  notOffered: "taken" | "inactive" | "not_on_roster" | "create_family_first" | "email_too_long" | "name_unusable" | ContactNotOffered | null;
   /**
    * For a kept change of a parent's phone and address (stage 3's slice 11b): what QuickBooks holds of the fields it
    * sends (the roster cache's), and what the portal holds now, each in words, as text; only with `showDetails` (a staff
@@ -559,13 +562,18 @@ export async function loadOpenWrites(o: { familyId?: AppFamilyId; showAmounts?: 
   // A refused move into a family with no customer in QuickBooks can't be sent until that family is made there.
   const joined = [...new Set(moveRows.flatMap((r) => { const w = r.request as Extract<QueuedWrite, { op: "move" }>; return r.state === "refused" && w.toFamilyId !== undefined ? [w.toFamilyId] : []; }))];
   const joinedLinked = joined.length ? (await linksOf({ families: joined, students: [] })).customerOfFamily : new Map<AppFamilyId, string>();
+  // A kept contact change whose record is no longer the one it is for (the guardian removed, the customer no longer
+  // theirs or the family's, the books changed): "Send the portal's value" would be refused, so it isn't offered, in words
+  // that say whose record changed (contactStopNow(), the press's own checks without its lock).
+  const contactStopsOf = new Map(await Promise.all(contacts.filter((r) => r.state === "refused")
+    .map(async (r) => [r.id, await contactStopNow(r.request as Extract<RosterWrite, { op: "contact" }>, r)] as const)));
   return rows.map((r) => {
     const refused = r.state === "refused";
     const request: QueuedWrite = refused && r.request.op === "create" ? { ...r.request, name: currentName(r) ?? r.request.name } : r.request;
     // A guardian's Parent customer create kept as a taken name, or as a name or address QuickBooks can't take: a rename
     // of the person takes its place, so nothing is offered to send it again as it is (stage 3's slice 9h).
     const guardianKept = refused && request.op === "create" && guardianOf(request) !== null && (r.lastCode === "fault_6240" || r.lastCode === NAME_UNUSABLE || r.lastCode === EMAIL_TOO_LONG);
-    const contactNotOffered = refused && request.op === "contact" ? (!names.has(request.qboId) ? "not_on_roster" : !activeHere.has(request.qboId) ? "inactive" : null) : undefined;
+    const contactNotOffered = refused && request.op === "contact" ? (!names.has(request.qboId) ? "not_on_roster" : !activeHere.has(request.qboId) ? "inactive" : contactStopsOf.get(r.id) ?? null) : undefined;
     const notOffered: QueueView["notOffered"] = contactNotOffered !== undefined ? contactNotOffered : guardianKept ? (r.lastCode === EMAIL_TOO_LONG ? "email_too_long" : r.lastCode === NAME_UNUSABLE ? "name_unusable" : "taken")
       : !refused || (request.op !== "rename" && request.op !== "move" && request.op !== "deactivate") ? null : request.op === "rename" && r.lastCode === "fault_6240" ? "taken"
       // A removed guardian's Parent customer QuickBooks has inactive now: the press finishes it as found (sendAgainHolding()).

@@ -9,6 +9,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 
+import { readFileSync } from "node:fs";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, family, guardian, qboCustomer, writeQueue } from "@/lib/db/schema";
@@ -18,7 +19,7 @@ import type { ContactValues } from "@/lib/parents/contact-fields";
 import { CONTACT_COPY, saveDetails, saveMyContact } from "@/lib/parents/contact-edits";
 import { addGuardian, removeGuardian } from "@/lib/parents/guardians";
 import { renamePerson } from "@/lib/parents/people";
-import { askFamilyInactive, CONTACT_DIFFERS, coverStamp, familyCover, keptContactWords, portalValueStamp, SENDING_LOCK, sendPortalValue, WRITE_COPY } from "@/lib/roster/writes";
+import { askFamilyInactive, CONTACT_DIFFERS, CONTACT_NOT_OFFERED, coverStamp, familyCover, keptContactWords, portalValueStamp, SENDING_LOCK, sendPortalValue, whoStopped, WRITE_COPY } from "@/lib/roster/writes";
 import { giveUp, loadOpenWrites, runWriteQueue } from "@/lib/roster/queue";
 import { ROSTER_LOCK, type MembershipShape } from "@/lib/roster/shape";
 import ReconciliationPage from "@/app/staff/(app)/reconciliation/page";
@@ -27,7 +28,7 @@ import { NO_DETAILS, inQuickBooks, personDetails, setPersonDetails } from "../he
 import { resetDb, seedGuardian, seedParent } from "../helpers/db";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { asOp, auditsOf, connectRoster, queueItem, seedAnaRivera, staffWith } from "../helpers/roster-writes";
-import { storeShape } from "../helpers/roster-cache";
+import { moveInQuickBooksOnly, storeShape } from "../helpers/roster-cache";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 
 /**
@@ -156,6 +157,11 @@ describe("a parent's save queues the change for each record it goes to (items 1 
     });
     expect(result).toMatchObject({ ok: true, message: CONTACT_COPY.saved });
     expect(await items()).toEqual([expect.objectContaining({ state: "waiting", targetQboId: "11" })]);
+    // Nor does it take one by trying: the modules a parent's save runs name no advisory lock and none of the roster's.
+    for (const file of ["src/lib/parents/contact-edits.ts", "src/lib/parents/contact-queue.ts"]) {
+      const source = readFileSync(file, "utf8");
+      for (const lock of ["advisory", "ROSTER_LOCK", "SENDING_LOCK", "lockRosterAs", "whileSending", "whileMaking"]) expect(source, `${file} ${lock}`).not.toContain(lock);
+    }
   });
 });
 
@@ -190,6 +196,29 @@ describe("each send compares QuickBooks' details first, and never overwrites one
     expect(inQuickBooks(stub, "11")).toMatchObject({ PrimaryPhone: { FreeFormNumber: "555-9999" } });
     expect(await personDetails(a.ana.id)).toMatchObject({ values: { phone: NEW_PHONE }, version: 2 });
     expect(await auditsOf("roster.write.kept_refused")).toHaveLength(1);
+  });
+
+  it("a stale answer with the field cleared in QuickBooks meanwhile: kept, never sent over the clearing", async () => {
+    const a = await ana();
+    await saveMyContact(a.ctx, form({ phone: NEW_PHONE }, "p:1"));
+    const there = inQuickBooks(stub, "11");
+    delete there.PrimaryPhone;
+    there.SyncToken = "3";
+    await wake();
+    expect(bodies().filter((b) => b.SyncToken !== "0")).toEqual([]);
+    expect((await items())[0]).toMatchObject({ state: "refused", lastCode: CONTACT_DIFFERS });
+    expect(inQuickBooks(stub, "11").PrimaryPhone).toBeUndefined();
+  });
+
+  it("QuickBooks' own refusal: kept, in words that say QuickBooks refused it", async () => {
+    const a = await ana();
+    await saveMyContact(a.ctx, form({ phone: NEW_PHONE }, "p:1"));
+    stub.updateFault = "6000";
+    await wake();
+    const [item] = await items();
+    expect(item).toMatchObject({ state: "refused" });
+    expect(whoStopped(item!.lastCode)).toBe("quickbooks");
+    expect(await personDetails(a.ana.id)).toMatchObject({ values: { phone: NEW_PHONE } });
   });
 
   it("stale twice in a row: waits as never sent, for a later try", async () => {
@@ -264,11 +293,48 @@ describe("a later change, a lost answer, a removal and what a waiting change hol
     await saveMyContact(a.ctx, form({ phone: "512-555-0333" }, "p:2"));
     const second = (await items()).find((i) => i.state === "waiting" && !i.sent)!;
     // The first is left to finish; the second accepts what it asked for as what QuickBooks may hold.
-    expect(second.request).toMatchObject({ change: { phone: "512-555-0333" }, was: { phone: "555-0101" }, orWas: { phone: NEW_PHONE } });
+    expect(second.request).toMatchObject({ change: { phone: "512-555-0333" }, was: { phone: "555-0101" }, orWas: [{ phone: NEW_PHONE }] });
     await wake(4 * MIN);
     expect(inQuickBooks(stub, "11")).toMatchObject({ PrimaryPhone: { FreeFormNumber: "512-555-0333" } });
     expect(bodies().at(-1)).toMatchObject({ PrimaryPhone: { FreeFormNumber: "512-555-0333" } });
     expect(await openItems()).toEqual([]);
+  });
+
+  it("a change of the other field while the first may have been sent: the later one carries both, so neither is lost", async () => {
+    const a = await ana();
+    await saveMyContact(a.ctx, form({ phone: NEW_PHONE }, "p:1"));
+    // The send is cut off before QuickBooks takes it: the change waits as maybe sent.
+    stub.dropApi = true;
+    await wake();
+    stub.dropApi = false;
+    expect((await items())[0]).toMatchObject({ state: "waiting", sent: true });
+    expect(inQuickBooks(stub, "11")).toMatchObject({ PrimaryPhone: { FreeFormNumber: "555-0101" } });
+    // Only the address this time.
+    await saveMyContact(a.ctx, form({ phone: NEW_PHONE, line1: "7 Kestrel Way" }, "p:2"));
+    const second = (await items()).find((i) => i.state === "waiting" && !i.sent)!;
+    expect(second.request).toMatchObject({ change: { phone: NEW_PHONE, address: { line1: "7 Kestrel Way" } }, was: { phone: "555-0101", address: { line1: "" } }, orWas: [{ phone: NEW_PHONE }] });
+    await wake(4 * MIN);
+    // Whichever is tried first, QuickBooks ends with both, and nothing is left open or lost.
+    expect(inQuickBooks(stub, "11")).toMatchObject({ PrimaryPhone: { FreeFormNumber: NEW_PHONE }, BillAddr: expect.objectContaining({ Line1: "7 Kestrel Way" }) });
+    expect(await openItems()).toEqual([]);
+  });
+
+  it("a maybe-sent change never lands after a later one, even once the later one is given up", async () => {
+    const a = await ana();
+    await saveMyContact(a.ctx, form({ phone: NEW_PHONE }, "p:1"));
+    stub.dropApi = true;
+    await wake();
+    stub.dropApi = false;
+    await saveMyContact(a.ctx, form({ phone: "512-555-0333" }, "p:2"));
+    const later = (await items()).find((i) => i.state === "waiting" && !i.sent)!;
+    expect(await giveUp(later.id, "The club will sort it out.", op)).toMatchObject({ ok: true });
+    stub.calls.length = 0;
+    await wake(4 * MIN);
+    // The older change no longer holds the portal's details: given up, nothing sent.
+    expect(posts()).toEqual([]);
+    expect(await openItems()).toEqual([]);
+    expect(inQuickBooks(stub, "11")).toMatchObject({ PrimaryPhone: { FreeFormNumber: "555-0101" } });
+    expect((await auditsOf("roster.write.given_up")).map((r) => r.after)).toContainEqual(expect.objectContaining({ why: "superseded", sentNow: false }));
   });
 
   it("removing the guardian gives up their change that never left, and sends none of it", async () => {
@@ -334,6 +400,15 @@ describe("Reconciliation and a family's page (item 7)", () => {
     expect(await queueItem(row!.id)).toMatchObject({ state: "done" });
     expect((await auditsOf("roster.write.sent_again"))).toHaveLength(1);
     expect(await personDetails(a.ana.id)).toMatchObject({ values: { phone: NEW_PHONE } });
+  });
+
+  it("one whose Parent customer QuickBooks has moved since: not offered, in words that say QuickBooks' record changed, and the press refused so", async () => {
+    await kept();
+    await moveInQuickBooksOnly(["11"], "20");
+    const [row] = await loadOpenWrites();
+    expect(row).toMatchObject({ mayResend: false, notOffered: "not_own" });
+    expect(await sendPortalValue(row!.id, row!.shown, portalValueStamp(row!.id, row!.shown), op)).toEqual({ ok: false, errors: [CONTACT_NOT_OFFERED.not_own] });
+    expect(posts()).toEqual([]);
   });
 
   it("\"Give up\": the portal keeps its details, QuickBooks keeps its own", async () => {
