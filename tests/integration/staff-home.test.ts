@@ -8,6 +8,7 @@ import { addDays, formsToChase, shiftsToFill } from "@/lib/staff-home/today";
 import StaffHome from "@/app/staff/(app)/page";
 import { resetDb, seedStaff } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, seedTwoFamilies } from "../helpers/parent";
+import { NO_FILTERS, filtersQuery } from "@/lib/audit/query";
 import { seedQueued, staffWith } from "../helpers/roster-writes";
 import { seedEvent, seedSignup } from "../helpers/volunteer";
 
@@ -107,5 +108,62 @@ describe("the staff home", () => {
     expect((await db.select().from(auditLog)).length).toBe(before);
     // The rows the counts came from are untouched.
     expect((await db.select().from(signatureRequest).where(and(eq(signatureRequest.evidenceOwed, true), eq(signatureRequest.state, "complete")))).length).toBe(1);
+  });
+});
+
+// The line for every other Admin after a sign-in reset (the sign-in release, slice SI-9a; open question 22): read from the
+// `parent.signin.reset` audit rows of the last 7 days, never the viewer's own, to Admins alone, never with the reason.
+describe("the staff home's sign-in resets", () => {
+  const DAY = 24 * HOUR;
+  const REASON = "Called back on the number in the club's records; she lost her phone.";
+  /** A reset as resetSignin() writes its row: by `by`, of `parentId`, `daysAgo` days ago. */
+  const resetRow = (by: { id: string; email: string }, parentId: string, daysAgo: number) => db.insert(auditLog).values({ door: "staff", actorId: by.id, actorLabel: by.email,
+    action: "parent.signin.reset", permission: "Parents.SignInReset.ReadWrite", targetType: "parent", targetId: parentId,
+    after: { reason: REASON, calledBack: true }, at: new Date(Date.now() - daysAgo * DAY) });
+  const section = (html: string) => { const at = html.indexOf('id="resets-h"'); return at < 0 ? "" : html.slice(at, html.indexOf("</section>", at)); };
+  /** A section's words with its markup taken out and nothing put in its place, so a link's text runs on into the words around it. */
+  const plain = (html: string) => html.replace(/<svg[\s\S]*?<\/svg>/g, "").replace(/<[^>]+>/g, "").replaceAll("&#x27;", "'").replace(/\s+/g, " ");
+
+  it("shows every other Admin who reset whose sign-in and when, for 7 days, linking the person and the audit log, never the reason", async () => {
+    const ada = await seedStaff({ email: "ada@club.org", name: "Ada Admin", admin: true });
+    const bo = await seedStaff({ email: "bo@club.org", name: "Bo Admin", admin: true });
+    const anaId = families.a.identity.parentId;
+    await resetRow(ada, anaId, 2);
+    await resetRow(ada, families.b.identity.parentId, 8); // past the week
+    asStaff(bo);
+    const before = (await db.select().from(auditLog)).length;
+    const html = await home();
+    const line = section(html);
+    expect(text(line)).toContain("Sign-in resets this week");
+    expect(plain(line)).toContain(`ada@club.org reset ${FAMILY_A.parent.name}'s sign-in `);
+    expect(line).toContain(`href="/staff/parents/${anaId}"`);
+    expect(line).toContain(`href="/staff/audit${filtersQuery({ ...NO_FILTERS, action: "parent.signin.reset", record: { type: "parent", id: anaId } }).replaceAll("&", "&amp;")}"`);
+    expect(text(line)).toContain("If you didn't expect one of these, ask whoever did it, and read their reason in the audit log.");
+    expect(line).not.toContain(FAMILY_B.parent.name);
+    expect(html).not.toContain(REASON);
+    expect(html).not.toContain("Called back");
+    // Showing it writes no audit row.
+    expect((await db.select().from(auditLog)).length).toBe(before);
+  });
+
+  it("never shows the Admin their own resets, nor anyone but an Admin, whatever else they hold", async () => {
+    const ada = await seedStaff({ email: "ada@club.org", name: "Ada Admin", admin: true });
+    await resetRow(ada, families.a.identity.parentId, 1);
+    asStaff(ada);
+    expect(section(await home())).toBe("");
+    // Every permission a role may hold, the Admin-only ones excepted: no line.
+    asStaff(await staffWith("everything@club.org", ["*"]));
+    const html = await home();
+    expect(section(html)).toBe("");
+    expect(html).not.toContain(FAMILY_A.parent.name);
+  });
+
+  it("names a person no longer in the portal in words, with no page to open", async () => {
+    const ada = await seedStaff({ email: "ada@club.org", name: "Ada Admin", admin: true });
+    await resetRow(ada, "00000000-0000-4000-8000-00000000dead", 1);
+    asStaff(await seedStaff({ email: "bo@club.org", name: "Bo Admin", admin: true }));
+    const line = section(await home());
+    expect(plain(line)).toContain("ada@club.org reset the sign-in of a person no longer in the portal ");
+    expect(line).not.toContain('href="/staff/parents/00000000-0000-4000-8000-00000000dead"');
   });
 });

@@ -20,7 +20,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { prerender } from "react-dom/static";
 import { db } from "@/lib/db/client";
 import { eq } from "drizzle-orm";
-import { auditLog, guardian, jobRun, parent, parentAuthUser, role, roleAssignment, roleRule } from "@/lib/db/schema";
+import { auditLog, guardian, jobRun, parent, parentAuthPasskey, parentAuthSession, parentAuthUser, role, roleAssignment, roleRule } from "@/lib/db/schema";
 import { recordNameWords } from "@/lib/families/words";
 import { AccessDenied } from "@/lib/guards";
 import { loadRosterPage } from "@/lib/roster/queries";
@@ -30,7 +30,7 @@ import PersonPage from "@/app/staff/(app)/parents/[id]/page";
 import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
 import StaffHome from "@/app/staff/(app)/page";
 import ChooseFamily from "@/app/choose-family/page";
-import { blockAction, unblockAction, resendWelcomeAction } from "@/app/staff/(app)/parents/actions";
+import { blockAction, unblockAction, resendWelcomeAction, resetSigninAction } from "@/app/staff/(app)/parents/actions";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 import { resetDb, seedGuardian, seedParent, seedStaff } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par } from "../helpers/roster-cache";
@@ -296,5 +296,96 @@ describe("the staff pages for parents", () => {
     expect(html).toContain(recordNameWords(null, "family").replaceAll("'", "&#x27;"));
     expect(html).not.toContain("Family account");
     expect(html).not.toContain("NOPE");
+  });
+
+  // An Admin's reset of a parent's sign-in (the sign-in release, slice SI-9a): the section on the person's page and its
+  // action. The reset itself is tests/integration/signin-reset.test.ts's.
+  describe("the Reset sign-in section", () => {
+    /** The section's HTML alone, from its heading to its end, with React's apostrophes written back. */
+    const resetSection = (html: string) => { const at = html.indexOf('id="pr-h"'); return at < 0 ? "" : html.slice(at, html.indexOf("</section>", at)).replaceAll("&#x27;", "'"); };
+    const authUserOf = async (parentId: string) => (await db.select().from(parentAuthUser).where(eq(parentAuthUser.parentId, parentId)))[0]!.id;
+    const asAdmin = async () => as(await seedStaff({ email: "ada@club.org", name: "Ada Admin", admin: true }));
+
+    it("is shown to an Admin only, with what the person signs in with as counts: no passkey's name and no address", async () => {
+      const ana = await anaRow();
+      const user = await authUserOf(ana.id);
+      await seedPassword(user, "a phrase Ana chose some time ago");
+      await db.insert(parentAuthPasskey).values({ id: crypto.randomUUID(), name: "Ana's secret laptop", publicKey: "pQECAyYgASFYIA", userId: user, credentialID: "cred-ana-1",
+        counter: 0, deviceType: "multiDevice", backedUp: true });
+      await db.insert(parentAuthSession).values({ id: crypto.randomUUID(), token: crypto.randomUUID(), userId: user, expiresAt: new Date(Date.now() + 86_400_000) });
+      // Parents.* and Roster.* hold no Admin-only permission: no section.
+      expect(resetSection(await personPage(ana.id))).toBe("");
+      await asAdmin();
+      const html = await personPage(ana.id);
+      const section = resetSection(html);
+      for (const shown of ["Reset sign-in</h2>", "<dt>Password</dt><dd>Chosen</dd>", "<dt>Passkeys</dt><dd>1</dd>", "<dt>Authenticator app</dt><dd>Off</dd>",
+        "<dt>Backup codes left</dt><dd>0</dd>", "<dt>Phones and computers remembered</dt><dd>0</dd>", "<dt>Signed in now</dt><dd>On 1 phone or computer</dd>"]) expect(section).toContain(shown);
+      expect(section).toContain("Resetting signs this person out everywhere and removes their password, passkeys, authenticator app and backup codes, and the phones and computers the portal remembered for them. They're emailed a new link to choose a password, which works once, for 7 days.");
+      expect(section).toContain("Before you reset, call them back on a number the club already holds (on this page, on their family's page, or in the club's own records), never one the caller gives you, and make sure they asked for this.");
+      expect(section).toContain("Only Admins can do this, and every other Admin sees it on their home page for a week.");
+      expect(section).toContain("I called them back on a number the club already holds, and they asked for this");
+      expect(section).toContain("Why? (staff only)");
+      expect(section).toContain(">Reset sign-in</button>");
+      expect(html.replaceAll("&#x27;", "'")).not.toContain("Ana's secret laptop");
+      expect(section).not.toContain("ana@example.com");
+      expect(section).not.toContain("cred-ana-1");
+    });
+
+    it("says why there is nothing to reset for a blocked person, one who can't sign in, and while sign-ins are off", async () => {
+      await asAdmin();
+      const ana = await anaRow();
+      await db.update(parent).set({ blocked: true }).where(eq(parent.id, ana.id));
+      expect(resetSection(await personPage(ana.id))).toContain("This person is blocked, so there's nothing to reset. Unblock them first if they should sign in again.");
+      await db.update(parent).set({ blocked: false }).where(eq(parent.id, ana.id));
+      await seedParentSettings({ signin: false });
+      expect(resetSection(await personPage(ana.id))).toContain("Parent sign-ins are switched off, so there's nothing to reset.");
+      await seedParentSettings(SIGNINS_ON);
+      await db.update(guardian).set({ status: "disabled", disabledReason: "removed" }).where(eq(guardian.parentId, ana.id));
+      const section = resetSection(await personPage(ana.id));
+      expect(section).toContain("This person can't sign in to any family right now, so there's nothing to reset.");
+      expect(section).not.toContain(">Reset sign-in</button>");
+    });
+
+    it("its action needs the Admin-only permission, refuses what no page sends, and answers each outcome in words", async () => {
+      const ana = await anaRow();
+      await expect(resetSigninAction(ana.id, "She lost her phone.", true)).rejects.toBeInstanceOf(AccessDenied);
+      await asAdmin();
+      const loose = resetSigninAction as unknown as (...a: unknown[]) => Promise<unknown>;
+      for (const args of [[{ id: ana.id }, "reason", true], ["not-an-id", "reason", true], [ana.id, 5, true], [ana.id, "x".repeat(2001), true], [ana.id, "reason", "yes"]]) {
+        expect(await loose(...args)).toEqual({ ok: false, errors: [BROWSER] });
+      }
+      const ASK = "Tick the box to say you called them back, and say why, in a few words. Only staff see it.";
+      expect(await resetSigninAction(ana.id, "She lost her phone.", false)).toEqual({ ok: false, errors: [ASK] });
+      expect(await resetSigninAction(ana.id, "   ", true)).toEqual({ ok: false, errors: [ASK] });
+      expect(await audits("parent.signin.reset")).toEqual([]);
+      expect(revalidated.count).toBe(0);
+      // Outgoing mail isn't set up here: the reset stands, and the answer says the email couldn't be sent and what to do.
+      expect(await resetSigninAction(ana.id, "She lost her phone.", true)).toEqual({ ok: true, status: "attention",
+        message: "Their sign-in was reset and they're signed out everywhere, but the email with the link couldn't be sent. Check outgoing mail under Mail, then, in a minute, send them a link with Resend welcome email." });
+      expect((await audits("parent.signin.reset"))[0]).toMatchObject({ targetId: ana.id, permission: "Parents.SignInReset.ReadWrite", after: { reason: "She lost her phone.", calledBack: true } });
+      expect(revalidated.count).toBe(1);
+      // The mail taken as handed over without sending it: the words are what is tested here.
+      const spy = vi.spyOn(sendModule, "sendMail").mockResolvedValue({ ok: true });
+      try {
+        const done = await resetSigninAction(ana.id, "She lost her phone.", true);
+        expect(done).toEqual({ ok: true, message: "Reset. They're signed out everywhere, and a link to choose a new password is on its way to ana@example.com." });
+        expect(JSON.stringify(done)).not.toContain("/sign-in/set-up/");
+      } finally { spy.mockRestore(); }
+    });
+
+    it("refuses in words a blocked person, sign-ins switched off, one who can't sign in and a person no longer in the portal", async () => {
+      await asAdmin();
+      const ana = await anaRow();
+      await db.update(parent).set({ blocked: true }).where(eq(parent.id, ana.id));
+      expect(await resetSigninAction(ana.id, "She lost her phone.", true)).toEqual({ ok: false, errors: ["This person is blocked. Unblock them first if they should sign in again."] });
+      await db.update(parent).set({ blocked: false }).where(eq(parent.id, ana.id));
+      await seedParentSettings({ signin: false });
+      expect(await resetSigninAction(ana.id, "She lost her phone.", true)).toEqual({ ok: false, errors: ["Parent sign-ins are switched off, so nothing was reset."] });
+      await seedParentSettings(SIGNINS_ON);
+      await db.update(guardian).set({ status: "disabled", disabledReason: "removed" }).where(eq(guardian.parentId, ana.id));
+      expect(await resetSigninAction(ana.id, "She lost her phone.", true)).toEqual({ ok: false, errors: ["This person can't sign in to any family right now, so there's nothing to reset."] });
+      expect(await resetSigninAction("00000000-0000-4000-8000-00000000dead", "She lost her phone.", true)).toEqual({ ok: false, errors: ["That person isn't in the portal any more."] });
+      expect(await audits("parent.signin.reset")).toEqual([]);
+    });
   });
 });
