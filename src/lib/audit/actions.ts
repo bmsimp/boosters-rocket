@@ -107,6 +107,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "role.unassign": "Role taken from a staff member",
   "role.unassign.refused": "Taking a role away refused",
   "roster.cleared": "Roster cleared after a company change",
+  "roster.customer.contact": "A parent's phone or mailing address, saved in the portal first, written to their record in QuickBooks",
   "roster.customer.create": "A family, student, parent or member made in QuickBooks by staff",
   "roster.customer.deactivate": "A family, student, parent or member made inactive in QuickBooks by staff",
   "roster.customer.read_again": "A customer that changed in QuickBooks while staff were changing it, read again into the roster",

@@ -1,5 +1,6 @@
 import type { RosterWrite } from "@/lib/db/schema";
 import { NO_TOKEN } from "@/lib/quickbooks/client";
+import { detailKey } from "@/lib/parents/contact-fields";
 import { nameKey } from "./names";
 
 /**
@@ -47,8 +48,41 @@ export function afterFailedTry(tries: number, createdAt: Date, now: Date): { sta
   return { state: "waiting", nextTryAt: new Date(now.getTime() + wait) };
 }
 
-/** A customer as the roster cache holds it, for the check before a queued write is sent again. */
-export type CachedCustomer = { qboId: string; displayName: string; active: boolean; parentQboId: string | null; typeQboId: string | null; syncToken: string };
+/**
+ * A customer as the roster cache holds it, for the check before a queued write is sent again: with its phone and
+ * billing address, which a parent's change of them (stage 3's slice 11b) is compared with.
+ */
+export type CachedCustomer = { qboId: string; displayName: string; active: boolean; parentQboId: string | null; typeQboId: string | null; syncToken: string } & Partial<DetailColumns>;
+/** A customer's phone and billing address, as the roster cache's columns hold them (or the portal's own, `parent` and `family`). */
+export type DetailColumns = { phone: string | null; addressLine1: string | null; addressLine2: string | null; addressCity: string | null; addressRegion: string | null;
+  addressPostalCode: string | null; addressCountry: string | null };
+
+/** A phone and an address as QuickBooks holds them (the cache's columns, or a live answer), as the form shows them: what isn't set is empty. */
+export type HeldContact = { phone: string; address: { line1: string; line2: string; city: string; region: string; postalCode: string; country: string } };
+/** What a row of those columns holds of a phone and an address. */
+export const heldInCache = (c: Partial<DetailColumns>): HeldContact => ({ phone: c.phone ?? "", address: { line1: c.addressLine1 ?? "", line2: c.addressLine2 ?? "",
+  city: c.addressCity ?? "", region: c.addressRegion ?? "", postalCode: c.addressPostalCode ?? "", country: c.addressCountry ?? "" } });
+
+type ContactWrite = Extract<RosterWrite, { op: "contact" }>;
+/**
+ * How QuickBooks' details (`held`) stand against a parent's change of their phone and address (stage 3's slice 11b),
+ * field by field, on the one normal form a phone or an address is compared by (detailKey(), the take-in's): `in_place`,
+ * every field it sends holds its new value; `sendable`, each holds its new value, its before-value (`was`, what the
+ * portal last knew QuickBooks held), an earlier change's that may have been sent (`orWas`), or nothing at all
+ * (overwriting nothing loses nothing); `differs`, otherwise: something the portal never knew of, never sent over.
+ */
+export function contactStands(held: HeldContact, w: Pick<ContactWrite, "change" | "was" | "orWas">): "in_place" | "sendable" | "differs" {
+  const fields = (["phone", "address"] as const).filter((f) => w.change[f] !== undefined);
+  let inPlace = true;
+  for (const f of fields) {
+    const now = detailKey(held[f]);
+    if (now === detailKey(w.change[f])) continue;
+    inPlace = false;
+    const known = [w.was[f], w.orWas?.[f]].filter((v) => v !== undefined).map((v) => detailKey(v));
+    if (now !== null && !known.includes(now)) return "differs";
+  }
+  return inPlace ? "in_place" : "sendable";
+}
 
 /**
  * What a queued write is, by a roster read since its last try. Only for one QuickBooks may already have made:
@@ -65,6 +99,13 @@ export function beforeResend(w: RosterWrite, cache: readonly CachedCustomer[]): 
   }
   const now = cache.find((c) => c.qboId === w.qboId);
   if (!now) return { is: "stuck", code: "gone" };
+  // A parent's phone and address (stage 3's slice 11b): in place when QuickBooks holds them; otherwise sent again only
+  // while every field it sends holds what the portal last knew of, at the version it was sent with. Anything else is
+  // settled by the fields, read live (`moved_on`, which the queue takes to the one path of a change saved first).
+  if (w.op === "contact") {
+    const stands = contactStands(heldInCache(now), w);
+    return stands === "in_place" ? { is: "done", qboId: now.qboId } : stands === "differs" || now.syncToken !== w.syncToken ? { is: "stuck", code: "moved_on" } : { is: "send" };
+  }
   const inPlace = w.op === "rename" ? now.displayName === w.name
     : w.op === "move" ? now.parentQboId === w.toFamilyQboId
       : !now.active;

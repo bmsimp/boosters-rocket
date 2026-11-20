@@ -82,6 +82,16 @@ const NOT_OFFERED: Record<NonNullable<QueueView["notOffered"]>, string> = {
   // One whose person's name QuickBooks can't take (nothing was sent): renaming the person takes its place.
   name_unusable: `${keptRefusalWords(NAME_UNUSABLE, null)} Or give it up here: the guardian keeps their access in the portal.`,
 };
+/**
+ * What QuickBooks holds and what the portal holds of a kept change of a parent's phone and address (stage 3's slice
+ * 11b), as text, only to staff who may see a person's details (QueueView.details); nothing otherwise, where the reason's
+ * words say only that QuickBooks holds other details.
+ */
+const contactDetails = (i: QueueView) => (i.details === null ? null : <>
+  <span className="when">QuickBooks has: {i.details.quickbooks}.</span>
+  <span className="when">The portal has: {i.details.portal}.</span>
+</>);
+
 /** Why "Send the portal's value" isn't offered for a refused item, by what it was: a guardian's taken name is the person's to rename (stage 3's slice 9h). */
 const notOfferedWords = (i: QueueView): string | null => {
   if (i.mayResend || i.notOffered === null) return null;
@@ -100,7 +110,7 @@ const notOfferedWords = (i: QueueView): string | null => {
 function Refused({ items, canChange }: { items: QueueView[]; canChange: boolean }) {
   const columns: Column<QueueView>[] = [
     { key: "what", header: "Change", rowHeader: true, cell: (i) => <>{i.words}<span className="when">{waitingWords(i)}</span>{i.moneyNote ? <span className="when">{i.moneyNote}</span> : null}</> },
-    { key: "why", header: "Why it didn't go through", cell: (i) => keptWordsFor(i.write, i.lastCode, i.holds) },
+    { key: "why", header: "Why it didn't go through", cell: (i) => <>{keptWordsFor(i.write, i.lastCode, i.holds)}{contactDetails(i)}</> },
     { key: "asked", header: "Asked", cell: (i) => <><LocalTime iso={i.askedAt} />{i.askedBy ? <span className="when">by {i.askedBy}</span> : null}</> },
     { key: "family", header: "Family", cell: (i) => (i.familyId ? <Link href={familyPage(i.familyId)}>Open the family</Link> : "None") },
     ...(canChange ? [{ key: "do", header: "What you can do", quiet: true, cell: (i: QueueView) => {
@@ -166,7 +176,9 @@ export default async function ReconciliationPage() {
   const money = can(ctx.effective, "Finance.Balance.Read");
   // Read before the roster, as every page that sends it does: a write refuses a page shown another company's roster.
   const rosterTag = await currentRosterTag();
-  const [writes, roster, balances, madeAnyway] = await Promise.all([loadOpenWrites({ showAmounts: money }), loadRosterPage(), money ? loadBalances() : Promise.resolve(null),
+  // A parent's phone and address, as QuickBooks and the portal hold them, only for staff who may see a person's details (stage 3's slice 11b).
+  const details = can(ctx.effective, "Parents.ReadWrite");
+  const [writes, roster, balances, madeAnyway] = await Promise.all([loadOpenWrites({ showAmounts: money, showDetails: details }), loadRosterPage(), money ? loadBalances() : Promise.resolve(null),
     loadMadeAfterGivingUp()]);
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite");
   // Customers no family is linked to, with "Create a family from this": only for staff who may link families to accounting.
@@ -188,7 +200,8 @@ export default async function ReconciliationPage() {
               one QuickBooks may already have made is first looked for in a fresh copy of the roster, so nothing is made twice or overwritten.
               One QuickBooks took that the portal couldn&apos;t take in at the time waits here too, until the portal finishes it on its side.
               A stuck change waits for you: try it again, or give it up and make it in QuickBooks.
-              A change saved in the portal first that didn&apos;t go through (QuickBooks refused it, the portal held it back as QuickBooks has something else, or it couldn&apos;t be sent) is kept in the portal: send the portal&apos;s value again on purpose, or give it up and leave QuickBooks as it is.</p>
+              A change saved in the portal first that didn&apos;t go through (QuickBooks refused it, the portal held it back as QuickBooks has something else, or it couldn&apos;t be sent) is kept in the portal: send the portal&apos;s value again on purpose, or give it up and leave QuickBooks as it is.
+              A parent&apos;s phone and mailing address are among them: saved in the portal first, sent on by the worker, and never sent over details QuickBooks holds that the portal didn&apos;t know of.</p>
             {refused.length > 0 && <><h3 className="table-head">Not in QuickBooks, kept in the portal ({refused.length})</h3><Refused items={refused} canChange={canChange} /></>}
             {stuck.length > 0 && <><h3 className="table-head">Stuck ({stuck.length})</h3><Writes items={stuck} caption="Stuck changes" canChange={canChange} mayLink={linking} /></>}
             {waiting.length > 0 && <><h3 className="table-head">Waiting ({waiting.length})</h3><Writes items={waiting} caption="Changes waiting" canChange={canChange} mayLink={linking} /></>}

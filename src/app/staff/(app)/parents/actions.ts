@@ -64,8 +64,9 @@ const WAITING_WORDS = "Making this family in QuickBooks is still waiting on the 
 const MAKING_WORDS = "This family is being made in QuickBooks at this moment, so nobody can be added to it. Try again in a minute.";
 // The family being changed in QuickBooks at this moment (made inactive with everyone under it, or renamed): stage 3's slice 9h.
 const CHANGING_WORDS = "This family is being changed in QuickBooks at this moment, so nobody can be added to it. Try again in a minute.";
-// A change to the guardian's own Parent customer in QuickBooks waiting or stuck on the queue (stage 3's slice 9h).
-const QBO_PENDING_WORDS = "A change to this guardian's Parent customer in QuickBooks is waiting or stuck on the Reconciliation page, so nothing was changed. Once it has gone through, or been given up there, try again.";
+// A change to the guardian's own Parent customer in QuickBooks waiting or stuck on the queue (stage 3's slice 9h), their
+// phone and address among them since slice 11b.
+const QBO_PENDING_WORDS = "A change to this guardian's Parent customer in QuickBooks (a new record, a name, their phone or mailing address, or making it inactive) is waiting or stuck on the Reconciliation page, so nothing was changed. Once it has gone through, or been given up there, try again.";
 // Someone holds the guardian row's "being sent" lock at this moment: another staff member's change to them being saved,
 // or a change to their Parent customer on its way to QuickBooks. Each refusal says its own cause.
 const BEING_CHANGED_WORDS = "This guardian is being changed at this moment (by someone else here, or a change to their Parent customer on its way to QuickBooks), so nothing was changed. Try again in a minute.";
@@ -160,7 +161,7 @@ export const renamePersonAction = staffAction(P, async (ctx, parentId: string, n
   const r = await renamePerson(parentId, name, op(ctx));
   if (!r.ok) {
     if (r.reason === "busy") return { ok: false, errors: [BUSY_WORDS] };
-    if (r.reason === "qbo_pending") return { ok: false, errors: ["A change to one of this person's Parent customers in QuickBooks is waiting or stuck on the Reconciliation page, so their name wasn't changed. Once it has gone through, or been given up there, try again."] };
+    if (r.reason === "qbo_pending") return { ok: false, errors: ["A change to one of this person's Parent customers in QuickBooks (their name, or their phone or mailing address among them) is waiting or stuck on the Reconciliation page, so their name wasn't changed. Once it has gone through, or been given up there, try again."] };
     if (r.reason === "being_changed") return { ok: false, errors: ["This person is being changed at this moment (by someone else here, or a change to one of their Parent customers on its way to QuickBooks), so their name wasn't changed. Try again in a minute."] };
     if (r.reason === "raced") return { ok: false, errors: ["This person's memberships changed at that same moment, so their name wasn't changed. Reload the page and try again."] };
     return r.reason === "invalid" ? { ok: false, errors: ["Give their name, up to 100 characters."] } : { ok: false, errors: ["That person isn't in the portal any more."] };
