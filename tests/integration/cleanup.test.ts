@@ -275,9 +275,11 @@ describe("the daily clean-up deletes only what is past use", () => {
 describe("the settings of retired features", () => {
   beforeEach(async () => { await resetDb(); });
 
-  // The two the held-address review left (the previous company's snapshot, the review notice's mark) were deleted by
+  // The two the retired reviews left (the previous company's snapshot, the review notice's mark) were deleted by
   // migration 0046 (tests/integration/migrate-retired-records.test.ts). None is listed now, so the clean-up deletes no
-  // setting, whatever is stored; the mechanism waits for a feature retired later.
+  // setting, whatever is stored; the mechanism waits for a feature retired later. While the list is empty its delete
+  // of a listed key runs in no test: the slice that lists one adds back a case that stores it and expects it deleted
+  // and counted (`retiredSettings: 1`).
   it("are none now, and every setting is kept", async () => {
     await db.insert(setting).values([
       { key: "parents.previous_company", value: { realmId: "1", people: [{ name: "Old Name", email: "old@example.com" }] } },

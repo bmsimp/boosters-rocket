@@ -15,9 +15,10 @@ export const FINISHED_WRITES_DAYS = 30;
 const CLEANUP_ACTOR: Actor = { door: "system", id: null, label: "worker" };
 /**
  * Settings whose feature is gone, so nothing reads, writes or expires them any more: their life ended with the feature,
- * and the clean-up removes any still stored. None is listed now: the two the held-address review left
- * (`parents.previous_company`, `parents.review_notice`) were deleted by migration 0046, with the review's tables. A
- * feature retired later lists its setting's key here.
+ * and the clean-up removes any still stored. None is listed now: the two the retired reviews left (the previous
+ * company's snapshot, `parents.previous_company`, and the review notice's mark, `parents.review_notice`) were deleted
+ * by migration 0046, with the reviews' tables. A feature retired later lists its setting's key here, and adds back a
+ * test that a listed key is deleted and counted (`retiredSettings`): while the list is empty that delete runs nowhere.
  */
 export const RETIRED_SETTINGS: readonly string[] = [];
 

@@ -123,6 +123,13 @@ MIGRATE_WITHOUT_RECENT_BACKUP=yes docker compose up -d
 Use it only for that one start, on the command line. Never put `MIGRATE_WITHOUT_RECENT_BACKUP` in `.env`: it would
 switch the check off for every update after this one.
 
+## A parent's new sign-in email while the update starts
+
+The update that drops what the retired reviews kept (migration 0046) removes a column the version before it still
+names when a parent asks for a new sign-in email, or opens or confirms its link. In the seconds between `migrate`
+finishing and the new `app` taking over, such a parent sees an error page. Nothing is lost: once **Health** names the
+new version, they ask again or open the link again, and it works.
+
 ## Going back
 
 After a `migrate` that failed, nothing was changed, so no restore is needed: put back the previous version's files and
