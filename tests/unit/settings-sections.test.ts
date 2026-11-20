@@ -42,7 +42,7 @@ describe("the staff menu", () => {
   it("groups an Admin's entries, with Settings as one entry", () => {
     expect(shape(staffMenu(ADMIN))).toEqual([
       "Home",
-      "Families: Roster, Parents",
+      "Families: Roster, Parents, Accounting links",
       "Season: Seasons, Progress, Signed forms, Volunteering, Volunteer credit",
       "Money: Balances, Reconciliation",
       "Settings",
