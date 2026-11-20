@@ -17,7 +17,7 @@ import { NOT_HERE } from "@/lib/roster/operations";
 import { coverStamp, familyCover, LINKED_DEACTIVATE, MAKING_LOCK } from "@/lib/roster/writes";
 import { TRY_AGAIN_NEEDS_LINKING } from "@/lib/roster/queue";
 import { addGuardianAction, reinstateGuardianAction, removeGuardianAction } from "@/app/staff/(app)/parents/actions";
-import { addStudentAction, addStudentHereAction, addToFamilyAction, createAction, createAndLinkAction, deactivateAction, deactivateHereAction, deactivateLinkedAction, familyInactiveAction, giveUpAction, moveAction,
+import { addStudentAction, addStudentHereAction, createAction, createAndLinkAction, deactivateAction, deactivateHereAction, deactivateLinkedAction, familyInactiveAction, giveUpAction, moveAction,
   renameHereAction, renameLinkedAction, renameParentAction, sendPortalValueAction, tryAgainAction } from "@/app/staff/(app)/roster/write-actions";
 import RosterPage from "@/app/staff/(app)/roster/page";
 import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
@@ -54,7 +54,6 @@ const riveraInactive = async (tag: string) => {
 const everyAction = (tag: string, itemId: string) => [
   () => createAction(tag, "family", "Patel Family"),
   () => addStudentAction(tag, SOME_UUID, "Rosa Rivera"),
-  () => addToFamilyAction(tag, "parent", "10", "Luis Rivera", "luis@example.com"),
   () => renameLinkedAction(tag, "student", SOME_UUID, "Leon Rivera"),
   () => renameParentAction(tag, "21", "0", "Mei L. Chen"),
   () => sendPortalValueAction(itemId, "", "stamp"),
@@ -100,9 +99,7 @@ describe("the roster write actions are staff actions on Roster.Family.ReadWrite,
       () => createAction("", "family", "Rosa"),
       () => createAction(tag, "family", { toString: () => "Rosa" } as unknown as string),
       () => createAction(tag, "family", "x".repeat(5000)),
-      // A student is no longer added by customer, and the parent's form takes an address.
-      () => addToFamilyAction(tag, "student" as "parent", "10", "Rosa", "rosa@example.com"),
-      () => addToFamilyAction(tag, "parent", "10", "Luis", null as unknown as string),
+      // A student is no longer added by customer.
       () => addStudentAction(tag, "10", "Rosa"),
       () => addStudentAction(tag, SOME_UUID, 7 as unknown as string),
       // A linked record's rename names it by its kind and app id, and sends no version.
@@ -267,13 +264,15 @@ describe("a family's page brings the portal's own records into line with what Qu
 });
 
 describe("the roster pages offer the changes the shape allows, to staff who may make them", () => {
-  it("a family's page, with both permissions: rename, add a student and a parent, move and make inactive", async () => {
+  it("a family's page, with both permissions: rename, add a student, move and make inactive; no \"Add a parent\" (stage 3's slice 9h)", async () => {
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
-    for (const words of ["Change in QuickBooks", "Add a student", "Add a parent", "Change the student Leo Rivera", "Change the parent Ana Rivera", "Move to", "Make Rivera Family inactive",
-      "From the portal you can make a family, add a student, add a parent with their own email address, rename a family, student or parent, move a student to another family and make a family, student or parent inactive."]) {
+    for (const words of ["Change in QuickBooks", "Add a student", "Change the student Leo Rivera", "Change the parent Ana Rivera", "Move to", "Make Rivera Family inactive",
+      "From the portal you can make a family, add a student, give each guardian added under Portal sign-ins their own Parent customer in QuickBooks, rename a family, student or parent, move a student to another family and make a family, student or parent inactive."]) {
       expect(html, words).toContain(words.replaceAll("'", "&#x27;"));
     }
+    // A guardian is added under Portal sign-ins, which makes their Parent customer: the QuickBooks-only form is gone.
+    expect(html).not.toContain("Add a parent");
     expect(html).toContain(NOT_HERE.contact);
   });
 

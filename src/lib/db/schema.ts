@@ -471,7 +471,7 @@ export type RosterRole = "family" | "student" | "parent" | "member";
  * create holds the customer type it was given. The app's records the item is filed under are the row's own columns.
  */
 export type RosterWrite =
-  | { op: "create"; role: RosterRole; name: string; typeQboId: string; familyQboId: string | null; email: string | null }
+  | { op: "create"; role: RosterRole; name: string; typeQboId: string; familyQboId: string | null; email: string | null; guardianId?: string }
   /**
    * A rename: `was`, for a linked family, member or student (saved in the portal first since stage 3's slice 9e), the
    * portal's own name of the record before this change, which a stale answer's live read is compared with (a parent's,
@@ -480,7 +480,7 @@ export type RosterWrite =
    * name read as the portal held it (or by "Send the portal's value", whose `was` is then the name its row showed, which
    * a later try compares QuickBooks' with), so its answer aligns the link. Neither is sent.
    */
-  | { op: "rename"; role: RosterRole; qboId: string; syncToken: string; name: string; was: string; checked?: true }
+  | { op: "rename"; role: RosterRole; qboId: string; syncToken: string; name: string; was: string; checked?: true; guardianId?: string }
   /**
    * A move of a linked student, saved in the portal first since stage 3's slice 9f (moveStudent()): `syncToken` is the
    * student link's own version (empty when it has none, and then nothing is sent before a live read);
@@ -502,8 +502,11 @@ export type RosterWrite =
    * was sent with the version a live read just showed (a link with none, a customer with no link of its own in the
    * family action, or a resend after a stale answer whose read showed the customer still active and with no balance),
    * so its answer aligns the link. Neither is sent but the version.
+   * `guardianId`, on a parent's create, rename or make-inactive (stage 3's slice 9h): the `guardian` row (a membership)
+   * whose own Parent customer it makes or changes, saved in the portal first. Never sent; an item queued before that
+   * slice names none and goes on as before, linking nothing.
    */
-  | { op: "deactivate"; role: RosterRole | "other"; qboId: string; syncToken: string; checked?: true };
+  | { op: "deactivate"; role: RosterRole | "other"; qboId: string; syncToken: string; checked?: true; guardianId?: string };
 /**
  * A volunteer buy-out's write to QuickBooks (v1 spec §11.5, src/lib/buyouts/writes.ts), kept in `write_queue.request`
  * beside the roster writes: the invoice made for one buy-out, and its void. Every id is a QuickBooks id of the company

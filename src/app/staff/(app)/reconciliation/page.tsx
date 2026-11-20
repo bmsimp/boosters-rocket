@@ -11,7 +11,7 @@ import { Notice } from "@/app/components/notice";
 import { WorthALook } from "../balances/worth-a-look";
 import { OneButton, TextAction } from "../seasons/forms";
 import { giveUpAction, linkMadeStudentAction, sendPortalValueAction, tryAgainAction } from "../roster/write-actions";
-import { keptWordsFor, portalValueStamp, TAKEN_NAME_KEPT } from "@/lib/roster/writes";
+import { EMAIL_TOO_LONG, GUARDIAN_TAKEN_NAME, guardianOf, keptRefusalWords, keptWordsFor, portalValueStamp, TAKEN_NAME_KEPT } from "@/lib/roster/writes";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { BuyoutsToLook } from "./buyouts";
 import { CustomersWithNoFamily } from "./no-family";
@@ -40,6 +40,10 @@ const CODE_WORDS: Record<string, string> = {
   // A family saved in the portal first, whose customer QuickBooks made, found linked to another family meanwhile (stage 3's slice 9d).
   customer_has_family: "QuickBooks made the customer, but another family in the portal is linked to it already, so this family was left unlinked and nothing will be sent again: check both in QuickBooks, then give this up",
   family_has_customer: "QuickBooks made the customer, but this family in the portal was linked to another customer meanwhile, so the new customer was left with no family and nothing will be sent again: check both in QuickBooks, then give this up",
+  // A guardian's Parent customer (stage 3's slice 9h): found made as a customer another guardian in the portal is linked to already.
+  customer_has_guardian: "QuickBooks has the Parent customer, but another guardian in the portal is linked to it already, so this guardian was left unlinked and nothing will be sent again: check it in QuickBooks, then give this up",
+  email_too_long: "the person's sign-in address is longer than QuickBooks takes, so no Parent customer was made for them",
+  name_unusable: "the person's name can't be used in QuickBooks, so no Parent customer was made for them: rename them on their page",
 };
 const codeWords = (code: string | null) => (code === null ? null
   : CODE_WORDS[code] ?? (/^http_5\d\d/.test(code) ? "QuickBooks had a problem of its own" : /^token_/.test(code) ? "the portal couldn't get a key to QuickBooks" : "QuickBooks refused it"));
@@ -73,6 +77,8 @@ const NOT_OFFERED: Record<NonNullable<QueueView["notOffered"]>, string> = {
   inactive: "QuickBooks has this customer inactive, and the portal never makes a customer active again, so the portal's value isn't sent: give it up here, or make the customer active in QuickBooks first.",
   not_on_roster: "This customer isn't on the roster the portal last read from QuickBooks, so the portal's value isn't sent: look for the customer in QuickBooks, then give this up here.",
   create_family_first: "The family the student was moved to has no customer in QuickBooks yet, so there is nowhere to put them there. Create the family in QuickBooks first, with “Create in QuickBooks and link” on its page; the portal's move can be sent from here after that.",
+  // A guardian's Parent customer create (stage 3's slice 9h) whose person's sign-in address is longer than QuickBooks takes.
+  email_too_long: `${keptRefusalWords(EMAIL_TOO_LONG, null)} Give it up here: the guardian keeps their access in the portal.`,
 };
 
 /**
@@ -94,7 +100,7 @@ function Refused({ items, canChange }: { items: QueueView[]; canChange: boolean 
       // (which takes its place, and is sent), a customer QuickBooks has inactive is never made active again by the
       // portal, one the roster doesn't hold isn't sent to, and a move into a family with no customer in QuickBooks waits
       // for that family to be made there. The press is bound to what the row shows (QueueView.shown).
-      const instead = i.mayResend || i.notOffered === null ? null : NOT_OFFERED[i.notOffered];
+      const instead = i.mayResend || i.notOffered === null ? null : i.notOffered === "taken" && guardianOf(i.write) !== null ? GUARDIAN_TAKEN_NAME : NOT_OFFERED[i.notOffered];
       return (
         <div className="row-actions">
           {instead === null

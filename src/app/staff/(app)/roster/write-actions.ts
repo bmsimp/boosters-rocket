@@ -14,7 +14,7 @@ import { NAME_MAX } from "@/lib/roster/names";
 const P = "Roster.Family.ReadWrite" as const;
 type Done = { ok: true; message: string } | { ok: false; errors: string[] };
 const NOT_FROM_PAGE = { ok: false as const, errors: ["That didn't go through. Reload the page and try again."] };
-const ID_MAX = 64, TAG_MAX = 64, EMAIL_MAX = 320, TOKEN_MAX = 20;
+const ID_MAX = 64, TAG_MAX = 64, TOKEN_MAX = 20;
 const str = (v: unknown, max: number): v is string => typeof v === "string" && v.length <= max;
 const id = (v: unknown): v is string => str(v, ID_MAX) && v.length > 0;
 const tag = (v: unknown): v is string => str(v, TAG_MAX) && v.length > 0;
@@ -89,12 +89,6 @@ export const renameHereAction = staffAction(P, async (ctx, rosterTag: string, ki
 export const deactivateHereAction = staffAction(P, async (ctx, rosterTag: string, kind: "family" | "student", recordId: string): Promise<WriteResult> => {
   if (!canRead(ctx) || !tag(rosterTag) || (kind !== "family" && kind !== "student") || !uuid(recordId)) return NOT_FROM_PAGE;
   return inPortal(ctx, kind === "family" ? { op: "deactivate_family", familyId: recordId } : { op: "deactivate_student", studentId: recordId }, rosterTag);
-});
-
-/** A parent with their own email address, under a linked family: QuickBooks first, as before (a parent has no record in the portal). */
-export const addToFamilyAction = staffAction(P, async (ctx, rosterTag: string, role: "parent", familyQboId: string, newName: string, email: string): Promise<WriteResult> => {
-  if (!tag(rosterTag) || role !== "parent" || !id(familyQboId) || !name(newName) || !str(email, EMAIL_MAX)) return NOT_FROM_PAGE;
-  return run(ctx, { op: "create", role, name: newName, familyQboId, email, typeQboId: null }, rosterTag);
 });
 
 /**

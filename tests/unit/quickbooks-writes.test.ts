@@ -100,6 +100,13 @@ const MAY_RENAME_TRY = [ROSTER_WRITER];
  */
 const ROSTER_DEACTIVATE = "deactivateLinked";
 const MAY_ROSTER_DEACTIVATE = [ROSTER_WRITER, "src/app/staff/(app)/roster/write-actions.ts"];
+/**
+ * A guardian's own Parent customer (stage 3's slice 9h): queued in the guardian's own transaction (an add, a reinstate,
+ * a removal, a person's rename) and tried at once after it commits, through the module's own try of a change saved
+ * first. Each named only by the module itself and the two guardian modules, since guardians and people now cause sends.
+ */
+const GUARDIAN_SENDS = ["queueForGuardian", "sendGuardianSaved"];
+const MAY_GUARDIAN_SEND = [ROSTER_WRITER, "src/lib/parents/guardians.ts", "src/lib/parents/people.ts"];
 /** One try of a change saved first, whoever makes it (at once, the press, the queue's worker), settling its own queue item. */
 const SAVED_TRY = "trySavedItem";
 const MAY_SAVED_TRY = [ROSTER_WRITER, "src/lib/roster/queue.ts"];
@@ -539,6 +546,7 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
       expect(naming(RENAME_TRY), `${RENAME_TRY} sends a rename, and resends it once after a live read. A new caller is a decision for a slice brief.`).toEqual([...MAY_RENAME_TRY].sort());
       expect(naming(ROSTER_DEACTIVATE), `${ROSTER_DEACTIVATE} makes a linked record inactive in QuickBooks. A new caller is a decision for a slice brief.`).toEqual([...MAY_ROSTER_DEACTIVATE].sort());
       expect(naming(SAVED_TRY), `${SAVED_TRY} sends a change saved first and settles its queue item. A new caller is a decision for a slice brief.`).toEqual([...MAY_SAVED_TRY].sort());
+      for (const name of GUARDIAN_SENDS) expect(naming(name), `${name} queues or sends a guardian's Parent customer change. A new caller is a decision for a slice brief.`).toEqual([...MAY_GUARDIAN_SEND].sort());
     });
 
     it("refuse a body that could carry another field", () => {
