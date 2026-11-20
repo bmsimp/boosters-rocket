@@ -66,12 +66,16 @@ const CLIENT_WRITES = ["qboUpdateCustomerContact", "qboUpdateCustomerEmail", "qb
  */
 const EMAIL_CHANGE = "src/lib/parents/email-change.ts";
 const EMAIL_WRITE = "qboUpdateCustomerEmail";
-/** The only modules that may name the email write: where it is written, and the parent's own email change that calls it. */
-const MAY_SEND_THE_EMAIL_WRITE = [CLIENT, EMAIL_CHANGE, CHECK_WRITER];
+/**
+ * The only modules that may name the email write: where it is written, and the check of the portal's requests. Since
+ * stage 3's slice 11d a parent's confirmed change of sign-in email is the portal's alone, so the email change names none
+ * of the client's writes (emailChangeProblems()); slice S11e adds the roster's write module, which sends it on.
+ */
+const MAY_SEND_THE_EMAIL_WRITE = [CLIENT, CHECK_WRITER];
 /** What reaches the email change's confirmation from a browser: the parent's own server action, and nothing else. */
 const CONFIRM = "confirmMyEmailChange";
 const MAY_CONFIRM = [EMAIL_CHANGE, "src/app/(parent)/family/email/actions.ts"];
-/** Everything the email change may export. A second exported function is a second way to the write. */
+/** Everything the email change may export. A second exported function is a second way to change a sign-in address. */
 const EMAIL_CHANGE_EXPORTS = ["EMAIL_CHANGE_TTL_MS", "EMAIL_COPY", "EmailResult", "ConfirmResult", "emailChangeLink", "canChangeMyEmail",
   "requestMyEmailChange", "EmailLinkView", "findMyEmailChange", CONFIRM];
 
@@ -281,25 +285,16 @@ function contactEditsProblems(source: string): string[] {
 }
 
 /**
- * What is wrong with how the email change reaches its write; nothing when the write is imported under its own name,
- * called once, inside the confirmation, for the record loadMyRecordForMyEmailChange(ctx) found for the session (its own
- * record by the address it signs in with, or while the record's email field reads as its own live change: only this
- * module may ask for that, tests/unit/my-record-for-email-change.test.ts), and the module exports nothing but its list.
- * The checks the first write's sender in the contact edits was held to until stage 3's slice 11a, for the second write.
+ * What is wrong with the email change (stage 3's slice 11d: a parent's sign-in email changed in the portal alone);
+ * nothing when the module imports nothing from the QuickBooks client, names none of its writes, takes the session's
+ * ParentCtx first in its confirmation, and exports nothing but its list. The checks the contact edits are held to
+ * (contactEditsProblems()), for the email change.
  */
-function emailWriterProblems(source: string): string[] {
+function emailChangeProblems(source: string): string[] {
   const text = code(source), problems: string[] = [];
-  const named = [...text.matchAll(new RegExp(`\\b${EMAIL_WRITE}\\b`, "g"))].length;
-  const imports = [...text.matchAll(/import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*["']@\/lib\/quickbooks\/client["']/g)].flatMap((m) => m[1]!.split(",").map((s) => s.trim()));
-  if (!imports.includes(EMAIL_WRITE)) problems.push(`${EMAIL_WRITE} is not imported under its own name`);
+  if (/from\s*["'][^"']*quickbooks\/client["']|import\(\s*["'][^"']*quickbooks\/client["']|require\(\s*["'][^"']*quickbooks\/client["']/.test(text)) problems.push("imports the QuickBooks client");
+  for (const name of CLIENT_WRITES) if (new RegExp(`\\b${name}\\b`).test(text)) problems.push(`names ${name}`);
   const confirm = exportedFunction(source, CONFIRM);
-  const calls = [...confirm.matchAll(new RegExp(`\\b${EMAIL_WRITE}\\s*\\(\\s*([^,)]*)`, "g"))].map((m) => m[1]!.trim());
-  if (calls.length !== 1) problems.push(`${CONFIRM} calls ${EMAIL_WRITE} ${calls.length} times, not once`);
-  else if (calls[0] !== "record.qboId") problems.push(`${EMAIL_WRITE} is called for ${calls[0]}, not for record.qboId`);
-  if (named !== 2) problems.push(`${EMAIL_WRITE} is named ${named} times: once to import it and once to call it is all`);
-  const OWN = "const record = await loadMyRecordForMyEmailChange(ctx);";
-  if (confirm.split(OWN).length !== 2) problems.push(`${CONFIRM} does not get its record from loadMyRecordForMyEmailChange(ctx), once`);
-  if (/\b(?:const|let|var)\s+record\b|\brecord\s*=[^=>]|\brecord\.qboId\s*=[^=]/.test(confirm.replace(OWN, ""))) problems.push(`${CONFIRM} gives record another value`);
   if (!confirm.startsWith(`export async function ${CONFIRM}(ctx: ParentCtx, `)) problems.push(`${CONFIRM} does not take the session's ParentCtx first`);
   const exported = [...text.matchAll(/^export\s+(?:declare\s+)?(?:async\s+)?(?:function\*?|const|let|var|class|type|interface|enum)\s+(\w+)/gm)].map((m) => m[1]!);
   if ([...exported].sort().join() !== [...EMAIL_CHANGE_EXPORTS].sort().join()) problems.push(`exports ${exported.join(", ")}`);
@@ -523,12 +518,12 @@ describe("what the portal writes to QuickBooks, and who may send each", () => {
     expect(emailBodyProblems(emailUpdateConstant(clientSource))).toEqual([]);
   });
 
-  it("lets only the parent's own email change send the email write, and only the parent's own action confirm through it", () => {
+  it("lets only the check of the portal's requests send the email write, and only the parent's own action confirm a change of sign-in email", () => {
     const naming = (name: string) => everything.filter((s) => new RegExp(`\\b${name}\\b`).test(code(s.text))).map((s) => s.file).sort();
     expect(naming(EMAIL_WRITE), `${EMAIL_WRITE} is the portal's second write to QuickBooks. A new caller is a decision for a slice brief, not a fix made in passing.`).toEqual([...MAY_SEND_THE_EMAIL_WRITE].sort());
     expect(naming(CONFIRM)).toEqual([...MAY_CONFIRM].sort());
-    // Called once, in the confirmation, for the session's own record, and the module is no second way to it.
-    expect(emailWriterProblems(emailChange)).toEqual([]);
+    // Since stage 3's slice 11d the email change sends nothing to QuickBooks, and the module is no way to it.
+    expect(emailChangeProblems(emailChange)).toEqual([]);
     expect([...client.matchAll(new RegExp(`\\b${EMAIL_WRITE}\\b`, "g"))]).toHaveLength(1);
   });
 
@@ -789,26 +784,30 @@ describe("what the portal writes to QuickBooks, and who may send each", () => {
       }
     });
 
-    it("a second way to the email write through the email change", () => {
+    it("a way to QuickBooks through the email change", () => {
+      expect(emailChangeProblems(emailChange)).toEqual([]);
       const added = (more: string) => `${emailChange}\n${more}\n`;
       const cut = emailChange.indexOf(`export async function ${CONFIRM}(`);
       const inConfirm = (from: string, to: string) => emailChange.slice(0, cut) + emailChange.slice(cut).replace(from, to);
-      const OWN = "const record = await loadMyRecordForMyEmailChange(ctx);";
+      const FINISH = "const finish = () => db.transaction(async (tx)";
       const refused = [
-        added(`export async function staffSetEmail(qboId: string, version: string, field: string) { return qboUpdateCustomerEmail(qboId, version, field, { realmId: "1" }); }`),
-        added(`async function alsoSend(qboId: string) { return qboUpdateCustomerEmail(qboId, "0", "a@b.org", { realmId: "1" }); }`),
-        added(`export const sendEmail = qboUpdateCustomerEmail;`),
-        added(`export { qboUpdateCustomerEmail };`),
+        // The email write imported and called, from a function of its own or from the confirmation.
+        added(`import { qboUpdateCustomerEmail } from "@/lib/quickbooks/client";\nasync function alsoSend(qboId: string) { return qboUpdateCustomerEmail(qboId, "0", "a@b.org", { realmId: "1" }); }`),
+        added(`async function viaImport(qboId: string) { const c = await import("@/lib/quickbooks/client"); return c.qboUpdateCustomerEmail(qboId, "0", "", { realmId: "1" }); }`),
+        inConfirm(FINISH, `await qboUpdateCustomerEmail("1", "0", row.newEmail, { realmId: "1" });\n  ${FINISH}`),
+        added(`import { qboRenameCustomer as rename } from "@/lib/quickbooks/client";`),
+        // A second way in: another export, a re-export, a default.
+        added(`export async function staffSetEmail(parentId: string, email: string) { return { parentId, email }; }`),
+        added(`export const sendEmail = confirmMyEmailChange;`),
+        added(`export { confirmMyEmailChange as confirm };`),
         added(`export * from "@/lib/quickbooks/client";`),
-        added(`export async function confirmFor(ctx: ParentCtx, qboId: string) { return qboId; }`),
-        emailChange.replace("qboUpdateCustomerEmail(record.qboId,", "qboUpdateCustomerEmail(row.recordQboId!,"),
-        inConfirm(OWN, `${OWN}\n  record.qboId = String(token);`),
-        inConfirm(OWN, "const record = await recordFor(token);"),
-        emailChange.replace("qboUpdateCustomerEmail } from", "qboUpdateCustomerEmail as send } from").replace("await qboUpdateCustomerEmail(record.qboId,", "await send(record.qboId,"),
+        added(`export default confirmMyEmailChange;`),
+        // The confirmation taking something else first.
+        emailChange.replace(`export async function ${CONFIRM}(ctx: ParentCtx, `, `export async function ${CONFIRM}(parentId: string, ctx: ParentCtx, `),
       ];
       for (const source of refused) {
         expect(source, "the case didn't change the module").not.toBe(emailChange);
-        expect(emailWriterProblems(source), `case ${refused.indexOf(source)}`).not.toEqual([]);
+        expect(emailChangeProblems(source), `case ${refused.indexOf(source)}`).not.toEqual([]);
       }
     });
 
