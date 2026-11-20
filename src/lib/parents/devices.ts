@@ -19,10 +19,10 @@ import { db } from "@/lib/db/client";
 import { parent, parentAuthSession, parentDevice } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { env } from "@/env";
-import { lockedPerson } from "./sessions";
+import { DEVICE_LIFE_MS, lockedPerson } from "./sessions";
 
-/** How long a device is remembered from its last use: a password sign-in on it, or its session's renewal (open question 26). */
-export const DEVICE_LIFE_MS = 90 * 24 * 60 * 60 * 1000;
+/** How long a device is remembered from its last use (sessions.ts, beside the session's own life, which its renewal shares). */
+export { DEVICE_LIFE_MS };
 const DEVICE_TOKEN_BYTES = 32;
 /** A device token as the portal makes one: 32 random bytes, base64url, 43 characters. */
 const TOKEN_SHAPE = /^[A-Za-z0-9_-]{43}$/;

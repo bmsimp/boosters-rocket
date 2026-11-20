@@ -1,6 +1,6 @@
 import { and, eq, exists, gt, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { family, guardian, parent, parentAuthSession, parentDevice, parentSigninToken, signinCode, student } from "@/lib/db/schema";
+import { family, guardian, parent, parentAuthSession, parentAuthUser, parentDevice, parentSigninToken, signinCode, student } from "@/lib/db/schema";
 import type { Actor } from "@/lib/audit/log";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { getShape, shapeNamesStudents, type MembershipShape } from "@/lib/roster/shape";
@@ -21,20 +21,45 @@ export const parentActor = (p: { id: string; email: string }): Actor => ({ door:
 export const PARENT_SESSION_SECONDS = 90 * 24 * 60 * 60;
 export const PARENT_SESSION_COOKIE_SECONDS = 400 * 24 * 60 * 60;
 const RENEW_AFTER_MS = 24 * 60 * 60 * 1000;
+/**
+ * How long a remembered device is remembered from its last use: a password sign-in on it, or its session's renewal
+ * (open question 26). Kept here, beside the session's own life, since the renewal below renews both; devices.ts, which
+ * imports this module, exports it on.
+ */
+export const DEVICE_LIFE_MS = 90 * 24 * 60 * 60 * 1000;
 
 /**
  * Starts the session's 90 days again, at most once a day: a row made or renewed less than a day ago is left alone,
  * without a query. Called for a session the portal has just accepted (src/lib/auth/identity.ts). A row that has run
  * out is never brought back: the update only matches one that is still live.
+ *
+ * Since the sign-in release's slice SI-5b it renews the session's device with it (open question 26: a device is
+ * "renewed by use, like sessions"), in one transaction and in the order above lockedPerson() (devices before sessions):
+ * first the device the session names (`parent_auth_session.device_id`), its last use now and its end DEVICE_LIFE_MS on,
+ * but only while it is that session's own person's (through `parent_auth_user.parent_id`), unexpired (a device past its
+ * end, or forgotten, whose row is gone, is never brought back) and not renewed in the last day (so two renewals at once
+ * renew it once), and only while the session itself is still live and due its renewal; then the session, as before. A
+ * request that renews nothing reads nothing new. Unaudited, as a session's renewal is (tests/unit/audit-rows.test.ts,
+ * NOT_AUDITED): it is the portal keeping what the person already has, and runs on every day's first page.
  */
 export async function renewParentSession(s: { id: string; expiresAt: Date }, now = new Date()): Promise<boolean> {
   const expiresAt = new Date(now.getTime() + PARENT_SESSION_SECONDS * 1000);
   const renewable = new Date(expiresAt.getTime() - RENEW_AFTER_MS);
   if (s.expiresAt.getTime() > renewable.getTime()) return false;
-  const rows = await db.update(parentAuthSession).set({ expiresAt, updatedAt: now })
-    .where(and(eq(parentAuthSession.id, s.id), gt(parentAuthSession.expiresAt, now), lte(parentAuthSession.expiresAt, renewable)))
-    .returning({ id: parentAuthSession.id });
-  return rows.length > 0;
+  const deviceEnds = new Date(now.getTime() + DEVICE_LIFE_MS);
+  const deviceRenewable = new Date(deviceEnds.getTime() - RENEW_AFTER_MS);
+  return db.transaction(async (tx) => {
+    const thisSession = tx.select({ one: sql`1` }).from(parentAuthSession)
+      .innerJoin(parentAuthUser, eq(parentAuthUser.id, parentAuthSession.userId))
+      .where(and(eq(parentAuthSession.id, s.id), eq(parentAuthSession.deviceId, parentDevice.id), eq(parentAuthUser.parentId, parentDevice.parentId),
+        gt(parentAuthSession.expiresAt, now), lte(parentAuthSession.expiresAt, renewable)));
+    await tx.update(parentDevice).set({ lastUsedAt: now, expiresAt: deviceEnds })
+      .where(and(exists(thisSession), gt(parentDevice.expiresAt, now), lte(parentDevice.expiresAt, deviceRenewable)));
+    const rows = await tx.update(parentAuthSession).set({ expiresAt, updatedAt: now })
+      .where(and(eq(parentAuthSession.id, s.id), gt(parentAuthSession.expiresAt, now), lte(parentAuthSession.expiresAt, renewable)))
+      .returning({ id: parentAuthSession.id });
+    return rows.length > 0;
+  });
 }
 
 /**
@@ -49,7 +74,8 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * person's row (`parent`), then what hangs on the person, in this order: their email change requests, their sign-in
  * codes, their set-up and reset links (`parent_signin_token`), their password (the `credential` row of
  * `parent_auth_account`), their remembered devices (`parent_device`), their sessions. Links are made since the sign-in
- * release's slice SI-2 (mintSigninLink(), signin-links.ts); devices since SI-3b (recordStrongSignin(), devices.ts). Everything that ends all of a
+ * release's slice SI-2 (mintSigninLink(), signin-links.ts); devices since SI-3b (recordStrongSignin(), devices.ts), and
+ * each session names the device it was made on since SI-5b (`parent_auth_session.device_id`). Everything that ends all of a
  * person's sign-in deletes their unused links, a held one on its way included (unspentLink, ./link-state.ts) and forgets their devices, in that
  * place, and keeps their password: blocking, sign-ins switched off, the change-of-company clear, a confirmed change of
  * sign-in email, and closing a person's last open membership (closeMembership(), membership.ts; the lead's choice 10 of
@@ -119,7 +145,14 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   then ends every session, this one included;
  * - "Sign out everywhere" (signOutEverywhere(), signin-settings.ts, since SI-5a, `parent.sessions.end_all`) takes the
  *   row FOR UPDATE, then deletes the unused email change requests, then the unused codes and those spent within a
- *   code's life, then forgets the devices, then ends every session; it keeps the password and the links.
+ *   code's life, then forgets the devices, then ends every session; it keeps the password and the links;
+ * - a session's renewal (renewParentSession(), above, since SI-5b), at most once a day, takes no person's row: it
+ *   updates the device the session names (the device's row), then the session's row, in one transaction, so it waits
+ *   behind a block, a reset or any other writer that has taken the device or the session first, and finds them gone;
+ * - forgetting a device in sign-in settings (forgetMyDevice() and forgetMyOtherDevices(), signin-settings.ts, since
+ *   SI-5b) takes the row FOR UPDATE, reads the session's `strong_at` unlocked under it, then deletes the device, or every
+ *   device but the session's own (which sets `device_id` null on the sessions that named them), and touches no session
+ *   otherwise.
  */
 export async function lockedPerson(tx: Tx, parentId: string): Promise<{ email: string; blocked: boolean } | null> {
   const [p] = await tx.select({ email: parent.email, blocked: parent.blocked }).from(parent).where(eq(parent.id, parentId)).for("key share");
