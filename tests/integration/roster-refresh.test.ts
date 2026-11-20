@@ -12,6 +12,7 @@ import { db } from "@/lib/db/client";
 import { auditLog, jobRun, qboCustomer, qboCustomerType, setting } from "@/lib/db/schema";
 import { refreshRoster, ROSTER_JOB, ROSTER_LOCK } from "@/lib/roster/refresh";
 import { saveShape, getShape, SHAPE_KEY } from "@/lib/roster/shape";
+import { TAKE_IN_KEY } from "@/lib/parents/contact-take-in";
 import { resetDb, untilALockIsAwaited } from "../helpers/db";
 import { startQboStub, seedConnected, fznCompany, FZN_SHAPE, type QboStub } from "../helpers/qbo-stub";
 
@@ -88,6 +89,28 @@ describe("the roster refresh", () => {
     await saveShape({ kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: null }, staffOp);
     c = await customers();
     expect(c["11"]).toMatchObject({ email: null, phone: null, ...none });
+  });
+
+  it("marks, for the take-in of contact details, that this build's read kept the billing addresses, and only a successful read while it waits", async () => {
+    const takeIn = async () => (await db.select({ value: setting.value }).from(setting).where(eq(setting.key, TAKE_IN_KEY)))[0]?.value as Record<string, unknown> | undefined;
+    // No setting (a database migration 0044 never wrote it into): nothing is made.
+    await refreshRoster(worker);
+    expect(await takeIn()).toBeUndefined();
+    const after = new Date(Date.now() - 60_000).toISOString();
+    await db.insert(setting).values({ key: TAKE_IN_KEY, value: { after } });
+    // A failed read marks nothing.
+    stub.oddRosterAnswer = { customers: { QueryResponse: "nothing" } };
+    expect(await refreshRoster(worker)).toMatchObject({ ok: false });
+    expect(await takeIn()).toEqual({ after });
+    stub.oddRosterAnswer = null;
+    expect(await refreshRoster(worker)).toMatchObject({ ok: true });
+    const run = await lastRun();
+    expect(await takeIn()).toEqual({ after, addressesReadAt: run.startedAt.toISOString() });
+    // Once the take-in has run, a read changes nothing of its setting.
+    const done = { after, addressesReadAt: run.startedAt.toISOString(), doneAt: new Date().toISOString() };
+    await db.update(setting).set({ value: done }).where(eq(setting.key, TAKE_IN_KEY));
+    await refreshRoster(worker);
+    expect(await takeIn()).toEqual(done);
   });
 
   it("stores a customer QuickBooks sends twice once, and counts what it stored", async () => {

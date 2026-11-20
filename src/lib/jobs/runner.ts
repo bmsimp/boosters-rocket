@@ -86,8 +86,8 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
   } catch {
     ran.push({ job: DUE_REMINDERS_JOB, ok: false });
   }
-  // A guardian's phone and mailing address taken into the portal, once, after the first successful roster read since
-  // migration 0044 (src/lib/parents/contact-take-in.ts). It reads the roster cache and asks QuickBooks nothing, so it
+  // A guardian's phone and mailing address taken into the portal, once, after the first successful roster read by this
+  // build since migration 0044 (src/lib/parents/contact-take-in.ts). It reads the roster cache and asks QuickBooks nothing, so it
   // goes before the connection check, at the wake after that read. Guarded like the steps above; in this wake's answer
   // only on the wake it ran.
   try {

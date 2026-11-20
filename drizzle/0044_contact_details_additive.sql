@@ -27,7 +27,8 @@ ALTER TABLE "qbo_customer" ADD COLUMN "address_country" text;--> statement-break
 -- they are cleared, and the take-in (src/lib/parents/contact-take-in.ts) gives each person and family the details their
 -- own record holds, once, after the first successful roster read that starts after this migration: asked for here as a
 -- parent's confirmed email change asks for one (src/lib/parents/refresh-ask.ts), and the take-in's own setting records
--- the time it must start after. Refuses nothing.
+-- the time it must start after. The read must be one that keeps the billing address, which marks the setting itself
+-- (`addressesReadAt`): the build before this one answers the same ask while it still runs. Refuses nothing.
 INSERT INTO "setting" ("key", "value")
   VALUES ('roster.refresh_asked', jsonb_build_object('at', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')))
   ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value", "updated_at" = now();

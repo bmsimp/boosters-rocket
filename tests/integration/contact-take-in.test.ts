@@ -8,18 +8,21 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
   return { ...m, qboEndpoints: () => ({ authorize: `${stubBase.url}/authorize`, token: `${stubBase.url}/token`, revoke: `${stubBase.url}/revoke`,
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
+// The worker's wake (runDueJobs()) reaches modules that read request headers; it has none.
+vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: async () => ({ get: () => undefined }) }));
 
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, parent, qboCustomer, setting } from "@/lib/db/schema";
-import { TAKE_IN_KEY, takeInContactDetails } from "@/lib/parents/contact-take-in";
+import { auditLog, family, parent, qboCustomer, setting } from "@/lib/db/schema";
+import { TAKE_IN_JOB, TAKE_IN_KEY, noteAddressesKept, planContactTakeIn, takeInContactDetails, writeContactTakeIn } from "@/lib/parents/contact-take-in";
+import { runDueJobs } from "@/lib/jobs/runner";
 import type { ContactValues } from "@/lib/parents/contact-fields";
 import { NO_DETAILS, familyDetails, personDetails, setPersonDetails } from "../helpers/contact";
 import { resetDb, seedGuardian } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, MONEY_REALM, seedParentIn, seedSignedInParent } from "../helpers/parent";
 import { seedConnected, startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { addToCache, fam, par, seedRosterRead, seedShape, storeShape, stu } from "../helpers/roster-cache";
-import { syncAppRecords } from "../helpers/app-records";
+import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 import { SOURCE_KEY } from "@/lib/roster/source";
 
 let stub: QboStub;
@@ -38,20 +41,29 @@ async function cacheHolds(qboId: string, o: { phone?: string | null; address?: A
   }).where(eq(qboCustomer.qboId, qboId));
 }
 /**
+ * A successful roster read by this build, which keeps the billing addresses: the run, and the mark its savepoint
+ * leaves for the take-in (noteAddressesKept(), as refreshRoster() writes it; tests/integration/roster-refresh.test.ts).
+ */
+async function thisBuildRead(at?: Date) {
+  const startedAt = await seedRosterRead({ finishedAt: at });
+  await db.transaction((tx) => noteAddressesKept(tx, startedAt));
+}
+/**
  * The database as migration 0044 leaves it, with the take-in waiting: every person's phone cleared, and the take-in's
- * time a minute ago. `read` then records a successful roster read that started after it (or `readAt`).
+ * time a minute ago. `read` then records a successful roster read by this build that started after it (or `readAt`).
  */
 async function asMigrated(o: { read?: boolean; readAt?: Date } = {}) {
   await db.update(parent).set({ phone: null });
   await db.insert(setting).values({ key: TAKE_IN_KEY, value: { after: new Date(Date.now() - 60_000).toISOString() } });
-  if (o.read ?? true) await seedRosterRead({ finishedAt: o.readAt });
+  if (o.read ?? true) await thisBuildRead(o.readAt);
 }
 const takeIns = async () => (await db.select().from(auditLog).orderBy(asc(auditLog.id))).filter((a) => a.action === "parent.details.taken_in");
 const takeInSetting = async () => (await db.select({ value: setting.value }).from(setting).where(eq(setting.key, TAKE_IN_KEY)))[0]!.value as { after: string; doneAt?: string };
 /** A second family for this person, with their own record in it, which the cache holds as `o` says. */
-async function secondFamily(parentId: string, email: string, o: { phone?: string | null; address?: Address | null }) {
+async function secondFamily(parentId: string, email: string, o: { phone?: string | null; address?: Address | null; status?: "active" | "disabled" }) {
   await addToCache([fam("CEDAR-FAM", "Cedarholm Family"), par("CEDAR-P1", "Ansgar Alderquist", "CEDAR-FAM", email), stu("CEDAR-S1", "Cosima Cedarholm", "CEDAR-FAM")]);
-  await seedGuardian({ parentId, familyQboId: "CEDAR-FAM", status: "active", sourceQboId: "CEDAR-P1" });
+  await seedGuardian({ parentId, familyQboId: "CEDAR-FAM", status: o.status ?? "active", sourceQboId: "CEDAR-P1",
+    ...(o.status === "disabled" ? { disabledReason: "removed" as const, statusBeforeDisable: "active" as const } : {}) });
   await syncAppRecords();
   await cacheHolds("CEDAR-P1", o);
 }
@@ -94,13 +106,75 @@ describe("the take-in of a guardian's phone and mailing address, once", () => {
     expect(await personDetails(a.identity.parentId)).toEqual({ values: { ...ADDRESS, phone: "" }, version: 1 });
   });
 
-  it("takes both when the person's two records agree, and a record with none does not count against the other", async () => {
+  it("takes both when the person's two records agree", async () => {
     const a = await seedSignedInParent(FAMILY_A);
     await cacheHolds(FAMILY_A.parent.qboId, { address: ADDRESS });
-    await secondFamily(a.identity.parentId, FAMILY_A.parent.email, { phone: FAMILY_A.parent.phone, address: null });
+    await secondFamily(a.identity.parentId, FAMILY_A.parent.email, { phone: FAMILY_A.parent.phone, address: ADDRESS });
     await asMigrated();
     expect(await takeInContactDetails()).toMatchObject({ ran: true, counts: { peopleGivenPhone: 1, peopleGivenAddress: 1, peopleDisagreeing: 0 } });
     expect(await personDetails(a.identity.parentId)).toEqual({ values: { phone: FAMILY_A.parent.phone, ...ADDRESS }, version: 1 });
+  });
+
+  it("a record that holds none beside one that holds one is a disagreement: that detail is left empty, and counted", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await cacheHolds(FAMILY_A.parent.qboId, { address: ADDRESS });
+    // The club left the address out of the second record, perhaps on purpose; the phone the two agree on.
+    await secondFamily(a.identity.parentId, FAMILY_A.parent.email, { phone: FAMILY_A.parent.phone, address: null });
+    await asMigrated();
+    expect(await takeInContactDetails()).toMatchObject({ ran: true, counts: { peopleGivenPhone: 1, peopleGivenAddress: 0, peopleDisagreeing: 1 } });
+    expect(await personDetails(a.identity.parentId)).toEqual({ values: { ...NO_DETAILS, phone: FAMILY_A.parent.phone }, version: 1 });
+  });
+
+  it("reads only the person's open rows in active families: a closed row's record, and one in an inactive family, give nothing and disagree with nothing", async () => {
+    for (const closedBy of ["row", "family"] as const) {
+      await resetDb();
+      const a = await seedSignedInParent(FAMILY_A);
+      await cacheHolds(FAMILY_A.parent.qboId, { address: ADDRESS });
+      // A record of the person's own in a family they are no longer a guardian of, or one whose record is inactive, holding other details.
+      await secondFamily(a.identity.parentId, FAMILY_A.parent.email, { phone: "512-555-0777", address: { ...ADDRESS, line1: "99 Elsewhere Row" },
+        status: closedBy === "row" ? "disabled" : "active" });
+      await asMigrated();
+      // After the read the helper records, which brings the records into step with the cache (syncAppRecords()).
+      if (closedBy === "family") await db.update(family).set({ active: false }).where(eq(family.id, await recordOfCustomer("CEDAR-FAM", "family")));
+      expect(await takeInContactDetails(), closedBy).toMatchObject({ ran: true, counts: { peopleGivenPhone: 1, peopleGivenAddress: 1, peopleDisagreeing: 0 } });
+      expect(await personDetails(a.identity.parentId), closedBy).toEqual({ values: { phone: FAMILY_A.parent.phone, ...ADDRESS }, version: 1 });
+    }
+  });
+
+  it("never overwrites a save made between its read and its write, and counts it", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await cacheHolds(FAMILY_A.parent.qboId, { address: ADDRESS });
+    await asMigrated();
+    const planned = await planContactTakeIn();
+    expect(planned!.people.map((p) => p.id)).toContain(a.identity.parentId);
+    // The parent saves their phone after the take-in read the cache and before it writes.
+    await setPersonDetails(a.identity.parentId, { phone: "512-555-0444" }, 1);
+    expect(await writeContactTakeIn(planned!)).toMatchObject({ ran: true, counts: { peopleSavedMeanwhile: 1, peopleGivenPhone: 0, peopleGivenAddress: 0 } });
+    expect(await personDetails(a.identity.parentId)).toEqual({ values: { ...NO_DETAILS, phone: "512-555-0444" }, version: 1 });
+  });
+
+  it("in books with no parent type, never overwrites a family's details saved between its read and its write", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await storeShape({ kind: "layered", familyTypeId: "F", studentTypeId: "S", parentTypeId: null });
+    await cacheHolds(FAMILY_A.family.qboId, { phone: "512-555-0199", address: ADDRESS });
+    await asMigrated();
+    const planned = await planContactTakeIn();
+    await db.update(family).set({ phone: "512-555-0555", contactVersion: 1 }).where(eq(family.id, a.identity.familyId));
+    expect(await writeContactTakeIn(planned!)).toMatchObject({ ran: true, counts: { familiesSavedMeanwhile: 1, familiesGivenDetails: 0 } });
+    expect(await familyDetails(a.identity.familyId)).toEqual({ values: { ...NO_DETAILS, phone: "512-555-0555" }, version: 1 });
+  });
+
+  it("is run by the worker's wake, before the connection is looked at, on the one wake it runs", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await cacheHolds(FAMILY_A.parent.qboId, { address: ADDRESS });
+    await asMigrated();
+    // QuickBooks is not connected: the wake stops at the connection check, after the take-in.
+    const takeInsOf = (r: Awaited<ReturnType<typeof runDueJobs>>) => r.ran.filter((x) => x.job === TAKE_IN_JOB);
+    expect(takeInsOf(await runDueJobs())).toEqual([{ job: TAKE_IN_JOB, ok: true }]);
+    expect(await personDetails(a.identity.parentId)).toEqual({ values: { phone: FAMILY_A.parent.phone, ...ADDRESS }, version: 1 });
+    expect(takeInsOf(await runDueJobs())).toEqual([]);
+    expect(await takeIns()).toHaveLength(1);
+    expect(stub.apiCalls()).toEqual([]);
   });
 
   it("never gives a person another person's details: a record whose email field holds another address, and a row staff added, give nothing", async () => {
@@ -169,9 +243,21 @@ describe("the take-in waits, and does nothing, until it can be trusted", () => {
     // A read that started before the migration's time.
     await asMigrated({ readAt: new Date(Date.now() - 10 * 60_000) });
     await waited(a.identity.parentId);
-    await seedRosterRead();
+    await thisBuildRead();
     expect(await takeInContactDetails()).toMatchObject({ ran: true });
     expect((await personDetails(a.identity.parentId)).version).toBe(1);
+  });
+
+  it("until this build has read the roster: a successful read since the migration by the build before it, which keeps no address, is not enough", async () => {
+    const a = await ready();
+    await asMigrated({ read: false });
+    // The build before 0044 answers the roster read the migration asks for, while it still runs beside the migrated
+    // database: a successful run after the migration's time, over a cache it leaves with no address.
+    await seedRosterRead();
+    await waited(a.identity.parentId);
+    await thisBuildRead();
+    expect(await takeInContactDetails()).toMatchObject({ ran: true, counts: { peopleGivenAddress: 1 } });
+    expect(await personDetails(a.identity.parentId)).toEqual({ values: { phone: FAMILY_A.parent.phone, ...ADDRESS }, version: 1 });
   });
 
   it("while the roster cache names no company", async () => {

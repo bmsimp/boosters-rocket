@@ -6,6 +6,7 @@ import { getConnection } from "@/lib/quickbooks/connection";
 import { qboQueryAll, qboCustomerTypes } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { billingAddressOf } from "@/lib/parents/contact-fields";
+import { noteAddressesKept } from "@/lib/parents/contact-take-in";
 import { getShape, shapeTypeIds, ROSTER_LOCK, NO_ADDRESS_COLUMNS } from "./shape";
 import { clearRosterOfOtherCompanyLocked, getRosterSource, ROSTER_JOB, setRosterSource } from "./source";
 
@@ -145,6 +146,9 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
         for (let i = 0; i < typeRows.length; i += CHUNK) await sp.insert(qboCustomerType).values(typeRows.slice(i, i + CHUNK)).onConflictDoNothing();
         for (let i = 0; i < rows.length; i += CHUNK) await sp.insert(qboCustomer).values(rows.slice(i, i + CHUNK)).onConflictDoNothing();
         await setRosterSource(sp, realmId);
+        // The cache holds the billing addresses this build keeps (none where it was just cleared): the take-in of
+        // contact details waits for such a read, not for any successful one (src/lib/parents/contact-take-in.ts).
+        if (!cleared) await noteAddressesKept(sp, run!.startedAt);
       });
     } catch (e) {
       return e instanceof NoCustomersInAnswer

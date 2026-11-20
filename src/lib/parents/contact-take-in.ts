@@ -1,12 +1,12 @@
 // Staff only (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts): it reads every person, guardian row, family
 // and cached customer at once. Run by the worker alone (src/lib/jobs/runner.ts).
 import "server-only";
-import { and, asc, desc, eq, gt, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { family, guardian, jobRun, parent, qboCustomer, qboCustomerType, setting } from "@/lib/db/schema";
+import { family, guardian, parent, qboCustomer, qboCustomerType, setting } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { getShape, missingTypes, ROSTER_LOCK, type MembershipShape } from "@/lib/roster/shape";
-import { getRosterSource, ROSTER_JOB } from "@/lib/roster/source";
+import { getRosterSource } from "@/lib/roster/source";
 import { connectedToAnotherCompany, linksOf } from "@/lib/families/links";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { asShown, type AddressValues } from "./contact-fields";
@@ -14,10 +14,11 @@ import { ownRecordIn, whoseDetails, type CachedRecord } from "./my-family";
 
 /**
  * The take-in of a guardian's phone and mailing address (stage 3's slice 11a of the app-owned families spec): once,
- * after the first successful roster read that started after migration 0044, each person (books with a parent type) or
- * family (books with none) is given the details their own QuickBooks record holds, as the roster cache keeps them. After
- * it, nothing QuickBooks holds changes a phone or an address in the portal (stage 4 shows the difference). Its setting
- * is written by migration 0044: `{ after }`, the migration's time, and `doneAt` once it has run.
+ * after the first successful roster read since migration 0044 made by a build that keeps the billing address in the
+ * cache, each person (books with a parent type) or family (books with none) is given the details their own QuickBooks
+ * record holds, as the roster cache keeps them. After it, nothing QuickBooks holds changes a phone or an address in the
+ * portal (stage 4 shows the difference). Its setting is written by migration 0044 as `{ after }`, the migration's
+ * time; the roster read adds `addressesReadAt` (noteAddressesKept()), and the take-in `doneAt` once it has run.
  */
 export const TAKE_IN_KEY = "parents.contact_take_in";
 export const TAKE_IN_JOB = "parents.contact_take_in";
@@ -39,28 +40,41 @@ const phoneOf = (r: Cached): string | null => asShown(r.phone ?? "") || null;
 const addressKey = (a: AddressValues) => JSON.stringify([a.line1, a.line2, a.city, a.region, a.postalCode, a.country]);
 
 /**
- * One detail across a person's records: the one value they all hold, where every record that holds one holds the same;
- * `disagree` when two hold different ones (left empty, for the person to set); null when none holds one.
+ * One detail across a person's records: the value every one of them holds, where they all hold the same; `disagree`
+ * when they don't, a record that holds none beside one that holds one included (left empty, for the person to set:
+ * the club may have left it out of that record on purpose); null when none holds one.
  */
 function agreed<T>(values: (T | null)[], key: (v: T) => string): T | null | "disagree" {
-  const held = values.filter((v): v is T => v !== null);
-  if (held.length === 0) return null;
-  return new Set(held.map(key)).size === 1 ? held[0]! : "disagree";
+  if (values.length === 0) return null;
+  return new Set(values.map((v) => (v === null ? null : key(v)))).size === 1 ? values[0]! : "disagree";
 }
 
-/** Whether the take-in is waiting to run: its setting is there, not done, and a roster read started after its time succeeded. */
+/**
+ * Notes, in the savepoint that saves a successful roster read (refreshRoster(), src/lib/roster/refresh.ts), that the
+ * cache now holds the billing addresses this build keeps, at the read's start: the take-in waits for it. A successful
+ * read is not enough by itself: the build before migration 0044 answers the roster read the migration asks for too,
+ * and while it still runs beside the migrated database (scripts/poc/deploy.sh migrates before it replaces the app) its
+ * read leaves every address empty, so the take-in would run once over a cache that holds none. Nothing once the
+ * take-in has run, or where the migration wrote no setting.
+ */
+export async function noteAddressesKept(tx: Tx, readAt: Date): Promise<void> {
+  await tx.update(setting).set({ value: sql`${setting.value} || ${JSON.stringify({ addressesReadAt: readAt.toISOString() })}::jsonb`, updatedAt: new Date() })
+    .where(and(eq(setting.key, TAKE_IN_KEY), sql`${setting.value}->'doneAt' is null`));
+}
+
+/**
+ * Whether the take-in is waiting to run: its setting is there, not done, and a roster read that kept the billing
+ * addresses (noteAddressesKept()) started after the migration's time.
+ */
 async function waiting(): Promise<boolean> {
   const [row] = await db.select({ value: setting.value }).from(setting).where(eq(setting.key, TAKE_IN_KEY));
-  const value = row?.value as { after?: unknown; doneAt?: unknown } | undefined;
-  if (!value || value.doneAt !== undefined || typeof value.after !== "string") return false;
-  const after = Date.parse(value.after);
-  if (Number.isNaN(after)) return false;
-  const [read] = await db.select({ id: jobRun.id }).from(jobRun)
-    .where(and(eq(jobRun.job, ROSTER_JOB), eq(jobRun.outcome, "ok"), gt(jobRun.startedAt, new Date(after)))).orderBy(desc(jobRun.id)).limit(1);
-  return read !== undefined;
+  const value = row?.value as { after?: unknown; addressesReadAt?: unknown; doneAt?: unknown } | undefined;
+  if (!value || value.doneAt !== undefined || typeof value.after !== "string" || typeof value.addressesReadAt !== "string") return false;
+  const after = Date.parse(value.after), read = Date.parse(value.addressesReadAt);
+  return !Number.isNaN(after) && !Number.isNaN(read) && read > after;
 }
 
-type Plan = {
+export type TakeInPlan = {
   people: { id: string; given: Given }[];
   families: { id: AppFamilyId; given: Given }[];
   counts: { peopleWithNoRecord: number; peopleDisagreeing: number };
@@ -72,7 +86,7 @@ type Plan = {
  * another, or the shape doesn't hold). It takes no person's row lock: the writes come after, in a transaction of their
  * own (the lock order above lockedPerson(), src/lib/parents/sessions.ts, takes a person's rows before the roster lock).
  */
-async function plan(): Promise<Plan | null> {
+export async function planContactTakeIn(): Promise<TakeInPlan | null> {
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`);
     const [source, other, shape, types] = await Promise.all([getRosterSource(tx), connectedToAnotherCompany(tx), getShape(tx),
@@ -92,14 +106,14 @@ async function plan(): Promise<Plan | null> {
 
 
 /** Books with a parent type: each person not yet given details, from the records their open guardian rows sign in from. */
-async function planPeople(tx: Tx, shape: MembershipShape, familyRows: (customer: string) => Cached[]): Promise<Plan> {
+async function planPeople(tx: Tx, shape: MembershipShape, familyRows: (customer: string) => Cached[]): Promise<TakeInPlan> {
   const people = await tx.select({ id: parent.id, email: parent.email }).from(parent).where(eq(parent.contactVersion, 0)).orderBy(asc(parent.id));
   const rows = people.length === 0 ? [] : await tx.select({ parentId: guardian.parentId, familyId: guardian.familyId, familyQboId: guardian.familyQboId, sourceQboId: guardian.sourceQboId })
     .from(guardian).innerJoin(family, eq(family.id, guardian.familyId))
     .where(and(ne(guardian.status, "disabled"), eq(family.active, true), inArray(guardian.parentId, people.map((p) => p.id))));
   const families = [...new Set(rows.map((r) => r.familyId).filter((f): f is AppFamilyId => f !== null))];
   const links = await linksOf({ families, students: [] }, tx);
-  const out: Plan = { people: [], families: [], counts: { peopleWithNoRecord: 0, peopleDisagreeing: 0 } };
+  const out: TakeInPlan = { people: [], families: [], counts: { peopleWithNoRecord: 0, peopleDisagreeing: 0 } };
   for (const person of people) {
     // The records the person's sign-in comes from, by the rule myOwnRecord() gives each of their rows (ownRecordIn()):
     // only one whose email field holds their sign-in address, so nobody is given another person's phone or address.
@@ -122,10 +136,10 @@ async function planPeople(tx: Tx, shape: MembershipShape, familyRows: (customer:
 }
 
 /** Books with no parent type: each active linked family not yet given details, from its own customer (the family, or the member). */
-async function planFamilies(tx: Tx, byId: Map<string, Cached>): Promise<Plan> {
+async function planFamilies(tx: Tx, byId: Map<string, Cached>): Promise<TakeInPlan> {
   const families = await tx.select({ id: family.id }).from(family).where(and(eq(family.active, true), eq(family.contactVersion, 0))).orderBy(asc(family.id));
   const links = await linksOf({ families: families.map((f) => f.id), students: [] }, tx);
-  const out: Plan = { people: [], families: [], counts: { peopleWithNoRecord: 0, peopleDisagreeing: 0 } };
+  const out: TakeInPlan = { people: [], families: [], counts: { peopleWithNoRecord: 0, peopleDisagreeing: 0 } };
   for (const f of families) {
     const customer = links.customerOfFamily.get(f.id);
     const row = customer === undefined ? undefined : byId.get(customer);
@@ -153,8 +167,17 @@ export type TakeInResult = { ran: false } | { ran: true; counts: Record<string, 
  */
 export async function takeInContactDetails(): Promise<TakeInResult> {
   if (!(await waiting())) return { ran: false };
-  const planned = await plan();
+  const planned = await planContactTakeIn();
   if (planned === null) return { ran: false };
+  return writeContactTakeIn(planned);
+}
+
+/**
+ * The take-in's writes, from what planContactTakeIn() read (apart from it so that a test can save a parent's details
+ * between the two): the setting's `doneAt` claimed, each person's and family's details only while their
+ * `contact_version` is still 0, and its audit row, in one transaction.
+ */
+export async function writeContactTakeIn(planned: TakeInPlan): Promise<TakeInResult> {
   return db.transaction(async (tx) => {
     const now = new Date();
     const claimed = await tx.update(setting).set({ value: sql`${setting.value} || ${JSON.stringify({ doneAt: now.toISOString() })}::jsonb`, updatedAt: now })
