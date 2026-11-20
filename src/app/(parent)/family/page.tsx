@@ -36,7 +36,7 @@ export default async function FamilyPage() {
         </dl>
         <p className="help">You sign in with this address and your password. On a device we don&apos;t know yet, we also email a code to this address.</p>
         {/* No id in either link: each page takes whose sign-in it is from the session. */}
-        <div className="box-foot">
+        <div className="box-foot stack">
           <Link className="btn btn-line" href="/family/sign-in">Sign-in settings</Link>
           {ownEmail && <Link className="btn btn-line" href="/family/email">Change my sign-in email</Link>}
         </div>
