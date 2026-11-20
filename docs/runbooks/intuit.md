@@ -1,7 +1,7 @@
 # Intuit: registering the portal and its production assessment
 
 The portal reads the club's families and invoices from QuickBooks Online, and writes back only what someone asks it to
-(a parent's own sign-in email; a guardian's phone and mailing address, changed by the parent or by staff; the roster
+(a guardian's phone and mailing address, changed by the parent or by staff; the roster
 changes staff make; and the invoice for a volunteer buy-out, made when a guardian chooses to pay instead of
 volunteering and voided if they switch back before paying). A guardian's phone and mailing address are the portal's
 own, kept and changed there, and each change is sent on to their record in QuickBooks after it is saved. To
@@ -73,8 +73,8 @@ that has read a sandbox's customers refuses the club's real books
      show each family its own, and changes in QuickBooks only what a parent or staff member asks it to.
 3. Answer the assessment questionnaire. It asks how the app uses QuickBooks data and keeps it safe. True answers for
    the portal: it runs on the club's own server; it stores the connection's tokens encrypted; families see only their
-   own records; it reads customers, invoices and items; it writes a parent's own sign-in email when that parent
-   changes it, the roster changes staff make, and one kind of invoice, a volunteer buy-out, which it creates
+   own records; it reads customers, invoices and items; it writes a guardian's phone and mailing address
+   after the portal saves a change to them, the roster changes staff make, and one kind of invoice, a volunteer buy-out, which it creates
    when a guardian chooses it and voids if they switch back before paying; it never deletes anything or touches a
    payment; it keeps an audit log of every change.
 4. Submit it, and answer Intuit's follow-up questions by email.

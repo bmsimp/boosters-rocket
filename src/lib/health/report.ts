@@ -146,7 +146,7 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
   if (!conn.configured) {
     lines.push({ key: "quickbooks", title: "QuickBooks", state: "off", word: "Not set up", says: "Not set up. Families, students and what they owe come from QuickBooks, so parents see none of it yet.", times: [], notes: takeInNote, fix: qboFix });
   } else if (!conn.connected) {
-    lines.push({ key: "quickbooks", title: "QuickBooks", state: "attention", word: "Not connected", says: "Not connected. The Intuit app's keys are saved, but the portal can't read the roster or what families owe, and parents can't change the email they sign in with, until an Admin connects.",
+    lines.push({ key: "quickbooks", title: "QuickBooks", state: "attention", word: "Not connected", says: "Not connected. The Intuit app's keys are saved, but the portal can't read the roster or what families owe until an Admin connects.",
       times: rosterTimes, notes: [...queueNote, ...takeInNote, use], fix: qboFix });
   } else {
     // The check of the portal's own requests (src/lib/quickbooks/sandbox-check/): when it last ran, and whether every request answered as expected.

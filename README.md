@@ -11,7 +11,7 @@ QuickBooks Online.
   keeps a copy for speed; it never holds its own version of the books. The families, students and
   sign-ins are the portal's own records, each linked to its customer in QuickBooks; a change made
   in QuickBooks doesn't change them. It
-  writes back only what someone asks it to: a parent's own sign-in email, a guardian's phone and
+  writes back only what someone asks it to: a guardian's phone and
   mailing address (the portal's own, changed by the parent or by staff, and sent on to their record
   after the save), the roster changes staff make (new families, students and parents, names, a student's
   family, making a customer inactive), and the one invoice it ever makes, for a guardian who

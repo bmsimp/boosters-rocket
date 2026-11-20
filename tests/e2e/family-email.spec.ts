@@ -7,27 +7,26 @@ import { e2eMailPort } from "./run-config";
 import { E2E_EMAIL, emailTokenHash } from "./email-seed";
 
 // A parent changes the address they sign in with (src/lib/parents/email-change.ts): asks at phone width, the link
-// arrives in the mail sink, opening it puts the question, and confirming is refused BEFORE ANYTHING IS SENT. Zelda's
-// record in the Quetzalcoatl family is E2E-P1, an id that is not digits (the tripwire in tests/e2e/family-details.spec.ts),
-// and an id that isn't digits is never sent to QuickBooks. This run's connection holds made-up tokens: a numeric id
-// would send the confirmation's read and write to Intuit's real servers. The change itself, QuickBooks first and then
-// the portal, is proved against a stub in tests/integration/email-change.test.ts.
+// arrives in the mail sink, opening it puts the question, and confirming is refused because another person holds the
+// address. Since stage 3's slice 11d a confirmed change is the portal's alone, so a change made here would end Zelda's
+// sessions, the one every later spec signs in with: for this spec another person holds the new address (one address
+// is one person), and the confirm changes nothing. The change itself is proved in tests/integration/email-change.test.ts.
 //
-// The change is offered only to a parent in one family, while parent sign-ins are on. Zelda is in two families on
-// purpose (the family chooser test), and sign-ins are switched on by tests/e2e/parents.spec.ts, which runs later in the
-// phone pass. So for this spec her link to the second family is closed and sign-ins are on, and afterward both are put
-// back as they were, with her seeded request (E2E_EMAIL.own, which asking replaces): the seed is as it was found.
+// The change is offered while parent sign-ins are on, which tests/e2e/parents.spec.ts switches on later in the phone
+// pass. So for this spec sign-ins are on and the other person exists, and afterward both are put back as they were,
+// with Zelda's seeded request (E2E_EMAIL.own, which asking replaces): the seed is as it was found.
 const sql = postgres(process.env.DATABASE_URL!);
 const NEW = "zelda.moved@e2e-moving.example";
 let sink: MailSink;
-let saved: { setting: unknown[]; link: { status: string; disabled_reason: string | null; status_before_disable: string | null } };
+let saved: { setting: unknown[] };
 
 const isPhone = (page: Page) => (page.viewportSize()?.width ?? 0) < 760;
 const noSidewaysScroll = async (page: Page) =>
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), `${page.url()} scrolls sideways`).toBe(false);
 /** A message as the sink got it, its quoted-printable line breaks joined again. */
 const textOf = (raw: string) => raw.replace(/=\r?\n/g, "").replace(/=3D/g, "=");
-const zelda = async () => (await sql`SELECT id, email FROM parent WHERE email IN ('zelda@example.com', ${NEW})`)[0]!;
+/** Zelda, whatever address she holds: never the other person this spec gives the new address. */
+const zelda = async () => (await sql`SELECT id, email FROM parent WHERE email = 'zelda@example.com' OR (email = ${NEW} AND name <> 'Someone Else')`)[0]!;
 
 test.beforeAll(async () => {
   const [seeded] = await sql`SELECT value FROM setting WHERE key = 'mail'`;
@@ -40,36 +39,28 @@ test.describe("a parent changes their sign-in email", () => {
   test.skip(({ viewport }) => (viewport?.width ?? 0) >= 760, "asked and confirmed at phone width; the desktop pass would only do it again");
 
   test.beforeAll(async () => {
-    const p = await zelda();
-    saved = {
-      setting: [...await sql`SELECT value FROM setting WHERE key = 'parents.settings'`],
-      link: (await sql`SELECT status, disabled_reason, status_before_disable FROM guardian WHERE parent_id = ${p.id} AND family_qbo_id = 'E2E-FAMILY-2'`)[0] as typeof saved.link,
-    };
+    saved = { setting: [...await sql`SELECT value FROM setting WHERE key = 'parents.settings'`] };
     const on = { signin: true, everEnabled: true, welcome: false, requireActiveStudents: false };
     await sql`INSERT INTO setting (key, value) VALUES ('parents.settings', ${sql.json(on)}) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
-    await sql`UPDATE guardian SET status = 'disabled', disabled_reason = 'not_in_quickbooks', status_before_disable = ${saved.link.status} WHERE parent_id = ${p.id} AND family_qbo_id = 'E2E-FAMILY-2'`;
+    // Another person signs in with the new address, so confirming changes nothing of Zelda's.
+    await sql`INSERT INTO parent (name, email) VALUES ('Someone Else', ${NEW})`;
   });
 
   test.afterAll(async () => {
     const p = await zelda();
     if (saved.setting.length) await sql`UPDATE setting SET value = ${sql.json((saved.setting[0] as { value: never }).value)} WHERE key = 'parents.settings'`;
     else await sql`DELETE FROM setting WHERE key = 'parents.settings'`;
-    await sql`UPDATE guardian SET status = ${saved.link.status}, disabled_reason = ${saved.link.disabled_reason}, status_before_disable = ${saved.link.status_before_disable}
-            WHERE parent_id = ${p.id} AND family_qbo_id = 'E2E-FAMILY-2'`;
-    // Asking replaced the seeded request: put it back, and drop the one this spec made.
+    await sql`DELETE FROM parent WHERE email = ${NEW}`;
+    // Asking replaced the seeded request: put it back, and drop the one this spec made (spent by the refused confirm).
     // The request names the family it was asked in by the app's record, the one Zelda's row in it names.
     const [link] = await sql`SELECT id, family_id FROM guardian WHERE parent_id = ${p.id} AND family_qbo_id = ${PARENT_SESSION_FAMILY}`;
-    await sql`DELETE FROM parent_email_change WHERE parent_id = ${p.id} AND used_at IS NULL`;
+    await sql`DELETE FROM parent_email_change WHERE parent_id = ${p.id} AND (used_at IS NULL OR new_email = ${NEW})`;
     await sql`INSERT INTO parent_email_change (parent_id, guardian_id, family_id, record_qbo_id, new_email, token_hash, expires_at)
             VALUES (${p.id}, ${link!.id}, ${link!.family_id}, 'E2E-P1', ${E2E_EMAIL.own.newEmail}, ${emailTokenHash(E2E_EMAIL.own.token)}, now() + interval '7 days')`;
   });
 
-  test("asks at phone width, gets the link by mail, is asked, and is refused before anything is sent to QuickBooks", async ({ context, page, baseURL }) => {
+  test("asks at phone width, gets the link by mail, is asked, and is refused while another person holds the address", async ({ context, page, baseURL }) => {
     expect(isPhone(page)).toBe(true);
-    // If this fails, don't change it: a numeric id here makes the confirmation call Intuit's real servers from this run.
-    const [record] = await sql`SELECT g.source_qbo_id FROM guardian g JOIN parent p ON p.id = g.parent_id WHERE p.email = 'zelda@example.com' AND g.family_qbo_id = ${PARENT_SESSION_FAMILY}`;
-    expect(record!.source_qbo_id).toBe("E2E-P1");
-    expect(record!.source_qbo_id).not.toMatch(/^\d+$/);
 
     await context.addCookies([parentSessionCookie()]);
     sink.messages.length = 0;
@@ -105,19 +96,21 @@ test.describe("a parent changes their sign-in email", () => {
     await expect(page.getByRole("heading", { name: `Use ${NEW} to sign in from now on?` })).toBeVisible();
     await noSidewaysScroll(page);
     const [asked] = await sql`SELECT used_at, record_qbo_id FROM parent_email_change WHERE token_hash = ${emailTokenHash(link![1]!)}`;
-    expect(asked).toEqual({ used_at: null, record_qbo_id: "E2E-P1" });
+    // The request names no QuickBooks record (stage 3's slice 11d).
+    expect(asked).toEqual({ used_at: null, record_qbo_id: null });
 
-    // Saying yes: refused before anything is sent, because the record's id is not one QuickBooks gives.
+    // Saying yes: refused, because another person signs in with the address, in words that never say why.
     const yes = page.getByRole("button", { name: "Yes, use this address" });
     expect((await yes.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await yes.click();
-    await expect(page.getByRole("main").getByRole("alert")).toHaveText("We couldn't reach the club's books just now, so nothing was changed. Please open the link again in a little while.");
+    await expect(page.getByRole("main").getByRole("alert")).toHaveText("That change can't be made here, so nothing was changed. Please ask the club to change your sign-in email.");
     const [refusal] = await sql`SELECT after FROM audit_log WHERE action = 'parent.email.save.failed' ORDER BY id DESC LIMIT 1`;
-    expect(refusal!.after).toEqual({ code: "bad_id" });
+    expect(refusal!.after).toEqual({ code: "address_taken" });
     expect(await sql`SELECT 1 FROM audit_log WHERE action = 'parent.email.save'`).toHaveLength(0);
 
-    // Nothing changed: the link still works, the address and the cache are as they were, and she is still signed in.
-    expect((await sql`SELECT used_at FROM parent_email_change WHERE token_hash = ${emailTokenHash(link![1]!)}`)[0]).toEqual({ used_at: null });
+    // Nothing changed: the link is spent (it can never work), the address and the cache are as they were, and she is
+    // still signed in.
+    expect((await sql`SELECT used_at FROM parent_email_change WHERE token_hash = ${emailTokenHash(link![1]!)}`)[0]!.used_at).not.toBeNull();
     expect((await zelda()).email).toBe("zelda@example.com");
     expect((await sql`SELECT email FROM qbo_customer WHERE qbo_id = 'E2E-P1'`)[0]).toEqual({ email: "zelda@example.com" });
     await page.goto("/family");
