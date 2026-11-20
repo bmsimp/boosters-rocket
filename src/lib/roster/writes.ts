@@ -2815,18 +2815,25 @@ export function keptMoveWords(code: string | null, holds: string | null): string
  * difference is said field by field (`differs`, contactDiffers() of what the roster cache holds; else each field the
  * change sends, by what the portal knew of it): where the portal knew none when the change was saved, that it didn't know
  * this record's phone (or mailing address) and QuickBooks holds one; otherwise that QuickBooks holds a different one, or
- * none, from the one the portal last knew. Never a guess at who changed it.
+ * none, from the one the portal last knew. Where the caller compared the roster cache and it shows no difference now
+ * (`differs` empty: QuickBooks holds the new value, the before-value, or none where the portal knew none), that it
+ * held other details when it was tried and the portal's copy shows none now; where the caller has no cache to compare
+ * (`differs` absent, as at a press), each field the change sends, by what the portal knew, said of the time it was
+ * tried. Never a guess at who changed it, and never a present claim the caller hasn't compared.
  */
 export function keptContactWords(code: string | null, w?: Pick<ContactWrite, "change" | "was">, differs?: readonly ContactDiffer[] | null): string {
   if (code === CONTACT_DIFFERS) {
+    if (differs !== undefined && differs !== null && differs.length === 0) {
+      return "The portal held it back when it was tried: QuickBooks held other details for this record then than the ones the portal last knew, so the portal's details weren't sent over them. The portal's latest copy of QuickBooks shows no difference now.";
+    }
     const fields: { field: "phone" | "address"; portalKnew: boolean; quickbooksHolds: boolean | null }[] = differs?.length ? [...differs]
       : (["phone", "address"] as const).filter((f) => w?.change[f] !== undefined).map((f) => ({ field: f, portalKnew: w!.was[f] !== undefined && detailKey(w!.was[f]) !== null, quickbooksHolds: null }));
-    if (!fields.length) return "The portal held it back: QuickBooks holds other details for this record than the ones the portal last knew, so the portal's details weren't sent over them.";
+    if (!fields.length) return "The portal held it back: QuickBooks held other details for this record when it was tried than the ones the portal last knew, so the portal's details weren't sent over them.";
     const word = (f: "phone" | "address") => (f === "phone" ? "phone" : "mailing address");
-    const clauses = fields.map((d) => !d.portalKnew ? `the portal didn't know this record's ${word(d.field)} when the change was saved, and QuickBooks holds one`
+    const clauses = fields.map((d) => !d.portalKnew ? `the portal didn't know this record's ${word(d.field)} when the change was saved, and QuickBooks ${d.quickbooksHolds === null ? "held one when it was tried" : "holds one"}`
       : d.quickbooksHolds === false ? `QuickBooks holds no ${word(d.field)} for this record, where the portal last knew one`
         : d.quickbooksHolds === true ? `QuickBooks holds a different ${word(d.field)} for this record from the one the portal last knew`
-          : `QuickBooks doesn't hold the ${word(d.field)} the portal last knew for this record`);
+          : `QuickBooks didn't hold the ${word(d.field)} the portal last knew for this record when it was tried`);
     const sent = fields.length > 1 ? "the portal's details weren't sent over them" : `the portal's ${word(fields[0]!.field)} wasn't sent over it`;
     return `The portal held it back: ${clauses.join("; and ")}, so ${sent}.`;
   }

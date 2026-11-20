@@ -618,6 +618,20 @@ describe("Reconciliation and a family's page (item 7, and the second read's item
       .toBe("The portal held it back: QuickBooks holds no phone for this record, where the portal last knew one, so the portal's phone wasn't sent over it.");
   });
 
+  it("once the portal's copy shows no difference, the words claim nothing QuickBooks no longer holds; with no copy to compare, they speak of the try", async () => {
+    await kept();
+    // A treasurer cleared the phone the portal never knew, and the next read stores it so: nothing differs now.
+    await db.update(qboCustomer).set({ phone: null }).where(eq(qboCustomer.qboId, "11"));
+    const [row] = await loadOpenWrites();
+    expect(row).toMatchObject({ state: "refused", lastCode: CONTACT_DIFFERS, differs: [] });
+    const words = keptWordsFor(row!.write, row!.lastCode, row!.holds, row!.differs);
+    expect(words).toBe("The portal held it back when it was tried: QuickBooks held other details for this record then than the ones the portal last knew, so the portal's details weren't sent over them. The portal's latest copy of QuickBooks shows no difference now.");
+    expect(words).not.toContain("QuickBooks holds one");
+    // A caller with no copy to compare (a press's refusal) says what the try found, in the past.
+    expect(keptWordsFor(row!.write, row!.lastCode, row!.holds))
+      .toBe("The portal held it back: the portal didn't know this record's phone when the change was saved, and QuickBooks held one when it was tried, so the portal's phone wasn't sent over it.");
+  });
+
   it("the compare view: audited before it shows both values, as text, with \"Send the portal's value\" beside them", async () => {
     const a = await kept();
     const [row] = await loadOpenWrites();
