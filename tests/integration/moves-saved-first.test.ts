@@ -18,7 +18,7 @@ import { db } from "@/lib/db/client";
 import { accountingLink, family, familyMoney, qboCustomer, student, volunteerCredit, volunteerSignup, writeQueue } from "@/lib/db/schema";
 import { QUICKBOOKS, type AppFamilyId, type AppStudentId } from "@/lib/families/ids";
 import { recordNameWords } from "@/lib/families/words";
-import { askFamilyInactive, BEING_SENT_NOW, changeInPortal, createInQuickBooksAndLink, FAMILY_BEING_CHANGED, FAMILY_BUSY, FAMILY_MAKING_NOW, FAMILY_WAITING, familyCover, INACTIVE_THERE_CODE, keptMoveWords, MAKING_LOCK,
+import { askFamilyInactive, BEING_SENT_NOW, changeInPortal, coverStamp, createInQuickBooksAndLink, FAMILY_BEING_CHANGED, FAMILY_BUSY, FAMILY_MAKING_NOW, FAMILY_WAITING, familyCover, INACTIVE_THERE_CODE, keptMoveWords, MAKING_LOCK,
   MOVE_PENDING, moveStudent, moveTargets, NO_FAMILY_CUSTOMER, PLACE_DIFFERS, portalValueStamp, renameLinked, sendPortalValue, SENDING_LOCK, STUDENT_BEING_CHANGED, TOP_OF_TREE, WRITE_COPY } from "@/lib/roster/writes";
 import { giveUp, loadOpenWrites, REFUSED_NOT_AGAIN, runWriteQueue, tryAgainNow } from "@/lib/roster/queue";
 import { refreshRoster } from "@/lib/roster/refresh";
@@ -77,6 +77,11 @@ const BODY = (token: string, to: string) => ({ Id: LEO, SyncToken: token, sparse
 let tag: string;
 let op: ReturnType<typeof asOp>;
 let leo: AppStudentId, rivera: AppFamilyId, chen: AppFamilyId;
+/** The stamp a family's page binds into its make-inactive form: whom its cover holds, sealed with the family record's app id. */
+const stampOf = async (familyQboId: string, record: AppFamilyId) => {
+  const c = (await familyCover(familyQboId))!;
+  return coverStamp(String(record), [c.family.qboId, ...c.under.map((u) => u.qboId)]);
+};
 const move = (to: AppFamilyId, who: AppStudentId = leo) => moveStudent(String(who), String(to), tag, op);
 
 beforeEach(async () => {
@@ -158,9 +163,7 @@ describe("a move by the app's own records", () => {
     expect(await tryAgainNow(kept!.id, op)).toEqual({ ok: false, errors: [REFUSED_NOT_AGAIN] });
     // Neither family is made inactive while it waits (QuickBooks is never asked to make Leo inactive under Rivera).
     expect(await changeInPortal({ op: "deactivate_family", familyId: String(okafor!.id) }, tag, op)).toEqual({ ok: false, errors: [MOVE_PENDING] });
-    const c = (await familyCover(RIVERA))!;
-    expect((await askFamilyInactive(RIVERA, [[c.family.qboId, c.family.syncToken], ...c.under.map((u): [string, string] => [u.qboId, u.syncToken])], tag, op)).result)
-      .toEqual({ ok: false, errors: [MOVE_PENDING] });
+    expect((await askFamilyInactive(String(rivera), await stampOf(RIVERA, rivera), tag, op)).result).toEqual({ ok: false, errors: [MOVE_PENDING] });
     // Send the portal's value: refused in words while the family has no customer.
     expect(await sendPortalValue(kept!.id, RIVERA, portalValueStamp(kept!.id, RIVERA), op)).toEqual({ ok: false, errors: [expect.stringContaining("has no customer in QuickBooks yet")] });
     expect(posts()).toEqual([]);
@@ -410,9 +413,7 @@ describe("a move by the app's own records", () => {
     expect(await move(chen)).toMatchObject({ ok: true, status: "waiting" });
     expect(await move(rivera)).toEqual({ ok: false, errors: [WRITE_COPY.waiting] });
     // The family joined isn't made inactive while the move waits; "Try again now" waits out a send under way.
-    const c = (await familyCover(CHEN))!;
-    expect((await askFamilyInactive(CHEN, [[c.family.qboId, c.family.syncToken], ...c.under.map((u): [string, string] => [u.qboId, u.syncToken])], tag, op)).result)
-      .toEqual({ ok: false, errors: [MOVE_PENDING] });
+    expect((await askFamilyInactive(String(chen), await stampOf(CHEN, chen), tag, op)).result).toEqual({ ok: false, errors: [MOVE_PENDING] });
     const [waiting] = await items();
     expect(await holding(SENDING_LOCK, String(leo), () => tryAgainNow(waiting!.id, op))).toEqual({ ok: false, errors: [BEING_SENT_NOW] });
   });
@@ -421,9 +422,8 @@ describe("a move by the app's own records", () => {
     // askFamilyInactive() holds the family's "being sent" lock from its checks to its last step; a move tries it shared.
     expect(await holding(SENDING_LOCK, String(chen), () => move(chen))).toEqual({ ok: false, errors: [FAMILY_BUSY] });
     expect(await holding(SENDING_LOCK, String(rivera), () => move(chen))).toEqual({ ok: false, errors: [FAMILY_BUSY] });
-    const c = (await familyCover(RIVERA))!;
-    const shown = [[c.family.qboId, c.family.syncToken], ...c.under.map((u): [string, string] => [u.qboId, u.syncToken])] as [string, string][];
-    expect((await holding(SENDING_LOCK, String(rivera), () => askFamilyInactive(RIVERA, shown, tag, op))).result).toEqual({ ok: false, errors: [FAMILY_BEING_CHANGED] });
+    const shown = await stampOf(RIVERA, rivera);
+    expect((await holding(SENDING_LOCK, String(rivera), () => askFamilyInactive(String(rivera), shown, tag, op))).result).toEqual({ ok: false, errors: [FAMILY_BEING_CHANGED] });
     expect(posts()).toEqual([]);
     expect(await auditsOf("roster.record.moved")).toEqual([]);
     expect(await followed()).toEqual([]);

@@ -12,8 +12,8 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster } from "./refresh";
 import { getRosterSource, ROSTER_JOB } from "./source";
 import { lockRosterAs, rosterTagOf } from "@/lib/seasons/roster-lock";
-import { alignAfterWrite, applyWritten, BEING_SENT_NOW, changeOwnRecord, isSavedFirst, itemLockFree, madeAfterGivingUp, markMoveMoneyStale, moveMoneyNotes, owedBy, REFRESH_ASK_KEY,
-  replaceRefusedCreates, sendWrite, trySavedItem, whileItemHeld, whoStopped, type MadeAfterGivingUp, type OwnRecordChange, type SavedTry } from "./writes";
+import { alignAfterWrite, applyWritten, BEING_SENT_NOW, changeOwnRecord, CREDIT_BALANCE, isSavedFirst, itemLockFree, madeAfterGivingUp, markMoveMoneyStale, moveMoneyNotes, REFRESH_ASK_KEY,
+  replaceRefusedCreates, sendWrite, tryDeactivate, trySavedItem, whileItemHeld, whoStopped, type MadeAfterGivingUp, type OwnRecordChange, type SavedTry } from "./writes";
 import { afterFailedTry, beforeResend, classify } from "./write-rules";
 import { isBuyoutWrite, sendBuyoutWrite } from "@/lib/buyouts/writes";
 import { formatMoney } from "@/lib/money/cents";
@@ -91,7 +91,8 @@ async function markDone(item: Item, how: "sent" | "found", resultQboId: string |
 /**
  * One try of one item. One that QuickBooks may already have made (`sent`) is first looked for in the cache, which a
  * refresh has read since its last try: there, it is done; an update whose record moved on otherwise is stuck, nothing
- * overwritten; otherwise it is sent again. What QuickBooks refuses now makes it stuck; what may still go through waits
+ * overwritten (but a rename or move saved first, and a linked make-inactive, settled by the field); otherwise it is sent
+ * again. What QuickBooks refuses now makes it stuck; what may still go through waits
  * for its next try, or is stuck once it is old or tried often (afterFailedTry).
  */
 async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise<Step> {
@@ -102,15 +103,25 @@ async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise
     return step === "waiting" || step === "stuck" ? step : "done";
   }
   const w = item.request as RosterWrite;
-  if (!isSavedFirst(item)) return tryRosterItem(item, w, now, refreshedAt);
+  if (!isSavedFirst(item) && !isLinkedDeactivate(item)) return tryRosterItem(item, w, now, refreshedAt);
   // One sender at a time (stage 3's slice 9e): a change saved first is tried only holding the lock its at-once try and
-  // "Send the portal's value" hold (whileItemHeld()). While someone holds it, nothing is sent and no try is counted: the
-  // item is left for the next wake.
+  // "Send the portal's value" hold (whileItemHeld()), and so, since slice 9g, is a make-inactive filed under a student or
+  // member, by the lock its record's rename, move and make-inactive hold. While someone holds it, nothing is sent and no
+  // try is counted: the item is left for the next wake.
   const step = await whileItemHeld(item, () => tryRosterItem(item, w, now, refreshedAt));
   if (step !== null) return step;
   await db.update(writeQueue).set({ nextTryAt: now, updatedAt: new Date() }).where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting")));
   return "skipped";
 }
+
+/**
+ * A make-inactive filed under the record it is for (stage 3's slice 9g): a student's, under its student record, or a
+ * member's, under its own family record. Tried holding that record's "being sent" lock (lockOfItem()).
+ */
+export const isLinkedDeactivate = (item: Pick<Item, "request" | "studentId" | "familyId">) => {
+  const w = item.request;
+  return w.op === "deactivate" && ((w.role === "student" && item.studentId !== null) || (w.role === "member" && item.familyId !== null));
+};
 
 /** The worker's share of a change saved first, from a try's outcome (trySavedItem(), ./writes.ts). */
 function savedStep(t: SavedTry): Step {
@@ -124,6 +135,10 @@ function savedStep(t: SavedTry): Step {
 async function tryRosterItem(item: Item, w: RosterWrite, now: Date, refreshedAt: Date | null): Promise<Step> {
   const saved = (readFirst: "moved_on" | null) => trySavedItem(item, w as Extract<RosterWrite, { op: "rename" | "create" | "move" }>,
     { by: "worker", readFirst, linkedBy: item.askedBy, actor: WORKER_ACTOR, ip: null, now }).then(savedStep);
+  // A linked make-inactive held as maybe sent whose cache row, still active, shows another version than it was sent with
+  // (the link's own, which no roster read moves on): settled by the field, the Active flag read live, as a rename or a
+  // move saved first is (the lead's decision 2 for slice 9g), and sent at most once more, with the version just read.
+  let byTheField = false;
   if (item.sent) {
     if (!refreshedAt || refreshedAt <= item.lastTriedAt) {
       // No roster read since the last try: leave it for the next wake, when one will have run.
@@ -137,23 +152,41 @@ async function tryRosterItem(item: Item, w: RosterWrite, now: Date, refreshedAt:
     // 3 for slices 9e and 9f): read live and compared with the item's before-value, it is kept refused when the name, or
     // the family QuickBooks has the student under, changed, and sent once otherwise.
     if (seen.is === "stuck" && seen.code === "moved_on" && (w.op === "rename" || w.op === "move") && isSavedFirst(item)) return saved("moved_on");
-    if (seen.is === "stuck") return settle(item, { state: "stuck", code: seen.code, sent: item.sent }, now);
+    byTheField = seen.is === "stuck" && seen.code === "moved_on" && isLinkedDeactivate(item);
+    if (seen.is === "stuck" && !byTheField) return settle(item, { state: "stuck", code: seen.code, sent: item.sent }, now);
     // A create QuickBooks answered with a customer, or one a read found made (`result_qbo_id`, kept when it was held or
     // its finish failed), that isn't there as sent now: QuickBooks made something, so it is never sent again, whatever
     // became of its finish. Staff look at it in QuickBooks.
     if (w.op === "create" && item.resultQboId !== null) return settle(item, { state: "stuck", code: "made_unmatched", sent: true }, now);
   }
   if (w.op === "deactivate") {
-    // Nobody with a balance is made inactive, here as when staff press it (src/lib/roster/writes.ts): what the customer
-    // owes is read first. One who owes makes the item stuck (`open_balance`), and nothing is sent; one QuickBooks shows
-    // inactive already is done. A read that may go through later waits for the next try, as a send would.
-    const owed = await owedBy(w.qboId, item.realmId, { mayWait: true });
-    if (!owed.ok) {
-      if (classify(owed.code).kind !== "retry") return settle(item, { state: "stuck", code: owed.code, sent: item.sent }, now);
-      return settle(item, { ...afterFailedTry(item.tries + 1, item.createdAt, now), code: owed.code, sent: item.sent }, now);
+    // Nobody with a balance is made inactive, here as when staff press it (src/lib/roster/writes.ts): the balance is read
+    // again first, by the one rule (balanceStops()). Any balance makes the item stuck (`open_balance`, or
+    // `credit_balance` for a credit), and nothing is sent; one QuickBooks shows inactive already is found made. A read
+    // that may go through later waits for the next try, as a send would; one that won't makes it stuck. A stale answer
+    // is settled by the Active flag (tryDeactivate(), stage 3's slice 9g), never simply stuck. One settled by the field
+    // (`byTheField`) carries no version of its own, so it is sent with the one its read shows (`checked`).
+    const t = await tryDeactivate(byTheField ?{ ...w, syncToken: "" } : w, item.realmId, { mayWait: true, name: "", showAmounts: false, actor: WORKER_ACTOR, ip: null });
+    switch (t.is) {
+      case "inactive_there": return finishFound(item, w, w.qboId, now);
+      case "stopped": {
+        if (t.stop.code === "open_balance" || t.stop.code === CREDIT_BALANCE || classify(t.stop.code).kind !== "retry") return settle(item, { state: "stuck", code: t.stop.code, sent: item.sent }, now);
+        return settle(item, { ...afterFailedTry(item.tries + 1, item.createdAt, now), code: t.stop.code, sent: item.sent }, now);
+      }
+      case "stale_again": return settle(item, { ...afterFailedTry(item.tries + 1, item.createdAt, now), code: "fault_5010", sent: item.sent }, new Date());
+      case "failed": {
+        const failure = classify(t.code);
+        if (failure.kind !== "retry") return settle(item, { state: "stuck", code: t.code, sent: item.sent }, new Date());
+        // Sent with another version than the item held (a resend after a live read): kept, so a later look finds it as sent.
+        return settle(item, { ...afterFailedTry(item.tries + 1, item.createdAt, now), code: t.code, sent: item.sent || t.sent, ...(t.sent ? { request: t.write } : {}) }, new Date());
+      }
+      case "answer": {
+        const { cached } = await applyWritten(t.write, t.answer, { realmId: item.realmId, actor: WORKER_ACTOR, ip: null, queueId: item.id, linkedBy: item.askedBy,
+          filed: { familyId: item.familyId, studentId: item.studentId }, ...(t.resent ? { auditExtra: { resent: "stale" } } : {}),
+          inside: (tx) => markDone(item, "sent", typeof t.answer.Id === "string" ? t.answer.Id.slice(0, 64) : null, item.tries + 1, tx) });
+        return cached ? "done" : "waiting";
+      }
     }
-    if (owed.cents > 0) return settle(item, { state: "stuck", code: "open_balance", sent: item.sent }, now);
-    if (!owed.active) return finishFound(item, w, w.qboId, now);
   }
   // A change saved first is tried as at once and on a press (the one path): its outcome settles the item.
   if ((w.op === "rename" || w.op === "create" || w.op === "move") && isSavedFirst(item)) return saved(null);
@@ -236,7 +269,7 @@ async function foundDone(item: Item, w: RosterWrite, qboId: string): Promise<Fou
       if (appRecord?.kind === "student" && "linked" in appRecord) {
         await replaceRefusedCreates(tx, asAppStudentId(appRecord.studentId), { op: "create", customerQboId: qboId, queueId: item.id }, { actor: WORKER_ACTOR, ip: null });
       }
-      if (item.sent) await alignAfterWrite(tx, w, item.realmId, row?.syncToken ?? null);
+      if (item.sent) await alignAfterWrite(tx, w, item.realmId, row?.syncToken ?? null, { familyId: item.familyId, studentId: item.studentId });
     }
     await markDone(item, "found", qboId, item.tries, tx, appRecord);
     return "done";

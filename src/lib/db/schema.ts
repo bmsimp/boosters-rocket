@@ -500,8 +500,13 @@ export type RosterWrite =
   /**
    * `other`: a customer under a family that is neither its student nor its parent (a deeper sub-customer, or one of a
    * type the shape doesn't name), made inactive only as part of making its family inactive, which is never queued.
+   * `syncToken` is, since stage 3's slice 9g, the record's link's own version for a linked student or member (a Parent
+   * customer's: the version its page was shown; an item queued before that slice: its page's), and `checked` says it
+   * was sent with the version a live read just showed (a link with none, a customer with no link of its own in the
+   * family action, or a resend after a stale answer whose read showed the customer still active and with no balance),
+   * so its answer aligns the link. Neither is sent but the version.
    */
-  | { op: "deactivate"; role: RosterRole | "other"; qboId: string; syncToken: string };
+  | { op: "deactivate"; role: RosterRole | "other"; qboId: string; syncToken: string; checked?: true };
 /**
  * A volunteer buy-out's write to QuickBooks (v1 spec §11.5, src/lib/buyouts/writes.ts), kept in `write_queue.request`
  * beside the roster writes: the invoice made for one buy-out, and its void. Every id is a QuickBooks id of the company

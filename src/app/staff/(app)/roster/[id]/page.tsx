@@ -134,9 +134,11 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   const changesGuardians = can(ctx.effective, "Roster.Family.ReadWrite");
   const signins = await familySignins(familyId);
   const waiting = await loadOpenWrites({ familyId, showAmounts: can(ctx.effective, "Finance.Balance.Read") });
-  // Changes are offered to staff who may make them, while QuickBooks is connected: each form carries the record's
-  // version and sends QuickBooks ids, so a family the roster lists no customer for is offered none; nor is a family
-  // whose own record is inactive in the portal (the action refuses one too, prepare() in src/lib/roster/writes.ts).
+  // Changes are offered to staff who may make them, while QuickBooks is connected: a linked record's rename and
+  // make-inactive send its kind and the app's id, the family action the family's app id and a stamp of whom it covers,
+  // and only a Parent customer's forms carry a version and a QuickBooks id (stage 3's slice 9g); a family the roster
+  // lists no customer for is offered none, nor is a family whose own record is inactive in the portal (the actions
+  // refuse one too).
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite") && page.connected && page.shape !== null && fam.active;
   // The family's own create waiting or stuck on the queue (stage 3's slice 9d): nothing else is changed on it meanwhile.
   // A change QuickBooks refused that the portal kept (stage 3's slice 9e) is listed, and blocks nothing.
@@ -165,8 +167,13 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
     ...fam.students.flatMap((s): [string, { kind: "student"; id: string; name: string }][] => (s.customer ? [[s.customer.qboId, { kind: "student", id: String(s.id), name: s.name }]] : [])),
   ] : []);
   const edit = canChange && inQuickBooks ? { rosterTag, versions: await versionsOf(records.map((r) => r.qboId)), familyId: String(familyId), records: linkedRecords,
-    blocked: new Set(open.map((w) => (w.write.op === "create" || !("qboId" in w.write) ? null : w.write.qboId)).filter((x): x is string => x !== null)) } : null;
-  // Who making the family inactive covers: everyone active under it in the cache, at any depth, with their versions.
+    blocked: new Set(open.map((w) => (w.write.op === "create" || !("qboId" in w.write) ? null : w.write.qboId)).filter((x): x is string => x !== null)),
+    // A student with a move QuickBooks refused that the portal kept (slice 9f) isn't made inactive until it is sent or
+    // given up (deactivateLinked() refuses it): their make-inactive is not offered, and the page says why.
+    keptMoves: new Set(fam.students.flatMap((s) => (s.customer !== null && waiting.some((w) => w.state === "refused" && w.write.op === "move" && w.studentId !== null
+      && String(w.studentId) === String(s.id)) ? [s.customer.qboId] : []))) } : null;
+  // Who making the family inactive covers: everyone active under it in the cache, at any depth, sealed into the form's
+  // action as a stamp (coverStamp()), never as ids or versions the browser sends back.
   const cover = edit && inQuickBooks && entry.kind === "family" ? await familyCover(inQuickBooks.customer.qboId) : null;
   // Moving a student (stage 3's slice 9f): saved in the portal first, for each active student of the family, linked or
   // not, to each of the portal's other active families, linked or not, by the app's ids: only the families a move can go

@@ -94,6 +94,12 @@ const SAVED_FIRST = ["renameLinked", "addStudentToLinked", "moveStudent", "sendP
 const MAY_SAVED_FIRST = [ROSTER_WRITER, "src/app/staff/(app)/roster/write-actions.ts"];
 const RENAME_TRY = "tryRename";
 const MAY_RENAME_TRY = [ROSTER_WRITER];
+/**
+ * A linked student's or member's make-inactive (stage 3's slice 9g): QuickBooks first, under the balance rule, sent
+ * through the module's own send without the staff ask. Started only by the module itself and the one staff action.
+ */
+const ROSTER_DEACTIVATE = "deactivateLinked";
+const MAY_ROSTER_DEACTIVATE = [ROSTER_WRITER, "src/app/staff/(app)/roster/write-actions.ts"];
 /** One try of a change saved first, whoever makes it (at once, the press, the queue's worker), settling its own queue item. */
 const SAVED_TRY = "trySavedItem";
 const MAY_SAVED_TRY = [ROSTER_WRITER, "src/lib/roster/queue.ts"];
@@ -531,6 +537,7 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
       expect(naming(ROSTER_ADD), `${ROSTER_ADD} sends a family's create to QuickBooks. A new caller is a decision for a slice brief.`).toEqual([...MAY_ROSTER_ADD].sort());
       for (const name of SAVED_FIRST) expect(naming(name), `${name} sends a change saved in the portal first. A new caller is a decision for a slice brief.`).toEqual([...MAY_SAVED_FIRST].sort());
       expect(naming(RENAME_TRY), `${RENAME_TRY} sends a rename, and resends it once after a live read. A new caller is a decision for a slice brief.`).toEqual([...MAY_RENAME_TRY].sort());
+      expect(naming(ROSTER_DEACTIVATE), `${ROSTER_DEACTIVATE} makes a linked record inactive in QuickBooks. A new caller is a decision for a slice brief.`).toEqual([...MAY_ROSTER_DEACTIVATE].sort());
       expect(naming(SAVED_TRY), `${SAVED_TRY} sends a change saved first and settles its queue item. A new caller is a decision for a slice brief.`).toEqual([...MAY_SAVED_TRY].sort());
     });
 

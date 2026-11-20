@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { staffAction, type StaffCtx } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
-import { addFamily, addStudentToLinked, askFamilyInactive, askRosterWrite, changeInPortal, createInQuickBooksAndLink, linkStudentMadeAfterGivingUp, moveStudent, renameLinked, sendPortalValue,
+import { addFamily, addStudentToLinked, askFamilyInactive, askRosterWrite, changeInPortal, createInQuickBooksAndLink, deactivateLinked, linkStudentMadeAfterGivingUp, moveStudent, renameLinked, sendPortalValue,
   type PortalChange, type WriteAsk, type WriteResult } from "@/lib/roster/writes";
 import { giveUp, tryAgainNow, NOTE_MAX } from "@/lib/roster/queue";
 import { NAME_MAX } from "@/lib/roster/names";
@@ -137,25 +137,40 @@ export const moveAction = staffAction(P, async (ctx, rosterTag: string, studentI
   return r;
 });
 
+/**
+ * A Parent customer made inactive: it has no record in the portal, so QuickBooks first, with the version its page was
+ * shown, under the balance rule (askRosterWrite(); a linked student's or member's is deactivateLinkedAction's, and the
+ * write module refuses one here).
+ */
 export const deactivateAction = staffAction(P, async (ctx, rosterTag: string, qboId: string, syncToken: string): Promise<WriteResult> => {
   if (!tag(rosterTag) || !id(qboId) || !version(syncToken)) return NOT_FROM_PAGE;
   return run(ctx, { op: "deactivate", qboId, syncToken }, rosterTag);
 });
 
-/** The most customers one family's list may hold: far more than any family has, and a bound on what a caller can send. */
-const COVER_MAX = 200;
-/** The list the page showed: pairs of a QuickBooks id and the version shown, the family's among them. */
-const shownList = (v: unknown): v is [string, string][] => Array.isArray(v) && v.length > 0 && v.length <= COVER_MAX
-  && v.every((pair) => Array.isArray(pair) && pair.length === 2 && id(pair[0]) && version(pair[1]));
+/**
+ * A linked student (layered) or member (flat) made inactive (stage 3's slice 9g): QuickBooks first, under the balance
+ * rule, with the link's own version (deactivateLinked()). The page sends the record's kind and app id, a uuid, and no
+ * version and no QuickBooks id.
+ */
+export const deactivateLinkedAction = staffAction(P, async (ctx, rosterTag: string, kind: "family" | "student", recordId: string): Promise<WriteResult> => {
+  if (!canRead(ctx) || !tag(rosterTag) || (kind !== "family" && kind !== "student") || !uuid(recordId)) return NOT_FROM_PAGE;
+  const r = await deactivateLinked({ kind, recordId }, rosterTag, op(ctx));
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
+});
+
+/** The stamp of whom the page covered (coverStamp()): base64url of a fixed length. */
+const stampOk = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9_-]{22}$/.test(v);
 
 /**
  * A family made inactive with everyone under it, as staff confirmed the list on its page (src/lib/roster/writes.ts,
- * askFamilyInactive). The pages are made again whenever anything may have changed, a stop part way included, so the
+ * askFamilyInactive): the family record's app id, a uuid, and the stamp of whom the page covered, never an id or a
+ * version to trust. The pages are made again whenever anything may have changed, a stop part way included, so the
  * list shown next is who is still active.
  */
-export const familyInactiveAction = staffAction(P, async (ctx, rosterTag: string, familyQboId: string, shown: [string, string][]): Promise<WriteResult> => {
-  if (!canRead(ctx) || !tag(rosterTag) || !id(familyQboId) || !shownList(shown)) return NOT_FROM_PAGE;
-  const { result, changed } = await askFamilyInactive(familyQboId, shown, rosterTag, op(ctx));
+export const familyInactiveAction = staffAction(P, async (ctx, rosterTag: string, familyId: string, stamp: string): Promise<WriteResult> => {
+  if (!canRead(ctx) || !tag(rosterTag) || !uuid(familyId) || !stampOk(stamp)) return NOT_FROM_PAGE;
+  const { result, changed } = await askFamilyInactive(familyId, stamp, rosterTag, op(ctx));
   if (changed) revalidatePath("/", "layout");
   return result;
 });
