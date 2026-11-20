@@ -55,8 +55,9 @@ installation with. `docker compose ps` shows what is running, and `docker compos
   - "The membership shape names a customer type QuickBooks no longer has": someone renamed or removed a customer type in
     QuickBooks. **Settings**, **QuickBooks**, **Change**, step 3: choose the shape again.
   - "Changes waiting for QuickBooks (staff roster changes, parents' phones and mailing addresses, and volunteer buy-out
-    invoices): N waiting to reach QuickBooks": changes staff made, a parent's new phone or mailing address (sent on at
-    the worker's next wake), or buy-out invoices a guardian asked for, that QuickBooks hasn't taken yet (it was busy or
+    invoices): N waiting to reach QuickBooks": changes staff made, a guardian's new phone or mailing address (a parent's
+    sent on at the worker's next wake; a staff member's tried at once, and otherwise left for the worker about a
+    minute later), or buy-out invoices a guardian asked for, that QuickBooks hasn't taken yet (it was busy or
     unreachable, or the worker hasn't woken since). They are tried again on their own, after 1, 5, 15 and 60 minutes,
     then every 6 hours. Nothing to do unless they stay.
   - "... stuck and waiting for someone to try them again or give them up on the Reconciliation page": a change failed

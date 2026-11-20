@@ -84,7 +84,9 @@ time) copies them in once, by itself:
   addresses taken into the portal from QuickBooks' records, once, with counts" from the worker (how many were given a phone, an address, whose records disagreed, who had no
   record of their own). After it, a change made in QuickBooks no longer reaches what parents see.
 - **Sent on.** Each change a parent saves to their phone or address is then sent to their own record in QuickBooks
-  (or the family's, in books with no Parent customers) by the worker, within a minute or two. Nothing is sent until
+  (or the family's, in books with no Parent customers) by the worker, within a minute or two. Staff can change them
+  too, on the person's page (or the family's page, in books with no Parent customers): a staff member's change is
+  tried at once, and whatever doesn't go at once is left for the worker, about a minute later. Nothing is sent until
   the copy above has run, nor after the membership shape is saved until the roster has been read again: until then
   such a change waits on the **Reconciliation** page, which says so. Where QuickBooks holds
   a phone or address there that the portal didn't know of, nothing is sent over it: the change is listed on the

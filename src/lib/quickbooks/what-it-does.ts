@@ -12,7 +12,7 @@ export const QUICKBOOKS_USE = {
     + "and a change made to them in QuickBooks after that stays there.",
   writes: "It changes only what someone asks it to there: the email address a parent signs in with, in their own record's email field, "
     + "only when that parent changes it in the portal; "
-    + "a guardian's phone and mailing address, on their own record (or, where the club's books have no parents of their own, the family's), after the portal saves a change a parent makes to them, "
+    + "a guardian's phone and mailing address, on their own record (or, where the club's books have no parents of their own, the family's), after the portal saves a change a parent or staff make to them, "
     + "and never over details QuickBooks holds that the portal didn't know of; "
     + "and, for staff allowed to change the roster, new families, students, parents and members, their names, a student's family, and making a customer inactive "
     + "(a family together with everyone under it, and never anyone with any balance, owed or a credit). "

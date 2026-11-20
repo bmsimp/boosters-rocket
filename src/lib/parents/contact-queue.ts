@@ -1,7 +1,9 @@
-// Parent-facing (PARENT_CODE_ELSEWHERE in tests/integration/page-guards.test.ts): the queueing of a parent's change of
-// their phone and mailing address, in the transaction that saves it (./contact-edits.ts). It imports nothing staff-only
-// and nothing from the QuickBooks client, and sends nothing: the write queue's worker sends each item at its next wake,
-// through the one try of a change saved first (trySavedItem(), src/lib/roster/writes.ts). Whose details they are, and
+// Parent-facing (PARENT_CODE_ELSEWHERE in tests/integration/page-guards.test.ts): the queueing of a change of a
+// guardian's phone and mailing address, a parent's own or (since stage 3's slice 11c) a staff member's, in the
+// transaction that saves it (./contact-edits.ts). It imports nothing staff-only and nothing from the QuickBooks client,
+// and sends nothing: the write queue's worker sends each item at its next wake, and a staff member's is first tried at
+// once after the save's commit, each through the one try of a change saved first (trySavedItem(),
+// src/lib/roster/writes.ts). Whose details they are, and
 // so which records they go to, comes from the caller, which took it from the session (tests/unit/quickbooks-writes.test.ts).
 import "server-only";
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
@@ -18,6 +20,14 @@ export type DetailsOf = { kind: "person"; parentId: string } | { kind: "family";
 type ContactWrite = Extract<RosterWrite, { op: "contact" }>;
 type Field = keyof ContactDetails;
 const FIELDS: readonly Field[] = ["phone", "address"];
+/** The note an earlier change is closed with when a later one of the same details takes its place (here, and once a later one is done or kept). */
+export const CONTACT_REPLACED_NOTE = "Replaced by a later change to the same details.";
+/**
+ * How a staff member's save queues its changes (stage 3's slice 11c): as a change saved first is held for its at-once
+ * try (queueSaved() in src/lib/roster/writes.ts), due only once its lease has run out (`nextTryAt`), asked by the staff
+ * member (`askedBy`). A parent's save gives none: its items are due at once, asked by nobody on staff.
+ */
+export type QueueAs = { askedBy: string; nextTryAt: Date };
 /** A QuickBooks customer id, by the client's own rule (isQboId()): digits only. Nothing else is ever queued to be sent. */
 const isCustomerId = (id: string) => /^\d{1,19}$/.test(id);
 
@@ -84,9 +94,11 @@ const pick = (d: ContactDetails, fields: readonly Field[]): ContactDetails =>
  * of them). The new item carries the portal's values now of every field any open change of the record asked for, the
  * ones that may have been sent included (so closing them once it is done or kept loses nothing), and the oldest
  * before-value of each among them, so it always says what QuickBooks last held by the portal's knowledge. It takes no
- * roster lock and no "being sent" lock, and waits for none.
+ * roster lock and no "being sent" lock, and waits for none. `o.queueAs`, for a staff member's save (QueueAs): its items
+ * are held for the at-once try that follows the commit, and the worker takes one once its lease has run out.
  */
-export async function queueContactChange(tx: Tx, of: DetailsOf, saved: { change: ContactDetails; was: ContactDetails; now: Required<ContactDetails> }, o: { actor: Actor; ip: string | null }): Promise<string[]> {
+export async function queueContactChange(tx: Tx, of: DetailsOf, saved: { change: ContactDetails; was: ContactDetails; now: Required<ContactDetails> },
+  o: { actor: Actor; ip: string | null; queueAs?: QueueAs }): Promise<string[]> {
   const found = await targetsOf(tx, of);
   if (found === null) return [];
   const ids: string[] = [];
@@ -101,7 +113,7 @@ export async function queueContactChange(tx: Tx, of: DetailsOf, saved: { change:
     for (const r of open) {
       const w = r.request as ContactWrite;
       const [gone] = free.has(r.id) && (r.state === "refused" || !r.sent)
-        ? await tx.update(writeQueue).set({ state: "given_up", note: "Replaced by a later change to the same details.", nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
+        ? await tx.update(writeQueue).set({ state: "given_up", note: CONTACT_REPLACED_NOTE, nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
           .where(and(eq(writeQueue.id, r.id), eq(writeQueue.state, r.state), r.state === "refused" ? undefined : eq(writeQueue.sent, false))).returning({ id: writeQueue.id })
         : [];
       if (gone) {
@@ -136,7 +148,7 @@ export async function queueContactChange(tx: Tx, of: DetailsOf, saved: { change:
       ...(orWas.length ? { orWas } : {}), ...(t.guardianId !== null ? { guardianId: t.guardianId } : {}) };
     const [item] = await tx.insert(writeQueue).values({
       realmId: found.realmId, request: write, targetQboId: t.qboId, familyId: t.familyId, studentId: null,
-      state: "waiting", sent: false, tries: 0, lastCode: null, nextTryAt: new Date(), askedBy: null, askedByLabel: o.actor.label,
+      state: "waiting", sent: false, tries: 0, lastCode: null, nextTryAt: o.queueAs?.nextTryAt ?? new Date(), askedBy: o.queueAs?.askedBy ?? null, askedByLabel: o.actor.label,
     }).returning({ id: writeQueue.id });
     ids.push(item!.id);
   }
