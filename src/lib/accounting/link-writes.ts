@@ -25,7 +25,7 @@ import { handful, type AimedAt } from "@/lib/roster/no-family";
 import { familyCreateWaiting, NO_FAMILY_CUSTOMER } from "@/lib/roster/writes";
 import { isUuid } from "@/lib/seasons/ids";
 import { lockRosterAs, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
-import { BULK_MAX, bulkKeys, readCustomerAims, readLinkBasics, suggestedRowsShown, type LinkBasics, type LinksState } from "./mapping";
+import { BULK_MAX, bulkKeys, readCustomerAims, readLinkBasics, REVIEW_LEFT_WORDS, suggestedRowsShown, type LinkBasics, type LinksState, type ReviewLeftWhy } from "./mapping";
 import { pairKeys, type Proposals } from "./proposals";
 import { isStatusKey, linkStanding, SEARCH_MAX, type StatusKey } from "./status";
 import { bulkStampHolds, isChosen, linkStampHolds, reviewStampHolds, type Chosen } from "./stamp";
@@ -56,12 +56,13 @@ export const LINK_COPY = {
   alreadyLeft: `This family is left unlinked already, so nothing was changed. ${AGAIN}`,
   notLeft: `This family isn't left unlinked now, so nothing was changed. ${AGAIN}`,
   listChanged: "The list has changed since the page was drawn (a family added to or gone from the Suggested rows it shows, a suggestion changed, or a student added, renamed, made inactive or moved on either side), so nothing was linked. It is shown again as it is now, with the new count: look it over, then press again.",
+  bulkSending: (family: string) => `${family}, one of the families this list shows, is being made in the books at this moment, so nothing was linked. Try again in a minute: the list is shown again as it is now.`,
   reviewChanged: `This family's link has changed since the page was drawn (it is no longer carried over to the same customer, or one of its students' links was added, removed or changed), so nothing was confirmed. ${AGAIN} Look it over, then press again.`,
   reviewNotStanding: `The customer this family is linked to isn't a family at the top of the books now, or isn't in the books' copy at all, so the link wasn't confirmed. ${AGAIN}`,
   no_company: `The portal hasn't read the club's books yet, so nothing was linked. ${AGAIN}`,
   other_company: `QuickBooks is connected to a different company than the one the roster was read from, so nothing was linked. An Admin can see why under Settings, QuickBooks. ${AGAIN}`,
   no_shape: `The membership shape isn't chosen, or names a customer type the books no longer have, so the portal can't tell which customers are families. Nothing was linked. An Admin can choose it under Settings, QuickBooks. ${AGAIN}`,
-} as const satisfies Record<string, string> & Record<Exclude<LinksState, "listed">, string>;
+} as const satisfies Record<string, string | ((family: string) => string)> & Record<Exclude<LinksState, "listed">, string>;
 
 /** The unique indexes a confirm may meet, the last line against a wrong link: a family's, and a student's. */
 const FAMILY_UQ = new Set(["accounting_link_family_customer_uq", "accounting_link_family_uq"]);
@@ -92,11 +93,11 @@ async function familyToLink(tx: Tx, familyId: AppFamilyId): Promise<{ ok: true; 
  * the family's link (`confirmed`, by the staff member, aligned with the cache row's version) and one student link for
  * each pair proposed, the same way, the family's Left unlinked mark cleared, and one `accounting.link.confirm` row
  * (`extra` added to its body: a bulk press's id). A single Confirm and each family of a bulk press go through it, so a
- * bulk link is exactly a single one. Returns the links made and how many of the kept moves into the family can be sent
- * now.
+ * bulk link is exactly a single one. `left` is whether the family's locked row had the mark (familyToLink()): the clear
+ * is made only then, as it would change nothing otherwise. Returns the links made.
  */
 async function linkIn(tx: Tx, b: LinkBasics, familyId: AppFamilyId, customerId: string, chosen: Chosen, proposals: Proposals, o: LinkOp,
-  extra: Record<string, unknown> = {}): Promise<{ linkIds: string[]; keptMoves: number }> {
+  left: boolean, extra: Record<string, unknown> = {}): Promise<{ linkIds: string[] }> {
   const familyKey = String(familyId);
   const realmId = b.realm!;
   const now = new Date();
@@ -106,20 +107,27 @@ async function linkIn(tx: Tx, b: LinkBasics, familyId: AppFamilyId, customerId: 
   const studentLinks = proposals.pairs.length === 0 ? [] : await tx.insert(accountingLink).values(proposals.pairs.map((p) =>
     ({ system: QUICKBOOKS, realmId, customerId: p.customerQboId, studentId: p.studentId, origin: "confirmed" as const, linkedBy: o.staffUserId, ...aligned(p.customerQboId) })))
     .returning({ id: accountingLink.id });
-  const cleared = await clearLeftUnlinked(tx, familyId);
+  const cleared = left ? await clearLeftUnlinked(tx, familyId) : false;
   const linkIds = [familyLink!.id, ...studentLinks.map((l) => l.id)];
   await writeAudit({ actor: o.actor, action: "accounting.link.confirm", permission: o.permission, ip: o.ip, targetType: "family", targetId: familyKey,
     after: { familyId: familyKey, customerQboId: customerId, realmId, chosen,
       studentsLinked: proposals.pairs.map((p) => ({ studentId: String(p.studentId), customerQboId: p.customerQboId })),
       studentsLeft: proposals.recordsLeft.map((r) => String(r.id)), studentCustomersLeft: proposals.customersLeft.map((c) => c.qboId),
       linkIds, ...(cleared ? { leftUnlinkedCleared: true } : {}), ...extra } }, tx);
-  // A student's move into this family kept only because it had no customer in the books (NO_FAMILY_CUSTOMER) can be
-  // sent now where Reconciliation offers it: only while the cache holds the student's customer active, the rule
-  // loadOpenWrites() (src/lib/roster/queue.ts) applies to a kept move before it asks whether the family joined is linked.
+  return { linkIds };
+}
+
+/**
+ * How many students' moves into these families, kept only because the family had no customer in the books
+ * (NO_FAMILY_CUSTOMER), can be sent now that they are linked, where Reconciliation offers it: only while the cache
+ * holds the student's customer active, the rule loadOpenWrites() (src/lib/roster/queue.ts) applies to a kept move
+ * before it asks whether the family joined is linked. One query, for a single press or a bulk one.
+ */
+async function keptMovesInto(tx: Tx, b: LinkBasics, familyKeys: readonly string[]): Promise<number> {
+  if (familyKeys.length === 0) return 0;
   const kept = await tx.select({ studentQboId: sql<string | null>`${writeQueue.request}->>'qboId'` }).from(writeQueue).where(and(eq(writeQueue.state, "refused"),
-    eq(writeQueue.lastCode, NO_FAMILY_CUSTOMER), sql`${writeQueue.request}->>'op' = 'move'`, sql`${writeQueue.request}->>'toFamilyId' = ${familyKey}`));
-  const keptMoves = kept.filter((m) => m.studentQboId !== null && b.customerById.get(m.studentQboId)?.active === true).length;
-  return { linkIds, keptMoves };
+    eq(writeQueue.lastCode, NO_FAMILY_CUSTOMER), sql`${writeQueue.request}->>'op' = 'move'`, inArray(sql<string>`${writeQueue.request}->>'toFamilyId'`, [...familyKeys])));
+  return kept.filter((m) => m.studentQboId !== null && b.customerById.get(m.studentQboId)?.active === true).length;
 }
 
 /**
@@ -153,7 +161,8 @@ export async function linkFamilyToCustomer(raw: { familyId: unknown; customerId:
       if (b.chosenFor(familyKey, customerId) !== chosen) return no(LINK_COPY.rowChanged);
       const proposals = b.proposalsFor(familyKey, customerId);
       if (!linkStampHolds(familyKey, customerId, chosen, pairKeys(proposals), stamp)) return no(LINK_COPY.rowChanged);
-      const { keptMoves } = await linkIn(tx, b, familyId, customerId, chosen, proposals, o);
+      await linkIn(tx, b, familyId, customerId, chosen, proposals, o, f.leftAt !== null);
+      const keptMoves = await keptMovesInto(tx, b, [familyKey]);
       return { ok: true, message: confirmedWords({ family: recordNameWords(f.name, "family"), customer: b.customerById.get(customerId)?.displayName ?? customerId,
         linked: proposals.pairs.map((p) => p.recordName), recordsLeft: proposals.recordsLeft.map((r) => recordNameWords(r.name, "student")),
         customersLeft: proposals.customersLeft.map((c) => ({ name: c.name, active: c.active })), keptMoves }) };
@@ -238,8 +247,10 @@ export async function undoLeaveUnlinked(rawFamily: unknown, rosterTag: string, o
   });
 }
 
-/** A bulk press found the list changed after it had begun writing: thrown, so its transaction keeps nothing. */
-class ListChanged extends Error {}
+/** A bulk press found the list changed after it had begun writing: thrown, so its transaction keeps nothing, with the words it is answered in. */
+class ListChanged extends Error {
+  constructor(readonly words: string = LINK_COPY.listChanged) { super(words); }
+}
 
 /**
  * Confirm all exact email matches (stage 4's slice M3a2; section 4, "bulk confirm"; the lead's decisions 2 to 4): links
@@ -249,8 +260,11 @@ class ListChanged extends Error {}
  * transaction, under the roster lock held exclusively with the page's tag, the rows are worked out again from reads
  * made in it (suggestedRowsShown(), the page's own rule) and must be as many, at most BULK_MAX, and seal to the same
  * stamp. Then, for each row in the roster's order, the single press's checks (the family locked, active, unlinked, its
- * create neither waiting nor being made; the customer in the pool; the row still `suggested`) and the links. All or
- * nothing: any change refuses the whole press in one set of words (LINK_COPY.listChanged), keeping nothing; the unique
+ * create neither waiting nor being made; the customer in the pool; the row still `suggested`) and the links. A family
+ * whose own create is waiting or stuck isn't among the rows at all (suggestedRowsShown() leaves it out, page and press
+ * alike), so only one being made at this moment can be found here, and that is said in words of its own
+ * (LINK_COPY.bulkSending). All or nothing: any change refuses the whole press in one set of words
+ * (LINK_COPY.listChanged), keeping nothing; the unique
  * indexes are the last line, answered the same way. One `accounting.link.confirm` row per family (with `bulk`, the
  * press's id) and one `accounting.link.bulk` row, in the transaction. Sends nothing to the books.
  */
@@ -269,22 +283,24 @@ export async function confirmAllSuggested(raw: { status: unknown; q: unknown; co
       const rows = suggestedRowsShown(b, filter);
       if (rows.length !== count || rows.length > BULK_MAX || !bulkStampHolds(filter, count, bulkKeys(rows), stamp)) return no(LINK_COPY.listChanged);
       const pressId = randomUUID();
-      const linked: { name: string; pairs: number; recordsLeft: number; customersLeft: { active: boolean }[]; keptMoves: number }[] = [];
+      const linked: { name: string; pairs: number; recordsLeft: number; customersLeft: { active: boolean }[] }[] = [];
       for (const r of rows) {
         const f = await familyToLink(tx, r.familyId);
-        if (!f.ok || !b.poolIds.has(r.customerId) || b.chosenFor(r.familyKey, r.customerId) !== "suggested") throw new ListChanged();
+        if (!f.ok) throw new ListChanged(f.error === LINK_COPY.createSending ? LINK_COPY.bulkSending(r.name) : LINK_COPY.listChanged);
+        if (!b.poolIds.has(r.customerId) || b.chosenFor(r.familyKey, r.customerId) !== "suggested") throw new ListChanged();
         const proposals = b.proposalsFor(r.familyKey, r.customerId);
-        const { keptMoves } = await linkIn(tx, b, r.familyId, r.customerId, "suggested", proposals, o, { bulk: pressId });
-        linked.push({ name: r.name, pairs: proposals.pairs.length, recordsLeft: proposals.recordsLeft.length, customersLeft: proposals.customersLeft, keptMoves });
+        await linkIn(tx, b, r.familyId, r.customerId, "suggested", proposals, o, f.leftAt !== null, { bulk: pressId });
+        linked.push({ name: r.name, pairs: proposals.pairs.length, recordsLeft: proposals.recordsLeft.length, customersLeft: proposals.customersLeft });
       }
+      const keptMoves = await keptMovesInto(tx, b, rows.map((r) => r.familyKey));
       await writeAudit({ actor: o.actor, action: "accounting.link.bulk", permission: o.permission, ip: o.ip, targetType: "accounting_link", targetId: pressId,
         after: { pressId, count: rows.length, familyIds: rows.map((r) => r.familyKey), realmId: b.realm, status: filter.status, searched: filter.q !== "" } }, tx);
       return { ok: true, message: bulkConfirmedWords({ families: linked.map((l) => l.name), students: linked.reduce((n, l) => n + l.pairs, 0),
         recordsLeft: linked.reduce((n, l) => n + l.recordsLeft, 0), activeCustomersLeft: linked.reduce((n, l) => n + l.customersLeft.filter((c) => c.active).length, 0),
-        inactiveCustomersLeft: linked.reduce((n, l) => n + l.customersLeft.filter((c) => !c.active).length, 0), keptMoves: linked.reduce((n, l) => n + l.keptMoves, 0) }) };
+        inactiveCustomersLeft: linked.reduce((n, l) => n + l.customersLeft.filter((c) => !c.active).length, 0), keptMoves }) };
     });
   } catch (e) {
-    if (e instanceof ListChanged) return no(LINK_COPY.listChanged);
+    if (e instanceof ListChanged) return no(e.words);
     const which = uniqueViolated(e);
     if (which !== null && (FAMILY_UQ.has(which) || STUDENT_UQ.has(which))) return no(LINK_COPY.listChanged);
     throw e;
@@ -365,10 +381,10 @@ export async function reviewCarriedOver(raw: { familyId: unknown; linkId: unknow
 }
 
 /** What staff read after Confirm this link, each sentence true by the code. */
-export function reviewedWords(s: { family: string; customer: string; confirmed: string[]; left: { name: string; why: "inactive" | "elsewhere" }[] }): string {
-  const parts = [`${s.family}'s link to “${s.customer}” in the books is confirmed: it is recorded as checked by you, and no longer as carried over.`];
+export function reviewedWords(s: { family: string; customer: string; confirmed: string[]; left: { name: string; why: ReviewLeftWhy }[] }): string {
+  const parts = [`The link of ${s.family} to “${s.customer}” in the books is confirmed: it is recorded as checked by you, and no longer as carried over.`];
   if (s.confirmed.length) parts.push(`Confirmed with it, as ${s.confirmed.length === 1 ? "its student's link" : "its students' links"}: ${list(s.confirmed)}.`);
-  if (s.left.length) parts.push(`Left carried over: ${list(s.left.map((l) => `${l.name} (${l.why === "inactive" ? "inactive in the portal" : "under another customer in the books"})`))}.`);
+  if (s.left.length) parts.push(`Left carried over: ${list(s.left.map((l) => `${l.name} (${REVIEW_LEFT_WORDS[l.why]})`))}.`);
   parts.push("Nothing was sent to the books.");
   return parts.join(" ");
 }
@@ -379,11 +395,19 @@ export function reviewedWords(s: { family: string; customer: string; confirmed: 
  * the screen's own rule (readCustomerAims(): a Suggested row's suggestion, a Several possible row's candidate, or a
  * customer a given-up create of an active family with no family link made). Passed to familyFromCustomer() by its
  * action, so src/lib/roster/no-family.ts never imports this screen's modules (which import it).
+ *
+ * What it can't hold still: unblocking a person and a parent's confirmed change of sign-in email change the addresses
+ * the matcher reads without taking the roster lock (readLinkBasics()), so one that commits after this read and before
+ * the press commits can make the customer Suggested for a family all the same. The parent rows aren't locked here:
+ * adding a guardian holds the person's row while it waits for the roster lock (the order above lockedPerson(),
+ * src/lib/parents/sessions.ts), so a press holding the roster lock and waiting on that row would make a cycle. That
+ * window is the press's own few moments; every writer that takes the roster lock is kept out for all of it.
  */
 export async function customerAimedAt(tx: Tx, customerId: string): Promise<AimedAt | null> {
   const aim = (await readCustomerAims(tx)).get(customerId);
   if (aim === undefined) return null;
-  return { why: aim.why, families: aim.families.map((f) => f.name) };
+  const names = aim.families.map((f) => f.name);
+  return aim.why === "given_up" ? { why: "given_up", families: [names[0]!], pickable: aim.pickable } : { why: aim.why, families: names };
 }
 
 export type { Chosen };

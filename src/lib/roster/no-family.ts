@@ -60,9 +60,17 @@ export async function customersWithNoFamily(tx?: Tx): Promise<NoFamilyList> {
 
 /** The family's and member's creates waiting or stuck on the write queue, whose customers the list leaves out (beforeResend()). */
 export async function familyCreatesOnTheQueue(tx?: Tx): Promise<RosterWrite[]> {
-  return (await (tx ?? db).select({ request: writeQueue.request }).from(writeQueue)
+  return (await familyCreatesFiled(tx)).map((c) => c.write);
+}
+/**
+ * The same creates, each with the family record it is filed under (`write_queue.family_id`; null for one queued before
+ * stage 3's slice 9d, which names none), in one query: the accounting links screen leaves such a family out of Confirm
+ * all exact email matches, as a press refuses it (familyCreateWaiting(), src/lib/roster/writes.ts).
+ */
+export async function familyCreatesFiled(tx?: Tx): Promise<{ write: RosterWrite; familyId: string | null }[]> {
+  return (await (tx ?? db).select({ request: writeQueue.request, familyId: writeQueue.familyId }).from(writeQueue)
     .where(and(inArray(writeQueue.state, ["waiting", "stuck"]), sql`${writeQueue.request}->>'op' = 'create'`, sql`${writeQueue.request}->>'role' in ('family', 'member')`)))
-    .map((r) => r.request as RosterWrite);
+    .map((r) => ({ write: r.request as RosterWrite, familyId: r.familyId === null ? null : String(r.familyId) }));
 }
 
 /**
@@ -108,7 +116,7 @@ export function handful(names: readonly string[], most = 5): string {
  * families (`suggested`) or lists it as a possible customer of them (`several`), or a create of this family, saved in the
  * portal first and given up after a try, made it (`given_up`). The families by name, as text.
  */
-export type AimedAt = { why: "suggested" | "several" | "given_up"; families: string[] };
+export type AimedAt = { why: "suggested" | "several"; families: string[] } | { why: "given_up"; families: [string]; pickable: boolean };
 /**
  * How familyFromCustomer() asks whether a customer is meant for a family the portal has: given the press's own
  * transaction, after its exclusive roster lock. Its one implementation is the accounting links screen's rule
@@ -128,7 +136,9 @@ export const NO_FAMILY_COPY = {
   /** A customer the accounting links screen suggests for, or lists as a possible customer of, families the portal has. */
   suggestedFor: (families: readonly string[]) => `Accounting links suggests this customer for, or lists it as a possible customer of, ${handful(families)}, ${families.length === 1 ? "a family the portal has already" : "families the portal has already"}, so no second family was made. ${families.length === 1 ? "Link the two on Accounting links." : "Link it to the right one on Accounting links."}`,
   /** A customer a given-up create of a family the portal saved first made. */
-  givenUpFor: (family: string) => `The portal saved ${family} first, and QuickBooks made this customer for it before making it was given up, so no second family was made. Pick it for that family on Accounting links.`,
+  givenUpFor: (family: string, pickable: boolean) => `The portal saved ${family} first, and QuickBooks made this customer for it before making it was given up, so no second family was made. ${pickable
+    ? "If it is that family's, pick it for that family on Accounting links."
+    : "Accounting links suggests another customer for that family: confirm that one there if it is the family's, or, if this one is, leave the family unlinked there first, then pick this one for it."}`,
 } as const;
 
 /**
@@ -190,7 +200,7 @@ export async function familyFromCustomer(customerId: string, o: { actor: Actor; 
       // A customer the accounting links screen aims at a family the portal has (stage 4's slice M3a2) is linked there,
       // never made a second family of: worked out now, under this transaction's lock, by that screen's own rule.
       const aim = await aimedAt(tx, customerId);
-      if (aim !== null) return no(aim.why === "given_up" ? NO_FAMILY_COPY.givenUpFor(aim.families[0] ?? "") : NO_FAMILY_COPY.suggestedFor(aim.families));
+      if (aim !== null) return no(aim.why === "given_up" ? NO_FAMILY_COPY.givenUpFor(aim.families[0], aim.pickable) : NO_FAMILY_COPY.suggestedFor(aim.families));
       const realmId = (await getRosterSource(tx))!;
       const made = await importRecordsFromRoster(tx, { familyCustomerId: customerId, linkedBy: o.staffUserId });
       // The list offered it, so the import's plan holds its family record and it had none. Had it found one after all,

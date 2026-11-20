@@ -23,7 +23,7 @@ import { confirmAllAction } from "@/app/staff/(app)/links/actions";
 import AccountingLinksPage from "@/app/staff/(app)/links/page";
 import { resetDb, seedParent, untilALockIsAwaited } from "../helpers/db";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
-import { asOp, auditsOf, connectRoster, REALM, staffWith, WORKER } from "../helpers/roster-writes";
+import { asOp, auditsOf, connectRoster, REALM, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
 
 /**
  * Confirm all exact email matches on the accounting links screen (stage 4's slice M3a2 of the app-owned families spec,
@@ -127,7 +127,7 @@ describe("the rows a filter shows", () => {
   it("counts only Suggested rows, under a status filter and a search by a guardian's address or the customer's email field, never a Left unlinked one", async () => {
     const { patels, okafors } = await seedFamilies();
     const view = await loadAccountingLinks();
-    expect(bulkOf(view, null)).toEqual({ count: 2, stamp: expect.any(String) });
+    expect(bulkOf(view, null)).toEqual({ count: 2, stamp: expect.any(String), waiting: 0 });
     expect(bulkOf(view, "suggested")).toMatchObject({ count: 2 });
     for (const status of ["no_match", "left_unlinked", "carried_over", "with_differences", "linked", "several"]) expect(bulkOf(view, status), status).toBeNull();
     expect(bulkOf(view, null, "IKE@")).toMatchObject({ count: 1 }); // a guardian's sign-in address
@@ -204,6 +204,41 @@ describe("the rows a filter shows", () => {
     expect(bulkOf(await loadAccountingLinks(), null)).toBeNull();
   });
 
+  it("leaves out a Suggested family whose own create in the books is waiting or stuck, says so beside the button, and links the others", async () => {
+    const { patels, okafors } = await seedFamilies();
+    // The Riveras' guardian signs in with the address on Rivera Household (75), so their row is Suggested; their own
+    // create, filed under them, is stuck on the queue (a lost answer tried eight times), so a press would refuse them.
+    await readAgain(qc("75", "Rivera Household", "1", mail("riv@example.org")));
+    const riveras = await unlinkedFamily("The Riveras");
+    await guardianIn(riveras, "Ana Rivera", "riv@example.org");
+    await seedQueued({ op: "create", role: "family", name: "The Riveras", typeQboId: "1", familyQboId: null, email: null }, { familyId: riveras, sent: true, state: "stuck", tries: 8 });
+    const view = await loadAccountingLinks();
+    const row = view.rows.find((r) => String(r.familyId) === String(riveras))!;
+    expect(row.status.key).toBe("suggested");
+    expect(row.confirm).toMatchObject({ customerId: "75", chosen: "suggested" });
+    const bulk = bulkOf(view, null)!;
+    expect(bulk).toEqual({ count: 2, stamp: expect.any(String), waiting: 1 });
+    expect(suggestedRowsShown(await readLinkBasics(), { status: null, q: "" }).map((r) => r.name)).toEqual(["The Okafors", "The Patels"]);
+    // Narrowed to the Riveras alone, no press is offered, and the notice says why.
+    expect(bulkOf(view, null, "riv@")).toEqual({ count: 0, stamp: null, waiting: 1 });
+    asStaff(linker);
+    const notice = "1 Suggested row this list shows isn&#x27;t counted in Confirm all exact email matches, as a press can&#x27;t link it now: making the family in the books is still waiting on the queue";
+    const all = listOf(await renderPage(AccountingLinksPage)).replaceAll("<!-- -->", "");
+    expect(all).toContain("Confirm all exact email matches (2)");
+    expect(all).toContain(notice);
+    const narrowed = listOf(await renderPage(AccountingLinksPage, { searchParams: { q: "riv@" } })).replaceAll("<!-- -->", "");
+    expect(narrowed).toContain(notice);
+    expect(narrowed).not.toContain("Confirm all exact email matches (");
+    // The press links the other two, every time; the Riveras' own Confirm says why it can't.
+    expect(await press({ status: "", q: "" }, bulk)).toMatchObject({ ok: true, message: expect.stringContaining("2 families linked") });
+    expect(await linksOfFamily(patels)).toHaveLength(1);
+    expect(await linksOfFamily(okafors)).toHaveLength(1);
+    expect(await linksOfFamily(riveras)).toEqual([]);
+    expect(await linkFamilyToCustomer({ familyId: String(riveras), customerId: "75", chosen: "suggested", stamp: row.confirm!.stamp }, tag, linkOp()))
+      .toEqual({ ok: false, errors: [LINK_COPY.createWaiting] });
+    expect(bulkOf(await loadAccountingLinks(), null)).toEqual({ count: 0, stamp: null, waiting: 1 });
+  });
+
   it("says the families linked up to a handful, then how many more, and the students over all of them", () => {
     const words = bulkConfirmedWords({ families: ["A", "B", "C", "D", "E", "F", "G"], students: 3, recordsLeft: 0, activeCustomersLeft: 0, inactiveCustomersLeft: 2, keptMoves: 2 });
     expect(words).toContain("7 families linked, each to the customer that was filled in on its row: A, B, C, D, E and 2 more. 3 students linked with them in all.");
@@ -243,6 +278,11 @@ describe("a list that changed since the page", () => {
     // A student renamed in one family: Mia Patel becomes Dev Patel, who now pairs with customer 73.
     await refusedAfter(async () => {
       expect(await changeInPortal({ op: "rename_student", studentId: String(await studentNamed(patels, "Mia Patel")), name: "Dev Patel" }, tag, op)).toMatchObject({ ok: true });
+    });
+    // A student added in one family, pairing with a student customer under its suggestion: what the press would link changes.
+    await refusedAfter(async () => {
+      await readAgain(qc("82", "Ada Okafor", "3", under("86")));
+      expect(await changeInPortal({ op: "add_student", familyId: String(okafors), name: "Ada Okafor" }, tag, op)).toMatchObject({ ok: true });
     });
     // A customer linked to a family by a single Confirm between the page and the press.
     await refusedAfter(async () => {
@@ -284,7 +324,7 @@ describe("a list that changed since the page", () => {
     const people = await db.insert(parent).values(families.map((_, i) => ({ name: `Bulk Parent ${i}`, email: `bulk${i}@example.com` }))).returning({ id: parent.id, email: parent.email });
     await db.insert(guardian).values(families.map((f, i) => ({ parentId: people.find((p) => p.email === `bulk${i}@example.com`)!.id, familyId: f.id, familyQboId: null, status: "invited" as const })));
     const view = await loadAccountingLinks();
-    expect(bulkOf(view, null)).toEqual({ count: n, stamp: null });
+    expect(bulkOf(view, null)).toEqual({ count: n, stamp: null, waiting: 0 });
     // Narrowed by the search, it is offered again.
     expect(bulkOf(view, null, "bulk1")).toMatchObject({ count: 111, stamp: expect.any(String) }); // bulk1, bulk10 to bulk19, bulk100 to bulk199
     asStaff(linker);

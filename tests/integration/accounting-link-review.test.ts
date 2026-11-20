@@ -17,6 +17,7 @@ import { AccessDenied } from "@/lib/guards";
 import { filterLinkRows, loadAccountingLinks, type LinkRow, type LinksView } from "@/lib/accounting/mapping";
 import { LINK_COPY, reviewCarriedOver } from "@/lib/accounting/link-writes";
 import { reviewStamp } from "@/lib/accounting/stamp";
+import { auditPage, parseAuditFilters } from "@/lib/audit/query";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { addFamily } from "@/lib/roster/writes";
 import { SHAPE_KEY } from "@/lib/roster/shape";
@@ -98,7 +99,7 @@ describe("Confirm this link", () => {
     const pressedAt = new Date();
     stub.calls.length = 0;
     const r = await pressRow(oaks, row);
-    expect(r).toEqual({ ok: true, message: "Oak Family's link to “Oak Family” in the books is confirmed: it is recorded as checked by you, and no longer as carried over."
+    expect(r).toEqual({ ok: true, message: "The link of Oak Family to “Oak Family” in the books is confirmed: it is recorded as checked by you, and no longer as carried over."
       + " Confirmed with it, as its student's link: Amy Oak. Nothing was sent to the books." });
     expect(stub.apiCalls()).toEqual([]);
 
@@ -118,6 +119,10 @@ describe("Confirm this link", () => {
       link: { id: before.family.id, origin: "confirmed", linkedAt: after.family.linkedAt.toISOString(), linkedBy: linker.id },
       studentsLinked: [{ id: before.student.id, origin: "confirmed", linkedAt: after.student.linkedAt.toISOString(), linkedBy: linker.id, studentId: String(amy), customerQboId: "81" }],
       studentLinksLeft: [] });
+    // The audit page's record filter finds the review under the family and under the student whose link it confirmed.
+    for (const record of [`family:${oaks}`, `student:${amy}`]) {
+      expect((await auditPage(parseAuditFilters({ record }))).rows.filter((x) => x.action === "accounting.link.confirm").map((x) => x.id), record).toEqual([audit!.id]);
+    }
 
     const now = await loadAccountingLinks();
     expect(rowOf(now, "Oak Family")).toMatchObject({ status: { key: "linked", origin: "confirmed", by: "linker" }, review: null });
@@ -134,24 +139,39 @@ describe("Confirm this link", () => {
   });
 
   it("offers it on a carried-over link with differences, confirming the students whose records and customers agree and leaving the others carried over", async () => {
-    await readAgain(qc("70", "Patel Family", "1"), qc("71", "Asha Patel", "3", under("70")), qc("72", "Ravi Patel", "3", under("70")), qc("74", "Sam Patel", "3", under("70")));
+    await readAgain(qc("70", "Patel Family", "1"), qc("71", "Asha Patel", "3", under("70")), qc("72", "Ravi Patel", "3", under("70")), qc("74", "Sam Patel", "3", under("70")),
+      qc("75", "Tara Patel", "3", under("70")), qc("76", "Uma Patel", "3", under("70")));
     await syncAppRecords();
     const patels = await recordOfCustomer("70", "family");
-    const [asha, ravi, sam] = [await recordOfCustomer("71", "student"), await recordOfCustomer("72", "student"), await recordOfCustomer("74", "student")];
-    // Ravi's record made inactive in the portal; Sam moved under the Riveras in QuickBooks alone (his record stays with the Patels).
+    const asha = await recordOfCustomer("71", "student"), ravi = await recordOfCustomer("72", "student"), sam = await recordOfCustomer("74", "student");
+    const tara = await recordOfCustomer("75", "student"), uma = await recordOfCustomer("76", "student");
+    // Ravi's record made inactive in the portal; Sam moved under the Riveras in QuickBooks alone (his record stays with
+    // the Patels); Tara's customer gone from the books' copy; Uma's retyped to Parent, still under the Patels.
     await db.update(student).set({ active: false }).where(eq(student.id, ravi));
+    stub.customers = stub.customers.filter((c) => c.Id !== "75");
+    changeInBooks("76", { CustomerTypeRef: { value: "2" } });
+    await readAgain();
     await moveInQuickBooksOnly(["74"], "10");
     const row = rowOf(await loadAccountingLinks(), "Patel Family");
     expect(row.status).toEqual({ key: "with_differences", made: { key: "carried_over", at: expect.any(String) } });
     expect(row.review).toMatchObject({ confirms: [{ studentId: asha, name: "Asha Patel" }],
-      leaves: [{ studentId: ravi, name: "Ravi Patel", why: "inactive" }, { studentId: sam, name: "Sam Patel", why: "elsewhere" }] });
+      leaves: [{ studentId: ravi, name: "Ravi Patel", why: "inactive" }, { studentId: sam, name: "Sam Patel", why: "elsewhere" },
+        { studentId: tara, name: "Tara Patel", why: "gone" }, { studentId: uma, name: "Uma Patel", why: "elsewhere" }] });
+    // The opening says each reason in its own words, never that a gone or retyped customer is under another customer.
+    asStaff(linker);
+    const opening = rowNamed(listOf(await renderPage(AccountingLinksPage)), "Patel Family")![4]!.replaceAll("&#x27;", "'");
+    expect(opening).toContain("Tara Patel (its customer isn't in the books' copy now)");
+    expect(opening).toContain("Uma Patel (its customer isn't a student customer directly under this one in the books now)");
+    expect(opening).not.toContain("under another customer in the books");
     const r = await pressRow(patels, row);
-    expect(r).toMatchObject({ ok: true, message: expect.stringContaining("Confirmed with it, as its student's link: Asha Patel. Left carried over: Ravi Patel (inactive in the portal) and Sam Patel (under another customer in the books).") });
+    expect(r).toMatchObject({ ok: true, message: expect.stringContaining("Confirmed with it, as its student's link: Asha Patel. Left carried over: Ravi Patel (inactive in the portal), "
+      + "Sam Patel (its customer isn't a student customer directly under this one in the books now), Tara Patel (its customer isn't in the books' copy now) "
+      + "and Uma Patel (its customer isn't a student customer directly under this one in the books now).") });
     expect(await familyLinkOf(patels)).toMatchObject({ origin: "confirmed", linkedBy: linker.id });
     expect(await studentLinkOf(asha)).toMatchObject({ origin: "confirmed", linkedBy: linker.id });
-    for (const left of [ravi, sam]) expect(await studentLinkOf(left)).toMatchObject({ origin: "carried_over", linkedBy: null });
+    for (const left of [ravi, sam, tara, uma]) expect(await studentLinkOf(left)).toMatchObject({ origin: "carried_over", linkedBy: null });
     const [audit] = await auditsOf("accounting.link.confirm");
-    expect(audit!.after).toMatchObject({ chosen: "reviewed", studentLinksLeft: [(await studentLinkOf(ravi)).id, (await studentLinkOf(sam)).id] });
+    expect(audit!.after).toMatchObject({ chosen: "reviewed", studentLinksLeft: await Promise.all([ravi, sam, tara, uma].map(async (id) => (await studentLinkOf(id)).id)) }); 
     expect(rowOf(await loadAccountingLinks(), "Patel Family").status).toEqual({ key: "with_differences", made: { key: "linked", origin: "confirmed", by: "linker", at: expect.any(String) } });
     // No guardian link was touched, nor any other family's.
     expect((await db.select().from(accountingLink).where(and(eq(accountingLink.origin, "confirmed"), isNotNull(accountingLink.guardianId))))).toEqual([]);

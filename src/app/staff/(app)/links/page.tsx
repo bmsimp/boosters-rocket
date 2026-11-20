@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireStaffAlso, requireStaffPage } from "@/lib/guards";
-import { BULK_MAX, filterLinkRows, filtersOf, givenUpCustomersOf, loadAccountingLinks, statusCounts, type BulkOffer, type ConfirmStep, type LinkMade, type LinkOffer, type LinkRow, type LinkStatus, type LinksState, type LinksView, type OwnLink, type ReviewOffer } from "@/lib/accounting/mapping";
+import { BULK_MAX, filterLinkRows, filtersOf, givenUpCustomersOf, loadAccountingLinks, REVIEW_LEFT_WORDS, statusCounts, type BulkOffer, type ConfirmStep, type LinkMade, type LinkOffer, type LinkRow, type LinkStatus, type LinksState, type LinksView, type OwnLink, type ReviewOffer } from "@/lib/accounting/mapping";
 import { differenceKinds, differenceWords, noteSentence, type Difference } from "@/lib/accounting/differences";
 import { NOT_A_FAMILY_WORDS, parseLinksFilter, searchMatches, SEARCH_MAX, STATUS_KEYS, STATUS_WORDS, type LinksFilter, type StatusKey } from "@/lib/accounting/status";
 import type { Holder } from "@/lib/accounting/match";
@@ -153,7 +153,7 @@ function ReviewShown({ review }: { review: ReviewOffer }) {
       <p>{review.confirms.length === 0 ? "No student's link is confirmed with it." : "Confirmed with it, each carried over to a student customer directly under this customer:"}</p>
       {review.confirms.length > 0 && <ul>{review.confirms.map((c) => <li key={c.linkId}>{c.name}</li>)}</ul>}
       {review.leaves.length > 0 && <><p>Left carried over, as the portal and the books don&apos;t agree on them:</p>
-        <ul>{review.leaves.map((l) => <li key={l.linkId}>{l.name} ({l.why === "inactive" ? "inactive in the portal" : "under another customer in the books"})</li>)}</ul></>}
+        <ul>{review.leaves.map((l) => <li key={l.linkId}>{l.name} ({REVIEW_LEFT_WORDS[l.why]})</li>)}</ul></>}
     </>
   );
 }
@@ -161,14 +161,22 @@ function ReviewShown({ review }: { review: ReviewOffer }) {
 /**
  * Confirm all exact email matches (slice M3a2): for the Suggested rows the filter shows now, in the `listed` state, a
  * press bound to the filter as parsed, the count, the roster tag and the stamp sealing those rows, and nothing else;
- * with more than BULK_MAX, no press but a notice to narrow the list.
+ * with more than BULK_MAX, no press but a notice to narrow the list. A Suggested row a press would refuse whatever
+ * happened meanwhile (the family's own create waiting or stuck on the queue) isn't counted, and a notice says so.
  */
 function BulkPress({ bulk, filter, tag }: { bulk: BulkOffer; filter: LinksFilter; tag: string }) {
+  const held = bulk.waiting === 0 ? null : (
+    <Notice tone="info" live="none">{bulk.waiting === 1 ? "1 Suggested row this list shows isn't" : `${bulk.waiting} Suggested rows this list shows aren't`} counted
+      in Confirm all exact email matches, as a press can&apos;t link {bulk.waiting === 1 ? "it" : "them"} now: making the family in the books is still waiting on the queue, until that has gone through
+      or been given up on Reconciliation, or the family is linked to a customer of another company. Each row&apos;s own Confirm says which.</Notice>
+  );
+  if (bulk.count === 0) return held;
   if (bulk.stamp === null) {
-    return <Notice tone="info" live="none">This list shows {bulk.count} Suggested rows. Up to {BULK_MAX} can be confirmed at once, so narrow the list with the search first.</Notice>;
+    return <>{held}<Notice tone="info" live="none">This list shows {bulk.count} Suggested rows. Up to {BULK_MAX} can be confirmed at once, so narrow the list with the search first.</Notice></>;
   }
   return (
     <div className="stack">
+      {held}
       <p>Confirm all exact email matches links each of the {plural(bulk.count, "family", "families")} this list shows as Suggested to the customer filled in on its row, with the students its row&apos;s opening lists by name.
         Only the rows this filter shows now are linked: if the list has changed by the time you press, nothing is linked and it is shown again. Nothing is sent to the books.</p>
       <p>Once linked, each family&apos;s guardians see its customer&apos;s open invoices and Pay links, and those of the students and parents the books hold directly under it, the next time they open Home or Payments. A link can&apos;t be removed in the portal yet, so look the rows over first.</p>
