@@ -19,7 +19,7 @@ import type { ContactValues } from "@/lib/parents/contact-fields";
 import { CONTACT_COPY, saveDetails, saveMyContact } from "@/lib/parents/contact-edits";
 import { addGuardian, removeGuardian } from "@/lib/parents/guardians";
 import { renamePerson } from "@/lib/parents/people";
-import { askFamilyInactive, CONTACT_AWAITS_READ, CONTACT_DIFFERS, CONTACT_NOT_OFFERED, coverStamp, familyCover, keptContactWords, portalValueStamp, SENDING_LOCK, sendPortalValue, whoStopped, WRITE_COPY } from "@/lib/roster/writes";
+import { addStudentToLinked, askFamilyInactive, CONTACT_AWAITS_READ, CONTACT_DIFFERS, CONTACT_NOT_OFFERED, coverStamp, familyCover, keptContactWords, moveStudent, portalValueStamp, renameLinked, SENDING_LOCK, sendPortalValue, whoStopped } from "@/lib/roster/writes";
 import { giveUp, loadOpenWrites, runWriteQueue, tryAgainNow } from "@/lib/roster/queue";
 import { ROSTER_LOCK, saveShape, type MembershipShape } from "@/lib/roster/shape";
 import { refreshRoster } from "@/lib/roster/refresh";
@@ -451,15 +451,77 @@ describe("a later change, a lost answer, a removal and what a waiting change hol
     expect(bodies().filter((b) => "PrimaryPhone" in b || "BillAddr" in b)).toEqual([]);
   });
 
-  it("a waiting change holds back the person's rename and the family action, in true words; a kept one blocks nothing", async () => {
+});
+
+describe("a parent's change of their details blocks nothing, in any state (the second read's item 4)", () => {
+  const givenUpWhy = async () => (await auditsOf("roster.write.given_up")).map((r) => (r.after as { why?: string }).why);
+  const phoneSent = () => bodies().filter((b) => "PrimaryPhone" in b);
+
+  it("the family action goes through while it waits; the change is then given up unsent at its next try", async () => {
     const a = await ana();
     await saveMyContact(a.ctx, form({ phone: NEW_PHONE }, "p:1"));
-    expect(await renamePerson(a.ana.id, "Ana M. Rivera", op)).toEqual({ ok: false, reason: "qbo_pending" });
+    const [item] = await items();
     const c = (await familyCover("10"))!;
     const stamp = coverStamp(String(rivera), [c.family.qboId, ...c.under.map((u) => u.qboId)]);
-    expect((await askFamilyInactive(String(rivera), stamp, tag, op)).result).toEqual({ ok: false, errors: [WRITE_COPY.waiting] });
-    await db.update(writeQueue).set({ state: "refused", lastCode: CONTACT_DIFFERS });
+    expect((await askFamilyInactive(String(rivera), stamp, tag, op)).result).toMatchObject({ ok: true });
+    expect((await db.select().from(family).where(eq(family.id, rivera)))[0]).toMatchObject({ active: false });
+    await wake();
+    expect(await queueItem(item!.id)).toMatchObject({ state: "given_up" });
+    expect(await givenUpWhy()).toContain("guardian_removed");
+    expect(phoneSent()).toEqual([]);
+  });
+
+  it("a removed guardian's change that may have been sent is given up unsent at its next try, never sent to a record no longer theirs", async () => {
+    const a = await ana();
+    await saveMyContact(a.ctx, form({ phone: NEW_PHONE }, "p:1"));
+    const [item] = await items();
+    stub.dropApi = true;
+    await wake();
+    stub.dropApi = false;
+    expect(await queueItem(item!.id)).toMatchObject({ state: "waiting", sent: true });
+    expect(await removeGuardian(a.row.id, "Moved away.", op)).toMatchObject({ ok: true });
+    // Left to finish, as one that may have been sent.
+    expect(await queueItem(item!.id)).toMatchObject({ state: "waiting" });
+    stub.calls.length = 0;
+    await wake(4 * MIN);
+    expect(await queueItem(item!.id)).toMatchObject({ state: "given_up" });
+    expect(await givenUpWhy()).toContain("guardian_removed");
+    expect(phoneSent()).toEqual([]);
+    expect(inQuickBooks(stub, "11")).toMatchObject({ PrimaryPhone: { FreeFormNumber: "555-0101" } });
+  });
+
+  it("a rename and a change of the details of one Parent customer both land, in either order", async () => {
+    const a = await ana();
+    // The details first, then the person's rename, which is sent at once and moves the link's version on.
+    await saveMyContact(a.ctx, form({ phone: NEW_PHONE }, "p:1"));
     expect(await renamePerson(a.ana.id, "Ana M. Rivera", op)).toMatchObject({ ok: true, changed: true });
+    await wake();
+    expect(inQuickBooks(stub, "11")).toMatchObject({ DisplayName: "Ana M. Rivera", PrimaryPhone: { FreeFormNumber: NEW_PHONE } });
+    expect(await openItems()).toEqual([]);
+    // The rename first, then the details.
+    expect(await renamePerson(a.ana.id, "Ana Rivera", op)).toMatchObject({ ok: true, changed: true });
+    await saveMyContact(a.ctx, form({ phone: "512-555-0333" }, "p:2"));
+    await wake(4 * MIN);
+    expect(inQuickBooks(stub, "11")).toMatchObject({ DisplayName: "Ana Rivera", PrimaryPhone: { FreeFormNumber: "512-555-0333" } });
+    expect(await openItems()).toEqual([]);
+  });
+
+  it("in books with no parent type, a student is moved and added, and the family renamed, while the family's change waits; all of it lands", async () => {
+    await storeShape({ kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: null });
+    const a = await ana();
+    await saveMyContact(a.ctx, form({ phone: NEW_PHONE }, "f:0"));
+    const [item] = await items();
+    expect(item).toMatchObject({ state: "waiting", targetQboId: "10" });
+    expect(await renameLinked({ kind: "family", recordId: String(rivera), name: "Rivera Household" }, tag, op)).toMatchObject({ ok: true });
+    expect(await addStudentToLinked(String(rivera), "Mia Rivera", tag, op)).toMatchObject({ ok: true });
+    const leo = await recordOfCustomer("12", "student");
+    expect(await moveStudent(String(leo), String(chen), tag, op)).toMatchObject({ ok: true });
+    await wake();
+    expect(await queueItem(item!.id)).toMatchObject({ state: "done" });
+    expect(inQuickBooks(stub, "10")).toMatchObject({ DisplayName: "Rivera Household", PrimaryPhone: { FreeFormNumber: NEW_PHONE } });
+    expect(inQuickBooks(stub, "12")).toMatchObject({ ParentRef: { value: "20" } });
+    expect(stub.customers.some((c) => c.DisplayName === "Mia Rivera")).toBe(true);
+    expect(await openItems()).toEqual([]);
   });
 });
 

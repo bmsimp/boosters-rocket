@@ -213,6 +213,16 @@ function connectionWordsOf(kind: "not_connected" | "needs_admin" | "other_compan
   return `QuickBooks is connected to a different company from the one this roster was read from, so ${name} wasn't changed. An Admin can sort that out under QuickBooks.`;
 }
 
+/**
+ * The queue items that hold back other changes while they wait or are stuck: every one but a parent's change of their
+ * phone and address (`contact`, stage 3's slice 11b), which blocks nothing in any state (the lead's decision on the
+ * second read). Each read of "a change waiting or stuck for this customer, guardian row or family" carries it. Two sends
+ * to one customer are kept apart by what is there already: one sender at a time under the item's "being sent" lock
+ * (lockOfItem(): a guardian's row, or the family's), and a stale answer settled by the fields (a rename compares the
+ * name, a contact change its own fields).
+ */
+export const blocksOthers = sql`${writeQueue.request}->>'op' <> 'contact'`;
+
 const taken = (name: string, offer: string): WriteResult => ({ ok: false, offer,
   errors: [`“${name}” is already a name in QuickBooks, and every name there must be different. You could use “${offer}” instead.`] });
 const refuse = (error: string): WriteResult => ({ ok: false, errors: [error] });
@@ -318,7 +328,7 @@ async function prepare(ask: WriteAsk, rosterTag: string): Promise<Prepared> {
     // A change still waiting or stuck for this record: a family's too, before anyone is added to it or moved into it
     // (a waiting "make inactive" would land after them).
     const waitingFor = async (qboId: string) => (await tx.select({ id: writeQueue.id }).from(writeQueue)
-      .where(and(eq(writeQueue.targetQboId, qboId), inArray(writeQueue.state, ["waiting", "stuck"]))).limit(1)).length > 0;
+      .where(and(eq(writeQueue.targetQboId, qboId), inArray(writeQueue.state, ["waiting", "stuck"]), blocksOthers)).limit(1)).length > 0;
 
     if (ask.op === "create") {
       const op: RosterOperation = ask.role === "family" ? "create_family" : ask.role === "member" ? "create_member" : "add_student";
@@ -1285,7 +1295,7 @@ async function prepareFamily(familyId: AppFamilyId, stamp: string, rosterTag: st
     const under = activeUnder(cache, familyQboId);
     if (!coverStampHolds(String(familyId), [familyQboId, ...under.map((u) => u.qboId)], stamp)) return no(WRITE_COPY.coverChanged);
     const ids = [familyQboId, ...under.map((u) => u.qboId)];
-    const waiting = await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(inArray(writeQueue.targetQboId, ids), inArray(writeQueue.state, ["waiting", "stuck"]))).limit(1);
+    const waiting = await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(inArray(writeQueue.targetQboId, ids), inArray(writeQueue.state, ["waiting", "stuck"]), blocksOthers)).limit(1);
     if (waiting.length) return no(WRITE_COPY.waiting);
     // A student's move into or out of the family that hasn't reached QuickBooks (slice 9f): QuickBooks is never asked to
     // make a student inactive under a family the portal has moved them out of.
@@ -1877,7 +1887,7 @@ async function prepareLink(rawFamilyId: string, chosenType: string | null, roste
       }
       // Nobody is added under a family customer with a change of its own waiting, as prepare() refuses an add.
       const waiting = await tx.select({ id: writeQueue.id }).from(writeQueue)
-        .where(and(eq(writeQueue.targetQboId, familyCustomer), inArray(writeQueue.state, ["waiting", "stuck"]))).limit(1);
+        .where(and(eq(writeQueue.targetQboId, familyCustomer), inArray(writeQueue.state, ["waiting", "stuck"]), blocksOthers)).limit(1);
       if (waiting.length) return no(WRITE_COPY.waiting);
     }
     let students: { id: AppStudentId; name: string | null }[] = [];
@@ -2821,9 +2831,9 @@ export async function replaceRefusedCreates(tx: Tx, studentId: AppStudentId, rep
 }
 const renamesOf = (customer: string) => and(eq(writeQueue.targetQboId, customer), sql`${writeQueue.request}->>'op' = 'rename'`);
 
-/** A change waiting or stuck for a customer (prepare()'s waitingFor()): a refused one blocks nothing. */
+/** A change waiting or stuck for a customer (prepare()'s waitingFor()): a refused one blocks nothing, nor a parent's details (blocksOthers). */
 async function waitingForCustomer(tx: Tx, qboId: string): Promise<boolean> {
-  return (await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(eq(writeQueue.targetQboId, qboId), inArray(writeQueue.state, ["waiting", "stuck"]))).limit(1)).length > 0;
+  return (await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(eq(writeQueue.targetQboId, qboId), inArray(writeQueue.state, ["waiting", "stuck"]), blocksOthers)).limit(1)).length > 0;
 }
 
 /** The checks every change saved first makes before anything is saved, under the roster lock with the page's tag: a roster of the company QuickBooks is connected to, and a shape that holds. */
@@ -3376,7 +3386,7 @@ async function moveRefusals(tx: Tx, familyIds: readonly AppFamilyId[], o: { lock
   const customers = (await linksOf({ families: familyIds, students: [] }, tx)).customerOfFamily;
   if (customers.size) {
     const waiting = new Set((await tx.select({ target: writeQueue.targetQboId }).from(writeQueue)
-      .where(and(inArray(writeQueue.targetQboId, [...customers.values()]), inArray(writeQueue.state, ["waiting", "stuck"])))).map((w) => w.target));
+      .where(and(inArray(writeQueue.targetQboId, [...customers.values()]), inArray(writeQueue.state, ["waiting", "stuck"]), blocksOthers))).map((w) => w.target));
     for (const [f, c] of customers) if (waiting.has(c)) say(String(f), WRITE_COPY.waiting);
   }
   return out;
@@ -3857,7 +3867,7 @@ const saverOf = (o: GuardianOp): SaverOp => ({ actor: o.actor, ip: o.ip, permiss
 /** A Parent customer that is a portal guardian's own is changed through the guardian: askRosterWrite() refuses its forms. */
 export const GUARDIAN_HERE = "That Parent customer is linked to a guardian in the portal, so it isn't changed from here: a guardian's own Parent customer is changed through them (rename the person on their page, or remove them under Portal sign-ins on this page), and one several guardians share, or one linked to a guardian of another family, is changed in QuickBooks until the mapping screen sorts it out. Nothing was changed.";
 /** The family action while a guardian's Parent customer change for the family is waiting or stuck. */
-export const GUARDIAN_PENDING = "A change to a guardian's Parent customer in this family (a new record, a name, their phone or mailing address, or making it inactive) hasn't reached QuickBooks yet (it is waiting or stuck on the Reconciliation page), so nothing was changed. Once it has gone through, or been given up there, try again.";
+export const GUARDIAN_PENDING = "A change to a guardian's Parent customer in this family hasn't reached QuickBooks yet (it is waiting or stuck on the Reconciliation page), so nothing was changed. Once it has gone through, or been given up there, try again.";
 /** The code of a guardian's Parent customer create found made as a customer another open guardian row is linked to already (foundDone(), ./queue.ts). */
 export const CUSTOMER_HAS_GUARDIAN = "customer_has_guardian";
 /** The code of a guardian's Parent customer create kept at once: the person's name is one QuickBooks can't take (checkName()). */
@@ -3944,7 +3954,7 @@ export async function familySendingFree(tx: Tx, familyId: AppFamilyId): Promise<
 /** Whether a guardian's Parent customer change filed under this family is waiting or stuck (askFamilyInactive() refuses meanwhile). */
 async function guardianItemsWaiting(tx: Tx, familyId: AppFamilyId): Promise<boolean> {
   return (await tx.select({ id: writeQueue.id }).from(writeQueue)
-    .where(and(eq(writeQueue.familyId, familyId), inArray(writeQueue.state, ["waiting", "stuck"]), sql`${writeQueue.request}->>'guardianId' is not null`)).limit(1)).length > 0;
+    .where(and(eq(writeQueue.familyId, familyId), inArray(writeQueue.state, ["waiting", "stuck"]), sql`${writeQueue.request}->>'guardianId' is not null`, blocksOthers)).limit(1)).length > 0;
 }
 
 /**
@@ -3997,7 +4007,7 @@ const itemsOfRow = (tx: Tx, guardianId: string, states: QueueRow["state"][]) =>
  */
 export async function guardianChangeWaiting(tx: Tx, guardianIds: readonly string[]): Promise<boolean> {
   for (const id of guardianIds) {
-    if ((await itemsOfRow(tx, id, ["waiting", "stuck"])).length) return true;
+    if ((await itemsOfRow(tx, id, ["waiting", "stuck"])).some((i) => i.request.op !== "contact")) return true;
     const customer = await customerOfGuardian(id, tx);
     if (customer !== null && (await waitingForCustomer(tx, customer))) return true;
   }
@@ -4014,7 +4024,7 @@ export async function guardianMaySend(rows: readonly { guardianId: string; famil
   if (!rows.length) return false;
   const ids = rows.map((r) => r.guardianId);
   const [item] = await (tx ?? db).select({ id: writeQueue.id }).from(writeQueue)
-    .where(and(inArray(sql`${writeQueue.request}->>'guardianId'`, ids), inArray(writeQueue.state, ["waiting", "stuck", "refused"]))).limit(1);
+    .where(and(inArray(sql`${writeQueue.request}->>'guardianId'`, ids), inArray(writeQueue.state, ["waiting", "stuck", "refused"]), blocksOthers)).limit(1);
   if (item) return true;
   const shape = await getShape(tx);
   if (!shape || shape.kind !== "layered" || shape.parentTypeId === null || !offers(shape, "add_parent")) return false;
