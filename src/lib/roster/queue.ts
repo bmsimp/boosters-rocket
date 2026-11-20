@@ -110,9 +110,11 @@ async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise
   // "Send the portal's value" hold (whileItemHeld()), and so, since slice 9g, is a make-inactive filed under a student or
   // member, by the lock its record's rename, move and make-inactive hold. While someone holds it, nothing is sent and no
   // try is counted: the item is left for the next wake. So it is while a guardian's Parent customer create finds its
-  // family being changed in QuickBooks (FAMILY_HELD: stage 3's slice 9h).
+  // family being changed in QuickBooks (FAMILY_HELD: stage 3's slice 9h), and while a parent's change of their details
+  // finds the portal may not send it yet (`skipped`: the gate withdrawn after runWriteQueue() looked), so the lease this
+  // wake's claim set never holds it past the next wake.
   const step = await whileItemHeld(item, () => tryRosterItem(item, w, now, refreshedAt));
-  if (step !== null && step !== FAMILY_HELD) return step;
+  if (step !== null && step !== FAMILY_HELD && step !== "skipped") return step;
   await db.update(writeQueue).set({ nextTryAt: now, updatedAt: new Date() }).where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting")));
   return "skipped";
 }
@@ -334,7 +336,13 @@ export const FAMILY_HAS_CUSTOMER = "family_has_customer";
 export async function runWriteQueue(now: Date = new Date()): Promise<{ ran: boolean; ok: boolean }> {
   const [conn, source] = await Promise.all([getConnection(), getRosterSource()]);
   if (!conn?.realmId || !conn.refreshTokenCiphertext || source !== conn.realmId) return { ran: false, ok: true };
-  const due = await db.select().from(writeQueue).where(and(eq(writeQueue.state, "waiting"), eq(writeQueue.realmId, source), lte(writeQueue.nextTryAt, now)))
+  // A parent's change of their details the portal may not send yet (contactSendsMayGo(): the take-in, or a read under the
+  // shape saved last, still to come) is not claimed at all: left exactly as it is, with no lease that would hold it past
+  // the next wake once it may go, and taking none of the wake's places from a staff change (it blocks nothing). Its try
+  // checks the gate again under the roster lock (trySavedItem()), for one withdrawn after this look.
+  const contactsMayGo = await db.transaction((tx) => contactSendsMayGo(tx));
+  const due = await db.select().from(writeQueue).where(and(eq(writeQueue.state, "waiting"), eq(writeQueue.realmId, source), lte(writeQueue.nextTryAt, now),
+    ...(contactsMayGo ? [] : [sql`${writeQueue.request}->>'op' is distinct from 'contact'`])))
     .orderBy(asc(writeQueue.nextTryAt)).limit(PER_WAKE);
   const asked = await refreshAsked();
   let refreshedAt = await lastGoodRefresh();
