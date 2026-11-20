@@ -5,6 +5,7 @@ import { auditLog, staffAuthUser } from "@/lib/db/schema";
 import { recordSignin, recordSignout } from "@/lib/auth/signin-audit";
 import { getStaffAuth } from "@/lib/auth/staff-auth";
 import { getParentAuth } from "@/lib/auth/parent-auth";
+import { whileFinishing } from "@/lib/auth/finish-scope";
 import { resetDb, seedParent } from "../helpers/db";
 import { env } from "@/env";
 
@@ -16,7 +17,8 @@ type Door = typeof staffAuth | typeof parentAuth;
 /** Signs a real session in the door's database and POSTs to its /sign-out endpoint with the signed cookie. */
 async function signOutThroughBetterAuth(door: Door, userId: string, ip: string) {
   const ctx = await door.$context;
-  const session = await ctx.internalAdapter.createSession(userId);
+  // Inside the one finish's scope, as the finish makes a session: the parent instance refuses any other (slice SI-7a).
+  const session = await whileFinishing(() => ctx.internalAdapter.createSession(userId));
   const sig = createHmac("sha256", env.BETTER_AUTH_SECRET).update(session.token).digest("base64");
   const cookie = `${ctx.authCookies.sessionToken.name}=${encodeURIComponent(`${session.token}.${sig}`)}`;
   const res = await door.handler(new Request(`${env.APP_URL}${ctx.options.basePath}/sign-out`, {
