@@ -12,6 +12,8 @@ export const SIGNIN_SETTINGS_COPY = {
   passwordChosen: "Chosen",
   passwordNotChosen: "Not chosen yet",
   how: "You sign in with this address and your password. On a device we don't know yet, we also email a code to this address.",
+  /** For a person with no password yet (a session from before passwords): they stay signed in, and need one to sign in again. */
+  howNoPassword: "You're signed in here, but you haven't chosen a password yet. To sign in again on any device, you'll need one.",
   changeEmail: "Change my sign-in email",
   passwordTitle: "Your password",
   /** Under Strict (SI-10 stores it): nothing can be changed here until a second factor of the guardian's own exists. */
@@ -37,6 +39,13 @@ export const SIGNIN_SETTINGS_COPY = {
   everywhereBusy: "Signing out…",
   everywhereDone: "You're signed out everywhere, this device too.",
   everywhereNext: "Sign in again with your email and password. On each device you'll also enter a code we email you.",
+  /** The same, for a person with no password yet: they choose one first, from "Set up or reset my password". */
+  everywhereThenNoPassword: "You haven't chosen a password yet, so to sign in again you'll first choose one from a link we email you. After that, on each device you sign in with your email and password and enter the code we email you.",
+  everywhereNextNoPassword: "To sign in again, first choose a password: we'll email you a link to choose one.",
+  choosePassword: "Choose a password",
+  /** The same, for a person with no password under Strict, where no link is mailed on request: only the club can help. */
+  everywhereThenStrict: "You haven't chosen a password yet, and for now only the club can help you set one up. If you sign out everywhere, please ask the club to help you sign in again.",
+  everywhereNextStrict: "Please ask the club to help you sign in again.",
   devicesTitle: "Remembered devices",
   devicesSoon: "The phones and computers we remember for you will be listed here, so you can see them and forget any you don't use.",
   moreTitle: "More ways to sign in",

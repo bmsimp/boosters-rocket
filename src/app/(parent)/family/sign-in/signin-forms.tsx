@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { safely } from "@/app/components/action-error";
 import { PASSWORD_COPY } from "@/lib/parents/password-copy";
 import { SIGNIN_SETTINGS_COPY as COPY } from "@/lib/parents/signin-settings-copy";
@@ -29,13 +29,32 @@ function Said({ message, children }: { message: string; children?: ReactNode }) 
   );
 }
 
+/** Where a signed-out parent goes to sign in again, and its words; none when only the club can help. */
+export type SignInAgain = { href: string; label: string } | null;
+/** What a press that signed the parent out everywhere answers: what happened, what next, and the way back in. */
+type Out = { message: string; next: string; signIn: SignInAgain };
+
 /** Signed out everywhere: what happens next, and the way to sign in again. */
-const SignedOut = ({ message, next }: { message: string; next: string }) => (
+const SignedOut = ({ message, next, signIn }: Out) => (
   <Said message={message}>
     <p className="help">{next}</p>
-    <div className="box-foot"><a className="btn" href="/sign-in">{COPY.signIn}</a></div>
+    {signIn && <div className="box-foot"><a className="btn" href={signIn.href}>{signIn.label}</a></div>}
   </Said>
 );
+
+/** The page's frame's way to hear that a press signed the parent out (SignInSettingsFrame). */
+const SignedOutContext = createContext<((out: Out) => void) | null>(null);
+
+/**
+ * The sign-in settings page's forms, as one: once a press has signed the parent out everywhere (the password changed,
+ * or "Sign out everywhere"), every other form of the page would only be refused, since the session is gone, so the
+ * frame draws the answer alone, in place of them all. Given nothing but the page's own children.
+ */
+export function SignInSettingsFrame({ children }: { children: ReactNode }) {
+  const [out, setOut] = useState<Out | null>(null);
+  if (out) return <section className="box"><SignedOut {...out} /></section>;
+  return <SignedOutContext.Provider value={setOut}>{children}</SignedOutContext.Provider>;
+}
 
 /**
  * Asking again (src/lib/parents/asking-again.ts): before a change of how the parent signs in, a session that hasn't
@@ -54,6 +73,9 @@ export function AskAgain({ email, proved, lede, children }: { email: string; pro
   // Moving between the steps draws the other form, so its field takes the focus (not on first drawing).
   const field = useRef<HTMLInputElement>(null);
   const moved = useRef(false);
+  // The code field is described by the words that say a code was emailed: a live region drawn with its words already
+  // in it is seldom read out, so the field that takes the focus carries them.
+  const sentId = useId();
   useEffect(() => { if (moved.current) field.current?.focus(); }, [step]);
 
   if (step === "proved") return <>{children}</>;
@@ -92,9 +114,9 @@ export function AskAgain({ email, proved, lede, children }: { email: string; pro
   }
   return (
     <form className="stack" onSubmit={(e) => { e.preventDefault(); if (!busy) void checkCode(); }}>
-      <p role="status">{COPY.codeSent}</p>
+      <p role="status" id={sentId}>{COPY.codeSent}</p>
       <label className="field"><span>{COPY.code}</span>
-        <input ref={field} name="code" inputMode="numeric" autoComplete="one-time-code" maxLength={9} required value={code} onChange={(e) => setCode(e.target.value)} />
+        <input ref={field} name="code" aria-describedby={sentId} inputMode="numeric" autoComplete="one-time-code" maxLength={9} required value={code} onChange={(e) => setCode(e.target.value)} />
       </label>
       {errors && <Errors errors={errors} />}
       <button className="btn" aria-disabled={busy || undefined}>{busy ? COPY.checking : COPY.confirm}</button>
@@ -112,11 +134,13 @@ export function ChangePasswordForm({ email }: { email: string }) {
   const [again, setAgain] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
-  if (result?.ok) return <SignedOut message={result.message} next={COPY.changedNext} />;
+  const signedOut = useContext(SignedOutContext);
+  if (result?.ok) return <SignedOut message={result.message} next={COPY.changedNext} signIn={{ href: "/sign-in", label: COPY.signIn }} />;
   const change = async () => {
     setBusy(true); setResult(null);
     const r = await safely(() => changePasswordAction(password, again), FAILED);
     setBusy(false);
+    if (r.ok && signedOut) { signedOut({ message: r.message, next: COPY.changedNext, signIn: { href: "/sign-in", label: COPY.signIn } }); return; }
     setResult(r);
   };
   return (
@@ -137,21 +161,26 @@ export function ChangePasswordForm({ email }: { email: string }) {
   );
 }
 
-/** "Sign out everywhere": the words before it say what it does, the answer what happens next. Given nothing. */
-export function SignOutEverywhereForm() {
+/**
+ * "Sign out everywhere": the words before it say what it does, the answer what happens next. Given only the words the
+ * page chose for this parent (with a password, with none yet, or with none under Strict) and where they sign in again.
+ */
+export function SignOutEverywhereForm({ then, next, signIn }: { then: string; next: string; signIn: SignInAgain }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
-  if (result?.ok) return <SignedOut message={result.message} next={COPY.everywhereNext} />;
+  const signedOut = useContext(SignedOutContext);
+  if (result?.ok) return <SignedOut message={result.message} next={next} signIn={signIn} />;
   const press = async () => {
     setBusy(true); setResult(null);
     const r = await safely(() => signOutEverywhereAction(), FAILED);
     setBusy(false);
+    if (r.ok && signedOut) { signedOut({ message: r.message, next, signIn }); return; }
     setResult(r);
   };
   return (
     <form className="stack" onSubmit={(e) => { e.preventDefault(); if (!busy) void press(); }}>
       <p>{COPY.everywhereLede}</p>
-      <p>{COPY.everywhereThen}</p>
+      <p>{then}</p>
       {result && !result.ok && <Errors errors={result.errors} />}
       <button className="btn btn-line" aria-disabled={busy || undefined}>{busy ? COPY.everywhereBusy : COPY.everywhereButton}</button>
     </form>
