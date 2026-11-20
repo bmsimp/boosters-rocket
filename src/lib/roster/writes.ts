@@ -1802,7 +1802,8 @@ async function saveAndSend(id: AppFamilyId, ask: AddFamilyAsk, rosterTag: string
    linked one by one. Like making a family inactive it is never queued to be sent later: the staff member is waiting.
    The first step that doesn't go through stops it; a step whose answer was lost is held on the queue as possibly made,
    filed under its records, so the found-done path links it after the next roster read; pressing again carries on with
-   whatever is still unlinked. It sends nothing for a guardian (slice 9h). */
+   whatever is still unlinked. It sends nothing for a guardian: a guardian's Parent customer is made when the guardian
+   is added, or a closed row reinstated (queueForGuardian(), stage 3's slice 9h). */
 
 type CreateWrite = Extract<RosterWrite, { op: "create" }>;
 type LinkPlan = {
