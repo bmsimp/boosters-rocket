@@ -4,6 +4,8 @@ import { loadMySignin } from "@/lib/parents/signin-settings";
 import { SIGNIN_SETTINGS_COPY as COPY, howYouSignIn } from "@/lib/parents/signin-settings-copy";
 import { AskAgain, ChangePasswordForm, RememberedDevices, SetupLinkForm, SignInSettingsFrame, SignOutEverywhereForm } from "./signin-forms";
 import { AuthenticatorBox } from "./authenticator-box";
+import { PasskeyBox } from "./passkey-box";
+import { env } from "@/env";
 
 export const metadata = { title: "Sign-in settings" };
 
@@ -16,14 +18,18 @@ export const metadata = { title: "Sign-in settings" };
  * keeps of each: when it was first remembered and last used, and which this session was made on. Since SI-6b the
  * "Authenticator app" box sets one up (asked again first), shows its backup codes once, makes new ones and turns it
  * off (AuthenticatorBox); the words that say how the parent signs in on a new device follow whether they have one
- * (howYouSignIn(), by the loader's `app`). Passkeys come in SI-7.
+ * (howYouSignIn(), by the loader's `app`). Since SI-7b the "Passkeys" box adds (asked again first), names, lists and
+ * removes passkeys (PasskeyBox), a passkey holder is asked again with the passkey, and the words follow whether they
+ * have one too (`hasPasskey`). APP_URL's origin, where passkeys work, is passed to the forms (no secret).
  * Once a press signs the parent out everywhere, the frame (SignInSettingsFrame) draws its answer in place of every form.
  */
 export default async function SignInSettingsPage() {
   const ctx = await requireParentPage("/family/sign-in");
   const me = await loadMySignin(ctx);
   // The sentences of how the parent signs in on a new device: the code from their authenticator app, or the code we email.
-  const words = howYouSignIn(me.app !== null);
+  const factors = { app: me.app !== null, passkey: me.hasPasskey };
+  const words = howYouSignIn(factors);
+  const portalOrigin = new URL(env.APP_URL).origin;
   // How a parent signs in again after signing out everywhere: with their password; with none yet, after choosing one
   // from "Set up or reset my password"; with none under Strict, where nothing is mailed on request, only with the club.
   const again = me.hasPassword ? { then: words.everywhereThen, next: words.everywhereNext, signIn: { href: "/sign-in", label: COPY.signIn } }
@@ -49,8 +55,8 @@ export default async function SignInSettingsPage() {
           {me.strict ? <p>{COPY.strict}</p>
             : !me.hasPassword ? <><p>{COPY.noPassword}</p><SetupLinkForm /></>
             : (
-              <AskAgain email={me.email} proved={me.provedRecently} lede={words.askAgainForPassword}>
-                <ChangePasswordForm email={me.email} app={me.app !== null} />
+              <AskAgain email={me.email} proved={me.provedRecently} lede={words.askAgainForPassword} passkey={me.hasPasskey} portalOrigin={portalOrigin}>
+                <ChangePasswordForm email={me.email} app={me.app !== null} passkey={me.hasPasskey} />
               </AskAgain>
             )}
         </section>
@@ -61,13 +67,20 @@ export default async function SignInSettingsPage() {
         <section className="box" aria-labelledby="devices-h">
           <h2 id="devices-h">{COPY.devicesTitle}</h2>
           {/* Each device is given only its row's id, whether it is this session's, and its two times. */}
-          <RememberedDevices devices={me.devices} proved={me.provedRecently} email={me.email} app={me.app !== null}
+          <RememberedDevices devices={me.devices} proved={me.provedRecently} email={me.email} app={me.app !== null} passkey={me.hasPasskey} portalOrigin={portalOrigin}
             canAsk={me.hasPassword && !me.strict} cantAsk={me.strict ? COPY.devicesStrict : COPY.choosePasswordForDevices} />
         </section>
         <section className="box" aria-labelledby="app-h">
           <h2 id="app-h">{COPY.appTitle}</h2>
           {/* Given the app's two facts and nothing else of it: the key, the QR code and the backup codes come only in a press's answer. */}
-          <AuthenticatorBox email={me.email} app={me.app} proved={me.provedRecently} hasPassword={me.hasPassword} strict={me.strict} />
+          <AuthenticatorBox email={me.email} app={me.app} proved={me.provedRecently} hasPassword={me.hasPassword} strict={me.strict}
+            passkey={me.hasPasskey} portalOrigin={portalOrigin} />
+        </section>
+        <section className="box" aria-labelledby="passkeys-h">
+          <h2 id="passkeys-h">{COPY.passkeysTitle}</h2>
+          {/* Each passkey is given only its row's id, its name and its two times: never a credential id, a key or the device's type. */}
+          <PasskeyBox email={me.email} passkeys={me.passkeys} proved={me.provedRecently} hasPassword={me.hasPassword} strict={me.strict}
+            app={me.app !== null} backupCodesLeft={me.backupCodesLeft} portalOrigin={portalOrigin} />
         </section>
         <p><Link className="link-line" href="/family">Back to Family</Link></p>
       </SignInSettingsFrame>

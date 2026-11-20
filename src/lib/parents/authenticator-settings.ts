@@ -25,6 +25,7 @@ import { authenticatorKeyUri, qrSquares, type QrSquares } from "./authenticator-
 import { readSecondStepCode } from "./backup-codes";
 import { giveBackRateLimit, takeRateLimit, takeRateLimitPlace } from "./rate-limit";
 import { provedRecently } from "./reask-rule";
+import { hasPasskey } from "./passkeys";
 import { deleteUnusedSigninCodes, parentActor } from "./sessions";
 import { PARENTS_KEY, getParentSettings } from "./settings";
 import { SIGNIN_SETTINGS_COPY as COPY } from "./signin-settings-copy";
@@ -284,9 +285,10 @@ export async function confirmMyAuthenticator(ctx: Me, code: unknown, stamp: unkn
 }
 
 /**
- * "Make new backup codes" (decision 3 of SI-6b; open question 28's "seeing backup codes"), only beside an app in force,
- * at either level: the window, `signin_settings_parent`, then one transaction: the person's row FOR UPDATE, the window
- * again under it (and the person not blocked), an app in force (refused in words otherwise), every backup code of the
+ * "Make new backup codes" (decision 3 of SI-6b; open question 28's "seeing backup codes"), only beside an app in force
+ * or, since slice SI-7b, a passkey, at either level: the window, `signin_settings_parent`, then one transaction: the
+ * person's row FOR UPDATE, the window again under it (and the person not blocked), an app in force or a passkey (refused
+ * in words otherwise), every backup code of the
  * person deleted and ten new ones made (makeBackupCodes()), with one `parent.backup_codes.make` row (how many it made and
  * replaced). The answer shows them once, saying the old ones no longer work. A sign-in that spent an old one just before
  * and finishes after is refused at its last check (signinStands(), `backup_code_gone`).
@@ -297,7 +299,7 @@ export async function remakeMyBackupCodes(ctx: Me, now?: Date): Promise<CodesAns
   const done = await db.transaction(async (tx) => {
     const me = await provedUnderLock(tx, ctx, now);
     if (!me) return "not_proved" as const;
-    if (!(await hasAuthenticator(ctx.parentId, tx))) return "off" as const;
+    if (!(await hasAuthenticator(ctx.parentId, tx)) && !(await hasPasskey(ctx.parentId, tx))) return "off" as const;
     const made = await makeBackupCodes(tx, ctx.parentId, me.at);
     await writeAudit({ actor: parentActor({ id: ctx.parentId, email: me.email }), action: "parent.backup_codes.make", targetType: "parent", targetId: ctx.parentId,
       after: { made: made.codes.length, replaced: made.replaced }, ip: ctx.ip }, tx);
@@ -311,9 +313,11 @@ export async function remakeMyBackupCodes(ctx: Me, now?: Date): Promise<CodesAns
 /**
  * "Turn off the authenticator app" (decision 4 of SI-6b; open questions 28 and 33): the window,
  * `signin_settings_parent`, then one transaction: the parents' settings lock shared (holdParentSettings()), the person's
- * row FOR UPDATE, the window again under it (and the person not blocked); under Strict refused in words (the app is their only second step until passkeys, SI-7, and Strict asks
- * for one: ask the club), changing nothing; an app in force (refused in words otherwise); then the app's row and every
- * backup code of the person deleted (removeAuthenticator()), with one `parent.authenticator.off` row (counts only).
+ * row FOR UPDATE, the window again under it (and the person not blocked); under Strict refused in words when the app
+ * is their only second step (Strict asks for one: ask the club, or add a passkey first; since slice SI-7b it is allowed
+ * while a passkey remains), changing nothing; an app in force (refused in words otherwise); then the app's row deleted
+ * and every backup code of the person with it, but for a person with a passkey (since SI-7b), beside which the backup
+ * codes still stand (removeAuthenticator(), `keepBackupCodes`), with one `parent.authenticator.off` row (counts only).
  * Remembered devices stay, and no session is made or ended. A sign-in whose app's code or backup code was taken just
  * before and whose session is made after is refused at its last check (signinStands(): `second_factor_gone`,
  * `backup_code_gone`), and a step that asked for the app and is still open ends at its next try (verifySecondFactor(),
@@ -326,15 +330,16 @@ export async function turnOffMyAuthenticator(ctx: Me, now?: Date): Promise<TurnO
     await holdParentSettings(tx);
     const me = await provedUnderLock(tx, ctx, now);
     if (!me) return "not_proved" as const;
-    if ((await getParentSettings(tx)).level === "strict") return "strict" as const;
+    const passkey = await hasPasskey(ctx.parentId, tx);
+    if (!passkey && (await getParentSettings(tx)).level === "strict") return "strict" as const;
     if (!(await hasAuthenticator(ctx.parentId, tx))) return "off" as const;
-    const gone = await removeAuthenticator(tx, ctx.parentId);
+    const gone = await removeAuthenticator(tx, ctx.parentId, { keepBackupCodes: passkey });
     await writeAudit({ actor: parentActor({ id: ctx.parentId, email: me.email }), action: "parent.authenticator.off", targetType: "parent", targetId: ctx.parentId,
-      after: { backupCodesDeleted: gone.backupCodes }, ip: ctx.ip }, tx);
-    return "off_now" as const;
+      after: { backupCodesDeleted: gone.backupCodes, passkeyStays: passkey }, ip: ctx.ip }, tx);
+    return passkey ? "off_beside_passkey" as const : "off_now" as const;
   });
   if (done === "not_proved") return PROVE_AGAIN;
   if (done === "strict") return { ok: false, errors: [COPY.turnOffStrict] };
   if (done === "off") return { ok: false, errors: [COPY.appNotOn] };
-  return { ok: true, message: COPY.turnedOff };
+  return { ok: true, message: done === "off_beside_passkey" ? COPY.turnedOffBesidePasskey : COPY.turnedOff };
 }

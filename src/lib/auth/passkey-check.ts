@@ -15,7 +15,7 @@
 import "server-only";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { PASSKEY_ERROR_CODES } from "@better-auth/passkey";
-import { passkeyNamed } from "@/lib/parents/passkeys";
+import { credentialTaken, passkeyNamed } from "@/lib/parents/passkeys";
 
 /** The passkey the library verified: its row and its person. */
 export type VerifiedPasskey = { passkeyId: string; parentId: string };
@@ -70,4 +70,64 @@ export async function verifyAssertion(headers: Headers, response: Record<string,
   }
   // The library answered with a session of its own: the guard would have to have failed. Never taken as a sign-in.
   return { ok: false, reason: "passkey_failed" };
+}
+
+/*
+ * A passkey's registration (the sign-in release, slice SI-7b, the lead's decision 2): the library's own
+ * verify-registration, run in process by auth.api and never over HTTP (its path stays disabled for browsers,
+ * PARENT_DISABLED_PATHS), with the request's headers, which carry the parent's session and the signed challenge cookie
+ * the options' answer set, inside a scope of its own, and never with `createSession` (the guard would refuse one
+ * regardless). The library, in this order: reads the session (its sensitive and fresh middleware; freshness is the
+ * portal's window, so the parent instance's `freshAge` is 0), spends the challenge (consumeVerificationValue()), checks
+ * that the challenge's user is the session's, verifies the answer (@simplewebauthn/server's verifyRegistrationResponse():
+ * the challenge, the origin and the relying party the instance names, user presence and, since the plugin asks for it,
+ * user verification), calls `registration.afterVerification` (afterRegistrationVerified(), below) and only then inserts
+ * the passkey's row, outside any transaction of the portal's, and answers it.
+ */
+type RegistrationBox = { refused: RegistrationRefusal | null };
+const registering = new AsyncLocalStorage<RegistrationBox>();
+
+/** Why a registration was refused, for the add's audit row only. */
+export type RegistrationRefusal = "not_verified" | "already_added" | "challenge_used" | "registration_failed";
+
+/**
+ * The library's `registration.afterVerification` (parent-auth.ts): called once the answer has verified and before the
+ * row is inserted, so throwing here leaves no row. Outside the add's scope (anyone calling the library's endpoint some
+ * other way) it throws: no passkey is added but through the portal's /portal-passkey/add. Inside it, the portal's own
+ * reads of what the library verified: the user verified (`registrationInfo.userVerified`, whatever the library asked),
+ * and the credential id held by no passkey already, anyone's (the unique `parent_auth_passkey_credential_id_uq` would
+ * refuse the insert too, as a failure of the library's own; this says why first).
+ */
+export async function afterRegistrationVerified(o: { verification: { registrationInfo?: { userVerified?: boolean; credential?: { id?: string } } } }): Promise<void> {
+  const box = registering.getStore();
+  if (!box) throw new Error("passkey registration outside the portal's add");
+  const info = o.verification.registrationInfo;
+  if (info?.userVerified !== true) { box.refused = "not_verified"; throw new Error("not user-verified"); }
+  const id = info.credential?.id;
+  if (typeof id !== "string" || id.length === 0) { box.refused = "registration_failed"; throw new Error("no credential id"); }
+  if (await credentialTaken(id)) { box.refused = "already_added"; throw new Error("already added"); }
+}
+
+/**
+ * The library's verification and insert of one registration answer, with this request's headers: the new passkey's row
+ * id, or why not. The answer passed is what the browser sent, read and bounded by the caller (readRegistration(),
+ * passkey-settings.ts); no name is passed (the portal sets it in its own transaction), and no `createSession`.
+ */
+export async function verifyRegistration(headers: Headers, response: Record<string, unknown>): Promise<{ ok: true; passkeyId: string } | { ok: false; reason: RegistrationRefusal }> {
+  const box: RegistrationBox = { refused: null };
+  let answered: unknown;
+  try {
+    answered = await registering.run(box, async () => {
+      const { getParentAuth } = await import("./parent-auth");
+      const auth = await getParentAuth();
+      return auth.api.verifyPasskeyRegistration({ body: { response: response as never }, headers });
+    });
+  } catch (e) {
+    if (box.refused) return { ok: false, reason: box.refused };
+    return { ok: false, reason: codeOf(e) === PASSKEY_ERROR_CODES.CHALLENGE_NOT_FOUND.code ? "challenge_used" : "registration_failed" };
+  }
+  const id = typeof answered === "object" && answered !== null ? (answered as { id?: unknown }).id : undefined;
+  // A session in the answer would mean the guard had failed: never taken.
+  if (typeof id !== "string" || (answered as { session?: unknown }).session !== undefined) return { ok: false, reason: "registration_failed" };
+  return { ok: true, passkeyId: id };
 }

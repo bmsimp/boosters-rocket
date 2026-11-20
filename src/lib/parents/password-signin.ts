@@ -116,8 +116,7 @@ export type PasswordRefusal = "rate_limited" | "not_an_address" | "signins_off" 
  * forgotten, another person's, or any under Strict), when the second step is to be asked, which second step that is
  * (`step`: the emailed code, or, since slice SI-6a, the person's own second factor, their authenticator app, for a
  * person who has one in force, and since slice SI-7a at the door a passkey: open question 24), which second factors they
- * have (`factors`: at the door, both; asking again, which names its own count, the app alone until slice SI-7b, so a
- * passkey holder with no app is asked again with the emailed code), and when the check finished (`at`: what follows,
+ * have (`factors`: both, at the door and, since slice SI-7b, in asking again), and when the check finished (`at`: what follows,
  * the pending step and its code, is timed from it, so a wait for a turn never shortens them). Every refusal is
  * `{ ok: false }`, with `limited` when it was over a limit or turned away from a full wait, which the page may say in
  * words of its own: each is decided before the person or their password is read, by what the visitor sent alone (the
@@ -244,10 +243,10 @@ export async function checkPasswordSignin(rawEmail: unknown, password: unknown, 
   const right = checked.result && hash !== null;
 
   const who = person ? { id: person.id, email: person.email } : null;
-  // The person's own second factor: since SI-6a their authenticator app in force, and since SI-7a, at the door, a
-  // passkey. Asking again (the caller that names its own count) counts the app alone until slice SI-7b, on purpose: a
-  // passkey holder with no app is asked again for the password and the emailed code, as a person with no passkey is.
-  const factors = { app: hasApp, passkey: count === undefined && hasKey };
+  // The person's own second factor: since SI-6a their authenticator app in force, and since SI-7a a passkey, at the
+  // door and, since SI-7b, in asking again too (the caller that names its own count): a passkey holder is asked for the
+  // passkey, never emailed a code.
+  const factors = { app: hasApp, passkey: hasKey };
   const secondStep = secondStepFor({ level: settings.level, hasSecondFactor: factors.app || factors.passkey }).step;
   const reason: PasswordRefusal | null = !email ? "not_an_address"
     : parentDoorClosed(settings) ? "signins_off"

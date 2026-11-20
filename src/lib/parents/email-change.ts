@@ -23,6 +23,7 @@ import { deleteUnusedSigninCodes, deleteUnusedSigninLinks, endParentSessions, en
 import { getParentSettings } from "./settings";
 import { sessionProvedRecently } from "./asking-again";
 import { hasAuthenticator } from "./authenticator";
+import { hasPasskey } from "./passkeys";
 import { SIGNIN_SETTINGS_COPY } from "./signin-settings-copy";
 
 /** How long the link mailed to the new address works. */
@@ -36,6 +37,8 @@ export const EMAIL_COPY = {
   proveFirst: "Before you change your sign-in email, please show it's you with your password and a code we email you. Please reload this page and do that first, or do it in Sign-in settings on the Family page.",
   /** The same, for a guardian with an authenticator app in force (slice SI-6b), who is asked for its code and emailed nothing. */
   proveFirstWithApp: "Before you change your sign-in email, please show it's you with your password and the code from your authenticator app. Please reload this page and do that first, or do it in Sign-in settings on the Family page.",
+  /** The same, for a guardian with a passkey (slice SI-7b), who is asked for it and emailed nothing. */
+  proveFirstWithPasskey: "Before you change your sign-in email, please show it's you with your passkey. Please reload this page and do that first, or do it in Sign-in settings on the Family page.",
   sent: (email: string) => `We've sent a link to ${email}. Open it within 24 hours to finish the change. Until then, keep signing in with the address you use now.`,
   notSent: "We couldn't send the email just now, so nothing has changed. Please try again in a little while.",
   tooManyAsks: "You've asked to change your sign-in email a few times in the last hour. Please wait a little while before trying again.",
@@ -118,7 +121,10 @@ export async function requestMyEmailChange(ctx: ParentCtx, input: unknown): Prom
       after: { email, familyId: String(ctx.familyId) }, ip: ctx.ip }, tx);
     return true as const;
   });
-  if (asked === "not_proved") return refused("not_proved", [(await hasAuthenticator(ctx.parentId)) ? EMAIL_COPY.proveFirstWithApp : EMAIL_COPY.proveFirst]);
+  if (asked === "not_proved") {
+    return refused("not_proved", [(await hasPasskey(ctx.parentId)) ? EMAIL_COPY.proveFirstWithPasskey
+      : (await hasAuthenticator(ctx.parentId)) ? EMAIL_COPY.proveFirstWithApp : EMAIL_COPY.proveFirst]);
+  }
   if (asked === "strict") return refused("strict", [SIGNIN_SETTINGS_COPY.strict]);
   const brand = await currentBrand();
   const sent = await sendMail(emailChangeConfirmMessage(brand, email, { link: emailChangeLink(token) }), { purpose: "email_change_confirm", actor, ip: ctx.ip });

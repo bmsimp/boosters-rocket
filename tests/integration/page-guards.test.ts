@@ -439,6 +439,9 @@ const PARENT_CODE_ELSEWHERE = [
   "src/lib/parents/passkey-signin.ts",
   "src/lib/auth/passkey-check.ts",
   "src/lib/auth/finish-scope.ts",
+  // Adding, naming and removing passkeys on /family/sign-in (slice SI-7b): the presses and the add's work at
+  // /portal-passkey/add, each for the session's own person alone, a passkey's id looked for only among theirs.
+  "src/lib/parents/passkey-settings.ts",
 ];
 
 /**

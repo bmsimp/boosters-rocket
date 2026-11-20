@@ -194,8 +194,20 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   check (signinStands()) reads the passkey unlocked under the person's row. Nothing that ends all of a person's
  *   sign-in removes them, as for the app (a block, a reset, a password change, Sign out everywhere, a change of sign-in
  *   email, sign-ins switched off, a change of company, a last membership closed, turning the app off). A later writer
- *   that takes them (SI-7b's presses, SI-9's staff reset) takes them after the person's row, beside the app and backup
- *   codes, before their devices.
+ *   that takes them (SI-9's staff reset) takes them after the person's row, beside the app and backup codes, before
+ *   their devices;
+ * - a person's passkeys in sign-in settings (passkey-settings.ts, since slice SI-7b): adding one is the passkey
+ *   library's insert of the row first, as it verifies, outside any transaction of the portal's and before the
+ *   person's row is taken; then one transaction that calls this, reads the new row (still theirs) and names it, counts
+ *   their passkeys, reads their app, and for a first passkey with no app deletes their backup codes and inserts ten new
+ *   ones (a failure there deletes the row the library inserted, in a transaction of its own that calls this first);
+ *   renaming one calls this, then reads and updates the passkey; removing one takes the parents' settings lock shared
+ *   (the club's level is read), then calls this, reads the session's `strong_at` under it, reads the passkey, their
+ *   app and their passkeys' count, then deletes the passkey and, with its last one and no app, their backup codes.
+ *   Asking again with a passkey (provePasskeyAgain(), asking-again.ts) calls this, sets the passkey's `last_used_at`,
+ *   then updates the session's `strong_at`. Turning the app off beside a passkey (authenticator-settings.ts) reads
+ *   whether they have a passkey under the person's row and keeps their backup codes. None of them touches a device, and
+ *   only asking again touches a session.
  */
 export async function lockedPerson(tx: Tx, parentId: string): Promise<{ email: string; blocked: boolean } | null> {
   const [p] = await tx.select({ email: parent.email, blocked: parent.blocked }).from(parent).where(eq(parent.id, parentId)).for("key share");

@@ -6,9 +6,9 @@
 // SI-6a it is the second step only for a person with no authenticator app in force (open question 24): one who has an
 // app is asked for its code or a backup code instead (verifySecondFactor(), below, at /portal-app/check), is sent no
 // code, and a code mailed before the app was in force signs them in nowhere (signinStands()). Since slice SI-7a the same
-// holds at the door for a person with a passkey (/portal-passkey/check, passkey-signin.ts): the door's readers count
-// it where they count the app (`use: "sign_in"`). Asking again (`use: "change"`) counts the app alone, on purpose, until
-// slice SI-7b makes it take a passkey: a passkey holder with no app is asked again with the emailed code, as today.
+// holds at the door for a person with a passkey (/portal-passkey/check, passkey-signin.ts), and since slice SI-7b in
+// asking again too (`use: "change"`): a passkey holder is never emailed a code anywhere, and is asked again with the
+// passkey (/portal-passkey/again, asking-again.ts) or, beside an app, the app's code or a backup code.
 import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
 import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
@@ -98,20 +98,21 @@ export async function newestSignOutEverywhere(q: Pick<typeof db, "select">, pare
 export type StepPerson = { parentId: string; email: string; password: PasswordProof; endsAt?: Date };
 /**
  * What a second step's code is for (sendSecondStepCode(), verifySigninCode(), signinStands()): a sign-in at the door,
- * or a change asked again for in a session. Since slice SI-7a it also says which second factors stand in for the code:
- * at the door an authenticator app or a passkey, in asking again the app alone (secondFactorFor()).
+ * or a change asked again for in a session. Which second factors stand in for the code is the same for both since
+ * slice SI-7b (secondFactorFor()): an authenticator app in force or a passkey; the use says only what the mail says.
  */
 export type CodeUse = "sign_in" | "change";
 
 /**
- * Whether the person has a second factor that stands in for the emailed code for this use: at the door
- * (`sign_in`) an authenticator app in force or a passkey (hasSecondFactor(), passkeys.ts: open question 24); in asking
- * again (`change`) the app alone. Asking again ignores passkeys on purpose until slice SI-7b makes it take one (open
- * question 28's "or a passkey"): until then a passkey holder with no app is asked again with the password and the
- * emailed code, as a person with no passkey is, and that code is taken.
+ * Whether the person has a second factor that stands in for the emailed code: an authenticator app in force or a
+ * passkey (hasSecondFactor(), passkeys.ts: open question 24), at the door (`sign_in`) and, since slice SI-7b, in asking
+ * again (`change`) alike (open question 28's "or a passkey"), so a passkey holder is never emailed a code anywhere and
+ * a code mailed before their first passkey is never taken. `use` is kept for the callers that name it.
  */
-const secondFactorFor = (parentId: string, use: CodeUse, q: Pick<typeof db, "select"> = db): Promise<boolean> =>
-  use === "sign_in" ? hasSecondFactor(parentId, q) : hasAuthenticator(parentId, q);
+const secondFactorFor = (parentId: string, use: CodeUse, q: Pick<typeof db, "select"> = db): Promise<boolean> => {
+  void use;
+  return hasSecondFactor(parentId, q);
+};
 
 type Refusal = "blocked" | "no_enabled_guardian" | "rate_limited" | "mail_failed" | "signins_off" | "address_changed" | "password_changed"
   | "strict_no_factor" | "step_ending" | "has_second_factor";
@@ -149,7 +150,8 @@ const DONE: CodeSend = { delivery: Promise.resolve(), ended: false };
 const ENDED: CodeSend = { delivery: Promise.resolve(), ended: true };
 /** Nothing sent, for a person whose second factor stands in for the code: which one they have, read for the answer. */
 async function factorInstead(parentId: string, use: CodeUse): Promise<CodeSend> {
-  const [app, passkey] = await Promise.all([hasAuthenticator(parentId), use === "sign_in" ? hasPasskey(parentId) : Promise.resolve(false)]);
+  void use;
+  const [app, passkey] = await Promise.all([hasAuthenticator(parentId), hasPasskey(parentId)]);
   // Neither read now (turned off again just after the read that stopped the send): the app's step, as SI-6a answered.
   return { delivery: Promise.resolve(), ended: false, ...(app || !passkey ? { app: true as const } : {}), ...(passkey ? { passkey: true as const } : {}) };
 }
@@ -185,9 +187,9 @@ export const samePassword = (stored: Date | null, proof: PasswordProof) => store
  * `ended` says the step can't go on (blocked, the address or the password changed, no row that counts, sign-ins off,
  * Strict), and the caller clears the pending step. A person with an authenticator app in force (since slice SI-6a) is
  * sent nothing (`has_second_factor`, not ended, `app`: their second step is the app's, /portal-app/check), and at the
- * door (`use: "sign_in"`) neither is one with a passkey (since slice SI-7a, `passkey`: /portal-passkey/check), read
- * before the lock and again under it, before the code is stored, where a set-up's confirm (SI-6b, which takes the
- * person's row first) is seen. Asking again (`use: "change"`) counts the app alone until slice SI-7b. Each refusal is `signin.code_refused` with its reason (over a limit,
+ * door (`use: "sign_in"`) neither is one with a passkey (since slice SI-7a, `passkey`: /portal-passkey/check; in asking
+ * again too since slice SI-7b), read before the lock and again under it, before the code is stored, where a set-up's
+ * confirm (SI-6b, which takes the person's row first) is seen. Each refusal is `signin.code_refused` with its reason (over a limit,
  * once per full window); a code mailed is `signin.code_sent`. `use` is what the code is for, which its mail says: a
  * sign-in on a device the portal doesn't know (`sign_in`, the door's: signinCodeMessage()), or a change to how the
  * person signs in, asked for in a session already signed in (`change`, asking again's: changeCodeMessage(), which says
@@ -294,7 +296,7 @@ export async function verifySigninCode(step: { parentId: string; email: string; 
   }
   // A person with an authenticator app in force (slice SI-6a), or at the door a passkey (slice SI-7a), is never signed in
   // by an emailed code, one mailed before it included: it is not looked at, and so not spent, and their pending step
-  // goes on to that factor (not ended). Asking again (`change`) counts the app alone until SI-7b (secondFactorFor()).
+  // goes on to that factor (not ended); in asking again too since SI-7b (secondFactorFor()).
   if (await secondFactorFor(p.id, use)) {
     await writeAudit({ actor: parentActor(p), action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason: "has_second_factor" }, ip });
     return REJECTED;
@@ -420,8 +422,11 @@ export async function verifySecondFactor(step: { parentId: string; email: string
     await lockedPerson(tx, p.id);
     if (!samePassword(await credentialNow(tx, p.id, step.password.credentialId), step.password)) return "password_changed" as const;
     const signedOutSeen = await newestSignOutEverywhere(tx, p.id);
-    // No app in force (turned off since the password asked for it, slice SI-6b): the step can't go on, whatever was typed.
-    const took = !(await hasAuthenticator(p.id, tx)) ? { miss: "no_app" as const }
+    // No app in force (turned off since the password asked for it, slice SI-6b): the step can't go on, whatever was
+    // typed; since slice SI-7b a backup code stands beside a passkey too (made with a first passkey), so for one the
+    // step ends only with neither an app nor a passkey.
+    const standing = typed.kind === "backup" ? await hasSecondFactor(p.id, tx) : await hasAuthenticator(p.id, tx);
+    const took = !standing ? { miss: "no_app" as const }
       : typed.kind === "backup" ? await takeBackupCode(tx, p.id, typed.code, now)
       : typed.kind === "app" ? await takeAuthenticatorCode(tx, p.id, typed.code, now) : { miss: "wrong" as const };
     if ("miss" in took) {
@@ -489,7 +494,7 @@ export async function refuseCodeWithoutStep(ip: string | null, now = new Date())
  * otherwise): a reset, or a staff reset, that committed since has replaced the password. Then what else it spent:
  * - a code (from verifySigninCode()): the person has no authenticator app in force, and at the door (`use`) no passkey
  *   (`second_factor_in_force` otherwise, since slices SI-6a and SI-7a: a code mailed before the factor came into force,
- *   for a pending step made before it in another tab, never gets in; asking again counts the app alone until SI-7b),
+ *   for a pending step made before it in another tab, never gets in; in asking again too since SI-7b),
  *   and its row is still there (`code_gone` otherwise). A reset that committed first is
  *   caught above as `password_changed`, since it replaces the `credential` row; it also deletes the person's codes
  *   spent within a code's life (choosePasswordFromLink(), password-set.ts), so `code_gone` is a second line behind it.

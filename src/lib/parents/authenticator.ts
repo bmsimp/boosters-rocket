@@ -112,12 +112,12 @@ export async function takeAuthenticatorCode(tx: Tx, parentId: string, code: stri
 
 /**
  * A backup code, spent in the caller's transaction (which writes the try's audit row): a second step only beside an
- * app in force (until slice SI-7 makes them with a first passkey), read with normalizeBackupCode() and found by its
+ * app in force or, since slice SI-7b, a passkey (which the caller checks: verifySecondFactor(), signin-codes.ts, since
+ * this module can't read passkeys), read with normalizeBackupCode() and found by its
  * keyed hash among the person's unspent ones, spent by one conditional update (`used_at` null, returning the row), so
  * a code works once. Answers how many unspent are left.
  */
 export async function takeBackupCode(tx: Tx, parentId: string, typed: string, now: Date): Promise<{ backupCodeId: string; left: number } | { miss: SecondStepMiss }> {
-  if (!(await hasAuthenticator(parentId, tx))) return { miss: "no_app" };
   const code = normalizeBackupCode(typed);
   if (code === null) return { miss: "wrong" };
   const [spent] = await tx.update(parentBackupCode).set({ usedAt: now })
@@ -141,6 +141,13 @@ export async function authenticatorShown(parentId: string, q: Reader = db): Prom
   const [{ n }] = (await q.select({ n: count() }).from(parentBackupCode)
     .where(and(eq(parentBackupCode.parentId, parentId), isNull(parentBackupCode.usedAt)))) as [{ n: number }];
   return { since: row.since, backupCodesLeft: n };
+}
+
+/** How many unspent backup codes the person has (slice SI-7b: beside a passkey too, so the page reads them with no app). */
+export async function unspentBackupCodes(parentId: string, q: Reader = db): Promise<number> {
+  const [{ n }] = (await q.select({ n: count() }).from(parentBackupCode)
+    .where(and(eq(parentBackupCode.parentId, parentId), isNull(parentBackupCode.usedAt)))) as [{ n: number }];
+  return Number(n);
 }
 
 /**
@@ -230,12 +237,22 @@ export async function makeBackupCodes(tx: Tx, parentId: string, now: Date): Prom
  * The app turned off (slice SI-6b), in the caller's transaction, which holds the person's row and writes the audit row:
  * the person's `parent_authenticator` row (in force or unfinished) and every backup code of theirs deleted. A sign-in
  * whose app's code or backup code was taken just before is refused at its last check (authenticatorStands(),
- * backupCodeStands(): `second_factor_gone`, `backup_code_gone`). Answers how many of each went.
+ * backupCodeStands(): `second_factor_gone`, `backup_code_gone`). Answers how many of each went. Since slice SI-7b the
+ * backup codes are kept (`keepBackupCodes`) for a person with a passkey, beside which they still stand.
  */
-export async function removeAuthenticator(tx: Tx, parentId: string): Promise<{ apps: number; backupCodes: number }> {
+export async function removeAuthenticator(tx: Tx, parentId: string, o: { keepBackupCodes?: boolean } = {}): Promise<{ apps: number; backupCodes: number }> {
   const apps = (await tx.delete(parentAuthenticator).where(eq(parentAuthenticator.parentId, parentId)).returning({ id: parentAuthenticator.id })).length;
-  const backupCodes = (await tx.delete(parentBackupCode).where(eq(parentBackupCode.parentId, parentId)).returning({ id: parentBackupCode.id })).length;
+  const backupCodes = o.keepBackupCodes ? 0 : (await tx.delete(parentBackupCode).where(eq(parentBackupCode.parentId, parentId)).returning({ id: parentBackupCode.id })).length;
   return { apps, backupCodes };
+}
+
+/**
+ * The person's backup codes deleted, in the caller's transaction, which holds the person's row and writes the audit
+ * row: since slice SI-7b, when their last passkey goes with no app in force, since they then stand beside nothing
+ * (removeMyPasskey(), passkey-settings.ts). Answers how many went.
+ */
+export async function removeBackupCodes(tx: Tx, parentId: string): Promise<number> {
+  return (await tx.delete(parentBackupCode).where(eq(parentBackupCode.parentId, parentId)).returning({ id: parentBackupCode.id })).length;
 }
 
 /** What the daily clean-up deletes of these tables: an unfinished set-up older than its life, and a backup code spent longer ago than `spentKeptMs`. */

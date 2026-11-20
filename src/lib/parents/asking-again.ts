@@ -9,7 +9,9 @@
 // tries are counted against that device when it is the person's and unexpired, else against the person, `password_reask_parent`),
 // then the second step: the emailed code (sendSecondStepCode() for a change, verifySigninCode(), signinStands(),
 // signin-codes.ts), or, since slice SI-6a, for a person with an authenticator app in force, the app's code or a backup
-// code, and no code is sent (verifySecondFactor(), signinStands(); open questions 24 and 28). A remembered device is never
+// code, and no code is sent (verifySecondFactor(), signinStands(); open questions 24 and 28). Since slice SI-7b a person
+// with a passkey proves it with the passkey alone (provePasskeyAgain(), /portal-passkey/again: "the password and the
+// second step again, or a passkey"), and is never emailed a code here either. A remembered device is never
 // a second step here: it is the very phone the question's reason speaks of ("a 90-day session on an unlocked phone
 // should not be enough to take the sign-in over"). Nothing here makes a session, sets a cookie or calls the finish: it
 // stamps the `strong_at` of the session that asked, and nothing else. Server only; parent code.
@@ -22,9 +24,10 @@ import { writeAudit } from "@/lib/audit/log";
 import { env } from "@/env";
 import type { ParentCtx } from "@/lib/guards";
 import { MOST_TYPED_PASSWORD, checkPasswordSignin } from "./password-signin";
-import { CODE_TTL_MS, refuseCodeWithoutStep, sendSecondStepCode, signinStands, verifySecondFactor, verifySigninCode, type PasswordProof, type SecondFactorProof, type StepPerson } from "./signin-codes";
+import { CODE_TTL_MS, refuseCodeWithoutStep, sendSecondStepCode, signinStands, takeIpLimit, verifySecondFactor, verifySigninCode, type PasswordProof, type SecondFactorProof, type StepPerson } from "./signin-codes";
 import { authenticatorInForceSince, hasAuthenticator } from "./authenticator";
-import { newestPasskeySince } from "./passkeys";
+import { hasSecondFactor, newestPasskeySince, passkeyNamed, usePasskey } from "./passkeys";
+import { presentAndVerified, readAssertion, type VerifyAssertion } from "./passkey-signin";
 import { lockedPerson, parentActor } from "./sessions";
 import { newestFactorSince, proofCountsBesideNewestFactor, provedRecently } from "./reask-rule";
 import { SIGNIN_SETTINGS_COPY as COPY } from "./signin-settings-copy";
@@ -39,9 +42,10 @@ type Reader = Pick<typeof db, "select">;
  * none yet, no such session of this person (ended, or another's), or (since slice SI-6b's second read) a proof made
  * before the person's newest second factor came into force (proofCountsBesideNewestFactor(), ./reask-rule.ts, against
  * newestFactorSince() of authenticatorInForceSince() and, since slice SI-7a, newestPasskeySince(), passkeys.ts).
- * Asking again itself takes no passkey until slice SI-7b, on purpose (a passkey holder with no app is asked for the
- * password and the emailed code, as today: signin-codes.ts, `use: "change"`); only this rule counts a passkey now. `strong_at` is set only by a proof the session made itself: a sign-in with the emailed
- * code or a set-up link (recordStrongSignin(), devices.ts), or asking again (askAgainCode(), below). A sign-in on a
+ * `strong_at` is set only by a proof the session made itself: a sign-in with the emailed code or a set-up link
+ * (recordStrongSignin(), devices.ts), or asking again (askAgainCode(), and since slice SI-7b provePasskeyAgain(),
+ * below). Adding a passkey stamps nothing (SI-7b): the new passkey is then the person's newest factor, so the adding
+ * session's earlier proof stops counting here, and its next change asks again, offering the passkey. A sign-in on a
  * remembered device proved only the password at that moment, and sets none. Every reader of whether a session proved
  * itself reads it here (sessionProvedRecently(), the page's loadMySignin(), and each change under the person's row), so
  * the page never offers what the change refuses. Confirming an app stamps no session, the one that confirmed included.
@@ -105,9 +109,11 @@ const MOST_SENT_CODE = 20;
 /*
  * Since slice SI-6b the HMAC also names which second step the stamp asked for (`code` or `app`), with no change to the
  * stamp's shape: the reader works out both and takes the one that matches, so a stamp that asked for the app is read as
- * the app's step even once the app has been turned off (decision 10 of SI-6b: that step then ends).
+ * the app's step even once the app has been turned off (decision 10 of SI-6b: that step then ends). Since slice SI-7b
+ * `passkey` too: the step of a passkey holder, whose passkey proves it alone at /portal-passkey/again, and who, beside
+ * an app, may send the app's code or a backup code with this stamp instead (verifySecondFactor()).
  */
-type StampStep = "code" | "app";
+type StampStep = "code" | "app" | "passkey";
 const stampMac = (s: { sessionId: string; parentId: string; email: string }, password: PasswordProof, endsAt: number, step: StampStep): Buffer =>
   createHmac("sha256", env.BETTER_AUTH_SECRET)
     .update(`asking-again:${s.sessionId}:${s.parentId}:${s.email}:${password.credentialId}:${password.credentialUpdatedAt.getTime()}:${endsAt}:${step}`).digest();
@@ -131,7 +137,7 @@ async function readStamp(raw: unknown, who: Asker, now: Date): Promise<(StepPers
   if (!password) return null;
   const got = Buffer.from(m[2]!, "base64url");
   let step: StampStep | null = null;
-  for (const s of ["code", "app"] as const) {
+  for (const s of ["code", "app", "passkey"] as const) {
     const want = stampMac(who, password, endsAt, s);
     if (got.length === want.length && timingSafeEqual(got, want)) step = s;
   }
@@ -144,7 +150,8 @@ async function readStamp(raw: unknown, who: Asker, now: Date): Promise<(StepPers
  * step to ask for (`step`): the code it emailed (`code`), or, since slice SI-6a, the person's authenticator app's code
  * or a backup code (`app`), when nothing is emailed.
  */
-export type AskAgainAnswer = { ok: true; message: string; stamp: string; step: "code" | "app" } | { ok: false; errors: string[] };
+export type AskAgainAnswer = { ok: true; message: string; stamp: string; step: "code" | "app" }
+  | { ok: true; message: string; stamp: string; step: "passkey"; app: boolean } | { ok: false; errors: string[] };
 /** `ended`: the app's step can't go on (since slice SI-6b), so the page goes back to the password; it never says why. */
 export type ProvedAnswer = { ok: true; message: string } | { ok: false; errors: string[]; ended?: true };
 const PASSWORD_REFUSED = { ok: false as const, errors: [COPY.passwordRejected] };
@@ -178,10 +185,17 @@ export async function askAgainPassword(ctx: Asker, password: unknown, now = new 
   if (check.person.id !== ctx.parentId) return PASSWORD_REFUSED; // one address is one person: never another's
   const endsAt = new Date(check.at.getTime() + CODE_TTL_MS);
   const asker = { sessionId: ctx.sessionId, parentId: ctx.parentId, email: check.person.email };
-  if (check.step === "second_factor") return { ok: true, message: COPY.appAsked, stamp: makeStamp(asker, check.password, endsAt, "app"), step: "app" };
-  const { delivery, app } = await sendSecondStepCode({ parentId: ctx.parentId, email: check.person.email, password: check.password, endsAt }, ctx.ip, check.at, "change");
+  // A passkey holder (since slice SI-7b) is sent no code: their passkey, with the app's code or a backup code beside it
+  // when they have an app too, on a stamp of the passkey's step.
+  const passkeyStep = (app: boolean): AskAgainAnswer => ({ ok: true, message: app ? COPY.passkeyOrAppAsked : COPY.passkeyAsked,
+    stamp: makeStamp(asker, check.password, endsAt, "passkey"), step: "passkey", app });
+  if (check.step === "second_factor") {
+    return check.factors.passkey ? passkeyStep(check.factors.app) : { ok: true, message: COPY.appAsked, stamp: makeStamp(asker, check.password, endsAt, "app"), step: "app" };
+  }
+  const { delivery, app, passkey } = await sendSecondStepCode({ parentId: ctx.parentId, email: check.person.email, password: check.password, endsAt }, ctx.ip, check.at, "change");
   void delivery;
-  // An app that came into force after the password's reads: nothing was sent, and the app is asked for.
+  // An app or a passkey that came into force after the password's reads: nothing was sent, and that is asked for.
+  if (passkey) return passkeyStep(app === true);
   if (app) return { ok: true, message: COPY.appAsked, stamp: makeStamp(asker, check.password, endsAt, "app"), step: "app" };
   return { ok: true, message: COPY.codeSent, stamp: makeStamp(asker, check.password, endsAt, "code"), step: "code" };
 }
@@ -205,7 +219,8 @@ export async function askAgainCode(ctx: Asker, stamp: unknown, code: unknown, no
   // Refused before any step is read (a code no field could send, a stamp that is no stamp or past its end): the words
   // of the step the person would be asked for. The session names the person already, so this tells nobody anything,
   // and an app holder, who was never emailed anything, is never told to look for an email.
-  const refused = async () => (await hasAuthenticator(ctx.parentId)) ? APP_REFUSED : CODE_REFUSED;
+  // Since slice SI-7b a passkey holder too: they were never emailed anything either.
+  const refused = async () => (await hasSecondFactor(ctx.parentId)) ? APP_REFUSED : CODE_REFUSED;
   if (typeof code !== "string" || code.length > MOST_SENT_CODE) return refused();
   const step = await readStamp(stamp, ctx, now);
   if (!step) return (await refuseCodeWithoutStep(ctx.ip, now)) === "rate_limited" ? TOO_MANY : refused();
@@ -238,12 +253,83 @@ type Proved = { ok: true; app: boolean; step: "emailed_code" | "authenticator" |
  * turned on between the password and the code leaves a code mailed before it to be refused at signinStands()
  * (`second_factor_in_force`).
  */
-async function proveSecondStep(step: StepPerson & { step: "code" | "app" }, code: string, ip: string | null, now: Date): Promise<Proved> {
+async function proveSecondStep(step: StepPerson & { step: StampStep }, code: string, ip: string | null, now: Date): Promise<Proved> {
   const who = { parentId: step.parentId, email: step.email, password: step.password };
-  if (step.step === "app" || await hasAuthenticator(step.parentId)) {
+  // A passkey's stamp (slice SI-7b) takes a code only as the app's step does: beside an app in force, its code or a
+  // backup code; with no app it is refused there, never taken as an emailed code.
+  if (step.step !== "code" || await hasAuthenticator(step.parentId)) {
     const r = await verifySecondFactor(who, code, ip, now);
     return r.ok ? { ok: true, app: true, step: r.factor, proof: r.proof } : { ok: false, app: true, limited: r.reason === "rate_limited", ended: r.ended };
   }
   const r = await verifySigninCode(who, code, ip, now, "change");
-  return r.ok ? { ok: true, app: false, step: "emailed_code", proof: { codeId: r.codeId } } : { ok: false, app: false, limited: r.reason === "rate_limited", ended: r.ended };
+  // A passkey that came into force after the code was mailed: the code is refused (`has_second_factor`), in the words
+  // of a person with a factor of their own, never "look for an email".
+  if (!r.ok) return { ok: false, app: await hasSecondFactor(step.parentId), limited: r.reason === "rate_limited", ended: r.ended };
+  return { ok: true, app: false, step: "emailed_code", proof: { codeId: r.codeId } };
+}
+
+/** What a passkey's proof in asking again answers: proved, or the one refusal (over the IP limit, its own word). */
+export type PasskeyAgainAnswer = { ok: true } | { ok: false; error: "rejected" | "rate_limited" };
+const PASSKEY_REJECTED = { ok: false as const, error: "rejected" as const };
+
+/** Why a passkey proved nothing in asking again, for its audit row only. */
+type AgainRefusal = "not_an_assertion" | "not_verified" | "passkey_unreadable" | "challenge_used" | "passkey_unknown" | "passkey_failed"
+  | "other_person" | "blocked" | "passkey_gone" | "session_gone";
+
+/**
+ * Asking again with a passkey (the sign-in release, slice SI-7b, the lead's decision 11; open question 28's "or a
+ * passkey"), at /portal-passkey/again (parent-code-plugin.ts), for the session the request carries (`who`: the library's
+ * session read from its cookie, the person the session's, never the passkey's). The steps of the door's passkey check
+ * (checkPasskeySignin(), passkey-signin.ts), called as they are: the limit per IP address (`code_check_ip`); the
+ * assertion read bounded (readAssertion()); the user present and verified flags read by the portal
+ * (presentAndVerified()); the passkey its credential id names must be the session's person's (`other_person`), checked
+ * before the library is asked, so another person's passkey spends nothing of theirs; a stored key that won't decode
+ * (`passkey_unreadable`); the library's own verification in process (`verify`, verifyAssertion(): the challenge spent
+ * once, the origin, the relying party, user verification, the signature and the counter, which it writes), whose
+ * passkey must be the session's person's again; then one transaction under the person's row (lockedPerson()): not
+ * blocked, the passkey still theirs with its `last_used_at` set (usePasskey()), and this session's `strong_at` set to
+ * now, this session's alone (`session_gone` when it is no longer this person's), `signin.proved_again` with `step:
+ * "passkey"`. No session is made, no cookie set and no finish called. Every refusal is one answer; its reason is only in
+ * its row (`signin.second_step_wrong`, or `signin.refused`, each with `factor: "passkey"` and `use: "change"`), and no
+ * row holds a credential id, a key, a counter, a challenge, a user handle or the assertion.
+ */
+export async function provePasskeyAgain(who: { parentId: string; sessionId: string; email: string }, raw: unknown, verify: VerifyAssertion,
+  ip: string | null, now = new Date()): Promise<PasskeyAgainAnswer> {
+  const actor = parentActor({ id: who.parentId, email: who.email });
+  const refuse = async (reason: AgainRefusal, action: "signin.second_step_wrong" | "signin.refused" = "signin.second_step_wrong") => {
+    await writeAudit({ actor, action, targetType: "parent", targetId: who.parentId, after: { factor: "passkey", use: "change", reason }, ip });
+    return PASSKEY_REJECTED;
+  };
+  const byIp = await takeIpLimit("code_check_ip", ip, now);
+  if (byIp !== "taken") {
+    if (byIp === "first_refusal") {
+      await writeAudit({ actor, action: "signin.refused", targetType: "parent", targetId: who.parentId,
+        after: { reason: "rate_limited", limit: "check_ip", factor: "passkey", use: "change" }, ip });
+    }
+    return { ok: false, error: "rate_limited" };
+  }
+  const assertion = readAssertion(raw);
+  if (!assertion) return refuse("not_an_assertion");
+  if (!presentAndVerified(assertion.response.authenticatorData)) return refuse("not_verified");
+  const named = await passkeyNamed(assertion.id);
+  if (named && named.parentId !== who.parentId) return refuse("other_person", "signin.refused");
+  if (named && !named.readable) return refuse("passkey_unreadable");
+  const verified = await verify(assertion);
+  if (!verified.ok) return refuse(verified.reason);
+  if (verified.passkey.parentId !== who.parentId) return refuse("other_person", "signin.refused");
+  const outcome = await db.transaction(async (tx) => {
+    const live = await lockedPerson(tx, who.parentId);
+    if (!live || live.blocked) return "blocked" as const;
+    if (!(await usePasskey(tx, who.parentId, verified.passkey.passkeyId, now))) return "passkey_gone" as const;
+    const rows = await tx.update(parentAuthSession).set({ strongAt: now })
+      .where(and(eq(parentAuthSession.id, who.sessionId),
+        inArray(parentAuthSession.userId, tx.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, who.parentId)))))
+      .returning({ id: parentAuthSession.id });
+    if (rows.length === 0) return "session_gone" as const;
+    await writeAudit({ actor: parentActor({ id: who.parentId, email: live.email }), action: "signin.proved_again", targetType: "parent", targetId: who.parentId,
+      after: { step: "passkey" }, ip }, tx);
+    return "proved" as const;
+  });
+  if (outcome !== "proved") return refuse(outcome, "signin.refused");
+  return { ok: true };
 }

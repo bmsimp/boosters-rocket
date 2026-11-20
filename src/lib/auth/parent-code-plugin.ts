@@ -1,5 +1,5 @@
 import type { BetterAuthPlugin, GenericEndpointContext } from "better-auth";
-import { createAuthEndpoint } from "better-auth/api";
+import { createAuthEndpoint, getSessionFromCtx } from "better-auth/api";
 import { z } from "zod";
 import { clientIpFrom } from "@/lib/request";
 import { refuseCodeWithoutStep, sendSecondStepCode, verifySecondFactor, verifySigninCode, type SecondFactorProof } from "@/lib/parents/signin-codes";
@@ -9,10 +9,14 @@ import { getParentSettings, parentDoorClosed } from "@/lib/parents/settings";
 import { MAX_RETURN_PATH } from "./return-path";
 import { finishParentSignin } from "./parent-signin-finish";
 import { clearPendingStep, pendingStepEnd, readDeviceToken, readPendingStep, setPendingStep, type PendingStep } from "./parent-signin-step";
-import { verifyAssertion } from "./passkey-check";
+import { verifyAssertion, verifyRegistration } from "./passkey-check";
+import { addMyPasskey, mayAddPasskey, type Adder } from "@/lib/parents/passkey-settings";
+import { provePasskeyAgain } from "@/lib/parents/asking-again";
 
 /** The passkey library's challenge, the one library path the door leaves open that writes a row (parent-auth.ts). */
 export const PASSKEY_CHALLENGE_PATH = "/passkey/generate-authenticate-options";
+/** The passkey library's registration options (slice SI-7b), reachable only behind the onRequest below. */
+export const PASSKEY_REGISTER_PATH = "/passkey/generate-register-options";
 /**
  * Better Auth's own answer for a path the portal turned off (its router's onRequest, for PARENT_DISABLED_PATHS): the
  * challenge answers it while the parent door is closed, the same as the library's six other passkey paths always do.
@@ -22,6 +26,27 @@ const notFound = () => new Response("Not Found", { status: 404 });
 type Ctx = { headers?: Headers; request?: Request };
 const ipOf = (ctx: Ctx) => { const h = ctx.headers ?? ctx.request?.headers; return h ? clientIpFrom(h) : null; };
 const REJECTED = { ok: false, error: "rejected" } as const;
+
+/** A session the library reads from a request's cookie, as the person's: its id, its person and the address, or null. */
+type LibrarySession = { session?: { id?: unknown } | null; user?: { parentId?: unknown; email?: unknown } | null } | null | undefined;
+function adderOf(s: LibrarySession): Adder | null {
+  const sessionId = s?.session?.id, parentId = s?.user?.parentId, email = s?.user?.email;
+  return typeof sessionId === "string" && typeof parentId === "string" && typeof email === "string" ? { sessionId, parentId, email } : null;
+}
+
+/**
+ * Whether a request for the library's registration options may go on (slice SI-7b, the lead's decision 2): no query at
+ * all (the library takes a `name` query as the passkey's user name, which must be the person's address), and a live
+ * parent session that may add a passkey now (mayAddPasskey(): sign-ins on, not blocked, a row that counts, a password,
+ * and proved within the window). Read before the library runs, so a refusal makes no challenge row.
+ */
+async function mayAskRegisterOptions(request: Request): Promise<boolean> {
+  if (new URL(request.url).search !== "") return false;
+  const { getParentAuth } = await import("./parent-auth");
+  const auth = await getParentAuth();
+  const who = adderOf(await auth.api.getSession({ headers: request.headers }).catch(() => null) as LibrarySession);
+  return who !== null && mayAddPasskey(who);
+}
 const LIMITED = { ok: false, error: "rate_limited" } as const;
 
 /**
@@ -60,8 +85,13 @@ export const parentCodePlugin = () => ({
   // so while the parent door is closed (parentDoorClosed(), sign-ins switched off) it is refused before the library
   // runs, after Better Auth's in-memory cap (customRules, parent-auth.ts), with the answer a disabled path gives: no
   // row, no cookie, and no answer of its own to say why. The door's own endpoints refuse with their one answer.
+  // Since slice SI-7b the library's registration options are refused here too, the same way, unless the request carries
+  // a session that may add a passkey now (mayAskRegisterOptions()).
   onRequest: async (request: Request, context: { baseURL: string }) => {
-    if (new URL(request.url).pathname !== `${new URL(context.baseURL).pathname}${PASSKEY_CHALLENGE_PATH}`) return;
+    const path = new URL(request.url).pathname;
+    const base = new URL(context.baseURL).pathname;
+    if (path === `${base}${PASSKEY_REGISTER_PATH}`) return (await mayAskRegisterOptions(request)) ? undefined : { response: notFound() };
+    if (path !== `${base}${PASSKEY_CHALLENGE_PATH}`) return;
     if (parentDoorClosed(await getParentSettings())) return { response: notFound() };
   },
   endpoints: {
@@ -202,6 +232,32 @@ export const parentCodePlugin = () => ({
       if (step) return ctx.json(await finishSecondStep(ctx, step, r.proof, ip, next));
       const done = await finishParentSignin(ctx, { parentId: r.person.id, email: r.person.email, proof: r.proof, ip, next });
       return ctx.json(done.ok ? { ok: true, next: done.next } : REJECTED);
+    }),
+    // Adding a passkey (the sign-in release, slice SI-7b, the lead's decision 2): the answer the passkey library's browser
+    // ceremony made for options from /passkey/generate-register-options, posted here instead of to the library's own
+    // verify path (disabled over HTTP), with the passkey's optional name beside it ({ response, name }). For the session
+    // the request carries alone; the work and its order are addMyPasskey()'s (passkey-settings.ts), which runs the
+    // library's verify-registration in process (verifyRegistration(), passkey-check.ts) with this request's headers: the
+    // session and the signed challenge cookie, whose challenge the library spends. No session is made or ended.
+    portalPasskeyAdd: createAuthEndpoint("/portal-passkey/add", {
+      method: "POST", body: z.looseObject({}),
+    }, async (ctx) => {
+      const headers = ctx.headers ?? ctx.request?.headers ?? new Headers();
+      const who = adderOf(await getSessionFromCtx(ctx).catch(() => null) as LibrarySession);
+      return ctx.json(await addMyPasskey(who, ctx.body, (answer) => verifyRegistration(headers, answer), ipOf(ctx)));
+    }),
+    // Asking again with a passkey (slice SI-7b, the lead's decision 11; open question 28): the assertion the library's
+    // ceremony made, for a challenge from /passkey/generate-authenticate-options (whose allowCredentials lists the
+    // session's own passkeys), posted here with the parent's session. It stamps that session's `strong_at` and nothing
+    // else (provePasskeyAgain(), asking-again.ts): no session made, no cookie, no finish. With no session it does nothing.
+    portalPasskeyAgain: createAuthEndpoint("/portal-passkey/again", {
+      method: "POST", body: z.looseObject({}),
+    }, async (ctx) => {
+      const who = adderOf(await getSessionFromCtx(ctx).catch(() => null) as LibrarySession);
+      if (!who) return ctx.json(REJECTED);
+      const headers = ctx.headers ?? ctx.request?.headers ?? new Headers();
+      const r = await provePasskeyAgain(who, ctx.body.response, (assertion) => verifyAssertion(headers, assertion), ipOf(ctx));
+      return ctx.json(r.ok ? { ok: true } : { ok: false, error: r.error });
     }),
     // A set-up link's sign-in (the sign-in release, slice SI-3a): the link form's action has set the password and holds
     // the proof of what it spent (choosePasswordFromLink(), password-set.ts), and finishes the sign-in here, through the
