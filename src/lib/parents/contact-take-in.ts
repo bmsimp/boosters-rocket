@@ -10,7 +10,7 @@ import { TAKE_IN_KEY } from "./take-in-setting";
 import { getRosterSource } from "@/lib/roster/source";
 import { connectedToAnotherCompany, linksOf } from "@/lib/families/links";
 import type { AppFamilyId } from "@/lib/families/ids";
-import { asShown, type AddressValues } from "./contact-fields";
+import { asShown, detailKey, type AddressValues } from "./contact-fields";
 import { ownRecordIn, whoseDetails, type CachedRecord } from "./my-family";
 
 /**
@@ -42,32 +42,38 @@ function addressOf(r: Cached): AddressValues | null {
   return Object.values(a).some(Boolean) ? a : null;
 }
 const phoneOf = (r: Cached): string | null => asShown(r.phone ?? "") || null;
-const addressKey = (a: AddressValues) => JSON.stringify([a.line1, a.line2, a.city, a.region, a.postalCode, a.country]);
 
 /**
- * One detail across a person's records: the value every one of them holds, where they all hold the same; `disagree`
+ * One detail across a person's records: the value every one of them holds, where they all hold the same by the one
+ * normal form a phone or an address is compared by (detailKey(), shared with the change sent on to QuickBooks, so a
+ * detail copied here is never held back there for a difference of spacing, letter case or an empty line); `disagree`
  * when they don't, a record that holds none beside one that holds one included (left empty, for the person to set:
  * the club may have left it out of that record on purpose); null when none holds one.
  */
-function agreed<T>(values: (T | null)[], key: (v: T) => string): T | null | "disagree" {
+function agreed<T extends string | AddressValues>(values: (T | null)[]): T | null | "disagree" {
   if (values.length === 0) return null;
-  return new Set(values.map((v) => (v === null ? null : key(v)))).size === 1 ? values[0]! : "disagree";
+  return new Set(values.map((v) => detailKey(v))).size === 1 ? values[0]! : "disagree";
 }
 
 /**
  * Notes, in the savepoint that saves a successful roster read (refreshRoster(), src/lib/roster/refresh.ts), that the
- * cache now holds the billing addresses this build keeps, at the read's start: the take-in waits for it. A successful
+ * cache now holds the billing addresses this build keeps, at the read's start: the take-in waits for it, and, once it
+ * has run, so does every send of a parent's change of their details (contactSendsMayGo(), stage 3's slice 11b). A successful
  * read is not enough by itself: the build before migration 0044 answers the roster read the migration asks for too,
  * and while it still runs beside the migrated database (scripts/poc/deploy.sh migrates before it replaces the app) its
- * read leaves every address empty, so the take-in would run once over a cache that holds none. Nothing once the
- * take-in has run, or where the migration wrote no setting. Nor while the shape doesn't hold (none, or one naming a
+ * read leaves every address empty, so the take-in would run once over a cache that holds none. Nothing where the
+ * migration wrote no setting. Nor while the shape doesn't hold (none, or one naming a
  * type the read didn't find in QuickBooks): such a read kept the addresses only of the types it names, so once an
  * Admin chooses a shape that holds the take-in waits for a read made under it (a shape save withdraws a note too).
  */
 export async function noteAddressesKept(tx: Tx, readAt: Date): Promise<void> {
   if (!(await shapeHolds(tx))) return;
-  await tx.update(setting).set({ value: sql`${setting.value} || ${JSON.stringify({ addressesReadAt: readAt.toISOString() })}::jsonb`, updatedAt: new Date() })
-    .where(and(eq(setting.key, TAKE_IN_KEY), sql`${setting.value}->'doneAt' is null`));
+  // `addressesSince` is the first such read since the mark was last withdrawn, kept by every later one: a parent's
+  // change of their details counts its age as a queue item from it (contactSendsSince(), ./take-in-setting.ts).
+  const at = readAt.toISOString();
+  await tx.update(setting).set({ value: sql`${setting.value} || jsonb_build_object('addressesReadAt', ${at}::text,
+    'addressesSince', coalesce(${setting.value}->'addressesSince', to_jsonb(${at}::text)))`, updatedAt: new Date() })
+    .where(eq(setting.key, TAKE_IN_KEY));
 }
 
 /**
@@ -205,8 +211,8 @@ async function planPeople(tx: Tx, shape: MembershipShape, familyRows: (customer:
       if (own && own.signsIn && own.edits === "own") records.set(own.row.qboId, own.row);
     }
     if (records.size === 0) { out.counts.peopleWithNoRecord++; continue; }
-    const phone = agreed([...records.values()].map(phoneOf), (v) => v);
-    const address = agreed([...records.values()].map(addressOf), addressKey);
+    const phone = agreed([...records.values()].map(phoneOf));
+    const address = agreed([...records.values()].map(addressOf));
     const disagreed = phone === "disagree" || address === "disagree";
     if (disagreed) out.counts.peopleDisagreeing++;
     const given: Given = { phone: phone === "disagree" ? null : phone, address: address === "disagree" ? null : address };

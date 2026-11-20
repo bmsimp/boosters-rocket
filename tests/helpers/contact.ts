@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { family, parent } from "@/lib/db/schema";
+import { family, parent, setting } from "@/lib/db/schema";
+import { TAKE_IN_KEY } from "@/lib/parents/take-in-setting";
 import type { AppFamilyId } from "@/lib/families/ids";
 import type { ContactValues } from "@/lib/parents/contact-fields";
 import { CHENOWETH, RIVERA, connectCompany } from "./money";
@@ -117,3 +118,19 @@ export async function setFamilyDetails(familyId: AppFamilyId, values: Partial<Co
 }
 /** Every field empty: a person or a family nobody has given details. */
 export const NO_DETAILS: ContactValues = { phone: "", line1: "", line2: "", city: "", region: "", postalCode: "", country: "" };
+
+/**
+ * The take-in of contact details has run, after a roster read that kept the addresses under the shape that holds now
+ * (stage 3's slices 11a and 11b): a parent's change of their details is then sent on (contactSendsMayGo()). A test
+ * that reads the roster again or saves a shape after it sees the mark move or go, as the portal does.
+ */
+export async function takeInDone(): Promise<void> {
+  const now = new Date().toISOString();
+  const value = { after: "2026-01-01T00:00:00.000Z", addressesReadAt: now, doneAt: now };
+  await db.insert(setting).values({ key: TAKE_IN_KEY, value }).onConflictDoUpdate({ target: setting.key, set: { value } });
+}
+/** The take-in as migration 0044 leaves it: not run, and no read noted that kept the addresses. */
+export async function takeInNotRun(): Promise<void> {
+  const value = { after: new Date(Date.now() - 60_000).toISOString() };
+  await db.insert(setting).values({ key: TAKE_IN_KEY, value }).onConflictDoUpdate({ target: setting.key, set: { value } });
+}

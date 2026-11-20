@@ -8,16 +8,19 @@ import { loadRosterPage, familyEntry, type RecordStudent } from "@/lib/roster/qu
 import { familyRecordAt } from "@/lib/families/address";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { familyCover, guardianCustomers, guardianStandings, moveTargets, studentsBeingMade, versionsOf } from "@/lib/roster/writes";
-import { loadOpenWrites } from "@/lib/roster/queue";
+import { comparableContacts, loadOpenWrites } from "@/lib/roster/queue";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
-import { familySignins, type FamilySignin } from "@/lib/parents/directory";
-import { AddGuardianForm } from "@/app/staff/(app)/parents/forms";
+import { familyContact, familySignins, type FamilySignin } from "@/lib/parents/directory";
+import { whoseDetails } from "@/lib/parents/my-family";
+import type { ContactForm } from "@/lib/parents/contact-fields";
+import { AddGuardianForm, DetailsForm } from "@/app/staff/(app)/parents/forms";
 import { GuardianChange } from "@/app/staff/(app)/parents/guardian-change";
 import { addGuardianAction } from "@/app/staff/(app)/parents/actions";
 import { DisconnectedNotice, Freshness } from "../freshness";
 import { CreateInQuickBooks, FamilyChanges, MemberChanges, MoveStudents, PortalChanges, Waiting, WhatChanges, type MovableStudent } from "../changes";
-import { moveAction } from "../write-actions";
+import { moveAction, saveFamilyDetailsAction } from "../write-actions";
 import { offers } from "@/lib/roster/operations";
+import { placeWords } from "@/lib/roster/place";
 import type { Cust, Family } from "@/lib/roster/model";
 import { DataTable, type Column } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
@@ -30,9 +33,11 @@ export const dynamic = "force-dynamic";
 const standing = (c: Cust | null) => (c === null ? "No customer" : c.active ? "Active" : "Inactive");
 /**
  * A student record's standing in QuickBooks: its customer's under this family; or, for a record whose linked customer
- * QuickBooks lists elsewhere (since stage 3's slice 9c the two can disagree), where that is. QuickBooks text, as text.
+ * QuickBooks has elsewhere (since stage 3's slice 9c the two can disagree), where that is, in the words the accounting
+ * links screen says it in too (placeWords(), src/lib/roster/place.ts): under another family, under no customer, under
+ * one that is no family here, no longer a student customer, or gone. QuickBooks text, as text.
  */
-const studentStanding = (s: RecordStudent) => (s.customer ? standing(s.customer) : s.elsewhere ? `Under ${s.elsewhere.familyName} in QuickBooks`
+const studentStanding = (s: RecordStudent) => (s.customer ? standing(s.customer) : s.place ? placeWords(s.place)
   : s.linked ? "Not under a family in QuickBooks" : "No customer");
 
 /** One row of a people table: a record's name (a student's) or a customer's (a parent's, a member's), with what QuickBooks holds for them. */
@@ -48,7 +53,10 @@ function People({ id, title, noun, people, contact, empty }: { id: string; title
     { key: "name", header: noun, rowHeader: true, cell: (p) => p.name },
     ...(contact ? [
       { key: "email", header: "Email", cell: (p: Person) => p.customer?.email ?? "No email address" },
-      // QuickBooks' own copy, from the roster cache: since stage 3's slice 11a the phone a parent sees and changes is the portal's.
+      // QuickBooks' own copy, from the roster cache. A guardian's phone and mailing address are the portal's own (stage
+      // 3's slice 11a), changed by the guardian or by staff (on the person's page, or this page's own details in books with
+      // no parent type, slice 11c), and each change is sent to their record in QuickBooks after the save (or kept on
+      // Reconciliation): this column is what QuickBooks holds.
       { key: "phone", header: "Phone in QuickBooks", cell: (p: Person) => p.customer?.phone ?? "No phone number" },
     ] : []),
     { key: "status", header: "In QuickBooks", cell: (p) => p.standing ?? standing(p.customer) },
@@ -100,6 +108,24 @@ function SignIns({ familyId, signins, links, changes, addable, inQuickBooks }: {
 }
 
 /**
+ * The family's phone and mailing address as the portal holds them (stage 3's slice 11c), in books where they are each
+ * family's (no parent type, flat books included), shared by its guardians: shown only to a reader who may change
+ * families or see parents' details, and the form only to one who may change families, for an active family record.
+ * QuickBooks' copy is shown only in Reconciliation's compare view of a kept difference, audited there.
+ */
+function FamilyDetails({ familyId, details, editable }: { familyId: AppFamilyId; details: ContactForm; editable: boolean }) {
+  const v = details.values;
+  const address = [v.line1, v.line2, v.city, [v.region, v.postalCode].filter(Boolean).join(" "), v.country].filter(Boolean).join(", ");
+  return (
+    <section className="box" aria-labelledby="entry-details-h"><h2 id="entry-details-h">Phone and mailing address</h2>
+      <p>The club&apos;s books have no parents of their own, so these are the family&apos;s, shared by its guardians, as the portal holds them. Its guardians change them on their Family page{editable ? ", and you can change them here" : ""}. A change is saved in the portal first, then sent to the family&apos;s own customer in QuickBooks; where QuickBooks holds details there the portal didn&apos;t know of, nothing is sent over them and the Reconciliation page lists it.</p>
+      {editable ? <DetailsForm initial={details} act={saveFamilyDetailsAction.bind(null, String(familyId))} />
+        : <dl className="details"><dt>Phone</dt><dd>{v.phone || "None"}</dd><dt>Mailing address</dt><dd>{address || "None"}</dd></dl>}
+    </section>
+  );
+}
+
+/**
  * The family's other staff pages, each for staff who may open it: the way from the roster to a family's money, its
  * season, its volunteering and its buy-outs, without going back to a list. Each of those pages records its own read.
  */
@@ -141,6 +167,13 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   // The Parent customers a portal guardian is linked to (stage 3's slice 9h): shown as theirs, with no forms here.
   const ofGuardians = await guardianCustomers(fam.parents.map((p) => p.qboId), familyId);
   const waiting = await loadOpenWrites({ familyId, showAmounts: can(ctx.effective, "Finance.Balance.Read") });
+  // Its kept contact changes the compare view would show now (its own rule), linked for a reader who may open it.
+  const compareIds = can(ctx.effective, "Parents.ReadWrite")
+    ? await comparableContacts(waiting.flatMap((w) => (w.state === "refused" && w.write.op === "contact" ? [w.id] : []))) : new Set<string>();
+  // The family's own phone and mailing address (stage 3's slice 11c), in books where they are each family's: never to a
+  // reader holding Roster.Read alone, who sees no portal phone or address (as on Reconciliation).
+  const familyDetails = page.shape !== null && whoseDetails(page.shape) === "family"
+    && (can(ctx.effective, "Roster.Family.ReadWrite") || can(ctx.effective, "Parents.ReadWrite")) ? await familyContact(familyId) : null;
   // Changes are offered to staff who may make them, while QuickBooks is connected: a linked record's rename and
   // make-inactive send its kind and the app's id, the family action the family's app id and a stamp of whom it covers,
   // and only a Parent customer's forms carry a version and a QuickBooks id (stage 3's slice 9g); a family the roster
@@ -221,7 +254,8 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
         money={entry.kind === "family" && fam.active && customer !== null && customer.active && can(ctx.effective, "Finance.Balance.Read")}
         season={entry.kind === "family" && fam.active && can(ctx.effective, "Season.Progress.Read")}
         credit={entry.kind === "family" && fam.active && can(ctx.effective, "Volunteer.Credit.ReadWrite")} />
-      <Waiting items={waiting} />
+      {familyDetails && <FamilyDetails familyId={familyId} details={familyDetails} editable={can(ctx.effective, "Roster.Family.ReadWrite") && fam.active} />}
+      <Waiting items={waiting} compare={compareIds} />
       {edit && inQuickBooks && entry.kind === "family" && page.shape?.kind === "layered" && <FamilyChanges shape={page.shape} family={inQuickBooks} edit={edit} cover={cover} inactiveRecords={inactiveRecords} />}
       {moves && <MoveStudents students={movable} families={moveTo.families} refusedHere={moveTo.refusedHere} rosterTag={rosterTag} act={moveAction} />}
       {edit && inQuickBooks && entry.kind === "member" && <MemberChanges member={inQuickBooks.customer} edit={edit} />}

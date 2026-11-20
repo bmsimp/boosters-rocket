@@ -3,20 +3,23 @@ import { notFound } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { writeAudit } from "@/lib/audit/log";
-import { getPerson, type PersonFamily } from "@/lib/parents/directory";
+import { getPerson, personContact, type PersonFamily } from "@/lib/parents/directory";
+import { whoseDetails } from "@/lib/parents/my-family";
+import { getShape } from "@/lib/roster/shape";
+import { familyPagesStand } from "@/lib/roster/queries";
 import { getParentSettings, parentDoorClosed } from "@/lib/parents/settings";
 import { LocalTime } from "@/app/components/local-time";
 import { DataTable } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
 import { StateWords } from "@/app/components/state-words";
-import { NameForm, NoteAction, OneButton } from "../forms";
-import { blockAction, unblockAction, resendWelcomeAction, renamePersonAction } from "../actions";
+import { DetailsForm, NameForm, NoteAction, OneButton } from "../forms";
+import { blockAction, unblockAction, resendWelcomeAction, renamePersonAction, savePersonDetailsAction } from "../actions";
 import { GuardianChange } from "../guardian-change";
 import { accessState } from "../access-state";
 import { familyPage } from "@/app/staff/(app)/family-pages";
 import { lifeWords } from "@/lib/parents/link-delivery";
 import { LINK_LIFE_MS } from "@/lib/parents/signin-links";
-import { guardianStandings } from "@/lib/roster/writes";
+import { guardianStandings, keptContactsOf } from "@/lib/roster/writes";
 
 export const metadata = { title: "Parent" };
 export const dynamic = "force-dynamic";
@@ -34,6 +37,19 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   const changesGuardians = can(ctx.effective, "Roster.Family.ReadWrite");
   // Where QuickBooks stands for each membership's own Parent customer (stage 3's slice 9h), in words; QuickBooks text as text.
   const inQuickBooks = await guardianStandings(p.families.filter((f) => !f.previousCompany).map((f) => ({ guardianId: f.guardianId, familyId: f.familyId, name: p.name, open: f.open })));
+  // A guardian's phone and mailing address are the portal's own (stage 3's slices 11a to 11c): each person's in books with
+  // parents of their own, shown and changed here; otherwise each family's, on each family's page. What QuickBooks holds
+  // for a kept difference is shown only in Reconciliation's compare view, audited there, which is linked for a reader
+  // who may open that page (its own guard, Roster.Read).
+  const whose = whoseDetails(await getShape());
+  const contact = whose === "person" ? await personContact(p.parentId) : null;
+  const kept = await keptContactsOf(p.families.filter((f) => !f.previousCompany && f.open).map((f) => f.guardianId));
+  const mayCompare = can(ctx.effective, "Roster.Read");
+  // Only the families they are a guardian of now: a removed membership's family details are no longer theirs.
+  // A family's page answers Not found while the membership shape is missing or names a customer type QuickBooks no
+  // longer has, or the roster cache is another company's: then none is linked for the details, and the page says why.
+  const pagesStand = whose === "family" ? await familyPagesStand() : true;
+  const familyPages = !pagesStand ? [] : p.families.flatMap((f) => (!f.previousCompany && f.open && f.familyId !== null && f.pageStands ? [{ key: f.guardianId, id: f.familyId, name: f.familyName }] : []));
   return (
     <main className="wrap single">
       <h1 className="page-title">{p.name}</h1>
@@ -50,7 +66,13 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
               { key: "family", header: "Family", rowHeader: true, cell: (f) => (f.previousCompany || f.familyId === null || !f.pageStands ? f.familyName
                 : <Link href={familyPage(f.familyId)}>{f.familyName}</Link>) },
               { key: "access", header: "Sign-in", cell: (f) => <StateWords state={accessState(f.kind, p.hasPassword)} words={f.words} /> },
-              { key: "quickbooks", header: "In QuickBooks", cell: (f) => inQuickBooks.get(f.guardianId) ?? "Nothing in QuickBooks for this membership." },
+              { key: "quickbooks", header: "In QuickBooks", cell: (f) => {
+                const said = inQuickBooks.get(f.guardianId) ?? "Nothing in QuickBooks for this membership.";
+                const item = kept.get(f.guardianId);
+                if (item === undefined) return said;
+                return <>{said}{mayCompare ? <Link className="link-line" href={`/staff/reconciliation?compare=${item}#writes-h`}>Compare the two<span className="visually-hidden"> for {f.familyName}</span></Link>
+                  : <span className="when">Someone who may see the Reconciliation page can compare the two there.</span>}</>;
+              } },
               ...(changesGuardians ? [{ key: "change", header: "Change", quiet: true, cell: (f: PersonFamily) => <GuardianChange name={f.familyName} guardianId={f.guardianId} open={f.open} reinstatable={f.reinstatable} /> }] : []),
             ]} />
         )}
@@ -61,7 +83,22 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           <dt>Welcome email</dt><dd>{p.welcomedAt ? <>Sent <LocalTime iso={p.welcomedAt} />{p.welcomeOwed ? ". An email with a link to choose a password is waiting to be sent" : null}</>
             : p.welcomeOwed ? "Waiting to be sent" : "Not sent"}</dd>
         </dl>
-        <p className="hint">The name and sign-in email are the portal&apos;s own. A parent changes their own sign-in email from the Family page; a change made in QuickBooks doesn&apos;t change them. A guardian is added to a family from that family&apos;s page. Where the club&apos;s books have parents of their own, each membership has its own Parent customer in QuickBooks under the family: a new name here is sent to each, and removing them makes theirs inactive only when it has no balance the portal can read, owed or a credit.</p>
+        <p className="hint">The name and sign-in email are the portal&apos;s own. A parent changes their own sign-in email from the Family page; a change made in QuickBooks doesn&apos;t change them. Their phone and mailing address are the portal&apos;s own too, changed by them on their Family page or by staff (below, or on each family&apos;s page where the club&apos;s books have no parents of their own), and each change is then sent to their record in QuickBooks. A guardian is added to a family from that family&apos;s page. Where the club&apos;s books have parents of their own, each membership has its own Parent customer in QuickBooks under the family: a new name here is sent to each, and removing them makes theirs inactive only when it has no balance the portal can read, owed or a credit.</p>
+      </section>
+
+      <section className="box" aria-labelledby="pd-h"><h2 id="pd-h">Phone and mailing address</h2>
+        {contact ? (
+          <>
+            <p>As the portal holds them: the parent changes them on their Family page, and you can change them here. A change is saved in the portal first, then sent to their own Parent customer under each family they are a guardian of; where QuickBooks holds details there the portal didn&apos;t know of, nothing is sent over them and the Reconciliation page lists it. What QuickBooks holds is shown only there, where someone who may see parents&apos; details can compare the two.</p>
+            <DetailsForm initial={contact} act={savePersonDetailsAction.bind(null, p.parentId)} />
+          </>
+        ) : (
+          <>
+            <p>The club&apos;s books have no parents of their own, so a phone and mailing address are each family&apos;s, shared by its guardians: they are shown and changed on the family&apos;s page.</p>
+            {!pagesStand && <Notice tone="info" live="none">A family&apos;s phone and mailing address can&apos;t be shown or changed by staff just now: the families&apos; pages are closed until the club&apos;s customer types are set again on Settings, QuickBooks. The parent can still change them on their Family page.</Notice>}
+            {familyPages.length > 0 && <ul className="lines">{familyPages.map((f) => <li key={f.key}><Link className="link-line" href={familyPage(f.id)}>{f.name}</Link></li>)}</ul>}
+          </>
+        )}
       </section>
 
       <section className="box" aria-labelledby="pn-h"><h2 id="pn-h">Name</h2>

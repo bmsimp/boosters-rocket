@@ -11,11 +11,17 @@ export const NAME_MAX = 100;
 /** A tab, a line break, or any other control character: C0, DEL, C1, and the Unicode line and paragraph separators. */
 const isControl = (ch: string): boolean => { const c = ch.codePointAt(0)!; return c < 0x20 || (c >= 0x7f && c <= 0x9f) || c === 0x2028 || c === 0x2029; };
 
+/**
+ * A name as the portal keeps it: composed (NFC), trimmed, each run of spaces one space. checkName() applies it to every
+ * name staff type, and the accounting links screen compares names after it (src/lib/accounting/differences.ts).
+ */
+export const normalName = (raw: string): string => raw.normalize("NFC").trim().replace(/ {2,}/g, " ");
+
 export type NameCheck = { ok: true; name: string } | { ok: false; error: string };
 
 export function checkName(raw: unknown): NameCheck {
   if (typeof raw !== "string") return { ok: false, error: "Enter a name." };
-  const name = raw.normalize("NFC").trim().replace(/ {2,}/g, " ");
+  const name = normalName(raw);
   if (!name) return { ok: false, error: "Enter a name." };
   if (name.length > NAME_MAX) return { ok: false, error: `That name is too long: ${NAME_MAX} characters at most.` };
   if (name.includes(":")) return { ok: false, error: "A name can't have a colon in it: QuickBooks uses one to join a student's or parent's name to their family's." };

@@ -117,6 +117,11 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   roster lock at most three seconds, as the confirm does, and gives up changing nothing: a roster read holds it
  *   through its whole QuickBooks read, and the person's row must not be held that long, since a code request waits for
  *   it (FOR KEY SHARE, below);
+ * - saveDetails() (contact-edits.ts, a parent's save of their phone and mailing address, stage 3's slice 11b) takes the
+ *   person's row (or, in books with no parent type, the family's) by its one conditional update, then, through
+ *   queueContactChange() (contact-queue.ts), the record's open contact items FOR UPDATE SKIP LOCKED (never waited for),
+ *   then closes those it may and inserts its own items (a key share on each membership's family row, by the foreign
+ *   key); it takes no roster lock and no "being sent" lock, and waits for none;
  * - setSignins(false) (switches.ts) takes FOR UPDATE, in id order, the row of every person it will touch (an owed
  *   welcome, an unused code, an unused link, a device, a session), then clears the owed welcomes, then deletes the
  *   unused codes, then the unused links, then the devices, then the sessions; setWelcome() takes the rows whose welcome it changes the same way before it changes them;

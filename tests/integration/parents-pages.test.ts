@@ -156,6 +156,28 @@ describe("the staff pages for parents", () => {
     expect(await audits("parent.read")).toHaveLength(1); // an unknown ID records no read
   });
 
+  it("a person's page shows their phone and mailing address as the portal holds them, with the form, only after its read is recorded; in books with no parent type, each family's page instead", async () => {
+    const ana = await anaRow();
+    await db.update(parent).set({ phone: "555-0123", addressLine1: "12 Heron Lane", addressCity: "Austin", contactVersion: 4 }).where(eq(parent.id, ana.id));
+    let html = await personPage(ana.id);
+    const details = html.slice(html.indexOf("pd-h"), html.indexOf("</section>", html.indexOf("pd-h")));
+    expect(details).toContain("value=\"555-0123\"");
+    expect(details).toContain("value=\"12 Heron Lane\"");
+    expect(details).toContain("value=\"Austin\"");
+    expect(details).toContain("Save details");
+    expect(html).toContain("Their phone and mailing address are the portal&#x27;s own too, changed by them on their Family page or by staff");
+    expect(await audits("parent.read")).toHaveLength(1);
+    // Never on the list page.
+    expect(await parentsPage()).not.toContain("555-0123");
+    await seedShape({ kind: "layered", familyTypeId: "F", studentTypeId: "S", parentTypeId: null });
+    html = await personPage(ana.id);
+    expect(html).not.toContain("555-0123");
+    expect(html).not.toContain("Save details");
+    expect(html).toContain("a phone and mailing address are each family&#x27;s, shared by its guardians");
+    const listed = html.slice(html.indexOf("pd-h"), html.indexOf("</section>", html.indexOf("pd-h")));
+    expect(listed).toContain(`href="/staff/roster/${await recordOfCustomer("10", "family")}"`);
+  });
+
   it("names a link from a previous QuickBooks company without looking up or linking its old family ID", async () => {
     const ana = await anaRow();
     // "20" is that company's ID; in the connected company it names Chen <b>Family</b>, which is not where this link came from.

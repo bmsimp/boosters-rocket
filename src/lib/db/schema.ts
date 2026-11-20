@@ -580,7 +580,25 @@ export type RosterWrite =
    * whose own Parent customer it makes or changes, saved in the portal first. Never sent; an item queued before that
    * slice names none and goes on as before, linking nothing.
    */
-  | { op: "deactivate"; role: RosterRole | "other"; qboId: string; syncToken: string; checked?: true; guardianId?: string };
+  | { op: "deactivate"; role: RosterRole | "other"; qboId: string; syncToken: string; checked?: true; guardianId?: string }
+  /**
+   * A guardian's phone and mailing address, saved in the portal first by a parent (stage 3's slice 11b,
+   * src/lib/parents/contact-queue.ts) and sent on by the queue's worker with today's body (CUSTOMER_UPDATE): `role`
+   * `parent` for a person's own details, sent to the own Parent customer of the membership `guardianId` names; `family`
+   * or `member` for a family's, in books with no parent type, sent to the family's own linked customer. `change` holds
+   * the fields the save changed, as the portal holds them now (the address whole when any part changed); `was`, the same
+   * fields as the portal held them before (or as an earlier change this one took the place of held them), which the
+   * cache and a live read are compared with; `orWas`, what each earlier change that may have been sent asked for (one
+   * entry per change, any of which QuickBooks may hold instead). A change that took the place of earlier ones, or that
+   * follows one that may have been sent, carries every field they changed, so closing them loses nothing.
+   * `syncToken` is the link's own version (empty when it has none: then nothing is sent before a live read); `checked`,
+   * that it was sent with a version read live after the fields read as `was` or `orWas`, so its answer aligns the link.
+   * Only `Id`, `SyncToken` and the fields of `change` are sent.
+   */
+  | { op: "contact"; role: "parent" | "family" | "member"; qboId: string; syncToken: string; change: ContactDetails; was: ContactDetails; orWas?: ContactDetails[];
+      checked?: true; guardianId?: string };
+/** A phone and a mailing address as a contact item carries them (RosterWrite `contact`): each part a field of the portal's form. */
+export type ContactDetails = { phone?: string; address?: { line1: string; line2: string; city: string; region: string; postalCode: string; country: string } };
 /**
  * A volunteer buy-out's write to QuickBooks (v1 spec §11.5, src/lib/buyouts/writes.ts), kept in `write_queue.request`
  * beside the roster writes: the invoice made for one buy-out, and its void. Every id is a QuickBooks id of the company
@@ -614,7 +632,8 @@ export type QueuedWrite = RosterWrite | BuyoutWrite;
  * answers), a parent's own customer, an invoice's student. A done or given-up item is kept 30 days (the daily
  * clean-up); every item goes when a different company is connected, before the app's records.
  * `refused` (stage 3's slice 9e): a change the portal saved first (a rename of a linked family, member or student, or a
- * student's create filed under the student record) that QuickBooks refused: the portal keeps its value, and the item
+ * student's create filed under the student record; since slice 11b a parent's phone and mailing address too) that
+ * QuickBooks refused, or the portal held back: the portal keeps its value, and the item
  * holds what was asked, as sent, and QuickBooks' short code, until staff send the portal's value again, give it up, or
  * a later change to the same record takes its place. It is never tried by the worker and blocks nothing; the clean-up
  * keeps it.

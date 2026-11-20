@@ -18,7 +18,7 @@ import { coverStamp, familyCover, LINKED_DEACTIVATE, MAKING_LOCK } from "@/lib/r
 import { TRY_AGAIN_NEEDS_LINKING } from "@/lib/roster/queue";
 import { addGuardianAction, reinstateGuardianAction, removeGuardianAction } from "@/app/staff/(app)/parents/actions";
 import { addStudentAction, addStudentHereAction, createAction, createAndLinkAction, deactivateAction, deactivateHereAction, deactivateLinkedAction, familyInactiveAction, giveUpAction, moveAction,
-  renameHereAction, renameLinkedAction, renameParentAction, sendPortalValueAction, tryAgainAction } from "@/app/staff/(app)/roster/write-actions";
+  renameHereAction, renameLinkedAction, renameParentAction, saveFamilyDetailsAction, sendPortalValueAction, tryAgainAction } from "@/app/staff/(app)/roster/write-actions";
 import RosterPage from "@/app/staff/(app)/roster/page";
 import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
 import ReconciliationPage from "@/app/staff/(app)/reconciliation/page";
@@ -42,6 +42,8 @@ const RENAME = { op: "rename" as const, role: "student" as const, qboId: "12", s
 const SOME_UUID = "00000000-0000-4000-8000-000000000000";
 /** A stamp of the shape a family's page binds (coverStamp()), sealing no cover: for the checks made before anything is looked up. */
 const SOME_STAMP = "A".repeat(22);
+/** A family's phone and mailing address as its page's form sends them (stage 3's slice 11c): the seven fields and the version. */
+const DETAILS = { phone: "512-555-0222", line1: "", line2: "", city: "", region: "", postalCode: "", country: "", version: "f:0" };
 /**
  * The Rivera family's make-inactive as its page binds it (stage 3's slice 9g): the family record's app id and the stamp
  * of whom the cover the page drew holds, never an id or a version to trust.
@@ -63,6 +65,7 @@ const everyAction = (tag: string, itemId: string) => [
   () => familyInactiveAction(tag, SOME_UUID, SOME_STAMP),
   () => tryAgainAction(itemId),
   () => giveUpAction(itemId, "Done by hand."),
+  () => saveFamilyDetailsAction(SOME_UUID, DETAILS),
 ];
 
 let tag: string;
@@ -126,6 +129,12 @@ describe("the roster write actions are staff actions on Roster.Family.ReadWrite,
       () => familyInactiveAction(tag, 10 as unknown as string, SOME_STAMP),
       () => tryAgainAction("not-a-uuid"),
       () => giveUpAction("00000000-0000-4000-8000-000000000000", 7 as unknown as string),
+      // A family's details name the family by its record's app id, with the form's fields and nothing else.
+      () => saveFamilyDetailsAction("10", DETAILS),
+      () => saveFamilyDetailsAction(SOME_UUID, DETAILS),
+      () => saveFamilyDetailsAction(SOME_UUID, { ...DETAILS, phone: 7 }),
+      () => saveFamilyDetailsAction(SOME_UUID, { ...DETAILS, version: "0" }),
+      () => saveFamilyDetailsAction(SOME_UUID, "phone=1"),
     ];
     for (const act of odd) expect(await act()).toEqual(NOT_FROM_PAGE);
     expect(posts()).toEqual([]);
@@ -300,7 +309,8 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
     }
     // A guardian is added under Portal sign-ins, which makes their Parent customer: the QuickBooks-only form is gone.
     expect(html).not.toContain("Add a parent");
-    // A guardian's phone and address are the portal's own (stage 3's slice 11a): nothing says they are changed in QuickBooks.
+    // A guardian's phone and address are the portal's own (stage 3's slice 11a), sent on after each save (slice 11b):
+    // nothing says staff change them in QuickBooks.
     expect(html).toContain(NOT_HERE.contact.replaceAll("'", "&#x27;"));
     expect(NOT_HERE.contact).toMatch(/phone and mailing address are the portal's own: they change them themselves on their Family page/);
     expect(html).not.toMatch(/phone numbers and mailing addresses are changed in QuickBooks/);
@@ -418,6 +428,32 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
     expect(member).toContain("Change the member Ana Rivera");
     expect(member).not.toContain("Add a student");
     expect(await createAction(tag, "member", "Sky Lee", "3")).toMatchObject({ ok: true });
+  });
+
+  it("a family's own phone and mailing address, in books with no parent type: shown to staff who may change families or see parents, the form to the first alone", async () => {
+    await resetDb(); stub.reset();
+    tag = await connectRoster(stub, { shape: { kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: null } });
+    const id = await idOf("10");
+    await db.update(family).set({ phone: "555-0177", addressLine1: "9 Plover Row", contactVersion: 2 }).where(eq(family.id, await recordOfCustomer("10", "family")));
+    const section = (html: string) => { const at = html.indexOf("entry-details-h"); return at < 0 ? "" : html.slice(at, html.indexOf("</section>", at)); };
+    asStaff(await staffWith("reader@club.org", ["Roster.Read"]));
+    let html = await renderPage(RosterEntryPage, { params: { id } });
+    expect(section(html)).toBe("");
+    expect(html).not.toContain("555-0177");
+    asStaff(await staffWith("parents@club.org", ["Roster.Read", "Parents.ReadWrite"]));
+    html = section(await renderPage(RosterEntryPage, { params: { id } }));
+    expect(html).toContain("555-0177");
+    expect(html).toContain("9 Plover Row");
+    expect(html).not.toContain("Save details");
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    html = section(await renderPage(RosterEntryPage, { params: { id } }));
+    expect(html).toContain("value=\"555-0177\"");
+    expect(html).toContain("Save details");
+    // In books with a parent type the details are each person's: the family's page shows none.
+    await resetDb(); stub.reset();
+    tag = await connectRoster(stub);
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Parents.ReadWrite"]));
+    expect(section(await renderPage(RosterEntryPage, { params: { id: await idOf("10") } }))).toBe("");
   });
 
   it("hostile names stay text on the forms", async () => {

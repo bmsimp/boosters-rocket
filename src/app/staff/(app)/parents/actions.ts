@@ -5,6 +5,13 @@ import { blockPerson, renamePerson, unblockPerson } from "@/lib/parents/people";
 import { addGuardian, reinstateGuardian, removeGuardian } from "@/lib/parents/guardians";
 import { familyRecordAt } from "@/lib/families/address";
 import { resendWelcome } from "@/lib/parents/welcome";
+import { can } from "@/lib/permissions/effective";
+import { getPerson } from "@/lib/parents/directory";
+import { parseContactForm, type ContactForm } from "@/lib/parents/contact-fields";
+import { saveDetails } from "@/lib/parents/contact-edits";
+import { whoseDetails } from "@/lib/parents/my-family";
+import { getShape } from "@/lib/roster/shape";
+import { contactSavedWords, SAVED_LEASE_MS, sendContactSaved, STAFF_DETAILS_COPY } from "@/lib/roster/writes";
 
 // Seeing parents, their names, blocking and the welcome are Parents.ReadWrite's. Giving an address a family's sign-in,
 // or ending one, is Roster.Family.ReadWrite's (with the Roster.Read it brings): the permission that changes a family
@@ -162,6 +169,36 @@ export const reinstateGuardianAction = staffAction(R, async (ctx, guardianId: st
   }
   refresh();
   return { ok: true, message: withQuickBooks("Reinstated. Their sign-in for this family is back.", r.quickbooks) };
+});
+
+/**
+ * A person's phone and mailing address, changed by staff on the person's page (stage 3's slice 11c), in books where they
+ * are each person's own (whoseDetails()): `parentId`, bound by the page, a uuid of a person the portal holds; `sent`,
+ * the seven fields and the version the form was shown (`p:<n>`), read whole by parseContactForm(). The one save
+ * (saveDetails()), its items held for the at-once try (QueueAs), then, after its commit, that try (sendContactSaved()).
+ * `current`: the details as they stand, shown in place of what was typed. `compare`: the kept items whose compare view
+ * the reader may open (Reconciliation's own guard, Roster.Read, beside this page's Parents.ReadWrite).
+ */
+type DetailsDone = { ok: true; message: string; status?: "waiting" | "attention"; current: ContactForm; compare: string[] } | { ok: false; errors: string[]; current?: ContactForm };
+export const savePersonDetailsAction = staffAction(P, async (ctx, parentId: string, sent: unknown): Promise<DetailsDone> => {
+  if (!personId(parentId)) return NOT_FROM_PAGE;
+  const parsed = parseContactForm(sent);
+  if (!parsed.ok) return NOT_FROM_PAGE;
+  const person = await getPerson(parentId);
+  if (!person) return NOT_FROM_PAGE;
+  // Whose details these are, read before the save as a parent's save reads it: a form drawn for the person's details that
+  // comes back after a shape save made them each family's is answered as changed, and nothing is saved on either row.
+  if (whoseDetails(await getShape()) !== "person") return { ok: false, errors: [STAFF_DETAILS_COPY.whoseChanged] };
+  const of = { kind: "person" as const, parentId: person.parentId };
+  const r = await saveDetails(of, parsed.form, { ...op(ctx), queueAs: { askedBy: ctx.staffUserId, nextTryAt: new Date(Date.now() + SAVED_LEASE_MS) } });
+  if (r.is === "none") return NOT_FROM_PAGE;
+  if (r.is === "invalid") return { ok: false, errors: r.errors };
+  if (r.is === "stale") return r.current ? { ok: false, errors: [STAFF_DETAILS_COPY.changed], current: r.current } : NOT_FROM_PAGE;
+  if (r.is === "unchanged") return { ok: true, message: STAFF_DETAILS_COPY.unchanged, current: r.current, compare: [] };
+  refresh();
+  const said = contactSavedWords(await sendContactSaved(of, r.queueIds, { ...op(ctx), staffUserId: ctx.staffUserId }), "person",
+    { mayCompare: can(ctx.effective, "Roster.Read"), whoCompares: "someone who may see the Reconciliation page can compare the two there." });
+  return { ok: true, message: [STAFF_DETAILS_COPY.savedPerson, ...said.sentences].join(" "), ...(said.status ? { status: said.status } : {}), current: r.current, compare: said.compare };
 });
 
 export const renamePersonAction = staffAction(P, async (ctx, parentId: string, name: string): Promise<Done> => {
