@@ -17,7 +17,7 @@ import type { AppFamilyId } from "@/lib/families/ids";
 import type { ContactValues } from "@/lib/parents/contact-fields";
 import { saveDetails, saveMyContact } from "@/lib/parents/contact-edits";
 import { CONTACT_REPLACED_NOTE } from "@/lib/parents/contact-queue";
-import { contactSavedWords, CONTACT_DIFFERS, keptContactWords, SAVED_LEASE_MS, SENDING_LOCK, sendContactSaved, STAFF_DETAILS_COPY } from "@/lib/roster/writes";
+import { contactSavedWords, CONTACT_DIFFERS, keptContactWords, RosterBusyAtTry, SAVED_LEASE_MS, SENDING_LOCK, sendContactSaved, STAFF_DETAILS_COPY, trySavedItem } from "@/lib/roster/writes";
 import { runWriteQueue } from "@/lib/roster/queue";
 import type { MembershipShape } from "@/lib/roster/shape";
 import { savePersonDetailsAction } from "@/app/staff/(app)/parents/actions";
@@ -258,13 +258,14 @@ describe("the gate, a parent's change on the queue, and the version (items 3 to 
 });
 
 describe("ids no page sends, and who may (items 1 to 3)", () => {
-  it("another person's id, a student's, a family's, a non-uuid, odd fields: refused, nothing of anyone changed or queued", async () => {
+  it("another person's id at a version not theirs, a student's, a family's, a non-uuid, odd fields: refused, nothing of anyone changed or queued", async () => {
     const a = await ana();
     await setPersonDetails(a.ana.id, {}, 3);
     const kit = await seedParent({ name: "Kit Rivera", email: "kit@example.com" });
     const leo = String(await recordOfCustomer("12", "student"));
     asStaff(registrar);
-    // Ana's form (version 3) sent with Kit's id: Kit's row isn't at that version, so nothing is saved on it.
+    // Ana's form (version 3) sent with Kit's id: the version is checked against Kit's own row, which isn't at it, so
+    // nothing is saved on it. (At Kit's own version it would be: the next test.)
     expect(await savePersonDetailsAction(kit.id, form({ phone: NEW_PHONE }, "p:3"))).toMatchObject({ ok: false, errors: [STAFF_DETAILS_COPY.changed] });
     for (const id of [leo, String(rivera), "not-a-uuid", "11", 11 as unknown as string]) expect(await savePersonDetailsAction(id, form({ phone: NEW_PHONE }, "p:3")), String(id)).toEqual(NOT_FROM_PAGE);
     for (const sent of [{ ...form({}, "p:3"), phone: 7 }, { phone: NEW_PHONE }, "phone=1", null, form({ phone: NEW_PHONE }, "3")]) {
@@ -282,6 +283,26 @@ describe("ids no page sends, and who may (items 1 to 3)", () => {
     expect(await items()).toEqual([]);
     expect(await auditsOf("parent.details.save")).toEqual([]);
     expect(posts()).toEqual([]);
+  });
+
+  it("what the version check is: another record's id at that record's own version is saved on that record, as its own page would save it", async () => {
+    // The id is checked as a record the portal holds and the version as that record's own; nothing else tells one
+    // record's form from another's, and both actions' permissions already cover every such record. So a form sent with
+    // another person's (or another active family's) id at that one's own version changes that one, audited as theirs,
+    // and the record the form was drawn for is left as it was.
+    const a = await ana();
+    const kit = await seedParent({ name: "Kit Rivera", email: "kit@example.com" });
+    asStaff(registrar);
+    expect(await savePersonDetailsAction(kit.id, form({ phone: NEW_PHONE }, "p:0"))).toMatchObject({ ok: true, current: asSaved({ phone: NEW_PHONE }, "p:1") });
+    expect(await personDetails(kit.id)).toEqual({ values: { ...NO_DETAILS, phone: NEW_PHONE }, version: 1 });
+    expect(await personDetails(a.ana.id)).toMatchObject({ version: 1, values: { phone: "555-0101" } });
+    expect((await auditsOf("parent.details.save")).map((r) => r.targetId)).toEqual([kit.id]);
+    // A family record that isn't the page's: Rivera's form at f:0 sent with Chen's id, both at version 0.
+    await storeShape(NO_PARENT_TYPE);
+    expect(await saveFamilyDetailsAction(String(chen), form({ phone: NEW_PHONE }, "f:0"))).toMatchObject({ ok: true, current: asSaved({ phone: NEW_PHONE }, "f:1") });
+    expect(await familyDetails(chen)).toEqual({ values: { ...NO_DETAILS, phone: NEW_PHONE }, version: 1 });
+    expect(await familyDetails(rivera)).toMatchObject({ version: 0, values: NO_DETAILS });
+    expect((await auditsOf("parent.details.save")).map((r) => r.targetId).sort()).toEqual([String(chen), kit.id].sort());
   });
 
   it("a holder of Roster.Read alone is refused by both actions, and the family's page shows them no details and no form", async () => {
@@ -318,7 +339,7 @@ describe("the at-once try, whatever stands in its way (item 4)", () => {
       return savePersonDetailsAction(a.ana.id, form({ phone: NEW_PHONE }, "p:1"));
     });
     expect(r).toEqual({ ok: true, status: "waiting", current: asSaved({ phone: NEW_PHONE }, "p:2"), compare: [],
-      message: `${SAVED} Nothing was sent to their record under Rivera Family just now: a change to it is being sent to QuickBooks at this moment. The portal tries them shortly, and you'll find them on the Reconciliation page until then.` });
+      message: `${SAVED} Nothing was sent to their record under Rivera Family just now: another change to this record is under way at this moment. The portal tries them shortly, and you'll find them on the Reconciliation page until then.` });
     expect(posts()).toEqual([]);
     const [item] = await items();
     expect(item).toMatchObject({ state: "waiting", sent: false, tries: 0 });
@@ -344,7 +365,7 @@ describe("the at-once try, whatever stands in its way (item 4)", () => {
     }
     expect(sent.map((s) => s.got)).toEqual([{ is: "roster" }]);
     expect(contactSavedWords(sent, "person", { mayCompare: true, whoCompares: "" })).toEqual({ status: "waiting", compare: [],
-      sentences: ["Nothing was sent to their record under Rivera Family just now: the portal is reading the roster from QuickBooks. The portal tries them shortly, and you'll find them on the Reconciliation page until then."] });
+      sentences: ["Nothing was sent to their record under Rivera Family just now: the roster is busy at this moment. The portal tries them shortly, and you'll find them on the Reconciliation page until then."] });
     expect(posts()).toEqual([]);
     expect(await items()).toEqual([expect.objectContaining({ state: "waiting", sent: false, tries: 0 })]);
   });
@@ -412,6 +433,110 @@ describe("the at-once try, whatever stands in its way (item 4)", () => {
       sentences: ["Nothing was sent to their record under Rivera Family: the guardian was removed in the portal, or their family made inactive, before it was sent."] });
     expect(posts()).toEqual([]);
   });
+
+  it("an item tried by someone else between the first read and its lock: read again, left to the worker untouched, never sent again", async () => {
+    const a = await ana();
+    const saved = await saveDetails({ kind: "person", parentId: a.ana.id }, asSaved({ phone: NEW_PHONE }, "p:1"), { ...staffOp(), queueAs: queueAs() });
+    if (saved.is !== "saved") throw new Error("not saved");
+    const lock = await holdTheRosterLock();
+    let sent: Awaited<ReturnType<typeof sendContactSaved>>;
+    try {
+      // The at-once try has read the item and holds its lock, waiting for the roster lock; meanwhile the item is tried
+      // elsewhere and its answer lost (as the worker leaves one once its lease has run out).
+      const sending = sendContactSaved({ kind: "person", parentId: a.ana.id }, saved.queueIds, staffOp(), { rosterWaitMs: 15_000 });
+      await untilALockIsAwaited();
+      await db.update(writeQueue).set({ sent: true, tries: 1, lastCode: "unreachable", lastTriedAt: new Date() }).where(eq(writeQueue.id, saved.queueIds[0]!));
+      await lock.release();
+      sent = await sending;
+    } finally {
+      await lock.release();
+    }
+    expect(sent.map((s) => s.got)).toEqual([{ is: "waiting", sent: true }]);
+    expect(posts()).toEqual([]);
+    expect(await queueItem(saved.queueIds[0]!)).toMatchObject({ state: "waiting", sent: true, tries: 1, lastCode: "unreachable" });
+  });
+
+  it("the roster lock held at the try's own look: nothing sent, the item as it was, and never waited on past the wait", async () => {
+    const a = await ana();
+    const saved = await saveDetails({ kind: "person", parentId: a.ana.id }, asSaved({ phone: NEW_PHONE }, "p:1"), { ...staffOp(), queueAs: queueAs() });
+    if (saved.is !== "saved") throw new Error("not saved");
+    const item = (await queueItem(saved.queueIds[0]!))!;
+    if (item.request.op !== "contact") throw new Error("not a contact item");
+    const lock = await holdTheRosterLock();
+    try {
+      // Its first look under the roster lock (the gate) gives up after the wait: the rejection is the proof.
+      await expect(trySavedItem(item, item.request, { by: "at_once", linkedBy: registrar.id, actor: staffOp().actor, ip: null, permission: "Parents.ReadWrite", rosterWaitMs: 1_000 }))
+        .rejects.toBeInstanceOf(RosterBusyAtTry);
+    } finally {
+      await lock.release();
+    }
+    expect(posts()).toEqual([]);
+    expect(await queueItem(item.id)).toMatchObject({ state: "waiting", sent: false, tries: 0 });
+  });
+
+  it("given up on Reconciliation between the commit and the try: said so, from what the item holds, and nothing sent", async () => {
+    const a = await ana();
+    const saved = await saveDetails({ kind: "person", parentId: a.ana.id }, asSaved({ phone: NEW_PHONE }, "p:1"), { ...staffOp(), queueAs: queueAs() });
+    if (saved.is !== "saved") throw new Error("not saved");
+    await db.update(writeQueue).set({ state: "given_up", finishedAt: new Date() }).where(eq(writeQueue.id, saved.queueIds[0]!));
+    const sent = await sendContactSaved({ kind: "person", parentId: a.ana.id }, saved.queueIds, staffOp());
+    expect(sent.map((s) => s.got)).toEqual([{ is: "abandoned", sent: false }]);
+    expect(contactSavedWords(sent, "person", { mayCompare: true, whoCompares: "" })).toEqual({ status: "attention", compare: [],
+      sentences: ["Nothing was sent to their record under Rivera Family: the change was given up on the Reconciliation page meanwhile. The portal keeps the details."] });
+    // One that may have been sent before it was given up is never said not to have gone through.
+    expect(contactSavedWords([{ ...sent[0]!, got: { is: "abandoned", sent: true } }], "person", { mayCompare: true, whoCompares: "" }).sentences)
+      .toEqual(["The change for their record under Rivera Family was given up on the Reconciliation page while it was being sent, so QuickBooks has the details only if that try got through. The portal keeps them."]);
+    expect(posts()).toEqual([]);
+  });
+
+  it("the details changed again with no newer change queued for the record: given up, and never said to be carried by one", async () => {
+    const a = await ana();
+    const saved = await saveDetails({ kind: "person", parentId: a.ana.id }, asSaved({ phone: NEW_PHONE }, "p:1"), { ...staffOp(), queueAs: queueAs() });
+    if (saved.is !== "saved") throw new Error("not saved");
+    // The portal's details change with nothing queued for her record (as a save does once QuickBooks' copy has it inactive).
+    await setPersonDetails(a.ana.id, { phone: "512-555-0333" }, 3);
+    const sent = await sendContactSaved({ kind: "person", parentId: a.ana.id }, saved.queueIds, staffOp());
+    expect(sent.map((s) => s.got)).toEqual([{ is: "outdated" }]);
+    expect(contactSavedWords(sent, "person", { mayCompare: true, whoCompares: "" })).toEqual({ status: "attention", compare: [],
+      sentences: ["Nothing was sent to their record under Rivera Family from this save: the portal's details changed again after it, and no newer change of them was queued for this record, so nothing goes to QuickBooks for it. This page shows the details the portal holds now."] });
+    expect(await queueItem(saved.queueIds[0]!)).toMatchObject({ state: "given_up" });
+    expect(posts()).toEqual([]);
+  });
+});
+
+describe("a family's details kept as a difference, and a family with no link (items 2 and 4)", () => {
+  it("kept: said so, the compare view linked in the answer and on the family's page only for a reader holding Parents.ReadWrite", async () => {
+    await storeShape(NO_PARENT_TYPE);
+    inQuickBooks(stub, "10").PrimaryPhone = { FreeFormNumber: "555-9999" };
+    await db.update(qboCustomer).set({ phone: "555-9999" }).where(eq(qboCustomer.qboId, "10"));
+    asStaff(registrar);
+    const r = await saveFamilyDetailsAction(String(rivera), form({ phone: NEW_PHONE }, "f:0"));
+    const [item] = await items();
+    expect(item).toMatchObject({ state: "refused", lastCode: CONTACT_DIFFERS });
+    const held = keptContactWords(CONTACT_DIFFERS, item!.request as Extract<RosterWrite, { op: "contact" }>);
+    expect(r).toEqual({ ok: true, status: "attention", current: asSaved({ phone: NEW_PHONE }, "f:1"), compare: [item!.id],
+      message: `${SAVED_FAMILY} They didn't reach Rivera Family's record in QuickBooks. ${held} It is kept on the Reconciliation page: compare the two there, from the link below.` });
+    expect(posts()).toEqual([]);
+    const page = async () => decode(await renderPage(RosterEntryPage, { params: { id: String(rivera) } }));
+    expect(await page()).toContain(`/staff/reconciliation?compare=${item!.id}#writes-h`);
+    // A reader who may change families but not see parents' details: told who can, and given no link anywhere.
+    asStaff(await staffWith("writer@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    const again = await saveFamilyDetailsAction(String(rivera), form({ phone: "512-555-0444" }, "f:1"));
+    const newer = (await items()).find((i) => i.state === "refused" && i.id !== item!.id)!;
+    expect(again).toEqual({ ok: true, status: "attention", current: asSaved({ phone: "512-555-0444" }, "f:2"), compare: [],
+      message: `${SAVED_FAMILY} They didn't reach Rivera Family's record in QuickBooks. ${keptContactWords(CONTACT_DIFFERS, newer.request as Extract<RosterWrite, { op: "contact" }>)} It is kept on the Reconciliation page: someone who may see parents' details can compare the two there.` });
+    expect(await page()).not.toContain("?compare=");
+  });
+
+  it("a family with no link: saved, and nothing sent to QuickBooks for it", async () => {
+    await storeShape(NO_PARENT_TYPE);
+    const [hand] = await db.insert(family).values({ name: "Hand Family", active: true }).returning({ id: family.id });
+    asStaff(registrar);
+    expect(await saveFamilyDetailsAction(String(hand!.id), form({ phone: NEW_PHONE }, "f:0")))
+      .toEqual({ ok: true, message: `${SAVED_FAMILY} Nothing was sent to QuickBooks for Hand Family.`, current: asSaved({ phone: NEW_PHONE }, "f:1"), compare: [] });
+    expect(await items()).toEqual([]);
+    expect(posts()).toEqual([]);
+  });
 });
 
 describe("the person's page: the details, and where QuickBooks stands for them (items 1 and 5)", () => {
@@ -459,5 +584,31 @@ describe("the person's page: the details, and where QuickBooks stands for them (
     expect(html).toContain(`href="/staff/roster/${String(rivera)}"`);
     expect(html).not.toContain("555-0101");
     expect(html).not.toContain("Save details");
+  });
+
+  /** The page's "Phone and mailing address" section alone. */
+  const detailsSection = (html: string) => html.slice(html.indexOf("id=\"pd-h\""), html.indexOf("id=\"pn-h\""));
+
+  it("in books with no parent type: a family they are no longer a guardian of isn't linked as the place their details are kept", async () => {
+    const a = await ana();
+    await storeShape(NO_PARENT_TYPE);
+    await db.execute(sql`update guardian set status = 'disabled' where id = ${a.row.id}`);
+    asStaff(registrar);
+    const section = detailsSection(await page(a.ana.id));
+    expect(section).toContain("a phone and mailing address are each family's");
+    expect(section).not.toContain(`href="/staff/roster/${String(rivera)}"`);
+  });
+
+  it("a kept change whose record no longer stands (the guardian removed): no compare link, and nobody pointed at one", async () => {
+    const a = await ana();
+    inQuickBooks(stub, "11").PrimaryPhone = { FreeFormNumber: "555-9999" };
+    await db.update(qboCustomer).set({ phone: "555-9999" }).where(eq(qboCustomer.qboId, "11"));
+    asStaff(registrar);
+    await savePersonDetailsAction(a.ana.id, form({ phone: NEW_PHONE }, "p:1"));
+    expect((await items()).map((i) => i.state)).toEqual(["refused"]);
+    await db.execute(sql`update guardian set status = 'disabled' where id = ${a.row.id}`);
+    const html = await page(a.ana.id);
+    expect(html).not.toContain("?compare=");
+    expect(html).not.toContain("can compare the two there");
   });
 });

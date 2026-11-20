@@ -49,11 +49,11 @@ export function WhatChanges({ shape, canChange, unlinked = false }: { shape: Mem
  * The writes waiting or stuck for this family or member, and the changes saved in the portal first that QuickBooks
  * refused (stage 3's slice 9e), each under its own heading: shown to everyone who can see the page, with no buttons (the
  * Reconciliation page has them). A refused change blocks nothing here, but that a kept move holds back making either of
- * its families inactive (MOVE_PENDING) until it is sent or given up. `compare`: the reader may open Reconciliation's
- * compare view of a kept change of a guardian's phone and mailing address (Parents.ReadWrite: stage 3's slice 11c),
- * linked for each whose record still stands.
+ * its families inactive (MOVE_PENDING) until it is sent or given up. `compare`: the kept changes of a guardian's phone
+ * and mailing address the reader may open in Reconciliation's compare view (Parents.ReadWrite: stage 3's slice 11c),
+ * each one whose record still stands by the compare view's own rule (comparableContacts()); empty for anyone else.
  */
-export function Waiting({ items, compare = false }: { items: QueueView[]; compare?: boolean }) {
+export function Waiting({ items, compare = new Set<string>() }: { items: QueueView[]; compare?: ReadonlySet<string> }) {
   const open = items.filter((i) => i.state !== "refused"), refused = items.filter((i) => i.state === "refused");
   return (
     <>
@@ -72,7 +72,7 @@ export function Waiting({ items, compare = false }: { items: QueueView[]; compar
           <p>These changes are saved in the portal, but they didn&apos;t go through to QuickBooks (QuickBooks refused them, the portal held them back as QuickBooks has something else, or they couldn&apos;t be sent), so QuickBooks still has something else. They don&apos;t stop other changes, except that a student&apos;s move kept here stops either of its two families being made inactive until it is sent or given up. On the <a href="/staff/reconciliation">Reconciliation page</a>, someone who may change families can send the portal&apos;s value again or give it up.</p>
           <DataTable caption="Each change that didn't go through, and why" captionHidden rows={refused} rowKey={(i) => i.id} columns={[
             { key: "change", header: "Change", rowHeader: true, cell: (i) => <>{i.words}{i.moneyNote ? <span className="when">{i.moneyNote}</span> : null}</> },
-            { key: "why", header: "Why", cell: (i) => <>{keptWordsFor(i.write, i.lastCode, i.holds, i.differs)}{compare && i.write.op === "contact" && i.notOffered !== "record_gone"
+            { key: "why", header: "Why", cell: (i) => <>{keptWordsFor(i.write, i.lastCode, i.holds, i.differs)}{i.write.op === "contact" && compare.has(i.id)
               ? <a className="link-line" href={`/staff/reconciliation?compare=${i.id}#writes-h`}>Compare the two</a> : null}</> },
             { key: "asked", header: "Asked", cell: (i) => <><LocalTime iso={i.askedAt} />{i.askedBy ? ` by ${i.askedBy}` : ""}</> },
           ]} />

@@ -663,6 +663,28 @@ export async function compareContact(rawItemId: string, o: { actor: Actor; ip: s
 }
 
 /**
+ * Which of these items compareContact() would show now, by its own rule and reading nothing of the details (a kept
+ * contact change filed under an active family record, and, for a guardian's, the row open in that same family): the
+ * items a family's page links to the compare view (stage 3's slice 11c), so a link never opens the plain list instead.
+ */
+export async function comparableContacts(itemIds: readonly string[]): Promise<Set<string>> {
+  if (!itemIds.length) return new Set();
+  const rows = await db.select({ id: writeQueue.id, request: writeQueue.request, familyId: writeQueue.familyId, active: family.active })
+    .from(writeQueue).innerJoin(family, eq(family.id, writeQueue.familyId))
+    .where(and(inArray(writeQueue.id, [...itemIds]), eq(writeQueue.state, "refused"), sql`${writeQueue.request}->>'op' = 'contact'`));
+  const rowIds = [...new Set(rows.flatMap((r) => { const g = guardianOf(r.request); return g === null ? [] : [g]; }))];
+  const rowsOf = new Map((rowIds.length ? await db.select({ id: guardian.id, status: guardian.status, familyId: guardian.familyId }).from(guardian).where(inArray(guardian.id, rowIds)) : [])
+    .map((g) => [g.id, g] as const));
+  return new Set(rows.filter((r) => {
+    if (!r.active) return false;
+    const g = guardianOf(r.request);
+    if (g === null) return true;
+    const row = rowsOf.get(g);
+    return row !== undefined && row.status !== "disabled" && row.familyId !== null && String(row.familyId) === String(r.familyId);
+  }).map((r) => r.id));
+}
+
+/**
  * The creates staff gave up that QuickBooks made all the same, each with no record linked to its customer
  * (madeAfterGivingUp(), ./writes.ts), for the Reconciliation page to say so. `familyPage` is the family record it was
  * filed under, for the link to that family's page, only while that record is active (its page stands).

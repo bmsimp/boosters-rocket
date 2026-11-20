@@ -42,7 +42,8 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   const contact = whose === "person" ? await personContact(p.parentId) : null;
   const kept = await keptContactsOf(p.families.filter((f) => !f.previousCompany && f.open).map((f) => f.guardianId));
   const mayCompare = can(ctx.effective, "Roster.Read");
-  const familyPages = p.families.flatMap((f) => (!f.previousCompany && f.familyId !== null && f.pageStands ? [{ key: f.guardianId, id: f.familyId, name: f.familyName }] : []));
+  // Only the families they are a guardian of now: a removed membership's family details are no longer theirs.
+  const familyPages = p.families.flatMap((f) => (!f.previousCompany && f.open && f.familyId !== null && f.pageStands ? [{ key: f.guardianId, id: f.familyId, name: f.familyName }] : []));
   return (
     <main className="wrap single">
       <h1 className="page-title">{p.name}</h1>

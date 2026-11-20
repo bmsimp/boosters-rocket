@@ -5,7 +5,7 @@
 // actions and the write queue's job reach QuickBooks through it.
 import "server-only";
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { env } from "@/env";
 import { db, type Tx } from "@/lib/db/client";
 import { accountingLink, family, familyMoney, guardian, jobRun, parent, qboCustomer, qboCustomerType, student, writeQueue, type QueuedWrite, type RosterRole, type RosterWrite } from "@/lib/db/schema";
@@ -2536,9 +2536,32 @@ export const CONTACT_AWAITS_READ = "The portal is still waiting for its read of 
 export const CONTACT_SUPERSEDED_AT_PRESS = "Nothing was sent from this row: the parent saved their details again meanwhile, and that newer change, which carries everything this one did, has taken its place. The worker sends it on, and this page lists it if it doesn't go through.";
 /** The code a press keeps for it, which is never stored: the press puts the item back as it was kept. */
 const CONTACT_AWAITS_READ_CODE = "awaits_read";
-/** contactSendsSince() under the roster lock held shared, in a transaction of its own: null while nothing may go. */
-export const contactReadStands = () => db.transaction(async (tx) => {
+/**
+ * The roster lock taken shared in the caller's transaction, waited for at most `waitMs` when it is given (a staff
+ * member's at-once try of a contact change, sendContactSaved(): past that the transaction fails with Postgres'
+ * lock_not_available, which trySavedItem() answers as RosterBusyAtTry), and for as long as it takes otherwise.
+ */
+async function rosterSharedIn(tx: Tx, waitMs?: number): Promise<void> {
+  if (waitMs === undefined) { await tx.execute(sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`); return; }
+  await tx.execute(sql.raw(`set local lock_timeout = '${Math.max(1, Math.floor(waitMs))}ms'`));
   await tx.execute(sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`);
+  await tx.execute(sql.raw("set local lock_timeout to default"));
+}
+/** Postgres could not take a lock within its wait (lock_not_available). Drizzle wraps the driver's error, so its cause is read too. */
+function lockTimedOut(e: unknown): boolean {
+  const code = (v: unknown) => (typeof v === "object" && v !== null ? (v as { code?: unknown }).code : undefined);
+  return (code(e) ?? code((e as { cause?: unknown } | null)?.cause)) === "55P03";
+}
+/**
+ * A contact try made with a wait for the roster lock (trySavedItem()'s `rosterWaitMs`) found it held past that wait at
+ * one of its own looks: nothing was sent and the item is as it was before the try (its mark as maybe sent taken back).
+ */
+export class RosterBusyAtTry extends Error {
+  constructor() { super("roster_busy"); this.name = "RosterBusyAtTry"; }
+}
+/** contactSendsSince() under the roster lock held shared, in a transaction of its own: null while nothing may go. */
+export const contactReadStands = (waitMs?: number) => db.transaction(async (tx) => {
+  await rosterSharedIn(tx, waitMs);
   return contactSendsSince(tx);
 });
 /** Why a contact change is given up at its try with nothing sent (contactStops()). */
@@ -2580,9 +2603,9 @@ export const CONTACT_NOT_OFFERED: Record<ContactNotOffered, string> = {
  * later one was saved, or one pressed while a parent saved again, never lands after the later one, even once that later
  * one is given up. Null when it may go.
  */
-async function contactStops(w: ContactWrite, item: QueueRow): Promise<ContactStop | "await_read" | null> {
+async function contactStops(w: ContactWrite, item: QueueRow, waitMs?: number): Promise<ContactStop | "await_read" | null> {
   return db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`);
+    await rosterSharedIn(tx, waitMs);
     if (!(await contactSendsMayGo(tx))) return "await_read";
     const stop = await contactStopsIn(tx, w, item);
     if (stop !== null) return stop;
@@ -3091,7 +3114,7 @@ async function giveUpForGoneGuardian(item: QueueRow, why: GuardianCreateStop, o:
  * mended (renameLinked()); the worker's is stuck. A press that reaches nothing leaves the item refused as it was.
  */
 export async function trySavedItem(item: QueueRow, write: RenameWrite | CreateWrite | MoveWrite | DeactivateWrite | ContactWrite, o: { by: TryBy; readFirst?: "moved_on" | null; linkedBy: string | null; actor: Actor; ip: string | null;
-  permission?: string; now?: Date; before?: Before }): Promise<SavedTry> {
+  permission?: string; now?: Date; before?: Before; rosterWaitMs?: number }): Promise<SavedTry> {
   const before: Before = o.before ?? { request: item.request as RosterWrite, sent: item.sent, lastCode: item.lastCode, tries: item.tries, lastTriedAt: item.lastTriedAt };
   const now = o.now ?? new Date();
   const mayWait = o.by === "worker";
@@ -3104,7 +3127,10 @@ export async function trySavedItem(item: QueueRow, write: RenameWrite | CreateWr
   const notYet = async (): Promise<SavedTry> => (o.by === "press"
     ? ((await settleSaved(item, { state: "refused", code: null, before }, triedAt, o)) ? { is: "not_reached", code: CONTACT_AWAITS_READ_CODE } : gone)
     : { is: "not_yet" });
-  const gateSince = write.op === "contact" ? await contactReadStands() : null;
+  // A staff member's at-once try (sendContactSaved()) waits for the roster lock at its own looks no longer than it
+  // waited before the try: held past that, nothing is sent, the item is left as it was, and RosterBusyAtTry is thrown.
+  const busy = (e: unknown): never => { throw o.rosterWaitMs !== undefined && lockTimedOut(e) ? new RosterBusyAtTry() : e; };
+  const gateSince = write.op === "contact" ? await contactReadStands(o.rosterWaitMs).catch(busy) : null;
   if (write.op === "contact" && gateSince === null) return notYet();
   // A contact change's age is counted from when it could first go (contactAgeFrom()): the time it waited for the read
   // above is no time it could be tried in, so it is never stuck by that age at its first failed try.
@@ -3124,13 +3150,16 @@ export async function trySavedItem(item: QueueRow, write: RenameWrite | CreateWr
   }
   // A parent's phone and address (stage 3's slice 11b) go only to the record they are for, as it stands at this try:
   // the membership's own Parent customer, or the family's own linked customer. Otherwise given up, nothing sent.
-  const contactStop = write.op === "contact" ? await contactStops(write, item) : null;
+  const unmark = () => db.update(writeQueue).set({ sent: before.sent, request: before.request, lastTriedAt: before.lastTriedAt, updatedAt: new Date() })
+    .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting")));
+  const contactStop = write.op === "contact" ? await contactStops(write, item, o.rosterWaitMs).catch(async (e: unknown) => {
+    // The roster lock held past an at-once try's wait: its mark as maybe sent is taken back, as nothing was sent.
+    if (o.rosterWaitMs !== undefined && lockTimedOut(e)) await unmark();
+    return busy(e);
+  }) : null;
   if (contactStop === "await_read") {
     // Withdrawn since the look above (a shape save): its mark as maybe sent is taken back, as nothing was sent.
-    if (o.by !== "press") {
-      await db.update(writeQueue).set({ sent: before.sent, request: before.request, lastTriedAt: before.lastTriedAt, updatedAt: new Date() })
-        .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting")));
-    }
+    if (o.by !== "press") await unmark();
     return notYet();
   }
   if (contactStop !== null) {
@@ -4570,13 +4599,18 @@ export const STAFF_DETAILS_COPY = {
 
 /**
  * What became of one record a staff member's save goes to (sendContactSaved()), by the family it is under: `nothing`,
- * nothing was queued for it; `held`, the item's lock was held (someone sending it, or a change to the same record), so
- * nothing was sent and it waits for the worker; `roster`, the roster lock wasn't free within the wait, the same;
- * `replaced`, given up with nothing sent as a newer change has taken its place and carries it (`superseded`, or a later
- * save closed it meanwhile); `stopped`, given up with nothing sent as its record is no longer the one it is for (`note`,
- * its reason, in words); `given_up`, given up meanwhile otherwise; else trySavedItem()'s outcome.
+ * nothing was queued for it; `held`, the item's lock was held (another change to the same record under way, or its
+ * sender), so nothing was sent and it waits for the worker; `roster`, the roster lock wasn't free within the wait, the
+ * same; `replaced`, given up with nothing sent as a newer change of the same record, saved meanwhile, has taken its
+ * place and carries it (a later save closed it, or the try found the details changed and such a change is open or done);
+ * `outdated`, given up with nothing sent as the portal's details changed again after it and no newer change of that
+ * record was queued (none could be: the record inactive in QuickBooks' copy, or no longer the row's own alone);
+ * `stopped`, given up with nothing sent as its record is no longer the one it is for (`note`, its reason, in words);
+ * `abandoned`, given up meanwhile otherwise (staff on Reconciliation), with `sent` whether any try may have reached
+ * QuickBooks (null when the item is gone and the portal can't tell); else trySavedItem()'s outcome.
  */
-export type ContactGot = { is: "nothing" } | { is: "held" } | { is: "roster" } | { is: "replaced" } | { is: "stopped"; note: string } | SavedTry;
+export type ContactGot = { is: "nothing" } | { is: "held" } | { is: "roster" } | { is: "replaced" } | { is: "outdated" } | { is: "stopped"; note: string }
+  | { is: "abandoned"; sent: boolean | null } | SavedTry;
 export type ContactSent = { familyName: string; itemId: string | null; write: ContactWrite | null; got: ContactGot };
 
 /** The notes a contact change is given up with when its record is no longer the one it is for (giveUpContact(), and a guardian's removal). */
@@ -4584,14 +4618,29 @@ const CONTACT_RECORD_NOTES = new Set<string>([...Object.entries(CONTACT_STOP_NOT
 /** What a contact item that isn't waiting now holds, told from its row and never guessed (sendContactSaved()). */
 async function contactHeld(itemId: string): Promise<ContactGot> {
   const [r] = await db.select().from(writeQueue).where(eq(writeQueue.id, itemId));
-  if (!r) return { is: "given_up" };
+  if (!r) return { is: "abandoned", sent: null };
   if (r.state === "done") return { is: "done", cached: true };
   if (r.state === "refused") return { is: "refused", code: r.lastCode ?? "", holds: null };
   if (r.state === "stuck") return { is: "stuck", code: r.lastCode ?? "" };
   if (r.state === "waiting") return { is: "waiting", sent: r.sent };
-  if (r.note === CONTACT_REPLACED_NOTE || r.note === CONTACT_STOP_NOTES.superseded) return { is: "replaced" };
+  // Closed by a later save (queueContactChange()), which queued the change that takes its place.
+  if (r.note === CONTACT_REPLACED_NOTE) return { is: "replaced" };
+  // The try found the portal's details changed: a newer change carries them only where one of the same record was queued.
+  if (r.note === CONTACT_STOP_NOTES.superseded) return (await newerContactOf(r)) ? { is: "replaced" } : { is: "outdated" };
   if (r.note !== null && CONTACT_RECORD_NOTES.has(r.note)) return { is: "stopped", note: r.note };
-  return { is: "given_up" };
+  return { is: "abandoned", sent: r.sent };
+}
+/**
+ * Whether a contact change of the same record and membership as `r` (queueContactChange()'s own match: the company,
+ * the customer, the guardian row or none) was queued after it and is open or done: the change that carries its details.
+ */
+async function newerContactOf(r: QueueRow): Promise<boolean> {
+  const g = guardianOf(r.request);
+  const [newer] = await db.select({ id: writeQueue.id }).from(writeQueue).where(and(ne(writeQueue.id, r.id), eq(writeQueue.realmId, r.realmId),
+    r.targetQboId === null ? sql`false` : eq(writeQueue.targetQboId, r.targetQboId), sql`${writeQueue.request}->>'op' = 'contact'`,
+    g === null ? sql`${writeQueue.request}->>'guardianId' is null` : sql`${writeQueue.request}->>'guardianId' = ${g}`,
+    gte(writeQueue.createdAt, r.createdAt), ne(writeQueue.state, "given_up"))).limit(1);
+  return newer !== undefined;
 }
 
 /**
@@ -4624,23 +4673,36 @@ async function contactPlaces(of: DetailsOf, items: readonly QueueRow[]): Promise
  * lease has run out), the roster lock waited for at most the guardian writes' three seconds (rosterFreeWithin(): past
  * that nothing is sent, the item is never marked as sent, and the worker takes it), then one try by the one path every
  * try takes (trySavedItem()), so the gate (contactSendsMayGo()), the record's checks (contactStops()), the comparison
- * (tryContact()), the version and the stale settle are the worker's. An item that is no longer waiting when it is read,
- * or that the try finds given up, is told from what its row holds (contactHeld()). `rosterWaitMs` is for tests.
+ * (tryContact()), the version and the stale settle are the worker's; its own looks under the roster lock wait no longer
+ * than that wait either (RosterBusyAtTry: nothing sent, the item as it was). The row is read again once the item's lock
+ * is held, and the try is made from that row, only while it is still waiting and no try has been made of it since it was
+ * first read (the worker takes an item whose lease ran out while an earlier item's try was under way): otherwise it is
+ * left to the worker, untouched. An item that is no longer waiting, or that the try finds given up, is told from what
+ * its row holds (contactHeld()). `rosterWaitMs` is for tests.
  */
 export async function sendContactSaved(of: DetailsOf, itemIds: readonly string[], op: GuardianOp & { staffUserId: string }, o: { rosterWaitMs?: number } = {}): Promise<ContactSent[]> {
   const items = itemIds.length ? await db.select().from(writeQueue).where(inArray(writeQueue.id, [...itemIds])) : [];
+  const wait = o.rosterWaitMs ?? GUARDIAN_ROSTER_WAIT_MS;
   const out: ContactSent[] = [];
   for (const { familyName, item } of await contactPlaces(of, items)) {
     if (!item || item.request.op !== "contact") { out.push({ familyName, itemId: null, write: null, got: { is: "nothing" } }); continue; }
     const write = item.request;
     const at = { familyName, itemId: item.id, write };
     if (item.state !== "waiting") { out.push({ ...at, got: await contactHeld(item.id) }); continue; }
-    const tried = await whileItemHeld(item, async (): Promise<SavedTry | "roster"> => {
-      if (!(await rosterFreeWithin(o.rosterWaitMs ?? GUARDIAN_ROSTER_WAIT_MS))) return "roster";
-      return trySavedItem(item, write, { by: "at_once", linkedBy: op.staffUserId, actor: op.actor, ip: op.ip, permission: op.permission });
+    const tried = await whileItemHeld(item, async (): Promise<SavedTry | "roster" | "moved_on"> => {
+      if (!(await rosterFreeWithin(wait))) return "roster";
+      // Read again under the item's lock: only the row as it stands now is tried, and only while nobody has tried it since.
+      const [now] = await db.select().from(writeQueue).where(eq(writeQueue.id, item.id));
+      if (!now || now.state !== "waiting" || now.sent !== item.sent || now.tries !== item.tries || now.request.op !== "contact") return "moved_on";
+      try {
+        return await trySavedItem(now, now.request, { by: "at_once", linkedBy: op.staffUserId, actor: op.actor, ip: op.ip, permission: op.permission, rosterWaitMs: wait });
+      } catch (e) {
+        if (e instanceof RosterBusyAtTry) return "roster";
+        throw e;
+      }
     });
     const got: ContactGot = tried === null || tried === FAMILY_HELD ? { is: "held" } : tried === "roster" ? { is: "roster" }
-      : tried.is === "given_up" && tried.why === "superseded" ? { is: "replaced" } : tried.is === "given_up" ? await contactHeld(item.id) : tried;
+      : tried === "moved_on" || tried.is === "given_up" ? await contactHeld(item.id) : tried;
     out.push({ ...at, got });
   }
   return out;
@@ -4685,11 +4747,11 @@ export function contactSavedWords(sent: readonly ContactSent[], whose: "person" 
         break;
       case "held":
         waiting = true;
-        sentences.push(`Nothing was sent to ${rec} just now: a change to it is being sent to QuickBooks at this moment. The portal tries them shortly, and you'll find them on the Reconciliation page until then.`);
+        sentences.push(`Nothing was sent to ${rec} just now: another change to this record is under way at this moment. The portal tries them shortly, and you'll find them on the Reconciliation page until then.`);
         break;
       case "roster":
         waiting = true;
-        sentences.push(`Nothing was sent to ${rec} just now: the portal is reading the roster from QuickBooks. The portal tries them shortly, and you'll find them on the Reconciliation page until then.`);
+        sentences.push(`Nothing was sent to ${rec} just now: the roster is busy at this moment. The portal tries them shortly, and you'll find them on the Reconciliation page until then.`);
         break;
       case "replaced":
         waiting = true;
@@ -4706,7 +4768,20 @@ export function contactSavedWords(sent: readonly ContactSent[], whose: "person" 
         sentences.push(`They didn't reach ${rec} in QuickBooks. ${keptContactWords(got.code, s.write ?? undefined)} It is kept on the Reconciliation page: ${may ? "compare the two there, from the link below." : o.whoCompares}`);
         break;
       }
-      case "stuck": case "not_reached": case "given_up":
+      case "outdated":
+        attention = true;
+        sentences.push(`Nothing was sent to ${rec} from this save: the portal's details changed again after it, and no newer change of them was queued for this record, so nothing goes to QuickBooks for it. This page shows the details the portal holds now.`);
+        break;
+      case "abandoned": case "given_up": {
+        attention = true;
+        // Told from the row: whether any try of it may have reached QuickBooks, never guessed (null: the item is gone).
+        const sentOnce = got.is === "abandoned" ? got.sent : null;
+        sentences.push(sentOnce === false
+          ? `Nothing was sent to ${rec}: the change was given up on the Reconciliation page meanwhile. The portal keeps the details.`
+          : `The change for ${rec} was given up on the Reconciliation page while it was being sent, so QuickBooks has the details only if that try got through. The portal keeps them.`);
+        break;
+      }
+      case "stuck": case "not_reached":
         attention = true;
         sentences.push(`Sending them to ${rec} didn't go through: see the Reconciliation page.`);
         break;

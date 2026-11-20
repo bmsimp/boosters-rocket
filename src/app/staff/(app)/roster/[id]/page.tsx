@@ -8,7 +8,7 @@ import { loadRosterPage, familyEntry, type RecordStudent } from "@/lib/roster/qu
 import { familyRecordAt } from "@/lib/families/address";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { familyCover, guardianCustomers, guardianStandings, moveTargets, studentsBeingMade, versionsOf } from "@/lib/roster/writes";
-import { loadOpenWrites } from "@/lib/roster/queue";
+import { comparableContacts, loadOpenWrites } from "@/lib/roster/queue";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { familyContact, familySignins, type FamilySignin } from "@/lib/parents/directory";
 import { whoseDetails } from "@/lib/parents/my-family";
@@ -164,6 +164,9 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   // The Parent customers a portal guardian is linked to (stage 3's slice 9h): shown as theirs, with no forms here.
   const ofGuardians = await guardianCustomers(fam.parents.map((p) => p.qboId), familyId);
   const waiting = await loadOpenWrites({ familyId, showAmounts: can(ctx.effective, "Finance.Balance.Read") });
+  // Its kept contact changes the compare view would show now (its own rule), linked for a reader who may open it.
+  const compareIds = can(ctx.effective, "Parents.ReadWrite")
+    ? await comparableContacts(waiting.flatMap((w) => (w.state === "refused" && w.write.op === "contact" ? [w.id] : []))) : new Set<string>();
   // The family's own phone and mailing address (stage 3's slice 11c), in books where they are each family's: never to a
   // reader holding Roster.Read alone, who sees no portal phone or address (as on Reconciliation).
   const familyDetails = page.shape !== null && whoseDetails(page.shape) === "family"
@@ -249,7 +252,7 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
         season={entry.kind === "family" && fam.active && can(ctx.effective, "Season.Progress.Read")}
         credit={entry.kind === "family" && fam.active && can(ctx.effective, "Volunteer.Credit.ReadWrite")} />
       {familyDetails && <FamilyDetails familyId={familyId} details={familyDetails} editable={can(ctx.effective, "Roster.Family.ReadWrite") && fam.active} />}
-      <Waiting items={waiting} compare={can(ctx.effective, "Parents.ReadWrite")} />
+      <Waiting items={waiting} compare={compareIds} />
       {edit && inQuickBooks && entry.kind === "family" && page.shape?.kind === "layered" && <FamilyChanges shape={page.shape} family={inQuickBooks} edit={edit} cover={cover} inactiveRecords={inactiveRecords} />}
       {moves && <MoveStudents students={movable} families={moveTo.families} refusedHere={moveTo.refusedHere} rosterTag={rosterTag} act={moveAction} />}
       {edit && inQuickBooks && entry.kind === "member" && <MemberChanges member={inQuickBooks.customer} edit={edit} />}
