@@ -463,8 +463,12 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
 6. **Read Accounting links against the real books** (`/staff/links`, Accounting links under Families; it takes the
    permission to link families to accounting). It only shows: nothing on it links or changes anything.
    **Pass:** every family you brought in reads **Linked**, confirmed by you, on the day you pressed; a family you added
-   by hand reads **Suggested** only where one of its guardians signs in with an address that really is on that
-   family's customer (or on a parent record under it), and otherwise **Several possible** or **No match**; and the
+   on Families while QuickBooks was connected reads **Linked**, made in the books from the portal, by you; a family
+   added with no customer (by someone who may not link families, or while QuickBooks was disconnected) reads
+   **Suggested** only where one of its guardians signs in with an address that really is on a customer no family is
+   linked to (or on a parent record under it), and otherwise **Several possible** or **No match**. Don't press
+   **Create a family from this** or **Create in QuickBooks and link** for a family that reads Suggested or Several
+   possible: either makes a second family or customer, and nothing links the two yet; and the
    count of customers with no family matches Reconciliation's list. **If not:** note the family, the status it read and
    what you expected; a suggestion that names the wrong customer is the most important to report.
 

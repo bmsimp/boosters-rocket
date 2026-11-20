@@ -320,11 +320,11 @@ Section 4 of `docs/superpowers/specs/2026-11-18-app-owned-families-design.md`, "
 | L.7 | Filters by status, and a search by name or email | Built | `parseLinksFilter()`, `filterLinkRows()`; `accounting-links.test.ts` "filters by a status key and searches", "filters by status with each status's count" |
 | L.8 | Carried-over links recorded as carried over from the roster on its date, with no person named, with their own status and filter (open question 2) | Built | `accounting-links.test.ts` "reads a link from the roster as carried over, on its date" |
 | L.9 | A customer gone is "Customer gone", the link kept and never relinked by itself (open question 13) | Built | `accounting-links.test.ts` "tells a customer gone from the books, and keeps the link as it is" |
-| L.10 | The screen says so when the books can't be read for it, rather than failing (section 7) | Built | `accounting-links.test.ts` "when the books can't be checked" (three states, each family Not checked) |
+| L.10 | The screen says so when the books can't be read for it, rather than failing (section 7) | Built | `accounting-links.test.ts` "when the books can't be checked" (three states: each family with no link reads Not checked; with no company or another company, every family does) and "says why nothing is suggested while the books can't be checked" (each state's words) |
 | L.11 | "Linked, with differences" (and an inactive customer shown as a difference, open question 13) | Missing | M2. Today a linked customer that isn't a family now reads "Not a family now" |
 | L.12 | "Left unlinked", kept out of the bulk button | Missing | M3a |
 | L.13 | Bulk confirm | Missing | M3a |
-| L.14 | Confirm the suggestion, or pick another customer | Missing | M3a. Today: "Create a family from this" (Reconciliation) and "Create in QuickBooks and link" (a family's page) |
+| L.14 | Confirm the suggestion, or pick another customer | Missing | M3a. Today nothing links a family the portal has to a customer the books have: "Create a family from this" (Reconciliation) makes a new family, and "Create in QuickBooks and link" (a family's page) or an add on Families by someone who may link makes a new customer; the screen warns that either, for a Suggested or Several possible row, makes a second |
 | L.15 | Customers no family is linked to in their own part of the screen | Missing | M3a. Until then they stay on Reconciliation, which links to the screen and back |
 | L.16 | The parent record a match was on is linked under the family | Missing | M3c |
 | L.17 | Unlink, and an admin picks again for a customer gone (open question 13) | Missing | M3b |

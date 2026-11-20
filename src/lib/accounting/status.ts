@@ -17,9 +17,9 @@ export const STATUS_WORDS: Record<StatusKey, string> = {
 };
 
 /** Why a linked customer isn't a family now, by the rule of the customers that may be suggested (noFamilyPool()). */
-export type NotAFamilyReason = "other_type" | "under_another" | "inactive";
+export type NotAFamilyReason = "other_type" | "no_type" | "under_another" | "inactive";
 export const NOT_A_FAMILY_WORDS: Record<NotAFamilyReason, string> = {
-  other_type: "it has another customer type there", under_another: "it is under another customer there", inactive: "it is inactive in the books",
+  other_type: "it has another customer type there", no_type: "it has no customer type there", under_another: "it is under another customer there", inactive: "it is inactive in the books",
 };
 
 /**
@@ -27,7 +27,7 @@ export const NOT_A_FAMILY_WORDS: Record<NotAFamilyReason, string> = {
  * - `gone`: the cache holds customers and the linked one isn't among them (open question 13: the link is kept);
  * - `not_a_family`: it is there, but not an active family at the top of the tree (a member, in flat books), by the
  *   rule of the customers that may be suggested: listed as a family by the shape (`listedAsFamily`, from
- *   buildRoster()), active, and under no other customer; each reason that applies, in that order. Null for
+ *   buildRoster(); a customer of another type is `other_type`, one with no type `no_type`), active, and under no other customer; each reason that applies, in that order. Null for
  *   `listedAsFamily` when the shape can't be trusted, and then this is not worked out;
  * - `stands`: neither, or the cache holds no customer at all, so nothing can be told.
  */
@@ -36,7 +36,8 @@ export function linkStanding(customer: Cust | undefined, o: { cacheHasCustomers:
   if (customer === undefined) return o.cacheHasCustomers ? { is: "gone" } : { is: "stands" };
   if (o.listedAsFamily === null) return { is: "stands" };
   const reasons: NotAFamilyReason[] = [];
-  if (!o.listedAsFamily.has(customer.qboId)) reasons.push("other_type");
+  // Not listed as a family by the shape: of another type, or of none at all, each said in its own words.
+  if (!o.listedAsFamily.has(customer.qboId)) reasons.push(customer.typeQboId === null ? "no_type" : "other_type");
   if (customer.parentQboId !== null) reasons.push("under_another");
   if (!customer.active) reasons.push("inactive");
   return reasons.length ? { is: "not_a_family", reasons } : { is: "stands" };

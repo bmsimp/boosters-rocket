@@ -9,7 +9,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 
-import { eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, auditLog, family, guardian, qboConnection, qboCustomerType, setting } from "@/lib/db/schema";
 import type { AppFamilyId } from "@/lib/families/ids";
@@ -21,9 +21,10 @@ import { addFamily } from "@/lib/roster/writes";
 import { SHAPE_KEY } from "@/lib/roster/shape";
 import { SOURCE_KEY } from "@/lib/roster/source";
 import AccountingLinksPage from "@/app/staff/(app)/links/page";
+import ReconciliationPage from "@/app/staff/(app)/reconciliation/page";
 import { resetDb, seedParent, seedStaff } from "../helpers/db";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
-import { asOp, connectRoster, seedAnaRivera, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
+import { asOp, connectRoster, REALM, seedAnaRivera, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
 import { rowNamed, tableRows } from "../helpers/table";
 
 /**
@@ -109,6 +110,20 @@ describe("the statuses of linked families", () => {
     expect(patel.guardians).toEqual([]);
   });
 
+  it("reads a link made by adding a family as someone who may link families as linked, made in the books from the portal, by whom", async () => {
+    tag = await connectRoster(stub);
+    const linker = await staffWith("linker@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Accounting.Link.ReadWrite"]);
+    expect(await addFamily({ role: "family", name: "Oak Family", typeQboId: null }, tag, { ...asOp(linker), mayLink: true })).toMatchObject({ ok: true });
+    await readAgain(); // the books' copy as QuickBooks holds it now, the new customer in it
+    const oak = rowOf(await loadAccountingLinks(), "Oak Family");
+    expect(oak.status).toEqual({ key: "linked", origin: "created", by: "linker", at: expect.any(String) });
+    expect(oak.customer).toEqual({ name: "Oak Family", email: null });
+    await asStaff(await seedStaff({ email: "admin@club.org", name: "Ada Admin", admin: true }));
+    const html = await renderPage(AccountingLinksPage);
+    const at = html.indexOf('id="links-list-h"');
+    expect(rowNamed(html.slice(at, html.indexOf("</section>", at)), "Oak Family")![3]).toMatch(/^LinkedMade in the books from the portal by linker, on .+\.$/);
+  });
+
   it("tells a customer gone from the books, and keeps the link as it is", async () => {
     tag = await connectRoster(stub);
     stub.customers = stub.customers.filter((c) => c.Id !== "20" && c.Id !== "21");
@@ -130,6 +145,27 @@ describe("the statuses of linked families", () => {
     expect(await statusOf("Rivera Family")).toEqual({ key: "not_a_family", reasons: ["inactive"] });
     expect(await statusOf("Chen Family")).toEqual({ key: "not_a_family", reasons: ["other_type"] });
     expect(await statusOf("Patel Family")).toEqual({ key: "not_a_family", reasons: ["under_another"] });
+    // The page says each reason in words, joined.
+    await asStaff(await seedStaff({ email: "admin@club.org", name: "Ada Admin", admin: true }));
+    const html = await renderPage(AccountingLinksPage);
+    const at = html.indexOf('id="links-list-h"');
+    expect(rowNamed(html.slice(at, html.indexOf("</section>", at)), "Rivera Family")![3])
+      .toBe("Not a family nowThe linked customer is still in the books, but isn't a family there now: it is inactive in the books. The link is kept as it is.");
+  });
+
+  it("says a linked customer with no customer type at all has none, and joins each reason that applies", async () => {
+    tag = await connectRoster(stub);
+    stub.customers = stub.customers.map((c) => {
+      if (c.Id !== "10") return c;
+      const typeless: Record<string, unknown> = { ...c, Active: false };
+      delete typeless.CustomerTypeRef; // the customer type cleared in QuickBooks
+      return typeless as typeof c;
+    });
+    await readAgain();
+    expect(await statusOf("Rivera Family")).toEqual({ key: "not_a_family", reasons: ["no_type", "inactive"] });
+    await asStaff(await seedStaff({ email: "admin@club.org", name: "Ada Admin", admin: true }));
+    const html = await renderPage(AccountingLinksPage);
+    expect(html).toContain("isn&#x27;t a family there now: it has no customer type there; it is inactive in the books.");
   });
 });
 
@@ -216,10 +252,18 @@ describe("suggestions for families with no link", () => {
     await guardianIn(patels, "Asha Patel", "asha@example.com");
     await db.insert(accountingLink).values({ system: "quickbooks", realmId: "9130000000000999", customerId: "70", familyId: patels, origin: "carried_over" });
     expect(await statusOf("The Patels")).toMatchObject({ key: "suggested", holders: [{ address: "asha@example.com" }] });
+    // Leo Rivera's own link moved to another company's: his row reads no link of its own, never that company's customer.
+    const leo = (await db.select().from(accountingLink).where(and(eq(accountingLink.customerId, "12"), isNotNull(accountingLink.studentId))))[0]!;
+    await db.update(accountingLink).set({ realmId: "9130000000000999" }).where(eq(accountingLink.id, leo.id));
+    expect(rowOf(await loadAccountingLinks(), "Rivera Family").students.map((s) => s.link)).toEqual([{ state: "none" }]);
   });
 });
 
 describe("the books' shape", () => {
+  // In both shapes here no type names Parent customer 81's type (2), so the roster read keeps no email for it
+  // (customerRow() in src/lib/roster/refresh.ts): The Okafors read No match whatever the matcher does with a customer
+  // under the family. That rule, that only a Parent customer of the shape's parent type counts, is carried by
+  // tests/unit/accounting-match.test.ts; these prove the whole read in each shape.
   it("in flat books suggests the member by its own field, never by a customer under it", async () => {
     tag = await connectRoster(stub, { shape: { kind: "flat", memberTypeIds: ["1"] } });
     await readAgain(qc("70", "Patel Family", "1", mail("asha@example.com")), qc("80", "Okafor Family", "1"), qc("81", "Ike Okafor", "2", { ...under("80"), ...mail("ike@example.com") }));
@@ -319,10 +363,16 @@ describe("the page", () => {
     expect(list(await renderPage(AccountingLinksPage))).toContain("Rivera Family");
     asStaff(await staffWith("treasurer@club.org", ["Accounting.Link.ReadWrite", "Roster.Read"]));
     expect(list(await renderPage(AccountingLinksPage))).toContain("Chen Family");
-    asStaff(await staffWith("linker@club.org", ["Accounting.Link.ReadWrite"]));
+    const linker = await staffWith("linker@club.org", ["Accounting.Link.ReadWrite"]);
+    asStaff(linker);
     expect(await pageOutcome(AccountingLinksPage)).toEqual({ redirect: "/refused" });
-    asStaff(await staffWith("reader@club.org", ["Roster.Read"]));
+    const reader = await staffWith("reader@club.org", ["Roster.Read"]);
+    asStaff(reader);
     expect(await pageOutcome(AccountingLinksPage)).toEqual({ redirect: "/refused" });
+    // Each refusal leaves the guard's own row, naming the permission missing: the page's second check refuses as the guard does.
+    const refusals = (await db.select().from(auditLog)).filter((a) => a.action === "access.refused");
+    expect(refusals.filter((a) => a.actorId === linker.id)).toMatchObject([{ permission: "Roster.Read" }]);
+    expect(refusals.filter((a) => a.actorId === reader.id)).toMatchObject([{ permission: "Accounting.Link.ReadWrite" }]);
   });
 
   it("draws each row with its family, addresses, customer and status, opens to students and guardians, and writes nothing", async () => {
@@ -337,7 +387,7 @@ describe("the page", () => {
     expect(tableRows(html)).toHaveLength(3);
     const rivera = rowNamed(html, "Rivera Family")!;
     expect(rivera.slice(0, 3)).toEqual(["Rivera Family", "ana@example.com", "Rivera FamilyNo email address"]);
-    expect(rivera[3]).toMatch(/^Carried overCarried over from the roster when the portal's families were first set up, on .+\. Nobody has confirmed it since\.$/);
+    expect(rivera[3]).toMatch(/^Carried overCarried over from the roster by the portal, on .+\. Nobody has confirmed it since\.$/);
     expect(rivera[4]).toBe("Students and guardians: Rivera FamilyStudents:Leo Rivera: linked to Leo RiveraGuardians:Ana Rivera (ana@example.com): linked to Ana Rivera");
     const patel = rowNamed(html, "The Patels")!;
     expect(patel.slice(1)).toEqual(["asha@example.com", "Patel Familyasha@example.com",
@@ -346,8 +396,17 @@ describe("the page", () => {
     expect(html).toContain('href="/staff/roster/<id>"');
     expect(html).toContain("<details class=\"more\"><summary>Students and guardians<span class=\"visually-hidden\">: The Patels</span></summary>");
     expect((await db.select().from(auditLog)).length).toBe(audits);
-    // The customers with no family stay on Reconciliation, linked from here.
-    expect(await renderPage(AccountingLinksPage)).toContain('href="/staff/reconciliation#no-family-h"');
+    // The customers with no family stay on Reconciliation, linked from here, counted by the pool's own rule, and the
+    // page says a suggestion can't be acted on yet, and that either button would make a second family or customer.
+    const whole = await renderPage(AccountingLinksPage);
+    expect(whole).toContain('href="/staff/reconciliation#no-family-h"');
+    expect(whole).toContain("1 active customer the books list as a family at the top level, under no other customer, has no family in the portal.");
+    expect(whole).toContain("so a suggestion can&#x27;t be acted on for now.");
+    expect(whole).toContain("would make a second family beside it");
+    // And Reconciliation's section links back here.
+    const recon = await renderPage(ReconciliationPage);
+    const at = recon.indexOf('id="no-family-h"');
+    expect(recon.slice(at, recon.indexOf("</section>", at))).toContain('href="/staff/links"');
   });
 
   it("renders the books' text as text", async () => {
@@ -388,9 +447,22 @@ describe("the page", () => {
     tag = await connectRoster(stub);
     await db.update(qboConnection).set({ realmId: "9130000000000999" });
     await asAdmin();
-    const html = await renderPage(AccountingLinksPage);
+    let html = await renderPage(AccountingLinksPage);
     expect(html).toContain("QuickBooks is connected to a different company than the one the roster was read from, so no link is read and nothing is suggested.");
     expect(tableRows(list(html)).map((r) => r[3]!.startsWith("Not checked"))).toEqual([true, true]);
+    // A linked family's customer isn't said to be none: it isn't checked now.
+    expect(tableRows(list(html)).map((r) => r[2])).toEqual(["Not checked now", "Not checked now"]);
     expect(list(html)).not.toContain('href="/staff/roster/');
+    // No shape: links shown as they are, a family with no link not checked, and the shape's own words.
+    await db.update(qboConnection).set({ realmId: REALM });
+    await db.delete(setting).where(eq(setting.key, SHAPE_KEY));
+    html = await renderPage(AccountingLinksPage);
+    expect(html).toContain("The membership shape isn&#x27;t chosen, or names a customer type the books no longer have, so the portal can&#x27;t tell which customers are families.");
+    expect(tableRows(list(html)).map((r) => r[3]!.startsWith("Carried over"))).toEqual([true, true]);
+    // No company named: the portal hasn't read the books.
+    await db.delete(setting).where(eq(setting.key, SOURCE_KEY));
+    html = await renderPage(AccountingLinksPage);
+    expect(html).toContain("The portal hasn&#x27;t read the club&#x27;s books yet, so no family&#x27;s link can be checked and nothing is suggested.");
+    expect(tableRows(list(html)).map((r) => r[3]!.startsWith("Not checked"))).toEqual([true, true]);
   });
 });

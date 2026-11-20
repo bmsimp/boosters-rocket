@@ -1,7 +1,5 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { requireStaffPage } from "@/lib/guards";
-import { can } from "@/lib/permissions/effective";
+import { requireStaffAlso, requireStaffPage } from "@/lib/guards";
 import { filterLinkRows, loadAccountingLinks, statusCounts, type LinkRow, type LinkStatus, type LinksState, type OwnLink } from "@/lib/accounting/mapping";
 import { NOT_A_FAMILY_WORDS, parseLinksFilter, SEARCH_MAX, STATUS_KEYS, STATUS_WORDS, type StatusKey } from "@/lib/accounting/status";
 import type { Holder } from "@/lib/accounting/match";
@@ -33,7 +31,7 @@ const holderWords = (h: Holder) => (h.on.kind === "family" ? `${h.address}, on t
 /** What a status means for the row, in words. Every name and address is the books' text or a person's, shown as text. */
 function StatusDetail({ status }: { status: LinkStatus }) {
   switch (status.key) {
-    case "carried_over": return <>Carried over from the roster when the portal&apos;s families were first set up, on <LocalTime iso={status.at} />. Nobody has confirmed it since.</>;
+    case "carried_over": return <>Carried over from the roster by the portal, on <LocalTime iso={status.at} />. Nobody has confirmed it since.</>;
     case "linked": return <>{status.origin === "confirmed" ? "Confirmed with “Create a family from this”" : "Made in the books from the portal"}{status.by ? ` by ${status.by}` : ""}, on <LocalTime iso={status.at} />.</>;
     case "customer_gone": return <>The customer this family is linked to isn&apos;t in the books&apos; copy any more. The link is kept as it is.</>;
     case "not_a_family": return <>The linked customer is still in the books, but isn&apos;t a family there now: {status.reasons.map((r) => NOT_A_FAMILY_WORDS[r]).join("; ")}. The link is kept as it is.</>;
@@ -71,13 +69,13 @@ function Opening({ row }: { row: LinkRow }) {
  * family, its link to its customer in the books and how that link stands, or the customer that looks like its own,
  * with a status on each row, a filter by status and a search. It only shows: nothing here links, stores, sends or
  * audits anything. For holders of the linking permission (Accounting.Link.ReadWrite, not Admin-only), who also need
- * Roster.Read, checked here: a role written with patterns can hold the first without the second. The page lists many
+ * Roster.Read, checked here and refused as the guard refuses (requireStaffAlso()): a role written with patterns can hold the first without the second. The page lists many
  * families, so neither the page nor a row's opening is audited as a read of one family, as Reconciliation isn't; each
  * family's own page is. A server component only: the books' text (names, email fields) is rendered as text.
  */
 export default async function AccountingLinksPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireStaffPage("Accounting.Link.ReadWrite");
-  if (!can(ctx.effective, "Roster.Read")) redirect("/refused");
+  await requireStaffAlso(ctx, "Roster.Read");
   const filter = parseLinksFilter(await searchParams);
   const view = await loadAccountingLinks();
   const counts = statusCounts(view.rows);
@@ -86,7 +84,7 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
   const columns: Column<LinkRow>[] = [
     { key: "family", header: "Family", rowHeader: true, sorted: "ascending", cell: (r) => (view.familyPages ? <Link href={familyPage(r.familyId)}>{r.name}</Link> : r.name) },
     { key: "addresses", header: "Guardians' sign-in addresses", cell: (r) => (r.addresses.length === 0 ? "None yet" : r.addresses.join(", ")) },
-    { key: "customer", header: "Customer in the books", cell: (r) => (r.customer === null ? "None"
+    { key: "customer", header: "Customer in the books", cell: (r) => (r.customer === null ? (r.status.key === "not_checked" ? "Not checked now" : "None")
       : <>{r.customer.name}<span className="when">{r.customer.email ?? "No email address"}</span></>) },
     { key: "status", header: "Status", cell: (r) => <><StateWords state={ICON[r.status.key]} words={STATUS_WORDS[r.status.key]} /><span className="when"><StatusDetail status={r.status} /></span></> },
     { key: "more", header: "Students and guardians", cell: (r) => <Opening row={r} /> },
@@ -100,10 +98,14 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
       <section className="box" aria-labelledby="links-how-h"><h2 id="links-how-h">How links are made today</h2>
         <p>A customer is suggested only when one of the family&apos;s guardians signs in with an address that is, exactly, on a customer no family is linked to:
           in its own email field, or on a parent record under it. A name never suggests a customer, and a customer another family is linked to is never suggested.</p>
-        <p>For now a link is made in two ways. &ldquo;Create a family from this&rdquo;, on Reconciliation, makes a new family in the portal from a customer no family is linked to.
-          &ldquo;Create in QuickBooks and link&rdquo;, on a family&apos;s page, makes a new customer in the books for a family that has none.</p>
+        <p>Nothing in the portal can yet link a family it has already to a customer the books have already, so a suggestion can&apos;t be acted on for now.
+          Today a link comes only with something new. &ldquo;Create a family from this&rdquo;, on Reconciliation, makes a new family in the portal from a customer no family is linked to.
+          &ldquo;Create in QuickBooks and link&rdquo;, on a family&apos;s page, makes a new customer in the books for a family that has none, and so does adding a family under Families, when someone who may link families adds it while the books are connected.</p>
+        <Notice tone="warning" live="none">Don&apos;t use either for a family that reads Suggested or Several possible: &ldquo;Create a family from this&rdquo; on its customer would make a second family beside it,
+          and &ldquo;Create in QuickBooks and link&rdquo; on its page would make a second customer in the books.</Notice>
         {view.noFamily !== null && (
-          <p>{view.noFamily === 0 ? "Every customer the books list as a family has a family in the portal." : `${plural(view.noFamily, "customer the books list as a family has", "customers the books list as a family have")} no family in the portal.`}
+          <p>{view.noFamily === 0 ? "Every active customer the books list as a family at the top level, under no other customer, is linked to a family in the portal, or is about to be by a change on Reconciliation."
+            : `${plural(view.noFamily, "active customer the books list as a family at the top level, under no other customer, has", "active customers the books list as a family at the top level, under no other customer, have")} no family in the portal.`}
             {" "}<Link href="/staff/reconciliation#no-family-h">See the customers with no family on Reconciliation</Link></p>
         )}
       </section>
