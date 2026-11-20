@@ -11,7 +11,7 @@
 // QR code. Nothing here makes or ends a session, forgets a device or touches `strong_at`. Server only; parent code.
 import "server-only";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { parent } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
@@ -25,7 +25,7 @@ import { readSecondStepCode } from "./backup-codes";
 import { giveBackRateLimit, takeRateLimit, takeRateLimitPlace } from "./rate-limit";
 import { provedRecently } from "./reask-rule";
 import { deleteUnusedSigninCodes, parentActor } from "./sessions";
-import { getParentSettings } from "./settings";
+import { PARENTS_KEY, getParentSettings } from "./settings";
 import { SIGNIN_SETTINGS_COPY as COPY } from "./signin-settings-copy";
 
 type Me = Pick<ParentCtx, "parentId" | "sessionId" | "email" | "ip">;
@@ -109,6 +109,13 @@ async function setupStanding(q: Parameters<typeof authenticatorRowOf>[1], ctx: M
 export const groupKey = (secret: string): string => secret.replace(/(.{4})(?=.)/g, "$1 ");
 
 /**
+ * The parents' settings lock, shared, for a press that reads the club's level (setting up, turning off): taken first,
+ * before the person's row, in the order above lockedPerson() (sessions.ts), so a change of level (switches.ts, which
+ * holds it exclusively) is wholly before the press's read or wholly after its commit, never between them.
+ */
+const holdParentSettings = (tx: Tx) => tx.execute(sql`select pg_advisory_xact_lock_shared(hashtext(${PARENTS_KEY}))`);
+
+/**
  * The person's row, FOR UPDATE, and, read under it, this session's window at `now` (or the clock once the row is held):
  * the first part of every press here, in the order above lockedPerson() (sessions.ts: the person's row, then their
  * emailed codes, then their app and backup codes, before devices and sessions). Null when the person is gone or blocked
@@ -125,8 +132,8 @@ async function provedUnderLock(tx: Tx, ctx: Me, now?: Date): Promise<{ email: st
  * "Set up an authenticator app", the first press (decision 2 of SI-6b). It takes no argument. In this order:
  * (a) the window, read for this session: refused in the words that say to show it's them again;
  * (b) the limit per person (`signin_settings_parent`, these settings' presses), taken after the window;
- * (c) one transaction: the person's row FOR UPDATE, the window again under it (and the person not blocked), the club not
- *     at Strict (where the club's own enrolment sets the app up, SI-10: refused in words), a password chosen, and no app
+ * (c) one transaction: the parents' settings lock shared (holdParentSettings()), the person's row FOR UPDATE, the
+ *     window again under it (and the person not blocked), the club not at Strict (where the club's own enrolment sets the app up, SI-10: refused in words), a password chosen, and no app
  *     in force (refused in words); then any unfinished set-up of theirs replaced by a new one, its secret sealed
  *     (beginAuthenticatorSetup(), authenticator.ts), with one `parent.authenticator.setup_started` row (how many it
  *     replaced, nothing of the secret).
@@ -140,6 +147,7 @@ export async function startMyAuthenticator(ctx: Me, now?: Date): Promise<SetupAn
   if ((await takeRateLimit("signin_settings_parent", ctx.parentId, now)) !== "taken") return TOO_MANY_PRESSES;
   const brand = await currentBrand();
   const begun = await db.transaction(async (tx) => {
+    await holdParentSettings(tx);
     const me = await provedUnderLock(tx, ctx, now);
     if (!me) return "not_proved" as const;
     if ((await getParentSettings(tx)).level === "strict") return "strict" as const;
@@ -271,8 +279,8 @@ export async function remakeMyBackupCodes(ctx: Me, now?: Date): Promise<CodesAns
 
 /**
  * "Turn off the authenticator app" (decision 4 of SI-6b; open questions 28 and 33): the window,
- * `signin_settings_parent`, then one transaction: the person's row FOR UPDATE, the window again under it (and the person
- * not blocked); under Strict refused in words (the app is their only second step until passkeys, SI-7, and Strict asks
+ * `signin_settings_parent`, then one transaction: the parents' settings lock shared (holdParentSettings()), the person's
+ * row FOR UPDATE, the window again under it (and the person not blocked); under Strict refused in words (the app is their only second step until passkeys, SI-7, and Strict asks
  * for one: ask the club), changing nothing; an app in force (refused in words otherwise); then the app's row and every
  * backup code of the person deleted (removeAuthenticator()), with one `parent.authenticator.off` row (counts only).
  * Remembered devices stay, and no session is made or ended. A sign-in whose app's code or backup code was taken just
@@ -284,6 +292,7 @@ export async function turnOffMyAuthenticator(ctx: Me, now?: Date): Promise<TurnO
   if (!(await sessionProvedRecently(db, ctx, now))) return PROVE_AGAIN;
   if ((await takeRateLimit("signin_settings_parent", ctx.parentId, now)) !== "taken") return TOO_MANY_PRESSES;
   const done = await db.transaction(async (tx) => {
+    await holdParentSettings(tx);
     const me = await provedUnderLock(tx, ctx, now);
     if (!me) return "not_proved" as const;
     if ((await getParentSettings(tx)).level === "strict") return "strict" as const;

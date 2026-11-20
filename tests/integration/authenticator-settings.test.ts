@@ -18,11 +18,12 @@ import { checkPasswordSignin } from "@/lib/parents/password-signin";
 import { takeRateLimit, takeRateLimitPlace } from "@/lib/parents/rate-limit";
 import { sendSecondStepCode, signinStands, verifySecondFactor, type StepPerson } from "@/lib/parents/signin-codes";
 import { SIGNIN_SETTINGS_COPY as COPY } from "@/lib/parents/signin-settings-copy";
+import { PARENTS_KEY } from "@/lib/parents/settings";
 import { totpStep } from "@/lib/parents/totp";
 import { currentBrand } from "@/lib/mail/send";
 import SignInSettingsPage from "@/app/(parent)/family/sign-in/page";
 import { confirmAuthenticatorAction, newBackupCodesAction, startAuthenticatorAction, turnOffAuthenticatorAction } from "@/app/(parent)/family/sign-in/actions";
-import { resetDb, seedParentSession, seedWorkingMail } from "../helpers/db";
+import { resetDb, seedParentSession, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, PROVEN_PASSWORD, proveRecently, seedParentIn, seedSignedInParent } from "../helpers/parent";
 import { seedParentSettings } from "../helpers/roster-cache";
 import { seedCode, seedDevice } from "../helpers/signin-links";
@@ -452,6 +453,38 @@ describe("turning it off", () => {
     expect(check.ok && check.step).toBe("emailed_code");
     // Once off, a second press is refused in words.
     expect(await turnOffAuthenticatorAction()).toEqual({ ok: false, errors: [COPY.appNotOn] });
+  });
+
+  it("waits for a move to Strict under way (the parents' settings lock, shared, before the person's row), then reads it: setting up and turning off are refused", async () => {
+    /** Runs `press` while an Admin's save of the level, holding the settings lock as switches.ts does, moves it to Strict. */
+    const whileStrictIsSaved = async <T,>(press: () => Promise<T>): Promise<T> => {
+      let locked!: () => void;
+      let release!: () => void;
+      const isLocked = new Promise<void>((r) => { locked = r; });
+      const held = new Promise<void>((r) => { release = r; });
+      const save = db.transaction(async (tx) => {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${PARENTS_KEY}))`);
+        await tx.execute(sql`update setting set value = jsonb_set(value, '{level}', '"strict"') where key = ${PARENTS_KEY}`);
+        locked();
+        await held;
+      });
+      await isLocked;
+      const pressed = press();
+      await untilALockIsAwaited();
+      release();
+      await save;
+      return pressed;
+    };
+    const a = await provedParent();
+    await seedParentSettings({ level: "standard" }); // the row the save changes, stored
+    expect(await whileStrictIsSaved(() => startMyAuthenticator(ctxOf(a.identity)))).toEqual({ ok: false, errors: [COPY.appStrictOff] });
+    expect(await authenticatorRows(a.identity.parentId)).toEqual([]);
+    await seedParentSettings({ level: "standard" });
+    await seedAuthenticator(a.identity.parentId);
+    await seedBackupCodes(a.identity.parentId, 2);
+    const before = { app: await authenticatorRows(a.identity.parentId), codes: await backupCodeRows(a.identity.parentId) };
+    expect(await whileStrictIsSaved(() => turnOffMyAuthenticator(ctxOf(a.identity)))).toEqual({ ok: false, errors: [COPY.turnOffStrict] });
+    expect({ app: await authenticatorRows(a.identity.parentId), codes: await backupCodeRows(a.identity.parentId) }).toEqual(before);
   });
 
   it("under Strict is refused, and nothing changes", async () => {
