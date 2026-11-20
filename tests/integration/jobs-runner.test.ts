@@ -122,11 +122,13 @@ describe("scheduled jobs", () => {
   it("runs no review notice and no snapshot expiry, and the daily clean-up leaves a stored snapshot alone", async () => {
     const snapshot = { key: "parents.previous_company", value: { realmId: "1111", newRealmId: "2222", at: new Date().toISOString(), families: [], approvals: [] } };
     await db.insert(setting).values(snapshot);
-    expect(await runDueJobs(hours(91 * 24))).toEqual({ ran: [{ job: CLEANUP_JOB, ok: true }] });
+    // The clean-up runs and finds nothing to remove, so the wake names no job and no cleanup.run row is written.
+    expect(await runDueJobs(hours(91 * 24))).toEqual({ ran: [] });
+    expect(await runs(CLEANUP_JOB)).toHaveLength(1);
     expect((await db.select().from(setting)).filter((x) => x.key === snapshot.key)).toHaveLength(1);
     const log = await db.select().from(auditLog);
     expect(log.filter((x) => x.action === "settings.parents.save" || x.action === "parent.review_notice.sent")).toEqual([]);
-    expect(log.filter((x) => x.action === "cleanup.run").map((x) => (x.after as { retiredSettings?: number }).retiredSettings ?? 0).filter((n) => n > 0)).toEqual([]);
+    expect(log.filter((x) => x.action === "cleanup.run")).toEqual([]);
   });
 
   it("an unexpected error in the token job is recorded as a fixed failure and the roster job still runs", async () => {
