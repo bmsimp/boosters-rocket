@@ -1,6 +1,6 @@
 import { and, asc, count, desc, eq, gt, gte, inArray, lt, lte, max, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, requirement } from "@/lib/db/schema";
+import { accountingLink, accountingLinkEnded, auditLog, requirement } from "@/lib/db/schema";
 import { QUICKBOOKS } from "@/lib/families/ids";
 import { getRosterSource } from "@/lib/roster/source";
 import { isUuid } from "@/lib/seasons/ids";
@@ -115,14 +115,50 @@ async function customersOfRecord(record: AuditFilters["record"]): Promise<Record
   if (!isUuid(id) || (type !== null && type !== "family" && type !== "student")) return null;
   const realmId = await getRosterSource();
   if (realmId === null) return { id, kind: type, families: [], students: [] };
-  const kind = type === "family" ? sql`${accountingLink.familyId}::text = ${id}` : type === "student" ? sql`${accountingLink.studentId}::text = ${id}`
-    : sql`(${accountingLink.familyId}::text = ${id} or ${accountingLink.studentId}::text = ${id})`;
-  const links = await db.select({ customerId: accountingLink.customerId, familyId: accountingLink.familyId }).from(accountingLink)
-    .where(and(eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId), kind));
-  return { id, kind: type, families: [...new Set(links.filter((l) => l.familyId !== null).map((l) => l.customerId))], students: [...new Set(links.filter((l) => l.familyId === null).map((l) => l.customerId))] };
+  const ofRecord = (t: typeof accountingLink | typeof accountingLinkEnded) => (type === "family" ? sql`${t.familyId}::text = ${id}` : type === "student" ? sql`${t.studentId}::text = ${id}`
+    : sql`(${t.familyId}::text = ${id} or ${t.studentId}::text = ${id})`);
+  // The record's link that is, and its links that were (stage 4's slice M3b: an unlink moves them to accounting_link_ended).
+  const [live, ended] = await Promise.all([
+    db.select({ customerId: accountingLink.customerId, familyId: accountingLink.familyId, linkedAt: accountingLink.linkedAt }).from(accountingLink)
+      .where(and(eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId), ofRecord(accountingLink))),
+    db.select({ customerId: accountingLinkEnded.customerId, familyId: accountingLinkEnded.familyId, linkedAt: accountingLinkEnded.linkedAt, endedAt: accountingLinkEnded.endedAt })
+      .from(accountingLinkEnded).where(and(eq(accountingLinkEnded.system, QUICKBOOKS), eq(accountingLinkEnded.realmId, realmId), ofRecord(accountingLinkEnded))),
+  ]);
+  const mine = [...live.map((l) => ({ ...l, endedAt: null as Date | null })), ...ended];
+  if (mine.length === 0) return { id, kind: type, families: [], students: [] };
+  // Each customer's other records of the same kind whose links to it ended: the latest that ended before this record's
+  // link was made bounds its window from below (rows about the customer written then were that other record's).
+  const others = ended.length === 0 && (await db.select({ id: accountingLinkEnded.id }).from(accountingLinkEnded).limit(1)).length === 0 ? []
+    : await db.select({ customerId: accountingLinkEnded.customerId, familyId: accountingLinkEnded.familyId, endedAt: accountingLinkEnded.endedAt }).from(accountingLinkEnded)
+      .where(and(eq(accountingLinkEnded.system, QUICKBOOKS), eq(accountingLinkEnded.realmId, realmId), inArray(accountingLinkEnded.customerId, [...new Set(mine.map((l) => l.customerId))]),
+        sql`coalesce(${ofRecord(accountingLinkEnded)}, false) = false`));
+  const windowsOf = (asFamily: boolean): Window[] => mine.filter((l) => (l.familyId !== null) === asFamily).map((l) => {
+    const before = others.filter((o) => o.customerId === l.customerId && (o.familyId !== null) === asFamily && o.endedAt <= l.linkedAt).map((o) => o.endedAt.getTime());
+    return { customerId: l.customerId, from: before.length ? new Date(Math.max(...before)) : null, to: l.endedAt };
+  });
+  return { id, kind: type, families: windowsOf(true), students: windowsOf(false) };
 }
-/** A family or student record the filter names (`kind` null when the filter gave the id alone), and the customers it is linked to. */
-type RecordNames = { id: string; kind: "family" | "student" | null; families: string[]; students: string[] };
+/**
+ * One customer a record is or was linked to, and when it was the record's (stage 4's slice M3b): rows naming the customer
+ * match only when written after `from` (the latest unlink of another record of the same kind from that customer, before
+ * this record's link was made) and at or before `to` (this record's own unlink of it); null bounds nothing. With no ended
+ * link anywhere every window is unbounded, and the filter finds what it found before.
+ */
+type Window = { customerId: string; from: Date | null; to: Date | null };
+/** A family or student record the filter names (`kind` null when the filter gave the id alone), and the customers it is or was linked to, each with its window. */
+type RecordNames = { id: string; kind: "family" | "student" | null; families: Window[]; students: Window[] };
+
+/**
+ * The conditions that match an expression naming one of these customers, each inside its window: the unbounded ones in
+ * one list, as before slice M3b, and each bounded one apart. None for no customer.
+ */
+function named(expr: SQL, ws: readonly Window[], match: (expr: SQL, customers: string[]) => SQL = (e, c) => inArray(e, c)): SQL[] {
+  if (ws.length === 0) return [];
+  const open = [...new Set(ws.filter((w) => w.from === null && w.to === null).map((w) => w.customerId))];
+  const bounded = ws.filter((w) => (w.from !== null || w.to !== null) && !open.includes(w.customerId));
+  return [...(open.length ? [match(expr, open)] : []),
+    ...bounded.map((w) => and(match(expr, [w.customerId]), w.from === null ? undefined : gt(auditLog.at, w.from), w.to === null ? undefined : lte(auditLog.at, w.to))!)];
+}
 
 /**
  * A form request's rows (target "signature_request") name its family and student in their body, not their target: the
@@ -135,9 +171,9 @@ function formRowsOf(r: RecordNames): SQL {
   const said = (side: "before" | "after", key: "familyId" | "studentId" | "familyQboId" | "subjectQboId") =>
     sql`(${side === "before" ? auditLog.before : auditLog.after}) ->> ${sql.raw(`'${key}'`)}`;
   const family = r.kind === "student" ? [] : [eq(said("after", "familyId"), r.id), eq(said("before", "familyId"), r.id),
-    ...(r.families.length ? [inArray(said("after", "familyQboId"), r.families), inArray(said("before", "familyQboId"), r.families)] : [])];
+    ...named(said("after", "familyQboId"), r.families), ...named(said("before", "familyQboId"), r.families)];
   const student = r.kind === "family" ? [] : [eq(said("after", "studentId"), r.id), eq(said("before", "studentId"), r.id),
-    ...(r.students.length ? [inArray(said("after", "subjectQboId"), r.students)] : [])];
+    ...named(said("after", "subjectQboId"), r.students)];
   return and(eq(auditLog.targetType, "signature_request"), or(...family, ...student))!;
 }
 
@@ -159,10 +195,10 @@ function buyoutRowsOf(r: RecordNames): SQL {
   const subjectAs = (kind: "family" | "student", customers: string[]) => and(inArray(said("after", "subjectQboId"), customers),
     sql`exists (select 1 from ${requirement} where ${requirement.id}::text = ${said("after", "requirementId")} and ${requirement.appliesTo} = ${kind})`)!;
   const family = r.kind === "student" ? [] : [eq(said("after", "familyId"), r.id), eq(said("before", "familyId"), r.id), eq(said("after", "toFamilyId"), r.id),
-    ...(r.families.length ? (["familyQboId", "fromFamilyQboId", "toFamilyQboId"] as const).map((k) => inArray(said("after", k), r.families))
-      .concat([inArray(said("before", "familyQboId"), r.families), subjectAs("family", r.families)]) : [])];
+    ...(["familyQboId", "fromFamilyQboId", "toFamilyQboId"] as const).flatMap((k) => named(said("after", k), r.families)),
+    ...named(said("before", "familyQboId"), r.families), ...named(said("after", "subjectQboId"), r.families, (_e, c) => subjectAs("family", c))];
   const student = r.kind === "family" ? [] : [eq(said("after", "studentId"), r.id), eq(said("before", "studentId"), r.id),
-    ...(r.students.length ? [subjectAs("student", r.students)] : [])];
+    ...named(said("after", "subjectQboId"), r.students, (_e, c) => subjectAs("student", c))];
   return and(eq(auditLog.targetType, "buyout"), or(...family, ...student))!;
 }
 
@@ -182,14 +218,14 @@ function parentRowsOf(r: RecordNames): SQL | undefined {
   if (r.kind === "student") return undefined;
   // The key is one of the four written here, never a value from the address: written into the query as a text literal.
   const said = (key: "familyId" | "familyQboId" | "from" | "to") => sql`(${auditLog.after}) ->> ${sql.raw(`'${key}'`)}`;
-  const names = [r.id, ...r.families];
   return or(
     and(eq(auditLog.targetType, "parent"), inArray(auditLog.action, ["signin", "signin.refused"]),
-      or(eq(said("familyId"), r.id), ...(r.families.length ? [inArray(said("familyQboId"), r.families)] : []))),
-    and(eq(auditLog.targetType, "parent"), eq(auditLog.action, "signin.family_switch"), or(inArray(said("from"), names), inArray(said("to"), names))),
+      or(eq(said("familyId"), r.id), ...named(said("familyQboId"), r.families))),
+    and(eq(auditLog.targetType, "parent"), eq(auditLog.action, "signin.family_switch"),
+      or(eq(said("from"), r.id), eq(said("to"), r.id), ...named(said("from"), r.families), ...named(said("to"), r.families))),
     and(inArray(auditLog.action, ["parent.email.request", "parent.email.save"]), eq(said("familyId"), r.id)),
     and(eq(auditLog.targetType, "guardian"), inArray(auditLog.action, ["parent.access.granted", "parent.access.ended"]),
-      or(eq(said("familyId"), r.id), ...(r.families.length ? [inArray(said("familyQboId"), r.families)] : []))),
+      or(eq(said("familyId"), r.id), ...named(said("familyQboId"), r.families))),
     and(eq(auditLog.targetType, "parent"), eq(auditLog.action, "parent.create"), eq(said("familyId"), r.id)),
   );
 }
@@ -211,20 +247,23 @@ function moveRowsOf(r: RecordNames): SQL | undefined {
   return or(
     and(eq(auditLog.action, "roster.record.moved"), or(eq(said("before", "familyId"), r.id), eq(said("after", "familyId"), r.id), eq(said("after", "fromFamilyId"), r.id))),
     and(eq(auditLog.action, "roster.student.move.followed"), or(eq(said("after", "fromFamilyId"), r.id), eq(said("after", "toFamilyId"), r.id),
-      ...(r.families.length ? [inArray(said("after", "fromFamilyQboId"), r.families), inArray(said("after", "toFamilyQboId"), r.families)] : []))),
-    ...(r.families.length ? [and(eq(auditLog.action, "roster.student.move"), or(inArray(said("before", "familyQboId"), r.families), inArray(said("after", "familyQboId"), r.families)))] : []),
+      ...named(said("after", "fromFamilyQboId"), r.families), ...named(said("after", "toFamilyQboId"), r.families))),
+    ...(r.families.length ? [and(eq(auditLog.action, "roster.student.move"), or(...named(said("before", "familyQboId"), r.families), ...named(said("after", "familyQboId"), r.families)))] : []),
   );
 }
 
 /**
  * A confirm on the accounting links screen (`accounting.link.confirm`, stage 4's slice M3a) targets the family and names
  * the students it linked only in its body (`after.studentsLinked`, each `{ studentId, customerQboId }`): a search for
- * one of those students finds it there, as a move's rows are found by the families they name. The family finds it by
- * its target.
+ * one of those students finds it there, as a move's rows are found by the families they name, and so does an unlink
+ * (`accounting.link.remove`, slice M3b) for each student whose link it ended (`after.studentLinksEnded`). The family
+ * finds both by their target.
  */
 function confirmRowsOf(r: RecordNames): SQL | undefined {
   if (r.kind === "family") return undefined;
-  return and(eq(auditLog.action, "accounting.link.confirm"), sql`(${auditLog.after}) -> 'studentsLinked' @> ${JSON.stringify([{ studentId: r.id }])}::jsonb`);
+  return or(and(eq(auditLog.action, "accounting.link.confirm"), sql`(${auditLog.after}) -> 'studentsLinked' @> ${JSON.stringify([{ studentId: r.id }])}::jsonb`),
+    // An unlink (slice M3b) targets the family and names the students whose links it ended in its body.
+    and(eq(auditLog.action, "accounting.link.remove"), sql`(${auditLog.after}) -> 'studentLinksEnded' @> ${JSON.stringify([{ studentId: r.id }])}::jsonb`));
 }
 
 /**
@@ -233,16 +272,17 @@ function confirmRowsOf(r: RecordNames): SQL | undefined {
  * "<requirement>:<subject>", naming the customer (before the seasons moved) or the record (since).
  */
 function recordsOlderNames(r: RecordNames): SQL | undefined {
-  const keys = [r.id, ...r.families, ...r.students];
+  // A tick's or waiver's target ends with its subject: the record's own id, or one of its customers inside its window.
+  const endsWith = (e: SQL, keys: string[]) => or(...keys.map((k) => sql`${e} like ${endsWithKey(k)} escape '\\'`))!;
   return or(
     formRowsOf(r),
     buyoutRowsOf(r),
     parentRowsOf(r),
     moveRowsOf(r),
     confirmRowsOf(r),
-    ...(r.families.length ? [and(inArray(auditLog.targetType, [...CUSTOMER_TARGET_TYPES.family]), inArray(auditLog.targetId, r.families))] : []),
-    ...(r.students.length ? [and(inArray(auditLog.targetType, [...CUSTOMER_TARGET_TYPES.student]), inArray(auditLog.targetId, r.students))] : []),
-    and(eq(auditLog.targetType, "requirement_progress"), or(...keys.map((k) => sql`${auditLog.targetId} like ${endsWithKey(k)} escape '\\'`))),
+    ...named(sql`${auditLog.targetId}`, r.families, (e, c) => and(inArray(auditLog.targetType, [...CUSTOMER_TARGET_TYPES.family]), inArray(e, c))!),
+    ...named(sql`${auditLog.targetId}`, r.students, (e, c) => and(inArray(auditLog.targetType, [...CUSTOMER_TARGET_TYPES.student]), inArray(e, c))!),
+    and(eq(auditLog.targetType, "requirement_progress"), or(endsWith(sql`${auditLog.targetId}`, [r.id]), ...named(sql`${auditLog.targetId}`, r.families, endsWith), ...named(sql`${auditLog.targetId}`, r.students, endsWith))),
   );
 }
 
