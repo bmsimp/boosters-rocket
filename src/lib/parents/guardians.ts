@@ -158,8 +158,13 @@ export type AddGuardianResult =
   | { ok: true; outcome: "added" | "reinstated"; person: "new" | "existing"; name: string; guardianId: string; parentId: string; quickbooks: string[] }
   /** The address belongs to a person already: nothing was written; staff are asked whether this is them. */
   | { ok: false; reason: "same_person"; person: { id: string; name: string; families: string[] } }
-  /** `qbo_pending`: a change to the row's Parent customer is waiting, stuck or being sent, so a closed row isn't reopened meanwhile. */
-  | { ok: false; reason: "invalid_name" | "invalid_email" | "no_family" | "inactive" | "waiting" | "making" | "changing" | "other_company" | "blocked" | "already" | "busy" | "qbo_pending" };
+  /**
+   * `qbo_pending`: a change to the row's Parent customer is waiting or stuck, so a closed row isn't reopened meanwhile;
+   * `being_changed`: someone holds the row's "being sent" lock at this moment (a change to it being saved or sent);
+   * `raced`: another add of this address in this family got there first. Each its own cause, said in its own words.
+   */
+  | { ok: false; reason: "invalid_name" | "invalid_email" | "no_family" | "inactive" | "waiting" | "making" | "changing" | "other_company" | "blocked" | "already" | "busy" | "qbo_pending"
+    | "being_changed" | "raced" };
 
 /**
  * The row an add would open for this address in this family, read before the add's transaction, unlocked: the person's
@@ -199,9 +204,12 @@ async function rowToOpen(familyId: AppFamilyId, email: string): Promise<string |
  * the books have a parent type and the family is linked, a row with none has its create queued, unless QuickBooks has a
  * customer of the person's name under the family already (nothing sent, nothing kept, no link guessed); and after the
  * commit it is tried at once (sendGuardianSaved()), holding the row's "being sent" lock from before the save: the row
- * the add reopens, read before and checked again under the locks (`busy` if it is another by then), or the new row,
- * whose id is chosen here. A closed row whose Parent customer change is waiting, stuck or being sent is not reopened
- * (`qbo_pending`). What QuickBooks answers is said in `quickbooks`, and never changes the row or its access.
+ * the add reopens, read before and checked again under the locks (`raced` if it is another by then: another add got
+ * there first), or the new row, whose id is chosen here. A closed row whose Parent customer change is waiting or stuck
+ * is not reopened (`qbo_pending`), nor one whose lock someone holds (`being_changed`). A create is tried at once only
+ * while its family isn't being changed in QuickBooks and no roster read holds the roster lock past ROSTER_WAIT_MS
+ * (sendGuardianSaved()): otherwise it waits for the worker, said. What QuickBooks answers is said in `quickbooks`, and
+ * never changes the row or its access.
  */
 export async function addGuardian(familyId: AppFamilyId, input: { name: string; email: string; samePerson?: string | null }, o: StaffOp, w: Waits = {}): Promise<AddGuardianResult> {
   const name = personName(input.name);
@@ -210,13 +218,13 @@ export async function addGuardian(familyId: AppFamilyId, input: { name: string; 
   if (email === null) return { ok: false, reason: "invalid_email" };
   const existing = await rowToOpen(familyId, email);
   const lockId = existing ?? randomUUID();
-  const r = await whileGuardiansHeld([lockId], async () => {
+  const r = await whileGuardiansHeld([lockId], async (hold) => {
     const saved = await saveGuardian(familyId, name, email, input.samePerson ?? null, lockId, existing !== null, o, w);
     if (!saved.ok) return saved;
-    const sent = await sendGuardianSaved(saved.queued, o);
+    const sent = await sendGuardianSaved(saved.queued, o, { hold, rosterWaitMs: w.rosterWaitMs });
     return { ...saved.result, quickbooks: guardianSentWords(sent, "grant", saved.result.name) };
   });
-  return r ?? { ok: false, reason: existing !== null ? "qbo_pending" : "busy" };
+  return r ?? { ok: false, reason: "being_changed" };
 }
 
 /** addGuardian()'s save, holding the row's "being sent" lock: `rowId` is the row it opens (`known`: one that was there before), or the new row's id. */
@@ -238,8 +246,8 @@ async function saveGuardian(familyId: AppFamilyId, name: string, email: string, 
       ? await tx.select().from(guardian).where(and(eq(guardian.parentId, p.id), eq(guardian.familyQboId, fam.customer))).for("update") : [];
     const held = inFamily ?? underCustomer;
     if (held && held.status !== "disabled") return { ok: false, reason: "already" };
-    // The row whose "being sent" lock is held must be the one opened: another by now (an add raced this one) is busy.
-    if (held ? held.id !== rowId : known) return { ok: false, reason: "busy" };
+    // The row whose "being sent" lock is held must be the one opened: another by now (an add raced this one) is `raced`.
+    if (held ? held.id !== rowId : known) return { ok: false, reason: "raced" };
     // Someone holds the address: nothing is written until staff have said, seeing who it is, that this is them.
     if (p && input.samePerson !== p.id) return { ok: false, reason: "same_person", person: { id: p.id, name: p.name, families: await openFamiliesOf(tx, p.id) } };
     const person = p ? "existing" as const : "new" as const;
@@ -316,7 +324,7 @@ export type RemoveGuardianResult = { ok: true; sessionsEnded: number; quickbooks
 export async function removeGuardian(guardianId: string, rawNote: string, o: StaffOp, w: Waits = {}): Promise<RemoveGuardianResult> {
   const note = rawNote.trim();
   if (!note || note.length > REMOVE_NOTE_MAX) return { ok: false, reason: "invalid_note" };
-  const run = async (locked: boolean): Promise<RemoveGuardianResult> => {
+  const run = async (hold: Tx | null): Promise<RemoveGuardianResult> => {
     type Saved = { ok: true; sessionsEnded: number; queued: GuardianQueued[]; name: string } | Exclude<RemoveGuardianResult, { ok: true }>;
     const saved = await db.transaction(async (tx): Promise<Saved> => {
       const held = await lockedRow(tx, guardianId, w);
@@ -328,14 +336,15 @@ export async function removeGuardian(guardianId: string, rawNote: string, o: Sta
       return { ok: true, sessionsEnded, queued, name: held.p.name };
     });
     if (!saved.ok) return saved;
-    const sent = locked ? await sendGuardianSaved(saved.queued, o) : saved.queued;
+    const sent = hold ? await sendGuardianSaved(saved.queued, o, { hold, rosterWaitMs: w.rosterWaitMs }) : saved.queued;
     return { ok: true, sessionsEnded: saved.sessionsEnded, quickbooks: guardianSentWords(sent, "remove", saved.name) };
   };
-  return (await whileGuardiansHeld([guardianId], () => run(true))) ?? run(false);
+  return (await whileGuardiansHeld([guardianId], (hold) => run(hold))) ?? run(null);
 }
 
 export type ReinstateGuardianResult = { ok: true; quickbooks: string[] }
-  | { ok: false; reason: "not_found" | "already_open" | "previous_company" | "blocked" | "no_family" | "inactive" | "waiting" | "making" | "changing" | "other_company" | "other_customer" | "busy" | "qbo_pending" };
+  | { ok: false; reason: "not_found" | "already_open" | "previous_company" | "blocked" | "no_family" | "inactive" | "waiting" | "making" | "changing" | "other_company" | "other_customer" | "busy" | "qbo_pending"
+    | "being_changed" };
 
 /**
  * Opens a closed membership again: the same row, as it was before it closed (`status_before_disable`, else invited),
@@ -348,11 +357,11 @@ export type ReinstateGuardianResult = { ok: true; quickbooks: string[] }
  *
  * Its Parent customer (stage 3's slice 9h, queueForGuardian()'s grant): a row with one of its own creates none, sends
  * nothing to one QuickBooks has inactive (open question 12: said in words), and replaces a refused make-inactive of the
- * row; a row with none goes by the add's rule. A change to it waiting, stuck or being sent refuses the reinstate,
- * changing nothing (`qbo_pending`).
+ * row; a row with none goes by the add's rule. A change to it waiting or stuck refuses the reinstate, changing nothing
+ * (`qbo_pending`), and so does someone holding the row's lock (`being_changed`).
  */
 export async function reinstateGuardian(guardianId: string, o: StaffOp, w: Waits = {}): Promise<ReinstateGuardianResult> {
-  const r = await whileGuardiansHeld([guardianId], async (): Promise<ReinstateGuardianResult> => {
+  const r = await whileGuardiansHeld([guardianId], async (hold): Promise<ReinstateGuardianResult> => {
     type Saved = { ok: true; queued: GuardianQueued[]; name: string } | Exclude<ReinstateGuardianResult, { ok: true }>;
     const saved = await db.transaction(async (tx): Promise<Saved> => {
       const held = await lockedRow(tx, guardianId, w);
@@ -372,7 +381,7 @@ export async function reinstateGuardian(guardianId: string, o: StaffOp, w: Waits
       return { ok: true, queued: await queueForGuardian(tx, { op: "grant", guardianId: row.id, familyId: row.familyId!, name: p.name, email: p.email }, o), name: p.name };
     });
     if (!saved.ok) return saved;
-    return { ok: true, quickbooks: guardianSentWords(await sendGuardianSaved(saved.queued, o), "grant", saved.name) };
+    return { ok: true, quickbooks: guardianSentWords(await sendGuardianSaved(saved.queued, o, { hold, rosterWaitMs: w.rosterWaitMs }), "grant", saved.name) };
   });
-  return r ?? { ok: false, reason: "qbo_pending" };
+  return r ?? { ok: false, reason: "being_changed" };
 }

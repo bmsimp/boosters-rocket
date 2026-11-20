@@ -206,6 +206,7 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
           <People id="entry-parents-h" title="Parents in QuickBooks" noun="Parent" contact empty="QuickBooks lists no parents under this family."
             people={fam.parents.map((c) => ({ ...ofCustomer(c), standing: `${standing(c)}: ${ofGuardians.get(c.qboId) === "own" ? "a portal guardian's own, changed through them under Portal sign-ins and on their page"
               : ofGuardians.get(c.qboId) === "other" ? "linked to a portal guardian, but not one guardian's own under this family (several share it, or theirs is another family), so the portal sends nothing for it: change it in QuickBooks, and the mapping screen will sort it out"
+              : ofGuardians.get(c.qboId) === "removed" ? "the own Parent customer of a guardian removed from this family, left active in QuickBooks (a removal makes it inactive only when its balance allows): adding them back under Portal sign-ins uses it again"
               : "not a portal guardian; adding the person under Portal sign-ins doesn't use it, and the mapping screen will offer to link it"}` }))} />
         </>
       ) : (

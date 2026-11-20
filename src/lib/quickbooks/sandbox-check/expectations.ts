@@ -187,7 +187,7 @@ export const EXPECTATIONS = [
   },
   {
     key: "duplicate_name_other_parent", group: "writes", title: "Making a parent with a name already used under another family",
-    expects: "The portal doesn't know yet whether QuickBooks takes a second customer with the same name under a different family, or refuses it as a name already in use (code 6240). Either is fine: when a guardian is added, the portal compares nothing but the family's own customers before it sends, and QuickBooks' answer decides. If QuickBooks takes it, a person who is a guardian in two families gets a Parent customer under each. If it refuses, the second family's Parent customer is kept on the Reconciliation page with the words for a name already in use, and its ways out are renaming the person or giving it up.",
+    expects: "The portal doesn't know yet whether QuickBooks takes a second customer with the same name under a different family, or refuses it as a name already in use (code 6240). Today the portal takes the stricter answer as its own: a person has one name, so when a guardian of two families already has their own Parent customer of that name under one, nothing is sent for the other, and that family's page says QuickBooks has their record under the first family. A refusal for any other customer of that name is kept on the Reconciliation page in the words for a name already in use: a rename of the person makes it under the new name only where no customer the portal knows of has that name, and giving it up leaves the guardian with no record of their own in QuickBooks. Either answer is fine for the portal as it is. If QuickBooks takes a name twice, a later change to the portal could make each family's guardian a Parent customer of their own.",
     learned: (l) => (l.code === "accepted" ? "QuickBooks made a second customer with the same name under the other family." : `QuickBooks answered with ${codeWords(l.code)}.`),
     ifNot: "Nothing in the portal is wrong either way: this tells the portal which of the two answers this company's QuickBooks gives.", codeChange: false,
     where: "the guardian's Parent customer create in src/lib/roster/writes.ts",
@@ -342,6 +342,8 @@ export const NOT_RUN_WORDS: Record<string, string> = {
   no_types: "Not tried: the company has no active customer type to make the check's records with. Add one in QuickBooks, then run the check again.",
   roster_busy: "Not tried: the portal was reading the roster from QuickBooks just then. Run the check again in a minute.",
   stopped: "Not tried: the check stopped before it got here.",
+  // A request the check learned after a stored run was made: that run never had the step (the check's page).
+  added_since: "Not part of this run: the check learned this request after it ran.",
 };
 export const notRunWords = (code: string | null): string => NOT_RUN_WORDS[code ?? ""] ?? NOT_RUN_WORDS.stopped!;
 

@@ -12,7 +12,7 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster } from "./refresh";
 import { getRosterSource, ROSTER_JOB } from "./source";
 import { lockRosterAs, rosterTagOf } from "@/lib/seasons/roster-lock";
-import { alignAfterWrite, applyWritten, balanceUnread, BEING_SENT_NOW, changeOwnRecord, CREDIT_BALANCE, CUSTOMER_HAS_GUARDIAN, EMAIL_TOO_LONG, guardianCustomerHeld, guardianOf, isSavedFirst, NAME_UNUSABLE, itemLockFree, madeAfterGivingUp, markMoveMoneyStale, moveMoneyNotes, REFRESH_ASK_KEY,
+import { alignAfterWrite, applyWritten, balanceUnread, BEING_SENT_NOW, changeOwnRecord, CREDIT_BALANCE, CUSTOMER_HAS_GUARDIAN, EMAIL_TOO_LONG, FAMILY_HELD, guardianCustomerLinked, guardianOf, isSavedFirst, NAME_UNUSABLE, itemLockFree, madeAfterGivingUp, markMoveMoneyStale, moveMoneyNotes, REFRESH_ASK_KEY,
   replaceRefusedCreates, sendWrite, tryDeactivate, trySavedItem, whileItemHeld, whoStopped, type MadeAfterGivingUp, type OwnRecordChange, type SavedTry } from "./writes";
 import { afterFailedTry, beforeResend, classify } from "./write-rules";
 import { isBuyoutWrite, sendBuyoutWrite } from "@/lib/buyouts/writes";
@@ -107,9 +107,10 @@ async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise
   // One sender at a time (stage 3's slice 9e): a change saved first is tried only holding the lock its at-once try and
   // "Send the portal's value" hold (whileItemHeld()), and so, since slice 9g, is a make-inactive filed under a student or
   // member, by the lock its record's rename, move and make-inactive hold. While someone holds it, nothing is sent and no
-  // try is counted: the item is left for the next wake.
+  // try is counted: the item is left for the next wake. So it is while a guardian's Parent customer create finds its
+  // family being changed in QuickBooks (FAMILY_HELD: stage 3's slice 9h).
   const step = await whileItemHeld(item, () => tryRosterItem(item, w, now, refreshedAt));
-  if (step !== null) return step;
+  if (step !== null && step !== FAMILY_HELD) return step;
   await db.update(writeQueue).set({ nextTryAt: now, updatedAt: new Date() }).where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting")));
   return "skipped";
 }
@@ -265,10 +266,11 @@ async function foundDone(item: Item, w: RosterWrite, qboId: string): Promise<Fou
         const own = await customerOfFamily(item.familyId, tx);
         if (own !== null && own !== qboId) return FAMILY_HAS_CUSTOMER;
       }
-      // A guardian's Parent customer (stage 3's slice 9h) found made as a customer another open guardian row is linked to
-      // already: no second link is made, and the item is left for staff.
+      // A guardian's Parent customer (stage 3's slice 9h) found made, by name, as a customer another guardian row, open or
+      // closed, is linked to already (a removed guardian's own, which they take back if reinstated): no second link is
+      // made, and the item is left for staff.
       const guardianId = guardianOf(w);
-      if (w.op === "create" && guardianId !== null && (await guardianCustomerHeld(tx, item.realmId, qboId, guardianId))) return CUSTOMER_HAS_GUARDIAN;
+      if (w.op === "create" && guardianId !== null && (await guardianCustomerLinked(tx, item.realmId, qboId, guardianId))) return CUSTOMER_HAS_GUARDIAN;
       // A move found made after the portal sent it: the cache has the student under the family joined now.
       if (w.op === "move" && item.sent) await markMoveMoneyStale(tx, w);
       // The link takes the version of the cache row it was found as, by the rule an answer's takes, only for a change the

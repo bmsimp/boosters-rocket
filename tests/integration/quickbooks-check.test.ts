@@ -101,6 +101,18 @@ describe("the check of the portal's requests against an Intuit sandbox company (
     expect(end!.after).toMatchObject({ outcome: "passed", notAsExpected: 0, made: 6, open: 0 });
   });
 
+  it("shows a step a run was made before as not part of that run, never as stopped (stage 3's slice 9h)", async () => {
+    await checkCompany(stub);
+    expect(await run()).toMatchObject({ ok: true, outcome: "passed" });
+    // A run stored before the check learned the step holds no result for it.
+    const { run: r } = await lastRun();
+    await db.update(qboCheckRun).set({ results: r.results.filter((x) => x.key !== "duplicate_name_other_parent") }).where(eq(qboCheckRun.id, r.id));
+    asStaff(admin);
+    const html = await renderPage(CheckRequestsPage);
+    expect(html).toContain("Not part of this run: the check learned this request after it ran.");
+    expect(html).not.toContain("the check stopped before it got here");
+  });
+
   it("keeps no QuickBooks text but its own names: no family's name, amount or address", async () => {
     await checkCompany(stub);
     stub.customers = stub.customers.map((c) => ({ ...c, Balance: 123.45 }));

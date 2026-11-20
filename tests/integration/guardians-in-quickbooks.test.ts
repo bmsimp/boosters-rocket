@@ -14,8 +14,8 @@ import { db } from "@/lib/db/client";
 import { accountingLink, family, guardian, parent, writeQueue } from "@/lib/db/schema";
 import { addGuardian, reinstateGuardian, removeGuardian } from "@/lib/parents/guardians";
 import { renamePerson } from "@/lib/parents/people";
-import { askFamilyInactive, askRosterWrite, coverStamp, CREDIT_BALANCE, EMAIL_TOO_LONG, familyCover, GUARDIAN_HERE, GUARDIAN_PENDING, guardianCustomers, keptRefusalWords, portalValueStamp, queueForGuardian,
-  SENDING_LOCK, sendPortalValue, whileGuardiansHeld, whoStopped } from "@/lib/roster/writes";
+import { askFamilyInactive, askRosterWrite, coverStamp, CREDIT_BALANCE, CUSTOMER_HAS_GUARDIAN, EMAIL_TOO_LONG, familyCover, GUARDIAN_FAMILY_CHANGING, GUARDIAN_HERE, GUARDIAN_PENDING, guardianCustomers,
+  guardianSentWords, guardianStandings, keptRefusalWords, portalValueStamp, queueForGuardian, SENDING_LOCK, sendGuardianSaved, sendPortalValue, whileGuardiansHeld, whoStopped } from "@/lib/roster/writes";
 import { giveUp, loadOpenWrites, runWriteQueue, waitingWords } from "@/lib/roster/queue";
 import { refreshRoster } from "@/lib/roster/refresh";
 import type { AppFamilyId } from "@/lib/families/ids";
@@ -24,6 +24,7 @@ import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { asOp, auditsOf, connectRoster, queueItem, seedAnaRivera, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
 import { saveShape } from "@/lib/roster/shape";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
+import { holdTheRosterLock } from "../helpers/reconcile";
 
 /**
  * Stage 3's slice 9h: a guardian's own Parent customer follows the portal, where the books have a parent type and the
@@ -90,7 +91,11 @@ describe("adding a guardian (item 2)", () => {
     if (!r.ok) throw new Error("not added");
     const [kept] = await items();
     expect(kept).toMatchObject({ state: "refused", lastCode: "fault_6240" });
-    expect(r.quickbooks[0]).toContain("QuickBooks refused the name “Luis Rivera” as taken");
+    expect(r.quickbooks[0]).toContain("QuickBooks refused the name “Luis Rivera” as taken: another customer in QuickBooks has that name");
+    // The words promise nothing of a rename (the lead's decision 1(b)): they say what it does, and what "Give up" leaves.
+    expect(r.quickbooks[0]).toContain("Renaming Luis Rivera changes their name in the portal and on every QuickBooks record of theirs.");
+    expect(r.quickbooks[0]).toContain("leaves them as they are, with no record of their own in QuickBooks, for the mapping screen");
+    expect(r.quickbooks[0]).not.toContain("takes its place");
     expect(await rowOf(r.guardianId)).toMatchObject({ status: "invited" });
     // "Send the portal's value" isn't offered for it: the rename of the person is the way out.
     expect((await loadOpenWrites({ familyId: rivera })).find((i) => i.id === kept!.id)).toMatchObject({ mayResend: false, notOffered: "taken" });
@@ -122,15 +127,38 @@ describe("adding a guardian (item 2)", () => {
     expect(await items()).toEqual([]);
   });
 
-  it("a person in two families gets a Parent customer under each, as far as QuickBooks takes the name", async () => {
-    stub.quirks.namesUnderParent = true;
+  it("a person in two families: their record under the first has their one name, so nothing is sent, kept or linked for the second", async () => {
+    // As QuickBooks is understood to (the client's own note, and this stub's default): a name any customer has is refused.
     const a = await addGuardian(rivera, { name: "Sam Lee", email: "sam@example.com" }, op);
     if (!a.ok) throw new Error("not added");
+    expect(bodies().map((x) => [x.DisplayName, (x.ParentRef as { value: string }).value])).toEqual([["Sam Lee", "10"]]);
+    stub.calls.length = 0;
     const b = await addGuardian(chen, { name: "Sam Lee", email: "sam@example.com", samePerson: a.parentId }, op);
-    expect(b).toMatchObject({ ok: true, person: "existing" });
-    expect(bodies().map((x) => [x.DisplayName, (x.ParentRef as { value: string }).value])).toEqual([["Sam Lee", "10"], ["Sam Lee", "20"]]);
-    const links = await db.select().from(accountingLink).where(isNotNull(accountingLink.guardianId));
-    expect(links.filter((l) => l.origin === "created")).toHaveLength(2);
+    expect(b).toMatchObject({ ok: true, person: "existing", outcome: "added" });
+    if (!b.ok) return;
+    expect(b.quickbooks).toEqual(["QuickBooks already has Sam Lee's record under Rivera Family, and takes a name once, so no Parent customer was made for them under Chen Family."]);
+    expect(posts()).toEqual([]);
+    expect((await items()).filter((i) => i.request.op === "create" && i.familyId === chen)).toEqual([]);
+    expect(await linkOfRow(b.guardianId)).toBeUndefined();
+    expect(await rowOf(b.guardianId)).toMatchObject({ status: "invited", familyId: chen });
+    // The family's page says so beside them.
+    expect((await guardianStandings([{ guardianId: b.guardianId, familyId: chen, name: "Sam Lee", open: true }])).get(b.guardianId))
+      .toBe("QuickBooks already has their record under Rivera Family, and takes a name once, so none is made under this family.");
+  });
+
+  it("a rename doesn't replace a create kept as a taken name while the new name isn't free: the name is saved, the create stays kept, and the answer says why", async () => {
+    stub.otherNames = ["Luis Rivera"];
+    const r = await addGuardian(rivera, { name: "Luis Rivera", email: "luis@example.com" }, op);
+    if (!r.ok) throw new Error("not added");
+    const [kept] = await items();
+    stub.calls.length = 0;
+    // Mei Chen is a customer QuickBooks holds: by the portal's own knowledge (namesTaken()) the name isn't free.
+    const renamed = await renamePerson(r.parentId, "Mei Chen", op);
+    expect(renamed).toEqual({ ok: true, changed: true, quickbooks: ["Nothing was sent for their Parent customer under Rivera Family, which QuickBooks refused before as a taken name: another customer in QuickBooks has the name “Mei Chen” already. It stays kept on the Reconciliation page, where you can give it up."] });
+    expect(posts()).toEqual([]);
+    expect(await queueItem(kept!.id)).toMatchObject({ state: "refused", lastCode: "fault_6240" });
+    expect(await items()).toHaveLength(1);
+    expect(await personNamed("luis@example.com")).toMatchObject({ name: "Mei Chen" });
   });
 
   it("two staff adding the same new address at once make one person, one row and one Parent customer", async () => {
@@ -299,17 +327,38 @@ describe("removing a guardian (item 4)", () => {
 });
 
 describe("renaming a person (item 5)", () => {
-  it("sends the new name to the Parent customer of each of their memberships that has one", async () => {
-    stub.quirks.namesUnderParent = true;
+  // Ana's Rivera row, linked to her own Parent customer 11, and a row of hers in Chen whose create QuickBooks refused as a
+  // taken name, its id chosen so the person's rows' order is known (the order a rename goes by: decision 1(d)).
+  const anaInTwo = async (chenRowId: string) => {
     const { ana, row } = await seedAnaRivera({ status: "active" });
-    const b = await addGuardian(chen, { name: "Ana Rivera", email: "ana@example.com", samePerson: ana.id }, op);
-    if (!b.ok) throw new Error("not added");
-    const theirs = (await linkOfRow(b.guardianId))!.customerId;
+    await db.insert(guardian).values({ id: chenRowId, familyQboId: "20", familyId: chen, parentId: ana.id, status: "active" });
+    const kept = await seedQueued({ op: "create", role: "parent", name: "Ana Rivera", typeQboId: "2", familyQboId: "20", email: "ana@example.com", guardianId: chenRowId },
+      { familyQboId: "20", state: "refused", code: "fault_6240", sent: true });
     stub.calls.length = 0;
-    const r = await renamePerson(ana.id, "Ana Rivera-Lopez", op);
+    return { ana, row, kept };
+  };
+
+  it("gives a person in two families' new name to one record of theirs, the first in their rows' order: their own Parent customer", async () => {
+    const { ana, row, kept } = await anaInTwo("ffffffff-ffff-4fff-bfff-ffffffffffff");
+    expect(row.id < "ffffffff-ffff-4fff-bfff-ffffffffffff").toBe(true);
+    const r = await renamePerson(ana.id, "Ana Lopez", op);
     expect(r).toMatchObject({ ok: true, changed: true });
-    expect(bodies().filter((x) => x.DisplayName === "Ana Rivera-Lopez").map((x) => x.Id).sort()).toEqual(["11", theirs].sort());
-    expect(await linkOfRow(row.id)).toMatchObject({ customerId: "11" });
+    // Only the rename of 11 is sent; the create under Chen isn't, and stays kept: QuickBooks would refuse the name twice.
+    expect(bodies().map((x) => [x.Id ?? null, x.DisplayName])).toEqual([["11", "Ana Lopez"]]);
+    expect(await queueItem(kept.id)).toMatchObject({ state: "refused", lastCode: "fault_6240" });
+    if (r.ok) expect(r.quickbooks).toContain("Nothing was sent for their Parent customer under Chen Family, which QuickBooks refused before as a taken name: their record under Rivera Family has the new name, and QuickBooks takes a name once. It stays kept on the Reconciliation page, where you can give it up.");
+  });
+
+  it("gives a person in two families' new name to one record of theirs, the first in their rows' order: the create kept under the other family", async () => {
+    const { ana, kept } = await anaInTwo("00000000-0000-4000-8000-000000000001");
+    const r = await renamePerson(ana.id, "Ana Lopez", op);
+    expect(r).toMatchObject({ ok: true, changed: true });
+    // The create under Chen takes the new name, and the rename of 11 isn't queued: 11 keeps the name it has.
+    expect(bodies().map((x) => [x.Id ?? null, x.DisplayName, (x.ParentRef as { value?: string } | undefined)?.value ?? null])).toEqual([[null, "Ana Lopez", "20"]]);
+    expect(await queueItem(kept.id)).toMatchObject({ state: "given_up" });
+    expect(stub.customers.find((c) => c.Id === "11")).toMatchObject({ DisplayName: "Ana Rivera" });
+    expect((await items()).filter((i) => i.request.op === "rename")).toEqual([]);
+    if (r.ok) expect(r.quickbooks).toContain("Their Parent customer under Rivera Family keeps the name it has in QuickBooks: QuickBooks takes a name once, and the new name goes to their record under Chen Family.");
   });
 
   it("is refused, changing nothing, while a change to one of their Parent customers waits", async () => {
@@ -384,5 +433,121 @@ describe("the queue (item 7)", () => {
     await runWriteQueue(new Date(Date.now() + 2 * MIN));
     expect(bodies()).toEqual([expect.objectContaining({ DisplayName: "Kit Rivera" })]);
     expect(await linkOfRow(row!.id)).toMatchObject({ origin: "created" });
+  });
+});
+
+describe("the last round's decisions: the family being changed, a found customer, and each refusal's own cause", () => {
+  /** Runs `f` while the family action holds the Rivera family's "being sent" lock, from before its checks to its last step. */
+  const whileRiveraChanged = <T,>(f: () => Promise<T>) => db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(${sql.raw(String(SENDING_LOCK))}, hashtext(${String(rivera)}::text))`);
+    return f();
+  });
+  const kit = async () => {
+    const [p] = await db.insert(parent).values({ name: "Kit Rivera", email: "kit@example.com" }).returning();
+    const [row] = await db.insert(guardian).values({ familyQboId: "10", familyId: rivera, parentId: p!.id, status: "invited" }).returning();
+    return { p: p!, row: row! };
+  };
+
+  it("while the family action runs, no create is sent at once, by the worker, by \"Send the portal's value\" or for a rename's replacement", async () => {
+    const { p, row } = await kit();
+    // At once: the create saved, its send finds the family being changed, and leaves it waiting.
+    const queued = await db.transaction((tx) => queueForGuardian(tx, { op: "grant", guardianId: row.id, familyId: rivera, name: "Kit Rivera", email: "kit@example.com" }, op));
+    const sent = await whileRiveraChanged(() => whileGuardiansHeld([row.id], (hold) => sendGuardianSaved(queued, op, { hold })));
+    expect(sent).toEqual([expect.objectContaining({ outcome: "queued", deferred: "family" })]);
+    expect(guardianSentWords(sent!, "grant", "Kit Rivera")).toEqual(["Making their Parent customer under Rivera Family wasn't sent just now: Rivera Family is being changed in QuickBooks at this moment. It is saved, and the portal sends it shortly; you'll find it on the Reconciliation page until then."]);
+    // The worker: left for its next wake, no try counted, nothing marked as sent.
+    await whileRiveraChanged(() => runWriteQueue(new Date(Date.now() + 2 * MIN)));
+    const [item] = await items();
+    expect(item).toMatchObject({ state: "waiting", sent: false, tries: 0 });
+    // "Send the portal's value" on it, kept: refused in words, the item kept as it was.
+    await db.update(writeQueue).set({ state: "refused", lastCode: "token_needs_admin" }).where(eq(writeQueue.id, item!.id));
+    expect(await whileRiveraChanged(() => sendPortalValue(item!.id, "Kit Rivera", portalValueStamp(item!.id, "Kit Rivera"), op))).toEqual({ ok: false, errors: [GUARDIAN_FAMILY_CHANGING] });
+    expect(await queueItem(item!.id)).toMatchObject({ state: "refused", lastCode: "token_needs_admin" });
+    // A rename's replacement of a create kept as a taken name: saved and queued, not sent.
+    await db.update(writeQueue).set({ lastCode: "fault_6240" }).where(eq(writeQueue.id, item!.id));
+    const renamed = await whileRiveraChanged(() => renamePerson(p.id, "Kit M. Rivera", op));
+    expect(renamed).toMatchObject({ ok: true, changed: true });
+    if (renamed.ok) expect(renamed.quickbooks[0]).toContain("wasn't sent just now: Rivera Family is being changed in QuickBooks at this moment");
+    expect(posts()).toEqual([]);
+    expect(await queueItem(item!.id)).toMatchObject({ state: "given_up" });
+    const replacement = (await items()).find((i) => i.state === "waiting");
+    expect(replacement).toMatchObject({ sent: false, tries: 0, request: expect.objectContaining({ op: "create", name: "Kit M. Rivera", guardianId: row.id }) });
+    // Once the family action is over, the worker sends it.
+    await runWriteQueue(new Date(Date.now() + 2 * MIN));
+    expect(bodies()).toEqual([expect.objectContaining({ DisplayName: "Kit M. Rivera", ParentRef: { value: "10" } })]);
+  });
+
+  it("a create found made by name links its row only to a customer no guardian row, open or removed, is linked to", async () => {
+    // A removed guardian of the same name, whose own Parent customer 70 was left active (its balance).
+    stub.customers.push({ Id: "70", DisplayName: "Kit Rivera", Active: true, SyncToken: "0", CustomerTypeRef: { value: "2" }, ParentRef: { value: "10" }, Job: true });
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
+    const other = await seedParent({ name: "Kit Rivera", email: "kit.other@example.com" });
+    const removed = await seedGuardian({ parentId: other.id, familyQboId: "10", sourceQboId: "70", status: "disabled", disabledReason: "removed", statusBeforeDisable: "active" });
+    await syncAppRecords();
+    expect(await linkOfRow(removed.id)).toMatchObject({ customerId: "70" });
+    // Kit's own create, its answer lost before QuickBooks got it: held as maybe sent, tried before the last roster read.
+    const { row } = await kit();
+    const c = await seedQueued({ op: "create", role: "parent", name: "Kit Rivera", typeQboId: "2", familyQboId: "10", email: "kit@example.com", guardianId: row.id },
+      { familyQboId: "10", sent: true, lastTriedAt: new Date(Date.now() - 10 * MIN), nextTryAt: new Date(Date.now() - MIN) });
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
+    stub.calls.length = 0;
+    await runWriteQueue(new Date(Date.now() + 2 * MIN));
+    expect(posts()).toEqual([]);
+    expect(await queueItem(c.id)).toMatchObject({ state: "stuck", lastCode: CUSTOMER_HAS_GUARDIAN });
+    expect(await linkOfRow(row.id)).toBeUndefined();
+    expect(await linkOfRow(removed.id)).toMatchObject({ customerId: "70" });
+  });
+
+  it("a removed guardian's own Parent customer, left active because of its balance, is theirs on the family's page", async () => {
+    stub.quirks.balances = true;
+    stub.invoices = [{ Id: "909", SyncToken: "0", CustomerRef: { value: "11" }, TotalAmt: 5, Balance: 5 }];
+    const { row } = await seedAnaRivera({ status: "active" });
+    await removeGuardian(row.id, "Moved away.", op);
+    expect(await guardianCustomers(["11", "21"], rivera)).toEqual(new Map([["11", "removed"]]));
+  });
+
+  it("renames a person nothing could be sent for whatever the roster is doing; one something could be sent for waits at most three seconds, then changes nothing", async () => {
+    const [hand] = await db.insert(family).values({ name: "Handmade Family", active: true }).returning({ id: family.id });
+    const hal = await addGuardian(hand!.id, { name: "Hal Handmade", email: "hal@example.com" }, op);
+    if (!hal.ok) throw new Error("not added");
+    const { ana } = await seedAnaRivera({ status: "active" });
+    const lock = await holdTheRosterLock();
+    try {
+      // Hal's one membership is in a family with no link: his rename is the portal's alone, as before slice 9h.
+      expect(await renamePerson(hal.parentId, "Hal H. Handmade", op, { rosterWaitMs: 50 })).toEqual({ ok: true, changed: true, quickbooks: [] });
+      // Ana's is in a linked family, in books with a parent type: her rename waits for the roster, and changes nothing.
+      expect(await renamePerson(ana.id, "Ana Rivera-Lopez", op, { rosterWaitMs: 50 })).toEqual({ ok: false, reason: "busy" });
+    } finally {
+      await lock.release();
+    }
+    expect(await personNamed("hal@example.com")).toMatchObject({ name: "Hal H. Handmade" });
+    expect(await personNamed("ana@example.com")).toMatchObject({ name: "Ana Rivera" });
+    expect(posts()).toEqual([]);
+  });
+
+  it("says each refusal's own cause: someone holding the row's lock is being_changed, never a change waiting in QuickBooks", async () => {
+    const { ana, row } = await seedAnaRivera({ status: "active" });
+    expect(await whileGuardiansHeld([row.id], () => renamePerson(ana.id, "Ana Rivera-Lopez", op))).toEqual({ ok: false, reason: "being_changed" });
+    await db.update(guardian).set({ status: "disabled", disabledReason: "removed", statusBeforeDisable: "active" }).where(eq(guardian.id, row.id));
+    expect(await whileGuardiansHeld([row.id], () => reinstateGuardian(row.id, op))).toEqual({ ok: false, reason: "being_changed" });
+    expect(await whileGuardiansHeld([row.id], () => addGuardian(rivera, { name: "Ana Rivera", email: "ana@example.com", samePerson: ana.id }, op))).toEqual({ ok: false, reason: "being_changed" });
+    expect(await rowOf(row.id)).toMatchObject({ status: "disabled" });
+    expect(posts()).toEqual([]);
+  });
+
+  it("a send after the commit waits for the roster lock at most three seconds: past that the item is left waiting for the worker, nothing sent", async () => {
+    const { row } = await kit();
+    const queued = await db.transaction((tx) => queueForGuardian(tx, { op: "grant", guardianId: row.id, familyId: rivera, name: "Kit Rivera", email: "kit@example.com" }, op));
+    const lock = await holdTheRosterLock();
+    let sent: Awaited<ReturnType<typeof sendGuardianSaved>> | null = null;
+    try {
+      sent = await whileGuardiansHeld([row.id], (hold) => sendGuardianSaved(queued, op, { hold, rosterWaitMs: 50 }));
+    } finally {
+      await lock.release();
+    }
+    expect(sent).toEqual([expect.objectContaining({ deferred: "roster" })]);
+    expect(guardianSentWords(sent!, "grant", "Kit Rivera")).toEqual(["Making their Parent customer under Rivera Family is saved, and will be sent to QuickBooks shortly: the portal is reading the roster from QuickBooks just now. You'll find it on the Reconciliation page until then."]);
+    expect(posts()).toEqual([]);
+    expect(await items()).toEqual([expect.objectContaining({ state: "waiting", sent: false, tries: 0 })]);
   });
 });

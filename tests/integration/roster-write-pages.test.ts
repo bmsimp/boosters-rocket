@@ -280,6 +280,17 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
     expect(chen).toContain("not a portal guardian; adding the person under Portal sign-ins doesn&#x27;t use it, and the mapping screen will offer to link it");
   });
 
+  it("says a removed guardian's Parent customer, left active, is their own and used again if they are added back (stage 3's slice 9h)", async () => {
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Parents.ReadWrite"]));
+    const { row } = await seedAnaRivera({ status: "active" });
+    // Removed while customer 11 had a balance: her row is closed, its link kept, and 11 left active in QuickBooks.
+    await db.update(guardian).set({ status: "disabled", disabledReason: "removed", statusBeforeDisable: "active" }).where(eq(guardian.id, row.id));
+    const rivera = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
+    const parents = rivera.slice(rivera.indexOf('id="entry-parents-h"'), rivera.indexOf("</section>", rivera.indexOf('id="entry-parents-h"')));
+    expect(parents).toContain("the own Parent customer of a guardian removed from this family, left active in QuickBooks (a removal makes it inactive only when its balance allows): adding them back under Portal sign-ins uses it again");
+    expect(parents).not.toContain("not a portal guardian");
+  });
+
   it("a family's page, with both permissions: rename, add a student, move and make inactive; no \"Add a parent\" (stage 3's slice 9h)", async () => {
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });

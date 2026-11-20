@@ -220,8 +220,11 @@ screen and the differences. Nobody's sign-in changes because of what it reads.
   2026-11-18, corrected here from "refused while anyone owes": it is the guardian's own Parent record's balance that
   decides, not the family's. *(Built in the app in stage 3's slice 7b, with add, reinstate and a change of name; the
   QuickBooks half is built in slice 9h: an added guardian gets a Parent customer of their own under a linked family,
-  where the books have a parent type, unless QuickBooks already has a customer of their name there; a rename follows
-  to it; a removal makes it inactive by the rule above.)*
+  where the books have a parent type, unless QuickBooks already has a customer of their name there, or the person's
+  own Parent customer of that name under another family of theirs (one person, one name: until the check of the
+  portal's requests shows QuickBooks takes a name twice, the portal takes it that QuickBooks takes a name once, so a
+  guardian of two families has their record under the first, the lead's decision); a rename follows to it, giving the
+  new name to one record of theirs; a removal makes it inactive by the rule above.)*
 - Adding, removing and reinstating a guardian take the permission that changes a family (`Roster.Family.ReadWrite`), not
   the one that sees parents: anyone who can change families can give an address a parent's view of one (its invoices,
   its forms, a buy-out to confirm), and every such grant is audited with who made it *(the lead's choice in stage 3's

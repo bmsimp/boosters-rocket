@@ -187,7 +187,7 @@ export function CreateInQuickBooks({ familyId, name, noun, unlinked, students, t
  * through them; `other`, shared or another family's guardian's, changed in QuickBooks for now.
  */
 export type Edit = { rosterTag: string; versions: Map<string, string>; blocked: Set<string>; familyId: string;
-  records: Map<string, { kind: "family" | "student"; id: string; name: string }>; keptMoves?: Set<string>; guardianCustomers?: Map<string, "own" | "other"> };
+  records: Map<string, { kind: "family" | "student"; id: string; name: string }>; keptMoves?: Set<string>; guardianCustomers?: Map<string, "own" | "other" | "removed"> };
 
 /**
  * Rename and make inactive, for one record: offered only when the shape allows it and nothing is waiting for it. Making
@@ -298,6 +298,9 @@ export function FamilyChanges({ shape, family, edit, cover, inactiveRecords }: {
         ? <Notice key={p.qboId} tone="info" live="none">{p.displayName} is a portal guardian&apos;s own Parent customer, so it is changed through them: rename the person on their page, or remove them under Portal sign-ins below.</Notice>
         : edit.guardianCustomers?.get(p.qboId) === "other"
           ? <Notice key={p.qboId} tone="info" live="none">{p.displayName} is linked to a portal guardian, but isn&apos;t one guardian&apos;s own Parent customer under this family (several guardians share it, or the guardian is in another family), so the portal sends nothing for it: change it in QuickBooks, and the mapping screen will sort it out.</Notice>
+        : edit.guardianCustomers?.get(p.qboId) === "removed"
+          ? <RecordChanges key={p.qboId} who="the parent" c={p} rename={offered.has("rename_parent")} deactivate={offered.has("deactivate_parent")} edit={edit}
+            warning="This is the own Parent customer of a guardian removed from this family, left active in QuickBooks because a removal makes it inactive only when its balance allows. Adding them back under Portal sign-ins uses it again, under whatever name it has then. A change here is made in QuickBooks only and changes nothing in the portal. A parent with any balance in QuickBooks, owed or a credit, isn't made inactive until it is settled there, nor while the portal can't read it." />
         : <RecordChanges key={p.qboId} who="the parent" c={p} rename={offered.has("rename_parent")} deactivate={offered.has("deactivate_parent")} edit={edit}
           warning="This Parent customer isn't a portal guardian: who can sign in is the portal's own list of the family's guardians, adding the person under Portal sign-ins doesn't use it, and the mapping screen will offer to link it. Making it inactive changes nothing in the portal. A parent with any balance in QuickBooks, owed or a credit, isn't made inactive until it is settled there, nor while the portal can't read it." />))}
     </section>

@@ -40,8 +40,8 @@ const CODE_WORDS: Record<string, string> = {
   // A family saved in the portal first, whose customer QuickBooks made, found linked to another family meanwhile (stage 3's slice 9d).
   customer_has_family: "QuickBooks made the customer, but another family in the portal is linked to it already, so this family was left unlinked and nothing will be sent again: check both in QuickBooks, then give this up",
   family_has_customer: "QuickBooks made the customer, but this family in the portal was linked to another customer meanwhile, so the new customer was left with no family and nothing will be sent again: check both in QuickBooks, then give this up",
-  // A guardian's Parent customer (stage 3's slice 9h): found made as a customer another guardian in the portal is linked to already.
-  customer_has_guardian: "QuickBooks has the Parent customer, but another guardian in the portal is linked to it already, so this guardian was left unlinked and nothing will be sent again: check it in QuickBooks, then give this up",
+  // A guardian's Parent customer (stage 3's slice 9h): found made, by its name, as a customer another guardian row in the portal, open or removed, is linked to already.
+  customer_has_guardian: "QuickBooks has a Parent customer of that name, but another guardian in the portal (one of this family's now, or one removed, who takes it back if reinstated) is linked to it already, so this guardian was left unlinked and nothing will be sent again: check it in QuickBooks, then give this up",
   email_too_long: "the person's sign-in address is longer than QuickBooks takes, so no Parent customer was made for them",
   name_unusable: "the person's name can't be used in QuickBooks, so no Parent customer was made for them: rename them on their page",
 };
