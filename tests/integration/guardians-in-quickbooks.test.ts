@@ -9,19 +9,21 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 });
 vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: async () => ({ get: () => undefined }) }));
 
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, family, guardian, parent, writeQueue } from "@/lib/db/schema";
 import { addGuardian, reinstateGuardian, removeGuardian } from "@/lib/parents/guardians";
 import { renamePerson } from "@/lib/parents/people";
-import { askFamilyInactive, askRosterWrite, coverStamp, CREDIT_BALANCE, EMAIL_TOO_LONG, familyCover, GUARDIAN_HERE, GUARDIAN_PENDING, portalValueStamp, queueForGuardian, sendPortalValue } from "@/lib/roster/writes";
-import { giveUp, loadOpenWrites, runWriteQueue } from "@/lib/roster/queue";
+import { askFamilyInactive, askRosterWrite, coverStamp, CREDIT_BALANCE, EMAIL_TOO_LONG, familyCover, GUARDIAN_HERE, GUARDIAN_PENDING, guardianCustomers, keptRefusalWords, portalValueStamp, queueForGuardian,
+  SENDING_LOCK, sendPortalValue, whileGuardiansHeld, whoStopped } from "@/lib/roster/writes";
+import { giveUp, loadOpenWrites, runWriteQueue, waitingWords } from "@/lib/roster/queue";
+import { refreshRoster } from "@/lib/roster/refresh";
 import type { AppFamilyId } from "@/lib/families/ids";
-import { resetDb } from "../helpers/db";
+import { resetDb, seedGuardian, seedParent } from "../helpers/db";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { asOp, auditsOf, connectRoster, queueItem, seedAnaRivera, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
 import { saveShape } from "@/lib/roster/shape";
-import { recordOfCustomer } from "../helpers/app-records";
+import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 
 /**
  * Stage 3's slice 9h: a guardian's own Parent customer follows the portal, where the books have a parent type and the
@@ -174,9 +176,19 @@ describe("removing a guardian (item 4)", () => {
     op = asOp(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     const { row } = await seedAnaRivera({ status: "active" });
     stub.calls.length = 0;
-    expect(await removeGuardian(row.id, "Moved away.", op)).toMatchObject({ ok: true });
+    // Nothing was sent, so it is the portal's holding back, never said as QuickBooks' refusal, and the customer is left active.
+    expect(await removeGuardian(row.id, "Moved away.", op)).toMatchObject({ ok: true,
+      quickbooks: ["Their Parent customer under Rivera Family was left active in QuickBooks: its balance couldn't be read, and nothing is made inactive without it. It is kept on the Reconciliation page, where you can send it again once that is settled, or give it up."] });
     expect(posts()).toEqual([]);
-    expect(await items()).toEqual([expect.objectContaining({ state: "refused", lastCode: "no_balance" })]);
+    const [kept] = await items();
+    expect(kept).toMatchObject({ state: "refused", lastCode: "balance_unread:no_balance" });
+    expect(whoStopped(kept!.lastCode)).toBe("held");
+    expect(keptRefusalWords(kept!.lastCode, null)).toContain("couldn't read what this customer owes in QuickBooks");
+    expect(keptRefusalWords(kept!.lastCode, null)).toContain("left active in QuickBooks");
+    expect(waitingWords({ state: "refused", finishing: false, lastCode: kept!.lastCode })).toBe("Held back by the portal, which keeps its own value");
+    // A balance read QuickBooks couldn't be reached for at that moment is kept so too, and said the same way.
+    expect(whoStopped("balance_unread:token_busy")).toBe("held");
+    expect(keptRefusalWords("balance_unread:token_busy", null)).toContain("left active in QuickBooks");
   });
 
   it("\"Send the portal's value\" reads the balance again: still owing, still kept; settled, made inactive; and \"Give up\" leaves it active", async () => {
@@ -222,6 +234,68 @@ describe("removing a guardian (item 4)", () => {
     expect(await rowOf(row.id)).toMatchObject({ status: "disabled" });
     expect(await items()).toEqual([expect.objectContaining({ state: "waiting", sent: true })]);
   });
+
+  it("a removal while someone else holds the row's lock still gives up its create that never left, and the worker sends nothing", async () => {
+    const [p] = await db.insert(parent).values({ name: "Kit Rivera", email: "kit@example.com" }).returning();
+    const [row] = await db.insert(guardian).values({ familyQboId: "10", familyId: rivera, parentId: p!.id, status: "invited" }).returning();
+    // Its at-once try got a 429, which surely sent nothing: waiting, never sent.
+    const c = await seedQueued({ op: "create", role: "parent", name: "Kit Rivera", typeQboId: "2", familyQboId: "10", email: "kit@example.com", guardianId: row!.id },
+      { familyQboId: "10", sent: false, code: "http_429", nextTryAt: new Date(Date.now() - MIN) });
+    // "Try again now", or a rename of the person, holds the row's lock at that moment: the removal can't take it.
+    const r = await whileGuardiansHeld([row!.id], () => removeGuardian(row!.id, "Left the club.", op));
+    expect(r).toMatchObject({ ok: true });
+    expect(await rowOf(row!.id)).toMatchObject({ status: "disabled" });
+    expect(await queueItem(c.id)).toMatchObject({ state: "given_up" });
+    await runWriteQueue(new Date(Date.now() + 2 * MIN));
+    expect(posts()).toEqual([]);
+    expect(await linkOfRow(row!.id)).toBeUndefined();
+  });
+
+  it("a create left to finish when its row was removed, then tried again, finds the row closed and is given up, nothing sent", async () => {
+    const [p] = await db.insert(parent).values({ name: "Kit Rivera", email: "kit@example.com" }).returning();
+    const [row] = await db.insert(guardian).values({ familyQboId: "10", familyId: rivera, parentId: p!.id, status: "disabled", disabledReason: "removed" }).returning();
+    // Its earlier try reached nothing (a key to QuickBooks that couldn't be had), so it was put back as never sent.
+    const c = await seedQueued({ op: "create", role: "parent", name: "Kit Rivera", typeQboId: "2", familyQboId: "10", email: "kit@example.com", guardianId: row!.id },
+      { familyQboId: "10", sent: false, nextTryAt: new Date(Date.now() - MIN) });
+    await runWriteQueue(new Date(Date.now() + 2 * MIN));
+    expect(posts()).toEqual([]);
+    expect(await queueItem(c.id)).toMatchObject({ state: "given_up" });
+    expect(await linkOfRow(row!.id)).toBeUndefined();
+    expect((await auditsOf("roster.write.given_up")).find((a) => a.targetId === c.id)?.after).toMatchObject({ why: "guardian_removed" });
+  });
+
+  it("a kept make-inactive whose customer QuickBooks has made inactive since: offered, and the press finishes it as found, nothing sent", async () => {
+    stub.invoices = [{ Id: "909", SyncToken: "0", CustomerRef: { value: "11" }, TotalAmt: 5, Balance: 5 }];
+    const { row } = await seedAnaRivera({ status: "active" });
+    await removeGuardian(row.id, "Moved away.", op);
+    const [kept] = await items();
+    expect(kept).toMatchObject({ state: "refused", lastCode: "open_balance" });
+    // The treasurer settles it and makes the Parent customer inactive in QuickBooks; the roster is read again.
+    stub.invoices = [];
+    stub.customers.find((c) => c.Id === "11")!.Active = false;
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
+    expect((await loadOpenWrites({ familyId: rivera })).find((i) => i.id === kept!.id)).toMatchObject({ mayResend: true, notOffered: null });
+    stub.calls.length = 0;
+    expect(await sendPortalValue(kept!.id, "", portalValueStamp(kept!.id, ""), op)).toEqual({ ok: true, message: "QuickBooks has the parent inactive already, so nothing was sent. The change is done." });
+    expect(posts()).toEqual([]);
+    expect(await queueItem(kept!.id)).toMatchObject({ state: "done" });
+  });
+
+  it("a reinstate replaces the row's kept make-inactive, even once QuickBooks has the customer inactive", async () => {
+    stub.invoices = [{ Id: "909", SyncToken: "0", CustomerRef: { value: "11" }, TotalAmt: 5, Balance: 5 }];
+    const { row } = await seedAnaRivera({ status: "active" });
+    await removeGuardian(row.id, "Moved away.", op);
+    const [kept] = await items();
+    stub.invoices = [];
+    stub.customers.find((c) => c.Id === "11")!.Active = false;
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
+    stub.calls.length = 0;
+    expect(await reinstateGuardian(row.id, op)).toEqual({ ok: true,
+      quickbooks: ["Their Parent customer under Rivera Family is inactive in QuickBooks, and the portal never makes a customer active again, so nothing was sent there."] });
+    expect(posts()).toEqual([]);
+    expect(await queueItem(kept!.id)).toMatchObject({ state: "given_up" });
+    expect((await auditsOf("roster.write.replaced")).find((a) => a.targetId === kept!.id)?.after).toMatchObject({ replacedBy: { op: "reinstate", guardianId: row.id } });
+  });
 });
 
 describe("renaming a person (item 5)", () => {
@@ -262,6 +336,34 @@ describe("the family's page and the family action (items 6 and 7)", () => {
     const r = await askFamilyInactive(String(rivera), coverStamp(String(rivera), [c.family.qboId, ...c.under.map((u) => u.qboId)]), tag, op);
     expect(r.result).toEqual({ ok: false, errors: [GUARDIAN_PENDING] });
     expect(posts()).toEqual([]);
+  });
+
+  it("a guardian add or reinstate while the family is being changed in QuickBooks is refused, changing nothing and sending nothing", async () => {
+    const { row } = await seedAnaRivera({ status: "active" });
+    await db.update(guardian).set({ status: "disabled", disabledReason: "removed", statusBeforeDisable: "active" }).where(eq(guardian.id, row.id));
+    stub.calls.length = 0;
+    // The family action holds the family's "being sent" lock from before its checks to its last step.
+    const [added, reinstated] = await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(${sql.raw(String(SENDING_LOCK))}, hashtext(${String(rivera)}::text))`);
+      return [await addGuardian(rivera, { name: "Luis Rivera", email: "luis@example.com" }, op), await reinstateGuardian(row.id, op)];
+    });
+    expect(added).toEqual({ ok: false, reason: "changing" });
+    expect(reinstated).toEqual({ ok: false, reason: "changing" });
+    expect(await db.select().from(parent).where(eq(parent.email, "luis@example.com"))).toEqual([]);
+    expect(await rowOf(row.id)).toMatchObject({ status: "disabled" });
+    expect(posts()).toEqual([]);
+    expect(await items()).toEqual([]);
+  });
+
+  it("a Parent customer is a guardian's own only while one open row of this family alone is linked to it", async () => {
+    await seedAnaRivera({ status: "active" });
+    expect(await guardianCustomers(["11", "21"], rivera)).toEqual(new Map([["11", "own"]]));
+    // A second open row whose sign-in came from the same Parent customer: shared, nobody's own, and still no forms.
+    const ben = await seedParent({ name: "Ben Rivera", email: "ben@example.com" });
+    await seedGuardian({ parentId: ben.id, familyQboId: "10", sourceQboId: "11", status: "active" });
+    await syncAppRecords();
+    expect(await guardianCustomers(["11"], rivera)).toEqual(new Map([["11", "other"]]));
+    expect(await askRosterWrite({ op: "deactivate", qboId: "11", syncToken: "0" }, tag, op)).toEqual({ ok: false, errors: [GUARDIAN_HERE] });
   });
 });
 

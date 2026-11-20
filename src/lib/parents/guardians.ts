@@ -36,7 +36,7 @@ import { customerOfFamily, familyLinkState } from "@/lib/families/links";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { recordNameWords } from "@/lib/families/words";
 import { ROSTER_LOCK } from "@/lib/roster/shape";
-import { familyCreateWaiting, guardianChangeWaiting, guardianSentWords, queueForGuardian, sendGuardianSaved, whileGuardiansHeld, type GuardianQueued } from "@/lib/roster/writes";
+import { familyCreateWaiting, familySendingFree, guardianChangeWaiting, guardianSentWords, queueForGuardian, sendGuardianSaved, whileGuardiansHeld, type GuardianQueued } from "@/lib/roster/writes";
 import { closeMembership } from "./membership";
 import type { StaffOp } from "./people";
 import { lockEmail } from "./sessions";
@@ -108,11 +108,12 @@ async function oweWelcome(tx: Tx, p: Person): Promise<{ welcomeOwed?: true }> {
  * Why a family can't take a guardian now, or the customer its own family link names when it can (null for a family
  * with no link, which takes guardians since stage 3's slice 9d): its record, active, no create of its own waiting or
  * stuck on the queue (`waiting`) or being sent at this moment (`making`: nothing else is changed on a family while its
- * customer is still being made), and whether it has a link known (`other_company` while the portal can't tell, as
+ * customer is still being made), a linked family not being changed in QuickBooks at this moment (`changing`: the family
+ * action or its rename on its way, stage 3's slice 9h), and whether it has a link known (`other_company` while the portal can't tell, as
  * when QuickBooks is connected to another company than the roster's: a row made then would name no customer for a
  * family that has one, and is never filled in later).
  */
-async function familyRefusal(tx: Tx, familyId: AppFamilyId | null): Promise<{ refusal: "no_family" | "inactive" | "waiting" | "making" | "other_company" } | { customer: string | null }> {
+async function familyRefusal(tx: Tx, familyId: AppFamilyId | null): Promise<{ refusal: "no_family" | "inactive" | "waiting" | "making" | "changing" | "other_company" } | { customer: string | null }> {
   if (familyId === null) return { refusal: "no_family" };
   const [f] = await tx.select({ active: family.active }).from(family).where(eq(family.id, familyId));
   if (!f) return { refusal: "no_family" };
@@ -121,6 +122,11 @@ async function familyRefusal(tx: Tx, familyId: AppFamilyId | null): Promise<{ re
   if (making) return { refusal: making === "sending" ? "making" : "waiting" };
   const link = await familyLinkState(familyId, tx);
   if (link.state === "unknown") return { refusal: "other_company" };
+  // A linked family being changed in QuickBooks at this moment (its "being sent" lock held: the family action making
+  // everyone under it inactive, or its rename on its way): no guardian is added or brought back meanwhile, whose Parent
+  // customer would be made under it after that action read who is there (stage 3's slice 9h). Tried shared, and held so
+  // to the end of this transaction; the family action then finds this guardian's create waiting (GUARDIAN_PENDING).
+  if (link.state === "linked" && !(await familySendingFree(tx, familyId))) return { refusal: "changing" };
   return { customer: link.state === "linked" ? link.customerId : null };
 }
 
@@ -153,7 +159,7 @@ export type AddGuardianResult =
   /** The address belongs to a person already: nothing was written; staff are asked whether this is them. */
   | { ok: false; reason: "same_person"; person: { id: string; name: string; families: string[] } }
   /** `qbo_pending`: a change to the row's Parent customer is waiting, stuck or being sent, so a closed row isn't reopened meanwhile. */
-  | { ok: false; reason: "invalid_name" | "invalid_email" | "no_family" | "inactive" | "waiting" | "making" | "other_company" | "blocked" | "already" | "busy" | "qbo_pending" };
+  | { ok: false; reason: "invalid_name" | "invalid_email" | "no_family" | "inactive" | "waiting" | "making" | "changing" | "other_company" | "blocked" | "already" | "busy" | "qbo_pending" };
 
 /**
  * The row an add would open for this address in this family, read before the add's transaction, unlocked: the person's
@@ -299,7 +305,8 @@ export type RemoveGuardianResult = { ok: true; sessionsEnded: number; quickbooks
  * wait.
  *
  * Then, in that same transaction (stage 3's slice 9h, queueForGuardian()'s remove): the row's own creates that never
- * left given up (one that may have reached QuickBooks, or is being sent, left to finish, and said), and, for a row with
+ * left given up, whoever holds the row's lock (one that may have reached QuickBooks, or is being sent, left to finish,
+ * and said; should that try then reach nothing, its next try finds the row closed and gives it up unsent), and, for a row with
  * a Parent customer of its own, its make-inactive queued. After the commit, while the row's "being sent" lock is held
  * from before the save, it is tried at once (sendGuardianSaved()) by the balance rule: no balance, made inactive; any
  * balance, or one that can't be read, nothing sent and the item kept refused, the customer left active in QuickBooks.
@@ -317,7 +324,7 @@ export async function removeGuardian(guardianId: string, rawNote: string, o: Sta
       if (!held) return { ok: false, reason: "not_found" };
       if (held.row.status === "disabled") return { ok: false, reason: "not_open" };
       const { sessionsEnded } = await closeMembership(tx, held.row, { reason: "removed", actor: o.actor, note, permission: o.permission, ip: o.ip });
-      const queued = await queueForGuardian(tx, { op: "remove", guardianId: held.row.id, familyId: held.row.familyId, locked }, o);
+      const queued = await queueForGuardian(tx, { op: "remove", guardianId: held.row.id, familyId: held.row.familyId }, o);
       return { ok: true, sessionsEnded, queued, name: held.p.name };
     });
     if (!saved.ok) return saved;
@@ -328,7 +335,7 @@ export async function removeGuardian(guardianId: string, rawNote: string, o: Sta
 }
 
 export type ReinstateGuardianResult = { ok: true; quickbooks: string[] }
-  | { ok: false; reason: "not_found" | "already_open" | "previous_company" | "blocked" | "no_family" | "inactive" | "waiting" | "making" | "other_company" | "other_customer" | "busy" | "qbo_pending" };
+  | { ok: false; reason: "not_found" | "already_open" | "previous_company" | "blocked" | "no_family" | "inactive" | "waiting" | "making" | "changing" | "other_company" | "other_customer" | "busy" | "qbo_pending" };
 
 /**
  * Opens a closed membership again: the same row, as it was before it closed (`status_before_disable`, else invited),

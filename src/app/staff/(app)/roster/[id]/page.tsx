@@ -138,7 +138,7 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   const signins = await familySignins(familyId);
   const signinStandings = await guardianStandings(signins.map((s) => ({ guardianId: s.guardianId, familyId, name: s.name, open: s.open })));
   // The Parent customers a portal guardian is linked to (stage 3's slice 9h): shown as theirs, with no forms here.
-  const ofGuardians = await guardianCustomers(fam.parents.map((p) => p.qboId));
+  const ofGuardians = await guardianCustomers(fam.parents.map((p) => p.qboId), familyId);
   const waiting = await loadOpenWrites({ familyId, showAmounts: can(ctx.effective, "Finance.Balance.Read") });
   // Changes are offered to staff who may make them, while QuickBooks is connected: a linked record's rename and
   // make-inactive send its kind and the app's id, the family action the family's app id and a stamp of whom it covers,
@@ -204,7 +204,8 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
         <>
           <People id="entry-students-h" title="Students" noun="Student" people={fam.students.map((s) => ({ key: String(s.id), name: s.name, customer: s.customer, standing: studentStanding(s) }))} contact={false} empty="The portal holds no students for this family." />
           <People id="entry-parents-h" title="Parents in QuickBooks" noun="Parent" contact empty="QuickBooks lists no parents under this family."
-            people={fam.parents.map((c) => ({ ...ofCustomer(c), standing: `${standing(c)}: ${ofGuardians.has(c.qboId) ? "a portal guardian's own, changed through them under Portal sign-ins and on their page"
+            people={fam.parents.map((c) => ({ ...ofCustomer(c), standing: `${standing(c)}: ${ofGuardians.get(c.qboId) === "own" ? "a portal guardian's own, changed through them under Portal sign-ins and on their page"
+              : ofGuardians.get(c.qboId) === "other" ? "linked to a portal guardian, but not one guardian's own under this family (several share it, or theirs is another family), so the portal sends nothing for it: change it in QuickBooks, and the mapping screen will sort it out"
               : "not a portal guardian; adding the person under Portal sign-ins doesn't use it, and the mapping screen will offer to link it"}` }))} />
         </>
       ) : (

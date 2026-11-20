@@ -62,6 +62,8 @@ const NAME_FIELD_MAX = 200, EMAIL_FIELD_MAX = 320, NOTE_MAX = 2000;
 const BUSY_WORDS = "The roster is being read from QuickBooks just now, so nothing was changed. Try again in a minute.";
 const WAITING_WORDS = "Making this family in QuickBooks is still waiting on the queue, so nobody can be added to it for now. Once it has gone through, or been given up on the Reconciliation page, try again.";
 const MAKING_WORDS = "This family is being made in QuickBooks at this moment, so nobody can be added to it. Try again in a minute.";
+// The family being changed in QuickBooks at this moment (made inactive with everyone under it, or renamed): stage 3's slice 9h.
+const CHANGING_WORDS = "This family is being changed in QuickBooks at this moment, so nobody can be added to it. Try again in a minute.";
 // A change to the guardian's own Parent customer in QuickBooks waiting, stuck or being sent (stage 3's slice 9h).
 const QBO_PENDING_WORDS = "A change to this guardian's Parent customer in QuickBooks is waiting, stuck or being sent just now, so nothing was changed. Once it has gone through, or been given up on the Reconciliation page, try again.";
 /** What became of the Parent customer in QuickBooks, after the portal's own sentence (stage 3's slice 9h). */
@@ -74,6 +76,7 @@ const ADD_REFUSED = {
   inactive: "This family is inactive in the portal, so nobody can be added to it.",
   waiting: WAITING_WORDS,
   making: MAKING_WORDS,
+  changing: CHANGING_WORDS,
   other_company: OTHER_COMPANY_WORDS,
   blocked: "The person with this address is blocked. Unblock them on their page first.",
   already: "The person with this address is already one of this family's guardians.",
@@ -125,6 +128,7 @@ const REINSTATE_REFUSED = {
   inactive: "This family is inactive in the portal, so nobody can sign in to it.",
   waiting: WAITING_WORDS.replace("nobody can be added to it for now", "this sign-in can't be brought back for now"),
   making: MAKING_WORDS.replace("nobody can be added to it", "this sign-in can't be brought back just now"),
+  changing: CHANGING_WORDS.replace("nobody can be added to it", "this sign-in can't be brought back just now"),
   other_company: OTHER_COMPANY_WORDS.replace("and nobody was added", "and this sign-in wasn't brought back"),
   other_customer: "This sign-in was made for a different customer in QuickBooks than this family's own, so it can't be brought back here.",
   busy: BUSY_WORDS,

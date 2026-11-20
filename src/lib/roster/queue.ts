@@ -12,7 +12,7 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster } from "./refresh";
 import { getRosterSource, ROSTER_JOB } from "./source";
 import { lockRosterAs, rosterTagOf } from "@/lib/seasons/roster-lock";
-import { alignAfterWrite, applyWritten, BEING_SENT_NOW, changeOwnRecord, CREDIT_BALANCE, CUSTOMER_HAS_GUARDIAN, EMAIL_TOO_LONG, guardianCustomerHeld, guardianOf, isSavedFirst, NAME_UNUSABLE, itemLockFree, madeAfterGivingUp, markMoveMoneyStale, moveMoneyNotes, REFRESH_ASK_KEY,
+import { alignAfterWrite, applyWritten, balanceUnread, BEING_SENT_NOW, changeOwnRecord, CREDIT_BALANCE, CUSTOMER_HAS_GUARDIAN, EMAIL_TOO_LONG, guardianCustomerHeld, guardianOf, isSavedFirst, NAME_UNUSABLE, itemLockFree, madeAfterGivingUp, markMoveMoneyStale, moveMoneyNotes, REFRESH_ASK_KEY,
   replaceRefusedCreates, sendWrite, tryDeactivate, trySavedItem, whileItemHeld, whoStopped, type MadeAfterGivingUp, type OwnRecordChange, type SavedTry } from "./writes";
 import { afterFailedTry, beforeResend, classify } from "./write-rules";
 import { isBuyoutWrite, sendBuyoutWrite } from "@/lib/buyouts/writes";
@@ -389,11 +389,14 @@ export type QueueView = {
    * (`notOffered`): a rename QuickBooks refused as a taken name (`taken`: a later rename takes its place, and is sent),
    * one of a customer the cache has inactive (`inactive`: the portal never makes one active again), one of a
    * customer the cache doesn't hold at all (`not_on_roster`), or a move into a family that has no customer in
-   * QuickBooks yet (`create_family_first`: the press would be refused until the family is made there and linked). The
+   * QuickBooks yet (`create_family_first`: the press would be refused until the family is made there and linked); a
+   * guardian's Parent customer create kept for a taken name (`taken`), a name QuickBooks can't take (`name_unusable`)
+   * or an address over its limit (`email_too_long`), whose ways out are a rename of the person or "Give up". A removed
+   * guardian's make-inactive is offered whatever the cache shows: inactive there, the press finishes it as found. The
    * press checks it all again.
    */
   mayResend: boolean;
-  notOffered: "taken" | "inactive" | "not_on_roster" | "create_family_first" | "email_too_long" | null;
+  notOffered: "taken" | "inactive" | "not_on_roster" | "create_family_first" | "email_too_long" | "name_unusable" | null;
 };
 
 /** The codes of an item QuickBooks took that the portal still has to finish on its side (QueueView.finishing). */
@@ -403,8 +406,11 @@ const FINISHING_CODES = new Set(["cache_failed", "answer_other", "finish_failed"
 export function waitingWords(i: Pick<QueueView, "state" | "finishing" | "lastCode">): string {
   if (i.state === "refused") {
     const who = whoStopped(i.lastCode);
+    // Held back for a balance, an unread balance, or a name or address QuickBooks can't take (a guardian's Parent
+    // customer, stage 3's slice 9h): nothing in QuickBooks differs, so the words don't say it does.
+    const heldHere = i.lastCode === "open_balance" || i.lastCode === CREDIT_BALANCE || i.lastCode === EMAIL_TOO_LONG || i.lastCode === NAME_UNUSABLE || balanceUnread(i.lastCode);
     return who === "quickbooks" ? "Refused by QuickBooks: the portal keeps its own value"
-      : who === "held" ? "Held back by the portal, as QuickBooks has something else: the portal keeps its own value"
+      : who === "held" ? (heldHere ? "Held back by the portal, which keeps its own value" : "Held back by the portal, as QuickBooks has something else: the portal keeps its own value")
         : "Not sent: the portal couldn't send it to QuickBooks at the time, and keeps its own value";
   }
   if (i.state === "stuck") return "Stuck: it needs someone to look at it";
@@ -506,9 +512,10 @@ export async function loadOpenWrites(o: { familyId?: AppFamilyId; showAmounts?: 
     // A guardian's Parent customer create kept as a taken name, or as a name or address QuickBooks can't take: a rename
     // of the person takes its place, so nothing is offered to send it again as it is (stage 3's slice 9h).
     const guardianKept = refused && request.op === "create" && guardianOf(request) !== null && (r.lastCode === "fault_6240" || r.lastCode === NAME_UNUSABLE || r.lastCode === EMAIL_TOO_LONG);
-    const notOffered: QueueView["notOffered"] = guardianKept ? (r.lastCode === EMAIL_TOO_LONG ? "email_too_long" : "taken")
+    const notOffered: QueueView["notOffered"] = guardianKept ? (r.lastCode === EMAIL_TOO_LONG ? "email_too_long" : r.lastCode === NAME_UNUSABLE ? "name_unusable" : "taken")
       : !refused || (request.op !== "rename" && request.op !== "move" && request.op !== "deactivate") ? null : request.op === "rename" && r.lastCode === "fault_6240" ? "taken"
-      : !names.has(request.qboId) ? "not_on_roster" : !activeHere.has(request.qboId) ? "inactive"
+      // A removed guardian's Parent customer QuickBooks has inactive now: the press finishes it as found (sendAgainHolding()).
+      : !names.has(request.qboId) ? "not_on_roster" : !activeHere.has(request.qboId) && !(request.op === "deactivate" && guardianOf(request) !== null) ? "inactive"
         : request.op === "move" && request.toFamilyId !== undefined && !joinedLinked.has(request.toFamilyId) ? "create_family_first" : null;
     return {
       id: r.id, state: r.state as QueueView["state"], write: request, words: describeWrite(request, names, { showAmounts: o.showAmounts, familyNames }), askedBy: r.askedByLabel, askedAt: r.createdAt.toISOString(),

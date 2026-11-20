@@ -56,7 +56,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           <dt>Last signed in</dt><dd>{p.lastSigninAt ? <LocalTime iso={p.lastSigninAt} /> : "Never"}</dd>
           <dt>Welcome email</dt><dd>{p.welcomedAt ? <>Sent <LocalTime iso={p.welcomedAt} /></> : p.welcomeOwed ? "Waiting to be sent" : "Not sent"}</dd>
         </dl>
-        <p className="hint">The name and sign-in email are the portal&apos;s own. A parent changes their own sign-in email from the Family page; a change made in QuickBooks doesn&apos;t change them. A guardian is added to a family from that family&apos;s page. Where the club&apos;s books have parents of their own, each membership has its own Parent customer in QuickBooks under the family: a new name here is sent to each, and removing them makes theirs inactive only when it owes nothing.</p>
+        <p className="hint">The name and sign-in email are the portal&apos;s own. A parent changes their own sign-in email from the Family page; a change made in QuickBooks doesn&apos;t change them. A guardian is added to a family from that family&apos;s page. Where the club&apos;s books have parents of their own, each membership has its own Parent customer in QuickBooks under the family: a new name here is sent to each, and removing them makes theirs inactive only when it has no balance the portal can read, owed or a credit.</p>
       </section>
 
       <section className="box" aria-labelledby="pn-h"><h2 id="pn-h">Name</h2>

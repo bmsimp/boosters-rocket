@@ -2198,6 +2198,15 @@ const beforeCustomer = (w: MoveWrite): string | null => (w.fromFamilyQboId === "
 export const NO_FAMILY_CUSTOMER = "no_family_customer";
 /** The code of a guardian's Parent customer create kept at once: the person's address is longer than QuickBooks takes. */
 export const EMAIL_TOO_LONG = "email_too_long";
+/**
+ * The code a guardian's Parent customer make-inactive is kept under when its balance couldn't be read (stage 3's slice
+ * 9h): nothing was sent, so it is the portal's holding back, never QuickBooks' refusal. The read's own code follows it
+ * (`balance_unread:no_balance`, `balance_unread:token_busy` and the like).
+ */
+export const BALANCE_UNREAD = "balance_unread";
+const unreadKept = (code: string) => `${BALANCE_UNREAD}:${code}`;
+/** Whether a kept code is a balance that couldn't be read (BALANCE_UNREAD). */
+export const balanceUnread = (code: string | null) => code !== null && code.startsWith(BALANCE_UNREAD);
 /** How long a change saved first is the at-once try's before the worker may take it: longer than one try takes. */
 const SAVED_LEASE_MS = 60_000;
 const short = (code: string) => code.slice(0, 40);
@@ -2409,7 +2418,8 @@ async function placeName(customer: string | null): Promise<string | null> {
  */
 export function whoStopped(code: string | null): "quickbooks" | "held" | "not_sent" {
   if (code === "fault_5010" || code === "moved_on" || code === NO_LINK_VERSION || code === NAME_DIFFERS || code === PLACE_DIFFERS || code === NO_FAMILY_CUSTOMER
-    || code === INACTIVE_THERE_CODE || code === "not_the_customer" || code === "open_balance" || code === CREDIT_BALANCE || code === EMAIL_TOO_LONG || code === NAME_UNUSABLE) return "held";
+    || code === INACTIVE_THERE_CODE || code === "not_the_customer" || code === "open_balance" || code === CREDIT_BALANCE || code === EMAIL_TOO_LONG || code === NAME_UNUSABLE
+    || balanceUnread(code)) return "held";
   if (code === null || code === "bad_id") return "not_sent";
   const kind = classify(code).kind;
   return kind === "needs_admin" || kind === "not_connected" || kind === "other_company" || kind === "retry" ? "not_sent" : "quickbooks";
@@ -2437,6 +2447,7 @@ export function keptRefusalWords(code: string | null, holds: string | null): str
   // decision of 2026-11-18 for a removal).
   if (code === "open_balance") return "The portal held it back: QuickBooks shows an amount owed on this customer, so it was left active in QuickBooks. Once it is settled there, send it again.";
   if (code === CREDIT_BALANCE) return "The portal held it back: QuickBooks shows a credit on this customer, so it was left active in QuickBooks. Once the credit is used or refunded there, send it again.";
+  if (balanceUnread(code)) return "The portal held it back: it couldn't read what this customer owes in QuickBooks, and it never makes a customer inactive without knowing, so nothing was sent and it was left active in QuickBooks. Send it again to read the balance once more.";
   if (code === EMAIL_TOO_LONG) return "The portal held it back: the person's sign-in address is longer than QuickBooks takes (100 characters), so no Parent customer was made for them.";
   if (code === NAME_UNUSABLE) return "The portal held it back: the person's name can't be used in QuickBooks (it may hold a colon, a tab or a line break, or be too long), so no Parent customer was made for them. Renaming them on their page takes its place.";
   if (code === "fault_6240") return "QuickBooks refused it: that name is already used in QuickBooks (by another customer, a vendor or an employee), and every name there must be different.";
@@ -2634,6 +2645,26 @@ async function doneIn(tx: Tx, item: QueueRow, resultQboId: string | null, triedA
     before: { state: "waiting", tries: item.tries, code: item.lastCode }, after: { state: "done", how: "sent", tries: item.tries + 1, ...(resultQboId ? { resultQboId } : {}) } }, tx);
 }
 
+/** Whether a guardian row still wants a Parent customer made for it: open, and linked to no customer in the company. */
+async function guardianStillWants(guardianId: string, realmId: string): Promise<boolean> {
+  const [row] = await db.select({ status: guardian.status }).from(guardian).where(eq(guardian.id, guardianId));
+  if (!row || row.status === "disabled") return false;
+  const [link] = await db.select({ id: accountingLink.id }).from(accountingLink)
+    .where(and(eq(accountingLink.guardianId, guardianId), eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId)));
+  return link === undefined;
+}
+/** A guardian's Parent customer create given up with nothing sent, its row closed or linked since it was queued: audited, only while it is still waiting. */
+async function giveUpForGoneGuardian(item: QueueRow, o: { actor: Actor; ip: string | null; permission?: string }): Promise<void> {
+  await db.transaction(async (tx) => {
+    // Its mark as maybe sent is taken back with it: this try sent nothing.
+    const [still] = await tx.update(writeQueue).set({ state: "given_up", sent: item.sent, note: "The guardian was removed in the portal, or linked, before it was sent.", nextTryAt: null,
+      finishedAt: new Date(), updatedAt: new Date() }).where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
+    if (!still) return;
+    await writeAudit({ actor: o.actor, action: "roster.write.given_up", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: item.id,
+      before: { state: item.state, tries: item.tries, code: item.lastCode, op: "create" }, after: { state: "given_up", why: "guardian_removed", sentNow: false } }, tx);
+  });
+}
+
 /**
  * One try of a change saved first (a rename of a linked record, or a student's create filed under the student), whoever
  * makes it: the staff member at once, the queue's worker, or "Send the portal's value". The caller holds the item's lock
@@ -2657,6 +2688,14 @@ export async function trySavedItem(item: QueueRow, write: RenameWrite | CreateWr
     .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
   const gone: SavedTry = { is: "given_up" };
   if (!marked) return gone;
+  // A guardian's Parent customer create (stage 3's slice 9h) is made only for a row still open and unlinked: one removed,
+  // or linked, since it was queued is given up here with nothing sent, whoever tries it (a removal that ran while an
+  // earlier try of it was on its way leaves it to this check).
+  const forRow = write.op === "create" ? guardianOf(write) : null;
+  if (forRow !== null && !(await guardianStillWants(forRow, item.realmId))) {
+    await giveUpForGoneGuardian(item, o);
+    return gone;
+  }
 
   const refused = async (code: string, holds: string | null): Promise<SavedTry> =>
     (await settleSaved(item, { state: "refused", code, before }, triedAt, o)) ? { is: "refused", code, holds } : gone;
@@ -2733,7 +2772,9 @@ export async function trySavedItem(item: QueueRow, write: RenameWrite | CreateWr
       case "inactive_there": return (await settleSaved(item, { state: "done", resultQboId: write.qboId }, triedAt, o)) ? { is: "found" } : gone;
       case "stopped": {
         const code = t.stop.code;
-        if (code === "open_balance" || code === CREDIT_BALANCE || classify(code).kind !== "retry" || o.by === "at_once") return refused(code, null);
+        if (code === "open_balance" || code === CREDIT_BALANCE) return refused(code, null);
+        // A balance that couldn't be read: nothing was sent, so it is kept as the portal's holding back, with the read's code.
+        if (classify(code).kind !== "retry" || o.by === "at_once") return refused(unreadKept(code), null);
         return later(code, false, before.request);
       }
       case "stale_again": return o.by === "press" ? refused("fault_5010", null) : later("fault_5010", false, before.request);
@@ -3248,6 +3289,12 @@ async function sendAgainHolding(itemId: string, shown: string, o: WriteOp & { st
     // A guardian's Parent customer (stage 3's slice 9h): checked against the guardian row and its person, never the family's records.
     const guardianId = guardianOf(w);
     if (guardianId !== null) {
+      // A removed guardian's Parent customer the cache has inactive now (made so in QuickBooks once its balance was
+      // settled): the change is done as found, nothing sent, the link not aligned.
+      if (w.op === "deactivate" && !cache.find((c) => c.qboId === w.qboId)?.active && (await customerOfGuardian(guardianId, tx)) === w.qboId) {
+        await refusedFoundIn(tx, item, w.qboId, o);
+        return { ok: false, result: { ok: true, message: "QuickBooks has the parent inactive already, so nothing was sent. The change is done." } };
+      }
       const g = await guardianPress(tx, item, w, guardianId, shown, source, cache);
       return g.ok ? { ok: true, item, write: g.write, realmId: source } : no(g.error);
     }
@@ -3423,7 +3470,7 @@ export type GuardianOp = { actor: Actor; ip: string | null; permission?: string 
 const saverOf = (o: GuardianOp): SaverOp => ({ actor: o.actor, ip: o.ip, permission: o.permission, staffUserId: o.actor.door === "staff" ? o.actor.id : null });
 
 /** A Parent customer that is a portal guardian's own is changed through the guardian: askRosterWrite() refuses its forms. */
-export const GUARDIAN_HERE = "That Parent customer is linked to one of the family's guardians in the portal, so it is changed through them: rename the person on their page, or remove them under Portal sign-ins on this page. Nothing was changed.";
+export const GUARDIAN_HERE = "That Parent customer is linked to a guardian in the portal, so it isn't changed from here: a guardian's own Parent customer is changed through them (rename the person on their page, or remove them under Portal sign-ins on this page), and one several guardians share, or one linked to a guardian of another family, is changed in QuickBooks until the mapping screen sorts it out. Nothing was changed.";
 /** The family action while a guardian's Parent customer change for the family is waiting or stuck. */
 export const GUARDIAN_PENDING = "A change to a guardian's Parent customer in this family hasn't reached QuickBooks yet (it is waiting or stuck on the Reconciliation page), so nothing was changed. Once it has gone through, or been given up there, try again.";
 /** The code of a guardian's Parent customer create found made as a customer another open guardian row is linked to already (foundDone(), ./queue.ts). */
@@ -3432,6 +3479,8 @@ export const CUSTOMER_HAS_GUARDIAN = "customer_has_guardian";
 export const NAME_UNUSABLE = "name_unusable";
 /** A guardian's Parent customer create QuickBooks refused as a taken name: renaming the person takes its place. */
 export const GUARDIAN_TAKEN_NAME = "QuickBooks refused the person's name as taken, so it isn't sent again as it is: rename the person on their page to a name QuickBooks can take. That makes the Parent customer under the new name, in place of this change. Or give it up.";
+/** A guardian's Parent customer rename QuickBooks refused as a taken name: a later rename of the person takes its place. */
+export const GUARDIAN_RENAME_TAKEN = "QuickBooks refused that name as taken, so it isn't sent again as it is: rename the person on their page to a name QuickBooks can take. That rename is sent to their Parent customer and takes the place of this change. Or give it up.";
 const ofGuardian = (guardianId: string) => sql`${writeQueue.request}->>'guardianId' = ${guardianId}`;
 const isOp = (op: string) => sql`${writeQueue.request}->>'op' = ${op}`;
 
@@ -3448,13 +3497,35 @@ async function openGuardiansOf(tx: Tx, realmId: string | null, customers: readon
 export async function guardianCustomerHeld(tx: Tx, realmId: string, customerId: string, except: string): Promise<boolean> {
   return ((await openGuardiansOf(tx, realmId, [customerId])).get(customerId) ?? []).some((g) => g !== except);
 }
-/** The customers of these that an open guardian row is linked to, in the roster's company: for a family's page, which offers them no forms. */
-export async function guardianCustomers(customers: readonly string[]): Promise<Set<string>> {
+/**
+ * The customers of these (a family's Parent customers) that an open guardian row is linked to, in the roster's company,
+ * for a family's page, which offers them no forms (askRosterWrite() refuses them, GUARDIAN_HERE): `own`, one open row
+ * of this family alone is linked to it, so it is that guardian's own and changed through them; `other`, it is shared by
+ * several open rows or linked to a guardian of another family, so the portal sends nothing for it (ownParentCustomer()),
+ * and it is changed in QuickBooks until the mapping screen sorts it out.
+ */
+export async function guardianCustomers(customers: readonly string[], familyId: AppFamilyId): Promise<Map<string, "own" | "other">> {
   return db.transaction(async (tx) => {
+    const out = new Map<string, "own" | "other">();
     const realmId = await getRosterSource(tx);
-    if (realmId === null || (await connectedToAnotherCompany(tx))) return new Set<string>();
-    return new Set((await openGuardiansOf(tx, realmId, customers)).keys());
+    if (realmId === null || (await connectedToAnotherCompany(tx))) return out;
+    const held = await openGuardiansOf(tx, realmId, customers);
+    const rows = [...new Set([...held.values()].flat())];
+    const familyOfRow = new Map((rows.length ? await tx.select({ id: guardian.id, familyId: guardian.familyId }).from(guardian).where(inArray(guardian.id, rows)) : [])
+      .map((r) => [r.id, r.familyId === null ? null : String(r.familyId)]));
+    for (const [customer, ids] of held) out.set(customer, ids.length === 1 && familyOfRow.get(ids[0]!) === String(familyId) ? "own" : "other");
+    return out;
   });
+}
+/**
+ * Whether nobody is changing this family in QuickBooks at this moment (its "being sent" lock, held by the family action
+ * from before its checks to its last step, and by its rename on its way): tried shared, and held so to the end of the
+ * caller's transaction, as a move tries it (moveRefusals()). A guardian add or reinstate is refused while it is held, so
+ * no Parent customer is made under a family whose customers are being made inactive (stage 3's slice 9h).
+ */
+export async function familySendingFree(tx: Tx, familyId: AppFamilyId): Promise<boolean> {
+  const [r] = (await tx.execute(sql`select pg_try_advisory_xact_lock_shared(${sql.raw(String(SENDING_LOCK))}, hashtext(${String(familyId)}::text)) as locked`)) as unknown as { locked: boolean }[];
+  return r?.locked === true;
 }
 /** Whether a guardian's Parent customer change filed under this family is waiting or stuck (askFamilyInactive() refuses meanwhile). */
 async function guardianItemsWaiting(tx: Tx, familyId: AppFamilyId): Promise<boolean> {
@@ -3466,8 +3537,10 @@ async function guardianItemsWaiting(tx: Tx, familyId: AppFamilyId): Promise<bool
  * Why nothing is sent for a guardian: the club's books (flat, or no parent type), the family (no link, or its customer
  * inactive or not on the roster), or the connection (not connected to the roster's company, or a shape that doesn't hold).
  */
-export type GuardianNotSent = "books" | "family" | "connection";
-type GuardianBooks = { ok: true; realmId: string; parentTypeId: string; familyCustomer: string; cache: (Cust & { syncToken: string })[] } | { ok: false; why: GuardianNotSent };
+export type GuardianNotSent = "books" | "family" | "connection" | "failed";
+/** Why nothing is sent for a guardian, as guardianBooks() reads it (`failed` is queueForGuardian()'s own: its savepoint failed). */
+type BooksNotSent = Exclude<GuardianNotSent, "failed">;
+type GuardianBooks = { ok: true; realmId: string; parentTypeId: string; familyCustomer: string; cache: (Cust & { syncToken: string })[] } | { ok: false; why: BooksNotSent };
 type Books = Extract<GuardianBooks, { ok: true }>;
 /** Where anything may be sent for a guardian of this family, read in the caller's transaction, which holds the roster lock. */
 async function guardianBooks(tx: Tx, familyId: AppFamilyId | null): Promise<GuardianBooks> {
@@ -3538,8 +3611,8 @@ export async function whileGuardiansHeld<T>(guardianIds: readonly string[], send
 export type GuardianAsk =
   /** A row just opened (added, reused at a second press, or reinstated): a Parent customer made where it has none. */
   | { op: "grant"; guardianId: string; familyId: AppFamilyId; name: string; email: string }
-  /** A row just closed: its own Parent customer made inactive under the balance rule; `locked`, the row's lock is held (its unsent create may be given up). */
-  | { op: "remove"; guardianId: string; familyId: AppFamilyId | null; locked: boolean }
+  /** A row just closed: its own creates that never left given up, its own Parent customer made inactive under the balance rule. */
+  | { op: "remove"; guardianId: string; familyId: AppFamilyId | null }
   /** A person renamed (`was`, the name before): each open row's own Parent customer renamed, a create kept as a taken name made again under the new one. */
   | { op: "rename"; rows: { guardianId: string; familyId: AppFamilyId | null }[]; name: string; was: string; email: string };
 
@@ -3586,9 +3659,11 @@ async function createForRow(tx: Tx, b: Books, guardianId: string, familyId: AppF
  *   replaced, roster.write.replaced; `inactive_there` when QuickBooks has it inactive, open question 12); one with a link
  *   that isn't its own nothing (`not_own`); one with none goes by item 2: a create already on the queue (`create_open`),
  *   a customer of the person's name under the family (`named_like`), else a create queued.
- * - remove: the row's own creates kept refused, or waiting and never sent while its lock is held, given up; one that may
- *   have been sent or is being sent left to finish (`maybe_made`); its own active Parent customer's make-inactive queued
- *   (the balance rule is the at-once try's), with the link's version.
+ * - remove: the row's own creates kept refused, or never sent, given up, whoever holds the row's lock (the update is
+ *   conditioned on `sent` false, so a sender that has marked one as maybe sent keeps it); one that may have been sent or
+ *   is being sent left to finish (`maybe_made`), and a later try of it finds the row closed and gives it up unsent
+ *   (trySavedItem()); its own active Parent customer's make-inactive queued (the balance rule is the at-once try's), with
+ *   the link's version.
  * - rename: for each open row, its own active Parent customer's rename queued (the link's version; `was` the person's
  *   name before, or a replaced refused rename's), a refused rename of it replaced; nothing for one QuickBooks has
  *   inactive; and a create kept refused as a taken name replaced by a create under the new name, by item 2.
@@ -3604,14 +3679,13 @@ export async function queueForGuardian(tx: Tx, ask: GuardianAsk, op: GuardianOp)
       if (ask.op === "grant") {
         const familyName = await familyNameOf(ask.familyId);
         const at = { guardianId: ask.guardianId, familyName };
+        // The row is open again: a make-inactive of it the portal kept refused is replaced, whatever QuickBooks now holds
+        // for it (inactive there, a link that isn't its own, books where nothing is sent any more).
+        await replaceRefused(sp, and(ofGuardian(ask.guardianId), isOp("deactivate")), { op: "reinstate", guardianId: ask.guardianId }, o);
         const b = await guardianBooks(sp, ask.familyId);
         if (!b.ok) return [{ ...at, outcome: "not_sent", why: b.why }];
         const own = await ownParentCustomer(sp, ask.guardianId, b);
-        if (own.is === "own") {
-          if (!own.active) return [{ ...at, outcome: "inactive_there", holds: own.name }];
-          await replaceRefused(sp, and(ofGuardian(ask.guardianId), isOp("deactivate")), { op: "reinstate", guardianId: ask.guardianId }, o);
-          return [{ ...at, outcome: "has_one", holds: own.name }];
-        }
+        if (own.is === "own") return [{ ...at, outcome: own.active ? "has_one" : "inactive_there", holds: own.name }];
         if (own.is === "not_own") return [{ ...at, outcome: "not_own" }];
         if ((await itemsOfRow(sp, ask.guardianId, ["waiting", "stuck", "refused"])).some((i) => i.request.op === "create")) return [{ ...at, outcome: "create_open" }];
         return [await createForRow(sp, b, ask.guardianId, ask.familyId, familyName, ask.name, ask.email, o)];
@@ -3622,8 +3696,12 @@ export async function queueForGuardian(tx: Tx, ask: GuardianAsk, op: GuardianOp)
         // The row's own creates: one that never left is given up with the membership; one that may have, left to finish.
         let maybeMade = false;
         for (const c of (await itemsOfRow(sp, ask.guardianId, ["waiting", "stuck", "refused"])).filter((i) => i.request.op === "create")) {
-          if (c.state === "refused" || (ask.locked && !c.sent)) {
-            await sp.update(writeQueue).set({ state: "given_up", note: "The guardian was removed in the portal.", nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() }).where(eq(writeQueue.id, c.id));
+          // Decided by the item itself, never by whose lock is held: one kept refused, or one never sent as it reads when the
+          // update runs (a sender's mark of it as maybe sent, committed meanwhile, is seen, and keeps it).
+          const [gone] = c.state === "refused" || !c.sent ? await sp.update(writeQueue).set({ state: "given_up", note: "The guardian was removed in the portal.", nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
+            .where(and(eq(writeQueue.id, c.id), c.state === "refused" ? eq(writeQueue.state, "refused") : and(eq(writeQueue.state, c.state), eq(writeQueue.sent, false))))
+            .returning({ id: writeQueue.id }) : [];
+          if (gone) {
             await writeAudit({ actor: o.actor, action: "roster.write.given_up", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: c.id,
               before: { state: c.state, tries: c.tries, code: c.lastCode, op: "create" }, after: { state: "given_up", why: "guardian_removed" } }, sp);
           } else maybeMade = true;
@@ -3665,7 +3743,7 @@ export async function queueForGuardian(tx: Tx, ask: GuardianAsk, op: GuardianOp)
   } catch {
     // Nothing of the Parent customers' side is kept; the guardian's own change goes ahead (the lead's decision 6).
     const rows = ask.op === "rename" ? ask.rows.map((r) => r.guardianId) : [ask.guardianId];
-    return rows.map((guardianId) => ({ guardianId, familyName: "this family", outcome: "not_sent" as const, why: "connection" as const }));
+    return rows.map((guardianId) => ({ guardianId, familyName: "this family", outcome: "not_sent" as const, why: "failed" as const }));
   }
 }
 
@@ -3697,7 +3775,7 @@ export function guardianSentWords(sent: readonly GuardianSent[], op: "grant" | "
     switch (s.outcome) {
       // Nothing is said where nothing is sent for this club's books, this family or while QuickBooks isn't connected:
       // the Portal sign-ins box and the person's page say which.
-      case "not_sent": return [];
+      case "not_sent": return s.why === "failed" ? ["Nothing was sent to QuickBooks for their Parent customer: the portal couldn't save that part of the change, so nothing will be sent for it. Their access in the portal is as said."] : [];
       case "nothing": case "not_own": return op === "remove" ? ["Nothing was sent to QuickBooks for them: they have no Parent customer of their own there."] : [];
       case "named_like": return [`QuickBooks already has a customer named “${s.holds}” ${under} that isn't linked to ${who}, so no Parent customer was made for them. The mapping screen will offer to link the two.`];
       case "has_one": return op === "rename" ? [`Their Parent customer ${under} has that name in QuickBooks already.`] : [`${who} already has their own Parent customer ${under} in QuickBooks, so none was made.`];
@@ -3718,7 +3796,7 @@ export function guardianSentWords(sent: readonly GuardianSent[], op: "grant" | "
         return [t.cached ? done : `${done} The portal finishes it on its side after its next read of QuickBooks, usually within a few minutes.`];
       }
       case "found": return [s.write?.op === "deactivate" ? `Their Parent customer ${under} is inactive in QuickBooks already, so nothing more was sent.` : `QuickBooks has that ${under} already, so nothing was sent.`];
-      case "waiting": return [t.sent ? `The portal can't tell yet whether QuickBooks took it (${what.toLowerCase()}): its answer didn't arrive. The portal finishes it after its next read of QuickBooks, and you'll find it on the Reconciliation page until then.`
+      case "waiting": return [t.sent ? `The portal can't tell yet whether QuickBooks took it (${what.charAt(0).toLowerCase()}${what.slice(1)}): its answer didn't arrive. The portal finishes it after its next read of QuickBooks, and you'll find it on the Reconciliation page until then.`
         : `${what} is waiting to reach QuickBooks: the portal tries again in a minute, then less often, and you'll find it on the Reconciliation page.`];
       case "refused": {
         if (s.write?.op === "create" && t.code === "fault_6240") {
@@ -3726,7 +3804,8 @@ export function guardianSentWords(sent: readonly GuardianSent[], op: "grant" | "
         }
         if (s.write?.op === "deactivate") {
           const why = t.code === "open_balance" ? "QuickBooks shows an amount owed on it" : t.code === CREDIT_BALANCE ? "QuickBooks shows a credit on it"
-            : whoStopped(t.code) === "quickbooks" ? "QuickBooks refused it" : "its balance couldn't be read";
+            : balanceUnread(t.code) ? "its balance couldn't be read, and nothing is made inactive without it"
+              : whoStopped(t.code) === "quickbooks" ? "QuickBooks refused it" : "the portal couldn't send it to QuickBooks at the time";
           return [`Their Parent customer ${under} was left active in QuickBooks: ${why}. It is kept on the Reconciliation page, where you can send it again once that is settled, or give it up.`];
         }
         return [`${what} didn't go through. ${keptRefusalWords(t.code, t.holds)} It is kept on the Reconciliation page.`];
@@ -3758,7 +3837,9 @@ export async function guardianStandings(rows: readonly { guardianId: string; fam
       const b = await guardianBooks(tx, r.familyId);
       if (!b.ok) {
         out.set(r.guardianId, b.why === "books" ? "Nothing is sent to QuickBooks for a guardian in this club's books."
-          : b.why === "family" ? "Nothing is sent to QuickBooks for them: this family isn't linked to an active family there." : "QuickBooks isn't connected, so nothing is sent for them for now.");
+          : b.why === "family" ? "Nothing is sent to QuickBooks for them: this family isn't linked to an active family there."
+            // Nothing is sent later for what wasn't sent then: say so, never "for now" (no reconnect queues a create).
+            : "Nothing is sent to QuickBooks for them while QuickBooks isn't connected to the roster's company, or its customer types don't match the club's setup. Nothing that wasn't sent is sent later by itself: the mapping screen will offer to link a Parent customer to them.");
         continue;
       }
       const own = await ownParentCustomer(tx, r.guardianId, b);
@@ -3766,7 +3847,10 @@ export async function guardianStandings(rows: readonly { guardianId: string; fam
       if (own.is === "not_own") { out.set(r.guardianId, "Linked to a customer that isn't their own Parent customer under this family, so nothing is sent for them."); continue; }
       if (!r.open) continue;
       const like = namedUnder(b, r.name);
-      out.set(r.guardianId, like ? `QuickBooks has a customer named “${like.displayName}” under this family that isn't linked to them.` : "No Parent customer in QuickBooks for them yet.");
+      // An open row with no link and nothing on the queue has nothing coming (added while nothing could be sent, or its
+      // create given up): nothing makes one later by itself.
+      out.set(r.guardianId, like ? `QuickBooks has a customer named “${like.displayName}” under this family that isn't linked to them.`
+        : "No Parent customer in QuickBooks is linked to them, and none is being made: the mapping screen will offer to link one.");
     }
     return out;
   });
@@ -3810,7 +3894,7 @@ async function guardianPress(tx: Tx, item: QueueRow, w: RosterWrite, guardianId:
   if (await waitingForCustomer(tx, w.qboId)) return no(WRITE_COPY.waiting);
   if (w.op === "rename") {
     if (row.status === "disabled") return no(RECORD_MOVED_ON);
-    if (item.lastCode === "fault_6240") return no(TAKEN_NAME_KEPT);
+    if (item.lastCode === "fault_6240") return no(GUARDIAN_RENAME_TAKEN);
     if (p.name !== w.name) return no(RECORD_MOVED_ON);
     return { ok: true, write: w };
   }

@@ -11,7 +11,7 @@ import { Notice } from "@/app/components/notice";
 import { WorthALook } from "../balances/worth-a-look";
 import { OneButton, TextAction } from "../seasons/forms";
 import { giveUpAction, linkMadeStudentAction, sendPortalValueAction, tryAgainAction } from "../roster/write-actions";
-import { EMAIL_TOO_LONG, GUARDIAN_TAKEN_NAME, guardianOf, keptRefusalWords, keptWordsFor, portalValueStamp, TAKEN_NAME_KEPT } from "@/lib/roster/writes";
+import { EMAIL_TOO_LONG, GUARDIAN_RENAME_TAKEN, GUARDIAN_TAKEN_NAME, guardianOf, keptRefusalWords, NAME_UNUSABLE, keptWordsFor, portalValueStamp, TAKEN_NAME_KEPT } from "@/lib/roster/writes";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { BuyoutsToLook } from "./buyouts";
 import { CustomersWithNoFamily } from "./no-family";
@@ -79,6 +79,14 @@ const NOT_OFFERED: Record<NonNullable<QueueView["notOffered"]>, string> = {
   create_family_first: "The family the student was moved to has no customer in QuickBooks yet, so there is nowhere to put them there. Create the family in QuickBooks first, with “Create in QuickBooks and link” on its page; the portal's move can be sent from here after that.",
   // A guardian's Parent customer create (stage 3's slice 9h) whose person's sign-in address is longer than QuickBooks takes.
   email_too_long: `${keptRefusalWords(EMAIL_TOO_LONG, null)} Give it up here: the guardian keeps their access in the portal.`,
+  // One whose person's name QuickBooks can't take (nothing was sent): renaming the person takes its place.
+  name_unusable: `${keptRefusalWords(NAME_UNUSABLE, null)} Or give it up here: the guardian keeps their access in the portal.`,
+};
+/** Why "Send the portal's value" isn't offered for a refused item, by what it was: a guardian's taken name is the person's to rename (stage 3's slice 9h). */
+const notOfferedWords = (i: QueueView): string | null => {
+  if (i.mayResend || i.notOffered === null) return null;
+  if (i.notOffered === "taken" && guardianOf(i.write) !== null) return i.write.op === "create" ? GUARDIAN_TAKEN_NAME : GUARDIAN_RENAME_TAKEN;
+  return NOT_OFFERED[i.notOffered];
 };
 
 /**
@@ -100,7 +108,7 @@ function Refused({ items, canChange }: { items: QueueView[]; canChange: boolean 
       // (which takes its place, and is sent), a customer QuickBooks has inactive is never made active again by the
       // portal, one the roster doesn't hold isn't sent to, and a move into a family with no customer in QuickBooks waits
       // for that family to be made there. The press is bound to what the row shows (QueueView.shown).
-      const instead = i.mayResend || i.notOffered === null ? null : i.notOffered === "taken" && guardianOf(i.write) !== null ? GUARDIAN_TAKEN_NAME : NOT_OFFERED[i.notOffered];
+      const instead = notOfferedWords(i);
       return (
         <div className="row-actions">
           {instead === null
