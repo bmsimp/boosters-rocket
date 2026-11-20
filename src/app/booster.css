@@ -385,6 +385,8 @@ dl.details dd { min-width: 0; overflow-wrap: anywhere; }
 }
 /* The passkey offer's two buttons sit side by side, wrapping under each other where there is no room. */
 .passkey-offer-buttons { display: flex; flex-wrap: wrap; gap: var(--s3); }
+/* Turned on with no codes, the done line is the box's first paragraph after its heading: a done line, not a subtitle. */
+.box.passkey-offer > h2 + .paid-up { color: var(--done); font-size: inherit; margin-top: var(--s3); }
 
 /* Sign-in settings, the authenticator app (slice SI-6b): its set-up's QR code, black on white whatever the theme (a
    forced-colors theme changes currentColor but not a fill), as the check-in sheet draws its own; the key to type and

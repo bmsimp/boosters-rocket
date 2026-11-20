@@ -127,19 +127,27 @@ test("Zelda adds a passkey, reads her backup codes once, renames it, asks again 
   expect(await sql`SELECT id FROM parent_backup_code WHERE parent_id = (SELECT id FROM parent WHERE email = ${ZELDA_EMAIL})`).toHaveLength(0);
 });
 
-test("Turn on in the passkey offer on Home adds a passkey with one tap and shows the backup codes once, and then the offer is gone", async ({ context, page }) => {
-  // A session of Zelda's own, made and proved just now on a device of its own with no "Not now" (five seconds back: the
-  // database's clock may run a little ahead of the app's), as a sign-in by the password and the emailed code leaves
-  // one: Home offers a passkey (the sign-in release, slice SI-8). It, its device, the passkey and its backup codes go
-  // after, with cleanUp().
+/**
+ * A session of Zelda's own, made and proved just now on a device of its own with no "Not now" (five seconds back: the
+ * database's clock may run a little ahead of the app's), as a sign-in by the password and the emailed code leaves one:
+ * Home offers a passkey (the sign-in release, slice SI-8). Its token is returned for the cookie; it and its device go
+ * with cleanUp(), Zelda's count with resetPasskeyOffer().
+ */
+async function offerSession(name: string): Promise<string> {
   await cleanUp();
   await resetPasskeyOffer(sql);
-  const token = "e2e-passkeys-offer-session-token";
+  const token = `e2e-passkeys-${name}-session-token`;
   const [device] = await sql`INSERT INTO parent_device (parent_id, token_hash, expires_at)
-    SELECT id, ${`passkeys-offer-${Date.now()}`}, now() + interval '90 days' FROM parent WHERE email = ${ZELDA_EMAIL} RETURNING id`;
+    SELECT id, ${`passkeys-${name}-${Date.now()}`}, now() + interval '90 days' FROM parent WHERE email = ${ZELDA_EMAIL} RETURNING id`;
   await sql`INSERT INTO parent_auth_session (id, token, user_id, family_id, device_id, expires_at, created_at, strong_at)
-    SELECT 'e2e-passkeys-offer-session', ${token}, user_id, family_id, ${device!.id as string}, now() + interval '1 day', now() - interval '5 seconds', now() - interval '5 seconds'
+    SELECT ${`e2e-passkeys-${name}-session`}, ${token}, user_id, family_id, ${device!.id as string}, now() + interval '1 day', now() - interval '5 seconds', now() - interval '5 seconds'
     FROM parent_auth_session WHERE token = ${PARENT_SESSION_TOKEN}`;
+  return token;
+}
+const zeldaDeclines = async () => (await sql`SELECT passkey_offer_declines AS n FROM parent WHERE email = ${ZELDA_EMAIL}`)[0]?.n as number;
+
+test("Turn on in the passkey offer on Home adds a passkey with one tap and shows the backup codes once, and then the offer is gone", async ({ context, page }) => {
+  const token = await offerSession("offer");
   try {
     await context.credentials.install();
     await context.addCookies([parentSessionCookie(token)]);
@@ -165,6 +173,63 @@ test("Turn on in the passkey offer on Home adds a passkey with one tap and shows
     await expect(page.locator("[data-passkey-offer]")).toHaveCount(0);
     const html = await page.content();
     for (const c of codes) expect(html).not.toContain(c);
+  } finally {
+    await cleanUp();
+    await resetPasskeyOffer(sql);
+  }
+});
+
+test("the passkey offer uses a phone's words on an iPhone, and draws nothing where the browser can't make a passkey", async ({ browser, baseURL }) => {
+  const token = await offerSession("offer-device");
+  const IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1";
+  const phone = await browser.newContext({ baseURL, userAgent: IPHONE });
+  const without = await browser.newContext({ baseURL });
+  try {
+    await phone.addCookies([parentSessionCookie(token)]);
+    const onPhone = await phone.newPage();
+    await onPhone.goto("/");
+    const offer = onPhone.locator('[data-passkey-offer="shown"]');
+    await expect(offer.getByRole("heading", { level: 2 })).toHaveText(OFFER.phoneTitle);
+    await expect(offer).toContainText(OFFER.phoneBody);
+    await expect(offer).not.toContainText(OFFER.computerBody);
+
+    // No WebAuthn in this browser: once the box has read it, nothing at all, and Home as usual.
+    await without.addInitScript(() => { Object.defineProperty(window, "PublicKeyCredential", { value: undefined, configurable: true, writable: true }); });
+    await without.addCookies([parentSessionCookie(token)]);
+    const noPasskeys = await without.newPage();
+    await noPasskeys.goto("/");
+    await expect(noPasskeys.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+    await expect(noPasskeys.locator('[data-passkey-offer="pending"]')).toHaveCount(0);
+    await expect(noPasskeys.locator("[data-passkey-offer]")).toHaveCount(0);
+    await expect(noPasskeys.getByText(OFFER.computerTitle)).toHaveCount(0);
+  } finally {
+    await phone.close();
+    await without.close();
+    await cleanUp();
+    await resetPasskeyOffer(sql);
+  }
+});
+
+test("Turn on after the ten minutes points to Sign-in settings, the box stays, and a late Not now is kept", async ({ context, page }) => {
+  const token = await offerSession("offer-late");
+  try {
+    await context.addCookies([parentSessionCookie(token)]);
+    await page.goto("/");
+    const offer = page.locator('[data-passkey-offer="shown"]');
+    await expect(offer.getByRole("button", { name: OFFER.turnOn, exact: true })).toBeVisible();
+    // The page stays open past the ten minutes: the session's making and its proof eleven minutes back.
+    await sql`UPDATE parent_auth_session SET created_at = now() - interval '11 minutes', strong_at = now() - interval '11 minutes' WHERE token = ${token}`;
+    await offer.getByRole("button", { name: OFFER.turnOn, exact: true }).click();
+    const alert = offer.getByRole("alert");
+    await expect(alert).toContainText(OFFER.cantTurnOnHere);
+    await expect(alert).not.toContainText(COPY.proveAgain);
+    await expect(alert.locator("..")).toBeFocused();
+    await expect(offer.getByRole("link", { name: OFFER.signInSettings, exact: true })).toHaveAttribute("href", "/family/sign-in");
+    expect(await sql`SELECT id FROM parent_auth_passkey WHERE user_id = ${ZELDA_USER()}`).toHaveLength(0);
+    // Not now, pressed late, is still her answer: kept.
+    await offer.getByRole("button", { name: OFFER.notNow, exact: true }).click();
+    await expect(page.locator('[data-passkey-offer="said"]').getByRole("status")).toContainText(OFFER.declined);
+    expect(await zeldaDeclines()).toBe(1);
   } finally {
     await cleanUp();
     await resetPasskeyOffer(sql);

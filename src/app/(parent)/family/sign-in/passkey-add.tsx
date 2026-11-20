@@ -15,8 +15,13 @@ import { toPortalAdd } from "./passkey-adding";
 
 /** What the portal's add answers (addMyPasskey(), src/lib/parents/passkey-settings.ts). */
 type AddAnswer = { ok: true; codes?: string[] } | { ok: false; error: "rejected" | "rate_limited" | "prove_again" | "already_added" };
-/** The add's outcome: the passkey added (with a first passkey's backup codes when it made them), or the words of why not. */
-export type AddOutcome = { ok: true; codes?: string[] } | { ok: false; error: string };
+/**
+ * The add's outcome: the passkey added (with a first passkey's backup codes when it made them), or the words of why
+ * not, with `proveAgain` when the session may not add one now (no recent proof, or it can't add one at all: the options'
+ * 404 or the add's `prove_again`). Sign-in settings shows the words, beside its own asking again; Home's offer, which
+ * has no asking again, shows words of its own for that one (passkey-offer.tsx).
+ */
+export type AddOutcome = { ok: true; codes?: string[] } | { ok: false; error: string; proveAgain?: true };
 
 export const Tick = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M4 12.5l5 5 11-11" /></svg>;
 
@@ -29,14 +34,17 @@ export const Tick = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentCo
 const HELD_ALREADY = "ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED";
 const heldAlready = (r: unknown) => typeof r === "object" && r !== null && (r as { error?: { code?: unknown } | null }).error?.code === HELD_ALREADY;
 
-/** The words of a refused add, by the portal's answer or the ceremony's outcome. */
-function addRefusal(outcome: CeremonyOutcome<AddAnswer>): string {
-  if (outcome.kind === "cancelled") return COPY.passkeyCancelled;
+const PROVE_AGAIN = { ok: false as const, error: COPY.proveAgain, proveAgain: true as const };
+/** A refused add, in words, by the portal's answer or the ceremony's outcome. */
+function addRefusal(outcome: CeremonyOutcome<AddAnswer>): Extract<AddOutcome, { ok: false }> {
+  const words = (error: string) => ({ ok: false as const, error });
+  if (outcome.kind === "cancelled") return words(COPY.passkeyCancelled);
   // The options refused (a 404: no recent proof, or the session can't add one now): show it's them again.
-  if (outcome.kind === "failed") return outcome.status === 404 ? COPY.proveAgain : COPY.failed;
+  if (outcome.kind === "failed") return outcome.status === 404 ? PROVE_AGAIN : words(COPY.failed);
   const a = outcome.body;
-  if (a.ok) return COPY.failed;
-  return a.error === "rate_limited" ? COPY.tooManyPresses : a.error === "prove_again" ? COPY.proveAgain : a.error === "already_added" ? COPY.passkeyAlready : COPY.passkeyRejected;
+  if (a.ok) return words(COPY.failed);
+  if (a.error === "prove_again") return PROVE_AGAIN;
+  return words(a.error === "rate_limited" ? COPY.tooManyPresses : a.error === "already_added" ? COPY.passkeyAlready : COPY.passkeyRejected);
 }
 
 /**
@@ -53,19 +61,20 @@ export async function addPasskeyHere(name: string): Promise<AddOutcome> {
     outcome = { kind: "failed", status: null };
   }
   if (outcome.kind === "answer" && outcome.body.ok) return outcome.body.codes ? { ok: true, codes: outcome.body.codes } : { ok: true };
-  return { ok: false, error: addRefusal(outcome) };
+  return addRefusal(outcome);
 }
 
 /**
  * Backup codes shown once: the line that says so (a status, focusable, which the caller focuses), the heading, the
- * words of how to keep them (beside an app, or in place of a passkey), the list and its copy button.
+ * words of how to keep them (beside an app, or in place of a passkey; `keep` in their place, for a page other than
+ * Sign-in settings, whose words say "this page"), the list and its copy button.
  */
-export function BackupCodesShown({ message, list, app, lineRef }: { message: string; list: string[]; app: boolean; lineRef: Ref<HTMLParagraphElement> }) {
+export function BackupCodesShown({ message, list, app, lineRef, keep }: { message: string; list: string[]; app: boolean; lineRef: Ref<HTMLParagraphElement>; keep?: string }) {
   return (
     <div className="stack">
       <p ref={lineRef} role="status" tabIndex={-1} className="paid-up"><Tick />{message}</p>
       <h3>{COPY.backupCodesTitle}</h3>
-      <p>{app ? COPY.backupCodesKeep : COPY.backupCodesKeepPasskey}</p>
+      <p>{keep ?? (app ? COPY.backupCodesKeep : COPY.backupCodesKeepPasskey)}</p>
       <ul className="backup-codes" aria-label={COPY.backupCodesTitle}>
         {list.map((c) => <li key={c}><code>{c}</code></li>)}
       </ul>

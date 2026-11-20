@@ -19,7 +19,8 @@ const Errors = ({ errors }: { errors: string[] }) => <ul role="alert" className=
  * **Turn on** and **Not now**. Turn on is one tap, nothing more asked: SI-7b's add, with no name (addPasskeyHere()),
  * and for a first passkey with no app the ten backup codes, shown once. Not now is the one server action, taking
  * nothing, and the box gives way to its answer. Refused or cancelled, SI-7b's words under the buttons, and the offer
- * stays. Given only APP_URL's origin: in a browser with no WebAuthn, or at another address, it draws nothing at all
+ * stays; refused because the session may no longer add one from here (the ten minutes past), words of its own and a
+ * link to Sign-in settings, since Home has no asking again. Given only APP_URL's origin: in a browser with no WebAuthn, or at another address, it draws nothing at all
  * (Sign-in settings says why it can't add there). Until it has read the browser it draws only an empty, hidden
  * placeholder, so the server's HTML and the first draw agree, and a browser test can tell "not read yet" from "not
  * drawn" (`data-passkey-offer`: `pending`, then `shown` or nothing, then `said`; passOffer(), tests/e2e/journey-helpers.ts).
@@ -34,6 +35,8 @@ export function PasskeyOffer({ portalOrigin }: { portalOrigin: string }) {
   }, [portalOrigin]);
   const [busy, setBusy] = useState<"on" | "not-now" | null>(null);
   const [errors, setErrors] = useState<string[] | null>(null);
+  // Turn on refused for want of a recent proof: Home can't ask again, so the answer points to Sign-in settings.
+  const [toSettings, setToSettings] = useState(false);
   const [on, setOn] = useState<{ codes?: string[] } | null>(null);
   const [declined, setDeclined] = useState<{ message: string; last: boolean } | null>(null);
   const said = useRef<HTMLParagraphElement>(null);
@@ -46,15 +49,16 @@ export function PasskeyOffer({ portalOrigin }: { portalOrigin: string }) {
 
   const turnOn = async () => {
     if (busy) return;
-    setBusy("on"); setErrors(null);
+    setBusy("on"); setErrors(null); setToSettings(false);
     const added = await addPasskeyHere("");
     setBusy(null);
     if (added.ok) setOn({ codes: added.codes });
+    else if (added.proveAgain) { setToSettings(true); setErrors([WORDS.cantTurnOnHere]); }
     else setErrors([added.error]);
   };
   const notNow = async () => {
     if (busy) return;
-    setBusy("not-now"); setErrors(null);
+    setBusy("not-now"); setErrors(null); setToSettings(false);
     const r: DeclineAnswer = await safely(() => declinePasskeyOfferAction(), FAILED);
     setBusy(null);
     if (r.ok) setDeclined({ message: r.message, last: r.last === true });
@@ -77,7 +81,7 @@ export function PasskeyOffer({ portalOrigin }: { portalOrigin: string }) {
       {on ? (
         on.codes ? (
           <>
-            <BackupCodesShown message={COPY.passkeyCodesMade} list={on.codes} app={false} lineRef={said} />
+            <BackupCodesShown message={COPY.passkeyCodesMade} list={on.codes} app={false} lineRef={said} keep={WORDS.backupCodesKeep} />
             <p>{WORDS.turnedOn}</p>
           </>
         ) : <p ref={said} role="status" tabIndex={-1} className="paid-up"><Tick />{WORDS.turnedOn}</p>
@@ -92,7 +96,12 @@ export function PasskeyOffer({ portalOrigin }: { portalOrigin: string }) {
             </button>
             <button type="button" className="btn btn-line" aria-disabled={busy !== null || undefined} onClick={() => void notNow()}>{WORDS.notNow}</button>
           </div>
-          {errors && <div ref={refused} tabIndex={-1}><Errors errors={errors} /></div>}
+          {errors && (
+            <div ref={refused} tabIndex={-1}>
+              <Errors errors={errors} />
+              {toSettings && <p><Link className="link-line" href="/family/sign-in">{WORDS.signInSettings}</Link></p>}
+            </div>
+          )}
         </>
       )}
     </div>
