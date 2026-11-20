@@ -24,7 +24,7 @@ import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { getRosterSource } from "@/lib/roster/source";
 import { takeEmailIntoCache } from "@/lib/roster/cache-email";
 import { fieldHasChange, fieldSignsIn, replaceAddressInField } from "./email-field";
-import { loadMyRecord, loadMyRecordForMyEmailChange, type MyRecord } from "./my-family";
+import { loadMyRecordForMyEmailChange, type MyRecord } from "./my-family";
 import { takeRateLimit } from "./rate-limit";
 import { askForRosterRefresh } from "./refresh-ask";
 import { deleteUnusedSigninCodes, deleteUnusedSigninLinks, endParentSessions, enterableGuardianRows, forgetDevices, lockEmail, parentActor } from "./sessions";
@@ -74,37 +74,18 @@ const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
 export const emailChangeLink = (token: string) => `${env.APP_URL.replace(/\/+$/, "")}/family/email/${token}`;
 
 /**
- * Who else must agree, beside the record: parent sign-ins switched on, and the person's open links all to this one family: the session's own guardian row is among their open rows,
- * and every open row of theirs names the session's family record (`guardian.family_id` is `ctx.familyId`, the app's
- * family the gate gave the session). A person whose address is on records of more than one family would be split by
- * changing one of them, so they ask the club; so does one with an open row that names no family record.
- */
-async function othersAllow(ctx: ParentCtx): Promise<boolean> {
-  const [settings, links] = await Promise.all([
-    getParentSettings(),
-    db.select({ id: guardian.id, familyId: guardian.familyId }).from(guardian).where(and(eq(guardian.parentId, ctx.parentId), ne(guardian.status, "disabled"))),
-  ]);
-  return settings.signin && links.some((l) => l.id === ctx.guardianId) && links.every((l) => l.familyId === ctx.familyId);
-}
-
-/**
- * The session's own record when this person may change their sign-in address here; null when they ask the club.
- * `forMyLiveRequest`, for a link's page only: the record may also be the one their own live request was asked for,
- * while its field reads as that change (loadMyRecordForMyEmailChange()). Offering a change, and asking for one, go by
- * the sign-in address alone (loadMyRecord()).
- */
-async function mayChange(ctx: ParentCtx, forMyLiveRequest = false): Promise<MyRecord | null> {
-  const [record, allowed] = await Promise.all([forMyLiveRequest ? loadMyRecordForMyEmailChange(ctx) : loadMyRecord(ctx), othersAllow(ctx)]);
-  return record && allowed ? record : null;
-}
-
-/**
- * Whether the signed-in parent may change their sign-in address from the portal: their sign-in comes from a QuickBooks
- * record of their own (MyContact.edits, the same rule as "Update my details"), parent sign-ins are on, and they are in
- * no other family. Otherwise the pages offer nothing, and the email page tells them to ask the club.
+ * Whether the signed-in parent may change their sign-in address from the portal: parent sign-ins are on, and the
+ * session's own guardian row is among the person's open rows. Nothing of QuickBooks is read, and the person may be a
+ * guardian of any number of families: the address is the person's, one per person, and stage 3's slice S11e sends it
+ * on to each record of theirs (app-owned families spec, Appendix B). Otherwise the pages offer nothing, and the email
+ * page tells them to ask the club.
  */
 export async function canChangeMyEmail(ctx: ParentCtx): Promise<boolean> {
-  return (await mayChange(ctx)) !== null;
+  const [settings, [row]] = await Promise.all([
+    getParentSettings(),
+    db.select({ id: guardian.id }).from(guardian).where(and(eq(guardian.id, ctx.guardianId), eq(guardian.parentId, ctx.parentId), ne(guardian.status, "disabled"))),
+  ]);
+  return settings.signin && row !== undefined;
 }
 
 /**
@@ -114,8 +95,8 @@ export async function canChangeMyEmail(ctx: ParentCtx): Promise<boolean> {
  * replaced, so only the newest link works.
  */
 export async function requestMyEmailChange(ctx: ParentCtx, input: unknown): Promise<EmailResult> {
-  const refused = async (code: string, errors: string[], record?: MyRecord | null): Promise<EmailResult> => {
-    await writeAudit({ actor: actorOf(ctx), action: "parent.email.request.failed", ...(record ? { targetType: "qbo_customer", targetId: record.qboId } : {}), after: { code }, ip: ctx.ip });
+  const refused = async (code: string, errors: string[]): Promise<EmailResult> => {
+    await writeAudit({ actor: actorOf(ctx), action: "parent.email.request.failed", targetType: "parent", targetId: ctx.parentId, after: { code }, ip: ctx.ip });
     return { ok: false, errors };
   };
   const take = await takeRateLimit("email_request_parent", ctx.parentId);
@@ -125,8 +106,7 @@ export async function requestMyEmailChange(ctx: ParentCtx, input: unknown): Prom
   const email = typeof input === "string" && input.length <= 320 ? normalizeEmail(input) : null;
   if (!email) return { ok: false, errors: [EMAIL_COPY.invalid] };
   if (email === ctx.email.trim().toLowerCase()) return { ok: false, errors: [EMAIL_COPY.same] };
-  const record = await mayChange(ctx);
-  if (!record) return refused("not_offered", [EMAIL_COPY.askTheClub]);
+  if (!(await canChangeMyEmail(ctx))) return refused("not_offered", [EMAIL_COPY.askTheClub]);
 
   const token = randomBytes(32).toString("base64url");
   const actor = actorOf(ctx);
@@ -135,9 +115,9 @@ export async function requestMyEmailChange(ctx: ParentCtx, input: unknown): Prom
     await tx.select({ id: parent.id }).from(parent).where(eq(parent.id, ctx.parentId)).for("update");
     await tx.delete(parentEmailChange).where(and(eq(parentEmailChange.parentId, ctx.parentId), isNull(parentEmailChange.usedAt)));
     // The request is asked in the session's own family (the app's family record the gate gave it).
-    await tx.insert(parentEmailChange).values({ parentId: ctx.parentId, guardianId: ctx.guardianId, familyId: ctx.familyId, recordQboId: record.qboId,
+    await tx.insert(parentEmailChange).values({ parentId: ctx.parentId, guardianId: ctx.guardianId, familyId: ctx.familyId, recordQboId: null,
       newEmail: email, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + EMAIL_CHANGE_TTL_MS) });
-    await writeAudit({ actor, action: "parent.email.request", targetType: "qbo_customer", targetId: record.qboId, before: { email: ctx.email },
+    await writeAudit({ actor, action: "parent.email.request", targetType: "parent", targetId: ctx.parentId, before: { email: ctx.email },
       after: { email, familyId: String(ctx.familyId) }, ip: ctx.ip }, tx);
   });
   const brand = await currentBrand();
@@ -172,14 +152,13 @@ export type EmailLinkView =
 
 /**
  * What the page a link opens shows. It changes nothing: mail scanners open links. The token is looked up only among
- * the session's own requests, and must still be for the session's own record.
+ * the session's own requests (liveRequest()), and the person must still be one who may change their address here.
  */
 export async function findMyEmailChange(ctx: ParentCtx, token: unknown): Promise<EmailLinkView> {
   const row = await liveRequest(ctx, token);
   if (!row) return { state: "gone" };
-  const record = await mayChange(ctx, true);
-  if (!record) return { state: "ask_club" };
-  return record.qboId === row.recordQboId ? { state: "ask", newEmail: row.newEmail } : { state: "gone" };
+  if (!(await canChangeMyEmail(ctx))) return { state: "ask_club" };
+  return { state: "ask", newEmail: row.newEmail };
 }
 
 /**
@@ -287,13 +266,8 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
   const row = await liveRequest(ctx, token);
   if (!row) return refuse("bad_link", [EMAIL_COPY.linkNoGood]);
   const record = await loadMyRecordForMyEmailChange(ctx);
-  if (!record || record.qboId !== row.recordQboId) {
-    // Another record is theirs now: this request can never be confirmed. No record at all may come back (a roster read
-    // under way), so that one is left for another try.
-    if (record) await spend(row.id);
-    return refuse("not_their_record", [EMAIL_COPY.linkNoGood], record?.qboId);
-  }
-  if (!(await othersAllow(ctx))) return refuse("not_offered", [EMAIL_COPY.askTheClub], record.qboId);
+  if (!record) return refuse("not_their_record", [EMAIL_COPY.linkNoGood]);
+  if (!(await canChangeMyEmail(ctx))) return refuse("not_offered", [EMAIL_COPY.askTheClub], record.qboId);
   const realmId = await connectedCompany();
   if (!realmId) return refuse("not_connected", [EMAIL_COPY.tryLater], record.qboId);
   // An id that isn't digits is never sent to QuickBooks (the browser run's seeded records are such ids).

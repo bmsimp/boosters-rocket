@@ -83,16 +83,16 @@ describe("asking for the change", () => {
     for (const m of outbox) for (const s of [RIVERA.family.name, RIVERA.parent.name, CHENOWETH.family.name, CHENOWETH.parent.email, R_PARENT, C_PARENT]) expect(`${m.subject}${m.text}${m.html}`).not.toContain(s);
 
     const [row] = await requests();
-    // Asked in the session's own family, the app's record: no QuickBooks id of the family is stored. The record it would
-    // change is still QuickBooks'.
-    expect(row).toMatchObject({ parentId: r.identity.parentId, guardianId: r.identity.guardianId, familyId: r.identity.familyId, recordQboId: R_PARENT, newEmail: NEW, usedAt: null });
+    // Asked in the session's own family, the app's record: no QuickBooks id is stored, of the family or of any record
+    // (stage 3's slice 11d: the address is the person's, and no QuickBooks record is read to ask).
+    expect(row).toMatchObject({ parentId: r.identity.parentId, guardianId: r.identity.guardianId, familyId: r.identity.familyId, recordQboId: null, newEmail: NEW, usedAt: null });
     expect(row).not.toHaveProperty("familyQboId");
     expect(row!.tokenHash).toMatch(/^[0-9a-f]{64}$/);
     expect(row!.tokenHash).not.toContain(token);
     expect(Math.abs(row!.expiresAt.getTime() - (Date.now() + 24 * 3_600_000))).toBeLessThan(60_000);
     // Asked, and audited without the token.
     const log = await audits();
-    expect(log).toEqual([{ action: "parent.email.request", targetId: R_PARENT, before: { email: RIVERA.parent.email }, after: { email: NEW, familyId: String(r.identity.familyId) } }]);
+    expect(log).toEqual([{ action: "parent.email.request", targetId: r.identity.parentId, before: { email: RIVERA.parent.email }, after: { email: NEW, familyId: String(r.identity.familyId) } }]);
     expect(JSON.stringify(log)).not.toContain(token);
     // Nothing else: QuickBooks isn't asked, the address and the session are as they were.
     expect(stub.calls).toHaveLength(0);
@@ -134,25 +134,36 @@ describe("asking for the change", () => {
     expect(await requests()).toEqual([]);
   });
 
-  it("tells a sign-in made by hand, a person in two families, and anyone while sign-ins are off to ask the club, and stores nothing", async () => {
-    const { r, c } = await seedContactFamilies(stub);
+  it("stores the request for a person with no QuickBooks record, one whose record no longer holds their address, and one in two families", async () => {
+    const { r } = await seedContactFamilies(stub);
+    // A sign-in made by hand: no record of their own in QuickBooks.
     const hand = await seedParentIn({ familyQboId: R_FAMILY, name: "Hand Made", email: "hand.made@family-r.example" });
     asParent(hand.identity);
-    expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.askTheClub] });
-
-    // Rivera's parent is also a parent of the Chenoweth family: changing one record would split the two.
+    expect(await asking("hand.moved@family-r-new.example")).toEqual({ ok: true, message: EMAIL_COPY.sent("hand.moved@family-r-new.example") });
+    // Rivera's parent, whose record the club re-addressed, and who is a parent of the Chenoweth family too.
+    await db.update(qboCustomer).set({ email: "someone.else@family-r.example" }).where(eq(qboCustomer.qboId, R_PARENT));
     await seedGuardian({ parentId: r.identity.parentId, familyQboId: C_FAMILY, status: "active", sourceQboId: C_PARENT });
+    await syncAppRecords();
     asParent(r.identity);
-    expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.askTheClub] });
+    expect(await asking(NEW)).toEqual({ ok: true, message: EMAIL_COPY.sent(NEW) });
+    expect((await requests()).map((q) => [q.parentId, q.newEmail, q.recordQboId]).sort()).toEqual([
+      [hand.identity.parentId, "hand.moved@family-r-new.example", null], [r.identity.parentId, NEW, null]].sort());
+    expect(stub.calls).toHaveLength(0);
+  });
 
-    await seedParentSettings({ signin: false });
+  it("tells anyone to ask the club while sign-ins are off, and from a closed row, and stores nothing", async () => {
+    const { r, c } = await seedContactFamilies(stub);
+    await db.update(guardian).set({ status: "disabled", disabledReason: "removed" }).where(eq(guardian.id, c.identity.guardianId));
     asParent(c.identity);
+    expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.askTheClub] });
+    await seedParentSettings({ signin: false });
+    asParent(r.identity);
     expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.askTheClub] });
 
     expect(outbox).toEqual([]);
     expect(await requests()).toEqual([]);
-    expect((await audits()).map((a) => [a.action, a.after])).toEqual([
-      ["parent.email.request.failed", { code: "not_offered" }], ["parent.email.request.failed", { code: "not_offered" }], ["parent.email.request.failed", { code: "not_offered" }]]);
+    expect((await audits()).map((a) => [a.action, a.targetId, a.after])).toEqual([
+      ["parent.email.request.failed", c.identity.parentId, { code: "not_offered" }], ["parent.email.request.failed", r.identity.parentId, { code: "not_offered" }]]);
   });
 
   it("is rate-limited per person, and audits the first refusal only", async () => {
@@ -162,7 +173,7 @@ describe("asking for the change", () => {
     expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.tooManyAsks] });
     expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.tooManyAsks] });
     expect((await audits()).filter((a) => a.action === "parent.email.request.failed")).toEqual([
-      { action: "parent.email.request.failed", targetId: null, before: null, after: { code: "rate_limited" } }]);
+      { action: "parent.email.request.failed", targetId: r.identity.parentId, before: null, after: { code: "rate_limited" } }]);
   });
 });
 
