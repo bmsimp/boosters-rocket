@@ -64,7 +64,7 @@ describe("names", () => {
     expect(compare(rivera(), { customers: books("10", " Rivera Family") }).differences).toEqual([]);
     expect(compare(rivera({ students: [student(S1, "Leo  Rivera", "12")] })).differences).toEqual([]);
     // "José" composed in the portal (NFC) and decomposed in the books (NFD): they look alike and are the same name.
-    const nfc = "Jos\u00e9 Rivera", nfd = "Jose\u0301 Rivera";
+    const nfc: string = "Jos\u00e9 Rivera", nfd: string = "Jose\u0301 Rivera";
     expect(nfc === nfd).toBe(false);
     expect(compare(rivera({ students: [student(S1, nfc, "12")] }), { customers: books("12", nfd) }).differences).toEqual([]);
     expect(compare(rivera({ students: [student(S1, nfd, "12")] }), { customers: books("12", nfc) }).differences).toEqual([]);
