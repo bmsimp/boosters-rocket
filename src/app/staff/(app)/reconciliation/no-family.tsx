@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { customersWithNoFamily, type NoFamilyList } from "@/lib/roster/no-family";
 import { Notice } from "@/app/components/notice";
 import { familyFromCustomerAction } from "./family-actions";
@@ -41,7 +42,9 @@ export async function CustomersWithNoFamily({ mayChangeFamilies }: { mayChangeFa
       <p>The active customers QuickBooks lists as a family at the top level, under no other customer, that no family in the portal is linked to: one added in QuickBooks since the portal&apos;s families were set up, say.
         A customer a family&apos;s waiting or stuck change on this page would be found as is left out until that change goes through or is given up. An inactive family customer isn&apos;t offered.
         Creating a family from one makes the family and its students in the portal, linked to their customers, so its invoices show to its guardians.
-        {` It makes no guardian and gives nobody a sign-in: ${mayChangeFamilies ? "add its guardians" : "someone who may change families adds its guardians"} on the family's page, under Families. Nothing is sent to QuickBooks.`}</p>
+        {` It makes no guardian and gives nobody a sign-in: ${mayChangeFamilies ? "add its guardians" : "someone who may change families adds its guardians"} on the family's page, under Families. Nothing is sent to QuickBooks.`}
+        {" "}<Link href="/staff/links">Accounting links</Link> shows every family in the portal beside its customer, and which of these customers looks like the customer of a family the portal has already, by a guardian&apos;s sign-in address:
+        creating a family from one of those would make a second family beside it, and nothing can link the two yet.</p>
       {list.state !== "listed" ? <Notice tone="warning" live="none">{WHY_NONE[list.state]}</Notice> : <NoFamilyRows rows={rows} />}
     </section>
   );

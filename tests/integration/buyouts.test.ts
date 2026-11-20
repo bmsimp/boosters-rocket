@@ -737,10 +737,10 @@ describe("how the requirement reads, on the parent's pages", () => {
     expect(page).not.toContain("Volunteer instead");
   });
 
-  // Today's reading, pinned so S9 meets it on purpose: until S9 a linked family can't lose its link, and S9 decides what
-  // a family with a live buy-out and no link reads. The requirement's words go by the buy-out (kept by the app's records),
+  // Today's reading, pinned so stage 4 meets it on purpose: until stage 4's slice that unlinks a family (M3b) a linked
+  // family can't lose its link, and that slice decides what a family with a live buy-out and no link reads. The requirement's words go by the buy-out (kept by the app's records),
   // while the offer, the pay-instead page and the money all need the link, so only the words remain.
-  it("a family that loses its link with a buy-out invoiced still reads 'Buy-out invoiced', with no way to it from Volunteer (S9 decides)", async () => {
+  it("a family that loses its link with a buy-out invoiced still reads 'Buy-out invoiced', with no way to it from Volunteer (stage 4 decides)", async () => {
     const p = await buyoutFamily(stub);
     const req = await seedBuyoutRequirement({ title: "Concession shifts QR78" });
     await seedBuyout({ requirementId: req, familyQboId: FAMILY, chosenBy: p.identity.parentId, invoiceQboId: "9902" });
