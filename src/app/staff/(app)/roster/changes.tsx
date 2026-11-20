@@ -59,7 +59,7 @@ export function Waiting({ items, compare = new Set<string>() }: { items: QueueVi
     <>
       {open.length > 0 && (
         <section className="box" aria-labelledby="waiting-h"><h2 id="waiting-h">Waiting to reach QuickBooks</h2>
-          <p>These changes were asked for and haven&apos;t been finished yet: most are waiting for QuickBooks to take them. Nothing else can be changed on the same record until they go through or are given up on the <a href="/staff/reconciliation">Reconciliation page</a>, but for a guardian&apos;s phone and mailing address, which hold nothing back.</p>
+          <p>These changes were asked for and haven&apos;t been finished yet: most are waiting for QuickBooks to take them. Nothing else can be changed on the same record until they go through or are given up on the <a href="/staff/reconciliation">Reconciliation page</a>, but for a guardian&apos;s phone, mailing address and sign-in email, which hold nothing back.</p>
           <DataTable caption="Each change, and where it stands" captionHidden rows={open} rowKey={(i) => i.id} columns={[
             { key: "change", header: "Change", rowHeader: true, cell: (i) => <>{i.words}{i.moneyNote ? <span className="when">{i.moneyNote}</span> : null}</> },
             { key: "state", header: "Where it stands", cell: (i) => waitingWords(i) },

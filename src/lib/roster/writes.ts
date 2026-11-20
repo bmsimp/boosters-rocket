@@ -2850,6 +2850,23 @@ export function emailShownUnder(key: string, field: string | null): string {
 }
 
 /**
+ * The addresses a change of sign-in email would replace (emailBefores()) that a person other than the membership's
+ * signs in with now (`parent.email`, which the sign-in account's mirrors). Since slice 11d an address a person gives up
+ * is free for another person, a guardian of the same family included, and in a field guardians share (a family's, in
+ * books with no parent type, or a flat member's) it is then theirs: such an address is never replaced (the lead's
+ * decision 2 for slice S11e: another person's address is never touched), so a change that finds only it there is kept
+ * as a difference. Read just before each decision that could send.
+ */
+async function othersSignInWith(w: EmailWrite): Promise<Set<string>> {
+  const befores = emailBefores(w);
+  if (!befores.length) return new Set();
+  const [row] = w.guardianId ? await db.select({ parentId: guardian.parentId }).from(guardian).where(eq(guardian.id, w.guardianId)) : [];
+  const others = await db.select({ email: parent.email }).from(parent)
+    .where(and(inArray(parent.email, befores), row ? ne(parent.id, row.parentId) : undefined));
+  return new Set(others.map((p) => p.email.trim().toLowerCase()));
+}
+
+/**
  * One send of a person's sign-in email (stage 3's slice S11e), by the rule tryContact() follows, with the field in
  * place of the details. The field sent is always made from one read live (stored in the cache when newer): the cache
  * keeps a field trimmed and lower-cased, and the other addresses in it are sent exactly as QuickBooks holds them. Read
@@ -2887,7 +2904,8 @@ async function tryEmail(w: EmailWrite, realmId: string, o: { mayWait: boolean; p
     if (!live.ok) return { is: "failed", code: live.code, sent: false, write: w };
     await storeReadAgain(live.answer, realmId, o);
     const field = fieldInAnswer(live.answer);
-    const stands = emailStands(field, w);
+    const taken = await othersSignInWith(w);
+    const stands = emailStands(field, w, taken);
     if (stands.is === "in_place") return { is: "in_place" };
     if (!live.active) return { is: "changed", code: INACTIVE_THERE_CODE };
     if (stands.is === "differs") return { is: "changed", code: EMAIL_DIFFERS };
@@ -2971,11 +2989,11 @@ export const EMAIL_SUPERSEDED_AT_PRESS = "Nothing was sent from this row: the pe
  * Reconciliation page's compare view shows those, as text, audited).
  */
 export function keptEmailWords(code: string | null): string {
-  if (code === EMAIL_DIFFERS) return "The portal held it back: QuickBooks' email field for this record doesn't hold the sign-in address the portal last knew for this person there, so the new address wasn't sent over it.";
+  if (code === EMAIL_DIFFERS) return "The portal held it back: QuickBooks' email field for this record doesn't hold the sign-in address the portal last knew for this person where the portal reads it (the first address, on a guardian's own record or a member's), or that address is another person's sign-in now, so the new address wasn't sent over it.";
   if (code === EMAIL_TOO_LONG) return "The portal held it back: with the new address in it, this record's email field in QuickBooks would be longer than QuickBooks takes (100 characters), so nothing was sent.";
   if (code === EMAIL_ALREADY_THERE) return "The portal held it back: QuickBooks' email field for this record holds the new address already, beside the one it was to replace, so nothing was sent over it.";
   if (code === INACTIVE_THERE_CODE) return "The portal held it back: QuickBooks has this record inactive, and the portal never sends a change to it or makes it active again.";
-  if (code === "fault_5010") return "The portal held it back: the record changed in QuickBooks twice while the new address was being sent, so nothing was overwritten.";
+  if (code === "fault_5010") return "The portal held it back: the record changed in QuickBooks while the new address was being sent, so nothing was overwritten.";
   if (code !== null) {
     const m = /^fault_(\d{1,6})$/.exec(code);
     if (m !== null && EMAIL_UPDATE.faults.validation.test(m[1]!)) return "QuickBooks refused it: it wouldn't take the email field with the new address in it.";
@@ -2984,13 +3002,14 @@ export function keptEmailWords(code: string | null): string {
 }
 /**
  * The field "Send the portal's value" sends for a kept change of sign-in email, from the field just read (the lead's
- * decision for slice S11e): `to` in place of `from` (or an `orFrom` address) where the field holds it; else, for a
+ * decision for slice S11e): `to` in place of `from` (or an `orFrom` address) where the field holds it, never one another
+ * person signs in with now (`taken`, othersSignInWith()), which is left as it is; else, for a
  * Parent customer's own record or a member's, `to` put first, ahead of what the field holds, and for a family's record
  * in books with no parent type, `to` added at the end. Never a field over 100 characters, nor one holding `to` twice.
  */
-function portalEmailField(field: string | null, w: EmailWrite): { ok: true; field: string } | { ok: false; error: string } {
+function portalEmailField(field: string | null, w: EmailWrite, taken: ReadonlySet<string>): { ok: true; field: string } | { ok: false; error: string } {
   const tooLong = "With the new address in it, this record's email field in QuickBooks would be longer than QuickBooks takes (100 characters), so nothing was sent. The change is still kept on this page: shorten the field in QuickBooks, or give this up.";
-  const held = emailBefores(w).find((a) => fieldHolds(field, a));
+  const held = emailBefores(w, taken).find((a) => fieldHolds(field, a));
   if (held !== undefined) {
     const next = replaceAddressInField(field, held, w.to);
     if (next.ok) return next;
@@ -3542,7 +3561,7 @@ export async function trySavedItem(item: QueueRow, write: RenameWrite | CreateWr
     // The cache's field already holds the new address by the record's rule, and none it replaces: done, nothing sent.
     // Otherwise the field is read live before anything is sent (tryEmail()), and nothing is kept on the cache's word.
     const [c] = o.readFirst || o.emailField !== undefined ? [] : await db.select({ email: qboCustomer.email }).from(qboCustomer).where(eq(qboCustomer.qboId, write.qboId));
-    if (c !== undefined && emailStands(c.email, write).is === "in_place") return (await settleSaved(item, { state: "done", resultQboId: write.qboId }, triedAt, o)) ? { is: "found" } : gone;
+    if (c !== undefined && emailStands(c.email, write, await othersSignInWith(write)).is === "in_place") return (await settleSaved(item, { state: "done", resultQboId: write.qboId }, triedAt, o)) ? { is: "found" } : gone;
     const t = await tryEmail(write, item.realmId, { mayWait, preset: o.emailField, actor: o.actor, ip: o.ip, permission: o.permission });
     switch (t.is) {
       case "answer": return taken(t.write, t.answer, t.resent);
@@ -4006,13 +4025,22 @@ const stampHolds = (itemId: string, shown: string, stamp: string) => {
 };
 
 /** A refused item QuickBooks was found to hold already ("Send the portal's value"): done, audited, in the caller's transaction, only while it is still refused. */
-async function refusedFoundIn(tx: Tx, item: QueueRow, resultQboId: string | null, o: { actor: Actor; ip: string | null; permission?: string }): Promise<void> {
+/** A kept change of sign-in email given up at a press because the person changed their address again since (`superseded`), audited, only while it is still kept. */
+async function giveUpSupersededEmailIn(tx: Tx, item: QueueRow, o: { actor: Actor; ip: string | null; permission?: string }): Promise<void> {
+  const [given] = await tx.update(writeQueue).set({ state: "given_up", note: EMAIL_STOP_NOTES.superseded, nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "refused"))).returning({ id: writeQueue.id });
+  if (!given) return;
+  await writeAudit({ actor: o.actor, action: "roster.write.given_up", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: item.id,
+    before: { state: "refused", tries: item.tries, code: item.lastCode, op: "email" }, after: { state: "given_up", why: "superseded", sentNow: false } }, tx);
+}
+async function refusedFoundIn(tx: Tx, item: QueueRow, resultQboId: string | null, o: { actor: Actor; ip: string | null; permission?: string }): Promise<boolean> {
   const [still] = await tx.update(writeQueue).set({ state: "done", resultQboId, tries: item.tries + 1, lastTriedAt: new Date(), nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
     .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "refused"))).returning({ id: writeQueue.id });
-  if (!still) return;
+  if (!still) return false;
   await writeAudit({ actor: o.actor, action: "roster.write.done", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: item.id,
     before: { state: "refused", tries: item.tries, code: item.lastCode }, after: { state: "done", how: "found", tries: item.tries + 1, ...(resultQboId ? { resultQboId } : {}) } }, tx);
   await closeEarlierContacts(tx, item, o);
+  return true;
 }
 
 /**
@@ -4077,12 +4105,7 @@ async function sendAgainHolding(itemId: string, shown: string, o: WriteOp & { st
     if (w.op === "email") {
       const stop = await emailStopsIn(tx, w, item);
       if (stop === "superseded") {
-        const [given] = await tx.update(writeQueue).set({ state: "given_up", note: EMAIL_STOP_NOTES.superseded, nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
-          .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "refused"))).returning({ id: writeQueue.id });
-        if (given) {
-          await writeAudit({ actor: o.actor, action: "roster.write.given_up", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: item.id,
-            before: { state: "refused", tries: item.tries, code: item.lastCode, op: "email" }, after: { state: "given_up", why: "superseded", sentNow: false } }, tx);
-        }
+        await giveUpSupersededEmailIn(tx, item, o);
         return { ok: false, result: { ok: true, status: "waiting", message: EMAIL_SUPERSEDED_AT_PRESS } };
       }
       if (stop !== null) return no(EMAIL_NOT_OFFERED[emailNotOffered(stop)]);
@@ -4239,14 +4262,32 @@ async function sendAgainHolding(itemId: string, shown: string, o: WriteOp & { st
     await storeReadAgain(live.answer, realmId, o);
     if (!live.active) return refuse(INACTIVE_THERE);
     const field = fieldInAnswer(live.answer);
-    // The new address there already, by the record's rule: done, nothing sent.
-    if (emailStands(field, write).is === "in_place") {
-      await db.transaction(async (tx) => { if (await lockRosterAs(tx, rosterTagOf(realmId))) await refusedFoundIn(tx, item, item.targetQboId, o); });
+    // An address the person gave up that another person signs in with now is theirs, and never replaced.
+    const taken = await othersSignInWith(write);
+    // The new address there already, by the record's rule: done, nothing sent. The live read ran outside the plan's
+    // transaction, and the confirm takes no lock a press holds, so the item's stops are checked again under the roster
+    // lock in the transaction that marks it done, and it is done only while it is still refused: a newer change that took
+    // its place meanwhile, or a removal that gave it up, is said so, never "done".
+    if (emailStands(field, write, taken).is === "in_place") {
+      const w = write;
+      const found = await db.transaction(async (tx): Promise<"done" | "roster" | "gone" | ContactStop> => {
+        if (!(await lockRosterAs(tx, rosterTagOf(realmId)))) return "roster";
+        const stop = await emailStopsIn(tx, w, item);
+        if (stop !== null) return stop;
+        return (await refusedFoundIn(tx, item, item.targetQboId, o)) ? "done" : "gone";
+      });
+      if (found === "roster") return refuse(WRITE_COPY.noRoster);
+      if (found === "gone") return refuse(NO_LONGER_REFUSED);
+      if (found === "superseded") {
+        await db.transaction((tx) => giveUpSupersededEmailIn(tx, item, o));
+        return { ok: true, status: "waiting", message: EMAIL_SUPERSEDED_AT_PRESS };
+      }
+      if (found !== "done") return refuse(EMAIL_NOT_OFFERED[emailNotOffered(found)]);
       return { ok: true, message: "QuickBooks has the person's new sign-in email already, so nothing was sent. The change is done." };
     }
     // Nothing is ever sent over a field nobody was shown: the row is drawn again with what QuickBooks holds now.
     if (emailShown(field) !== shown) return { ok: false, errors: ["QuickBooks changed this email field again since this page was shown. Nothing was sent. Reload the page to see it, then send the portal's address if it is still wanted."] };
-    const made = portalEmailField(field, write);
+    const made = portalEmailField(field, write, taken);
     if (!made.ok) return refuse(made.error);
     emailField = made.field;
     write = { ...write, syncToken: live.syncToken, checked: true };

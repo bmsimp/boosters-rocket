@@ -19,7 +19,7 @@ import { EMAIL_ASKED_BY, queueEmailChange } from "@/lib/parents/contact-queue";
 import { removeGuardian } from "@/lib/parents/guardians";
 import { blockPerson, renamePerson } from "@/lib/parents/people";
 import { addStudentToLinked, askFamilyInactive, coverStamp, EMAIL_ALREADY_THERE, EMAIL_DIFFERS, EMAIL_NOT_OFFERED, EMAIL_SUPERSEDED_AT_PRESS, EMAIL_TOO_LONG, emailShown, emailShownUnder,
-  familyCover, keptEmailWords, keptWordsFor, moveStudent, portalValueStamp, renameLinked, SENDING_LOCK, sendPortalValue, whoStopped } from "@/lib/roster/writes";
+  familyCover, INACTIVE_THERE_CODE, keptEmailWords, keptWordsFor, moveStudent, portalValueStamp, renameLinked, SENDING_LOCK, sendPortalValue, whoStopped } from "@/lib/roster/writes";
 import { compareEmail, giveUp, loadOpenWrites, runWriteQueue } from "@/lib/roster/queue";
 import { env } from "@/env";
 import { ROSTER_LOCK } from "@/lib/roster/shape";
@@ -251,6 +251,36 @@ describe("each send settles the field by what it holds, and never touches an add
     expect((await items())[0]).toMatchObject({ state: "refused", lastCode: EMAIL_DIFFERS });
   });
 
+  it("an address she gave up that another guardian of a shared field signs in with now is theirs: never replaced", async () => {
+    // Books with no parent type: the Rivera family's own field, shared by its guardians, holds Kit's address alone.
+    await storeShape({ kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: null });
+    fieldInQuickBooks("10", "kit@example.com");
+    const a = await ana();
+    const kit = await seedParent({ name: "Kit Rivera", email: "kit@example.com" });
+    await seedGuardian({ parentId: kit.id, familyQboId: "10", status: "active" });
+    await syncAppRecords();
+    const [kitRow] = await db.select().from(guardian).where(eq(guardian.parentId, kit.id));
+    // Ana moves to a new address; her change's first try can't reach QuickBooks, so it waits, never sent.
+    await confirm(a.who, NEW);
+    stub.dropApi = true;
+    await wake();
+    stub.dropApi = false;
+    const [anas] = await emailItems();
+    expect(anas).toMatchObject({ state: "waiting", sent: false });
+    // Kit then takes the address Ana gave up, and Kit's change lands first, putting it in the family's field.
+    await confirm({ parentId: kit.id, authUserId: kit.authUserId, guardianId: kitRow!.id, familyId: rivera, name: "Kit Rivera" }, OLD);
+    stub.calls.length = 0;
+    await wake();
+    expect(sentFields()).toEqual([OLD]);
+    // Ana's next try finds her old address there, but it is Kit's sign-in now: kept, nothing sent, Kit's left as it is.
+    stub.calls.length = 0;
+    await wake(10 * MIN);
+    await stub.idle();
+    expect(posts()).toEqual([]);
+    expect(await queueItem(anas!.id)).toMatchObject({ state: "refused", lastCode: EMAIL_DIFFERS });
+    expect(inQuickBooks(stub, "10")).toMatchObject({ PrimaryEmailAddr: { Address: OLD } });
+  });
+
   it("a field that would pass 100 characters: kept, nothing sent, in words of its own", async () => {
     const a = await ana();
     const long = `${"x".repeat(68)}@rivera.example`;
@@ -327,6 +357,39 @@ describe("each send settles the field by what it holds, and never touches an add
     await wake();
     expect(bodies()).toHaveLength(2);
     expect((await items())[0]).toMatchObject({ state: "waiting", sent: false, lastCode: "fault_5010" });
+  });
+
+  it("her address changed again before the worker's try: given up unsent as superseded, never an older address after a newer", async () => {
+    const a = await ana();
+    await confirm(a.who, NEW);
+    const [item] = await emailItems();
+    await db.update(parent).set({ email: NEWER }).where(eq(parent.id, a.ana.id));
+    await wake();
+    await stub.idle();
+    expect(posts()).toEqual([]);
+    expect(await queueItem(item!.id)).toMatchObject({ state: "given_up" });
+    expect((await auditsOf("roster.write.given_up")).map((r) => (r.after as { why?: string }).why)).toEqual(["superseded"]);
+  });
+
+  it("a link with no version: the field read live first, then sent with the version just read", async () => {
+    const a = await ana();
+    await db.update(accountingLink).set({ syncedToken: null }).where(eq(accountingLink.guardianId, a.row.id));
+    await confirm(a.who, NEW);
+    expect((await emailItems())[0]!.request).toMatchObject({ syncToken: "" });
+    await wake();
+    expect(gets("11")).toHaveLength(1);
+    expect(bodies()).toEqual([{ Id: "11", SyncToken: "0", sparse: true, PrimaryEmailAddr: { Address: ` ${NEW} ` } }]);
+    expect((await emailItems())[0]).toMatchObject({ state: "done" });
+  });
+
+  it("QuickBooks having the record inactive, though the roster's copy doesn't yet: kept, nothing sent", async () => {
+    const a = await ana();
+    await confirm(a.who, NEW);
+    Object.assign(inQuickBooks(stub, "11"), { Active: false });
+    await wake();
+    await stub.idle();
+    expect(posts()).toEqual([]);
+    expect((await emailItems())[0]).toMatchObject({ state: "refused", lastCode: INACTIVE_THERE_CODE });
   });
 
   it("QuickBooks' own refusal: kept, in words that say QuickBooks refused it", async () => {
@@ -449,6 +512,26 @@ describe("a change of sign-in email blocks nothing, and goes with the membership
     expect(emailSent()).toEqual([]);
   });
 
+  it("the family's page offers every change beside a waiting one: nothing is held back there either", async () => {
+    const blockedWords = ["is waiting to reach QuickBooks, so nothing else can be changed for now", "so the family can't be made inactive for now"];
+    const page = async () => { asStaff(await staffWith(`page${Math.random().toString(36).slice(2, 8)}@club.org`, ["Roster.Read", "Roster.Family.ReadWrite"]));
+      return decode(await renderPage(RosterEntryPage, { params: { id: String(rivera) } })); };
+    // Her own Parent customer's change waiting, under the family.
+    const a = await ana();
+    await confirm(a.who, NEW);
+    expect(await emailItems()).toEqual([expect.objectContaining({ state: "waiting", targetQboId: "11" })]);
+    let html = await page();
+    for (const w of blockedWords) expect(html).not.toContain(w);
+    // In books with no parent type, the family's own customer's.
+    await db.delete(writeQueue);
+    await storeShape({ kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: null });
+    fieldInQuickBooks("10", NEW);
+    await confirm(a.who, NEWER);
+    expect(await emailItems()).toEqual([expect.objectContaining({ state: "waiting", targetQboId: "10" })]);
+    html = await page();
+    for (const w of blockedWords) expect(html).not.toContain(w);
+  });
+
   it("in books with no parent type: the family's field, a student moved and added and the family renamed while it waits; all of it lands", async () => {
     await storeShape({ kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: null });
     fieldInQuickBooks("10", "home@rivera.example; ana@example.com");
@@ -549,6 +632,19 @@ describe("Reconciliation: the rows, the compare view, \"Send the portal's value\
     expect(await auditsOf("roster.write.sent_again")).toHaveLength(1);
   });
 
+  it("the press over her old address where it stands, not first, its answer lost: found made after the roster's next read", async () => {
+    const { row } = await kept(`someone.else@example.com, ${OLD}`);
+    const view = (await compareEmail(row.id, reader(await staffWith("reader@club.org", ["Roster.Read"]))))!;
+    stub.loseUpdateAnswer = true;
+    expect(await sendPortalValue(row.id, view.shown, portalValueStamp(row.id, view.shown), op)).toMatchObject({ ok: true, status: "waiting" });
+    stub.loseUpdateAnswer = false;
+    expect(sentFields()).toEqual([`someone.else@example.com, ${NEW}`]);
+    stub.calls.length = 0;
+    await wake(4 * MIN);
+    expect(posts()).toEqual([]);
+    expect(await queueItem(row.id)).toMatchObject({ state: "done" });
+  });
+
   it("the press over a field changed since, one holding the change already, and one that would pass 100 characters", async () => {
     const { row } = await kept();
     const view = (await compareEmail(row.id, reader(await staffWith("reader@club.org", ["Roster.Read"]))))!;
@@ -577,6 +673,50 @@ describe("Reconciliation: the rows, the compare view, \"Send the portal's value\
     expect(await sendPortalValue(row.id, view.shown, portalValueStamp(row.id, view.shown), op)).toEqual({ ok: true, status: "waiting", message: EMAIL_SUPERSEDED_AT_PRESS });
     expect(posts()).toEqual([]);
     expect(await queueItem(row.id)).toMatchObject({ state: "given_up" });
+  });
+
+  it("a newer change confirmed while the press reads QuickBooks: never told done, though the field holds the older address", async () => {
+    const { a, row } = await kept();
+    const view = (await compareEmail(row.id, reader(await staffWith("reader@club.org", ["Roster.Read"]))))!;
+    // Someone puts her address in QuickBooks, and she changes it again while the press is reading the record.
+    fieldInQuickBooks("11", NEW);
+    stub.onApiRequest = async (call) => {
+      if (call.method !== "GET" || !call.path.endsWith("/customer/11")) return;
+      stub.onApiRequest = null;
+      await confirm(a.who, NEWER);
+    };
+    expect(await sendPortalValue(row.id, view.shown, portalValueStamp(row.id, view.shown), op)).toEqual({ ok: true, status: "waiting", message: EMAIL_SUPERSEDED_AT_PRESS });
+    expect(posts()).toEqual([]);
+    expect(await queueItem(row.id)).toMatchObject({ state: "given_up" });
+    expect(await auditsOf("roster.write.done")).toEqual([]);
+    expect((await emailItems()).filter((i) => i.state === "waiting")).toEqual([expect.objectContaining({ request: expect.objectContaining({ to: NEWER }) })]);
+  });
+
+  it("a family customer's own field (books with no parent type): compared only by staff who may see a person's details, and the press adds the address at the end", async () => {
+    await storeShape({ kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: null });
+    fieldInQuickBooks("10", "home@rivera.example");
+    const a = await ana();
+    await confirm(a.who, NEW);
+    await wake();
+    stub.calls.length = 0;
+    const [row] = await loadOpenWrites();
+    expect(row).toMatchObject({ state: "refused", lastCode: EMAIL_DIFFERS, write: expect.objectContaining({ role: "family" }) });
+    // A reader of Reconciliation alone: no compare offered, none shown when asked, nothing audited.
+    const only = await staffWith("reader@club.org", ["Roster.Read"]);
+    asStaff(only);
+    let html = decode(writesSection(await renderPage(ReconciliationPage, { searchParams: { compare: row!.id } })));
+    expect(html).not.toContain(`?compare=${row!.id}`);
+    expect(html).not.toContain("home@rivera.example");
+    expect(await compareEmail(row!.id, reader(only))).toBeNull();
+    expect(await compares()).toEqual([]);
+    // Staff who may see a person's details: offered, audited under that permission, and shown.
+    asStaff(await staffWith("parents@club.org", ["Roster.Read", "Parents.ReadWrite"]));
+    html = decode(writesSection(await renderPage(ReconciliationPage, { searchParams: { compare: row!.id } })));
+    expect(html).toContain("QuickBooks has: the email field “home@rivera.example”.");
+    expect(await compares()).toEqual([expect.objectContaining({ permission: "Parents.ReadWrite", targetId: a.ana.id })]);
+    const view = (await compareEmail(row!.id, { ...reader(only), mayReadFamilyField: true }))!;
+    expect(await sendPortalValue(row!.id, view.shown, portalValueStamp(row!.id, view.shown), op)).toEqual({ ok: true, message: "Sent: QuickBooks has the person's new sign-in email now." });
+    expect(sentFields()).toEqual([`home@rivera.example, ${NEW}`]);
   });
 
   it("once the record is gone (the family made inactive), neither is shown, no compare is offered, and the press is refused", async () => {

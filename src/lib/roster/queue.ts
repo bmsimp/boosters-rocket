@@ -700,7 +700,9 @@ export async function compareContact(rawItemId: string, o: { actor: Actor; ip: s
 /**
  * The compare view of one kept change of a person's sign-in email (stage 3's slice S11e, the lead's decision 5), for
  * the Reconciliation page, offered to every reader of it (Roster.Read: that reader sees the guardian's sign-in address
- * under Portal sign-ins and the Parent customers' and members' email fields on the family's page already): the item
+ * under Portal sign-ins and the Parent customers' and members' email fields on the family's page already), but for a
+ * family customer's own field (role `family`, layered books with no parent type), which no page shows that reader:
+ * only for staff who may see a person's details (`mayReadFamilyField`, Parents.ReadWrite, as compareContact()). The item
  * must be a kept (`refused`) change of sign-in email whose record still stands (the membership open in the active family
  * record the item is filed under), or null, with nothing written. Otherwise a staff read of one person's sign-in
  * address beside a QuickBooks record's email field: audited (`parent.email.compared`, targeting the person, naming the
@@ -708,18 +710,19 @@ export async function compareContact(rawItemId: string, o: { actor: Actor; ip: s
  * roster cache holds it, and the person's sign-in address now, each as text, and `shown`, the digest of the field
  * "Send the portal's value" is bound to (emailShown(), keyed with the server's secret).
  */
-export async function compareEmail(rawItemId: string, o: { actor: Actor; ip: string | null }): Promise<ContactCompare | null> {
+export async function compareEmail(rawItemId: string, o: { actor: Actor; ip: string | null; mayReadFamilyField?: boolean }): Promise<ContactCompare | null> {
   if (!isUuid(rawItemId)) return null;
   const itemId = rawItemId.toLowerCase();
   return db.transaction(async (tx) => {
     const [item] = await tx.select().from(writeQueue).where(and(eq(writeQueue.id, itemId), eq(writeQueue.state, "refused")));
     if (!item || item.request.op !== "email" || item.familyId === null || !item.request.guardianId) return null;
     const w = item.request;
+    if (w.role === "family" && o.mayReadFamilyField !== true) return null;
     const [row] = await tx.select({ parentId: guardian.parentId, status: guardian.status, familyId: guardian.familyId }).from(guardian).where(eq(guardian.id, w.guardianId!));
     if (!row || row.status === "disabled" || row.familyId === null || String(row.familyId) !== String(item.familyId)) return null;
     const [f] = await tx.select({ active: family.active }).from(family).where(eq(family.id, item.familyId));
     if (!f?.active) return null;
-    await writeAudit({ actor: o.actor, action: "parent.email.compared", permission: "Roster.Read", ip: o.ip, targetType: "parent", targetId: row.parentId,
+    await writeAudit({ actor: o.actor, action: "parent.email.compared", permission: w.role === "family" ? "Parents.ReadWrite" : "Roster.Read", ip: o.ip, targetType: "parent", targetId: row.parentId,
       after: { queueId: item.id, staffUserId: o.actor.id } }, tx);
     const [me] = await tx.select({ email: parent.email }).from(parent).where(eq(parent.id, row.parentId));
     const [there] = await tx.select({ email: qboCustomer.email }).from(qboCustomer).where(eq(qboCustomer.qboId, w.qboId));

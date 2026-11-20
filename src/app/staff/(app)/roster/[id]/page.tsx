@@ -7,7 +7,7 @@ import { writeAudit } from "@/lib/audit/log";
 import { loadRosterPage, familyEntry, type RecordStudent } from "@/lib/roster/queries";
 import { familyRecordAt } from "@/lib/families/address";
 import type { AppFamilyId } from "@/lib/families/ids";
-import { familyCover, guardianCustomers, guardianStandings, moveTargets, studentsBeingMade, versionsOf } from "@/lib/roster/writes";
+import { familyCover, guardianCustomers, guardianStandings, isDetailsSend, moveTargets, studentsBeingMade, versionsOf } from "@/lib/roster/writes";
 import { comparableContacts, loadOpenWrites } from "@/lib/roster/queue";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { familyContact, familySignins, type FamilySignin } from "@/lib/parents/directory";
@@ -208,7 +208,8 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   ] : []);
   const edit = canChange && inQuickBooks ? { rosterTag, versions: await versionsOf(records.map((r) => r.qboId)), familyId: String(familyId), records: linkedRecords,
     guardianCustomers: ofGuardians,
-    blocked: new Set(open.map((w) => (w.write.op === "create" || !("qboId" in w.write) ? null : w.write.qboId)).filter((x): x is string => x !== null)),
+    // A guardian's phone, mailing address or sign-in email sent on blocks nothing (isDetailsSend(), as blocksOthers on the server).
+    blocked: new Set(open.map((w) => (w.write.op === "create" || isDetailsSend(w.write) || !("qboId" in w.write) ? null : w.write.qboId)).filter((x): x is string => x !== null)),
     // A student with a move QuickBooks refused that the portal kept (slice 9f) isn't made inactive until it is sent or
     // given up (deactivateLinked() refuses it): their make-inactive is not offered, and the page says why.
     keptMoves: new Set(fam.students.flatMap((s) => (s.customer !== null && waiting.some((w) => w.state === "refused" && w.write.op === "move" && w.studentId !== null

@@ -106,22 +106,29 @@ type EmailWrite = Extract<RosterWrite, { op: "email" }>;
  * flat member's, any of them on a family's record in books with no parent type.
  */
 export const emailRuleOf = (w: Pick<EmailWrite, "role">): "first" | "every" => (w.role === "family" ? "every" : "first");
-/** The addresses a change of sign-in email may find in QuickBooks in place of the new one: its before-value, then each earlier change's that may have been sent. */
-export const emailBefores = (w: Pick<EmailWrite, "from" | "to" | "orFrom">): string[] =>
-  [...new Set([w.from, ...(w.orFrom ?? [])].map((a) => a.trim().toLowerCase()))].filter((a) => a !== "" && a !== w.to.trim().toLowerCase());
+/**
+ * The addresses a change of sign-in email may find in QuickBooks in place of the new one: its before-value, then each
+ * earlier change's that may have been sent; never one in `taken`, the addresses another person signs in with now
+ * (othersSignInWith() in ./writes.ts), which are theirs and never replaced.
+ */
+export const emailBefores = (w: Pick<EmailWrite, "from" | "to" | "orFrom">, taken: ReadonlySet<string> = new Set()): string[] =>
+  [...new Set([w.from, ...(w.orFrom ?? [])].map((a) => a.trim().toLowerCase()))].filter((a) => a !== "" && a !== w.to.trim().toLowerCase() && !taken.has(a));
 /**
  * How a customer's email field (`field`, as QuickBooks holds it or the cache keeps it) stands against a change of a
  * person's sign-in email (stage 3's slice S11e), by the record's rule (emailRuleOf()): `in_place`, the new address
- * signs in through it and none of the addresses it replaces does; `sendable`, one of those (`held`: `from`, or an
- * entry of `orFrom`) signs in through it, so that one is replaced by the new address and nothing else is touched;
- * `differs`, otherwise: something the portal never knew of there, never sent over.
+ * signs in through it and none of the addresses it replaces does, or the field holds the new address and none it
+ * replaces anywhere (nothing is left to replace: so a press that put it where the old one stood, its answer lost, is
+ * found made); `sendable`, one of those (`held`: `from`, or an entry of `orFrom`) signs in through it, so that one is
+ * replaced by the new address and nothing else is touched; `differs`, otherwise: something the portal never knew of
+ * there, never sent over. `taken`: the addresses another person signs in with now, never among those it replaces.
  */
-export function emailStands(field: string | null, w: Pick<EmailWrite, "role" | "from" | "to" | "orFrom">): { is: "in_place" } | { is: "sendable"; held: string } | { is: "differs" } {
+export function emailStands(field: string | null, w: Pick<EmailWrite, "role" | "from" | "to" | "orFrom">, taken?: ReadonlySet<string>): { is: "in_place" } | { is: "sendable"; held: string } | { is: "differs" } {
   const rule = emailRuleOf(w);
-  const befores = emailBefores(w);
+  const befores = emailBefores(w, taken);
   if (fieldSignsIn(field, w.to, rule) && !befores.some((a) => fieldSignsIn(field, a, rule))) return { is: "in_place" };
   const held = befores.find((a) => fieldSignsIn(field, a, rule));
-  return held === undefined ? { is: "differs" } : { is: "sendable", held };
+  if (held !== undefined) return { is: "sendable", held };
+  return fieldHolds(field, w.to) && !befores.some((a) => fieldHolds(field, a)) ? { is: "in_place" } : { is: "differs" };
 }
 /** Whether an email field holds this address anywhere in it, whatever the record's rule. */
 export const fieldHolds = (field: string | null, email: string) => parseEmailField(field).usable.includes(email.trim().toLowerCase());

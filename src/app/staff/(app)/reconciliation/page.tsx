@@ -47,7 +47,7 @@ const CODE_WORDS: Record<string, string> = {
   email_too_long: "the person's sign-in address is longer than QuickBooks takes, so no Parent customer was made for them",
   name_unusable: "the person's name can't be used in QuickBooks, so no Parent customer was made for them: rename them on their page",
   // A person's sign-in email sent on (stage 3's slice S11e), held back by the portal.
-  email_differs: "QuickBooks' email field doesn't hold the sign-in address the portal last knew there, so the new one wasn't sent over it",
+  email_differs: "QuickBooks' email field doesn't hold the sign-in address the portal last knew where the portal reads it, or that address is another person's sign-in now, so the new one wasn't sent over it",
   email_already_there: "QuickBooks' email field holds the new address already, beside the old one, so nothing was sent",
 };
 const codeWords = (code: string | null) => (code === null ? null
@@ -102,10 +102,14 @@ const NOT_OFFERED: Record<NonNullable<QueueView["notOffered"]>, string> = {
 const isContact = (i: QueueView) => i.write.op === "contact";
 /**
  * A kept change of a person's sign-in email (stage 3's slice S11e) is compared the same way, offered to every reader of
- * this page (the lead's decision 5: that reader sees the guardian's sign-in address and the Parent customers' email
- * fields on the family's page already); the list says in words why it didn't go through, never an address.
+ * this page for a Parent customer's own record or a flat member's (the lead's decision 5: that reader sees the
+ * guardian's sign-in address and those records' email fields on the family's page already); the list says in words
+ * why it didn't go through, never an address. A family customer's own field, in layered books with no parent type, is
+ * shown on no page a reader of this one sees, so its compare view is offered only to staff who may see a person's
+ * details (Parents.ReadWrite), as a kept phone and address is: emailMayCompare().
  */
 const isEmail = (i: QueueView) => i.write.op === "email";
+const emailMayCompare = (i: QueueView, mayCompare: boolean) => i.write.op === "email" && (i.write.role !== "family" || mayCompare);
 /** Whether a kept item is compared before "Send the portal's value" is offered: a phone and address, or a sign-in email. */
 const isCompared = (i: QueueView) => isContact(i) || isEmail(i);
 function ContactCell({ i, compared, mayCompare }: { i: QueueView; compared: ContactCompare | null; mayCompare: boolean }) {
@@ -121,6 +125,7 @@ const COMPARE_FIRST = "Compare the two first: the portal's details are sent from
 const COMPARE_NEEDS = "Someone who may see parents' details can compare the two here and send the portal's details from there.";
 /** Where "Send the portal's value" isn't beside a kept change of sign-in email: it too is offered only in its compare view. */
 const COMPARE_EMAIL_FIRST = "Compare the two first: the person's sign-in email is sent from there, beside the email field QuickBooks holds.";
+const COMPARE_EMAIL_NEEDS = "Someone who may see parents' details can compare the two here and send the person's sign-in email from there.";
 
 /** Why "Send the portal's value" isn't offered for a refused item, by what it was: a guardian's taken name is the person's to rename (stage 3's slice 9h). */
 const notOfferedWords = (i: QueueView): string | null => {
@@ -141,7 +146,7 @@ function Refused({ items, canChange, compared, mayCompare }: { items: QueueView[
   const columns: Column<QueueView>[] = [
     { key: "what", header: "Change", rowHeader: true, cell: (i) => <>{i.words}<span className="when">{waitingWords(i)}</span>{i.moneyNote ? <span className="when">{i.moneyNote}</span> : null}</> },
     { key: "why", header: "Why it didn't go through", cell: (i) => <>{keptWordsFor(i.write, i.lastCode, i.holds, i.differs, i.joined)}{isCompared(i)
-      ? <ContactCell i={i} compared={compared} mayCompare={isEmail(i) || mayCompare} /> : null}</> },
+      ? <ContactCell i={i} compared={compared} mayCompare={isEmail(i) ? emailMayCompare(i, mayCompare) : mayCompare} /> : null}</> },
     { key: "asked", header: "Asked", cell: (i) => <><LocalTime iso={i.askedAt} />{i.askedBy ? <span className="when">by {i.askedBy}</span> : null}</> },
     { key: "family", header: "Family", cell: (i) => (i.familyId ? <Link href={familyPage(i.familyId)}>Open the family</Link> : "None") },
     ...(canChange ? [{ key: "do", header: "What you can do", quiet: true, cell: (i: QueueView) => {
@@ -149,7 +154,7 @@ function Refused({ items, canChange, compared, mayCompare }: { items: QueueView[
       // (which takes its place, and is sent), a customer QuickBooks has inactive is never made active again by the
       // portal, one the roster doesn't hold isn't sent to, and a move into a family with no customer in QuickBooks waits
       // for that family to be made there. The press is bound to what the row shows (QueueView.shown).
-      const instead = notOfferedWords(i) ?? (!isCompared(i) || compared?.id === i.id ? null : isEmail(i) ? COMPARE_EMAIL_FIRST : mayCompare ? COMPARE_FIRST : COMPARE_NEEDS);
+      const instead = notOfferedWords(i) ?? (!isCompared(i) || compared?.id === i.id ? null : isEmail(i) ? (emailMayCompare(i, mayCompare) ? COMPARE_EMAIL_FIRST : COMPARE_EMAIL_NEEDS) : mayCompare ? COMPARE_FIRST : COMPARE_NEEDS);
       // A kept contact change, or change of sign-in email, is bound to the digest of what its compare view showed (ContactCompare.shown).
       const shown = isCompared(i) ? compared?.shown ?? "" : i.shown;
       return (
@@ -217,12 +222,13 @@ export default async function ReconciliationPage({ searchParams }: { searchParam
   const [writes, roster, balances, madeAnyway] = await Promise.all([loadOpenWrites({ showAmounts: money }), loadRosterPage(), money ? loadBalances() : Promise.resolve(null),
     loadMadeAfterGivingUp()]);
   // The one item asked to be compared: a uuid naming a kept contact change of the list, for a holder of Parents.ReadWrite,
-  // or a kept change of sign-in email, for any reader of this page (stage 3's slice S11e); anything else shows the list
+  // or a kept change of sign-in email, for any reader of this page but a family customer's own field, only for a holder
+  // of Parents.ReadWrite (stage 3's slice S11e, emailMayCompare()); anything else shows the list
   // as if none were asked. Audited (compareContact(), compareEmail()) before the page shows anything of it.
   const asked = typeof sp.compare === "string" && isUuid(sp.compare) ? sp.compare.toLowerCase() : null;
-  const toCompare = asked ? writes.find((w) => w.id === asked && w.state === "refused" && ((mayCompare && isContact(w)) || isEmail(w))) : undefined;
+  const toCompare = asked ? writes.find((w) => w.id === asked && w.state === "refused" && ((mayCompare && isContact(w)) || emailMayCompare(w, mayCompare))) : undefined;
   const staff = { actor: { door: "staff" as const, id: ctx.staffUserId, label: ctx.email }, ip: ctx.ip };
-  const compared = !toCompare ? null : isEmail(toCompare) ? await compareEmail(toCompare.id, staff) : await compareContact(toCompare.id, staff);
+  const compared = !toCompare ? null : isEmail(toCompare) ? await compareEmail(toCompare.id, { ...staff, mayReadFamilyField: mayCompare }) : await compareContact(toCompare.id, staff);
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite");
   // Customers no family is linked to, with "Create a family from this": only for staff who may link families to accounting.
   const linking = can(ctx.effective, "Accounting.Link.ReadWrite");
