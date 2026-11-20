@@ -3,8 +3,10 @@
 // WebAuthn ceremony is the passkey library's (@better-auth/passkey, on the parent instance, src/lib/auth/parent-auth.ts):
 // it makes the challenge, verifies an assertion against the stored public key and writes the signature counter itself.
 // What the portal reads here is whether a person has a passkey (who is asked which step at the door), when their newest
-// came into force (a proof older than it doesn't count for asking again), the passkey an assertion names, and, in the
-// door's own transaction, that the passkey that verified is still the person's, with its `last_used_at` set. Adding,
+// came into force (a proof older than it doesn't count for asking again), the passkey an assertion's credential id names
+// (passkeyNamed(), by that id alone, which is unique here: read before the library verifies, and again by the library's
+// `afterVerification`, src/lib/auth/passkey-check.ts, for the id it verified; whether its person is the pending step's
+// is the door's own check, `other_person` in passkey-signin.ts), and, in the door's own transaction, that the passkey that verified is still the person's, with its `last_used_at` set. Adding,
 // naming, listing and removing passkeys are SI-7b's. Server only.
 import "server-only";
 import { and, eq, inArray, max } from "drizzle-orm";
@@ -50,17 +52,6 @@ export async function passkeyNamed(credentialId: string, q: Reader = db): Promis
     .from(parentAuthPasskey).innerJoin(parentAuthUser, eq(parentAuthUser.id, parentAuthPasskey.userId))
     .where(eq(parentAuthPasskey.credentialID, credentialId));
   return row ? { id: row.id, parentId: row.parentId, readable: readablePublicKey(row.publicKey) } : null;
-}
-
-/**
- * The passkey the library has just verified (its `afterVerification`, src/lib/auth/passkey-check.ts), found again by the
- * credential id it verified and the sign-in account it belongs to: its row and its person, or null.
- */
-export async function verifiedPasskey(credentialId: string, userId: string, q: Reader = db): Promise<{ id: string; parentId: string } | null> {
-  const [row] = await q.select({ id: parentAuthPasskey.id, parentId: parentAuthUser.parentId })
-    .from(parentAuthPasskey).innerJoin(parentAuthUser, eq(parentAuthUser.id, parentAuthPasskey.userId))
-    .where(and(eq(parentAuthPasskey.credentialID, credentialId), eq(parentAuthPasskey.userId, userId)));
-  return row ?? null;
 }
 
 /**
