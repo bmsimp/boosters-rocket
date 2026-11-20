@@ -138,6 +138,12 @@ describe("Parent customers and guardians, as counts", () => {
     expect(compare(rivera({ guardians: [] }), { guardianLinked: ["11", "60"] }).differences).toEqual([]);
     expect(compare(rivera({ guardians: [] }), { guardianLinked: ["60"] }).differences).toEqual([{ kind: "parent_customers", count: 1 }]);
   });
+  it("a customer whose type the books changed between Student and Parent shows once, through the record it is linked to", () => {
+    // Leo's customer retyped as a Parent: his place says so, and it isn't counted as a Parent customer with no guardian.
+    expect(compare(rivera(), { customers: changed("12", { typeQboId: "2" }) }).differences.map((d) => d.kind)).toEqual(["place"]);
+    // Ana's Parent customer retyped as a Student: her guardian row is linked to it, so it is no student with no record.
+    expect(compare(rivera(), { customers: changed("11", { typeQboId: "3" }) }).differences).toEqual([]);
+  });
   it("aren't compared with no parent type, nor in flat books", () => {
     const f = rivera({ guardians: [{ id: "g-sol", customerId: null }] });
     expect(compare(f, { shape: NO_PARENTS, guardianLinked: [] }).differences).toEqual([]);

@@ -84,7 +84,9 @@ export function indexQueue(items: readonly QueueFact[]) {
 /**
  * The differences of each family whose link stands, over one roster: built once for the view, then asked per family.
  * `studentLinked` and `guardianLinked` are the customers any student or guardian link of the records' company names
- * (a guardian's: of an open or a closed row). Names are compared exactly (===), as renameLinked() decides a record has
+ * (a guardian's: of an open or a closed row). A customer either kind of link names is on no side "only": one whose type
+ * the books changed between Student and Parent shows through the record it is linked to (as its place, or in the
+ * opening's guardians), never a second time as a customer with no record. Names are compared exactly (===), as renameLinked() decides a record has
  * a name already (ALREADY_NAMED) and tryRename() compares QuickBooks' with the portal's: the screen calls two names the
  * same exactly when a rename would send nothing, so a difference of case or spacing shows (nameKey() is the rule of
  * which names are taken, not this one). Students and Parent customers are compared only where the shape has their
@@ -98,6 +100,7 @@ export function differencesOf(o: { shape: MembershipShape; roster: Roster; custo
   const q = indexQueue(o.queue);
   const studentType = o.shape.kind === "layered" && o.shape.studentTypeId !== null;
   const parentType = o.shape.kind === "layered" && o.shape.parentTypeId !== null;
+  const linked = (id: string) => o.studentLinked.has(id) || o.guardianLinked.has(id);
   return (f) => {
     const customer = byId.get(f.customerId);
     if (customer === undefined) return { differences: [], inactiveUnrecorded: 0 };
@@ -113,7 +116,9 @@ export function differencesOf(o: { shape: MembershipShape; roster: Roster; custo
       }
       const c = byId.get(s.customerId);
       if (!s.active) {
-        // An inactive record shows only where the roster lists its customer, active, directly under the family's (as the Families pages list it).
+        // An inactive record shows only where the roster lists its customer, active, directly under the family's (as the
+        // Families pages list it; brief item 5). One whose customer the books have active under another family shows in
+        // neither row: not here, and not there, where the customer is passed over as linked. A later slice may say it.
         if (c?.active && there?.students.some((x) => x.qboId === c.qboId)) out.push({ kind: "active", of: "student", who, portalActive: false, queue: q.deactivate.get(c.qboId) ?? null });
         continue;
       }
@@ -127,13 +132,13 @@ export function differencesOf(o: { shape: MembershipShape; roster: Roster; custo
     let inactiveUnrecorded = 0;
     if (studentType && there !== undefined) {
       for (const c of there.students) {
-        if (o.studentLinked.has(c.qboId)) continue;
+        if (linked(c.qboId)) continue;
         if (c.active) out.push({ kind: "student_customer", books: c.displayName });
         else inactiveUnrecorded++;
       }
     }
     if (parentType && there !== undefined) {
-      const parents = there.parents.filter((c) => c.active && !o.guardianLinked.has(c.qboId)).length;
+      const parents = there.parents.filter((c) => c.active && !linked(c.qboId)).length;
       if (parents > 0) out.push({ kind: "parent_customers", count: parents });
       const rows = f.guardians.filter((g) => g.customerId === null);
       if (rows.length > 0) {
