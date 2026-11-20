@@ -1,9 +1,10 @@
 # Intuit: registering the portal and its production assessment
 
 The portal reads the club's families and invoices from QuickBooks Online, and writes back only what someone asks it to
-(a parent's own sign-in email; the roster changes staff make; and the invoice for a volunteer buy-out, made when a
-guardian chooses to pay instead of volunteering and voided if they switch back before paying). A parent's phone and
-mailing address are the portal's own, kept and changed there. To
+(a parent's own sign-in email; a guardian's phone and mailing address, changed by the parent or by staff; the roster
+changes staff make; and the invoice for a volunteer buy-out, made when a guardian chooses to pay instead of
+volunteering and voided if they switch back before paying). A guardian's phone and mailing address are the portal's
+own, kept and changed there, and each change is sent on to their record in QuickBooks after it is saved. To
 do that it is registered with Intuit as an app of the club's own, and it connects to the club's company with that
 app's keys.
 
