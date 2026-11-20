@@ -8,6 +8,10 @@ import type { QboOp } from "@/lib/quickbooks/connection";
 export const SHAPE_KEY = "membership.shape";
 /** Postgres advisory lock held for the length of a refresh and of a shape save, so neither overlaps the other (spec §2 Refreshing). */
 export const ROSTER_LOCK = 7461001;
+/** The roster cache's billing address columns with nothing in them: a customer whose type the shape doesn't name keeps none. */
+export const NO_ADDRESS_COLUMNS = {
+  addressLine1: null, addressLine2: null, addressCity: null, addressRegion: null, addressPostalCode: null, addressCountry: null,
+} as const;
 
 /** How the club's membership is laid out in QuickBooks, by customer type ID (spec §1). */
 export type MembershipShape =
@@ -98,7 +102,7 @@ export function describeShape(s: MembershipShape, types: TypeRow[]): string {
 }
 
 /**
- * Saves the shape and, in the same transaction, drops email and phone from every customer the new shape doesn't name
+ * Saves the shape and, in the same transaction, drops email, phone and billing address from every customer the new shape doesn't name
  * (spec §1 Rules) and forgets what each family was last seen to owe (`family_money`), money's own rule. It changes none
  * of the app's own records (stage 3's slice 9c: they stand alone, whatever the shape calls each customer). It leaves
  * the parents' settings alone: "Families with no active student" is simply not in force while the shape names no
@@ -115,7 +119,7 @@ export async function saveShape(input: MembershipShape, o: QboOp): Promise<void>
     const types = await tx.select().from(qboCustomerType);
     await tx.insert(setting).values({ key: SHAPE_KEY, value: shape }).onConflictDoUpdate({ target: setting.key, set: { value: shape, updatedAt: new Date() } });
     const named = shapeTypeIds(shape);
-    await tx.update(qboCustomer).set({ email: null, phone: null })
+    await tx.update(qboCustomer).set({ email: null, phone: null, ...NO_ADDRESS_COLUMNS })
       .where(named.length ? or(isNull(qboCustomer.typeQboId), notInArray(qboCustomer.typeQboId, named)) : undefined);
     // The shape decides whose invoices are a family's, so what each family was last seen to owe was added up under the
     // old one. It goes, and each family's figures are read from QuickBooks again when its parent next looks.

@@ -73,6 +73,23 @@ describe("the roster refresh", () => {
     expect(c["60"]).toMatchObject({ displayName: "No Type At All", email: null, phone: null }); // no type, so no shape can name it
   });
 
+  it("keeps the billing address only for customers the shape names, as the parent's form shows one, and a shape save drops it", async () => {
+    const billTo = { Line1: "12 Oak St\nRear door", Line2: "Unit 4", Line3: "c/o Rivera", City: "Austin", CountrySubDivisionCode: "TX", PostalCode: "78701", Country: "USA" };
+    stub.customers = stub.customers.map((c) => (c.Id === "11" || c.Id === "30" ? { ...c, BillAddr: billTo } : c));
+    await saveShape(FZN_SHAPE, staffOp);
+    await refreshRoster(worker);
+    const shown = { addressLine1: "12 Oak St, Rear door", addressLine2: "Unit 4, c/o Rivera", addressCity: "Austin", addressRegion: "TX", addressPostalCode: "78701", addressCountry: "USA" };
+    const none = { addressLine1: null, addressLine2: null, addressCity: null, addressRegion: null, addressPostalCode: null, addressCountry: null };
+    let c = await customers();
+    expect(c["11"]).toMatchObject(shown);
+    expect(c["30"]).toMatchObject({ displayName: "Lincoln High", ...none }); // a School: the shape doesn't name it
+    expect(c["10"]).toMatchObject(none); // no address in QuickBooks: nothing kept, never an empty string
+    // A shape that stops naming the Parent type drops the address with the email and phone, before any refresh runs.
+    await saveShape({ kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: null }, staffOp);
+    c = await customers();
+    expect(c["11"]).toMatchObject({ email: null, phone: null, ...none });
+  });
+
   it("stores a customer QuickBooks sends twice once, and counts what it stored", async () => {
     stub.customers = [...stub.customers, { ...stub.customers[0]!, DisplayName: "Rivera Family again" }];
     expect(await refreshRoster(worker)).toEqual({ ok: true, customers: 9, types: 5 });
