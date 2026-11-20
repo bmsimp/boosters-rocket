@@ -140,7 +140,7 @@ test("a parent sets an authenticator app up, signs in on new browsers with its c
     await expect(box.getByRole("button", { name: "Set up an authenticator app", exact: true })).toBeVisible();
     await third.page.getByLabel("Code from your authenticator app, or a backup code").fill(await nextAppCode(third.page, app.key, app.at));
     await third.page.getByRole("button", { name: "Confirm" }).click();
-    await expect(third.page.getByRole("alert")).toContainText(`${APP_REJECTED} ${APP_STEP_OVER}`);
+    await expect(third.page.getByRole("main").getByRole("alert")).toContainText(`${APP_REJECTED} ${APP_STEP_OVER}`);
     await expect(third.page.getByLabel("Password")).toHaveValue("");
     await expect(third.page.getByLabel("Code from your authenticator app, or a backup code")).toHaveCount(0);
     await expect(third.page).toHaveURL(/\/sign-in/);
