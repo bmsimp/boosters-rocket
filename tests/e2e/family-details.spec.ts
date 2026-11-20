@@ -65,7 +65,8 @@ test.describe("signed in", () => {
     await expect(page.getByRole("main")).not.toContainText(/club's books|QuickBooks/);
     const who = page.getByRole("region", { name: "You", exact: true });
     await expect(who.locator("dd")).toHaveText(["Zelda Quetzalcoatl", "zelda@example.com"]);
-    await expect(who).toContainText("The club changes names and email addresses. Ask the club and they'll update them.");
+    // Her sign-in email is hers to change, though she is in two families (stage 3's slice 11d).
+    await expect(who).toContainText("You can change the email you sign in with yourself. The club changes names. Ask the club and they'll update yours.");
 
     const edit = page.getByRole("region", { name: "Phone and mailing address" });
     await expect(edit.getByLabel("Phone")).toHaveValue(E2E_DETAILS.phone);
