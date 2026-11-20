@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { signinFailure, TOO_MANY_TRIES, SIGNIN_NETWORK_FAILED, SIGNIN_LEDE, PASSWORD_REJECTED, CODE_SENT, CODE_REJECTED, CODE_STEP_ENDED, APP_STEP_ENDED,
-  PASSKEY_ASKED, PASSKEY_BUTTON, PASSKEY_CANCELLED, PASSKEY_EXPLAINED, PASSKEY_ONLY, PASSKEY_OR_APP, PASSKEY_REJECTED, PASSKEY_STEP_ENDED, PASSKEY_UNSUPPORTED, passkeyElsewhere } from "@/lib/parents/signin-copy";
+  PASSKEY_ASKED, PASSKEY_BUTTON, PASSKEY_CANCELLED, PASSKEY_EXPLAINED, PASSKEY_ONLY, PASSKEY_OR_APP, PASSKEY_REJECTED, PASSKEY_STEP_ENDED, PASSKEY_UNSUPPORTED, passkeyElsewhere,
+  PASSKEY_STEP_CANCELLED, PASSKEY_STEP_FAILED, PASSKEY_STEP_REJECTED, PASSKEY_STEP_UNSUPPORTED, passkeyStepElsewhere } from "@/lib/parents/signin-copy";
 
 describe("what the sign-in page says when a request fails", () => {
   it("says too many tries for a 429, which is the portal's own limit and not a network fault", () => {
@@ -28,6 +29,11 @@ describe("the sign-in page's words (the sign-in release, slice SI-3b)", () => {
   it("asks for the passkey at the second step without saying anything was emailed", () => {
     for (const words of [PASSKEY_ASKED, PASSKEY_OR_APP, PASSKEY_ONLY, PASSKEY_STEP_ENDED]) expect(words).not.toMatch(/we(?:'ve)? emailed|sent you|new one/i);
     expect(PASSKEY_ONLY).toMatch(/ask the club for help/);
+  });
+  it("at the passkey step never offers the email and password, which lead back to the same step", () => {
+    const atStep = [PASSKEY_STEP_UNSUPPORTED, passkeyStepElsewhere("https://portal.example.org"), PASSKEY_STEP_CANCELLED, PASSKEY_STEP_REJECTED, PASSKEY_STEP_FAILED];
+    for (const words of atStep) expect(words).not.toMatch(/email|password/i);
+    expect(passkeyStepElsewhere("https://portal.example.org")).toBe("Passkeys work only at https://portal.example.org. Go there to use yours.");
   });
   it("gives every refusal at the password step one answer, which names no reason and points to setting up or resetting a password", () => {
     expect(PASSWORD_REJECTED).toBe("That email and password didn't work. Check them and try again. If you haven't set up a password yet, or you've forgotten it, you can set up or reset it.");

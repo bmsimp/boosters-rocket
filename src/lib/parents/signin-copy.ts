@@ -29,6 +29,17 @@ export const PASSKEY_ASKED = "To finish signing in on this device, use your pass
 export const PASSKEY_OR_APP = "Or enter the 6-digit code from your authenticator app, or one of your backup codes.";
 export const PASSKEY_ONLY = "If you don't have your passkey with you, ask the club for help.";
 export const PASSKEY_USE = "Use your passkey";
+/**
+ * The passkey step's own words where it can't go on or didn't: never "sign in with your email and password", since the
+ * password is already right and leads back to this same step (the emailed code is never a passkey holder's). The way
+ * on is what the step's status line offers beside it (PASSKEY_OR_APP, or PASSKEY_ONLY), or another browser or device.
+ */
+export const PASSKEY_STEP_UNSUPPORTED = "This browser can't use passkeys. Try a phone, computer or browser that has your passkey.";
+export const passkeyStepElsewhere = (origin: string) => `Passkeys work only at ${origin}. Go there to use yours.`;
+export const PASSKEY_STEP_CANCELLED = "Your passkey wasn't used. You can try it again.";
+export const PASSKEY_STEP_REJECTED = "That passkey didn't work. You can try it again.";
+/** A passkey refused in a way that ended the step: the page goes back to the password step and says to start over. */
+export const PASSKEY_STEP_FAILED = "That passkey didn't work.";
 /** Shown on the password step when an open passkey step's time ran out: it promises no code, since none is emailed. */
 export const PASSKEY_STEP_ENDED = "Time ran out. Enter your email and password again, then use your passkey.";
 /**

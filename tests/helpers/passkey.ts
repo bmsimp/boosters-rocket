@@ -56,20 +56,24 @@ export type PasskeyTry = { flags?: number; origin?: string; rpId?: string; count
 /**
  * The passkey at the door, as the sign-in page's ceremony sends it: the options (with `cookie`, the pending step's when
  * there is one), an assertion for their challenge signed by `key` (with the switches), posted to /portal-passkey/check
- * with the pending step's cookie and the challenge cookie, and `next` in the query string. Its response, its body, and
- * the assertion sent (to send it again).
+ * with the pending step's cookie and the challenge cookie, and `next` (and `alone=1`, as the first screen's button
+ * sends it, when told) in the query string. Its response, its body, and the assertion sent (to send it again).
  */
-export async function passkeyStep(key: PasskeyKey, o: PasskeyTry & { cookie?: string; next?: string; challengeCookie?: string | null } = {}) {
+export async function passkeyStep(key: PasskeyKey, o: PasskeyTry & { cookie?: string; next?: string; alone?: boolean; challengeCookie?: string | null } = {}) {
   const options = await passkeyOptions({ cookie: o.cookie });
   const assertion = assertionFor(key, options.body.challenge, { origin: o.origin ?? ORIGIN, rpId: o.rpId ?? RP_ID, flags: o.flags, counter: o.counter, signWith: o.signWith, id: o.id });
   const challenge = o.challengeCookie === null ? "" : o.challengeCookie ?? options.challengeCookie;
   const cookie = [o.cookie, challenge].filter(Boolean).join("; ");
-  const sent = await postPasskey(assertion, { cookie, next: o.next });
+  const sent = await postPasskey(assertion, { cookie, next: o.next, alone: o.alone });
   return { ...sent, assertion, cookie };
 }
 
-/** One post of an assertion to /portal-passkey/check, with a Cookie header and `next` in the query string. */
-export async function postPasskey(assertion: AssertionJSON | unknown, o: { cookie?: string; next?: string } = {}) {
-  const res = await postDoor(`/portal-passkey/check${o.next ? `?next=${encodeURIComponent(o.next)}` : ""}`, { response: assertion }, { cookie: o.cookie });
+/**
+ * One post of an assertion to /portal-passkey/check, with a Cookie header, and `next`, `alone=1` when told, and any
+ * other query string the test writes (`query`, without its `?`) in the query string.
+ */
+export async function postPasskey(assertion: AssertionJSON | unknown, o: { cookie?: string; next?: string; alone?: boolean; query?: string } = {}) {
+  const query = [o.next ? `next=${encodeURIComponent(o.next)}` : "", o.alone ? "alone=1" : "", o.query ?? ""].filter(Boolean).join("&");
+  const res = await postDoor(`/portal-passkey/check${query ? `?${query}` : ""}`, { response: assertion }, { cookie: o.cookie });
   return { res, body: (await res.json()) as DoorBody };
 }

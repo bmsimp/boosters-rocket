@@ -147,9 +147,13 @@ export const parentCodePlugin = () => ({
     }),
     // A passkey (the sign-in release, slice SI-7a; open questions 24, 30 and 35): the assertion the passkey library's
     // browser ceremony made, for a challenge from /passkey/generate-authenticate-options, posted here instead of to the
-    // library's own verify path (which is disabled, and whose session the instance's guard refuses). `next` rides in the
-    // query string, beside the body the library's ceremony builds ({ response }). With a pending step it is the step's
-    // second step and must be its person's; with none it signs in alone. The check (checkPasskeySignin()) has its own
+    // library's own verify path (which is disabled, and whose session the instance's guard refuses). `next` and `alone`
+    // ride in the query string, beside the body the library's ceremony builds ({ response }). The first screen's "Sign in
+    // with a passkey" says `alone=1`: it signs in alone, and a pending step the browser still carries (a right password
+    // whose step was left, by Start again or by going away, on a shared device perhaps somebody else's) is cleared and
+    // never read, so it can't turn another person's passkey into a refused second step. The passkey step's own button
+    // sends no `alone`: with a pending step it is the step's second step and must be its person's; with none it signs in
+    // alone. The check (checkPasskeySignin()) has its own
     // limit, order and rows, and runs the library's verification in process (verifyAssertion(), passkey-check.ts); a
     // passkey that went through ends in the one finish, so the device is remembered and the session proved strong.
     portalPasskeyCheck: createAuthEndpoint("/portal-passkey/check", {
@@ -157,12 +161,17 @@ export const parentCodePlugin = () => ({
     }, async (ctx) => {
       const ip = ipOf(ctx);
       const now = new Date();
-      const step = await readPendingStep(ctx, now);
-      // `next` from the query string: absent, or a string of at most MAX_RETURN_PATH; anything else is the one refusal,
-      // uncounted, as a body the other endpoints' schemas refuse is.
+      // `next` from the query string: absent, or a string of at most MAX_RETURN_PATH; `alone`: absent, or "1". Anything
+      // else is the one refusal, uncounted, as a body the other endpoints' schemas refuse is.
       const rawNext = ctx.query?.next;
       if (rawNext !== undefined && (typeof rawNext !== "string" || rawNext.length > MAX_RETURN_PATH)) return ctx.json(REJECTED);
+      const rawAlone = ctx.query?.alone;
+      if (rawAlone !== undefined && rawAlone !== "1") return ctx.json(REJECTED);
       const next = typeof rawNext === "string" ? rawNext : undefined;
+      const left = await readPendingStep(ctx, now);
+      // Alone, a step left in the browser ends here: nothing of it is read.
+      if (rawAlone === "1" && left) clearPendingStep(ctx);
+      const step = rawAlone === "1" ? null : left;
       const headers = ctx.headers ?? ctx.request?.headers ?? new Headers();
       const r = await checkPasskeySignin(ctx.body.response,
         step ? { parentId: step.parentId, email: step.email, password: { credentialId: step.credentialId, credentialUpdatedAt: step.credentialUpdatedAt } } : null,

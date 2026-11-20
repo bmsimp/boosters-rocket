@@ -13,6 +13,14 @@ describe("the verify request goes to the portal's own check", () => {
       .toBe("https://portal.example.org/api/auth/parent/portal-passkey/check?next=%2Fforms%2F1%3Fx%3D2");
   });
 
+  it("says alone=1 for the first screen's passkey, so a step the browser still carries is never read, and nothing at the step", () => {
+    expect(portalCheckUrl("https://portal.example.org", null, true).href).toBe("https://portal.example.org/api/auth/parent/portal-passkey/check?alone=1");
+    expect(portalCheckUrl("https://portal.example.org", "/payments", true).searchParams.get("alone")).toBe("1");
+    expect(portalCheckUrl("https://portal.example.org", "/payments").searchParams.has("alone")).toBe(false);
+    const url = new URL(String(toPortalCheck("http://localhost:3000", null, true).onRequest({ url: "http://localhost:3000/x" }).url));
+    expect([url.pathname, url.searchParams.get("alone")]).toEqual([PASSKEY_CHECK_PATH, "1"]);
+  });
+
   it("better-fetch's onRequest hook changes the request's address and nothing else", () => {
     const sent = { url: "http://localhost:3000/api/auth/parent/passkey/verify-authentication", method: "POST", body: JSON.stringify({ response: { id: "x" } }) };
     const changed = toPortalCheck("http://localhost:3000", "/payments").onRequest(sent);

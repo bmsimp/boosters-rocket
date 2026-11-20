@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { APP_ASKED, APP_CODE_LABEL, APP_REJECTED, APP_STEP_ENDED, APP_STEP_OVER, CODE_SENT, CODE_REJECTED, CODE_STEP_ENDED, PASSWORD_REJECTED, SIGNIN_LEDE, TOO_MANY_TRIES, signinFailure,
   PASSKEY_ASKED, PASSKEY_BUTTON, PASSKEY_CANCELLED, PASSKEY_EXPLAINED, PASSKEY_ONLY, PASSKEY_OR_APP, PASSKEY_REJECTED, PASSKEY_STEP_ENDED, PASSKEY_UNSUPPORTED, PASSKEY_USE,
-  passkeyElsewhere } from "@/lib/parents/signin-copy";
+  PASSKEY_STEP_CANCELLED, PASSKEY_STEP_FAILED, PASSKEY_STEP_REJECTED, PASSKEY_STEP_UNSUPPORTED, passkeyElsewhere, passkeyStepElsewhere } from "@/lib/parents/signin-copy";
 import { parentAuthClient } from "@/lib/auth/client";
 import { CODE_STEP_LIFE_MS, clearCodeStep, deviceStore, loadCodeStep, saveCodeStep, type CodeStepKind } from "./code-step";
 import { passkeysWorkIn, readCeremony, toPortalCheck } from "./passkey-ceremony";
@@ -134,16 +134,19 @@ export function PasswordSignIn({ next, portalOrigin }: { next: string | null; po
     } catch (e) { setProblem({ words: failure(e), passwordLink: false }); } finally { setBusy(false); }
   };
   // A passkey: the passkey library's ceremony (the browser's own prompt), its verify request sent to the portal's check,
-  // which takes it alone on the first screen and as the second step at the passkey step (the pending step decides).
+  // alone from the first screen (`alone`, so a step the browser still carries from a password whose step was left is
+  // cleared there and never read), and as the pending step's second step from the passkey step. The passkey step's
+  // words never send the parent back to their email and password, which lead to this same step.
   const signInWithPasskey = async () => {
     setBusy(true); setProblem(null);
+    const atStep = step === "passkey";
     try {
-      const r = readCeremony<Answer>(await parentAuthClient.signIn.passkey({ fetchOptions: toPortalCheck(window.location.origin, back) }));
-      if (r.kind === "cancelled") { setProblem({ words: PASSKEY_CANCELLED, passwordLink: false }); return; }
+      const r = readCeremony<Answer>(await parentAuthClient.signIn.passkey({ fetchOptions: toPortalCheck(window.location.origin, back, !atStep) }));
+      if (r.kind === "cancelled") { setProblem({ words: atStep ? PASSKEY_STEP_CANCELLED : PASSKEY_CANCELLED, passwordLink: false }); return; }
       if (r.kind === "failed") { setProblem({ words: signinFailure(r.status), passwordLink: false }); return; }
       if (r.body.ok && r.body.next) { clearCodeStep(deviceStore()); window.location.assign(r.body.next); return; }
-      if (step === "passkey" && r.body.ended) { stepOver(PASSKEY_REJECTED); return; }
-      setProblem({ words: r.body.error === "rate_limited" ? TOO_MANY_TRIES : PASSKEY_REJECTED, passwordLink: false });
+      if (atStep && r.body.ended) { stepOver(PASSKEY_STEP_FAILED); return; }
+      setProblem({ words: r.body.error === "rate_limited" ? TOO_MANY_TRIES : atStep ? PASSKEY_STEP_REJECTED : PASSKEY_REJECTED, passwordLink: false });
     } catch (e) { setProblem({ words: failure(e), passwordLink: false }); } finally { setBusy(false); }
   };
   // Starting again keeps nothing of the step it leaves, which on a shared device may have been somebody else's: not the
@@ -196,7 +199,7 @@ export function PasswordSignIn({ next, portalOrigin }: { next: string | null; po
         {passkeys === "here" ? (
           <button ref={firstButton} type="button" className="btn" aria-describedby="passkey-step-words" aria-disabled={busy || undefined}
             onClick={() => { if (!busy) void signInWithPasskey(); }}>{PASSKEY_USE}</button>
-        ) : <p className="help">{passkeys === "elsewhere" ? passkeyElsewhere(portalOrigin) : PASSKEY_UNSUPPORTED}</p>}
+        ) : <p className="help">{passkeys === "elsewhere" ? passkeyStepElsewhere(portalOrigin) : PASSKEY_STEP_UNSUPPORTED}</p>}
         {appBeside && (
           <form className="stack" onSubmit={(e) => { e.preventDefault(); if (!busy) void check(); }}>
             <label className="field"><span>{APP_CODE_LABEL}</span>

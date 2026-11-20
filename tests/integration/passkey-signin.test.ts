@@ -6,8 +6,9 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, parent, parentAuthPasskey, parentAuthSession, rateLimitEvent, signinCode } from "@/lib/db/schema";
+import { auditLog, parent, parentAuthAccount, parentAuthPasskey, parentAuthSession, rateLimitEvent, signinCode } from "@/lib/db/schema";
 import { signinStands } from "@/lib/parents/signin-codes";
+import { checkPasskeySignin } from "@/lib/parents/passkey-signin";
 import { signOutEverywhere } from "@/lib/parents/signin-settings";
 import { resetDb, seedParent, seedGuardianInFamily, seedWorkingMail } from "../helpers/db";
 import { SIGNINS_ON, seedParentSettings } from "../helpers/roster-cache";
@@ -65,6 +66,12 @@ describe("a passkey alone signs in (open questions 30 and 35)", () => {
     expect(await audits("signin.device_remembered")).toHaveLength(1);
     expect(await audits("signin.second_step_asked")).toEqual([]);
     expect(outbox).toEqual([]);
+  });
+
+  it("takes a signature counter past a 32-bit signed number, as WebAuthn's counter is unsigned", async () => {
+    const ana = await seedHolder("Ana", { counter: 3_000_000_000 });
+    expect((await passkeyStep(ana.key!, { counter: 3_000_000_001 })).body).toEqual({ ok: true, next: "/" });
+    expect((await passkeyRows(ana.id))[0]!.counter).toBe(3_000_000_001);
   });
 
   it("lands where the code's sign-in lands: the page asked for", async () => {
@@ -247,6 +254,106 @@ describe("one person's passkey, and one answer for everything else", () => {
   });
 });
 
+describe("the first screen's passkey signs in alone, whatever step the browser still carries", () => {
+  it("after A's password left a step (Start again on a shared computer), B's passkey alone signs B in and ends A's step", async () => {
+    const ana = await seedHolder("Ana", { familyQboId: "F1" });
+    const ben = await seedHolder("Ben", { familyQboId: "F2" });
+    const pending = await atThePasskey("ana@example.com");
+    const r = await passkeyStep(ben.key!, { cookie: pending, alone: true });
+    expect(r.body).toEqual({ ok: true, next: "/" });
+    expect(r.res.headers.getSetCookie().some((l) => /signin_step=;/.test(l))).toBe(true);
+    const [session] = await sessions();
+    expect(session!.userId).toBe(ben.authUserId);
+    expect((await audits("signin.second_step")).map((x) => [x.targetId, x.after])).toEqual([[ben.id, { factor: "passkey", alone: true }]]);
+    expect(await audits("signin.refused")).toEqual([]);
+    // Nothing of A's was used: her passkey untouched, and her step no longer carried by the browser that sent B's.
+    expect((await passkeyRows(ana.id))[0]!.lastUsedAt).toBeNull();
+  });
+
+  it("A's own passkey from the first screen signs her in alone, the step she left ended", async () => {
+    const ana = await seedHolder("Ana");
+    const pending = await atThePasskey("ana@example.com");
+    const r = await passkeyStep(ana.key!, { cookie: pending, alone: true });
+    expect(r.body).toEqual({ ok: true, next: "/" });
+    expect((await audits("signin.second_step")).map((x) => x.after)).toEqual([{ factor: "passkey", alone: true }]);
+  });
+
+  it("a refused passkey alone still ends the step left in the browser, and its refusal ends nothing at the page", async () => {
+    const ana = await seedHolder("Ana");
+    const pending = await atThePasskey("ana@example.com");
+    const r = await passkeyStep(ana.key!, { cookie: pending, alone: true, signWith: makePasskeyKey() });
+    expect(r.body).toEqual(REFUSED);
+    expect(r.res.headers.getSetCookie().some((l) => /signin_step=;/.test(l))).toBe(true);
+    expect((await audits("signin.second_step_wrong")).map((x) => [x.targetId, x.after])).toEqual([[ana.id, { factor: "passkey", reason: "passkey_failed" }]]);
+  });
+
+  it("refuses, uncounted, an alone that is not 1 and a next that is not one string of at most a return path's length", async () => {
+    const ana = await seedHolder("Ana");
+    const options = await passkeyOptions();
+    const assertion = assertionFor(ana.key!, options.body.challenge, { origin: ORIGIN, rpId: RP_ID });
+    for (const query of ["alone=2", "alone=1&alone=1", "next=%2Fa&next=%2Fb", `next=${"a".repeat(2049)}`]) {
+      expect((await postPasskey(assertion, { cookie: options.challengeCookie, query })).body).toEqual(REFUSED);
+    }
+    expect(await placesOf("code_check_ip")).toEqual([]);
+    expect((await db.select().from(auditLog)).filter((x) => x.action.startsWith("signin."))).toEqual([]);
+    // The challenge was never spent: the same assertion then signs in.
+    expect((await postPasskey(assertion, { cookie: options.challengeCookie })).body).toEqual({ ok: true, next: "/" });
+  });
+});
+
+describe("a passkey's refusals that the other tests don't meet", () => {
+  it("a stored public key that won't decode is refused in words of its own (passkey_unreadable), never a throw", async () => {
+    const ana = await seedHolder("Ana", { passkey: false });
+    const notBase64 = await seedPasskey(ana.id, { publicKey: "!!" });
+    const notAMap = await seedPasskey(ana.id, { publicKey: Buffer.from([0x82, 0x01, 0x02]).toString("base64") });
+    for (const key of [notBase64, notAMap]) {
+      const r = await passkeyStep(key);
+      expect(r.res.status).toBe(200);
+      expect(r.body).toEqual(REFUSED);
+    }
+    expect(await sessions()).toEqual([]);
+    expect((await audits("signin.second_step_wrong")).map((x) => [x.targetId, x.after])).toEqual([
+      [ana.id, { factor: "passkey", reason: "passkey_unreadable" }], [ana.id, { factor: "passkey", reason: "passkey_unreadable" }]]);
+  });
+
+  it("a password reset between the password and the passkey ends the step (password_changed)", async () => {
+    const ana = await seedHolder("Ana");
+    const pending = await atThePasskey("ana@example.com");
+    await db.delete(parentAuthAccount).where(eq(parentAuthAccount.userId, ana.authUserId));
+    await seedPassword(ana.authUserId, "a new password after the reset");
+    const r = await passkeyStep(ana.key!, { cookie: pending });
+    expect(r.body).toEqual({ ...REFUSED, ended: true });
+    expect(r.res.headers.getSetCookie().some((l) => /signin_step=;/.test(l))).toBe(true);
+    expect((await audits("signin.refused")).map((x) => [x.targetId, x.after])).toEqual([[ana.id, { reason: "password_changed", factor: "passkey" }]]);
+    expect(await sessions()).toEqual([]);
+  });
+
+  it("an address changed between the password and the passkey ends the step (address_changed)", async () => {
+    const ana = await seedHolder("Ana");
+    const pending = await atThePasskey("ana@example.com");
+    await db.update(parent).set({ email: "ana.new@example.com" }).where(eq(parent.id, ana.id));
+    const r = await passkeyStep(ana.key!, { cookie: pending });
+    expect(r.body).toEqual({ ...REFUSED, ended: true });
+    expect((await audits("signin.refused")).map((x) => [x.targetId, x.after])).toEqual([[ana.id, { reason: "address_changed", factor: "passkey" }]]);
+    expect(await sessions()).toEqual([]);
+  });
+
+  it("a passkey the library verified as another person's than the step's is refused after it (other_person), the step kept", async () => {
+    const ana = await seedHolder("Ana", { familyQboId: "F1" });
+    const ben = await seedHolder("Ben", { familyQboId: "F2" });
+    const step = await stepPersonFor("ana@example.com");
+    // A credential id the portal finds nobody for before the library is asked (a row made between the two reads), which
+    // the library then verifies as Ben's.
+    const assertion = assertionFor(makePasskeyKey(), "a-challenge", { origin: ORIGIN, rpId: RP_ID });
+    const r = await checkPasskeySignin({ ...assertion }, step,
+      async () => ({ ok: true, passkey: { passkeyId: ben.key!.rowId, parentId: ben.id } }), DOOR_IP);
+    expect(r).toEqual({ ok: false, reason: "rejected", ended: false });
+    expect((await audits("signin.refused")).map((x) => [x.targetId, x.after])).toEqual([[ana.id, { reason: "other_person", factor: "passkey" }]]);
+    expect((await passkeyRows(ben.id))[0]!.lastUsedAt).toBeNull();
+    expect(await audits("signin.second_step")).toEqual([]);
+  });
+});
+
 describe("a passkey's proof at the sign-in's last check", () => {
   it("Sign out everywhere between the passkey's check and its session refuses it", async () => {
     const ana = await seedHolder("Ana");
@@ -283,5 +390,16 @@ describe("the challenge (generate-authenticate-options)", () => {
     }
     expect(Object.keys(asked.body).sort()).toEqual(Object.keys(plain.body).sort());
     expect(asked.body.challenge).not.toBe(plain.body.challenge);
+  });
+
+  it("with a session, lists that session's own person's passkeys alone", async () => {
+    const ana = await seedHolder("Ana", { familyQboId: "F1" });
+    const ben = await seedHolder("Ben", { familyQboId: "F2" });
+    const signedIn = await passkeyStep(ana.key!);
+    expect(signedIn.body).toEqual({ ok: true, next: "/" });
+    const listed = await passkeyOptions({ cookie: cookieNamed(signedIn.res, "session_token") });
+    expect(listed.res.status).toBe(200);
+    expect((listed.body.allowCredentials ?? []).map((c) => c.id)).toEqual([ana.key!.id]);
+    expect(JSON.stringify(listed.body)).not.toContain(ben.key!.id);
   });
 });
