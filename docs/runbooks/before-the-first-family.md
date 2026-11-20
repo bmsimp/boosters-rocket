@@ -318,6 +318,38 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
 22. **The staff home for someone with one permission.** Give a test staff member a role with one of the staff home's
     four permissions only, and sign in as them.
     **Pass:** the Today box shows only that permission's line. **If not:** note what else showed.
+23. **An authenticator app from the QR code, on another phone.** On a laptop, as a test parent: Family, **Sign-in
+    settings**, the **Authenticator app** box; show it's you if it asks; **Set up an authenticator app**. Scan the QR
+    code with Google Authenticator and finish with the code it shows. Then **Turn off the authenticator app** and set it
+    up again with Microsoft Authenticator, and once more with a password manager's authenticator (1Password, Bitwarden,
+    or the iPhone's Passwords app).
+    **Pass:** each app names the club and the parent's address, shows a 6-digit code that changes every 30 seconds, and
+    that code finishes the set-up; ten backup codes show, once, and are gone when the page is reloaded. **If not:** note
+    the app and what it showed.
+24. **The same phone, by the typed key.** On the iPhone, in the installed app: **Set up an authenticator app**, then
+    **Copy the key**; in the authenticator app, add an account by hand ("Enter a setup key" or similar, time based) and
+    paste the key, or type it from the screen with or without its spaces. The same on Android, in Chrome.
+    **Pass:** the app's code finishes the set-up. **If not:** note the app, and whether the paste or the typing failed.
+25. **The code field's keyboard and autofill.** At the set-up's code field, and at the sign-in page's app step on a
+    device the portal doesn't know (a private window).
+    **Pass:** the set-up's field opens the number keypad; the sign-in's opens a keyboard with letters too (it takes a
+    backup code); where the phone's own password manager holds the code, the keyboard offers it and filling it in works.
+    **If not:** note the phone, the field and the keyboard.
+26. **A phone whose clock is off.** On the phone with the authenticator app, turn off setting the time automatically and
+    put the clock a minute behind, then a minute ahead, and each time sign in on a device the portal doesn't know.
+    **Pass:** a minute either way still signs in (the portal takes the code of the 30 seconds before and after); two
+    minutes off is refused. Put the clock back after. **If not:** note how far off it was and what happened.
+27. **Backup codes typed on a phone keyboard.** In **Sign-in settings**, **Make new backup codes**, and write two down.
+    On a device the portal doesn't know, sign in with one typed on the phone's keyboard in lower case with its dash, and
+    with the other with a space for the dash.
+    **Pass:** each signs in once; the same code again is refused; **Backup codes left** on Sign-in settings has gone
+    down by two. **If not:** note what was typed.
+28. **The installed app beside the browser.** With the authenticator app set up from Safari (or Chrome), sign in from
+    the installed app as a device the portal doesn't know yet (step 3 says how), then turn the app off in one and reload
+    the other.
+    **Pass:** the installed app asks for the authenticator app's code, not an emailed one, and the code works there;
+    after the turn-off, both say the app is off and the next new device gets an emailed code. **If not:** note which
+    showed what.
 
 The phone checks that sign a form need Documenso, so they are in part 4.
 

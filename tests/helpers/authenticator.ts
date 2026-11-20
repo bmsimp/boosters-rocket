@@ -7,9 +7,10 @@ import { base32Decode, base32Encode, hotp, totpStep } from "@/lib/parents/totp";
 import { BACKUP_CODE_COUNT, hashBackupCode, newBackupCode, showBackupCode } from "@/lib/parents/backup-codes";
 
 /**
- * A person's authenticator app and backup codes in a test (the sign-in release, slice SI-6a): nothing a parent can
- * press sets an app up until SI-6b, so the tests seed one as SI-6b will store it: a 20-byte secret sealed by the
- * portal's own box for its row and person (sealAuthenticatorSecret()), and backup codes held only as their keyed hash.
+ * A person's authenticator app and backup codes in a test (the sign-in release, slice SI-6a): seeded as the set-up
+ * stores them since SI-6b (beginAuthenticatorSetup(), confirmAuthenticator(), makeBackupCodes()): a 20-byte secret
+ * sealed by the portal's own box for its row and person (sealAuthenticatorSecret()), and backup codes held only as
+ * their keyed hash. A test of the set-up itself goes through its presses (tests/integration/authenticator-settings.test.ts).
  */
 
 /**

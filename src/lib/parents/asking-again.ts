@@ -187,6 +187,9 @@ export async function askAgainPassword(ctx: Asker, password: unknown, now = new 
  * lockedPerson() (the person's row, then their sessions), the person still at the address and not blocked, and this
  * session's `strong_at` set to now, this session's alone, audited `signin.proved_again` with the step that proved it
  * (`emailed_code`, `authenticator` or `backup_code`). Every refusal is one answer, and over a limit the door's words.
+ * Since slice SI-6b a stamp that asked for the app is checked as the app's step even once the app has been turned off:
+ * that step then ends (verifySecondFactor()'s `no_app`), answered with the app's words and that they start again with
+ * their password, `ended: true`, and the page goes back to its password field.
  */
 export async function askAgainCode(ctx: Asker, stamp: unknown, code: unknown, now = new Date()): Promise<ProvedAnswer> {
   // Refused before any step is read (a code no field could send, a stamp that is no stamp or past its end): the words

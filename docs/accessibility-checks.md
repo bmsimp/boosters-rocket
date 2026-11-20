@@ -24,6 +24,7 @@ in the page's order, and a page the keyboard can't Tab out of; and after each ac
 | 7. The email change | The seeded session is stamped as proved just now and put back after (asking again, the sign-in release's slice SI-5a, is journey 10). An address with no "@" keeps the focus in the field; the good one is announced with the focus left on Send me a link; on the emailed link's page, the refused Yes keeps the focus with its alert. |
 | 8. The Display page | Each choice group is one stop and the arrow keys choose (Dark sets `data-theme="dark"`, Match my device takes it off); Contrast, Text size and Motion follow, then Sign out, which signs out. |
 | 10. Sign-in settings: asking again | From Family, "Sign-in settings" by Tab and Enter; the password field, then Continue; Enter puts the focus in the code field; a wrong code is an alert with the focus left in the field; the emailed code by Enter, and the thank-you takes the focus; then New password, New password again, Change my password (never pressed) and Sign out everywhere (never pressed); Tab then leaves the page. The seeded session's `strong_at` is put back after, and the codes the journey made are deleted (the seed has none). |
+| 11. The authenticator app | In the Authenticator app box: its own asking again (the password, Continue, the emailed code), the thank-you taking the focus; Set up an authenticator app by Enter puts the focus on the words above the QR code; Copy the key by Tab and Enter copies the key alone; the code field, Finish setting up, and the backup codes' words take the focus; Copy the backup codes copies the ten alone. Drawn again with no recent proof: the password, then the app's own code, the thank-you; Make new backup codes (not pressed), Turn off the authenticator app by Enter, and what happened takes the focus; Tab then leaves the page. The app, its codes and the counts are removed after, and the seeded session's `strong_at` put back (added with the sign-in release's slice SI-6b). |
 
 Still walked only by hand, or not at all, because the browser run can't reach the service: agreeing to sign and the
 signing frame (journey 3's second half, against the local Documenso as in step 6), saving the phone and address form
@@ -180,7 +181,7 @@ Added with the sign-in release's slice SI-5a, and the remembered devices with SI
 the spec nor by hand yet.
 
 - Walked: the order: the club bar, then the password box (Your password, Continue), Sign out everywhere, the
-  remembered devices, Back to Family. The address a password manager files the password under is a hidden `username`
+  remembered devices, the Authenticator app box (since SI-6b, journey 11), Back to Family. The address a password manager files the password under is a hidden `username`
   field, never a stop.
 - Walked: Continue moves to the code step, whose field takes the focus (and is described by the words that a code was
   emailed); a wrong code is an alert, with the focus left in the field (the busy button is `aria-disabled`).
@@ -212,6 +213,31 @@ the spec nor by hand yet.
   signed out everywhere. The spec never presses either, so the seeded session lives on.
 - Not walked yet: on `/family/email` the same asking comes before the new address field, and a person with no password
   is offered "Email me a link to choose a password" instead.
+
+### 11. The authenticator app: setting it up, its backup codes, asking again with it, turning it off (`/family/sign-in`)
+
+Added with the sign-in release's slice SI-6b. Journey 11 of `tests/e2e/keyboard-journeys.spec.ts` walks what is marked
+"walked"; `tests/e2e/parent-a11y.spec.ts` draws the box's four states only presses reach (the set-up shown, the backup
+codes shown, the app on, and asking again for the app's code) in every mode at 360 and 1440 wide.
+
+- Walked: the box asks again on its own (the password, Continue, then the code emailed to a parent with no app yet);
+  once proved, its "Thank you, that's you." takes the focus and **Set up an authenticator app** is the next stop.
+- Walked: the set-up press puts the focus on "Scan this QR code with your authenticator app…", above the QR code (an
+  image named "QR code to scan with your authenticator app", never a stop) and the key in groups of four, selectable
+  text; **Copy the key** is the next stop, copies the key alone, and says "Copied." in a status line; then the code
+  field (the number keypad on a phone, `one-time-code`), then **Finish setting up**.
+- Walked: finishing puts the focus on "Your authenticator app is set up.", above the ten backup codes (a list named
+  "Your backup codes") and the words to keep them off the phone; **Copy the backup codes** copies the ten alone, one
+  per line.
+- Walked: drawn again with no recent proof, the box asks for the password and then the app's code (one field that takes
+  a backup code too); proved, **Make new backup codes**, then the words that the backup codes go with it and new
+  devices get an emailed code again, then **Turn off the authenticator app**, whose answer takes the focus, and the box
+  is off again.
+- Not walked yet: a wrong code at the set-up is an alert with the focus left in the field; a set-up past its half hour
+  says to start again; **Make new backup codes** shows the new ten the same way, saying the old ones no longer work;
+  under Strict the box says the app can't be turned off here, and offers no set-up to a parent without one.
+- Not walked yet: the sign-in page's app step when the app was turned off meanwhile goes back to the password step,
+  with the refusal's words and that they start again, and asking again goes back to its password field the same way.
 
 ### On a phone: the tab bar and the focus
 
