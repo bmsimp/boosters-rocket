@@ -453,20 +453,23 @@ test.describe("10. sign-in settings, by keyboard: asking again, then the change 
     // The password: its field, then Continue; the code step's field takes the focus.
     // The field alone: its box is a region headed "Your password" too, which getByLabel() would also find; and the
     // devices box asks again too (slice SI-5b), so the field is the password box's.
-    const password = page.getByRole("region", { name: "Your password" }).locator('input[name="password"][autocomplete="current-password"]');
+    // Until a proof, the devices box draws its own asking again, with a Continue of its own: every step of this one is
+    // read inside the password box.
+    const passwordBox = page.getByRole("region", { name: "Your password" });
+    const password = passwordBox.locator('input[name="password"][autocomplete="current-password"]');
     await tabTo(page, password);
     await page.keyboard.type(E2E_SIGNIN.password);
     await page.keyboard.press("Tab");
-    await expect(page.getByRole("button", { name: "Continue" })).toBeFocused();
+    await expect(passwordBox.getByRole("button", { name: "Continue" })).toBeFocused();
     await page.keyboard.press("Enter");
-    await expect(page.getByRole("main").getByRole("status")).toContainText("We've emailed you a 6-digit code.");
-    const code = page.getByLabel("6-digit code");
+    await expect(passwordBox.getByRole("status")).toContainText("We've emailed you a 6-digit code.");
+    const code = passwordBox.getByLabel("6-digit code");
     await expect(code).toBeFocused();
     // A wrong code is an alert, and the focus stays in the field.
     await page.keyboard.type("000000");
     await page.keyboard.press("Enter");
-    await expect(page.getByRole("main").getByRole("alert")).toHaveText("That code didn't work. Check the newest email from us and try again, or start again with your password.");
-    await expect(page.getByRole("button", { name: "Confirm" })).toBeVisible(); // no longer Checking…
+    await expect(passwordBox.getByRole("alert")).toHaveText("That code didn't work. Check the newest email from us and try again, or start again with your password.");
+    await expect(passwordBox.getByRole("button", { name: "Confirm" })).toBeVisible(); // no longer Checking…
     await expect(code).toBeFocused();
     await page.keyboard.press("ControlOrMeta+A");
     await page.keyboard.type(await codeFor(sql, sink, "zelda@example.com"));
