@@ -123,16 +123,16 @@ export type PasswordCheck = { ok: true; person: { id: string; email: string }; p
 const REFUSED: PasswordCheck = { ok: false, limited: false };
 
 /**
- * The count a try is held to when its caller names one, in place of the door's (the device the cookie names, else the
- * address): asking again (asking-again.ts; the sign-in release, slice SI-5a) counts a signed-in parent's tries against
- * their own person (`password_reask_parent`, keyed by the person's id), so a stranger who keeps the address's count
- * full at the door can't stop them proving it's them, and their wrong tries there don't fill the door's. The door names
- * none.
+ * The count a try is held to when its caller names one and no device of the person answers, in place of the address's:
+ * asking again (asking-again.ts; the sign-in release, slice SI-5a) counts a signed-in parent's tries against their own
+ * person (`password_reask_parent`, keyed by the person's id), so a stranger who keeps the address's count full at the
+ * door can't stop them proving it's them, and their wrong tries there never fill the address's. Since slice SI-5b asking
+ * again names the session's own device too (`{ deviceId }`): a try in a session made on one of the person's unexpired
+ * devices is counted against that device (`password_try_device`, the door's count for a password typed on it, which
+ * those tries fill), and only one with none (a session from before SI-5b, or whose device is forgotten, expired or not
+ * the person's) against the person. The door names none.
  */
 export type TryCount = { kind: "password_reask_parent"; subject: string };
-// Since slice SI-5b asking again names the session's own device too (`{ deviceId }`): a try in a session made on one
-// of the person's unexpired devices is counted against that device, as the door counts a try on it, and only one with
-// none (a session from before SI-5b, or whose device is forgotten or expired) against the person.
 const LIMITED: PasswordCheck = { ok: false, limited: true };
 
 type Found = { id: string; email: string; blocked: boolean; authUserId: string | null; credentialId: string | null; hash: string | null; updatedAt: Date | null };
