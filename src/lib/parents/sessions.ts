@@ -219,7 +219,12 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   then their unspent links, a held one included, then makes a new set-up link (mintSigninLink(), the row again FOR
  *   UPDATE, a lock it holds already), then deletes their password, then their app (an unfinished set-up included) and
  *   every backup code, then their passkeys, then forgets their devices, then ends their sessions. It is the one writer
- *   that removes everything a person signs in with; its mail goes after the commit.
+ *   that removes everything a person signs in with; its mail goes after the commit;
+ * - "Not now" on the passkey offer on Home (declinePasskeyOffer(), passkey-offer.ts, since the sign-in release's slice
+ *   SI-8), in a transaction of its own, takes the person's row FOR UPDATE and no other lock, reads the session, its
+ *   device and the person's count under it, then updates the device the session names (`passkey_offered_at`), then the
+ *   person's row (`passkey_offer_declines`). It touches no session, and every writer that deletes devices finds the
+ *   person's row held or waits for it.
  */
 export async function lockedPerson(tx: Tx, parentId: string): Promise<{ email: string; blocked: boolean } | null> {
   const [p] = await tx.select({ email: parent.email, blocked: parent.blocked }).from(parent).where(eq(parent.id, parentId)).for("key share");
