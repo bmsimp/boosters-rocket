@@ -5,6 +5,7 @@ import { blockPerson, renamePerson, unblockPerson } from "@/lib/parents/people";
 import { addGuardian, reinstateGuardian, removeGuardian } from "@/lib/parents/guardians";
 import { familyRecordAt } from "@/lib/families/address";
 import { resendWelcome } from "@/lib/parents/welcome";
+import { resetSignin } from "@/lib/parents/signin-reset";
 import { can } from "@/lib/permissions/effective";
 import { getPerson } from "@/lib/parents/directory";
 import { parseContactForm, type ContactForm } from "@/lib/parents/contact-fields";
@@ -68,6 +69,35 @@ export const resendWelcomeAction = staffAction(P, async (ctx, parentId: string):
   if (!r.ok) return { ok: false, errors: [RESEND_FAILED[r.reason]] };
   refresh();
   return { ok: true, message: RESENT[r.link] };
+});
+
+// An Admin's reset of a parent's sign-in (the sign-in release, slice SI-9a; open question 22): Admin-only, kept apart
+// from Parents.ReadWrite, which this page needs too. The box says the Admin called the person back on a number the club
+// already holds and they asked for it; the reason is for staff only. Each answer in its own words.
+const RESET = "Parents.SignInReset.ReadWrite" as const;
+const RESET_REFUSED = {
+  invalid: "Tick the box to say you called them back, and say why, in a few words. Only staff see it.",
+  blocked: "This person is blocked. Unblock them first if they should sign in again.",
+  no_access: "This person can't sign in to any family right now, so there's nothing to reset.",
+  signins_off: "Parent sign-ins are switched off, so nothing was reset.",
+  rate_limited: "This person's sign-in has been reset three times today already. Try again tomorrow, or ask another Admin to look.",
+  not_found: "That person isn't in the portal any more.",
+} as const;
+// The Resend welcome email press waits a minute after a set-up link was made (resendWelcome()'s `on_its_way`), so the
+// mail-failed words say so. The link the reset made works but was never mailed, and the worker's welcome to a person still
+// owed one takes it as the link "emailed to you earlier" (welcome.ts's `earlier`) and carries none: the words say so, so
+// the Admin presses Resend all the same.
+const RESET_UNMAILED = "Their sign-in was reset and they're signed out everywhere, but the email with the link couldn't be sent. Check outgoing mail under Settings, Outgoing mail, then, in a minute, send them a link with Resend welcome email. A welcome email the portal sends them meanwhile won't carry one.";
+// A reset whose mail couldn't be handed over went through, and needs attention: the answer says so, and what to do next.
+type ResetDone = Done | { ok: true; message: string; status: "attention" };
+export const resetSigninAction = staffAction(RESET, async (ctx, parentId: string, reason: string, calledBack: boolean): Promise<ResetDone> => {
+  if (!personId(parentId) || !str(reason, TEXT_MAX) || typeof calledBack !== "boolean") return NOT_FROM_PAGE;
+  if (!calledBack || !reason.trim()) return { ok: false, errors: [RESET_REFUSED.invalid] };
+  const r = await resetSignin(parentId, { reason, calledBack }, { actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, ip: ctx.ip, permission: RESET });
+  if (!r.ok) return { ok: false, errors: [RESET_REFUSED[r.reason]] };
+  refresh();
+  return r.mailed ? { ok: true, message: `Reset. They're signed out everywhere, and a link to choose a new password is on its way to ${r.to}.` }
+    : { ok: true, message: RESET_UNMAILED, status: "attention" };
 });
 
 // A family's guardians (stage 3's slice 7b), from a family's roster page or a person's page. Each id is the app's own

@@ -172,8 +172,9 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   row, unlocked under the person's row; the clean-up deletes them
  *   after the person's rows and links, before the devices. Nothing that ends all of a person's sign-in removes them (a
  *   block, a reset, a password change, Sign out everywhere, a change of sign-in email, sign-ins switched off, a change
- *   of company, a last membership closed: each keeps them as it keeps the password). A later writer that takes them
- *   (SI-9's staff reset) takes them after the person's row and before their devices;
+ *   of company, a last membership closed: each keeps them as it keeps the password). The one writer that takes them
+ *   beside those, the staff reset (resetSignin(), signin-reset.ts, since SI-9a, below), takes them after the person's
+ *   row and their password, and before their devices;
  * - the authenticator app's presses in sign-in settings (authenticator-settings.ts, since slice SI-6b) each take the
  *   person's row FOR UPDATE and read the session's `strong_at` under it (with when the person's app came into force,
  *   since a proof older than it doesn't count: sessionStrongAt(), asking-again.ts; so do the password change, the email
@@ -193,8 +194,8 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   one conditional update (still the person's) and reads their newest "Sign out everywhere" row; a sign-in's last
  *   check (signinStands()) reads the passkey unlocked under the person's row. Nothing that ends all of a person's
  *   sign-in removes them, as for the app (a block, a reset, a password change, Sign out everywhere, a change of sign-in
- *   email, sign-ins switched off, a change of company, a last membership closed, turning the app off). A later writer
- *   that takes them (SI-9's staff reset) takes them after the person's row, beside the app and backup codes, before
+ *   email, sign-ins switched off, a change of company, a last membership closed, turning the app off). The staff reset
+ *   (resetSignin(), since SI-9a, below) takes them after the person's row, after the app and backup codes, before
  *   their devices;
  * - a person's passkeys in sign-in settings (passkey-settings.ts, since slice SI-7b): adding one is the passkey
  *   library's insert of the row first, as it verifies, outside any transaction of the portal's and before the
@@ -210,7 +211,15 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   Asking again with a passkey (provePasskeyAgain(), asking-again.ts) calls this, sets the passkey's `last_used_at`,
  *   then updates the session's `strong_at`. Turning the app off beside a passkey (authenticator-settings.ts) reads
  *   whether they have a passkey under the person's row and keeps their backup codes. None of them touches a device, and
- *   only asking again touches a session.
+ *   only asking again touches a session;
+ * - an Admin's reset of a person's sign-in (resetSignin(), signin-reset.ts, since the sign-in release's slice SI-9a,
+ *   `parent.signin.reset`) takes the parents' settings lock shared (the door is read), then the person's row FOR UPDATE,
+ *   reads their sign-in account, rows that count, app, backup codes and passkeys under it, then deletes their unused
+ *   email change requests, then their unused codes and those spent within a code's life (as a password reset does),
+ *   then their unspent links, a held one included, then makes a new set-up link (mintSigninLink(), the row again FOR
+ *   UPDATE, a lock it holds already), then deletes their password, then their app (an unfinished set-up included) and
+ *   every backup code, then their passkeys, then forgets their devices, then ends their sessions. It is the one writer
+ *   that removes everything a person signs in with; its mail goes after the commit.
  */
 export async function lockedPerson(tx: Tx, parentId: string): Promise<{ email: string; blocked: boolean } | null> {
   const [p] = await tx.select({ email: parent.email, blocked: parent.blocked }).from(parent).where(eq(parent.id, parentId)).for("key share");

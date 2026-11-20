@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { changeCodeMessage, signinCodeMessage, welcomeMessage, emailChangeConfirmMessage, emailChangeNoticeMessage, testMessage, signedFormCopyMessage, formReminderMessage, volunteerSignupMessage,
-  passwordSetupMessage, passwordResetMessage, choosePasswordMessage, passwordChangedMessage } from "@/lib/mail/messages";
+  passwordSetupMessage, passwordResetMessage, choosePasswordMessage, passwordChangedMessage, signinResetMessage } from "@/lib/mail/messages";
 
 const b = { clubName: "FZN <Band> Boosters", color: "#5b2a86" };
 
@@ -244,6 +244,41 @@ describe("mail messages", () => {
     it("says the same in its text and its HTML, names no family, student or other person, and escapes the club's name", () => {
       expect(htmlWords).toEqual(m.text.trim().split("\n\n"));
       expect(`${m.text}${m.html.replace(/font-family:/g, "")}`).not.toMatch(/family|student|guardian/i);
+      expect(m.html).toContain("FZN &lt;Band&gt; Boosters");
+      expect(m.html).not.toContain("<Band>");
+    });
+  });
+
+  // An Admin's reset of a parent's sign-in (slice SI-9a; src/lib/parents/signin-reset.ts).
+  describe("the mail of a reset of a parent's sign-in", () => {
+    const link = "https://portal.example.org/sign-in/set-up/AbC-123_xyz";
+    const m = signinResetMessage(b, "ana@example.com", { link, life: "7 days", contact: "treasurer@boosters.example.org" });
+    /** The words of the mail's HTML body, with its markup taken out and its escaping undone. */
+    const htmlWords = m.html.replace(/<div style="background[^>]*>[^<]*<\/div>/, "").replace(/<[^>]+>/g, "\n").split("\n").map((l) => l.trim()).filter(Boolean)
+      .map((l) => l.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&"));
+    it("goes to the address, with its subject, the set-up link on a line of its own and how long it works", () => {
+      expect(m.to).toBe("ana@example.com");
+      expect(m.subject).toBe("Your FZN <Band> Boosters sign-in was reset");
+      expect(m.text.split("\n")).toContain(link);
+      expect(m.html).toContain(`<p style="margin:0 0 16px"><a href="${link}">${link}</a></p>`);
+      for (const part of [m.text, m.html]) expect(part).toContain("The link works once, for 7 days.");
+    });
+    it("says what no longer works, what to do next, and to contact the club straight away if the reader didn't ask", () => {
+      expect(m.text).toContain("Someone at FZN <Band> Boosters reset how you sign in to the portal with this email address. Your password, passkeys, authenticator app and backup codes no longer work, and every phone and computer that was signed in has been signed out.");
+      expect(m.text).toContain("Once you've chosen your password, you can add a passkey or an authenticator app again under Sign-in settings.");
+      expect(m.text).toContain("If you asked the club for this, that's all there is to do.");
+      expect(m.text).toContain("If you didn't ask the club for this, please contact the club straight away: someone may be trying to get into your account.");
+      expect(m.text).toContain("FZN <Band> Boosters will never ask you for your password, by email or by phone.");
+    });
+    it("says where to write to the club when it has an address, and leaves the line out when it has none", () => {
+      expect(m.text).toContain("You can write to the club at treasurer@boosters.example.org.");
+      const none = signinResetMessage(b, "ana@example.com", { link, life: "7 days", contact: null });
+      expect(`${none.text}${none.html}`).not.toContain("You can write to the club");
+      expect(none.text.trim().split("\n\n")).toHaveLength(m.text.trim().split("\n\n").length - 1);
+    });
+    it("says the same in its text and its HTML, names no family, student, guardian or Admin, and escapes the club's name", () => {
+      expect(htmlWords).toEqual(m.text.trim().split("\n\n"));
+      expect(`${m.text}${m.html.replace(/font-family:/g, "")}`).not.toMatch(/family|student|guardian|admin|staff/i);
       expect(m.html).toContain("FZN &lt;Band&gt; Boosters");
       expect(m.html).not.toContain("<Band>");
     });

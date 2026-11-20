@@ -179,3 +179,15 @@ export async function removePasskey(tx: Tx, parentId: string, passkeyId: string)
     .returning({ id: parentAuthPasskey.id });
   return rows.length > 0;
 }
+
+/**
+ * Every passkey of the person removed, in the caller's transaction, which holds the person's row and writes the audit
+ * row: an Admin's reset of their sign-in (resetSignin(), signin-reset.ts; the sign-in release, slice SI-9a), which takes
+ * away what they sign in with, the passkeys that no longer work after a change of the portal's address included.
+ * Answers how many went. A sign-in that verified one just before and whose session is made after is refused at its last
+ * check (signinStands(): `passkey_gone`).
+ */
+export async function removeAllPasskeys(tx: Tx, parentId: string): Promise<number> {
+  const rows = await tx.delete(parentAuthPasskey).where(inArray(parentAuthPasskey.userId, usersOf(tx, parentId))).returning({ id: parentAuthPasskey.id });
+  return rows.length;
+}

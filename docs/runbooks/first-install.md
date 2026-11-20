@@ -59,7 +59,8 @@ Documenso seals every signed form with a certificate of the club's own. Follow
      passkeys belong to that address, so changing it later stops every one of them. A parent whose only second step
      is a passkey (no authenticator app) is then locked out: on a new device the portal asks for that passkey, which
      no longer works, and sends no emailed code in its place, so they can't sign in until an Admin resets their
-     sign-in (the staff reset, still to be built). Don't change the address lightly once parents have passkeys.
+     sign-in, one parent at a time ([resetting a parent's sign-in](resetting-a-parents-sign-in.md)). Don't change the
+     address lightly once parents have passkeys.
    - `CLUB_TIME_ZONE`: for example `America/Chicago`.
    - `CLIENT_IP_HEADER`: `x-forwarded-for` if you will use this installation's own proxy (step 5). With a proxy of your
      own, see [A proxy of your own](#a-proxy-of-your-own) below.

@@ -12,14 +12,15 @@ import { LocalTime } from "@/app/components/local-time";
 import { DataTable } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
 import { StateWords } from "@/app/components/state-words";
-import { DetailsForm, NameForm, NoteAction, OneButton } from "../forms";
-import { blockAction, unblockAction, resendWelcomeAction, renamePersonAction, savePersonDetailsAction } from "../actions";
+import { DetailsForm, NameForm, NoteAction, OneButton, ResetSigninForm } from "../forms";
+import { blockAction, unblockAction, resendWelcomeAction, renamePersonAction, resetSigninAction, savePersonDetailsAction } from "../actions";
 import { GuardianChange } from "../guardian-change";
 import { accessState } from "../access-state";
 import { familyPage } from "@/app/staff/(app)/family-pages";
 import { lifeWords } from "@/lib/parents/link-delivery";
 import { LINK_LIFE_MS } from "@/lib/parents/signin-links";
 import { guardianStandings, keptContactsOf } from "@/lib/roster/writes";
+import { signinHeld } from "@/lib/parents/signin-reset";
 
 export const metadata = { title: "Parent" };
 export const dynamic = "force-dynamic";
@@ -49,6 +50,10 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   // A family's page answers Not found while the membership shape is missing or names a customer type QuickBooks no
   // longer has, or the roster cache is another company's: then none is linked for the details, and the page says why.
   const pagesStand = whose === "family" ? await familyPagesStand() : true;
+  // An Admin's reset of their sign-in (the sign-in release, slice SI-9a): Admin-only, beside this page's own permission.
+  // What they sign in with now is read only for a reader who may reset it, counts only.
+  const mayReset = can(ctx.effective, "Parents.SignInReset.ReadWrite");
+  const held = mayReset ? await signinHeld(p.parentId) : null;
   const familyPages = !pagesStand ? [] : p.families.flatMap((f) => (!f.previousCompany && f.open && f.familyId !== null && f.pageStands ? [{ key: f.guardianId, id: f.familyId, name: f.familyName }] : []));
   return (
     <main className="wrap single">
@@ -130,6 +135,31 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           </>
         )}
       </section>
+
+      {held && (
+        <section className="box" aria-labelledby="pr-h"><h2 id="pr-h">Reset sign-in</h2>
+          <dl className="details">
+            <dt>Password</dt><dd>{held.password ? "Chosen" : "Not chosen"}</dd>
+            <dt>Passkeys</dt><dd>{held.passkeys}</dd>
+            <dt>Authenticator app</dt><dd>{held.app ? "On" : "Off"}</dd>
+            <dt>Backup codes left</dt><dd>{held.backupCodes}</dd>
+            <dt>Phones and computers remembered</dt><dd>{held.devices}</dd>
+            <dt>Signed in now</dt><dd>{held.sessions === 1 ? "On 1 phone or computer" : `On ${held.sessions} phones or computers`}</dd>
+          </dl>
+          {p.blocked ? <Notice tone="info" live="none">This person is blocked, so there&apos;s nothing to reset. Unblock them first if they should sign in again.</Notice>
+            : !canSignIn ? <Notice tone="info" live="none">This person can&apos;t sign in to any family right now, so there&apos;s nothing to reset.</Notice>
+            : parentDoorClosed(settings) ? <Notice tone="info" live="none">Parent sign-ins are switched off, so there&apos;s nothing to reset.</Notice>
+            : (
+              <>
+                <p>Resetting signs this person out everywhere and removes their password, passkeys, authenticator app and backup codes, and the phones and computers the portal remembered for them. They&apos;re emailed a new link to choose a password, which works once, for {lifeWords(LINK_LIFE_MS.setup)}. Choosing it signs them in on that phone or computer; on another one they sign in with that password and a code emailed to them. They can then add a passkey or an authenticator app again. Their families, forms and everything else stay as they are.</p>
+                <p>Use it when they&apos;ve lost what they sign in with: their phone with its passkey or authenticator app and their backup codes, or passkeys that stopped working because the portal&apos;s address changed.</p>
+                <Notice tone="warning" live="none">Before you reset, call them back on a number the club already holds (on this page, on their family&apos;s page, or in the club&apos;s own records), never one the caller gives you, and make sure they asked for this. The link goes to the email address being reset, so whoever reads that mailbox can use it.</Notice>
+                <p className="hint">Only Admins can do this, and every other Admin sees it on their home page for a week.</p>
+                <ResetSigninForm act={resetSigninAction.bind(null, p.parentId)} />
+              </>
+            )}
+        </section>
+      )}
     </main>
   );
 }

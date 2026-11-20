@@ -414,8 +414,17 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
     **Pass:** after the email change the passkey still signs in (the password manager may still show the old address
     as the user name); after the address change no passkey works (each is bound to the old address), and the parent
     signs in with their password and the second step. **If not:** note what happened.
+42. **An Admin resets a parent's sign-in** ([resetting a parent's sign-in](resetting-a-parents-sign-in.md)). Give a test
+    parent a passkey and an authenticator app, and sign them in on two devices. As an Admin, open **Parents**, the
+    parent's page, **Reset sign-in**: tick the call-back box, give a reason and press **Reset sign-in**. Then, as a
+    second Admin, open the staff home.
+    **Pass:** both devices are signed out at their next page; the email arrives at the parent's address with a link,
+    which chooses a new password; signing in with it on a new device asks for an emailed code; the portal no longer
+    asks for the passkey (the device may still offer it, and the portal refuses it with "That passkey didn't work");
+    the second Admin's home page shows "Sign-in resets this week" with who reset whose sign-in and when, and the first
+    Admin's doesn't. **If not:** note what happened, and where.
 
-These checks are what Playwright's own authenticator can't show (`tests/e2e/passkey-signin.spec.ts` and
+Checks 30 to 41 are what Playwright's own authenticator can't show (`tests/e2e/passkey-signin.spec.ts` and
 `tests/e2e/passkeys.spec.ts` say so in their heads): a real authenticator, a password manager, a synced passkey, a
 phone by its QR code, a security key, the installed app, Safari and Firefox. The browser's own passkey suggestions on
 the email field are not checked: the portal doesn't start them.
@@ -511,7 +520,8 @@ The proof-of-concept host has no Documenso. Forms need a full installation from 
     **Pass:** each says `Restored ...`. **If not:** its message and exit code.
 19. **Settle the portal's address before parents are offered passkeys.** A passkey belongs to `APP_URL`'s host name:
     once parents have added passkeys, changing the address stops every one, and locks out each parent whose only
-    second step is a passkey until an Admin resets their sign-in ([a first installation, part 3](first-install.md#3-fill-in-the-settings)).
+    second step is a passkey until an Admin resets their sign-in, one parent at a time, each with a call back
+    ([a first installation, part 3](first-install.md#3-fill-in-the-settings); [resetting a parent's sign-in](resetting-a-parents-sign-in.md)).
     **Pass:** the address in `deploy/.env` is the one the club will keep. **If not:** change it now, before any parent
     has a passkey.
 
