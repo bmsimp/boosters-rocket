@@ -1,0 +1,3 @@
+ALTER TABLE "parent_auth_session" ADD COLUMN "device_id" uuid;--> statement-breakpoint
+ALTER TABLE "parent_auth_session" ADD CONSTRAINT "parent_auth_session_device_id_parent_device_id_fk" FOREIGN KEY ("device_id") REFERENCES "public"."parent_device"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "parent_auth_session_device_ix" ON "parent_auth_session" USING btree ("device_id");
