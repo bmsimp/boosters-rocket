@@ -2665,15 +2665,44 @@ async function guardianStillWants(guardianId: string, realmId: string): Promise<
     .where(and(eq(accountingLink.guardianId, guardianId), eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId)));
   return link === undefined;
 }
-/** A guardian's Parent customer create given up with nothing sent, its row closed or linked since it was queued: audited, only while it is still waiting. */
-async function giveUpForGoneGuardian(item: QueueRow, o: { actor: Actor; ip: string | null; permission?: string }): Promise<void> {
+/** Why a guardian's Parent customer create is given up at its try with nothing sent (guardianCreateStops()). */
+type GuardianCreateStop = "guardian_removed" | "family_inactive" | "named_elsewhere";
+const GUARDIAN_STOP_NOTES: Record<GuardianCreateStop, string> = {
+  guardian_removed: "The guardian was removed in the portal, or linked, before it was sent.",
+  family_inactive: "The guardian's family was made inactive, or is no longer linked to an active family in QuickBooks, before it was sent: nothing is made under it.",
+  named_elsewhere: "QuickBooks has the person's own record under another family of theirs, and takes a name once, so none was made under this family.",
+};
+/**
+ * Whether a guardian's Parent customer create must not be sent now, checked at every try, whoever makes it (the lead's
+ * decisions 1(a) and 2 in slice 9h's last round, at the send as well as at the save): the row closed or linked since it
+ * was queued; its family record inactive, or no longer linked to the active family customer it was asked under (the
+ * family action ran meanwhile: nothing is made under a family being, or made, inactive); or the person's own Parent
+ * customer of that name under another family of theirs, which the cache holds now though it didn't when this was queued
+ * (ownNamedElsewhere()). Null when it may go.
+ */
+async function guardianCreateStops(guardianId: string, w: CreateWrite, item: QueueRow): Promise<GuardianCreateStop | null> {
+  if (!(await guardianStillWants(guardianId, item.realmId))) return "guardian_removed";
+  const familyId = item.familyId;
+  if (familyId === null) return null;
+  return db.transaction(async (tx) => {
+    const [f] = await tx.select({ active: family.active }).from(family).where(eq(family.id, familyId));
+    if (!f?.active) return "family_inactive";
+    const b = await guardianBooks(tx, familyId);
+    // The books or the connection: what the send itself answers (refused, or left for a later try), as before.
+    if (!b.ok) return b.why === "family" ? "family_inactive" : null;
+    if (b.familyCustomer !== w.familyQboId) return "family_inactive";
+    return (await ownNamedElsewhere(tx, b, guardianId, w.name)) !== null ? "named_elsewhere" : null;
+  });
+}
+/** A guardian's Parent customer create given up with nothing sent (guardianCreateStops()): audited, only while it is still waiting. */
+async function giveUpForGoneGuardian(item: QueueRow, why: GuardianCreateStop, o: { actor: Actor; ip: string | null; permission?: string }): Promise<void> {
   await db.transaction(async (tx) => {
     // Its mark as maybe sent is taken back with it: this try sent nothing.
-    const [still] = await tx.update(writeQueue).set({ state: "given_up", sent: item.sent, note: "The guardian was removed in the portal, or linked, before it was sent.", nextTryAt: null,
+    const [still] = await tx.update(writeQueue).set({ state: "given_up", sent: item.sent, note: GUARDIAN_STOP_NOTES[why], nextTryAt: null,
       finishedAt: new Date(), updatedAt: new Date() }).where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
     if (!still) return;
     await writeAudit({ actor: o.actor, action: "roster.write.given_up", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: item.id,
-      before: { state: item.state, tries: item.tries, code: item.lastCode, op: "create" }, after: { state: "given_up", why: "guardian_removed", sentNow: false } }, tx);
+      before: { state: item.state, tries: item.tries, code: item.lastCode, op: "create" }, after: { state: "given_up", why, sentNow: false } }, tx);
   });
 }
 
@@ -2700,12 +2729,14 @@ export async function trySavedItem(item: QueueRow, write: RenameWrite | CreateWr
     .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
   const gone: SavedTry = { is: "given_up" };
   if (!marked) return gone;
-  // A guardian's Parent customer create (stage 3's slice 9h) is made only for a row still open and unlinked: one removed,
-  // or linked, since it was queued is given up here with nothing sent, whoever tries it (a removal that ran while an
-  // earlier try of it was on its way leaves it to this check).
+  // A guardian's Parent customer create (stage 3's slice 9h) is made only for a row still open and unlinked, under its
+  // family's active customer, and only while no record of the person's own has that name under another family: one that
+  // no longer is so since it was queued is given up here with nothing sent, whoever tries it (a removal that ran while
+  // an earlier try of it was on its way, or a family action that finished while it waited, leaves it to this check).
   const forRow = write.op === "create" ? guardianOf(write) : null;
-  if (forRow !== null && !(await guardianStillWants(forRow, item.realmId))) {
-    await giveUpForGoneGuardian(item, o);
+  const stop = forRow !== null && write.op === "create" ? await guardianCreateStops(forRow, write, item) : null;
+  if (stop !== null) {
+    await giveUpForGoneGuardian(item, stop, o);
     return gone;
   }
 
@@ -3924,7 +3955,7 @@ export function guardianSentWords(sent: readonly GuardianSent[], op: "grant" | "
       // One person, one name (the lead's decision 1 in slice 9h's last round).
       case "named_elsewhere": return [`QuickBooks already has ${who}'s record under ${s.elsewhere}, and takes a name once, so no Parent customer was made for them ${under}.`];
       case "name_held": return [`Nothing was sent for their Parent customer ${under}, which QuickBooks refused before as a taken name: ${s.elsewhere !== undefined
-        ? `their record under ${s.elsewhere} has the new name, and QuickBooks takes a name once`
+        ? `the new name goes to their record under ${s.elsewhere}, and QuickBooks takes a name once`
         : `another customer in QuickBooks has the name “${s.holds}” already`}. It stays kept on the Reconciliation page, where you can give it up.`];
       case "name_once": return [`Their Parent customer ${under} keeps the name it has in QuickBooks: QuickBooks takes a name once, and the new name goes to their record under ${s.elsewhere}.`];
       case "has_one": return op === "rename" ? [`Their Parent customer ${under} has that name in QuickBooks already.`] : [`${who} already has their own Parent customer ${under} in QuickBooks, so none was made.`];
