@@ -5,6 +5,18 @@ import type { AppFamilyId, AppStudentId } from "../families/ids";
 
 const created = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 const updated = () => timestamp("updated_at", { withTimezone: true }).notNull().defaultNow();
+/**
+ * A mailing address, one nullable text column per field of the form (ContactValues, src/lib/parents/contact-fields.ts):
+ * on a person and a family the portal's own (stage 3's slice 11a), and in the roster cache QuickBooks' billing address.
+ */
+const mailingAddress = () => ({
+  addressLine1: text("address_line1"),
+  addressLine2: text("address_line2"),
+  addressCity: text("address_city"),
+  addressRegion: text("address_region"),
+  addressPostalCode: text("address_postal_code"),
+  addressCountry: text("address_country"),
+});
 
 /** Key/value runtime settings (club name, color, monogram, …). */
 export const setting = pgTable("setting", {
@@ -63,12 +75,22 @@ export type GuardianStatus = "invited" | "active" | "disabled";
 export type DisabledReason = "no_active_students" | "removed" | "inactive" | "family_inactive" | "no_email" | "held" | "address_changed" | "not_in_quickbooks" | "company_changed";
 const DISABLED_REASONS = ["no_active_students", "removed", "inactive", "family_inactive", "no_email", "held", "address_changed", "not_in_quickbooks", "company_changed"] as const;
 
-/** One record per parent, whatever families they're in (spec §2). Everything refers to the id, never to the email. */
+/**
+ * One record per parent, whatever families they're in (spec §2). Everything refers to the id, never to the email.
+ * `phone` and the mailing address (`address_*`) are the person's own contact details, the portal's own since stage 3's
+ * slice 11a (migration 0044, which cleared the phones an earlier migration had copied): one set, whatever families the
+ * person is in, shown and changed on /family/details in books with a parent type (src/lib/parents/contact-edits.ts).
+ * Filled once from the person's own QuickBooks records by the take-in (src/lib/parents/contact-take-in.ts); nothing
+ * QuickBooks holds changes them after that. `contact_version` is raised by every change of either: 0 means nobody
+ * has ever set them, which is what the take-in fills.
+ */
 export const parent = pgTable("parent", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   email: text("email").notNull(), // stored trimmed + lower-cased
   phone: text("phone"),
+  ...mailingAddress(),
+  contactVersion: integer("contact_version").notNull().default(0),
   blocked: boolean("blocked").notNull().default(false),
   blockedAt: timestamp("blocked_at", { withTimezone: true }),
   blockedBy: uuid("blocked_by"),                       // staff_user.id
@@ -96,12 +118,18 @@ export const parent = pgTable("parent", {
  * cache (a member, in flat books), or by a staff member's new family or member once QuickBooks made its customer.
  * Named and made active or inactive by the app alone since stage 3's slice 9c (a staff rename or make-inactive sent to
  * QuickBooks changes it too); what QuickBooks holds changes nothing here. Its QuickBooks customer is in its link
- * (`accounting_link`).
+ * (`accounting_link`). `phone`, the mailing address (`address_*`) and `contact_version` are the family's own contact
+ * details, the portal's own since stage 3's slice 11a, for books with no parent type (flat, or layered with no parent
+ * type: open question 6), where every guardian of the family shares them; as on `parent`, filled once by the take-in
+ * and 0 until anyone sets them.
  */
 export const family = pgTable("family", {
   id: uuid("id").primaryKey().defaultRandom().$type<AppFamilyId>(),
   name: text("name"),                                 // QuickBooks text, shown as text only; null when the portal never knew one
   active: boolean("active").notNull(),
+  phone: text("phone"),
+  ...mailingAddress(),
+  contactVersion: integer("contact_version").notNull().default(0),
   createdAt: created(),
   updatedAt: updated(),
 });
@@ -363,8 +391,10 @@ export const qboCustomerType = pgTable("qbo_customer_type", {
 });
 
 /**
- * A reference copy of QuickBooks' customers (spec §2). Never a source of truth. Email and phone are kept only for
- * customers whose type the membership shape names.
+ * A reference copy of QuickBooks' customers (spec §2). Never a source of truth. Email, phone and the billing address
+ * (`address_*`, kept since stage 3's slice 11a, read as the parent's form once showed it) are kept only for customers
+ * whose type the membership shape names. Nothing a parent sees reads them: the take-in read the address once
+ * (src/lib/parents/contact-take-in.ts), and stage 4's differences will compare them.
  */
 export const qboCustomer = pgTable("qbo_customer", {
   qboId: text("qbo_id").primaryKey(),
@@ -374,6 +404,7 @@ export const qboCustomer = pgTable("qbo_customer", {
   typeQboId: text("type_qbo_id"),
   email: text("email"),
   phone: text("phone"),
+  ...mailingAddress(),
   syncToken: text("sync_token").notNull(),
   qboUpdatedAt: timestamp("qbo_updated_at", { withTimezone: true }),
   refreshedAt: timestamp("refreshed_at", { withTimezone: true }).notNull().defaultNow(),
