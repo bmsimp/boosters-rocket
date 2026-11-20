@@ -23,9 +23,9 @@ import { rosterRefreshAsked } from "@/lib/parents/refresh-ask";
 import { saveDetailsAction } from "@/app/(parent)/family/details/actions";
 import FamilyPage from "@/app/(parent)/family/page";
 import FamilyDetailsPage from "@/app/(parent)/family/details/page";
-import { NO_DETAILS, contactForm, familyDetails, personDetails, seedContactFamilies, setFamilyDetails, setPersonDetails } from "../helpers/contact";
+import { NO_DETAILS, contactForm, familyDetails, personDetails, seedContactFamilies, setFamilyDetails, setPersonDetails, shownTo } from "../helpers/contact";
 import { resetDb, seedGuardian, seedStaff } from "../helpers/db";
-import { RIVERA } from "../helpers/money";
+import { CHENOWETH, RIVERA } from "../helpers/money";
 import { identityNow, seedParentIn, seedTwoFamilies } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { addToCache, fam, par, stu, storeShape } from "../helpers/roster-cache";
@@ -402,6 +402,31 @@ describe("whose details come from the session and nothing else (v1 spec §12)", 
       expect(await save({ ...theirs.values, line2: ids.join(" ") }, v(before.version), naming(b.identity.parentId))).toMatchObject({ ok: true });
       expect(await mineNow()).toEqual({ values: { ...theirs.values, line2: ids.join(" ") }, version: before.version + 1 });
       await theirsUnchanged();
+    }
+    expect(stub.apiCalls()).toEqual([]);
+  });
+
+  it("with families whose QuickBooks ids are digits, as real ones are: A's saves with B's values and ids in every field queue items naming A's records and customers only", async () => {
+    const { r, c } = await seedContactFamilies(stub);
+    const theirIds = [c.identity.parentId, String(c.identity.familyId), c.identity.guardianId, CHENOWETH.parent.qboId, CHENOWETH.family.qboId];
+    const naming = (id: string) => Object.fromEntries(["id", "Id", "parentId", "personId", "familyId", "family", "guardianId", "customerId", "qboId", "recordId", "targetQboId"].map((name) => [name, id]));
+    asParent(r.identity);
+    // The person's details (books with a parent type), then the family's (books with none), each with B's shown values.
+    for (const [shape, whose] of [[null, "person"], [NO_PARENT_TYPE, "family"]] as const) {
+      if (shape) await storeShape(shape);
+      await db.delete(rateLimitEvent);
+      const at = whose === "person" ? (await personDetails(r.identity.parentId)).version : (await familyDetails(r.identity.familyId)).version;
+      expect(await save({ ...shownTo(CHENOWETH), line2: theirIds.join(" ") }, `${whose === "person" ? "p" : "f"}:${at}`, naming(c.identity.guardianId)), whose).toMatchObject({ ok: true });
+    }
+    const queued = await db.select().from(writeQueue);
+    // One for Rivera's own Parent customer, one for the Rivera family's own customer: never anything of Chenoweth's.
+    expect(queued.map((q) => q.targetQboId).sort()).toEqual([RIVERA.family.qboId, RIVERA.parent.qboId].sort());
+    for (const q of queued) {
+      expect(String(q.familyId)).toBe(String(r.identity.familyId));
+      const w = q.request as { qboId: string; guardianId?: string };
+      expect([RIVERA.family.qboId, RIVERA.parent.qboId]).toContain(w.qboId);
+      if (w.guardianId !== undefined) expect(w.guardianId).toBe(r.identity.guardianId);
+      for (const id of theirIds) expect([q.targetQboId, String(q.familyId), w.qboId, w.guardianId ?? ""]).not.toContain(id);
     }
     expect(stub.apiCalls()).toEqual([]);
   });
