@@ -7,12 +7,25 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 
+// The family's link, passed through as it is, with a hook a test may set to run once, just after a lookup of a family's
+// customer has answered (stage 4's slice M3b: a link that changes between a read's first look and its lock).
+const linkHook = vi.hoisted(() => ({ after: null as null | (() => Promise<void>) }));
+vi.mock("@/lib/families/links", async (original) => {
+  const m = await original<typeof import("@/lib/families/links")>();
+  return { ...m, customerOfFamily: async (...args: Parameters<typeof m.customerOfFamily>) => {
+    const r = await m.customerOfFamily(...args);
+    const hook = linkHook.after;
+    if (hook) { linkHook.after = null; await hook(); }
+    return r;
+  } };
+});
+
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, auditLog, family, familyMoney, qboConnection, qboCustomer, setting } from "@/lib/db/schema";
 import { asAppFamilyId } from "@/lib/families/ids";
-import { loadFamilyMoney, MAX_LIVE_READS, RETRY_AFTER_FAILURE_MS } from "@/lib/money/family-money";
+import { loadFamilyMoney, MAX_LIVE_READS, readFamilyForRun, RELINKED, RETRY_AFTER_FAILURE_MS } from "@/lib/money/family-money";
 import { saveShape } from "@/lib/roster/shape";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import { calendarDayIn } from "@/lib/settings/club";
@@ -893,5 +906,37 @@ describe("the cross-check against QuickBooks' own balance (v1 spec §8.3)", () =
     expect((await moneyOf("10")).figures).toMatchObject({ totalCents: 18500, credit: false });
     expect(await audits()).toHaveLength(0);
     expect(await db.select().from(auditLog)).toHaveLength(0); // a parent's own read is not audited either
+  });
+});
+
+describe("a read never keeps another link's invoices (stage 4's slice M3b)", () => {
+  beforeEach(() => { linkHook.after = null; });
+
+  it("a page load whose family is unlinked between its first look and its lock reads and keeps nothing", async () => {
+    await twoFamilies();
+    await connectCompany(stub);
+    stub.invoices = [inv("1", "10")];
+    const familyId = (await familyRecordOf("10"))!;
+    // The link goes (as an unlink commits) just after the read's first look found it.
+    linkHook.after = async () => { await db.delete(accountingLink).where(eq(accountingLink.familyId, familyId)); };
+    const money = await loadFamilyMoney(familyId);
+    expect(linkHook.after).toBeNull(); // the hook ran: the read's first look found the customer
+    expect(money).toMatchObject({ figures: null, notConnected: true });
+    expect(invoiceQueries(stub)).toEqual([]);
+    expect(await db.select().from(familyMoney).where(eq(familyMoney.familyId, familyId))).toEqual([]);
+  });
+
+  it("the run's read of a family handed a customer the family is no longer linked to passes it over, reading and stamping nothing", async () => {
+    await twoFamilies();
+    await connectCompany(stub);
+    stub.invoices = [inv("1", "10"), inv("2", "20")];
+    const familyId = (await familyRecordOf("10"))!;
+    const pace = async () => {};
+    // "20" is the other family's customer: as a run that listed family A under it before a relink would hand it over.
+    expect(await readFamilyForRun(familyId, "20", { pace })).toEqual({ ok: false, code: RELINKED });
+    await db.delete(accountingLink).where(eq(accountingLink.familyId, familyId));
+    expect(await readFamilyForRun(familyId, "10", { pace })).toEqual({ ok: false, code: RELINKED });
+    expect(stub.apiCalls()).toEqual([]);
+    expect(await db.select().from(familyMoney)).toEqual([]);
   });
 });
