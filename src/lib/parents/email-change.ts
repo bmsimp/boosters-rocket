@@ -30,6 +30,7 @@ import { askForRosterRefresh } from "./refresh-ask";
 import { deleteUnusedSigninCodes, deleteUnusedSigninLinks, endParentSessions, enterableGuardianRows, forgetDevices, lockEmail, parentActor } from "./sessions";
 import { getParentSettings } from "./settings";
 import { sessionProvedRecently } from "./asking-again";
+import { hasAuthenticator } from "./authenticator";
 import { SIGNIN_SETTINGS_COPY } from "./signin-settings-copy";
 
 /** How long the link mailed to the new address works. */
@@ -46,6 +47,8 @@ export const EMAIL_COPY = {
   same: "That's the address you sign in with now.",
   /** Asked without a recent proof (asking again, slice SI-5a): nothing is stored or mailed. */
   proveFirst: "Before you change your sign-in email, please show it's you with your password and a code we email you. Please reload this page and do that first, or do it in Sign-in settings on the Family page.",
+  /** The same, for a guardian with an authenticator app in force (slice SI-6b), who is asked for its code and emailed nothing. */
+  proveFirstWithApp: "Before you change your sign-in email, please show it's you with your password and the code from your authenticator app. Please reload this page and do that first, or do it in Sign-in settings on the Family page.",
   sent: (email: string) => `We've sent a link to ${email}. Open it within 24 hours to finish the change. Until then, keep signing in with the address you use now.`,
   notSent: "We couldn't send the email just now, so nothing has changed. Please try again in a little while.",
   tooManyAsks: "You've asked to change your sign-in email a few times in the last hour. Please wait a little while before trying again.",
@@ -152,7 +155,7 @@ export async function requestMyEmailChange(ctx: ParentCtx, input: unknown): Prom
       after: { email, familyId: String(ctx.familyId) }, ip: ctx.ip }, tx);
     return true as const;
   });
-  if (asked === "not_proved") return refused("not_proved", [EMAIL_COPY.proveFirst], record);
+  if (asked === "not_proved") return refused("not_proved", [(await hasAuthenticator(ctx.parentId)) ? EMAIL_COPY.proveFirstWithApp : EMAIL_COPY.proveFirst], record);
   if (asked === "strict") return refused("strict", [SIGNIN_SETTINGS_COPY.strict], record);
   const brand = await currentBrand();
   const sent = await sendMail(emailChangeConfirmMessage(brand, email, { link: emailChangeLink(token) }), { purpose: "email_change_confirm", actor, ip: ctx.ip });
