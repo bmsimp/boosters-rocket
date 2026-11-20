@@ -20,8 +20,8 @@ export const DOOR_IP = "203.0.113.30";
 export const DOOR_PASSWORD = "the parents' long test password";
 
 type Mail = { to: string; subject: string };
-/** What a door endpoint answered. */
-export type DoorBody = { ok: boolean; next?: string; step?: "code" | "app"; error?: string; ended?: boolean };
+/** What a door endpoint answered: since slice SI-7a the passkey step too, with `app` when the app is offered beside it. */
+export type DoorBody = { ok: boolean; next?: string; step?: "code" | "app" | "passkey"; app?: boolean; error?: string; ended?: boolean };
 /** Request headers beside the content type and origin; by default the client-IP header with DOOR_IP. */
 type Headers = Record<string, string>;
 

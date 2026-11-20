@@ -52,6 +52,7 @@ import { codeMailed } from "../helpers/parent-door";
 import { seedEmailChange } from "../helpers/email-change";
 import { linkRows, mintLink, seedCode, seedDevice, seedPassword } from "../helpers/signin-links";
 import { appCode, authenticatorRows, backupCodeRows, seedAuthenticator, seedBackupCodes, wrongAppCode } from "../helpers/authenticator";
+import { seedPasskey } from "../helpers/passkey";
 
 /**
  * A parent's sign-in settings (/family/sign-in; the sign-in release, slice SI-5a): the page, asking again (the door's
@@ -1107,5 +1108,45 @@ describe("the authenticator app box (slice SI-6b)", () => {
     expect(box(whole)).toContain(COPY.appSetUp);
     expect(whole).toContain(html(COPY.how));
     for (const v of [unfinished.secret, unfinished.id]) expect(whole).not.toContain(v);
+  });
+});
+
+describe("a passkey and asking again (slice SI-7a: only the newest-factor rule; asking again takes a passkey from SI-7b)", () => {
+  it("a passkey added after a session's proof makes the session asked again", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await proveRecently(a.identity, PROVEN_PASSWORD, new Date(Date.now() - 5_000));
+    expect(await sessionProvedRecently(db, a.identity)).toBe(true);
+    await seedPasskey(a.identity.parentId, { createdAt: new Date() });
+    expect(await sessionProvedRecently(db, a.identity)).toBe(false);
+    expect(await changeMyPassword(ctxOf(a.identity), { password: NEW_PASSWORD, again: NEW_PASSWORD })).toEqual({ ok: false, errors: [COPY.proveAgain] });
+  });
+
+  it("a passkey older than the proof leaves it counting", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await seedPasskey(a.identity.parentId, { createdAt: new Date(Date.now() - 60_000) });
+    await proveRecently(a.identity, PROVEN_PASSWORD, new Date(Date.now() - 5_000));
+    expect(await sessionProvedRecently(db, a.identity)).toBe(true);
+  });
+
+  it("a passkey holder with no app is asked again, by design until SI-7b, as a person with no passkey is: the password, then the emailed code, which is taken", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await withPassword(a);
+    await seedPasskey(a.identity.parentId);
+    const { stamp, code } = await passwordThenCode(a.identity);
+    expect(await askAgainCodeAction(stamp, code)).toEqual({ ok: true, message: COPY.proved });
+    expect((await audits("signin.proved_again")).map((r) => r.after)).toEqual([{ step: "emailed_code" }]);
+    expect(await sessionProvedRecently(db, a.identity)).toBe(true);
+  });
+
+  it("a holder of a passkey and an app is asked again for the app, as SI-6a made it", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await withPassword(a);
+    const app = await seedAuthenticator(a.identity.parentId);
+    await seedPasskey(a.identity.parentId);
+    asParent(a.identity);
+    const first = await askAgainPasswordAction(PROVEN_PASSWORD);
+    if (!first.ok || first.step !== "app") throw new Error("the app's step should be asked for");
+    expect(await askAgainCodeAction(first.stamp, appCode(app.secret))).toEqual({ ok: true, message: COPY.proved });
+    expect(await codesOf(a.identity.parentId)).toEqual([]);
   });
 });
