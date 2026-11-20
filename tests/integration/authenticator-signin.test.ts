@@ -239,6 +239,60 @@ describe("the app step at /portal-app/check", () => {
     expect((await audits("signin.refused")).map((r) => r.after)).toEqual([{ reason: "second_factor_unreadable" }]);
     expect(await sessions()).toEqual([]);
   });
+
+  it("tries against a secret that won't open keep no place: after five the count is zero, and a backup code still gets in", async () => {
+    const ana = await seedAna();
+    const [backup] = await seedBackupCodes(ana.id, 1);
+    const elsewhere = sealAuthenticatorSecret("00000000-0000-4000-8000-000000000000", ana.id, ana.app!.secret);
+    await db.update(parentAuthenticator).set({ secretCiphertext: elsewhere.ciphertext, secretKeyId: elsewhere.keyId }).where(eq(parentAuthenticator.id, ana.app!.id));
+    const pending = await anaAtTheApp();
+    for (let i = 0; i < 5; i++) expect((await appStep(appCode(ana.app!.secret), pending)).body).toEqual(REFUSED);
+    expect((await db.select().from(rateLimitEvent)).filter((e) => e.kind === "second_step_parent" && e.subject === ana.id)).toEqual([]);
+    expect((await audits("signin.refused")).map((r) => r.after)).toEqual(Array.from({ length: 5 }, () => ({ reason: "second_factor_unreadable" })));
+    expect(await audits("signin.second_step_wrong")).toEqual([]);
+    expect((await appStep(backup!, pending)).body).toEqual({ ok: true, next: "/" });
+    expect((await audits("signin.second_step")).map((r) => r.after)).toEqual([{ factor: "backup_code", left: 0 }]);
+  });
+
+  it("an app's code typed as the apps show it, with a space or a dash, is the app's code, a leading zero kept", async () => {
+    const ana = await seedAna();
+    const step = await stepPersonFor("ana@example.com");
+    const s = ana.app!.secret;
+    // Two steps whose codes start with a zero, the second the newer (a code is taken only for a newer step than the last).
+    const zeros: Date[] = [];
+    for (let k = 0; zeros.length < 2; k++) {
+      const at = new Date(Date.now() + k * 30_000);
+      if (appCode(s, at).startsWith("0")) zeros.push(at);
+    }
+    const [first, second] = zeros as [Date, Date];
+    const a = appCode(s, first);
+    const b = appCode(s, second);
+    expect(await verifySecondFactor(step, `${a.slice(0, 3)} ${a.slice(3)}`, DOOR_IP, first)).toMatchObject({ ok: true, factor: "authenticator" });
+    expect(await verifySecondFactor(step, `${b.slice(0, 3)}-${b.slice(3)}`, DOOR_IP, second)).toMatchObject({ ok: true, factor: "authenticator" });
+    expect((await authenticatorRows(ana.id))[0]!.lastUsedStep).toBe(totpStep(second));
+    // Five digits (as a code with its zero dropped would be) or seven, spaced or dashed or not, are no code of either shape.
+    const later = new Date(second.getTime() + 30_000);
+    for (const typed of ["12345", "12 34 5", "1234-567"]) {
+      expect([typed, await verifySecondFactor(step, typed, DOOR_IP, later)]).toEqual([typed, { ok: false, reason: "rejected", ended: false }]);
+    }
+    expect((await audits("signin.second_step_wrong")).map((r) => (r.after as { reason: string }).reason)).toEqual(["wrong", "wrong", "wrong"]);
+  });
+
+  it("a backup code with spaces and dashes about it is still a backup code", async () => {
+    const ana = await seedAna();
+    const step = await stepPersonFor("ana@example.com");
+    const [code] = await seedBackupCodes(ana.id, 1);
+    expect(await verifySecondFactor(step, ` ${code!.replace("-", " - ").toLowerCase()} `, DOOR_IP)).toMatchObject({ ok: true, factor: "backup_code" });
+  });
+
+  it("tries made at once each write their own number among the window's tries", async () => {
+    const ana = await seedAna();
+    const step = await stepPersonFor("ana@example.com");
+    const wrong = wrongAppCode(ana.app!.secret);
+    const now = new Date();
+    await Promise.all([1, 2, 3].map(() => verifySecondFactor(step, wrong, DOOR_IP, now)));
+    expect((await audits("signin.second_step_wrong")).map((r) => (r.after as { try: number }).try).sort()).toEqual([1, 2, 3]);
+  });
 });
 
 describe("the emailed code is never an app holder's", () => {

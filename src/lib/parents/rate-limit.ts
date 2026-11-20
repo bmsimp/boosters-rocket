@@ -64,7 +64,8 @@ export const RATE_LIMITS: Record<RateLimitKind, { max: number; windowMs: number 
   // (never a typed address: only a right password makes either). A six-digit code has a million values and three are
   // live at once (a step either way), so 5 wrong tries in 15 minutes, as the emailed code's 5 tries, keeps a guess
   // at about one in sixty thousand a quarter of an hour; a right code gives its place back (giveBackRateLimit()), so a
-  // parent's own codes never use one up. Taken before the person's app or codes are read, so tries sent at once can't
+  // parent's own codes never use one up, and so does a try whose app's secret won't open (no guess was possible), so it
+  // never shuts the parent out of their backup codes. Taken before the person's app or codes are read, so tries sent at once can't
   // slip past. The per-IP flood stop is the code check's (code_check_ip).
   second_step_parent: { max: 5, windowMs: WINDOW_MS },
   password_change_parent: { max: 10, windowMs: 60 * 60 * 1000 },
@@ -115,8 +116,13 @@ export async function takeRateLimit(kind: RateLimitKind, subject: string, now = 
   return (await takeRateLimitPlace(kind, subject, now)).take;
 }
 
-/** A place taken in a window: the event's row, which giveBackRateLimit() can give back, or null when nothing was counted. */
-export type RateLimitPlace = { take: RateLimitTake; placeId: number | null };
+/**
+ * A place taken in a window: the event's row, which giveBackRateLimit() can give back, or null when nothing was counted;
+ * and, for a place taken, its number among the window's live events (`number`, 1 for the first), counted under the
+ * limit's lock in the transaction that took it, so tries made at once each get their own (a try's audit row,
+ * verifySecondFactor()).
+ */
+export type RateLimitPlace = { take: RateLimitTake; placeId: number | null; number?: number };
 
 /** As takeRateLimit(), with the row of the event it counted, for a caller that may give the place back. */
 export async function takeRateLimitPlace(kind: RateLimitKind, subject: string, now = new Date()): Promise<RateLimitPlace> {
@@ -130,7 +136,7 @@ export async function takeRateLimitPlace(kind: RateLimitKind, subject: string, n
     const [{ n }] = (await tx.select({ n: count() }).from(rateLimitEvent).where(live)) as [{ n: number }];
     if (n < max) {
       const [row] = await tx.insert(rateLimitEvent).values({ kind, subject, at: now }).returning({ id: rateLimitEvent.id });
-      return { take: "taken" as const, placeId: row!.id };
+      return { take: "taken" as const, placeId: row!.id, number: n + 1 };
     }
     const [oldest] = await tx.select({ id: rateLimitEvent.id, refusalAudited: rateLimitEvent.refusalAudited }).from(rateLimitEvent)
       .where(live).orderBy(asc(rateLimitEvent.at), asc(rateLimitEvent.id)).limit(1);
@@ -138,14 +144,6 @@ export async function takeRateLimitPlace(kind: RateLimitKind, subject: string, n
     await tx.update(rateLimitEvent).set({ refusalAudited: true }).where(eq(rateLimitEvent.id, oldest.id));
     return { take: "first_refusal" as const, placeId: null };
   });
-}
-
-/** How many events of (kind, subject) the window holds now: a try's number, for its audit row (verifySecondFactor()). */
-export async function rateLimitCount(kind: RateLimitKind, subject: string, now = new Date()): Promise<number> {
-  const since = new Date(now.getTime() - RATE_LIMITS[kind].windowMs);
-  const [{ n }] = (await db.select({ n: count() }).from(rateLimitEvent)
-    .where(and(eq(rateLimitEvent.kind, kind), eq(rateLimitEvent.subject, subject), gt(rateLimitEvent.at, since)))) as [{ n: number }];
-  return n;
 }
 
 /**

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { BACKUP_CODE_ALPHABET, BACKUP_CODE_COUNT, BACKUP_CODE_LENGTH, hashBackupCode, isBackupCodeShape, newBackupCode, normalizeBackupCode, showBackupCode } from "@/lib/parents/backup-codes";
+import { BACKUP_CODE_ALPHABET, BACKUP_CODE_COUNT, BACKUP_CODE_LENGTH, hashBackupCode, isBackupCodeShape, newBackupCode, normalizeBackupCode, readSecondStepCode, showBackupCode } from "@/lib/parents/backup-codes";
 
 const PERSON = "6f3a9c1e-2b4d-4e8f-9a7b-1c2d3e4f5a6b";
 
@@ -34,6 +34,17 @@ describe("backup codes", () => {
       expect(normalizeBackupCode(typed)).toBeNull();
       expect(isBackupCodeShape(typed)).toBe(false);
     });
+
+  it.each([
+    ["123456", { kind: "app", code: "123456" }], ["123 456", { kind: "app", code: "123456" }], ["123-456", { kind: "app", code: "123456" }],
+    [" 012 345 ", { kind: "app", code: "012345" }], ["012-345", { kind: "app", code: "012345" }], ["000000", { kind: "app", code: "000000" }],
+    ["ABCDE-FGHJK", { kind: "backup", code: "ABCDEFGHJK" }], ["abcde fghjk", { kind: "backup", code: "ABCDEFGHJK" }],
+    ["AB CDE-FG HJK", { kind: "backup", code: "ABCDEFGHJK" }], ["23456 78923", { kind: "backup", code: "2345678923" }],
+    ["12345", { kind: "neither" }], ["1234567", { kind: "neither" }], ["12 34 5", { kind: "neither" }], ["1234-567", { kind: "neither" }],
+    ["12345a", { kind: "neither" }], ["ABCDE-FGHIK", { kind: "neither" }], ["", { kind: "neither" }],
+  ] as const)("a typed second step %j reads as %j: spaces and dashes dropped first", (typed, read) => {
+    expect(readSecondStepCode(typed)).toEqual(read);
+  });
 
   it("are held only as a keyed hash that names the person, never the code", () => {
     const h = hashBackupCode(PERSON, "ABCDEFGHJK");

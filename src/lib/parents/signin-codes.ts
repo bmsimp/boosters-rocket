@@ -16,12 +16,12 @@ import { env } from "@/env";
 import { mailWorking } from "@/lib/mail/settings";
 import { sendMail, currentBrand } from "@/lib/mail/send";
 import { changeCodeMessage, signinCodeMessage } from "@/lib/mail/messages";
-import { giveBackRateLimit, rateLimitCount, takeRateLimit, takeRateLimitPlace, type RateLimitTake } from "./rate-limit";
+import { giveBackRateLimit, takeRateLimit, takeRateLimitPlace, type RateLimitTake } from "./rate-limit";
 import { enterableGuardianRows, lockedPerson, parentActor } from "./sessions";
 import { getParentSettings, parentDoorClosed, type ParentSettings } from "./settings";
 import { secondStepFor } from "./second-step-rule";
 import { authenticatorStands, backupCodeStands, hasAuthenticator, takeAuthenticatorCode, takeBackupCode } from "./authenticator";
-import { isBackupCodeShape } from "./backup-codes";
+import { readSecondStepCode } from "./backup-codes";
 
 export const CODE_TTL_MS = 10 * 60 * 1000;
 export const CODE_MAX_TRIES = 5;
@@ -316,7 +316,6 @@ export type SecondFactorResult = { ok: true; factor: SecondFactor; proof: Second
 const FACTOR_REJECTED: SecondFactorResult = { ok: false, reason: "rejected", ended: false };
 const FACTOR_REJECTED_ENDED: SecondFactorResult = { ok: false, reason: "rejected", ended: true };
 const FACTOR_LIMITED: SecondFactorResult = { ok: false, reason: "rate_limited", ended: false };
-const SIX_DIGITS = /^\d{6}$/;
 
 /**
  * The second step of a person with an authenticator app in force (the sign-in release, slice SI-6a; open question 24),
@@ -326,19 +325,24 @@ const SIX_DIGITS = /^\d{6}$/;
  *     audited naming nobody;
  * (b) the try's place under the person (`second_step_parent`, 5 wrong in 15 minutes, keyed by the person's id), taken
  *     before their app or codes are read, so tries sent at once can't slip past; its first refusal audited
- *     `signin.refused` (`rate_limited`, `limit: "second_step"`); a right code gives the place back;
+ *     `signin.refused` (`rate_limited`, `limit: "second_step"`); a right code gives the place back, and so does a try
+ *     whose app's secret won't open, against which no guess was possible, so it never shuts the person out of their
+ *     backup codes;
  * (c) as verifySigninCode() does before it looks at a code: the person still at the address, not blocked, and their
  *     `credential` row still the one the step proved (each ends the step), the last read in the try's transaction under
  *     the person's row (lockedPerson()), where their newest "Sign out everywhere" is read too, for the proof
  *     (SecondFactorProof.signedOutSeen): a press waits for the try, or the try for the press;
- * (d) the code by its shape (spaces dropped): six digits is the app's, read against its sealed secret for the step now
+ * (d) the code by its shape (readSecondStepCode(), backup-codes.ts: spaces and dashes dropped, so "123 456" and
+ *     "123-456" are the app's code as the apps show it): six digits is the app's, read against its sealed secret for the step now
  *     and the one before and after, and taken only for a step newer than the newest taken (takeAuthenticatorCode(),
  *     authenticator.ts: no replay, and two tries at once take it once); ten characters of the backup codes' alphabet,
  *     with or without their dash and in any case, is a backup code, found by its keyed hash among the person's unspent
  *     ones and spent (takeBackupCode(): it works once, and only beside an app in force); anything else is a wrong try.
  *     Each in one transaction with its row: `signin.second_step` (`factor`, and for a backup code how many are `left`),
- *     or `signin.second_step_wrong` (`factor`, the try's number in the window, `try`, and why, `reason`: `wrong`,
- *     `replayed` or `no_app`), or, for an app whose secret won't open, `signin.refused` (`second_factor_unreadable`);
+ *     or `signin.second_step_wrong` (`factor`, the try's number among the window's live tries, `try`, counted under
+ *     the limit's lock as its place was taken, and why, `reason`: `wrong`,
+ *     `replayed` or `no_app`), or, for an app whose secret won't open, `signin.refused` (`second_factor_unreadable`),
+ *     answered as the one refusal with its place given back; a backup code is still taken then, as it opens no secret;
  * (e) the door's own checks again (sign-ins on, not blocked, a row that counts), each `signin.refused` ending the step.
  * Every refusal is one answer to the browser, over a limit the over-limit one; the reasons are in the rows alone, and
  * no row holds the code, the secret or a hash.
@@ -367,23 +371,25 @@ export async function verifySecondFactor(step: { parentId: string; email: string
     await writeAudit({ actor: parentActor(p), action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason: "blocked" }, ip });
     return FACTOR_REJECTED_ENDED;
   }
-  const typed = rawCode.replace(/\s+/g, "");
-  const factor: SecondFactor = !SIX_DIGITS.test(typed) && isBackupCodeShape(typed) ? "backup_code" : "authenticator";
-  const tries = await rateLimitCount("second_step_parent", p.id, now);
+  const typed = readSecondStepCode(rawCode);
+  const factor: SecondFactor = typed.kind === "backup" ? "backup_code" : "authenticator";
 
   const outcome = await db.transaction(async (tx) => {
     await lockedPerson(tx, p.id);
     if (!samePassword(await credentialNow(tx, p.id, step.password.credentialId), step.password)) return "password_changed" as const;
     const signedOutSeen = await newestSignOutEverywhere(tx, p.id);
-    const took = factor === "backup_code" ? await takeBackupCode(tx, p.id, typed, now)
-      : SIX_DIGITS.test(typed) ? await takeAuthenticatorCode(tx, p.id, typed, now) : { miss: "wrong" as const };
+    const took = typed.kind === "backup" ? await takeBackupCode(tx, p.id, typed.code, now)
+      : typed.kind === "app" ? await takeAuthenticatorCode(tx, p.id, typed.code, now) : { miss: "wrong" as const };
     if ("miss" in took) {
       if (took.miss === "unreadable") {
+        // No guess against the secret was possible: the try gives its place back (below), so a secret that won't open
+        // never shuts the person out of their backup codes.
         await writeAudit({ actor: parentActor(p), action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason: "second_factor_unreadable" }, ip }, tx);
-      } else {
-        await writeAudit({ actor: parentActor(p), action: "signin.second_step_wrong", targetType: "parent", targetId: p.id,
-          after: { factor, try: tries, reason: took.miss }, ip }, tx);
+        return "unreadable" as const;
       }
+      // `try` is the place's own number among the window's live tries, counted when it was taken (takeRateLimitPlace()).
+      await writeAudit({ actor: parentActor(p), action: "signin.second_step_wrong", targetType: "parent", targetId: p.id,
+        after: { factor, try: place.number ?? 0, reason: took.miss }, ip }, tx);
       return "missed" as const;
     }
     await writeAudit({ actor: parentActor(p), action: "signin.second_step", targetType: "parent", targetId: p.id,
@@ -395,8 +401,9 @@ export async function verifySecondFactor(step: { parentId: string; email: string
     return FACTOR_REJECTED_ENDED;
   }
   if (outcome === "missed") return FACTOR_REJECTED;
-  // A right code is never counted against the parent.
+  // A right code is never counted against the parent, nor a try whose app's secret wouldn't open (still the one refusal).
   await giveBackRateLimit(place.placeId);
+  if (outcome === "unreadable") return FACTOR_REJECTED;
   // The person must still be allowed in now; whether the address, the password and what was spent still stand is
   // settled last of all, once the session exists (signinStands()). Under Strict the app is a second step (question 35).
   const [fresh] = await db.select().from(parent).where(eq(parent.id, p.id));

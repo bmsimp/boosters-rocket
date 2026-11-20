@@ -31,6 +31,20 @@ export function normalizeBackupCode(typed: string): string | null {
 /** Whether what was typed is a backup code's shape (normalizeBackupCode() reads it as one). */
 export const isBackupCodeShape = (typed: string): boolean => normalizeBackupCode(typed) !== null;
 
+/**
+ * What a typed second step is by its shape (verifySecondFactor(), signin-codes.ts): with spaces and dashes dropped
+ * first (an app shows its code as "123 456", and some as "123-456"), six digits are an authenticator app's code, kept as
+ * typed (a leading zero included); ten characters of the alphabet, in any case, a backup code, as
+ * normalizeBackupCode() reads it; anything else is neither.
+ */
+export type TypedSecondStep = { kind: "app"; code: string } | { kind: "backup"; code: string } | { kind: "neither" };
+export function readSecondStepCode(raw: string): TypedSecondStep {
+  const typed = raw.replace(/[\s-]/g, "");
+  if (/^\d{6}$/.test(typed)) return { kind: "app", code: typed };
+  const backup = normalizeBackupCode(typed);
+  return backup !== null ? { kind: "backup", code: backup } : { kind: "neither" };
+}
+
 /** A code as it is shown: its two halves with a dash between them. */
 export const showBackupCode = (code: string): string => `${code.slice(0, 5)}-${code.slice(5)}`;
 
