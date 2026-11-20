@@ -24,6 +24,7 @@ for (const [path, heading] of [["/sign-in", "Sign in"], ["/staff/sign-in", "Staf
 
 test("the parent door promises what a parent finds today: their students, what's owed, forms and volunteer shifts", async ({ page }) => {
   await page.goto("/sign-in");
-  // Since the sign-in release's slice SI-3b: the email and password, and a code only on a device the portal doesn't know.
-  await expect(page.locator("main .lede").first()).toHaveText("Sign in with your email and password to see your students, what's owed, the forms to sign and the volunteer shifts. On a device we don't know yet, we'll also ask for a code.");
+  // Since the sign-in release's slice SI-3b: the email and password, and one more thing only on a device the portal
+  // doesn't know (since SI-7a it never says which: a code, the app or a passkey).
+  await expect(page.locator("main .lede").first()).toHaveText("Sign in with your email and password to see your students, what's owed, the forms to sign and the volunteer shifts. On a device we don't know yet, we'll ask for one more thing to be sure it's you.");
 });

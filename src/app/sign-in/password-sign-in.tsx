@@ -1,7 +1,11 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { APP_ASKED, APP_CODE_LABEL, APP_REJECTED, APP_STEP_ENDED, APP_STEP_OVER, CODE_SENT, CODE_REJECTED, CODE_STEP_ENDED, PASSWORD_REJECTED, SIGNIN_LEDE, TOO_MANY_TRIES, signinFailure } from "@/lib/parents/signin-copy";
+import { APP_ASKED, APP_CODE_LABEL, APP_REJECTED, APP_STEP_ENDED, APP_STEP_OVER, CODE_SENT, CODE_REJECTED, CODE_STEP_ENDED, PASSWORD_REJECTED, SIGNIN_LEDE, TOO_MANY_TRIES, signinFailure,
+  PASSKEY_ASKED, PASSKEY_BUTTON, PASSKEY_CANCELLED, PASSKEY_EXPLAINED, PASSKEY_ONLY, PASSKEY_OR_APP, PASSKEY_REJECTED, PASSKEY_STEP_ENDED, PASSKEY_UNSUPPORTED, PASSKEY_USE,
+  passkeyElsewhere } from "@/lib/parents/signin-copy";
+import { parentAuthClient } from "@/lib/auth/client";
 import { CODE_STEP_LIFE_MS, clearCodeStep, deviceStore, loadCodeStep, saveCodeStep, type CodeStepKind } from "./code-step";
+import { passkeysWorkIn, readCeremony, toPortalCheck } from "./passkey-ceremony";
 
 const BASE = "/api/auth/parent";
 const RESEND_SECONDS = 60;
@@ -14,20 +18,26 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 class HttpStatus extends Error { constructor(readonly status: number) { super(`HTTP ${status}`); } }
 const failure = (e: unknown) => signinFailure(e instanceof HttpStatus ? e.status : null);
 
-type Answer = { ok: boolean; next?: string; step?: "code" | "app"; error?: string; ended?: boolean };
+type Answer = { ok: boolean; next?: string; step?: "code" | "app" | "passkey"; app?: boolean; error?: string; ended?: boolean };
+/** Where passkeys can be used from this page: here, not in this browser at all, or not at this address. */
+type PasskeysHere = "here" | "unsupported" | "elsewhere";
 /** What went wrong, in words, with whether to show the way to set up or reset a password beside it. */
 type Problem = { words: string; passwordLink: boolean };
 
 /**
  * Spec §1 The pages, as the sign-in release's slice SI-3b made them: the email and the password on one form, then, on a
  * device the portal doesn't remember, the 6-digit code it emails, or, since slice SI-6a, for a parent with an
- * authenticator app, the app's code or a backup code (the app step: nothing is emailed, so there is no Resend). The page
- * never says whether the address is on file.
+ * authenticator app, the app's code or a backup code (the app step: nothing is emailed, so there is no Resend), and,
+ * since slice SI-7a, for a parent with a passkey, the passkey (with the app's code beside it when they have an app too).
+ * The first screen also offers "Sign in with a passkey" to everyone, with no address asked (open question 30): the
+ * passkey library's ceremony, whose one verify request goes to the portal's own check (./passkey-ceremony.ts). The page
+ * never says whether the address is on file. `portalOrigin` is APP_URL's origin, where passkeys work; reached at
+ * another address, the page says so in the button's place.
  * The step between the two is the server's (a signed cookie this component never sets or reads); the device keeps only
  * when the second step was asked for, which one it is, and where to go (./code-step.ts). `next` is the page the parent asked for, already checked
  * by the sign-in page; the portal checks it again when the sign-in finishes.
  */
-export function PasswordSignIn({ next }: { next: string | null }) {
+export function PasswordSignIn({ next, portalOrigin }: { next: string | null; portalOrigin: string }) {
   const [step, setStep] = useState<"password" | CodeStepKind>("password");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -40,10 +50,20 @@ export function PasswordSignIn({ next }: { next: string | null }) {
   const [back, setBack] = useState(next);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
+  // At the passkey step: whether the app's code or a backup code is offered beside the passkey.
+  const [appBeside, setAppBeside] = useState(false);
+  // Known only in the browser, after mount: drawn as "here" first, so the server's page and the first draw agree.
+  const [passkeys, setPasskeys] = useState<PasskeysHere>("here");
+  useEffect(() => {
+    /* eslint-disable-next-line react-hooks/set-state-in-effect */
+    setPasskeys(!passkeysWorkIn(window as unknown as Parameters<typeof passkeysWorkIn>[0]) ? "unsupported" : window.location.origin !== portalOrigin ? "elsewhere" : "here");
+  }, [portalOrigin]);
   // Moving between the steps draws the other form, so the first field of the new step takes the focus (not on first drawing).
   const field = useRef<HTMLInputElement>(null);
+  // The passkey step's first stop, which has no field of its own to take the focus.
+  const firstButton = useRef<HTMLButtonElement>(null);
   const moved = useRef(false);
-  useEffect(() => { if (moved.current) field.current?.focus(); }, [step]);
+  useEffect(() => { if (moved.current) (field.current ?? firstButton.current)?.focus(); }, [step]);
 
   // A reload in the middle (a phone reloads an installed app when the parent comes back from their mail) picks the
   // code step up where it was. What the device kept is unknowable on the server, so it is read after mount.
@@ -51,7 +71,7 @@ export function PasswordSignIn({ next }: { next: string | null }) {
     const saved = loadCodeStep(deviceStore(), Date.now());
     if (!saved) return;
     /* eslint-disable react-hooks/set-state-in-effect */
-    setStartedAt(saved.sentAt); setSentAt(saved.sentAt); setNow(Date.now()); setStep(saved.kind);
+    setStartedAt(saved.sentAt); setSentAt(saved.sentAt); setNow(Date.now()); setStep(saved.kind); setAppBeside(saved.app === true);
     if (!next) setBack(saved.next);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [next]);
@@ -64,21 +84,28 @@ export function PasswordSignIn({ next }: { next: string | null }) {
       if (at - startedAt < CODE_STEP_LIFE_MS) { setNow(at); return; }
       clearCodeStep(deviceStore()); moved.current = true;
       setStep("password"); setEmail(""); setPassword(""); setBack(next); setCode("");
-      setProblem({ words: step === "app" ? APP_STEP_ENDED : CODE_STEP_ENDED, passwordLink: false });
+      setProblem({ words: step === "app" ? APP_STEP_ENDED : step === "passkey" ? PASSKEY_STEP_ENDED : CODE_STEP_ENDED, passwordLink: false });
     }, 1000);
     return () => clearInterval(t);
   }, [step, startedAt, next]);
 
-  const toCodeStep = (kind: CodeStepKind) => {
+  const toCodeStep = (kind: CodeStepKind, app = false) => {
     const t = Date.now();
-    saveCodeStep(deviceStore(), { sentAt: t, next: back, kind });
-    moved.current = true; setStartedAt(t); setSentAt(t); setNow(t); setCode(""); setPassword(""); setStep(kind);
+    saveCodeStep(deviceStore(), { sentAt: t, next: back, kind, ...(kind === "passkey" ? { app } : {}) });
+    moved.current = true; setStartedAt(t); setSentAt(t); setNow(t); setCode(""); setPassword(""); setAppBeside(app); setStep(kind);
+  };
+  // A step the server ended (it never says why): back to the password step, as when its time runs out.
+  const stepOver = (words: string) => {
+    clearCodeStep(deviceStore()); moved.current = true;
+    setStep("password"); setEmail(""); setPassword(""); setBack(next); setCode("");
+    setProblem({ words: `${words} ${APP_STEP_OVER}`, passwordLink: false });
   };
   const signIn = async () => {
     setBusy(true); setProblem(null);
     try {
       const r = await post<Answer>("/portal-password/check", { email, password, ...(back ? { next: back } : {}) });
       if (r.ok && r.next) { clearCodeStep(deviceStore()); window.location.assign(r.next); return; }
+      if (r.ok && r.step === "passkey") { toCodeStep("passkey", r.app === true); return; }
       if (r.ok && (r.step === "code" || r.step === "app")) { toCodeStep(r.step); return; }
       // Too many tries is said as such, with no way to a reset: a reset ends every session and doesn't shorten the wait.
       setProblem(r.error === "rate_limited" ? { words: TOO_MANY_TRIES, passwordLink: false } : { words: PASSWORD_REJECTED, passwordLink: true });
@@ -97,17 +124,26 @@ export function PasswordSignIn({ next }: { next: string | null }) {
   };
   const check = async () => {
     setBusy(true); setProblem(null);
+    // The app's code or a backup code at the app step, or beside a passkey at the passkey step.
+    const app = step !== "code";
     try {
-      const r = await post<Answer>(step === "app" ? "/portal-app/check" : "/portal-code/check", { code, ...(back ? { next: back } : {}) });
+      const r = await post<Answer>(app ? "/portal-app/check" : "/portal-code/check", { code, ...(back ? { next: back } : {}) });
       if (r.ok && r.next) { clearCodeStep(deviceStore()); window.location.assign(r.next); return; }
-      if (step === "app" && r.ended) {
-        // The server ended the step (it never says why): back to the password step, as when its time runs out.
-        clearCodeStep(deviceStore()); moved.current = true;
-        setStep("password"); setEmail(""); setPassword(""); setBack(next); setCode("");
-        setProblem({ words: `${APP_REJECTED} ${APP_STEP_OVER}`, passwordLink: false });
-        return;
-      }
-      setProblem({ words: r.error === "rate_limited" ? TOO_MANY_TRIES : step === "app" ? APP_REJECTED : CODE_REJECTED, passwordLink: false });
+      if (app && r.ended) { stepOver(APP_REJECTED); return; }
+      setProblem({ words: r.error === "rate_limited" ? TOO_MANY_TRIES : app ? APP_REJECTED : CODE_REJECTED, passwordLink: false });
+    } catch (e) { setProblem({ words: failure(e), passwordLink: false }); } finally { setBusy(false); }
+  };
+  // A passkey: the passkey library's ceremony (the browser's own prompt), its verify request sent to the portal's check,
+  // which takes it alone on the first screen and as the second step at the passkey step (the pending step decides).
+  const signInWithPasskey = async () => {
+    setBusy(true); setProblem(null);
+    try {
+      const r = readCeremony<Answer>(await parentAuthClient.signIn.passkey({ fetchOptions: toPortalCheck(window.location.origin, back) }));
+      if (r.kind === "cancelled") { setProblem({ words: PASSKEY_CANCELLED, passwordLink: false }); return; }
+      if (r.kind === "failed") { setProblem({ words: signinFailure(r.status), passwordLink: false }); return; }
+      if (r.body.ok && r.body.next) { clearCodeStep(deviceStore()); window.location.assign(r.body.next); return; }
+      if (step === "passkey" && r.body.ended) { stepOver(PASSKEY_REJECTED); return; }
+      setProblem({ words: r.body.error === "rate_limited" ? TOO_MANY_TRIES : PASSKEY_REJECTED, passwordLink: false });
     } catch (e) { setProblem({ words: failure(e), passwordLink: false }); } finally { setBusy(false); }
   };
   // Starting again keeps nothing of the step it leaves, which on a shared device may have been somebody else's: not the
@@ -128,6 +164,7 @@ export function PasswordSignIn({ next }: { next: string | null }) {
 
   if (step === "password") {
     return (
+      <>
       <form className="stack" onSubmit={(e) => { e.preventDefault(); if (!busy) void signIn(); }}>
         <p className="lede">{SIGNIN_LEDE}</p>
         <label className="field"><span>Email</span>
@@ -140,6 +177,38 @@ export function PasswordSignIn({ next }: { next: string | null }) {
         {/* Busy is aria-disabled, not disabled: a disabled button drops the focus, and the keyboard's place with it. */}
         <button className="btn" aria-disabled={busy || undefined}>{busy ? "Signing in…" : "Sign in"}</button>
       </form>
+      {/* The same for every visitor: no address is asked, the browser offers the passkey (open question 30). */}
+      <div className="stack">
+        <p className="help" id="passkey-words">{PASSKEY_EXPLAINED}</p>
+        {passkeys === "here" ? (
+          <button type="button" className="btn btn-line" aria-describedby="passkey-words" aria-disabled={busy || undefined}
+            onClick={() => { if (!busy) void signInWithPasskey(); }}>{PASSKEY_BUTTON}</button>
+        ) : <p className="help">{passkeys === "elsewhere" ? passkeyElsewhere(portalOrigin) : PASSKEY_UNSUPPORTED}</p>}
+      </div>
+      </>
+    );
+  }
+  if (step === "passkey") {
+    // The passkey first; the app's code or a backup code beside it for a parent who has an app too. No Resend: nothing is emailed.
+    return (
+      <div className="stack">
+        <p role="status" id="passkey-step-words">{PASSKEY_ASKED} {appBeside ? PASSKEY_OR_APP : PASSKEY_ONLY}</p>
+        {passkeys === "here" ? (
+          <button ref={firstButton} type="button" className="btn" aria-describedby="passkey-step-words" aria-disabled={busy || undefined}
+            onClick={() => { if (!busy) void signInWithPasskey(); }}>{PASSKEY_USE}</button>
+        ) : <p className="help">{passkeys === "elsewhere" ? passkeyElsewhere(portalOrigin) : PASSKEY_UNSUPPORTED}</p>}
+        {appBeside && (
+          <form className="stack" onSubmit={(e) => { e.preventDefault(); if (!busy) void check(); }}>
+            <label className="field"><span>{APP_CODE_LABEL}</span>
+              <input name="code" aria-describedby="passkey-step-words" inputMode="text" autoCapitalize="characters" autoCorrect="off" spellCheck={false}
+                autoComplete="one-time-code" maxLength={20} required value={code} onChange={(e) => setCode(e.target.value)} />
+            </label>
+            <button className="btn btn-line" aria-disabled={busy || undefined}>{busy ? "Checking…" : "Confirm"}</button>
+          </form>
+        )}
+        {shown}
+        <button type="button" className="btn btn-line" onClick={startAgain}>Start again</button>
+      </div>
     );
   }
   if (step === "app") {

@@ -6,6 +6,7 @@ import { RETURN_PARAM, safeReturnPath } from "@/lib/auth/return-path";
 import { ClubBar } from "@/app/components/club-bar";
 import { InstallHint } from "@/app/components/pwa/install-hint";
 import { PasswordSignIn } from "./password-sign-in";
+import { env } from "@/env";
 
 export const metadata = { title: "Sign in" };
 export const dynamic = "force-dynamic";
@@ -26,7 +27,8 @@ export default async function ParentSignIn({ searchParams }: { searchParams?: Pr
       <main className="wrap signin">
         <h1 className="page-title">Sign in</h1>
         {ready && confirmingEmail && <p className="help">To confirm your new email, sign in with the address you use now. The new one works once the change is confirmed.</p>}
-        {ready ? <PasswordSignIn next={next} /> : <p role="status">{SIGNIN_UNAVAILABLE}</p>}
+        {/* The portal's own origin (APP_URL's, no secret), where passkeys work: reached at any other address, the form says so. */}
+        {ready ? <PasswordSignIn next={next} portalOrigin={new URL(env.APP_URL).origin} /> : <p role="status">{SIGNIN_UNAVAILABLE}</p>}
         {/* A set-up link for a first password, or a reset link for a forgotten one (./password, slice SI-3a). */}
         {ready && <p><a className="link-line" href="/sign-in/password">Set up or reset my password</a></p>}
         <p className="lede"><a className="link-line" href="/staff/sign-in">Board and staff sign in here</a></p>

@@ -1,10 +1,36 @@
 // The sign-in page's fixed sentences (spec §1, and the sign-in release, slice SI-3b). No imports: the client component uses this file.
 /**
- * The page's lede, above the form: what signing in is for, and that a new device takes a code too. Drawn before anyone
- * is known, so it says nothing of where the code comes from (an email, or since slice SI-6b a guardian's authenticator
- * app): the step after the password says which.
+ * The page's lede, above the form: what signing in is for, and that a new device takes one more step. Drawn before
+ * anyone is known, so it says nothing of what that step is (an emailed code, since slice SI-6b a guardian's
+ * authenticator app, since SI-7a their passkey): the step after the password says which.
  */
-export const SIGNIN_LEDE = "Sign in with your email and password to see your students, what's owed, the forms to sign and the volunteer shifts. On a device we don't know yet, we'll also ask for a code.";
+export const SIGNIN_LEDE = "Sign in with your email and password to see your students, what's owed, the forms to sign and the volunteer shifts. On a device we don't know yet, we'll ask for one more thing to be sure it's you.";
+/**
+ * The passkey's way in on the first screen (the sign-in release, slice SI-7a; open question 30): the same for every
+ * visitor, with no address asked, since the browser offers the passkey. The sentence says what a passkey is, for a
+ * parent who has never heard the word, and promises nothing about adding one.
+ */
+export const PASSKEY_BUTTON = "Sign in with a passkey";
+export const PASSKEY_EXPLAINED = "A passkey lets your phone or computer sign you in with your face, fingerprint or PIN, with no password to type.";
+/** Said in the button's place where the browser can't use passkeys at all. */
+export const PASSKEY_UNSUPPORTED = "This browser can't use passkeys. You can still sign in with your email and password.";
+/** Said in the button's place when the page was reached at an address other than the portal's own. */
+export const passkeyElsewhere = (origin: string) => `Passkeys work only at ${origin}. You can still sign in here with your email and password.`;
+/** The person cancelled the browser's passkey prompt, or the browser refused it: words, never an error. */
+export const PASSKEY_CANCELLED = "Your passkey wasn't used. You can try again, or sign in with your email and password.";
+/** One answer for a passkey that didn't sign in, whatever the reason. */
+export const PASSKEY_REJECTED = "That passkey didn't work. Try it again, or sign in with your email and password.";
+/**
+ * The passkey step, once a passkey holder's password was right on a device the portal doesn't remember: never "we
+ * emailed you", since nothing is. Beside it, for a guardian with an authenticator app too, the app's code or a backup
+ * code (PASSKEY_OR_APP); with nothing beside it, that the club can help (PASSKEY_ONLY).
+ */
+export const PASSKEY_ASKED = "To finish signing in on this device, use your passkey. Your phone or computer will ask for your face, fingerprint or PIN.";
+export const PASSKEY_OR_APP = "Or enter the 6-digit code from your authenticator app, or one of your backup codes.";
+export const PASSKEY_ONLY = "If you don't have your passkey with you, ask the club for help.";
+export const PASSKEY_USE = "Use your passkey";
+/** Shown on the password step when an open passkey step's time ran out: it promises no code, since none is emailed. */
+export const PASSKEY_STEP_ENDED = "Time ran out. Enter your email and password again, then use your passkey.";
 /**
  * One answer for every refusal at the password step but too many tries (an address nobody holds, no password yet, a
  * wrong password, a blocked person, nobody the club lets in, sign-ins off), so the page can't tell anyone whether an
