@@ -285,7 +285,8 @@ test("a parent's journeys by keyboard alone: sign in, Home to Payments, a form, 
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/\/family\/details$/);
     // The details are the portal's own (stage 3's slice 11a), so the form is there: its first field and its save are each reached.
-    await tabTo(page, page.getByRole("main").getByLabel("Phone"));
+    // By the field's role and exact name: the section's heading ("Phone and mailing address") names the section too.
+    await tabTo(page, page.getByRole("main").getByRole("textbox", { name: "Phone", exact: true }));
     await tabTo(page, page.getByRole("button", { name: "Save my details" }));
     await tabTo(page, page.getByRole("main").getByRole("link", { name: "Back to Family" }));
     await page.keyboard.press("Enter");
