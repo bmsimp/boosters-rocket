@@ -208,8 +208,10 @@ export const EMAIL_ASKED_BY = "the parent";
  * its `to` (and its `orFrom`) as what QuickBooks may hold instead (`orFrom`). The new item's `from` is the oldest of
  * every open change of the record (what QuickBooks held before them, if none landed), else the person's address before
  * this change. A change that would come back to the address the oldest one replaced queues nothing. It takes no roster
- * lock and no "being sent" lock, and waits for none: it reads and writes the queue's rows after the person's row, in the
- * order lockedPerson() (./sessions.ts) gives.
+ * lock and no "being sent" lock and waits for neither: it reads and writes the queue's rows after the person's row, in
+ * the order lockedPerson() (./sessions.ts) gives. Its inserts take a key share on each membership's family row (the
+ * foreign key), which can wait briefly for a staff write holding that row FOR UPDATE; the comment above lockedPerson()
+ * says why that is safe, and what a new writer must not do.
  */
 export async function queueEmailChange(tx: Tx, parentId: string, change: { from: string; to: string }, o: { actor: Actor; ip: string | null }): Promise<string[]> {
   const found = await emailTargetsOf(tx, parentId);
