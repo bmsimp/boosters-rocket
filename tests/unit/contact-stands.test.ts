@@ -33,14 +33,22 @@ describe("contactStands()", () => {
     expect(contactStands(held("555-0101", { ...NONE, line1: "1 Somewhere Else" }), write())).toBe("sendable");
   });
 
-  it("an empty field there is the portal's to fill only at the version it last aligned with, or where the portal knew it empty", () => {
-    // Someone may have cleared it in QuickBooks: at any other version, a difference.
+  it("an empty field there is the portal's to fill only where the portal knew it empty, whatever the version", () => {
+    // Someone may have cleared it in QuickBooks: a difference, as any other value the portal never knew of.
     expect(contactStands(held(""), write())).toBe("differs");
-    expect(contactStands(held(""), write(), { atKnownVersion: false })).toBe("differs");
-    expect(contactStands(held(""), write(), { atKnownVersion: true })).toBe("sendable");
-    // The portal knew it empty (a Parent customer made with no phone): sendable at any version.
+    expect(contactStands(held(""), write({ syncToken: "" }))).toBe("differs");
+    // The portal knew it empty (a Parent customer made with no phone): sendable.
     expect(contactStands(held(""), write({ was: { phone: "" } }))).toBe("sendable");
     expect(contactStands(held("", NONE), write({ change: { address: { ...NONE, line1: "7 Kestrel Way" } }, was: { address: NONE } }))).toBe("sendable");
+    // Or an earlier change that may have been sent asked for it empty.
+    expect(contactStands(held(""), write({ orWas: [{ phone: "" }] }))).toBe("sendable");
+    expect(contactStands(held(""), write({ orWas: [{ phone: "512-555-0111" }] }))).toBe("differs");
+    // Field by field: the address known empty, the phone not.
+    const both = write({ change: { phone: "512-555-0222", address: { ...NONE, line1: "7 Kestrel Way" } }, was: { phone: "555-0101", address: NONE } });
+    expect(contactStands(held("555-0101", NONE), both)).toBe("sendable");
+    expect(contactStands(held("", NONE), both)).toBe("differs");
+    expect(contactStands(held("", NONE), { ...both, was: { phone: "", address: { ...NONE, line1: "1 Somewhere" } } })).toBe("differs");
+    expect(contactStands(held("", NONE), { ...both, was: { phone: "", address: NONE } })).toBe("sendable");
   });
 });
 
@@ -54,8 +62,11 @@ describe("beforeResend() for a contact change that may have been sent", () => {
     expect(beforeResend(write(), [cached({})])).toEqual({ is: "send" });
     expect(beforeResend(write(), [cached({ syncToken: "5" })])).toEqual({ is: "stuck", code: "moved_on" });
     expect(beforeResend(write(), [cached({ phone: "555-9999" })])).toEqual({ is: "stuck", code: "moved_on" });
-    expect(beforeResend(write(), [cached({ phone: null })])).toEqual({ is: "send" });
+    // Empty where the portal knew a phone: settled by the field, read live, at the version it was sent with too.
+    expect(beforeResend(write(), [cached({ phone: null })])).toEqual({ is: "stuck", code: "moved_on" });
     expect(beforeResend(write(), [cached({ phone: null, syncToken: "5" })])).toEqual({ is: "stuck", code: "moved_on" });
+    // Empty where the portal knew it empty: sent again at the same version.
+    expect(beforeResend(write({ was: { phone: "" } }), [cached({ phone: null })])).toEqual({ is: "send" });
   });
   it("gone from the roster: stuck", () => {
     expect(beforeResend(write(), [])).toEqual({ is: "stuck", code: "gone" });

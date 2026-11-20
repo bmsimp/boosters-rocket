@@ -210,6 +210,33 @@ describe("each send compares QuickBooks' details first, and never overwrites one
     expect(inQuickBooks(stub, "11").PrimaryPhone).toBeUndefined();
   });
 
+  it("a field cleared in QuickBooks stays cleared, even once a send of the other field has moved the link's version on", async () => {
+    const a = await ana();
+    await setPersonDetails(a.ana.id, { line1: "12 Heron Lane", city: "Austin" });
+    await db.update(qboCustomer).set({ addressLine1: "12 Heron Lane", addressCity: "Austin" }).where(eq(qboCustomer.qboId, "11"));
+    const there = inQuickBooks(stub, "11");
+    there.BillAddr = { Line1: "12 Heron Lane", City: "Austin" };
+    // The treasurer clears the phone in QuickBooks; the portal's copy of QuickBooks hasn't been read since.
+    delete there.PrimaryPhone;
+    there.SyncToken = "1";
+    // The parent changes only the address: QuickBooks holds the address the portal knew, so it is sent, once more
+    // after the stale answer, and the link is aligned with QuickBooks' answer.
+    await saveMyContact(a.ctx, form({ phone: "555-0101", line1: "14 Heron Lane", city: "Austin" }, "p:1"));
+    await wake();
+    expect((await items())[0]).toMatchObject({ state: "done" });
+    const aligned = (await linkOfRow(a.row.id))!.syncedToken;
+    expect(aligned).toBe(inQuickBooks(stub, "11").SyncToken);
+    // Then the phone: the item carries the link's version, the very one QuickBooks holds, and the phone is empty there.
+    // The portal never knew it empty, so it is kept as a difference and nothing is sent over the clearing.
+    await saveMyContact(a.ctx, form({ phone: NEW_PHONE, line1: "14 Heron Lane", city: "Austin" }, "p:2"));
+    const phoneItem = (await items()).find((i) => i.state === "waiting")!;
+    expect(phoneItem.request).toMatchObject({ change: { phone: NEW_PHONE }, was: { phone: "555-0101" }, syncToken: aligned });
+    await wake();
+    expect(await queueItem(phoneItem.id)).toMatchObject({ state: "refused", lastCode: CONTACT_DIFFERS });
+    expect(bodies().filter((b) => "PrimaryPhone" in b)).toEqual([]);
+    expect(inQuickBooks(stub, "11").PrimaryPhone).toBeUndefined();
+  });
+
   it("QuickBooks' own refusal: kept, in words that say QuickBooks refused it", async () => {
     const a = await ana();
     await saveMyContact(a.ctx, form({ phone: NEW_PHONE }, "p:1"));

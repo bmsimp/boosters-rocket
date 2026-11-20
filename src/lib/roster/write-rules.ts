@@ -68,12 +68,13 @@ type ContactWrite = Extract<RosterWrite, { op: "contact" }>;
  * How QuickBooks' details (`held`) stand against a parent's change of their phone and address (stage 3's slice 11b),
  * field by field, on the one normal form a phone or an address is compared by (detailKey(), the take-in's): `in_place`,
  * every field it sends holds its new value; `sendable`, each holds its new value, its before-value (`was`, what the
- * portal last knew QuickBooks held), an earlier change's that may have been sent (`orWas`), or, only while `held` is
- * read at the version the portal last aligned with (`atKnownVersion`: the link's own, which the change carries), nothing
- * at all; `differs`, otherwise: something the portal never knew of, never sent over. A field QuickBooks holds empty at
- * any other version may have been cleared there on purpose, so it is a difference like any other value.
+ * portal last knew QuickBooks held), or an earlier change's that may have been sent (`orWas`); `differs`, otherwise:
+ * something the portal never knew of, never sent over. A field QuickBooks holds empty is the portal's to fill only where
+ * the portal knew it empty (`was`, or an entry of `orWas`, empty for that field): otherwise someone may have cleared it
+ * there on purpose, and it is a difference like any other value. No version says the portal knew a field: the link's
+ * version moves on with any send QuickBooks takes, the other field's, a rename's or a found change's included.
  */
-export function contactStands(held: HeldContact, w: Pick<ContactWrite, "change" | "was" | "orWas">, o: { atKnownVersion: boolean } = { atKnownVersion: false }): "in_place" | "sendable" | "differs" {
+export function contactStands(held: HeldContact, w: Pick<ContactWrite, "change" | "was" | "orWas">): "in_place" | "sendable" | "differs" {
   const fields = (["phone", "address"] as const).filter((f) => w.change[f] !== undefined);
   let inPlace = true;
   for (const f of fields) {
@@ -81,7 +82,7 @@ export function contactStands(held: HeldContact, w: Pick<ContactWrite, "change" 
     if (now === detailKey(w.change[f])) continue;
     inPlace = false;
     const known = [w.was[f], ...(w.orWas ?? []).map((e) => e[f])].filter((v) => v !== undefined).map((v) => detailKey(v));
-    if (now === null ? !o.atKnownVersion && !known.includes(null) : !known.includes(now)) return "differs";
+    if (!known.includes(now)) return "differs";
   }
   return inPlace ? "in_place" : "sendable";
 }
@@ -105,7 +106,7 @@ export function beforeResend(w: RosterWrite, cache: readonly CachedCustomer[]): 
   // while every field it sends holds what the portal last knew of, at the version it was sent with. Anything else is
   // settled by the fields, read live (`moved_on`, which the queue takes to the one path of a change saved first).
   if (w.op === "contact") {
-    const stands = contactStands(heldInCache(now), w, { atKnownVersion: w.syncToken !== "" && now.syncToken === w.syncToken });
+    const stands = contactStands(heldInCache(now), w);
     return stands === "in_place" ? { is: "done", qboId: now.qboId } : stands === "differs" || now.syncToken !== w.syncToken ? { is: "stuck", code: "moved_on" } : { is: "send" };
   }
   const inPlace = w.op === "rename" ? now.displayName === w.name

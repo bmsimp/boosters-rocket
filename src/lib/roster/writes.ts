@@ -2486,9 +2486,9 @@ async function tryContact(w: ContactWrite, realmId: string, o: { mayWait: boolea
   const live = await readLive(w.qboId, realmId, o.mayWait);
   if (!live.ok) return { is: "failed", code: live.code, sent: false, write: w };
   await storeReadAgain(live.answer, realmId, o);
-  // A field QuickBooks holds empty is the portal's to fill only at the version it last aligned with (the link's own,
-  // which the change carries): at any other, someone may have cleared it there, and it is a difference like any other.
-  const stands = contactStands(heldInAnswer(live.answer), w, { atKnownVersion: w.syncToken !== "" && live.syncToken === w.syncToken });
+  // A field QuickBooks holds empty is the portal's to fill only where the portal knew it empty (`was` or `orWas`):
+  // otherwise someone may have cleared it there, and it is a difference like any other.
+  const stands = contactStands(heldInAnswer(live.answer), w);
   if (stands === "in_place") return { is: "in_place" };
   if (!live.active) return { is: "changed", code: INACTIVE_THERE_CODE };
   if (stands === "differs") return { is: "changed", code: CONTACT_DIFFERS };
@@ -3081,7 +3081,7 @@ export async function trySavedItem(item: QueueRow, write: RenameWrite | CreateWr
     // before anything is sent, so nothing QuickBooks holds that the portal never saw is overwritten (the lead's decision 5).
     const [c] = o.readFirst ? [] : await db.select().from(qboCustomer).where(eq(qboCustomer.qboId, write.qboId));
     const readFirst = o.readFirst ?? (c === undefined || !c.active
-      || contactStands(heldInCache(c), write, { atKnownVersion: write.syncToken !== "" && c.syncToken === write.syncToken }) === "differs" ? "differs" : null);
+      || contactStands(heldInCache(c), write) === "differs" ? "differs" : null);
     const t = await tryContact(write, item.realmId, { mayWait, readFirst, actor: o.actor, ip: o.ip, permission: o.permission });
     switch (t.is) {
       case "answer": return taken(t.write, t.answer, t.resent);
