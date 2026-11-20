@@ -276,7 +276,7 @@ test("a parent's journeys by keyboard alone: sign in, Home to Payments, a form, 
     ringsShown();
   });
 
-  await test.step("6. Family: opens Update my details, reads why it can't be changed from this run, and goes back", async () => {
+  await test.step("6. Family: opens Update my details, reaches its form, and goes back", async () => {
     await fromTheTop(page);
     await tabTo(page, bar(page, "Family"));
     await page.keyboard.press("Enter");
@@ -284,7 +284,9 @@ test("a parent's journeys by keyboard alone: sign in, Home to Payments, a form, 
     await tabTo(page, page.getByRole("link", { name: "Update my details" }));
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/\/family\/details$/);
-    await expect(page.locator("main")).toContainText("can't be changed here just yet");
+    // The details are the portal's own (stage 3's slice 11a), so the form is there: its first field and its save are each reached.
+    await tabTo(page, page.getByRole("main").getByLabel("Phone"));
+    await tabTo(page, page.getByRole("button", { name: "Save my details" }));
     await tabTo(page, page.getByRole("main").getByRole("link", { name: "Back to Family" }));
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/\/family$/);

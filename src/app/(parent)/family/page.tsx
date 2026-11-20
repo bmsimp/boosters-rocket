@@ -3,7 +3,7 @@ import { requireParentPage } from "@/lib/guards";
 import { canChangeMyEmail } from "@/lib/parents/email-change";
 import { loadMyFamily } from "@/lib/parents/my-family";
 import { getClubSettings } from "@/lib/settings/club";
-import { DetailsBox, NotSetUpBox, RosterAsOf, StudentsBox } from "../family-boxes";
+import { DetailsBox, NotSetUpBox, StudentsBox } from "../family-boxes";
 
 export const metadata = { title: "Family" };
 
@@ -16,7 +16,7 @@ export default async function FamilyPage() {
       {family ? (
         <>
           {family.students && <StudentsBox students={family.students} />}
-          <DetailsBox who={family.me ?? { name: ctx.name, email: ctx.email, phone: null }} treasurerEmail={club.treasurerEmail} ownEmail={ownEmail && "below"} />
+          <DetailsBox who={family.me} treasurerEmail={club.treasurerEmail} ownEmail={ownEmail && "below"} />
         </>
       ) : <NotSetUpBox treasurerEmail={club.treasurerEmail} />}
       {ctx.families.length > 1 && (
@@ -38,7 +38,6 @@ export default async function FamilyPage() {
         {/* No id in the link: the page takes whose address it is from the session. */}
         {ownEmail && <div className="box-foot"><Link className="btn btn-line" href="/family/email">Change my sign-in email</Link></div>}
       </section>
-      {family && <RosterAsOf family={family} />}
     </main>
   );
 }

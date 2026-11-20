@@ -244,7 +244,10 @@ describe("the health page", () => {
       expect(html).not.toMatch(/changes nothing (there|in QuickBooks)|only reads/);
     }
     expect(QUICKBOOKS_USE.reads).toMatch(/families and members.*what each family owes/);
-    expect(QUICKBOOKS_USE.writes).toMatch(/phone and mailing address.*email address they sign in with.*new families, students, parents and members.*inactive.*never deletes/);
+    expect(QUICKBOOKS_USE.writes).toMatch(/email address a parent signs in with.*new families, students, parents and members.*inactive.*never deletes/);
+    // A guardian's phone and mailing address are the portal's own (stage 3's slice 11a): nothing of them is sent there yet.
+    expect(QUICKBOOKS_USE.writes).not.toMatch(/phone|mailing address/);
+    expect(QUICKBOOKS_USE.reads).toMatch(/phone and mailing address are the portal's own: it takes them in once/);
     // A buy-out invoice carries the chooser's sign-in address so it can be paid online, and nothing is emailed (2026-11-17).
     expect(QUICKBOOKS_USE.writes).toMatch(/pay instead of volunteering.*sign-in email address as its bill-to address, so it can be paid online; nothing is emailed/);
     expect(health).toContain("Last change made in QuickBooks: never");
@@ -266,7 +269,7 @@ describe("the health page", () => {
     // Not connected: the page says what parents can't do meanwhile, too.
     await db.update(qboConnection).set({ realmId: null, refreshTokenCiphertext: null, accessTokenCiphertext: null });
     const off = line(await healthReport(), "quickbooks");
-    expect(off.says).toMatch(/can't read the roster or what families owe, and parents can't change their phone or address/);
+    expect(off.says).toMatch(/can't read the roster or what families owe, and parents can't change the email they sign in with/);
     expect(off.notes).toEqual([`${QUICKBOOKS_USE.reads} ${QUICKBOOKS_USE.writes}`]);
   });
 

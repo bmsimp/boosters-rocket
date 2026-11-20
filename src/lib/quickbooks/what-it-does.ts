@@ -5,11 +5,13 @@
  * tests/unit/quickbooks-writes.test.ts.
  */
 export const QUICKBOOKS_USE = {
-  reads: "The portal reads the club's families and members, what each family owes, and the products and services its invoices are for, from QuickBooks. "
+  reads: "The portal reads the club's families and members, with the email, phone and mailing address on their records, what each family owes, and the products and services its invoices are for, from QuickBooks. "
     + "What it reads there decides whose invoices each family sees; it changes none of the portal's own families, students or sign-ins, "
-    + "so a name, a student's family or an inactive customer changed in QuickBooks stays as the portal has it.",
-  writes: "It changes only what someone asks it to there: a parent's own phone and mailing address, and the email address they sign in with, in their own record's email field, "
-    + "each only when that parent changes it in the portal; "
+    + "so a name, a student's family or an inactive customer changed in QuickBooks stays as the portal has it. "
+    + "A guardian's phone and mailing address are the portal's own: it takes them in once, from the guardian's own record, after the first roster read since the update that made them so, "
+    + "and a change made to them in QuickBooks after that stays there.",
+  writes: "It changes only what someone asks it to there: the email address a parent signs in with, in their own record's email field, "
+    + "only when that parent changes it in the portal; "
     + "and, for staff allowed to change the roster, new families, students, parents and members, their names, a student's family, and making a customer inactive "
     + "(a family together with everyone under it, and never anyone with any balance, owed or a credit). "
     + "Where the club's books have parents of their own, a guardian staff add to a linked family gets a parent record under it, with their name and sign-in email address, unless QuickBooks already has a customer of that name there; "

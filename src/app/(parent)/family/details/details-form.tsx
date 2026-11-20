@@ -1,5 +1,5 @@
 "use client";
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useEffect, useRef } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { CONTACT_FIELDS, type ContactField, type ContactForm, type ContactValues } from "@/lib/parents/contact-fields";
 import { saveDetailsAction } from "./actions";
@@ -24,35 +24,19 @@ const typed = (f: FormData): ContactValues =>
   Object.fromEntries(CONTACT_FIELDS.map(({ name }) => [name, String(f.get(name) ?? "")])) as ContactValues;
 
 /**
- * What the "Phone and mailing address" box holds: the form, or, when QuickBooks couldn't be asked as the page was
- * drawn (`initial` is null), a line saying so.
+ * The parent's phone and mailing address (their own, or their family's), to change and save. It is given what it shows
+ * and nothing else: the values, and the version they were read at, which goes back with a save so that a change saved
+ * meanwhile (from another device, or by another parent of the family) is noticed and not overwritten. No id is here to
+ * send: the server knows whose details they are.
  *
- * A save revalidates this page, so Next.js draws it again as the answer comes back, and that second read from
- * QuickBooks can fail though the save worked. A form that is already on the screen therefore stays, with its "Saved"
- * and its own values, whatever the page is drawn with afterward; only a page with no form yet takes one when it comes.
+ * A save revalidates this page, so Next.js draws it again as the answer comes back; the form keeps its own state (the
+ * values the answer brought and its "Saved") whatever the page is drawn with afterward.
  */
-export function DetailsEditor({ initial }: { initial: ContactForm | null }) {
-  const [first, setFirst] = useState(initial);
-  if (!first && initial) setFirst(initial);
-  if (first) return <DetailsForm initial={first} />;
-  return (
-    <>
-      <p className="offline-note" role="status">We can&apos;t reach the club&apos;s books right now, so your details can&apos;t be changed here just yet. Please try again in a little while.</p>
-      <div className="box-foot"><a className="btn btn-line" href="/family">Back to Family</a></div>
-    </>
-  );
-}
-
-/**
- * The parent's own phone and mailing address, to change and save. It is given what it shows and nothing else: the
- * values, and the version of the record they were read from, which goes back with a save so that a change made in
- * QuickBooks meanwhile is noticed and not overwritten. No id is here to send: the server knows whose record it is.
- */
-function DetailsForm({ initial }: { initial: ContactForm }) {
+export function DetailsEditor({ initial }: { initial: ContactForm }) {
   const [state, action, pending] = useActionState(async (prev: State, f: FormData): Promise<State> => {
     f.set("version", prev.shown.version);
     const r = await safely(() => saveDetailsAction(f), { ok: false as const, errors: [ACTION_FAILED] });
-    // When the answer brings the record as QuickBooks has it now (saved, or changed by someone else), the form shows
+    // When the answer brings the details as the portal holds them now (saved, or changed meanwhile), the form shows
     // that. Otherwise it keeps what was typed, so nothing has to be typed twice.
     const shown = "current" in r && r.current ? r.current : { values: typed(f), version: prev.shown.version };
     return { shown, result: r.ok ? { ok: true, message: r.message } : { ok: false, errors: r.errors }, round: prev.round + 1 };

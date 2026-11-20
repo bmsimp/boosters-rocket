@@ -1,13 +1,17 @@
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db/client";
+import { family, parent } from "@/lib/db/schema";
+import type { AppFamilyId } from "@/lib/families/ids";
 import type { ContactValues } from "@/lib/parents/contact-fields";
 import { CHENOWETH, RIVERA, connectCompany } from "./money";
 import { seedSignedInParent, type ParentFamilySpec, type SeededParent } from "./parent";
 import type { QboStub } from "./qbo-stub";
 
 /**
- * For tests of a parent's own phone and address (src/lib/parents/contact-edits.ts), which are read from and written to
- * the stub QuickBooks. The families are the two in tests/helpers/money.ts, whose QuickBooks ids are numbers as real
- * ones are: an id that isn't digits is never sent to QuickBooks, so FAMILY_A and FAMILY_B only ever see the edit page
- * say it can't reach the club's books.
+ * For tests of a parent's phone and address (src/lib/parents/contact-edits.ts, the portal's own since stage 3's slice
+ * 11a: personDetails(), familyDetails() and their setters below) and of the email change, whose record is read from and
+ * written to the stub QuickBooks. The families are the two in tests/helpers/money.ts, whose QuickBooks ids are numbers
+ * as real ones are, so a test can prove nothing is asked of the stub.
  */
 
 /** A customer as QuickBooks sends one: active, at version 0. */
@@ -74,3 +78,42 @@ export const inQuickBooks = (stub: QboStub, id: string): Record<string, unknown>
   if (!customer) throw new Error(`inQuickBooks: the stub holds no customer ${id}`);
   return customer;
 };
+
+/**
+ * A person's or a family's contact details as the portal holds them (stage 3's slice 11a), as the form shows them, with
+ * the version they are at: what isn't set reads as an empty string.
+ */
+export type HeldDetails = { values: ContactValues; version: number };
+type DetailRow = { phone: string | null; addressLine1: string | null; addressLine2: string | null; addressCity: string | null; addressRegion: string | null;
+  addressPostalCode: string | null; addressCountry: string | null; contactVersion: number };
+const heldOf = (r: DetailRow): HeldDetails => ({ version: r.contactVersion, values: { phone: r.phone ?? "", line1: r.addressLine1 ?? "", line2: r.addressLine2 ?? "",
+  city: r.addressCity ?? "", region: r.addressRegion ?? "", postalCode: r.addressPostalCode ?? "", country: r.addressCountry ?? "" } });
+const columnsOf = (v: Partial<ContactValues>) => ({
+  ...(v.phone !== undefined ? { phone: v.phone || null } : {}), ...(v.line1 !== undefined ? { addressLine1: v.line1 || null } : {}),
+  ...(v.line2 !== undefined ? { addressLine2: v.line2 || null } : {}), ...(v.city !== undefined ? { addressCity: v.city || null } : {}),
+  ...(v.region !== undefined ? { addressRegion: v.region || null } : {}), ...(v.postalCode !== undefined ? { addressPostalCode: v.postalCode || null } : {}),
+  ...(v.country !== undefined ? { addressCountry: v.country || null } : {}),
+});
+
+/** The details the portal holds on this person's row. */
+export async function personDetails(parentId: string): Promise<HeldDetails> {
+  const [r] = await db.select().from(parent).where(eq(parent.id, parentId));
+  if (!r) throw new Error(`personDetails: there is no person ${parentId}`);
+  return heldOf(r);
+}
+/** The details the portal holds on this family record. */
+export async function familyDetails(familyId: AppFamilyId): Promise<HeldDetails> {
+  const [r] = await db.select().from(family).where(eq(family.id, familyId));
+  if (!r) throw new Error(`familyDetails: there is no family ${String(familyId)}`);
+  return heldOf(r);
+}
+/** Sets some of a person's details on their row, as a save or the take-in would leave them, at `version` when given. */
+export async function setPersonDetails(parentId: string, values: Partial<ContactValues>, version?: number): Promise<void> {
+  await db.update(parent).set({ ...columnsOf(values), ...(version !== undefined ? { contactVersion: version } : {}) }).where(eq(parent.id, parentId));
+}
+/** Sets some of a family record's details, at `version` when given. */
+export async function setFamilyDetails(familyId: AppFamilyId, values: Partial<ContactValues>, version?: number): Promise<void> {
+  await db.update(family).set({ ...columnsOf(values), ...(version !== undefined ? { contactVersion: version } : {}) }).where(eq(family.id, familyId));
+}
+/** Every field empty: a person or a family nobody has given details. */
+export const NO_DETAILS: ContactValues = { phone: "", line1: "", line2: "", city: "", region: "", postalCode: "", country: "" };
