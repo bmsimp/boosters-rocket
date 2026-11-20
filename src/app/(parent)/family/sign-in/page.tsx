@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireParentPage } from "@/lib/guards";
 import { loadMySignin } from "@/lib/parents/signin-settings";
 import { SIGNIN_SETTINGS_COPY as COPY } from "@/lib/parents/signin-settings-copy";
-import { AskAgain, ChangePasswordForm, SetupLinkForm, SignInSettingsFrame, SignOutEverywhereForm } from "./signin-forms";
+import { AskAgain, ChangePasswordForm, RememberedDevices, SetupLinkForm, SignInSettingsFrame, SignOutEverywhereForm } from "./signin-forms";
 
 export const metadata = { title: "Sign-in settings" };
 
@@ -11,7 +11,9 @@ export const metadata = { title: "Sign-in settings" };
  * everywhere. Reached from the Family page's "Your account" box, never a tab. Everything is read through the session's
  * own person (loadMySignin(), src/lib/parents/signin-settings.ts): the page's address has no id in it, and neither has
  * any form. Changing the password asks again first (src/lib/parents/asking-again.ts) unless this session proved itself
- * in the last 10 minutes. The device list, and forgetting a device, come in SI-5b; more ways to sign in in SI-6 and SI-7.
+ * in the last 10 minutes, and so does forgetting a remembered device (SI-5b), whose list shows only what the portal
+ * keeps of each: when it was first remembered and last used, and which this session was made on. More ways to sign in
+ * come in SI-6 and SI-7.
  * Once a press signs the parent out everywhere, the frame (SignInSettingsFrame) draws its answer in place of every form.
  */
 export default async function SignInSettingsPage() {
@@ -53,7 +55,9 @@ export default async function SignInSettingsPage() {
         </section>
         <section className="box" aria-labelledby="devices-h">
           <h2 id="devices-h">{COPY.devicesTitle}</h2>
-          <p>{COPY.devicesSoon}</p>
+          {/* Each device is given only its row's id, whether it is this session's, and its two times. */}
+          <RememberedDevices devices={me.devices} proved={me.provedRecently} email={me.email}
+            canAsk={me.hasPassword && !me.strict} cantAsk={me.strict ? COPY.devicesStrict : COPY.choosePasswordForDevices} />
         </section>
         <section className="box" aria-labelledby="more-h">
           <h2 id="more-h">{COPY.moreTitle}</h2>

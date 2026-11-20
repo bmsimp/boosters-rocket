@@ -1,13 +1,14 @@
 // A parent's sign-in settings (/family/sign-in; the sign-in release, slice SI-5a; section 6 of the app-owned families
 // spec, "Signing in", and open questions 26, 28, 34 and 36): what the page shows, changing the password, signing out
 // everywhere, and the set-up link offered to a person with no password. Everything is read and changed through the
-// session's own person (`ctx.parentId`, `ctx.sessionId`, `ctx.email`), never by an id from the address or a form. The
-// device list, forgetting one and renewing a device while its session is in use are SI-5b's. Server only; parent code.
+// session's own person (`ctx.parentId`, `ctx.sessionId`, `ctx.email`), never by an id from the address or a form, but
+// one: since slice SI-5b the page lists the person's remembered devices, and forgetting one takes that device's row id
+// from the page, checked against the person in the delete itself. Server only; parent code.
 import "server-only";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, ne } from "drizzle-orm";
 import { hashPassword } from "better-auth/crypto";
 import { db, type Tx } from "@/lib/db/client";
-import { parent, parentAuthAccount, parentEmailChange } from "@/lib/db/schema";
+import { parent, parentAuthAccount, parentDevice, parentEmailChange } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import type { ParentCtx } from "@/lib/guards";
 import { currentBrand, sendMail } from "@/lib/mail/send";
@@ -24,7 +25,8 @@ import { deleteUnusedSigninCodes, deleteUnusedSigninLinks, endParentSessions, fo
 import { getParentSettings } from "./settings";
 import { getClubSettings } from "@/lib/settings/club";
 import { CODE_TTL_MS } from "./signin-codes";
-import { currentPassword, sessionProvedRecently, sessionStrongAt } from "./asking-again";
+import { currentPassword, sessionDeviceId, sessionProvedRecently, sessionStrongAt } from "./asking-again";
+import { isDeviceId } from "./devices";
 import { provedRecently } from "./reask-rule";
 import { portalAddress } from "./link-delivery";
 import { SIGNIN_SETTINGS_COPY as COPY } from "./signin-settings-copy";
@@ -33,19 +35,31 @@ type Me = Pick<ParentCtx, "parentId" | "sessionId" | "email" | "ip">;
 export type SettingsResult = { ok: true; message: string } | { ok: false; errors: string[] };
 
 /**
+ * One remembered device as the page lists it (slice SI-5b), and all it is given: the row's id (the value of its forget
+ * button, the only id an action of the page takes), whether it is the one this session names (`device_id`), and when
+ * it was first remembered and last used, as ISO strings for LocalTime. Never its token's hash, a session, a person or an
+ * address: the portal keeps no name, browser or place for a device.
+ */
+export type MyDevice = { id: string; thisOne: boolean; createdAt: string; lastUsedAt: string };
+
+/**
  * What the page shows, and nothing else: the address the parent signs in with, whether the change of it is offered
  * (canChangeMyEmail()), whether they have a password, whether this session proved itself within the window
- * (provedRecently(), the page's choice between asking again and the change), and whether the club is at Strict, where
+ * (provedRecently(), the page's choice between asking again and the change), whether the club is at Strict, where
  * nothing can be changed here yet (the door's password step refuses every password without a second factor, so nobody
- * can be asked again until SI-6 and SI-7).
+ * can be asked again until SI-6 and SI-7), and (since SI-5b) the person's remembered devices that are still unexpired,
+ * newest use first, the one this session names marked. A session from before SI-5b names none, and none is marked.
  */
-export type MySignin = { email: string; canChangeEmail: boolean; hasPassword: boolean; provedRecently: boolean; strict: boolean };
+export type MySignin = { email: string; canChangeEmail: boolean; hasPassword: boolean; provedRecently: boolean; strict: boolean; devices: MyDevice[] };
 
 export async function loadMySignin(ctx: ParentCtx, now = new Date()): Promise<MySignin> {
-  const [canChangeEmail, password, strongAt, settings] = await Promise.all([
-    canChangeMyEmail(ctx), currentPassword(db, ctx.parentId), sessionStrongAt(db, ctx), getParentSettings(),
+  const [canChangeEmail, password, strongAt, settings, thisDevice, devices] = await Promise.all([
+    canChangeMyEmail(ctx), currentPassword(db, ctx.parentId), sessionStrongAt(db, ctx), getParentSettings(), sessionDeviceId(db, ctx),
+    db.select({ id: parentDevice.id, createdAt: parentDevice.createdAt, lastUsedAt: parentDevice.lastUsedAt }).from(parentDevice)
+      .where(and(eq(parentDevice.parentId, ctx.parentId), gt(parentDevice.expiresAt, now))).orderBy(desc(parentDevice.lastUsedAt), parentDevice.id),
   ]);
-  return { email: ctx.email, canChangeEmail, hasPassword: password !== null, provedRecently: provedRecently(strongAt, now), strict: settings.level === "strict" };
+  return { email: ctx.email, canChangeEmail, hasPassword: password !== null, provedRecently: provedRecently(strongAt, now), strict: settings.level === "strict",
+    devices: devices.map((d) => ({ id: d.id, thisOne: d.id === thisDevice, createdAt: d.createdAt.toISOString(), lastUsedAt: d.lastUsedAt.toISOString() })) };
 }
 
 const sent = (v: unknown): v is string => typeof v === "string" && v.length <= MOST_SENT;
@@ -163,6 +177,88 @@ export async function signOutEverywhere(ctx: Me): Promise<SettingsResult> {
       after: { emailChangesDeleted, codesDeleted, devicesForgotten, sessionsEnded }, ip: ctx.ip }, tx);
   });
   return { ok: true, message: COPY.everywhereDone };
+}
+
+/** The one answer to a device that isn't the person's to forget: another's, gone, expired, or not a device's id at all. */
+const NOT_FROM_PAGE: SettingsResult = { ok: false, errors: [COPY.deviceNotFound] };
+
+/**
+ * The person's row, FOR UPDATE, and, read under it, this session's window: the first part of both forgets, in the
+ * order above lockedPerson() (sessions.ts: the person's row, then their devices). Null when the person is gone or
+ * blocked or the window has run out since the page.
+ */
+async function provedUnderLock(tx: Tx, ctx: Me): Promise<{ email: string; now: Date } | null> {
+  const [me] = await tx.select({ email: parent.email, blocked: parent.blocked }).from(parent).where(eq(parent.id, ctx.parentId)).for("update");
+  if (!me || me.blocked) return null;
+  const now = new Date(); // read once the person's row is held
+  return provedRecently(await sessionStrongAt(tx, ctx), now) ? { email: me.email, now } : null;
+}
+
+/**
+ * "Forget this device" (slice SI-5b; open question 26), for one of the person's remembered devices, asked again first
+ * as a change of how they sign in is (open question 28; the lead's decision). In this order:
+ * (a) the argument: a device row's id, a uuid string of at most 36 characters (isDeviceId()); anything else is the one
+ *     refusal, NOT_FROM_PAGE, uncounted;
+ * (b) the window, read for this session (sessionProvedRecently()): refused in the words that say to show it's them;
+ * (c) the limit per person (`signin_settings_parent`, the kind of these settings' presses), taken after the window;
+ * (d) one transaction in the order above lockedPerson(): the person's row FOR UPDATE, the window again under it (and the
+ *     person not blocked), then the device deleted with its person in the delete's own WHERE (`parent_device.parent_id`
+ *     = the session's person, and unexpired): never a read and then a delete. A device of anyone else, gone or expired
+ *     deletes nothing and is the same one refusal, changing nothing. The device this session names may be forgotten: the
+ *     session goes on, its `device_id` set null by the foreign key, and the next sign-in on it takes the emailed code.
+ *     One `parent.device.forgotten` row, with the device's id and whether it was this session's, never its token.
+ */
+export async function forgetMyDevice(ctx: Me, deviceId: unknown): Promise<SettingsResult> {
+  if (!isDeviceId(deviceId)) return NOT_FROM_PAGE;
+  if (!(await sessionProvedRecently(db, ctx))) return PROVE_AGAIN;
+  if ((await takeRateLimit("signin_settings_parent", ctx.parentId)) !== "taken") return { ok: false, errors: [COPY.tooManyPresses] };
+  const done = await db.transaction(async (tx) => {
+    const me = await provedUnderLock(tx, ctx);
+    if (!me) return "not_proved" as const;
+    const thisOne = (await sessionDeviceId(tx, ctx)) === deviceId.toLowerCase();
+    const gone = await tx.delete(parentDevice)
+      .where(and(eq(parentDevice.id, deviceId), eq(parentDevice.parentId, ctx.parentId), gt(parentDevice.expiresAt, me.now)))
+      .returning({ id: parentDevice.id });
+    if (gone.length === 0) return "not_theirs" as const;
+    await writeAudit({ actor: parentActor({ id: ctx.parentId, email: me.email }), action: "parent.device.forgotten", targetType: "parent", targetId: ctx.parentId,
+      after: { deviceId: gone[0]!.id, thisDevice: thisOne }, ip: ctx.ip }, tx);
+    return "forgotten" as const;
+  });
+  if (done === "not_proved") return PROVE_AGAIN;
+  if (done === "not_theirs") return NOT_FROM_PAGE;
+  return { ok: true, message: COPY.deviceForgotten };
+}
+
+/**
+ * "Forget every other device" (slice SI-5b): every remembered device of the person but the one this session names
+ * (all of them when it names none), asked again first as forgetting one is, limited the same way, in one transaction
+ * in the order above lockedPerson() (the person's row FOR UPDATE, the window again under it, then the devices), with one
+ * `parent.devices.forgotten` row and its count. It takes no id: whose devices, and which is kept, come from the session.
+ * When none is kept (the session names no device, or one no longer the person's own unexpired one), the page called it
+ * "Forget every device", and the answer says every device is forgotten, this one included (`everyDeviceForgotten`).
+ */
+export async function forgetMyOtherDevices(ctx: Me): Promise<SettingsResult> {
+  if (!(await sessionProvedRecently(db, ctx))) return PROVE_AGAIN;
+  if ((await takeRateLimit("signin_settings_parent", ctx.parentId)) !== "taken") return { ok: false, errors: [COPY.tooManyPresses] };
+  const done = await db.transaction(async (tx) => {
+    const me = await provedUnderLock(tx, ctx);
+    if (!me) return false;
+    const kept = await sessionDeviceId(tx, ctx);
+    const gone = await tx.delete(parentDevice)
+      .where(kept ? and(eq(parentDevice.parentId, ctx.parentId), ne(parentDevice.id, kept)) : eq(parentDevice.parentId, ctx.parentId))
+      .returning({ id: parentDevice.id });
+    // Kept only when what the session names is still one of the person's own remembered devices: an expired row the
+    // clean-up hasn't reached yet, or anyone else's, was never on the page and is no device of theirs kept.
+    const [stillTheirs] = kept ? await tx.select({ id: parentDevice.id }).from(parentDevice)
+      .where(and(eq(parentDevice.id, kept), eq(parentDevice.parentId, ctx.parentId), gt(parentDevice.expiresAt, me.now))) : [];
+    await writeAudit({ actor: parentActor({ id: ctx.parentId, email: me.email }), action: "parent.devices.forgotten", targetType: "parent", targetId: ctx.parentId,
+      after: { devicesForgotten: gone.length, thisDeviceKept: stillTheirs !== undefined }, ip: ctx.ip }, tx);
+    return stillTheirs !== undefined ? "kept" as const : "none_kept" as const;
+  });
+  if (!done) return PROVE_AGAIN;
+  // With none kept the page couldn't say which device was in use ("Forget every device"): the answer says every one is
+  // gone, the one in use included.
+  return { ok: true, message: done === "kept" ? COPY.otherDevicesForgotten : COPY.everyDeviceForgotten };
 }
 
 /**

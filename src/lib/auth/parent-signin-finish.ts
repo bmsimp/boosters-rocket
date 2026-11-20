@@ -45,8 +45,9 @@ const REFUSED: SigninFinish = { ok: false };
  *    remembered device leaves it null; refused (a block, or the session ended, or the device gone), the session is
  *    deleted and no cookie is set;
  * 6. the cookies: the session's, sent this once with the longest life browsers allow (PARENT_SESSION_COOKIE_SECONDS,
- *    400 days), since it has to outlive the session row, which use renews (sessions.ts); the device's, for its 90 days;
- *    and the pending step's, cleared;
+ *    400 days), since it has to outlive the session row, which use renews (sessions.ts); the device's, for as long
+ *    (setDeviceCookie(): since slice SI-5b use renews the device's row too, through the session, which names it); and
+ *    the pending step's, cleared;
  * 7. where to go: the page asked for (`next`, from the browser, only through landingPath() and withReturnPath(), which
  *    drop anything that is not a parent page of this site) once a family is entered, else the chooser carrying it.
  * `ctx` is the Better Auth endpoint that is finishing the sign-in; `email` is the address the sign-in was proved with

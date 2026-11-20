@@ -9,8 +9,9 @@
 //   and the address from it and from nothing the browser sends. A value that is unsigned, mis-signed, malformed or past
 //   its end is no pending step. It is cleared by a sign-in that finishes and by a refusal that ends the step.
 // - The device: a remembered device's token (src/lib/parents/devices.ts holds only its keyed hash), set when a sign-in that
-//   proved a password and a second step, or a set-up link, finishes, for the device's 90 days, and set again with the
-//   same token when a password sign-in on the device renews it. One per browser: a second person signing in on a shared
+//   proved a password and a second step, or a set-up link, finishes, and set again with the same token when a password
+//   sign-in on the device renews it; for the longest life browsers allow (setDeviceCookie()), since the row, renewed by
+//   use, is the authority. One per browser: a second person signing in on a shared
 //   browser replaces it with their own, and the first person's row stays until it expires (or is forgotten).
 //
 // Both are made by Better Auth's createAuthCookie() (so `br_parent.` plus the name, with the `__Secure-` prefix and
@@ -20,6 +21,7 @@ import "server-only";
 import type { GenericEndpointContext } from "better-auth";
 import { CODE_TTL_MS } from "@/lib/parents/signin-codes";
 import { isDeviceToken, type DeviceCookie } from "@/lib/parents/devices";
+import { PARENT_SESSION_COOKIE_SECONDS } from "@/lib/parents/sessions";
 
 const PENDING = "signin_step";
 const DEVICE = "device";
@@ -80,8 +82,15 @@ export function readDeviceToken(ctx: GenericEndpointContext): string | null {
   return isDeviceToken(token) ? token : null;
 }
 
-/** Sets the device's cookie, for as long as its row lives. */
+/**
+ * Sets the device's cookie. Since slice SI-5b the device's row is renewed while a session made on it is used
+ * (renewParentSession(), src/lib/parents/sessions.ts), which runs while a page renders, where no cookie can be set, so
+ * the row outlives any life the cookie was given at sign-in: the cookie gets the longest life browsers allow, as the
+ * session's does (PARENT_SESSION_COOKIE_SECONDS, 400 days), whatever `d.expiresAt` and `now` say. The row is the
+ * authority: a device is known only while its row is unexpired (rememberedDevice(), deviceOfAddress()).
+ */
 export function setDeviceCookie(ctx: GenericEndpointContext, d: DeviceCookie, now: Date): void {
-  const c = cookieOf(ctx, DEVICE, seconds(d.expiresAt.getTime() - now.getTime()));
+  void now; // the cookie's life no longer follows the row's end (above); the finish still passes it
+  const c = cookieOf(ctx, DEVICE, PARENT_SESSION_COOKIE_SECONDS);
   ctx.setCookie(c.name, d.token, c.attributes);
 }

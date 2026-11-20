@@ -243,9 +243,11 @@ export const parentSigninToken = pgTable("parent_signin_token", {
 /**
  * A device remembered as having passed the second step of a sign-in, for a person (the sign-in release): the keyed
  * hash of the token its cookie holds, never the token; renewed by use (`last_used_at`, `expires_at`). It goes with the
- * person. The daily clean-up deletes one past its expiry. Nothing makes one yet (slice SI-3b will); since slice SI-2
- * blocking, sign-ins switched off, the change-of-company clear, a password reset, a confirmed change of sign-in email
- * and closing a person's last open membership delete them (src/lib/parents/sessions.ts).
+ * person. The daily clean-up deletes one past its expiry. Made since slice SI-3b (recordStrongSignin(),
+ * src/lib/parents/devices.ts), renewed since SI-5b while a session that names it (`parent_auth_session.device_id`) is
+ * used, and forgotten by the person on their sign-in settings; since slice SI-2 blocking, sign-ins switched off, the
+ * change-of-company clear, a password reset, a confirmed change of sign-in email and closing a person's last open
+ * membership delete them (src/lib/parents/sessions.ts).
  */
 export const parentDevice = pgTable("parent_device", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -1274,11 +1276,21 @@ export const staffAuthVerification = staffAuth.verification;
 // never names it. Its drizzle adapter inserts and updates only the fields its own schema knows, leaving this column at
 // its null, and returns only those fields (so /get-session never answers it, and a session the library makes again
 // from an old one starts with none). Nullable for that reason; no backfill.
+// `device_id` (the sign-in release, slice SI-5b, migration 0043): the remembered device (`parent_device`) this session
+// was made on, written with `strong_at` by a sign-in's strong step (recordStrongSignin(), src/lib/parents/devices.ts):
+// the new device's row for a code's or a set-up link's sign-in, the remembered one for a device's. A page request never
+// carries the device's cookie (its path is the door's), so the session's renewal (renewParentSession(),
+// src/lib/parents/sessions.ts), which runs while a page renders, renews the device it names through this; and the
+// sign-in settings mark "This device" by it. Like `strong_at` it is the portal's alone and not a Better Auth additional
+// field. `ON DELETE SET NULL`: forgetting a device, a block, a reset, a password change, the clean-up and the
+// change-of-company clear delete device rows, and the sessions they named go on with none. Null for a session made
+// before SI-5b (nothing tells which device made it), and for one whose device is gone.
 const parentAuth = authTables("parent_auth",
   { parentId: uuid("parent_id").notNull().unique().references(() => parent.id, { onDelete: "cascade" }) },
   { familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
-    strongAt: timestamp("strong_at", { withTimezone: true }) },
-  (t) => [index("parent_auth_session_family_ix").on(t.familyId!)]);
+    strongAt: timestamp("strong_at", { withTimezone: true }),
+    deviceId: uuid("device_id").references(() => parentDevice.id, { onDelete: "set null" }) },
+  (t) => [index("parent_auth_session_family_ix").on(t.familyId!), index("parent_auth_session_device_ix").on(t.deviceId!)]);
 export const parentAuthUser = parentAuth.user;
 export const parentAuthSession = parentAuth.session;
 export const parentAuthAccount = parentAuth.account;

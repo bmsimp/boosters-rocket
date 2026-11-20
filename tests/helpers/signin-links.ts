@@ -41,11 +41,13 @@ export const credentialRows = (authUserId: string) => db.select().from(parentAut
 /**
  * A device remembered for the person, as a sign-in remembers one (recordStrongSignin(), src/lib/parents/devices.ts):
  * only the keyed hash of its token is stored. Its token, for the device cookie a test sends, and its row's id; with
- * `expiresAt`, one that ends then (in the past for an expired one).
+ * `expiresAt`, one that ends then (in the past for an expired one); with `createdAt` and `lastUsedAt`, one first
+ * remembered and last used then (now when left out). A session names it with seedParentSession()'s `deviceId`.
  */
-export async function seedDevice(parentId: string, o: { expiresAt?: Date } = {}): Promise<{ token: string; id: string }> {
+export async function seedDevice(parentId: string, o: { expiresAt?: Date; createdAt?: Date; lastUsedAt?: Date } = {}): Promise<{ token: string; id: string }> {
   const token = randomBytes(32).toString("base64url");
-  const [row] = await db.insert(parentDevice).values({ parentId, tokenHash: hashDeviceToken(token), expiresAt: o.expiresAt ?? new Date(Date.now() + 90 * 86_400_000) })
+  const [row] = await db.insert(parentDevice).values({ parentId, tokenHash: hashDeviceToken(token), expiresAt: o.expiresAt ?? new Date(Date.now() + 90 * 86_400_000),
+    ...(o.createdAt ? { createdAt: o.createdAt } : {}), ...(o.lastUsedAt ? { lastUsedAt: o.lastUsedAt } : {}) })
     .returning({ id: parentDevice.id });
   return { token, id: row!.id };
 }

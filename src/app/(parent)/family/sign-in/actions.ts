@@ -2,17 +2,20 @@
 import { revalidatePath } from "next/cache";
 import { parentAction } from "@/lib/guards";
 import { askAgainCode, askAgainPassword } from "@/lib/parents/asking-again";
-import { askMySetupLink, changeMyPassword, signOutEverywhere } from "@/lib/parents/signin-settings";
+import { askMySetupLink, changeMyPassword, forgetMyDevice, forgetMyOtherDevices, signOutEverywhere } from "@/lib/parents/signin-settings";
 
 /**
  * A parent's sign-in settings (src/lib/parents/signin-settings.ts) and asking again (src/lib/parents/asking-again.ts).
  *
  * Every argument comes from the browser, whatever its type says, and is handed on as it is, to be checked there for its
  * type and size. None names a person, a session, a family or a customer, and none is looked for: whose password, whose
- * sessions and whose code are decided from the session (ctx) alone. The one value the server made is the stamp asking
- * again hands the page between the password and the code, and it is checked against this session and person.
+ * sessions and whose code are decided from the session (ctx) alone. The values the server made are the stamp asking
+ * again hands the page between the password and the code, checked against this session and person, and (since slice
+ * SI-5b) a remembered device's row id, the value of its forget button, deleted only with the session's own person in
+ * the delete's WHERE.
  *
- * Only a proof revalidates, since it changes what the pages draw (the change form in place of the asking). A password
+ * A proof revalidates, since it changes what the pages draw (the change form in place of the asking), and so does a
+ * device forgotten, since the list changes and the session goes on. A password
  * changed and a press of "Sign out everywhere" end this session too, so drawing the page again would only send the
  * parent to sign in before they had read the answer; the answer itself offers the way there.
  */
@@ -30,3 +33,15 @@ export const changePasswordAction = parentAction(async (ctx, password: string, a
 export const signOutEverywhereAction = parentAction(async (ctx) => signOutEverywhere(ctx));
 
 export const askSetupLinkAction = parentAction(async (ctx) => askMySetupLink(ctx));
+
+export const forgetDeviceAction = parentAction(async (ctx, deviceId: string) => {
+  const result = await forgetMyDevice(ctx, deviceId as unknown);
+  if (result.ok) revalidatePath("/family/sign-in");
+  return result;
+});
+
+export const forgetOtherDevicesAction = parentAction(async (ctx) => {
+  const result = await forgetMyOtherDevices(ctx);
+  if (result.ok) revalidatePath("/family/sign-in");
+  return result;
+});

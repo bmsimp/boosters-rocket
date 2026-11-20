@@ -71,7 +71,10 @@ async function main() {
     await sql`INSERT INTO parent_auth_account (id, account_id, provider_id, user_id, password)
             VALUES (${crypto.randomUUID()}, ${user}, 'credential', ${user}, ${await hashPassword(E2E_SIGNIN.password)})`;
   }
-  await sql`INSERT INTO parent_device (parent_id, token_hash, expires_at) VALUES (${p!.id}, ${deviceTokenHash(E2E_SIGNIN.zeldaDevice)}, now() + interval '90 days')`;
+  // Her seeded session (below) names it as the device it was made on, so her sign-in settings list it as "This device"
+  // (slice SI-5b) and the browser checks meet the list with that row.
+  const [zeldaDevice] = await sql`INSERT INTO parent_device (parent_id, token_hash, expires_at)
+          VALUES (${p!.id}, ${deviceTokenHash(E2E_SIGNIN.zeldaDevice)}, now() + interval '90 days') RETURNING id`;
   // SMTP to the e2e mail sink (tests/e2e/parent-sign-in.spec.ts), counted as tested.
   const sealed = createSecretBox({ current: process.env.SETTINGS_ENCRYPTION_KEY! }).seal("sink-password", "mail:smtp-password");
   const mail = { method: "smtp", host: "127.0.0.1", port: mailPort, security: "tls", username: "sender", from: "boosters@e2e.example.org",
@@ -347,9 +350,9 @@ async function main() {
     return { id: row.id as string, familyId: row.family_id as string };
   };
   // A live session for Zelda with the first family chosen, so the e2e run can open parent pages without the emailed
-  // code (tests/e2e/parent-session.ts makes the cookie).
-  await sql`INSERT INTO parent_auth_session (id, token, user_id, family_id, expires_at)
-          VALUES ('e2e-parent-session', 'e2e-parent-session-token', ${zelda!.id}, ${(await zeldaIn("E2E-FAMILY")).familyId}, now() + interval '7 days')`;
+  // code (tests/e2e/parent-session.ts makes the cookie). It was made on her remembered device (`device_id`, slice SI-5b).
+  await sql`INSERT INTO parent_auth_session (id, token, user_id, family_id, device_id, expires_at)
+          VALUES ('e2e-parent-session', 'e2e-parent-session-token', ${zelda!.id}, ${(await zeldaIn("E2E-FAMILY")).familyId}, ${zeldaDevice!.id}, now() + interval '7 days')`;
   // A change of sign-in address Zelda asked for and hasn't confirmed, under her link to the Quetzalcoatl family, and a
   // used one under her link to the second family (tests/e2e/email-seed.ts: fixed tokens, so the specs can open them).
   // Their records' ids are not numbers: confirming is refused before anything is sent (tests/e2e/family-email.spec.ts).

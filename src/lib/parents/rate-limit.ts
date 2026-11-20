@@ -49,13 +49,15 @@ export const RATE_LIMITS: Record<RateLimitKind, { max: number; windowMs: number 
   // password: each try may ask the breach service and make a 32 MiB hash, so it is held to 10 an hour, far more than a
   // parent choosing a new password takes, mistyped or refused a few times. Signing out everywhere (and from SI-5b,
   // forgetting a device): each press is a write and an audit row, and the first press ends the session that made it,
-  // so 10 an hour is far more than anyone needs. Asking again counts a signed-in parent's password tries against their
-  // own person (`password_reask_parent`, keyed by the person's id; checkPasswordSignin()'s TryCount): 5 wrong tries in
-  // 15 minutes, as at the door, a right password giving its place back, and never against the address's count, so a
-  // stranger who keeps `password_try_email` full at the door can't stop the parent proving it's them, and a thief holding
-  // only the session can't fill the door's count from here. The per-IP flood stop (password_try_ip), the code's limits
-  // (code_send_*, code_check_ip and its five tries) are the door's, and the set-up link offered here is the request
-  // page's (password_ask_*).
+  // so 10 an hour is far more than anyone needs. Asking again counts a signed-in parent's password tries, 5 wrong in 15
+  // minutes as at the door, a right password giving its place back: since SI-5b, in a session made on one of the
+  // person's unexpired devices, against that device (`password_try_device`, the door's own count for a password typed on
+  // it, so whoever holds that session can fill that one device's count, as anyone holding the device could at the door);
+  // otherwise against the person (`password_reask_parent`, keyed by the person's id; checkPasswordSignin()'s TryCount).
+  // Never against the address's count, so a stranger who keeps `password_try_email` full at the door can't stop the
+  // parent proving it's them, and a thief holding only the session can't fill the address's. The per-IP flood stop
+  // (password_try_ip), the code's limits (code_send_*, code_check_ip and its five tries) are the door's, and the set-up
+  // link offered here is the request page's (password_ask_*).
   password_reask_parent: { max: 5, windowMs: WINDOW_MS },
   password_change_parent: { max: 10, windowMs: 60 * 60 * 1000 },
   signin_settings_parent: { max: 10, windowMs: 60 * 60 * 1000 },

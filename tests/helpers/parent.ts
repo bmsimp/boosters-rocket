@@ -13,7 +13,7 @@ import { seedTwoFamilyForms, type FamilyForms } from "./forms";
 import { seedTwoFamilyEmailChanges, type FamilyEmailChange } from "./email-change";
 import { seedTwoFamilyBuyouts, type FamilyBuyout } from "./buyouts";
 import { recordOfCustomer, syncAppRecords } from "./app-records";
-import { seedPassword } from "./signin-links";
+import { seedDevice, seedPassword } from "./signin-links";
 
 /** The password proveRecently() gives a person who has none: the door helper's (DOOR_PASSWORD, tests/helpers/parent-door.ts). */
 export const PROVEN_PASSWORD = "the parents' long test password";
@@ -185,7 +185,8 @@ async function appIdsOf(spec: ParentFamilySpec): Promise<string[]> {
  * told about them. The club has a current season (seedTwoFamilySeason): each family has its own ticks and a waiver, and
  * a requirement asked of it alone, whose title, id and waiver reason are among its markers. Each also has forms to sign
  * (seedTwoFamilyForms): a request in every state, and one form asked of it alone. And one volunteer shift that both
- * families have signed up for (seedTwoFamilyVolunteering), whose sign-up ids are among their markers. Last, the app's
+ * families have signed up for (seedTwoFamilyVolunteering), whose sign-up ids are among their markers. Each parent has
+ * a remembered device their session was made on, whose id is among their markers. Last, the app's
  * own records and links for both families (stage 1 of the app-owned families spec), as a roster read makes them.
  */
 export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededParent }> {
@@ -207,6 +208,13 @@ export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededPar
   const forms = await seedTwoFamilyForms({ spec: FAMILY_A, parentId: a.identity.parentId }, { spec: FAMILY_B, parentId: b.identity.parentId }, seasons.season);
   a.forms = forms.a; a.markers.push(...forms.a.markers);
   b.forms = forms.b; b.markers.push(...forms.b.markers);
+  // Each parent has a remembered device, the one their session was made on (slice SI-5b): its id, which their sign-in
+  // settings list, and its token, which no page ever holds, are their markers.
+  for (const p of [a, b]) {
+    const device = await seedDevice(p.identity.parentId);
+    await db.update(parentAuthSession).set({ deviceId: device.id }).where(eq(parentAuthSession.id, p.identity.sessionId));
+    p.markers.push(device.id, device.token);
+  }
   // Each parent has asked to change their sign-in address: the new address and the link's token are their markers.
   const emails = await seedTwoFamilyEmailChanges(a, b);
   a.emailChange = emails.a; a.markers.push(...emails.a.markers);

@@ -175,16 +175,36 @@ can't reach QuickBooks, so no buy-out is made there).
 
 ### 10. Sign-in settings: asking again before a change (`/family/sign-in`, and `/family/email` the same way)
 
-Added with the sign-in release's slice SI-5a. Journey 10 of `tests/e2e/keyboard-journeys.spec.ts` walks what is marked
-"walked"; the rest is how the page is built, walked neither by the spec nor by hand yet.
+Added with the sign-in release's slice SI-5a, and the remembered devices with SI-5b. Journey 10 of
+`tests/e2e/keyboard-journeys.spec.ts` walks what is marked "walked"; the rest is how the page is built, walked neither by
+the spec nor by hand yet.
 
-- Walked: the order: the club bar, then the password box (Your password, Continue), Sign out everywhere, Back to
-  Family. The address a password manager files the password under is a hidden `username` field, never a stop.
+- Walked: the order: the club bar, then the password box (Your password, Continue), Sign out everywhere, the
+  remembered devices, Back to Family. The address a password manager files the password under is a hidden `username`
+  field, never a stop.
 - Walked: Continue moves to the code step, whose field takes the focus (and is described by the words that a code was
   emailed); a wrong code is an alert, with the focus left in the field (the busy button is `aria-disabled`).
 - Walked: once proved, "Thank you, that's you. You can make the change now." takes the focus and the change form
   follows it: New password, New password again, Change my password (never pressed), then Sign out everywhere (never
   pressed).
+- Walked: the proof covers forgetting a device too, so after Sign out everywhere come the remembered devices, newest
+  use first, each with its button: "Forget this device" on the row marked "This device" (the seeded session was made
+  on it), and on every other row "Forget", whose name says which device by the row's two times ("Forget the device
+  first remembered …, last used …", and the row's place in the list when another row's times read the same), so no two
+  buttons share a name; then "Forget every other device". Forgetting one (the spec's own device, found by its button's
+  name, never the seeded one) puts "That device is forgotten…" in a status line that takes the focus, and its row goes.
+- Walked, in a session of the spec's own made on a device of its own: "Forget this device" by Tab and Enter puts the
+  same status line in the focus, the row goes, and the page drawn again (its session now naming no device) still offers
+  "Forget every other device", never saying it can't tell which device is in use.
+- Checked by the accessibility spec, not walked: without a recent proof the devices are listed, the seeded one marked
+  "This device", with no buttons, and the devices box asks again itself.
+- Not walked yet: the devices box's own asking (the password, then the code); once proved there, its own "Thank you,
+  that's you." is drawn above the list and takes the focus, and the buttons follow it, so Tab reaches them next; the
+  password box above, its password step not yet answered, draws the change form in its place. A parent with no
+  password, or a club at Strict, reads why nothing can be forgotten here instead.
+- Not walked yet: a session that names none of the listed devices (one from before SI-5b, or one whose device ran out
+  or was forgotten before the page was opened) says above the list that the portal can't tell which is the device in use, marks none, and
+  offers "Forget every device" instead of "Forget every other device".
 - Not walked yet: Start again goes back to the password field; a wrong password is an alert with the focus left in the
   field.
 - Not walked yet: a change that is made, and "Sign out everywhere", replace every form of the page with what happened,

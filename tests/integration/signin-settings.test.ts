@@ -22,11 +22,13 @@ import { checkPasswordSignin, hashTriedAddress } from "@/lib/parents/password-si
 import { PASSWORD_COPY } from "@/lib/parents/password-copy";
 import { takeRateLimit } from "@/lib/parents/rate-limit";
 import { changeMyPassword } from "@/lib/parents/signin-settings";
+import { renewParentSession } from "@/lib/parents/sessions";
 import { SIGNIN_SETTINGS_COPY as COPY } from "@/lib/parents/signin-settings-copy";
 import { CODE_TTL_MS, signinStands } from "@/lib/parents/signin-codes";
 import SignInSettingsPage from "@/app/(parent)/family/sign-in/page";
 import FamilyPage from "@/app/(parent)/family/page";
-import { askAgainCodeAction, askAgainPasswordAction, askSetupLinkAction, changePasswordAction, signOutEverywhereAction } from "@/app/(parent)/family/sign-in/actions";
+import { utcFallback } from "@/app/components/utc-fallback";
+import { askAgainCodeAction, askAgainPasswordAction, askSetupLinkAction, changePasswordAction, forgetDeviceAction, forgetOtherDevicesAction, signOutEverywhereAction } from "@/app/(parent)/family/sign-in/actions";
 import { resetDb, seedParentSession, seedWorkingMail } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, PROVEN_PASSWORD, identityNow, proveRecently, seedParentIn, seedSignedInParent, type SeededParent } from "../helpers/parent";
 import { seedParentSettings } from "../helpers/roster-cache";
@@ -37,8 +39,9 @@ import { linkRows, mintLink, seedCode, seedDevice, seedPassword } from "../helpe
 /**
  * A parent's sign-in settings (/family/sign-in; the sign-in release, slice SI-5a): the page, asking again (the door's
  * password check, then its emailed code, with a stamp between them that names no id), changing the password, signing
- * out everywhere and the set-up link offered to a person with no password. Every action is called as the signed-in
- * parent; whose password, sessions and code are the session's own.
+ * out everywhere and the set-up link offered to a person with no password; since slice SI-5b the remembered devices
+ * listed, forgotten one at a time or all but this one, and asking again counted against the session's own device.
+ * Every action is called as the signed-in parent; whose password, sessions, code and devices are the session's own.
  */
 const sha1 = (s: string) => createHash("sha1").update(s, "utf8").digest("hex").toUpperCase();
 const NEW_PASSWORD = "a brand new phrase for the portal, long enough";
@@ -77,6 +80,10 @@ const codesOf = (parentId: string) => db.select().from(signinCode).where(eq(sign
 const emailChangesOf = (parentId: string) => db.select().from(parentEmailChange).where(eq(parentEmailChange.parentId, parentId));
 const allSessions = () => db.select({ id: parentAuthSession.id }).from(parentAuthSession);
 const ctxOf = (identity: ParentIdentity) => ({ ...identity, ip: IP });
+const DAY = 86_400_000;
+/** The device a session was made on (`device_id`, slice SI-5b), as a sign-in's strong step writes it. */
+const nameDevice = (sessionId: string, deviceId: string | null) => db.update(parentAuthSession).set({ deviceId }).where(eq(parentAuthSession.id, sessionId));
+const deviceIdOf = async (sessionId: string) => (await db.select({ deviceId: parentAuthSession.deviceId }).from(parentAuthSession).where(eq(parentAuthSession.id, sessionId)))[0]?.deviceId;
 
 /** The parent with a password chosen a minute ago, and no proof on their session (as a session from before SI-3b). */
 async function withPassword(seeded: { identity: ParentIdentity }): Promise<void> {
@@ -111,7 +118,8 @@ describe("the page", () => {
     expect(page).not.toMatch(/autocomplete="current-password"/i);
     expect(page).toContain(html(COPY.signsOutEverywhere));
     expect(page).toContain(COPY.everywhereButton);
-    expect(page).toContain(html(COPY.devicesSoon));
+    // No device remembered for this parent: the list says so, and what it means at the next sign-in.
+    expect(page).toContain(html(COPY.devicesNone));
     expect(page).toContain(html(COPY.moreSoon));
     const credential = await credentialOf(a.identity.parentId);
     for (const secret of [a.identity.sessionId, a.session.token, a.identity.parentId, a.identity.guardianId, credential!.id, credential!.password!]) expect(page).not.toContain(secret);
@@ -195,7 +203,7 @@ describe("asking again", () => {
     expect(await renderPage(SignInSettingsPage)).toMatch(/autocomplete="new-password"/i);
   });
 
-  const counted = (kind: "password_reask_parent" | "password_try_email", subject: string) =>
+  const counted = (kind: "password_reask_parent" | "password_try_email" | "password_try_device", subject: string) =>
     db.select().from(rateLimitEvent).where(and(eq(rateLimitEvent.kind, kind), eq(rateLimitEvent.subject, subject)));
 
   it("five wrong passwords stop asking again, counted against the person and not the address: the door still lets them in", async () => {
@@ -213,6 +221,30 @@ describe("asking again", () => {
     // A thief holding only the session can't fill the door's count from here: the right password at the door, for the
     // address and with no device (as /sign-in checks it), still goes on to its code.
     expect(await checkPasswordSignin(FAMILY_A.parent.email, PROVEN_PASSWORD, null, IP)).toMatchObject({ ok: true, person: { id: a.identity.parentId } });
+  });
+
+  it("a wrong password is counted against the device this session was made on, and with none (expired, or forgotten) against the person", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await withPassword(a);
+    const device = await seedDevice(a.identity.parentId);
+    await nameDevice(a.identity.sessionId, device.id);
+    asParent(a.identity);
+    const PASSWORD_NO = { ok: false, errors: [COPY.passwordRejected] };
+    expect(await askAgainPasswordAction("not the password at all")).toEqual(PASSWORD_NO);
+    expect(await counted("password_try_device", device.id)).toHaveLength(1);
+    expect(await counted("password_reask_parent", a.identity.parentId)).toEqual([]);
+    // Its device expired: the person's count, as before the session named one.
+    await db.update(parentDevice).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(parentDevice.id, device.id));
+    expect(await askAgainPasswordAction("not the password at all")).toEqual(PASSWORD_NO);
+    expect(await counted("password_try_device", device.id)).toHaveLength(1);
+    expect(await counted("password_reask_parent", a.identity.parentId)).toHaveLength(1);
+    // Forgotten: the session names none now, and the person's count it is.
+    await db.delete(parentDevice).where(eq(parentDevice.id, device.id));
+    expect(await deviceIdOf(a.identity.sessionId)).toBeNull();
+    expect(await askAgainPasswordAction("not the password at all")).toEqual(PASSWORD_NO);
+    expect(await counted("password_reask_parent", a.identity.parentId)).toHaveLength(2);
+    // Never the address's count.
+    expect(await counted("password_try_email", hashTriedAddress(FAMILY_A.parent.email))).toEqual([]);
   });
 
   it("five wrong passwords at the door for the address don't stop the parent proving it's them here", async () => {
@@ -478,6 +510,170 @@ describe("signing out everywhere", () => {
   });
 });
 
+describe("remembered devices", () => {
+  /** Two devices of the person, the older-used one this session's, and one expired, which is never listed. */
+  async function withDevices(a: SeededParent) {
+    const mine = await seedDevice(a.identity.parentId, { createdAt: new Date(Date.now() - 40 * DAY), lastUsedAt: new Date(Date.now() - 5 * DAY), expiresAt: new Date(Date.now() + 85 * DAY) });
+    const other = await seedDevice(a.identity.parentId, { createdAt: new Date(Date.now() - 20 * DAY), lastUsedAt: new Date(Date.now() - DAY), expiresAt: new Date(Date.now() + 89 * DAY) });
+    const expired = await seedDevice(a.identity.parentId, { createdAt: new Date(Date.now() - 200 * DAY), lastUsedAt: new Date(Date.now() - 100 * DAY), expiresAt: new Date(Date.now() - DAY) });
+    await nameDevice(a.identity.sessionId, mine.id);
+    return { mine, other, expired };
+  }
+  /** The devices box, cut from its heading to the next box's, so nothing another box draws is counted. */
+  const devicesBox = (page: string) => page.slice(page.indexOf(`id="devices-h"`), page.indexOf(`id="more-h"`));
+  const NOT_FROM_PAGE = { ok: false, errors: [COPY.deviceNotFound] };
+  const PROVE = { ok: false, errors: [COPY.proveAgain] };
+  /** Each button's accessible name in the box, as its text reads (the hidden words included, tags and React's text breaks cut). */
+  const buttonNames = (box: string) => [...box.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)].map((m) => m[1]!.replace(/<!-- -->/g, "").replace(/<[^>]+>/g, "").replace(/&#x27;/g, "'"));
+  /** The name an unmarked row's button carries, by the times its row shows (as the server draws LocalTime: in UTC). */
+  const forgetName = (d: { createdAt: Date; lastUsedAt: Date }, row?: number) =>
+    `${COPY.forgetOne} ${COPY.forgetWhichFirst} ${utcFallback(d.createdAt.toISOString())}, ${COPY.forgetWhichLast} ${utcFallback(d.lastUsedAt.toISOString())}${row ? `, ${COPY.forgetWhichRow} ${row}` : ""}`;
+
+  it("lists the unexpired devices, newest use first, this session's marked, with their two times and nothing else of them", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await proveRecently(a.identity);
+    const { mine, other, expired } = await withDevices(a);
+    asParent(a.identity);
+    const box = devicesBox(await renderPage(SignInSettingsPage));
+    expect(box).toContain(html(COPY.devicesLede));
+    expect(box).toContain(html(COPY.devicesNoNames));
+    expect(box).toContain(other.id);
+    expect(box).toContain(mine.id);
+    expect(box.indexOf(other.id)).toBeLessThan(box.indexOf(mine.id));
+    expect(box).not.toContain(expired.id);
+    expect(box.match(/<strong>This device<\/strong>/g)).toHaveLength(1);
+    expect(box.indexOf(`<strong>${COPY.thisDevice}</strong>`)).toBeGreaterThan(box.indexOf(mine.id));
+    // Each button says which device it forgets: this one's "Forget this device", the other's "Forget" named by its two
+    // times; no two share a name. The session named one, so nothing says it can't tell which.
+    const [otherRow] = await db.select().from(parentDevice).where(eq(parentDevice.id, other.id));
+    expect(buttonNames(box)).toEqual([forgetName(otherRow!), COPY.forgetDevice, COPY.forgetOthers]);
+    expect(box).not.toContain(html(COPY.devicesWhichUnknown));
+    expect(box).not.toContain(COPY.forgetAll);
+    expect(box).toContain(html(COPY.forgetHere));
+    // The rows' two times each, and the other row's button's two.
+    expect(box.match(/<time /g)).toHaveLength(6);
+    // Nothing that would let anyone use a device: no token, no hash, no session or person.
+    const rows = await db.select().from(parentDevice).where(eq(parentDevice.parentId, a.identity.parentId));
+    for (const secret of [mine.token, other.token, ...rows.map((r) => r.tokenHash), a.identity.sessionId, a.session.token, a.identity.parentId]) expect(box).not.toContain(secret);
+  });
+
+  it("a session that names no device marks none, and without a recent proof the list has no buttons and asks again", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await withPassword(a);
+    const { mine, other } = await withDevices(a);
+    await nameDevice(a.identity.sessionId, null);
+    asParent(a.identity);
+    const box = devicesBox(await renderPage(SignInSettingsPage));
+    for (const id of [mine.id, other.id]) expect(box).toContain(id);
+    expect(box).not.toContain(`<strong>${COPY.thisDevice}</strong>`);
+    expect(box).not.toContain(html(COPY.forgetHere));
+    // It can't say which is the one in use, and says so above the list.
+    expect(box).toContain(html(COPY.devicesWhichUnknown));
+    expect(box.indexOf(html(COPY.devicesWhichUnknown))).toBeLessThan(box.indexOf(mine.id));
+    expect(box).not.toContain(`>${COPY.forgetDevice}<`);
+    expect(box).not.toContain(`>${COPY.forgetOne}<`);
+    expect(box).not.toContain(COPY.forgetOthers);
+    expect(box).not.toContain(COPY.forgetAll);
+    expect(box).toContain(html(COPY.askAgainForDevices));
+    expect(box).toMatch(/autocomplete="current-password"/i);
+  });
+
+  it("proved, a session that names none says it can't tell which is in use, names every button by its row, and offers Forget every device", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await proveRecently(a.identity);
+    // Two devices whose times read the same to the minute, and a third: names that still differ, by the row's place.
+    const at = { createdAt: new Date(Date.now() - 30 * DAY), lastUsedAt: new Date(Date.now() - 2 * DAY) };
+    const twinA = await seedDevice(a.identity.parentId, at);
+    const twinB = await seedDevice(a.identity.parentId, at);
+    const newest = await seedDevice(a.identity.parentId, { createdAt: new Date(Date.now() - 10 * DAY), lastUsedAt: new Date(Date.now() - DAY) });
+    asParent(a.identity);
+    const box = devicesBox(await renderPage(SignInSettingsPage));
+    expect(box).toContain(html(COPY.devicesWhichUnknown));
+    expect(box).not.toContain(`<strong>${COPY.thisDevice}</strong>`);
+    expect(box).not.toContain(html(COPY.forgetHere));
+    // The newest use first; the two alike in either order, each told apart by its place in the list.
+    const rows = new Map((await devicesOf(a.identity.parentId)).map((d) => [d.id, d]));
+    const names = buttonNames(box);
+    expect(names[0]).toBe(forgetName(rows.get(newest.id)!));
+    expect(names.slice(1, 3).sort()).toEqual([forgetName(rows.get(twinA.id)!, 2), forgetName(rows.get(twinB.id)!, 3)].sort());
+    expect(names[3]).toBe(COPY.forgetAll);
+    expect(names).toHaveLength(4);
+    expect(new Set(names).size).toBe(names.length);
+    expect(names).not.toContain(COPY.forgetDevice);
+    expect(box).not.toContain(COPY.forgetOthers);
+    // Pressed: every device goes, and the answer and the row say none was kept.
+    expect(await forgetOtherDevicesAction()).toEqual({ ok: true, message: COPY.everyDeviceForgotten });
+    expect(await devicesOf(a.identity.parentId)).toEqual([]);
+    expect((await audits("parent.devices.forgotten")).map((r) => r.after)).toEqual([{ devicesForgotten: 3, thisDeviceKept: false }]);
+  });
+
+  it("forgetting one is refused without a recent proof, and taken with one; this device too, the session going on", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await withPassword(a);
+    const { mine, other, expired } = await withDevices(a);
+    asParent(a.identity);
+    expect(await forgetDeviceAction(other.id)).toEqual(PROVE);
+    expect(await devicesOf(a.identity.parentId)).toHaveLength(3);
+    await proveRecently(a.identity);
+    expect(await forgetDeviceAction(other.id)).toEqual({ ok: true, message: COPY.deviceForgotten });
+    expect((await devicesOf(a.identity.parentId)).map((d) => d.id).sort()).toEqual([mine.id, expired.id].sort());
+    // An expired one isn't listed, and is no device to forget: the one refusal.
+    expect(await forgetDeviceAction(expired.id)).toEqual(NOT_FROM_PAGE);
+    // This device: forgotten, and the session goes on with none.
+    expect(await forgetDeviceAction(mine.id)).toEqual({ ok: true, message: COPY.deviceForgotten });
+    expect((await devicesOf(a.identity.parentId)).map((d) => d.id)).toEqual([expired.id]);
+    expect(await sessionsOf(a.identity.parentId)).toHaveLength(1);
+    expect(await deviceIdOf(a.identity.sessionId)).toBeNull();
+    const rows = await audits("parent.device.forgotten");
+    expect(rows.map((r) => [r.actorId, r.targetType, r.targetId, r.after])).toEqual([
+      [a.identity.parentId, "parent", a.identity.parentId, { deviceId: other.id, thisDevice: false }],
+      [a.identity.parentId, "parent", a.identity.parentId, { deviceId: mine.id, thisDevice: true }],
+    ]);
+    expect(JSON.stringify(rows)).not.toContain(mine.token);
+    // The page goes on drawing, with nothing to list.
+    expect(devicesBox(await renderPage(SignInSettingsPage))).toContain(html(COPY.devicesNone));
+  });
+
+  it("forgetting every other device is refused without a recent proof, and taken with one, keeping this one", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await withPassword(a);
+    const { mine } = await withDevices(a);
+    asParent(a.identity);
+    expect(await forgetOtherDevicesAction()).toEqual(PROVE);
+    expect(await devicesOf(a.identity.parentId)).toHaveLength(3);
+    await proveRecently(a.identity);
+    expect(await forgetOtherDevicesAction()).toEqual({ ok: true, message: COPY.otherDevicesForgotten });
+    expect((await devicesOf(a.identity.parentId)).map((d) => d.id)).toEqual([mine.id]);
+    expect(await deviceIdOf(a.identity.sessionId)).toBe(mine.id);
+    expect((await audits("parent.devices.forgotten")).map((r) => [r.targetId, r.after])).toEqual([[a.identity.parentId, { devicesForgotten: 2, thisDeviceKept: true }]]);
+    // A session naming a device past its end (its row not yet cleaned up) keeps no remembered device, and says so: the
+    // answer says every device is forgotten, this one included, and the row that none was kept.
+    await db.update(parentDevice).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(parentDevice.id, mine.id));
+    expect(await forgetOtherDevicesAction()).toEqual({ ok: true, message: COPY.everyDeviceForgotten });
+    expect((await audits("parent.devices.forgotten")).map((r) => r.after)[1]).toEqual({ devicesForgotten: 0, thisDeviceKept: false });
+    // A session that names none forgets them all, in the same words.
+    await nameDevice(a.identity.sessionId, null);
+    expect(await forgetOtherDevicesAction()).toEqual({ ok: true, message: COPY.everyDeviceForgotten });
+    expect((await audits("parent.devices.forgotten")).map((r) => r.after)).toEqual([
+      { devicesForgotten: 2, thisDeviceKept: true }, { devicesForgotten: 0, thisDeviceKept: false }, { devicesForgotten: 1, thisDeviceKept: false }]);
+    expect(await devicesOf(a.identity.parentId)).toEqual([]);
+    expect(await sessionsOf(a.identity.parentId)).toHaveLength(1);
+  });
+
+  it("is refused when the window ran out between the page and the press, changing nothing", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    const { other } = await withDevices(a);
+    await proveRecently(a.identity, undefined, new Date(Date.now() - 11 * 60_000));
+    expect(await sessionProvedRecently(db, a.identity)).toBe(false);
+    asParent(a.identity);
+    expect(await forgetDeviceAction(other.id)).toEqual(PROVE);
+    expect(await forgetOtherDevicesAction()).toEqual(PROVE);
+    expect(await devicesOf(a.identity.parentId)).toHaveLength(3);
+    expect(await audits("parent.device.forgotten")).toEqual([]);
+    expect(await audits("parent.devices.forgotten")).toEqual([]);
+  });
+});
+
 describe("the set-up link offered to a person with no password", () => {
   it("mails one link to the session's own address and answers as the request page does", async () => {
     const a = await seedSignedInParent(FAMILY_A);
@@ -487,6 +683,60 @@ describe("the set-up link offered to a person with no password", () => {
     expect(outbox.map((m) => m.to)).toEqual([FAMILY_A.parent.email]);
     expect(outbox[0]!.text).toMatch(/\/sign-in\/set-up\/[A-Za-z0-9_-]{43}/);
     expect(await credentialOf(a.identity.parentId)).toBeUndefined();
+  });
+});
+
+describe("one parent never reaches another's devices", () => {
+  it("as family A's parent: family B's parent's devices, a second guardian of family A's, an id of another shape and a gone one are never shown, forgotten or renewed, and are the one refusal", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    const b = await seedSignedInParent(FAMILY_B);
+    const second = await seedParentIn({ familyQboId: FAMILY_A.family.qboId, name: "Sigrid Secondguardian", email: "sigrid.second@family-a.example" });
+    const mine = await seedDevice(a.identity.parentId);
+    await nameDevice(a.identity.sessionId, mine.id);
+    const theirs = await seedDevice(b.identity.parentId);
+    const bOther = await seedDevice(b.identity.parentId, { lastUsedAt: new Date(Date.now() - 10 * DAY), expiresAt: new Date(Date.now() + 80 * DAY) });
+    const secondsDevice = await seedDevice(second.identity.parentId);
+    await nameDevice(b.identity.sessionId, theirs.id);
+    await nameDevice(second.identity.sessionId, secondsDevice.id);
+    const gone = await seedDevice(a.identity.parentId);
+    await db.delete(parentDevice).where(eq(parentDevice.id, gone.id));
+    const theirRows = async () => ({ devices: await db.select().from(parentDevice).where(eq(parentDevice.parentId, b.identity.parentId)),
+      second: await db.select().from(parentDevice).where(eq(parentDevice.parentId, second.identity.parentId)),
+      sessions: [...await sessionsOf(b.identity.parentId), ...await sessionsOf(second.identity.parentId)],
+      named: [await deviceIdOf(b.identity.sessionId), await deviceIdOf(second.identity.sessionId)] });
+    const before = await theirRows();
+    await proveRecently(a.identity);
+    asParent(a.identity);
+
+    // Not shown: A's page lists A's device alone.
+    const page = await renderPage(SignInSettingsPage);
+    expect(page).toContain(mine.id);
+    for (const id of [theirs.id, bOther.id, secondsDevice.id, gone.id]) expect(page).not.toContain(id);
+
+    // Not forgotten: each is the one refusal, whatever the reason.
+    const NOT_FROM_PAGE = { ok: false, errors: [COPY.deviceNotFound] };
+    const odd = [theirs.id, bOther.id, secondsDevice.id, gone.id, theirs.id.toUpperCase(), `${theirs.id} `, "not-a-device", "", undefined, null, 42, {}, [theirs.id],
+      b.identity.sessionId, b.identity.parentId, theirs.token, "x".repeat(5000)] as unknown as string[];
+    for (const v of odd) expect(await forgetDeviceAction(v), String(v)).toEqual(NOT_FROM_PAGE);
+    // "Forget every other device" takes no id: one sent is never read, and only A's own others go (A has none).
+    expect(await (forgetOtherDevicesAction as unknown as (x: unknown) => Promise<unknown>)(theirs.id)).toEqual({ ok: true, message: COPY.otherDevicesForgotten });
+    expect((await devicesOf(a.identity.parentId)).map((d) => d.id)).toEqual([mine.id]);
+
+    // Not renewed: A's session renewing, even naming B's device by hand, touches nothing of theirs.
+    await nameDevice(a.identity.sessionId, bOther.id);
+    const [row] = await db.select().from(parentAuthSession).where(eq(parentAuthSession.id, a.identity.sessionId));
+    expect(await renewParentSession({ id: row!.id, expiresAt: row!.expiresAt })).toBe(true);
+
+    // Not counted against: A asking again in a session naming B's device by hand is counted against A, never B's device.
+    await withPassword(a);
+    await nameDevice(a.identity.sessionId, theirs.id);
+    const triesOn = (kind: "password_reask_parent" | "password_try_device", subject: string) => db.select().from(rateLimitEvent).where(and(eq(rateLimitEvent.kind, kind), eq(rateLimitEvent.subject, subject)));
+    expect(await askAgainPasswordAction("not the password at all")).toEqual({ ok: false, errors: [COPY.passwordRejected] });
+    expect(await triesOn("password_try_device", theirs.id)).toEqual([]);
+    expect(await triesOn("password_reask_parent", a.identity.parentId)).toHaveLength(1);
+
+    expect(await theirRows()).toEqual(before);
+    expect((await audits("parent.device.forgotten")).length).toBe(0);
   });
 });
 
