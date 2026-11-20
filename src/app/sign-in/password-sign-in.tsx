@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { APP_ASKED, APP_CODE_LABEL, APP_REJECTED, CODE_SENT, CODE_REJECTED, CODE_STEP_ENDED, PASSWORD_REJECTED, SIGNIN_LEDE, TOO_MANY_TRIES, signinFailure } from "@/lib/parents/signin-copy";
+import { APP_ASKED, APP_CODE_LABEL, APP_REJECTED, APP_STEP_ENDED, CODE_SENT, CODE_REJECTED, CODE_STEP_ENDED, PASSWORD_REJECTED, SIGNIN_LEDE, TOO_MANY_TRIES, signinFailure } from "@/lib/parents/signin-copy";
 import { CODE_STEP_LIFE_MS, clearCodeStep, deviceStore, loadCodeStep, saveCodeStep, type CodeStepKind } from "./code-step";
 
 const BASE = "/api/auth/parent";
@@ -63,7 +63,8 @@ export function PasswordSignIn({ next }: { next: string | null }) {
       const at = Date.now();
       if (at - startedAt < CODE_STEP_LIFE_MS) { setNow(at); return; }
       clearCodeStep(deviceStore()); moved.current = true;
-      setStep("password"); setEmail(""); setPassword(""); setBack(next); setCode(""); setProblem({ words: CODE_STEP_ENDED, passwordLink: false });
+      setStep("password"); setEmail(""); setPassword(""); setBack(next); setCode("");
+      setProblem({ words: step === "app" ? APP_STEP_ENDED : CODE_STEP_ENDED, passwordLink: false });
     }, 1000);
     return () => clearInterval(t);
   }, [step, startedAt, next]);

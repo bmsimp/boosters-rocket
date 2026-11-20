@@ -26,6 +26,11 @@ export const CODE_REJECTED = "That code didn't work. Check the newest email from
  * from the right password, however late it was resent). It never says whether a code was sent.
  */
 export const CODE_STEP_ENDED = "Time ran out for that code. Enter your email and password again to get a new one.";
+/**
+ * Shown on the password step when an open app step's time ran out (slice SI-6a): nothing is ever emailed at the app
+ * step, so it promises no new code, only the app's again.
+ */
+export const APP_STEP_ENDED = "Time ran out. Enter your email and password again, then the code from your authenticator app.";
 /** Over a limit at either step (and, at the password step, the portal too busy to check a password just then). */
 export const TOO_MANY_TRIES ="Too many tries. Wait a few minutes and try again.";
 export const SIGNIN_UNAVAILABLE = "Parent sign-in isn't available yet.";
