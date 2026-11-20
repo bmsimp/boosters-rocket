@@ -495,6 +495,33 @@ describe("the at-once try, whatever stands in its way (item 4)", () => {
     expect(await queueItem(item.id)).toMatchObject({ state: "waiting", sent: false, tries: 0 });
   });
 
+  it("the roster lock taken after the try marked its item, before its record's check: the mark taken back, nothing sent, no try counted", async () => {
+    const a = await ana();
+    const saved = await saveDetails({ kind: "person", parentId: a.ana.id }, asSaved({ phone: NEW_PHONE }, "p:1"), { ...staffOp(), queueAs: queueAs() });
+    if (saved.is !== "saved") throw new Error("not saved");
+    const id = saved.queueIds[0]!;
+    const first = (await queueItem(id))!;
+    if (first.request.op !== "contact") throw new Error("not a contact item");
+    // The item's row held, so the try's mark waits for it once its first look (the gate) has gone through.
+    const row = await holdTheRow(id);
+    let lock: Awaited<ReturnType<typeof holdTheRosterLock>> | null = null;
+    try {
+      const trying = trySavedItem(first, first.request, { by: "at_once", linkedBy: registrar.id, actor: staffOp().actor, ip: null, permission: "Parents.ReadWrite", rosterWaitMs: 3_000 })
+        .then(() => null, (e: unknown) => e);
+      await untilALockIsAwaited();
+      lock = await holdTheRosterLock();
+      await row.release();
+      // Marked as maybe sent (the proof the mark was made), then its record's check gives up waiting for the roster lock.
+      await untilTheItem(id, (r) => r.sent);
+      expect(await trying).toBeInstanceOf(RosterBusyAtTry);
+    } finally {
+      await row.release();
+      await lock?.release();
+    }
+    expect(posts()).toEqual([]);
+    expect(await queueItem(id)).toMatchObject({ state: "waiting", sent: false, tries: 0, lastTriedAt: first.lastTriedAt, request: first.request, nextTryAt: first.nextTryAt });
+  });
+
   it("given up on Reconciliation while the at-once try waits for the roster lock: said from what the item holds, never promised to the worker", async () => {
     const a = await ana();
     const saved = await saveDetails({ kind: "person", parentId: a.ana.id }, asSaved({ phone: NEW_PHONE }, "p:1"), { ...staffOp(), queueAs: queueAs() });
