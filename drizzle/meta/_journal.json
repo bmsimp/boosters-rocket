@@ -330,6 +330,13 @@
       "when": 1795202270305,
       "tag": "0046_retired_records_dropped",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1795209125298,
+      "tag": "0047_link_history",
+      "breakpoints": true
     }
   ]
 }
