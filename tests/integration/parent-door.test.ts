@@ -403,10 +403,12 @@ describe("the parent door", () => {
     expect((o.session as { cookieCache?: { enabled?: boolean } } | undefined)?.cookieCache?.enabled ?? false).toBe(false);
     expect(o.advanced?.ipAddress?.ipAddressHeaders).toEqual(["x-booster-client-ip"]); // written by the portal itself: tests/integration/client-address.test.ts
     expect(o.emailAndPassword?.enabled).toBe(false);
-    // In front of the database limits, an in-memory cap per IP on the door's three routes (on when NODE_ENV is production).
+    // In front of the database limits, an in-memory cap per IP on the door's four routes (on when NODE_ENV is production;
+    // /portal-app/check since slice SI-6a, under the code check's own limit per IP, code_check_ip).
     // A minute of it allows what the database allows in 15, so it is never the first limit a full room meets.
     expect(o.rateLimit?.customRules).toEqual({
       "/portal-password/check": { window: 60, max: 180 }, "/portal-code/resend": { window: 60, max: 60 }, "/portal-code/check": { window: 60, max: 180 },
+      "/portal-app/check": { window: 60, max: 180 },
     });
     expect((o.rateLimit as { enabled?: boolean } | undefined)?.enabled).toBeUndefined(); // Better Auth's default: on only in production
   });
