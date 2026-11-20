@@ -1,6 +1,7 @@
 // Staff only: a staff member's changes to the roster in QuickBooks (v1 spec §6.1, §6.3). It loads every family in the
 // club, so it is never imported by parent code (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts). It is
-// the only module that may call the client's roster writes (tests/unit/quickbooks-writes.test.ts): the staff roster
+// the only module that may call the client's roster writes (tests/unit/quickbooks-writes.test.ts), and, since stage 3's
+// slice 11b, the customer update of a parent's phone and mailing address saved in the portal first: the staff roster
 // actions and the write queue's job reach QuickBooks through it.
 import "server-only";
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
@@ -3764,7 +3765,7 @@ async function sendAgainHolding(itemId: string, shown: string, o: WriteOp & { st
    change to access. A row's own Parent customer is the customer of its own link (customerOfGuardian()), only while the
    roster cache holds it as a customer of the parent type directly under the family's customer and no other open
    guardian row is linked to it (ownParentCustomer()). Nothing is sent for a guardian in flat books, in books with no
-   parent type (the family's email field, open question 7, is S11's) or for a family with no link. The portal never
+   parent type (the family's email field, open question 7, is S11d's) or for a family with no link. The portal never
    matches a person to a customer by name or address by itself: when the family already has a customer of the person's
    name under it, nothing is sent and nothing is kept, for stage 4's mapping screen to offer. `source_qbo_id` and
    `family_qbo_id` are never written for a Parent customer made here, so no record becomes a parent's own (`me`). */
