@@ -10,7 +10,7 @@ import { writeAudit, type Actor } from "@/lib/audit/log";
 import { connectedToAnotherCompany, familyLinkedTo, linksOfCustomers } from "@/lib/families/links";
 import { importRecordsFromRoster } from "@/lib/families/roster-import";
 import { isQboId } from "@/lib/quickbooks/client";
-import { buildRoster, type Cust } from "./model";
+import { buildRoster, type Cust, type Roster } from "./model";
 import { getShape, ROSTER_LOCK, shapeHolds } from "./shape";
 import { getRosterSource } from "./source";
 import { beforeResend } from "./write-rules";
@@ -49,24 +49,47 @@ export async function customersWithNoFamily(tx?: Tx): Promise<NoFamilyList> {
   if (shape === null || !(await shapeHolds(tx))) return { state: "no_shape" };
   const customers: Cust[] = (await (tx ?? db).select().from(qboCustomer)).map((c) =>
     ({ qboId: c.qboId, displayName: c.displayName, active: c.active, parentQboId: c.parentQboId, typeQboId: c.typeQboId, email: null, phone: null }));
+  const creates = await familyCreatesOnTheQueue(tx);
   const roster = buildRoster(shape, customers);
-  const listed: { customer: Cust; students: Cust[] }[] = roster.kind === "flat"
-    ? roster.members.map((m) => ({ customer: m, students: [] })) : roster.families.map((f) => ({ customer: f.customer, students: f.students }));
-  const creates = (await (tx ?? db).select({ request: writeQueue.request }).from(writeQueue)
+  // The links of the candidates alone, read in one lookup; the pool then applies them.
+  const families = noFamilyCandidates(roster, customers, creates);
+  const links = await linksOfCustomers({ families: families.map((f) => f.customer.qboId), students: families.flatMap((f) => f.students.map((s) => s.qboId)) }, tx);
+  return { state: "listed", customers: noFamilyPool(roster, customers, creates,
+    { familyLinked: new Set(links.familyOfCustomer.keys()), studentLinked: new Set(links.studentOfCustomer.keys()) }) };
+}
+
+/** The family's and member's creates waiting or stuck on the write queue, whose customers the list leaves out (beforeResend()). */
+export async function familyCreatesOnTheQueue(tx?: Tx): Promise<RosterWrite[]> {
+  return (await (tx ?? db).select({ request: writeQueue.request }).from(writeQueue)
     .where(and(inArray(writeQueue.state, ["waiting", "stuck"]), sql`${writeQueue.request}->>'op' = 'create'`, sql`${writeQueue.request}->>'role' in ('family', 'member')`)))
     .map((r) => r.request as RosterWrite);
+}
+
+/**
+ * The customers the roster lists as families (members in flat books) that may be on the list before the links are
+ * asked about: active, under no other customer, and not one a waiting or stuck family create would be found as. Pure.
+ */
+export function noFamilyCandidates(roster: Roster, customers: readonly Cust[], creates: readonly RosterWrite[]): { customer: Cust; students: Cust[] }[] {
+  const listed: { customer: Cust; students: Cust[] }[] = roster.kind === "flat"
+    ? roster.members.map((m) => ({ customer: m, students: [] })) : roster.families.map((f) => ({ customer: f.customer, students: f.students }));
   const cached = customers.map((c) => ({ ...c, syncToken: "" }));
   const aboutToBeLinked = new Set(creates.flatMap((w) => { const seen = beforeResend(w, cached); return seen.is === "done" ? [seen.qboId] : []; }));
-  const families = listed.filter((f) => f.customer.active && f.customer.parentQboId === null && !aboutToBeLinked.has(f.customer.qboId));
-  const links = await linksOfCustomers({ families: families.map((f) => f.customer.qboId), students: families.flatMap((f) => f.students.map((s) => s.qboId)) }, tx);
-  return {
-    state: "listed",
-    customers: families.filter((f) => !links.familyOfCustomer.has(f.customer.qboId)).map((f) => ({
-      qboId: f.customer.qboId, name: f.customer.displayName, students: f.students.length,
-      inactiveStudents: f.students.filter((s) => !s.active).length,
-      studentsWithRecord: f.students.filter((s) => links.studentOfCustomer.has(s.qboId)).length,
-    })),
-  };
+  return listed.filter((f) => f.customer.active && f.customer.parentQboId === null && !aboutToBeLinked.has(f.customer.qboId));
+}
+
+/**
+ * The customers no family is linked to, from what the list is read from: the roster (buildRoster() of the shape and the
+ * cache), the cache's customers, the family creates on the queue and which customers have a family link and a student
+ * link in the roster's company. Pure: the one rule, for Reconciliation's list (customersWithNoFamily()) and the
+ * accounting links screen's suggestions (src/lib/accounting/mapping.ts) alike.
+ */
+export function noFamilyPool(roster: Roster, customers: readonly Cust[], creates: readonly RosterWrite[],
+  links: { familyLinked: ReadonlySet<string>; studentLinked: ReadonlySet<string> }): NoFamilyCustomer[] {
+  return noFamilyCandidates(roster, customers, creates).filter((f) => !links.familyLinked.has(f.customer.qboId)).map((f) => ({
+    qboId: f.customer.qboId, name: f.customer.displayName, students: f.students.length,
+    inactiveStudents: f.students.filter((s) => !s.active).length,
+    studentsWithRecord: f.students.filter((s) => links.studentLinked.has(s.qboId)).length,
+  }));
 }
 
 type Done = { ok: true; message: string } | { ok: false; errors: string[] };

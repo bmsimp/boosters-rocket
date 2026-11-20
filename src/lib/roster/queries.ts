@@ -37,6 +37,24 @@ async function signIns(): Promise<SignIn[]> {
 }
 
 /**
+ * While connected, a cache read from another company (or, naming none, one that holds anything) is treated as not read
+ * yet: the roster pages show none of it. Pure.
+ */
+export const anotherCompanysCache = (o: { connected: boolean; connectedRealmId: string | null; source: string | null; hasCache: boolean }): boolean =>
+  o.connected && (o.source !== null ? o.source !== o.connectedRealmId : o.hasCache);
+/** The types a shape names that QuickBooks no longer has, once a roster read has gone through (before one, none is judged). Pure. */
+export const brokenShapeTypes = (shape: MembershipShape | null, readOnce: boolean, typeRows: TypeRow[]): string[] =>
+  (shape && readOnce ? missingTypes(shape, typeRows) : []);
+/**
+ * Whether loadRosterPage() has a roster to show, from what it reads: so whether a family's page stands for an active
+ * family record (familyEntry() finds every active one then, and none otherwise). Pure, for a page that reads the same
+ * tables itself (the accounting links screen, src/lib/accounting/mapping.ts).
+ */
+export const rosterShown = (o: { connected: boolean; connectedRealmId: string | null; source: string | null; hasCache: boolean;
+  shape: MembershipShape | null; readOnce: boolean; typeRows: TypeRow[] }): boolean =>
+  !anotherCompanysCache(o) && o.shape !== null && brokenShapeTypes(o.shape, o.readOnce, o.typeRows).length === 0;
+
+/**
  * Everything the roster pages and the settings view show. A broken shape gives no roster rather than a wrong one (spec §1
  * Rules). While connected, a cache read from another company (or one that doesn't say which) is treated as not read
  * yet: none of it, nor that company's run history, is shown under the connected company's name. Disconnected, the last
@@ -49,10 +67,10 @@ export async function loadRosterPage(): Promise<RosterPage> {
     db.select().from(jobRun).where(and(eq(jobRun.job, ROSTER_JOB), eq(jobRun.outcome, "ok"))).orderBy(desc(jobRun.id)).limit(1),
   ]);
   const hasCache = typeRows.length > 0 || anyCustomer.length > 0;
-  if (conn.connected && (from !== null ? from !== c?.realmId : hasCache)) {
+  if (anotherCompanysCache({ connected: conn.connected, connectedRealmId: c?.realmId ?? null, source: from, hasCache })) {
     return { connected: true, shape: null, shapeWords: null, brokenTypes: [], roster: null, attention: [], signIns: people, types: [], lastRun: null, lastOkAt: null };
   }
-  const brokenTypes = shape && lastOk ? missingTypes(shape, typeRows) : [];
+  const brokenTypes = brokenShapeTypes(shape, lastOk !== undefined, typeRows);
   const roster = shape && !brokenTypes.length ? buildRoster(shape, await customers()) : null;
   // A cache that names no company has no records' company to hold a sign-in's family to (every link names one), so the
   // sign-in rule waits for a read that records it, rather than flag every open sign-in as attached to no family.
