@@ -3150,8 +3150,11 @@ export async function trySavedItem(item: QueueRow, write: RenameWrite | CreateWr
   }
   // A parent's phone and address (stage 3's slice 11b) go only to the record they are for, as it stands at this try:
   // the membership's own Parent customer, or the family's own linked customer. Otherwise given up, nothing sent.
+  // Taking back this try's mark, when it sent nothing: keyed on the mark itself (`sent` and this try's own tried-at
+  // time), never on the state, so an item given up on Reconciliation while this try waited for the roster lock keeps no
+  // mark of a send that never went; a later try's mark (another time) is never touched.
   const unmark = () => db.update(writeQueue).set({ sent: before.sent, request: before.request, lastTriedAt: before.lastTriedAt, updatedAt: new Date() })
-    .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting")));
+    .where(and(eq(writeQueue.id, item.id), eq(writeQueue.sent, true), eq(writeQueue.lastTriedAt, triedAt)));
   const contactStop = write.op === "contact" ? await contactStops(write, item, o.rosterWaitMs).catch(async (e: unknown) => {
     // The roster lock held past an at-once try's wait: its mark as maybe sent is taken back, as nothing was sent.
     if (o.rosterWaitMs !== undefined && lockTimedOut(e)) await unmark();
@@ -4678,7 +4681,8 @@ async function contactPlaces(of: DetailsOf, items: readonly QueueRow[]): Promise
  * is held, and the try is made from that row, only while it is still waiting and no try has been made of it since it was
  * first read (the worker takes an item whose lease ran out while an earlier item's try was under way): otherwise it is
  * left to the worker, untouched. An item that is no longer waiting, or that the try finds given up, is told from what
- * its row holds (contactHeld()). `rosterWaitMs` is for tests.
+ * its row holds (contactHeld()), and so is one found given up when it is read again after a lock held or a busy roster
+ * left nothing sent. `rosterWaitMs` is for tests.
  */
 export async function sendContactSaved(of: DetailsOf, itemIds: readonly string[], op: GuardianOp & { staffUserId: string }, o: { rosterWaitMs?: number } = {}): Promise<ContactSent[]> {
   const items = itemIds.length ? await db.select().from(writeQueue).where(inArray(writeQueue.id, [...itemIds])) : [];
@@ -4701,7 +4705,13 @@ export async function sendContactSaved(of: DetailsOf, itemIds: readonly string[]
         throw e;
       }
     });
-    const got: ContactGot = tried === null || tried === FAMILY_HELD ? { is: "held" } : tried === "roster" ? { is: "roster" }
+    // Nothing sent as a lock was held or the roster busy: read again, so an item given up meanwhile (on Reconciliation,
+    // while this waited) is told from what its row holds, never promised to the worker.
+    const leftFor = async (g: ContactGot): Promise<ContactGot> => {
+      const [r] = await db.select({ state: writeQueue.state }).from(writeQueue).where(eq(writeQueue.id, item.id));
+      return r?.state === "waiting" ? g : contactHeld(item.id);
+    };
+    const got: ContactGot = tried === null || tried === FAMILY_HELD ? await leftFor({ is: "held" }) : tried === "roster" ? await leftFor({ is: "roster" })
       : tried === "moved_on" || tried.is === "given_up" ? await contactHeld(item.id) : tried;
     out.push({ ...at, got });
   }

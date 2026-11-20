@@ -18,7 +18,7 @@ import type { ContactValues } from "@/lib/parents/contact-fields";
 import { saveDetails, saveMyContact } from "@/lib/parents/contact-edits";
 import { CONTACT_REPLACED_NOTE } from "@/lib/parents/contact-queue";
 import { contactSavedWords, CONTACT_DIFFERS, keptContactWords, RosterBusyAtTry, SAVED_LEASE_MS, SENDING_LOCK, sendContactSaved, STAFF_DETAILS_COPY, trySavedItem } from "@/lib/roster/writes";
-import { runWriteQueue } from "@/lib/roster/queue";
+import { giveUp, runWriteQueue } from "@/lib/roster/queue";
 import type { MembershipShape } from "@/lib/roster/shape";
 import { savePersonDetailsAction } from "@/app/staff/(app)/parents/actions";
 import { saveFamilyDetailsAction } from "@/app/staff/(app)/roster/write-actions";
@@ -83,6 +83,27 @@ async function ana() {
 }
 const staffOp = () => ({ actor: { door: "staff" as const, id: registrar.id, label: registrar.email }, ip: null, permission: "Parents.ReadWrite", staffUserId: registrar.id });
 const queueAs = () => ({ askedBy: registrar.id, nextTryAt: new Date(Date.now() + SAVED_LEASE_MS) });
+/** Reconciliation's "Give up", as the registrar. */
+const reconciler = () => ({ actor: staffOp().actor, ip: null, permission: "Roster.Family.ReadWrite" });
+/** A queue item's row held FOR UPDATE in a transaction of its own, so a write to it waits until it is released. */
+async function holdTheRow(id: string): Promise<{ release: () => Promise<void> }> {
+  let release!: () => void, taken!: () => void;
+  const released = new Promise<void>((r) => { release = r; });
+  const isTaken = new Promise<void>((r) => { taken = r; });
+  const held = db.transaction(async (tx) => { await tx.execute(sql`select id from write_queue where id = ${id} for update`); taken(); await released; });
+  await isTaken;
+  return { release: async () => { release(); await held; } };
+}
+/** Until the queue item's row reads as `ready` says: the thing itself, read again, never a guessed sleep. */
+async function untilTheItem(id: string, ready: (r: NonNullable<Awaited<ReturnType<typeof queueItem>>>) => boolean, timeoutMs = 15_000): Promise<void> {
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    const r = await queueItem(id);
+    if (r && ready(r)) return;
+    if (Date.now() > until) throw new Error(`The item didn't come to the state asked for within ${timeoutMs} ms.`);
+    await new Promise((res) => setTimeout(res, 20));
+  }
+}
 
 describe("staff change a person's details on their page: saved, audited, and tried at once (items 1, 3 and 4)", () => {
   it("saved, `parent.details.save` naming the staff member and the permission, and their own Parent customer in QuickBooks at once", async () => {
@@ -472,6 +493,58 @@ describe("the at-once try, whatever stands in its way (item 4)", () => {
     }
     expect(posts()).toEqual([]);
     expect(await queueItem(item.id)).toMatchObject({ state: "waiting", sent: false, tries: 0 });
+  });
+
+  it("given up on Reconciliation while the at-once try waits for the roster lock: said from what the item holds, never promised to the worker", async () => {
+    const a = await ana();
+    const saved = await saveDetails({ kind: "person", parentId: a.ana.id }, asSaved({ phone: NEW_PHONE }, "p:1"), { ...staffOp(), queueAs: queueAs() });
+    if (saved.is !== "saved") throw new Error("not saved");
+    const lock = await holdTheRosterLock();
+    let sent: Awaited<ReturnType<typeof sendContactSaved>>;
+    try {
+      const sending = sendContactSaved({ kind: "person", parentId: a.ana.id }, saved.queueIds, staffOp(), { rosterWaitMs: 3_000 });
+      // It waits for the roster lock before its try (rosterFreeWithin()); meanwhile staff give the item up.
+      await untilALockIsAwaited();
+      expect(await giveUp(saved.queueIds[0]!, "Not needed now.", reconciler())).toMatchObject({ ok: true });
+      sent = await sending;
+    } finally {
+      await lock.release();
+    }
+    expect(sent.map((s) => s.got)).toEqual([{ is: "abandoned", sent: false }]);
+    expect(contactSavedWords(sent, "person", { mayCompare: true, whoCompares: "" }).sentences)
+      .toEqual(["Nothing was sent to their record under Rivera Family: the change was given up on the Reconciliation page meanwhile. The portal keeps the details."]);
+    expect(posts()).toEqual([]);
+    expect(await queueItem(saved.queueIds[0]!)).toMatchObject({ state: "given_up", sent: false, tries: 0 });
+  });
+
+  it("given up while the try, its item marked, waits for the roster lock at its record's check: the mark taken back, and said from what the item holds", async () => {
+    const a = await ana();
+    const saved = await saveDetails({ kind: "person", parentId: a.ana.id }, asSaved({ phone: NEW_PHONE }, "p:1"), { ...staffOp(), queueAs: queueAs() });
+    if (saved.is !== "saved") throw new Error("not saved");
+    const id = saved.queueIds[0]!;
+    const first = (await queueItem(id))!;
+    // The item's row held, so the try's mark waits for it: the try's first look (the gate) has gone through by then.
+    const row = await holdTheRow(id);
+    let lock: Awaited<ReturnType<typeof holdTheRosterLock>> | null = null;
+    let sent: Awaited<ReturnType<typeof sendContactSaved>>;
+    try {
+      const sending = sendContactSaved({ kind: "person", parentId: a.ana.id }, saved.queueIds, staffOp(), { rosterWaitMs: 3_000 });
+      await untilALockIsAwaited();
+      // The roster lock taken before the record's check (contactStops()) asks for it, then the mark let through.
+      lock = await holdTheRosterLock();
+      await row.release();
+      await untilTheItem(id, (r) => r.sent);
+      await untilALockIsAwaited();
+      expect(await giveUp(id, "Not needed now.", reconciler())).toMatchObject({ ok: true });
+      sent = await sending;
+    } finally {
+      await row.release();
+      await lock?.release();
+    }
+    expect(sent.map((s) => s.got)).toEqual([{ is: "abandoned", sent: false }]);
+    expect(posts()).toEqual([]);
+    // Given up as staff asked, with no mark of a send that never went.
+    expect(await queueItem(id)).toMatchObject({ state: "given_up", sent: false, tries: 0, lastTriedAt: first.lastTriedAt, request: first.request });
   });
 
   it("given up on Reconciliation between the commit and the try: said so, from what the item holds, and nothing sent", async () => {
