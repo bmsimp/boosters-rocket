@@ -6,6 +6,7 @@ import { writeAudit } from "@/lib/audit/log";
 import { getPerson, personContact, type PersonFamily } from "@/lib/parents/directory";
 import { whoseDetails } from "@/lib/parents/my-family";
 import { getShape } from "@/lib/roster/shape";
+import { familyPagesStand } from "@/lib/roster/queries";
 import { getParentSettings, parentDoorClosed } from "@/lib/parents/settings";
 import { LocalTime } from "@/app/components/local-time";
 import { DataTable } from "@/app/components/data-table";
@@ -43,7 +44,10 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   const kept = await keptContactsOf(p.families.filter((f) => !f.previousCompany && f.open).map((f) => f.guardianId));
   const mayCompare = can(ctx.effective, "Roster.Read");
   // Only the families they are a guardian of now: a removed membership's family details are no longer theirs.
-  const familyPages = p.families.flatMap((f) => (!f.previousCompany && f.open && f.familyId !== null && f.pageStands ? [{ key: f.guardianId, id: f.familyId, name: f.familyName }] : []));
+  // A family's page answers Not found while the membership shape is missing or names a customer type QuickBooks no
+  // longer has, or the roster cache is another company's: then none is linked for the details, and the page says why.
+  const pagesStand = whose === "family" ? await familyPagesStand() : true;
+  const familyPages = !pagesStand ? [] : p.families.flatMap((f) => (!f.previousCompany && f.open && f.familyId !== null && f.pageStands ? [{ key: f.guardianId, id: f.familyId, name: f.familyName }] : []));
   return (
     <main className="wrap single">
       <h1 className="page-title">{p.name}</h1>
@@ -86,6 +90,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
         ) : (
           <>
             <p>The club&apos;s books have no parents of their own, so a phone and mailing address are each family&apos;s, shared by its guardians: they are shown and changed on the family&apos;s page.</p>
+            {!pagesStand && <Notice tone="info" live="none">A family&apos;s phone and mailing address can&apos;t be shown or changed by staff just now: the families&apos; pages are closed until the club&apos;s customer types are set again on Settings, QuickBooks. The parent can still change them on their Family page.</Notice>}
             {familyPages.length > 0 && <ul className="lines">{familyPages.map((f) => <li key={f.key}><Link className="link-line" href={familyPage(f.id)}>{f.name}</Link></li>)}</ul>}
           </>
         )}

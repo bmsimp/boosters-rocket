@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
-import { asStaff, renderPage } from "../helpers/signed-in";
+import { asStaff, pageOutcome, renderPage } from "../helpers/signed-in";
 
 // Every request goes to the QuickBooks stub, never Intuit.
 const stubBase = vi.hoisted(() => ({ url: "" }));
@@ -684,6 +684,23 @@ describe("the person's page: the details, and where QuickBooks stands for them (
     expect(html).toContain(`href="/staff/roster/${String(rivera)}"`);
     expect(html).not.toContain("555-0101");
     expect(html).not.toContain("Save details");
+  });
+
+  it("in books with no parent type and a broken shape: no family's page linked for the details (it would answer Not found), and why in words", async () => {
+    const a = await ana();
+    // The student type the shape names is one QuickBooks no longer has: the families' pages answer Not found.
+    await storeShape({ ...NO_PARENT_TYPE, studentTypeId: "99" });
+    asStaff(registrar);
+    expect(await pageOutcome(RosterEntryPage, { params: { id: String(rivera) } })).toEqual({ notFound: true });
+    const section = detailsSection(await page(a.ana.id));
+    expect(section).toContain("a phone and mailing address are each family's");
+    expect(section).not.toContain(`href="/staff/roster/${String(rivera)}"`);
+    expect(section).toContain("A family's phone and mailing address can't be shown or changed by staff just now: the families' pages are closed until the club's customer types are set again on Settings, QuickBooks. The parent can still change them on their Family page.");
+    // Set again, the link is back and the words gone.
+    await storeShape(NO_PARENT_TYPE);
+    const mended = detailsSection(await page(a.ana.id));
+    expect(mended).toContain(`href="/staff/roster/${String(rivera)}"`);
+    expect(mended).not.toContain("can't be shown or changed by staff just now");
   });
 
   /** The page's "Phone and mailing address" section alone. */

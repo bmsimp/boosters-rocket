@@ -53,6 +53,18 @@ export const brokenShapeTypes = (shape: MembershipShape | null, readOnce: boolea
 export const rosterShown = (o: { connected: boolean; connectedRealmId: string | null; source: string | null; hasCache: boolean;
   shape: MembershipShape | null; readOnce: boolean; typeRows: TypeRow[] }): boolean =>
   !anotherCompanysCache(o) && o.shape !== null && brokenShapeTypes(o.shape, o.readOnce, o.typeRows).length === 0;
+/**
+ * rosterShown() read now, from what loadRosterPage() reads, without building the roster: whether a family's page stands
+ * for an active family record at this moment (a person's page links the families' pages for their details only then).
+ */
+export async function familyPagesStand(): Promise<boolean> {
+  const [conn, c, from, anyCustomer, shape, typeRows, [lastOk]] = await Promise.all([
+    connectionView(), getConnection(), getRosterSource(), db.select({ qboId: qboCustomer.qboId }).from(qboCustomer).limit(1), getShape(), types(),
+    db.select({ id: jobRun.id }).from(jobRun).where(and(eq(jobRun.job, ROSTER_JOB), eq(jobRun.outcome, "ok"))).limit(1),
+  ]);
+  return rosterShown({ connected: conn.connected, connectedRealmId: c?.realmId ?? null, source: from, hasCache: typeRows.length > 0 || anyCustomer.length > 0,
+    shape, readOnce: lastOk !== undefined, typeRows });
+}
 
 /**
  * Everything the roster pages and the settings view show. A broken shape gives no roster rather than a wrong one (spec §1
