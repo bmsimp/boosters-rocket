@@ -59,10 +59,10 @@ async function readAgain(...customers: ReturnType<typeof qc>[]) {
 const changeInBooks = (id: string, change: Record<string, unknown>) => { stub.customers = stub.customers.map((c) => (c.Id === id ? { ...c, ...change } : c)); };
 
 let tag: string;
-/** A family added in the portal by someone who may not link it: active, with no link. */
-async function unlinkedFamily(name: string): Promise<AppFamilyId> {
+/** A family (a member, in flat books) added in the portal by someone who may not link it: active, with no link. */
+async function unlinkedFamily(name: string, role: "family" | "member" = "family"): Promise<AppFamilyId> {
   const op = asOp(await seedStaff({ email: `adder.${name.toLowerCase().replace(/\W+/g, ".")}@club.org`, name: "Adder" }));
-  expect(await addFamily({ role: "family", name, typeQboId: null }, tag, { ...op, mayLink: false })).toMatchObject({ ok: true, unlinked: true });
+  expect(await addFamily({ role, name, typeQboId: null }, tag, { ...op, mayLink: false })).toMatchObject({ ok: true, unlinked: true });
   return (await db.select({ id: family.id }).from(family).where(eq(family.name, name)))[0]!.id;
 }
 /** An open guardian row of this person in this family record (the person made once, by their address). */
@@ -178,8 +178,10 @@ describe("suggestions for families with no link", () => {
   });
 
   it("finds no match for an address on no customer, a customer another family is linked to, an inactive customer, or a name; and says when there are no guardians", async () => {
+    changeInBooks("20", mail("chen@example.com"));
     await readAgain(qc("90", "Quiet Family", "1", { Active: false, ...mail("zoe@example.com") }), qc("91", "nobody@example.com", "1"));
     const a = await unlinkedFamily("Family A");
+    await guardianIn(a, "Chen Again", "chen@example.com"); // on the Chen family's own customer, which the Chen family is linked to
     await guardianIn(a, "Ana Again", "ana@example.com"); // on Ana Rivera's customer, under the Rivera family, which is linked
     await guardianIn(a, "Zoe Quiet", "zoe@example.com"); // on an inactive customer
     await guardianIn(a, "No Body", "nobody@example.com"); // only a customer's name
@@ -221,9 +223,9 @@ describe("the books' shape", () => {
   it("in flat books suggests the member by its own field, never by a customer under it", async () => {
     tag = await connectRoster(stub, { shape: { kind: "flat", memberTypeIds: ["1"] } });
     await readAgain(qc("70", "Patel Family", "1", mail("asha@example.com")), qc("80", "Okafor Family", "1"), qc("81", "Ike Okafor", "2", { ...under("80"), ...mail("ike@example.com") }));
-    const patels = await unlinkedFamily("The Patels");
+    const patels = await unlinkedFamily("The Patels", "member");
     await guardianIn(patels, "Asha Patel", "asha@example.com");
-    const okafors = await unlinkedFamily("The Okafors");
+    const okafors = await unlinkedFamily("The Okafors", "member");
     await guardianIn(okafors, "Ike Okafor", "ike@example.com");
     expect(await statusOf("The Patels")).toMatchObject({ key: "suggested", holders: [{ address: "asha@example.com", on: { kind: "family" } }] });
     expect(await statusOf("The Okafors")).toEqual({ key: "no_match", noGuardians: false });
