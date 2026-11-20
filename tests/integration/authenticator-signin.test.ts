@@ -22,7 +22,7 @@ import { createHmac } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, parentAuthenticator, parentAuthSession, parentBackupCode, parentDevice, rateLimitEvent, signinCode } from "@/lib/db/schema";
-import { sealAuthenticatorSecret } from "@/lib/parents/authenticator";
+import { removeAuthenticator, sealAuthenticatorSecret } from "@/lib/parents/authenticator";
 import { sendSecondStepCode, signinStands, verifySecondFactor } from "@/lib/parents/signin-codes";
 import { signOutEverywhere } from "@/lib/parents/signin-settings";
 import { totpStep } from "@/lib/parents/totp";
@@ -294,9 +294,11 @@ describe("the app step at /portal-app/check", () => {
 
   it("an app turned off while its step is open: the try is refused and ends the step, and the password then asks for the emailed code (slice SI-6b)", async () => {
     const ana = await seedAna();
+    await seedBackupCodes(ana.id, 2);
     const pending = await anaAtTheApp();
-    // As "Turn off the authenticator app" leaves it (removeAuthenticator()): the app and its codes gone.
-    await db.delete(parentAuthenticator).where(eq(parentAuthenticator.parentId, ana.id));
+    // Turned off by the press's own delete (removeAuthenticator(), which turnOffMyAuthenticator() runs): the app and its codes gone.
+    expect(await db.transaction((tx) => removeAuthenticator(tx, ana.id))).toEqual({ apps: 1, backupCodes: 2 });
+    expect(await authenticatorRows(ana.id)).toEqual([]);
     const { res, body } = await appStep(appCode(ana.app!.secret), pending);
     // The answer says only that the step ended, never why; the pending step's cookie is cleared.
     expect(body).toEqual({ ...REFUSED, ended: true });

@@ -6,6 +6,7 @@ import { e2eMailPort } from "./run-config";
 import { codeFor } from "./journey-helpers";
 import { PARENT_SESSION_TOKEN, parentSessionCookie } from "./parent-session";
 import { E2E_SIGNIN } from "./signin-seed";
+import { APP_REJECTED, APP_STEP_OVER } from "../../src/lib/parents/signin-copy";
 import { ZELDA_EMAIL, removeZeldaDevicesMadeHere, removeZeldaSessionsMadeHere } from "./signin-links";
 import { clearZeldaCounts, keepZeldaProof, nextAppCode, removeZeldaSecondSteps, setUpAppOnPage } from "./authenticator-steps";
 
@@ -30,6 +31,9 @@ test.beforeAll(async () => {
   sink = await startMailSink({ secure: true, port: e2eMailPort(), key: readFileSync(".e2e/sink-key.pem", "utf8"), cert: readFileSync(".e2e/sink-cert.pem", "utf8") });
   await removeZeldaSecondSteps(sql);
   await clearZeldaCounts(sql);
+  // A run cut off midway may have left the sessions and devices its sign-ins made: the seeded ones are kept.
+  await removeZeldaSessionsMadeHere(sql);
+  await removeZeldaDevicesMadeHere(sql);
   putProofBack = await keepZeldaProof(sql);
 });
 test.afterAll(async () => {
@@ -63,7 +67,7 @@ async function finishTo(page: Page, code: string, baseURL: string) {
   await expect(page).toHaveURL(`${baseURL}/`);
 }
 
-test("a parent sets an authenticator app up, signs in on new browsers with its code and with a backup code, and turns it off", async ({ browser, context, page, baseURL }) => {
+test("a parent sets an authenticator app up, signs in on new browsers with its code and with a backup code, and turns it off while a browser is at its step", async ({ browser, context, page, baseURL }) => {
   test.setTimeout(180_000);
   await sql`UPDATE parent_auth_session SET strong_at = NULL WHERE token = ${PARENT_SESSION_TOKEN}`;
   sink.messages.length = 0;
@@ -107,12 +111,22 @@ test("a parent sets an authenticator app up, signs in on new browsers with its c
   const spent = await sql`SELECT used_at FROM parent_backup_code c JOIN parent p ON p.id = c.parent_id WHERE p.email = ${ZELDA_EMAIL} AND used_at IS NOT NULL`;
   expect(spent).toHaveLength(1);
 
-  // Last, turned off through the page (the proof from the start is still within its 10 minutes).
-  await page.reload();
-  await expect(box.getByText("your backup codes stop working too")).toBeVisible();
-  await box.getByRole("button", { name: "Turn off the authenticator app" }).click();
-  await expect(box.getByRole("status").filter({ hasText: "Your authenticator app is turned off" })).toBeVisible();
-  await expect(box.getByRole("button", { name: "Set up an authenticator app", exact: true })).toBeVisible();
+  // Last, turned off through the page (the proof from the start is still within its 10 minutes), while a third new
+  // browser is at the app's step (decision 10 of SI-6b): its code then ends the step, and it is back at the password.
+  const third = await newDevice(browser, baseURL!);
+  try {
+    await page.reload();
+    await expect(box.getByText("your backup codes stop working too")).toBeVisible();
+    await box.getByRole("button", { name: "Turn off the authenticator app" }).click();
+    await expect(box.getByRole("status").filter({ hasText: "Your authenticator app is turned off" })).toBeVisible();
+    await expect(box.getByRole("button", { name: "Set up an authenticator app", exact: true })).toBeVisible();
+    await third.page.getByLabel("Code from your authenticator app, or a backup code").fill(await nextAppCode(third.page, app.key, app.at));
+    await third.page.getByRole("button", { name: "Confirm" }).click();
+    await expect(third.page.getByRole("alert")).toContainText(`${APP_REJECTED} ${APP_STEP_OVER}`);
+    await expect(third.page.getByLabel("Password")).toHaveValue("");
+    await expect(third.page.getByLabel("Code from your authenticator app, or a backup code")).toHaveCount(0);
+    await expect(third.page).toHaveURL(/\/sign-in/);
+  } finally { await third.close(); }
   expect(await sql`SELECT id FROM parent_authenticator a WHERE a.parent_id = (SELECT id FROM parent WHERE email = ${ZELDA_EMAIL})`).toHaveLength(0);
   expect(await sql`SELECT id FROM parent_backup_code c WHERE c.parent_id = (SELECT id FROM parent WHERE email = ${ZELDA_EMAIL})`).toHaveLength(0);
   // No row of the audit log holds the key or a code.

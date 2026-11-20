@@ -31,6 +31,7 @@ import { db } from "@/lib/db/client";
 import { auditLog, parent, parentAuthAccount, parentAuthenticator, parentAuthSession, parentAuthUser, parentDevice, parentEmailChange, parentSigninToken, rateLimitEvent, signinCode } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import { askAgainCode, currentPassword, sessionProvedRecently } from "@/lib/parents/asking-again";
+import { removeAuthenticator } from "@/lib/parents/authenticator";
 import { recordStrongSignin } from "@/lib/parents/devices";
 import { checkPasswordSignin, hashTriedAddress } from "@/lib/parents/password-signin";
 import { PASSWORD_COPY } from "@/lib/parents/password-copy";
@@ -621,7 +622,7 @@ describe("remembered devices", () => {
     return { mine, other, expired };
   }
   /** The devices box, cut from its heading to the next box's, so nothing another box draws is counted. */
-  const devicesBox = (page: string) => page.slice(page.indexOf(`id="devices-h"`), page.indexOf(`id="more-h"`));
+  const devicesBox = (page: string) => page.slice(page.indexOf(`id="devices-h"`), page.indexOf(`id="app-h"`));
   const NOT_FROM_PAGE = { ok: false, errors: [COPY.deviceNotFound] };
   const PROVE = { ok: false, errors: [COPY.proveAgain] };
   /** Each button's accessible name in the box, as its text reads (the hidden words included, tags and React's text breaks cut). */
@@ -928,8 +929,8 @@ describe("asking again when the app is turned off while its step is open (slice 
     asParent(a.identity);
     const first = await askAgainPasswordAction(PROVEN_PASSWORD);
     if (!first.ok || first.step !== "app") throw new Error("the app's step should be asked for");
-    // Turned off in another tab, as "Turn off the authenticator app" leaves it.
-    await db.delete(parentAuthenticator).where(eq(parentAuthenticator.parentId, a.identity.parentId));
+    // Turned off in another tab, by the press's own delete (removeAuthenticator(), which turnOffMyAuthenticator() runs).
+    expect(await db.transaction((tx) => removeAuthenticator(tx, a.identity.parentId))).toEqual({ apps: 1, backupCodes: 0 });
     const ENDED = { ok: false, errors: [COPY.appRejected, COPY.stepOver], ended: true };
     expect(await askAgainCodeAction(first.stamp, appCode(app.secret))).toEqual(ENDED);
     // The stamp asked for the app: it is never read as an emailed code's, whatever is typed with it.
