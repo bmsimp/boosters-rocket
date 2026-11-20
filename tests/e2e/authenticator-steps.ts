@@ -44,6 +44,16 @@ export async function setZeldaProof(sql: postgres.Sql, proved: boolean): Promise
   else await sql`UPDATE parent_auth_session SET strong_at = NULL WHERE token = ${PARENT_SESSION_TOKEN}`;
 }
 
+/**
+ * Stamps the seeded session as proved at the moment Zelda's app came into force: a proof made before it no longer counts
+ * (slice SI-6b's second read), so a page drawn after a set-up asks again unless the proof is at least that new. Read from
+ * the app's own row, so the two clocks (the database's and the app's) never disagree.
+ */
+export async function proveZeldaSinceHerApp(sql: postgres.Sql): Promise<void> {
+  await sql`UPDATE parent_auth_session SET strong_at = (SELECT a.confirmed_at FROM parent_authenticator a JOIN parent p ON p.id = a.parent_id
+    WHERE p.email = ${ZELDA_EMAIL} AND a.confirmed_at IS NOT NULL) WHERE token = ${PARENT_SESSION_TOKEN}`;
+}
+
 /** The key as the page shows it (groups of four), as the bytes an app is given. */
 const secretOf = (key: string) => base32Decode(key.replace(/\s+/g, ""))!;
 
@@ -58,6 +68,19 @@ export const appCodeAt = (key: string, atMs: number, steps = 0): string => totp(
 export async function nextAppCode(page: Page, key: string, lastMs: number): Promise<string> {
   const now = await page.evaluate(() => Date.now());
   return totpStep(now) > totpStep(lastMs) ? appCodeAt(key, now) : appCodeAt(key, lastMs, 1);
+}
+
+/**
+ * A code the portal takes now for an app whose newest taken code was for the step `lastStep`, and its step: the step
+ * the page's clock is in, or the one after `lastStep` once the clock is near enough for the check to take it (a step
+ * either way of now). While the clock is still two steps short, it waits for the clock itself (at most one step).
+ */
+export async function appCodeAfter(page: Page, key: string, lastStep: number): Promise<{ code: string; step: number }> {
+  let now = 0;
+  await expect.poll(async () => { now = await page.evaluate(() => Date.now()); return totpStep(now) + 1 > lastStep; },
+    { timeout: (TOTP_STEP_SECONDS + 10) * 1000 }).toBe(true);
+  const step = Math.max(totpStep(now), lastStep + 1);
+  return { code: totp(secretOf(key), step * TOTP_STEP_SECONDS * 1000), step };
 }
 
 /**

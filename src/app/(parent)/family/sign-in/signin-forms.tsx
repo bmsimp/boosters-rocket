@@ -79,6 +79,15 @@ export function AskAgain({ email, proved, lede, children }: { email: string; pro
   // in it is seldom read out, so the field that takes the focus carries them.
   const sentId = useId();
   useEffect(() => { if (moved.current) field.current?.focus(); }, [step]);
+  // A proof that stops counting while the page is open (since slice SI-6b's second read: an authenticator app set up
+  // on this page, which leaves every earlier proof of the person behind) reaches here as `proved` turning false once
+  // the page is drawn again: a change drawn for that proof gives way to the password, so the page never offers a press
+  // the server will refuse. Only a turn from true to false does this, never a first drawing or a proof just made here.
+  const [wasProved, setWasProved] = useState(proved);
+  if (proved !== wasProved) {
+    setWasProved(proved);
+    if (!proved && (step === "proved" || step === "arrived")) { setErrors(null); setStep("password"); }
+  }
   // A proof made elsewhere on the page (the devices box's own asking again) reaches here as `proved` once the page is
   // drawn again: a password step not yet answered gives way to the change, so it never asks for what was just shown.
   if (step === "proved" || (step === "password" && proved)) return <>{children}</>;

@@ -7,7 +7,7 @@ import { PARAMS } from "./parent-params";
 import { MIN_TARGET, focusStop, layoutProblems } from "./a11y-checks";
 import { mintZeldaLink, NO_SUCH_LINK, removeZeldaLinks, takeZeldaPassword, type LinkPurpose } from "./signin-links";
 import { E2E_SIGNIN } from "./signin-seed";
-import { clearZeldaCounts, keepZeldaProof, removeZeldaSecondSteps, setUpAppOnPage, setZeldaProof } from "./authenticator-steps";
+import { clearZeldaCounts, keepZeldaProof, proveZeldaSinceHerApp, removeZeldaSecondSteps, setUpAppOnPage, setZeldaProof } from "./authenticator-steps";
 
 /**
  * Every page a parent sees, in every display mode, at a phone's width and a desktop's (step 6 of the roadmap; PRODUCT.md:
@@ -152,8 +152,10 @@ async function prepareApp(page: Page, state: AppState) {
   }
   await setUpAppOnPage(page, box);
   if (state === "codes") return;
-  // Asking again is drawn for a session with no recent proof: it is taken away before the page is drawn again.
+  // Asking again is drawn for a session with no proof that counts: it is taken away before the page is drawn again. The
+  // app on with its presses needs a proof at least as new as the app (one from before it no longer counts).
   if (state === "asked") await setZeldaProof(sql, false);
+  else await proveZeldaSinceHerApp(sql);
   await page.reload();
   await expect(box.getByText("Your authenticator app is set up.")).toBeVisible();
   if (state === "on") return;

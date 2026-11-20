@@ -23,9 +23,9 @@ import { env } from "@/env";
 import type { ParentCtx } from "@/lib/guards";
 import { MOST_TYPED_PASSWORD, checkPasswordSignin } from "./password-signin";
 import { CODE_TTL_MS, refuseCodeWithoutStep, sendSecondStepCode, signinStands, verifySecondFactor, verifySigninCode, type PasswordProof, type SecondFactorProof, type StepPerson } from "./signin-codes";
-import { hasAuthenticator } from "./authenticator";
+import { authenticatorInForceSince, hasAuthenticator } from "./authenticator";
 import { lockedPerson, parentActor } from "./sessions";
-import { provedRecently } from "./reask-rule";
+import { proofCountsBesideApp, provedRecently } from "./reask-rule";
 import { SIGNIN_SETTINGS_COPY as COPY } from "./signin-settings-copy";
 
 /** Who is asking: the session and its person, from the guard (ParentCtx) and never from the browser. */
@@ -34,16 +34,22 @@ type Asker = Pick<ParentCtx, "parentId" | "sessionId" | "email" | "ip">;
 type Reader = Pick<typeof db, "select">;
 
 /**
- * The session's own proof of the password and a second step, as `strong_at` holds it, or null: none yet, or no such
- * session of this person (ended, or another's). `strong_at` is set only by a proof the session made itself: a sign-in
- * with the emailed code or a set-up link (recordStrongSignin(), devices.ts), or asking again (askAgainCode(), below). A
- * sign-in on a remembered device proved only the password at that moment, and sets none.
+ * The session's own proof of the password and a second step, as `strong_at` holds it, when it still counts, or null:
+ * none yet, no such session of this person (ended, or another's), or (since slice SI-6b's second read) a proof made
+ * before the person's authenticator app came into force (proofCountsBesideApp(), ./reask-rule.ts, against
+ * authenticatorInForceSince()). `strong_at` is set only by a proof the session made itself: a sign-in with the emailed
+ * code or a set-up link (recordStrongSignin(), devices.ts), or asking again (askAgainCode(), below). A sign-in on a
+ * remembered device proved only the password at that moment, and sets none. Every reader of whether a session proved
+ * itself reads it here (sessionProvedRecently(), the page's loadMySignin(), and each change under the person's row), so
+ * the page never offers what the change refuses. Confirming an app stamps no session, the one that confirmed included.
  */
 export async function sessionStrongAt(q: Reader, s: { sessionId: string; parentId: string }): Promise<Date | null> {
   const [row] = await q.select({ strongAt: sql<Date | null>`${parentAuthSession.strongAt}`.mapWith(parentAuthSession.strongAt) }).from(parentAuthSession)
     .where(and(eq(parentAuthSession.id, s.sessionId),
       inArray(parentAuthSession.userId, q.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, s.parentId)))));
-  return row?.strongAt ?? null;
+  const strongAt = row?.strongAt ?? null;
+  if (strongAt === null) return null;
+  return proofCountsBesideApp(strongAt, await authenticatorInForceSince(s.parentId, q)) ? strongAt : null;
 }
 
 /**

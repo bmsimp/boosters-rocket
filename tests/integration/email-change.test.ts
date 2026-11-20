@@ -36,7 +36,9 @@ import { holdTheRosterLock } from "../helpers/reconcile";
 import { addToCache, seedParentSettings, seedShape, stu } from "../helpers/roster-cache";
 import { NO_CHANGES, appRecordsByCustomer, syncAppRecords, whatAFreshRunWouldChange } from "../helpers/app-records";
 import { holdLink, linkRows, mintLink, seedDevice } from "../helpers/signin-links";
-import { seedAuthenticator } from "../helpers/authenticator";
+import { appCode, seedAuthenticator } from "../helpers/authenticator";
+import { askAgainCode, askAgainPassword } from "@/lib/parents/asking-again";
+import { confirmMyAuthenticator, startMyAuthenticator } from "@/lib/parents/authenticator-settings";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -150,6 +152,30 @@ describe("asking for the change", () => {
     expect(outbox).toEqual([]);
     expect(await requests()).toEqual([]);
     expect((await audits()).map((a) => a.after)).toEqual(Array.from({ length: 3 }, () => ({ code: "not_proved" })));
+  });
+
+  it("refuses a proof made before the person's app came into force in another session, until they show it's them with the app's code (slice SI-6b's second read)", async () => {
+    const { r } = await seedContactFamilies(stub);
+    asParent(r.identity);
+    // This session proved itself a few seconds ago (as with the emailed code); another of theirs then sets an app up.
+    await proveRecently(r.identity, PROVEN_PASSWORD, new Date(Date.now() - 5_000));
+    const [user] = await db.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, r.identity.parentId));
+    const other = await seedParentSession(user!.id, { familyId: r.identity.familyId, strongAt: new Date(Date.now() - 4_000) });
+    const elsewhere = { ...ctxOf(r.identity), sessionId: other.id };
+    const start = await startMyAuthenticator(elsewhere);
+    if (!start.ok) throw new Error(`the set-up should begin: ${start.errors.join(" ")}`);
+    const secret = start.key.replace(/ /g, "");
+    expect(await confirmMyAuthenticator(elsewhere, appCode(secret), start.stamp)).toMatchObject({ ok: true });
+    // Within this session's 10 minutes: refused, nothing stored or mailed.
+    expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.proveFirstWithApp] });
+    expect(outbox).toEqual([]);
+    expect(await requests()).toEqual([]);
+    // Asked again with the app's code: asked, as before.
+    const first = await askAgainPassword(ctxOf(r.identity), PROVEN_PASSWORD);
+    if (!first.ok || first.step !== "app") throw new Error("the app's step should be asked for");
+    expect(await askAgainCode(ctxOf(r.identity), first.stamp, appCode(secret, Date.now(), 1))).toMatchObject({ ok: true });
+    expect(await asking(NEW)).toEqual({ ok: true, message: EMAIL_COPY.sent(NEW) });
+    expect((await requests()).map((x) => x.newEmail)).toEqual([NEW]);
   });
 
   it("answers the same whatever the new address is, known to the portal and to QuickBooks or not", async () => {

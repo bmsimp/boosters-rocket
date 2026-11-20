@@ -415,7 +415,8 @@ describe("new backup codes", () => {
     await seedAuthenticator(a.identity.parentId, { confirmed: false });
     expect(await remakeMyBackupCodes(ctxOf(a.identity))).toEqual({ ok: false, errors: [COPY.appNotOn] });
     expect(await backupCodeRows(a.identity.parentId)).toEqual([]);
-    await db.update(parentAuthenticator).set({ confirmedAt: new Date() }).where(eq(parentAuthenticator.parentId, a.identity.parentId));
+    // In force since before the proof (a proof older than the app wouldn't count).
+    await db.update(parentAuthenticator).set({ confirmedAt: new Date(Date.now() - 60 * 60_000) }).where(eq(parentAuthenticator.parentId, a.identity.parentId));
     await seedParentSettings({ level: "strict" });
     expect(await remakeMyBackupCodes(ctxOf(a.identity))).toMatchObject({ ok: true, message: COPY.newCodesMade });
     expect(await backupCodeRows(a.identity.parentId)).toHaveLength(10);
@@ -474,9 +475,16 @@ describe("no press touches a session, a device or strong_at", () => {
     const now = new Date();
     const { secret, stamp } = await started(a.identity, now);
     expect(await confirmMyAuthenticator(ctxOf(a.identity), appCode(secret, now), stamp, now)).toMatchObject({ ok: true });
-    expect(await remakeMyBackupCodes(ctxOf(a.identity), now)).toMatchObject({ ok: true });
-    expect(await turnOffMyAuthenticator(ctxOf(a.identity), now)).toMatchObject({ ok: true });
     expect({ sessions: await sessionsOf(a.identity.parentId), devices: await devicesOf(a.identity.parentId), strongAt: await strongAtOf(a.identity.sessionId) }).toEqual(before);
+    // The proof from before the app came into force no longer counts: the session is asked again (as with the app's
+    // code), here stamped by hand a second on.
+    const later = new Date(now.getTime() + 1000);
+    await proveRecently(a.identity, PROVEN_PASSWORD, later);
+    const proved = { sessions: await sessionsOf(a.identity.parentId), devices: await devicesOf(a.identity.parentId), strongAt: await strongAtOf(a.identity.sessionId) };
+    expect(proved.strongAt).toEqual(later);
+    expect(await remakeMyBackupCodes(ctxOf(a.identity), later)).toMatchObject({ ok: true });
+    expect(await turnOffMyAuthenticator(ctxOf(a.identity), later)).toMatchObject({ ok: true });
+    expect({ sessions: await sessionsOf(a.identity.parentId), devices: await devicesOf(a.identity.parentId), strongAt: await strongAtOf(a.identity.sessionId) }).toEqual(proved);
     expect(await audits("signin")).toEqual([]);
     expect(await audits("parent.sessions.end_all")).toEqual([]);
   });
@@ -539,6 +547,9 @@ describe("one parent never reaches another's app", () => {
       const confirmed = await confirmAuthenticatorAction(appCode(mine.key.replace(/ /g, ""), Date.now()), mine.stamp);
       if (!confirmed.ok) throw new Error(`A's own set-up should be confirmed: ${confirmed.errors.join(" ")}`);
       for (const c of confirmed.codes) expect([...theirCodes.b, ...theirCodes.second]).not.toContain(c);
+      // A's proof is older than A's app now: shown again, as A would be asked with the app's code.
+      expect(await newBackupCodesAction()).toEqual({ ok: false, errors: [COPY.proveAgain] });
+      await proveRecently(a.identity);
       const remade = await newBackupCodesAction();
       expect(remade.ok).toBe(true);
       expect(await theirs()).toEqual(before);

@@ -169,7 +169,9 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   of company, a last membership closed: each keeps them as it keeps the password). A later writer that takes them
  *   (SI-9's staff reset) takes them after the person's row and before their devices;
  * - the authenticator app's presses in sign-in settings (authenticator-settings.ts, since slice SI-6b) each take the
- *   person's row FOR UPDATE and read the session's `strong_at` under it, then: setting it up deletes the person's
+ *   person's row FOR UPDATE and read the session's `strong_at` under it (with when the person's app came into force,
+ *   since a proof older than it doesn't count: sessionStrongAt(), asking-again.ts; so do the password change, the email
+ *   request and the forgets above, reading the app row unlocked under the person's row, as every writer of it holds it), then: setting it up deletes the person's
  *   unfinished set-up and inserts the new one (their app row); confirming it reads and then updates the unfinished app
  *   row, then deletes their unused emailed codes, then deletes their backup codes and inserts ten new ones; new backup
  *   codes delete and insert the backup codes alone; turning it off deletes the app row, then the backup codes. None of

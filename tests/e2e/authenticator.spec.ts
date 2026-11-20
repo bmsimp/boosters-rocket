@@ -8,14 +8,17 @@ import { PARENT_SESSION_TOKEN, parentSessionCookie } from "./parent-session";
 import { E2E_SIGNIN } from "./signin-seed";
 import { APP_REJECTED, APP_STEP_OVER } from "../../src/lib/parents/signin-copy";
 import { ZELDA_EMAIL, removeZeldaDevicesMadeHere, removeZeldaSessionsMadeHere } from "./signin-links";
-import { clearZeldaCounts, keepZeldaProof, nextAppCode, removeZeldaSecondSteps, setUpAppOnPage } from "./authenticator-steps";
+import { appCodeAfter, clearZeldaCounts, keepZeldaProof, nextAppCode, removeZeldaSecondSteps, setUpAppOnPage } from "./authenticator-steps";
+import { totpStep } from "../../src/lib/parents/totp";
 
 /**
  * An authenticator app through the server, in the browser (the sign-in release, slice SI-6b, and the journey SI-6a's
  * reviews asked for): Zelda shows it's her on /family/sign-in with her password and the code emailed to her, sets an
  * app up (the key the page shows is all the test knows, and it works the app's code out from it by RFC 6238 at the
  * page's own clock), reads her ten backup codes once, then signs in on a new browser with her password and the app's
- * code, and on another with a backup code typed as shown; last, she turns the app off through the page. Nothing of it
+ * code, and on another with a backup code typed as shown; last, she turns the app off through the page, shown it's her
+ * again first with the app's own code, since the proof she made before the app came into force no longer counts (slice
+ * SI-6b's second read). Nothing of it
  * stays: her app, backup codes, the sessions and devices the sign-ins made, her emailed codes and her counts are
  * removed after (and before, for a run cut off midway), and the seeded session's proof is put back, so both passes,
  * phone then desktop, read one seed.
@@ -89,9 +92,12 @@ test("a parent sets an authenticator app up, signs in on new browsers with its c
   await expect(box.getByText("Your authenticator app is set up.").first()).toBeVisible();
   expect(new Set(app.codes).size).toBe(10);
   for (const c of app.codes) expect(c).toMatch(/^[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/);
-  // Drawn again, the page holds neither the key nor a code: they were in the presses' answers alone.
+  // Drawn again, the page holds neither the key nor a code: they were in the presses' answers alone. The proof from
+  // before the app no longer counts: the box asks again for the password before its presses.
   await page.reload();
   await expect(box.getByText("Your authenticator app is set up.")).toBeVisible();
+  await expect(box.getByRole("button", { name: "Turn off the authenticator app" })).toHaveCount(0);
+  await expect(box.getByLabel("Your password")).toBeVisible();
   await expect(box.getByRole("list", { name: "Your backup codes" })).toHaveCount(0);
   const html = await page.content();
   for (const v of [app.key, app.key.replace(/ /g, ""), ...app.codes]) expect(html).not.toContain(v);
@@ -100,8 +106,11 @@ test("a parent sets an authenticator app up, signs in on new browsers with its c
 
   // A new browser: the password, then the app's code for a step after the one the set-up took.
   const first = await newDevice(browser, baseURL!);
+  let taken = totpStep(app.at);
   try {
-    await finishTo(first.page, await nextAppCode(first.page, app.key, app.at), baseURL!);
+    const next = await appCodeAfter(first.page, app.key, taken);
+    taken = next.step;
+    await finishTo(first.page, next.code, baseURL!);
   } finally { await first.close(); }
   // Another new browser: a backup code, typed as shown, with its dash.
   const second = await newDevice(browser, baseURL!);
@@ -111,11 +120,20 @@ test("a parent sets an authenticator app up, signs in on new browsers with its c
   const spent = await sql`SELECT used_at FROM parent_backup_code c JOIN parent p ON p.id = c.parent_id WHERE p.email = ${ZELDA_EMAIL} AND used_at IS NOT NULL`;
   expect(spent).toHaveLength(1);
 
-  // Last, turned off through the page (the proof from the start is still within its 10 minutes), while a third new
-  // browser is at the app's step (decision 10 of SI-6b): its code then ends the step, and it is back at the password.
+  // Last, turned off through the page, while a third new browser is at the app's step (decision 10 of SI-6b): its code
+  // then ends the step, and it is back at the password. The page asks again first: her password, then the app's code
+  // (a step after the one the first browser took), and nothing is emailed.
   const third = await newDevice(browser, baseURL!);
   try {
     await page.reload();
+    sink.messages.length = 0;
+    await box.getByLabel("Your password").fill(E2E_SIGNIN.password);
+    await box.getByRole("button", { name: "Continue" }).click();
+    await expect(box.getByRole("status")).toContainText("Enter the 6-digit code from your authenticator app");
+    await box.getByLabel("Code from your authenticator app, or a backup code").fill((await appCodeAfter(page, app.key, taken)).code);
+    await box.getByRole("button", { name: "Confirm" }).click();
+    await expect(box.getByText("Thank you, that's you.")).toBeVisible();
+    expect(sink.messages).toHaveLength(0);
     await expect(box.getByText("your backup codes stop working too")).toBeVisible();
     await box.getByRole("button", { name: "Turn off the authenticator app" }).click();
     await expect(box.getByRole("status").filter({ hasText: "Your authenticator app is turned off" })).toBeVisible();

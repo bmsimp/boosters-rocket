@@ -159,8 +159,12 @@ export const SIGNIN_SETTINGS_COPY = {
   codeRejected: "That code didn't work. Check the newest email from us and try again, or start again with your password.",
   tooManyTries: TOO_MANY_TRIES,
   proved: "Thank you, that's you. You can make the change now.",
-  /** The change asked after the 10 minutes ran out (or before asking again): the page is drawn again with the asking. */
-  proveAgain: "It's been more than 10 minutes since you showed it's you. Please reload this page and do that again first.",
+  /**
+   * The change asked with no proof that counts: the 10 minutes ran out, the page was drawn before asking again, or
+   * (slice SI-6b's second read) the proof was made before an authenticator app was set up, in this window or another.
+   * It names no reason, since the 10 minutes may not have run out. The page is drawn again with the asking.
+   */
+  proveAgain: "We need you to show it's you again before this change. Please reload this page and do that first.",
   tooManyChanges: "You've tried to change your password a few times in the last hour. Please wait a little while before trying again.",
   tooManyPresses: "You've pressed this a few times in the last hour. Please wait a little while before trying again.",
   /** When the action itself couldn't be reached or threw: try again, nothing about why. */

@@ -320,8 +320,9 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
     **Pass:** the Today box shows only that permission's line. **If not:** note what else showed.
 23. **An authenticator app from the QR code, on another phone.** On a laptop, as a test parent: Family, **Sign-in
     settings**, the **Authenticator app** box; show it's you if it asks; **Set up an authenticator app**. Scan the QR
-    code with Google Authenticator and finish with the code it shows. Then **Turn off the authenticator app** and set it
-    up again with Microsoft Authenticator, and once more with a password manager's authenticator (1Password, Bitwarden,
+    code with Google Authenticator and finish with the code it shows. Then **Turn off the authenticator app** (the box
+    asks you to show it's you again first, this time with the app's code, since a proof from before the app was set up
+    no longer counts) and set it up again with Microsoft Authenticator, and once more with a password manager's authenticator (1Password, Bitwarden,
     or the iPhone's Passwords app).
     **Pass:** each app names the club and the parent's address, shows a 6-digit code that changes every 30 seconds, and
     that code finishes the set-up; ten backup codes show, once, and are gone when the page is reloaded. **If not:** note

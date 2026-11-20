@@ -16,13 +16,15 @@ import { BACKUP_CODE_COUNT, hashBackupCode, newBackupCode, showBackupCode } from
 /**
  * An app for the person: in force (`confirmed_at` set) unless `confirmed` is false (a set-up never finished), with
  * `lastUsedStep` when a code was taken before. Its row's id and the base32 secret, which only the test holds, to work
- * out its codes with appCode().
+ * out its codes with appCode(). An app in force is set up an hour before now unless `createdAt` says when, so a proof a
+ * test stamps just now (proveRecently()) is newer than the app and counts beside it (a proof made before the app came
+ * into force doesn't: proofCountsBesideApp(), slice SI-6b's second read); an unfinished set-up is begun now, within its life.
  */
 export async function seedAuthenticator(parentId: string, o: { confirmed?: boolean; lastUsedStep?: number | null; createdAt?: Date } = {}): Promise<{ id: string; secret: string }> {
   const id = randomUUID();
   const secret = base32Encode(randomBytes(20));
   const sealed = sealAuthenticatorSecret(id, parentId, secret);
-  const at = o.createdAt ?? new Date();
+  const at = o.createdAt ?? (o.confirmed === false ? new Date() : new Date(Date.now() - 60 * 60_000));
   await db.insert(parentAuthenticator).values({ id, parentId, secretCiphertext: sealed.ciphertext, secretKeyId: sealed.keyId, createdAt: at,
     confirmedAt: o.confirmed === false ? null : at, lastUsedStep: o.lastUsedStep ?? null });
   return { id, secret };

@@ -37,6 +37,7 @@ import { checkPasswordSignin, hashTriedAddress } from "@/lib/parents/password-si
 import { PASSWORD_COPY } from "@/lib/parents/password-copy";
 import { takeRateLimit } from "@/lib/parents/rate-limit";
 import { changeMyPassword } from "@/lib/parents/signin-settings";
+import { confirmMyAuthenticator, remakeMyBackupCodes, startMyAuthenticator, turnOffMyAuthenticator } from "@/lib/parents/authenticator-settings";
 import { renewParentSession } from "@/lib/parents/sessions";
 import { SIGNIN_SETTINGS_COPY as COPY, SIGNIN_WITH_APP_COPY as WITH_APP } from "@/lib/parents/signin-settings-copy";
 import { CODE_TTL_MS, signinStands } from "@/lib/parents/signin-codes";
@@ -918,6 +919,75 @@ describe("one parent never reaches another's sign-in", () => {
     // Nothing was mailed to anyone but A after their codes went: A has a password, so the ask was a reset link to A.
     await vi.waitFor(() => expect(outbox.some((m) => m.to === FAMILY_A.parent.email)).toBe(true));
     expect(outbox.filter((m) => m.to !== FAMILY_A.parent.email).map((m) => m.to).sort()).toEqual([FAMILY_B.parent.email, "sigrid.second@family-a.example"].sort());
+  });
+});
+
+describe("a proof made before the person's authenticator app came into force (slice SI-6b's second read, decision 1)", () => {
+  it("no longer counts: another session's changes ask again and change nothing, the confirming session is asked again too, and the app's code lets each through", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    // Session A proves itself (as a sign-in with the emailed code would) a few seconds ago.
+    await proveRecently(a.identity, PROVEN_PASSWORD, new Date(Date.now() - 5_000));
+    const device = await seedDevice(a.identity.parentId);
+    // Session B, the same person's, proves itself just after and sets an app up there.
+    const bSession = await seedParentSession(await authUserOf(a.identity.parentId), { familyQboId: FAMILY_A.family.qboId, strongAt: new Date(Date.now() - 4_000) });
+    const b = { ...a.identity, sessionId: bSession.id };
+    expect(await sessionProvedRecently(db, a.identity)).toBe(true);
+    const start = await startMyAuthenticator(ctxOf(b));
+    if (!start.ok) throw new Error(`B's set-up should begin: ${start.errors.join(" ")}`);
+    const secret = start.key.replace(/ /g, "");
+    expect(await confirmMyAuthenticator(ctxOf(b), appCode(secret), start.stamp)).toMatchObject({ ok: true });
+
+    // Within A's 10 minutes, every change of A's asks again, and nothing changes.
+    const PROVE_AGAIN = { ok: false, errors: [COPY.proveAgain] };
+    const before = { app: await authenticatorRows(a.identity.parentId), codes: await backupCodeRows(a.identity.parentId),
+      credential: await credentialOf(a.identity.parentId), devices: await devicesOf(a.identity.parentId) };
+    expect(await sessionProvedRecently(db, a.identity)).toBe(false);
+    expect(await remakeMyBackupCodes(ctxOf(a.identity))).toEqual(PROVE_AGAIN);
+    expect(await turnOffMyAuthenticator(ctxOf(a.identity))).toEqual(PROVE_AGAIN);
+    expect(await changeMyPassword(ctxOf(a.identity), { password: NEW_PASSWORD, again: NEW_PASSWORD })).toEqual(PROVE_AGAIN);
+    asParent(a.identity);
+    expect(await forgetDeviceAction(device.id)).toEqual(PROVE_AGAIN);
+    expect(await forgetOtherDevicesAction()).toEqual(PROVE_AGAIN);
+    expect({ app: await authenticatorRows(a.identity.parentId), codes: await backupCodeRows(a.identity.parentId),
+      credential: await credentialOf(a.identity.parentId), devices: await devicesOf(a.identity.parentId) }).toEqual(before);
+    expect(await sessionsOf(a.identity.parentId)).toHaveLength(2);
+    for (const action of ["parent.backup_codes.make", "parent.authenticator.off", "parent.password.changed", "parent.device.forgotten", "parent.devices.forgotten"]) {
+      expect((await audits(action)).length, action).toBe(action === "parent.backup_codes.make" ? 1 : 0); // the confirm's own
+    }
+    // The page asks again too, so it never offers a press the server refuses: the box's ask names the app's code.
+    const page = await renderPage(SignInSettingsPage);
+    expect(page).toContain(html(COPY.askAgainForAppChange));
+    expect(page).toContain(html(WITH_APP.askAgainForPassword));
+    expect(page).not.toContain(COPY.newCodes);
+    expect(page).not.toContain(COPY.changeButton);
+    // B, which confirmed the app, is asked again for its next press as well: confirming stamps no session.
+    expect(await remakeMyBackupCodes(ctxOf(b))).toEqual(PROVE_AGAIN);
+
+    // A shows it's them again, now with the app's code (nothing is emailed), and each change goes through.
+    const sentBefore = outbox.length;
+    const first = await askAgainPasswordAction(PROVEN_PASSWORD);
+    if (!first.ok || first.step !== "app") throw new Error("the app's step should be asked for");
+    expect(await askAgainCodeAction(first.stamp, appCode(secret, Date.now(), 1))).toEqual({ ok: true, message: COPY.proved });
+    expect(outbox.length).toBe(sentBefore);
+    expect((await audits("signin.proved_again")).map((r) => r.after)).toEqual([{ step: "authenticator" }]);
+    expect(await sessionProvedRecently(db, a.identity)).toBe(true);
+    expect(await renderPage(SignInSettingsPage)).toContain(COPY.newCodes);
+    expect(await forgetDeviceAction(device.id)).toMatchObject({ ok: true });
+    expect(await remakeMyBackupCodes(ctxOf(a.identity))).toMatchObject({ ok: true, message: COPY.newCodesMade });
+    expect(await turnOffMyAuthenticator(ctxOf(a.identity))).toEqual({ ok: true, message: COPY.turnedOff });
+    expect(await changeMyPassword(ctxOf(a.identity), { password: NEW_PASSWORD, again: NEW_PASSWORD })).toMatchObject({ ok: true });
+  });
+
+  it("leaves a person with no app as they were: a proof within the window counts", async () => {
+    const b = await seedSignedInParent(FAMILY_B);
+    await proveRecently(b.identity, PROVEN_PASSWORD, new Date(Date.now() - 5_000));
+    // Another person's app, set up just now, is nothing to do with them.
+    const a = await seedSignedInParent(FAMILY_A);
+    await seedAuthenticator(a.identity.parentId, { createdAt: new Date() });
+    expect(await sessionProvedRecently(db, b.identity)).toBe(true);
+    asParent(b.identity);
+    expect(await renderPage(SignInSettingsPage)).toContain(COPY.changeButton);
+    expect(await forgetOtherDevicesAction()).toMatchObject({ ok: true });
   });
 });
 

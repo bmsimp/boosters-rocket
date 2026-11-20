@@ -46,6 +46,16 @@ export async function hasAuthenticator(parentId: string, q: Reader = db): Promis
   return row !== undefined;
 }
 
+/**
+ * When the person's app in force came into force (`confirmed_at`), or null with none: a session's proof older than this
+ * no longer counts for asking again (sessionStrongAt(), asking-again.ts; slice SI-6b's second read).
+ */
+export async function authenticatorInForceSince(parentId: string, q: Reader = db): Promise<Date | null> {
+  const [row] = await q.select({ since: parentAuthenticator.confirmedAt }).from(parentAuthenticator)
+    .where(and(eq(parentAuthenticator.parentId, parentId), isNotNull(parentAuthenticator.confirmedAt)));
+  return row?.since ?? null;
+}
+
 /** The person's app the sign-in took a code from is still there, theirs and in force (signinStands(), signin-codes.ts). */
 export async function authenticatorStands(q: Reader, parentId: string, authenticatorId: string): Promise<boolean> {
   const [row] = await q.select({ id: parentAuthenticator.id }).from(parentAuthenticator)

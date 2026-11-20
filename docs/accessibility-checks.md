@@ -229,6 +229,8 @@ codes shown, the app on, and asking again for the app's code) in every mode at 3
 - Walked: finishing puts the focus on "Your authenticator app is set up.", above the ten backup codes (a list named
   "Your backup codes") and the words to keep them off the phone; **Copy the backup codes** copies the ten alone, one
   per line.
+- Not walked yet: below the backup codes the box asks for the password again at once (a proof from before the app came
+  into force no longer counts), and the other boxes' changes drawn for that proof go back to their password field too.
 - Walked: drawn again with no recent proof, the box asks for the password and then the app's code (one field that takes
   a backup code too); proved, **Make new backup codes**, then the words that the backup codes go with it and new
   devices get an emailed code again, then **Turn off the authenticator app**, whose answer takes the focus, and the box
