@@ -497,6 +497,9 @@ describe("a parent's change of their details blocks nothing, in any state (the s
   const phoneSent = () => bodies().filter((b) => "PrimaryPhone" in b);
 
   it("the family action goes through while it waits; the change is then given up unsent at its next try", async () => {
+    // A customer read by id carries its own Balance, as QuickBooks' does: the family action reads each one's before
+    // making anyone inactive, and refuses one it can't read (roster-writes.test.ts sets the same).
+    stub.quirks.balances = true;
     const a = await ana();
     await saveMyContact(a.ctx, form({ phone: NEW_PHONE }, "p:1"));
     const [item] = await items();
