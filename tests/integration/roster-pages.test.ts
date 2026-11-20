@@ -159,10 +159,12 @@ describe("the roster pages", () => {
     expect(html).toContain("ana.portal@example.com");
     // The sign-in's standing, in words (parents spec §4), on the person's own row of the sign-ins table. This reader's
     // role is Roster.*, which holds Roster.Family.ReadWrite, so the row goes on to offer Remove (who is offered it, and
-    // who isn't, is tests/integration/staff-guardians.test.ts's).
+    // who isn't, is tests/integration/staff-guardians.test.ts's). Since slice 9h the row says where QuickBooks stands for
+    // the person's own Parent customer: Ana was seeded with no link and nothing queued, and no customer under the family
+    // has her name, so nothing is coming (tests/integration/guardians-in-quickbooks.test.ts holds the other words).
     const row = [...html.matchAll(/<tr role="row">([\s\S]*?)<\/tr>/g)].map((m) => m[1]!.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim())
       .find((r) => r.includes("ana.portal@example.com"));
-    expect(row).toMatch(/^Ana R\. Email ana\.portal@example\.com Sign-in Can sign in \(hasn&#x27;t yet\) Remove Ana R\. /);
+    expect(row).toMatch(/^Ana R\. Email ana\.portal@example\.com Sign-in Can sign in \(hasn&#x27;t yet\) In QuickBooks No Parent customer in QuickBooks is linked to them, and none is being made: the mapping screen will offer to link one\. Remove Ana R\. /);
     expect((await audits("roster.family.read"))).toHaveLength(1);
     expect((await audits("roster.family.read"))[0]).toMatchObject({ actorId: reader.id, actorLabel: "registrar@club.org", permission: "Roster.Read",
       targetType: "family", targetId: await idOf("10"), ip: "203.0.113.40" });
