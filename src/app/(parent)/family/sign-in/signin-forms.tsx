@@ -24,7 +24,7 @@ const Tick = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" st
 const Username = ({ email }: { email: string }) => <input type="email" name="username" autoComplete="username" value={email} readOnly hidden />;
 
 /** Words that take the focus once they are drawn: the answer to a press whose form has gone. */
-function Said({ message, children }: { message: string; children?: ReactNode }) {
+export function Said({ message, children }: { message: string; children?: ReactNode }) {
   const line = useRef<HTMLParagraphElement>(null);
   useEffect(() => { line.current?.focus(); }, []);
   return (
@@ -73,14 +73,16 @@ export function SignInSettingsFrame({ children }: { children: ReactNode }) {
  * Since slice SI-7b, for a parent with a passkey (`passkey`), "Use your passkey" comes first, the password beside it:
  * the passkey library's ceremony, its verify request sent to the portal's /portal-passkey/again (toPortalAgain()),
  * which proves this session alone. After the password such a parent is asked for the passkey again (the server's
- * `step: "passkey"`), with the app's code or a backup code beside it when they have an app. `portalOrigin` is APP_URL's
+ * `step: "passkey"`), with the app's code or a backup code beside it when they have an app, or a backup code alone when
+ * they hold unspent ones and no app (`backupCodes`). `portalOrigin` is APP_URL's
  * origin, where passkeys work: reached at any other address, the form says so in place of the button.
  */
 export function AskAgain({ email, proved, lede, children, passkey = false, portalOrigin = "" }: { email: string; proved: boolean; lede: string; children: ReactNode;
   passkey?: boolean; portalOrigin?: string }) {
   const [step, setStep] = useState<"password" | "code" | "app" | "passkey" | "proved" | "arrived">(proved ? "proved" : "password");
-  // At the passkey's step after the password: whether the app's code or a backup code is taken beside it.
-  const [appBeside, setAppBeside] = useState(false);
+  // At the passkey's step after the password: what is taken beside it, the app's code or a backup code (`app`), a
+  // backup code alone (`codes`), or nothing.
+  const [beside, setBeside] = useState<"app" | "codes" | null>(null);
   // Where a passkey can be used from this page: here, not in this browser, or not at this address (read once drawn).
   const [keysHere, setKeysHere] = useState<"here" | "unsupported" | "elsewhere">("here");
   useEffect(() => {
@@ -97,11 +99,13 @@ export function AskAgain({ email, proved, lede, children, passkey = false, porta
   const [errors, setErrors] = useState<string[] | null>(null);
   // Moving between the steps draws the other form, so its field takes the focus (not on first drawing).
   const field = useRef<HTMLInputElement>(null);
+  // The passkey's step with nothing beside it has no field: its words take the focus instead.
+  const stepLine = useRef<HTMLParagraphElement>(null);
   const moved = useRef(false);
   // The code field is described by the words that say a code was emailed: a live region drawn with its words already
   // in it is seldom read out, so the field that takes the focus carries them.
   const sentId = useId();
-  useEffect(() => { if (moved.current) field.current?.focus(); }, [step]);
+  useEffect(() => { if (moved.current) (field.current ?? stepLine.current)?.focus(); }, [step]);
   // A proof that stops counting while the page is open (since slice SI-6b's second read: an authenticator app set up
   // on this page, which leaves every earlier proof of the person behind) reaches here as `proved` turning false once
   // the page is drawn again: a change drawn for that proof gives way to the password, so the page never offers a press
@@ -124,7 +128,7 @@ export function AskAgain({ email, proved, lede, children, passkey = false, porta
     // The server says which second step: the code it emailed, (slice SI-6a) the parent's authenticator app, or (slice
     // SI-7b) their passkey, with the app beside it when they have one.
     moved.current = true; setStamp(r.stamp); setPassword(""); setCode("");
-    if (r.step === "passkey") { setAppBeside(r.app); setStep("passkey"); return; }
+    if (r.step === "passkey") { setBeside(r.app ? "app" : r.backupCodes ? "codes" : null); setStep("passkey"); return; }
     setStep(r.step === "app" ? "app" : "code");
   };
   // A passkey (slice SI-7b): the library's ceremony, its verify request sent to the portal's asking again. A proof
@@ -173,11 +177,11 @@ export function AskAgain({ email, proved, lede, children, passkey = false, porta
       </form>
     );
   }
-  // The passkey's step after the password (slice SI-7b): the passkey, and beside an app its code or a backup code.
-  if (step === "passkey" && !appBeside) {
+  // The passkey's step after the password (slice SI-7b): the passkey, and beside it an app's code or a backup code.
+  if (step === "passkey" && !beside) {
     return (
       <div className="stack">
-        <p role="status">{COPY.passkeyAsked}</p>
+        <p ref={stepLine} role="status" tabIndex={-1}>{COPY.passkeyAsked}</p>
         {passkeyPress}
         {errors && <Errors errors={errors} />}
         <button type="button" className="btn btn-line" onClick={startAgain}>{COPY.startAgain}</button>
@@ -188,9 +192,9 @@ export function AskAgain({ email, proved, lede, children, passkey = false, porta
   const app = step === "app" || step === "passkey";
   return (
     <form className="stack" onSubmit={(e) => { e.preventDefault(); if (!busy) void checkCode(); }}>
-      <p role="status" id={sentId}>{step === "passkey" ? COPY.passkeyOrAppAsked : app ? COPY.appAsked : COPY.codeSent}</p>
+      <p role="status" id={sentId}>{step === "passkey" ? (beside === "app" ? COPY.passkeyOrAppAsked : COPY.passkeyOrBackupAsked) : app ? COPY.appAsked : COPY.codeSent}</p>
       {step === "passkey" && passkeyPress}
-      <label className="field"><span>{app ? COPY.appCode : COPY.code}</span>
+      <label className="field"><span>{step === "passkey" && beside === "codes" ? COPY.backupCode : app ? COPY.appCode : COPY.code}</span>
         {app
           ? <input ref={field} name="code" aria-describedby={sentId} inputMode="text" autoCapitalize="characters" autoCorrect="off" spellCheck={false}
             autoComplete="one-time-code" maxLength={20} required value={code} onChange={(e) => setCode(e.target.value)} />

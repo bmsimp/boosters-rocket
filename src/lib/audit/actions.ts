@@ -83,7 +83,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "parent.authenticator.confirm_wrong": "A wrong code from an authenticator app while setting it up",
   "parent.authenticator.confirm_refused": "An authenticator app's set-up couldn't be finished (too many tries, or its key couldn't be read)",
   "parent.authenticator.on": "A parent finished setting up an authenticator app: it's now their second step",
-  "parent.authenticator.off": "A parent turned off their authenticator app, and their backup codes with it",
+  "parent.authenticator.off": "A parent turned off their authenticator app, and their backup codes with it unless a passkey keeps them",
   "parent.backup_codes.make": "A parent's backup codes were made, replacing any older ones",
   "parent.passkey.add": "A parent added a passkey in sign-in settings",
   "parent.passkey.add_refused": "A passkey couldn't be added in sign-in settings",

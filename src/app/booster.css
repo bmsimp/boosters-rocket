@@ -744,6 +744,9 @@ details > summary { min-height: 44px; box-sizing: border-box; padding-block: 10p
   padding: 0 var(--s4); background: var(--paper); color: var(--ink); border: 2px solid var(--ink); font-weight: 700; }
 /* Where it lands: not a control, so the focus rests there with no ring, and the next Tab goes on into the page. */
 .page-start:focus { outline: none; }
+/* A passkey's name on Sign-in settings is the parent's own words, up to 50 characters with no space needed: it breaks
+   anywhere rather than push a 360px page sideways. */
+.passkey-name { overflow-wrap: anywhere; }
 /* ---- End of Accessibility fixes for parent pages ---- */
 
 /* ===== Installed app: safe areas and the install hint. Keep this block last. =====

@@ -140,8 +140,8 @@ export const SIGNIN_SETTINGS_COPY = {
   /** Under Strict the app is the guardian's only second step until passkeys come (SI-7): it stays. */
   turnOffStrict: "For now, your authenticator app can't be turned off here, since the club asks everyone for a second step and the app is your only one. Add a passkey first, or ask the club if you need it changed.",
   /** Turning the app off beside a passkey (slice SI-7b): the backup codes stay, and the passkey is the second step. */
-  turnOffWordsBesidePasskey: "If you turn off your authenticator app, your passkey stays your second step, and your backup codes keep working beside it.",
-  turnedOffBesidePasskey: "Your authenticator app is turned off. Your passkey is still your second step, and your backup codes still work.",
+  turnOffWordsBesidePasskey: "If you turn off your authenticator app, your passkey stays your second step. Your backup codes stay too, and work in place of your passkey when this page asks you to show it's you.",
+  turnedOffBesidePasskey: "Your authenticator app is turned off. Your passkey is still your second step, and your backup codes still work in place of it when this page asks you to show it's you.",
   // Passkeys (slice SI-7b): adding, naming, listing and removing them, and their backup codes.
   passkeysTitle: "Passkeys",
   passkeysWhat: "A passkey lets your phone or computer sign you in with your face, fingerprint or PIN, with no password to type. It can be kept on a phone, a computer, a password manager or a security key, and you can add more than one.",
@@ -156,6 +156,8 @@ export const SIGNIN_SETTINGS_COPY = {
   passkeyCancelled: "The passkey wasn't added. You can try again whenever you like.",
   passkeyRejected: "That passkey couldn't be added. Please try again.",
   passkeyAlready: "That passkey is already added here.",
+  /** The browser or password manager refused to make a second passkey for this account, as it holds one already (slice SI-7b). */
+  passkeyAlreadyHeld: "This phone, computer or password manager already holds one of your passkeys for this portal, so there's nothing more to add here. To add another, use a different one.",
   /** A passkey listed with no name of its own: these words, then the day it was added. */
   passkeyNoName: "Passkey added",
   passkeyAddedOn: "Added",
@@ -181,12 +183,19 @@ export const SIGNIN_SETTINGS_COPY = {
   passkeyNotFound: "That passkey isn't one of yours now. Please reload this page.",
   /** The backup codes made with a first passkey of a guardian with no app (open question 25). */
   passkeyCodesMade: "Your passkey is added, and here are your backup codes.",
-  backupCodesKeepPasskey: "Each backup code works once, in place of your passkey. If you lose the phone or computer that holds your passkey, they're how you get in, so keep them somewhere safe that isn't on that device, like on paper or in a password manager on another device. We won't show them again.",
+  /**
+   * Beside a passkey and no app (open question 25): what the codes do today. They are taken in place of the passkey when
+   * this page asks again; the sign-in page's passkey step (SI-7a's) takes none yet, so nothing here promises a way in.
+   */
+  backupCodesKeepPasskey: "Each backup code works once, in place of your passkey, when you're signed in and this page asks you to show it's you. Keep them somewhere safe that isn't on the device that holds your passkey, like on paper or in a password manager on another device. We won't show them again.",
   // Asking again with a passkey (slice SI-7b): the passkey alone, or the password and then the second step.
   usePasskey: "Use your passkey",
   orPassword: "Or enter your password",
   passkeyAsked: "Now use your passkey to go on. Your phone or computer will ask for your face, fingerprint or PIN.",
   passkeyOrAppAsked: "Now use your passkey to go on. Or enter the 6-digit code from your authenticator app, or one of your backup codes.",
+  /** Beside a passkey with no app, for a parent who holds unspent backup codes (slice SI-7b). */
+  passkeyOrBackupAsked: "Now use your passkey to go on. If you don't have it with you, enter one of your backup codes instead.",
+  backupCode: "Backup code",
   passkeyAgainCancelled: "Your passkey wasn't used. You can try it again, or enter your password.",
   passkeyAgainRejected: "That passkey didn't work. You can try it again, or enter your password.",
   // Asking again (asking-again.ts): the password, then the emailed code.

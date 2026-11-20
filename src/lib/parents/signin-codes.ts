@@ -379,7 +379,7 @@ const FACTOR_LIMITED: SecondFactorResult = { ok: false, reason: "rate_limited", 
  *     and the one before and after, and taken only for a step newer than the newest taken (takeAuthenticatorCode(),
  *     authenticator.ts: no replay, and two tries at once take it once); ten characters of the backup codes' alphabet,
  *     with or without their dash and in any case, is a backup code, found by its keyed hash among the person's unspent
- *     ones and spent (takeBackupCode(): it works once, and only beside an app in force); anything else is a wrong try.
+ *     ones and spent (takeBackupCode(): it works once, and only beside an app in force or, since slice SI-7b, a passkey); anything else is a wrong try.
  *     Each in one transaction with its row: `signin.second_step` (`factor`, and for a backup code how many are `left`),
  *     or `signin.second_step_wrong` (`factor`, the try's number among the window's live tries, `try`, counted under
  *     the limit's lock as its place was taken, and why, `reason`: `wrong`,

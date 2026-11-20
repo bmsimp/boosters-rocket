@@ -9,7 +9,7 @@ import { SIGNIN_SETTINGS_COPY as COPY, howYouSignIn, passkeysAddedOnlyAt } from 
 import { newBackupCodesAction, removePasskeyAction, renamePasskeyAction } from "./actions";
 import { CopyButton } from "./authenticator-box";
 import { passkeysAddIn, toPortalAdd } from "./passkey-adding";
-import { AskAgain } from "./signin-forms";
+import { AskAgain, Said } from "./signin-forms";
 
 type Result = { ok: true; message: string } | { ok: false; errors: string[] };
 const FAILED = { ok: false as const, errors: [COPY.failed] };
@@ -27,6 +27,15 @@ function WhenDrawn({ then }: { then: () => void }) {
   useEffect(() => { then(); }, [then]);
   return null;
 }
+
+/**
+ * What the library's browser ceremony answers when the browser or password manager refused to make the passkey because
+ * it holds one of the person's already (the options list them in `excludeCredentials`): @simplewebauthn/browser's
+ * InvalidStateError, which @better-auth/passkey/client returns as this code. readCeremony() (SI-7a's) reads every
+ * `ERROR_` code as a cancel, so the add looks for this one first.
+ */
+const HELD_ALREADY = "ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED";
+const heldAlready = (r: unknown) => typeof r === "object" && r !== null && (r as { error?: { code?: unknown } | null }).error?.code === HELD_ALREADY;
 
 /** The words of a refused add, by the portal's answer or the ceremony's outcome. */
 function addRefusal(outcome: CeremonyOutcome<AddAnswer>): string {
@@ -71,7 +80,13 @@ export function PasskeyBox({ email, passkeys, proved, hasPassword, strict, app, 
   const codesLine = useRef<HTMLParagraphElement>(null);
   // "Rename" draws the name field in place of the buttons: the field takes the focus.
   const renameField = useRef<HTMLInputElement>(null);
-  useEffect(() => { if (renaming) renameField.current?.focus(); }, [renaming]);
+  // "Cancel" draws the buttons again: the passkey's own "Rename" takes the focus back, so the keyboard keeps its place.
+  const renameButtons = useRef(new Map<string, HTMLButtonElement>());
+  const backTo = useRef<string | null>(null);
+  useEffect(() => {
+    if (renaming) { renameField.current?.focus(); return; }
+    if (backTo.current) { renameButtons.current.get(backTo.current)?.focus(); backTo.current = null; }
+  }, [renaming]);
   useEffect(() => { if (answer) said.current?.focus(); }, [answer]);
   useEffect(() => { if (codes) codesLine.current?.focus(); }, [codes]);
   const canChange = proved || provedHere;
@@ -81,7 +96,9 @@ export function PasskeyBox({ email, passkeys, proved, hasPassword, strict, app, 
     setBusy("add"); setAnswer(null);
     let outcome: CeremonyOutcome<AddAnswer>;
     try {
-      outcome = readCeremony<AddAnswer>(await parentAuthClient.passkey.addPasskey(undefined, toPortalAdd(window.location.origin, name)));
+      const r = await parentAuthClient.passkey.addPasskey(undefined, toPortalAdd(window.location.origin, name));
+      if (heldAlready(r)) { setBusy(null); setAnswer({ ok: false, errors: [COPY.passkeyAlreadyHeld] }); return; }
+      outcome = readCeremony<AddAnswer>(r);
     } catch {
       outcome = { kind: "failed", status: null };
     }
@@ -149,7 +166,7 @@ export function PasskeyBox({ email, passkeys, proved, hasPassword, strict, app, 
         <ul className="stack">
           {passkeys.map((k) => (
             <li key={k.id}>
-              <p><strong>{k.name ?? <>{COPY.passkeyNoName} <LocalTime iso={k.createdAt} /></>}</strong></p>
+              <p className="passkey-name"><strong>{k.name ?? <>{COPY.passkeyNoName} <LocalTime iso={k.createdAt} /></>}</strong></p>
               <dl className="details">
                 <dt>{COPY.passkeyAddedOn}</dt><dd><LocalTime iso={k.createdAt} /></dd>
                 <dt>{COPY.passkeyLastUsed}</dt><dd>{k.lastUsedAt ? <LocalTime iso={k.lastUsedAt} /> : COPY.passkeyNotUsed}</dd>
@@ -160,11 +177,12 @@ export function PasskeyBox({ email, passkeys, proved, hasPassword, strict, app, 
                     <input name="passkey-name" maxLength={50} value={newName} onChange={(e) => setNewName(e.target.value)} ref={renameField} />
                   </label>
                   <button className="btn" aria-disabled={busy !== null || undefined}>{busy === `rename:${k.id}` ? COPY.passkeyRenameBusy : COPY.passkeyRenameSave}</button>
-                  <button type="button" className="btn btn-line" onClick={() => setRenaming(null)}>{COPY.passkeyRenameCancel}</button>
+                  <button type="button" className="btn btn-line" onClick={() => { backTo.current = k.id; setRenaming(null); }}>{COPY.passkeyRenameCancel}</button>
                 </form>
               ) : (
                 <div className="box-foot">
                   <button type="button" className="btn btn-line" aria-disabled={busy !== null || undefined}
+                    ref={(el) => { if (el) renameButtons.current.set(k.id, el); else renameButtons.current.delete(k.id); }}
                     onClick={() => { setNewName(k.name ?? ""); setRenaming(k.id); }}>{COPY.passkeyRename}<span className="visually-hidden"> {k.name ?? COPY.passkeyNoName}</span></button>
                   {canChange && !(last && strict && !app) && (
                     <button type="button" className="btn btn-line" aria-disabled={busy !== null || undefined} onClick={() => void remove(k.id)}>
@@ -179,6 +197,8 @@ export function PasskeyBox({ email, passkeys, proved, hasPassword, strict, app, 
         </ul>
       )}
       {passkeys.length > 0 && !app && <p className="help">{COPY.backupCodesLeft}: {backupCodesLeft}</p>}
+      {/* Proved here, by the asking below: AskAgain gives way to the change at once, so its thanks is drawn here, and keeps the focus. */}
+      {provedHere && <Said message={COPY.proved} />}
       {!hasPassword ? <p>{COPY.passkeyNeedsPassword}</p> : !canChange ? (
         <AskAgain email={email} proved={false} lede={words.askAgainForPasskeys} passkey={passkeys.length > 0} portalOrigin={portalOrigin}>
           <WhenDrawn then={() => setProvedHere(true)} />

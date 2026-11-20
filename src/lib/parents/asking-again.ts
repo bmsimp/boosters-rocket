@@ -25,7 +25,7 @@ import { env } from "@/env";
 import type { ParentCtx } from "@/lib/guards";
 import { MOST_TYPED_PASSWORD, checkPasswordSignin } from "./password-signin";
 import { CODE_TTL_MS, refuseCodeWithoutStep, sendSecondStepCode, signinStands, takeIpLimit, verifySecondFactor, verifySigninCode, type PasswordProof, type SecondFactorProof, type StepPerson } from "./signin-codes";
-import { authenticatorInForceSince, hasAuthenticator } from "./authenticator";
+import { authenticatorInForceSince, hasAuthenticator, unspentBackupCodes } from "./authenticator";
 import { hasSecondFactor, newestPasskeySince, passkeyNamed, usePasskey } from "./passkeys";
 import { presentAndVerified, readAssertion, type VerifyAssertion } from "./passkey-signin";
 import { lockedPerson, parentActor } from "./sessions";
@@ -151,7 +151,7 @@ async function readStamp(raw: unknown, who: Asker, now: Date): Promise<(StepPers
  * or a backup code (`app`), when nothing is emailed.
  */
 export type AskAgainAnswer = { ok: true; message: string; stamp: string; step: "code" | "app" }
-  | { ok: true; message: string; stamp: string; step: "passkey"; app: boolean } | { ok: false; errors: string[] };
+  | { ok: true; message: string; stamp: string; step: "passkey"; app: boolean; backupCodes: boolean } | { ok: false; errors: string[] };
 /** `ended`: the app's step can't go on (since slice SI-6b), so the page goes back to the password; it never says why. */
 export type ProvedAnswer = { ok: true; message: string } | { ok: false; errors: string[]; ended?: true };
 const PASSWORD_REFUSED = { ok: false as const, errors: [COPY.passwordRejected] };
@@ -186,16 +186,21 @@ export async function askAgainPassword(ctx: Asker, password: unknown, now = new 
   const endsAt = new Date(check.at.getTime() + CODE_TTL_MS);
   const asker = { sessionId: ctx.sessionId, parentId: ctx.parentId, email: check.person.email };
   // A passkey holder (since slice SI-7b) is sent no code: their passkey, with the app's code or a backup code beside it
-  // when they have an app too, on a stamp of the passkey's step.
-  const passkeyStep = (app: boolean): AskAgainAnswer => ({ ok: true, message: app ? COPY.passkeyOrAppAsked : COPY.passkeyAsked,
-    stamp: makeStamp(asker, check.password, endsAt, "passkey"), step: "passkey", app });
+  // when they have an app too, on a stamp of the passkey's step. With no app, a backup code is still taken beside the
+  // passkey when they hold unspent ones (made with a first passkey: proveSecondStep() takes it on this stamp), so the
+  // page draws the field for it (`backupCodes`), and the codes it showed them are something they can type here.
+  const passkeyStep = async (app: boolean): Promise<AskAgainAnswer> => {
+    const backupCodes = app || (await unspentBackupCodes(ctx.parentId)) > 0;
+    return { ok: true, message: app ? COPY.passkeyOrAppAsked : backupCodes ? COPY.passkeyOrBackupAsked : COPY.passkeyAsked,
+      stamp: makeStamp(asker, check.password, endsAt, "passkey"), step: "passkey", app, backupCodes };
+  };
   if (check.step === "second_factor") {
-    return check.factors.passkey ? passkeyStep(check.factors.app) : { ok: true, message: COPY.appAsked, stamp: makeStamp(asker, check.password, endsAt, "app"), step: "app" };
+    return check.factors.passkey ? await passkeyStep(check.factors.app) : { ok: true, message: COPY.appAsked, stamp: makeStamp(asker, check.password, endsAt, "app"), step: "app" };
   }
   const { delivery, app, passkey } = await sendSecondStepCode({ parentId: ctx.parentId, email: check.person.email, password: check.password, endsAt }, ctx.ip, check.at, "change");
   void delivery;
   // An app or a passkey that came into force after the password's reads: nothing was sent, and that is asked for.
-  if (passkey) return passkeyStep(app === true);
+  if (passkey) return await passkeyStep(app === true);
   if (app) return { ok: true, message: COPY.appAsked, stamp: makeStamp(asker, check.password, endsAt, "app"), step: "app" };
   return { ok: true, message: COPY.codeSent, stamp: makeStamp(asker, check.password, endsAt, "code"), step: "code" };
 }
@@ -255,8 +260,8 @@ type Proved = { ok: true; app: boolean; step: "emailed_code" | "authenticator" |
  */
 async function proveSecondStep(step: StepPerson & { step: StampStep }, code: string, ip: string | null, now: Date): Promise<Proved> {
   const who = { parentId: step.parentId, email: step.email, password: step.password };
-  // A passkey's stamp (slice SI-7b) takes a code only as the app's step does: beside an app in force, its code or a
-  // backup code; with no app it is refused there, never taken as an emailed code.
+  // A passkey's stamp (slice SI-7b) takes a code only as the app's step does (verifySecondFactor()): beside an app in
+  // force, its code or a backup code; with no app, a backup code alone (it stands beside the passkey); never an emailed code.
   if (step.step !== "code" || await hasAuthenticator(step.parentId)) {
     const r = await verifySecondFactor(who, code, ip, now);
     return r.ok ? { ok: true, app: true, step: r.factor, proof: r.proof } : { ok: false, app: true, limited: r.reason === "rate_limited", ended: r.ended };
