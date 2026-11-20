@@ -6,7 +6,8 @@
  * How recently a session must have proved the password and the second step (`parent_auth_session.strong_at`) for a
  * change of how its person signs in (the password, the sign-in email; later a passkey or the authenticator app) to go
  * ahead without asking again: 10 minutes (open question 28). A sign-in stamps `strong_at` (recordStrongSignin(),
- * devices.ts), and so does asking again (askAgainCode(), asking-again.ts).
+ * devices.ts), and so does asking again (askAgainCode(), asking-again.ts); a stamp a remembered device's sign-in made
+ * is not taken as a proof (sessionStrongAt(), asking-again.ts), since there the device stood in for the second step.
  */
 export const REASK_WINDOW_MS = 10 * 60 * 1000;
 

@@ -1,8 +1,9 @@
 // Asking again (the sign-in release, slice SI-5a; open question 28 of the app-owned families spec): before a change of
 // how a parent signs in (their password, their sign-in email; from SI-5b, SI-6 and SI-7 forgetting a device, the
 // authenticator app and passkeys), the session that asks must have proved the password and the second step within the
-// last 10 minutes (provedRecently(), ./reask-rule.ts, of `parent_auth_session.strong_at`). A sign-in stamps it
-// (recordStrongSignin(), devices.ts); otherwise the parent proves it again here, on the page they are on, through the
+// last 10 minutes (provedRecently(), ./reask-rule.ts, of `parent_auth_session.strong_at`). A sign-in with the emailed
+// code or a set-up link stamps it (recordStrongSignin(), devices.ts); one on a remembered device stamps it too, and that
+// stamp is not taken (sessionStrongAt()); otherwise the parent proves it again here, on the page they are on, through the
 // door's own checks, called as they are: the password (checkPasswordSignin(), password-signin.ts, for the session's
 // own address and with no device: a page request carries no device cookie, whose path is /api/auth/parent), then the
 // emailed code (sendSecondStepCode(), verifySigninCode(), signinStands(), signin-codes.ts). A remembered device is never
@@ -13,7 +14,7 @@ import "server-only";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { parentAuthAccount, parentAuthSession, parentAuthUser } from "@/lib/db/schema";
+import { parentAuthAccount, parentAuthSession, parentAuthUser, parentDevice } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { env } from "@/env";
 import type { ParentCtx } from "@/lib/guards";
@@ -28,12 +29,27 @@ type Asker = Pick<ParentCtx, "parentId" | "sessionId" | "email" | "ip">;
 /** A query runner: the database, or the caller's transaction. */
 type Reader = Pick<typeof db, "select">;
 
-/** The session's own `strong_at`, or null: none yet, or no such session of this person (ended, or another's). */
+/**
+ * The session's own proof of the password and a second step, as `strong_at` holds it, or null: none yet, no such
+ * session of this person (ended, or another's), or a `strong_at` a remembered device stamped. recordStrongSignin()
+ * (devices.ts, SI-3b's) stamps `strong_at` for every sign-in it finishes, a password on a remembered device too, where
+ * the device stood in for the emailed code; here a remembered device is never a second step, so that stamp opens no
+ * window. It is told apart by what the same transaction wrote: a remembered device's sign-in moves that device's
+ * `last_used_at` to the very instant it stamps (one `now`), on a row made earlier, while a code's or a set-up link's
+ * sign-in makes a new device at that instant (`created_at` equal to `last_used_at`), and asking again touches no device.
+ * Until SI-5b records on the session the device it was made on (and renews a device by use, which would move the
+ * instant on), this is how the window knows; SI-5b replaces it with that record.
+ */
 export async function sessionStrongAt(q: Reader, s: { sessionId: string; parentId: string }): Promise<Date | null> {
-  const [row] = await q.select({ strongAt: sql<Date | null>`${parentAuthSession.strongAt}`.mapWith(parentAuthSession.strongAt) }).from(parentAuthSession)
+  const [row] = await q.select({
+    strongAt: sql<Date | null>`${parentAuthSession.strongAt}`.mapWith(parentAuthSession.strongAt),
+    byRememberedDevice: sql<boolean>`exists (select 1 from ${parentDevice} where ${parentDevice.parentId} = ${s.parentId}
+      and ${parentDevice.lastUsedAt} = ${parentAuthSession.strongAt} and ${parentDevice.createdAt} < ${parentDevice.lastUsedAt})`,
+  }).from(parentAuthSession)
     .where(and(eq(parentAuthSession.id, s.sessionId),
       inArray(parentAuthSession.userId, q.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, s.parentId)))));
-  return row?.strongAt ?? null;
+  if (!row || row.byRememberedDevice) return null;
+  return row.strongAt ?? null;
 }
 
 /**
