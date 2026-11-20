@@ -3,22 +3,24 @@ import type { MembershipShape } from "@/lib/roster/shape";
 import type { Cust, Family } from "@/lib/roster/model";
 import { NOT_HERE, shapeOperations, type RosterOperation } from "@/lib/roster/operations";
 import { waitingWords, type QueueView } from "@/lib/roster/queue";
-import { keptWordsFor } from "@/lib/roster/writes";
+import { coverStamp, keptWordsFor } from "@/lib/roster/writes";
 import { LocalTime } from "@/app/components/local-time";
 import { Notice } from "@/app/components/notice";
 import { DataTable } from "@/app/components/data-table";
 import type { Covered } from "@/lib/roster/writes";
 import { CreateAndLinkForm, DeactivateForm, FamilyInactiveForm, MemberForm, MoveForm, NameForm, ParentForm } from "./write-forms";
 import type { WriteResult } from "@/lib/roster/writes";
-import { addStudentAction, addStudentHereAction, addToFamilyAction, createAction, createAndLinkAction, deactivateAction, deactivateHereAction, familyInactiveAction,
+import { addStudentAction, addStudentHereAction, addToFamilyAction, createAction, createAndLinkAction, deactivateAction, deactivateHereAction, deactivateLinkedAction, familyInactiveAction,
   renameHereAction, renameLinkedAction, renameParentAction } from "./write-actions";
 
 /**
  * The roster's changes in QuickBooks, for staff who hold Roster.Family.ReadWrite with Roster.Read. Every form's action
  * has the page's roster tag and the record's id bound in: a rename of a linked family, member or student, a new
  * student and a move of a student, the app's ids (saved in the portal first, stage 3's slices 9e and 9f, and sent with
- * the link's own version); a make-inactive and a parent's changes, the customer's id and the version the page was
- * shown. Names are QuickBooks text, or the portal's own, shown as text only.
+ * the link's own version); a linked student's or member's make-inactive, the app's id too (QuickBooks first, sent with
+ * the link's own version, stage 3's slice 9g), and the family's, the family record's app id and a stamp of whom the page
+ * covered; a Parent customer's changes, the customer's id and the version the page was shown. Names are QuickBooks
+ * text, or the portal's own, shown as text only.
  */
 
 /** What can be changed here for this club, and why the rest can't, in words (src/lib/roster/operations.ts). */
@@ -174,13 +176,15 @@ export function CreateInQuickBooks({ familyId, name, noun, unlinked, students, t
 }
 
 /**
- * What the forms of a family's page are given: the roster tag, each customer's version (for a move, a make-inactive and
- * a parent's rename), the customers a change waits for, the family record's app id (for a new student), and each linked
- * record by its customer (`records`: the family's or member's own, and each student's), whose rename is saved in the
- * portal first and starts from the portal's own name.
+ * What the forms of a family's page are given: the roster tag, each customer's version (sent only by a Parent
+ * customer's rename and make-inactive, which go to QuickBooks first; stage 3's slice 9g), the customers a change waits
+ * for, the family record's app id (for a new student and the family action), and each linked record by its customer
+ * (`records`: the family's or member's own, and each student's), whose rename is saved in the portal first and whose
+ * make-inactive is sent by its kind and app id. `keptMoves`: the customers of students with a move QuickBooks refused
+ * that the portal kept, who aren't made inactive until it is sent or given up.
  */
 export type Edit = { rosterTag: string; versions: Map<string, string>; blocked: Set<string>; familyId: string;
-  records: Map<string, { kind: "family" | "student"; id: string; name: string }> };
+  records: Map<string, { kind: "family" | "student"; id: string; name: string }>; keptMoves?: Set<string> };
 
 /**
  * Rename and make inactive, for one record: offered only when the shape allows it and nothing is waiting for it. Making
@@ -201,28 +205,32 @@ function RecordChanges({ who, c, rename, deactivate, warning, edit, extra, follo
         act={renameLinkedAction.bind(null, edit.rosterTag, record.kind, record.id)} />
         : <NameForm field="New name" label="Rename" pendingLabel="Renaming in QuickBooks…" initial={c.displayName} act={renameParentAction.bind(null, edit.rosterTag, c.qboId, version)} />)}
       {extra}
-      {deactivate && c.active && <DeactivateForm label={`Make ${c.displayName} inactive`} warning={warning} act={deactivateAction.bind(null, edit.rosterTag, c.qboId, version)} />}
-      {deactivate && !c.active && follow && <DeactivateForm label={`Make ${c.displayName} inactive in the portal`}
+      {deactivate && record?.kind === "student" && edit.keptMoves?.has(c.qboId) ? <Notice tone="info" live="none">A move of {c.displayName} that QuickBooks didn&apos;t take is kept on the Reconciliation page, so they can&apos;t be made inactive until it is sent or given up there.</Notice>
+        : deactivate && c.active && <DeactivateForm label={`Make ${c.displayName} inactive`} warning={warning}
+        act={record ? deactivateLinkedAction.bind(null, edit.rosterTag, record.kind, record.id) : deactivateAction.bind(null, edit.rosterTag, c.qboId, version)} />}
+      {deactivate && !c.active && follow && record && !(record.kind === "student" && edit.keptMoves?.has(c.qboId)) && <DeactivateForm label={`Make ${c.displayName} inactive in the portal`}
         warning={`QuickBooks has ${c.displayName} inactive already, but the portal's own record is still active. This sends nothing to QuickBooks and makes the portal's record inactive too.`}
-        act={deactivateAction.bind(null, edit.rosterTag, c.qboId, version)} />}
+        act={deactivateLinkedAction.bind(null, edit.rosterTag, record.kind, record.id)} />}
     </details>
   );
 }
 
 /**
  * Making the family inactive, with everyone under it: the list of who that covers, by name, deepest first as the portal
- * makes them inactive. The form is given the names it shows; the ids and versions are bound into its action on the server.
+ * makes them inactive. The form is given the names it shows; the family record's app id and the stamp of whom it
+ * covered (coverStamp()) are bound into its action on the server.
  */
 function FamilyInactive({ family, cover, edit }: { family: Cust; cover: { family: Covered; under: Covered[] }; edit: Edit }) {
   if (cover.under.some((u) => edit.blocked.has(u.qboId))) {
     return <Notice tone="info" live="none">A change to someone under {family.displayName} is waiting to reach QuickBooks, so the family can&apos;t be made inactive for now.</Notice>;
   }
-  const shown: [string, string][] = [[cover.family.qboId, cover.family.syncToken], ...cover.under.map((u): [string, string] => [u.qboId, u.syncToken])];
+  // Whom the page covered, sealed on the server (coverStamp()): the action trusts no id or version from the browser.
+  const stamp = coverStamp(edit.familyId, [cover.family.qboId, ...cover.under.map((u) => u.qboId)]);
   return (
     <>
       {!family.active && <Notice tone="info" live="none">QuickBooks has {family.displayName} inactive already, but the portal&apos;s own family is still active. Making it inactive here sends nothing for it to QuickBooks, and makes the portal&apos;s family inactive too.</Notice>}
       <FamilyInactiveForm familyName={family.displayName} names={cover.under.map((u) => u.name)}
-        act={familyInactiveAction.bind(null, edit.rosterTag, family.qboId, shown)} />
+        act={familyInactiveAction.bind(null, edit.rosterTag, edit.familyId, stamp)} />
     </>
   );
 }
@@ -285,11 +293,11 @@ export function FamilyChanges({ shape, family, edit, cover, inactiveRecords }: {
       )}
       {family.students.filter((s) => !inactiveRecords.has(s.qboId)).map((s) => (
         <RecordChanges key={s.qboId} who="the student" c={s} rename={offered.has("rename_student")} deactivate={offered.has("deactivate_student")} edit={edit} follow
-          warning="The student is no longer counted in the family's season, and their invoices no longer show to the family. A student with an open balance in QuickBooks isn't made inactive until it is paid or written off." />
+          warning="The student is no longer counted in the family's season, and their invoices no longer show to the family. A student with any balance in QuickBooks, owed or a credit, isn't made inactive until it is settled there, nor while the portal can't read it." />
       ))}
       {family.parents.map((p) => (
         <RecordChanges key={p.qboId} who="the parent" c={p} rename={offered.has("rename_parent")} deactivate={offered.has("deactivate_parent")} edit={edit}
-          warning="Their sign-in to the portal stays as it is: who can sign in is the portal's own list of the family's guardians. A parent with an open balance in QuickBooks isn't made inactive until it is paid or written off." />
+          warning="Their sign-in to the portal stays as it is: who can sign in is the portal's own list of the family's guardians. A parent with any balance in QuickBooks, owed or a credit, isn't made inactive until it is settled there, nor while the portal can't read it." />
       ))}
     </section>
   );
@@ -299,7 +307,7 @@ export function FamilyChanges({ shape, family, edit, cover, inactiveRecords }: {
 export function MemberChanges({ member, edit }: { member: Cust; edit: Edit }) {
   return (
     <section className="box" aria-labelledby="member-changes-h"><h2 id="member-changes-h">Change in QuickBooks</h2>
-      <RecordChanges who="the member" c={member} rename deactivate edit={edit} follow warning="They can no longer sign in to the portal. A member with an open balance in QuickBooks isn't made inactive until it is paid or written off." />
+      <RecordChanges who="the member" c={member} rename deactivate edit={edit} follow warning="They can no longer sign in to the portal. A member with any balance in QuickBooks, owed or a credit, isn't made inactive until it is settled there, nor while the portal can't read it." />
     </section>
   );
 }

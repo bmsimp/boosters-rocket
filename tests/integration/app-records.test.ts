@@ -12,7 +12,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, auditLog, family, guardian, parent, qboConnection, student } from "@/lib/db/schema";
 import { refreshRoster } from "@/lib/roster/refresh";
-import { askRosterWrite, moveStudent, WRITE_COPY } from "@/lib/roster/writes";
+import { askRosterWrite, deactivateLinked, moveStudent, WRITE_COPY } from "@/lib/roster/writes";
 import { saveShape, ROSTER_LOCK } from "@/lib/roster/shape";
 import { clearRosterOfOtherCompany } from "@/lib/roster/source";
 import { importRecordsFromRoster } from "@/lib/families/roster-import";
@@ -186,7 +186,8 @@ describe("the records stand alone: what QuickBooks holds changes none of them (s
     expect(await studentOf("12")).toEqual({ customer: "12", name: "Leon Rivera", active: true, family: "20" });
     expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
 
-    expect((await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "2" }, tag, op)).ok).toBe(true);
+    // A make-inactive goes by the record too since slice 9g, QuickBooks first, with the link's own version.
+    expect((await deactivateLinked({ kind: "student", recordId: leo! }, tag, op)).ok).toBe(true);
     expect(await studentOf("12")).toEqual({ customer: "12", name: "Leon Rivera", active: false, family: "20" });
     expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
     expect((await recordIds())["student:12"]).toBe(leo);
