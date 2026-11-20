@@ -88,7 +88,9 @@ time) copies them in once, by itself:
   the copy above has run, nor after the membership shape is saved until the roster has been read again: until then
   such a change waits on the **Reconciliation** page, which says so. Where QuickBooks holds
   a phone or address there that the portal didn't know of, nothing is sent over it: the change is listed on the
-  **Reconciliation** page, where staff who may change families send the portal's details on purpose or give it up.
+  **Reconciliation** page, which says which details differ but never shows them: staff who may see parents' details
+  open **Compare the two** (recorded in the audit log) to see both, and from there staff who may also change families
+  send the portal's details on purpose; or give it up.
 
 ## When the start stops for a backup
 
