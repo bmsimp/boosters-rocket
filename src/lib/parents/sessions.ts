@@ -167,7 +167,20 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   after the person's rows and links, before the devices. Nothing that ends all of a person's sign-in removes them (a
  *   block, a reset, a password change, Sign out everywhere, a change of sign-in email, sign-ins switched off, a change
  *   of company, a last membership closed: each keeps them as it keeps the password). A later writer that takes them
- *   (SI-6b's set-up and turning off, SI-9's staff reset) takes them after the person's row and before their devices.
+ *   (SI-9's staff reset) takes them after the person's row and before their devices;
+ * - the authenticator app's presses in sign-in settings (authenticator-settings.ts, since slice SI-6b) each take the
+ *   person's row FOR UPDATE and read the session's `strong_at` under it (with when the person's app came into force,
+ *   since a proof older than it doesn't count: sessionStrongAt(), asking-again.ts; so do the password change, the email
+ *   request and the forgets above, reading the app row unlocked under the person's row, as every writer of it holds it);
+ *   setting it up and turning it off, which read the club's level, take the parents' settings lock shared before the
+ *   person's row (as the staff writes of guardians.ts do, below), so a change of level never falls between their read
+ *   and their write; then: setting it up deletes the person's
+ *   unfinished set-up and inserts the new one (their app row); confirming it reads and then updates the unfinished app
+ *   row, then deletes their unused emailed codes, then deletes their backup codes and inserts ten new ones; new backup
+ *   codes delete and insert the backup codes alone; turning it off deletes the app row, then the backup codes. None of
+ *   them touches a device or a session. A try at the second step (verifySecondFactor(), above) holds the person's row
+ *   FOR KEY SHARE, which a press's FOR UPDATE waits for and is waited for by, before it reads the app or a code, so a
+ *   try sees an app as it was before a press or after it, never midway.
  */
 export async function lockedPerson(tx: Tx, parentId: string): Promise<{ email: string; blocked: boolean } | null> {
   const [p] = await tx.select({ email: parent.email, blocked: parent.blocked }).from(parent).where(eq(parent.id, parentId)).for("key share");

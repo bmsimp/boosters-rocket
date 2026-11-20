@@ -4,8 +4,9 @@
 // Since stage 3's slice 9c of the app-owned families spec the records stand alone: no roster read, staff write,
 // read-again, shape save or email confirm changes them from the cache any more, and a staff write changes its own
 // record itself (changeOwnRecord(), src/lib/roster/writes.ts). Its one caller under src/ is "Create a family from this"
-// (stage 3's slice 10, src/lib/roster/no-family.ts), which runs it narrowed to one family customer (`one`); stage 4's
-// import will run it whole. It is also the one statement of the rules migration 0023's fill followed
+// (stage 3's slice 10, src/lib/roster/no-family.ts), which runs it narrowed to one family customer (`one`). Stage 4's
+// reviewed import is a later slice of its own and will not run it whole: a whole run would rewrite records the portal
+// owns (families added by hand made inactive, renames undone, students moved back). It is also the one statement of the rules migration 0023's fill followed
 // (tests/integration/app-records-fill.test.ts proves the two make the same records). The tests' helpers call it after
 // they write the cache (syncAppRecords(), tests/helpers/app-records.ts), so the records they seed are the ones an
 // import would make.

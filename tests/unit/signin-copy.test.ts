@@ -13,7 +13,9 @@ describe("what the sign-in page says when a request fails", () => {
 describe("the sign-in page's words (the sign-in release, slice SI-3b)", () => {
   it("asks for the email and password, and promises a code only on a device the portal doesn't know", () => {
     expect(SIGNIN_LEDE).toMatch(/email and password/);
-    expect(SIGNIN_LEDE).toMatch(/On a device we don't know yet, we'll also email you a code\./);
+    expect(SIGNIN_LEDE).toMatch(/On a device we don't know yet, we'll also ask for a code\./);
+    // Said before anyone is known: true for a guardian with an authenticator app too, so it never says the code is emailed.
+    expect(SIGNIN_LEDE).not.toMatch(/email(?:ed)? (?:you )?a code|authenticator/i);
     expect(SIGNIN_LEDE).not.toMatch(/6-digit code\.$/);
   });
   it("gives every refusal at the password step one answer, which names no reason and points to setting up or resetting a password", () => {

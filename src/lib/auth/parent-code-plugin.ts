@@ -132,8 +132,10 @@ export const parentCodePlugin = () => ({
       const r = await verifySecondFactor({ parentId: step.parentId, email: step.email,
         password: { credentialId: step.credentialId, credentialUpdatedAt: step.credentialUpdatedAt } }, ctx.body.code, ip, now);
       if (!r.ok) {
+        // A refusal that ends the step says only that (`ended`), whatever ended it (the app turned off since, a block, the
+        // password or the address changed), so the page goes back to the password step (slice SI-6b, decision 10).
         if (r.ended) clearPendingStep(ctx);
-        return ctx.json({ ok: false, error: r.reason });
+        return ctx.json(r.ended ? { ok: false, error: r.reason, ended: true } : { ok: false, error: r.reason });
       }
       return ctx.json(await finishSecondStep(ctx, step, r.proof, ip, ctx.body.next));
     }),

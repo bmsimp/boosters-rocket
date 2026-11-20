@@ -48,8 +48,9 @@ export const RATE_LIMITS: Record<RateLimitKind, { max: number; windowMs: number 
   // A parent's sign-in settings (signin-settings.ts; the sign-in release, slice SI-5a), counted per person. Changing the
   // password: each try may ask the breach service and make a 32 MiB hash, so it is held to 10 an hour, far more than a
   // parent choosing a new password takes, mistyped or refused a few times. Signing out everywhere (and from SI-5b,
-  // forgetting a device): each press is a write and an audit row, and the first press ends the session that made it,
-  // so 10 an hour is far more than anyone needs. Asking again counts a signed-in parent's password tries, 5 wrong in 15
+  // forgetting a device; from SI-6b, setting an authenticator app up, new backup codes and turning the app off): each
+  // press is a write and an audit row, and the first press ends the session that made it, so 10 an hour is far more
+  // than anyone needs. Asking again counts a signed-in parent's password tries, 5 wrong in 15
   // minutes as at the door, a right password giving its place back: since SI-5b, in a session made on one of the
   // person's unexpired devices, against that device (`password_try_device`, the door's own count for a password typed on
   // it, so whoever holds that session can fill that one device's count, as anyone holding the device could at the door);
@@ -60,8 +61,9 @@ export const RATE_LIMITS: Record<RateLimitKind, { max: number; windowMs: number 
   // link offered here is the request page's (password_ask_*).
   password_reask_parent: { max: 5, windowMs: WINDOW_MS },
   // An authenticator app's code or a backup code as the second step (verifySecondFactor(), signin-codes.ts; the sign-in
-  // release, slice SI-6a), at the door and in asking again, counted per person, the one a pending step or a stamp names
-  // (never a typed address: only a right password makes either). A six-digit code has a million values and three are
+  // release, slice SI-6a), at the door and in asking again, and since SI-6b the code that confirms an app's set-up in
+  // sign-in settings (one count with the door's, so set-up tries and sign-in tries share the 5), counted per person, the
+  // one a pending step, a stamp or the session names (never a typed address). A six-digit code has a million values and three are
   // live at once (a step either way), so 5 wrong tries in 15 minutes, as the emailed code's 5 tries, keeps a guess
   // at about one in sixty thousand a quarter of an hour; a right code gives its place back (giveBackRateLimit()), so a
   // parent's own codes never use one up, and so does a try whose app's secret won't open (no guess was possible), so it

@@ -5,8 +5,8 @@ import { getConnection } from "@/lib/quickbooks/connection";
 import { getRosterSource } from "@/lib/roster/source";
 import { QUICKBOOKS, type AppFamilyId, type AppStudentId } from "./ids";
 
-/** Connected (a company named) to a company other than the roster cache's: one meaning, for both readers below. */
-const otherCompany = (source: string | null, connected: string | null | undefined) => source !== null && !!connected && connected !== source;
+/** Connected (a company named) to a company other than the roster cache's: one meaning, for both readers below and the accounting links screen (src/lib/accounting/mapping.ts). */
+export const otherCompany = (source: string | null, connected: string | null | undefined) => source !== null && !!connected && connected !== source;
 
 /**
  * Lookups through a link, one record of one kind at a time (stage 1 of the app-owned families spec). A customer may

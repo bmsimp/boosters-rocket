@@ -1,6 +1,10 @@
 // The sign-in page's fixed sentences (spec §1, and the sign-in release, slice SI-3b). No imports: the client component uses this file.
-/** The page's lede, above the form: what signing in is for, and that a new device takes a code too. */
-export const SIGNIN_LEDE = "Sign in with your email and password to see your students, what's owed, the forms to sign and the volunteer shifts. On a device we don't know yet, we'll also email you a code.";
+/**
+ * The page's lede, above the form: what signing in is for, and that a new device takes a code too. Drawn before anyone
+ * is known, so it says nothing of where the code comes from (an email, or since slice SI-6b a guardian's authenticator
+ * app): the step after the password says which.
+ */
+export const SIGNIN_LEDE = "Sign in with your email and password to see your students, what's owed, the forms to sign and the volunteer shifts. On a device we don't know yet, we'll also ask for a code.";
 /**
  * One answer for every refusal at the password step but too many tries (an address nobody holds, no password yet, a
  * wrong password, a blocked person, nobody the club lets in, sign-ins off), so the page can't tell anyone whether an
@@ -19,6 +23,11 @@ export const APP_ASKED = "To finish signing in on this device, enter the 6-digit
 export const APP_CODE_LABEL = "Code from your authenticator app, or a backup code";
 /** One answer for a wrong or used code at the app step, or a second step that has ended. */
 export const APP_REJECTED = "That code didn't work. Enter the newest code from your authenticator app, or a backup code you haven't used yet, or start again with your email and password.";
+/**
+ * Said after APP_REJECTED when the app step's refusal ended the step (slice SI-6b): the page is back at the password,
+ * whatever ended it (the answer never says why).
+ */
+export const APP_STEP_OVER = "Please enter your email and password again to start over.";
 /** One answer for a wrong, expired, used-up or never-sent code, or a second step that has ended. */
 export const CODE_REJECTED = "That code didn't work. Check the newest email from us and try again, or start again with your email and password.";
 /**

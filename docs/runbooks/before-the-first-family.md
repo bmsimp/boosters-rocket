@@ -318,6 +318,54 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
 22. **The staff home for someone with one permission.** Give a test staff member a role with one of the staff home's
     four permissions only, and sign in as them.
     **Pass:** the Today box shows only that permission's line. **If not:** note what else showed.
+23. **An authenticator app from the QR code, on another phone.** On a laptop, as a test parent: Family, **Sign-in
+    settings**, the **Authenticator app** box; show it's you if it asks; **Set up an authenticator app**. Scan the QR
+    code with Google Authenticator and finish with the code it shows. Then **Turn off the authenticator app** (the box
+    asks you to show it's you again first, this time with the app's code, since a proof from before the app was set up
+    no longer counts) and set it up again with Microsoft Authenticator, and once more with a password manager's authenticator (1Password, Bitwarden,
+    or the iPhone's Passwords app).
+    **Pass:** each app names the club and the parent's address, shows a 6-digit code that changes every 30 seconds, and
+    that code finishes the set-up; ten backup codes show, once, and are gone when the page is reloaded. **If not:** note
+    the app and what it showed.
+24. **The same phone, by the typed key.** On the iPhone, in the installed app: **Set up an authenticator app**, then
+    **Copy the key**; in the authenticator app, add an account by hand ("Enter a setup key" or similar, time based) and
+    paste the key, or type it from the screen with or without its spaces. The same on Android, in Chrome.
+    **Pass:** the app's code finishes the set-up. **If not:** note the app, and whether the paste or the typing failed.
+25. **The code field's keyboard and autofill.** At the set-up's code field, and at the sign-in page's app step on a
+    device the portal doesn't know (a private window).
+    **Pass:** the set-up's field opens the number keypad; the sign-in's opens a keyboard with letters too (it takes a
+    backup code); where the phone's own password manager holds the code, the keyboard offers it and filling it in works.
+    **If not:** note the phone, the field and the keyboard.
+26. **A phone whose clock is off.** The portal takes the app's code for the 30 seconds before now, now, and the 30
+    seconds after, so a clock under about 30 seconds off always works and one a minute or more off never does. On the
+    phone with the authenticator app, turn off setting the time automatically and put the clock a minute behind, then a
+    minute ahead, and each time try one sign-in on a device the portal doesn't know (a new private window). Then put
+    the clock back to automatic and sign in once more in a new private window.
+    **Pass:** a minute behind and a minute ahead are each refused with "That code didn't work", and nothing else
+    changes; with the clock right again, the app's newest code signs in. (Five wrong codes in 15 minutes stop the tries
+    for a while, so make only these.) **If not:** note how far off it was and what happened.
+27. **Backup codes typed on a phone keyboard.** In **Sign-in settings**, **Make new backup codes**, and write two down.
+    A device the portal knows asks for no code, so make each of the three tries below in a new private window, closed
+    after the try: sign in with one code typed on the phone's keyboard in lower case with its dash; then with the other
+    with a space for the dash; then with the first code again.
+    **Pass:** the first two sign in; the third is refused; **Backup codes left** on Sign-in settings has gone down by
+    two. **If not:** note what was typed, and in which window.
+28. **The installed app beside the browser.** With the authenticator app set up from Safari (or Chrome), sign in from
+    the installed app as a device the portal doesn't know yet (step 3 says how), then turn the app off in one and reload
+    the other.
+    **Pass:** the installed app asks for the authenticator app's code, not an emailed one, and the code works there;
+    after the turn-off, both say the app is off and the next new device gets an emailed code. **If not:** note which
+    showed what.
+29. **Away from the page for over a minute, and back.** On the iPhone in the installed app, and on Android in Chrome
+    and in the installed app: **Set up an authenticator app**, then leave for the authenticator app and stay there for
+    more than a minute (time it) before coming back to the portal and typing the app's code. Then, with the ten backup
+    codes on the screen, leave for Notes (or a password manager), paste them, wait more than a minute and come back.
+    Coming back after a minute or more makes the portal read the page again; what the set-up and the codes showed is
+    kept in the open page, so it should still be there, unless the phone closed the page while it was in the background.
+    **Pass:** each time, the QR code, the key and the code field are still shown when you come back, and the code
+    finishes the set-up; the ten backup codes are still shown. **If not:** note the phone, browser or installed app,
+    how long you were away and what the page showed instead (a page that starts over has lost the set-up: the app's
+    entry from it won't work; a page that lost the codes can make new ones with **Make new backup codes**).
 
 The phone checks that sign a form need Documenso, so they are in part 4.
 
@@ -465,6 +513,17 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    for the line.
 5. **The products and services:** on a payment requirement's page, **Read the list from QuickBooks**.
    **Pass:** the club's items are listed and a requirement can name its own. **If not:** note what the page said.
+6. **Read Accounting links against the real books** (`/staff/links`, Accounting links under Families; it takes the
+   permission to link families to accounting). It only shows: nothing on it links or changes anything.
+   **Pass:** every family you brought in reads **Linked**, confirmed by you, on the day you pressed; a family you added
+   on Families while QuickBooks was connected reads **Linked**, made in the books from the portal, by you; a family
+   added with no customer (by someone who may not link families, or while QuickBooks was disconnected) reads
+   **Suggested** only where one of its guardians signs in with an address that really is on a customer no family is
+   linked to (or on a parent record under it), and otherwise **Several possible** or **No match**. Don't press
+   **Create a family from this** or **Create in QuickBooks and link** for a family that reads Suggested or Several
+   possible: either makes a second family or customer, and nothing links the two yet; and the
+   count of customers with no family matches Reconciliation's list. **If not:** note the family, the status it read and
+   what you expected; a suggestion that names the wrong customer is the most important to report.
 
 ## 7. A pilot with a few families
 
@@ -532,7 +591,9 @@ work another. Any time before the pilot.
    ships (open question 8 of the app-owned families spec) the club can't change it for them either: a change made in
    QuickBooks no longer changes anyone's sign-in address.
 6. The staff menu's groups (Families, Season, Money, Admin, with Reconciliation under Money and Settings as one entry)
-   and its labels ("Signed forms", "Volunteer credit", "Reconciliation"); setup asks for the club before the first
+   and its labels ("Signed forms", "Volunteer credit", "Reconciliation"); the mapping screen's name and place,
+   "Accounting links" under Families after Parents, shown to whoever may link families to accounting and see the
+   roster; setup asks for the club before the first
    Admin; a role saved from the checklist no longer takes up new permissions by itself.
 7. A buy-out is billed in the company's home currency with no due date sent; credit earned after a buy-out still counts
    toward the requirement but doesn't lower the invoice; a student moved in QuickBooks is no longer followed (stage 3's

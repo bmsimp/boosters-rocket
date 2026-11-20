@@ -1,7 +1,7 @@
 import { requireParentPage } from "@/lib/guards";
 import { EMAIL_COPY } from "@/lib/parents/email-change";
 import { loadMySignin } from "@/lib/parents/signin-settings";
-import { SIGNIN_SETTINGS_COPY } from "@/lib/parents/signin-settings-copy";
+import { SIGNIN_SETTINGS_COPY, howYouSignIn } from "@/lib/parents/signin-settings-copy";
 import { getClubSettings } from "@/lib/settings/club";
 import { AskAgain, SetupLinkForm } from "../sign-in/signin-forms";
 import { NewEmailForm } from "./email-forms";
@@ -16,7 +16,8 @@ export const metadata = { title: "Change your sign-in email" };
  * are in no other family. Anyone else is told to ask the club, and nothing more: not why. Since the sign-in release's
  * slice SI-5a the change is asked for only by a session that proved itself in the last 10 minutes (open question 28):
  * the page asks again first (src/lib/parents/asking-again.ts), and a person with no password is offered a link to
- * choose one. Under Strict nothing can be asked again until SI-6 and SI-7, so the club is asked.
+ * choose one; since SI-6b a guardian with an authenticator app is asked for its code (howYouSignIn()). Under Strict the
+ * change isn't made here yet, so the club is asked.
  */
 export default async function FamilyEmailPage() {
   const ctx = await requireParentPage("/family/email");
@@ -36,7 +37,7 @@ export default async function FamilyEmailPage() {
                   <SetupLinkForm />
                 </>
               ) : (
-                <AskAgain email={me.email} proved={me.provedRecently} lede={SIGNIN_SETTINGS_COPY.askAgainForEmail}>
+                <AskAgain email={me.email} proved={me.provedRecently} lede={howYouSignIn(me.app !== null).askAgainForEmail}>
                   <p>We&apos;ll email a link to the new address. Nothing changes until you open it and say yes.</p>
                   <NewEmailForm />
                 </AskAgain>

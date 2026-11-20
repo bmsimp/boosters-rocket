@@ -22,7 +22,7 @@ import { createHmac } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, parentAuthenticator, parentAuthSession, parentBackupCode, parentDevice, rateLimitEvent, signinCode } from "@/lib/db/schema";
-import { sealAuthenticatorSecret } from "@/lib/parents/authenticator";
+import { removeAuthenticator, sealAuthenticatorSecret } from "@/lib/parents/authenticator";
 import { sendSecondStepCode, signinStands, verifySecondFactor } from "@/lib/parents/signin-codes";
 import { signOutEverywhere } from "@/lib/parents/signin-settings";
 import { totpStep } from "@/lib/parents/totp";
@@ -283,13 +283,38 @@ describe("the app step at /portal-app/check", () => {
     for (const c of [first!, second!, ...(await backupCodeRows(ana.id)).map((r) => r.codeHash)]) expect(all).not.toContain(c);
   });
 
-  it("a backup code is no second step for a person with no app in force", async () => {
+  it("a backup code is no second step for a person with no app in force, and the try ends the step (slice SI-6b)", async () => {
     const ana = await seedAna({ app: "unfinished" });
     const [code] = await seedBackupCodes(ana.id, 1);
     const step = await stepPersonFor("ana@example.com");
-    expect(await verifySecondFactor(step, code!, DOOR_IP)).toEqual({ ok: false, reason: "rejected", ended: false });
+    expect(await verifySecondFactor(step, code!, DOOR_IP)).toEqual({ ok: false, reason: "rejected", ended: true });
     expect((await backupCodeRows(ana.id))[0]!.usedAt).toBeNull();
     expect((await audits("signin.second_step_wrong")).map((r) => r.after)).toEqual([{ factor: "backup_code", try: 1, reason: "no_app" }]);
+  });
+
+  it("an app turned off while its step is open: the try is refused and ends the step, and the password then asks for the emailed code (slice SI-6b)", async () => {
+    const ana = await seedAna();
+    await seedBackupCodes(ana.id, 2);
+    const pending = await anaAtTheApp();
+    // Turned off by the press's own delete (removeAuthenticator(), which turnOffMyAuthenticator() runs): the app and its codes gone.
+    expect(await db.transaction((tx) => removeAuthenticator(tx, ana.id))).toEqual({ apps: 1, backupCodes: 2 });
+    expect(await authenticatorRows(ana.id)).toEqual([]);
+    const { res, body } = await appStep(appCode(ana.app!.secret), pending);
+    // The answer says only that the step ended, never why; the pending step's cookie is cleared.
+    expect(body).toEqual({ ...REFUSED, ended: true });
+    expect(res.headers.getSetCookie().some((l) => /signin_step=;/.test(l))).toBe(true);
+    expect(cookieNamed(res, "session_token")).toBe("");
+    // Still counted, its row saying why.
+    expect((await audits("signin.second_step_wrong")).map((r) => r.after)).toEqual([{ factor: "authenticator", try: 1, reason: "no_app" }]);
+    expect((await db.select().from(rateLimitEvent)).filter((e) => e.kind === "second_step_parent" && e.subject === ana.id)).toHaveLength(1);
+    // The browser has dropped the step, so its next check is one with no pending step.
+    expect((await appStep(appCode(ana.app!.secret), "")).body).toEqual(REFUSED);
+    expect((await audits("signin.refused")).map((r) => r.after)).toContainEqual({ reason: "no_pending_step" });
+    expect(await sessions()).toEqual([]);
+    // The next right password asks for the emailed code, and mails it.
+    const again = await passwordStep("ana@example.com");
+    expect(again.body).toEqual({ ok: true, step: "code" });
+    await vi.waitFor(() => expect(outbox.map((m) => m.to)).toEqual(["ana@example.com"]));
   });
 
   it("the sixth wrong try is refused in the over-limit words, the right code included, and a right code gives its place back", async () => {
@@ -320,7 +345,9 @@ describe("the app step at /portal-app/check", () => {
     const unsigned = `${name}=${Buffer.from(JSON.stringify({ p: ana.id, e: "ana@example.com", c: "x", u: 0, x: Date.now() + 60_000 })).toString("base64url")}`;
     for (const cookie of ["", unsigned, forgedSigned, bens]) {
       const r = await appStep(appCode(ana.app!.secret), cookie);
-      expect([cookie, r.body]).toEqual([cookie, REFUSED]);
+      // A step that reached the check and can't go on (a password row that isn't Ana's; Ben, who has no app) says it
+      // ended, as every refusal that ends the step does since slice SI-6b; with no step there is none to end.
+      expect([cookie, r.body]).toEqual([cookie, cookie === forgedSigned || cookie === bens ? { ...REFUSED, ended: true } : REFUSED]);
       expect(cookieNamed(r.res, "session_token")).toBe("");
     }
     expect(await sessions()).toEqual([]);

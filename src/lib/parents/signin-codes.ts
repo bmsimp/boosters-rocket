@@ -341,7 +341,9 @@ const FACTOR_LIMITED: SecondFactorResult = { ok: false, reason: "rate_limited", 
  *     Each in one transaction with its row: `signin.second_step` (`factor`, and for a backup code how many are `left`),
  *     or `signin.second_step_wrong` (`factor`, the try's number among the window's live tries, `try`, counted under
  *     the limit's lock as its place was taken, and why, `reason`: `wrong`,
- *     `replayed` or `no_app`), or, for an app whose secret won't open, `signin.refused` (`second_factor_unreadable`),
+ *     `replayed` or `no_app`: since slice SI-6b, a person with no app in force, whatever was typed, the app turned off
+ *     since the password asked for it, a try still counted that ends the step, so the parent starts again with their
+ *     password and is asked for the emailed code), or, for an app whose secret won't open, `signin.refused` (`second_factor_unreadable`),
  *     answered as the one refusal with its place given back; a backup code is still taken then, as it opens no secret;
  * (e) the door's own checks again (sign-ins on, not blocked, a row that counts), each `signin.refused` ending the step.
  * Every refusal is one answer to the browser, over a limit the over-limit one; the reasons are in the rows alone, and
@@ -378,7 +380,9 @@ export async function verifySecondFactor(step: { parentId: string; email: string
     await lockedPerson(tx, p.id);
     if (!samePassword(await credentialNow(tx, p.id, step.password.credentialId), step.password)) return "password_changed" as const;
     const signedOutSeen = await newestSignOutEverywhere(tx, p.id);
-    const took = typed.kind === "backup" ? await takeBackupCode(tx, p.id, typed.code, now)
+    // No app in force (turned off since the password asked for it, slice SI-6b): the step can't go on, whatever was typed.
+    const took = !(await hasAuthenticator(p.id, tx)) ? { miss: "no_app" as const }
+      : typed.kind === "backup" ? await takeBackupCode(tx, p.id, typed.code, now)
       : typed.kind === "app" ? await takeAuthenticatorCode(tx, p.id, typed.code, now) : { miss: "wrong" as const };
     if ("miss" in took) {
       if (took.miss === "unreadable") {
@@ -390,7 +394,7 @@ export async function verifySecondFactor(step: { parentId: string; email: string
       // `try` is the place's own number among the window's live tries, counted when it was taken (takeRateLimitPlace()).
       await writeAudit({ actor: parentActor(p), action: "signin.second_step_wrong", targetType: "parent", targetId: p.id,
         after: { factor, try: place.number ?? 0, reason: took.miss }, ip }, tx);
-      return "missed" as const;
+      return took.miss === "no_app" ? "no_app" as const : "missed" as const;
     }
     await writeAudit({ actor: parentActor(p), action: "signin.second_step", targetType: "parent", targetId: p.id,
       after: "left" in took ? { factor, left: took.left } : { factor }, ip }, tx);
@@ -401,6 +405,9 @@ export async function verifySecondFactor(step: { parentId: string; email: string
     return FACTOR_REJECTED_ENDED;
   }
   if (outcome === "missed") return FACTOR_REJECTED;
+  // Still counted, and the step ends: every try after it would be refused too, and the parent starts again with their
+  // password, which then asks for the emailed code (slice SI-6b, decision 10).
+  if (outcome === "no_app") return FACTOR_REJECTED_ENDED;
   // A right code is never counted against the parent, nor a try whose app's secret wouldn't open (still the one refusal).
   await giveBackRateLimit(place.placeId);
   if (outcome === "unreadable") return FACTOR_REJECTED;

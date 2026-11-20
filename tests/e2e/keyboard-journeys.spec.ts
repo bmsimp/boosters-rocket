@@ -10,6 +10,7 @@ import { E2E_EMAIL, emailTokenHash } from "./email-seed";
 import { codeFor } from "./journey-helpers";
 import { E2E_SIGNIN, deviceTokenHash } from "./signin-seed";
 import { removeZeldaDevicesMadeHere } from "./signin-links";
+import { appCodeAt, clearZeldaCounts, keepZeldaProof, nextAppCode, removeZeldaSecondSteps, setZeldaProof } from "./authenticator-steps";
 
 /**
  * The parent journeys docs/accessibility-checks.md walked by hand, walked here by the keyboard alone: Tab, Shift+Tab,
@@ -556,6 +557,102 @@ test.describe("10. sign-in settings, by keyboard: asking again, then the change 
     expect(await sql`SELECT id FROM parent_device WHERE id = ${hereDevices[0]!}`).toHaveLength(0);
     expect((await sql`SELECT device_id FROM parent_auth_session WHERE token = ${HERE_SESSION_TOKEN}`)[0]?.device_id).toBeNull();
     expect((await sql`SELECT device_id FROM parent_auth_session WHERE token = ${PARENT_SESSION_TOKEN}`)[0]?.device_id).not.toBeNull();
+    ringsShown();
+  });
+});
+
+test.describe("11. the authenticator app, by keyboard: asking again, the set-up, the key and the backup codes copied, asking again with the app, turning it off", () => {
+  // The app is set up for Zelda here, through the page's own presses, and turned off by keyboard as the journey's last
+  // step; it and her backup codes are removed after too, for a run cut off midway (the seed gives nobody an app). The
+  // seeded session's proof is put back as it was, and the codes and counts the journey took are removed.
+  let putProofBack: () => Promise<void> = async () => undefined;
+  test.beforeAll(async () => {
+    await removeZeldaSecondSteps(sql);
+    await clearZeldaCounts(sql);
+    putProofBack = await keepZeldaProof(sql);
+  });
+  test.afterAll(async () => {
+    await removeZeldaSecondSteps(sql);
+    await clearZeldaCounts(sql);
+    await putProofBack();
+  });
+
+  test("the password and the emailed code, Set up, the key copied, the app's code, the backup codes copied, then asking again with the app and Turn off", async ({ context, page }) => {
+    test.setTimeout(120_000);
+    await sql`DELETE FROM rate_limit_event`;
+    await setZeldaProof(sql, false);
+    sink.messages.length = 0;
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await context.addCookies([parentSessionCookie()]);
+    await page.goto("/family/sign-in");
+    const box = page.getByRole("region", { name: "Authenticator app" });
+
+    // Asking again inside the app's box: its password field, Continue, then the emailed code (Zelda has no app yet).
+    const password = box.locator('input[name="password"][autocomplete="current-password"]');
+    await tabTo(page, password, { max: 60 });
+    await page.keyboard.type(E2E_SIGNIN.password);
+    await page.keyboard.press("Tab");
+    await expect(box.getByRole("button", { name: "Continue" })).toBeFocused();
+    await page.keyboard.press("Enter");
+    const code = box.getByLabel("6-digit code");
+    await expect(code).toBeFocused();
+    await page.keyboard.type(await codeFor(sql, sink, "zelda@example.com"));
+    await page.keyboard.press("Enter");
+    await expect(box.getByRole("status").filter({ hasText: "Thank you, that's you." })).toBeFocused();
+
+    // Set up: the next stop; Enter puts the focus on the words above the QR code.
+    await page.keyboard.press("Tab");
+    await expect(box.getByRole("button", { name: "Set up an authenticator app", exact: true })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(box.getByText("Scan this QR code with your authenticator app.")).toBeFocused();
+    await expect(box.getByRole("img", { name: "QR code to scan with your authenticator app" })).toBeVisible();
+    const key = ((await box.locator(".app-key").textContent()) ?? "").trim();
+    // The key's copy press, by Tab and Enter: it copies the key alone, and says so.
+    await page.keyboard.press("Tab");
+    await expect(box.getByRole("button", { name: "Copy the key" })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(box.getByText("Copied.")).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(key.replace(/ /g, ""));
+    // The code field, then Finish setting up by Enter: the backup codes' words take the focus.
+    await page.keyboard.press("Tab");
+    await expect(box.getByLabel("Code from your authenticator app", { exact: true })).toBeFocused();
+    const at = await page.evaluate(() => Date.now());
+    await page.keyboard.type(appCodeAt(key, at));
+    await page.keyboard.press("Tab");
+    await expect(box.getByRole("button", { name: "Finish setting up" })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(box.getByRole("status").filter({ hasText: "Your authenticator app is set up." }).first()).toBeFocused();
+    const codes = (await box.getByRole("list", { name: "Your backup codes" }).getByRole("listitem").allTextContents()).map((c) => c.trim());
+    expect(codes).toHaveLength(10);
+    await tabTo(page, box.getByRole("button", { name: "Copy the backup codes" }));
+    await page.keyboard.press("Enter");
+    await expect(box.getByText("Copied.")).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(codes.join("\n"));
+    ringsShown();
+
+    // Asking again with the app: the proof taken away, the page drawn again; the password, then the app's code.
+    await setZeldaProof(sql, false);
+    await page.reload();
+    const again = box.locator('input[name="password"][autocomplete="current-password"]');
+    await tabTo(page, again, { max: 60 });
+    await page.keyboard.type(E2E_SIGNIN.password);
+    await page.keyboard.press("Enter");
+    const appField = box.getByLabel("Code from your authenticator app, or a backup code");
+    await expect(appField).toBeFocused();
+    await page.keyboard.type(await nextAppCode(page, key, at));
+    await page.keyboard.press("Enter");
+    await expect(box.getByRole("status").filter({ hasText: "Thank you, that's you." })).toBeFocused();
+    // New backup codes (not pressed), then Turn off by Enter: what happened takes the focus, and the box is off again.
+    await page.keyboard.press("Tab");
+    await expect(box.getByRole("button", { name: "Make new backup codes" })).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(box.getByRole("button", { name: "Turn off the authenticator app" })).toBeFocused();
+    await page.keyboard.press("Enter");
+    const off = box.locator("div[tabindex='-1']").filter({ hasText: "Your authenticator app is turned off" });
+    await expect(off).toBeFocused();
+    await expect(box.getByRole("button", { name: "Set up an authenticator app", exact: true })).toBeVisible();
+    expect(await sql`SELECT id FROM parent_authenticator WHERE parent_id = (SELECT id FROM parent WHERE email = 'zelda@example.com')`).toHaveLength(0);
+    await tabsOut(page);
     ringsShown();
   });
 });

@@ -23,9 +23,9 @@ import { env } from "@/env";
 import type { ParentCtx } from "@/lib/guards";
 import { MOST_TYPED_PASSWORD, checkPasswordSignin } from "./password-signin";
 import { CODE_TTL_MS, refuseCodeWithoutStep, sendSecondStepCode, signinStands, verifySecondFactor, verifySigninCode, type PasswordProof, type SecondFactorProof, type StepPerson } from "./signin-codes";
-import { hasAuthenticator } from "./authenticator";
+import { authenticatorInForceSince, hasAuthenticator } from "./authenticator";
 import { lockedPerson, parentActor } from "./sessions";
-import { provedRecently } from "./reask-rule";
+import { proofCountsBesideApp, provedRecently } from "./reask-rule";
 import { SIGNIN_SETTINGS_COPY as COPY } from "./signin-settings-copy";
 
 /** Who is asking: the session and its person, from the guard (ParentCtx) and never from the browser. */
@@ -34,16 +34,22 @@ type Asker = Pick<ParentCtx, "parentId" | "sessionId" | "email" | "ip">;
 type Reader = Pick<typeof db, "select">;
 
 /**
- * The session's own proof of the password and a second step, as `strong_at` holds it, or null: none yet, or no such
- * session of this person (ended, or another's). `strong_at` is set only by a proof the session made itself: a sign-in
- * with the emailed code or a set-up link (recordStrongSignin(), devices.ts), or asking again (askAgainCode(), below). A
- * sign-in on a remembered device proved only the password at that moment, and sets none.
+ * The session's own proof of the password and a second step, as `strong_at` holds it, when it still counts, or null:
+ * none yet, no such session of this person (ended, or another's), or (since slice SI-6b's second read) a proof made
+ * before the person's authenticator app came into force (proofCountsBesideApp(), ./reask-rule.ts, against
+ * authenticatorInForceSince()). `strong_at` is set only by a proof the session made itself: a sign-in with the emailed
+ * code or a set-up link (recordStrongSignin(), devices.ts), or asking again (askAgainCode(), below). A sign-in on a
+ * remembered device proved only the password at that moment, and sets none. Every reader of whether a session proved
+ * itself reads it here (sessionProvedRecently(), the page's loadMySignin(), and each change under the person's row), so
+ * the page never offers what the change refuses. Confirming an app stamps no session, the one that confirmed included.
  */
 export async function sessionStrongAt(q: Reader, s: { sessionId: string; parentId: string }): Promise<Date | null> {
   const [row] = await q.select({ strongAt: sql<Date | null>`${parentAuthSession.strongAt}`.mapWith(parentAuthSession.strongAt) }).from(parentAuthSession)
     .where(and(eq(parentAuthSession.id, s.sessionId),
       inArray(parentAuthSession.userId, q.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, s.parentId)))));
-  return row?.strongAt ?? null;
+  const strongAt = row?.strongAt ?? null;
+  if (strongAt === null) return null;
+  return proofCountsBesideApp(strongAt, await authenticatorInForceSince(s.parentId, q)) ? strongAt : null;
 }
 
 /**
@@ -92,19 +98,26 @@ export const MOST_SENT_STAMP = 64;
 /** The most a code field may hold as sent, as at the door's code step. */
 const MOST_SENT_CODE = 20;
 
-const stampMac = (s: { sessionId: string; parentId: string; email: string }, password: PasswordProof, endsAt: number): Buffer =>
+/*
+ * Since slice SI-6b the HMAC also names which second step the stamp asked for (`code` or `app`), with no change to the
+ * stamp's shape: the reader works out both and takes the one that matches, so a stamp that asked for the app is read as
+ * the app's step even once the app has been turned off (decision 10 of SI-6b: that step then ends).
+ */
+type StampStep = "code" | "app";
+const stampMac = (s: { sessionId: string; parentId: string; email: string }, password: PasswordProof, endsAt: number, step: StampStep): Buffer =>
   createHmac("sha256", env.BETTER_AUTH_SECRET)
-    .update(`asking-again:${s.sessionId}:${s.parentId}:${s.email}:${password.credentialId}:${password.credentialUpdatedAt.getTime()}:${endsAt}`).digest();
+    .update(`asking-again:${s.sessionId}:${s.parentId}:${s.email}:${password.credentialId}:${password.credentialUpdatedAt.getTime()}:${endsAt}:${step}`).digest();
 
-function makeStamp(s: { sessionId: string; parentId: string; email: string }, password: PasswordProof, endsAt: Date): string {
-  return `${endsAt.getTime()}.${stampMac(s, password, endsAt.getTime()).toString("base64url")}`;
+function makeStamp(s: { sessionId: string; parentId: string; email: string }, password: PasswordProof, endsAt: Date, step: StampStep): string {
+  return `${endsAt.getTime()}.${stampMac(s, password, endsAt.getTime(), step).toString("base64url")}`;
 }
 
 /**
- * The step a stamp names for the asker, or null: not a stamp's shape, past its end (or an end no stamp could have), the
- * person with no password now, or an HMAC that is not the one this session, person, address and password make.
+ * The step a stamp names for the asker, with which second step it asked for, or null: not a stamp's shape, past its end
+ * (or an end no stamp could have), the person with no password now, or an HMAC that is not the one this session,
+ * person, address and password make, for either step (both are compared, in constant time each).
  */
-async function readStamp(raw: unknown, who: Asker, now: Date): Promise<StepPerson | null> {
+async function readStamp(raw: unknown, who: Asker, now: Date): Promise<(StepPerson & { step: StampStep }) | null> {
   if (typeof raw !== "string" || raw.length > MOST_SENT_STAMP) return null;
   const m = STAMP_SHAPE.exec(raw);
   if (!m) return null;
@@ -112,10 +125,14 @@ async function readStamp(raw: unknown, who: Asker, now: Date): Promise<StepPerso
   if (!(endsAt > now.getTime() && endsAt <= now.getTime() + CODE_TTL_MS)) return null;
   const password = await currentPassword(db, who.parentId);
   if (!password) return null;
-  const want = stampMac(who, password, endsAt);
   const got = Buffer.from(m[2]!, "base64url");
-  if (got.length !== want.length || !timingSafeEqual(got, want)) return null;
-  return { parentId: who.parentId, email: who.email, password, endsAt: new Date(endsAt) };
+  let step: StampStep | null = null;
+  for (const s of ["code", "app"] as const) {
+    const want = stampMac(who, password, endsAt, s);
+    if (got.length === want.length && timingSafeEqual(got, want)) step = s;
+  }
+  if (!step) return null;
+  return { parentId: who.parentId, email: who.email, password, endsAt: new Date(endsAt), step };
 }
 
 /**
@@ -124,10 +141,12 @@ async function readStamp(raw: unknown, who: Asker, now: Date): Promise<StepPerso
  * or a backup code (`app`), when nothing is emailed.
  */
 export type AskAgainAnswer = { ok: true; message: string; stamp: string; step: "code" | "app" } | { ok: false; errors: string[] };
-export type ProvedAnswer = { ok: true; message: string } | { ok: false; errors: string[] };
+/** `ended`: the app's step can't go on (since slice SI-6b), so the page goes back to the password; it never says why. */
+export type ProvedAnswer = { ok: true; message: string } | { ok: false; errors: string[]; ended?: true };
 const PASSWORD_REFUSED = { ok: false as const, errors: [COPY.passwordRejected] };
 const CODE_REFUSED = { ok: false as const, errors: [COPY.codeRejected] };
 const APP_REFUSED = { ok: false as const, errors: [COPY.appRejected] };
+const APP_STEP_OVER = { ok: false as const, errors: [COPY.appRejected, COPY.stepOver], ended: true as const };
 const TOO_MANY = { ok: false as const, errors: [COPY.tooManyTries] };
 
 /**
@@ -154,13 +173,13 @@ export async function askAgainPassword(ctx: Asker, password: unknown, now = new 
   if (!check.ok) return check.limited ? TOO_MANY : PASSWORD_REFUSED;
   if (check.person.id !== ctx.parentId) return PASSWORD_REFUSED; // one address is one person: never another's
   const endsAt = new Date(check.at.getTime() + CODE_TTL_MS);
-  const stamp = makeStamp({ sessionId: ctx.sessionId, parentId: ctx.parentId, email: check.person.email }, check.password, endsAt);
-  if (check.step === "second_factor") return { ok: true, message: COPY.appAsked, stamp, step: "app" };
+  const asker = { sessionId: ctx.sessionId, parentId: ctx.parentId, email: check.person.email };
+  if (check.step === "second_factor") return { ok: true, message: COPY.appAsked, stamp: makeStamp(asker, check.password, endsAt, "app"), step: "app" };
   const { delivery, app } = await sendSecondStepCode({ parentId: ctx.parentId, email: check.person.email, password: check.password, endsAt }, ctx.ip, check.at, "change");
   void delivery;
   // An app that came into force after the password's reads: nothing was sent, and the app is asked for.
-  if (app) return { ok: true, message: COPY.appAsked, stamp, step: "app" };
-  return { ok: true, message: COPY.codeSent, stamp, step: "code" };
+  if (app) return { ok: true, message: COPY.appAsked, stamp: makeStamp(asker, check.password, endsAt, "app"), step: "app" };
+  return { ok: true, message: COPY.codeSent, stamp: makeStamp(asker, check.password, endsAt, "code"), step: "code" };
 }
 
 /**
@@ -174,6 +193,9 @@ export async function askAgainPassword(ctx: Asker, password: unknown, now = new 
  * lockedPerson() (the person's row, then their sessions), the person still at the address and not blocked, and this
  * session's `strong_at` set to now, this session's alone, audited `signin.proved_again` with the step that proved it
  * (`emailed_code`, `authenticator` or `backup_code`). Every refusal is one answer, and over a limit the door's words.
+ * Since slice SI-6b a stamp that asked for the app is checked as the app's step even once the app has been turned off:
+ * that step then ends (verifySecondFactor()'s `no_app`), answered with the app's words and that they start again with
+ * their password, `ended: true`, and the page goes back to its password field.
  */
 export async function askAgainCode(ctx: Asker, stamp: unknown, code: unknown, now = new Date()): Promise<ProvedAnswer> {
   // Refused before any step is read (a code no field could send, a stamp that is no stamp or past its end): the words
@@ -184,7 +206,7 @@ export async function askAgainCode(ctx: Asker, stamp: unknown, code: unknown, no
   const step = await readStamp(stamp, ctx, now);
   if (!step) return (await refuseCodeWithoutStep(ctx.ip, now)) === "rate_limited" ? TOO_MANY : refused();
   const proved = await proveSecondStep(step, code, ctx.ip, now);
-  if (!proved.ok) return proved.limited ? TOO_MANY : proved.app ? APP_REFUSED : CODE_REFUSED;
+  if (!proved.ok) return proved.limited ? TOO_MANY : proved.app ? (proved.ended ? APP_STEP_OVER : APP_REFUSED) : CODE_REFUSED;
   if (!(await signinStands(step.parentId, step.email, ctx.ip, { password: step.password, ...proved.proof }, now))) return proved.app ? APP_REFUSED : CODE_REFUSED;
   const stamped = await db.transaction(async (tx) => {
     const live = await lockedPerson(tx, ctx.parentId);
@@ -203,19 +225,21 @@ export async function askAgainCode(ctx: Asker, stamp: unknown, code: unknown, no
 
 /** The second step a stamp's person proved, with what it spent, or a refusal (`app` when it was the app's step that refused). */
 type Proved = { ok: true; app: boolean; step: "emailed_code" | "authenticator" | "backup_code"; proof: { codeId: string } | SecondFactorProof }
-  | { ok: false; app: boolean; limited: boolean };
+  | { ok: false; app: boolean; limited: boolean; ended: boolean };
 
 /**
  * The person's own second step, as the door takes it: their authenticator app's code or a backup code when they have an
- * app in force (verifySecondFactor()), otherwise the emailed code (verifySigninCode()). An app turned on between the
- * password and the code leaves a code mailed before it to be refused at signinStands() (`second_factor_in_force`).
+ * app in force, or when the stamp asked for the app (verifySecondFactor(), which, since slice SI-6b, refuses and ends the
+ * step of a person whose app was turned off since, `no_app`), otherwise the emailed code (verifySigninCode()). An app
+ * turned on between the password and the code leaves a code mailed before it to be refused at signinStands()
+ * (`second_factor_in_force`).
  */
-async function proveSecondStep(step: StepPerson, code: string, ip: string | null, now: Date): Promise<Proved> {
+async function proveSecondStep(step: StepPerson & { step: "code" | "app" }, code: string, ip: string | null, now: Date): Promise<Proved> {
   const who = { parentId: step.parentId, email: step.email, password: step.password };
-  if (await hasAuthenticator(step.parentId)) {
+  if (step.step === "app" || await hasAuthenticator(step.parentId)) {
     const r = await verifySecondFactor(who, code, ip, now);
-    return r.ok ? { ok: true, app: true, step: r.factor, proof: r.proof } : { ok: false, app: true, limited: r.reason === "rate_limited" };
+    return r.ok ? { ok: true, app: true, step: r.factor, proof: r.proof } : { ok: false, app: true, limited: r.reason === "rate_limited", ended: r.ended };
   }
   const r = await verifySigninCode(who, code, ip, now);
-  return r.ok ? { ok: true, app: false, step: "emailed_code", proof: { codeId: r.codeId } } : { ok: false, app: false, limited: r.reason === "rate_limited" };
+  return r.ok ? { ok: true, app: false, step: "emailed_code", proof: { codeId: r.codeId } } : { ok: false, app: false, limited: r.reason === "rate_limited", ended: r.ended };
 }

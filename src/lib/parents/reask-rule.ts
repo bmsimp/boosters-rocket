@@ -22,3 +22,15 @@ export function provedRecently(strongAt: Date | null, now: Date): boolean {
   const age = now.getTime() - strongAt.getTime();
   return age >= 0 && age <= REASK_WINDOW_MS;
 }
+
+/**
+ * Whether a session's proof at `strongAt` still counts beside the person's authenticator app, in force since `appSince`
+ * (null with none): a proof made before the app came into force does not (the sign-in release, slice SI-6b's second
+ * read, the lead's decision 1). It may have been made with the emailed code, which the app has since replaced, in
+ * another session minutes before the app was set up; the session is asked again, and for an app holder that asks for
+ * the app's code. A proof made at the very moment the app came into force counts. Every reader of a session's proof
+ * goes through this, by sessionStrongAt() (asking-again.ts), before provedRecently().
+ */
+export function proofCountsBesideApp(strongAt: Date, appSince: Date | null): boolean {
+  return appSince === null || strongAt.getTime() >= appSince.getTime();
+}

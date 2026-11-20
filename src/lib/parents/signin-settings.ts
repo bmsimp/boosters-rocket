@@ -29,7 +29,8 @@ import { currentPassword, sessionDeviceId, sessionProvedRecently, sessionStrongA
 import { isDeviceId } from "./devices";
 import { provedRecently } from "./reask-rule";
 import { portalAddress } from "./link-delivery";
-import { SIGNIN_SETTINGS_COPY as COPY } from "./signin-settings-copy";
+import { SIGNIN_SETTINGS_COPY as COPY, howYouSignIn } from "./signin-settings-copy";
+import { authenticatorShown, hasAuthenticator } from "./authenticator";
 
 type Me = Pick<ParentCtx, "parentId" | "sessionId" | "email" | "ip">;
 export type SettingsResult = { ok: true; message: string } | { ok: false; errors: string[] };
@@ -50,16 +51,25 @@ export type MyDevice = { id: string; thisOne: boolean; createdAt: string; lastUs
  * can be asked again until SI-6 and SI-7), and (since SI-5b) the person's remembered devices that are still unexpired,
  * newest use first, the one this session names marked. A session from before SI-5b names none, and none is marked.
  */
-export type MySignin = { email: string; canChangeEmail: boolean; hasPassword: boolean; provedRecently: boolean; strict: boolean; devices: MyDevice[] };
+export type MySignin = { email: string; canChangeEmail: boolean; hasPassword: boolean; provedRecently: boolean; strict: boolean; devices: MyDevice[]; app: MyApp | null };
+
+/**
+ * The person's authenticator app as the page shows it (slice SI-6b), or null with none in force: when it was set up, as
+ * an ISO string for LocalTime, and how many unspent backup codes are left. Never the secret, a row's id or a hash, and
+ * nothing of an unfinished set-up (read through authenticator.ts, authenticatorShown()).
+ */
+export type MyApp = { since: string; backupCodesLeft: number };
 
 export async function loadMySignin(ctx: ParentCtx, now = new Date()): Promise<MySignin> {
-  const [canChangeEmail, password, strongAt, settings, thisDevice, devices] = await Promise.all([
+  const [canChangeEmail, password, strongAt, settings, thisDevice, devices, app] = await Promise.all([
     canChangeMyEmail(ctx), currentPassword(db, ctx.parentId), sessionStrongAt(db, ctx), getParentSettings(), sessionDeviceId(db, ctx),
     db.select({ id: parentDevice.id, createdAt: parentDevice.createdAt, lastUsedAt: parentDevice.lastUsedAt }).from(parentDevice)
       .where(and(eq(parentDevice.parentId, ctx.parentId), gt(parentDevice.expiresAt, now))).orderBy(desc(parentDevice.lastUsedAt), parentDevice.id),
+    authenticatorShown(ctx.parentId),
   ]);
   return { email: ctx.email, canChangeEmail, hasPassword: password !== null, provedRecently: provedRecently(strongAt, now), strict: settings.level === "strict",
-    devices: devices.map((d) => ({ id: d.id, thisOne: d.id === thisDevice, createdAt: d.createdAt.toISOString(), lastUsedAt: d.lastUsedAt.toISOString() })) };
+    devices: devices.map((d) => ({ id: d.id, thisOne: d.id === thisDevice, createdAt: d.createdAt.toISOString(), lastUsedAt: d.lastUsedAt.toISOString() })),
+    app: app ? { since: app.since.toISOString(), backupCodesLeft: app.backupCodesLeft } : null };
 }
 
 const sent = (v: unknown): v is string => typeof v === "string" && v.length <= MOST_SENT;
@@ -224,13 +234,15 @@ export async function forgetMyDevice(ctx: Me, deviceId: unknown): Promise<Settin
       .where(and(eq(parentDevice.id, deviceId), eq(parentDevice.parentId, ctx.parentId), gt(parentDevice.expiresAt, me.now)))
       .returning({ id: parentDevice.id });
     if (gone.length === 0) return "not_theirs" as const;
+    const app = await hasAuthenticator(ctx.parentId, tx);
     await writeAudit({ actor: parentActor({ id: ctx.parentId, email: me.email }), action: "parent.device.forgotten", targetType: "parent", targetId: ctx.parentId,
       after: { deviceId: gone[0]!.id, thisDevice: thisOne }, ip: ctx.ip }, tx);
-    return "forgotten" as const;
+    return app ? "forgotten_app" as const : "forgotten" as const;
   });
   if (done === "not_proved") return PROVE_AGAIN;
   if (done === "not_theirs") return NOT_FROM_PAGE;
-  return { ok: true, message: COPY.deviceForgotten };
+  // What the next sign-in on it asks for: the code from their authenticator app (slice SI-6b), or the code we email.
+  return { ok: true, message: howYouSignIn(done === "forgotten_app").deviceForgotten };
 }
 
 /**
@@ -257,12 +269,13 @@ export async function forgetMyOtherDevices(ctx: Me): Promise<SettingsResult> {
       .where(and(eq(parentDevice.id, kept), eq(parentDevice.parentId, ctx.parentId), gt(parentDevice.expiresAt, me.now))) : [];
     await writeAudit({ actor: parentActor({ id: ctx.parentId, email: me.email }), action: "parent.devices.forgotten", targetType: "parent", targetId: ctx.parentId,
       after: { devicesForgotten: gone.length, thisDeviceKept: stillTheirs !== undefined }, ip: ctx.ip }, tx);
-    return stillTheirs !== undefined ? "kept" as const : "none_kept" as const;
+    return { kept: stillTheirs !== undefined, app: await hasAuthenticator(ctx.parentId, tx) };
   });
   if (!done) return PROVE_AGAIN;
   // With none kept the page couldn't say which device was in use ("Forget every device"): the answer says every one is
-  // gone, the one in use included.
-  return { ok: true, message: done === "kept" ? COPY.otherDevicesForgotten : COPY.everyDeviceForgotten };
+  // gone, the one in use included; and what the next sign-in asks for, by whether they have an app (slice SI-6b).
+  const words = howYouSignIn(done.app);
+  return { ok: true, message: done.kept ? words.otherDevicesForgotten : words.everyDeviceForgotten };
 }
 
 /**

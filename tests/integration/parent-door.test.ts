@@ -151,7 +151,9 @@ describe("the parent door", () => {
     for (const cookie of ["", `${name}=${forged}`, `${name}=${encodeURIComponent(`${forged}.${"A".repeat(43)}=`)}`, bens]) {
       for (const code of [appCode(app.secret), backup!]) {
         const r = await appStep(code, cookie);
-        expect([cookie, code, r.body]).toEqual([cookie, code, { ok: false, error: "rejected" }]);
+        // Ben's own step reaches the check, and, as he has no app in force, ends there (slice SI-6b): the answer says
+        // only that it ended. The others name no step this server signed.
+        expect([cookie, code, r.body]).toEqual([cookie, code, cookie === bens ? { ok: false, error: "rejected", ended: true } : { ok: false, error: "rejected" }]);
         expect(cookieNamed(r.res, "session_token")).toBe("");
       }
     }
