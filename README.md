@@ -91,6 +91,8 @@ The runbooks, written for a club volunteer:
 - [Restore](docs/runbooks/restore.md): onto the same machine or a new one
 - [Reconnecting QuickBooks](docs/runbooks/quickbooks-reconnect.md): the same company, or a different one
 - [When the Health page warns](docs/runbooks/health-warnings.md): one entry for each of its lines
+- [Resetting a parent's sign-in](docs/runbooks/resetting-a-parents-sign-in.md): the call back, the reset, and what
+  the parent does next
 - [Before the first family](docs/runbooks/before-the-first-family.md): every check only a person can
   make (real phones, a real QuickBooks company, Documenso, Intuit's assessment), then a pilot with a
   few families and the welcome emails

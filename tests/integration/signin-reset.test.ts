@@ -253,6 +253,40 @@ describe("what a reset refuses, changing nothing and mailing nothing", () => {
   });
 });
 
+describe("a reset's limit and counts", () => {
+  it("counts every spelling of one person's id in one window, and names the person one way in every row", async () => {
+    const ana = await seedGuardianNamed("Ana Zebrafish");
+    // Postgres reads a uuid in any letter case as the same one: each spelling must take a place in the same count.
+    const spellings = [ana.id, ana.id.toUpperCase(), ana.id.replace(/[a-f]/, (c) => c.toUpperCase())];
+    expect(new Set(spellings).size).toBeGreaterThan(1); // seedParent's ids are random uuids, holding letters
+    for (const id of spellings) expect((await resetSignin(id, asked, ADMIN)).ok).toBe(true);
+    expect(await resetSignin(ana.id.toUpperCase(), asked, ADMIN)).toEqual({ ok: false, reason: "rate_limited" });
+    expect(await resetSignin(ana.id, asked, ADMIN)).toEqual({ ok: false, reason: "rate_limited" });
+    expect(mail.outbox).toHaveLength(3);
+    const rows = (await db.select().from(auditLog)).filter((r) => r.action.startsWith("parent.signin.reset"));
+    expect(rows.map((r) => r.targetId)).toEqual([ana.id, ana.id, ana.id, ana.id]);
+    // A mail that fails for an upper-cased id writes its row under the id as the audit page's filter finds it.
+    const bea = await seedGuardianNamed("Bea Other", "F2");
+    mail.fail = true;
+    expect((await resetSignin(bea.id.toUpperCase(), asked, ADMIN)).ok).toBe(true);
+    expect((await audits("parent.signin.reset_unmailed")).map((r) => r.targetId)).toEqual([bea.id]);
+  });
+
+  it("counts as what the person had only the devices and sessions still live, as their page does, and forgets the expired ones too", async () => {
+    const ana = await seedGuardianNamed("Ana Zebrafish");
+    await seedPassword(ana.authUserId, DOOR_PASSWORD);
+    const gone = new Date(Date.now() - 60_000);
+    await seedDevice(ana.id); await seedDevice(ana.id, { expiresAt: gone });
+    await seedParentSession(ana.authUserId); await seedParentSession(ana.authUserId, { expiresAt: gone });
+    expect(await signinHeld(ana.id)).toMatchObject({ devices: 1, sessions: 1 });
+    expect((await resetSignin(ana.id, asked, ADMIN)).ok).toBe(true);
+    const [row] = await audits("parent.signin.reset");
+    expect(row!.before).toMatchObject({ devices: 1, sessions: 1 });
+    expect(row!.after).toMatchObject({ devicesForgotten: 2, sessionsEnded: 2 });
+    expect(await held(ana)).toMatchObject({ devices: 0, sessions: 0 });
+  });
+});
+
 describe("a reset whose mail can't be handed over", () => {
   it("stands, keeps its link, and writes its own row with the send's sentence", async () => {
     const ana = await seedAnaWithEverything();

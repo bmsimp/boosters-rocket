@@ -158,6 +158,26 @@ describe("the staff home's sign-in resets", () => {
     expect(html).not.toContain(FAMILY_A.parent.name);
   });
 
+  it("says when there were more resets this week than it names, linking every one in the audit log", async () => {
+    const ada = await seedStaff({ email: "ada@club.org", name: "Ada Admin", admin: true });
+    const anaId = families.a.identity.parentId;
+    asStaff(await seedStaff({ email: "bo@club.org", name: "Bo Admin", admin: true }));
+    const many = (n: number) => db.insert(auditLog).values(Array.from({ length: n }, (_, i) => ({ door: "staff" as const, actorId: ada.id, actorLabel: ada.email,
+      action: "parent.signin.reset", permission: "Parents.SignInReset.ReadWrite", targetType: "parent", targetId: anaId,
+      after: { reason: REASON, calledBack: true }, at: new Date(Date.now() - (i + 1) * HOUR) })));
+    const all = `href="/staff/audit${filtersQuery({ ...NO_FILTERS, action: "parent.signin.reset" }).replaceAll("&", "&amp;")}"`;
+    await many(50);
+    let line = section(await home());
+    expect(line.match(/<li[ >]/g)).toHaveLength(50);
+    expect(plain(line)).not.toContain("There were more this week");
+    expect(line).not.toContain(all);
+    await many(1);
+    line = section(await home());
+    expect(line.match(/<li[ >]/g)).toHaveLength(50);
+    expect(plain(line)).toContain("These are the latest 50. There were more this week: every reset is in the audit log.");
+    expect(line).toContain(all);
+  });
+
   it("names a person no longer in the portal in words, with no page to open", async () => {
     const ada = await seedStaff({ email: "ada@club.org", name: "Ada Admin", admin: true });
     await resetRow(ada, "00000000-0000-4000-8000-00000000dead", 1);

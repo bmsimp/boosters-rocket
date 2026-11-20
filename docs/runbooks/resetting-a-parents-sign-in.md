@@ -29,9 +29,9 @@ one check that matters is made before the press, by a person:
 3. Tick **I called them back on a number the club already holds, and they asked for this**, say why in a few words
    (only staff see it: it is kept in the audit log), and press **Reset sign-in**.
 
-The page says it is done and which address the link went to. The section isn't offered for a parent who is blocked
-(unblock them first if they should sign in again), who can't sign in to any family, or while parent sign-ins are
-switched off. One parent's sign-in can be reset three times a day at most.
+The page says it is done and which address the link went to. For a parent who is blocked (unblock them first if
+they should sign in again), who can't sign in to any family, or while parent sign-ins are switched off, the section says
+why there is nothing to reset, and offers no press. One parent's sign-in can be reset three times a day at most.
 
 ## What the parent gets, and what they do next
 
@@ -40,8 +40,8 @@ and remembered phones and computers are removed. Their families, forms, voluntee
 are.
 
 They are emailed a link to choose a new password. It works once, for 7 days. The email says that if they didn't ask the
-club for this, they should contact the club straight away. With the link they choose a password; then they sign in with
-it and, on a phone or computer the portal doesn't know, a code emailed to them. They can then add a passkey or an
+club for this, they should contact the club straight away. Choosing the password with the link signs them in on that
+phone or computer; on another one they sign in with the password and a code emailed to them. They can then add a passkey or an
 authenticator app again under **Sign-in settings**.
 
 ## When the email couldn't be sent
@@ -49,7 +49,8 @@ authenticator app again under **Sign-in settings**.
 The page says so: their sign-in was still reset, and they are signed out everywhere. Check outgoing mail (**Settings**,
 **Outgoing mail**; the Health page's mail line says what failed). Once mail works, wait a minute, then press **Resend
 welcome email** on the same page: for a parent with no password it carries a new link to choose one. (It waits a
-minute after a link was made, and says so if pressed sooner.) Resetting again would mail a link too, but counts towards
+minute after a link was made, and says so if pressed sooner.) Press it even if the parent is still owed their first
+welcome email: the one the portal sends by itself would say a link was emailed earlier, and carry none. Resetting again would mail a link too, but counts towards
 the three a day.
 
 ## The line on every other Admin's home page

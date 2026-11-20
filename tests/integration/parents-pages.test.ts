@@ -361,7 +361,7 @@ describe("the staff pages for parents", () => {
       expect(revalidated.count).toBe(0);
       // Outgoing mail isn't set up here: the reset stands, and the answer says the email couldn't be sent and what to do.
       expect(await resetSigninAction(ana.id, "She lost her phone.", true)).toEqual({ ok: true, status: "attention",
-        message: "Their sign-in was reset and they're signed out everywhere, but the email with the link couldn't be sent. Check outgoing mail under Mail, then, in a minute, send them a link with Resend welcome email." });
+        message: "Their sign-in was reset and they're signed out everywhere, but the email with the link couldn't be sent. Check outgoing mail under Settings, Outgoing mail, then, in a minute, send them a link with Resend welcome email. A welcome email the portal sends them meanwhile won't carry one." });
       expect((await audits("parent.signin.reset"))[0]).toMatchObject({ targetId: ana.id, permission: "Parents.SignInReset.ReadWrite", after: { reason: "She lost her phone.", calledBack: true } });
       expect(revalidated.count).toBe(1);
       // The mail taken as handed over without sending it: the words are what is tested here.

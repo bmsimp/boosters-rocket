@@ -12,8 +12,9 @@ import { recentSigninResets } from "@/lib/parents/signin-reset";
  * it writes no audit row, as the rest of the home doesn't.
  */
 export async function SigninResets({ viewerStaffId }: { viewerStaffId: string }) {
-  const resets = await recentSigninResets(viewerStaffId);
+  const { resets, more } = await recentSigninResets(viewerStaffId);
   if (resets.length === 0) return null;
+  const all = `/staff/audit${filtersQuery({ ...NO_FILTERS, action: "parent.signin.reset" })}`;
   return (
     <Notice tone="info" title="Sign-in resets this week" titleId="resets-h">
       <ul className="notice-list">{resets.map((r) => {
@@ -28,6 +29,7 @@ export async function SigninResets({ viewerStaffId }: { viewerStaffId: string })
           </li>
         );
       })}</ul>
+      {more && <p>These are the latest {resets.length}. There were more this week: <Link href={all}>every reset is in the audit log</Link>.</p>}
       <p>If you didn&apos;t expect one of these, ask whoever did it, and read their reason in the audit log.</p>
     </Notice>
   );

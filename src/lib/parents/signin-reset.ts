@@ -77,7 +77,10 @@ type Done = { to: string; token: string };
  * makes its session after it is refused at its last check by what the reset removed (signinStands(): `password_changed`
  * for every proof that carries the password, which the reset deleted; `passkey_gone` for a passkey alone).
  */
-export async function resetSignin(parentId: string, raw: { reason: string; calledBack: boolean }, o: StaffOp): Promise<ResetResult> {
+export async function resetSignin(sentId: string, raw: { reason: string; calledBack: boolean }, o: StaffOp): Promise<ResetResult> {
+  // One spelling of the id for the limit and every audit row: Postgres reads a uuid in any letter case as the same one,
+  // so a count keyed by the id as sent would give each spelling a window of its own.
+  const parentId = sentId.toLowerCase();
   const reason = typeof raw.reason === "string" ? raw.reason.trim() : "";
   if (!reason || reason.length > MOST_RESET_REASON || raw.calledBack !== true) return { ok: false, reason: "invalid" };
   const permission = o.permission ?? RESET_PERMISSION;
@@ -104,6 +107,10 @@ export async function resetSignin(parentId: string, raw: { reason: string; calle
     const app = await hasAuthenticator(p.id, tx);
     const backupCodes = await unspentBackupCodes(p.id, tx);
     const passkeys = await passkeyCount(p.id, tx);
+    // Devices and sessions as the section counts them (signinHeld()): those still live, not the expired ones the daily
+    // clean-up has yet to delete, which go below all the same.
+    const [devices] = await tx.select({ n: count() }).from(parentDevice).where(and(eq(parentDevice.parentId, p.id), gt(parentDevice.expiresAt, now)));
+    const [sessions] = await tx.select({ n: count() }).from(parentAuthSession).where(and(eq(parentAuthSession.userId, user.id), gt(parentAuthSession.expiresAt, now)));
 
     // What hangs on the person, in the order above lockedPerson() (sessions.ts): requests, codes, links, the password,
     // the app and backup codes and passkeys, devices, sessions.
@@ -120,7 +127,7 @@ export async function resetSignin(parentId: string, raw: { reason: string; calle
     const sessionsEnded = await endParentSessions(p.id, tx);
 
     await writeAudit({ actor: o.actor, action: "parent.signin.reset", permission, targetType: "parent", targetId: p.id,
-      before: { password: passwordRemoved, passkeys, app, backupCodes, devices: devicesForgotten, sessions: sessionsEnded },
+      before: { password: passwordRemoved, passkeys, app, backupCodes, devices: Number(devices?.n ?? 0), sessions: Number(sessions?.n ?? 0) },
       after: { reason, calledBack: true, passwordRemoved, passkeysRemoved, appsRemoved: removed.apps, backupCodesRemoved: removed.backupCodes,
         devicesForgotten, sessionsEnded, codesDeleted, linksDeleted, requestsDeleted }, ip: o.ip }, tx);
     return { to: p.email, token };
@@ -168,17 +175,21 @@ export const RESET_SHOWN_MS = 7 * 24 * 60 * 60 * 1000;
  * reason: it stays in the audit log, which the line links to.
  */
 export type RecentReset = { auditId: number; by: string | null; parentId: string; name: string | null; at: Date };
+/** The most resets the staff home's line names; `more` says there were others this week, which the audit log holds. */
+export const RESETS_SHOWN = 50;
 
 /**
  * The `parent.signin.reset` rows of the last RESET_SHOWN_MS, newest first, but those the viewer wrote (open question
- * 22: "for every other Admin"), read from the audit log, so nothing new is stored for them. At most 50: a week of
- * resets of one person each is far fewer.
+ * 22: "for every other Admin"), read from the audit log, so nothing new is stored for them. At most RESETS_SHOWN, and
+ * `more` when there were others (after a change of the portal's address, Admins may reset many parents one by one):
+ * the line says so and links to the audit log, so it never reads as the whole week when it isn't.
  */
-export async function recentSigninResets(viewerStaffId: string, now = new Date()): Promise<RecentReset[]> {
+export async function recentSigninResets(viewerStaffId: string, now = new Date()): Promise<{ resets: RecentReset[]; more: boolean }> {
   const rows = await db.select({ auditId: auditLog.id, by: auditLog.actorLabel, parentId: auditLog.targetId, name: parent.name, at: auditLog.at })
     .from(auditLog).leftJoin(parent, sql`${parent.id}::text = ${auditLog.targetId}`)
     .where(and(eq(auditLog.action, "parent.signin.reset"), gt(auditLog.at, new Date(now.getTime() - RESET_SHOWN_MS)),
       or(isNull(auditLog.actorId), ne(auditLog.actorId, viewerStaffId))))
-    .orderBy(desc(auditLog.at), desc(auditLog.id)).limit(50);
-  return rows.flatMap((r) => (r.parentId ? [{ auditId: r.auditId, by: r.by, parentId: r.parentId, name: r.name, at: r.at }] : []));
+    .orderBy(desc(auditLog.at), desc(auditLog.id)).limit(RESETS_SHOWN + 1);
+  const resets = rows.slice(0, RESETS_SHOWN).flatMap((r) => (r.parentId ? [{ auditId: r.auditId, by: r.by, parentId: r.parentId, name: r.name, at: r.at }] : []));
+  return { resets, more: rows.length > RESETS_SHOWN };
 }

@@ -84,8 +84,10 @@ const RESET_REFUSED = {
   not_found: "That person isn't in the portal any more.",
 } as const;
 // The Resend welcome email press waits a minute after a set-up link was made (resendWelcome()'s `on_its_way`), so the
-// mail-failed words say so.
-const RESET_UNMAILED = "Their sign-in was reset and they're signed out everywhere, but the email with the link couldn't be sent. Check outgoing mail under Mail, then, in a minute, send them a link with Resend welcome email.";
+// mail-failed words say so. The link the reset made works but was never mailed, and the worker's welcome to a person still
+// owed one takes it as the link "emailed to you earlier" (welcome.ts's `earlier`) and carries none: the words say so, so
+// the Admin presses Resend all the same.
+const RESET_UNMAILED = "Their sign-in was reset and they're signed out everywhere, but the email with the link couldn't be sent. Check outgoing mail under Settings, Outgoing mail, then, in a minute, send them a link with Resend welcome email. A welcome email the portal sends them meanwhile won't carry one.";
 // A reset whose mail couldn't be handed over went through, and needs attention: the answer says so, and what to do next.
 type ResetDone = Done | { ok: true; message: string; status: "attention" };
 export const resetSigninAction = staffAction(RESET, async (ctx, parentId: string, reason: string, calledBack: boolean): Promise<ResetDone> => {
