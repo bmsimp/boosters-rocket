@@ -292,6 +292,29 @@ describe("the app step at /portal-app/check", () => {
     expect((await audits("signin.second_step_wrong")).map((r) => r.after)).toEqual([{ factor: "backup_code", try: 1, reason: "no_app" }]);
   });
 
+  it("an app turned off while its step is open: the try is refused and ends the step, and the password then asks for the emailed code (slice SI-6b)", async () => {
+    const ana = await seedAna();
+    const pending = await anaAtTheApp();
+    // As "Turn off the authenticator app" leaves it (removeAuthenticator()): the app and its codes gone.
+    await db.delete(parentAuthenticator).where(eq(parentAuthenticator.parentId, ana.id));
+    const { res, body } = await appStep(appCode(ana.app!.secret), pending);
+    // The answer says only that the step ended, never why; the pending step's cookie is cleared.
+    expect(body).toEqual({ ...REFUSED, ended: true });
+    expect(res.headers.getSetCookie().some((l) => /signin_step=;/.test(l))).toBe(true);
+    expect(cookieNamed(res, "session_token")).toBe("");
+    // Still counted, its row saying why.
+    expect((await audits("signin.second_step_wrong")).map((r) => r.after)).toEqual([{ factor: "authenticator", try: 1, reason: "no_app" }]);
+    expect((await db.select().from(rateLimitEvent)).filter((e) => e.kind === "second_step_parent" && e.subject === ana.id)).toHaveLength(1);
+    // The browser has dropped the step, so its next check is one with no pending step.
+    expect((await appStep(appCode(ana.app!.secret), "")).body).toEqual(REFUSED);
+    expect((await audits("signin.refused")).map((r) => r.after)).toContainEqual({ reason: "no_pending_step" });
+    expect(await sessions()).toEqual([]);
+    // The next right password asks for the emailed code, and mails it.
+    const again = await passwordStep("ana@example.com");
+    expect(again.body).toEqual({ ok: true, step: "code" });
+    await vi.waitFor(() => expect(outbox.map((m) => m.to)).toEqual(["ana@example.com"]));
+  });
+
   it("the sixth wrong try is refused in the over-limit words, the right code included, and a right code gives its place back", async () => {
     const ana = await seedAna();
     const pending = await anaAtTheApp();

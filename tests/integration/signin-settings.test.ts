@@ -37,7 +37,7 @@ import { PASSWORD_COPY } from "@/lib/parents/password-copy";
 import { takeRateLimit } from "@/lib/parents/rate-limit";
 import { changeMyPassword } from "@/lib/parents/signin-settings";
 import { renewParentSession } from "@/lib/parents/sessions";
-import { SIGNIN_SETTINGS_COPY as COPY } from "@/lib/parents/signin-settings-copy";
+import { SIGNIN_SETTINGS_COPY as COPY, SIGNIN_WITH_APP_COPY as WITH_APP } from "@/lib/parents/signin-settings-copy";
 import { CODE_TTL_MS, signinStands } from "@/lib/parents/signin-codes";
 import SignInSettingsPage from "@/app/(parent)/family/sign-in/page";
 import FamilyPage from "@/app/(parent)/family/page";
@@ -917,5 +917,124 @@ describe("one parent never reaches another's sign-in", () => {
     // Nothing was mailed to anyone but A after their codes went: A has a password, so the ask was a reset link to A.
     await vi.waitFor(() => expect(outbox.some((m) => m.to === FAMILY_A.parent.email)).toBe(true));
     expect(outbox.filter((m) => m.to !== FAMILY_A.parent.email).map((m) => m.to).sort()).toEqual([FAMILY_B.parent.email, "sigrid.second@family-a.example"].sort());
+  });
+});
+
+describe("asking again when the app is turned off while its step is open (slice SI-6b, decision 10)", () => {
+  it("the app's step ends: the app's words and that they start again, still counted, and the next password asks for the emailed code", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await withPassword(a);
+    const app = await seedAuthenticator(a.identity.parentId);
+    asParent(a.identity);
+    const first = await askAgainPasswordAction(PROVEN_PASSWORD);
+    if (!first.ok || first.step !== "app") throw new Error("the app's step should be asked for");
+    // Turned off in another tab, as "Turn off the authenticator app" leaves it.
+    await db.delete(parentAuthenticator).where(eq(parentAuthenticator.parentId, a.identity.parentId));
+    const ENDED = { ok: false, errors: [COPY.appRejected, COPY.stepOver], ended: true };
+    expect(await askAgainCodeAction(first.stamp, appCode(app.secret))).toEqual(ENDED);
+    // The stamp asked for the app: it is never read as an emailed code's, whatever is typed with it.
+    expect(await askAgainCodeAction(first.stamp, "123456")).toEqual(ENDED);
+    expect((await audits("signin.second_step_wrong")).map((r) => r.after))
+      .toEqual([{ factor: "authenticator", try: 1, reason: "no_app" }, { factor: "authenticator", try: 2, reason: "no_app" }]);
+    expect((await db.select().from(rateLimitEvent)).filter((e) => e.kind === "second_step_parent" && e.subject === a.identity.parentId)).toHaveLength(2);
+    expect(await strongAtOf(a.identity.sessionId)).toBeNull();
+    expect(await audits("signin.proved_again")).toEqual([]);
+    // Back at the password, the next right one asks for the emailed code, which proves the session.
+    const { stamp, code } = await passwordThenCode(a.identity);
+    expect(await askAgainCodeAction(stamp, code)).toEqual({ ok: true, message: COPY.proved });
+    expect((await audits("signin.proved_again")).map((r) => r.after)).toEqual([{ step: "emailed_code" }]);
+  });
+});
+
+describe("the authenticator app box (slice SI-6b)", () => {
+  /** The box alone: from its heading to the end of the page's last box. */
+  const box = (page: string) => page.slice(page.indexOf(`id="app-h"`));
+
+  it("off, with no recent proof: what an app is, and asking again before the set-up press", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await withPassword(a);
+    asParent(a.identity);
+    const page = box(await renderPage(SignInSettingsPage));
+    expect(page).toContain(COPY.appTitle);
+    expect(page).toContain(html(COPY.appWhat));
+    expect(page).toContain(html(COPY.appKeepsDevices));
+    expect(page).toContain(html(COPY.askAgainForApp));
+    expect(page).toMatch(/autocomplete="current-password"/i);
+    expect(page).not.toContain(COPY.appSetUp);
+  });
+
+  it("off and proved: the set-up press; with no password: choose one first; under Strict: words and no press", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await proveRecently(a.identity);
+    asParent(a.identity);
+    expect(box(await renderPage(SignInSettingsPage))).toContain(COPY.appSetUp);
+    await seedParentSettings({ level: "strict" });
+    const strict = box(await renderPage(SignInSettingsPage));
+    expect(strict).toContain(html(COPY.appStrictOff));
+    expect(strict).not.toContain(COPY.appSetUp);
+    await seedParentSettings({ level: "standard" });
+    const b = await seedSignedInParent(FAMILY_B);
+    asParent(b.identity);
+    const none = box(await renderPage(SignInSettingsPage));
+    expect(none).toContain(html(COPY.appNeedsPassword));
+    expect(none).not.toContain(COPY.appSetUp);
+    expect(none).not.toMatch(/type="password"/);
+  });
+
+  it("on and proved: since when, the backup codes left, new codes and turning off, every sentence of how they sign in naming the app, and nothing of the app itself", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await proveRecently(a.identity);
+    const app = await seedAuthenticator(a.identity.parentId);
+    const codes = await seedBackupCodes(a.identity.parentId, 3);
+    asParent(a.identity);
+    const whole = await renderPage(SignInSettingsPage);
+    const page = box(whole);
+    expect(page).toContain(COPY.appOn);
+    expect(page).toContain(`<dt>${COPY.appOnSince}</dt>`);
+    expect(page).toContain(`<dt>${COPY.backupCodesLeft}</dt><dd>3</dd>`);
+    expect(page).toContain(COPY.newCodes);
+    expect(page).toContain(html(COPY.turnOffWords));
+    expect(page).toContain(COPY.turnOff);
+    expect(page).not.toContain(COPY.appSetUp);
+    expect(page).not.toContain(html(COPY.backupCodesNone));
+    // How they sign in, signing out everywhere, the password change and the device list name the app's code.
+    for (const words of [WITH_APP.how, WITH_APP.everywhereThen, WITH_APP.signsOutEverywhere, WITH_APP.devicesNone]) expect(whole).toContain(html(words));
+    for (const words of [COPY.how, COPY.everywhereThen, COPY.signsOutEverywhere, COPY.devicesNone]) expect(whole).not.toContain(html(words));
+    const [row] = await authenticatorRows(a.identity.parentId);
+    const hashes = (await backupCodeRows(a.identity.parentId)).map((r) => r.codeHash);
+    for (const v of [app.secret, app.id, row!.secretCiphertext, ...codes, ...hashes]) expect(whole).not.toContain(v);
+    // The Family page's "Your account" box says the same.
+    const family = await renderPage(FamilyPage);
+    expect(family).toContain(html(WITH_APP.how));
+    expect(family).not.toContain(html(COPY.how));
+  });
+
+  it("on with no recent proof: asking again for the app's code; none left: what to do; under Strict: new codes, and no turning off", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await withPassword(a);
+    await seedAuthenticator(a.identity.parentId);
+    asParent(a.identity);
+    const page = await renderPage(SignInSettingsPage);
+    expect(box(page)).toContain(html(COPY.askAgainForAppChange));
+    expect(box(page)).toContain(html(COPY.backupCodesNone));
+    expect(box(page)).not.toContain(COPY.newCodes);
+    expect(page).toContain(html(WITH_APP.askAgainForPassword));
+    await proveRecently(a.identity);
+    await seedParentSettings({ level: "strict" });
+    const strict = box(await renderPage(SignInSettingsPage));
+    expect(strict).toContain(COPY.newCodes);
+    expect(strict).toContain(html(COPY.turnOffStrict));
+    expect(strict).not.toContain(COPY.turnOff);
+  });
+
+  it("an unfinished set-up is nothing the page shows: the box is off", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await proveRecently(a.identity);
+    const unfinished = await seedAuthenticator(a.identity.parentId, { confirmed: false });
+    asParent(a.identity);
+    const whole = await renderPage(SignInSettingsPage);
+    expect(box(whole)).toContain(COPY.appSetUp);
+    expect(whole).toContain(html(COPY.how));
+    for (const v of [unfinished.secret, unfinished.id]) expect(whole).not.toContain(v);
   });
 });
