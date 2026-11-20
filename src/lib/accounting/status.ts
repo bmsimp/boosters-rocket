@@ -1,19 +1,19 @@
-// The statuses of the accounting links screen (stage 4's slice M1 of docs/superpowers/specs/2026-11-18-app-owned-families-design.md,
+// The statuses of the accounting links screen (stage 4's slices M1 and M2 of docs/superpowers/specs/2026-11-18-app-owned-families-design.md,
 // section 4, "Statuses"), worked out at each view and stored nowhere. Pure: it reads nothing.
 import type { Cust } from "@/lib/roster/model";
 
 /**
- * Each status's fixed key, in the order the screen offers them. "Linked, with differences" (slice M2) and "Left
- * unlinked" (a mark a later slice stores) are not here yet.
+ * Each status's fixed key, in the order the screen offers them. "Left unlinked" (a mark a later slice stores) is not
+ * here yet.
  */
-export const STATUS_KEYS = ["suggested", "several", "no_match", "carried_over", "linked", "not_a_family", "customer_gone", "not_checked"] as const;
+export const STATUS_KEYS = ["suggested", "several", "no_match", "carried_over", "linked", "with_differences", "not_a_family", "customer_gone", "not_checked"] as const;
 export type StatusKey = (typeof STATUS_KEYS)[number];
 export const isStatusKey = (s: unknown): s is StatusKey => typeof s === "string" && (STATUS_KEYS as readonly string[]).includes(s);
 
 /** A status in words: what the row and the filter say. */
 export const STATUS_WORDS: Record<StatusKey, string> = {
   suggested: "Suggested", several: "Several possible", no_match: "No match", carried_over: "Carried over", linked: "Linked",
-  not_a_family: "Not a family now", customer_gone: "Customer gone", not_checked: "Not checked",
+  with_differences: "Linked, with differences", not_a_family: "Not a family now", customer_gone: "Customer gone", not_checked: "Not checked",
 };
 
 /** Why a linked customer isn't a family now, by the rule of the customers that may be suggested (noFamilyPool()). */
@@ -25,10 +25,12 @@ export const NOT_A_FAMILY_WORDS: Record<NotAFamilyReason, string> = {
 /**
  * How a family's own link stands against the roster cache:
  * - `gone`: the cache holds customers and the linked one isn't among them (open question 13: the link is kept);
- * - `not_a_family`: it is there, but not an active family at the top of the tree (a member, in flat books), by the
- *   rule of the customers that may be suggested: listed as a family by the shape (`listedAsFamily`, from
- *   buildRoster(); a customer of another type is `other_type`, one with no type `no_type`), active, and under no other customer; each reason that applies, in that order. Null for
- *   `listedAsFamily` when the shape can't be trusted, and then this is not worked out;
+ * - `not_a_family`: it is there, but not a family at the top of the tree (a member, in flat books): not listed as a
+ *   family by the shape (`listedAsFamily`, from buildRoster(); a customer of another type is `other_type`, one with no
+ *   type `no_type`), or under another customer; each reason that applies, in that order, and then `inactive` too when
+ *   it is inactive in the books. Inactive alone doesn't make it one (open question 13: an inactive customer that is
+ *   otherwise a family is a difference, and the link is kept; slice M2). Null for `listedAsFamily` when the shape
+ *   can't be trusted, and then this is not worked out;
  * - `stands`: neither, or the cache holds no customer at all, so nothing can be told.
  */
 export function linkStanding(customer: Cust | undefined, o: { cacheHasCustomers: boolean; listedAsFamily: ReadonlySet<string> | null }):
@@ -39,8 +41,9 @@ export function linkStanding(customer: Cust | undefined, o: { cacheHasCustomers:
   // Not listed as a family by the shape: of another type, or of none at all, each said in its own words.
   if (!o.listedAsFamily.has(customer.qboId)) reasons.push(customer.typeQboId === null ? "no_type" : "other_type");
   if (customer.parentQboId !== null) reasons.push("under_another");
+  if (reasons.length === 0) return { is: "stands" };
   if (!customer.active) reasons.push("inactive");
-  return reasons.length ? { is: "not_a_family", reasons } : { is: "stands" };
+  return { is: "not_a_family", reasons };
 }
 
 /** The list's filter, from the address: anything it doesn't know is dropped, never guessed at. */
