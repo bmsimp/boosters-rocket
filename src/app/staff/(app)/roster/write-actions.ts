@@ -2,10 +2,15 @@
 import { revalidatePath } from "next/cache";
 import { staffAction, type StaffCtx } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
-import { addFamily, addStudentToLinked, askFamilyInactive, askRosterWrite, changeInPortal, createInQuickBooksAndLink, deactivateLinked, linkStudentMadeAfterGivingUp, moveStudent, renameLinked, sendPortalValue,
+import { addFamily, addStudentToLinked, askFamilyInactive, askRosterWrite, changeInPortal, contactSavedWords, createInQuickBooksAndLink, deactivateLinked, linkStudentMadeAfterGivingUp, moveStudent, renameLinked, SAVED_LEASE_MS, sendContactSaved, sendPortalValue, STAFF_DETAILS_COPY,
   type PortalChange, type WriteAsk, type WriteResult } from "@/lib/roster/writes";
 import { giveUp, tryAgainNow, NOTE_MAX } from "@/lib/roster/queue";
 import { NAME_MAX } from "@/lib/roster/names";
+import { getShape } from "@/lib/roster/shape";
+import { familyRecordAt } from "@/lib/families/address";
+import { parseContactForm, type ContactForm } from "@/lib/parents/contact-fields";
+import { saveDetails } from "@/lib/parents/contact-edits";
+import { whoseDetails } from "@/lib/parents/my-family";
 
 // Staff changes to the roster in QuickBooks (v1 spec §6.1). Each action needs Roster.Family.ReadWrite, and also
 // Roster.Read, the pages' own permission: the forms show only to staff who hold both. A server action can be called
@@ -167,6 +172,36 @@ export const familyInactiveAction = staffAction(P, async (ctx, rosterTag: string
   const { result, changed } = await askFamilyInactive(familyId, stamp, rosterTag, op(ctx));
   if (changed) revalidatePath("/", "layout");
   return result;
+});
+
+/**
+ * A family's phone and mailing address, changed by staff on the family's page (stage 3's slice 11c), in books where they
+ * are each family's (whoseDetails(): no parent type, flat books included): `familyId`, the family record's app id the
+ * page bound, a uuid of a family record (NOT_FROM_PAGE otherwise; saveDetails() answers none for one that isn't
+ * active); `sent`, the seven fields and the version the form was shown (`f:<n>`), read whole by parseContactForm(). The
+ * one save (saveDetails()), its items held for the at-once try (QueueAs), then, after its commit, that try
+ * (sendContactSaved()). `compare`: the kept items whose compare view the reader may open (it takes Parents.ReadWrite).
+ */
+type DetailsDone = { ok: true; message: string; status?: "waiting" | "attention"; current: ContactForm; compare: string[] } | { ok: false; errors: string[]; current?: ContactForm };
+export const saveFamilyDetailsAction = staffAction(P, async (ctx, familyId: string, sent: unknown): Promise<DetailsDone> => {
+  if (!canRead(ctx) || !uuid(familyId)) return NOT_FROM_PAGE;
+  const parsed = parseContactForm(sent);
+  if (!parsed.ok) return NOT_FROM_PAGE;
+  const record = await familyRecordAt(familyId);
+  if (!record) return NOT_FROM_PAGE;
+  // Whose details these are, read before the save: a form drawn for the family's details that comes back after a shape
+  // save made them each person's is answered as changed, and nothing is saved on either row.
+  if (whoseDetails(await getShape()) !== "family") return { ok: false, errors: [STAFF_DETAILS_COPY.whoseChanged] };
+  const of = { kind: "family" as const, familyId: record };
+  const r = await saveDetails(of, parsed.form, { actor: op(ctx).actor, ip: ctx.ip, permission: P, queueAs: { askedBy: ctx.staffUserId, nextTryAt: new Date(Date.now() + SAVED_LEASE_MS) } });
+  if (r.is === "none") return { ok: false, errors: ["This family is inactive in the portal, so its details can't be changed. Nothing was saved."] };
+  if (r.is === "invalid") return { ok: false, errors: r.errors };
+  if (r.is === "stale") return r.current ? { ok: false, errors: [STAFF_DETAILS_COPY.changed], current: r.current } : NOT_FROM_PAGE;
+  if (r.is === "unchanged") return { ok: true, message: STAFF_DETAILS_COPY.unchanged, current: r.current, compare: [] };
+  revalidatePath("/", "layout");
+  const said = contactSavedWords(await sendContactSaved(of, r.queueIds, { actor: op(ctx).actor, ip: ctx.ip, permission: P, staffUserId: ctx.staffUserId }), "family",
+    { mayCompare: can(ctx.effective, "Parents.ReadWrite"), whoCompares: "someone who may see parents' details can compare the two there." });
+  return { ok: true, message: [STAFF_DETAILS_COPY.savedFamily, ...said.sentences].join(" "), ...(said.status ? { status: said.status } : {}), current: r.current, compare: said.compare };
 });
 
 /* ---- The write queue, from the Reconciliation page ---- */

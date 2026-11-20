@@ -1,12 +1,14 @@
 "use client";
+import Link from "next/link";
 import { startTransition, useActionState, useEffect, useRef, useState } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { ActionOutcome, Notice } from "@/app/components/notice";
+import { CONTACT_FIELDS, type ContactForm, type ContactValues } from "@/lib/parents/contact-fields";
 
 // No form `action` on the forms with a text field: React resets a form after one, and the note would vanish on a
 // refusal. State is the source of truth; a type="button" calls the action inside startTransition (see
 // settings/quickbooks/forms.tsx).
-type Done = { ok: true; message: string } | { ok: false; errors: string[] };
+type Done = { ok: true; message: string; status?: "waiting" | "attention" } | { ok: false; errors: string[] };
 const failed: Done = { ok: false, errors: [ACTION_FAILED] };
 const noSubmit = (e: { preventDefault: () => void }) => e.preventDefault();
 function Outcome({ state }: { state: Done | null }) {
@@ -117,6 +119,41 @@ export function NameForm({ name: current, act }: { name: string; act: (name: str
       <label className="field"><span>Name</span><input type="text" maxLength={100} autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} /></label>
       <Outcome state={state} />
       <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : "Save name"}</button>
+    </form>
+  );
+}
+
+/** What a staff save of a guardian's phone and mailing address answers (the person's page, and a family's page in books with no parent type). */
+export type DetailsDone = { ok: true; message: string; status?: "waiting" | "attention"; current: ContactForm; compare: string[] } | { ok: false; errors: string[]; current?: ContactForm };
+const detailsFailed: DetailsDone = { ok: false, errors: [ACTION_FAILED] };
+
+/**
+ * A guardian's phone and mailing address as the portal holds them, changed by staff (stage 3's slice 11c): the seven
+ * fields and the version they were read at, which goes back with the save so a change saved meanwhile (by the parent, or
+ * someone else here) is noticed and not overwritten. Given only those: whose details they are is bound into `act` on the
+ * server. After an answer that brings the details as they stand (saved, or changed meanwhile), the fields show those;
+ * otherwise what was typed stays. A kept change's compare view is linked for a reader who may open it (`compare`).
+ */
+export function DetailsForm({ initial, act }: { initial: ContactForm; act: (sent: Record<string, string>) => Promise<DetailsDone> }) {
+  const [shown, setShown] = useState(initial);
+  const [values, setValues] = useState<ContactValues>(initial.values);
+  const [state, run, pending] = useActionState(async () => {
+    const r = await safely(() => act({ ...values, version: shown.version }), detailsFailed);
+    if (r.current) { setShown(r.current); setValues(r.current.values); }
+    return r;
+  }, null);
+  return (
+    <form onSubmit={noSubmit} className="stack">
+      {CONTACT_FIELDS.map(({ name, label, max }) => (
+        <label className="field" key={name}><span>{label}</span>
+          <input type={name === "phone" ? "tel" : "text"} maxLength={max} autoComplete="off" value={values[name]} onChange={(e) => setValues({ ...values, [name]: e.target.value })} />
+        </label>
+      ))}
+      <Outcome state={state} />
+      {state?.ok && state.compare.map((id) => (
+        <Link key={id} className="link-line" href={`/staff/reconciliation?compare=${id}#writes-h`}>Compare the two on the Reconciliation page</Link>
+      ))}
+      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving, then sending to QuickBooks…" : "Save details"}</button>
     </form>
   );
 }

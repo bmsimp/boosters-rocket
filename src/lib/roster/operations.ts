@@ -20,7 +20,7 @@ const LAYERED_ALL: RosterOperation[] = ["create_family", "add_student", "add_par
   "deactivate_family", "deactivate_student", "deactivate_parent"];
 
 export const NOT_HERE = {
-  contact: "A guardian's phone and mailing address are the portal's own: they change them themselves on their Family page, and each change is then sent to their own record in QuickBooks (the family's, where the club's books have no parents of their own), unless QuickBooks holds details there the portal didn't know of, which the Reconciliation page then lists. Email addresses are changed in QuickBooks; the roster shows them once it is read again.",
+  contact: "A guardian's phone and mailing address are the portal's own: they change them themselves on their Family page, and staff change them on the person's page (or on the family's page, where the club's books have no parents of their own). Each change is then sent to their own record in QuickBooks (the family's, where the books have no parents of their own), unless QuickBooks holds details there the portal didn't know of, which the Reconciliation page then lists. Email addresses are changed in QuickBooks; the roster shows them once it is read again.",
   parentsInFamilyEmail: "This club's parents aren't customers of their own in QuickBooks: their addresses are in the family's email field, which is changed in QuickBooks; the roster shows it once it is read again.",
   noStudents: "This club doesn't identify students in QuickBooks, so the portal can't tell a student and can't add or move one.",
   flat: "Members aren't grouped into families, so there are no students or parents to add.",

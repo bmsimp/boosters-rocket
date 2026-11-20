@@ -9,8 +9,8 @@ export const metadata = { title: "Change your sign-in email" };
  * Where a parent asks to change the address they sign in with (src/lib/parents/email-change.ts). Whose address this is
  * comes from the session alone: the page's address has no id in it, and neither has the form.
  *
- * Offered to a parent whose sign-in comes from a QuickBooks record of their own, while parent sign-ins are on and they
- * are in no other family. Anyone else is told to ask the club, and nothing more: not why.
+ * Offered to every parent while parent sign-ins are on and the session's own guardian row is open (canChangeMyEmail()),
+ * in however many families they are. Anyone else is told to ask the club, and nothing more: not why.
  */
 export default async function FamilyEmailPage() {
   const ctx = await requireParentPage("/family/email");
@@ -20,7 +20,7 @@ export default async function FamilyEmailPage() {
       <h1 className="page-title">Change your sign-in email</h1>
       {may ? (
         <>
-          <p className="lede">You sign in with {ctx.email}. A new address replaces it in the club&apos;s books too, so the club writes to you there.</p>
+          <p className="lede">You sign in with {ctx.email}. A new address becomes the one you sign in with, and the club&apos;s records are brought up to date with it.</p>
           <section className="box" aria-labelledby="new-h">
             <h2 id="new-h">Your new email</h2>
             <p>We&apos;ll email a link to the new address. Nothing changes until you open it and say yes.</p>

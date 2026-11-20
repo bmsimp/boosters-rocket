@@ -10,9 +10,8 @@ export const QUICKBOOKS_USE = {
     + "so a name, a student's family or an inactive customer changed in QuickBooks stays as the portal has it. "
     + "A guardian's phone and mailing address are the portal's own: it takes them in once, from the guardian's own record, after the first roster read since the update that made them so, "
     + "and a change made to them in QuickBooks after that stays there.",
-  writes: "It changes only what someone asks it to there: the email address a parent signs in with, in their own record's email field, "
-    + "only when that parent changes it in the portal; "
-    + "a guardian's phone and mailing address, on their own record (or, where the club's books have no parents of their own, the family's), after the portal saves a change a parent makes to them, "
+  writes: "It changes only what someone asks it to there: "
+    + "a guardian's phone and mailing address, on their own record (or, where the club's books have no parents of their own, the family's), after the portal saves a change a parent or staff make to them, "
     + "and never over details QuickBooks holds that the portal didn't know of; "
     + "and, for staff allowed to change the roster, new families, students, parents and members, their names, a student's family, and making a customer inactive "
     + "(a family together with everyone under it, and never anyone with any balance, owed or a credit). "
@@ -26,7 +25,7 @@ export const QUICKBOOKS_USE = {
 
 /** The audit actions of those changes, for the pages that say when one was last made. */
 export const QUICKBOOKS_WRITE_ACTION: readonly string[] = [
-  "parent.contact.save", "parent.email.save", "roster.customer.contact",
+  "parent.contact.save", "roster.customer.contact",
   "roster.customer.create", "roster.customer.rename", "roster.student.move", "roster.customer.deactivate", "roster.write.done",
   "volunteer.buyout.invoiced", "volunteer.buyout.voided",
 ];

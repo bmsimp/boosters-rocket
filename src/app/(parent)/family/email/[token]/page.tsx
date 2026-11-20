@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
  * back here. Opening it changes nothing, since mail scanners open links too: it asks, and the button makes the change.
  *
  * The token in the address is untrusted. findMyEmailChange() looks it up among the session's own requests only, made
- * under the session's own family and record; any other token gets the words of a link that has expired, whatever the
+ * under the session's own family and link; any other token gets the words of a link that has expired, whatever the
  * reason, and nothing of anyone else's request is shown.
  */
 export default async function ConfirmEmailPage({ params }: { params: Promise<{ token: string }> }) {
@@ -25,7 +25,7 @@ export default async function ConfirmEmailPage({ params }: { params: Promise<{ t
         {view.state === "ask" ? (
           <>
             <h2 id="confirm-h">{`Use ${view.newEmail} to sign in from now on?`}</h2>
-            <p>You sign in with {ctx.email} now. Once you say yes, the club&apos;s books have the new address, and you sign in again with it.</p>
+            <p>You sign in with {ctx.email} now. Once you say yes, you sign in again with the new address, and the club&apos;s records are brought up to date with it.</p>
             <ConfirmEmailForm token={token} />
           </>
         ) : (

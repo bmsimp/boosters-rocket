@@ -220,12 +220,12 @@ export default async function ReconciliationPage({ searchParams }: { searchParam
       <section className="box" aria-labelledby="writes-h"><h2 id="writes-h">Changes waiting to reach QuickBooks</h2>
         {writes.length === 0 ? <Notice tone="done" live="none">Nothing is waiting: every change staff and parents made has reached QuickBooks.</Notice> : (
           <>
-            <p>QuickBooks couldn&apos;t take these when they were asked for, or they are a parent&apos;s phone and mailing address, which the worker sends on at its next wake. The worker tries a waiting change again, at longer and longer gaps;
+            <p>QuickBooks couldn&apos;t take these when they were asked for, or they are a guardian&apos;s phone and mailing address, changed by the parent or by staff (a staff member&apos;s is tried at once, then left for the worker; a parent&apos;s goes at the worker&apos;s next wake). The worker tries a waiting change again, at longer and longer gaps;
               one QuickBooks may already have made is first looked for in a fresh copy of the roster, so nothing is made twice or overwritten.
               One QuickBooks took that the portal couldn&apos;t take in at the time waits here too, until the portal finishes it on its side.
               A stuck change waits for you: try it again, or give it up and make it in QuickBooks.
               A change saved in the portal first that didn&apos;t go through (QuickBooks refused it, the portal held it back as QuickBooks has something else, or it couldn&apos;t be sent) is kept in the portal: send the portal&apos;s value again on purpose, or give it up and leave QuickBooks as it is.
-              A parent&apos;s phone and mailing address are among them: saved in the portal first, sent on by the worker, and never sent over details QuickBooks holds that the portal didn&apos;t know of.</p>
+              A guardian&apos;s phone and mailing address are among them: saved in the portal first, then sent on, and never sent over details QuickBooks holds that the portal didn&apos;t know of.</p>
             {refused.length > 0 && <><h3 className="table-head">Not in QuickBooks, kept in the portal ({refused.length})</h3><Refused items={refused} canChange={canChange} compared={compared} mayCompare={mayCompare} /></>}
             {stuck.length > 0 && <><h3 className="table-head">Stuck ({stuck.length})</h3><Writes items={stuck} caption="Stuck changes" canChange={canChange} mayLink={linking} /></>}
             {waiting.length > 0 && <><h3 className="table-head">Waiting ({waiting.length})</h3><Writes items={waiting} caption="Changes waiting" canChange={canChange} mayLink={linking} /></>}
