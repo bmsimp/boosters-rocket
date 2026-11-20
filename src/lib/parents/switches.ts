@@ -80,6 +80,13 @@ export async function missingForSignins(): Promise<string[]> {
   return (await mailWorking()) ? [] : ["Set up outgoing mail and send a test email first."];
 }
 
+/**
+ * Parent sign-ins switched on or off by an Admin. Off ends all of everyone's sign-in: welcome emails go off too, owed
+ * welcomes are cleared, and every unused code, unused set-up or reset link, remembered device and session goes. The
+ * passwords stay, and so (since the sign-in release's slice SI-6a) do the authenticator apps and backup codes, so
+ * switching sign-ins on again lets the same people in the same way. On needs working mail (missingForSignins()) and
+ * opens or closes no guardian row.
+ */
 export async function setSignins(on: boolean, o: StaffOp): Promise<SwitchResult> {
   if (!on) {
     // Off already (or never on): there is nothing to close, and nothing to record.

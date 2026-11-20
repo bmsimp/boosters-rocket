@@ -93,7 +93,8 @@ type NotChanged = "not_proved" | "strict" | "blocked" | "no_password" | "passwor
  *     `credential` row replaced, every device forgotten and every session of theirs ended, this one included (open
  *     question 26), with one `parent.password.changed` row: the counts and the breach outcome, never the password or a hash.
  * Then, after the commit and not awaited, a short notice to the address read under the lock (passwordChangedMessage()).
- * A refusal at (b) or (g) says to reload and show it's them again; one at (d) or (e) says why.
+ * A refusal at (b) or (g) says to reload and show it's them again; one at (d) or (e) says why. The authenticator app
+ * and the backup codes stay (since slice SI-6a): they are the second step, not the first.
  */
 export async function changeMyPassword(ctx: Me, raw: { password: unknown; again: unknown }): Promise<SettingsResult> {
   const { password, again } = raw;
@@ -160,7 +161,8 @@ export async function changeMyPassword(ctx: Me, raw: { password: unknown; again:
  * row and its counts. Their unused email change requests go too, as a block's do, so a change of sign-in email asked in
  * a session this ends can't outlive it; and their unused codes and those spent within a code's life, as a reset's do,
  * so a sign-in finishing at this moment, whose code was spent before the press and whose session is made after it, is
- * refused by its last check (signinStands(), `code_gone`). The password and the links stay. Not asked again (the lead's
+ * refused by its last check (signinStands(), `code_gone`). The password and the links stay, and so (since slice SI-6a)
+ * do the authenticator app and the backup codes: the next sign-in on each device asks for the app. Not asked again (the lead's
  * choice 9 of the sign-in release: it leaves nobody signed in, the one who pressed it included), and open to a person
  * with no password too. Limited per person (`signin_settings_parent`).
  */

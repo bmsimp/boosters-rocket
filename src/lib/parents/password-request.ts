@@ -19,6 +19,7 @@ import { getParentSettings, parentDoorClosed, type ParentSettings } from "./sett
 import { RESEND_AFTER_MS } from "./signin-codes";
 import { hashLinkToken, holdSigninLink, linkSentWithin, LINK_LIFE_MS, LINK_TOKEN_BYTES, type LinkPurpose } from "./signin-links";
 import { whichLinkToMail } from "./password-request-rule";
+import { hasAuthenticator } from "./authenticator";
 import { deliverHeldLink, lifeWords, passwordLink, personBy, type HeldLink, type LinkPerson } from "./link-delivery";
 
 /** The most an address field may hold as sent: anything longer, or anything not a string, gets the answer and nothing else. */
@@ -58,7 +59,7 @@ type Who = { id: string; email: string };
 type Person = LinkPerson;
 
 /** What the reads say: the link to mail, or why none. The order only decides which reason the audit row gives. */
-function decide(o: { email: string | null; person: Person | null; counts: boolean; settings: ParentSettings; mail: boolean }): { mail: LinkPurpose } | { reason: NotMailed } {
+function decide(o: { email: string | null; person: Person | null; counts: boolean; hasApp: boolean; settings: ParentSettings; mail: boolean }): { mail: LinkPurpose } | { reason: NotMailed } {
   if (!o.email) return { reason: "not_an_address" };
   if (parentDoorClosed(o.settings)) return { reason: "signins_off" };
   if (!o.mail) return { reason: "mail_not_working" };
@@ -66,8 +67,9 @@ function decide(o: { email: string | null; person: Person | null; counts: boolea
   if (o.person.authUserId === null) return { reason: "no_sign_in_account" };
   if (o.person.blocked) return { reason: "blocked" };
   if (!o.counts) return { reason: "no_enabled_guardian" };
-  // SI-6 (the authenticator app) and SI-7 (passkeys) give hasSecondFactor its value; until then nobody has one.
-  const rule = whichLinkToMail({ level: o.settings.level, hasPassword: o.person.hasPassword, hasSecondFactor: false });
+  // The person's own second factor: since slice SI-6a their authenticator app in force (hasAuthenticator()); SI-7 adds
+  // passkeys. Under Strict only a person with one is mailed a reset.
+  const rule = whichLinkToMail({ level: o.settings.level, hasPassword: o.person.hasPassword, hasSecondFactor: o.hasApp });
   return rule.mail !== null ? { mail: rule.mail } : { reason: rule.reason };
 }
 
@@ -87,8 +89,9 @@ async function audit(who: Who | null, after: Record<string, unknown>, ip: string
  *     address (what was typed, lower-cased, when it is no address), and not counted while the IP address is over its
  *     limit;
  * (d) the reads, the same whoever the address names: the parents' settings (the door and the level), whether mail is
- *     working, the person by address with their sign-in account and whether they have a password, and their rows that
- *     count (read for a fixed nobody when the address is nobody's);
+ *     working, the person by address with their sign-in account and whether they have a password, their rows that
+ *     count, and (since slice SI-6a) whether they have an authenticator app in force (each read for a fixed nobody when
+ *     the address is nobody's);
  * (e) the rule (decide(), whichLinkToMail());
  * (f) one transaction, whatever the address: for a person to be mailed it takes the person's row first (the order
  *     above lockedPerson(), ./sessions.ts), checks everything again under that lock (the address still theirs, not
@@ -117,7 +120,8 @@ export async function askForPasswordLink(raw: unknown, ip: string | null, now = 
   const email = normalizeEmail(raw);
   const byAddress: RateLimitTake = byIp === "taken" ? await takeRateLimit("password_ask_email", hashAskedAddress(email ?? raw.trim().toLowerCase()), now) : "refused";
   const [settings, mail, person] = await Promise.all([getParentSettings(), mailWorking(), email ? personBy({ email }) : Promise.resolve(null)]);
-  const counts = (await enterableGuardianRows(person?.id ?? NOBODY)).length > 0;
+  const [rows, hasApp] = await Promise.all([enterableGuardianRows(person?.id ?? NOBODY), hasAuthenticator(person?.id ?? NOBODY)]);
+  const counts = rows.length > 0;
 
   const over = byIp !== "taken" ? { take: byIp, limit: "ip" } : byAddress !== "taken" ? { take: byAddress, limit: "email" } : null;
   if (over) {
@@ -125,7 +129,7 @@ export async function askForPasswordLink(raw: unknown, ip: string | null, now = 
     if (over.take === "first_refusal") await db.transaction((tx) => audit(null, { outcome: "none", reason: "rate_limited", limit: over.limit }, ip, tx));
     return DONE;
   }
-  const decided = decide({ email, person, counts, settings, mail });
+  const decided = decide({ email, person, counts, hasApp, settings, mail });
   const who = person ? { id: person.id, email: person.email } : null;
   if (!("mail" in decided) || !person) {
     hashLinkToken("setup", randomBytes(LINK_TOKEN_BYTES).toString("base64url"));
@@ -140,7 +144,7 @@ export async function askForPasswordLink(raw: unknown, ip: string | null, now = 
     // The address was read before this transaction: a change since that took it from this person makes it nobody's
     // here, refused as an address never on file.
     const again = live && live.email === email
-      ? decide({ email, person: live, counts: liveCounts, settings: await getParentSettings(tx), mail: true })
+      ? decide({ email, person: live, counts: liveCounts, hasApp: await hasAuthenticator(live.id, tx), settings: await getParentSettings(tx), mail: true })
       : { reason: "unknown_email" as const };
     if (!("mail" in again) || !live) {
       await audit(who, { outcome: "none", reason: "mail" in again ? "unknown_email" : again.reason }, ip, tx);
@@ -181,7 +185,7 @@ async function linkMessage(l: HeldLink) {
 async function stillToMail(tx: Tx, live: Person | null, l: HeldLink): Promise<NotSent | null> {
   const counts = live ? (await enterableGuardianRows(live.id, tx)).length > 0 : false;
   const again = live && live.email === l.to
-    ? decide({ email: l.to, person: live, counts, settings: await getParentSettings(tx), mail: true })
+    ? decide({ email: l.to, person: live, counts, hasApp: await hasAuthenticator(live.id, tx), settings: await getParentSettings(tx), mail: true })
     : { reason: "unknown_email" as const };
   return !("mail" in again) ? again.reason : again.mail !== l.purpose ? "changed_while_mailing" : null;
 }

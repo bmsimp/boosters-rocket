@@ -152,7 +152,15 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * - forgetting a device in sign-in settings (forgetMyDevice() and forgetMyOtherDevices(), signin-settings.ts, since
  *   SI-5b) takes the row FOR UPDATE, reads the session's `strong_at` unlocked under it, then deletes the device, or every
  *   device but the session's own (which sets `device_id` null on the sessions that named them), and touches no session
- *   otherwise.
+ *   otherwise;
+ * - a person's authenticator app and backup codes (`parent_authenticator`, `parent_backup_code`, since slice SI-6a,
+ *   read and written only by authenticator.ts): a try at the second step (verifySecondFactor(), signin-codes.ts) takes
+ *   no person's lock, and takes the app's code (its `last_used_step`) or spends a backup code by one conditional update
+ *   each; a sign-in's last check (signinStands()) reads them unlocked under the person's row; the clean-up deletes them
+ *   after the person's rows and links, before the devices. Nothing that ends all of a person's sign-in removes them (a
+ *   block, a reset, a password change, Sign out everywhere, a change of sign-in email, sign-ins switched off, a change
+ *   of company, a last membership closed: each keeps them as it keeps the password). A later writer that takes them
+ *   (SI-6b's set-up and turning off, SI-9's staff reset) takes them after the person's row and before their devices.
  */
 export async function lockedPerson(tx: Tx, parentId: string): Promise<{ email: string; blocked: boolean } | null> {
   const [p] = await tx.select({ email: parent.email, blocked: parent.blocked }).from(parent).where(eq(parent.id, parentId)).for("key share");
