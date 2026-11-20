@@ -15,7 +15,7 @@ import { CUSTOMER_UPDATE, CUSTOMER_WRITES, NO_TOKEN, qboCreateCustomer, qboCusto
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { currencyOf, formatMoney, toCents } from "@/lib/money/cents";
 import { lockRosterAs, rosterTagOf, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
-import { connectedToAnotherCompany, customerOfFamily, customerOfGuardian, customerOfStudent, familyLinkState, familyLinkedTo, linksOf, linksOfCustomers, studentLinkedTo } from "@/lib/families/links";
+import { connectedToAnotherCompany, customerOfFamily, customerOfGuardian, customerOfStudent, familyLinkState, familyLinkedTo, linksOf, linksOfCustomers, recordsCompany, studentLinkedTo } from "@/lib/families/links";
 import { asAppFamilyId, asAppStudentId, QUICKBOOKS, type AppFamilyId, type AppStudentId } from "@/lib/families/ids";
 import { recordNameWords } from "@/lib/families/words";
 import { isUuid } from "@/lib/seasons/ids";
@@ -2535,10 +2535,11 @@ export const contactReadStands = () => db.transaction(async (tx) => {
   return contactSendsMayGo(tx);
 });
 /** Why a contact change is given up at its try with nothing sent (contactStops()). */
-type ContactStop = "guardian_removed" | "not_own" | "family_inactive" | "not_the_family" | "books_changed" | "superseded";
+type ContactStop = "guardian_removed" | "not_own" | "family_off" | "family_inactive" | "not_the_family" | "books_changed" | "superseded";
 const CONTACT_STOP_NOTES: Record<ContactStop, string> = {
   guardian_removed: "The guardian was removed in the portal, or their family made inactive, before it was sent.",
   not_own: "That Parent customer is no longer the guardian's own record in QuickBooks (moved, retyped, shared or unlinked), so nothing was sent to it.",
+  family_off: "The guardian's family is no longer linked to a customer in QuickBooks, or QuickBooks has that customer inactive, so nothing was sent to the guardian's record under it.",
   family_inactive: "The family was made inactive in the portal before it was sent.",
   not_the_family: "That customer is no longer the family's own active record in QuickBooks, so nothing was sent to it.",
   books_changed: "The club's books no longer keep these details there (the membership shape changed, or QuickBooks isn't connected to the roster's company), so nothing was sent.",
@@ -2547,14 +2548,15 @@ const CONTACT_STOP_NOTES: Record<ContactStop, string> = {
 /**
  * Why "Send the portal's value" can't go through for a kept contact change, by contactStopsIn()'s answer, in words
  * that say whose record changed (QueueView.notOffered, and the press's answer): the portal's (`record_gone`), QuickBooks'
- * (`not_own`), or the club's books (`books_changed`).
+ * (`not_own`; for a guardian's, the family's own customer, `family_off`), or the club's books (`books_changed`).
  */
-export type ContactNotOffered = "record_gone" | "not_own" | "books_changed" | "awaits_read";
+export type ContactNotOffered = "record_gone" | "not_own" | "family_off" | "books_changed" | "awaits_read";
 export const contactNotOffered = (stop: Exclude<ContactStop, "superseded">): ContactNotOffered =>
-  stop === "guardian_removed" || stop === "family_inactive" ? "record_gone" : stop === "books_changed" ? "books_changed" : "not_own";
+  stop === "guardian_removed" || stop === "family_inactive" ? "record_gone" : stop === "books_changed" ? "books_changed" : stop === "family_off" ? "family_off" : "not_own";
 export const CONTACT_NOT_OFFERED: Record<ContactNotOffered, string> = {
   record_gone: "The guardian was removed, or the family made inactive, in the portal since this was kept, so the portal's details aren't sent: give it up here.",
   not_own: "QuickBooks no longer has this customer as the guardian's or the family's own record (it was moved, retyped, shared or unlinked), so the portal's details aren't sent to it: give it up here. The portal keeps its details.",
+  family_off: "The guardian's family in the portal is no longer linked to a customer in QuickBooks, or QuickBooks has that family's customer inactive, so nothing is sent to the guardian's record under it: give it up here. The portal keeps its details.",
   books_changed: "The club's books don't keep these details on this record just now (the membership shape changed, or QuickBooks isn't connected to the roster's company), so the portal's details can't be sent. Once QuickBooks is connected again and the shape keeps them there, they can be sent from here; or give it up. The portal keeps its details.",
   // The take-in, or a read under the shape saved last, still to come (contactSendsMayGo()).
   awaits_read: CONTACT_AWAITS_READ,
@@ -2583,35 +2585,92 @@ async function contactStops(w: ContactWrite, item: QueueRow): Promise<ContactSto
 }
 /**
  * The same checks for a page that lists kept contact changes (loadOpenWrites()), with no lock: whether "Send the
- * portal's value" is offered, as contactStopsIn() would answer the press now. The press checks it all again.
+ * portal's value" is offered, as contactStopsIn() would answer the press now, for every item at once, from facts read
+ * once in one transaction (contactFacts()), never a transaction or a read of the roster cache per row. The press checks
+ * it all again. contactStopNow() is the same for one item.
  */
+export async function contactStopsNow(items: readonly { id: string; w: ContactWrite; familyId: AppFamilyId | null }[]): Promise<Map<string, ContactNotOffered | null>> {
+  if (!items.length) return new Map();
+  const facts = await db.transaction((tx) => contactFacts(tx, items));
+  return new Map(items.map((i) => { const stop = contactStopFrom(facts, i.w, i); return [i.id, stop === null ? null : contactNotOffered(stop)] as const; }));
+}
 export async function contactStopNow(w: ContactWrite, item: Pick<QueueRow, "familyId">): Promise<ContactNotOffered | null> {
   const stop = await db.transaction((tx) => contactStopsIn(tx, w, item));
   return stop === null ? null : contactNotOffered(stop);
 }
 /** contactStops()'s checks of the record, in the caller's transaction, which holds the roster lock. */
 async function contactStopsIn(tx: Tx, w: ContactWrite, item: Pick<QueueRow, "familyId">): Promise<Exclude<ContactStop, "superseded"> | null> {
+  return contactStopFrom(await contactFacts(tx, [{ w, familyId: item.familyId }]), w, item);
+}
+/**
+ * What contactStopsIn() goes by, read in one transaction for any number of contact items: the shape, whether QuickBooks
+ * is connected to the roster's company and the shape's types are all there, the items' guardian rows and family records,
+ * the family and guardian links in the records' company, the open guardian rows linked to each customer, and the cache
+ * rows of those customers only. A constant number of statements, however many items.
+ */
+type ContactFacts = {
+  shape: MembershipShape | null; connected: boolean; typesHold: boolean;
+  guardians: Map<string, { status: string; familyId: AppFamilyId | null }>;
+  familyActive: Map<string, boolean>;
+  familyCustomer: Map<string, string>;
+  guardianCustomer: Map<string, string>;
+  openRowsOf: Map<string, string[]>;
+  cache: Map<string, { typeQboId: string | null; parentQboId: string | null; active: boolean }>;
+};
+async function contactFacts(tx: Tx, items: readonly { w: ContactWrite; familyId: AppFamilyId | null }[]): Promise<ContactFacts> {
+  const [shape, source, conn, types, realm] = await Promise.all([getShape(tx), getRosterSource(tx), getConnection(tx), tx.select().from(qboCustomerType), recordsCompany(tx)]);
+  const connected = !!conn?.realmId && !!conn.refreshTokenCiphertext && source !== null && source === conn.realmId;
+  const typesHold = shape !== null && missingTypes(shape, types.map((t) => ({ qboId: t.qboId, name: t.name, active: t.active }))).length === 0;
+  const guardianIds = [...new Set(items.flatMap((i) => (i.w.guardianId ? [i.w.guardianId] : [])))];
+  const rows = guardianIds.length ? await tx.select({ id: guardian.id, status: guardian.status, familyId: guardian.familyId }).from(guardian).where(inArray(guardian.id, guardianIds)) : [];
+  const familyIds = [...new Set([...items.flatMap((i) => (i.familyId === null ? [] : [i.familyId])), ...rows.flatMap((r) => (r.familyId === null ? [] : [r.familyId]))])];
+  const [families, links] = await Promise.all([
+    familyIds.length ? tx.select({ id: family.id, active: family.active }).from(family).where(inArray(family.id, familyIds)) : Promise.resolve([]),
+    linksOf({ families: familyIds, students: [] }, tx)]);
+  const guardianLinks = realm !== null && guardianIds.length ? await tx.select({ guardianId: accountingLink.guardianId, customerId: accountingLink.customerId }).from(accountingLink)
+    .where(and(eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realm), inArray(accountingLink.guardianId, guardianIds))) : [];
+  const guardianCustomer = new Map(guardianLinks.flatMap((l) => (l.guardianId === null ? [] : [[l.guardianId, l.customerId] as const])));
+  const familyCustomer = new Map([...links.customerOfFamily].map(([f, c]) => [String(f), c] as const));
+  const customers = [...new Set([...guardianCustomer.values(), ...familyCustomer.values(), ...items.map((i) => i.w.qboId)])];
+  const [openRowsOf, cached] = await Promise.all([openGuardiansOf(tx, source, customers),
+    customers.length ? tx.select({ qboId: qboCustomer.qboId, typeQboId: qboCustomer.typeQboId, parentQboId: qboCustomer.parentQboId, active: qboCustomer.active }).from(qboCustomer)
+      .where(inArray(qboCustomer.qboId, customers)) : Promise.resolve([])]);
+  return { shape, connected, typesHold, guardians: new Map(rows.map((r) => [r.id, { status: r.status, familyId: r.familyId }])),
+    familyActive: new Map(families.map((f) => [String(f.id), f.active])), familyCustomer, guardianCustomer, openRowsOf, cache: new Map(cached.map((c) => [c.qboId, c])) };
+}
+/**
+ * contactStopsIn()'s rule, pure, over the facts read for it: for a person's details, the membership still open in the
+ * active family record the item is filed under; then the books (layered, with a parent type), the connection and the
+ * shape's types; then the family's own customer, linked and active in the cache (`family_off` otherwise: the family's,
+ * not the guardian's); then the customer still the row's own Parent customer (ownParentCustomer()'s rule: of the parent
+ * type, directly under the family's customer, no other open row linked to it). For a family's, the record active, the
+ * books keeping the family's details there, and the customer still its own linked customer of the family's type (a
+ * member's in flat books), at the top of the tree.
+ */
+function contactStopFrom(f: ContactFacts, w: ContactWrite, item: { familyId: AppFamilyId | null }): Exclude<ContactStop, "superseded"> | null {
+  const shape = f.shape;
   if (w.role === "parent") {
     if (!w.guardianId) return "not_own";
-    const [row] = await tx.select({ status: guardian.status, familyId: guardian.familyId }).from(guardian).where(eq(guardian.id, w.guardianId));
+    const row = f.guardians.get(w.guardianId);
     if (!row || row.status === "disabled" || row.familyId === null || item.familyId === null || String(row.familyId) !== String(item.familyId)) return "guardian_removed";
-    const [f] = await tx.select({ active: family.active }).from(family).where(eq(family.id, row.familyId));
-    if (!f?.active) return "guardian_removed";
-    const b = await guardianBooks(tx, row.familyId);
-    if (!b.ok) return b.why === "family" ? "not_own" : "books_changed";
-    const own = await ownParentCustomer(tx, w.guardianId, b);
-    return own.is === "own" && own.customer === w.qboId ? null : "not_own";
+    if (f.familyActive.get(String(row.familyId)) !== true) return "guardian_removed";
+    if (!shape || shape.kind !== "layered" || shape.parentTypeId === null || !offers(shape, "add_parent")) return "books_changed";
+    if (!f.connected || !f.typesHold) return "books_changed";
+    const familyCustomer = f.familyCustomer.get(String(row.familyId));
+    if (familyCustomer === undefined || f.cache.get(familyCustomer)?.active !== true) return "family_off";
+    const customer = f.guardianCustomer.get(w.guardianId);
+    if (customer === undefined || customer !== w.qboId) return "not_own";
+    const c = f.cache.get(customer);
+    if (!c || c.typeQboId !== shape.parentTypeId || c.parentQboId !== familyCustomer || (f.openRowsOf.get(customer) ?? []).some((g) => g !== w.guardianId)) return "not_own";
+    return null;
   }
   const familyId = item.familyId;
   if (familyId === null) return "not_the_family";
-  const [f] = await tx.select({ active: family.active }).from(family).where(eq(family.id, familyId));
-  if (!f?.active) return "family_inactive";
-  const [shape, source, conn, types] = await Promise.all([getShape(tx), getRosterSource(tx), getConnection(tx), tx.select().from(qboCustomerType)]);
-  if (!shape || whoseDetails(shape) !== "family" || !conn?.realmId || !conn.refreshTokenCiphertext || source === null || source !== conn.realmId
-    || missingTypes(shape, types.map((t) => ({ qboId: t.qboId, name: t.name, active: t.active }))).length) return "books_changed";
+  if (f.familyActive.get(String(familyId)) !== true) return "family_inactive";
+  if (!shape || whoseDetails(shape) !== "family" || !f.connected || !f.typesHold) return "books_changed";
   if ((shape.kind === "flat" ? "member" : "family") !== w.role) return "books_changed";
-  if ((await customerOfFamily(familyId, tx)) !== w.qboId) return "not_the_family";
-  const [c] = await tx.select({ typeQboId: qboCustomer.typeQboId, parentQboId: qboCustomer.parentQboId }).from(qboCustomer).where(eq(qboCustomer.qboId, w.qboId));
+  if (f.familyCustomer.get(String(familyId)) !== w.qboId) return "not_the_family";
+  const c = f.cache.get(w.qboId);
   const ofType = shape.kind === "flat" ? c?.typeQboId !== null && c?.typeQboId !== undefined && shape.memberTypeIds.includes(c.typeQboId) : c?.typeQboId === shape.familyTypeId;
   return c && ofType && c.parentQboId === null ? null : "not_the_family";
 }

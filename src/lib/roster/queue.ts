@@ -13,7 +13,7 @@ import { refreshRoster } from "./refresh";
 import { getRosterSource, ROSTER_JOB } from "./source";
 import { lockRosterAs, rosterTagOf } from "@/lib/seasons/roster-lock";
 import { alignAfterWrite, applyWritten, balanceUnread, BEING_SENT_NOW, changeOwnRecord, closeEarlierContacts, CONTACT_AWAITS_READ, contactShown, CREDIT_BALANCE, CUSTOMER_HAS_GUARDIAN, EMAIL_TOO_LONG, FAMILY_HELD, guardianCustomerLinked, guardianOf, isSavedFirst, NAME_UNUSABLE, itemLockFree, madeAfterGivingUp, markMoveMoneyStale, moveMoneyNotes, REFRESH_ASK_KEY,
-  replaceRefusedCreates, sendWrite, tryDeactivate, trySavedItem, whileItemHeld, whoStopped, contactStopNow, type ContactNotOffered, type MadeAfterGivingUp, type OwnRecordChange, type SavedTry } from "./writes";
+  replaceRefusedCreates, sendWrite, tryDeactivate, trySavedItem, whileItemHeld, whoStopped, contactStopsNow, type ContactNotOffered, type MadeAfterGivingUp, type OwnRecordChange, type SavedTry } from "./writes";
 import { afterFailedTry, beforeResend, classify, contactDiffers, heldInCache, type ContactDiffer, type HeldContact } from "./write-rules";
 import { isUuid } from "@/lib/seasons/ids";
 import { contactSendsMayGo } from "@/lib/parents/take-in-setting";
@@ -576,9 +576,10 @@ export async function loadOpenWrites(o: { familyId?: AppFamilyId; showAmounts?: 
   const joinedLinked = joined.length ? (await linksOf({ families: joined, students: [] })).customerOfFamily : new Map<AppFamilyId, string>();
   // A kept contact change whose record is no longer the one it is for (the guardian removed, the customer no longer
   // theirs or the family's, the books changed): "Send the portal's value" would be refused, so it isn't offered, in words
-  // that say whose record changed (contactStopNow(), the press's own checks without its lock).
-  const contactStopsOf = new Map(await Promise.all(contacts.filter((r) => r.state === "refused")
-    .map(async (r) => [r.id, await contactStopNow(r.request as Extract<RosterWrite, { op: "contact" }>, r)] as const)));
+  // that say whose record changed (contactStopsNow(), the press's own checks without its lock, for every kept one at once
+  // from facts read once: never a transaction per row).
+  const contactStopsOf = await contactStopsNow(contacts.filter((r) => r.state === "refused")
+    .map((r) => ({ id: r.id, w: r.request as Extract<RosterWrite, { op: "contact" }>, familyId: r.familyId })));
   return rows.map((r) => {
     const refused = r.state === "refused";
     const request: QueuedWrite = refused && r.request.op === "create" ? { ...r.request, name: currentName(r) ?? r.request.name } : r.request;

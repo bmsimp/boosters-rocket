@@ -13,14 +13,14 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, family, guardian, qboCustomer, writeQueue } from "@/lib/db/schema";
+import { accountingLink, family, guardian, qboCustomer, writeQueue, type RosterWrite } from "@/lib/db/schema";
 import type { ParentCtx } from "@/lib/guards";
 import type { AppFamilyId } from "@/lib/families/ids";
 import type { ContactValues } from "@/lib/parents/contact-fields";
 import { CONTACT_COPY, saveDetails, saveMyContact } from "@/lib/parents/contact-edits";
 import { addGuardian, removeGuardian } from "@/lib/parents/guardians";
 import { renamePerson } from "@/lib/parents/people";
-import { addStudentToLinked, askFamilyInactive, CONTACT_AWAITS_READ, CONTACT_DIFFERS, CONTACT_NOT_OFFERED, contactShown, contactShownUnder, coverStamp, familyCover, keptWordsFor, moveStudent, portalValueStamp,
+import { addStudentToLinked, askFamilyInactive, CONTACT_AWAITS_READ, CONTACT_DIFFERS, CONTACT_NOT_OFFERED, contactShown, contactShownUnder, contactStopNow, contactStopsNow, coverStamp, familyCover, keptWordsFor, moveStudent, portalValueStamp,
   renameLinked, SENDING_LOCK, sendPortalValue, whoStopped } from "@/lib/roster/writes";
 import { compareContact, giveUp, loadOpenWrites, runWriteQueue, tryAgainNow } from "@/lib/roster/queue";
 import { env } from "@/env";
@@ -660,6 +660,57 @@ describe("Reconciliation and a family's page (item 7, and the second read's item
     expect(posts()).toEqual([]);
     expect(await personDetails(a.ana.id)).toMatchObject({ values: { phone: NEW_PHONE } });
     expect(inQuickBooks(stub, "11")).toMatchObject({ PrimaryPhone: { FreeFormNumber: "555-0101" } });
+  });
+});
+
+describe("the list works out every kept change's answer at once (the second read's items 6 and 8)", () => {
+  type ContactWrite = Extract<RosterWrite, { op: "contact" }>;
+  it("a dozen kept rows: one transaction for all, each answer as contactStopNow() gives it for that row, and the family's own words", async () => {
+    const a = await ana();
+    // Mei Chen as a guardian of the Chen family, with her own Parent customer 21; and a guardian of Rivera's removed.
+    const mei = await seedParent({ name: "Mei Chen", email: "mei@example.com" });
+    const meiRow = await seedGuardian({ parentId: mei.id, familyQboId: "20", sourceQboId: "21", status: "active" });
+    const old = await seedParent({ name: "Old Rivera", email: "old@example.com" });
+    const oldRow = await seedGuardian({ parentId: old.id, familyQboId: "10", status: "disabled", disabledReason: "removed", statusBeforeDisable: "active" });
+    await syncAppRecords();
+    const contact = (o: Partial<ContactWrite>): ContactWrite => ({ op: "contact", role: "parent", qboId: "11", syncToken: "0", change: { phone: NEW_PHONE }, was: { phone: "555-0101" },
+      guardianId: a.row.id, ...o });
+    const kinds: [ContactWrite, { familyId?: AppFamilyId }][] = [
+      [contact({}), {}],
+      [contact({ qboId: "21" }), { familyId: rivera }],
+      [contact({ guardianId: oldRow.id }), {}],
+      [{ op: "contact", role: "family", qboId: "10", syncToken: "0", change: { phone: NEW_PHONE }, was: { phone: "" } }, {}],
+      [contact({ qboId: "21", guardianId: meiRow.id }), {}],
+    ];
+    for (let i = 0; i < 12; i++) {
+      const [w, o] = kinds[i % kinds.length]!;
+      await seedQueued(w, { state: "refused", code: CONTACT_DIFFERS, ...o });
+    }
+    // QuickBooks has the Chen family's own customer inactive: Mei's record under it is the family's matter, said so.
+    await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, "20"));
+    const rows = (await db.select().from(writeQueue)).map((r) => ({ id: r.id, w: r.request as ContactWrite, familyId: r.familyId }));
+    expect(rows).toHaveLength(12);
+    const spy = vi.spyOn(db, "transaction");
+    const all = await contactStopsNow(rows);
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+    for (const r of rows) expect(all.get(r.id), JSON.stringify(r.w)).toEqual(await contactStopNow(r.w, r));
+    expect(new Set(all.values())).toEqual(new Set([null, "not_own", "record_gone", "books_changed", "family_off"]));
+    expect(CONTACT_NOT_OFFERED.family_off).toMatch(/^The guardian's family in the portal is no longer linked to a customer in QuickBooks, or QuickBooks has that family's customer inactive/);
+    // The list gives those answers, in as many transactions for twelve rows as for one.
+    const counted = async () => {
+      const s = vi.spyOn(db, "transaction");
+      const views = await loadOpenWrites();
+      const n = s.mock.calls.length;
+      s.mockRestore();
+      return { views, n };
+    };
+    const twelve = await counted();
+    for (const v of twelve.views) expect(v.notOffered, v.id).toBe(all.get(v.id));
+    await db.delete(writeQueue).where(sql`${writeQueue.id} <> ${rows[0]!.id}`);
+    const one = await counted();
+    expect(one.views).toHaveLength(1);
+    expect(twelve.n).toBe(one.n);
   });
 });
 
