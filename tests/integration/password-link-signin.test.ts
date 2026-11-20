@@ -27,7 +27,7 @@ import { resetDb, seedGuardianInFamily, seedParent, seedWorkingMail } from "../h
 import { SIGNINS_ON, seedParentSettings } from "../helpers/roster-cache";
 import { deviceRows, mintLink, seedDevice, seedPassword } from "../helpers/signin-links";
 import { signInThroughDoor } from "../helpers/parent-door";
-import { hashDeviceToken, DEVICE_LIFE_MS } from "@/lib/parents/devices";
+import { hashDeviceToken } from "@/lib/parents/devices";
 
 /**
  * A set-up link signs the parent in (the sign-in release, slice SI-3a): once its password is set while the club's level
@@ -135,7 +135,8 @@ describe("a set-up link signs the parent in", () => {
     expect(deviceCookies()).toHaveLength(1);
     // The cookie holds the token; the row only its keyed hash; neither is in any audit row.
     expect(hashDeviceToken(cookie!.value)).toBe(rows[0]!.tokenHash);
-    expect(cookie!.options).toMatchObject({ path: "/api/auth/parent", httpOnly: true, sameSite: "lax", maxAge: DEVICE_LIFE_MS / 1000 });
+    // The row is the authority and is renewed by use (slice SI-5b), so the cookie gets the longest life browsers allow.
+    expect(cookie!.options).toMatchObject({ path: "/api/auth/parent", httpOnly: true, sameSite: "lax", maxAge: PARENT_SESSION_COOKIE_SECONDS });
     const all = JSON.stringify(await db.select().from(auditLog));
     expect(all).not.toContain(cookie!.value);
     expect(all).not.toContain(rows[0]!.tokenHash);
@@ -143,6 +144,8 @@ describe("a set-up link signs the parent in", () => {
     const [session] = await sessions();
     expect(session!.strongAt).not.toBeNull();
     expect(session!.strongAt!.getTime()).toBeGreaterThanOrEqual(before - 1000);
+    // The session names the device it was made on (slice SI-5b), so its renewal renews that device.
+    expect(session!.deviceId).toBe(rows[0]!.id);
     // No pending step was held, so none is cleared.
     expect(cookiesSetByActions().filter((c) => c.name.endsWith(".signin_step"))).toEqual([]);
   });

@@ -130,6 +130,9 @@ const REFUSED: PasswordCheck = { ok: false, limited: false };
  * none.
  */
 export type TryCount = { kind: "password_reask_parent"; subject: string };
+// Since slice SI-5b asking again names the session's own device too (`{ deviceId }`): a try in a session made on one
+// of the person's unexpired devices is counted against that device, as the door counts a try on it, and only one with
+// none (a session from before SI-5b, or whose device is forgotten or expired) against the person.
 const LIMITED: PasswordCheck = { ok: false, limited: true };
 
 type Found = { id: string; email: string; blocked: boolean; authUserId: string | null; credentialId: string | null; hash: string | null; updatedAt: Date | null };
@@ -158,18 +161,20 @@ async function audit(reason: PasswordRefusal, who: { id: string; email: string }
 }
 
 /**
- * The password step, in this order (each argument comes from the browser but the device token, which is the request's
- * own device cookie, read by src/lib/auth/parent-signin-step.ts, and the signal, which says the request was given up):
+ * The password step, in this order (each argument comes from the browser but the device, which at the door is the token
+ * of the request's own device cookie, read by src/lib/auth/parent-signin-step.ts, and for asking again (since slice
+ * SI-5b) the row its own session names, `{ deviceId }`, and the signal, which says the request was given up):
  * (a) the arguments: an address of at most MOST_TYPED_ADDRESS characters and a password of at most MOST_TYPED_PASSWORD;
  *     anything else is the refusal, uncounted and unrecorded; a request already given up is refused the same way;
  * (b) the wait for a check: when it is full (inTurn()), the over-limit answer at once, counting and reading nothing
  *     (audited once per window, `limit: "busy"`, naming nobody);
  * (c) the limit per IP address (`password_try_ip`; skipped when the address is unknown: every visitor would share one count);
  * (d) the address, read with normalizeEmail(), and the try's place, taken before the person or the password is read so
- *     tries sent at once can't slip past: against the caller's own count when it names one (`count`, TryCount: asking
- *     again's, by the person; no device is read for it), otherwise against the remembered device when the request carries a device cookie that
- *     names an unexpired device of the person who holds the address (deviceOfAddress(), read only when a cookie of a
- *     device token's shape is there; `password_try_device`, keyed by the device's row), otherwise against the address
+ *     tries sent at once can't slip past: against the remembered device when the device named (a cookie of a device
+ *     token's shape, or, for asking again, the session's own row by its id) is an unexpired device of the person who
+ *     holds the address (deviceOfAddress(); `password_try_device`, keyed by the device's row; a cookie's token is not
+ *     read when the caller names a count of its own), otherwise against the caller's own count when it names one
+ *     (`count`, TryCount: asking again's, by the person), otherwise against the address
  *     (`password_try_email`, counted under hashTriedAddress(), never the address (what was typed, lower-cased, when it
  *     is no address), whatever it names); not taken while the IP address is over its limit;
  * (e) the reads, the same whoever the address names: the parents' settings (the door and the level), the person by
@@ -192,20 +197,21 @@ async function audit(reason: PasswordRefusal, who: { id: string; email: string }
  * Over a limit, or turned away by a full wait, the answer is `limited`; every other refusal is the one refusal.
  * A password, a hash, the device token and the typed address (for an address that is nobody's) appear in no row.
  */
-export async function checkPasswordSignin(rawEmail: unknown, password: unknown, deviceToken: string | null, ip: string | null, now = new Date(), signal?: AbortSignal,
-  count?: TryCount): Promise<PasswordCheck> {
+export async function checkPasswordSignin(rawEmail: unknown, password: unknown, device: string | { deviceId: string } | null, ip: string | null, now = new Date(),
+  signal?: AbortSignal, count?: TryCount): Promise<PasswordCheck> {
   if (typeof rawEmail !== "string" || rawEmail.length > MOST_TYPED_ADDRESS || typeof password !== "string" || password.length > MOST_TYPED_PASSWORD) return REFUSED;
   if (signal?.aborted) return REFUSED;
   if (waitIsFull()) { await turnedAwayBusy(ip, now); return LIMITED; }
   const byIp: RateLimitTake = await takeIpLimit("password_try_ip", ip, now);
   const email = normalizeEmail(rawEmail);
-  const ownDevice = byIp === "taken" && email && !count ? await deviceOfAddress(email, deviceToken, now) : null;
+  // A device named by its row (asking again's session) is read whatever the count; a cookie's token only at the door.
+  const ownDevice = byIp === "taken" && email && !(count && typeof device === "string") ? await deviceOfAddress(email, device, now) : null;
   const place: RateLimitPlace = byIp !== "taken" ? { take: "refused", placeId: null }
-    : count ? await takeRateLimitPlace(count.kind, count.subject, now)
     : ownDevice ? await takeRateLimitPlace("password_try_device", ownDevice.deviceId, now)
+    : count ? await takeRateLimitPlace(count.kind, count.subject, now)
     : await takeRateLimitPlace("password_try_email", hashTriedAddress(email ?? rawEmail.trim().toLowerCase()), now);
   const over = byIp !== "taken" ? { take: byIp, limit: "ip" }
-    : place.take !== "taken" ? { take: place.take, limit: count ? "reask" : ownDevice ? "device" : "email" } : null;
+    : place.take !== "taken" ? { take: place.take, limit: ownDevice ? "device" : count ? "reask" : "email" } : null;
   if (over) {
     if (over.take === "first_refusal") await audit("rate_limited", null, ip, { limit: over.limit });
     return LIMITED;
@@ -245,10 +251,10 @@ export async function checkPasswordSignin(rawEmail: unknown, password: unknown, 
   // A right password that goes on gives its place back: it is never counted against the parent.
   await giveBackRateLimit(place.placeId);
   const proof: PasswordProof = { credentialId: person.credentialId, credentialUpdatedAt: person.updatedAt };
-  const device = await rememberedDevice(person.id, deviceToken, at);
-  if (!device) {
+  const remembered = await rememberedDevice(person.id, typeof device === "string" ? device : null, at);
+  if (!remembered) {
     await writeAudit({ actor: parentActor(person), action: "signin.second_step_asked", targetType: "parent", targetId: person.id,
       after: { step: step.step }, ip });
   }
-  return { ok: true, person: { id: person.id, email: person.email }, password: proof, device, at };
+  return { ok: true, person: { id: person.id, email: person.email }, password: proof, device: remembered, at };
 }

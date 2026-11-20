@@ -217,7 +217,8 @@ describe("the password step", () => {
     const [device] = await deviceRows(ana.id);
     expect(await deviceRows(ana.id)).toHaveLength(1);
     const deviceLine = setCookieLine(res, "device")!;
-    expect(deviceLine).toMatch(new RegExp(`;\\s*Max-Age=${DEVICE_LIFE_MS / 1000}(;|$)`, "i"));
+    // The row is the authority and is renewed by use (slice SI-5b), so the cookie gets the longest life browsers allow.
+    expect(deviceLine).toMatch(new RegExp(`;\\s*Max-Age=${PARENT_SESSION_COOKIE_SECONDS}(;|$)`, "i"));
     expect(deviceLine).toMatch(/;\s*Path=\/api\/auth\/parent(;|$)/i);
     expect(deviceLine).toMatch(/;\s*HttpOnly(;|$)/i);
     expect(hashDeviceToken(cookieNamed(res, "device").split("=")[1]!)).toBe(device!.tokenHash);
@@ -225,6 +226,8 @@ describe("the password step", () => {
     expect(setCookieLine(res, "signin_step")).toMatch(/Max-Age=0/i);
     const [row] = await sessions();
     expect(row!.strongAt!.getTime()).toBeGreaterThanOrEqual(before - 1000);
+    // The session names the new device (slice SI-5b), so its renewal renews that device.
+    expect(row!.deviceId).toBe(device!.id);
     for (const action of ["signin.second_step_asked", "signin.code_sent", "signin.device_remembered"]) expect([action, (await audits(action)).length]).toEqual([action, 1]);
     if (families === 1) expect(await audits("signin")).toHaveLength(1);
     // The token is only in the cookie: no audit row holds it, or its hash.
@@ -257,6 +260,8 @@ describe("the password step", () => {
     // Only the code's sign-in proved the password and a second step: the remembered device's proved the password alone at
     // that moment, so its session has no strong_at and opens no window for a change (asking again, slice SI-5a).
     expect((await sessions()).map((s) => s.strongAt !== null).sort()).toEqual([false, true]);
+    // Both sessions name the one device (slice SI-5b): the code's made it, the password's used it.
+    expect((await sessions()).map((s) => s.deviceId)).toEqual([made!.id, made!.id]);
   });
 
   it.each([
