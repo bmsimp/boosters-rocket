@@ -254,7 +254,9 @@ describe("the password step", () => {
     expect(renewed!.expiresAt.getTime()).toBeGreaterThan(Date.now() + DEVICE_LIFE_MS - 60_000);
     expect(await audits("signin.device_used")).toEqual([expect.objectContaining({ actorId: ana.id, targetId: ana.id, after: expect.objectContaining({ deviceId: made!.id }) })]);
     expect(await audits("signin.second_step_asked")).toHaveLength(1);   // only the first sign-in's
-    expect((await sessions()).every((s) => s.strongAt !== null)).toBe(true);
+    // Only the code's sign-in proved the password and a second step: the remembered device's proved the password alone at
+    // that moment, so its session has no strong_at and opens no window for a change (asking again, slice SI-5a).
+    expect((await sessions()).map((s) => s.strongAt !== null).sort()).toEqual([false, true]);
   });
 
   it.each([

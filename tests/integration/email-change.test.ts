@@ -19,6 +19,7 @@ import type { ParentIdentity } from "@/lib/auth/resolve";
 import { EMAIL_COPY, confirmMyEmailChange, findMyEmailChange } from "@/lib/parents/email-change";
 import { rosterRefreshAsked } from "@/lib/parents/refresh-ask";
 import { SIGNIN_SETTINGS_COPY } from "@/lib/parents/signin-settings-copy";
+import { signOutEverywhere } from "@/lib/parents/signin-settings";
 import { SOURCE_KEY } from "@/lib/roster/source";
 import { confirmEmailChangeAction, requestEmailChangeAction } from "@/app/(parent)/family/email/actions";
 import FamilyPage from "@/app/(parent)/family/page";
@@ -615,6 +616,37 @@ describe("confirming: what goes wrong changes nothing in the portal", () => {
     expect(await cached(R_PARENT)).toMatchObject({ email: RIVERA.parent.email });
     expect((await person(r.identity.parentId)).email).toBe(NEW);
     expect((await audits()).at(-1)).toMatchObject({ action: "parent.email.save", after: { portal: "refresh_asked", code: "other_company", app: "changed" } });
+  });
+
+  // What a parent does to stop a change (slice SI-5a) can't be outrun by a confirm already under way: its finish reads
+  // again, under the person's row, that its session still exists and the person isn't blocked.
+  it.each([
+    ["the parent signs out everywhere", "session_ended"],
+    ["the person is blocked", "blocked"],
+  ] as const)("a confirm whose write to QuickBooks is on its way when %s changes no address in the portal", async (how, code) => {
+    const { r, token } = await asked();
+    stub.onApiRequest = async (call) => {
+      if (call.method !== "POST") return;
+      if (code === "session_ended") await signOutEverywhere(ctxOf(r.identity));
+      else await db.update(parent).set({ blocked: true }).where(eq(parent.id, r.identity.parentId));
+    };
+    expect(await confirmMyEmailChange(ctxOf(r.identity), token), how).toEqual({ ok: false, errors: [EMAIL_COPY.notMade] });
+    // QuickBooks took the address; the portal keeps the old one, for the person and their sign-in account alike.
+    expect(posts()).toHaveLength(1);
+    expect(inQuickBooks(stub, R_PARENT).PrimaryEmailAddr).toEqual({ Address: NEW });
+    expect((await person(r.identity.parentId)).email).toBe(RIVERA.parent.email);
+    expect((await db.select().from(parentAuthUser).where(eq(parentAuthUser.parentId, r.identity.parentId)))[0]!.email).toBe(RIVERA.parent.email);
+    expect(await cached(R_PARENT)).toMatchObject({ email: RIVERA.parent.email });
+    // Recorded as an app side that couldn't finish, with its own code, and a roster refresh asked for.
+    expect(await rosterRefreshAsked()).toBe(true);
+    expect((await audits()).filter((a) => a.action === "parent.email.save")).toEqual([{ action: "parent.email.save", targetId: R_PARENT,
+      before: { email: RIVERA.parent.email, field: RIVERA.parent.email },
+      after: { email: NEW, familyId: String(r.identity.familyId), field: NEW, portal: "refresh_asked", code, app: "unchanged", quickbooks: "holds_new_address" } }]);
+    // Signing out everywhere ended every session and took the request with it: its link can't finish the change later.
+    if (code === "session_ended") {
+      expect(await sessionsOf(r.identity.parentId)).toEqual([]);
+      expect(await requests()).toEqual([]);
+    }
   });
 });
 

@@ -41,6 +41,24 @@ export function signinCodeMessage(b: Brand, to: string, code: string, o: { passw
 }
 
 /**
+ * The code that confirms a change to how a parent signs in, asked for in a session that is already signed in (asking
+ * again, the sign-in release, slice SI-5a; sendSecondStepCode() with `change`, src/lib/parents/signin-codes.ts): that
+ * someone signed in to the portal as them asked to change how they sign in, that this code confirms it, and, if it
+ * wasn't them, not to share it and to sign out everywhere from Sign-in settings (`settingsPage`: APP_URL and
+ * /family/sign-in) or ask the club. Nothing about a device the portal doesn't know: the change is asked in a session.
+ * The subject carries the code with the sign-in code's words (tests/e2e/journey-helpers.ts and the vitest helpers read
+ * it). `minutes` as for the sign-in code.
+ */
+export function changeCodeMessage(b: Brand, to: string, code: string, o: { settingsPage: string; minutes: number }): MailMessage {
+  const lines = [
+    `Your ${b.clubName} sign-in code is ${code}.`,
+    `Someone signed in to the ${b.clubName} portal as you has asked to change how you sign in. This code confirms that change. It expires in ${o.minutes === 1 ? "1 minute" : `${o.minutes} minutes`}.`,
+    `If that wasn't you, don't share this code. Sign out everywhere from Sign-in settings at ${o.settingsPage}, or ask the club for help.`,
+  ];
+  return { to, subject: `Your ${b.clubName} sign-in code: ${code}, to confirm a change`, text: text(lines), html: html(b, lines, code) };
+}
+
+/**
  * A set-up link as the welcome and the press's mail carry it (the sign-in release, slice SI-4): its address, how long it
  * works in words (lifeWords() of LINK_LIFE_MS.setup), and whether the club is at Strict, where "Set up or reset my
  * password" mails no set-up link (whichLinkToMail(), `strict_no_setup`), so the mail says to ask the club instead.

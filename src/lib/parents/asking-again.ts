@@ -2,11 +2,11 @@
 // how a parent signs in (their password, their sign-in email; from SI-5b, SI-6 and SI-7 forgetting a device, the
 // authenticator app and passkeys), the session that asks must have proved the password and the second step within the
 // last 10 minutes (provedRecently(), ./reask-rule.ts, of `parent_auth_session.strong_at`). A sign-in with the emailed
-// code or a set-up link stamps it (recordStrongSignin(), devices.ts); one on a remembered device stamps it too, and that
-// stamp is not taken (sessionStrongAt()); otherwise the parent proves it again here, on the page they are on, through the
-// door's own checks, called as they are: the password (checkPasswordSignin(), password-signin.ts, for the session's
-// own address and with no device: a page request carries no device cookie, whose path is /api/auth/parent), then the
-// emailed code (sendSecondStepCode(), verifySigninCode(), signinStands(), signin-codes.ts). A remembered device is never
+// code or a set-up link stamps it (recordStrongSignin(), devices.ts); one on a remembered device does not; otherwise the
+// parent proves it again here, on the page they are on, through the door's own checks: the password
+// (checkPasswordSignin(), password-signin.ts, for the session's own address and with no device: a page request carries
+// no device cookie, whose path is /api/auth/parent; its tries counted against the person, `password_reask_parent`),
+// then the emailed code (sendSecondStepCode() for a change, verifySigninCode(), signinStands(), signin-codes.ts). A remembered device is never
 // a second step here: it is the very phone the question's reason speaks of ("a 90-day session on an unlocked phone
 // should not be enough to take the sign-in over"). Nothing here makes a session, sets a cookie or calls the finish: it
 // stamps the `strong_at` of the session that asked, and nothing else. Server only; parent code.
@@ -14,7 +14,7 @@ import "server-only";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { parentAuthAccount, parentAuthSession, parentAuthUser, parentDevice } from "@/lib/db/schema";
+import { parentAuthAccount, parentAuthSession, parentAuthUser } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { env } from "@/env";
 import type { ParentCtx } from "@/lib/guards";
@@ -30,26 +30,16 @@ type Asker = Pick<ParentCtx, "parentId" | "sessionId" | "email" | "ip">;
 type Reader = Pick<typeof db, "select">;
 
 /**
- * The session's own proof of the password and a second step, as `strong_at` holds it, or null: none yet, no such
- * session of this person (ended, or another's), or a `strong_at` a remembered device stamped. recordStrongSignin()
- * (devices.ts, SI-3b's) stamps `strong_at` for every sign-in it finishes, a password on a remembered device too, where
- * the device stood in for the emailed code; here a remembered device is never a second step, so that stamp opens no
- * window. It is told apart by what the same transaction wrote: a remembered device's sign-in moves that device's
- * `last_used_at` to the very instant it stamps (one `now`), on a row made earlier, while a code's or a set-up link's
- * sign-in makes a new device at that instant (`created_at` equal to `last_used_at`), and asking again touches no device.
- * Until SI-5b records on the session the device it was made on (and renews a device by use, which would move the
- * instant on), this is how the window knows; SI-5b replaces it with that record.
+ * The session's own proof of the password and a second step, as `strong_at` holds it, or null: none yet, or no such
+ * session of this person (ended, or another's). `strong_at` is set only by a proof the session made itself: a sign-in
+ * with the emailed code or a set-up link (recordStrongSignin(), devices.ts), or asking again (askAgainCode(), below). A
+ * sign-in on a remembered device proved only the password at that moment, and sets none.
  */
 export async function sessionStrongAt(q: Reader, s: { sessionId: string; parentId: string }): Promise<Date | null> {
-  const [row] = await q.select({
-    strongAt: sql<Date | null>`${parentAuthSession.strongAt}`.mapWith(parentAuthSession.strongAt),
-    byRememberedDevice: sql<boolean>`exists (select 1 from ${parentDevice} where ${parentDevice.parentId} = ${s.parentId}
-      and ${parentDevice.lastUsedAt} = ${parentAuthSession.strongAt} and ${parentDevice.createdAt} < ${parentDevice.lastUsedAt})`,
-  }).from(parentAuthSession)
+  const [row] = await q.select({ strongAt: sql<Date | null>`${parentAuthSession.strongAt}`.mapWith(parentAuthSession.strongAt) }).from(parentAuthSession)
     .where(and(eq(parentAuthSession.id, s.sessionId),
       inArray(parentAuthSession.userId, q.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, s.parentId)))));
-  if (!row || row.byRememberedDevice) return null;
-  return row.strongAt ?? null;
+  return row?.strongAt ?? null;
 }
 
 /**
@@ -119,23 +109,25 @@ const CODE_REFUSED = { ok: false as const, errors: [COPY.codeRejected] };
 const TOO_MANY = { ok: false as const, errors: [COPY.tooManyTries] };
 
 /**
- * The first step: the session's own password. The door's check, called as it is (checkPasswordSignin()), for the
- * session's address (`ctx.email`, never a typed one) and with no device token, so its limits are the door's for an
- * address (`password_try_email`, `password_try_ip`), with its wait for a turn, its refusals and its rows (a right
+ * The first step: the session's own password. The door's check (checkPasswordSignin()), for the session's address
+ * (`ctx.email`, never a typed one) and with no device token, its tries counted against the session's person
+ * (`password_reask_parent`, its TryCount), never the address's count: a stranger who keeps `password_try_email` full at
+ * the door can't stop the parent proving it's them, and wrong tries here don't fill the door's count. The per-IP flood
+ * stop (`password_try_ip`), the wait for a turn, its refusals and its rows are the door's (a right
  * password writes `signin.second_step_asked`, left as the door writes it: the row after it, `signin.proved_again`, says
  * the code was for asking again). Anything but a string of at most MOST_TYPED_PASSWORD is the refusal, uncounted. Every
  * refusal is one answer, and over a limit or turned away by a full wait, the door's words. A right password always
- * sends the code (sendSecondStepCode(), with its own limits, wait and rows; its mail is not awaited, and the answer never
- * says what became of it), for a step ending CODE_TTL_MS after the password proved right, which the stamp carries.
+ * sends the code (sendSecondStepCode() for a change, whose mail says so; with its own limits, wait and rows; its mail is
+ * not awaited, and the answer never says what became of it), for a step ending CODE_TTL_MS after the password proved right, which the stamp carries.
  * Under Strict the door refuses (`strict_no_factor`), and so nothing is asked again until SI-6 and SI-7.
  */
 export async function askAgainPassword(ctx: Asker, password: unknown, now = new Date()): Promise<AskAgainAnswer> {
   if (typeof password !== "string" || password.length > MOST_TYPED_PASSWORD) return PASSWORD_REFUSED;
-  const check = await checkPasswordSignin(ctx.email, password, null, ctx.ip, now);
+  const check = await checkPasswordSignin(ctx.email, password, null, ctx.ip, now, undefined, { kind: "password_reask_parent", subject: ctx.parentId });
   if (!check.ok) return check.limited ? TOO_MANY : PASSWORD_REFUSED;
   if (check.person.id !== ctx.parentId) return PASSWORD_REFUSED; // one address is one person: never another's
   const endsAt = new Date(check.at.getTime() + CODE_TTL_MS);
-  const { delivery } = await sendSecondStepCode({ parentId: ctx.parentId, email: check.person.email, password: check.password, endsAt }, ctx.ip, check.at);
+  const { delivery } = await sendSecondStepCode({ parentId: ctx.parentId, email: check.person.email, password: check.password, endsAt }, ctx.ip, check.at, "change");
   void delivery;
   return { ok: true, message: COPY.codeSent, stamp: makeStamp({ sessionId: ctx.sessionId, parentId: ctx.parentId, email: check.person.email }, check.password, endsAt) };
 }

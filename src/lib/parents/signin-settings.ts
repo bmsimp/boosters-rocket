@@ -4,10 +4,10 @@
 // session's own person (`ctx.parentId`, `ctx.sessionId`, `ctx.email`), never by an id from the address or a form. The
 // device list, forgetting one and renewing a device while its session is in use are SI-5b's. Server only; parent code.
 import "server-only";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { hashPassword } from "better-auth/crypto";
-import { db } from "@/lib/db/client";
-import { parent, parentAuthAccount } from "@/lib/db/schema";
+import { db, type Tx } from "@/lib/db/client";
+import { parent, parentAuthAccount, parentEmailChange } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import type { ParentCtx } from "@/lib/guards";
 import { currentBrand, sendMail } from "@/lib/mail/send";
@@ -51,14 +51,21 @@ export async function loadMySignin(ctx: ParentCtx, now = new Date()): Promise<My
 const sent = (v: unknown): v is string => typeof v === "string" && v.length <= MOST_SENT;
 const PROVE_AGAIN: SettingsResult = { ok: false, errors: [COPY.proveAgain] };
 
+/** Deletes the person's unused email change requests, as a block does, in the caller's transaction: how many went. */
+async function deleteUnusedEmailChanges(parentId: string, tx: Tx): Promise<number> {
+  return (await tx.delete(parentEmailChange).where(and(eq(parentEmailChange.parentId, parentId), isNull(parentEmailChange.usedAt)))
+    .returning({ id: parentEmailChange.id })).length;
+}
+
 /** Why a change found under the person's lock can't go on: the window run out, blocked, no password, or another one. */
 type NotChanged = "not_proved" | "strict" | "blocked" | "no_password" | "password_changed" | "gone";
 
 /**
  * Changing the password, signed in and proved within the window (open questions 26 and 28). In this order:
  * (a) the arguments: two strings of at most MOST_SENT; anything else is a bad request, refused uncounted;
- * (b) the limit per person (`password_change_parent`): each try past it may ask the breach service and make a hash;
- * (c) the window, read for this session (sessionProvedRecently()); the current password is not asked again;
+ * (b) the window, read for this session (sessionProvedRecently()); the current password is not asked again;
+ * (c) the limit per person (`password_change_parent`): each try past it may ask the breach service and make a hash. It
+ *     is taken after the window, so a session that can't change the password can't use up the parent's changes;
  * (d) the two passwords match and meet the rule (checkPasswordRule(), PASSWORD_COPY's words);
  * (e) the breach check (checkBreach(), with markBreachCheck()): found is refused in words, not checked is taken, its
  *     code in the audit row;
@@ -66,18 +73,19 @@ type NotChanged = "not_proved" | "strict" | "blocked" | "no_password" | "passwor
  * (g) one transaction in the order above lockedPerson() (sessions.ts): the person's row FOR UPDATE, then, read under it,
  *     the window again on this session, the club not at Strict (refused in the Strict words), the person not blocked, and their `credential` row still there and not
  *     replaced since this session proved itself (its `updated_at` no later than `strong_at`: every writer of a password
- *     holds the person's row); then, as a reset does (writePassword(), password-set.ts), their unused sign-in codes and
- *     those spent within a code's life, their unspent links (a held one included), the `credential` row replaced, every
- *     device forgotten and every session of theirs ended, this one included (open question 26), with one
- *     `parent.password.changed` row: the counts and the breach outcome, never the password or a hash.
+ *     holds the person's row); then their unused email change requests (as a block does, so a change of sign-in email
+ *     asked in a session this ends can't outlive it), and, as a reset does (writePassword(), password-set.ts), their
+ *     unused sign-in codes and those spent within a code's life, their unspent links (a held one included), the
+ *     `credential` row replaced, every device forgotten and every session of theirs ended, this one included (open
+ *     question 26), with one `parent.password.changed` row: the counts and the breach outcome, never the password or a hash.
  * Then, after the commit and not awaited, a short notice to the address read under the lock (passwordChangedMessage()).
- * A refusal at (c) or (g) says to reload and show it's them again; one at (d) or (e) says why.
+ * A refusal at (b) or (g) says to reload and show it's them again; one at (d) or (e) says why.
  */
 export async function changeMyPassword(ctx: Me, raw: { password: unknown; again: unknown }): Promise<SettingsResult> {
   const { password, again } = raw;
   if (!sent(password) || !sent(again)) return { ok: false, errors: [COPY.failed] };
-  if ((await takeRateLimit("password_change_parent", ctx.parentId)) !== "taken") return { ok: false, errors: [COPY.tooManyChanges] };
   if (!(await sessionProvedRecently(db, ctx))) return PROVE_AGAIN;
+  if ((await takeRateLimit("password_change_parent", ctx.parentId)) !== "taken") return { ok: false, errors: [COPY.tooManyChanges] };
   if (password !== again) return { ok: false, errors: [PASSWORD_COPY.mismatch] };
   const rule = checkPasswordRule(password);
   if (!rule.ok) return { ok: false, errors: [rule.problem === "too_long" ? PASSWORD_COPY.tooLong : PASSWORD_COPY.tooShort] };
@@ -103,6 +111,7 @@ export async function changeMyPassword(ctx: Me, raw: { password: unknown; again:
       if (!had) return "no_password" as const;
       if (had.credentialUpdatedAt.getTime() > strongAt!.getTime()) return "password_changed" as const;
 
+      const emailChangesDeleted = await deleteUnusedEmailChanges(ctx.parentId, tx);
       const codesDeleted = await deleteUnusedSigninCodes(ctx.parentId, tx, { spentSince: new Date(now.getTime() - CODE_TTL_MS) });
       const linksDeleted = await deleteUnusedSigninLinks(ctx.parentId, tx);
       await tx.update(parentAuthAccount).set({ password: hash, updatedAt: now })
@@ -111,7 +120,7 @@ export async function changeMyPassword(ctx: Me, raw: { password: unknown; again:
       const sessionsEnded = await endParentSessions(ctx.parentId, tx);
       await writeAudit({ actor: parentActor({ id: ctx.parentId, email: me.email }), action: "parent.password.changed", targetType: "parent", targetId: ctx.parentId,
         after: { breachChecked: breach.outcome === "not_found", ...(breach.outcome === "not_checked" ? { breachNotChecked: breach.why } : {}),
-          codesDeleted, linksDeleted, devicesForgotten, sessionsEnded }, ip: ctx.ip }, tx);
+          emailChangesDeleted, codesDeleted, linksDeleted, devicesForgotten, sessionsEnded }, ip: ctx.ip }, tx);
       return { to: me.email };
     });
   } catch {
@@ -133,18 +142,25 @@ export async function changeMyPassword(ctx: Me, raw: { password: unknown; again:
 /**
  * "Sign out everywhere" (open question 26): every session of the person ended, this one included, and every device the
  * portal remembers for them forgotten, in one transaction in the order above lockedPerson() (the person's row FOR
- * UPDATE, their devices, their sessions), with one `parent.sessions.end_all` row and its counts. Not asked again (the
- * lead's choice 9 of the sign-in release: it leaves nobody signed in, the one who pressed it included), and open to a
- * person with no password too. Limited per person (`signin_settings_parent`).
+ * UPDATE, their email change requests, their codes, their devices, their sessions), with one `parent.sessions.end_all`
+ * row and its counts. Their unused email change requests go too, as a block's do, so a change of sign-in email asked in
+ * a session this ends can't outlive it; and their unused codes and those spent within a code's life, as a reset's do,
+ * so a sign-in finishing at this moment, whose code was spent before the press and whose session is made after it, is
+ * refused by its last check (signinStands(), `code_gone`). The password and the links stay. Not asked again (the lead's
+ * choice 9 of the sign-in release: it leaves nobody signed in, the one who pressed it included), and open to a person
+ * with no password too. Limited per person (`signin_settings_parent`).
  */
 export async function signOutEverywhere(ctx: Me): Promise<SettingsResult> {
   if ((await takeRateLimit("signin_settings_parent", ctx.parentId)) !== "taken") return { ok: false, errors: [COPY.tooManyPresses] };
   await db.transaction(async (tx) => {
     const [me] = await tx.select({ email: parent.email }).from(parent).where(eq(parent.id, ctx.parentId)).for("update");
+    const now = new Date(); // read once the person's row is held
+    const emailChangesDeleted = await deleteUnusedEmailChanges(ctx.parentId, tx);
+    const codesDeleted = await deleteUnusedSigninCodes(ctx.parentId, tx, { spentSince: new Date(now.getTime() - CODE_TTL_MS) });
     const devicesForgotten = await forgetDevices(ctx.parentId, tx);
     const sessionsEnded = await endParentSessions(ctx.parentId, tx);
     await writeAudit({ actor: parentActor({ id: ctx.parentId, email: me?.email ?? ctx.email }), action: "parent.sessions.end_all", targetType: "parent", targetId: ctx.parentId,
-      after: { devicesForgotten, sessionsEnded }, ip: ctx.ip }, tx);
+      after: { emailChangesDeleted, codesDeleted, devicesForgotten, sessionsEnded }, ip: ctx.ip }, tx);
   });
   return { ok: true, message: COPY.everywhereDone };
 }

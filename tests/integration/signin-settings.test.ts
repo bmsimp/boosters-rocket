@@ -14,13 +14,16 @@ vi.mock("@/lib/parents/breach-endpoints", () => ({ breachEndpoints: () => ({ ran
 import { and, eq, sql } from "drizzle-orm";
 import { verifyPassword } from "better-auth/crypto";
 import { db } from "@/lib/db/client";
-import { auditLog, parentAuthAccount, parentAuthSession, parentAuthUser, parentDevice, parentSigninToken, rateLimitEvent, signinCode } from "@/lib/db/schema";
+import { auditLog, parent, parentAuthAccount, parentAuthSession, parentAuthUser, parentDevice, parentEmailChange, parentSigninToken, rateLimitEvent, signinCode } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
-import { askAgainCode, sessionProvedRecently } from "@/lib/parents/asking-again";
-import { hashTriedAddress } from "@/lib/parents/password-signin";
+import { askAgainCode, currentPassword, sessionProvedRecently } from "@/lib/parents/asking-again";
+import { recordStrongSignin } from "@/lib/parents/devices";
+import { checkPasswordSignin, hashTriedAddress } from "@/lib/parents/password-signin";
 import { PASSWORD_COPY } from "@/lib/parents/password-copy";
+import { takeRateLimit } from "@/lib/parents/rate-limit";
+import { changeMyPassword } from "@/lib/parents/signin-settings";
 import { SIGNIN_SETTINGS_COPY as COPY } from "@/lib/parents/signin-settings-copy";
-import { CODE_TTL_MS } from "@/lib/parents/signin-codes";
+import { CODE_TTL_MS, signinStands } from "@/lib/parents/signin-codes";
 import SignInSettingsPage from "@/app/(parent)/family/sign-in/page";
 import FamilyPage from "@/app/(parent)/family/page";
 import { askAgainCodeAction, askAgainPasswordAction, askSetupLinkAction, changePasswordAction, signOutEverywhereAction } from "@/app/(parent)/family/sign-in/actions";
@@ -28,6 +31,7 @@ import { resetDb, seedParentSession, seedWorkingMail } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, PROVEN_PASSWORD, identityNow, proveRecently, seedParentIn, seedSignedInParent, type SeededParent } from "../helpers/parent";
 import { seedParentSettings } from "../helpers/roster-cache";
 import { codeMailed } from "../helpers/parent-door";
+import { seedEmailChange } from "../helpers/email-change";
 import { linkRows, mintLink, seedCode, seedDevice, seedPassword } from "../helpers/signin-links";
 
 /**
@@ -70,6 +74,7 @@ const credentialOf = async (parentId: string) => (await db.select().from(parentA
   .where(and(eq(parentAuthAccount.userId, await authUserOf(parentId)), eq(parentAuthAccount.providerId, "credential"))))[0];
 const devicesOf = (parentId: string) => db.select().from(parentDevice).where(eq(parentDevice.parentId, parentId));
 const codesOf = (parentId: string) => db.select().from(signinCode).where(eq(signinCode.parentId, parentId));
+const emailChangesOf = (parentId: string) => db.select().from(parentEmailChange).where(eq(parentEmailChange.parentId, parentId));
 const allSessions = () => db.select({ id: parentAuthSession.id }).from(parentAuthSession);
 const ctxOf = (identity: ParentIdentity) => ({ ...identity, ip: IP });
 
@@ -170,6 +175,12 @@ describe("asking again", () => {
     const credential = await credentialOf(a.identity.parentId);
     for (const id of [a.identity.sessionId, a.identity.parentId, credential!.id]) expect(stamp).not.toContain(id);
     expect(await audits("signin.second_step_asked")).toHaveLength(1);
+    // The code's mail says what it is for: a change asked for in a session, never a sign-in on a device it doesn't know.
+    const mail = outbox.filter((m) => m.to === FAMILY_A.parent.email).at(-1)!;
+    expect(mail.subject).toMatch(/sign-in code: \d{6}, to confirm a change$/);
+    expect(mail.text).toContain("has asked to change how you sign in");
+    expect(mail.text).toContain("http://localhost:3000/family/sign-in");
+    expect(`${mail.text}${mail.html}`).not.toMatch(/device/i);
 
     const before = Date.now();
     expect(await askAgainCodeAction(stamp, code)).toEqual({ ok: true, message: COPY.proved });
@@ -184,17 +195,51 @@ describe("asking again", () => {
     expect(await renderPage(SignInSettingsPage)).toMatch(/autocomplete="new-password"/i);
   });
 
-  it("a wrong password is counted as the door counts it, and the sixth is refused in the over-limit words", async () => {
+  const counted = (kind: "password_reask_parent" | "password_try_email", subject: string) =>
+    db.select().from(rateLimitEvent).where(and(eq(rateLimitEvent.kind, kind), eq(rateLimitEvent.subject, subject)));
+
+  it("five wrong passwords stop asking again, counted against the person and not the address: the door still lets them in", async () => {
     const a = await seedSignedInParent(FAMILY_A);
     await withPassword(a);
     asParent(a.identity);
     for (let i = 0; i < 5; i++) expect(await askAgainPasswordAction("not the password at all")).toEqual({ ok: false, errors: [COPY.passwordRejected] });
+    // The sixth, right or not, is refused in the over-limit words before the password is read.
     expect(await askAgainPasswordAction(PROVEN_PASSWORD)).toEqual({ ok: false, errors: [COPY.tooManyTries] });
-    const counted = await db.select().from(rateLimitEvent).where(and(eq(rateLimitEvent.kind, "password_try_email"), eq(rateLimitEvent.subject, hashTriedAddress(FAMILY_A.parent.email))));
-    expect(counted).toHaveLength(5);
+    expect(await counted("password_reask_parent", a.identity.parentId)).toHaveLength(5);
+    expect(await counted("password_try_email", hashTriedAddress(FAMILY_A.parent.email))).toEqual([]);
     expect(await audits("signin.password_wrong")).toHaveLength(5);
     expect(outbox).toEqual([]);
     expect(await strongAtOf(a.identity.sessionId)).toBeNull();
+    // A thief holding only the session can't fill the door's count from here: the right password at the door, for the
+    // address and with no device (as /sign-in checks it), still goes on to its code.
+    expect(await checkPasswordSignin(FAMILY_A.parent.email, PROVEN_PASSWORD, null, IP)).toMatchObject({ ok: true, person: { id: a.identity.parentId } });
+  });
+
+  it("five wrong passwords at the door for the address don't stop the parent proving it's them here", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await withPassword(a);
+    // A stranger who knows only the address keeps the door's count for it full.
+    for (let i = 0; i < 5; i++) expect(await checkPasswordSignin(FAMILY_A.parent.email, "a stranger's guess", null, IP)).toEqual({ ok: false, limited: false });
+    expect(await checkPasswordSignin(FAMILY_A.parent.email, PROVEN_PASSWORD, null, IP)).toEqual({ ok: false, limited: true });
+    expect(await counted("password_try_email", hashTriedAddress(FAMILY_A.parent.email))).toHaveLength(5);
+    // The parent, signed in, proves it's them all the same, and the right password gives its place back.
+    const { stamp, code } = await passwordThenCode(a.identity);
+    expect(await askAgainCodeAction(stamp, code)).toEqual({ ok: true, message: COPY.proved });
+    expect(await counted("password_reask_parent", a.identity.parentId)).toEqual([]);
+  });
+
+  // A block and a change of address are seen by the door's own checks of the code (verifySigninCode(), signinStands())
+  // before the lock is taken, and again under it by askAgainCode(); a session ended since is seen only there.
+  it.each(["blocked", "moved", "session_ended"] as const)("refuses a code once the person is %s since the password, stamping nothing", async (stop) => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await withPassword(a);
+    const { stamp, code } = await passwordThenCode(a.identity);
+    if (stop === "blocked") await db.update(parent).set({ blocked: true }).where(eq(parent.id, a.identity.parentId));
+    if (stop === "moved") await db.update(parent).set({ email: "somewhere.else@family-a.example" }).where(eq(parent.id, a.identity.parentId));
+    if (stop === "session_ended") await db.delete(parentAuthSession).where(eq(parentAuthSession.id, a.identity.sessionId));
+    expect(await askAgainCode(ctxOf(a.identity), stamp, code)).toEqual({ ok: false, errors: [COPY.codeRejected] });
+    expect(await strongAtOf(a.identity.sessionId)).toBeNull();
+    expect(await audits("signin.proved_again")).toEqual([]);
   });
 
   it("a code with a stamp of another session, of another person, from before the password changed, or past its end is refused, and stamps nothing", async () => {
@@ -237,14 +282,16 @@ describe("changing the password", () => {
     expect(await audits("parent.password.changed")).toEqual([]);
   });
 
-  it("a remembered device's sign-in opens no window: the page asks again, and the change and an email change are refused", async () => {
-    // As recordStrongSignin() leaves a password sign-in on a remembered device: the device made earlier, its last use
-    // and the session's strong_at the one instant. The device stood in for the code, and is never a second step here.
+  it("a remembered device's sign-in stamps no proof: the page asks again, and the change is refused; a code's new device stamps one", async () => {
+    // The strong step of a password sign-in on a remembered device (recordStrongSignin()): it renews the device, and
+    // proved only the password at that moment, so it leaves the session's strong_at as it is.
     const a = await seedSignedInParent(FAMILY_A);
-    const at = new Date(Date.now() - 1000);
-    await proveRecently(a.identity, PROVEN_PASSWORD, at);
+    await withPassword(a);
     const device = await seedDevice(a.identity.parentId);
-    await db.update(parentDevice).set({ createdAt: new Date(at.getTime() - 86_400_000), lastUsedAt: at }).where(eq(parentDevice.id, device.id));
+    const strong = { parentId: a.identity.parentId, email: a.identity.email, sessionId: a.identity.sessionId, ip: IP };
+    expect(await recordStrongSignin({ ...strong, device: { deviceId: device.id, token: device.token } })).toMatchObject({ ok: true });
+    expect(await audits("signin.device_used")).toHaveLength(1);
+    expect(await strongAtOf(a.identity.sessionId)).toBeNull();
     asParent(a.identity);
     expect(await renderPage(SignInSettingsPage)).toContain(html(COPY.askAgainForPassword));
     expect(await sessionProvedRecently(db, a.identity)).toBe(false); // what requestMyEmailChange() reads under the lock
@@ -252,10 +299,49 @@ describe("changing the password", () => {
     expect(await changePasswordAction(NEW_PASSWORD, NEW_PASSWORD)).toEqual({ ok: false, errors: [COPY.proveAgain] });
     expect(await credentialOf(a.identity.parentId)).toEqual(before);
     expect(await audits("parent.password.changed")).toEqual([]);
-    // A new device made at that instant (a code's or a set-up link's sign-in) is a proof, and so is asking again.
-    await db.update(parentDevice).set({ createdAt: at }).where(eq(parentDevice.id, device.id));
+    // A code's or a set-up link's sign-in remembers a new device and proved the second step itself: it stamps the session.
+    const at = Date.now();
+    expect(await recordStrongSignin({ ...strong, device: { remember: true } })).toMatchObject({ ok: true });
+    expect((await strongAtOf(a.identity.sessionId))!.getTime()).toBeGreaterThanOrEqual(at - 1000);
     expect(await sessionProvedRecently(db, a.identity)).toBe(true);
     expect(await renderPage(SignInSettingsPage)).toMatch(/autocomplete="new-password"/i);
+  });
+
+  it("is refused under the lock when the password was replaced since the proof, the person is blocked or has no password, changing nothing", async () => {
+    await seedSignedInParent(FAMILY_A); // the roster and family A, which each person below is a guardian of
+    for (const stop of ["password_changed", "blocked", "no_password"] as const) {
+      const seeded = await seedParentIn({ familyQboId: FAMILY_A.family.qboId, name: `Someone ${stop}`, email: `${stop.replace("_", ".")}@family-a.example` });
+      await proveRecently(seeded.identity);
+      const credentialId = (await credentialOf(seeded.identity.parentId))!.id;
+      // Each is read only under the person's row: the window itself still holds.
+      if (stop === "password_changed") await db.update(parentAuthAccount).set({ updatedAt: new Date(Date.now() + 1000) }).where(eq(parentAuthAccount.id, credentialId));
+      if (stop === "blocked") await db.update(parent).set({ blocked: true }).where(eq(parent.id, seeded.identity.parentId));
+      if (stop === "no_password") await db.delete(parentAuthAccount).where(eq(parentAuthAccount.id, credentialId));
+      expect(await sessionProvedRecently(db, seeded.identity), stop).toBe(true);
+      const before = await credentialOf(seeded.identity.parentId);
+      expect(await changeMyPassword(ctxOf(seeded.identity), { password: NEW_PASSWORD, again: NEW_PASSWORD }), stop).toEqual({ ok: false, errors: [COPY.proveAgain] });
+      expect(await credentialOf(seeded.identity.parentId), stop).toEqual(before);
+      expect(await sessionsOf(seeded.identity.parentId), stop).toHaveLength(1);
+    }
+    expect(await audits("parent.password.changed")).toEqual([]);
+    expect(outbox.filter((m) => m.subject.endsWith("password was changed"))).toEqual([]);
+  });
+
+  it("is limited per person, and only tries from a session that proved itself count", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await withPassword(a);
+    asParent(a.identity);
+    // A session that hasn't proved itself can't use up the parent's changes.
+    for (let i = 0; i < 11; i++) expect(await changePasswordAction(NEW_PASSWORD, `${NEW_PASSWORD}!`)).toEqual({ ok: false, errors: [COPY.proveAgain] });
+    expect(await db.select().from(rateLimitEvent).where(eq(rateLimitEvent.kind, "password_change_parent"))).toEqual([]);
+    // Proved, ten tries an hour (here two that differ, which count), and the eleventh is refused in words, changing nothing.
+    await proveRecently(a.identity);
+    for (let i = 0; i < 10; i++) expect(await changePasswordAction(NEW_PASSWORD, `${NEW_PASSWORD}!`)).toEqual({ ok: false, errors: [PASSWORD_COPY.mismatch] });
+    const before = await credentialOf(a.identity.parentId);
+    expect(await changePasswordAction(NEW_PASSWORD, NEW_PASSWORD)).toEqual({ ok: false, errors: [COPY.tooManyChanges] });
+    expect(await credentialOf(a.identity.parentId)).toEqual(before);
+    expect(await sessionsOf(a.identity.parentId)).toHaveLength(1);
+    expect(await audits("parent.password.changed")).toEqual([]);
   });
 
   it("under Strict is refused even with a recent proof, in the Strict words, changing nothing", async () => {
@@ -294,7 +380,11 @@ describe("changing the password", () => {
     await seedDevice(a.identity.parentId);
     await seedDevice(b.identity.parentId);
     await seedCode(b.identity.parentId);
-    const theirsBefore = { credential: await credentialOf(b.identity.parentId), sessions: await sessionsOf(b.identity.parentId), devices: await devicesOf(b.identity.parentId), codes: await codesOf(b.identity.parentId) };
+    // A change of sign-in email asked for in a session this ends can't outlive it; B's is B's.
+    await seedEmailChange({ parentId: a.identity.parentId, guardianId: a.identity.guardianId, familyId: a.identity.familyId, recordQboId: null, newEmail: "taken.over@elsewhere.example" });
+    await seedEmailChange({ parentId: b.identity.parentId, guardianId: b.identity.guardianId, familyId: b.identity.familyId, recordQboId: null, newEmail: "b.moving@elsewhere.example" });
+    const theirsBefore = { credential: await credentialOf(b.identity.parentId), sessions: await sessionsOf(b.identity.parentId), devices: await devicesOf(b.identity.parentId), codes: await codesOf(b.identity.parentId),
+      emailChanges: await emailChangesOf(b.identity.parentId) };
     const before = await credentialOf(a.identity.parentId);
     asParent(a.identity);
 
@@ -307,12 +397,14 @@ describe("changing the password", () => {
     expect((await linkRows(a.identity.parentId)).filter((l) => l.usedAt === null)).toEqual([]);
     expect(await devicesOf(a.identity.parentId)).toEqual([]);
     expect(await sessionsOf(a.identity.parentId)).toEqual([]);
+    expect(await emailChangesOf(a.identity.parentId)).toEqual([]);
     // Nobody else's.
-    expect({ credential: await credentialOf(b.identity.parentId), sessions: await sessionsOf(b.identity.parentId), devices: await devicesOf(b.identity.parentId), codes: await codesOf(b.identity.parentId) }).toEqual(theirsBefore);
+    expect({ credential: await credentialOf(b.identity.parentId), sessions: await sessionsOf(b.identity.parentId), devices: await devicesOf(b.identity.parentId), codes: await codesOf(b.identity.parentId),
+      emailChanges: await emailChangesOf(b.identity.parentId) }).toEqual(theirsBefore);
 
     const rows = await audits("parent.password.changed");
     expect(rows.map((r) => [r.targetType, r.targetId, r.after])).toEqual([["parent", a.identity.parentId,
-      { breachChecked: true, codesDeleted: 1, linksDeleted: 1, devicesForgotten: 1, sessionsEnded: 2 }]]);
+      { breachChecked: true, emailChangesDeleted: 1, codesDeleted: 1, linksDeleted: 1, devicesForgotten: 1, sessionsEnded: 2 }]]);
     expect(JSON.stringify(rows)).not.toContain(NEW_PASSWORD);
     expect(JSON.stringify(rows)).not.toContain(after!.password!);
     // One notice, to the address held at that moment, and to nobody else.
@@ -330,7 +422,7 @@ describe("changing the password", () => {
     breachDown = true;
     asParent(a.identity);
     expect(await changePasswordAction(NEW_PASSWORD, NEW_PASSWORD)).toEqual({ ok: true, message: COPY.changed });
-    expect((await audits("parent.password.changed"))[0]!.after).toEqual({ breachChecked: false, breachNotChecked: "bad_answer", codesDeleted: 0, linksDeleted: 0, devicesForgotten: 0, sessionsEnded: 1 });
+    expect((await audits("parent.password.changed"))[0]!.after).toEqual({ breachChecked: false, breachNotChecked: "bad_answer", emailChangesDeleted: 0, codesDeleted: 0, linksDeleted: 0, devicesForgotten: 0, sessionsEnded: 1 });
   });
 });
 
@@ -341,13 +433,48 @@ describe("signing out everywhere", () => {
     await seedParentSession(await authUserOf(a.identity.parentId), { familyQboId: FAMILY_A.family.qboId });
     await seedDevice(a.identity.parentId);
     await seedDevice(b.identity.parentId);
+    // An unused code, one spent a minute ago (a sign-in finishing elsewhere at this moment) and one spent long ago, which
+    // stays; an email change asked for in a session this ends; and B's code and email change, which stay.
+    await seedCode(a.identity.parentId);
+    await seedCode(a.identity.parentId, { usedAt: new Date(Date.now() - 60_000) });
+    const old = await seedCode(a.identity.parentId, { usedAt: new Date(Date.now() - CODE_TTL_MS - 60_000) });
+    await seedEmailChange({ parentId: a.identity.parentId, guardianId: a.identity.guardianId, familyId: a.identity.familyId, recordQboId: null, newEmail: "taken.over@elsewhere.example" });
+    await seedCode(b.identity.parentId);
+    await seedEmailChange({ parentId: b.identity.parentId, guardianId: b.identity.guardianId, familyId: b.identity.familyId, recordQboId: null, newEmail: "b.moving@elsewhere.example" });
     asParent(a.identity);
     expect(await signOutEverywhereAction()).toEqual({ ok: true, message: COPY.everywhereDone });
     expect(await sessionsOf(a.identity.parentId)).toEqual([]);
     expect(await devicesOf(a.identity.parentId)).toEqual([]);
+    expect((await codesOf(a.identity.parentId)).map((c) => c.id)).toEqual([old]);
+    expect(await emailChangesOf(a.identity.parentId)).toEqual([]);
     expect(await sessionsOf(b.identity.parentId)).toHaveLength(1);
     expect(await devicesOf(b.identity.parentId)).toHaveLength(1);
-    expect((await audits("parent.sessions.end_all")).map((r) => [r.targetType, r.targetId, r.after])).toEqual([["parent", a.identity.parentId, { devicesForgotten: 1, sessionsEnded: 2 }]]);
+    expect(await codesOf(b.identity.parentId)).toHaveLength(1);
+    expect(await emailChangesOf(b.identity.parentId)).toHaveLength(1);
+    expect((await audits("parent.sessions.end_all")).map((r) => [r.targetType, r.targetId, r.after])).toEqual([["parent", a.identity.parentId,
+      { emailChangesDeleted: 1, codesDeleted: 2, devicesForgotten: 1, sessionsEnded: 2 }]]);
+  });
+
+  it("refuses the last check of a sign-in whose code was spent just before the press: no session made after it stands", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await withPassword(a);
+    const codeId = await seedCode(a.identity.parentId, { usedAt: new Date(Date.now() - 1000) });
+    const password = (await currentPassword(db, a.identity.parentId))!;
+    // As the door's finish would see it a moment before the press: the code it spent still stands.
+    expect(await signinStands(a.identity.parentId, a.identity.email, IP, { password, codeId })).toBe(true);
+    asParent(a.identity);
+    expect(await signOutEverywhereAction()).toEqual({ ok: true, message: COPY.everywhereDone });
+    expect(await signinStands(a.identity.parentId, a.identity.email, IP, { password, codeId })).toBe(false);
+    expect((await audits("signin.refused")).map((r) => r.after)).toContainEqual({ reason: "code_gone" });
+  });
+
+  it("is limited per person: past ten presses an hour it is refused in words, ending nothing", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    for (let i = 0; i < 10; i++) expect(await takeRateLimit("signin_settings_parent", a.identity.parentId)).toBe("taken");
+    asParent(a.identity);
+    expect(await signOutEverywhereAction()).toEqual({ ok: false, errors: [COPY.tooManyPresses] });
+    expect(await sessionsOf(a.identity.parentId)).toHaveLength(1);
+    expect(await audits("parent.sessions.end_all")).toEqual([]);
   });
 });
 

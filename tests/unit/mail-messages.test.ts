@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { signinCodeMessage, welcomeMessage, emailChangeConfirmMessage, emailChangeNoticeMessage, testMessage, signedFormCopyMessage, formReminderMessage, volunteerSignupMessage,
+import { changeCodeMessage, signinCodeMessage, welcomeMessage, emailChangeConfirmMessage, emailChangeNoticeMessage, testMessage, signedFormCopyMessage, formReminderMessage, volunteerSignupMessage,
   passwordSetupMessage, passwordResetMessage, choosePasswordMessage, passwordChangedMessage } from "@/lib/mail/messages";
 
 const b = { clubName: "FZN <Band> Boosters", color: "#5b2a86" };
@@ -32,6 +32,29 @@ describe("mail messages", () => {
         expect(part).not.toContain("10 minutes");
       }
     }
+  });
+  it("the code for a change asked in a session says what it's for, and what to do if it wasn't them, and nothing of a device", () => {
+    // Asking again (the sign-in release, slice SI-5a): the parent is signed in already, so a device the portal doesn't
+    // know has nothing to do with it. The sign-in code's mail (above) is unchanged.
+    const settingsPage = "https://portal.example.org/family/sign-in";
+    const m = changeCodeMessage(b, "ana@example.com", "482913", { settingsPage, minutes: 10 });
+    expect(m.to).toBe("ana@example.com");
+    // The subject carries the code with the sign-in code's words, which the test helpers read.
+    expect(m.subject).toBe("Your FZN <Band> Boosters sign-in code: 482913, to confirm a change");
+    expect(m.text).toBe([
+      "Your FZN <Band> Boosters sign-in code is 482913.",
+      "Someone signed in to the FZN <Band> Boosters portal as you has asked to change how you sign in. This code confirms that change. It expires in 10 minutes.",
+      `If that wasn't you, don't share this code. Sign out everywhere from Sign-in settings at ${settingsPage}, or ask the club for help.`,
+    ].join("\n\n") + "\n");
+    for (const part of [m.text, m.html]) {
+      expect(part).toContain("482913");
+      expect(part).not.toMatch(/device|entered correctly|reset my password/i);
+      // The one address it names is Sign-in settings; no image, and no link tag.
+      expect(part.match(/https?:\/\/[^\s<"]+/g)).toEqual([`${settingsPage},`]);
+      expect(part).not.toMatch(/<a\b|<img\b/i);
+    }
+    expect(m.html).toContain("If that wasn&#39;t you, don&#39;t share this code.");
+    expect(changeCodeMessage(b, "ana@example.com", "482913", { settingsPage, minutes: 1 }).text).toContain("It expires in 1 minute.");
   });
   it("escapes the club name in HTML and uses the club color", () => {
     const m = signinCodeMessage(b, "ana@example.com", "482913", { passwordPage, minutes: 10 });
