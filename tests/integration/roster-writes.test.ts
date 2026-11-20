@@ -12,7 +12,7 @@ import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, auditLog, family, guardian, qboConnection, qboCustomer, setting, student, writeQueue } from "@/lib/db/schema";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
-import { addFamily, askFamilyInactive, askRosterWrite, CREDIT_BALANCE, coverStamp, deactivateLinked, familyCover, familyHereWords, LINKED_DEACTIVATE, moveStudent, PLACE_DIFFERS, REFRESH_ASK_KEY,
+import { addFamily, askFamilyInactive, askRosterWrite, CREDIT_BALANCE, GUARDIAN_HERE, coverStamp, deactivateLinked, familyCover, familyHereWords, LINKED_DEACTIVATE, moveStudent, PLACE_DIFFERS, REFRESH_ASK_KEY,
   WRITE_COPY } from "@/lib/roster/writes";
 import { runWriteQueue } from "@/lib/roster/queue";
 import { refreshRoster } from "@/lib/roster/refresh";
@@ -229,11 +229,12 @@ describe("staff change the roster in QuickBooks, and the cache follows QuickBook
     expect(posts()).toEqual([]);
   });
 
-  it("makes a parent inactive in QuickBooks: the portal's own sign-in for them stays", async () => {
+  it("a guardian's own Parent customer isn't changed from its QuickBooks form (stage 3's slice 9h); the portal's own sign-in for them stays", async () => {
     await seedParentSettings(SIGNINS_ON);
     const { ana } = await seedAnaRivera();
-    const r = await askRosterWrite({ op: "deactivate", qboId: "11", syncToken: "0" }, tag, op);
-    expect(r.ok).toBe(true);
+    // Ana's row is linked to customer 11: it is changed through her (removing her, renaming her), never by its form.
+    expect(await askRosterWrite({ op: "deactivate", qboId: "11", syncToken: "0" }, tag, op)).toEqual({ ok: false, errors: [GUARDIAN_HERE] });
+    expect(posts()).toEqual([]);
     expect((await db.select().from(guardian).where(eq(guardian.parentId, ana.id)))[0]).toMatchObject({ status: "invited", disabledReason: null });
     expect(await enterableGuardianRows(ana.id)).toHaveLength(1);
     expect((await db.select().from(auditLog)).filter((a) => a.action === "parent.access.ended")).toEqual([]);
