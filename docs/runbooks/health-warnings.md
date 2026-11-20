@@ -27,6 +27,11 @@ installation with. `docker compose ps` shows what is running, and `docker compos
 - **"Not yet run"** on a new installation is normal: it runs once a day.
 - **"The last clean-up couldn't finish."** The worker tries again in 15 minutes. If it keeps failing, the note under the
   line has the reason; check the worker line too.
+- **"The worker's sweep of expired passkey sign-in requests ... failed at its last try."** Besides the daily clean-up,
+  the worker removes expired passkey sign-in requests at every wake, so that they never pile up beyond about five
+  minutes' worth. Until a sweep works again they wait for the daily clean-up instead. It tries again each minute, and
+  the line clears at the first sweep that works. If it stays, check the worker line and the database line, and
+  `docker compose logs worker`.
 
 ## QuickBooks
 

@@ -9,7 +9,7 @@ import * as schema from "@/lib/db/schema";
 import { getTableName, is } from "drizzle-orm";
 import { PgTable } from "drizzle-orm/pg-core";
 import { cleanUp, runCleanup, describeCleanup, sweepExpiredChallenges, CHALLENGE_SWEEP_JOB, CLEANED_TABLES, KEPT_TABLES, CLEANUP_JOB, RETIRED_SETTINGS, FINISHED_WRITES_DAYS, JOB_HISTORY_DAYS, REMINDER_CLAIM_DAYS, type CleanupCounts } from "@/lib/jobs/cleanup";
-import { CHALLENGE_SWEEP_MARK, readMark } from "@/lib/jobs/marks";
+import { CHALLENGE_SWEEP_MARK, markJob, readMark } from "@/lib/jobs/marks";
 import { runDueJobs } from "@/lib/jobs/runner";
 import { RATE_LIMITS } from "@/lib/parents/rate-limit";
 import { CODE_TTL_MS, RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
@@ -408,5 +408,12 @@ describe("the sweep of expired passkey challenges at every wake (slice SI-7a)", 
     expect((await readMark(CHALLENGE_SWEEP_MARK))?.did).toEqual({ challenges: 1 });
     // Nothing of it is audited: the rows are the library's.
     expect((await db.select().from(auditLog)).length).toBe(auditedBefore);
+  });
+
+  it("after a sweep that failed, marks the next one that works even when it removed nothing, so the Health page's clean-up line clears", async () => {
+    expect(await runDueJobs()).toEqual({ ran: [] });
+    await markJob(CHALLENGE_SWEEP_MARK, "threw");
+    expect(await runDueJobs()).toEqual({ ran: [] });
+    expect(await readMark(CHALLENGE_SWEEP_MARK)).toMatchObject({ failedLast: false, did: null });
   });
 });

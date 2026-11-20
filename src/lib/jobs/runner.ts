@@ -9,7 +9,7 @@ import { sendOwedWelcomes } from "@/lib/parents/welcome";
 import { rosterRefreshAsked } from "@/lib/parents/refresh-ask";
 import { TAKE_IN_JOB, takeInAsksForARead, takeInContactDetails } from "@/lib/parents/contact-take-in";
 import { CHALLENGE_SWEEP_JOB, CLEANUP_JOB, removedInAll, runCleanup, sweepExpiredChallenges } from "./cleanup";
-import { BUYOUT_CHECK_MARK, CHALLENGE_SWEEP_MARK, markJob, REMINDERS_MARK } from "./marks";
+import { BUYOUT_CHECK_MARK, CHALLENGE_SWEEP_MARK, failedLast, markJob, readMark, REMINDERS_MARK } from "./marks";
 import { MONEY_JOB } from "@/lib/money/sweep";
 import { runMoneyAndItems } from "./money-job";
 import { FORMS_JOB, checkOpenForms } from "@/lib/forms/job";
@@ -58,13 +58,12 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
   }
   // Expired passkey challenges (and any other expired parent verification row), at every wake: what bounds them when
   // no cap per address can (cleanup.ts). Counted in its mark and this wake's answer only when it removed some, so a
-  // quiet wake stays quiet; a throw is marked, with none of its text.
+  // quiet wake stays quiet; a throw is marked, with none of its text, and the Health page's clean-up line says so
+  // (report.ts), so the first sweep that works after one marks too, quiet or not, and the line clears.
   try {
     const swept = await sweepExpiredChallenges();
-    if (swept > 0) {
-      await markJob(CHALLENGE_SWEEP_MARK, { counts: { challenges: swept }, failed: 0 });
-      ran.push({ job: CHALLENGE_SWEEP_JOB, ok: true });
-    }
+    if (swept > 0 || failedLast(await readMark(CHALLENGE_SWEEP_MARK))) await markJob(CHALLENGE_SWEEP_MARK, { counts: { challenges: swept }, failed: 0 });
+    if (swept > 0) ran.push({ job: CHALLENGE_SWEEP_JOB, ok: true });
   } catch {
     await markJob(CHALLENGE_SWEEP_MARK, "threw");
     ran.push({ job: CHALLENGE_SWEEP_JOB, ok: false });

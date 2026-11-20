@@ -1,7 +1,7 @@
 // What the worker last did in jobs that keep no job_run row of their own, for the Health page
 // (src/lib/health/job-lines.ts, report.ts): the volunteer reminders, which look every wake, the daily check of the
-// buy-out invoices, which follows each read of every family, the sweep of expired passkey challenges at each wake (read
-// by nothing yet: counts kept for whoever looks), and the welcome emails, whose mark also decides how many a
+// buy-out invoices, which follows each read of every family, the sweep of expired passkey challenges at each wake (whose
+// failure the clean-up line reports), and the welcome emails, whose mark also decides how many a
 // wake tries while mail is failing (sendOwedWelcomes(), src/lib/parents/welcome.ts). Counts and times only: never an
 // address, a name or an id.
 import { eq, sql } from "drizzle-orm";

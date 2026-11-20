@@ -3,7 +3,7 @@ import { db } from "@/lib/db/client";
 import { auditLog, jobRun, requirement, season, seasonStep } from "@/lib/db/schema";
 import { lastWake } from "@/lib/jobs/runner";
 import { CLEANUP_JOB } from "@/lib/jobs/cleanup";
-import { failedLast, readMark, WELCOME_MARK } from "@/lib/jobs/marks";
+import { CHALLENGE_SWEEP_MARK, failedLast, readMark, WELCOME_MARK } from "@/lib/jobs/marks";
 import { connectionView } from "@/lib/quickbooks/connection";
 import { quickbooksProblems } from "@/lib/quickbooks/health";
 import { QUICKBOOKS_USE, QUICKBOOKS_WRITE_ACTION } from "@/lib/quickbooks/what-it-does";
@@ -87,6 +87,8 @@ export function breachCheckLine(mark: BreachMark | null): HealthLine {
     says: "Answering. Each password a parent chooses is checked against passwords known from data breaches, sending only the first five characters of a hash of it." };
 }
 
+/** The clean-up line's words while the sweep of expired passkey challenges at every wake is failing (runner.ts). */
+export const SWEEP_FAILED = "The worker's sweep of expired passkey sign-in requests, which runs every minute, failed at its last try. The daily clean-up still removes them once a day; until the sweep works again, they can pile up for a day instead of five minutes. The worker tries again at its next wake.";
 const bytesWords = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / (1024 * 1024)).toFixed(1)} MB`);
 
 export async function healthReport(now: Date = new Date()): Promise<HealthLine[]> {
@@ -122,12 +124,20 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
       : { state: "ok", word: "Working", says: "Waking every minute to run the scheduled jobs." };
   lines.push({ key: "worker", title: "Worker", ...worker, times: [{ label: "Last woke", at: wake }], notes: [], fix: null });
 
-  const cleaned: Verdict = !cleanup ? { state: "off", word: "Not yet run", says: "Hasn't run yet. The worker runs it once a day: it removes expired sessions, used sign-in codes and other records that are past use." }
+  // The sweep of expired passkey challenges at every wake (sweepExpiredChallenges(), runner.ts) has no line of its own:
+  // it is the clean-up's delete of those rows, run more often. While its latest word is a failure the line says so; the
+  // daily clean-up still removes them once a day.
+  const sweep = await readMark(CHALLENGE_SWEEP_MARK);
+  const sweepFailed = failedLast(sweep);
+  const cleaned: Verdict = sweepFailed && cleanup?.outcome !== "failed" ? { state: "attention", word: "Needs attention", says: SWEEP_FAILED }
+    : !cleanup ? { state: "off", word: "Not yet run", says: "Hasn't run yet. The worker runs it once a day: it removes expired sessions, used sign-in codes and other records that are past use." }
     : cleanup.outcome === "failed" ? { state: "attention", word: "Needs attention", says: "The last clean-up couldn't finish. The worker tries again in 15 minutes." }
       : { state: "ok", word: "Working", says: "Once a day, removes expired sessions, used sign-in codes and other records that are past use." };
   lines.push({
-    key: "cleanup", title: "Daily clean-up", ...cleaned, notes: cleanup?.detail ? [cleanup.detail] : [], fix: null,
-    times: [{ label: cleanup && cleanup.outcome !== "ok" ? "Last tried" : "Last ran", at: cleanup ? (cleanup.finishedAt ?? cleanup.startedAt).toISOString() : null }],
+    key: "cleanup", title: "Daily clean-up", ...cleaned,
+    notes: [...(cleanup?.detail ? [cleanup.detail] : []), ...(sweepFailed && cleanup?.outcome === "failed" ? [SWEEP_FAILED] : [])], fix: null,
+    times: [{ label: cleanup && cleanup.outcome !== "ok" ? "Last tried" : "Last ran", at: cleanup ? (cleanup.finishedAt ?? cleanup.startedAt).toISOString() : null },
+      ...(sweepFailed ? [{ label: "Challenge sweep last failed", at: sweep?.failedAt ?? null }] : [])],
   });
 
   const rosterTimes = [{ label: "Last token refresh", at: conn.lastTokenRefreshAt }, { label: "Last roster read", at: roster.lastOkAt },
