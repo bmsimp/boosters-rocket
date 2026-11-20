@@ -3,9 +3,10 @@
 // questions 25, 26, 28 and 33): setting it up in two presses, its ten backup codes shown once, new ones made, and the
 // app turned off. Each press is asked again first (open question 28; the lead's decision for SI-6b asks for the set-up
 // too, since it shows backup codes): it acts only for a session that proved itself within the window
-// (sessionProvedRecently(), asking-again.ts), read before and again under the person's row. Everything is for the
-// session's own person (`ctx.parentId`, `ctx.email`): no press takes an id, and an unfinished set-up is found by the
-// person alone. The rows themselves are read and written only by authenticator.ts. The secret is answered once, at the
+// (sessionProvedRecently(), asking-again.ts, where a proof made before the person's app came into force doesn't count),
+// read before and again under the person's row. Everything is for the session's own person (`ctx.parentId`,
+// `ctx.email`): no press takes an id, and an unfinished set-up is found by the person alone, the confirm's stamp only
+// telling whether it is still the one its page shows (setupStamp()). The rows themselves are read and written only by authenticator.ts. The secret is answered once, at the
 // first press, as the key to type and the QR code's squares (drawn here, on the server: authenticator-qr.ts), and never
 // again; the backup codes once, as they are made. No audit row holds a secret, a code, a hash, the key URI or the
 // QR code. Nothing here makes or ends a session, forgets a device or touches `strong_at`. Server only; parent code.
