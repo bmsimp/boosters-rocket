@@ -39,6 +39,7 @@ const NOT_AUDITED: Record<string, string> = {
   "src/lib/forms/requests.ts#release": "a claim: lets go of the hold above",
   "src/lib/quickbooks/sandbox-check/writes.ts#closeUnmade": "a claim: the check of the portal's requests marks a record it listed and never made; the run is audited at its start and end",
   "src/lib/quickbooks/sandbox-check/writes.ts#noteCloseFailed": "a claim: the same check notes a record it couldn't make inactive, to try again at its next run",
+  "src/lib/parents/contact-take-in.ts#takeInAsksForARead": "a claim: when the take-in of contact details last asked the worker for a roster read, so it asks at most once an hour; the read is audited (roster.refresh), and so is the take-in (parent.details.taken_in)",
   // Setup's and the connection's own progress, before the thing they lead to is done (and audited).
   "src/lib/setup/state.ts#updateSetupState": "which step of the first-run setup is showing; what the steps save (the first Admin, the keys) is audited",
   "src/lib/quickbooks/connection.ts#beginConnect": "the single-use state of a connection being started, before Intuit answers; the connection made (quickbooks.connect) is audited",

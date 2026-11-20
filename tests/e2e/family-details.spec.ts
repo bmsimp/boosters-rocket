@@ -1,27 +1,28 @@
 import { test, expect, type Page } from "@playwright/test";
 import postgres from "postgres";
+import { E2E_DETAILS } from "./details-seed";
 import { PARENT_SESSION_FAMILY, parentSessionCookie } from "./parent-session";
 
 const sql = postgres(process.env.DATABASE_URL!);
-test.afterAll(async () => { await sql.end(); });
 
-// The seeded session (scripts/seed-e2e.ts) is Zelda's, with the Quetzalcoatl family chosen, and her link names her own
-// QuickBooks record, E2E-P1. The edit page reads that record from QuickBooks as it opens. This run's QuickBooks
-// connection holds made-up tokens, so the page must never ask: it doesn't, because an id that isn't digits is never
-// sent to QuickBooks (tests/integration/family-details-page.test.ts proves that against a stub, and covers the form
-// and the save; tests/integration/contact-edits.test.ts covers the action). What a browser can check here is the way
-// to the page, and the page when the club's books can't be reached. Nothing here changes anything, so both passes of
-// the run find the seed as it was.
-const CANT_REACH = "We can't reach the club's books right now, so your details can't be changed here just yet. Please try again in a little while.";
+// The seeded session (scripts/seed-e2e.ts) is Zelda's, with the Quetzalcoatl family chosen. Her phone and mailing
+// address are the portal's own (stage 3's slice 11a), on her person row (E2E_DETAILS): the page shows them in its form,
+// and a save changes the portal alone, sending nothing to QuickBooks (tests/integration/contact-edits.test.ts proves
+// that against a stub). The save here changes her details, so each test that saves puts the seeded ones back after
+// it, and both passes of the run find the seed as it was.
 const isPhone = (page: Page) => (page.viewportSize()?.width ?? 0) < 760;
 const mainNav = (page: Page) => page.locator(isPhone(page) ? "nav.tabs" : "nav.top-nav");
 const noSidewaysScroll = async (page: Page) =>
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), `${page.url()} scrolls sideways`).toBe(false);
+/** Her details as the seed stores them, and the version nobody has changed. */
+const putBack = () => sql`UPDATE parent SET phone = ${E2E_DETAILS.phone}, address_line1 = ${E2E_DETAILS.line1}, address_line2 = null, address_city = ${E2E_DETAILS.city},
+  address_region = ${E2E_DETAILS.region}, address_postal_code = ${E2E_DETAILS.postalCode}, address_country = null, contact_version = 0 WHERE email = 'zelda@example.com'`;
+test.afterAll(async () => { await putBack(); await sql.end(); });
 
 test("the seeded parent's QuickBooks record has an id that is never sent to Intuit", async () => {
   const links = await sql`SELECT g.source_qbo_id FROM guardian g JOIN parent p ON p.id = g.parent_id WHERE p.email = 'zelda@example.com' AND g.family_qbo_id = ${PARENT_SESSION_FAMILY}`;
   expect(links).toHaveLength(1);
-  // If this fails, don't change it: a numeric id here makes the edit page call Intuit's real servers from this run.
+  // If this fails, don't change it: a numeric id here could send this run's requests to Intuit's real servers.
   expect(links[0]!.source_qbo_id).toBe("E2E-P1");
   expect(links[0]!.source_qbo_id).not.toMatch(/^\d+$/);
 });
@@ -45,11 +46,13 @@ test("an anonymous visitor is sent to sign in, with this page to come back to", 
 
 test.describe("signed in", () => {
   test.beforeEach(async ({ context }) => { await context.addCookies([parentSessionCookie()]); });
+  test.afterEach(async () => { await putBack(); });
 
-  test("Update my details leads from Family to the edit page, which says so kindly when the club's books can't be reached", async ({ page }) => {
+  test("Update my details leads from Family to the edit page, whose form holds the portal's own details", async ({ page }) => {
     await page.goto("/family");
     const details = page.getByRole("region", { name: "Your details" });
     await expect(details).toContainText("You can change your phone and mailing address yourself.");
+    await expect(details.locator("dd")).toHaveText(["Zelda Quetzalcoatl", "zelda@example.com", E2E_DETAILS.phone]);
     const link = details.getByRole("link", { name: "Update my details" });
     expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await link.click();
@@ -57,15 +60,20 @@ test.describe("signed in", () => {
     await expect(page).toHaveURL(/\/family\/details$/);
     await expect(page).toHaveTitle(/^Update your details · /);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Update your details");
-    await expect(page.locator("main .lede")).toHaveText("Your phone and mailing address, as the club's books have them. A change here goes straight to the club.");
+    await expect(page.locator("main .lede")).toHaveText("These are the details the club uses to reach you.");
+    // Nothing on the page speaks of the club's books.
+    await expect(page.getByRole("main")).not.toContainText(/club's books|QuickBooks/);
     const who = page.getByRole("region", { name: "You", exact: true });
     await expect(who.locator("dd")).toHaveText(["Zelda Quetzalcoatl", "zelda@example.com"]);
     await expect(who).toContainText("The club changes names and email addresses. Ask the club and they'll update them.");
 
-    // QuickBooks is out of reach for this run: the page says so in words, and offers nothing to fill in.
     const edit = page.getByRole("region", { name: "Phone and mailing address" });
-    await expect(edit.getByRole("status")).toHaveText(CANT_REACH);
-    await expect(page.locator("main form, main input, main button")).toHaveCount(0);
+    await expect(edit.getByLabel("Phone")).toHaveValue(E2E_DETAILS.phone);
+    await expect(edit.getByLabel("Address line 1")).toHaveValue(E2E_DETAILS.line1);
+    await expect(edit.getByLabel("City")).toHaveValue(E2E_DETAILS.city);
+    await expect(edit.getByLabel("State or region")).toHaveValue(E2E_DETAILS.region);
+    await expect(edit.getByLabel("ZIP or postal code")).toHaveValue(E2E_DETAILS.postalCode);
+    await expect(edit.getByRole("button", { name: "Save my details" })).toBeVisible();
     // The page belongs to Family: its tab stays marked, and nothing of her second family is here.
     await expect(mainNav(page).getByRole("link", { name: "Family", exact: true })).toHaveAttribute("aria-current", "page");
     await expect(page.getByRole("main")).not.toContainText(/Second Family|Wolfgang/);
@@ -76,6 +84,24 @@ test.describe("signed in", () => {
     await back.click();
     await expect(page).toHaveURL(/\/family$/);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
+  });
+
+  test("a change is saved in the portal, said in words, and shown on Family", async ({ page }) => {
+    await page.goto("/family/details");
+    const edit = page.getByRole("region", { name: "Phone and mailing address" });
+    await edit.getByLabel("Phone").fill("505-555-0199");
+    await edit.getByLabel("City").fill("Santa Fe");
+    await edit.getByRole("button", { name: "Save my details" }).click();
+    // The answer speaks of the portal only.
+    const saved = edit.getByRole("status");
+    await expect(saved).toHaveText("Saved. These are your details now.");
+    await expect(edit.getByLabel("Phone")).toHaveValue("505-555-0199");
+    const [row] = await sql`SELECT phone, address_city, contact_version FROM parent WHERE email = 'zelda@example.com'`;
+    expect(row).toEqual({ phone: "505-555-0199", address_city: "Santa Fe", contact_version: 1 });
+    await noSidewaysScroll(page);
+
+    await page.goto("/family");
+    await expect(page.getByRole("region", { name: "Your details" }).locator("dd")).toHaveText(["Zelda Quetzalcoatl", "zelda@example.com", "505-555-0199"]);
   });
 
   test("Home's details box leads there too", async ({ page }) => {

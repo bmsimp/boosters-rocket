@@ -33,15 +33,22 @@ const CHECK_FOLDER = "src/lib/quickbooks/sandbox-check/";
 /** What starts a run: the check itself, and the one Admin action on its page. */
 const CHECK_RUN = "runSandboxCheck";
 const MAY_START_CHECK = ["src/lib/quickbooks/sandbox-check/run.ts", "src/app/staff/(app)/settings/quickbooks/check/actions.ts"];
-/** The one function that sends a write to the QuickBooks API, and the constant that holds its address and body. */
+/** The first write: a sparse update of one customer's phone and billing address, and the constant that holds its address and body. */
 const WRITE = "qboUpdateCustomerContact";
-/** The only modules that may name that function: where it is written, and the parent's contact edits that call it. */
-const MAY_SEND_THE_WRITE = [CLIENT, CONTACT_EDITS, CHECK_WRITER];
+/**
+ * The only modules that may name that function: where it is written, and the check of the portal's requests. Since
+ * stage 3's slice 11a a guardian's phone and address are the portal's own, saved by the parent's contact edits in the
+ * portal alone, and nothing sends them to QuickBooks until S11b names its sender here on purpose.
+ */
+const MAY_SEND_THE_WRITE = [CLIENT, CHECK_WRITER];
 /** What reaches the contact edits' save from a browser: the parent's own server action, and nothing else. */
 const SAVE = "saveMyContact";
 const MAY_SAVE = [CONTACT_EDITS, "src/app/(parent)/family/details/actions.ts"];
-/** Everything the contact edits may export. A second exported function is a second way to the write. */
+/** Everything the contact edits may export. A second exported function would be a second way to change a person's details. */
 const CONTACT_EDITS_EXPORTS = ["CONTACT_COPY", "ContactView", "SaveContactResult", "loadMyContact", SAVE];
+/** Every write the client sends, by its function's name: the contact edits name none of them (stage 3's slice 11a). */
+const CLIENT_WRITES = ["qboUpdateCustomerContact", "qboUpdateCustomerEmail", "qboCreateCustomer", "qboRenameCustomer", "qboMoveCustomer", "qboSetCustomerActive",
+  "qboCreateInvoice", "qboVoidInvoice"];
 
 /**
  * The second write, decided in the slice brief of 2026-11-16 (roadmap step 5): a parent's own sign-in email, a sparse
@@ -240,25 +247,15 @@ function exportedFunction(source: string, name: string): string {
 }
 
 /**
- * What is wrong with how the contact edits reach the write; nothing when the write is imported under its own name,
- * called once, inside saveMyContact, for the record loadMyRecord(ctx) found for the session, and the module exports
- * nothing that could be a second way to it.
+ * What is wrong with the contact edits (stage 3's slice 11a: a guardian's phone and address saved in the portal alone);
+ * nothing when the module imports nothing from the QuickBooks client, names none of its writes, takes the session's
+ * ParentCtx first in its save, and exports nothing but its list.
  */
-function writerProblems(source: string): string[] {
+function contactEditsProblems(source: string): string[] {
   const text = code(source), problems: string[] = [];
-  const named = [...text.matchAll(new RegExp(`\\b${WRITE}\\b`, "g"))].length;
-  const imports = [...text.matchAll(/import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*["']@\/lib\/quickbooks\/client["']/g)].flatMap((m) => m[1]!.split(",").map((s) => s.trim()));
-  if (!imports.includes(WRITE)) problems.push(`${WRITE} is not imported under its own name`);
+  if (/from\s*["'][^"']*quickbooks\/client["']|import\(\s*["'][^"']*quickbooks\/client["']|require\(\s*["'][^"']*quickbooks\/client["']/.test(text)) problems.push("imports the QuickBooks client");
+  for (const name of CLIENT_WRITES) if (new RegExp(`\\b${name}\\b`).test(text)) problems.push(`names ${name}`);
   const save = exportedFunction(source, SAVE);
-  const calls = [...save.matchAll(new RegExp(`\\b${WRITE}\\s*\\(\\s*([^,)]*)`, "g"))].map((m) => m[1]!.trim());
-  if (calls.length !== 1) problems.push(`${SAVE} calls ${WRITE} ${calls.length} times, not once`);
-  else if (calls[0] !== "record.qboId") problems.push(`${WRITE} is called for ${calls[0]}, not for record.qboId`);
-  // Once to import it and once to call it. A third mention is another call, another name for it, or a way to hand it on.
-  if (named !== 2) problems.push(`${WRITE} is named ${named} times: once to import it and once to call it is all`);
-  // `record` is the session's own, and stays so.
-  const OWN = "const record = await loadMyRecord(ctx);";
-  if (save.split(OWN).length !== 2) problems.push(`${SAVE} does not get its record from loadMyRecord(ctx), once`);
-  if (/\b(?:const|let|var)\s+record\b|\brecord\s*=[^=>]|\brecord\.qboId\s*=[^=]/.test(save.replace(OWN, ""))) problems.push(`${SAVE} gives record another value`);
   if (!/^export async function saveMyContact\(ctx: ParentCtx, /.test(save)) problems.push(`${SAVE} does not take the session's ParentCtx first`);
   const exported = [...text.matchAll(/^export\s+(?:declare\s+)?(?:async\s+)?(?:function\*?|const|let|var|class|type|interface|enum)\s+(\w+)/gm)].map((m) => m[1]!);
   if ([...exported].sort().join() !== [...CONTACT_EDITS_EXPORTS].sort().join()) problems.push(`exports ${exported.join(", ")}`);
@@ -271,7 +268,7 @@ function writerProblems(source: string): string[] {
  * called once, inside the confirmation, for the record loadMyRecordForMyEmailChange(ctx) found for the session (its own
  * record by the address it signs in with, or while the record's email field reads as its own live change: only this
  * module may ask for that, tests/unit/my-record-for-email-change.test.ts), and the module exports nothing but its list.
- * The checks of writerProblems(), for the second write.
+ * The checks the first write's sender in the contact edits was held to until stage 3's slice 11a, for the second write.
  */
 function emailWriterProblems(source: string): string[] {
   const text = code(source), problems: string[] = [];
@@ -405,10 +402,11 @@ function checkWriterProblems(source: string): string[] {
   }
   return problems;
 }
-describe("the portal writes one thing to QuickBooks: a parent's own phone and address (v1 spec §6.2)", () => {
+describe("what the portal writes to QuickBooks, and who may send each", () => {
   const everything = read("src");
-  // src/lib/money reads invoices for parents, and src/lib/parents/contact-edits.ts reads and changes a parent's own
-  // record: scanned with the rest, on purpose. A new folder that calls QuickBooks is found by the test below.
+  // src/lib/money reads invoices for parents, and src/lib/parents/contact-edits.ts, which changed a parent's own record
+  // until stage 3's slice 11a and names none of the client's writes since (contactEditsProblems()), and email-change.ts:
+  // scanned with the rest, on purpose. A new folder that calls QuickBooks is found by the test below.
   const sources = [...read("src/lib/quickbooks"), ...read("src/lib/roster"), ...read("src/lib/jobs"), ...read("src/lib/money"), ...read("src/lib/buyouts"),
     ...everything.filter((s) => s.file === CONTACT_EDITS || s.file === EMAIL_CHANGE)];
   const clientSource = sources.find((s) => s.file === CLIENT)!.text;
@@ -473,19 +471,18 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
     expect(bodyProblems(updateConstant(clientSource))).toEqual([]);
   });
 
-  it("lets only the parent's contact edits send it, and only the parent's own action save through them", () => {
+  it("lets only the check of the portal's requests send it, and only the parent's own action save through the contact edits", () => {
     const naming = (name: string) => everything.filter((s) => new RegExp(`\\b${name}\\b`).test(code(s.text))).map((s) => s.file).sort();
-    expect(naming(WRITE), `${WRITE} is the portal's one write to QuickBooks. A new caller is a decision for a slice brief, not a fix made in passing.`).toEqual([...MAY_SEND_THE_WRITE].sort());
+    expect(naming(WRITE), `${WRITE} has no sender in the portal until S11b. A new caller is a decision for a slice brief, not a fix made in passing.`).toEqual([...MAY_SEND_THE_WRITE].sort());
     expect(naming(SAVE)).toEqual([...MAY_SAVE].sort());
     // Nobody reaches the client's write by taking the module whole.
     for (const s of everything) expect(code(s.text), s.file).not.toMatch(/import\s*\*\s*as\s+\w+\s+from\s*["'][^"']*quickbooks\/client["']|import\(\s*["'][^"']*quickbooks\/client["']\s*\)|require\(\s*["'][^"']*quickbooks\/client["']\s*\)/);
   });
 
-  it("sends it from one place in the contact edits, for the session's own record, and the module is no second way to it", () => {
-    // Naming the module is not enough: a second exported function in it could send the write for any customer, and
-    // any staff page could then call that. So the write is called once, in saveMyContact, for the record
-    // loadMyRecord(ctx) found, and the module exports nothing but its two functions, its copy and its types.
-    expect(writerProblems(contactEdits)).toEqual([]);
+  it("the contact edits send nothing to QuickBooks, and the module is no way to it (stage 3's slice 11a)", () => {
+    // A guardian's phone and address are the portal's own: the contact edits import nothing from the client, name none
+    // of its writes, and export nothing but their two functions, their copy and their types.
+    expect(contactEditsProblems(contactEdits)).toEqual([]);
     // The client itself only defines the write: nothing in it calls it.
     expect([...client.matchAll(new RegExp(`\\b${WRITE}\\b`, "g"))]).toHaveLength(1);
   });
@@ -739,38 +736,27 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
       expect(fetchCalls(clientSource)).toHaveLength(6);
     });
 
-    it("a second way to the write through the contact edits", () => {
-      expect(writerProblems(contactEdits)).toEqual([]);
+    it("a way to QuickBooks through the contact edits", () => {
+      expect(contactEditsProblems(contactEdits)).toEqual([]);
       const added = (more: string) => `${contactEdits}\n${more}\n`;
-      // loadMyContact gets its record the same way: these cases change the save, which is the one that writes.
       const cut = contactEdits.indexOf(`export async function ${SAVE}(`);
-      const inSave = (from: string, to: string) => contactEdits.slice(0, cut) + contactEdits.slice(cut).replace(from, to);
-      const OWN = "const record = await loadMyRecord(ctx);";
       const refused = [
-        // A second sender, for any customer: the case the old check passed.
-        added(`export async function staffSaveContact(qboId: string, version: string, change: CustomerContactChange) { return qboUpdateCustomerContact(qboId, version, change, { realmId: "1" }); }`),
-        added(`async function alsoSend(qboId: string) { return qboUpdateCustomerContact(qboId, "0", { phone: "" }, { realmId: "1" }); }`),
-        // The write handed on under another name.
-        added(`export const sendContact = qboUpdateCustomerContact;`),
-        added(`export { qboUpdateCustomerContact };`),
-        added(`export { qboUpdateCustomerContact as sendContact } from "@/lib/quickbooks/client";`),
+        // The write imported and called, from a function of its own or from the save.
+        added(`import { qboUpdateCustomerContact } from "@/lib/quickbooks/client";\nasync function alsoSend(qboId: string) { return qboUpdateCustomerContact(qboId, "0", { phone: "" }, { realmId: "1" }); }`),
+        added(`async function viaImport(qboId: string) { const c = await import("@/lib/quickbooks/client"); return c.qboUpdateCustomerContact(qboId, "0", {}, { realmId: "1" }); }`),
+        contactEdits.slice(0, cut) + contactEdits.slice(cut).replace("const parsed = parseContactForm(input);", "const parsed = parseContactForm(input);\n  await qboUpdateCustomerEmail(\"1\", \"0\", \"\", { realmId: \"1\" });"),
+        added(`import { qboRenameCustomer as rename } from "@/lib/quickbooks/client";`),
+        // A second way in: another export, a re-export, a default.
+        added(`export async function staffSaveContact(parentId: string, input: unknown) { return { parentId, input }; }`),
+        added(`export { saveMyContact as save };`),
         added(`export * from "@/lib/quickbooks/client";`),
         added(`export default saveMyContact;`),
-        // Another export, harmless or not: every export is on the list.
-        added(`export async function saveContactFor(ctx: ParentCtx, qboId: string) { return qboId; }`),
-        // The one call, made for another record.
-        contactEdits.replace("qboUpdateCustomerContact(record.qboId,", "qboUpdateCustomerContact(input.qboId,"),
-        contactEdits.replace("qboUpdateCustomerContact(record.qboId,", "qboUpdateCustomerContact(record.parentQboId,"),
-        inSave(OWN, `${OWN}\n  record.qboId = String((input as { id: string }).id);`),
-        inSave(OWN, "const record = await recordFor(input);"),
-        inSave(OWN, "let record = await loadMyRecord(ctx);\n  record = await recordFor(input);"),
-        inSave(OWN, `${OWN}\n  if (input) { const record = await recordFor(input); await qboUpdateCustomerContact(record.qboId, version, {}, { realmId: "1" }); }`),
-        // The write imported under another name.
-        contactEdits.replace("qboUpdateCustomerContact, type CustomerContactChange", "qboUpdateCustomerContact as send, type CustomerContactChange").replace("await qboUpdateCustomerContact(record.qboId,", "await send(record.qboId,"),
+        // The save taking something else first.
+        contactEdits.replace(`export async function ${SAVE}(ctx: ParentCtx, `, `export async function ${SAVE}(parentId: string, ctx: ParentCtx, `),
       ];
       for (const source of refused) {
         expect(source, "the case didn't change the module").not.toBe(contactEdits);
-        expect(writerProblems(source), `case ${refused.indexOf(source)}`).not.toEqual([]);
+        expect(contactEditsProblems(source), `case ${refused.indexOf(source)}`).not.toEqual([]);
       }
     });
 

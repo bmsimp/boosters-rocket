@@ -18,8 +18,8 @@ import { codeFor } from "./journey-helpers";
  *
  * Run in the desktop pass only, at 1440 wide: tests/e2e/parent-a11y.spec.ts walks every page with Tab at 360 for the
  * phone's tab bar. Not walked here, because the run can't reach them: agreeing to sign and signing in Documenso's frame
- * (forms are not set up in the seed), and saving the phone and address form (QuickBooks is never reached; the details
- * page shows only its note). The seed is left as it was found, or in a state the other specs accept: the sign-up is
+ * (forms are not set up in the seed). The phone and address form is walked to its Save button and not pressed: a save
+ * changes the seed, and tests/e2e/family-details.spec.ts saves it and puts it back. The seed is left as it was found, or in a state the other specs accept: the sign-up is
  * cancelled again, the check-in is left done (tests/e2e/check-in.spec.ts passes from either state), and the email
  * change's settings and seeded request are put back as tests/e2e/family-email.spec.ts puts them.
  */
@@ -276,7 +276,7 @@ test("a parent's journeys by keyboard alone: sign in, Home to Payments, a form, 
     ringsShown();
   });
 
-  await test.step("6. Family: opens Update my details, reads why it can't be changed from this run, and goes back", async () => {
+  await test.step("6. Family: opens Update my details, reaches its form, and goes back", async () => {
     await fromTheTop(page);
     await tabTo(page, bar(page, "Family"));
     await page.keyboard.press("Enter");
@@ -284,7 +284,10 @@ test("a parent's journeys by keyboard alone: sign in, Home to Payments, a form, 
     await tabTo(page, page.getByRole("link", { name: "Update my details" }));
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/\/family\/details$/);
-    await expect(page.locator("main")).toContainText("can't be changed here just yet");
+    // The details are the portal's own (stage 3's slice 11a), so the form is there: its first field and its save are each reached.
+    // By the field's role and exact name: the section's heading ("Phone and mailing address") names the section too.
+    await tabTo(page, page.getByRole("main").getByRole("textbox", { name: "Phone", exact: true }));
+    await tabTo(page, page.getByRole("button", { name: "Save my details" }));
     await tabTo(page, page.getByRole("main").getByRole("link", { name: "Back to Family" }));
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/\/family$/);

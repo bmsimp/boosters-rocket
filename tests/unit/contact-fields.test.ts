@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { CONTACT_FIELDS, NOT_THE_FORM, asShown, fieldErrors, parseContactForm, sameAddress, samePhone, type ContactValues } from "@/lib/parents/contact-fields";
 
 const GOOD: ContactValues = { phone: "512-555-0171", line1: "12 Heron Lane", line2: "", city: "Austin", region: "TX", postalCode: "78745", country: "" };
-const sent = (over: Record<string, unknown> = {}) => ({ ...GOOD, version: "3", ...over });
+const sent = (over: Record<string, unknown> = {}) => ({ ...GOOD, version: "p:3", ...over });
 const without = (name: string) => Object.fromEntries(Object.entries(sent()).filter(([field]) => field !== name));
 const at = (code: number) => String.fromCodePoint(code);
 /** The form read, then every field checked as one the parent typed: what a save does with a form none of which is as it was shown. */
@@ -15,15 +15,15 @@ const checked = (input: unknown) => {
 
 describe("parseContactForm: what a browser sends for a parent's phone and address", () => {
   it("takes the form's fields as trimmed text, with the version it was shown", () => {
-    expect(parseContactForm(sent({ phone: "  512-555-0171 ", city: "\tAustin\n" }))).toEqual({ ok: true, form: { values: GOOD, version: "3" } });
+    expect(parseContactForm(sent({ phone: "  512-555-0171 ", city: "\tAustin\n" }))).toEqual({ ok: true, form: { values: GOOD, version: "p:3" } });
     // Everything may be empty: an empty field is a cleared one.
     const empty = Object.fromEntries(CONTACT_FIELDS.map((f) => [f.name, ""])) as ContactValues;
-    expect(parseContactForm({ ...empty, version: "0" })).toEqual({ ok: true, form: { values: empty, version: "0" } });
+    expect(parseContactForm({ ...empty, version: "f:0" })).toEqual({ ok: true, form: { values: empty, version: "f:0" } });
   });
 
   it("reads nothing but its own fields: an id sent along is not in what comes out", () => {
     const parsed = parseContactForm(sent({ id: "8011", Id: "8011", customerId: "8011", familyQboId: "8010" }));
-    expect(parsed).toEqual({ ok: true, form: { values: GOOD, version: "3" } });
+    expect(parsed).toEqual({ ok: true, form: { values: GOOD, version: "p:3" } });
     expect(JSON.stringify(parsed)).not.toMatch(/8011|8010/);
   });
 
@@ -47,7 +47,7 @@ describe("parseContactForm: what a browser sends for a parent's phone and addres
 
   it("keeps what is only text: markup, quotes, accents, other scripts, an emoji", () => {
     for (const text of ["<img src=x onerror=alert(1)>", `"quoted" & 'single'`, "Zoë Ångström", "東京都", "🏠 home", "+1 (512) 555-0171 ext. 22", "a  b"]) {
-      expect(checked(sent({ line1: text })), text).toEqual({ ok: true, form: { values: { ...GOOD, line1: text }, version: "3" } });
+      expect(checked(sent({ line1: text })), text).toEqual({ ok: true, form: { values: { ...GOOD, line1: text }, version: "p:3" } });
     }
     // A decomposed accent is stored composed, so the same address typed two ways compares equal.
     expect(parseContactForm(sent({ city: `Zoe${at(0x308)}` }))).toMatchObject({ ok: true, form: { values: { city: `Zo${at(0xeb)}` } } });
@@ -61,7 +61,9 @@ describe("parseContactForm: what a browser sends for a parent's phone and addres
   it("refuses anything that isn't the form, with one answer that says nothing about why", () => {
     const notTheForm = [
       null, undefined, "phone=1", 7, [], [sent()], new Map(Object.entries(sent())),
-      sent({ version: undefined }), sent({ version: 3 }), sent({ version: "" }), sent({ version: "3a" }), sent({ version: "-1" }), sent({ version: " 3" }), sent({ version: "1".repeat(21) }),
+      sent({ version: undefined }), sent({ version: 3 }), sent({ version: "" }), sent({ version: "p:3a" }), sent({ version: "p:-1" }), sent({ version: " p:3" }), sent({ version: `p:${"1".repeat(21)}` }),
+      // A version that doesn't say whose details it carries (a bare number, as pages drew it before), or names nobody.
+      sent({ version: "3" }), sent({ version: "x:3" }), sent({ version: "P:3" }), sent({ version: "p:" }), sent({ version: "p:3:f" }),
       sent({ phone: undefined }), sent({ phone: null }), sent({ phone: 5125550171 }), sent({ phone: ["512"] }), sent({ phone: { toString: () => "512" } }),
       sent({ line2: "x".repeat(2001) }), without("city"), without("country"),
     ];

@@ -300,7 +300,11 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
     }
     // A guardian is added under Portal sign-ins, which makes their Parent customer: the QuickBooks-only form is gone.
     expect(html).not.toContain("Add a parent");
-    expect(html).toContain(NOT_HERE.contact);
+    // A guardian's phone and address are the portal's own (stage 3's slice 11a): nothing says they are changed in QuickBooks.
+    expect(html).toContain(NOT_HERE.contact.replaceAll("'", "&#x27;"));
+    expect(NOT_HERE.contact).toMatch(/phone and mailing address are the portal's own: they change them themselves on their Family page/);
+    expect(html).not.toMatch(/phone numbers and mailing addresses are changed in QuickBooks/);
+    expect(html).toContain("Phone in QuickBooks");
   });
 
   it("offers a Parent sub-customer its changes with no sign-in behind it, and a family with no QuickBooks customer the portal's own changes alone (stage 3's slice 9d)", async () => {

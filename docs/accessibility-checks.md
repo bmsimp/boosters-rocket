@@ -20,13 +20,13 @@ in the page's order, and a page the keyboard can't Tab out of; and after each ac
 | 3. Opening a form | The family's signed form opened by keyboard; its page title is the form's name; the download and Back to Forms are reached. Agreeing and Documenso's frame are not: forms are not set up in the seed (below). |
 | 4. Signing up for a shift and cancelling | The choice group is one stop, then Sign me up; the thank-you takes the focus. Cancel my sign-up puts the focus on Keep it, inside the group "Cancel my sign-up?"; Keep it gives it back; Shift+Tab reaches Yes, cancel it; the cancelled message takes the focus. |
 | 5. Checking in | Check me in by Enter; the box's status line takes the focus; Tab then leaves the page. |
-| 6. The details form | Family, Update my details and Back to Family by keyboard. The form itself is not: the run can't reach QuickBooks, so the page shows only its note (below). |
+| 6. The details form | Family, Update my details, the form's first field and its Save, and Back to Family by keyboard. Since stage 3's slice 11a the details are the portal's own, so the browser run shows the form (below). |
 | 7. The email change | An address with no "@" keeps the focus in the field; the good one is announced with the focus left on Send me a link; on the emailed link's page, the refused Yes keeps the focus with its alert. |
 | 8. The Display page | Each choice group is one stop and the arrow keys choose (Dark sets `data-theme="dark"`, Match my device takes it off); Contrast, Text size and Motion follow, then Sign out, which signs out. |
 
 Still walked only by hand, or not at all, because the browser run can't reach the service: agreeing to sign and the
 signing frame (journey 3's second half, against the local Documenso as in step 6), saving the phone and address form
-(journey 6), and paying instead of volunteering (journey 9).
+by keyboard (journey 6; the form itself is reached since stage 3's slice 11a), and paying instead of volunteering (journey 9).
 
 Found while making it: a form's page was titled "Form", and every page made the keyboard pass the club bar's stops
 first. A form's page is now titled with its name, and every club bar that has links starts with "Skip to the page",
@@ -125,9 +125,9 @@ on staff pages too (both were "For later" in the section below).
 
 - Family's order: the club bar, Switch family, Update my details, Switch family (the account box). Rings in every
   mode.
-- The browser run can't reach QuickBooks (the seed's ids are not digits, so nothing is sent to Intuit), so the details
-  page shows only its note ("We can't reach the club's books right now…", a status) and "Back to Family". The form
-  itself was not walked in a browser. Read in the code and fixed: each answer draws the fields again, so the field or
+- When this was walked the browser run couldn't reach QuickBooks, so the details page showed only its note and "Back
+  to Family". Since stage 3's slice 11a the details are the portal's own and the page shows its form in the browser
+  run: `keyboard-journeys.spec.ts` reaches its first field and its Save, and `family-details.spec.ts` saves a change. Read in the code and fixed: each answer draws the fields again, so the field or
   button that had the focus was gone; the answer (saved, or what went wrong) now takes the focus, and Save is
   `aria-disabled` while busy. Each field has a visible label, the browser's autofill names (`tel`,
   `address-line1`…), and the two optional ones say so.

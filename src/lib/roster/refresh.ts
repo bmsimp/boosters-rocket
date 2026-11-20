@@ -5,7 +5,9 @@ import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getConnection } from "@/lib/quickbooks/connection";
 import { qboQueryAll, qboCustomerTypes } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
-import { getShape, shapeTypeIds, ROSTER_LOCK } from "./shape";
+import { billingAddressOf } from "@/lib/parents/contact-fields";
+import { noteAddressesKept } from "@/lib/parents/contact-take-in";
+import { getShape, shapeTypeIds, ROSTER_LOCK, NO_ADDRESS_COLUMNS } from "./shape";
 import { clearRosterOfOtherCompanyLocked, getRosterSource, ROSTER_JOB, setRosterSource } from "./source";
 
 export { ROSTER_LOCK, ROSTER_JOB };
@@ -27,7 +29,20 @@ type TypeRowIn = { qboId: string; name: string; active: boolean; refreshedAt: Da
 type CustomerRowIn = NonNullable<ReturnType<typeof customerRow>>;
 /** The answer held no customers while the cache, read from the same company, holds some. Thrown inside the save, so nothing of it is kept. */
 class NoCustomersInAnswer extends Error {}
-/** One customer of a QuickBooks answer as the cache holds it (spec §2): contact details only for a customer the shape names. Null without an Id. */
+/**
+ * The billing address of a customer QuickBooks sent, as the cache's columns hold it: as the parent's form shows an
+ * address (billingAddressOf()), each part that is empty kept as null.
+ */
+function addressColumns(c: Raw) {
+  const a = billingAddressOf(c);
+  return { addressLine1: a.line1 || null, addressLine2: a.line2 || null, addressCity: a.city || null, addressRegion: a.region || null,
+    addressPostalCode: a.postalCode || null, addressCountry: a.country || null };
+}
+
+/**
+ * One customer of a QuickBooks answer as the cache holds it (spec §2): contact details (email, phone and, since stage
+ * 3's slice 11a, the billing address) only for a customer the shape names. Null without an Id.
+ */
 export function customerRow(c: Raw, named: Set<string>, now: Date) {
   const qboId = text(c.Id, 64);
   if (!qboId) return null;
@@ -38,6 +53,7 @@ export function customerRow(c: Raw, named: Set<string>, now: Date) {
     qboId, displayName: text(c.DisplayName, 500) ?? `Customer ${qboId}`, active: isActive(c.Active), parentQboId: ref(c.ParentRef), typeQboId,
     email: keep ? text((c.PrimaryEmailAddr as { Address?: unknown } | undefined)?.Address, 320)?.toLowerCase() ?? null : null,
     phone: keep ? text((c.PrimaryPhone as { FreeFormNumber?: unknown } | undefined)?.FreeFormNumber, 50) : null,
+    ...(keep ? addressColumns(c) : NO_ADDRESS_COLUMNS),
     syncToken: text(c.SyncToken, 20) ?? "0", qboUpdatedAt: updated && !Number.isNaN(Date.parse(updated)) ? new Date(updated) : null, refreshedAt: now,
   };
 }
@@ -124,12 +140,15 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
         // Another company's cache was just cleared, and a new company may truly have no customers yet. Otherwise the
         // customers in the cache are this company's, and an answer without one of them is not believed.
         if (!cleared && customerRows.length === 0 && (await sp.select({ qboId: qboCustomer.qboId }).from(qboCustomer).limit(1)).length > 0) throw new NoCustomersInAnswer();
-        const rows = cleared ? customerRows.map((r) => ({ ...r, email: null, phone: null })) : customerRows;
+        const rows = cleared ? customerRows.map((r) => ({ ...r, email: null, phone: null, ...NO_ADDRESS_COLUMNS })) : customerRows;
         await sp.delete(qboCustomerType);
         await sp.delete(qboCustomer);
         for (let i = 0; i < typeRows.length; i += CHUNK) await sp.insert(qboCustomerType).values(typeRows.slice(i, i + CHUNK)).onConflictDoNothing();
         for (let i = 0; i < rows.length; i += CHUNK) await sp.insert(qboCustomer).values(rows.slice(i, i + CHUNK)).onConflictDoNothing();
         await setRosterSource(sp, realmId);
+        // The cache holds the billing addresses this build keeps (none where it was just cleared): the take-in of
+        // contact details waits for such a read, not for any successful one (src/lib/parents/contact-take-in.ts).
+        if (!cleared) await noteAddressesKept(sp, run!.startedAt);
       });
     } catch (e) {
       return e instanceof NoCustomersInAnswer

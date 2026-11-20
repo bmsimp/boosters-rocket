@@ -21,7 +21,7 @@ const DATABASE_WORK = 300_000;
 const { name: NAME, url: DB_URL } = scratchDatabase("migrate_moves");
 const folders: string[] = [];
 
-/** The migrations folder as it was up to `last` (by index). */
+/** The migrations folder as it was up to `last` (by index): these tests run up to 0042, since a later migration is its own test's. */
 function migrationsUpTo(last: number): string {
   const folder = mkdtempSync(path.join(tmpdir(), "br-migrate-moves-"));
   folders.push(folder);
@@ -83,7 +83,7 @@ describe("migration 0042: a move is saved in the portal first", { timeout: 60_00
     const held = await queue();
     const appliedBefore = await applied();
     const refusedWith = async (count: number) => {
-      const failure = await failureOf(migrateWith(path.resolve("drizzle")));
+      const failure = await failureOf(migrateWith(migrationsUpTo(42)));
       expect(saidBy(failure)).toContain(`Migration 0042 stopped, and changed nothing: ${count} staff move(s) of a student are still waiting or stuck on the queue.`);
       expect(saidBy(failure)).toContain(`Clear them on the Reconciliation page, with "Try again now" or "Give up", then update again.`);
       // The database is exactly at the one before: 0041 applied, 0042 not.
@@ -104,7 +104,7 @@ describe("migration 0042: a move is saved in the portal first", { timeout: 60_00
   it("goes through with every other kind on the queue, changing no row", async () => {
     const held = await queue();
     const appliedBefore = await applied();
-    await migrateWith(path.resolve("drizzle"));
+    await migrateWith(migrationsUpTo(42));
     expect(await applied()).toBe(appliedBefore + 1);
     expect(await queue()).toEqual(held);
     expect(held.map((r) => r.state as string).sort()).toEqual(PASSING.map(([state]) => state).sort());
@@ -115,7 +115,7 @@ describe("migration 0042: a move is saved in the portal first", { timeout: 60_00
     await q((pg) => pg`DELETE FROM drizzle.__drizzle_migrations WHERE id = (SELECT max(id) FROM drizzle.__drizzle_migrations)`);
     await q((pg) => pg`DELETE FROM setting WHERE key = 'roster.source'`);
     const waiting = await queueItem("waiting", MOVE, "C2");
-    await migrateWith(path.resolve("drizzle"));
+    await migrateWith(migrationsUpTo(42));
     await removeItem(waiting);
   });
 });

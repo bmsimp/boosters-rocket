@@ -8,6 +8,7 @@ import { E2E_VOLUNTEER } from "../tests/e2e/volunteer-seed";
 import { E2E_BUYOUT } from "../tests/e2e/buyout-seed";
 import { E2E_SIGNED_PDF } from "../tests/e2e/signed-forms-seed";
 import { E2E_EMAIL, emailTokenHash } from "../tests/e2e/email-seed";
+import { E2E_DETAILS } from "../tests/e2e/details-seed";
 import { appRecordsFillStatements } from "../tests/helpers/app-records-fill";
 
 /**
@@ -34,14 +35,16 @@ async function main() {
   const tables = (await sql`SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'role'`).map((r) => r.tablename as string);
   await sql.unsafe(`TRUNCATE ${tables.map((t) => `"${t.replaceAll('"', '""')}"`).join(", ")} RESTART IDENTITY CASCADE`);
   await sql`DELETE FROM role WHERE builtin = false`;
-  const [p] = await sql`INSERT INTO parent (name, email) VALUES ('Zelda Quetzalcoatl', 'zelda@example.com')
+  // Her phone and mailing address are the portal's own (stage 3's slice 11a), on her person row: /family/details shows
+  // them in its form and saves a change in the portal alone (tests/e2e/family-details.spec.ts puts them back).
+  const [p] = await sql`INSERT INTO parent (name, email, phone, address_line1, address_city, address_region, address_postal_code)
+          VALUES ('Zelda Quetzalcoatl', 'zelda@example.com', ${E2E_DETAILS.phone}, ${E2E_DETAILS.line1}, ${E2E_DETAILS.city}, ${E2E_DETAILS.region}, ${E2E_DETAILS.postalCode})
           ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name RETURNING id`;
   await sql`INSERT INTO parent_auth_user (id, name, email, email_verified, parent_id)
           VALUES (${crypto.randomUUID()}, 'Zelda Quetzalcoatl', 'zelda@example.com', true, ${p!.id}) ON CONFLICT (parent_id) DO NOTHING`;
-  // Each link names the QuickBooks record it came from (E2E-P1, E2E-P2 below): "Your details" then offers "Update my
-  // details" in both passes of the run. Those ids are not numbers on purpose. The edit page reads a parent's record from QuickBooks as it
-  // opens, and an id that isn't digits is never sent: with the made-up tokens below, a number here would send this
-  // run's requests to Intuit's real servers (tests/e2e/family-details.spec.ts checks the id before it opens the page).
+  // Each link names the QuickBooks record it came from (E2E-P1, E2E-P2 below). Those ids are not numbers on purpose: an
+  // id that isn't digits is never sent to QuickBooks, so with the made-up tokens below nothing of this run can reach
+  // Intuit's real servers (tests/e2e/family-details.spec.ts checks the id).
   await sql`INSERT INTO guardian (family_qbo_id, parent_id, is_primary, status, source_qbo_id) VALUES ('E2E-FAMILY', ${p!.id}, true, 'active', 'E2E-P1')
           ON CONFLICT (family_qbo_id, parent_id) DO NOTHING`;
   await sql`INSERT INTO guardian (family_qbo_id, parent_id, is_primary, status, source_qbo_id) VALUES ('E2E-FAMILY-2', ${p!.id}, false, 'active', 'E2E-P2')

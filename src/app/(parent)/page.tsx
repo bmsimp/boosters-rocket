@@ -4,7 +4,7 @@ import { canChangeMyEmail } from "@/lib/parents/email-change";
 import { firstName } from "@/lib/parents/first-name";
 import { getClubSettings } from "@/lib/settings/club";
 import { loadMySeason } from "@/lib/seasons/my-season";
-import { DetailsBox, FamilyStepBox, NotSetUpBox, RosterAsOf, StudentsBox } from "./family-boxes";
+import { DetailsBox, FamilyStepBox, NotSetUpBox, StudentsBox } from "./family-boxes";
 import { loadFamilyMoney } from "@/lib/money/family-money";
 import { loadMyBuyoutInvoices } from "@/lib/money/my-buyout-invoices";
 import { MoneySection } from "./money-box";
@@ -44,8 +44,7 @@ export default async function ParentHome() {
             {/* Only for a family the portal may show: when it may not, nothing of it is shown, money included. */}
             {money && <MoneySection money={money} buyouts={buyouts} more />}
             {family.students ? <StudentsBox students={family.students} season={season} /> : season && <FamilyStepBox season={season} />}
-            <DetailsBox who={family.me ?? { name: ctx.name, email: ctx.email, phone: null }} treasurerEmail={club.treasurerEmail} ownEmail={ownEmail && "family"} />
-            <RosterAsOf family={family} />
+            <DetailsBox who={family.me} treasurerEmail={club.treasurerEmail} ownEmail={ownEmail && "family"} />
           </>
         ) : <NotSetUpBox treasurerEmail={club.treasurerEmail} />}
       </main>

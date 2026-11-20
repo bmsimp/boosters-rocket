@@ -98,7 +98,7 @@ export function CreateBox({ shape, rosterTag, memberTypes, goes }: { shape: Memb
   if (shape.kind === "flat") {
     return (
       <section className="box" aria-labelledby="create-h"><h2 id="create-h">Make a member</h2>
-        <p>{addGoesWords(goes, "member", `member type${memberTypes.length > 1 ? " you choose" : ""}`)} Their email address and phone are added in QuickBooks.</p>
+        <p>{addGoesWords(goes, "member", `member type${memberTypes.length > 1 ? " you choose" : ""}`)} Their email address is added in QuickBooks. Their phone and mailing address are the portal&apos;s own: the member&apos;s guardians set them on their Family page.</p>
         <MemberForm types={goes === "sends" ? memberTypes : []} pendingLabel={pendingLabel} act={createAction.bind(null, rosterTag, "member")} />
       </section>
     );

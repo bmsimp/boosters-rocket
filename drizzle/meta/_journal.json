@@ -302,6 +302,20 @@
       "when": 1795119144029,
       "tag": "0042_moves_saved_first",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1795140148650,
+      "tag": "0043_session_device",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1795144777896,
+      "tag": "0044_contact_details_additive",
+      "breakpoints": true
     }
   ]
 }

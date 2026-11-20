@@ -1,11 +1,10 @@
-import type { MyContact, MyFamily, MyStudent } from "@/lib/parents/my-family";
+import type { MyContact, MyStudent } from "@/lib/parents/my-family";
 import type { MySeason } from "@/lib/seasons/my-season";
-import { LocalTime } from "../components/local-time";
 import { DoneCount, RequirementLines, SeasonFoot, StepState, asksAnything, currentStep } from "./season-parts";
 
 /**
- * The boxes Home and Family share. Server components: every name, address and number here is QuickBooks text or the
- * person's own, written as text only.
+ * The boxes Home and Family share. Server components: every name, address and number here is the portal's own record
+ * (a name or phone the take-in brought from QuickBooks among them) or the person's own, written as text only.
  */
 
 /**
@@ -68,9 +67,9 @@ function AskTheClub({ treasurerEmail }: { treasurerEmail: string | null }) {
 }
 
 /**
- * The person's own name, email and phone as QuickBooks has them, or as the portal knows them when their sign-in has no
- * QuickBooks record. A QuickBooks record (`who.edits`, set by loadMyFamily) gets the way to the page where its phone
- * and address are changed; the link carries no id, because that page takes the record from the session.
+ * The person's name and sign-in email with the phone the portal holds (their own, or their family's in books with no
+ * parent type), from the portal's own records (loadMyFamily()'s `me`). `who.edits` gets the way to the page where the
+ * phone and address are changed; the link carries no id, because that page takes whose they are from the session.
  * `ownEmail`: the person may change their sign-in email themselves (canChangeMyEmail), and the words say where: in the
  * box below (Family, which offers it) or on the Family page (Home).
  */
@@ -82,13 +81,14 @@ export function DetailsBox({ who, treasurerEmail, ownEmail = false }: { who: MyC
       <dl className="details">
         <dt>Name</dt><dd>{who.name}</dd>
         {who.email && <><dt>Email</dt><dd>{who.email}</dd></>}
-        {who.phone && <><dt>Phone</dt><dd className="num">{who.phone}</dd></>}
+        {/* In books with no parent type the phone is the family's, shared by its parents: said so beside the person's own name and email. */}
+        {who.phone && <><dt>{who.edits === "family" ? "Family phone" : "Phone"}</dt><dd className="num">{who.phone}</dd></>}
       </dl>
       {who.edits ? (
         <>
           <p className="help">{ownEmail
-            ? <>You can change your phone and mailing address yourself, and your sign-in email {ownEmail === "below" ? "below" : "on your Family page"}. The club changes your name for you. <AskTheClub treasurerEmail={treasurerEmail} /></>
-            : <>You can change your phone and mailing address yourself. The club changes your name and email for you. <AskTheClub treasurerEmail={treasurerEmail} /></>}</p>
+            ? <>You can change {who.edits === "family" ? "your family's" : "your"} phone and mailing address yourself, and your sign-in email {ownEmail === "below" ? "below" : "on your Family page"}. The club changes your name for you. <AskTheClub treasurerEmail={treasurerEmail} /></>
+            : <>You can change {who.edits === "family" ? "your family's" : "your"} phone and mailing address yourself. The club changes your name and email for you. <AskTheClub treasurerEmail={treasurerEmail} /></>}</p>
           <div className="box-foot"><a className="btn btn-line" href="/family/details">Update my details</a></div>
         </>
       ) : <p className="help">For now, the club makes changes for you. <AskTheClub treasurerEmail={treasurerEmail} /></p>}
@@ -105,14 +105,4 @@ export function NotSetUpBox({ treasurerEmail }: { treasurerEmail: string | null 
         soon{treasurerEmail ? <>, or email the treasurer at <a href={`mailto:${treasurerEmail}`}>{treasurerEmail}</a></> : null}.</p>
     </section>
   );
-}
-
-/**
- * Where the contact details come from, and when they were last read: the guardian's own record in the roster cache
- * (`me`). The family's name and its students are the portal's own records since stage 3's slice 9c, which a read of
- * QuickBooks doesn't change, so the line names only the details. Nothing when the time isn't known.
- */
-export function RosterAsOf({ family }: { family: MyFamily }) {
-  if (!family.rosterReadAt) return null;
-  return <p className="roster-asof">From the club&apos;s QuickBooks, as of <LocalTime iso={family.rosterReadAt} />: your contact details.</p>;
 }
