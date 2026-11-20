@@ -3,8 +3,8 @@ import type { MySeason } from "@/lib/seasons/my-season";
 import { DoneCount, RequirementLines, SeasonFoot, StepState, asksAnything, currentStep } from "./season-parts";
 
 /**
- * The boxes Home and Family share. Server components: every name, address and number here is QuickBooks text or the
- * person's own, written as text only.
+ * The boxes Home and Family share. Server components: every name, address and number here is the portal's own record
+ * (a name or phone the take-in brought from QuickBooks among them) or the person's own, written as text only.
  */
 
 /**
@@ -81,7 +81,8 @@ export function DetailsBox({ who, treasurerEmail, ownEmail = false }: { who: MyC
       <dl className="details">
         <dt>Name</dt><dd>{who.name}</dd>
         {who.email && <><dt>Email</dt><dd>{who.email}</dd></>}
-        {who.phone && <><dt>Phone</dt><dd className="num">{who.phone}</dd></>}
+        {/* In books with no parent type the phone is the family's, shared by its parents: said so beside the person's own name and email. */}
+        {who.phone && <><dt>{who.edits === "family" ? "Family phone" : "Phone"}</dt><dd className="num">{who.phone}</dd></>}
       </dl>
       {who.edits ? (
         <>

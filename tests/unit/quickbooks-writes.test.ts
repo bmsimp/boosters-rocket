@@ -404,8 +404,9 @@ function checkWriterProblems(source: string): string[] {
 }
 describe("what the portal writes to QuickBooks, and who may send each", () => {
   const everything = read("src");
-  // src/lib/money reads invoices for parents, and src/lib/parents/contact-edits.ts reads and changes a parent's own
-  // record: scanned with the rest, on purpose. A new folder that calls QuickBooks is found by the test below.
+  // src/lib/money reads invoices for parents, and src/lib/parents/contact-edits.ts, which changed a parent's own record
+  // until stage 3's slice 11a and names none of the client's writes since (contactEditsProblems()), and email-change.ts:
+  // scanned with the rest, on purpose. A new folder that calls QuickBooks is found by the test below.
   const sources = [...read("src/lib/quickbooks"), ...read("src/lib/roster"), ...read("src/lib/jobs"), ...read("src/lib/money"), ...read("src/lib/buyouts"),
     ...everything.filter((s) => s.file === CONTACT_EDITS || s.file === EMAIL_CHANGE)];
   const clientSource = sources.find((s) => s.file === CLIENT)!.text;

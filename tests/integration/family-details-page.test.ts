@@ -183,7 +183,9 @@ describe("Your details, on Family and on Home", () => {
     asParent(r.identity);
     const html = await renderPage(FamilyPage);
     expect(html).toContain("You can change your family&#x27;s phone and mailing address yourself");
-    expect(html).toContain(`<dt>Phone</dt><dd class="num">512-555-0199</dd>`);
+    // The phone is the family's, beside the person's own name and email: said so.
+    expect(html).toContain(`<dt>Family phone</dt><dd class="num">512-555-0199</dd>`);
+    expect(html).not.toContain("<dt>Phone</dt>");
     expect(html).toContain(LINK);
   });
 
