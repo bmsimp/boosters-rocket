@@ -2527,6 +2527,8 @@ async function tryContact(w: ContactWrite, realmId: string, o: { mayWait: boolea
  * press of "Send the portal's value" and "Try again now" all say it, and nothing is sent.
  */
 export const CONTACT_AWAITS_READ = "The portal is still waiting for its read of the phones and mailing addresses QuickBooks holds (the first since this version was installed, or since the membership shape was last saved), so nothing is sent for this yet. It goes once that read is done, usually within a few minutes.";
+/** What "Send the portal's value" says when a parent saved their details again meanwhile (trySavedItem()'s `superseded`). */
+export const CONTACT_SUPERSEDED_AT_PRESS = "Nothing was sent from this row: the parent saved their details again meanwhile, and that newer change, which carries everything this one did, has taken its place. The worker sends it on, and this page lists it if it doesn't go through.";
 /** The code a press keeps for it, which is never stored: the press puts the item back as it was kept. */
 const CONTACT_AWAITS_READ_CODE = "awaits_read";
 /** contactSendsMayGo() under the roster lock held shared, in a transaction of its own. */
@@ -2567,10 +2569,11 @@ export const CONTACT_NOT_OFFERED: Record<ContactNotOffered, string> = {
  * Parent customer (ownParentCustomer()'s rule); for a family's, the family record active, the customer still its own
  * linked customer of the family's type (a member's in flat books), and whoseDetails() still the family's; for both,
  * QuickBooks connected to the roster's company and the shape holding. A customer QuickBooks has inactive is no stop:
- * the try reads it live and keeps the change (INACTIVE_THERE_CODE). And, at a try (never at "Send the portal's value",
- * which sends the portal's details as they are), the details the change carries still the portal's (`superseded`
- * otherwise): an older change, one that may have been sent while a later one was saved, never lands after the later
- * one, even once that later one is given up. Null when it may go.
+ * the try reads it live and keeps the change (INACTIVE_THERE_CODE). And, at every try, "Send the portal's value"'s
+ * included (on purpose: a newer change carries every field this one does, so nothing is lost by it), the details the
+ * change carries still the portal's (`superseded` otherwise): an older change, one that may have been sent while a
+ * later one was saved, or one pressed while a parent saved again, never lands after the later one, even once that later
+ * one is given up. Null when it may go.
  */
 async function contactStops(w: ContactWrite, item: QueueRow): Promise<ContactStop | "await_read" | null> {
   return db.transaction(async (tx) => {
@@ -2688,10 +2691,11 @@ async function portalDetailsFor(tx: Tx, w: ContactWrite, item: Pick<QueueRow, "f
   return { ...(w.change.phone !== undefined ? { phone: now.phone } : {}), ...(w.change.address !== undefined ? { address: now.address } : {}) };
 }
 /** A contact change given up with nothing sent (contactStops()): audited, only while it is still waiting. */
-async function giveUpContact(item: QueueRow, why: ContactStop, o: { actor: Actor; ip: string | null; permission?: string }): Promise<void> {
+async function giveUpContact(item: QueueRow, why: ContactStop, sentBefore: boolean, o: { actor: Actor; ip: string | null; permission?: string }): Promise<void> {
   await db.transaction(async (tx) => {
-    // Its mark as maybe sent is taken back with it: this try sent nothing.
-    const [still] = await tx.update(writeQueue).set({ state: "given_up", sent: item.sent, note: CONTACT_STOP_NOTES[why], nextTryAt: null,
+    // Its mark as maybe sent is taken back with it, to what it was before this try (a press's own copy says sent): this
+    // try sent nothing.
+    const [still] = await tx.update(writeQueue).set({ state: "given_up", sent: sentBefore, note: CONTACT_STOP_NOTES[why], nextTryAt: null,
       finishedAt: new Date(), updatedAt: new Date() }).where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
     if (!still) return;
     await writeAudit({ actor: o.actor, action: "roster.write.given_up", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: item.id,
@@ -2956,7 +2960,8 @@ type Before = { request: RosterWrite; sent: boolean; lastCode: string | null; tr
  * `waiting`, for a later try (`sent`: QuickBooks may have made it, and it is looked for after a roster read first);
  * `stuck`, the worker's, as any item's; `refused`, kept, with who stopped it in its code (whoStopped()); `not_reached`,
  * "Send the portal's value" reached nothing, so the item is kept refused as it was; `given_up`, staff gave it up while
- * it was on its way, and it stays so; `not_yet`, a parent's change of their details the portal may not send yet
+ * it was on its way, and it stays so (`why` `superseded`: a parent's change of their details a newer one has taken the
+ * place of, given up with nothing sent, at any try, a press's included); `not_yet`, a parent's change of their details the portal may not send yet
  * (contactSendsMayGo(): the take-in, or a read under the shape, still to come), left exactly as it was, no try counted.
  */
 export type SavedTry =
@@ -2966,7 +2971,7 @@ export type SavedTry =
   | { is: "stuck"; code: string }
   | { is: "refused"; code: string; holds: string | null }
   | { is: "not_reached"; code: string }
-  | { is: "given_up" }
+  | { is: "given_up"; why?: "superseded" }
   | { is: "not_yet" };
 
 /** The state an item of a change saved first is settled to, with its audit row, in one transaction, only while it is still waiting. Whether it was. */
@@ -3113,8 +3118,8 @@ export async function trySavedItem(item: QueueRow, write: RenameWrite | CreateWr
     return notYet();
   }
   if (contactStop !== null) {
-    await giveUpContact(item, contactStop, o);
-    return gone;
+    await giveUpContact(item, contactStop, before.sent, o);
+    return contactStop === "superseded" ? { is: "given_up", why: "superseded" } : gone;
   }
 
   const refused = async (code: string, holds: string | null): Promise<SavedTry> =>
@@ -3914,7 +3919,10 @@ async function sendAgainHolding(itemId: string, shown: string, o: WriteOp & { st
     case "not_reached": return refuse(t.code === CONTACT_AWAITS_READ_CODE ? CONTACT_AWAITS_READ : "QuickBooks couldn't take it just now, so nothing was changed there. The change is still kept here: try again in a few minutes.");
     case "not_yet": return refuse(CONTACT_AWAITS_READ);
     case "refused": return refuse(`It didn't go through this time either. ${keptWordsFor(sent, t.code, t.holds)} The change is still kept on this page.`);
-    case "given_up": return { ok: true, status: "attention", message: `The change was given up on this page while it was on its way to QuickBooks, so it stays given up and nothing in the portal was changed or linked for it, whatever QuickBooks did with it. ${sent.op === "rename"
+    // A parent saved their details again while this was pressed (stage 3's slice 11b): the newer change, which carries
+    // every field this one did, takes its place, and nothing was sent from this row.
+    case "given_up": if (t.why === "superseded") return { ok: true, status: "waiting", message: CONTACT_SUPERSEDED_AT_PRESS };
+      return { ok: true, status: "attention", message: `The change was given up on this page while it was on its way to QuickBooks, so it stays given up and nothing in the portal was changed or linked for it, whatever QuickBooks did with it. ${sent.op === "rename"
       ? "QuickBooks has the portal's name only if that send got through, which the roster shows after its next read."
       : sent.op === "move" ? "QuickBooks has the move only if that send got through, which the roster shows after its next read."
       : sent.op === "contact" ? "QuickBooks has the portal's details only if that send got through, which the roster shows after its next read."

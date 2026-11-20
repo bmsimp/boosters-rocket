@@ -20,7 +20,7 @@ import type { ContactValues } from "@/lib/parents/contact-fields";
 import { CONTACT_COPY, saveDetails, saveMyContact } from "@/lib/parents/contact-edits";
 import { addGuardian, removeGuardian } from "@/lib/parents/guardians";
 import { renamePerson } from "@/lib/parents/people";
-import { addStudentToLinked, askFamilyInactive, CONTACT_AWAITS_READ, CONTACT_DIFFERS, CONTACT_NOT_OFFERED, contactShown, contactShownUnder, contactStopNow, contactStopsNow, coverStamp, familyCover, keptWordsFor, moveStudent, portalValueStamp,
+import { addStudentToLinked, askFamilyInactive, CONTACT_AWAITS_READ, CONTACT_DIFFERS, CONTACT_NOT_OFFERED, CONTACT_SUPERSEDED_AT_PRESS, contactShown, contactShownUnder, contactStopNow, contactStopsNow, coverStamp, familyCover, keptWordsFor, moveStudent, portalValueStamp,
   renameLinked, SENDING_LOCK, sendPortalValue, whoStopped } from "@/lib/roster/writes";
 import { compareContact, giveUp, loadOpenWrites, runWriteQueue, tryAgainNow } from "@/lib/roster/queue";
 import { env } from "@/env";
@@ -639,6 +639,24 @@ describe("Reconciliation and a family's page (item 7, and the second read's item
     expect(await queueItem(row!.id)).toMatchObject({ state: "done" });
     expect((await auditsOf("roster.write.sent_again"))).toHaveLength(1);
     expect(await personDetails(a.ana.id)).toMatchObject({ values: { phone: NEW_PHONE } });
+  });
+
+  it("a parent's newer save while \"Send the portal's value\" is on its way: nothing sent from the row, and the press says the newer change took its place", async () => {
+    const a = await kept();
+    const [row] = await loadOpenWrites();
+    const before = (await queueItem(row!.id))!;
+    const view = (await compareContact(row!.id, { actor: staffActor(await staffWith("registrar2@club.org", ["Parents.ReadWrite"])), ip: null }))!;
+    // The portal's details change while the press reads QuickBooks, after it chose what to send.
+    stub.onApiRequest = async (call) => {
+      if (call.method !== "GET" || !call.path.endsWith("/customer/11")) return;
+      stub.onApiRequest = null;
+      await setPersonDetails(a.ana.id, { phone: "512-555-0999" });
+    };
+    expect(await sendPortalValue(row!.id, view.shown, portalValueStamp(row!.id, view.shown), op)).toEqual({ ok: true, status: "waiting", message: CONTACT_SUPERSEDED_AT_PRESS });
+    expect(posts()).toEqual([]);
+    // Given up with nothing sent, its mark as maybe sent what it was before the press.
+    expect(await queueItem(row!.id)).toMatchObject({ state: "given_up", sent: before.sent });
+    expect((await auditsOf("roster.write.given_up")).map((r) => r.after)).toContainEqual(expect.objectContaining({ why: "superseded", sentNow: false }));
   });
 
   it("one whose Parent customer QuickBooks has moved since: not offered, in words that say QuickBooks' record changed, and the press refused so", async () => {
