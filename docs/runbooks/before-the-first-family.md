@@ -179,7 +179,9 @@ What the page can't do is walk the portal's own screens. Do these in the sandbox
 7. **An email change on a phone.** As a parent: Family, **Change my sign-in email**, a new address you can read. Open
    the emailed link on the phone while signed out.
    **Pass:** you sign in with the old address and land back on the question; confirming signs you out, and you sign in
-   with the new address. **If not:** note where it went instead.
+   with the new address; after the worker's next wake (a few minutes), the parent's own record in QuickBooks shows the
+   new address in its email field in place of the old, and any other address in it as it was. **If not:** note where it
+   went instead, and what Reconciliation says of the change.
 8. **A staff change that waits.** The portal puts a roster change on its queue when QuickBooks is busy or can't be
    reached, which can't be made to happen from the portal. The first time Health's QuickBooks line counts a change
    waiting, open Reconciliation.
