@@ -6,7 +6,7 @@ import { confirmMyEmailChange, requestMyEmailChange } from "@/lib/parents/email-
  * A parent's change of the address they sign in with (src/lib/parents/email-change.ts).
  *
  * Both take what the browser sent, whatever its type says, and hand it on as it is: the new address from the form's
- * one field, and the token from the link. Neither names a customer or a person, and none is looked for: whose record
+ * one field, and the token from the link. Neither names a customer or a person, and none is looked for: whose address
  * and whose request are decided from the session (ctx) alone.
  *
  * Neither revalidates a page. A confirmation that was made ends the person's sessions, so drawing the page again would
