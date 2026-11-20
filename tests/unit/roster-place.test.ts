@@ -38,11 +38,15 @@ describe("where the books have a student", () => {
     expect(placeOf("12", null)).toEqual({ at: "other_family", familyQboId: "10", familyName: "Rivera Family" });
     expect(placesOf(layered, buildRoster(layered, []), [])("12", "10")).toEqual({ at: "unknown" });
   });
-  it("with no student type, or in flat books, no customer is a student customer", () => {
+  it("with no student type, or in flat books, nothing is told: a customer whose type didn't change is never said to be no student now", () => {
     const noStudents = { kind: "layered", familyTypeId: "1", studentTypeId: null, parentTypeId: "2" } as const;
-    expect(placesOf(noStudents, buildRoster(noStudents, company), company)("12", "10")).toEqual({ at: "not_student" });
+    expect(placesOf(noStudents, buildRoster(noStudents, company), company)("12", "10")).toEqual({ at: "unknown" });
     const flat: MembershipShape = { kind: "flat", memberTypeIds: ["1"] };
-    expect(placesOf(flat, buildRoster(flat, company), company)("12", "10")).toEqual({ at: "not_student" });
+    expect(placesOf(flat, buildRoster(flat, company), company)("12", "10")).toEqual({ at: "unknown" });
+  });
+  it("under the family's own customer once the roster no longer lists it as a family is under no family here, never here", () => {
+    const retyped = company.map((x) => (x.qboId === "10" ? { ...x, typeQboId: "4" } : x));
+    expect(placesOf(layered, buildRoster(layered, retyped), retyped)("12", "10")).toEqual({ at: "under_other" });
   });
   it("says each place in words that name QuickBooks, a family's name as the books have it", () => {
     expect(placeWords({ at: "other_family", familyQboId: "20", familyName: "Chen Family" })).toBe("Under Chen Family in QuickBooks");

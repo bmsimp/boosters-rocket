@@ -9,14 +9,16 @@ import type { MembershipShape } from "./shape";
 
 /**
  * Where the books have a student's linked customer:
- * - `here`: directly under the family's own customer;
+ * - `here`: directly under the family's own customer, which the roster lists as a family;
  * - `other_family`: directly under another customer the roster lists as a family (`familyQboId`, its name in the
  *   books, `familyName`: QuickBooks text, shown as text only), whether or not a family of the portal is linked to it;
  * - `top`: under no customer at all;
- * - `under_other`: under a customer that is no family here (a stray's parent: another type, or none);
- * - `not_student`: not a student customer in the books now (its type changed, or the shape names no student type);
+ * - `under_other`: under a customer that is no family here (a stray's parent: another type, or none; the family's own
+ *   customer included, once the roster no longer lists it as a family);
+ * - `not_student`: not a student customer in the books now (its type changed);
  * - `gone`: the cache holds customers, and not this one;
- * - `unknown`: the cache holds no customer at all, so nothing can be told.
+ * - `unknown`: nothing can be told: the cache holds no customer at all, or the shape names no student type (flat books
+ *   included), so no customer is a student customer and a type that hasn't changed isn't said to have.
  */
 export type StudentPlace =
   | { at: "here" }
@@ -38,9 +40,11 @@ export function placesOf(shape: MembershipShape, roster: Roster, customers: read
   return (studentCustomerId, familyCustomerId) => {
     const c = byId.get(studentCustomerId);
     if (c === undefined) return byId.size > 0 ? { at: "gone" } : { at: "unknown" };
-    if (studentType === null || c.typeQboId !== studentType) return { at: "not_student" };
+    if (studentType === null) return { at: "unknown" };
+    if (c.typeQboId !== studentType) return { at: "not_student" };
     if (c.parentQboId === null) return { at: "top" };
-    if (familyCustomerId !== null && c.parentQboId === familyCustomerId) return { at: "here" };
+    // Under the family's own customer only while the roster lists it as a family: otherwise it is no family here.
+    if (familyCustomerId !== null && c.parentQboId === familyCustomerId && families.has(familyCustomerId)) return { at: "here" };
     const other = families.get(c.parentQboId);
     return other ? { at: "other_family", familyQboId: other.qboId, familyName: other.displayName } : { at: "under_other" };
   };
