@@ -1,5 +1,8 @@
 // Privacy: `listPeople` and `getPerson` return other families' names or a block reason. Use them only on pages behind
 // `Parents.ReadWrite`, never behind `Roster.Read`. `familySignins` returns one family's own guardians, for its page.
+// Beside them, the accounting links screen (/staff/links, src/lib/accounting/mapping.ts) lists every family's open
+// guardians' names and sign-in addresses in one list, behind the linking permission with Roster.Read; never a block
+// reason or a sign-in state.
 import { and, eq, inArray, max, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, family, guardian, parent, qboCustomer, type DisabledReason, type GuardianStatus } from "@/lib/db/schema";
