@@ -296,13 +296,13 @@ export const rateLimitEvent = pgTable("rate_limit_event", {
 
 /**
  * A parent's own change of sign-in address, waiting for the link mailed to the new address (src/lib/parents/email-change.ts).
- * The token is stored hashed. A request belongs to the person, the link (`guardian_id`) and the family it was asked under
- * and the QuickBooks record it would change; it is confirmed only by that person, signed in to that family through that
- * link, while that is still their record. The family is the app's own record (`family_id`, the session's family when it
- * was asked; migration 0037 carried each request's QuickBooks family over to it and 0038 dropped `family_qbo_id`);
- * which QuickBooks record it writes (`record_qbo_id`) is still decided when it is asked. The link and family were added
- * after the table (0016, 0037): a row without them is never confirmed. The record's id names a customer of the
- * connected company: a change of company deletes every row, before the app's records it names.
+ * The token is stored hashed. A request belongs to the person, the link (`guardian_id`) and the family it was asked
+ * under; it is confirmed only by that person, signed in to that family through that link. The family is the app's own
+ * record (`family_id`, the session's family when it was asked; migration 0037 carried each request's QuickBooks family
+ * over to it and 0038 dropped `family_qbo_id`). `record_qbo_id`, the QuickBooks record a change was written to until
+ * stage 3's slice 11d, is written null since and read by nothing (stage 3's last slice drops it). The link and family
+ * were added after the table (0016, 0037): a row without them is never confirmed. A change of company deletes every
+ * row, before the app's records it names.
  */
 export const parentEmailChange = pgTable("parent_email_change", {
   id: uuid("id").primaryKey().defaultRandom(),
