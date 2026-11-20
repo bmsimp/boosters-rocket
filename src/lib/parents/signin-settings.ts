@@ -245,8 +245,12 @@ export async function forgetMyOtherDevices(ctx: Me): Promise<SettingsResult> {
     const gone = await tx.delete(parentDevice)
       .where(kept ? and(eq(parentDevice.parentId, ctx.parentId), ne(parentDevice.id, kept)) : eq(parentDevice.parentId, ctx.parentId))
       .returning({ id: parentDevice.id });
+    // Kept only when what the session names is still one of the person's own remembered devices: an expired row the
+    // clean-up hasn't reached yet, or anyone else's, was never on the page and is no device of theirs kept.
+    const [stillTheirs] = kept ? await tx.select({ id: parentDevice.id }).from(parentDevice)
+      .where(and(eq(parentDevice.id, kept), eq(parentDevice.parentId, ctx.parentId), gt(parentDevice.expiresAt, me.now))) : [];
     await writeAudit({ actor: parentActor({ id: ctx.parentId, email: me.email }), action: "parent.devices.forgotten", targetType: "parent", targetId: ctx.parentId,
-      after: { devicesForgotten: gone.length, thisDeviceKept: kept !== null }, ip: ctx.ip }, tx);
+      after: { devicesForgotten: gone.length, thisDeviceKept: stillTheirs !== undefined }, ip: ctx.ip }, tx);
     return true;
   });
   return done ? { ok: true, message: COPY.otherDevicesForgotten } : PROVE_AGAIN;
