@@ -335,15 +335,20 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
     **Pass:** the set-up's field opens the number keypad; the sign-in's opens a keyboard with letters too (it takes a
     backup code); where the phone's own password manager holds the code, the keyboard offers it and filling it in works.
     **If not:** note the phone, the field and the keyboard.
-26. **A phone whose clock is off.** On the phone with the authenticator app, turn off setting the time automatically and
-    put the clock a minute behind, then a minute ahead, and each time sign in on a device the portal doesn't know.
-    **Pass:** a minute either way still signs in (the portal takes the code of the 30 seconds before and after); two
-    minutes off is refused. Put the clock back after. **If not:** note how far off it was and what happened.
+26. **A phone whose clock is off.** The portal takes the app's code for the 30 seconds before now, now, and the 30
+    seconds after, so a clock under about 30 seconds off always works and one a minute or more off never does. On the
+    phone with the authenticator app, turn off setting the time automatically and put the clock a minute behind, then a
+    minute ahead, and each time try one sign-in on a device the portal doesn't know (a new private window). Then put
+    the clock back to automatic and sign in once more in a new private window.
+    **Pass:** a minute behind and a minute ahead are each refused with "That code didn't work", and nothing else
+    changes; with the clock right again, the app's newest code signs in. (Five wrong codes in 15 minutes stop the tries
+    for a while, so make only these.) **If not:** note how far off it was and what happened.
 27. **Backup codes typed on a phone keyboard.** In **Sign-in settings**, **Make new backup codes**, and write two down.
-    On a device the portal doesn't know, sign in with one typed on the phone's keyboard in lower case with its dash, and
-    with the other with a space for the dash.
-    **Pass:** each signs in once; the same code again is refused; **Backup codes left** on Sign-in settings has gone
-    down by two. **If not:** note what was typed.
+    A device the portal knows asks for no code, so make each of the three tries below in a new private window, closed
+    after the try: sign in with one code typed on the phone's keyboard in lower case with its dash; then with the other
+    with a space for the dash; then with the first code again.
+    **Pass:** the first two sign in; the third is refused; **Backup codes left** on Sign-in settings has gone down by
+    two. **If not:** note what was typed, and in which window.
 28. **The installed app beside the browser.** With the authenticator app set up from Safari (or Chrome), sign in from
     the installed app as a device the portal doesn't know yet (step 3 says how), then turn the app off in one and reload
     the other.
