@@ -18,13 +18,13 @@ export const emailChangeToken = () => randomBytes(32).toString("base64url");
 export const hashOfToken = (token: string) => createHash("sha256").update(token).digest("hex");
 
 export async function seedEmailChange(o: {
-  parentId: string; guardianId: string | null; familyQboId?: string | null; familyId?: AppFamilyId | null; recordQboId: string | null; newEmail: string;
+  parentId: string; guardianId: string | null; familyQboId?: string | null; familyId?: AppFamilyId | null; newEmail: string;
   token?: string; expiresAt?: Date; usedAt?: Date | null;
 }): Promise<{ id: string; token: string }> {
   const token = o.token ?? emailChangeToken();
   const familyId = o.familyId ?? (o.familyQboId ? await familyOfSession(await authUserOf(o.parentId), o.familyQboId) : null);
   const [row] = await db.insert(parentEmailChange).values({
-    parentId: o.parentId, guardianId: o.guardianId, familyId, recordQboId: o.recordQboId, newEmail: o.newEmail,
+    parentId: o.parentId, guardianId: o.guardianId, familyId, newEmail: o.newEmail,
     tokenHash: hashOfToken(token), expiresAt: o.expiresAt ?? new Date(Date.now() + 24 * 3_600_000), usedAt: o.usedAt ?? null,
   }).returning({ id: parentEmailChange.id });
   return { id: row!.id, token };
@@ -37,7 +37,7 @@ export type FamilyEmailChange = { token: string; newEmail: string; markers: stri
 export async function seedTwoFamilyEmailChanges(a: SeededParent, b: SeededParent): Promise<{ a: FamilyEmailChange; b: FamilyEmailChange }> {
   const one = async (p: SeededParent, newEmail: string): Promise<FamilyEmailChange> => {
     const { token } = await seedEmailChange({ parentId: p.identity.parentId, guardianId: p.identity.guardianId, familyId: p.identity.familyId,
-      recordQboId: p.spec.parent.qboId, newEmail });
+      newEmail });
     return { token, newEmail, markers: [newEmail, token] };
   };
   return { a: await one(a, "ansgar.newmail@family-a-moving.example"), b: await one(b, "bettina.newmail@family-b-moving.example") };

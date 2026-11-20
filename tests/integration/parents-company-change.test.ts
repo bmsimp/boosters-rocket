@@ -9,7 +9,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, heldAddress, parent, parentAuthSession, parentAuthUser, setting, signinCode } from "@/lib/db/schema";
+import { auditLog, guardian, parent, parentAuthSession, parentAuthUser, setting, signinCode } from "@/lib/db/schema";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { loadRosterPage, rosterEntry } from "@/lib/roster/queries";
@@ -53,8 +53,6 @@ describe("connecting a different QuickBooks company", () => {
     await seedGuardian({ parentId: ana.id, familyQboId: "12", sourceQboId: "13" });
     await seedGuardian({ parentId: ana.id, familyQboId: "20", sourceQboId: "21" });
     await seedGuardian({ parentId: mei.id, familyQboId: "20", sourceQboId: "22" });
-    // A held address left from before the review was retired: nothing reads or writes the table any more.
-    await db.insert(heldAddress).values({ email: "ana@example.com", approvedFamilyQboIds: ["12", "20"], note: "Both hers." });
     await syncAppRecords();
   });
 
@@ -84,11 +82,9 @@ describe("connecting a different QuickBooks company", () => {
     expect((await audits("parent.access.cleared"))[0]!.after).toMatchObject({ links: 3, closedLinksMarked: 1 });
   });
 
-  it("writes no snapshot of the old company and leaves the retired held addresses as they were", async () => {
-    const held = await db.select().from(heldAddress);
+  it("writes no snapshot of the old company", async () => {
     await clearRosterOfOtherCompany("2222", admin);
     expect(await db.select().from(setting).where(eq(setting.key, SNAPSHOT_KEY))).toEqual([]);
-    expect(await db.select().from(heldAddress)).toEqual(held);
     // A second change of company finds nothing open, and still keeps nothing of the first.
     await clearRosterOfOtherCompany("3333", admin);
     expect((await audits("parent.access.cleared"))[1]!.after).toMatchObject({ links: 0, fromRealmId: "2222", toRealmId: "3333" });

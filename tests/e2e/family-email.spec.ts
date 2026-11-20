@@ -55,8 +55,8 @@ test.describe("a parent changes their sign-in email", () => {
     // The request names the family it was asked in by the app's record, the one Zelda's row in it names.
     const [link] = await sql`SELECT id, family_id FROM guardian WHERE parent_id = ${p.id} AND family_qbo_id = ${PARENT_SESSION_FAMILY}`;
     await sql`DELETE FROM parent_email_change WHERE parent_id = ${p.id} AND (used_at IS NULL OR new_email = ${NEW})`;
-    await sql`INSERT INTO parent_email_change (parent_id, guardian_id, family_id, record_qbo_id, new_email, token_hash, expires_at)
-            VALUES (${p.id}, ${link!.id}, ${link!.family_id}, 'E2E-P1', ${E2E_EMAIL.own.newEmail}, ${emailTokenHash(E2E_EMAIL.own.token)}, now() + interval '7 days')`;
+    await sql`INSERT INTO parent_email_change (parent_id, guardian_id, family_id, new_email, token_hash, expires_at)
+            VALUES (${p.id}, ${link!.id}, ${link!.family_id}, ${E2E_EMAIL.own.newEmail}, ${emailTokenHash(E2E_EMAIL.own.token)}, now() + interval '7 days')`;
   });
 
   test("asks at phone width, gets the link by mail, is asked, and is refused while another person holds the address", async ({ context, page, baseURL }) => {
@@ -95,9 +95,8 @@ test.describe("a parent changes their sign-in email", () => {
     await page.goto(link![0]!);
     await expect(page.getByRole("heading", { name: `Use ${NEW} to sign in from now on?` })).toBeVisible();
     await noSidewaysScroll(page);
-    const [asked] = await sql`SELECT used_at, record_qbo_id FROM parent_email_change WHERE token_hash = ${emailTokenHash(link![1]!)}`;
-    // The request names no QuickBooks record (stage 3's slice 11d).
-    expect(asked).toEqual({ used_at: null, record_qbo_id: null });
+    const [asked] = await sql`SELECT used_at FROM parent_email_change WHERE token_hash = ${emailTokenHash(link![1]!)}`;
+    expect(asked).toEqual({ used_at: null });
 
     // Saying yes: refused, because another person signs in with the address, in words that never say why.
     const yes = page.getByRole("button", { name: "Yes, use this address" });

@@ -117,16 +117,16 @@ describe("scheduled jobs", () => {
   });
 
   // The held-address review's notice and the previous company's snapshot went with the review (stage 3 of the
-  // app-owned families spec): no wake sends the one or runs the other's expiry. A snapshot an older portal stored is a
-  // retired feature's setting, which the daily clean-up removes (RETIRED_SETTINGS), due on this first wake.
-  it("runs no review notice and no snapshot expiry, and the daily clean-up removes a stored snapshot", async () => {
+  // app-owned families spec): no wake sends the one or runs the other's expiry. Migration 0046 deleted any snapshot an
+  // older portal stored; one found after it is left alone, as every setting is (RETIRED_SETTINGS is empty).
+  it("runs no review notice and no snapshot expiry, and the daily clean-up leaves a stored snapshot alone", async () => {
     const snapshot = { key: "parents.previous_company", value: { realmId: "1111", newRealmId: "2222", at: new Date().toISOString(), families: [], approvals: [] } };
     await db.insert(setting).values(snapshot);
     expect(await runDueJobs(hours(91 * 24))).toEqual({ ran: [{ job: CLEANUP_JOB, ok: true }] });
-    expect((await db.select().from(setting)).filter((x) => x.key === snapshot.key)).toEqual([]);
+    expect((await db.select().from(setting)).filter((x) => x.key === snapshot.key)).toHaveLength(1);
     const log = await db.select().from(auditLog);
     expect(log.filter((x) => x.action === "settings.parents.save" || x.action === "parent.review_notice.sent")).toEqual([]);
-    expect(log.filter((x) => x.action === "cleanup.run").map((x) => x.after)).toEqual([expect.objectContaining({ retiredSettings: 1 })]);
+    expect(log.filter((x) => x.action === "cleanup.run")).toEqual([]);
   });
 
   it("an unexpected error in the token job is recorded as a fixed failure and the roster job still runs", async () => {

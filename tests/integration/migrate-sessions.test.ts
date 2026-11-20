@@ -37,6 +37,11 @@ const GUS = "7c0a9a1e-0000-4000-8000-000000000037";
 /** The columns the re-key adds or drops: every other column of a session or a request is kept exactly. */
 const RE_KEYED = new Set(["family_id", "family_qbo_id"]);
 
+/**
+ * The newest migration these runs go to: 0045, the last that kept `parent_email_change.record_qbo_id`, which 0037 carried
+ * and these tests read (0046 dropped it: tests/integration/migrate-retired-records.test.ts).
+ */
+const UPGRADED = 45;
 /** The migrations folder as it was up to `last` (by index), for the database as it was before this slice. */
 function migrationsUpTo(last: number): string {
   const folder = mkdtempSync(path.join(tmpdir(), "br-migrate-sessions-"));
@@ -159,7 +164,7 @@ describe("migrations 0037 and 0038: a session and a pending email change name th
         await person(pg, FAY, "Fay");
         await row(pg, FAY, "F-NOBODY");
       });
-      const message = await failureOf(company.migrate(path.resolve("drizzle")));
+      const message = await failureOf(company.migrate(migrationsUpTo(UPGRADED)));
       expect(message).toMatch(/Migration 0037 stopped, and changed nothing: 1 open guardian rows of 1 people name no family record, while the roster names company 4650000000000001/);
       expect(await columnsOf(company, "parent_auth_session")).toContain("family_qbo_id");
       expect(await columnsOf(company, "parent_auth_session")).not.toContain("family_id");
@@ -178,7 +183,7 @@ describe("migrations 0037 and 0038: a session and a pending email change name th
       /** The customer each session's family record is linked to, by session. */
       let familyOf = new Map<string, string | null>();
       beforeAll(async () => {
-        await company.migrate(path.resolve("drizzle"));
+        await company.migrate(migrationsUpTo(UPGRADED));
         familyOf = new Map((await company.q((pg) => pg`SELECT s.id, l.customer_id FROM parent_auth_session s
           LEFT JOIN accounting_link l ON l.family_id = s.family_id AND l.system = 'quickbooks' AND l.realm_id = ${REALM}`)).map((r) => [r.id as string, (r.customer_id as string | null) ?? null]));
       });
@@ -270,7 +275,7 @@ describe("migrations 0037 and 0038: a session and a pending email change name th
         await session(pg, "gus-row-names-no-family", GUS, "F1");
         changes.bare = await change(pg, "bare", { parentId: GUS, guardianId: gusRow, familyQboId: "F1" });
       });
-      await bare.migrate(path.resolve("drizzle"));
+      await bare.migrate(migrationsUpTo(UPGRADED));
     }, DATABASE_WORK);
 
     it("clears the family of a session whose row names no family record, deletes its live email change, and says so", async () => {

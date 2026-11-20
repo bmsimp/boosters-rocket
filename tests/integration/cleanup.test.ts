@@ -275,18 +275,17 @@ describe("the daily clean-up deletes only what is past use", () => {
 describe("the settings of retired features", () => {
   beforeEach(async () => { await resetDb(); });
 
-  // The previous company's snapshot held its people's names and addresses for 90 days; nothing expires it now that
-  // its feature is gone, so the clean-up removes it, and the review notice's mark, and no other setting.
-  it("are deleted, and every other setting is kept", async () => {
+  // The two the held-address review left (the previous company's snapshot, the review notice's mark) were deleted by
+  // migration 0046 (tests/integration/migrate-retired-records.test.ts). None is listed now, so the clean-up deletes no
+  // setting, whatever is stored; the mechanism waits for a feature retired later.
+  it("are none now, and every setting is kept", async () => {
     await db.insert(setting).values([
       { key: "parents.previous_company", value: { realmId: "1", people: [{ name: "Old Name", email: "old@example.com" }] } },
-      { key: "parents.review_notice", value: { sentAt: "2026-11-01T00:00:00Z" } },
       { key: "parents.settings", value: { signin: true, everEnabled: true, welcome: false, requireActiveStudents: false } },
     ]);
-    expect(RETIRED_SETTINGS).toEqual(["parents.previous_company", "parents.review_notice"]);
-    expect(await clean()).toEqual({ ...NOTHING, retiredSettings: 2 });
-    expect((await db.select({ key: setting.key }).from(setting)).map((r) => r.key)).toEqual(["parents.settings"]);
+    expect(RETIRED_SETTINGS).toEqual([]);
     expect(await clean()).toEqual(NOTHING);
+    expect((await db.select({ key: setting.key }).from(setting)).map((r) => r.key).sort()).toEqual(["parents.previous_company", "parents.settings"]);
     expect(describeCleanup({ ...NOTHING, retiredSettings: 2 })).toBe("Removed 2 settings of retired features.");
   });
 });
