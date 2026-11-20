@@ -32,10 +32,10 @@ QuickBooks, **Check the portal's requests** (`/staff/settings/quickbooks/check`,
 | §13 Audit log | 10 | 1 | 0 | 0 |
 | §14 Operations | 9 | 3 | 0 | 2 |
 | Owner's decisions of 2026-11-14 | 5 | 0 | 0 | 0 |
-| App-owned families: the mapping screen | 11 | 0 | 9 | 0 |
-| **All** | **158** | **5** | **9** | **11** |
+| App-owned families: the mapping screen | 13 | 0 | 7 | 0 |
+| **All** | **160** | **5** | **7** | **11** |
 
-Nothing the v1 spec asks for is missing outright. The nine missing rows are the app-owned families spec's mapping screen,
+Nothing the v1 spec asks for is missing outright. The seven missing rows are the app-owned families spec's mapping screen,
 which stage 4 is building one slice at a time: each row names the slice that builds it. The five partly built rows, and what each lacks, are listed at the foot
 of this page with a rough size; the changes the step made are under "Fixed in this step", and the roadmap's Known gaps
 are checked one by one after that.
@@ -322,10 +322,10 @@ Section 4 of `docs/superpowers/specs/2026-11-18-app-owned-families-design.md`, "
 | L.9 | A customer gone is "Customer gone", the link kept and never relinked by itself (open question 13) | Built | `accounting-links.test.ts` "tells a customer gone from the books, and keeps the link as it is" |
 | L.10 | The screen says so when the books can't be read for it, rather than failing (section 7) | Built | `accounting-links.test.ts` "when the books can't be checked" (three states: each family with no link reads Not checked; with no company or another company, every family does) and "says why nothing is suggested while the books can't be checked" (each state's words) |
 | L.11 | "Linked, with differences" (and an inactive customer shown as a difference, open question 13) | Built | M2: `src/lib/accounting/differences.ts` (`differencesOf()`: names, whether each is active, where the books have each student, a student customer under the family whose record the portal has elsewhere (in another family, in no family, or inactive, told in that family's row whatever the record's own row says), students and Parent customers on one side only, and the queue's words for an item that explains one), `mapping.ts` (`loadAccountingLinks()`, `filtersOf()`), `status.ts` (`linkStanding()`: inactive alone is no longer Not a family now), `src/lib/roster/place.ts` (one place rule and its words, shared with a family's page); `accounting-differences.test.ts`, `roster-place.test.ts`, `accounting-links.test.ts` "differences, for a link that stands" and "tells a linked customer that isn't a family now apart from one that is gone" |
-| L.12 | "Left unlinked", kept out of the bulk button | Missing | M3a |
-| L.13 | Bulk confirm | Missing | M3a |
-| L.14 | Confirm the suggestion, or pick another customer | Missing | M3a. Today nothing links a family the portal has to a customer the books have: "Create a family from this" (Reconciliation) makes a new family, and "Create in QuickBooks and link" (a family's page) or an add on Families by someone who may link makes a new customer; the screen warns that either, for a Suggested or Several possible row, makes a second |
-| L.15 | Customers no family is linked to in their own part of the screen | Missing | M3a. Until then they stay on Reconciliation, which links to the screen and back |
+| L.12 | "Left unlinked", kept out of the bulk button | Built | M3a: the mark (`family.accounting_left_unlinked_at` and `_by`, migration 0045), Leave unlinked and Undo (`leaveUnlinked()`, `undoLeaveUnlinked()` in `src/lib/accounting/link-writes.ts`), the status `left_unlinked` with its filter and count, the family given to no matcher, and the mark cleared by every path that links the family (`clearLeftUnlinked()`, `src/lib/families/left-unlinked.ts`); kept out of the bulk button with L.13 (M3a2). `accounting-link-confirm.test.ts` "Leave unlinked, and Undo" and "the mark is cleared by every path that gives the family a link", `migrate-family-left-unlinked.test.ts` |
+| L.13 | Bulk confirm | Missing | M3a2 |
+| L.14 | Confirm the suggestion, or pick another customer | Built | M3a: Confirm on a Suggested row and on a Several possible row's candidate, and Pick a different customer from the customers no family is linked to (`noFamilyPool()`), one write (`linkFamilyToCustomer()`, `src/lib/accounting/link-writes.ts`) that sends nothing and links the family and the students proposed by name (`proposeStudents()`, `src/lib/accounting/proposals.ts`), under the roster lock with a sealed stamp of what the row showed; the page's chooser and confirm step (`src/app/staff/(app)/links/page.tsx`). `accounting-link-confirm.test.ts`, `tests/unit/accounting-proposals.test.ts` |
+| L.15 | Customers no family is linked to in their own part of the screen | Missing | A later slice. They stay on Reconciliation, which links to the screen and back; since M3a Pick a different customer lists them on the screen as the customers a family may be linked to, but they have no part of their own there |
 | L.16 | The parent record a match was on is linked under the family | Missing | M3c |
 | L.17 | Unlink, and an admin picks again for a customer gone (open question 13) | Missing | M3b |
 | L.18 | Settle a difference: take the books' value, or send the app's | Missing | M4, M5 |
