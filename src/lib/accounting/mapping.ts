@@ -118,12 +118,12 @@ const byName = <T extends { name: string; id: unknown }>(a: T, b: T) => COLLATOR
  *
  * Queries per view, whatever the number of families: ten at once (the roster's company, the connection, the shape, the
  * types, the last good read, the customers, the family creates, the families, the students, the guardian rows), then
- * the links and the queue's open items together, then the staff names when a link names one: 13 with an empty queue.
+ * the links and the queue's open items together, then the staff names when a link names one: 12 or 13 with an empty queue.
  * loadOpenWrites() makes one query for its items and, when there are any, up to 20 more of its own (the cache's
  * customers again, the family records the items are filed under and their links, the names of refused students and
  * guardians, and a move's families, links and money note: each lookup through a link reads the roster's company and
  * the connection first), so at most 33 in all. On four hundred families with two thousand customers that is the same
- * 13 to 33 queries; memory holds the two thousand cached customers (twice, while the queue holds items, as
+ * 12 to 33 queries; memory holds the two thousand cached customers (twice, while the queue holds items, as
  * loadOpenWrites() reads its own), the records, guardian rows and links (a few thousand small rows), and the rows
  * rendered are the four hundred families, each opening listing its students, guardians and differences.
  */
