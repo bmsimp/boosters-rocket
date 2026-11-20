@@ -107,6 +107,17 @@ export async function requireStaffAlso(ctx: StaffCtx, permission: Permission): P
   redirect("/refused");
 }
 
+/**
+ * requireStaffAlso() for a server action: a second permission the action needs beside the one its staffAction() guard
+ * checked, refused as that guard refuses, with the same `access.refused` row naming the permission missing, then
+ * AccessDenied, which the page's safely() turns into the one generic answer.
+ */
+export async function requireStaffActionAlso(ctx: StaffCtx, permission: Permission): Promise<void> {
+  if (can(ctx.effective, permission)) return;
+  await writeAudit({ actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, action: "access.refused", permission, ip: ctx.ip });
+  throw new AccessDenied();
+}
+
 export type ParentSessionCtx ={ parentId: string; sessionId: string; ip: string | null };
 
 /** For the family chooser: a signed-in parent, whether or not a family is chosen yet. */

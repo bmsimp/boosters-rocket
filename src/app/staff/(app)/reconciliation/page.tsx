@@ -124,7 +124,7 @@ const notOfferedWords = (i: QueueView): string | null => {
 function Refused({ items, canChange, compared, mayCompare }: { items: QueueView[]; canChange: boolean; compared: ContactCompare | null; mayCompare: boolean }) {
   const columns: Column<QueueView>[] = [
     { key: "what", header: "Change", rowHeader: true, cell: (i) => <>{i.words}<span className="when">{waitingWords(i)}</span>{i.moneyNote ? <span className="when">{i.moneyNote}</span> : null}</> },
-    { key: "why", header: "Why it didn't go through", cell: (i) => <>{keptWordsFor(i.write, i.lastCode, i.holds, i.differs)}{isContact(i) ? <ContactCell i={i} compared={compared} mayCompare={mayCompare} /> : null}</> },
+    { key: "why", header: "Why it didn't go through", cell: (i) => <>{keptWordsFor(i.write, i.lastCode, i.holds, i.differs, i.joined)}{isContact(i) ? <ContactCell i={i} compared={compared} mayCompare={mayCompare} /> : null}</> },
     { key: "asked", header: "Asked", cell: (i) => <><LocalTime iso={i.askedAt} />{i.askedBy ? <span className="when">by {i.askedBy}</span> : null}</> },
     { key: "family", header: "Family", cell: (i) => (i.familyId ? <Link href={familyPage(i.familyId)}>Open the family</Link> : "None") },
     ...(canChange ? [{ key: "do", header: "What you can do", quiet: true, cell: (i: QueueView) => {

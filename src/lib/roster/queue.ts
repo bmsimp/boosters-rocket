@@ -13,7 +13,7 @@ import { refreshRoster } from "./refresh";
 import { getRosterSource, ROSTER_JOB } from "./source";
 import { lockRosterAs, rosterTagOf } from "@/lib/seasons/roster-lock";
 import { alignAfterWrite, applyWritten, balanceUnread, BEING_SENT_NOW, changeOwnRecord, closeEarlierContacts, CONTACT_AWAITS_READ, contactShown, CREDIT_BALANCE, CUSTOMER_HAS_GUARDIAN, EMAIL_TOO_LONG, FAMILY_HELD, guardianCustomerLinked, guardianOf, isSavedFirst, NAME_UNUSABLE, itemLockFree, madeAfterGivingUp, markMoveMoneyStale, moveMoneyNotes, REFRESH_ASK_KEY,
-  replaceRefusedCreates, sendWrite, tryDeactivate, trySavedItem, whileItemHeld, whoStopped, contactStopsNow, type ContactNotOffered, type MadeAfterGivingUp, type OwnRecordChange, type SavedTry } from "./writes";
+  replaceRefusedCreates, sendWrite, tryDeactivate, trySavedItem, whileItemHeld, whoStopped, contactStopsNow, type ContactNotOffered, type JoinedNow, type MadeAfterGivingUp, type OwnRecordChange, type SavedTry } from "./writes";
 import { afterFailedTry, beforeResend, classify, contactDiffers, heldInCache, type ContactDiffer, type HeldContact } from "./write-rules";
 import { isUuid } from "@/lib/seasons/ids";
 import { contactAgeFrom, contactSendsMayGo, contactSendsSince } from "@/lib/parents/take-in-setting";
@@ -435,6 +435,13 @@ export type QueueView = {
    * anything else. The list's `shown` is empty for such a row: only the compare view binds what QuickBooks holds.
    */
   differs: ContactDiffer[] | null;
+  /**
+   * For a kept move whose family joined has a customer in QuickBooks now (its family link), whether "Send the portal's
+   * value" is offered for it (`sendable`) or not for another reason (`not_offered`, said by `notOffered`): a move kept
+   * because that family had none (NO_FAMILY_CUSTOMER) is then told by what is so now (keptWordsFor()). Null for
+   * anything else, a kept move into a family still with no customer included.
+   */
+  joined: JoinedNow;
 };
 
 /** A phone and billing address's columns, which the roster cache, a person's row and a family's row name alike. */
@@ -615,6 +622,7 @@ export async function loadOpenWrites(o: { familyId?: AppFamilyId; showAmounts?: 
       shown: !refused ? "" : request.op === "rename" ? names.get(request.qboId) ?? "" : request.op === "create" ? request.name : request.op === "move" ? parentOf.get(request.qboId) ?? "" : "",
       mayResend: refused && notOffered === null,
       notOffered,
+      joined: !(refused && request.op === "move" && request.toFamilyId !== undefined && joinedLinked.has(request.toFamilyId)) ? null : notOffered === null ? "sendable" : "not_offered",
       differs: refused && request.op === "contact" ? contactDiffers(heldThere.get(request.qboId) ?? heldInCache({}), request) : null,
     };
   });
