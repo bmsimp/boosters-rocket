@@ -524,8 +524,8 @@ work another. Any time before the pilot.
    The lead's decision, with no exception for an installation that holds no season records yet.
 4. The cancelling cut-off for a shift is 48 hours before it; a staff tick no longer counts for volunteering; a declined
    form still gets reminders.
-5. A parent in two families can't change their own sign-in email (they ask the club). Until the staff email change
-   ships (open question 8 of the app-owned families spec) the club can't change it for them either: a change made in
+5. A parent changes their own sign-in email in the portal, whatever families they are in. Until the staff email change
+   ships (open question 8 of the app-owned families spec) the club can't change it for them: a change made in
    QuickBooks no longer changes anyone's sign-in address.
 6. The staff menu's groups (Families, Season, Money, Admin, with Reconciliation under Money and Settings as one entry)
    and its labels ("Signed forms", "Volunteer credit", "Reconciliation"); the mapping screen's name and place,

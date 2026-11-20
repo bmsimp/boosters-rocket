@@ -71,7 +71,8 @@ function AskTheClub({ treasurerEmail }: { treasurerEmail: string | null }) {
  * parent type), from the portal's own records (loadMyFamily()'s `me`). `who.edits` gets the way to the page where the
  * phone and address are changed; the link carries no id, because that page takes whose they are from the session.
  * `ownEmail`: the person may change their sign-in email themselves (canChangeMyEmail), and the words say where: in the
- * box below (Family, which offers it) or on the Family page (Home).
+ * box below (Family, which offers it) or on the Family page (Home). The new address is the one they then sign in with,
+ * and the club's records are brought up to date with it.
  */
 export function DetailsBox({ who, treasurerEmail, ownEmail = false }: { who: MyContact; treasurerEmail: string | null; ownEmail?: false | "below" | "family" }) {
   return (

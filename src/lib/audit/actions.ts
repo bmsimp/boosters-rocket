@@ -69,7 +69,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "parent.email.changed": "A parent's email address changed in QuickBooks",
   "parent.email.request": "A parent asked to change their sign-in email",
   "parent.email.request.failed": "A parent's ask to change their sign-in email was refused",
-  "parent.email.save": "A parent changed their sign-in email, written to QuickBooks",
+  "parent.email.save": "A parent changed their sign-in email (until stage 3's slice 11d, written to QuickBooks first)",
   "parent.email.save.failed": "A parent's change of sign-in email wasn't made",
   "parent.email_change": "Parent's email address changed",
   "parent.email_change.quickbooks_failed": "Email change couldn't be written to QuickBooks",

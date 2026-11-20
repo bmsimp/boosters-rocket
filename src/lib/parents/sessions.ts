@@ -61,9 +61,11 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   writer of a person's links holds that row, and the code check of signin-codes.ts touches no link. A new writer of
  *   both that does not take the person's row first must take the link before the codes too. mintSigninLink() takes the row FOR UPDATE, then replaces the unused link
  *   of its purpose;
- * - confirmMyEmailChange() (email-change.ts) takes both address locks and the row FOR UPDATE, spends its request and
- *   changes the address, then deletes the person's other requests, then their unused codes, then their unused links,
- *   then their devices, then their sessions, and only then, in a savepoint, the roster lock and the app's records;
+ * - confirmMyEmailChange() (email-change.ts) takes both address locks and the row FOR UPDATE, spends its request,
+ *   reads under the row that the person isn't blocked and its own session still exists (stopping with the address
+ *   unchanged otherwise), and changes the address, then deletes the person's other requests, then their unused codes,
+ *   then their unused links, then their devices, then their sessions; it takes no roster lock and touches no app
+ *   records or roster cache (since stage 3's slice 11d);
  * - requestMyEmailChange() takes the row FOR UPDATE, then replaces the person's unused request;
  * - blockPerson() (people.ts) takes the row FOR UPDATE, then deletes the unused requests, then the codes, then the
  *   unused links, then the devices, then the sessions; renamePerson() (people.ts) takes the row FOR UPDATE, then the

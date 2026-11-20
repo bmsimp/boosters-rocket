@@ -4,10 +4,11 @@ import { jobRun, setting } from "@/lib/db/schema";
 import { ROSTER_JOB } from "@/lib/roster/source";
 
 /**
- * A request that the worker read the roster again at its next wake, rather than at the daily time. Asked when a
- * parent's change of sign-in address went into QuickBooks while the roster was busy (./email-change.ts): the portal
- * then leaves its copy alone, and the refresh brings the change in with the rest. Nothing runs a refresh here; the
- * worker does (src/lib/jobs/runner.ts).
+ * A request that the worker read the roster again at its next wake, rather than at the daily time. Asked by the staff
+ * roster writes (src/lib/roster/writes.ts) when QuickBooks may hold a change the portal's copy doesn't yet: the
+ * portal then leaves its copy alone, and the refresh brings the change in with the rest. (Until stage 3's slice 11d a
+ * parent's change of sign-in address asked for one too.) Nothing runs a refresh here; the worker does
+ * (src/lib/jobs/runner.ts).
  *
  * The ask is only a time. It is answered by a successful refresh that started after it; a refresh that failed is tried
  * again after the worker's usual wait, as a failed daily one is. A later ask moves the time on, so the refresh that
