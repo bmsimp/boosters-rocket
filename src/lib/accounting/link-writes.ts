@@ -506,7 +506,7 @@ export async function unlinkFamily(raw: { familyId: unknown; linkId: unknown; st
     const listed = b.roster !== null && noFamilyPool(b.roster, b.customers, b.creates, { familyLinked, studentLinked }).some((c) => c.qboId === link.customerId);
     const nameOf = new Map(records.map((r) => [String(r.id), r.name]));
     return { ok: true, message: unlinkedWords({ family: recordNameWords(f.name, "family"), customer: b.customerById.get(link.customerId)?.displayName ?? null,
-      students: studentLinks.map((l) => recordNameWords(nameOf.get(String(l.studentId)) ?? null, "student")), guardianLinks: guardianLinks.length,
+      students: studentLinks.map((l) => recordNameWords(nameOf.get(String(l.studentId)) ?? null, "student")).sort((x, y) => x.localeCompare(y)), guardianLinks: guardianLinks.length,
       paidKept, listedWithNoFamily: listed, details }) };
   });
 }
