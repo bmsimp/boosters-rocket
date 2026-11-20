@@ -220,6 +220,27 @@ describe("nothing is sent until the portal knows the details QuickBooks holds (t
     expect(await queueItem(item!.id)).toMatchObject({ state: "done" });
   });
 
+  it("a change that waited more than a day for the read gets the queue's usual tries once it may go, counted from then, not stuck at its first failure", async () => {
+    const a = await ana();
+    await takeInNotRun();
+    await saveMyContact(a.ctx, form({ phone: NEW_PHONE }, "p:1"));
+    const [item] = await items();
+    // Saved two days ago, and left alone since by every wake, as the take-in hadn't run.
+    await db.update(writeQueue).set({ createdAt: new Date(Date.now() - 48 * 60 * MIN) }).where(eq(writeQueue.id, item!.id));
+    await wake();
+    expect(await queueItem(item!.id)).toMatchObject({ state: "waiting", tries: 0, sent: false });
+    // The read and the take-in now: the gate opens, and the first send meets a 500.
+    await takeInDone();
+    stub.failNext = 1;
+    await wake();
+    expect(posts()).toHaveLength(1);
+    const after = await queueItem(item!.id);
+    // Waiting for the queue's next gap, as any item's first failure leaves it, though it was made two days ago.
+    expect(after).toMatchObject({ state: "waiting", tries: 1, sent: true });
+    expect(after!.lastCode).toMatch(/^http_500/);
+    expect(after!.nextTryAt).not.toBeNull();
+  });
+
   it("a save while a shape save has withdrawn the read's mark waits until the next read, and then goes", async () => {
     const a = await ana();
     await saveShape(FZN_SHAPE, { actor: WORKER.actor, ip: null });

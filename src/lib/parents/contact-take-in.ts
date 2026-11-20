@@ -68,7 +68,11 @@ function agreed<T extends string | AddressValues>(values: (T | null)[]): T | nul
  */
 export async function noteAddressesKept(tx: Tx, readAt: Date): Promise<void> {
   if (!(await shapeHolds(tx))) return;
-  await tx.update(setting).set({ value: sql`${setting.value} || ${JSON.stringify({ addressesReadAt: readAt.toISOString() })}::jsonb`, updatedAt: new Date() })
+  // `addressesSince` is the first such read since the mark was last withdrawn, kept by every later one: a parent's
+  // change of their details counts its age as a queue item from it (contactSendsSince(), ./take-in-setting.ts).
+  const at = readAt.toISOString();
+  await tx.update(setting).set({ value: sql`${setting.value} || jsonb_build_object('addressesReadAt', ${at}::text,
+    'addressesSince', coalesce(${setting.value}->'addressesSince', to_jsonb(${at}::text)))`, updatedAt: new Date() })
     .where(eq(setting.key, TAKE_IN_KEY));
 }
 

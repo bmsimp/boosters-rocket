@@ -18,8 +18,8 @@ export const TAKE_IN_KEY = "parents.contact_take_in";
  * read made under the saved shape lets the take-in run, and, once it has run, lets a parent's change be sent on.
  */
 export async function withdrawAddressesNote(tx: Tx): Promise<void> {
-  await tx.update(setting).set({ value: sql`${setting.value} - 'addressesReadAt'`, updatedAt: new Date() })
-    .where(and(eq(setting.key, TAKE_IN_KEY), sql`${setting.value}->'addressesReadAt' is not null`));
+  await tx.update(setting).set({ value: sql`${setting.value} - 'addressesReadAt' - 'addressesSince'`, updatedAt: new Date() })
+    .where(and(eq(setting.key, TAKE_IN_KEY), sql`(${setting.value}->'addressesReadAt' is not null or ${setting.value}->'addressesSince' is not null)`));
 }
 
 /**
@@ -30,8 +30,30 @@ export async function withdrawAddressesNote(tx: Tx): Promise<void> {
  * Until then the cache's empty columns say nothing of what QuickBooks holds, and nothing is sent for any contact item.
  */
 export async function contactSendsMayGo(tx: Tx): Promise<boolean> {
-  const [row] = await tx.select({ value: setting.value }).from(setting).where(eq(setting.key, TAKE_IN_KEY));
-  const v = row?.value as { doneAt?: unknown; addressesReadAt?: unknown } | undefined;
-  const at = (x: unknown) => typeof x === "string" && !Number.isNaN(Date.parse(x));
-  return v !== undefined && v !== null && typeof v === "object" && at(v.doneAt) && at(v.addressesReadAt);
+  return (await contactSendsSince(tx)) !== null;
 }
+
+/**
+ * contactSendsMayGo()'s answer as a time: since when a parent's change of their details has been free to go, the later
+ * of the take-in (`doneAt`) and the first read under the shape that holds now (`addressesSince`, which a read keeps and
+ * a shape save withdraws with `addressesReadAt`; `addressesReadAt` itself where a read marked none), or null while it
+ * may not go. A contact item's age, which makes a queue item stuck after a day, is counted from it, never from before
+ * it (the time it waited for this read is not a time it could be tried in).
+ */
+export async function contactSendsSince(tx: Tx): Promise<Date | null> {
+  const [row] = await tx.select({ value: setting.value }).from(setting).where(eq(setting.key, TAKE_IN_KEY));
+  const v = row?.value as { doneAt?: unknown; addressesReadAt?: unknown; addressesSince?: unknown } | undefined;
+  const at = (x: unknown) => (typeof x === "string" && !Number.isNaN(Date.parse(x)) ? Date.parse(x) : null);
+  if (v === undefined || v === null || typeof v !== "object") return null;
+  const done = at(v.doneAt);
+  const read = at(v.addressesReadAt);
+  if (done === null || read === null) return null;
+  return new Date(Math.max(done, at(v.addressesSince) ?? read));
+}
+
+/**
+ * The time a contact item's age is counted from for afterFailedTry(): the later of its own making and the time sends
+ * of its kind have been free to go (contactSendsSince()), so an item that waited out the take-in or a shape save's read
+ * gets the queue's usual tries and gaps once it may go, rather than being stuck by the age it reached while it couldn't.
+ */
+export const contactAgeFrom = (createdAt: Date, since: Date | null): Date => (since !== null && since > createdAt ? since : createdAt);

@@ -16,7 +16,7 @@ import { alignAfterWrite, applyWritten, balanceUnread, BEING_SENT_NOW, changeOwn
   replaceRefusedCreates, sendWrite, tryDeactivate, trySavedItem, whileItemHeld, whoStopped, contactStopsNow, type ContactNotOffered, type MadeAfterGivingUp, type OwnRecordChange, type SavedTry } from "./writes";
 import { afterFailedTry, beforeResend, classify, contactDiffers, heldInCache, type ContactDiffer, type HeldContact } from "./write-rules";
 import { isUuid } from "@/lib/seasons/ids";
-import { contactSendsMayGo } from "@/lib/parents/take-in-setting";
+import { contactAgeFrom, contactSendsMayGo, contactSendsSince } from "@/lib/parents/take-in-setting";
 import { isBuyoutWrite, sendBuyoutWrite } from "@/lib/buyouts/writes";
 import { formatMoney } from "@/lib/money/cents";
 import { customerOfFamily, familyLinkedTo, linksOf, linksOfCustomers } from "@/lib/families/links";
@@ -310,7 +310,10 @@ async function finishFound(item: Item, w: RosterWrite, qboId: string, now: Date)
   try {
     how = await foundDone(item, w, qboId);
   } catch {
-    return settle(item, { ...afterFailedTry(item.tries + 1, item.createdAt, now), code: "finish_failed", sent: item.sent, ...(w.op === "create" ? { resultQboId: qboId } : {}) }, now);
+    // A parent's change of their details counts its age from when it could first go (contactAgeFrom()), and not at all
+    // while it may not go.
+    const ageFrom = w.op === "contact" ? contactAgeFrom(item.createdAt, (await db.transaction((tx) => contactSendsSince(tx))) ?? now) : item.createdAt;
+    return settle(item, { ...afterFailedTry(item.tries + 1, ageFrom, now), code: "finish_failed", sent: item.sent, ...(w.op === "create" ? { resultQboId: qboId } : {}) }, now);
   }
   // QuickBooks made it, and another family is linked to that customer, or this family to another customer: stuck with
   // its own code, never sent again (`result_qbo_id` keeps the customer), for staff to look at on Reconciliation.

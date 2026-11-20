@@ -23,7 +23,7 @@ import { askForRosterRefresh, ROSTER_ASK_KEY } from "@/lib/parents/refresh-ask";
 import { studentsRuleInForce } from "@/lib/parents/sessions";
 import { numberedWhereRepeated } from "@/lib/parents/my-family-names";
 import { billingAddressOf, detailKey } from "@/lib/parents/contact-fields";
-import { contactSendsMayGo } from "@/lib/parents/take-in-setting";
+import { contactAgeFrom, contactSendsMayGo, contactSendsSince } from "@/lib/parents/take-in-setting";
 import { whoseDetails } from "@/lib/parents/my-family";
 import { formsForMovedStudent } from "@/lib/forms/moved";
 import { volunteerForMovedStudent } from "@/lib/volunteer/moved-student";
@@ -2531,10 +2531,10 @@ export const CONTACT_AWAITS_READ = "The portal is still waiting for its read of 
 export const CONTACT_SUPERSEDED_AT_PRESS = "Nothing was sent from this row: the parent saved their details again meanwhile, and that newer change, which carries everything this one did, has taken its place. The worker sends it on, and this page lists it if it doesn't go through.";
 /** The code a press keeps for it, which is never stored: the press puts the item back as it was kept. */
 const CONTACT_AWAITS_READ_CODE = "awaits_read";
-/** contactSendsMayGo() under the roster lock held shared, in a transaction of its own. */
+/** contactSendsSince() under the roster lock held shared, in a transaction of its own: null while nothing may go. */
 export const contactReadStands = () => db.transaction(async (tx) => {
   await tx.execute(sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`);
-  return contactSendsMayGo(tx);
+  return contactSendsSince(tx);
 });
 /** Why a contact change is given up at its try with nothing sent (contactStops()). */
 type ContactStop = "guardian_removed" | "not_own" | "family_off" | "family_inactive" | "not_the_family" | "books_changed" | "superseded";
@@ -3092,7 +3092,11 @@ export async function trySavedItem(item: QueueRow, write: RenameWrite | CreateWr
   const notYet = async (): Promise<SavedTry> => (o.by === "press"
     ? ((await settleSaved(item, { state: "refused", code: null, before }, triedAt, o)) ? { is: "not_reached", code: CONTACT_AWAITS_READ_CODE } : gone)
     : { is: "not_yet" });
-  if (write.op === "contact" && !(await contactReadStands())) return notYet();
+  const gateSince = write.op === "contact" ? await contactReadStands() : null;
+  if (write.op === "contact" && gateSince === null) return notYet();
+  // A contact change's age is counted from when it could first go (contactAgeFrom()): the time it waited for the read
+  // above is no time it could be tried in, so it is never stuck by that age at its first failed try.
+  const ageFrom = write.op === "contact" ? contactAgeFrom(item.createdAt, gateSince) : item.createdAt;
   const [marked] = await db.update(writeQueue).set({ sent: true, request: write, lastTriedAt: triedAt, updatedAt: new Date() })
     .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
   if (!marked) return gone;
@@ -3127,7 +3131,7 @@ export async function trySavedItem(item: QueueRow, write: RenameWrite | CreateWr
   /** For a later try: `sentNow`, this try may have reached QuickBooks; `request`, what a later look finds it as. */
   const later = async (code: string, sentNow: boolean, request: RosterWrite): Promise<SavedTry> => {
     if (o.by === "press" && !sentNow) return (await settleSaved(item, { state: "refused", code: null, before }, triedAt, o)) ? { is: "not_reached", code } : gone;
-    const next = o.by === "press" ? { state: "waiting" as const, nextTryAt: new Date(Date.now() + SAVED_LEASE_MS) } : afterFailedTry(item.tries + 1, item.createdAt, now);
+    const next = o.by === "press" ? { state: "waiting" as const, nextTryAt: new Date(Date.now() + SAVED_LEASE_MS) } : afterFailedTry(item.tries + 1, ageFrom, now);
     const sent = sentNow || (o.by !== "press" && before.sent);
     const ok = await settleSaved(item, { state: next.state, code, sent, request, nextTryAt: next.state === "waiting" ? next.nextTryAt : null }, triedAt, o);
     return !ok ? gone : next.state === "stuck" ? { is: "stuck", code } : { is: "waiting", sent };
