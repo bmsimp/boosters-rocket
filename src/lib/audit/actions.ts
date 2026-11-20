@@ -72,6 +72,8 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "parent.email_change_refused": "Email change refused",
   "parent.email_change_request": "Email change asked for",
   "parent.hold.decided": "Held address decided",
+  "parent.device.forgotten": "A parent forgot one of their remembered devices in sign-in settings",
+  "parent.devices.forgotten": "A parent forgot every remembered device but the one they were using, in sign-in settings",
   "parent.hold.opened": "Address held for staff to review",
   "parent.match.decided": "Family match decided",
   "parent.name.changed": "A parent's name changed (by staff in the portal; in QuickBooks, in older rows)",

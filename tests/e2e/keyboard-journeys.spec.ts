@@ -8,7 +8,7 @@ import { PARENT_SESSION_FAMILY, PARENT_SESSION_TOKEN, parentSessionCookie } from
 import { E2E_VOLUNTEER } from "./volunteer-seed";
 import { E2E_EMAIL, emailTokenHash } from "./email-seed";
 import { codeFor } from "./journey-helpers";
-import { E2E_SIGNIN } from "./signin-seed";
+import { E2E_SIGNIN, deviceTokenHash } from "./signin-seed";
 import { removeZeldaDevicesMadeHere } from "./signin-links";
 
 /**
@@ -403,21 +403,28 @@ test.describe("7. the email change, by keyboard", () => {
   });
 });
 
-test.describe("10. sign-in settings, by keyboard: asking again, then the change form", () => {
+test.describe("10. sign-in settings, by keyboard: asking again, then the change form, then forgetting a device", () => {
   // Asking again (slice SI-5a) stamps the seeded session's strong_at, and the code it mails is spent: both are put back
   // as they were. The change form is reached and never sent, and Sign out everywhere is never pressed, so Zelda's
-  // password, her device and the seeded session stay as seeded.
+  // password, her device and the seeded session stay as seeded. The device forgotten (slice SI-5b) is this spec's own,
+  // made here, used last just now so it is listed first, and removed after if it is still there; Zelda's seeded device
+  // is listed beside it and never forgotten.
   let strongAt: Date | null = null;
+  let ownDevice = "";
   test.beforeAll(async () => {
     strongAt = ((await sql`SELECT strong_at FROM parent_auth_session WHERE token = ${PARENT_SESSION_TOKEN}`)[0]?.strong_at ?? null) as Date | null;
     await sql`UPDATE parent_auth_session SET strong_at = NULL WHERE token = ${PARENT_SESSION_TOKEN}`;
+    const [made] = await sql`INSERT INTO parent_device (parent_id, token_hash, last_used_at, expires_at)
+      SELECT id, ${`journey-10-device-${Date.now()}`}, now(), now() + interval '90 days' FROM parent WHERE email = 'zelda@example.com' RETURNING id`;
+    ownDevice = made!.id as string;
   });
   test.afterAll(async () => {
     await sql`UPDATE parent_auth_session SET strong_at = ${strongAt} WHERE token = ${PARENT_SESSION_TOKEN}`;
     await sql`DELETE FROM signin_code WHERE parent_id IN (SELECT id FROM parent WHERE email = 'zelda@example.com')`;
+    if (ownDevice) await sql`DELETE FROM parent_device WHERE id = ${ownDevice}`;
   });
 
-  test("Family to Sign-in settings, the password, the emailed code, and the change form's fields and button", async ({ context, page }) => {
+  test("Family to Sign-in settings, the password, the emailed code, the change form's fields and button, and forgetting a device", async ({ context, page }) => {
     // The door's own counts (asking again uses them), as the sign-in journeys clear them.
     await sql`DELETE FROM rate_limit_event`;
     await sql`DELETE FROM signin_code WHERE parent_id IN (SELECT id FROM parent WHERE email = 'zelda@example.com')`;
@@ -430,8 +437,9 @@ test.describe("10. sign-in settings, by keyboard: asking again, then the change 
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Sign-in settings");
 
     // The password: its field, then Continue; the code step's field takes the focus.
-    // The field alone: its box is a region headed "Your password" too, which getByLabel() would also find.
-    const password = page.getByRole("main").locator('input[name="password"][autocomplete="current-password"]');
+    // The field alone: its box is a region headed "Your password" too, which getByLabel() would also find; and the
+    // devices box asks again too (slice SI-5b), so the field is the password box's.
+    const password = page.getByRole("region", { name: "Your password" }).locator('input[name="password"][autocomplete="current-password"]');
     await tabTo(page, password);
     await page.keyboard.type(E2E_SIGNIN.password);
     await page.keyboard.press("Tab");
@@ -460,6 +468,32 @@ test.describe("10. sign-in settings, by keyboard: asking again, then the change 
     // Not pressed: the run never changes Zelda's password. Sign out everywhere follows, and is never pressed either.
     await page.keyboard.press("Tab");
     await expect(page.getByRole("button", { name: "Sign out everywhere" })).toBeFocused();
+
+    // The remembered devices (slice SI-5b): the proof covers forgetting too, so each listed device has its button (the
+    // spec's own, Zelda's seeded one, and one an earlier journey's sign-in remembered, which goes after the file), then
+    // "Forget every other device" (the seeded session was made on none of them, so none is "This device").
+    const devices = page.getByRole("region", { name: "Remembered devices" });
+    const forget = devices.getByRole("button", { name: "Forget this device" });
+    const listed = Number((await sql`SELECT count(*)::int AS n FROM parent_device
+      WHERE parent_id = (SELECT id FROM parent WHERE email = 'zelda@example.com') AND expires_at > now()`)[0]!.n);
+    expect(listed).toBeGreaterThanOrEqual(2);
+    await expect(forget).toHaveCount(listed);
+    for (let i = 0; i < listed; i++) {
+      await page.keyboard.press("Tab");
+      await expect(forget.nth(i)).toBeFocused();
+    }
+    await page.keyboard.press("Tab");
+    await expect(devices.getByRole("button", { name: "Forget every other device" })).toBeFocused();
+    // Back to the spec's own device (its button is described by its row), and forget it: what happened takes the focus,
+    // its row goes, and the seeded device stays.
+    await tabTo(page, devices.locator(`button[aria-describedby="device-${ownDevice}"]`), { back: true });
+    await page.keyboard.press("Enter");
+    await expect(devices.getByRole("status")).toHaveText("That device is forgotten. The next time you sign in on it, we'll email you a code.");
+    await expect(devices.getByRole("status")).toBeFocused();
+    await expect(forget).toHaveCount(listed - 1);
+    expect(await sql`SELECT id FROM parent_device WHERE id = ${ownDevice}`).toHaveLength(0);
+    expect(await sql`SELECT id FROM parent_device WHERE token_hash = ${deviceTokenHash(E2E_SIGNIN.zeldaDevice)}`).toHaveLength(1);
+    ownDevice = "";
     await tabsOut(page);
     ringsShown();
   });

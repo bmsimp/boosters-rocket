@@ -1,9 +1,10 @@
 "use client";
 import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { safely } from "@/app/components/action-error";
+import { LocalTime } from "@/app/components/local-time";
 import { PASSWORD_COPY } from "@/lib/parents/password-copy";
 import { SIGNIN_SETTINGS_COPY as COPY } from "@/lib/parents/signin-settings-copy";
-import { askAgainCodeAction, askAgainPasswordAction, askSetupLinkAction, changePasswordAction, signOutEverywhereAction } from "./actions";
+import { askAgainCodeAction, askAgainPasswordAction, askSetupLinkAction, changePasswordAction, forgetDeviceAction, forgetOtherDevicesAction, signOutEverywhereAction } from "./actions";
 
 type Result = { ok: true; message: string } | { ok: false; errors: string[] };
 const FAILED: Result = { ok: false, errors: [COPY.failed] };
@@ -203,5 +204,87 @@ export function SetupLinkForm() {
       {result?.ok && <p role="status" className="paid-up"><Tick />{result.message}</p>}
       <button className="btn" aria-disabled={busy || undefined}>{busy ? COPY.setupBusy : COPY.setupButton}</button>
     </form>
+  );
+}
+
+/**
+ * A remembered device as the page lists it (MyDevice, src/lib/parents/signin-settings.ts): its row's id (its forget
+ * button's value, the only id the page sends), whether this session was made on it, and its two times as ISO strings.
+ */
+export type ListedDevice = { id: string; thisOne: boolean; createdAt: string; lastUsedAt: string };
+
+/** Calls `then` once, when it is drawn: AskAgain draws it once the parent has shown it's them. */
+function WhenDrawn({ then }: { then: () => void }) {
+  useEffect(() => { then(); }, [then]);
+  return null;
+}
+
+/**
+ * The remembered devices (slice SI-5b), newest use first, the one this session was made on marked "This device". Each
+ * can be forgotten, and every other one at once, but only by a session that showed it's the parent in the last 10
+ * minutes: otherwise the list is drawn without its buttons and asking again below it (AskAgain; `canAsk` false, for a
+ * parent with no password or under Strict, draws `cantAsk`'s words instead). Given only the listed devices, whether
+ * this session proved itself, the address for AskAgain's username field and those words.
+ */
+export function RememberedDevices({ devices, proved, canAsk, cantAsk, email }: { devices: ListedDevice[]; proved: boolean; canAsk: boolean; cantAsk: string; email: string }) {
+  // Proved here, by the asking below: it gives way to its thanks, and the buttons come. Proved in another box of the
+  // page, the page is drawn again with `proved` (the proof revalidates it), and the asking here simply goes.
+  const [provedHere, setProvedHere] = useState(false);
+  const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
+  const [busy, setBusy] = useState<string | null>(null);
+  const [result, setResult] = useState<Result | null>(null);
+  const said = useRef<HTMLParagraphElement>(null);
+  useEffect(() => { if (result) said.current?.focus(); }, [result]);
+  const listed = devices.filter((d) => !gone.has(d.id));
+  const canForget = proved || provedHere;
+  const others = listed.filter((d) => !d.thisOne);
+
+  const forget = async (which: "one" | "others", id?: string) => {
+    if (busy) return;
+    setBusy(which === "one" ? id! : "others"); setResult(null);
+    const r = await safely(() => (which === "one" ? forgetDeviceAction(id!) : forgetOtherDevicesAction()), FAILED);
+    setBusy(null);
+    if (r.ok) setGone((g) => new Set([...g, ...(which === "one" ? [id!] : others.map((d) => d.id))]));
+    setResult(r);
+  };
+
+  return (
+    <div className="stack">
+      <p>{COPY.devicesLede}</p>
+      <p className="help">{COPY.devicesNoNames}</p>
+      {result && (result.ok
+        ? <p ref={said} role="status" tabIndex={-1} className="paid-up"><Tick />{result.message}</p>
+        : <div ref={said} tabIndex={-1}><Errors errors={result.errors} /></div>)}
+      {listed.length === 0 ? <p>{COPY.devicesNone}</p> : (
+        <ul className="stack">
+          {listed.map((d) => (
+            <li key={d.id}>
+              <div id={`device-${d.id}`}>
+                {d.thisOne && <p><strong>{COPY.thisDevice}</strong></p>}
+                <dl className="details">
+                  <dt>{COPY.firstRemembered}</dt><dd><LocalTime iso={d.createdAt} /></dd>
+                  <dt>{COPY.lastUsed}</dt><dd><LocalTime iso={d.lastUsedAt} /></dd>
+                </dl>
+              </div>
+              {canForget && (
+                <div className="box-foot">
+                  <button type="button" className="btn btn-line" aria-describedby={`device-${d.id}`} aria-disabled={busy !== null || undefined}
+                    onClick={() => void forget("one", d.id)}>{busy === d.id ? COPY.forgetBusy : COPY.forgetDevice}</button>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {listed.some((d) => d.thisOne) && <p className="help">{COPY.forgetHere}</p>}
+      {canForget && others.length > 0 && listed.length > 1 && (
+        <button type="button" className="btn btn-line" aria-disabled={busy !== null || undefined}
+          onClick={() => void forget("others")}>{busy === "others" ? COPY.forgetBusy : COPY.forgetOthers}</button>
+      )}
+      {provedHere && <Said message={COPY.proved} />}
+      {!canForget && listed.length > 0 && (canAsk
+        ? <AskAgain email={email} proved={false} lede={COPY.askAgainForDevices}><WhenDrawn then={() => setProvedHere(true)} /></AskAgain>
+        : <p>{cantAsk}</p>)}
+    </div>
   );
 }
