@@ -407,15 +407,17 @@ test.describe("10. sign-in settings, by keyboard: asking again, then the change 
   // Asking again (slice SI-5a) stamps the seeded session's strong_at, and the code it mails is spent: both are put back
   // as they were. The change form is reached and never sent, and Sign out everywhere is never pressed, so Zelda's
   // password, her device and the seeded session stay as seeded. The device forgotten (slice SI-5b) is this spec's own,
-  // made here, used last just now so it is listed first, and removed after if it is still there; Zelda's seeded device
-  // is listed beside it and never forgotten.
+  // made here, used last just now so it is listed first, and removed after if it is still there; Zelda's seeded device,
+  // which the seeded session names (scripts/seed-e2e.ts), is listed beside it as "This device" and never forgotten, so
+  // the session keeps naming it.
   let strongAt: Date | null = null;
   let ownDevice = "";
   test.beforeAll(async () => {
     strongAt = ((await sql`SELECT strong_at FROM parent_auth_session WHERE token = ${PARENT_SESSION_TOKEN}`)[0]?.strong_at ?? null) as Date | null;
     await sql`UPDATE parent_auth_session SET strong_at = NULL WHERE token = ${PARENT_SESSION_TOKEN}`;
-    const [made] = await sql`INSERT INTO parent_device (parent_id, token_hash, last_used_at, expires_at)
-      SELECT id, ${`journey-10-device-${Date.now()}`}, now(), now() + interval '90 days' FROM parent WHERE email = 'zelda@example.com' RETURNING id`;
+    // First remembered long ago, on a day no other device of hers has, so its button's name finds it.
+    const [made] = await sql`INSERT INTO parent_device (parent_id, token_hash, created_at, last_used_at, expires_at)
+      SELECT id, ${`journey-10-device-${Date.now()}`}, '2001-02-03T12:00:00Z', now(), now() + interval '90 days' FROM parent WHERE email = 'zelda@example.com' RETURNING id`;
     ownDevice = made!.id as string;
   });
   test.afterAll(async () => {
@@ -476,26 +478,35 @@ test.describe("10. sign-in settings, by keyboard: asking again, then the change 
 
     // The remembered devices (slice SI-5b): the proof covers forgetting too, so each listed device has its button (the
     // spec's own, Zelda's seeded one, and one an earlier journey's sign-in remembered, which goes after the file), then
-    // "Forget every other device" (the seeded session was made on none of them, so none is "This device").
+    // "Forget every other device". The seeded session was made on the seeded device, so its row is "This device" and its
+    // button "Forget this device"; every other row's reads "Forget", named by the row's two times.
     const devices = page.getByRole("region", { name: "Remembered devices" });
-    const forget = devices.getByRole("button", { name: "Forget this device" });
+    const rowButtons = devices.getByRole("listitem").getByRole("button");
+    const thisOne = devices.getByRole("listitem").filter({ hasText: "This device" });
+    await expect(thisOne).toHaveCount(1);
+    await expect(thisOne.getByRole("button", { name: "Forget this device", exact: true })).toHaveCount(1);
+    await expect(devices.getByRole("button", { name: "Forget this device", exact: true })).toHaveCount(1);
     const listed = Number((await sql`SELECT count(*)::int AS n FROM parent_device
       WHERE parent_id = (SELECT id FROM parent WHERE email = 'zelda@example.com') AND expires_at > now()`)[0]!.n);
     expect(listed).toBeGreaterThanOrEqual(2);
-    await expect(forget).toHaveCount(listed);
+    await expect(rowButtons).toHaveCount(listed);
     for (let i = 0; i < listed; i++) {
       await page.keyboard.press("Tab");
-      await expect(forget.nth(i)).toBeFocused();
+      await expect(rowButtons.nth(i)).toBeFocused();
     }
     await page.keyboard.press("Tab");
     await expect(devices.getByRole("button", { name: "Forget every other device" })).toBeFocused();
-    // Back to the spec's own device (its button is described by its row), and forget it: what happened takes the focus,
-    // its row goes, and the seeded device stays.
-    await tabTo(page, devices.locator(`button[aria-describedby="device-${ownDevice}"]`), { back: true });
+    // Back to the spec's own device, found by its button's name (first remembered in 2001, as made above), and forget
+    // it: what happened takes the focus, its row goes, and the seeded device and its "This device" row stay.
+    const own = devices.getByRole("button", { name: /^Forget the device first remembered .*2001.*, last used / });
+    await expect(own).toHaveCount(1);
+    await tabTo(page, own, { back: true });
     await page.keyboard.press("Enter");
     await expect(devices.getByRole("status")).toHaveText("That device is forgotten. The next time you sign in on it, we'll email you a code.");
     await expect(devices.getByRole("status")).toBeFocused();
-    await expect(forget).toHaveCount(listed - 1);
+    await expect(rowButtons).toHaveCount(listed - 1);
+    await expect(own).toHaveCount(0);
+    await expect(thisOne).toHaveCount(1);
     expect(await sql`SELECT id FROM parent_device WHERE id = ${ownDevice}`).toHaveLength(0);
     expect(await sql`SELECT id FROM parent_device WHERE token_hash = ${deviceTokenHash(E2E_SIGNIN.zeldaDevice)}`).toHaveLength(1);
     ownDevice = "";

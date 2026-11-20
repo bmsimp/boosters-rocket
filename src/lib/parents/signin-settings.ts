@@ -234,6 +234,8 @@ export async function forgetMyDevice(ctx: Me, deviceId: unknown): Promise<Settin
  * (all of them when it names none), asked again first as forgetting one is, limited the same way, in one transaction
  * in the order above lockedPerson() (the person's row FOR UPDATE, the window again under it, then the devices), with one
  * `parent.devices.forgotten` row and its count. It takes no id: whose devices, and which is kept, come from the session.
+ * When none is kept (the session names no device, or one no longer the person's own unexpired one), the page called it
+ * "Forget every device", and the answer says every device is forgotten, this one included (`everyDeviceForgotten`).
  */
 export async function forgetMyOtherDevices(ctx: Me): Promise<SettingsResult> {
   if (!(await sessionProvedRecently(db, ctx))) return PROVE_AGAIN;
@@ -251,9 +253,12 @@ export async function forgetMyOtherDevices(ctx: Me): Promise<SettingsResult> {
       .where(and(eq(parentDevice.id, kept), eq(parentDevice.parentId, ctx.parentId), gt(parentDevice.expiresAt, me.now))) : [];
     await writeAudit({ actor: parentActor({ id: ctx.parentId, email: me.email }), action: "parent.devices.forgotten", targetType: "parent", targetId: ctx.parentId,
       after: { devicesForgotten: gone.length, thisDeviceKept: stillTheirs !== undefined }, ip: ctx.ip }, tx);
-    return true;
+    return stillTheirs !== undefined ? "kept" as const : "none_kept" as const;
   });
-  return done ? { ok: true, message: COPY.otherDevicesForgotten } : PROVE_AGAIN;
+  if (!done) return PROVE_AGAIN;
+  // With none kept the page couldn't say which device was in use ("Forget every device"): the answer says every one is
+  // gone, the one in use included.
+  return { ok: true, message: done === "kept" ? COPY.otherDevicesForgotten : COPY.everyDeviceForgotten };
 }
 
 /**

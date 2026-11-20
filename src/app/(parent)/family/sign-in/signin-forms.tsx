@@ -220,16 +220,26 @@ function WhenDrawn({ then }: { then: () => void }) {
   return null;
 }
 
+/** Two devices whose two times read the same to the minute, as LocalTime draws them: their buttons' names add the row. */
+const sameMinutes = (a: ListedDevice, b: ListedDevice) => a.createdAt.slice(0, 16) === b.createdAt.slice(0, 16) && a.lastUsedAt.slice(0, 16) === b.lastUsedAt.slice(0, 16);
+
 /**
  * The remembered devices (slice SI-5b), newest use first, the one this session was made on marked "This device". Each
  * can be forgotten, and every other one at once, but only by a session that showed it's the parent in the last 10
  * minutes: otherwise the list is drawn without its buttons and asking again below it (AskAgain; `canAsk` false, for a
  * parent with no password or under Strict, draws `cantAsk`'s words instead). Given only the listed devices, whether
  * this session proved itself, the address for AskAgain's username field and those words.
+ *
+ * Each button says which device it forgets: "Forget this device" on the session's own row, and on every other "Forget"
+ * with, in its name, the two times the row shows ("the device first remembered …, last used …"; the row's place in the
+ * list too when another row's times read the same), so no two buttons share a name. A session that names none of them
+ * can't say which is the one in use: the box says so above the list, and the button for all of them is "Forget every
+ * device".
  */
 export function RememberedDevices({ devices, proved, canAsk, cantAsk, email }: { devices: ListedDevice[]; proved: boolean; canAsk: boolean; cantAsk: string; email: string }) {
-  // Proved here, by the asking below: it gives way to its thanks, and the buttons come. Proved in another box of the
-  // page, the page is drawn again with `proved` (the proof revalidates it), and the asking here simply goes.
+  // Proved here, by the asking below: it gives way to its thanks, drawn above the list, and the buttons come after it.
+  // Proved in another box of the page, the page is drawn again with `proved` (the proof revalidates it), and the
+  // asking here simply goes.
   const [provedHere, setProvedHere] = useState(false);
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
@@ -239,6 +249,9 @@ export function RememberedDevices({ devices, proved, canAsk, cantAsk, email }: {
   const listed = devices.filter((d) => !gone.has(d.id));
   const canForget = proved || provedHere;
   const others = listed.filter((d) => !d.thisOne);
+  // Whether the session named one of the listed devices when the page was drawn: forgetting that one leaves the rest
+  // "every other device", and the session still knew which it was.
+  const knowsThisOne = devices.some((d) => d.thisOne);
 
   const forget = async (which: "one" | "others", id?: string) => {
     if (busy) return;
@@ -253,36 +266,44 @@ export function RememberedDevices({ devices, proved, canAsk, cantAsk, email }: {
     <div className="stack">
       <p>{COPY.devicesLede}</p>
       <p className="help">{COPY.devicesNoNames}</p>
+      {provedHere && <Said message={COPY.proved} />}
       {result && (result.ok
         ? <p ref={said} role="status" tabIndex={-1} className="paid-up"><Tick />{result.message}</p>
         : <div ref={said} tabIndex={-1}><Errors errors={result.errors} /></div>)}
       {listed.length === 0 ? <p>{COPY.devicesNone}</p> : (
-        <ul className="stack">
-          {listed.map((d) => (
-            <li key={d.id}>
-              <div id={`device-${d.id}`}>
+        <>
+          {!knowsThisOne && <p>{COPY.devicesWhichUnknown}</p>}
+          <ul className="stack">
+            {listed.map((d, i) => (
+              <li key={d.id} data-device={d.id}>
                 {d.thisOne && <p><strong>{COPY.thisDevice}</strong></p>}
                 <dl className="details">
                   <dt>{COPY.firstRemembered}</dt><dd><LocalTime iso={d.createdAt} /></dd>
                   <dt>{COPY.lastUsed}</dt><dd><LocalTime iso={d.lastUsedAt} /></dd>
                 </dl>
-              </div>
-              {canForget && (
-                <div className="box-foot">
-                  <button type="button" className="btn btn-line" aria-describedby={`device-${d.id}`} aria-disabled={busy !== null || undefined}
-                    onClick={() => void forget("one", d.id)}>{busy === d.id ? COPY.forgetBusy : COPY.forgetDevice}</button>
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
+                {canForget && (
+                  <div className="box-foot">
+                    <button type="button" className="btn btn-line" aria-disabled={busy !== null || undefined} onClick={() => void forget("one", d.id)}>
+                      {busy === d.id ? COPY.forgetBusy : d.thisOne ? COPY.forgetDevice : COPY.forgetOne}
+                      {!d.thisOne && (
+                        <span className="visually-hidden">
+                          {" "}{COPY.forgetWhichFirst} <LocalTime iso={d.createdAt} />, {COPY.forgetWhichLast} <LocalTime iso={d.lastUsedAt} />
+                          {listed.some((o) => o.id !== d.id && !o.thisOne && sameMinutes(o, d)) && <>, {COPY.forgetWhichRow} {i + 1}</>}
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
       )}
       {listed.some((d) => d.thisOne) && <p className="help">{COPY.forgetHere}</p>}
       {canForget && others.length > 0 && listed.length > 1 && (
         <button type="button" className="btn btn-line" aria-disabled={busy !== null || undefined}
-          onClick={() => void forget("others")}>{busy === "others" ? COPY.forgetBusy : COPY.forgetOthers}</button>
+          onClick={() => void forget("others")}>{busy === "others" ? COPY.forgetBusy : knowsThisOne ? COPY.forgetOthers : COPY.forgetAll}</button>
       )}
-      {provedHere && <Said message={COPY.proved} />}
       {!canForget && listed.length > 0 && (canAsk
         ? <AskAgain email={email} proved={false} lede={COPY.askAgainForDevices}><WhenDrawn then={() => setProvedHere(true)} /></AskAgain>
         : <p>{cantAsk}</p>)}

@@ -54,15 +54,28 @@ export const SIGNIN_SETTINGS_COPY = {
   thisDevice: "This device",
   firstRemembered: "First remembered",
   lastUsed: "Last used",
+  /** Said above the list when the session names none of the listed devices (one from before SI-5b, or its device forgotten or run out). */
+  devicesWhichUnknown: "We can't tell which of these is the device you're using now.",
+  /** The button of the device this session was made on. */
   forgetDevice: "Forget this device",
+  /** Every other row's button: "Forget" to the eye, and in its name which device, by the two times its row shows. */
+  forgetOne: "Forget",
+  forgetWhichFirst: "the device first remembered",
+  forgetWhichLast: "last used",
+  /** Added to that name only when another row's two times read the same to the minute, so no two buttons share a name. */
+  forgetWhichRow: "listed number",
   forgetBusy: "Forgetting…",
   forgetOthers: "Forget every other device",
+  /** The same button when the session names none of the listed devices: it forgets them all, whichever is in use. */
+  forgetAll: "Forget every device",
   forgetHere: "Forgetting the device you're using now doesn't sign you out here. The next time you sign in on it, we'll email you a code again.",
   askAgainForDevices: "Before you forget a device, please show it's you: enter your password, then the code we email you.",
   choosePasswordForDevices: "To forget a device here, please choose a password first. Signing out everywhere forgets every device too.",
   devicesStrict: "For now, devices can't be forgotten one at a time here. Signing out everywhere forgets every device.",
   deviceForgotten: "That device is forgotten. The next time you sign in on it, we'll email you a code.",
   otherDevicesForgotten: "Every other device is forgotten. The next time you sign in on one of them, we'll email you a code.",
+  /** The same press when the session kept no device of the person's: every one is gone, the one in use too, if it was one. */
+  everyDeviceForgotten: "Every device is forgotten. The next time you sign in on any device, this one included, we'll email you a code.",
   /** One answer for a device that isn't one of the parent's to forget, whatever the reason. */
   deviceNotFound: "That device isn't one we remember for you now. Please reload this page.",
   moreTitle: "More ways to sign in",
