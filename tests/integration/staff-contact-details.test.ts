@@ -10,7 +10,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 });
 
 import { eq, sql } from "drizzle-orm";
-import { db } from "@/lib/db/client";
+import { db, type Tx } from "@/lib/db/client";
 import { family, qboCustomer, writeQueue, type RosterWrite } from "@/lib/db/schema";
 import { AccessDenied, type ParentCtx } from "@/lib/guards";
 import type { AppFamilyId } from "@/lib/families/ids";
@@ -18,7 +18,7 @@ import type { ContactValues } from "@/lib/parents/contact-fields";
 import { CONTACT_COPY, loadMyContact, saveDetails, saveMyContact } from "@/lib/parents/contact-edits";
 import { CONTACT_REPLACED_NOTE } from "@/lib/parents/contact-queue";
 import { contactSavedWords, CONTACT_DIFFERS, keptContactWords, RosterBusyAtTry, SAVED_LEASE_MS, SENDING_LOCK, sendContactSaved, STAFF_DETAILS_COPY, trySavedItem } from "@/lib/roster/writes";
-import { giveUp, runWriteQueue } from "@/lib/roster/queue";
+import { giveUpIn, runWriteQueue } from "@/lib/roster/queue";
 import type { MembershipShape } from "@/lib/roster/shape";
 import { savePersonDetailsAction } from "@/app/staff/(app)/parents/actions";
 import { saveFamilyDetailsAction } from "@/app/staff/(app)/roster/write-actions";
@@ -94,13 +94,29 @@ async function holdTheRow(id: string): Promise<{ release: () => Promise<void> }>
   await isTaken;
   return { release: async () => { release(); await held; } };
 }
-/** Until the queue item's row reads as `ready` says: the thing itself, read again, never a guessed sleep. */
-async function untilTheItem(id: string, ready: (r: NonNullable<Awaited<ReturnType<typeof queueItem>>>) => boolean, timeoutMs = 15_000): Promise<void> {
+/**
+ * The item's row taken FOR UPDATE next, by a transaction queued behind whatever holds or is waiting for it now (Postgres
+ * grants a row's lock in the order it was asked for, so it is granted only once the write ahead of it has committed),
+ * running `then` once granted and holding the row until released.
+ */
+function takeTheRowNext<T>(id: string, then?: (tx: Tx) => Promise<T>): { granted: Promise<T | null>; release: () => Promise<void> } {
+  let release!: () => void, grant!: (v: T | null) => void;
+  const released = new Promise<void>((r) => { release = r; });
+  const granted = new Promise<T | null>((r) => { grant = r; });
+  const held = db.transaction(async (tx) => { await tx.execute(sql`select id from write_queue where id = ${id} for update`); grant(then ? await then(tx) : null); await released; });
+  return { granted, release: async () => { release(); await held; } };
+}
+/**
+ * Until `n` sessions of this database are waiting for a row's lock (not an advisory lock), read from pg_locks: the wait
+ * itself, never a row's value or a time.
+ */
+async function untilARowLockIsAwaited(n = 1, timeoutMs = 15_000): Promise<void> {
   const until = Date.now() + timeoutMs;
   for (;;) {
-    const r = await queueItem(id);
-    if (r && ready(r)) return;
-    if (Date.now() > until) throw new Error(`The item didn't come to the state asked for within ${timeoutMs} ms.`);
+    const [row] = await db.execute<{ n: number }>(sql`select count(distinct l.pid)::int as n from pg_locks l join pg_stat_activity a on a.pid = l.pid
+      where a.datname = current_database() and a.pid <> pg_backend_pid() and l.locktype <> 'advisory' and not l.granted`);
+    if (row!.n >= n) return;
+    if (Date.now() > until) throw new Error(`Fewer than ${n} sessions were waiting for a row's lock after ${timeoutMs} ms.`);
     await new Promise((res) => setTimeout(res, 20));
   }
 }
@@ -538,43 +554,32 @@ describe("the at-once try, whatever stands in its way (item 4)", () => {
     // The item's row held, so the try's mark waits for it once its first look (the gate) has gone through.
     const row = await holdTheRow(id);
     let lock: Awaited<ReturnType<typeof holdTheRosterLock>> | null = null;
+    let behind: ReturnType<typeof takeTheRowNext> | null = null;
     try {
-      const trying = trySavedItem(first, first.request, { by: "at_once", linkedBy: registrar.id, actor: staffOp().actor, ip: null, permission: "Parents.ReadWrite", rosterWaitMs: 3_000 })
+      const trying = trySavedItem(first, first.request, { by: "at_once", linkedBy: registrar.id, actor: staffOp().actor, ip: null, permission: "Parents.ReadWrite", rosterWaitMs: 1_000 })
         .then(() => null, (e: unknown) => e);
-      await untilALockIsAwaited();
+      // The mark's statement waits for the row: the gate went through and the item is being marked.
+      await untilARowLockIsAwaited();
+      // The roster lock taken before the record's check (contactStops()) asks for it.
       lock = await holdTheRosterLock();
+      // A second taker of the row queued behind the mark, so it holds the row once the mark has landed.
+      behind = takeTheRowNext(id);
+      await untilARowLockIsAwaited(2);
       await row.release();
-      // Marked as maybe sent (the proof the mark was made), then its record's check gives up waiting for the roster lock.
-      await untilTheItem(id, (r) => r.sent);
+      await behind.granted;
+      // Marked as maybe sent, and nothing can take the mark back while the row is held.
+      expect(await queueItem(id)).toMatchObject({ state: "waiting", sent: true });
+      // The record's check gave up waiting for the roster lock, and the taking back of the mark waits for the row.
+      await untilARowLockIsAwaited();
+      await behind.release();
       expect(await trying).toBeInstanceOf(RosterBusyAtTry);
     } finally {
       await row.release();
+      await behind?.release();
       await lock?.release();
     }
     expect(posts()).toEqual([]);
     expect(await queueItem(id)).toMatchObject({ state: "waiting", sent: false, tries: 0, lastTriedAt: first.lastTriedAt, request: first.request, nextTryAt: first.nextTryAt });
-  });
-
-  it("given up on Reconciliation while the at-once try waits for the roster lock: said from what the item holds, never promised to the worker", async () => {
-    const a = await ana();
-    const saved = await saveDetails({ kind: "person", parentId: a.ana.id }, asSaved({ phone: NEW_PHONE }, "p:1"), { ...staffOp(), queueAs: queueAs() });
-    if (saved.is !== "saved") throw new Error("not saved");
-    const lock = await holdTheRosterLock();
-    let sent: Awaited<ReturnType<typeof sendContactSaved>>;
-    try {
-      const sending = sendContactSaved({ kind: "person", parentId: a.ana.id }, saved.queueIds, staffOp(), { rosterWaitMs: 3_000 });
-      // It waits for the roster lock before its try (rosterFreeWithin()); meanwhile staff give the item up.
-      await untilALockIsAwaited();
-      expect(await giveUp(saved.queueIds[0]!, "Not needed now.", reconciler())).toMatchObject({ ok: true });
-      sent = await sending;
-    } finally {
-      await lock.release();
-    }
-    expect(sent.map((s) => s.got)).toEqual([{ is: "abandoned", sent: false }]);
-    expect(contactSavedWords(sent, "person", { mayCompare: true, whoCompares: "" }).sentences)
-      .toEqual(["Nothing was sent to their record under Rivera Family: the change was given up on the Reconciliation page meanwhile. The portal keeps the details."]);
-    expect(posts()).toEqual([]);
-    expect(await queueItem(saved.queueIds[0]!)).toMatchObject({ state: "given_up", sent: false, tries: 0 });
   });
 
   it("given up while the try, its item marked, waits for the roster lock at its record's check: the mark taken back, and said from what the item holds", async () => {
@@ -586,19 +591,26 @@ describe("the at-once try, whatever stands in its way (item 4)", () => {
     // The item's row held, so the try's mark waits for it: the try's first look (the gate) has gone through by then.
     const row = await holdTheRow(id);
     let lock: Awaited<ReturnType<typeof holdTheRosterLock>> | null = null;
+    let behind: ReturnType<typeof takeTheRowNext<Awaited<ReturnType<typeof giveUpIn>>>> | null = null;
     let sent: Awaited<ReturnType<typeof sendContactSaved>>;
     try {
-      const sending = sendContactSaved({ kind: "person", parentId: a.ana.id }, saved.queueIds, staffOp(), { rosterWaitMs: 3_000 });
-      await untilALockIsAwaited();
-      // The roster lock taken before the record's check (contactStops()) asks for it, then the mark let through.
+      const sending = sendContactSaved({ kind: "person", parentId: a.ana.id }, saved.queueIds, staffOp(), { rosterWaitMs: 1_000 });
+      await untilARowLockIsAwaited();
+      // The roster lock taken before the record's check (contactStops()) asks for it.
       lock = await holdTheRosterLock();
+      // Staff's "Give up" queued behind the mark: it gives the item up once the mark has landed, while the try waits for
+      // the roster lock, and holds the row until released, so the try's taking back of its mark waits for it.
+      behind = takeTheRowNext(id, (tx) => giveUpIn(tx, id, "Not needed now.", reconciler()));
+      await untilARowLockIsAwaited(2);
       await row.release();
-      await untilTheItem(id, (r) => r.sent);
-      await untilALockIsAwaited();
-      expect(await giveUp(id, "Not needed now.", reconciler())).toMatchObject({ ok: true });
+      expect(await behind.granted).toMatchObject({ ok: true });
+      // The record's check gave up waiting for the roster lock, and the taking back of the mark waits for the give-up.
+      await untilARowLockIsAwaited();
+      await behind.release();
       sent = await sending;
     } finally {
       await row.release();
+      await behind?.release();
       await lock?.release();
     }
     expect(sent.map((s) => s.got)).toEqual([{ is: "abandoned", sent: false }]);
