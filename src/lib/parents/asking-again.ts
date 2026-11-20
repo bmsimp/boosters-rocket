@@ -4,8 +4,9 @@
 // last 10 minutes (provedRecently(), ./reask-rule.ts, of `parent_auth_session.strong_at`). A sign-in with the emailed
 // code or a set-up link stamps it (recordStrongSignin(), devices.ts); one on a remembered device does not; otherwise the
 // parent proves it again here, on the page they are on, through the door's own checks: the password
-// (checkPasswordSignin(), password-signin.ts, for the session's own address and with no device: a page request carries
-// no device cookie, whose path is /api/auth/parent; its tries counted against the person, `password_reask_parent`),
+// (checkPasswordSignin(), password-signin.ts, for the session's own address; a page request carries no device cookie,
+// whose path is /api/auth/parent, so since slice SI-5b the device is the one the session names, `device_id`, and its
+// tries are counted against that device when it is the person's and unexpired, else against the person, `password_reask_parent`),
 // then the emailed code (sendSecondStepCode() for a change, verifySigninCode(), signinStands(), signin-codes.ts). A remembered device is never
 // a second step here: it is the very phone the question's reason speaks of ("a 90-day session on an unlocked phone
 // should not be enough to take the sign-in over"). Nothing here makes a session, sets a cookie or calls the finish: it
@@ -40,6 +41,19 @@ export async function sessionStrongAt(q: Reader, s: { sessionId: string; parentI
     .where(and(eq(parentAuthSession.id, s.sessionId),
       inArray(parentAuthSession.userId, q.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, s.parentId)))));
   return row?.strongAt ?? null;
+}
+
+/**
+ * The remembered device this session of this person was made on (`parent_auth_session.device_id`, since slice SI-5b),
+ * or null: none (a session from before SI-5b, or one whose device was forgotten), or no such session of this person.
+ * Whether the device is still the person's and unexpired is for its reader to check (deviceOfAddress(), the sign-in
+ * settings' list): the row may have run out.
+ */
+export async function sessionDeviceId(q: Reader, s: { sessionId: string; parentId: string }): Promise<string | null> {
+  const [row] = await q.select({ deviceId: parentAuthSession.deviceId }).from(parentAuthSession)
+    .where(and(eq(parentAuthSession.id, s.sessionId),
+      inArray(parentAuthSession.userId, q.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, s.parentId)))));
+  return row?.deviceId ?? null;
 }
 
 /**
@@ -110,9 +124,11 @@ const TOO_MANY = { ok: false as const, errors: [COPY.tooManyTries] };
 
 /**
  * The first step: the session's own password. The door's check (checkPasswordSignin()), for the session's address
- * (`ctx.email`, never a typed one) and with no device token, its tries counted against the session's person
- * (`password_reask_parent`, its TryCount), never the address's count: a stranger who keeps `password_try_email` full at
- * the door can't stop the parent proving it's them, and wrong tries here don't fill the door's count. The per-IP flood
+ * (`ctx.email`, never a typed one) and with the device this session names (sessionDeviceId(), by its row: since slice
+ * SI-5b), its tries counted against that device when it is the person's and unexpired (`password_try_device`, the count
+ * a password at the door on that device fills too), and otherwise against the session's person (`password_reask_parent`,
+ * its TryCount), never the address's count: a stranger who keeps `password_try_email` full at the door can't stop the
+ * parent proving it's them, and wrong tries here don't fill the door's count for the address. The per-IP flood
  * stop (`password_try_ip`), the wait for a turn, its refusals and its rows are the door's (a right
  * password writes `signin.second_step_asked`, left as the door writes it: the row after it, `signin.proved_again`, says
  * the code was for asking again). Anything but a string of at most MOST_TYPED_PASSWORD is the refusal, uncounted. Every
@@ -123,7 +139,8 @@ const TOO_MANY = { ok: false as const, errors: [COPY.tooManyTries] };
  */
 export async function askAgainPassword(ctx: Asker, password: unknown, now = new Date()): Promise<AskAgainAnswer> {
   if (typeof password !== "string" || password.length > MOST_TYPED_PASSWORD) return PASSWORD_REFUSED;
-  const check = await checkPasswordSignin(ctx.email, password, null, ctx.ip, now, undefined, { kind: "password_reask_parent", subject: ctx.parentId });
+  const deviceId = await sessionDeviceId(db, ctx);
+  const check = await checkPasswordSignin(ctx.email, password, deviceId ? { deviceId } : null, ctx.ip, now, undefined, { kind: "password_reask_parent", subject: ctx.parentId });
   if (!check.ok) return check.limited ? TOO_MANY : PASSWORD_REFUSED;
   if (check.person.id !== ctx.parentId) return PASSWORD_REFUSED; // one address is one person: never another's
   const endsAt = new Date(check.at.getTime() + CODE_TTL_MS);
