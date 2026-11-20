@@ -5,7 +5,8 @@ import postgres from "postgres";
 import { startMailSink, type MailSink } from "../helpers/mail-sink";
 import { e2eMailPort } from "./run-config";
 import { E2E_SIGNIN, deviceTokenHash } from "./signin-seed";
-import { removeZeldaDevicesMadeHere, removeZeldaSessionsMadeHere, zeldaDeviceCookie } from "./signin-links";
+import { removeZeldaDevicesMadeHere, removeZeldaSessionsMadeHere, resetPasskeyOffer, zeldaDeviceCookie } from "./signin-links";
+import { passOffer } from "./journey-helpers";
 
 /**
  * The parent door in the browser, as the sign-in release's slice SI-3b made it: the email and the password on one form,
@@ -32,7 +33,7 @@ test.beforeEach(async () => {
   await sql`DELETE FROM signin_code`;
   await sql`DELETE FROM rate_limit_event`;
 });
-test.afterEach(async () => { await removeZeldaSessionsMadeHere(sql); await removeZeldaDevicesMadeHere(sql); });
+test.afterEach(async () => { await removeZeldaSessionsMadeHere(sql); await removeZeldaDevicesMadeHere(sql); await resetPasskeyOffer(sql); });
 
 // A code is mailed after the answer to the password (src/lib/parents/signin-codes.ts), so an earlier test's email can
 // reach the sink after this test emptied it. The code to use is the newest one the database still holds unused, found
@@ -89,6 +90,8 @@ test("a parent signs in with a password and an emailed code, switches family, an
   await page.getByRole("button", { name: "Quetzalcoatl Family", exact: true }).click();
   await expect(page).toHaveURL(`${baseURL}/`);
   await expect(page.getByText("Viewing Quetzalcoatl Family.")).toBeVisible();
+  // A new browser that proved the code: Home offers a passkey (slice SI-8). Not now.
+  await passOffer(page);
 
   await page.getByRole("link", { name: "Switch family" }).click();
   await page.getByRole("button", { name: "Second Family", exact: true }).click();
@@ -226,6 +229,8 @@ test("a page to return to that is not a parent page of this site is dropped", as
     await expect(page).toHaveURL(`${baseURL}/choose-family`);
     await page.getByRole("button", { name: "Quetzalcoatl Family", exact: true }).click();
     await expect(page).toHaveURL(`${baseURL}/`);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+    await passOffer(page);
     await page.goto("/display");
     await page.getByRole("button", { name: "Sign out" }).click();
     await expect(page).toHaveURL(/\/sign-in$/);

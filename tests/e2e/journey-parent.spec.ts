@@ -5,9 +5,9 @@ import { startMailSink, type MailSink } from "../helpers/mail-sink";
 import { e2eMailPort } from "./run-config";
 import { E2E_BUYOUT } from "./buyout-seed";
 import { E2E_VOLUNTEER } from "./volunteer-seed";
-import { codeFor, noSidewaysScroll, shot } from "./journey-helpers";
+import { codeFor, noSidewaysScroll, passOffer, shot } from "./journey-helpers";
 import { E2E_SIGNIN } from "./signin-seed";
-import { removeZeldaDevicesMadeHere } from "./signin-links";
+import { removeZeldaDevicesMadeHere, resetPasskeyOffer } from "./signin-links";
 
 // One parent's whole visit, walked by what they would tap (docs/walkthrough.md): Zelda signs in with the code the
 // portal mails her, chooses a family, reads Home, opens her signed form, looks at Payments, signs up for two shifts and
@@ -30,7 +30,7 @@ test.beforeAll(async () => {
   sink = await startMailSink({ secure: true, port: e2eMailPort(), key: readFileSync(".e2e/sink-key.pem", "utf8"), cert: readFileSync(".e2e/sink-cert.pem", "utf8") });
 });
 // The sign-in remembers this browser's device for Zelda (slice SI-3b): it goes after, keeping the seed's.
-test.afterAll(async () => { await removeZeldaDevicesMadeHere(sql); await sink.close(); await sql.end(); });
+test.afterAll(async () => { await removeZeldaDevicesMadeHere(sql); await resetPasskeyOffer(sql); await sink.close(); await sql.end(); });
 
 test("a parent's visit: sign in by password and emailed code, read and do what the family needs, and sign out", async ({ page, baseURL }) => {
   test.setTimeout(120_000);
@@ -61,6 +61,8 @@ test("a parent's visit: sign in by password and emailed code, read and do what t
 
   await test.step("reads Home: what is owed, the season and each student", async () => {
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+    // The sign-in proved a second step on a new browser: Home offers a passkey first (slice SI-8). Not now.
+    await passOffer(page);
     await expect(page.getByText("Viewing Quetzalcoatl Family.")).toBeVisible();
     await expect(page.getByRole("region", { name: "Quetzalcoatl Family" }).locator(".total, .owed, .big").first()).toContainText("$185.00");
     await expect(page.getByRole("heading", { name: "Your students" })).toBeVisible();

@@ -1,11 +1,11 @@
 import { test, expect, type Browser, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import postgres from "postgres";
-import { parentSessionCookie } from "./parent-session";
+import { PARENT_SESSION_TOKEN, parentSessionCookie } from "./parent-session";
 import { addressOf, isDynamic, parentRoutes } from "./parent-routes";
 import { PARAMS } from "./parent-params";
 import { MIN_TARGET, focusStop, layoutProblems } from "./a11y-checks";
-import { mintZeldaLink, NO_SUCH_LINK, removeZeldaLinks, takeZeldaPassword, type LinkPurpose } from "./signin-links";
+import { mintZeldaLink, NO_SUCH_LINK, removeZeldaLinks, resetPasskeyOffer, takeZeldaPassword, type LinkPurpose } from "./signin-links";
 import { E2E_SIGNIN } from "./signin-seed";
 import { clearZeldaCounts, keepZeldaProof, proveZeldaSinceHerApp, removeZeldaSecondSteps, setUpAppOnPage, setZeldaProof } from "./authenticator-steps";
 
@@ -64,7 +64,8 @@ const summary = (text: string | undefined) => (text ?? "").replace(/\s+/g, " ").
  * a set-up or reset link made for Zelda just before the page is opened (tests/e2e/signin-links.ts), its token added to
  * the end of `address`; the links are removed as each page is closed (and after the run), so the seed is as it was.
  */
-type Target = { label: string; address: string; signedIn: boolean; deviceStore?: Record<string, string>; status?: number; link?: LinkPurpose; app?: AppState };
+type Target = { label: string; address: string; signedIn: boolean; deviceStore?: Record<string, string>; status?: number; link?: LinkPurpose; app?: AppState;
+  offer?: true };
 /**
  * A state of the "Authenticator app" box of /family/sign-in that only presses reach (the sign-in release, slice SI-6b):
  * the set-up shown (the QR code, the key and its copy press, the code field), the backup codes shown once, the box with
@@ -126,7 +127,31 @@ const APP_TARGETS: Target[] = [
   { label: "/family/sign-in (asking again for the app's code)", address: "/family/sign-in", signedIn: true, app: "asked" },
 ];
 
-const TARGETS = [...parentTargets(), ...APP_TARGETS, ...BEFORE_SIGN_IN];
+/**
+ * Home with the passkey offer (the sign-in release, slice SI-8): drawn only in a session made and proved just now, on a
+ * device of the person's with no "Not now", so the seeded session (made at the seed, its `strong_at` null) never meets
+ * it. A session of Zelda's own is made for it as each page is opened, on a device of its own (offerSession()), made and
+ * proved five seconds before (the database's clock may run a little ahead of the app's), and removed with Zelda's count
+ * as the page is closed. Nothing is pressed. Chromium here says it is a computer at both widths, so the computer's words
+ * are the ones checked; a phone's are the owner's to see (docs/runbooks/before-the-first-family.md).
+ */
+const OFFER_TARGETS: Target[] = [{ label: "/ (the passkey offer)", address: "/", signedIn: false, offer: true }];
+const OFFER_SESSION_TOKEN = "e2e-a11y-offer-session-token";
+async function offerSession(): Promise<() => Promise<void>> {
+  await resetPasskeyOffer(sql);
+  const [device] = await sql`INSERT INTO parent_device (parent_id, token_hash, expires_at)
+    SELECT id, ${`a11y-offer-${Date.now()}`}, now() + interval '90 days' FROM parent WHERE email = 'zelda@example.com' RETURNING id`;
+  await sql`INSERT INTO parent_auth_session (id, token, user_id, family_id, device_id, expires_at, created_at, strong_at)
+    SELECT 'e2e-a11y-offer-session', ${OFFER_SESSION_TOKEN}, user_id, family_id, ${device!.id as string}, now() + interval '1 day', now() - interval '5 seconds', now() - interval '5 seconds'
+    FROM parent_auth_session WHERE token = ${PARENT_SESSION_TOKEN}`;
+  return async () => {
+    await sql`DELETE FROM parent_auth_session WHERE token = ${OFFER_SESSION_TOKEN}`;
+    await sql`DELETE FROM parent_device WHERE id = ${device!.id as string}`;
+    await resetPasskeyOffer(sql);
+  };
+}
+
+const TARGETS = [...parentTargets(), ...APP_TARGETS, ...OFFER_TARGETS, ...BEFORE_SIGN_IN];
 
 /** The pages under src/app/sign-in, from disk: "set-up/[token]/page.tsx" is "/sign-in/set-up/[token]". */
 const signInRoutes = () => parentRoutes("src/app/sign-in").map((route) => (route === "/" ? "/sign-in" : `/sign-in${route}`));
@@ -175,6 +200,10 @@ async function prepareApp(page: Page, state: AppState) {
 async function open(browser: Browser, target: Target, width: number): Promise<{ page: Page; close: () => Promise<void> }> {
   const context = await browser.newContext({ viewport: { width, height: HEIGHT } });
   if (target.signedIn) await context.addCookies([parentSessionCookie()]);
+  // A session left by an opening cut off midway goes first; then one made and proved just now.
+  if (target.offer) await sql`DELETE FROM parent_auth_session WHERE token = ${OFFER_SESSION_TOKEN}`;
+  const removeOffer = target.offer ? await offerSession() : null;
+  if (target.offer) await context.addCookies([parentSessionCookie(OFFER_SESSION_TOKEN)]);
   if (target.deviceStore) {
     // A code step must be live to be picked up: give it the time it is opened at.
     await context.addInitScript((store) => {
@@ -195,6 +224,8 @@ async function open(browser: Browser, target: Target, width: number): Promise<{ 
   expect(res?.status(), `${target.label} answered ${res?.status()} at ${address}: it can't be checked with the seeded data. `
     + `A dynamic parent page needs its ids in PARAMS (tests/e2e/parent-params.ts).`).toBe(target.status ?? 200);
   if (target.app) await prepareApp(page, target.app);
+  // The box is drawn once the page has read the browser (WebAuthn, the address, a phone or a computer).
+  if (target.offer) await expect(page.locator('[data-passkey-offer="shown"]')).toBeVisible();
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
   const close = async () => {
     await context.close();
@@ -203,6 +234,7 @@ async function open(browser: Browser, target: Target, width: number): Promise<{ 
     // Zelda with none.
     if (target.link) await removeZeldaLinks(sql);
     if (target.app) { await removeZeldaSecondSteps(sql); await clearZeldaCounts(sql); await putProofBack(); }
+    if (removeOffer) await removeOffer();
   };
   return { page, close };
 }

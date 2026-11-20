@@ -3,11 +3,11 @@ import { readFileSync } from "node:fs";
 import postgres from "postgres";
 import { startMailSink, type MailSink } from "../helpers/mail-sink";
 import { e2eMailPort } from "./run-config";
-import { codeFor } from "./journey-helpers";
+import { codeFor, passOffer } from "./journey-helpers";
 import { PARENT_SESSION_TOKEN, parentSessionCookie } from "./parent-session";
 import { E2E_SIGNIN } from "./signin-seed";
 import { APP_REJECTED, APP_STEP_OVER } from "../../src/lib/parents/signin-copy";
-import { ZELDA_EMAIL, removeZeldaDevicesMadeHere, removeZeldaSessionsMadeHere } from "./signin-links";
+import { ZELDA_EMAIL, removeZeldaDevicesMadeHere, removeZeldaSessionsMadeHere, resetPasskeyOffer } from "./signin-links";
 import { appCodeAfter, clearZeldaCounts, keepZeldaProof, nextAppCode, removeZeldaSecondSteps, setUpAppOnPage } from "./authenticator-steps";
 import { totpStep } from "../../src/lib/parents/totp";
 
@@ -43,6 +43,7 @@ test.afterAll(async () => {
   await removeZeldaSecondSteps(sql);
   await removeZeldaSessionsMadeHere(sql);
   await removeZeldaDevicesMadeHere(sql);
+  await resetPasskeyOffer(sql);
   await clearZeldaCounts(sql);
   await putProofBack();
   await sink.close();
@@ -68,6 +69,9 @@ async function finishTo(page: Page, code: string, baseURL: string) {
   await expect(page).toHaveURL(/\/choose-family$/);
   await page.getByRole("button", { name: "Quetzalcoatl Family", exact: true }).click();
   await expect(page).toHaveURL(`${baseURL}/`);
+  // The app proved the second step on a new browser: Home offers a passkey (slice SI-8). Not now.
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+  await passOffer(page);
 }
 
 test("a parent sets an authenticator app up, signs in on new browsers with its code and with a backup code, and turns it off while a browser is at its step", async ({ browser, context, page, baseURL }) => {
