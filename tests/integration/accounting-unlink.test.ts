@@ -212,6 +212,8 @@ describe("an unlink", () => {
     changeInBooks("85", { CustomerTypeRef: { value: "4" } });
     stub.customers = stub.customers.filter((c) => c.Id !== "90");
     await readAgain();
+    // The roster's reads above asked the stub; the unlinks after this must ask it nothing.
+    stub.calls.length = 0;
     for (const name of ["Oak Family", "Chen Family", "Ash Family", "Elm Family"]) {
       const row = rowOf(await loadAccountingLinks(), name);
       expect(await press(row)).toMatchObject({ ok: true });

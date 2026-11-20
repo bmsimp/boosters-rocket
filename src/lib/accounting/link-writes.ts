@@ -436,7 +436,10 @@ export async function unlinkFamily(raw: { familyId: unknown; linkId: unknown; st
   const familyId = asAppFamilyId(familyKey);
   return db.transaction(async (tx): Promise<LinkDone> => {
     if (!(await lockRosterAs(tx, rosterTag))) return no(ROSTER_MOVED);
-    const [f] = await tx.select({ name: family.name, active: family.active }).from(family).where(eq(family.id, familyId)).for("update");
+    // `no key update`, not `update`: it still keeps out every change of the record, but not the key share a money read's
+    // write of the family's money row takes on it (its foreign key). That read holds the family's money lock, which this
+    // waits for further on (forgetFamilyMoney()): with `update` the two waited for each other, a deadlock.
+    const [f] = await tx.select({ name: family.name, active: family.active }).from(family).where(eq(family.id, familyId)).for("no key update");
     if (!f || !f.active) return no(LINK_COPY.familyGone);
     const b = await readLinkBasics(tx);
     if (b.state !== "listed") return no(LINK_COPY[b.state]);
