@@ -10,7 +10,7 @@ const authUserOf = async (parentId: string) => (await db.select({ id: parentAuth
 
 /**
  * Requests to change a parent's sign-in address (src/lib/parents/email-change.ts), stored as an ask would store them:
- * the token's hash, the person, the link and family it was asked under, and the record it would change. The family is
+ * the token's hash, the person, and the link and family it was asked under. The family is
  * the app's own record: `familyId`, or the one a family's QuickBooks id comes to for that person (familyOfSession(), as
  * a session's), or none. The token itself is returned, as the link in the email would carry it.
  */
