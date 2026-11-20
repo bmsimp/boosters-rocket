@@ -10,6 +10,20 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 // The breach service is a stub listening on port 0, as in password-links.test.ts.
 const where = vi.hoisted(() => ({ range: "" }));
 vi.mock("@/lib/parents/breach-endpoints", () => ({ breachEndpoints: () => ({ range: where.range }) }));
+/**
+ * A change made between the reads: once `seed` is set, after the `after`-th read of whether `parentId` has an app in
+ * force (hasAuthenticator()) has answered, `seed` runs once (seeding the app), so the reads after it see it. Every read
+ * goes through as it is; with no `seed`, nothing else happens.
+ */
+const appHook = vi.hoisted(() => ({ parentId: "", after: 0, seed: null as null | (() => Promise<unknown>) }));
+vi.mock("@/lib/parents/authenticator", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/parents/authenticator")>();
+  return { ...actual, hasAuthenticator: async (...args: Parameters<typeof actual.hasAuthenticator>) => {
+    const answer = await actual.hasAuthenticator(...args);
+    if (appHook.seed && args[0] === appHook.parentId && --appHook.after === 0) { const seed = appHook.seed; appHook.seed = null; await seed(); }
+    return answer;
+  } };
+});
 
 import { and, eq, sql } from "drizzle-orm";
 import { verifyPassword } from "better-auth/crypto";
@@ -63,7 +77,7 @@ beforeAll(async () => {
 afterAll(async () => { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); });
 
 const IP = "203.0.113.71";
-beforeEach(async () => { await resetDb(); outbox.length = 0; breachDown = false; await seedWorkingMail(); fromIp(IP); });
+beforeEach(async () => { await resetDb(); outbox.length = 0; breachDown = false; appHook.seed = null; await seedWorkingMail(); fromIp(IP); });
 
 /** React writes an apostrophe in text as &#x27;. */
 const html = (words: string) => words.replace(/'/g, "&#x27;");
@@ -266,6 +280,26 @@ describe("asking again", () => {
     await db.delete(parentAuthenticator).where(eq(parentAuthenticator.parentId, a.identity.parentId));
     for (const t of tries("123456")) expect(await t()).toEqual({ ok: false, errors: [COPY.codeRejected] });
     expect(await strongAtOf(a.identity.sessionId)).toBeNull();
+  });
+
+  it("an app that comes into force after the password's reads: nothing is sent, the app is asked for, and its code proves the session", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await withPassword(a);
+    let secret = "";
+    // The password check's own read (the first) and the send's read before its lock (the second) answer no app; the
+    // app is seeded then, and the send's read under the lock sees it.
+    Object.assign(appHook, { parentId: a.identity.parentId, after: 2, seed: async () => { secret = (await seedAuthenticator(a.identity.parentId)).secret; } });
+    asParent(a.identity);
+    const first = await askAgainPasswordAction(PROVEN_PASSWORD);
+    expect(appHook.seed).toBeNull();
+    expect(first).toEqual({ ok: true, message: COPY.appAsked, stamp: expect.stringMatching(/^\d{13}\.[A-Za-z0-9_-]{43}$/), step: "app" });
+    if (!first.ok) throw new Error("unreachable");
+    expect(await codesOf(a.identity.parentId)).toEqual([]);
+    expect((await audits("signin.code_refused")).map((r) => r.after)).toEqual([{ reason: "has_second_factor" }]);
+    await new Promise((r) => setImmediate(r));
+    expect(outbox.filter((m) => m.to === FAMILY_A.parent.email)).toEqual([]);
+    expect(await askAgainCodeAction(first.stamp, appCode(secret))).toEqual({ ok: true, message: COPY.proved });
+    expect((await audits("signin.proved_again")).map((r) => r.after)).toEqual([{ step: "authenticator" }]);
   });
 
   const counted = (kind: "password_reask_parent" | "password_try_email" | "password_try_device", subject: string) =>

@@ -3,13 +3,27 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 type Msg = { to: string; subject: string; text: string; html: string };
 const outbox = vi.hoisted(() => [] as Msg[]);
 vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", buildSender: async () => async (m: Msg) => { outbox.push(m); } }));
+/**
+ * A change made between the reads: once `seed` is set, after the `after`-th read of whether `parentId` has an app in
+ * force (hasAuthenticator()) has answered, `seed` runs once (seeding the app), so the reads after it see it. Every read
+ * goes through as it is; with no `seed`, nothing else happens.
+ */
+const appHook = vi.hoisted(() => ({ parentId: "", after: 0, seed: null as null | (() => Promise<unknown>) }));
+vi.mock("@/lib/parents/authenticator", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/parents/authenticator")>();
+  return { ...actual, hasAuthenticator: async (...args: Parameters<typeof actual.hasAuthenticator>) => {
+    const answer = await actual.hasAuthenticator(...args);
+    if (appHook.seed && args[0] === appHook.parentId && --appHook.after === 0) { const seed = appHook.seed; appHook.seed = null; await seed(); }
+    return answer;
+  } };
+});
 
 import { createHmac } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, parentAuthenticator, parentAuthSession, parentBackupCode, parentDevice, rateLimitEvent, signinCode } from "@/lib/db/schema";
 import { sealAuthenticatorSecret } from "@/lib/parents/authenticator";
-import { signinStands, verifySecondFactor } from "@/lib/parents/signin-codes";
+import { sendSecondStepCode, signinStands, verifySecondFactor } from "@/lib/parents/signin-codes";
 import { signOutEverywhere } from "@/lib/parents/signin-settings";
 import { totpStep } from "@/lib/parents/totp";
 import { env } from "@/env";
@@ -52,7 +66,7 @@ function signedStep(name: string, v: { p: string; e: string; c: string; u: numbe
   return `${name}=${encodeURIComponent(`${value}.${sig}`)}`;
 }
 
-beforeEach(async () => { await resetDb(); outbox.length = 0; await seedWorkingMail(); await seedParentSettings(SIGNINS_ON); });
+beforeEach(async () => { await resetDb(); outbox.length = 0; appHook.seed = null; await seedWorkingMail(); await seedParentSettings(SIGNINS_ON); });
 
 describe("who is asked for the app (open question 24)", () => {
   it("an app holder's right password on a new device sets the pending step, sends no code and asks for the app", async () => {
@@ -141,6 +155,39 @@ describe("who is asked for the app (open question 24)", () => {
     expect(anas.filter((d) => d.id !== expired.id).every((d) => d.expiresAt.getTime() > Date.now())).toBe(true);
     expect((await deviceRows(ben.id)).map((d) => d.id)).toEqual([bens.id]);
     expect(await audits("signin.device_used")).toEqual([]);
+  });
+
+  it("an app that comes into force after the password's reads: the send stores and mails nothing, under its lock, and answers app", async () => {
+    const ana = await seedAna({ app: "none" });
+    const step = await stepPersonFor("ana@example.com");
+    // Seeded once the send's first read (before its lock) has answered no app: the read under the lock sees it.
+    Object.assign(appHook, { parentId: ana.id, after: 1, seed: () => seedAuthenticator(ana.id) });
+    const sent = await sendSecondStepCode({ ...step, endsAt: new Date(Date.now() + 600_000) }, DOOR_IP);
+    await sent.delivery;
+    expect(appHook.seed).toBeNull();
+    expect({ ended: sent.ended, app: sent.app }).toEqual({ ended: false, app: true });
+    expect(await codesOf(ana.id)).toEqual([]);
+    expect((await audits("signin.code_refused")).map((r) => r.after)).toEqual([{ reason: "has_second_factor" }]);
+    expect(await audits("signin.code_sent")).toEqual([]);
+    expect(outbox).toEqual([]);
+  });
+
+  it("an app that comes into force after the password's reads: the door asks for the app, with the pending step, and it signs in", async () => {
+    const ana = await seedAna({ app: "none" });
+    let secret = "";
+    // The password step's own read (the first) and the send's read before its lock (the second) answer no app; the
+    // app is seeded then, and the send's read under the lock sees it.
+    Object.assign(appHook, { parentId: ana.id, after: 2, seed: async () => { secret = (await seedAuthenticator(ana.id)).secret; } });
+    const { body, pending } = await passwordStep("ana@example.com");
+    expect(appHook.seed).toBeNull();
+    expect(body).toEqual({ ok: true, step: "app" });
+    expect(pending).not.toBe("");
+    expect(await codesOf(ana.id)).toEqual([]);
+    expect((await audits("signin.second_step_asked")).map((r) => r.after)).toEqual([{ step: "emailed_code" }]);
+    expect((await audits("signin.code_refused")).map((r) => r.after)).toEqual([{ reason: "has_second_factor" }]);
+    await new Promise((r) => setImmediate(r));
+    expect(outbox).toEqual([]);
+    expect((await appStep(appCode(secret), pending)).body).toEqual({ ok: true, next: "/" });
   });
 
   it("answers an unknown address, and an app holder's wrong password, the same as any refusal", async () => {
