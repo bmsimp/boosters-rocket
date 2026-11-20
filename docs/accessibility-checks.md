@@ -25,6 +25,7 @@ in the page's order, and a page the keyboard can't Tab out of; and after each ac
 | 8. The Display page | Each choice group is one stop and the arrow keys choose (Dark sets `data-theme="dark"`, Match my device takes it off); Contrast, Text size and Motion follow, then Sign out, which signs out. |
 | 10. Sign-in settings: asking again | From Family, "Sign-in settings" by Tab and Enter; the password field, then Continue; Enter puts the focus in the code field; a wrong code is an alert with the focus left in the field; the emailed code by Enter, and the thank-you takes the focus; then New password, New password again, Change my password (never pressed) and Sign out everywhere (never pressed); Tab then leaves the page. The seeded session's `strong_at` is put back after, and the codes the journey made are deleted (the seed has none). |
 | 11. The authenticator app | In the Authenticator app box: its own asking again (the password, Continue, the emailed code), the thank-you taking the focus; Set up an authenticator app by Enter puts the focus on the words above the QR code; Copy the key by Tab and Enter copies the key alone; the code field, Finish setting up, and the backup codes' words take the focus; Copy the backup codes copies the ten alone. Drawn again with no recent proof: the password, then the app's own code, the thank-you; Make new backup codes (not pressed), Turn off the authenticator app by Enter, and what happened takes the focus; Tab then leaves the page. The app, its codes and the counts are removed after, and the seeded session's `strong_at` put back (added with the sign-in release's slice SI-6b). |
+| 13. The passkey offer on Home | A session made and proved just now on a device of its own (as a sign-in by the password and the emailed code leaves one): on Home, Tab from the top reaches **Turn on**, then **Not now**; Enter on Not now replaces the box with its answer ("No problem. We'll leave it for now."), which takes the focus; Tab then goes on through Home and leaves it. The session, its device and Zelda's count are removed and put back after (added with the sign-in release's slice SI-8). |
 
 Still walked only by hand, or not at all, because the browser run can't reach the service: agreeing to sign and the
 signing frame (journey 3's second half, against the local Documenso as in step 6), saving the phone and address form
@@ -269,6 +270,20 @@ passkey on a fresh browser); what a real phone's or computer's prompt does is on
   cancelled passkey is an alert with the focus left on its button; a browser or password manager that already holds a
   passkey for the parent is answered in words that say so.
 - A busy button keeps the focus (`aria-disabled`), and every answer takes the focus.
+
+### 13. The passkey offer on Home (`/`)
+
+Added with the sign-in release's slice SI-8. Journey 13 of `tests/e2e/keyboard-journeys.spec.ts` walks Not now by
+keyboard alone; `tests/e2e/parent-a11y.spec.ts` checks the box at 360 and 1440 in every mode (its target "/ (the passkey
+offer)"); `tests/e2e/passkeys.spec.ts` presses **Turn on** once with Playwright's own authenticator. What a real phone's
+or computer's prompt does is on the owner's list (`docs/runbooks/before-the-first-family.md`).
+
+- Walked: the box comes after the greeting and before the family's boxes, headed with its question; **Turn on** then
+  **Not now** are the next Tab stops; Not now's answer replaces the box and takes the focus; Tab goes on through Home.
+- Not walked by keyboard: **Turn on** (the passkey prompt is the browser's own); after it, the words "Done. Next time you
+  sign in here, use your passkey." take the focus, or, for a first passkey with no app, the words above the ten backup
+  codes; a refused or cancelled add is an alert under the buttons, which takes the focus, with the offer still there;
+  the third Not now's answer, with its **Sign-in settings** link after it.
 
 ### On a phone: the tab bar and the focus
 

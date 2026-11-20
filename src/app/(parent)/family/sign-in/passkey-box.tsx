@@ -3,23 +3,18 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { safely } from "@/app/components/action-error";
 import { LocalTime } from "@/app/components/local-time";
-import { parentAuthClient } from "@/lib/auth/client";
-import { readCeremony, type CeremonyOutcome } from "@/app/sign-in/passkey-ceremony";
 import { SIGNIN_SETTINGS_COPY as COPY, howYouSignIn, passkeysAddedOnlyAt } from "@/lib/parents/signin-settings-copy";
 import { newBackupCodesAction, removePasskeyAction, renamePasskeyAction } from "./actions";
-import { CopyButton } from "./authenticator-box";
-import { passkeysAddIn, toPortalAdd } from "./passkey-adding";
+import { BackupCodesShown, Tick, addPasskeyHere } from "./passkey-add";
+import { passkeysAddIn } from "./passkey-adding";
 import { AskAgain, Said } from "./signin-forms";
 
 type Result = { ok: true; message: string } | { ok: false; errors: string[] };
 const FAILED = { ok: false as const, errors: [COPY.failed] };
 const Errors = ({ errors }: { errors: string[] }) => <ul role="alert" className="errors">{errors.map((e) => <li key={e}>{e}</li>)}</ul>;
-const Tick = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M4 12.5l5 5 11-11" /></svg>;
 
 /** A passkey as the page lists it (MyPasskey, src/lib/parents/signin-settings.ts): its row's id, its name, and its two times. */
 export type ShownPasskey = { id: string; name: string | null; createdAt: string; lastUsedAt: string | null };
-/** What the portal's add answers (addMyPasskey(), passkey-settings.ts). */
-type AddAnswer = { ok: true; codes?: string[] } | { ok: false; error: "rejected" | "rate_limited" | "prove_again" | "already_added" };
 type CodesResult = { ok: true; message: string; codes: string[] } | { ok: false; errors: string[] };
 
 /** Calls `then` once, when it is drawn: AskAgain draws it once the parent has shown it's them. */
@@ -29,32 +24,14 @@ function WhenDrawn({ then }: { then: () => void }) {
 }
 
 /**
- * What the library's browser ceremony answers when the browser or password manager refused to make the passkey because
- * it holds one of the person's already (the options list them in `excludeCredentials`): @simplewebauthn/browser's
- * InvalidStateError, which @better-auth/passkey/client returns as this code. readCeremony() (SI-7a's) reads every
- * `ERROR_` code as a cancel, so the add looks for this one first.
- */
-const HELD_ALREADY = "ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED";
-const heldAlready = (r: unknown) => typeof r === "object" && r !== null && (r as { error?: { code?: unknown } | null }).error?.code === HELD_ALREADY;
-
-/** The words of a refused add, by the portal's answer or the ceremony's outcome. */
-function addRefusal(outcome: CeremonyOutcome<AddAnswer>): string {
-  if (outcome.kind === "cancelled") return COPY.passkeyCancelled;
-  // The options refused (a 404: no recent proof, or the session can't add one now): show it's them again.
-  if (outcome.kind === "failed") return outcome.status === 404 ? COPY.proveAgain : COPY.failed;
-  const a = outcome.body;
-  if (a.ok) return COPY.failed;
-  return a.error === "rate_limited" ? COPY.tooManyPresses : a.error === "prove_again" ? COPY.proveAgain : a.error === "already_added" ? COPY.passkeyAlready : COPY.passkeyRejected;
-}
-
-/**
  * The passkeys on the sign-in settings page (the sign-in release, slice SI-7b; src/lib/parents/passkey-settings.ts):
  * one sentence of what a passkey is, the list (each with its name, or "Passkey added" and its date, when it was added
  * and when last used), "Rename" on each (not asked again), and, asked again first (AskAgain, with the passkey itself for
  * a holder) unless the session proved itself in the last 10 minutes, "Remove" on each and "Add a passkey" with its
  * optional name. Adding is the passkey library's ceremony, its verify request sent to the portal's /portal-passkey/add
- * with the name (toPortalAdd()); a first passkey of a parent with no app answers ten backup codes, shown once, in this
- * component's state. Beside a passkey and no app, "Make new backup codes" too. Given only what it shows: the address for
+ * with the name (toPortalAdd(); the ceremony and its outcome's words are shared with the passkey offer on Home,
+ * addPasskeyHere(), ./passkey-add.tsx); a first passkey of a parent with no app answers ten backup codes, shown once, in this
+ * component's state (BackupCodesShown). Beside a passkey and no app, "Make new backup codes" too. Given only what it shows: the address for
  * AskAgain's username field, the listed passkeys, whether a password is chosen, whether the session proved itself,
  * whether the club is at Strict, whether they have an app, how many backup codes are left, and APP_URL's origin (where
  * a passkey can be added; reached at any other address, the box says so in place of the add press).
@@ -94,26 +71,19 @@ export function PasskeyBox({ email, passkeys, proved, hasPassword, strict, app, 
   const add = async () => {
     if (busy) return;
     setBusy("add"); setAnswer(null);
-    let outcome: CeremonyOutcome<AddAnswer>;
-    try {
-      const r = await parentAuthClient.passkey.addPasskey(undefined, toPortalAdd(window.location.origin, name));
-      if (heldAlready(r)) { setBusy(null); setAnswer({ ok: false, errors: [COPY.passkeyAlreadyHeld] }); return; }
-      outcome = readCeremony<AddAnswer>(r);
-    } catch {
-      outcome = { kind: "failed", status: null };
-    }
+    const added = await addPasskeyHere(name);
     setBusy(null);
-    if (outcome.kind === "answer" && outcome.body.ok) {
+    if (added.ok) {
       setName("");
       // The new passkey is now the newest way in, so this session's earlier proof no longer counts (decision 1): the
       // page drawn again asks again before the next change, offering the passkey.
       setProvedHere(false);
-      if (outcome.body.codes) setCodes({ message: COPY.passkeyCodesMade, list: outcome.body.codes });
+      if (added.codes) setCodes({ message: COPY.passkeyCodesMade, list: added.codes });
       else setAnswer({ ok: true, message: COPY.passkeyAdded });
       router.refresh();
       return;
     }
-    setAnswer({ ok: false, errors: [addRefusal(outcome)] });
+    setAnswer({ ok: false, errors: [added.error] });
   };
   const rename = async (id: string) => {
     if (busy) return;
@@ -146,17 +116,7 @@ export function PasskeyBox({ email, passkeys, proved, hasPassword, strict, app, 
   return (
     <div className="stack">
       <p>{COPY.passkeysWhat}</p>
-      {codes && (
-        <div className="stack">
-          <p ref={codesLine} role="status" tabIndex={-1} className="paid-up"><Tick />{codes.message}</p>
-          <h3>{COPY.backupCodesTitle}</h3>
-          <p>{app ? COPY.backupCodesKeep : COPY.backupCodesKeepPasskey}</p>
-          <ul className="backup-codes" aria-label={COPY.backupCodesTitle}>
-            {codes.list.map((c) => <li key={c}><code>{c}</code></li>)}
-          </ul>
-          <CopyButton text={codes.list.join("\n")} label={COPY.copyCodes} />
-        </div>
-      )}
+      {codes && <BackupCodesShown message={codes.message} list={codes.list} app={app} lineRef={codesLine} />}
       {answer && (
         <div ref={said} tabIndex={-1}>
           {answer.ok ? <p role="status" className="paid-up"><Tick />{answer.message}</p> : <Errors errors={answer.errors} />}

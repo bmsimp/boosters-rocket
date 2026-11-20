@@ -443,6 +443,11 @@ const PARENT_CODE_ELSEWHERE = [
   // Adding, naming and removing passkeys on /family/sign-in (slice SI-7b): the presses and the add's work at
   // /portal-passkey/add, each for the session's own person alone, a passkey's id looked for only among theirs.
   "src/lib/parents/passkey-settings.ts",
+  // The passkey offer on Home (slice SI-8): who is offered and "Not now", for the session's own person and device
+  // alone, the pure rule and the offer's words.
+  "src/lib/parents/passkey-offer.ts",
+  "src/lib/parents/passkey-offer-rule.ts",
+  "src/lib/parents/passkey-offer-copy.ts",
 ];
 
 /**

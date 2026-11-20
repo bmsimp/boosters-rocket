@@ -7,9 +7,9 @@ import { focusStop } from "./a11y-checks";
 import { PARENT_SESSION_FAMILY, PARENT_SESSION_TOKEN, parentSessionCookie } from "./parent-session";
 import { E2E_VOLUNTEER } from "./volunteer-seed";
 import { E2E_EMAIL, emailTokenHash } from "./email-seed";
-import { codeFor } from "./journey-helpers";
+import { codeFor, passOffer } from "./journey-helpers";
 import { E2E_SIGNIN, deviceTokenHash } from "./signin-seed";
-import { removeZeldaDevicesMadeHere } from "./signin-links";
+import { removeZeldaDevicesMadeHere, resetPasskeyOffer } from "./signin-links";
 import { appCodeAt, clearZeldaCounts, keepZeldaProof, nextAppCode, removeZeldaSecondSteps, setZeldaProof } from "./authenticator-steps";
 
 /**
@@ -36,8 +36,9 @@ test.beforeAll(async () => {
   expect((seeded?.value as { port?: number } | undefined)?.port, "the mail port in the seeded settings; seed again with this run's E2E_MAIL_PORT").toBe(e2eMailPort());
   sink = await startMailSink({ secure: true, port: e2eMailPort(), key: readFileSync(".e2e/sink-key.pem", "utf8"), cert: readFileSync(".e2e/sink-cert.pem", "utf8") });
 });
-// Journey 1 remembers this browser's device for Zelda (slice SI-3b): it goes after, keeping the seed's.
-test.afterAll(async () => { await removeZeldaDevicesMadeHere(sql); await sink.close(); await sql.end(); });
+// Journey 1 remembers this browser's device for Zelda (slice SI-3b): it goes after, keeping the seed's, and so do the
+// answers to the passkey offer it and journey 13 give on Home (slice SI-8).
+test.afterAll(async () => { await removeZeldaDevicesMadeHere(sql); await resetPasskeyOffer(sql); await sink.close(); await sql.end(); });
 
 /** Everything a Tab stop on the way showed wrong: no ring, or left under something fixed. Checked at the end of each step. */
 let ringProblems: string[] = [];
@@ -189,6 +190,9 @@ test("a parent's journeys by keyboard alone: sign in, Home to Payments, a form, 
 
   await test.step("2. Home: Skip to the page is the first stop and goes past the bar; then Payments and its Pay link", async () => {
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+    // The sign-in proved the code on a new browser, so Home offers a passkey first (slice SI-8): journey 13 walks it by
+    // keyboard; here it is answered Not now, and the walk starts from the top as before.
+    await passOffer(page);
     await fromTheTop(page);
     await page.keyboard.press("Tab");
     const skip = page.getByRole("link", { name: "Skip to the page" });
@@ -748,6 +752,52 @@ test.describe("12. passkeys, by keyboard: asking again, adding one, the backup c
     await page.keyboard.press("Enter");
     await expect(box.locator("div[tabindex='-1']").filter({ hasText: "That passkey is removed" })).toBeFocused();
     expect(await zeldasPasskeys()).toHaveLength(0);
+    await tabsOut(page);
+    ringsShown();
+  });
+});
+
+test.describe("13. the passkey offer on Home, by keyboard: reached, Not now, the answer, then on through Home", () => {
+  // A session of Zelda's own to this journey, made and proved just now (five seconds back: the database's clock may run
+  // a little ahead of the app's) on a device of its own with no "Not now", as a
+  // sign-in by the password and the emailed code leaves one (slice SI-8): Home offers a passkey. Turn on isn't walked
+  // here (the ceremony is the browser's own; tests/e2e/passkeys.spec.ts presses it once). The session, its device and
+  // Zelda's count are removed and put back after.
+  const OFFER_SESSION_TOKEN = "e2e-journey-13-session-token";
+  let offerDevice: string | null = null;
+  const removeOfferSession = async () => {
+    await sql`DELETE FROM parent_auth_session WHERE token = ${OFFER_SESSION_TOKEN}`;
+    if (offerDevice) await sql`DELETE FROM parent_device WHERE id = ${offerDevice}`;
+    await resetPasskeyOffer(sql);
+  };
+  // Not now takes a place under the settings' presses (signin_settings_parent): the journeys before it may have used them.
+  // A session a run cut off midway left goes first.
+  test.beforeAll(async () => { await removeOfferSession(); await clearZeldaCounts(sql); });
+  test.afterAll(removeOfferSession);
+
+  test("Tab reaches Turn on, then Not now; Enter answers, the focus lands on the answer, and Tab goes on through Home", async ({ context, page }) => {
+    const [made] = await sql`INSERT INTO parent_device (parent_id, token_hash, expires_at)
+      SELECT id, ${`journey-13-offer-${Date.now()}`}, now() + interval '90 days' FROM parent WHERE email = 'zelda@example.com' RETURNING id`;
+    offerDevice = made!.id as string;
+    await sql`INSERT INTO parent_auth_session (id, token, user_id, family_id, device_id, expires_at, created_at, strong_at)
+      SELECT 'e2e-journey-13-session', ${OFFER_SESSION_TOKEN}, user_id, family_id, ${offerDevice}, now() + interval '1 day', now() - interval '5 seconds', now() - interval '5 seconds'
+      FROM parent_auth_session WHERE token = ${PARENT_SESSION_TOKEN}`;
+    await context.addCookies([parentSessionCookie(OFFER_SESSION_TOKEN)]);
+    await page.goto("/");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+    const offer = page.getByRole("region", { name: "Sign in with a passkey next time?" });
+    await expect(offer).toBeVisible();
+    await fromTheTop(page);
+    await tabTo(page, offer.getByRole("button", { name: "Turn on", exact: true }));
+    await page.keyboard.press("Tab");
+    await expect(offer.getByRole("button", { name: "Not now", exact: true })).toBeFocused();
+    await page.keyboard.press("Enter");
+    const said = page.locator('[data-passkey-offer="said"]').getByRole("status");
+    await expect(said).toHaveText("No problem. We'll leave it for now.");
+    await expect(said).toBeFocused();
+    await expect(offer).toHaveCount(0);
+    expect((await sql`SELECT passkey_offer_declines AS n FROM parent WHERE email = 'zelda@example.com'`)[0]?.n).toBe(1);
+    expect((await sql`SELECT passkey_offered_at FROM parent_device WHERE id = ${offerDevice}`)[0]?.passkey_offered_at).not.toBeNull();
     await tabsOut(page);
     ringsShown();
   });

@@ -83,6 +83,11 @@ const DISABLED_REASONS = ["no_active_students", "removed", "inactive", "family_i
  * Filled once from the person's own QuickBooks records by the take-in (src/lib/parents/contact-take-in.ts); nothing
  * QuickBooks holds changes them after that. `contact_version` is raised by every change of either: 0 means nobody
  * has ever set them, which is what the take-in fills.
+ * `passkey_offer_declines` (the sign-in release, slice SI-8, migration 0048): how many times the person has pressed
+ * "Not now" on the passkey offer on Home, on any device (declinePasskeyOffer(), src/lib/parents/passkey-offer.ts);
+ * from the third, Home offers a passkey no more and Sign-in settings is the place to add one (open question 31). Kept
+ * by everything that ends or resets a person's sign-in, a staff reset included; never shown, sent to the browser or
+ * audited.
  */
 export const parent = pgTable("parent", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -98,6 +103,7 @@ export const parent = pgTable("parent", {
   welcomedAt: timestamp("welcomed_at", { withTimezone: true }),
   welcomeOwed: boolean("welcome_owed").notNull().default(false),
   welcomeTriedAt: timestamp("welcome_tried_at", { withTimezone: true }),
+  passkeyOfferDeclines: integer("passkey_offer_declines").notNull().default(0),
   createdAt: created(),
   updatedAt: updated(),
 }, (t) => [uniqueIndex("parent_email_uq").on(t.email)]);
@@ -286,6 +292,10 @@ export const parentSigninToken = pgTable("parent_signin_token", {
  * used, and forgotten by the person on their sign-in settings; since slice SI-2 blocking, sign-ins switched off, the
  * change-of-company clear, a password reset, a confirmed change of sign-in email and closing a person's last open
  * membership delete them (src/lib/parents/sessions.ts).
+ * `passkey_offered_at` (the sign-in release, slice SI-8, migration 0048): when "Not now" was last pressed on the
+ * passkey offer on Home in a session made on this device, null until it is; the offer comes back on this device only
+ * 30 days after it (open question 31; src/lib/parents/passkey-offer-rule.ts). It goes with the row: a device the
+ * portal forgets, by whatever path, is a new device to the offer.
  */
 export const parentDevice = pgTable("parent_device", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -294,6 +304,7 @@ export const parentDevice = pgTable("parent_device", {
   createdAt: created(),
   lastUsedAt: timestamp("last_used_at", { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  passkeyOfferedAt: timestamp("passkey_offered_at", { withTimezone: true }),
 }, (t) => [
   uniqueIndex("parent_device_token_uq").on(t.tokenHash),
   index("parent_device_parent_ix").on(t.parentId),

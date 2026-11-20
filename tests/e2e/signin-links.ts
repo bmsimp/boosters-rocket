@@ -50,6 +50,17 @@ export async function removeZeldaSessionsMadeHere(sql: postgres.Sql): Promise<vo
             AND user_id = (SELECT id FROM parent_auth_user WHERE parent_id = (SELECT id FROM parent WHERE email = ${ZELDA_EMAIL}))`;
 }
 
+/**
+ * Puts Zelda's answers to the passkey offer on Home back as the seed left them (the sign-in release, slice SI-8): her
+ * count of "Not now" to 0, and the stamp off her seeded device. The devices a spec's sign-ins made go with
+ * removeZeldaDevicesMadeHere(), their stamps with them. Run after every spec that signs her in by the emailed code and
+ * meets the offer (passOffer(), journey-helpers.ts), so both passes of a run, and every spec, find her as the seed did.
+ */
+export async function resetPasskeyOffer(sql: postgres.Sql): Promise<void> {
+  await sql`UPDATE parent SET passkey_offer_declines = 0 WHERE email = ${ZELDA_EMAIL}`;
+  await sql`UPDATE parent_device SET passkey_offered_at = NULL WHERE parent_id = (SELECT id FROM parent WHERE email = ${ZELDA_EMAIL})`;
+}
+
 const ZELDA_USER = (sql: postgres.Sql | postgres.TransactionSql) => sql`(SELECT id FROM parent_auth_user WHERE parent_id = (SELECT id FROM parent WHERE email = ${ZELDA_EMAIL}))`;
 /**
  * Where the seed's password row waits while a spec has taken it away: the same row under a provider nothing in the

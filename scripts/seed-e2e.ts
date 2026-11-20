@@ -353,9 +353,11 @@ async function main() {
     return { id: row.id as string, familyId: row.family_id as string };
   };
   // A live session for Zelda with the first family chosen, so the e2e run can open parent pages without the emailed
-  // code (tests/e2e/parent-session.ts makes the cookie). It was made on her remembered device (`device_id`, slice SI-5b).
-  await sql`INSERT INTO parent_auth_session (id, token, user_id, family_id, device_id, expires_at)
-          VALUES ('e2e-parent-session', 'e2e-parent-session-token', ${zelda!.id}, ${(await zeldaIn("E2E-FAMILY")).familyId}, ${zeldaDevice!.id}, now() + interval '7 days')`;
+  // code (tests/e2e/parent-session.ts makes the cookie). It was made on her remembered device (`device_id`, slice SI-5b),
+  // a day before the run, so it is never a session at its sign-in: Home's passkey offer (slice SI-8) is drawn only in a
+  // session made in the last 10 minutes, and the specs that stamp this one as proved just now open Home too.
+  await sql`INSERT INTO parent_auth_session (id, token, user_id, family_id, device_id, expires_at, created_at)
+          VALUES ('e2e-parent-session', 'e2e-parent-session-token', ${zelda!.id}, ${(await zeldaIn("E2E-FAMILY")).familyId}, ${zeldaDevice!.id}, now() + interval '7 days', now() - interval '1 day')`;
   // A change of sign-in address Zelda asked for and hasn't confirmed, under her link to the Quetzalcoatl family, and a
   // used one under her link to the second family (tests/e2e/email-seed.ts: fixed tokens, so the specs can open them).
   // Their records' ids are not numbers: confirming is refused before anything is sent (tests/e2e/family-email.spec.ts).

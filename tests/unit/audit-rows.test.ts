@@ -34,6 +34,8 @@ const NOT_AUDITED: Record<string, string> = {
   "src/lib/forms/my-forms.ts#loadMyForms": "a placeholder: the family's signature requests are made, not opened and with nothing sent, the first time its Forms page is read, so each has an id; the open that makes a document is audited (form.document.create)",
   // A session's own upkeep.
   "src/lib/parents/sessions.ts#renewParentSession": "a session's expiry pushed forward while the parent keeps using it, and (since SI-5b) the expiry and last use of the remembered device it names with it; signing in, signing out, ending sessions and remembering and forgetting devices are audited",
+  // A parent's own answer to an offer.
+  "src/lib/parents/passkey-offer.ts#declinePasskeyOffer": "a parent's own answer to the passkey offer on Home, kept so it comes back at most once a month on a device and not after the third: it grants and removes nothing, like the install hint's dismissal, and adding a passkey from the offer is audited by the add (parent.passkey.add)",
   // Rate-limit counts.
   "src/lib/parents/rate-limit.ts#takeRateLimitPlace": "rate-limit counts: one row per try, cleaned up when they expire (CLEANED_TABLES); a refusal is audited by its caller",
   "src/lib/parents/rate-limit.ts#giveBackRateLimit": "rate-limit counts: a right password's try gives its own row back (password-signin.ts), so only wrong tries stay counted; the sign-in it goes on to is audited",

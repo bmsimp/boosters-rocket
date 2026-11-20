@@ -50,3 +50,18 @@ export function installHintView(o: { device: InstallDevice | "unknown"; offered:
   if (o.offered) return "install";
   return o.permanent ? "menu" : "none";
 }
+
+/** Which words the passkey offer on Home uses (the sign-in release, slice SI-8): a phone's, or a computer's. */
+export type OfferDevice = "phone" | "computer";
+
+/**
+ * A phone is an iPhone, iPad or iPod by installDevice()'s own test (the iPad that says it is a Mac included), or an
+ * Android whose browser says `Mobile`; everything else, an Android tablet included, is a computer, whose words still
+ * name Face ID and the fingerprint beside Windows Hello and a password manager. Whether the page is installed changes
+ * nothing here.
+ */
+export function offerDevice(b: BrowserFacts): OfferDevice {
+  if (/iPhone|iPad|iPod/.test(b.userAgent) || (b.platform === "MacIntel" && (b.maxTouchPoints ?? 0) > 1)) return "phone";
+  if (/Android/.test(b.userAgent) && /Mobile/.test(b.userAgent)) return "phone";
+  return "computer";
+}
