@@ -183,14 +183,14 @@ export const EXPECTATIONS = [
     key: "create_parent", group: "writes", title: "Making a parent under a family",
     expects: "QuickBooks makes a sub-customer of the family, not billed with it, with the email address sent.",
     learned: (l) => `The parent was made${yes(l.under) ? " under the family" : " but not under the family"}, ${yes(l.emailKept) ? "with the email address sent" : "without the email address sent"}. QuickBooks ${yes(l.copiedContact) ? "copied the family's phone or address onto it" : "didn't copy the family's phone or address onto it"}.`,
-    ifNot: "Staff couldn't add a parent from the roster pages.", codeChange: true, where: "CUSTOMER_WRITES.create in src/lib/quickbooks/client.ts",
+    ifNot: "A guardian added under Portal sign-ins wouldn't get their own Parent customer under the family.", codeChange: true, where: "CUSTOMER_WRITES.create in src/lib/quickbooks/client.ts",
   },
   {
     key: "duplicate_name_other_parent", group: "writes", title: "Making a parent with a name already used under another family",
     expects: "The portal doesn't know yet whether QuickBooks takes a second customer with the same name under a different family, or refuses it as a name already in use (code 6240). Either is fine: when a guardian is added, the portal compares nothing but the family's own customers before it sends, and QuickBooks' answer decides. If QuickBooks takes it, a person who is a guardian in two families gets a Parent customer under each. If it refuses, the second family's Parent customer is kept on the Reconciliation page with the words for a name already in use, and its ways out are renaming the person or giving it up.",
     learned: (l) => (l.code === "accepted" ? "QuickBooks made a second customer with the same name under the other family." : `QuickBooks answered with ${codeWords(l.code)}.`),
     ifNot: "Nothing in the portal is wrong either way: this tells the portal which of the two answers this company's QuickBooks gives.", codeChange: false,
-    where: "queueForGuardian() in src/lib/roster/writes.ts (the guardian's Parent customer create)",
+    where: "the guardian's Parent customer create in src/lib/roster/writes.ts",
   },
   {
     key: "contact_stale", group: "writes", title: "A phone change from an old version of the record",
