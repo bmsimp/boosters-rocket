@@ -403,7 +403,9 @@ describe("the page", () => {
     await guardianIn(patels, "Asha Patel", "asha@example.com");
     await asAdmin();
     const audits = (await db.select().from(auditLog)).length;
-    const html = withoutIds(list(await renderPage(AccountingLinksPage)));
+    // The cells are read from the markup as drawn: withoutIds() puts "<id>" inside a link's href, which a cell's text
+    // would then keep a piece of. Only the href itself is compared with its id masked.
+    const html = list(await renderPage(AccountingLinksPage));
     expect(tableRows(html)).toHaveLength(3);
     const rivera = rowNamed(html, "Rivera Family")!;
     expect(rivera.slice(0, 3)).toEqual(["Rivera Family", "ana@example.com", "Rivera FamilyNo email address"]);
@@ -413,7 +415,7 @@ describe("the page", () => {
     expect(patel.slice(1)).toEqual(["asha@example.com", "Patel Familyasha@example.com",
       "SuggestedA guardian's sign-in address matches: asha@example.com, on this customer.",
       "Students and guardians: The PatelsNo active students.Guardians:Asha Patel (asha@example.com): no link of its own"]);
-    expect(html).toContain('href="/staff/roster/<id>"');
+    expect(withoutIds(html)).toContain('href="/staff/roster/<id>"');
     expect(html).toContain("<details class=\"more\"><summary>Students and guardians<span class=\"visually-hidden\">: The Patels</span></summary>");
     expect((await db.select().from(auditLog)).length).toBe(audits);
     // The customers with no family stay on Reconciliation, linked from here, counted by the pool's own rule, and the
@@ -436,7 +438,7 @@ describe("the page", () => {
     const patels = await unlinkedFamily("The Patels");
     await guardianIn(patels, "Asha Patel", "asha@example.com", "invited", { blocked: true });
     await asAdmin();
-    const patel = rowNamed(withoutIds(list(await renderPage(AccountingLinksPage))), "The Patels")!;
+    const patel = rowNamed(list(await renderPage(AccountingLinksPage)), "The Patels")!;
     expect(patel.slice(1)).toEqual(["None that can sign in", "None",
       "No matchNone of this family's guardians can sign in, so there is no address to match.",
       "Students and guardians: The PatelsNo active students.Guardians:Asha Patel (asha@example.com), can't sign in, so this address isn't matched: no link of its own"]);
