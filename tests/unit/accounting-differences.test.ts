@@ -265,6 +265,18 @@ describe("the queue's words", () => {
     expect(i.rename.get("10")).toEqual({ state: "waiting", words: "first" });
     expect([i.deactivate.size, i.move.size, i.studentCreate.size, i.guardianCreate.size]).toEqual([0, 0, 0, 0]);
   });
+  it("pass over an op they don't know, whatever ids it names: a contact item and a made-up one explain nothing", () => {
+    // Each names every id a known op is matched by: the family's customer, Leo's record and customer, a guardian row.
+    const ids = { qboId: "10", studentId: String(S1), guardianId: "g-sol", role: "parent" as const };
+    const unknown = [fact({ op: "contact", ...ids, state: "stuck", words: "Contact words" }), fact({ op: "frobnicate", ...ids, role: "student", words: "Made-up words" })];
+    const i = indexQueue(unknown);
+    expect([i.rename.size, i.deactivate.size, i.move.size, i.studentCreate.size, i.guardianCreate.size]).toEqual([0, 0, 0, 0, 0]);
+    // A family with a name, an active flag, a place, a student with no link and a guardian row with no link, each with no note.
+    const r = compare(rivera({ name: "Riveras", students: [student(S1, "Sam Chen", "22"), student(S3, "Ivy Rivera", null)], guardians: [{ id: "g-sol", customerId: null }] }),
+      { customers: changed("10", { active: false }), studentLinked: [], records: { "22": { id: S1, active: true, family: "Rivera Family" } }, queue: unknown });
+    expect(r.differences.map((d) => d.kind)).toEqual(["name", "active", "place", "student_unlinked", "student_customer", "guardians_unlinked"]);
+    expect(r.differences.map((d) => (d.kind === "guardians_unlinked" ? d.queue : wordsOf(d)))).toEqual([null, null, null, null, null, []]);
+  });
   it("end in one full stop", () => {
     expect(noteSentence({ state: "waiting", words: "Waiting to reach QuickBooks" })).toBe("Waiting to reach QuickBooks.");
     expect(noteSentence({ state: "refused", words: "QuickBooks refused it." })).toBe("QuickBooks refused it.");

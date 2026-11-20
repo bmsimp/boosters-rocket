@@ -74,7 +74,9 @@ export type FamilyToCompare = {
  * Which queue item explains which difference: the first in the order given (loadOpenWrites()'s, newest first) of each
  * kind. A name, a `rename` of that customer; active, a `deactivate` of it; a student's place, a `move` of that student
  * record; a student record with no link, a student's `create` filed under it; a guardian row with no link, a `create`
- * naming that row (guardianOf()). Any other item explains nothing here.
+ * naming that row (guardianOf()). Any other item explains nothing here, an op this module doesn't know included (a
+ * parent's phone or address waiting to be sent, `contact`, or any later one): it is passed over, never thrown on,
+ * whatever ids it names.
  */
 export function indexQueue(items: readonly QueueFact[]) {
   const rename = new Map<string, QueueNote>(), deactivate = new Map<string, QueueNote>(), move = new Map<string, QueueNote>();
