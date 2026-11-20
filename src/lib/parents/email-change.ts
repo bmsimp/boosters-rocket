@@ -165,7 +165,9 @@ class NotFinished extends Error { constructor(readonly why: "session_ended" | "b
  *
  * Then the portal, in one transaction, in the order ./sessions.ts gives (lockedPerson()): both address locks, then the
  * person's row, then the request is spent (one already spent, by another press of the same link, ends it there: nothing
- * more is done or audited, and this press is told as that one was); then, read again under that row, the person still
+ * more is done or audited, and this press is told as that one was; one deleted since it was read, by a block, a
+ * removal, a new ask or the change-of-company clear, is told as signed out when the person was blocked or the session
+ * ended, and otherwise as a link that no longer works, `bad_link`); then, read again under that row, the person still
  * there and not blocked and the session that confirms still existing (ended meanwhile by any end of it, the change
  * stops: thrown, so the spend goes back with the rest, recorded with its own code, `session_ended`, `blocked` or
  * `person_gone`, and the one who pressed is told the change wasn't made); then the new address checked again (should
@@ -208,22 +210,32 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown): Prom
   }
 
   const oldEmail = ctx.email.trim().toLowerCase(), newEmail = row.newEmail;
-  const finish = () => db.transaction(async (tx): Promise<"changed" | "taken" | null> => {
+  const finish = () => db.transaction(async (tx): Promise<"changed" | "taken" | "gone" | null> => {
     // The person first, in the order ./sessions.ts gives (lockedPerson()): both addresses, then the person's row, then
     // what hangs on the person, their email change requests, sign-in codes, set-up and reset links, remembered devices
     // and sessions, in that order. An ask, a block, the switches, the daily clean-up and the change-of-company clear
     // take the same rows in the same order, so none of them can wait on this one while it waits on them.
     for (const address of [oldEmail, newEmail].sort()) await lockEmail(tx, address);
     const [me] = await tx.select({ blocked: parent.blocked }).from(parent).where(eq(parent.id, ctx.parentId)).for("update");
-    // A request already spent was finished by the confirmation that spent it: a second press of the button, say.
-    // Nothing more is done or audited for it.
-    if (!(await spend(row.id, tx))) return null;
     // What stops it, read again under the person's row (the guard read it only as the confirm began): a session ended
     // since (signed out, a block, any end of it) or a block means the address is not changed. Thrown, so the spend
-    // above goes back with the rest.
-    if (!me || me.blocked) throw new NotFinished(me ? "blocked" : "person_gone");
-    const [session] = await tx.select({ id: parentAuthSession.id }).from(parentAuthSession).where(eq(parentAuthSession.id, ctx.sessionId));
-    if (!session) throw new NotFinished("session_ended");
+    // goes back with the rest.
+    const stopIfSignedOut = async () => {
+      if (!me || me.blocked) throw new NotFinished(me ? "blocked" : "person_gone");
+      const [session] = await tx.select({ id: parentAuthSession.id }).from(parentAuthSession).where(eq(parentAuthSession.id, ctx.sessionId));
+      if (!session) throw new NotFinished("session_ended");
+    };
+    if (!(await spend(row.id, tx))) {
+      // A request already spent was finished by the confirmation that spent it: a second press of the button, say.
+      // Nothing more is done or audited for it.
+      const [still] = await tx.select({ id: parentEmailChange.id }).from(parentEmailChange).where(eq(parentEmailChange.id, row.id));
+      if (still) return null;
+      // Gone since it was read: a block, a removal, the change-of-company clear or a new ask deleted it. A block or
+      // an end of the session is told as one; otherwise the link no longer works, as any other.
+      await stopIfSignedOut();
+      return "gone";
+    }
+    await stopIfSignedOut();
     // Someone else came to hold the new address since it was checked: the person keeps the address they have, and
     // signs in with it as before. The parent is told the outcome, never why.
     if (await heldByAnother(tx, newEmail, ctx.parentId)) {
@@ -246,7 +258,7 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown): Prom
     return "changed";
   });
 
-  let outcome: "changed" | "taken" | null;
+  let outcome: "changed" | "taken" | "gone" | null;
   try {
     outcome = await finish().catch((e: unknown) => { if (worthAnotherTry(e)) return finish(); throw e; });
   } catch (e) {
@@ -261,6 +273,8 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown): Prom
   // The new address can never be the person's here, so nothing is promised and nobody was signed out: the words are
   // the ones for a change the parent asks the club for, which say nothing of why.
   if (outcome === "taken") return { ok: false, errors: [EMAIL_COPY.askTheClub] };
+  // The request was deleted between the first read and the transaction: the link no longer works.
+  if (outcome === "gone") return refuse("bad_link", [EMAIL_COPY.linkNoGood]);
   // A second press, on a request another confirmation spent: told as that one was. When it changed the person's
   // address it ended their sessions; when it didn't (the address was taken), nothing is promised and nobody was signed
   // out, so this press is told to ask the club too.

@@ -59,6 +59,7 @@ import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { addToCache, seedParentSettings, seedShape, stu } from "../helpers/roster-cache";
 import { NO_CHANGES, appRecordsByCustomer, recordOfCustomer, syncAppRecords, whatAFreshRunWouldChange } from "../helpers/app-records";
 import { linkRows, mintLink, seedDevice, seedPassword } from "../helpers/signin-links";
+import { ROSTER_LOCK } from "@/lib/roster/shape";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -199,6 +200,16 @@ describe("asking for the change", () => {
       ["parent.email.request.failed", c.identity.parentId, { code: "not_offered" }], ["parent.email.request.failed", r.identity.parentId, { code: "not_offered" }]]);
   });
 
+  it("the confirm is rate-limited per person too, and audits its first refusal only", async () => {
+    const { r } = await seedContactFamilies(stub);
+    asParent(r.identity);
+    for (let i = 0; i < 10; i++) expect(await confirmEmailChangeAction(emailChangeToken())).toEqual({ ok: false, errors: [EMAIL_COPY.linkNoGood] });
+    expect(await confirmEmailChangeAction(emailChangeToken())).toEqual({ ok: false, errors: [EMAIL_COPY.tooManyTries] });
+    expect(await confirmEmailChangeAction(emailChangeToken())).toEqual({ ok: false, errors: [EMAIL_COPY.tooManyTries] });
+    expect((await auditsOf("parent.email.save.failed")).filter((a) => (a.after as { code: string }).code === "rate_limited")).toHaveLength(1);
+    expect((await person(r.identity.parentId)).email).toBe(RIVERA.parent.email);
+  });
+
   it("is rate-limited per person, and audits the first refusal only", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
@@ -259,6 +270,7 @@ describe("the link's page, and who is offered the change", () => {
     asParent(home.identity);
     expect(await renderPage(FamilyPage)).toContain(OFFER);
     expect(await renderPage(FamilyDetailsPage)).toContain(OFFER);
+    expect(await renderPage(HomePage)).toContain("and your sign-in email on your Family page");
   });
 
   it("offers it to nobody while sign-ins are off, or from a closed row, and the email page tells them to ask the club", async () => {
@@ -391,6 +403,41 @@ describe("confirming: the portal alone", () => {
     // The other parent signs in as before.
     expect((await person(work.identity.parentId)).email).toBe("work@noparent.example");
     expect(await sessionsOf(work.identity.parentId)).toHaveLength(1);
+  });
+
+  it("flat books: the member changes their own address, and the member's field is left as it was", async () => {
+    await seedShape({ kind: "flat", memberTypeIds: ["M"] });
+    await addToCache([{ qboId: "7410", displayName: "Marisol Thackeray", typeQboId: "M", email: "marisol@flat.example" }]);
+    const m = await seedParentIn({ familyQboId: "7410", name: "Marisol Thackeray", email: "marisol@flat.example", sourceQboId: "7410" });
+    asParent(m.identity);
+    expect(await renderPage(FamilyPage)).toContain(OFFER);
+    await asking("marisol.new@flat.example");
+    expect(await confirmEmailChangeAction(linkTo("marisol.new@flat.example"))).toEqual(DONE("marisol.new@flat.example"));
+    expect((await person(m.identity.parentId)).email).toBe("marisol.new@flat.example");
+    expect(await cachedEmail("7410")).toBe("marisol@flat.example");
+    expect(stub.apiCalls()).toEqual([]);
+  });
+
+  it("takes no roster lock: a confirm made while a roster read holds it finishes", async () => {
+    const { r } = await seedContactFamilies(stub);
+    asParent(r.identity);
+    await asking(NEW);
+    const token = linkTo(NEW);
+    let held!: () => void, release!: () => void;
+    const isHeld = new Promise<void>((y) => { held = y; });
+    const holding = db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
+      held();
+      await new Promise<void>((y) => { release = y; });
+    });
+    await isHeld;
+    try {
+      expect(await confirmEmailChangeAction(token)).toEqual(DONE(NEW));
+    } finally {
+      release();
+      await holding;
+    }
+    expect((await person(r.identity.parentId)).email).toBe(NEW);
   });
 
   it("two presses of the button at once make one change, audited once", async () => {
@@ -532,19 +579,34 @@ describe("confirming: stopped meanwhile, nothing changes", () => {
     expect(await auditsOf("parent.email.save.failed")).toEqual([expect.objectContaining({ targetId: r.identity.parentId, after: { code: why } })]);
   });
 
-  it("a block staff make beside the confirm: the change isn't made", async () => {
+  // A block and a removal delete the request, so the confirm tells the deleted request from one another press spent
+  // and says what became of the press, with its own audit row.
+  it("a block staff make beside the confirm: the change isn't made, and they're told they were signed out", async () => {
     const { r, token } = await asked();
     meanwhile.before = () => blockPerson(r.identity.parentId, "Custody order on file.", staffOp);
-    expect(await confirmMyEmailChange(ctxOf(r.identity), token)).toEqual({ ok: false, errors: [EMAIL_COPY.askTheClub] });
+    expect(await confirmMyEmailChange(ctxOf(r.identity), token)).toEqual({ ok: false, errors: [EMAIL_COPY.notMade] });
     await unchanged(r);
     expect((await person(r.identity.parentId)).blocked).toBe(true);
+    expect(await auditsOf("parent.email.save.failed")).toEqual([expect.objectContaining({ targetId: r.identity.parentId, after: { code: "blocked" } })]);
   });
 
-  it("the person's last open row removed beside the confirm: the change isn't made", async () => {
+  it("the person's last open row removed beside the confirm: the change isn't made, and they're told they were signed out", async () => {
     const { r, token } = await asked();
     meanwhile.before = () => removeGuardian(r.identity.guardianId, "Moved away.", staffOp);
-    expect(await confirmMyEmailChange(ctxOf(r.identity), token)).toEqual({ ok: false, errors: [EMAIL_COPY.askTheClub] });
+    expect(await confirmMyEmailChange(ctxOf(r.identity), token)).toEqual({ ok: false, errors: [EMAIL_COPY.notMade] });
     await unchanged(r);
+    expect(await auditsOf("parent.email.save.failed")).toEqual([expect.objectContaining({ targetId: r.identity.parentId, after: { code: "session_ended" } })]);
+  });
+
+  it("a new ask from another tab beside the confirm: the first link no longer works, and the refusal is recorded", async () => {
+    const { r, token } = await asked();
+    meanwhile.before = async () => expect(await asking("rosalind.other@family-r.example")).toMatchObject({ ok: true });
+    expect(await confirmMyEmailChange(ctxOf(r.identity), token)).toEqual({ ok: false, errors: [EMAIL_COPY.linkNoGood] });
+    await unchanged(r);
+    expect(await sessionsOf(r.identity.parentId)).toHaveLength(1);
+    expect(await auditsOf("parent.email.save.failed")).toEqual([expect.objectContaining({ targetId: r.identity.parentId, after: { code: "bad_link" } })]);
+    // The new ask's request is the one left, unspent.
+    expect((await requests()).map((q) => [q.newEmail, q.usedAt])).toEqual([["rosalind.other@family-r.example", null]]);
   });
 
   it("a deadlock is tried once more, and the change is made and audited once", async () => {
