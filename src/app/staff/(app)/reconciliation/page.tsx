@@ -2,7 +2,8 @@ import Link from "next/link";
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { loadRosterPage } from "@/lib/roster/queries";
-import { isFamilyCreateItem, loadMadeAfterGivingUp, loadOpenWrites, TRY_AGAIN_NEEDS_LINKING, waitingWords, type GivenUpMadeView, type QueueView } from "@/lib/roster/queue";
+import { compareContact, isFamilyCreateItem, loadMadeAfterGivingUp, loadOpenWrites, TRY_AGAIN_NEEDS_LINKING, waitingWords, type ContactCompare, type GivenUpMadeView, type QueueView } from "@/lib/roster/queue";
+import { isUuid } from "@/lib/seasons/ids";
 import { loadBalances } from "@/lib/money/balances";
 import { linksOfCustomers } from "@/lib/families/links";
 import { LocalTime } from "@/app/components/local-time";
@@ -86,14 +87,24 @@ const NOT_OFFERED: Record<NonNullable<QueueView["notOffered"]>, string> = {
   ...CONTACT_NOT_OFFERED,
 };
 /**
- * What QuickBooks holds and what the portal holds of a kept change of a parent's phone and address (stage 3's slice
- * 11b), as text, only to staff who may see a person's details (QueueView.details); nothing otherwise, where the reason's
- * words say only that QuickBooks holds other details.
+ * A kept change of a parent's phone and address (stage 3's slice 11b): the list says in words which details differ and
+ * whose (QueueView.words, keptWordsFor() with QueueView.differs), never the values. A holder of Parents.ReadWrite gets
+ * "Compare the two", the same page for that one item (`?compare=<id>`), which is audited before it shows both, as text,
+ * with "Send the portal's value" beside them; nobody presses it blind. Once the row's record is gone (the guardian
+ * removed, the family made inactive) neither is shown, and no link is offered.
  */
-const contactDetails = (i: QueueView) => (i.details === null ? null : <>
-  <span className="when">{`QuickBooks has: ${i.details.quickbooks}.`}</span>
-  <span className="when">{`The portal has: ${i.details.portal}.`}</span>
-</>);
+const isContact = (i: QueueView) => i.write.op === "contact";
+function ContactCell({ i, compared, mayCompare }: { i: QueueView; compared: ContactCompare | null; mayCompare: boolean }) {
+  if (compared?.id === i.id) return <>
+    <span className="when">{`QuickBooks has: ${compared.quickbooks}.`}</span>
+    <span className="when">{`The portal has: ${compared.portal}.`}</span>
+  </>;
+  if (!mayCompare || i.notOffered === "record_gone") return null;
+  return <Link className="link-line" href={`/staff/reconciliation?compare=${i.id}#writes-h`}>Compare the two</Link>;
+}
+/** Where "Send the portal's value" isn't beside a kept contact change: it is offered only in its compare view. */
+const COMPARE_FIRST = "Compare the two first: the portal's details are sent from there, beside what QuickBooks holds.";
+const COMPARE_NEEDS = "Someone who may see parents' details can compare the two here and send the portal's details from there.";
 
 /** Why "Send the portal's value" isn't offered for a refused item, by what it was: a guardian's taken name is the person's to rename (stage 3's slice 9h). */
 const notOfferedWords = (i: QueueView): string | null => {
@@ -110,10 +121,10 @@ const notOfferedWords = (i: QueueView): string | null => {
  * may change families, "Send the portal's value" (bound to what the row showed, sealed so a value the form sends back
  * that isn't it is refused) and "Give up". Such a change is never tried again by itself.
  */
-function Refused({ items, canChange }: { items: QueueView[]; canChange: boolean }) {
+function Refused({ items, canChange, compared, mayCompare }: { items: QueueView[]; canChange: boolean; compared: ContactCompare | null; mayCompare: boolean }) {
   const columns: Column<QueueView>[] = [
     { key: "what", header: "Change", rowHeader: true, cell: (i) => <>{i.words}<span className="when">{waitingWords(i)}</span>{i.moneyNote ? <span className="when">{i.moneyNote}</span> : null}</> },
-    { key: "why", header: "Why it didn't go through", cell: (i) => <>{keptWordsFor(i.write, i.lastCode, i.holds)}{contactDetails(i)}</> },
+    { key: "why", header: "Why it didn't go through", cell: (i) => <>{keptWordsFor(i.write, i.lastCode, i.holds, i.differs)}{isContact(i) ? <ContactCell i={i} compared={compared} mayCompare={mayCompare} /> : null}</> },
     { key: "asked", header: "Asked", cell: (i) => <><LocalTime iso={i.askedAt} />{i.askedBy ? <span className="when">by {i.askedBy}</span> : null}</> },
     { key: "family", header: "Family", cell: (i) => (i.familyId ? <Link href={familyPage(i.familyId)}>Open the family</Link> : "None") },
     ...(canChange ? [{ key: "do", header: "What you can do", quiet: true, cell: (i: QueueView) => {
@@ -121,11 +132,13 @@ function Refused({ items, canChange }: { items: QueueView[]; canChange: boolean 
       // (which takes its place, and is sent), a customer QuickBooks has inactive is never made active again by the
       // portal, one the roster doesn't hold isn't sent to, and a move into a family with no customer in QuickBooks waits
       // for that family to be made there. The press is bound to what the row shows (QueueView.shown).
-      const instead = notOfferedWords(i);
+      const instead = notOfferedWords(i) ?? (!isContact(i) || compared?.id === i.id ? null : mayCompare ? COMPARE_FIRST : COMPARE_NEEDS);
+      // A kept contact change is bound to the digest of what its compare view showed (ContactCompare.shown).
+      const shown = isContact(i) ? compared?.shown ?? "" : i.shown;
       return (
         <div className="row-actions">
           {instead === null
-            ? <OneButton label="Send the portal's value" pendingLabel="Reading QuickBooks, then sending…" act={sendPortalValueAction.bind(null, i.id, i.shown, portalValueStamp(i.id, i.shown))} />
+            ? <OneButton label="Send the portal's value" pendingLabel="Reading QuickBooks, then sending…" act={sendPortalValueAction.bind(null, i.id, shown, portalValueStamp(i.id, shown))} />
             : <Notice tone="info" live="none">{instead}</Notice>}
           <details className="more"><summary>Give up</summary>
             <p className="hint">The portal keeps its own value, and QuickBooks keeps what it has.</p>
@@ -172,17 +185,25 @@ function MadeAfterGivingUp({ items, linking, canChange, rosterTag }: { items: Gi
  * waiting to reach QuickBooks or stuck, the roster's Needs attention list, for staff who may link families to
  * accounting the customers no family is linked to (stage 3's slice 10), and, for staff who may see money, the
  * families whose QuickBooks balance isn't what their invoices add up to. It lists many families, so opening it is not
- * audited as a read of one; each family's own page is. Names are QuickBooks text, shown as text only.
+ * audited as a read of one; each family's own page is, and so is the compare view of one kept change of a parent's phone
+ * and address (`?compare=<id>`, stage 3's slice 11b), before anything of it is shown. Names are QuickBooks text, shown
+ * as text only.
  */
-export default async function ReconciliationPage() {
+export default async function ReconciliationPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireStaffPage("Roster.Read");
+  const sp = await searchParams;
   const money = can(ctx.effective, "Finance.Balance.Read");
   // Read before the roster, as every page that sends it does: a write refuses a page shown another company's roster.
   const rosterTag = await currentRosterTag();
-  // A parent's phone and address, as QuickBooks and the portal hold them, only for staff who may see a person's details (stage 3's slice 11b).
-  const details = can(ctx.effective, "Parents.ReadWrite");
-  const [writes, roster, balances, madeAnyway] = await Promise.all([loadOpenWrites({ showAmounts: money, showDetails: details }), loadRosterPage(), money ? loadBalances() : Promise.resolve(null),
+  // A parent's phone and address are compared only by staff who may see a person's details (stage 3's slice 11b).
+  const mayCompare = can(ctx.effective, "Parents.ReadWrite");
+  const [writes, roster, balances, madeAnyway] = await Promise.all([loadOpenWrites({ showAmounts: money }), loadRosterPage(), money ? loadBalances() : Promise.resolve(null),
     loadMadeAfterGivingUp()]);
+  // The one item asked to be compared: a uuid naming a kept contact change of the list, for a holder of Parents.ReadWrite;
+  // anything else shows the list as if none were asked. Audited (compareContact()) before the page shows anything of it.
+  const asked = typeof sp.compare === "string" && isUuid(sp.compare) ? sp.compare.toLowerCase() : null;
+  const toCompare = mayCompare && asked ? writes.find((w) => w.id === asked && w.state === "refused" && isContact(w)) : undefined;
+  const compared = toCompare ? await compareContact(toCompare.id, { actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, ip: ctx.ip }) : null;
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite");
   // Customers no family is linked to, with "Create a family from this": only for staff who may link families to accounting.
   const linking = can(ctx.effective, "Accounting.Link.ReadWrite");
@@ -205,7 +226,7 @@ export default async function ReconciliationPage() {
               A stuck change waits for you: try it again, or give it up and make it in QuickBooks.
               A change saved in the portal first that didn&apos;t go through (QuickBooks refused it, the portal held it back as QuickBooks has something else, or it couldn&apos;t be sent) is kept in the portal: send the portal&apos;s value again on purpose, or give it up and leave QuickBooks as it is.
               A parent&apos;s phone and mailing address are among them: saved in the portal first, sent on by the worker, and never sent over details QuickBooks holds that the portal didn&apos;t know of.</p>
-            {refused.length > 0 && <><h3 className="table-head">Not in QuickBooks, kept in the portal ({refused.length})</h3><Refused items={refused} canChange={canChange} /></>}
+            {refused.length > 0 && <><h3 className="table-head">Not in QuickBooks, kept in the portal ({refused.length})</h3><Refused items={refused} canChange={canChange} compared={compared} mayCompare={mayCompare} /></>}
             {stuck.length > 0 && <><h3 className="table-head">Stuck ({stuck.length})</h3><Writes items={stuck} caption="Stuck changes" canChange={canChange} mayLink={linking} /></>}
             {waiting.length > 0 && <><h3 className="table-head">Waiting ({waiting.length})</h3><Writes items={waiting} caption="Changes waiting" canChange={canChange} mayLink={linking} /></>}
           </>

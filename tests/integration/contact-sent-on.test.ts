@@ -9,6 +9,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
@@ -19,8 +20,10 @@ import type { ContactValues } from "@/lib/parents/contact-fields";
 import { CONTACT_COPY, saveDetails, saveMyContact } from "@/lib/parents/contact-edits";
 import { addGuardian, removeGuardian } from "@/lib/parents/guardians";
 import { renamePerson } from "@/lib/parents/people";
-import { addStudentToLinked, askFamilyInactive, CONTACT_AWAITS_READ, CONTACT_DIFFERS, CONTACT_NOT_OFFERED, coverStamp, familyCover, keptContactWords, moveStudent, portalValueStamp, renameLinked, SENDING_LOCK, sendPortalValue, whoStopped } from "@/lib/roster/writes";
-import { giveUp, loadOpenWrites, runWriteQueue, tryAgainNow } from "@/lib/roster/queue";
+import { addStudentToLinked, askFamilyInactive, CONTACT_AWAITS_READ, CONTACT_DIFFERS, CONTACT_NOT_OFFERED, contactShown, contactShownUnder, coverStamp, familyCover, keptWordsFor, moveStudent, portalValueStamp,
+  renameLinked, SENDING_LOCK, sendPortalValue, whoStopped } from "@/lib/roster/writes";
+import { compareContact, giveUp, loadOpenWrites, runWriteQueue, tryAgainNow } from "@/lib/roster/queue";
+import { env } from "@/env";
 import { ROSTER_LOCK, saveShape, type MembershipShape } from "@/lib/roster/shape";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { takeInContactDetails } from "@/lib/parents/contact-take-in";
@@ -28,9 +31,8 @@ import ReconciliationPage from "@/app/staff/(app)/reconciliation/page";
 import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
 import { NO_DETAILS, inQuickBooks, personDetails, setPersonDetails, takeInDone, takeInNotRun } from "../helpers/contact";
 import { resetDb, seedGuardian, seedParent } from "../helpers/db";
-import { startQboStub, type QboStub } from "../helpers/qbo-stub";
-import { asOp, auditsOf, connectRoster, queueItem, seedAnaRivera, staffWith, WORKER } from "../helpers/roster-writes";
-import { FZN_SHAPE } from "../helpers/qbo-stub";
+import { FZN_SHAPE, startQboStub, type QboStub } from "../helpers/qbo-stub";
+import { asOp, auditsOf, connectRoster, queueItem, seedAnaRivera, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
 import { moveInQuickBooksOnly, storeShape } from "../helpers/roster-cache";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 
@@ -358,7 +360,7 @@ describe("each send compares QuickBooks' details first, and never overwrites one
   });
 
   for (const version of [0, 1]) {
-    it(`${version === 0 ? "a person who saved before the take-in" : "a person whose records disagreed at the take-in"}: read live, kept and listed, and the parent is told nothing`, async () => {
+    it(`${version === 0 ? "a person the take-in gave no phone" : "a person whose records disagreed at the take-in"}: read live, kept and listed, and the parent is told nothing`, async () => {
       const a = await ana({ phone: "", version });
       expect(await saveMyContact(a.ctx, form({ phone: NEW_PHONE }, `p:${version}`))).toMatchObject({ ok: true, message: CONTACT_COPY.saved });
       await wake();
@@ -366,10 +368,9 @@ describe("each send compares QuickBooks' details first, and never overwrites one
       expect(posts()).toEqual([]);
       expect(stub.apiCalls().filter((c) => c.method === "GET" && c.path.endsWith("/customer/11"))).toHaveLength(1);
       expect((await items())[0]).toMatchObject({ state: "refused", lastCode: CONTACT_DIFFERS });
-      const [row] = await loadOpenWrites({ showDetails: true });
+      const [row] = await loadOpenWrites();
       expect(row).toMatchObject({ state: "refused", words: "Send Ana Rivera's phone to their record under Rivera Family", familyId: rivera, mayResend: true,
-        details: { quickbooks: "phone 555-0101", portal: `phone ${NEW_PHONE}` } });
-      expect((await loadOpenWrites())[0]!.details).toBeNull();
+        differs: [{ field: "phone", portalKnew: false, quickbooksHolds: true }] });
     });
   }
 });
@@ -525,7 +526,7 @@ describe("a parent's change of their details blocks nothing, in any state (the s
   });
 });
 
-describe("Reconciliation and a family's page (item 7)", () => {
+describe("Reconciliation and a family's page (item 7, and the second read's items 3 and 5)", () => {
   /** A change kept because QuickBooks holds a phone the portal never knew of. */
   async function kept() {
     const a = await ana({ phone: "" });
@@ -534,34 +535,106 @@ describe("Reconciliation and a family's page (item 7)", () => {
     stub.calls.length = 0;
     return a;
   }
+  const decode = (html: string) => html.replaceAll("&#x27;", "'");
+  const DIDNT_KNOW = "The portal held it back: the portal didn't know this record's phone when the change was saved, and QuickBooks holds one, so the portal's phone wasn't sent over it.";
+  const compares = () => auditsOf("parent.details.compared");
+  const staffActor = (s: { id: string; email: string }) => ({ door: "staff" as const, id: s.id, label: s.email });
 
-  it("lists it in words, with what QuickBooks and the portal hold only for staff who may see a person's details", async () => {
+  it("the list says which details differ and whose, in true words, and holds no phone or address for any reader", async () => {
     await kept();
-    const decode = (html: string) => html.replaceAll("&#x27;", "'");
-    asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
-    let html = decode(await renderPage(ReconciliationPage));
-    expect(html).toContain("Send Ana Rivera's phone to their record under Rivera Family");
-    expect(html).toContain(keptContactWords(CONTACT_DIFFERS));
-    expect(html).toContain("Send the portal's value");
-    expect(html).not.toContain("555-0101");
-    expect(html).not.toContain(NEW_PHONE);
-    asStaff(await staffWith("parents@club.org", ["Roster.Read", "Parents.ReadWrite"]));
-    html = decode(await renderPage(ReconciliationPage));
-    expect(html).toContain("QuickBooks has: phone 555-0101.");
-    expect(html).toContain(`The portal has: phone ${NEW_PHONE}.`);
-    expect(html).not.toContain("Send the portal's value"); // no Roster.Family.ReadWrite
-    // The family's page lists it in words, with no buttons.
+    const [row] = await loadOpenWrites();
+    expect(row).toMatchObject({ words: "Send Ana Rivera's phone to their record under Rivera Family", differs: [{ field: "phone", portalKnew: false, quickbooksHolds: true }], shown: "" });
+    expect(keptWordsFor(row!.write, row!.lastCode, row!.holds, row!.differs)).toBe(DIDNT_KNOW);
+    const readers: [string, string[]][] = [["reader@club.org", ["Roster.Read"]], ["treasurer@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]],
+      ["parents@club.org", ["Roster.Read", "Parents.ReadWrite"]], ["registrar2@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Parents.ReadWrite"]]];
+    for (const [email, patterns] of readers) {
+      asStaff(await staffWith(email, patterns));
+      const html = decode(await renderPage(ReconciliationPage));
+      expect(html, email).toContain("Send Ana Rivera's phone to their record under Rivera Family");
+      expect(html, email).toContain(DIDNT_KNOW);
+      for (const value of ["555-0101", NEW_PHONE]) expect(html, `${email} ${value}`).not.toContain(value);
+      expect(html, email).not.toContain("Send the portal's value");
+      // Only a reader who may see a person's details is offered the compare view.
+      expect(html.includes(`?compare=${row!.id}`), email).toBe(patterns.includes("Parents.ReadWrite"));
+    }
+    expect(await compares()).toEqual([]);
+    // The family's page lists it in the same words, with no buttons and no values.
     const page = decode(await renderPage(RosterEntryPage, { params: { id: String(rivera) } }));
-    expect(page).toContain(keptContactWords(CONTACT_DIFFERS));
+    expect(page).toContain(DIDNT_KNOW);
+    expect(page).not.toContain(NEW_PHONE);
   });
 
-  it("\"Send the portal's value\" sends the portal's details as they are now, over what the row showed, with the live version", async () => {
+  it("where the portal knew a phone: that QuickBooks holds a different one, or none", async () => {
+    const a = await ana();
+    await saveMyContact(a.ctx, form({ phone: NEW_PHONE }, "p:1"));
+    Object.assign(inQuickBooks(stub, "11"), { SyncToken: "3", PrimaryPhone: { FreeFormNumber: "555-9999" } });
+    await wake();
+    let [row] = await loadOpenWrites();
+    expect(row).toMatchObject({ state: "refused", differs: [{ field: "phone", portalKnew: true, quickbooksHolds: true }] });
+    expect(keptWordsFor(row!.write, row!.lastCode, row!.holds, row!.differs))
+      .toBe("The portal held it back: QuickBooks holds a different phone for this record from the one the portal last knew, so the portal's phone wasn't sent over it.");
+    // Cleared there since, as the roster's next read shows it.
+    await db.update(qboCustomer).set({ phone: null }).where(eq(qboCustomer.qboId, "11"));
+    [row] = await loadOpenWrites();
+    expect(keptWordsFor(row!.write, row!.lastCode, row!.holds, row!.differs))
+      .toBe("The portal held it back: QuickBooks holds no phone for this record, where the portal last knew one, so the portal's phone wasn't sent over it.");
+  });
+
+  it("the compare view: audited before it shows both values, as text, with \"Send the portal's value\" beside them", async () => {
     const a = await kept();
     const [row] = await loadOpenWrites();
-    // A stamp of anything but what the row showed sends nothing.
+    const staff = await staffWith("registrar2@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Parents.ReadWrite"]);
+    asStaff(staff);
+    const html = decode(await renderPage(ReconciliationPage, { searchParams: { compare: row!.id.toUpperCase() } }));
+    expect(html).toContain("QuickBooks has: phone 555-0101.");
+    expect(html).toContain(`The portal has: phone ${NEW_PHONE}.`);
+    expect(html).toContain("Send the portal's value");
+    const [audit] = await compares();
+    expect(await compares()).toHaveLength(1);
+    expect(audit).toMatchObject({ actorId: staff.id, permission: "Parents.ReadWrite", targetType: "parent", targetId: a.ana.id, after: { queueId: row!.id } });
+  });
+
+  it("a reader without Parents.ReadWrite, a made-up id, another kind of item, or a record gone: the plain list, and no audit row", async () => {
+    await kept();
+    const [row] = await loadOpenWrites();
+    const rename = await seedQueued({ op: "rename", role: "family", qboId: "20", syncToken: "0", name: "Chen Household", was: "Chen Family" }, { state: "refused", code: "fault_6000" });
+    const holder = await staffWith("parents@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Parents.ReadWrite"]);
+    const without = await staffWith("treasurer@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]);
+    const plain = (html: string) => {
+      for (const value of ["555-0101", NEW_PHONE, "QuickBooks has: ", "The portal has: "]) expect(decode(html)).not.toContain(value);
+    };
+    for (const [who, compare] of [[without, row!.id], [holder, randomUUID()], [holder, "not-a-uuid"], [holder, rename.id], [holder, [row!.id, row!.id]]] as const) {
+      asStaff(who);
+      plain(await renderPage(ReconciliationPage, { searchParams: { compare: compare as string | string[] } }));
+    }
+    // The family made inactive in the portal since: the record is gone, so neither value is shown and no compare is offered.
+    await db.update(family).set({ active: false }).where(eq(family.id, rivera));
+    asStaff(holder);
+    const html = await renderPage(ReconciliationPage, { searchParams: { compare: row!.id } });
+    plain(html);
+    expect(html).not.toContain(`?compare=${row!.id}`);
+    expect(await compareContact(row!.id, { actor: staffActor(holder), ip: null })).toBeNull();
+    expect(await compares()).toEqual([]);
+  });
+
+  it("the stamp bound into the press is keyed with the server's secret, never a constant", async () => {
+    const held = { phone: "555-0101", address: { line1: "", line2: "", city: "", region: "", postalCode: "", country: "" } };
+    const w = { change: { phone: NEW_PHONE } };
+    expect(contactShownUnder("one secret", held, w)).not.toBe(contactShownUnder("another secret", held, w));
+    expect(contactShown(held, w)).toBe(contactShownUnder(env.BETTER_AUTH_SECRET, held, w));
+    expect(contactShown(held, w)).not.toBe(contactShownUnder("contact-shown", held, w));
+  });
+
+  it("\"Send the portal's value\" from the compare view sends the portal's details as they are now, over what it showed, with the live version", async () => {
+    const a = await kept();
+    const [row] = await loadOpenWrites();
+    const view = (await compareContact(row!.id, { actor: staffActor(await staffWith("registrar2@club.org", ["Parents.ReadWrite"])), ip: null }))!;
+    expect(view).toMatchObject({ id: row!.id, quickbooks: "phone 555-0101", portal: `phone ${NEW_PHONE}` });
+    // A stamp of anything but what the view showed sends nothing.
     expect(await sendPortalValue(row!.id, "something else", portalValueStamp(row!.id, "something else"), op)).toMatchObject({ ok: false });
+    expect(await sendPortalValue(row!.id, row!.shown, portalValueStamp(row!.id, row!.shown), op)).toMatchObject({ ok: false });
     expect(posts()).toEqual([]);
-    expect(await sendPortalValue(row!.id, row!.shown, portalValueStamp(row!.id, row!.shown), op)).toEqual({ ok: true, message: "Sent: QuickBooks has the portal's details now." });
+    expect(await sendPortalValue(row!.id, view.shown, portalValueStamp(row!.id, view.shown), op)).toEqual({ ok: true, message: "Sent: QuickBooks has the portal's details now." });
     expect(bodies()).toEqual([{ Id: "11", SyncToken: "0", sparse: true, PrimaryPhone: { FreeFormNumber: NEW_PHONE } }]);
     expect(await queueItem(row!.id)).toMatchObject({ state: "done" });
     expect((await auditsOf("roster.write.sent_again"))).toHaveLength(1);
@@ -573,7 +646,8 @@ describe("Reconciliation and a family's page (item 7)", () => {
     await moveInQuickBooksOnly(["11"], "20");
     const [row] = await loadOpenWrites();
     expect(row).toMatchObject({ mayResend: false, notOffered: "not_own" });
-    expect(await sendPortalValue(row!.id, row!.shown, portalValueStamp(row!.id, row!.shown), op)).toEqual({ ok: false, errors: [CONTACT_NOT_OFFERED.not_own] });
+    const view = (await compareContact(row!.id, { actor: staffActor(await staffWith("registrar2@club.org", ["Parents.ReadWrite"])), ip: null }))!;
+    expect(await sendPortalValue(row!.id, view.shown, portalValueStamp(row!.id, view.shown), op)).toEqual({ ok: false, errors: [CONTACT_NOT_OFFERED.not_own] });
     expect(posts()).toEqual([]);
   });
 

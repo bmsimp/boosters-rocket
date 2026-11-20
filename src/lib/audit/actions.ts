@@ -83,6 +83,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "parent.password.refused": "A parent's password wasn't set from a link",
   "parent.password.set": "A parent set their password from a link",
   "parent.read": "A parent's record opened",
+  "parent.details.compared": "A parent's phone and mailing address, as the portal and QuickBooks hold them, opened on Reconciliation",
   "parent.review.notified": "Staff emailed about addresses to review",
   "parent.seed": "Test parent made by the proof-of-concept script",
   "parent.session.carried_over": "Parents' sessions and pending email changes moved to the portal's own families, with counts",

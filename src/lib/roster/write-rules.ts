@@ -76,15 +76,25 @@ type ContactWrite = Extract<RosterWrite, { op: "contact" }>;
  */
 export function contactStands(held: HeldContact, w: Pick<ContactWrite, "change" | "was" | "orWas">): "in_place" | "sendable" | "differs" {
   const fields = (["phone", "address"] as const).filter((f) => w.change[f] !== undefined);
-  let inPlace = true;
-  for (const f of fields) {
+  if (fields.every((f) => detailKey(held[f]) === detailKey(w.change[f]))) return "in_place";
+  return contactDiffers(held, w).length ? "differs" : "sendable";
+}
+
+/**
+ * One field of a parent's change that QuickBooks holds otherwise than the portal knew (contactStands()'s `differs`, field
+ * by field), for the words a kept change is shown in (keptContactWords()): whether the portal knew a value for it when
+ * the change was saved (`was` not empty), and whether QuickBooks holds one now. Never the values themselves.
+ */
+export type ContactDiffer = { field: "phone" | "address"; portalKnew: boolean; quickbooksHolds: boolean };
+/** The fields of a contact change `held` holds as neither its new value, nor its before-value, nor an earlier change's. */
+export function contactDiffers(held: HeldContact, w: Pick<ContactWrite, "change" | "was" | "orWas">): ContactDiffer[] {
+  return (["phone", "address"] as const).filter((f) => w.change[f] !== undefined).flatMap((f): ContactDiffer[] => {
     const now = detailKey(held[f]);
-    if (now === detailKey(w.change[f])) continue;
-    inPlace = false;
+    if (now === detailKey(w.change[f])) return [];
     const known = [w.was[f], ...(w.orWas ?? []).map((e) => e[f])].filter((v) => v !== undefined).map((v) => detailKey(v));
-    if (!known.includes(now)) return "differs";
-  }
-  return inPlace ? "in_place" : "sendable";
+    if (known.includes(now)) return [];
+    return [{ field: f, portalKnew: w.was[f] !== undefined && detailKey(w.was[f]) !== null, quickbooksHolds: now !== null }];
+  });
 }
 
 /**

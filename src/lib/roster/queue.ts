@@ -14,7 +14,8 @@ import { getRosterSource, ROSTER_JOB } from "./source";
 import { lockRosterAs, rosterTagOf } from "@/lib/seasons/roster-lock";
 import { alignAfterWrite, applyWritten, balanceUnread, BEING_SENT_NOW, changeOwnRecord, closeEarlierContacts, CONTACT_AWAITS_READ, contactShown, CREDIT_BALANCE, CUSTOMER_HAS_GUARDIAN, EMAIL_TOO_LONG, FAMILY_HELD, guardianCustomerLinked, guardianOf, isSavedFirst, NAME_UNUSABLE, itemLockFree, madeAfterGivingUp, markMoveMoneyStale, moveMoneyNotes, REFRESH_ASK_KEY,
   replaceRefusedCreates, sendWrite, tryDeactivate, trySavedItem, whileItemHeld, whoStopped, contactStopNow, type ContactNotOffered, type MadeAfterGivingUp, type OwnRecordChange, type SavedTry } from "./writes";
-import { afterFailedTry, beforeResend, classify, heldInCache, type HeldContact } from "./write-rules";
+import { afterFailedTry, beforeResend, classify, contactDiffers, heldInCache, type ContactDiffer, type HeldContact } from "./write-rules";
+import { isUuid } from "@/lib/seasons/ids";
 import { contactSendsMayGo } from "@/lib/parents/take-in-setting";
 import { isBuyoutWrite, sendBuyoutWrite } from "@/lib/buyouts/writes";
 import { formatMoney } from "@/lib/money/cents";
@@ -417,11 +418,12 @@ export type QueueView = {
   mayResend: boolean;
   notOffered: "taken" | "inactive" | "not_on_roster" | "create_family_first" | "email_too_long" | "name_unusable" | ContactNotOffered | null;
   /**
-   * For a kept change of a parent's phone and address (stage 3's slice 11b): what QuickBooks holds of the fields it
-   * sends (the roster cache's), and what the portal holds now, each in words, as text; only with `showDetails` (a staff
-   * member holding Parents.ReadWrite), otherwise null, and the row says only that QuickBooks holds other details.
+   * For a kept change of a parent's phone and address (stage 3's slice 11b): which of its fields the roster cache holds
+   * otherwise than the portal knew, and whether the portal knew any value for each (contactDiffers()), for the words
+   * that say so (keptWordsFor()); never the values, which only the compare view shows (compareContact()). Null for
+   * anything else. The list's `shown` is empty for such a row: only the compare view binds what QuickBooks holds.
    */
-  details: { quickbooks: string; portal: string } | null;
+  differs: ContactDiffer[] | null;
 };
 
 /** A phone and billing address's columns, which the roster cache, a person's row and a family's row name alike. */
@@ -496,7 +498,7 @@ export function describeWrite(w: QueuedWrite, names: Map<string, string>, o: { s
  * item's family record is offered as the page's link only when it has a link (one lookup for the list). With
  * `showAmounts` a buy-out invoice's words carry its amount (describeWrite).
  */
-export async function loadOpenWrites(o: { familyId?: AppFamilyId; showAmounts?: boolean; showDetails?: boolean } = {}): Promise<QueueView[]> {
+export async function loadOpenWrites(o: { familyId?: AppFamilyId; showAmounts?: boolean } = {}): Promise<QueueView[]> {
   const customer = o.familyId === undefined ? null : await customerOfFamily(o.familyId);
   const where = and(inArray(writeQueue.state, ["waiting", "stuck", "refused"]), o.familyId === undefined ? undefined
     : or(eq(writeQueue.familyId, o.familyId), sql`${writeQueue.request}->>'toFamilyId' = ${String(o.familyId)}`, customer === null ? undefined : eq(writeQueue.targetQboId, customer),
@@ -542,16 +544,15 @@ export async function loadOpenWrites(o: { familyId?: AppFamilyId; showAmounts?: 
     return g !== null ? personName.get(g) : r.studentId !== null ? studentName.get(String(r.studentId)) : undefined;
   };
   // A parent's phone and address (stage 3's slice 11b): the person by the portal's name, the family by its record's,
-  // what the cache holds of each customer's details (sealed for "Send the portal's value", contactShown()), and, for a
-  // kept one and staff who may see a person's details, what QuickBooks holds and the portal holds, as text.
+  // and which fields the cache holds otherwise than the portal knew (never the values: the list writes no audit row).
   const contacts = rows.filter((r) => r.request.op === "contact");
   // Whether any of them may be sent now, read once for the list (contactSendsMayGo()).
   const mayGo = contacts.length ? await db.transaction((tx) => contactSendsMayGo(tx)) : true;
   const contactGuardians = [...new Set(contacts.flatMap((r) => { const g = guardianOf(r.request); return g === null ? [] : [g]; }))];
-  const contactPeople = new Map((contactGuardians.length ? await db.select({ id: guardian.id, name: parent.name, ...detailColumns(parent) }).from(guardian)
+  const contactPeople = new Map((contactGuardians.length ? await db.select({ id: guardian.id, name: parent.name }).from(guardian)
     .innerJoin(parent, eq(parent.id, guardian.parentId)).where(inArray(guardian.id, contactGuardians)) : []).map((g) => [g.id, g]));
   const contactFamilies = [...new Set(contacts.flatMap((r) => (r.familyId === null ? [] : [r.familyId])))];
-  const contactFamilyRows = new Map((contactFamilies.length ? await db.select({ id: family.id, name: family.name, ...detailColumns(family) }).from(family)
+  const contactFamilyRows = new Map((contactFamilies.length ? await db.select({ id: family.id, name: family.name }).from(family)
     .where(inArray(family.id, contactFamilies)) : []).map((f) => [String(f.id), f]));
   const contactTargets = [...new Set(contacts.flatMap((r) => (r.targetQboId === null ? [] : [r.targetQboId])))];
   const heldThere = new Map((contactTargets.length ? await db.select({ qboId: qboCustomer.qboId, ...detailColumns(qboCustomer) }).from(qboCustomer)
@@ -599,15 +600,53 @@ export async function loadOpenWrites(o: { familyId?: AppFamilyId; showAmounts?: 
       finishing: finishingOf(r),
       awaitsRead: request.op === "contact" && !mayGo,
       holds: !refused ? null : request.op === "rename" ? names.get(request.qboId) ?? null : request.op === "move" ? placeOf(request.qboId) : null,
-      shown: !refused ? "" : request.op === "rename" ? names.get(request.qboId) ?? "" : request.op === "create" ? request.name : request.op === "move" ? parentOf.get(request.qboId) ?? ""
-        : request.op === "contact" ? contactShown(heldThere.get(request.qboId) ?? heldInCache({}), request) : "",
+      shown: !refused ? "" : request.op === "rename" ? names.get(request.qboId) ?? "" : request.op === "create" ? request.name : request.op === "move" ? parentOf.get(request.qboId) ?? "" : "",
       mayResend: refused && notOffered === null,
       notOffered,
-      details: refused && request.op === "contact" && o.showDetails ? {
-        quickbooks: detailsInWords(heldThere.get(request.qboId) ?? heldInCache({}), request),
-        portal: detailsInWords(heldInCache((guardianOf(request) !== null ? contactPeople.get(guardianOf(request)!) : r.familyId === null ? undefined : contactFamilyRows.get(String(r.familyId))) ?? {}), request),
-      } : null,
+      differs: refused && request.op === "contact" ? contactDiffers(heldThere.get(request.qboId) ?? heldInCache({}), request) : null,
     };
+  });
+}
+
+/**
+ * What the compare view of one kept change of a parent's phone and address shows (stage 3's slice 11b, the lead's
+ * decision 5 on the second read): what QuickBooks holds of the fields it sends (the roster cache's) and what the portal
+ * holds now, each in words, as text, and `shown`, the digest of QuickBooks' that "Send the portal's value" is bound to
+ * (contactShown(), keyed with the server's secret).
+ */
+export type ContactCompare = { id: string; quickbooks: string; portal: string; shown: string };
+/**
+ * The compare view of one kept contact change, for the Reconciliation page, which offers it only to a holder of
+ * Parents.ReadWrite (and checks it before it calls this): the item must be a kept (`refused`) contact change whose record
+ * still stands (the membership open in an active family whose row the item is filed under, or the family record
+ * active), or null, with nothing written. Otherwise a staff read of one person's (or one family's) details: audited
+ * (`parent.details.compared`, targeting the person, or the family for a family's details, naming the item) in the same
+ * transaction, before anything of them is read.
+ */
+export async function compareContact(rawItemId: string, o: { actor: Actor; ip: string | null }): Promise<ContactCompare | null> {
+  if (!isUuid(rawItemId)) return null;
+  const itemId = rawItemId.toLowerCase();
+  return db.transaction(async (tx) => {
+    const [item] = await tx.select().from(writeQueue).where(and(eq(writeQueue.id, itemId), eq(writeQueue.state, "refused")));
+    if (!item || item.request.op !== "contact" || item.familyId === null) return null;
+    const w = item.request;
+    const g = guardianOf(w);
+    let target: { type: "parent" | "family"; id: string };
+    if (g !== null) {
+      const [row] = await tx.select({ parentId: guardian.parentId, status: guardian.status, familyId: guardian.familyId }).from(guardian).where(eq(guardian.id, g));
+      if (!row || row.status === "disabled" || row.familyId === null || String(row.familyId) !== String(item.familyId)) return null;
+      target = { type: "parent", id: row.parentId };
+    } else target = { type: "family", id: String(item.familyId) };
+    const [f] = await tx.select({ active: family.active }).from(family).where(eq(family.id, item.familyId));
+    if (!f?.active) return null;
+    await writeAudit({ actor: o.actor, action: "parent.details.compared", permission: "Parents.ReadWrite", ip: o.ip, targetType: target.type, targetId: target.id,
+      after: { queueId: item.id } }, tx);
+    const [mine] = target.type === "parent"
+      ? await tx.select(detailColumns(parent)).from(parent).where(eq(parent.id, target.id))
+      : await tx.select(detailColumns(family)).from(family).where(eq(family.id, item.familyId));
+    const [there] = await tx.select(detailColumns(qboCustomer)).from(qboCustomer).where(eq(qboCustomer.qboId, w.qboId));
+    const held = heldInCache(there ?? {});
+    return { id: item.id, quickbooks: detailsInWords(held, w), portal: detailsInWords(heldInCache(mine ?? {}), w), shown: contactShown(held, w) };
   });
 }
 

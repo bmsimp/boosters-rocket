@@ -8,7 +8,7 @@ import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { env } from "@/env";
 import { db, type Tx } from "@/lib/db/client";
-import { accountingLink, family, familyMoney, guardian, jobRun, parent, qboCustomer, qboCustomerType, student, writeQueue, type RosterRole, type RosterWrite } from "@/lib/db/schema";
+import { accountingLink, family, familyMoney, guardian, jobRun, parent, qboCustomer, qboCustomerType, student, writeQueue, type QueuedWrite, type RosterRole, type RosterWrite } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getConnection } from "@/lib/quickbooks/connection";
 import { CUSTOMER_UPDATE, CUSTOMER_WRITES, NO_TOKEN, qboCreateCustomer, qboCustomerById, qboMoveCustomer, qboRenameCustomer, qboSetCustomerActive, qboUpdateCustomerContact } from "@/lib/quickbooks/client";
@@ -34,7 +34,7 @@ import { getRosterSource, ROSTER_JOB } from "./source";
 import { customerRow } from "./refresh";
 import { checkName, freeName, nameKey } from "./names";
 import { deactivateOf, offers, renameOf, typeForNew, type RosterOperation } from "./operations";
-import { afterFailedTry, beforeResend, classify, contactStands, heldInCache, type CachedCustomer, type HeldContact } from "./write-rules";
+import { afterFailedTry, beforeResend, classify, contactStands, heldInCache, type CachedCustomer, type ContactDiffer, type HeldContact } from "./write-rules";
 
 /**
  * The setting that asks the worker for a roster refresh at its next wake: `{ at }`. One ask for the whole portal,
@@ -2457,9 +2457,17 @@ const heldInAnswer = (c: Record<string, unknown>): HeldContact => {
 /** The keys of the fields a contact change sends, as `held` holds them: one for the phone, one for the address, null for one it doesn't send. */
 const contactKeys = (held: HeldContact, w: Pick<ContactWrite, "change">) =>
   [w.change.phone !== undefined ? detailKey(held.phone) : undefined, w.change.address !== undefined ? detailKey(held.address) : undefined];
-/** The details a refused contact change's row shows QuickBooks holding, sealed by "Send the portal's value" (portalValueStamp()): a digest, never the values themselves. */
+/**
+ * The details a refused contact change's compare view shows QuickBooks holding, sealed by "Send the portal's value"
+ * (portalValueStamp()): a digest, never the values themselves, keyed with the server's secret as portalValueStamp() is,
+ * so a guessed phone or address can't be tested against it in the browser.
+ */
 export function contactShown(held: HeldContact, w: Pick<ContactWrite, "change">): string {
-  return createHmac("sha256", "contact-shown").update(JSON.stringify(contactKeys(held, w))).digest("base64url").slice(0, 22);
+  return contactShownUnder(env.BETTER_AUTH_SECRET, held, w);
+}
+/** contactShown() under a key given: the server's secret in the portal, another only in a test that it is keyed. */
+export function contactShownUnder(key: string, held: HeldContact, w: Pick<ContactWrite, "change">): string {
+  return createHmac("sha256", key).update(`contact-shown:${JSON.stringify(contactKeys(held, w))}`).digest("base64url").slice(0, 22);
 }
 
 /**
@@ -2740,11 +2748,24 @@ export function keptMoveWords(code: string | null, holds: string | null): string
 /**
  * Why a parent's phone and address the portal kept didn't reach QuickBooks (stage 3's slice 11b), in words, for every
  * code a kept contact change can hold, saying who stopped it: never the code itself, and never the details (the
- * Reconciliation page shows those, as text, only to staff who may see a person's details).
+ * Reconciliation page's compare view shows those, as text, only to staff who may see a person's details, audited). A
+ * difference is said field by field (`differs`, contactDiffers() of what the roster cache holds; else each field the
+ * change sends, by what the portal knew of it): where the portal knew none when the change was saved, that it didn't know
+ * this record's phone (or mailing address) and QuickBooks holds one; otherwise that QuickBooks holds a different one, or
+ * none, from the one the portal last knew. Never a guess at who changed it.
  */
-export function keptContactWords(code: string | null): string {
+export function keptContactWords(code: string | null, w?: Pick<ContactWrite, "change" | "was">, differs?: readonly ContactDiffer[] | null): string {
   if (code === CONTACT_DIFFERS) {
-    return "The portal held it back: QuickBooks holds other details for this record than the ones the portal last knew it held (someone may have changed them there, or an earlier change from the portal never reached it and was given up), so the portal's details weren't sent over them.";
+    const fields: { field: "phone" | "address"; portalKnew: boolean; quickbooksHolds: boolean | null }[] = differs?.length ? [...differs]
+      : (["phone", "address"] as const).filter((f) => w?.change[f] !== undefined).map((f) => ({ field: f, portalKnew: w!.was[f] !== undefined && detailKey(w!.was[f]) !== null, quickbooksHolds: null }));
+    if (!fields.length) return "The portal held it back: QuickBooks holds other details for this record than the ones the portal last knew, so the portal's details weren't sent over them.";
+    const word = (f: "phone" | "address") => (f === "phone" ? "phone" : "mailing address");
+    const clauses = fields.map((d) => !d.portalKnew ? `the portal didn't know this record's ${word(d.field)} when the change was saved, and QuickBooks holds one`
+      : d.quickbooksHolds === false ? `QuickBooks holds no ${word(d.field)} for this record, where the portal last knew one`
+        : d.quickbooksHolds === true ? `QuickBooks holds a different ${word(d.field)} for this record from the one the portal last knew`
+          : `QuickBooks doesn't hold the ${word(d.field)} the portal last knew for this record`);
+    const sent = fields.length > 1 ? "the portal's details weren't sent over them" : `the portal's ${word(fields[0]!.field)} wasn't sent over it`;
+    return `The portal held it back: ${clauses.join("; and ")}, so ${sent}.`;
   }
   if (code === INACTIVE_THERE_CODE) return "The portal held it back: QuickBooks has this record inactive, and the portal never sends a change to it or makes it active again.";
   if (code === "fault_5010") return "The portal held it back: the record changed in QuickBooks twice while the details were being sent, so nothing was overwritten.";
@@ -2755,9 +2776,12 @@ export function keptContactWords(code: string | null): string {
 }
 /** Whether a kept code is QuickBooks' refusal of a value it won't take (CUSTOMER_UPDATE.faults.validation). */
 const valueRefused = (code: string) => { const m = /^fault_(\d{1,6})$/.exec(code); return m !== null && CUSTOMER_UPDATE.faults.validation.test(m[1]!); };
-/** Why a change the portal kept didn't go through, in words, by what it was: a move's (keptMoveWords()), a parent's details' (keptContactWords()), or any other's (keptRefusalWords()). */
-export const keptWordsFor = (w: Pick<RosterWrite, "op"> | { op: string }, code: string | null, holds: string | null) =>
-  w.op === "move" ? keptMoveWords(code, holds) : w.op === "contact" ? keptContactWords(code) : keptRefusalWords(code, holds);
+/**
+ * Why a change the portal kept didn't go through, in words, by what it was: a move's (keptMoveWords()), a parent's
+ * details' (keptContactWords(), field by field with `differs` where the caller has it), or any other's (keptRefusalWords()).
+ */
+export const keptWordsFor = (w: RosterWrite | QueuedWrite, code: string | null, holds: string | null, differs?: readonly ContactDiffer[] | null) =>
+  w.op === "move" ? keptMoveWords(code, holds) : w.op === "contact" ? keptContactWords(code, w, differs) : keptRefusalWords(code, holds);
 /**
  * Whose invoices each family sees while a move hasn't reached the portal's copy of QuickBooks (open question 14:
  * invoices follow once QuickBooks takes the move), in words for staff: `seenBy`, the portal's name of the family that
