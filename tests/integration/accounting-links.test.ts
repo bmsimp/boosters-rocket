@@ -19,7 +19,7 @@ import { placeWords } from "@/lib/roster/place";
 import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
 import { familyFromCustomer } from "@/lib/roster/no-family";
 import { refreshRoster } from "@/lib/roster/refresh";
-import { addFamily } from "@/lib/roster/writes";
+import { addFamily, keptMoveWords, NO_FAMILY_CUSTOMER } from "@/lib/roster/writes";
 import { SHAPE_KEY } from "@/lib/roster/shape";
 import { SOURCE_KEY } from "@/lib/roster/source";
 import AccountingLinksPage from "@/app/staff/(app)/links/page";
@@ -577,14 +577,38 @@ describe("differences, for a link that stands (slice M2)", () => {
     expect(await placesIn("Rivera Family")).toEqual([{ at: "gone" }]);
   });
 
-  it("a move made in the books alone is shown once, in the student's own family's row, never as a student with no record in the other", async () => {
+  it("a move made in the books alone is told in both rows: as its place in the student's own family's, as a student whose record is elsewhere in the other's, never as one with no record", async () => {
     tag = await connectRoster(stub);
     await seedAnaRivera();
     await moveInQuickBooksOnly(["12"], "20");
     const view = await loadAccountingLinks();
-    expect(rowOf(view, "Rivera Family").differences).toEqual([{ kind: "place", who: "Leo Rivera", studentId: await recordOfCustomer("12", "student"),
+    const leo = await recordOfCustomer("12", "student");
+    expect(rowOf(view, "Rivera Family").differences).toEqual([{ kind: "place", who: "Leo Rivera", studentId: leo,
       place: { at: "other_family", familyQboId: "20", familyName: "Chen Family" }, queue: null }]);
-    expect(rowOf(view, "Chen Family").differences.map((d) => d.kind)).toEqual(["parent_customers"]); // Mei Chen's, and nothing of Leo's
+    expect(rowOf(view, "Chen Family").differences).toEqual([ // and Mei Chen's Parent customer
+      { kind: "student_elsewhere", books: "Leo Rivera", studentId: leo, portal: { at: "family", family: "Rivera Family" }, queue: null }, { kind: "parent_customers", count: 1 }]);
+  });
+
+  it("a student moved in the portal to a family with no link, the move kept refused, is told in the row of the family the books have them under, with the move's words", async () => {
+    tag = await connectRoster(stub);
+    await seedAnaRivera();
+    const rivera = await recordOfCustomer("10", "family"), leo = await recordOfCustomer("12", "student");
+    const patels = await unlinkedFamily("The Patels");
+    // As moveStudent() leaves it: the record in the Patels', the move kept as the Patels have no customer (slice 9f).
+    await db.update(student).set({ familyId: patels }).where(eq(student.id, leo));
+    await seedQueued({ op: "move", role: "student", qboId: "12", syncToken: "0", fromFamilyQboId: "10", toFamilyQboId: "", fromFamilyId: rivera, toFamilyId: patels },
+      { state: "refused", code: NO_FAMILY_CUSTOMER });
+    const view = await loadAccountingLinks();
+    const words = keptMoveWords(NO_FAMILY_CUSTOMER, null);
+    const riveras = rowOf(view, "Rivera Family");
+    expect(riveras.differences).toEqual([{ kind: "student_elsewhere", books: "Leo Rivera", studentId: leo, portal: { at: "family", family: "The Patels" }, queue: { state: "refused", words } }]);
+    expect(riveras.status).toMatchObject({ key: "with_differences" });
+    expect(rowOf(view, "The Patels").differences).toEqual([]); // no link: nothing compared there
+    await asAdmin();
+    const html = list(await renderPage(AccountingLinksPage));
+    expect(rowNamed(html, "Rivera Family")![3]).toMatch(/1 difference with the books: where a student is.$/);
+    expect(rowNamed(html, "Rivera Family")![4]).toContain(
+      `A student the books have under this family. In the portal: Their record is in The Patels. In the books: “Leo Rivera”, a student customer under this family. ${words} See the change on Reconciliation`);
   });
 
   it("the family's page and this page say a move in the same words", async () => {
@@ -715,7 +739,9 @@ describe("differences, for a link that stands (slice M2)", () => {
     await seedQueued({ op: "move", role: "student", qboId: "12", syncToken: "0", fromFamilyQboId: "10", toFamilyQboId: "20", fromFamilyId: rivera, toFamilyId: chen });
     const view = await loadAccountingLinks();
     const kept = "QuickBooks refused it: that name is already used in QuickBooks (by another customer, a vendor or an employee), and every name there must be different.";
-    expect(rowOf(view, "Riveras").differences).toEqual([{ kind: "name", of: "family", portal: "Riveras", books: "Rivera Family", queue: { state: "refused", words: kept } }]);
+    // Leo's customer stays under the Riveras in the books: their row tells it too, with the move's words.
+    expect(rowOf(view, "Riveras").differences).toEqual([{ kind: "name", of: "family", portal: "Riveras", books: "Rivera Family", queue: { state: "refused", words: kept } },
+      { kind: "student_elsewhere", books: "Leo Rivera", studentId: leo, portal: { at: "family", family: "Chen Family" }, queue: { state: "waiting", words: "Waiting to reach QuickBooks" } }]);
     expect(rowOf(view, "Chen Family").differences).toContainEqual({ kind: "place", who: "Leo Rivera", studentId: leo,
       place: { at: "other_family", familyQboId: "10", familyName: "Rivera Family" }, queue: { state: "waiting", words: "Waiting to reach QuickBooks" } });
     await asAdmin();
@@ -723,7 +749,7 @@ describe("differences, for a link that stands (slice M2)", () => {
     expect(html.split(kept).length - 1).toBe(1);
     expect(rowNamed(html, "Riveras")![4]).toContain(`The family's name. In the portal: “Riveras”. In the books: “Rivera Family”. ${kept} See the change on Reconciliation`);
     expect(rowNamed(html, "Chen Family")![4]).toContain("Where Leo Rivera is. In the portal: In this family. In the books: Under Rivera Family in QuickBooks. Waiting to reach QuickBooks. See the change on Reconciliation");
-    expect(html.split('href="/staff/reconciliation#writes-h"').length - 1).toBe(2);
+    expect(html.split('href="/staff/reconciliation#writes-h"').length - 1).toBe(3);
     // No button but the filter's own, and nothing of money.
     expect(html.split("<button").length - 1).toBe(1);
     expect(html).not.toContain("invoices");

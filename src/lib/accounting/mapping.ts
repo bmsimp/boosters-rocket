@@ -21,7 +21,7 @@ import { guardianOf, keptWordsFor } from "@/lib/roster/writes";
 import { byRosterOrder, rosterShown } from "@/lib/roster/queries";
 import { getShape, missingTypes } from "@/lib/roster/shape";
 import { getRosterSource, ROSTER_JOB } from "@/lib/roster/source";
-import { differencesOf, type Difference, type QueueFact } from "./differences";
+import { differencesOf, type Difference, type LinkedStudent, type QueueFact } from "./differences";
 import { suggestCustomers, type Holder } from "./match";
 import { linkStanding, searchMatches, STATUS_KEYS, type LinksFilter, type NotAFamilyReason, type StatusKey } from "./status";
 
@@ -110,8 +110,9 @@ const byName = <T extends { name: string; id: unknown }>(a: T, b: T) => COLLATOR
 /**
  * Every active family record, with its status and, for a link that stands, its differences. The screen's own reads
  * touch each table once, whatever the number of families: the roster's company and the connection, the shape and the customer types, the last
- * successful roster read, the cache's customers, the family creates on the write queue, the active families, every
- * student record with a family (active or not), the open guardian rows with their people, the links of the records'
+ * successful roster read, the cache's customers, the family creates on the write queue, every family record (the rows
+ * are the active ones; an inactive one is read for the name of a student record's family), every student record (active
+ * or not, with a family or in none), the open guardian rows with their people, the links of the records'
  * company (the roster's, while the books aren't connected to another; another company's links are never read), the
  * names of the staff members those links name, and, only in the `listed` state, the write queue's open items
  * (loadOpenWrites(), with no family and no amounts). loadOpenWrites() then reads some of those tables again, a fixed
@@ -131,18 +132,22 @@ const byName = <T extends { name: string; id: unknown }>(a: T, b: T) => COLLATOR
  * rendered are the four hundred families, each opening listing its students, guardians and differences.
  */
 export async function loadAccountingLinks(): Promise<LinksView> {
-  const [source, connection, shape, typeRows, okRuns, customerRows, creates, families, students, guardians] = await Promise.all([
+  const [source, connection, shape, typeRows, okRuns, customerRows, creates, everyFamily, everyStudent, guardians] = await Promise.all([
     getRosterSource(), getConnection(), getShape(),
     db.select({ qboId: qboCustomerType.qboId, name: qboCustomerType.name, active: qboCustomerType.active }).from(qboCustomerType),
     db.select({ id: jobRun.id, finishedAt: jobRun.finishedAt }).from(jobRun).where(and(eq(jobRun.job, ROSTER_JOB), eq(jobRun.outcome, "ok"))).orderBy(desc(jobRun.id)).limit(1),
     db.select().from(qboCustomer), familyCreatesOnTheQueue(),
-    db.select({ id: family.id, name: family.name }).from(family).where(eq(family.active, true)),
-    // Every student record with a family, active or not: the opening lists the active ones, and the differences read an
-    // inactive one whose customer the books have active under the family.
-    db.select({ id: student.id, familyId: student.familyId, name: student.name, active: student.active }).from(student).where(isNotNull(student.familyId)),
+    // Every family record: the rows are the active ones, and a student record's family is named from any of them.
+    db.select({ id: family.id, name: family.name, active: family.active }).from(family),
+    // Every student record, active or not, with a family or in none: the opening lists a family's active ones, and the
+    // differences read an inactive one whose customer the books have active under the family, and where the portal has
+    // the record of any student customer a family's customer holds (student_elsewhere).
+    db.select({ id: student.id, familyId: student.familyId, name: student.name, active: student.active }).from(student),
     db.select({ id: guardian.id, familyId: guardian.familyId, name: parent.name, email: parent.email, blocked: parent.blocked }).from(guardian).innerJoin(parent, eq(guardian.parentId, parent.id))
       .where(and(ne(guardian.status, "disabled"), isNotNull(guardian.familyId))),
   ]);
+  const families = everyFamily.filter((f) => f.active);
+  const students = everyStudent.flatMap((s) => (s.familyId === null ? [] : [{ ...s, familyId: s.familyId }]));
   const elsewhere = otherCompany(source, connection?.realmId);
   // The records' company (recordsCompany()'s meaning): links are read only of it, and none while there is none.
   const realm = source !== null && !elsewhere ? source : null;
@@ -168,7 +173,14 @@ export async function loadAccountingLinks(): Promise<LinksView> {
     familyLinked: new Set(links.flatMap((l) => (l.familyId === null ? [] : [l.customerId]))), studentLinked,
   });
   // The differences of a link that stands, over this view's roster (none to work out while it has none: the state isn't `listed`).
-  const compare = roster === null || shape === null ? null : differencesOf({ shape, roster, customers, studentLinked,
+  // Each student link's record, by its customer: where the portal has it, for the row of the family whose customer holds it.
+  const familyWords = new Map(everyFamily.map((f) => [String(f.id), recordNameWords(f.name, "family")]));
+  const studentById = new Map(everyStudent.map((s) => [String(s.id), s]));
+  const studentRecords = new Map(links.flatMap((l): [string, LinkedStudent][] => {
+    const s = l.studentId === null ? undefined : studentById.get(String(l.studentId));
+    return s === undefined ? [] : [[l.customerId, { id: s.id, active: s.active, family: s.familyId === null ? null : familyWords.get(String(s.familyId)) ?? null }]];
+  }));
+  const compare = roster === null || shape === null ? null : differencesOf({ shape, roster, customers, studentRecords,
     guardianLinked: new Set(links.flatMap((l) => (l.guardianId === null ? [] : [l.customerId]))), queue: queue.map(queueFactOf) });
   const listedAsFamily = roster === null ? null : new Set(roster.kind === "flat" ? roster.members.map((m) => m.qboId) : roster.families.map((f) => f.customer.qboId));
 

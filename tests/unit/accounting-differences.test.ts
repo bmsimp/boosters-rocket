@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { differenceKinds, differencesOf, differenceWords, indexQueue, noteSentence, type Difference, type FamilyToCompare, type QueueFact } from "@/lib/accounting/differences";
+import { differenceKinds, differencesOf, differenceWords, indexQueue, noteSentence, type Difference, type FamilyToCompare, type LinkedStudent, type QueueFact } from "@/lib/accounting/differences";
 import { asAppStudentId, type AppStudentId } from "@/lib/families/ids";
 import { buildRoster, type Cust } from "@/lib/roster/model";
 import type { MembershipShape } from "@/lib/roster/shape";
@@ -26,9 +26,13 @@ const student = (id: AppStudentId, name: string | null, customerId: string | nul
 /** The Rivera family as the portal has it, every record matching the books, Ana's guardian row linked to her Parent customer. */
 const rivera = (o: Partial<FamilyToCompare> = {}): FamilyToCompare => ({ kind: "family", name: "Rivera Family", customerId: "10",
   students: [student(S1, "Leo Rivera", "12")], guardians: [{ id: "g-ana", customerId: "11" }], ...o });
-function compare(f: FamilyToCompare, o: { shape?: MembershipShape; customers?: Cust[]; studentLinked?: string[]; guardianLinked?: string[]; queue?: QueueFact[] } = {}) {
+/** The student records the links name, by customer: Leo Rivera's (12) and Sam Chen's (22), each active in their own family. */
+const RECORDS: Record<string, LinkedStudent> = { "12": { id: S1, active: true, family: "Rivera Family" }, "22": { id: S2, active: true, family: "Chen Family" } };
+/** `studentLinked`: which of RECORDS' customers a student link names; `records`: others, or those records changed. */
+function compare(f: FamilyToCompare, o: { shape?: MembershipShape; customers?: Cust[]; studentLinked?: string[]; records?: Record<string, LinkedStudent>; guardianLinked?: string[]; queue?: QueueFact[] } = {}) {
   const shape = o.shape ?? LAYERED, customers = o.customers ?? company;
-  return differencesOf({ shape, roster: buildRoster(shape, customers), customers, studentLinked: new Set(o.studentLinked ?? ["12", "22"]),
+  const studentRecords = new Map<string, LinkedStudent>([...(o.studentLinked ?? ["12", "22"]).map((id): [string, LinkedStudent] => [id, RECORDS[id]!]), ...Object.entries(o.records ?? {})]);
+  return differencesOf({ shape, roster: buildRoster(shape, customers), customers, studentRecords,
     guardianLinked: new Set(o.guardianLinked ?? ["11", "60"]), queue: o.queue ?? [] })(f);
 }
 const changed = (id: string, change: Partial<Cust>) => company.map((x) => (x.qboId === id ? { ...x, ...change } : x));
@@ -110,9 +114,12 @@ describe("students on one side only", () => {
     expect(r.inactiveUnrecorded).toBe(1);
     expect(differenceWords(r.differences[0]!)).toEqual({ what: "A student in the books only", portal: "No student record", books: "“Zoe Rivera”, a student customer under this family" });
   });
-  it("never one another family's student record is linked to: it shows in that family's row, as its place", () => {
+  it("never one another family's student record is linked to: both rows tell it, this one as a student whose record is elsewhere, that one as its place", () => {
     const customers = changed("22", { parentQboId: "10" }); // Sam Chen moved under the Riveras in the books alone
-    expect(compare(rivera(), { customers }).differences).toEqual([]);
+    const r = compare(rivera(), { customers }).differences;
+    expect(r).toEqual([{ kind: "student_elsewhere", books: "Sam Chen", studentId: S2, portal: { at: "family", family: "Chen Family" }, queue: null }]);
+    expect(differenceWords(r[0]!)).toEqual({ what: "A student the books have under this family", portal: "Their record is in Chen Family", books: "“Sam Chen”, a student customer under this family" });
+    expect(differenceKinds(r)).toEqual(["where a student is"]);
     const chen: FamilyToCompare = { kind: "family", name: "Chen Family", customerId: "20", students: [student(S2, "Sam Chen", "22")], guardians: [] };
     expect(compare(chen, { customers }).differences.map((d) => d.kind)).toEqual(["place"]);
   });
@@ -123,6 +130,44 @@ describe("students on one side only", () => {
   it("isn't compared with no student type", () => {
     const customers = [...company, c("13", "Zoe Rivera", "3", "10")];
     expect(compare(rivera({ students: [student(S3, "Ivy Rivera", null)] }), { shape: NO_STUDENTS, customers }).differences).toEqual([]);
+  });
+});
+
+describe("a student customer under the family whose record the portal has elsewhere", () => {
+  // Leo Rivera's customer (12) stays under the Riveras in the books; his record isn't the Riveras' in the portal.
+  const leoIs = (record: LinkedStudent, queue: QueueFact[] = []) => compare(rivera({ students: [] }), { records: { "12": record }, queue }).differences;
+  it("in a family with no link, after a move kept refused as that family has no customer: with the move's words", () => {
+    const kept = fact({ op: "move", studentId: String(S1), qboId: "12", state: "refused",
+      words: "The portal held it back: the family the student was moved to has no customer in QuickBooks yet, so there is nowhere to put them there." });
+    const r = leoIs({ id: S1, active: true, family: "The Patels" }, [kept]);
+    expect(r).toEqual([{ kind: "student_elsewhere", books: "Leo Rivera", studentId: S1, portal: { at: "family", family: "The Patels" }, queue: { state: "refused", words: kept.words } }]);
+  });
+  it("in a family whose link reads Not a family now, so its row compares nothing", () => {
+    // The Chens' customer is a School now; Sam Chen's customer is under the Riveras.
+    const customers = changed("22", { parentQboId: "10" }).map((x) => (x.qboId === "20" ? { ...x, typeQboId: "4" } : x));
+    expect(compare(rivera(), { customers }).differences).toEqual([{ kind: "student_elsewhere", books: "Sam Chen", studentId: S2, portal: { at: "family", family: "Chen Family" }, queue: null }]);
+  });
+  it("in no family", () => {
+    const r = leoIs({ id: S1, active: true, family: null });
+    expect(r).toEqual([{ kind: "student_elsewhere", books: "Leo Rivera", studentId: S1, portal: { at: "no_family" }, queue: null }]);
+    expect(differenceWords(r[0]!).portal).toBe("Their record is in no family");
+  });
+  it("inactive, in another family, its customer active here: told here, with a make-inactive of its customer as its note, and nothing in its own family's row", () => {
+    const customers = changed("22", { parentQboId: "10" });
+    const off = fact({ op: "deactivate", qboId: "22", state: "stuck", words: "Stuck: it needs someone to look at it" });
+    const r = compare(rivera(), { customers, records: { "22": { id: S2, active: false, family: "Chen Family" } }, queue: [off] }).differences;
+    expect(r).toEqual([{ kind: "student_elsewhere", books: "Sam Chen", studentId: S2, portal: { at: "inactive" }, queue: { state: "stuck", words: off.words } }]);
+    expect(differenceWords(r[0]!).portal).toBe("Their record is inactive");
+    const chen: FamilyToCompare = { kind: "family", name: "Chen Family", customerId: "20", students: [student(S2, "Sam Chen", "22", false)], guardians: [] };
+    expect(compare(chen, { customers, records: { "22": { id: S2, active: false, family: "Chen Family" } } }).differences).toEqual([]);
+  });
+  it("the ordinary case is unchanged: a record of this family, active or inactive, is told as that record, never as elsewhere", () => {
+    expect(compare(rivera()).differences).toEqual([]);
+    expect(compare(rivera({ students: [student(S1, "Leo Rivera", "12", false)] }), { records: { "12": { id: S1, active: false, family: "Rivera Family" } } }).differences)
+      .toEqual([{ kind: "active", of: "student", who: "Leo Rivera", portalActive: false, queue: null }]);
+    // An inactive customer whose record is elsewhere is neither told nor counted.
+    const r = compare(rivera({ students: [] }), { customers: changed("12", { active: false }), records: { "12": { id: S1, active: true, family: "Chen Family" } } });
+    expect(r).toEqual({ differences: [], inactiveUnrecorded: 0 });
   });
 });
 

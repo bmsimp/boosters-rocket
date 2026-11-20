@@ -26,6 +26,9 @@ export type QueueFact = QueueNote & { op: string; role: string | null; qboId: st
  *   reverse (an inactive student record whose customer the roster lists active under the family);
  * - `place`: where the books have an active student's linked customer, when that isn't under the family's own;
  * - `student_customer`: an active student customer under the family's customer that no student record is linked to;
+ * - `student_elsewhere`: an active student customer under the family's customer whose linked student record isn't
+ *   this family's: the portal has it in another family (`portal.family`, the record's words for it), in no family, or
+ *   inactive. The record's own family's row, when compared, tells it too, as its place: each row truly, once each;
  * - `student_unlinked`: an active student record of the family with no link of its own;
  * - `parent_customers`: how many active Parent customers under the family's customer no guardian row is linked to;
  * - `guardians_unlinked`: how many of the family's open guardian rows have no link, with the queue's words for those a
@@ -38,9 +41,14 @@ export type Difference =
   | { kind: "active"; of: "family" | "member" | "student"; who: string; portalActive: boolean; queue: QueueNote | null }
   | { kind: "place"; who: string; studentId: AppStudentId; place: Exclude<StudentPlace, { at: "here" } | { at: "unknown" }>; queue: QueueNote | null }
   | { kind: "student_customer"; books: string }
+  | { kind: "student_elsewhere"; books: string; studentId: AppStudentId; portal: StudentElsewhere; queue: QueueNote | null }
   | { kind: "student_unlinked"; who: string; studentId: AppStudentId; queue: QueueNote | null }
   | { kind: "parent_customers"; count: number }
   | { kind: "guardians_unlinked"; count: number; queue: { note: QueueNote; count: number }[] };
+/** Where the portal has a student record whose customer the books have under another family: by the record's words for its family, in none, or inactive. */
+export type StudentElsewhere = { at: "family"; family: string } | { at: "no_family" } | { at: "inactive" };
+/** A student record some student link names, as the screen needs it: its id, whether it is active, and its family's words (null: in none). */
+export type LinkedStudent = { id: AppStudentId; active: boolean; family: string | null };
 export type FamilyDifferences = {
   differences: Difference[];
   /** Inactive student customers under the family's customer with no student record: only counted, never a difference. */
@@ -83,16 +91,21 @@ export function indexQueue(items: readonly QueueFact[]) {
 
 /**
  * The differences of each family whose link stands, over one roster: built once for the view, then asked per family.
- * `studentLinked` and `guardianLinked` are the customers any student or guardian link of the records' company names
- * (a guardian's: of an open or a closed row). A customer either kind of link names is on no side "only": one whose type
- * the books changed between Student and Parent shows through the record it is linked to (as its place, or in the
- * opening's guardians), never a second time as a customer with no record. Names are compared exactly (===), as renameLinked() decides a record has
+ * `studentRecords` are the customers any student link of the records' company names, each with its record, and
+ * `guardianLinked` the customers any guardian link names (of an open or a closed row). A customer either kind of link
+ * names is on no side "only". Every active student customer directly under the family's customer is told in this row:
+ * one whose record is an active student of this family is compared as that record; one whose record is this family's
+ * but inactive, as that record's active difference; one whose record isn't this family's, as `student_elsewhere`,
+ * whatever that record's own family's row says (that row may not be compared at all: a family with no link, Not a
+ * family now, Customer gone, or no family), with a move of that record on the queue (filed under the family left) as
+ * its note, or for an inactive record a make-inactive of its customer. One a guardian link names (the books changed its
+ * type between Parent and Student) shows in the opening's guardians, never as a customer with no record. Names are compared exactly (===), as renameLinked() decides a record has
  * a name already (ALREADY_NAMED) and tryRename() compares QuickBooks' with the portal's: the screen calls two names the
  * same exactly when a rename would send nothing, so a difference of case or spacing shows (nameKey() is the rule of
  * which names are taken, not this one). Students and Parent customers are compared only where the shape has their
  * type, in layered books; a student's place only where it has a student type.
  */
-export function differencesOf(o: { shape: MembershipShape; roster: Roster; customers: readonly Cust[]; studentLinked: ReadonlySet<string>;
+export function differencesOf(o: { shape: MembershipShape; roster: Roster; customers: readonly Cust[]; studentRecords: ReadonlyMap<string, LinkedStudent>;
   guardianLinked: ReadonlySet<string>; queue: readonly QueueFact[] }): (f: FamilyToCompare) => FamilyDifferences {
   const byId = new Map(o.customers.map((c) => [c.qboId, c]));
   const listed = new Map<string, Family>(o.roster.kind === "flat" ? [] : o.roster.families.map((f) => [f.customer.qboId, f]));
@@ -100,7 +113,7 @@ export function differencesOf(o: { shape: MembershipShape; roster: Roster; custo
   const q = indexQueue(o.queue);
   const studentType = o.shape.kind === "layered" && o.shape.studentTypeId !== null;
   const parentType = o.shape.kind === "layered" && o.shape.parentTypeId !== null;
-  const linked = (id: string) => o.studentLinked.has(id) || o.guardianLinked.has(id);
+  const linked = (id: string) => o.studentRecords.has(id) || o.guardianLinked.has(id);
   return (f) => {
     const customer = byId.get(f.customerId);
     if (customer === undefined) return { differences: [], inactiveUnrecorded: 0 };
@@ -116,9 +129,9 @@ export function differencesOf(o: { shape: MembershipShape; roster: Roster; custo
       }
       const c = byId.get(s.customerId);
       if (!s.active) {
-        // An inactive record shows only where the roster lists its customer, active, directly under the family's (as the
-        // Families pages list it; brief item 5). One whose customer the books have active under another family shows in
-        // neither row: not here, and not there, where the customer is passed over as linked. A later slice may say it.
+        // An inactive record shows here only where the roster lists its customer, active, directly under the family's (as
+        // the Families pages list it). One whose customer the books have active under another family is told in that
+        // family's row, as a student whose record is inactive (student_elsewhere, below).
         if (c?.active && there?.students.some((x) => x.qboId === c.qboId)) out.push({ kind: "active", of: "student", who, portalActive: false, queue: q.deactivate.get(c.qboId) ?? null });
         continue;
       }
@@ -132,7 +145,16 @@ export function differencesOf(o: { shape: MembershipShape; roster: Roster; custo
     let inactiveUnrecorded = 0;
     if (studentType && there !== undefined) {
       for (const c of there.students) {
-        if (linked(c.qboId)) continue;
+        const record = o.studentRecords.get(c.qboId);
+        if (record !== undefined) {
+          // This family's record: compared above (an active one), or told above as inactive (an inactive one).
+          if (!c.active || f.students.some((s) => s.id === record.id)) continue;
+          out.push({ kind: "student_elsewhere", books: c.displayName, studentId: record.id,
+            portal: !record.active ? { at: "inactive" } : record.family === null ? { at: "no_family" } : { at: "family", family: record.family },
+            queue: q.move.get(String(record.id)) ?? (record.active ? undefined : q.deactivate.get(c.qboId)) ?? null });
+          continue;
+        }
+        if (o.guardianLinked.has(c.qboId)) continue;
         if (c.active) out.push({ kind: "student_customer", books: c.displayName });
         else inactiveUnrecorded++;
       }
@@ -172,6 +194,8 @@ export function differenceWords(d: Difference): { what: string; portal: string; 
     case "active": return { what: `Whether ${d.who} is active`, portal: d.portalActive ? "Active" : "Inactive", books: d.portalActive ? "Inactive" : "Active" };
     case "place": return { what: `Where ${d.who} is`, portal: "In this family", books: placeWords(d.place) };
     case "student_customer": return { what: "A student in the books only", portal: "No student record", books: `${quoted(d.books)}, a student customer under this family` };
+    case "student_elsewhere": return { what: "A student the books have under this family", books: `${quoted(d.books)}, a student customer under this family`,
+      portal: d.portal.at === "family" ? `Their record is in ${d.portal.family}` : d.portal.at === "no_family" ? "Their record is in no family" : "Their record is inactive" };
     case "student_unlinked": return { what: "A student in the portal only", portal: d.who, books: "No customer of their own" };
     case "parent_customers": return { what: "Parent customers in the books only", portal: "No guardian linked to them",
       books: plural(d.count, "active Parent customer under this family", "active Parent customers under this family") };
@@ -183,7 +207,7 @@ export function differenceWords(d: Difference): { what: string; portal: string; 
 /** The kinds a row's differences are of, in words, each once, in a fixed order: for the row's status line. */
 export function differenceKinds(ds: readonly Difference[]): string[] {
   const groups: [string, Difference["kind"][]][] = [
-    ["names", ["name"]], ["whether a record is active", ["active"]], ["where a student is", ["place"]],
+    ["names", ["name"]], ["whether a record is active", ["active"]], ["where a student is", ["place", "student_elsewhere"]],
     ["students on one side only", ["student_customer", "student_unlinked"]], ["Parent customers or guardians on one side only", ["parent_customers", "guardians_unlinked"]],
   ];
   return groups.filter(([, kinds]) => ds.some((d) => kinds.includes(d.kind))).map(([words]) => words);
