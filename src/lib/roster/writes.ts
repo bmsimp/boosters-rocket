@@ -3525,11 +3525,11 @@ export const NAME_UNUSABLE = "name_unusable";
 /**
  * A guardian's Parent customer create QuickBooks refused as a taken name: another customer there has it. Nothing is
  * promised of a rename (the lead's decision 1 in slice 9h's last round): a person has one name, so a rename changes it
- * on every QuickBooks record of theirs, and replaces this only when the new name is free by the portal's knowledge.
+ * on their own record in QuickBooks, and replaces this only when the new name is free by the portal's knowledge.
  */
-export const GUARDIAN_TAKEN_NAME = "QuickBooks refused the person's name as taken: another customer in QuickBooks has that name, so it isn't sent again as it is. Renaming the person changes their name in the portal and on every QuickBooks record of theirs. “Give up” leaves the guardian as they are, with no record of their own in QuickBooks, for the mapping screen.";
+export const GUARDIAN_TAKEN_NAME = "QuickBooks refused the person's name as taken: another customer in QuickBooks has that name, so it isn't sent again as it is. Renaming the person changes their name in the portal and on their own record in QuickBooks. “Give up” leaves the guardian as they are, with no record of their own in QuickBooks, for the mapping screen.";
 /** A guardian's Parent customer rename QuickBooks refused as a taken name: another customer there has it. */
-export const GUARDIAN_RENAME_TAKEN = "QuickBooks refused that name as taken: another customer in QuickBooks has it, so it isn't sent again as it is. Renaming the person again changes their name in the portal and on every QuickBooks record of theirs. “Give up” leaves this Parent customer with the name it has in QuickBooks, for the mapping screen.";
+export const GUARDIAN_RENAME_TAKEN = "QuickBooks refused that name as taken: another customer in QuickBooks has it, so it isn't sent again as it is. Renaming the person again changes their name in the portal and on their own record in QuickBooks. “Give up” leaves this Parent customer with the name it has in QuickBooks, for the mapping screen.";
 /** A guardian's Parent customer create not sent at once, or on a press, while its family is being changed in QuickBooks (the family action: the lead's decision 2). */
 export const GUARDIAN_FAMILY_CHANGING = "The guardian's family is being changed in QuickBooks at this moment, so nothing was sent for their Parent customer just now. Try again in a minute.";
 /** How long a guardian's at-once send waits for the roster lock before it is left for the worker: the guardian writes' three seconds. */
@@ -3982,7 +3982,7 @@ export function guardianSentWords(sent: readonly GuardianSent[], op: "grant" | "
         : `${what} is waiting to reach QuickBooks: the portal tries again in a minute, then less often, and you'll find it on the Reconciliation page.`];
       case "refused": {
         if (s.write?.op === "create" && t.code === "fault_6240") {
-          return [`QuickBooks refused the name “${s.write.name}” as taken: another customer in QuickBooks has that name, so no Parent customer was made for ${who} ${under}. Renaming ${who} changes their name in the portal and on every QuickBooks record of theirs. “Give up” on the Reconciliation page leaves them as they are, with no record of their own in QuickBooks, for the mapping screen.`];
+          return [`QuickBooks refused the name “${s.write.name}” as taken: another customer in QuickBooks has that name, so no Parent customer was made for ${who} ${under}. Renaming ${who} changes their name in the portal and on their own record in QuickBooks. “Give up” on the Reconciliation page leaves them as they are, with no record of their own in QuickBooks, for the mapping screen.`];
         }
         if (s.write?.op === "deactivate") {
           const why = t.code === "open_balance" ? "QuickBooks shows an amount owed on it" : t.code === CREDIT_BALANCE ? "QuickBooks shows a credit on it"

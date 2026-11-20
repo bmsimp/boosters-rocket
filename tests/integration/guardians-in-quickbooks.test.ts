@@ -93,7 +93,7 @@ describe("adding a guardian (item 2)", () => {
     expect(kept).toMatchObject({ state: "refused", lastCode: "fault_6240" });
     expect(r.quickbooks[0]).toContain("QuickBooks refused the name “Luis Rivera” as taken: another customer in QuickBooks has that name");
     // The words promise nothing of a rename (the lead's decision 1(b)): they say what it does, and what "Give up" leaves.
-    expect(r.quickbooks[0]).toContain("Renaming Luis Rivera changes their name in the portal and on every QuickBooks record of theirs.");
+    expect(r.quickbooks[0]).toContain("Renaming Luis Rivera changes their name in the portal and on their own record in QuickBooks.");
     expect(r.quickbooks[0]).toContain("leaves them as they are, with no record of their own in QuickBooks, for the mapping screen");
     expect(r.quickbooks[0]).not.toContain("takes its place");
     expect(await rowOf(r.guardianId)).toMatchObject({ status: "invited" });
