@@ -20,6 +20,7 @@ export const PERMISSIONS = [
   "Roster.Family.ReadWrite",       // create, rename, move and make inactive families, students and parents (or members) in QuickBooks, retry or give up a waiting write, and add, remove and reinstate a family's guardians in the portal (giving or ending an address's sign-in for the family)
   "Settings.Parents.ReadWrite",    // admin-only: switch parent sign-ins and welcome emails on or off, the active-students option, and email set-up links to those with no password
   "Parents.ReadWrite",             // see every parent, change a parent's name, block and unblock a parent, resend a welcome email
+  "Parents.SignInReset.ReadWrite", // admin-only: reset a parent's sign-in (open question 22 of the app-owned families spec): end every session, remove their password, passkeys, authenticator app, backup codes and remembered devices, and email them a new set-up link; under Strict the way back for someone who lost everything
   "Season.Steps.Read",             // see the seasons, their steps and the requirements in them
   "Season.Steps.ReadWrite",        // create and change seasons, steps and requirements, and choose the current season
   "Season.Progress.Read",          // see which families and students have met each requirement
@@ -36,7 +37,7 @@ export const PERMISSIONS = [
 export type Permission = (typeof PERMISSIONS)[number];
 
 /** Never grantable through a custom role; only the built-in Admin holds them. */
-export const ADMIN_ONLY: readonly Permission[] = ["Admin.Roles.ReadWrite", "Staff.Users.ReadWrite", "Settings.SignIn.ReadWrite", "Settings.Mail.ReadWrite", "Settings.QuickBooks.ReadWrite", "Settings.Parents.ReadWrite", "Audit.Log.Read", "Admin.Health.Read", "Settings.Forms.ReadWrite"];
+export const ADMIN_ONLY: readonly Permission[] = ["Admin.Roles.ReadWrite", "Staff.Users.ReadWrite", "Settings.SignIn.ReadWrite", "Settings.Mail.ReadWrite", "Settings.QuickBooks.ReadWrite", "Settings.Parents.ReadWrite", "Audit.Log.Read", "Admin.Health.Read", "Settings.Forms.ReadWrite", "Parents.SignInReset.ReadWrite"];
 
 export const GRANTABLE: readonly Permission[] = PERMISSIONS.filter((p) => !ADMIN_ONLY.includes(p));
 
