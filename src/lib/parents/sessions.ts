@@ -154,9 +154,11 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   device but the session's own (which sets `device_id` null on the sessions that named them), and touches no session
  *   otherwise;
  * - a person's authenticator app and backup codes (`parent_authenticator`, `parent_backup_code`, since slice SI-6a,
- *   read and written only by authenticator.ts): a try at the second step (verifySecondFactor(), signin-codes.ts) takes
- *   no person's lock, and takes the app's code (its `last_used_step`) or spends a backup code by one conditional update
- *   each; a sign-in's last check (signinStands()) reads them unlocked under the person's row; the clean-up deletes them
+ *   read and written only by authenticator.ts): a try at the second step (verifySecondFactor(), signin-codes.ts) calls
+ *   this, then reads the password and the person's newest "Sign out everywhere" row, then takes the app's code (its
+ *   `last_used_step`, sealing the secret again under the current key when it was sealed under the one before) or spends
+ *   a backup code by one conditional update each; a sign-in's last check (signinStands()) reads them, and that newest
+ *   row, unlocked under the person's row; the clean-up deletes them
  *   after the person's rows and links, before the devices. Nothing that ends all of a person's sign-in removes them (a
  *   block, a reset, a password change, Sign out everywhere, a change of sign-in email, sign-ins switched off, a change
  *   of company, a last membership closed: each keeps them as it keeps the password). A later writer that takes them

@@ -82,6 +82,7 @@ describe("sending the second step's code", () => {
     const r = await sendSecondStepCode(await stepOf(), IP, T0);
     await r.delivery;
     expect(r.ended).toBe(false);
+    expect(r.app).toBe(true);
     expect(mail.attempted).toEqual([]);
     expect(await db.select().from(signinCode)).toEqual([]);
     expect((await audits("signin.code_refused")).map((a) => a.after)).toEqual([{ reason: "has_second_factor" }]);

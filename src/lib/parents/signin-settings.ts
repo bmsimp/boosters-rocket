@@ -162,7 +162,9 @@ export async function changeMyPassword(ctx: Me, raw: { password: unknown; again:
  * a session this ends can't outlive it; and their unused codes and those spent within a code's life, as a reset's do,
  * so a sign-in finishing at this moment, whose code was spent before the press and whose session is made after it, is
  * refused by its last check (signinStands(), `code_gone`). The password and the links stay, and so (since slice SI-6a)
- * do the authenticator app and the backup codes: the next sign-in on each device asks for the app. Not asked again (the lead's
+ * do the authenticator app and the backup codes: the next sign-in on each device asks for the app. A sign-in whose
+ * app's code or backup code was taken before the press is refused by that last check all the same: its proof names the
+ * newest `parent.sessions.end_all` it saw, and this row is newer (`signed_out_everywhere`). Not asked again (the lead's
  * choice 9 of the sign-in release: it leaves nobody signed in, the one who pressed it included), and open to a person
  * with no password too. Limited per person (`signin_settings_parent`).
  */

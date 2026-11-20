@@ -10,6 +10,7 @@ import { db } from "@/lib/db/client";
 import { auditLog, parentAuthenticator, parentAuthSession, parentBackupCode, rateLimitEvent, signinCode } from "@/lib/db/schema";
 import { sealAuthenticatorSecret } from "@/lib/parents/authenticator";
 import { signinStands, verifySecondFactor } from "@/lib/parents/signin-codes";
+import { signOutEverywhere } from "@/lib/parents/signin-settings";
 import { totpStep } from "@/lib/parents/totp";
 import { env } from "@/env";
 import { resetDb, seedParent, seedGuardianInFamily, seedWorkingMail } from "../helpers/db";
@@ -195,7 +196,9 @@ describe("the app step at /portal-app/check", () => {
     const ana = await seedAna();
     const pending = await anaAtTheApp();
     // A right code first: its place is given back, so it never counts.
-    const right = await verifySecondFactor(await stepPersonFor("ana@example.com"), appCode(ana.app!.secret, Date.now(), -1), DOOR_IP);
+    // Worked out for the instant the check is given, so no step's edge can fall between the two.
+    const at = new Date();
+    const right = await verifySecondFactor(await stepPersonFor("ana@example.com"), appCode(ana.app!.secret, at, -1), DOOR_IP, at);
     expect(right.ok).toBe(true);
     for (let i = 0; i < 5; i++) expect((await appStep(wrongAppCode(ana.app!.secret), pending)).body).toEqual(REFUSED);
     expect((await appStep(appCode(ana.app!.secret, Date.now(), 1), pending)).body).toEqual(LIMITED);
@@ -275,11 +278,31 @@ describe("the emailed code is never an app holder's", () => {
     const spent = await verifySecondFactor(step, code!, DOOR_IP);
     if (!spent.ok) throw new Error("the backup code should be taken");
     expect(await signinStands(ana.id, "ana@example.com", DOOR_IP, { password: step.password, ...spent.proof })).toBe(true);
-    expect(await signinStands(ana.id, "ana@example.com", DOOR_IP, { password: step.password, authenticatorId: ana.app!.id })).toBe(true);
+    expect(await signinStands(ana.id, "ana@example.com", DOOR_IP, { password: step.password, authenticatorId: ana.app!.id, signedOutSeen: 0 })).toBe(true);
     await db.delete(parentBackupCode).where(eq(parentBackupCode.parentId, ana.id));
     await db.update(parentAuthenticator).set({ confirmedAt: null }).where(eq(parentAuthenticator.id, ana.app!.id));
     expect(await signinStands(ana.id, "ana@example.com", DOOR_IP, { password: step.password, ...spent.proof })).toBe(false);
-    expect(await signinStands(ana.id, "ana@example.com", DOOR_IP, { password: step.password, authenticatorId: ana.app!.id })).toBe(false);
+    expect(await signinStands(ana.id, "ana@example.com", DOOR_IP, { password: step.password, authenticatorId: ana.app!.id, signedOutSeen: 0 })).toBe(false);
     expect((await audits("signin.refused")).map((r) => r.after)).toEqual([{ reason: "backup_code_gone" }, { reason: "second_factor_gone" }]);
+  });
+
+  it("a code taken before Sign out everywhere signs nobody in after it, and one taken after the press does", async () => {
+    const ana = await seedAna();
+    const step = await stepPersonFor("ana@example.com");
+    const [code] = await seedBackupCodes(ana.id, 1);
+    const now = new Date();
+    const byApp = await verifySecondFactor(step, appCode(ana.app!.secret, now), DOOR_IP, now);
+    const byCode = await verifySecondFactor(step, code!, DOOR_IP, now);
+    if (!byApp.ok || !byCode.ok) throw new Error("both should be taken");
+    // The press commits between the try and the sign-in's last check: it keeps the app and the backup codes.
+    expect(await signOutEverywhere({ parentId: ana.id, sessionId: "no-session", email: "ana@example.com", ip: DOOR_IP })).toEqual(expect.objectContaining({ ok: true }));
+    expect(await signinStands(ana.id, "ana@example.com", DOOR_IP, { password: step.password, ...byApp.proof })).toBe(false);
+    expect(await signinStands(ana.id, "ana@example.com", DOOR_IP, { password: step.password, ...byCode.proof })).toBe(false);
+    expect((await audits("signin.refused")).map((r) => r.after)).toEqual([{ reason: "signed_out_everywhere" }, { reason: "signed_out_everywhere" }]);
+    // A code taken after the press stands.
+    const later = new Date(now.getTime() + 30_000);
+    const again = await verifySecondFactor(step, appCode(ana.app!.secret, later), DOOR_IP, later);
+    if (!again.ok) throw new Error("the next step's code should be taken");
+    expect(await signinStands(ana.id, "ana@example.com", DOOR_IP, { password: step.password, ...again.proof })).toBe(true);
   });
 });

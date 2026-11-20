@@ -2,7 +2,7 @@ import type { BetterAuthPlugin, GenericEndpointContext } from "better-auth";
 import { createAuthEndpoint } from "better-auth/api";
 import { z } from "zod";
 import { clientIpFrom } from "@/lib/request";
-import { refuseCodeWithoutStep, sendSecondStepCode, verifySecondFactor, verifySigninCode } from "@/lib/parents/signin-codes";
+import { refuseCodeWithoutStep, sendSecondStepCode, verifySecondFactor, verifySigninCode, type SecondFactorProof } from "@/lib/parents/signin-codes";
 import { checkPasswordSignin, MOST_TYPED_ADDRESS, MOST_TYPED_PASSWORD } from "@/lib/parents/password-signin";
 import { MAX_RETURN_PATH } from "./return-path";
 import { finishParentSignin } from "./parent-signin-finish";
@@ -19,7 +19,7 @@ const LIMITED = { ok: false, error: "rate_limited" } as const;
  * pending step's person and password and what the step spent as the proof; refused, the pending step is cleared, since
  * what it spent can't be used again.
  */
-async function finishSecondStep(ctx: GenericEndpointContext, step: PendingStep, spent: { codeId: string } | { authenticatorId: string } | { backupCodeId: string },
+async function finishSecondStep(ctx: GenericEndpointContext, step: PendingStep, spent: { codeId: string } | SecondFactorProof,
   ip: string | null, next: string | undefined) {
   const done = await finishParentSignin(ctx, { parentId: step.parentId, email: step.email, ip, next,
     proof: { password: { credentialId: step.credentialId, credentialUpdatedAt: step.credentialUpdatedAt }, ...spent } });
@@ -74,10 +74,12 @@ export const parentCodePlugin = () => ({
       // The emailed code. Its answer never says what happened to the mail (spec §12 invariant 9), and doesn't wait for it.
       // A code that could not be sent because the step can't go on (a block or an address change landing just now) sets
       // no pending step; the answer is the same.
-      const { delivery, ended } = await sendSecondStepCode({ parentId: r.person.id, email: r.person.email, password: r.password, endsAt }, ip, now);
+      // An app that came into force after the password's reads (the send reads it again under the person's lock) sends
+      // nothing, and the app is asked for instead, with the same pending step.
+      const { delivery, ended, app } = await sendSecondStepCode({ parentId: r.person.id, email: r.person.email, password: r.password, endsAt }, ip, now);
       void delivery;
       if (!ended) await setPendingStep(ctx, { parentId: r.person.id, email: r.person.email, ...r.password, endsAt }, now);
-      return ctx.json({ ok: true, step: "code" });
+      return ctx.json({ ok: true, step: app ? "app" : "code" });
     }),
     // The code again, for the pending step's person; nothing the browser sends names anyone. Always the same answer. The
     // step is not extended: the code resent ends when it does (sendSecondStepCode(), which says so in its mail and sends

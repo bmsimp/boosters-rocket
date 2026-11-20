@@ -22,7 +22,7 @@ import { writeAudit } from "@/lib/audit/log";
 import { env } from "@/env";
 import type { ParentCtx } from "@/lib/guards";
 import { MOST_TYPED_PASSWORD, checkPasswordSignin } from "./password-signin";
-import { CODE_TTL_MS, refuseCodeWithoutStep, sendSecondStepCode, signinStands, verifySecondFactor, verifySigninCode, type PasswordProof, type StepPerson } from "./signin-codes";
+import { CODE_TTL_MS, refuseCodeWithoutStep, sendSecondStepCode, signinStands, verifySecondFactor, verifySigninCode, type PasswordProof, type SecondFactorProof, type StepPerson } from "./signin-codes";
 import { hasAuthenticator } from "./authenticator";
 import { lockedPerson, parentActor } from "./sessions";
 import { provedRecently } from "./reask-rule";
@@ -156,8 +156,10 @@ export async function askAgainPassword(ctx: Asker, password: unknown, now = new 
   const endsAt = new Date(check.at.getTime() + CODE_TTL_MS);
   const stamp = makeStamp({ sessionId: ctx.sessionId, parentId: ctx.parentId, email: check.person.email }, check.password, endsAt);
   if (check.step === "second_factor") return { ok: true, message: COPY.appAsked, stamp, step: "app" };
-  const { delivery } = await sendSecondStepCode({ parentId: ctx.parentId, email: check.person.email, password: check.password, endsAt }, ctx.ip, check.at, "change");
+  const { delivery, app } = await sendSecondStepCode({ parentId: ctx.parentId, email: check.person.email, password: check.password, endsAt }, ctx.ip, check.at, "change");
   void delivery;
+  // An app that came into force after the password's reads: nothing was sent, and the app is asked for.
+  if (app) return { ok: true, message: COPY.appAsked, stamp, step: "app" };
   return { ok: true, message: COPY.codeSent, stamp, step: "code" };
 }
 
@@ -195,7 +197,7 @@ export async function askAgainCode(ctx: Asker, stamp: unknown, code: unknown, no
 }
 
 /** The second step a stamp's person proved, with what it spent, or a refusal (`app` when it was the app's step that refused). */
-type Proved = { ok: true; app: boolean; step: "emailed_code" | "authenticator" | "backup_code"; proof: { codeId: string } | { authenticatorId: string } | { backupCodeId: string } }
+type Proved = { ok: true; app: boolean; step: "emailed_code" | "authenticator" | "backup_code"; proof: { codeId: string } | SecondFactorProof }
   | { ok: false; app: boolean; limited: boolean };
 
 /**
