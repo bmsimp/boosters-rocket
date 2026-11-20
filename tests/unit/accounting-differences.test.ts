@@ -53,9 +53,24 @@ describe("a family whose records match the books", () => {
 });
 
 describe("names", () => {
-  it("the family's and a student's, compared exactly: a difference of case or spacing shows", () => {
+  it("the family's and a student's: a difference of case, or of any visible character, shows", () => {
     expect(compare(rivera({ name: "Rivera family" })).differences).toEqual([{ kind: "name", of: "family", portal: "Rivera family", books: "Rivera Family", queue: null }]);
-    expect(compare(rivera({ students: [student(S1, "Leo  Rivera", "12")] })).differences).toEqual([{ kind: "name", of: "student", portal: "Leo  Rivera", books: "Leo Rivera", queue: null }]);
+    expect(compare(rivera({ students: [student(S1, "Leo Riviera", "12")] })).differences).toEqual([{ kind: "name", of: "student", portal: "Leo Riviera", books: "Leo Rivera", queue: null }]);
+  });
+  it("compared after the portal's own name rule: a doubled or trailing space, or a decomposed accent, is no difference", () => {
+    const books = (id: string, displayName: string) => changed(id, { displayName });
+    expect(compare(rivera(), { customers: books("10", "Rivera  Family") }).differences).toEqual([]);
+    expect(compare(rivera(), { customers: books("10", "Rivera Family ") }).differences).toEqual([]);
+    expect(compare(rivera(), { customers: books("10", " Rivera Family") }).differences).toEqual([]);
+    expect(compare(rivera({ students: [student(S1, "Leo  Rivera", "12")] })).differences).toEqual([]);
+    // "José" composed in the portal (NFC) and decomposed in the books (NFD): they look alike and are the same name.
+    const nfc = "Jos\u00e9 Rivera", nfd = "Jose\u0301 Rivera";
+    expect(nfc === nfd).toBe(false);
+    expect(compare(rivera({ students: [student(S1, nfc, "12")] }), { customers: books("12", nfd) }).differences).toEqual([]);
+    expect(compare(rivera({ students: [student(S1, nfd, "12")] }), { customers: books("12", nfc) }).differences).toEqual([]);
+    // Case is still a difference after the rule, and so is a different accent.
+    expect(compare(rivera(), { customers: books("10", "rivera  family") }).differences.map((d) => d.kind)).toEqual(["name"]);
+    expect(compare(rivera({ students: [student(S1, nfc, "12")] }), { customers: books("12", "Jose Rivera") }).differences.map((d) => d.kind)).toEqual(["name"]);
   });
   it("a record with no name differs from any name the books hold, said in the portal's words for none", () => {
     const [d] = compare(rivera({ name: null })).differences;

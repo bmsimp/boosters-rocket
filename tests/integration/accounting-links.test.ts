@@ -517,7 +517,7 @@ describe("differences, for a link that stands (slice M2)", () => {
   const diffsOf = async (name: string) => rowOf(await loadAccountingLinks(), name).differences;
   const placesIn = async (name: string) => (await diffsOf(name)).flatMap((d) => (d.kind === "place" ? [d.place] : []));
 
-  it("names: the family's and a student's, made in the books and read again, compared exactly", async () => {
+  it("names: the family's and a student's, made in the books and read again, a difference of case shows and one of spacing alone doesn't", async () => {
     tag = await connectRoster(stub);
     await seedAnaRivera();
     expect(await diffsOf("Rivera Family")).toEqual([]);
@@ -527,6 +527,10 @@ describe("differences, for a link that stands (slice M2)", () => {
     expect(await diffsOf("Rivera Family")).toEqual([
       { kind: "name", of: "family", portal: "Rivera Family", books: "Rivera family", queue: null },
       { kind: "name", of: "student", portal: "Leo Rivera", books: "Leo M. Rivera", queue: null }]);
+    changeInBooks("10", { DisplayName: "Rivera  Family " }); // spaces alone, which the portal's names never hold
+    changeInBooks("12", { DisplayName: "Leo Rivera" });
+    await readAgain();
+    expect(await diffsOf("Rivera Family")).toEqual([]);
   });
 
   it("a record with no name differs from the books' name, said in the portal's words for none", async () => {

@@ -8,6 +8,7 @@
 import type { AppStudentId } from "@/lib/families/ids";
 import { recordNameWords } from "@/lib/families/words";
 import type { Cust, Family, Roster } from "@/lib/roster/model";
+import { normalName } from "@/lib/roster/names";
 import { placesOf, placeWords, type StudentPlace } from "@/lib/roster/place";
 import type { MembershipShape } from "@/lib/roster/shape";
 
@@ -99,10 +100,12 @@ export function indexQueue(items: readonly QueueFact[]) {
  * whatever that record's own family's row says (that row may not be compared at all: a family with no link, Not a
  * family now, Customer gone, or no family), with a move of that record on the queue (filed under the family left) as
  * its note, or for an inactive record a make-inactive of its customer. One a guardian link names (the books changed its
- * type between Parent and Student) shows in the opening's guardians, never as a customer with no record. Names are compared exactly (===), as renameLinked() decides a record has
- * a name already (ALREADY_NAMED) and tryRename() compares QuickBooks' with the portal's: the screen calls two names the
- * same exactly when a rename would send nothing, so a difference of case or spacing shows (nameKey() is the rule of
- * which names are taken, not this one). Students and Parent customers are compared only where the shape has their
+ * type between Parent and Student) shows in the opening's guardians, never as a customer with no record. Names are
+ * compared after the portal's own name rule (normalName(), which checkName() applies to every name staff type:
+ * composed accents, trimmed, each run of spaces one), so two names that differ only there, which look alike on the page
+ * and which no rename in the portal could change (the portal's name is already in that form), are the same; a
+ * difference of case or of any visible character is a difference (nameKey(), which ignores case, is the rule of which
+ * names are taken, not this one). A record with no name differs from any name. Students and Parent customers are compared only where the shape has their
  * type, in layered books; a student's place only where it has a student type.
  */
 export function differencesOf(o: { shape: MembershipShape; roster: Roster; customers: readonly Cust[]; studentRecords: ReadonlyMap<string, LinkedStudent>;
@@ -118,7 +121,7 @@ export function differencesOf(o: { shape: MembershipShape; roster: Roster; custo
     const customer = byId.get(f.customerId);
     if (customer === undefined) return { differences: [], inactiveUnrecorded: 0 };
     const out: Difference[] = [];
-    if (f.name !== customer.displayName) out.push({ kind: "name", of: f.kind, portal: f.name, books: customer.displayName, queue: q.rename.get(customer.qboId) ?? null });
+    if (!sameName(f.name, customer.displayName)) out.push({ kind: "name", of: f.kind, portal: f.name, books: customer.displayName, queue: q.rename.get(customer.qboId) ?? null });
     if (!customer.active) out.push({ kind: "active", of: f.kind, who: recordNameWords(f.name, "family"), portalActive: true, queue: q.deactivate.get(customer.qboId) ?? null });
     const there = listed.get(f.customerId);
     for (const s of f.students) {
@@ -135,7 +138,7 @@ export function differencesOf(o: { shape: MembershipShape; roster: Roster; custo
         if (c?.active && there?.students.some((x) => x.qboId === c.qboId)) out.push({ kind: "active", of: "student", who, portalActive: false, queue: q.deactivate.get(c.qboId) ?? null });
         continue;
       }
-      if (c !== undefined && s.name !== c.displayName) out.push({ kind: "name", of: "student", portal: s.name, books: c.displayName, queue: q.rename.get(c.qboId) ?? null });
+      if (c !== undefined && !sameName(s.name, c.displayName)) out.push({ kind: "name", of: "student", portal: s.name, books: c.displayName, queue: q.rename.get(c.qboId) ?? null });
       if (c !== undefined && !c.active) out.push({ kind: "active", of: "student", who, portalActive: true, queue: q.deactivate.get(c.qboId) ?? null });
       if (studentType) {
         const place = placeOf(s.customerId, f.customerId);
@@ -177,6 +180,9 @@ export function differencesOf(o: { shape: MembershipShape; roster: Roster; custo
     return { differences: out, inactiveUnrecorded };
   };
 }
+
+/** Whether the portal's name and the books' are the same by the portal's own name rule (differencesOf()); none is no name. */
+const sameName = (portal: string | null, books: string) => portal !== null && normalName(portal) === normalName(books);
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 const quoted = (s: string) => `“${s}”`;
