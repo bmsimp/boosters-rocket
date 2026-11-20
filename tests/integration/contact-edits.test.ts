@@ -292,7 +292,8 @@ describe("what the browser sends is checked, and how often", () => {
     expect(await loadMyContact(ctxOf(r.identity))).toMatchObject({ state: "ok", form: { values: shown } });
     expect(await save({ ...shown, phone: NEW_PHONE })).toMatchObject({ ok: true, message: CONTACT_COPY.saved });
     expect(await personDetails(r.identity.parentId)).toEqual({ values: { ...shown, phone: NEW_PHONE }, version: 1 });
-    expect((await audits()).map((a) => [a.action, a.before, a.after])).toEqual([["parent.details.save", { phone: RIVERA.parent.phone }, { phone: NEW_PHONE }]]);
+    // Rivera's own Parent customer is linked to her row, so the change is queued to be sent on (stage 3's slice 11b).
+    expect((await audits()).map((a) => [a.action, a.before, a.after])).toEqual([["parent.details.save", { phone: RIVERA.parent.phone }, { phone: NEW_PHONE, queueIds: [expect.any(String)] }]]);
   });
 
   it("a field the parent did change is still checked, beside one too long that they left alone", async () => {
@@ -342,8 +343,11 @@ describe("what the browser sends is checked, and how often", () => {
     for (let i = 0; i < max; i++) expect(await save({ ...SHOWN, phone: `512-555-03${10 + i}` }, `p:${i}`)).toMatchObject({ ok: true });
     for (let i = 0; i < 3; i++) expect(await save({ ...SHOWN, phone: "512-555-0399" }, `p:${max}`)).toEqual({ ok: false, errors: [CONTACT_COPY.tooMany] });
     expect(await personDetails(r.identity.parentId)).toEqual({ values: { ...SHOWN, phone: `512-555-03${10 + max - 1}` }, version: max });
-    const log = await audits();
+    // Each save after the first also closes the change the one before it queued and never sent (stage 3's slice 11b:
+    // `roster.write.replaced`, in the save's transaction, before its own row); the details' own rows are read here.
+    const log = (await audits()).filter((a) => a.action.startsWith("parent.details."));
     expect(log.map((a) => a.action)).toEqual([...Array.from({ length: max }, () => "parent.details.save"), "parent.details.save.failed"]);
+    expect((await audits()).filter((a) => a.action === "roster.write.replaced")).toHaveLength(max - 1);
     expect(log.at(-1)).toMatchObject({ after: { code: "rate_limited" }, actorId: r.identity.parentId });
     // Counted per person: the other family's parent is not held up.
     asParent(c.identity);
