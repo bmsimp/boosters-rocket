@@ -35,8 +35,11 @@ export default async function FamilyPage() {
           <dt>Email</dt><dd>{ctx.email}</dd>
         </dl>
         <p className="help">You sign in with this address and your password. On a device we don&apos;t know yet, we also email a code to this address.</p>
-        {/* No id in the link: the page takes whose address it is from the session. */}
-        {ownEmail && <div className="box-foot"><Link className="btn btn-line" href="/family/email">Change my sign-in email</Link></div>}
+        {/* No id in either link: each page takes whose sign-in it is from the session. */}
+        <div className="box-foot">
+          <Link className="btn btn-line" href="/family/sign-in">Sign-in settings</Link>
+          {ownEmail && <Link className="btn btn-line" href="/family/email">Change my sign-in email</Link>}
+        </div>
       </section>
       {family && <RosterAsOf family={family} />}
     </main>

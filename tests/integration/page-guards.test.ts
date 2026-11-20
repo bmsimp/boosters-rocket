@@ -411,6 +411,13 @@ const PARENT_CODE_ELSEWHERE = [
   "src/lib/parents/second-step-rule.ts",
   "src/lib/parents/devices.ts",
   "src/lib/auth/parent-signin-step.ts",
+  // What a parent's sign-in settings (/family/sign-in) and the email change's asking again run (slice SI-5a): the
+  // page's loader, the password change and signing out everywhere, asking again with its window rule, and their words.
+  // Each reads and changes the session's own person alone.
+  "src/lib/parents/signin-settings.ts",
+  "src/lib/parents/asking-again.ts",
+  "src/lib/parents/reask-rule.ts",
+  "src/lib/parents/signin-settings-copy.ts",
 ];
 
 /**
