@@ -62,7 +62,7 @@ const summary = (text: string | undefined) => (text ?? "").replace(/\s+/g, " ").
 /**
  * A page to open: where, signed in as the seeded parent or not, and anything the device holds before it loads. `link` is
  * a set-up or reset link made for Zelda just before the page is opened (tests/e2e/signin-links.ts), its token added to
- * the end of `address`; the links are removed after the run, so the seed is as it was.
+ * the end of `address`; the links are removed as each page is closed (and after the run), so the seed is as it was.
  */
 type Target = { label: string; address: string; signedIn: boolean; deviceStore?: Record<string, string>; status?: number; link?: LinkPurpose; app?: AppState };
 /**
@@ -179,7 +179,7 @@ async function open(browser: Browser, target: Target, width: number): Promise<{ 
   }
   const page = await context.newPage();
   // A set-up link works only for a person with no password: the seed's of Zelda's is taken away for it, and put back
-  // after the spec (removeZeldaLinks()). A reset link works with it, or without.
+  // as the page is closed (removeZeldaLinks()). A reset link works with it, or without.
   if (target.link === "setup") await takeZeldaPassword(sql);
   // An app state starts from none, in a session proved just now, with no count of an earlier opening in the way.
   if (target.app) { await removeZeldaSecondSteps(sql); await clearZeldaCounts(sql); await setZeldaProof(sql, true); }
@@ -191,6 +191,10 @@ async function open(browser: Browser, target: Target, width: number): Promise<{ 
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
   const close = async () => {
     await context.close();
+    // A link's page leaves nothing behind for the next target: its link goes, and the password a set-up link took is
+    // put back, or every target after it (the gold pass's /family/sign-in and its app states among them) would find
+    // Zelda with none.
+    if (target.link) await removeZeldaLinks(sql);
     if (target.app) { await removeZeldaSecondSteps(sql); await clearZeldaCounts(sql); await putProofBack(); }
   };
   return { page, close };
