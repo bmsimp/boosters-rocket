@@ -734,7 +734,7 @@ test.describe("12. passkeys, by keyboard: asking again, adding one, the backup c
     await page.keyboard.type("Zelda renamed key");
     await page.keyboard.press("Enter");
     await expect(box.locator("div[tabindex='-1']").filter({ hasText: "The passkey's name is saved." })).toBeFocused();
-    await expect(box.getByText("Zelda renamed key")).toBeVisible();
+    await expect(box.locator(".passkey-name").getByText("Zelda renamed key")).toBeVisible();
 
     // The add stamped no proof, so removing asks again: Use your passkey is reached, and its thanks takes the focus.
     await tabTo(page, box.getByRole("button", { name: "Use your passkey" }));
