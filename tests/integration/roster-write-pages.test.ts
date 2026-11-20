@@ -25,7 +25,7 @@ import ReconciliationPage from "@/app/staff/(app)/reconciliation/page";
 import { resetDb } from "../helpers/db";
 import { seedSignedInParent } from "../helpers/parent";
 import { fznCompany, startQboStub, type QboStub } from "../helpers/qbo-stub";
-import { connectRoster, REALM, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
+import { connectRoster, REALM, seedAnaRivera, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { rowNamed } from "../helpers/table";
 import { recordOfCustomer } from "../helpers/app-records";
@@ -264,6 +264,22 @@ describe("a family's page brings the portal's own records into line with what Qu
 });
 
 describe("the roster pages offer the changes the shape allows, to staff who may make them", () => {
+  it("shows a guardian's own Parent customer as theirs, with no forms, and a QuickBooks-only one as not a portal guardian (stage 3's slice 9h)", async () => {
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Parents.ReadWrite"]));
+    await seedAnaRivera({ status: "active" });
+    const rivera = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
+    expect(rivera).toContain("Ana Rivera is a portal guardian&#x27;s own Parent customer, so it is changed through them");
+    expect(rivera).not.toContain("Change the parent Ana Rivera");
+    expect(rivera).toContain("a portal guardian&#x27;s own, changed through them under Portal sign-ins and on their page");
+    // The Portal sign-ins box says where QuickBooks stands for her.
+    const box = rivera.slice(rivera.indexOf('id="entry-signins-h"'), rivera.indexOf("</section>", rivera.indexOf('id="entry-signins-h"')));
+    expect(box).toContain("Linked to their own Parent customer “Ana Rivera”.");
+    // Mei Chen is in QuickBooks only: her forms stay, and the page says she isn't a portal guardian.
+    const chen = await renderPage(RosterEntryPage, { params: { id: await idOf("20") } });
+    expect(chen).toContain("Change the parent Mei Chen");
+    expect(chen).toContain("not a portal guardian; adding the person under Portal sign-ins doesn&#x27;t use it, and the mapping screen will offer to link it");
+  });
+
   it("a family's page, with both permissions: rename, add a student, move and make inactive; no \"Add a parent\" (stage 3's slice 9h)", async () => {
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });

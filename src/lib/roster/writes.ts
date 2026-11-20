@@ -3687,16 +3687,17 @@ export async function sendGuardianSaved(queued: readonly GuardianQueued[], op: G
 /**
  * What became of each Parent customer a guardian's change touched, in words for the staff member's answer (the add, the
  * reinstate, the removal, a person's rename): one sentence per family, or none where nothing is sent for this club's
- * books or this family (for a removal, that nothing was sent). Names are the portal's own and QuickBooks text, as text.
+ * books, this family or while QuickBooks isn't connected (the pages say which). Names are the portal's own and
+ * QuickBooks text, as text.
  */
 export function guardianSentWords(sent: readonly GuardianSent[], op: "grant" | "remove" | "rename", who: string): string[] {
   return sent.flatMap((s): string[] => {
     const under = `under ${s.familyName}`;
     switch (s.outcome) {
-      case "not_sent":
-        if (s.why === "connection") return [`QuickBooks isn't connected to the company the roster was read from, so nothing was sent there for ${who}.`];
-        return op === "remove" ? ["Nothing was sent to QuickBooks for them."] : [];
-      case "nothing": case "not_own": return op === "remove" ? ["Nothing was sent to QuickBooks for them."] : [];
+      // Nothing is said where nothing is sent for this club's books, this family or while QuickBooks isn't connected:
+      // the Portal sign-ins box and the person's page say which.
+      case "not_sent": return [];
+      case "nothing": case "not_own": return op === "remove" ? ["Nothing was sent to QuickBooks for them: they have no Parent customer of their own there."] : [];
       case "named_like": return [`QuickBooks already has a customer named “${s.holds}” ${under} that isn't linked to ${who}, so no Parent customer was made for them. The mapping screen will offer to link the two.`];
       case "has_one": return op === "rename" ? [`Their Parent customer ${under} has that name in QuickBooks already.`] : [`${who} already has their own Parent customer ${under} in QuickBooks, so none was made.`];
       case "inactive_there": return [op === "remove" ? `Their Parent customer ${under} is inactive in QuickBooks already, so nothing was sent.`

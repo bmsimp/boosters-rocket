@@ -130,7 +130,7 @@ export type StubQuirks = {
   invoiceEmailStatus: string | null;  // a made invoice's EmailStatus, whatever was sent ("EmailSent"); null keeps what was sent
   createDrops: string[];              // fields a customer create leaves out of what it makes ("CustomerTypeRef", "BillWithParent")
   emailFirstOnly: boolean;            // an email field of several addresses is stored as its first address alone
-  namesUnderParent: boolean;          // a create's name is refused only when a customer under the same parent has it (not known of QuickBooks: the check's duplicate_name_other_parent says)
+  namesUnderParent: boolean;          // a create's or a rename's name is refused only when another customer under the same parent has it (not known of QuickBooks: the check's duplicate_name_other_parent says)
 };
 export const defaultQuirks = (): StubQuirks => ({ emptyKeeps: false, limits: {}, limitCode: "6000", checkEmail: false, staleCode: "5010", duplicateCode: "6240", fullNames: false,
   balances: false, inactiveWithBalance: "6220", inactiveWithActiveUnder: "800", parentVersionFollows: false, copyFamilyContact: false, invoiceLinkHost: "connect.intuit.com", linkNeedsEmail: true, keepPrivateNote: true,
@@ -303,7 +303,11 @@ export async function startQboStub(): Promise<QboStub> {
         stub.beforeUpdate?.(stub.customers[at]!);
         const stored = stub.customers[at]!;
         if (sent.SyncToken !== String(stored.SyncToken ?? "0")) return json(400, fault(stub.quirks.staleCode));
-        if ("DisplayName" in sent && nameTaken(sent.DisplayName, stored.Id)) return json(400, fault(stub.quirks.duplicateCode));
+        // With `namesUnderParent`, a rename is met only against the other customers under the same parent, as a create is.
+        const underSame = (c: Record<string, unknown>) => c.Id !== stored.Id && ((c.ParentRef as { value?: unknown } | undefined)?.value ?? null) === ((stored.ParentRef as { value?: unknown } | undefined)?.value ?? null);
+        const renamedOver = stub.quirks.namesUnderParent ? typeof sent.DisplayName === "string" && [...stub.customers.filter(underSame).map((c) => c.DisplayName), ...stub.otherNames]
+          .some((n) => typeof n === "string" && n.trim().toLowerCase() === String(sent.DisplayName).trim().toLowerCase()) : nameTaken(sent.DisplayName, stored.Id);
+        if ("DisplayName" in sent && renamedOver) return json(400, fault(stub.quirks.duplicateCode));
         if (sent.Active === false && stub.quirks.inactiveWithBalance && stub.invoices.some((i) => (i.CustomerRef as { value?: unknown } | undefined)?.value === stored.Id && Number(i.Balance) > 0)) return json(400, fault(stub.quirks.inactiveWithBalance));
         // As the sandbox answered a family on 2026-11-17: refused while a customer directly under it is active, taken once none is.
         if (sent.Active === false && stub.quirks.inactiveWithActiveUnder && !stub.inactiveTakesChildren
