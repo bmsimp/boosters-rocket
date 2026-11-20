@@ -412,6 +412,10 @@ test.describe("10. sign-in settings, by keyboard: asking again, then the change 
   // the session keeps naming it.
   let strongAt: Date | null = null;
   let ownDevice = "";
+  // The second test's own session and devices, removed after: a session of its own, so the seeded one goes on naming
+  // Zelda's seeded device.
+  const HERE_SESSION_TOKEN = "e2e-journey-10-forget-this-device";
+  let hereDevices: string[] = [];
   test.beforeAll(async () => {
     strongAt = ((await sql`SELECT strong_at FROM parent_auth_session WHERE token = ${PARENT_SESSION_TOKEN}`)[0]?.strong_at ?? null) as Date | null;
     await sql`UPDATE parent_auth_session SET strong_at = NULL WHERE token = ${PARENT_SESSION_TOKEN}`;
@@ -429,6 +433,9 @@ test.describe("10. sign-in settings, by keyboard: asking again, then the change 
       AND subject IN (SELECT id::text FROM parent WHERE email = 'zelda@example.com'
         UNION SELECT d.id::text FROM parent_device d JOIN parent p ON p.id = d.parent_id WHERE p.email = 'zelda@example.com')`;
     if (ownDevice) await sql`DELETE FROM parent_device WHERE id = ${ownDevice}`;
+    await sql`DELETE FROM parent_auth_session WHERE token = ${HERE_SESSION_TOKEN}`;
+    if (hereDevices.length > 0) await sql`DELETE FROM parent_device WHERE id IN ${sql(hereDevices)}`;
+    hereDevices = [];
   });
 
   test("Family to Sign-in settings, the password, the emailed code, the change form's fields and button, and forgetting a device", async ({ context, page }) => {
@@ -511,6 +518,38 @@ test.describe("10. sign-in settings, by keyboard: asking again, then the change 
     expect(await sql`SELECT id FROM parent_device WHERE token_hash = ${deviceTokenHash(E2E_SIGNIN.zeldaDevice)}`).toHaveLength(1);
     ownDevice = "";
     await tabsOut(page);
+    ringsShown();
+  });
+
+  test("forgetting the device this session names leaves the rest as every other device, never a box that can't tell", async ({ context, page }) => {
+    // A session of Zelda's own to this test, proved just now and made on a device of its own, with a second device of
+    // its own beside it, so the list still has two rows (the spare and the seeded device) once the first is forgotten.
+    const made = await sql`INSERT INTO parent_device (parent_id, token_hash, created_at, last_used_at, expires_at)
+      SELECT id, ${`journey-10-here-${Date.now()}-`} || n, '2002-03-04T12:00:00Z', now(), now() + interval '90 days'
+      FROM parent, (VALUES ('a'), ('b')) AS t(n) WHERE email = 'zelda@example.com' RETURNING id`;
+    hereDevices = made.map((r) => r.id as string);
+    expect(hereDevices).toHaveLength(2);
+    await sql`INSERT INTO parent_auth_session (id, token, user_id, family_id, device_id, expires_at, strong_at)
+      SELECT 'e2e-journey-10-session', ${HERE_SESSION_TOKEN}, user_id, family_id, ${hereDevices[0]!}, now() + interval '1 day', now()
+      FROM parent_auth_session WHERE token = ${PARENT_SESSION_TOKEN}`;
+    await context.addCookies([parentSessionCookie(HERE_SESSION_TOKEN)]);
+    await page.goto("/family/sign-in");
+    const devices = page.getByRole("region", { name: "Remembered devices" });
+    const thisOne = devices.getByRole("listitem").filter({ hasText: "This device" });
+    await expect(thisOne).toHaveCount(1);
+    await expect(thisOne).toHaveAttribute("data-device", hereDevices[0]!);
+    await tabTo(page, thisOne.getByRole("button", { name: "Forget this device", exact: true }), { max: 60 });
+    await page.keyboard.press("Enter");
+    await expect(devices.getByRole("status")).toHaveText("That device is forgotten. The next time you sign in on it, we'll email you a code.");
+    await expect(devices.getByRole("status")).toBeFocused();
+    await expect(thisOne).toHaveCount(0);
+    // The page is drawn again with the session naming no device: the box still knows the rest are the others.
+    await expect(devices.getByText("We can't tell which of these is the device you're using now.")).toHaveCount(0);
+    await expect(devices.getByRole("button", { name: "Forget every other device", exact: true })).toHaveCount(1);
+    await expect(devices.getByRole("button", { name: "Forget every device", exact: true })).toHaveCount(0);
+    expect(await sql`SELECT id FROM parent_device WHERE id = ${hereDevices[0]!}`).toHaveLength(0);
+    expect((await sql`SELECT device_id FROM parent_auth_session WHERE token = ${HERE_SESSION_TOKEN}`)[0]?.device_id).toBeNull();
+    expect((await sql`SELECT device_id FROM parent_auth_session WHERE token = ${PARENT_SESSION_TOKEN}`)[0]?.device_id).not.toBeNull();
     ringsShown();
   });
 });

@@ -234,7 +234,8 @@ const sameMinutes = (a: ListedDevice, b: ListedDevice) => a.createdAt.slice(0, 1
  * with, in its name, the two times the row shows ("the device first remembered …, last used …"; the row's place in the
  * list too when another row's times read the same), so no two buttons share a name. A session that names none of them
  * can't say which is the one in use: the box says so above the list, and the button for all of them is "Forget every
- * device".
+ * device". A session whose own device was just forgotten in this box knows the rest are the others, and keeps "Forget
+ * every other device" without that sentence.
  */
 export function RememberedDevices({ devices, proved, canAsk, cantAsk, email }: { devices: ListedDevice[]; proved: boolean; canAsk: boolean; cantAsk: string; email: string }) {
   // Proved here, by the asking below: it gives way to its thanks, drawn above the list, and the buttons come after it.
@@ -244,21 +245,29 @@ export function RememberedDevices({ devices, proved, canAsk, cantAsk, email }: {
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
+  // Forgotten here: the device this session names, once its own button's press went through. The forget redraws the
+  // page (it revalidates it), and the session then names no device (its `device_id` went null with the row), so the
+  // redrawn list marks none: this is how the box still knows the rest are the other devices.
+  const [forgotThisOne, setForgotThisOne] = useState(false);
   const said = useRef<HTMLParagraphElement>(null);
   useEffect(() => { if (result) said.current?.focus(); }, [result]);
   const listed = devices.filter((d) => !gone.has(d.id));
   const canForget = proved || provedHere;
   const others = listed.filter((d) => !d.thisOne);
-  // Whether the session named one of the listed devices when the page was drawn: forgetting that one leaves the rest
-  // "every other device", and the session still knew which it was.
-  const knowsThisOne = devices.some((d) => d.thisOne);
+  // Whether the session names one of the listed devices, or named the one just forgotten here: then the rest are "every
+  // other device", and the box never says it can't tell which is the one in use.
+  const knowsThisOne = forgotThisOne || devices.some((d) => d.thisOne);
 
   const forget = async (which: "one" | "others", id?: string) => {
     if (busy) return;
+    const wasThisOne = which === "one" && devices.some((d) => d.id === id && d.thisOne);
     setBusy(which === "one" ? id! : "others"); setResult(null);
     const r = await safely(() => (which === "one" ? forgetDeviceAction(id!) : forgetOtherDevicesAction()), FAILED);
     setBusy(null);
-    if (r.ok) setGone((g) => new Set([...g, ...(which === "one" ? [id!] : others.map((d) => d.id))]));
+    if (r.ok) {
+      setGone((g) => new Set([...g, ...(which === "one" ? [id!] : others.map((d) => d.id))]));
+      if (wasThisOne) setForgotThisOne(true);
+    }
     setResult(r);
   };
 

@@ -193,14 +193,17 @@ the spec nor by hand yet.
   first remembered …, last used …", and the row's place in the list when another row's times read the same), so no two
   buttons share a name; then "Forget every other device". Forgetting one (the spec's own device, found by its button's
   name, never the seeded one) puts "That device is forgotten…" in a status line that takes the focus, and its row goes.
+- Walked, in a session of the spec's own made on a device of its own: "Forget this device" by Tab and Enter puts the
+  same status line in the focus, the row goes, and the page drawn again (its session now naming no device) still offers
+  "Forget every other device", never saying it can't tell which device is in use.
 - Checked by the accessibility spec, not walked: without a recent proof the devices are listed, the seeded one marked
   "This device", with no buttons, and the devices box asks again itself.
 - Not walked yet: the devices box's own asking (the password, then the code); once proved there, its own "Thank you,
   that's you." is drawn above the list and takes the focus, and the buttons follow it, so Tab reaches them next; the
   password box above, its password step not yet answered, draws the change form in its place. A parent with no
   password, or a club at Strict, reads why nothing can be forgotten here instead.
-- Not walked yet: a session that names none of the listed devices (one from before SI-5b, or one whose device was
-  forgotten or ran out) says above the list that the portal can't tell which is the device in use, marks none, and
+- Not walked yet: a session that names none of the listed devices (one from before SI-5b, or one whose device ran out
+  or was forgotten before the page was opened) says above the list that the portal can't tell which is the device in use, marks none, and
   offers "Forget every device" instead of "Forget every other device".
 - Not walked yet: Start again goes back to the password field; a wrong password is an alert with the focus left in the
   field.
