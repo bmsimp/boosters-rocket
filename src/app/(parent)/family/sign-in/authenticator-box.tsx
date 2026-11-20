@@ -27,8 +27,11 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 
 /** The parent's app as the page shows it (MyApp, src/lib/parents/signin-settings.ts): when it was set up, and the backup codes left. */
 export type ShownApp = { since: string; backupCodesLeft: number };
-/** The set-up's first answer, kept only in this component's state: the key to type and the QR code's squares. */
-type Setup = { key: string; qr: { size: number; path: string } };
+/**
+ * The set-up's first answer, kept only in this component's state: the key to type, the QR code's squares, and the
+ * set-up's stamp, which the confirm sends back so the server can tell this set-up from a newer one or one finished elsewhere.
+ */
+type Setup = { key: string; qr: { size: number; path: string }; stamp: string };
 type SetupResult = ({ ok: true; message: string } & Setup) | { ok: false; errors: string[] };
 type CodesResult = { ok: true; message: string; codes: string[] } | { ok: false; errors: string[]; setupOver?: true };
 type Busy = "start" | "confirm" | "codes" | "off" | null;
@@ -66,15 +69,16 @@ export function AuthenticatorBox({ email, app, proved, hasPassword, strict }: { 
     const r: SetupResult = await safely(() => startAuthenticatorAction(), FAILED);
     setBusy(null);
     if (!r.ok) { setAnswer(r); return; }
-    setCode(""); setSetup({ key: r.key, qr: r.qr }); setLanded((n) => n + 1);
+    setCode(""); setSetup({ key: r.key, qr: r.qr, stamp: r.stamp }); setLanded((n) => n + 1);
   };
   const confirm = async () => {
-    if (busy) return;
+    if (busy || !setup) return;
     setBusy("confirm"); setAnswer(null);
-    const r: CodesResult = await safely(() => confirmAuthenticatorAction(code), FAILED);
+    const r: CodesResult = await safely(() => confirmAuthenticatorAction(code, setup.stamp), FAILED);
     setBusy(null);
-    // Nothing left to finish (run out, replaced, or finished in another window): the dead QR code and key go, and the
-    // box draws its set-up press (or the app, once the page is drawn again) under the words.
+    // Nothing left to finish (run out, replaced by a newer set-up, or finished in another window, as the server tells by
+    // the stamp): the dead QR code and key go, and the box draws its set-up press (or the app, once the page is drawn
+    // again) under the words.
     if (!r.ok) { if (r.setupOver) { setSetup(null); setCode(""); } setAnswer(r); return; }
     setSetup(null); setCode(""); setCodes({ message: r.message, list: r.codes }); setLanded((n) => n + 1);
   };

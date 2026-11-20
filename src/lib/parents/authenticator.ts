@@ -138,11 +138,12 @@ export async function authenticatorShown(parentId: string, q: Reader = db): Prom
  * no app in force, any unfinished set-up of the person is replaced by a new row (one per person,
  * `parent_authenticator_parent_uq`), its id chosen first, since the seal's `aad` names it, holding a new secret of 20
  * random bytes as base32, sealed (sealAuthenticatorSecret()); `confirmed_at` and `last_used_step` null, so nothing is in
- * force until a code from the app is checked (confirmAuthenticator()). Answers the base32 secret, once, for the set-up's
- * one answer (the key to type and the QR code), and how many unfinished set-ups it replaced; null, changing nothing,
+ * force until a code from the app is checked (confirmAuthenticator()). Answers the new row's id (for the set-up's stamp
+ * alone), the base32 secret, once, for the set-up's one answer (the key to type and the QR code), and how many
+ * unfinished set-ups it replaced; null, changing nothing,
  * while an app is in force.
  */
-export async function beginAuthenticatorSetup(tx: Tx, parentId: string, now: Date): Promise<{ secret: string; replaced: number } | null> {
+export async function beginAuthenticatorSetup(tx: Tx, parentId: string, now: Date): Promise<{ id: string; secret: string; replaced: number } | null> {
   if (await hasAuthenticator(parentId, tx)) return null;
   const replaced = (await tx.delete(parentAuthenticator)
     .where(and(eq(parentAuthenticator.parentId, parentId), isNull(parentAuthenticator.confirmedAt))).returning({ id: parentAuthenticator.id })).length;
@@ -152,7 +153,18 @@ export async function beginAuthenticatorSetup(tx: Tx, parentId: string, now: Dat
   bytes.fill(0);
   const sealed = sealAuthenticatorSecret(id, parentId, secret);
   await tx.insert(parentAuthenticator).values({ id, parentId, secretCiphertext: sealed.ciphertext, secretKeyId: sealed.keyId, createdAt: now });
-  return { secret, replaced };
+  return { id, secret, replaced };
+}
+
+/**
+ * The person's one row (`parent_authenticator_parent_uq`) as it stands, for the set-up's stamp (authenticator-settings.ts,
+ * since slice SI-6b's second read): its id, whether it is in force, and when it was begun, or null with none. Read for
+ * the confirm alone, to tell its own set-up from one that replaced it or was finished; never shown, audited or sent.
+ */
+export async function authenticatorRowOf(parentId: string, q: Reader = db): Promise<{ id: string; inForce: boolean; createdAt: Date } | null> {
+  const [row] = await q.select({ id: parentAuthenticator.id, confirmedAt: parentAuthenticator.confirmedAt, createdAt: parentAuthenticator.createdAt })
+    .from(parentAuthenticator).where(eq(parentAuthenticator.parentId, parentId));
+  return row ? { id: row.id, inForce: row.confirmedAt !== null, createdAt: row.createdAt } : null;
 }
 
 /** Why a set-up's code wasn't taken: no unfinished set-up younger than its life, a secret that won't open, or a wrong code. */
@@ -160,15 +172,16 @@ export type SetupMiss = "no_setup" | "unreadable" | "wrong";
 
 /**
  * A set-up confirmed (slice SI-6b), in the caller's transaction, which holds the person's row and writes the audit row:
- * the person's unfinished set-up, younger than AUTHENTICATOR_SETUP_LIFE_MS, its secret opened with its `aad`, and the
+ * the person's unfinished set-up `setupId` (the one the confirm's stamp names), younger than AUTHENTICATOR_SETUP_LIFE_MS, its secret opened with its `aad`, and the
  * code typed (six digits, as readSecondStepCode() reads it) matched for the step `now` falls in or the one before or
  * after (matchTotp()); then one conditional update sets `confirmed_at` and `last_used_step` only while `confirmed_at`
  * is still null and the row within its life, returning it, so two confirms at once make one app and the code taken
  * here is never taken again at the door. A secret that won't open (SecretBoxError) is a miss, never a throw.
  */
-export async function confirmAuthenticator(tx: Tx, parentId: string, code: string, now: Date): Promise<{ authenticatorId: string } | { miss: SetupMiss }> {
+export async function confirmAuthenticator(tx: Tx, parentId: string, setupId: string, code: string, now: Date): Promise<{ authenticatorId: string } | { miss: SetupMiss }> {
   const youngerThan = new Date(now.getTime() - AUTHENTICATOR_SETUP_LIFE_MS);
-  const unfinished = and(eq(parentAuthenticator.parentId, parentId), isNull(parentAuthenticator.confirmedAt), gt(parentAuthenticator.createdAt, youngerThan));
+  const unfinished = and(eq(parentAuthenticator.id, setupId), eq(parentAuthenticator.parentId, parentId), isNull(parentAuthenticator.confirmedAt),
+    gt(parentAuthenticator.createdAt, youngerThan));
   const [row] = await tx.select({ id: parentAuthenticator.id, ciphertext: parentAuthenticator.secretCiphertext, keyId: parentAuthenticator.secretKeyId })
     .from(parentAuthenticator).where(unfinished);
   if (!row) return { miss: "no_setup" };

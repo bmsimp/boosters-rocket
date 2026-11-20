@@ -3,6 +3,13 @@
 // door's own words: the client components use this file.
 import { TOO_MANY_TRIES } from "./signin-copy";
 
+/**
+ * What a parent's authenticator app may hold after a set-up that went another way (decision 2 of SI-6b's second read):
+ * said after each of the words for a set-up that is over. It never says which entry by order: an app may save them in
+ * any order, and the one that works is the one from the set-up that was finished, whichever window it was in.
+ */
+const APP_LEFTOVERS = "Once a set-up is finished, only the entry it made in your authenticator app works for this portal, so you can delete any others; if you can't tell them apart, turn the app off here and set it up once more.";
+
 export const SIGNIN_SETTINGS_COPY = {
   title: "Sign-in settings",
   lede: "How you sign in to the portal, and what you can change about it.",
@@ -104,12 +111,14 @@ export const SIGNIN_SETTINGS_COPY = {
    */
   appSetupLost: "Please finish within 10 minutes of showing it's you. Switching to your authenticator app and back to this page is fine. If you reload this page or take longer, nothing is kept: you'll start again with a new QR code, and the entry your app saved this time won't work, so delete it from the app.",
   appSetupWrong: "That code didn't work. Check that it's the newest code the app shows for this portal, and try again.",
-  /** The set-up ran out, or another window began a new one: the box goes back to its set-up press. */
-  appSetupGone: "That set-up has run out, so nothing was kept. Please delete this portal's entry from your authenticator app, since it won't work, then press \"Set up an authenticator app\" to start again.",
+  /** The set-up ran out (or there is none): the box goes back to its set-up press. */
+  appSetupGone: `That set-up has run out, so nothing was kept. Press "Set up an authenticator app" to start again. ${APP_LEFTOVERS}`,
+  /** Another window began a newer set-up since this page's: the box goes back to its set-up press. */
+  appSetupReplaced: `You started a newer set-up in another window. Finish it there, or start again here. ${APP_LEFTOVERS}`,
   /** The 10 minutes since the proof ran out before the set-up was finished: the box goes back to its set-up press. */
   appSetupTimedOut: "It's been more than 10 minutes since you showed it's you, so this set-up can't be finished, and nothing was kept. Please delete this portal's entry from your authenticator app, since it won't work, then reload this page, show it's you again and start over.",
-  /** Another window finished a set-up first: the page is drawn again with the app on. */
-  appSetupDoneElsewhere: "Your authenticator app is already set up, perhaps in another window, so there's nothing to finish here. If your app saved a second entry for this portal just now, delete it: only the first one works.",
+  /** An app is in force already, finished in another window (or by the other of two presses at once): the page is drawn again with the app on. */
+  appSetupDoneElsewhere: `Your authenticator app is already set up, from another window. ${APP_LEFTOVERS}`,
   appAlreadyOn: "You already have an authenticator app set up. Please reload this page.",
   appNotOn: "You don't have an authenticator app set up right now. Please reload this page.",
   appOn: "Your authenticator app is set up.",

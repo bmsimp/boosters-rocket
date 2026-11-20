@@ -50,13 +50,14 @@ export const forgetOtherDevicesAction = parentAction(async (ctx) => {
 /*
  * The authenticator app (slice SI-6b; src/lib/parents/authenticator-settings.ts). None takes an id: the app, an
  * unfinished set-up and the backup codes are the session's own person's. The first press answers the key and the QR
- * code once and is not revalidated, so the page drawn again never holds them; a confirm, new codes and turning off
- * change what the page draws, and are.
+ * code once, with the set-up's stamp (an HMAC the server made, which the confirm sends back beside the code and which is
+ * checked there for this session), and is not revalidated, so the page drawn again never holds them; a confirm, new
+ * codes and turning off change what the page draws, and are.
  */
 export const startAuthenticatorAction = parentAction(async (ctx) => startMyAuthenticator(ctx));
 
-export const confirmAuthenticatorAction = parentAction(async (ctx, code: string) => {
-  const result = await confirmMyAuthenticator(ctx, code as unknown);
+export const confirmAuthenticatorAction = parentAction(async (ctx, code: string, stamp: string) => {
+  const result = await confirmMyAuthenticator(ctx, code as unknown, stamp as unknown);
   // An app finished in another window changes what the page draws too.
   if (result.ok || result.setupOver) for (const path of ["/family/sign-in", "/family/email", "/family"]) revalidatePath(path);
   return result;
