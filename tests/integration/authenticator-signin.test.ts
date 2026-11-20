@@ -7,7 +7,7 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 import { createHmac } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, parentAuthenticator, parentAuthSession, parentBackupCode, rateLimitEvent, signinCode } from "@/lib/db/schema";
+import { auditLog, parentAuthenticator, parentAuthSession, parentBackupCode, parentDevice, rateLimitEvent, signinCode } from "@/lib/db/schema";
 import { sealAuthenticatorSecret } from "@/lib/parents/authenticator";
 import { signinStands, verifySecondFactor } from "@/lib/parents/signin-codes";
 import { signOutEverywhere } from "@/lib/parents/signin-settings";
@@ -94,6 +94,53 @@ describe("who is asked for the app (open question 24)", () => {
     const { body, pending } = await passwordStep("ana@example.com", { cookie: `br_parent.device=${device.token}` });
     expect(body).toEqual({ ok: true, step: "app" });
     expect((await appStep(appCode(ana.app!.secret), pending)).body).toEqual({ ok: true, next: "/" });
+  });
+
+  it("under Strict two sign-ins on one browser leave one device row, renewed by use, and still ask for the app", async () => {
+    const ana = await seedAna();
+    await seedParentSettings({ level: "strict" });
+    const first = await appStep(appCode(ana.app!.secret), await anaAtTheApp());
+    expect(first.body).toEqual({ ok: true, next: "/" });
+    const device = cookieNamed(first.res, "device");
+    expect(device).not.toBe("");
+    const [row] = await deviceRows(ana.id);
+    // Set back a day, so its renewal shows.
+    const earlier = new Date(Date.now() - 86_400_000);
+    await db.update(parentDevice).set({ lastUsedAt: earlier }).where(eq(parentDevice.id, row!.id));
+    // The same browser: the remembered device stands in for nothing under Strict, so the app is asked for again.
+    const second = await passwordStep("ana@example.com", { cookie: device });
+    expect(second.body).toEqual({ ok: true, step: "app" });
+    const done = await appStep(appCode(ana.app!.secret, Date.now(), 1), `${second.pending}; ${device}`);
+    expect(done.body).toEqual({ ok: true, next: "/" });
+    const rows = await deviceRows(ana.id);
+    expect(rows.map((r) => r.id)).toEqual([row!.id]);
+    expect(rows[0]!.lastUsedAt.getTime()).toBeGreaterThan(earlier.getTime());
+    expect(cookieNamed(done.res, "device")).toBe(device);
+    expect((await sessions()).map((s) => s.deviceId)).toEqual([row!.id, row!.id]);
+    expect((await audits("signin.device_remembered")).map((r) => (r.after as { deviceId: string }).deviceId)).toEqual([row!.id]);
+    expect((await audits("signin.device_used")).map((r) => (r.after as { deviceId: string }).deviceId)).toEqual([row!.id]);
+  });
+
+  it("under Strict a device cookie naming another person's device, or an expired one, makes a new device at the finish", async () => {
+    const ana = await seedAna();
+    const ben = await seedParent({ name: "Ben", email: "ben@example.com" });
+    const bens = await seedDevice(ben.id);
+    const expired = await seedDevice(ana.id, { expiresAt: new Date(Date.now() - 1000) });
+    await seedParentSettings({ level: "strict" });
+    for (const [i, token] of [bens.token, expired.token].entries()) {
+      const cookie = `br_parent.device=${token}`;
+      const step = await passwordStep("ana@example.com", { cookie });
+      expect(step.body).toEqual({ ok: true, step: "app" });
+      const done = await appStep(appCode(ana.app!.secret, Date.now(), i), `${step.pending}; ${cookie}`);
+      expect(done.body).toEqual({ ok: true, next: "/" });
+      expect(cookieNamed(done.res, "device")).not.toBe("");
+      expect(cookieNamed(done.res, "device")).not.toBe(cookie);
+    }
+    const anas = await deviceRows(ana.id);
+    expect(anas).toHaveLength(3);
+    expect(anas.filter((d) => d.id !== expired.id).every((d) => d.expiresAt.getTime() > Date.now())).toBe(true);
+    expect((await deviceRows(ben.id)).map((d) => d.id)).toEqual([bens.id]);
+    expect(await audits("signin.device_used")).toEqual([]);
   });
 
   it("answers an unknown address, and an app holder's wrong password, the same as any refusal", async () => {

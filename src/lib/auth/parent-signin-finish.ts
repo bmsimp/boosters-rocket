@@ -42,8 +42,9 @@ const REFUSED: SigninFinish = { ok: false };
  *    sign-in audited; a session ended in the meantime, or a person left with no row that counts, is refused with no
  *    cookie;
  * 5. the strong step (recordStrongSignin(), src/lib/parents/devices.ts): in one transaction, the device remembered (a
- *    new one for a code's, an app's, a backup code's or a link's sign-in, the one used renewed for a remembered
- *    device's) and, only when the sign-in itself proved a second step (the emailed code, the app or a backup code, or a
+ *    new one for a code's, an app's, a backup code's or a link's sign-in, unless the browser's device cookie names a
+ *    live device of this person, which is renewed, so Strict's app step on a remembered device makes no copy of it; the
+ *    one used renewed for a remembered device's) and, only when the sign-in itself proved a second step (the emailed code, the app or a backup code, or a
  *    set-up link), the session's `strong_at` set: a password on a
  *    remembered device leaves it null; refused (a block, or the session ended, or the device gone), the session is
  *    deleted and no cookie is set;
@@ -68,7 +69,7 @@ export async function finishParentSignin(ctx: GenericEndpointContext,
   }
   const { familyId, sessionEnded } = await completeParentSignin(o.parentId, o.ip, session.id);
   if (sessionEnded) return REFUSED;   // ended while it was being made: no cookie for it
-  const device = "deviceId" in o.proof ? { deviceId: o.proof.deviceId, token: readDeviceToken(ctx) } : { remember: true as const };
+  const device = "deviceId" in o.proof ? { deviceId: o.proof.deviceId, token: readDeviceToken(ctx) } : { remember: true as const, token: readDeviceToken(ctx) };
   const now = new Date();
   const strong = await recordStrongSignin({ parentId: o.parentId, email: o.email, sessionId: session.id, device, ip: o.ip, now });
   if (!strong.ok) {
