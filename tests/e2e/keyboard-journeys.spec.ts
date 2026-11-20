@@ -421,6 +421,11 @@ test.describe("10. sign-in settings, by keyboard: asking again, then the change 
   test.afterAll(async () => {
     await sql`UPDATE parent_auth_session SET strong_at = ${strongAt} WHERE token = ${PARENT_SESSION_TOKEN}`;
     await sql`DELETE FROM signin_code WHERE parent_id IN (SELECT id FROM parent WHERE email = 'zelda@example.com')`;
+    // The counts this journey's presses took for Zelda (forgetting's per-person press, asking again's per-person or
+    // per-device tries), so the seed is left as it was found.
+    await sql`DELETE FROM rate_limit_event WHERE kind IN ('signin_settings_parent', 'password_reask_parent', 'password_try_device')
+      AND subject IN (SELECT id::text FROM parent WHERE email = 'zelda@example.com'
+        UNION SELECT d.id::text FROM parent_device d JOIN parent p ON p.id = d.parent_id WHERE p.email = 'zelda@example.com')`;
     if (ownDevice) await sql`DELETE FROM parent_device WHERE id = ${ownDevice}`;
   });
 
