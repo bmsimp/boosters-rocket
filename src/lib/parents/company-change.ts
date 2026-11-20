@@ -14,7 +14,7 @@ import { unspentLink } from "./link-state";
  * session, unused code, unused set-up or reset link, remembered device and change of sign-in address goes (a session and
  * a change name the app's own family by a `restrict` key, and the app's records go next), "already welcomed" is cleared, and sign-ins and welcomes switch off until an Admin has
  * looked at the new company. Passwords stay, and so (since the sign-in release's slice SI-6a) do each person's
- * authenticator app and backup codes: they are the person's own second step, not the old company's. Since stage 2 of the app-owned families spec nothing the portal runs reaches this (a
+ * authenticator app and backup codes, and (since slice SI-7a) passkeys: they are the person's own second step, not the old company's. Since stage 2 of the app-owned families spec nothing the portal runs reaches this (a
  * different company is refused before the clear); stage 4 decides what a change of company still does to sign-ins.
  */
 export async function clearParentAccess(tx: Tx, o: { fromRealmId: string; toRealmId: string; actor: Actor; ip: string | null }): Promise<void> {
