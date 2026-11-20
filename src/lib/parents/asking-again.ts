@@ -216,9 +216,10 @@ export async function askAgainPassword(ctx: Asker, password: unknown, now = new 
  * lockedPerson() (the person's row, then their sessions), the person still at the address and not blocked, and this
  * session's `strong_at` set to now, this session's alone, audited `signin.proved_again` with the step that proved it
  * (`emailed_code`, `authenticator` or `backup_code`). Every refusal is one answer, and over a limit the door's words.
- * Since slice SI-6b a stamp that asked for the app is checked as the app's step even once the app has been turned off:
- * that step then ends (verifySecondFactor()'s `no_app`), answered with the app's words and that they start again with
- * their password, `ended: true`, and the page goes back to its password field.
+ * Since slice SI-6b a stamp that asked for the app is checked as the app's step even once the app has been turned off.
+ * For a person left with no second step at all, that step then ends (verifySecondFactor()'s `no_app`), answered with
+ * the app's words and that they start again with their password, `ended: true`, and the page goes back to its password
+ * field; beside a passkey (since slice SI-7b) it stays open: a six-digit code is a wrong try and a backup code is taken.
  */
 export async function askAgainCode(ctx: Asker, stamp: unknown, code: unknown, now = new Date()): Promise<ProvedAnswer> {
   // Refused before any step is read (a code no field could send, a stamp that is no stamp or past its end): the words
@@ -254,7 +255,8 @@ type Proved = { ok: true; app: boolean; step: "emailed_code" | "authenticator" |
 /**
  * The person's own second step, as the door takes it: their authenticator app's code or a backup code when they have an
  * app in force, or when the stamp asked for the app (verifySecondFactor(), which, since slice SI-6b, refuses and ends the
- * step of a person whose app was turned off since, `no_app`), otherwise the emailed code (verifySigninCode()). An app
+ * step of a person left with no second step since, `no_app`; beside a passkey, since SI-7b, the step stays open and a
+ * six-digit code is a wrong try), otherwise the emailed code (verifySigninCode()). An app
  * turned on between the password and the code leaves a code mailed before it to be refused at signinStands()
  * (`second_factor_in_force`).
  */

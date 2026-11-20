@@ -320,8 +320,9 @@ export async function remakeMyBackupCodes(ctx: Me, now?: Date): Promise<CodesAns
  * codes still stand (removeAuthenticator(), `keepBackupCodes`), with one `parent.authenticator.off` row (counts only).
  * Remembered devices stay, and no session is made or ended. A sign-in whose app's code or backup code was taken just
  * before and whose session is made after is refused at its last check (signinStands(): `second_factor_gone`,
- * `backup_code_gone`), and a step that asked for the app and is still open ends at its next try (verifySecondFactor(),
- * `no_app`). The next sign-in on a new device asks for the emailed code again.
+ * `backup_code_gone`). A step that asked for the app and is still open ends at its next try (verifySecondFactor(),
+ * `no_app`) for a person with no passkey; beside a passkey it stays open, a six-digit code there being a wrong try and
+ * a backup code taken. The next sign-in on a new device asks for the emailed code again, or for the passkey beside one.
  */
 export async function turnOffMyAuthenticator(ctx: Me, now?: Date): Promise<TurnOffAnswer> {
   if (!(await sessionProvedRecently(db, ctx, now))) return PROVE_AGAIN;
