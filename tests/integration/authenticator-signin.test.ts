@@ -283,11 +283,11 @@ describe("the app step at /portal-app/check", () => {
     for (const c of [first!, second!, ...(await backupCodeRows(ana.id)).map((r) => r.codeHash)]) expect(all).not.toContain(c);
   });
 
-  it("a backup code is no second step for a person with no app in force", async () => {
+  it("a backup code is no second step for a person with no app in force, and the try ends the step (slice SI-6b)", async () => {
     const ana = await seedAna({ app: "unfinished" });
     const [code] = await seedBackupCodes(ana.id, 1);
     const step = await stepPersonFor("ana@example.com");
-    expect(await verifySecondFactor(step, code!, DOOR_IP)).toEqual({ ok: false, reason: "rejected", ended: false });
+    expect(await verifySecondFactor(step, code!, DOOR_IP)).toEqual({ ok: false, reason: "rejected", ended: true });
     expect((await backupCodeRows(ana.id))[0]!.usedAt).toBeNull();
     expect((await audits("signin.second_step_wrong")).map((r) => r.after)).toEqual([{ factor: "backup_code", try: 1, reason: "no_app" }]);
   });
@@ -320,7 +320,9 @@ describe("the app step at /portal-app/check", () => {
     const unsigned = `${name}=${Buffer.from(JSON.stringify({ p: ana.id, e: "ana@example.com", c: "x", u: 0, x: Date.now() + 60_000 })).toString("base64url")}`;
     for (const cookie of ["", unsigned, forgedSigned, bens]) {
       const r = await appStep(appCode(ana.app!.secret), cookie);
-      expect([cookie, r.body]).toEqual([cookie, REFUSED]);
+      // A step that reached the check and can't go on (a password row that isn't Ana's; Ben, who has no app) says it
+      // ended, as every refusal that ends the step does since slice SI-6b; with no step there is none to end.
+      expect([cookie, r.body]).toEqual([cookie, cookie === forgedSigned || cookie === bens ? { ...REFUSED, ended: true } : REFUSED]);
       expect(cookieNamed(r.res, "session_token")).toBe("");
     }
     expect(await sessions()).toEqual([]);

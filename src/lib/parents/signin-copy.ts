@@ -19,6 +19,11 @@ export const APP_ASKED = "To finish signing in on this device, enter the 6-digit
 export const APP_CODE_LABEL = "Code from your authenticator app, or a backup code";
 /** One answer for a wrong or used code at the app step, or a second step that has ended. */
 export const APP_REJECTED = "That code didn't work. Enter the newest code from your authenticator app, or a backup code you haven't used yet, or start again with your email and password.";
+/**
+ * Said after APP_REJECTED when the app step's refusal ended the step (slice SI-6b): the page is back at the password,
+ * whatever ended it (the answer never says why).
+ */
+export const APP_STEP_OVER = "Please enter your email and password again to start over.";
 /** One answer for a wrong, expired, used-up or never-sent code, or a second step that has ended. */
 export const CODE_REJECTED = "That code didn't work. Check the newest email from us and try again, or start again with your email and password.";
 /**

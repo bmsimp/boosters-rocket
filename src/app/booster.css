@@ -378,6 +378,16 @@ dl.details dd { min-width: 0; overflow-wrap: anywhere; }
   .home > .money { grid-column: 1; grid-row: 2 / span 2; }
   .home > .money ~ .students-box, .home > .money ~ .details-box { grid-column: 2; }
 }
+
+/* Sign-in settings, the authenticator app (slice SI-6b): its set-up's QR code, black on white whatever the theme (a
+   forced-colors theme changes currentColor but not a fill), as the check-in sheet draws its own; the key to type and
+   the backup codes in the reading face (made to tell characters apart) with even figures, selectable, grouped so they
+   read, wrapping rather than widening the page. */
+.app-qr { display: block; width: min(100%, 15rem); height: auto; margin: var(--s3) 0; background: white; forced-color-adjust: none; }
+.app-key, .backup-codes code { font-family: var(--read); font-variant-numeric: tabular-nums; font-size: 1.0625rem; font-weight: 700; letter-spacing: 0.06em;
+  overflow-wrap: anywhere; user-select: all; }
+.app-key { display: block; margin-top: var(--s2); }
+ul.backup-codes { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: var(--s2) var(--s4); margin-top: var(--s3); }
 /* ---- End of Home and Family ---- */
 
 /* ---- Season: the ruler's heading on Home, requirement lines, the Season page, and the staff season pages. Keep new rules for them inside this block. ---- */

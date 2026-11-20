@@ -21,7 +21,7 @@ export const DOOR_PASSWORD = "the parents' long test password";
 
 type Mail = { to: string; subject: string };
 /** What a door endpoint answered. */
-export type DoorBody = { ok: boolean; next?: string; step?: "code" | "app"; error?: string };
+export type DoorBody = { ok: boolean; next?: string; step?: "code" | "app"; error?: string; ended?: boolean };
 /** Request headers beside the content type and origin; by default the client-IP header with DOOR_IP. */
 type Headers = Record<string, string>;
 

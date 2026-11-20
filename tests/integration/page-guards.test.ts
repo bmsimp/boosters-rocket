@@ -426,6 +426,10 @@ const PARENT_CODE_ELSEWHERE = [
   "src/lib/parents/totp.ts",
   "src/lib/parents/backup-codes.ts",
   "src/lib/parents/authenticator.ts",
+  // Setting the app up, its backup codes shown once and made again, and turning it off, on /family/sign-in (slice
+  // SI-6b): the presses, for the session's own person alone, and the QR code of the set-up, drawn on the server.
+  "src/lib/parents/authenticator-settings.ts",
+  "src/lib/parents/authenticator-qr.ts",
 ];
 
 /**

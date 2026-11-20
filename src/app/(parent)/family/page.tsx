@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { requireParentPage } from "@/lib/guards";
 import { canChangeMyEmail } from "@/lib/parents/email-change";
+import { hasAuthenticator } from "@/lib/parents/authenticator";
+import { howYouSignIn } from "@/lib/parents/signin-settings-copy";
 import { loadMyFamily } from "@/lib/parents/my-family";
 import { getClubSettings } from "@/lib/settings/club";
 import { DetailsBox, NotSetUpBox, StudentsBox } from "../family-boxes";
@@ -9,7 +11,7 @@ export const metadata = { title: "Family" };
 
 export default async function FamilyPage() {
   const ctx = await requireParentPage("/family");
-  const [family, club, ownEmail] = await Promise.all([loadMyFamily(ctx), getClubSettings(), canChangeMyEmail(ctx)]);
+  const [family, club, ownEmail, app] = await Promise.all([loadMyFamily(ctx), getClubSettings(), canChangeMyEmail(ctx), hasAuthenticator(ctx.parentId)]);
   return (
     <main className="wrap single family-page">
       <h1 className="page-title">{family ? family.name : "Your family"}</h1>
@@ -34,7 +36,8 @@ export default async function FamilyPage() {
           <dt>Name</dt><dd>{ctx.name}</dd>
           <dt>Email</dt><dd>{ctx.email}</dd>
         </dl>
-        <p className="help">You sign in with this address and your password. On a device we don&apos;t know yet, we also email a code to this address.</p>
+        {/* How they sign in on a new device: the code from their authenticator app (since SI-6b), or the code we email. */}
+        <p className="help">{howYouSignIn(app).how}</p>
         {/* No id in either link: each page takes whose sign-in it is from the session. */}
         <div className="box-foot stack">
           <Link className="btn btn-line" href="/family/sign-in">Sign-in settings</Link>

@@ -78,8 +78,49 @@ export const SIGNIN_SETTINGS_COPY = {
   everyDeviceForgotten: "Every device is forgotten. The next time you sign in on any device, this one included, we'll email you a code.",
   /** One answer for a device that isn't one of the parent's to forget, whatever the reason. */
   deviceNotFound: "That device isn't one we remember for you now. Please reload this page.",
-  moreTitle: "More ways to sign in",
-  moreSoon: "More ways to sign in, like a passkey or an authenticator app, will come here.",
+  // The authenticator app (slice SI-6b, in place of SI-5a's words that more ways to sign in would come here): setting it up, its backup codes, making new ones, and turning it off.
+  appTitle: "Authenticator app",
+  appWhat: "An authenticator app on your phone, like Google Authenticator or Microsoft Authenticator, shows a new 6-digit code every 30 seconds. Once you set one up, when you sign in on a device we don't know yet we ask for its code instead of emailing you one.",
+  /** Setting one up keeps the remembered devices (open question 26 lists what forgets them): said beside the device list. */
+  appKeepsDevices: "Setting up an app doesn't forget the devices we remember for you.",
+  appNeedsPassword: "To set up an authenticator app, please choose a password first.",
+  /** Under Strict (SI-10 stores it) the app is set up when the club first asks for one, not here. */
+  appStrictOff: "For now, an authenticator app can't be set up here. Please ask the club if you'd like to use one.",
+  askAgainForApp: "Before you set up an authenticator app, please show it's you: enter your password, then the code we email you.",
+  appSetUp: "Set up an authenticator app",
+  appSetUpBusy: "Starting…",
+  appScan: "Scan this QR code with your authenticator app. If the app is on this phone, copy the key below into the app instead.",
+  appQrLabel: "QR code to scan with your authenticator app",
+  appKey: "Key to type into the app",
+  copyKey: "Copy the key",
+  copied: "Copied.",
+  copyFailed: "We couldn't copy it. Select it and copy it yourself instead.",
+  appConfirmLede: "Then enter the 6-digit code the app shows for this portal, to finish.",
+  appConfirmCode: "Code from your authenticator app",
+  appConfirm: "Finish setting up",
+  /** The set-up lives only in this page: a reload or leaving it starts again with a new key. */
+  appSetupLost: "If you leave or reload this page before you finish, nothing is kept, and you'll start again with a new QR code.",
+  appSetupWrong: "That code didn't work. Check that it's the newest code the app shows for this portal, and try again.",
+  appSetupGone: "That set-up has run out. Please press \"Set up an authenticator app\" to start again.",
+  appAlreadyOn: "You already have an authenticator app set up. Please reload this page.",
+  appNotOn: "You don't have an authenticator app set up right now. Please reload this page.",
+  appOn: "Your authenticator app is set up.",
+  appOnSince: "Set up",
+  backupCodesTitle: "Your backup codes",
+  backupCodesKeep: "Each backup code works once, in place of a code from your app. If you lose your phone, they're how you get in, so keep them somewhere safe that isn't on your phone, like on paper or in a password manager on another device. We won't show them again.",
+  copyCodes: "Copy the backup codes",
+  backupCodesLeft: "Backup codes left",
+  backupCodesNone: "You've used all your backup codes. Make new ones now, while your app still works.",
+  askAgainForAppChange: "Before you make new backup codes or turn off your authenticator app, please show it's you: enter your password, then the code from your authenticator app.",
+  newCodes: "Make new backup codes",
+  newCodesBusy: "Making…",
+  newCodesMade: "Here are your new backup codes. Your old ones no longer work.",
+  turnOffWords: "If you turn off your authenticator app, your backup codes stop working too, and when you sign in on a device we don't know yet, we'll email you a code again.",
+  turnOff: "Turn off the authenticator app",
+  turnOffBusy: "Turning off…",
+  turnedOff: "Your authenticator app is turned off, and your backup codes no longer work. When you sign in on a device we don't know yet, we'll email you a code again.",
+  /** Under Strict the app is the guardian's only second step until passkeys come (SI-7): it stays. */
+  turnOffStrict: "For now, your authenticator app can't be turned off here, since the club asks everyone for a second step and the app is your only one. Please ask the club if you need it changed.",
   // Asking again (asking-again.ts): the password, then the emailed code.
   yourPassword: "Your password",
   continue: "Continue",
@@ -91,6 +132,8 @@ export const SIGNIN_SETTINGS_COPY = {
   appCode: "Code from your authenticator app, or a backup code",
   /** One answer for a wrong or used app code or backup code, and a step that has ended or that this page never began. */
   appRejected: "That code didn't work. Enter the newest code from your authenticator app, or a backup code you haven't used yet, or start again with your password.",
+  /** Said after appRejected when the step can't go on (decision 10 of SI-6b): the page is back at the password. */
+  stepOver: "Please enter your password again to start over.",
   confirm: "Confirm",
   startAgain: "Start again",
   /** One answer for every refusal of the password, but too many tries: nothing tells the reasons apart. */
@@ -106,3 +149,38 @@ export const SIGNIN_SETTINGS_COPY = {
   /** When the action itself couldn't be reached or threw: try again, nothing about why. */
   failed: "That didn't go through. Please try again in a moment.",
 } as const;
+
+/**
+ * The sentences that say how the parent signs in on a new device, for a guardian with an authenticator app in force
+ * (slice SI-6b): the code from their app, where the others say the code we email. Each replaces the same key of
+ * SIGNIN_SETTINGS_COPY, through howYouSignIn(), so a page or form picks one by whether the person has an app (MySignin.app).
+ */
+const WITH_APP = {
+  how: "You sign in with this address and your password. On a device we don't know yet, we also ask for the code from your authenticator app, or one of your backup codes.",
+  askAgainForPassword: "Before you change your password, please show it's you: enter your password, then the code from your authenticator app.",
+  askAgainForEmail: "Before you change your sign-in email, please show it's you: enter your password, then the code from your authenticator app.",
+  askAgainForDevices: "Before you forget a device, please show it's you: enter your password, then the code from your authenticator app.",
+  signsOutEverywhere: "Changing your password signs you out everywhere, this device too. Then you sign in again with your new password, and on each device you enter the code from your authenticator app.",
+  changedNext: "Sign in again with your new password. On each device you'll also enter the code from your authenticator app.",
+  everywhereThen: "Then you sign in again with your email and password, and on each device you enter the code from your authenticator app.",
+  everywhereNext: "Sign in again with your email and password. On each device you'll also enter the code from your authenticator app.",
+  devicesLede: "These are the phones and computers we remember for you. On them, you sign in with your password, without a code from your authenticator app.",
+  devicesNone: "We don't remember any device for you right now. The next time you sign in, we'll also ask for the code from your authenticator app, and then remember that device.",
+  forgetHere: "Forgetting the device you're using now doesn't sign you out here. The next time you sign in on it, we'll ask for the code from your authenticator app again.",
+  deviceForgotten: "That device is forgotten. The next time you sign in on it, we'll ask for the code from your authenticator app.",
+  otherDevicesForgotten: "Every other device is forgotten. The next time you sign in on one of them, we'll ask for the code from your authenticator app.",
+  everyDeviceForgotten: "Every device is forgotten. The next time you sign in on any device, this one included, we'll ask for the code from your authenticator app.",
+} as const;
+
+export type HowWords = { [K in keyof typeof WITH_APP]: string };
+/** The sentences of how the parent signs in on a new device: the app's for a guardian with one in force, the emailed code's otherwise. */
+export function howYouSignIn(app: boolean): HowWords {
+  if (app) return WITH_APP;
+  const c = SIGNIN_SETTINGS_COPY;
+  return { how: c.how, askAgainForPassword: c.askAgainForPassword, askAgainForEmail: c.askAgainForEmail, askAgainForDevices: c.askAgainForDevices,
+    signsOutEverywhere: c.signsOutEverywhere, changedNext: c.changedNext, everywhereThen: c.everywhereThen, everywhereNext: c.everywhereNext,
+    devicesLede: c.devicesLede, devicesNone: c.devicesNone, forgetHere: c.forgetHere, deviceForgotten: c.deviceForgotten,
+    otherDevicesForgotten: c.otherDevicesForgotten, everyDeviceForgotten: c.everyDeviceForgotten };
+}
+/** The app's own sentences, for tests and pages that name one. */
+export const SIGNIN_WITH_APP_COPY = WITH_APP;

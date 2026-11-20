@@ -135,7 +135,9 @@ describe("the page", () => {
     expect(page).toContain(COPY.everywhereButton);
     // No device remembered for this parent: the list says so, and what it means at the next sign-in.
     expect(page).toContain(html(COPY.devicesNone));
-    expect(page).toContain(html(COPY.moreSoon));
+    // The authenticator app box (slice SI-6b), off, with its set-up press: this session proved itself just now.
+    expect(page).toContain(COPY.appTitle);
+    expect(page).toContain(COPY.appSetUp);
     const credential = await credentialOf(a.identity.parentId);
     for (const secret of [a.identity.sessionId, a.session.token, a.identity.parentId, a.identity.guardianId, credential!.id, credential!.password!]) expect(page).not.toContain(secret);
   });

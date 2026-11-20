@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { APP_ASKED, APP_CODE_LABEL, APP_REJECTED, APP_STEP_ENDED, CODE_SENT, CODE_REJECTED, CODE_STEP_ENDED, PASSWORD_REJECTED, SIGNIN_LEDE, TOO_MANY_TRIES, signinFailure } from "@/lib/parents/signin-copy";
+import { APP_ASKED, APP_CODE_LABEL, APP_REJECTED, APP_STEP_ENDED, APP_STEP_OVER, CODE_SENT, CODE_REJECTED, CODE_STEP_ENDED, PASSWORD_REJECTED, SIGNIN_LEDE, TOO_MANY_TRIES, signinFailure } from "@/lib/parents/signin-copy";
 import { CODE_STEP_LIFE_MS, clearCodeStep, deviceStore, loadCodeStep, saveCodeStep, type CodeStepKind } from "./code-step";
 
 const BASE = "/api/auth/parent";
@@ -14,7 +14,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 class HttpStatus extends Error { constructor(readonly status: number) { super(`HTTP ${status}`); } }
 const failure = (e: unknown) => signinFailure(e instanceof HttpStatus ? e.status : null);
 
-type Answer = { ok: boolean; next?: string; step?: "code" | "app"; error?: string };
+type Answer = { ok: boolean; next?: string; step?: "code" | "app"; error?: string; ended?: boolean };
 /** What went wrong, in words, with whether to show the way to set up or reset a password beside it. */
 type Problem = { words: string; passwordLink: boolean };
 
@@ -100,6 +100,13 @@ export function PasswordSignIn({ next }: { next: string | null }) {
     try {
       const r = await post<Answer>(step === "app" ? "/portal-app/check" : "/portal-code/check", { code, ...(back ? { next: back } : {}) });
       if (r.ok && r.next) { clearCodeStep(deviceStore()); window.location.assign(r.next); return; }
+      if (step === "app" && r.ended) {
+        // The server ended the step (it never says why): back to the password step, as when its time runs out.
+        clearCodeStep(deviceStore()); moved.current = true;
+        setStep("password"); setEmail(""); setPassword(""); setBack(next); setCode("");
+        setProblem({ words: `${APP_REJECTED} ${APP_STEP_OVER}`, passwordLink: false });
+        return;
+      }
       setProblem({ words: r.error === "rate_limited" ? TOO_MANY_TRIES : step === "app" ? APP_REJECTED : CODE_REJECTED, passwordLink: false });
     } catch (e) { setProblem({ words: failure(e), passwordLink: false }); } finally { setBusy(false); }
   };

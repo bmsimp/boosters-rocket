@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { parentAction } from "@/lib/guards";
 import { askAgainCode, askAgainPassword } from "@/lib/parents/asking-again";
 import { askMySetupLink, changeMyPassword, forgetMyDevice, forgetMyOtherDevices, signOutEverywhere } from "@/lib/parents/signin-settings";
+import { confirmMyAuthenticator, remakeMyBackupCodes, startMyAuthenticator, turnOffMyAuthenticator } from "@/lib/parents/authenticator-settings";
 
 /**
  * A parent's sign-in settings (src/lib/parents/signin-settings.ts) and asking again (src/lib/parents/asking-again.ts).
@@ -43,5 +44,31 @@ export const forgetDeviceAction = parentAction(async (ctx, deviceId: string) => 
 export const forgetOtherDevicesAction = parentAction(async (ctx) => {
   const result = await forgetMyOtherDevices(ctx);
   if (result.ok) revalidatePath("/family/sign-in");
+  return result;
+});
+
+/*
+ * The authenticator app (slice SI-6b; src/lib/parents/authenticator-settings.ts). None takes an id: the app, an
+ * unfinished set-up and the backup codes are the session's own person's. The first press answers the key and the QR
+ * code once and is not revalidated, so the page drawn again never holds them; a confirm, new codes and turning off
+ * change what the page draws, and are.
+ */
+export const startAuthenticatorAction = parentAction(async (ctx) => startMyAuthenticator(ctx));
+
+export const confirmAuthenticatorAction = parentAction(async (ctx, code: string) => {
+  const result = await confirmMyAuthenticator(ctx, code as unknown);
+  if (result.ok) for (const path of ["/family/sign-in", "/family/email", "/family"]) revalidatePath(path);
+  return result;
+});
+
+export const newBackupCodesAction = parentAction(async (ctx) => {
+  const result = await remakeMyBackupCodes(ctx);
+  if (result.ok) revalidatePath("/family/sign-in");
+  return result;
+});
+
+export const turnOffAuthenticatorAction = parentAction(async (ctx) => {
+  const result = await turnOffMyAuthenticator(ctx);
+  if (result.ok) for (const path of ["/family/sign-in", "/family/email", "/family"]) revalidatePath(path);
   return result;
 });

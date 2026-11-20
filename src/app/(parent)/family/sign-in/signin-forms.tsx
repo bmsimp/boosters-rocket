@@ -3,7 +3,7 @@ import { createContext, useContext, useEffect, useId, useRef, useState, type Rea
 import { safely } from "@/app/components/action-error";
 import { LocalTime } from "@/app/components/local-time";
 import { PASSWORD_COPY } from "@/lib/parents/password-copy";
-import { SIGNIN_SETTINGS_COPY as COPY } from "@/lib/parents/signin-settings-copy";
+import { SIGNIN_SETTINGS_COPY as COPY, howYouSignIn } from "@/lib/parents/signin-settings-copy";
 import { askAgainCodeAction, askAgainPasswordAction, askSetupLinkAction, changePasswordAction, forgetDeviceAction, forgetOtherDevicesAction, signOutEverywhereAction } from "./actions";
 
 type Result = { ok: true; message: string } | { ok: false; errors: string[] };
@@ -94,8 +94,10 @@ export function AskAgain({ email, proved, lede, children }: { email: string; pro
   };
   const checkCode = async () => {
     setBusy(true); setErrors(null);
-    const r = await safely(() => askAgainCodeAction(stamp, code), FAILED);
+    const r: Result & { ended?: true } = await safely(() => askAgainCodeAction(stamp, code), FAILED);
     setBusy(false);
+    // The app's step can't go on (since slice SI-6b; the server never says why): back to the password, with the words.
+    if (!r.ok && r.ended) { moved.current = true; setStamp(""); setCode(""); setPassword(""); setErrors(r.errors); setStep("password"); return; }
     if (!r.ok) { setErrors(r.errors); return; }
     setStamp(""); setCode(""); setStep("arrived");
   };
@@ -137,19 +139,21 @@ export function AskAgain({ email, proved, lede, children }: { email: string; pro
 /**
  * The new password, twice. Shown only once the session has proved itself: the current password is not asked again. A
  * change that was made signs the parent out everywhere, this device too, so the answer brings the way to sign in again.
+ * `app`: whether the parent has an authenticator app (slice SI-6b), for the words of how they sign in again.
  */
-export function ChangePasswordForm({ email }: { email: string }) {
+export function ChangePasswordForm({ email, app }: { email: string; app: boolean }) {
+  const words = howYouSignIn(app);
   const [password, setPassword] = useState("");
   const [again, setAgain] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
   const signedOut = useContext(SignedOutContext);
-  if (result?.ok) return <SignedOut message={result.message} next={COPY.changedNext} signIn={{ href: "/sign-in", label: COPY.signIn }} />;
+  if (result?.ok) return <SignedOut message={result.message} next={words.changedNext} signIn={{ href: "/sign-in", label: COPY.signIn }} />;
   const change = async () => {
     setBusy(true); setResult(null);
     const r = await safely(() => changePasswordAction(password, again), FAILED);
     setBusy(false);
-    if (r.ok && signedOut) { signedOut({ message: r.message, next: COPY.changedNext, signIn: { href: "/sign-in", label: COPY.signIn } }); return; }
+    if (r.ok && signedOut) { signedOut({ message: r.message, next: words.changedNext, signIn: { href: "/sign-in", label: COPY.signIn } }); return; }
     setResult(r);
   };
   return (
@@ -163,7 +167,7 @@ export function ChangePasswordForm({ email }: { email: string }) {
       <label className="field"><span>{COPY.newPasswordAgain}</span>
         <input name="new-password-again" type="password" required autoComplete="new-password" maxLength={1024} value={again} onChange={(e) => setAgain(e.target.value)} />
       </label>
-      <p>{COPY.signsOutEverywhere}</p>
+      <p>{words.signsOutEverywhere}</p>
       {result && !result.ok && <Errors errors={result.errors} />}
       <button className="btn" aria-disabled={busy || undefined}>{busy ? COPY.changeBusy : COPY.changeButton}</button>
     </form>
@@ -244,7 +248,9 @@ const sameMinutes = (a: ListedDevice, b: ListedDevice) => a.createdAt.slice(0, 1
  * device". A session whose own device was just forgotten in this box knows the rest are the others, and keeps "Forget
  * every other device" without that sentence.
  */
-export function RememberedDevices({ devices, proved, canAsk, cantAsk, email }: { devices: ListedDevice[]; proved: boolean; canAsk: boolean; cantAsk: string; email: string }) {
+export function RememberedDevices({ devices, proved, canAsk, cantAsk, email, app }: { devices: ListedDevice[]; proved: boolean; canAsk: boolean; cantAsk: string; email: string; app: boolean }) {
+  // What the next sign-in on a forgotten device asks for: the code from their authenticator app (slice SI-6b), or ours.
+  const words = howYouSignIn(app);
   // Proved here, by the asking below: it gives way to its thanks, drawn above the list, and the buttons come after it.
   // Proved in another box of the page, the page is drawn again with `proved` (the proof revalidates it), and the
   // asking here simply goes.
@@ -280,13 +286,13 @@ export function RememberedDevices({ devices, proved, canAsk, cantAsk, email }: {
 
   return (
     <div className="stack">
-      <p>{COPY.devicesLede}</p>
+      <p>{words.devicesLede}</p>
       <p className="help">{COPY.devicesNoNames}</p>
       {provedHere && <Said message={COPY.proved} />}
       {result && (result.ok
         ? <p ref={said} role="status" tabIndex={-1} className="paid-up"><Tick />{result.message}</p>
         : <div ref={said} tabIndex={-1}><Errors errors={result.errors} /></div>)}
-      {listed.length === 0 ? <p>{COPY.devicesNone}</p> : (
+      {listed.length === 0 ? <p>{words.devicesNone}</p> : (
         <>
           {!knowsThisOne && <p>{COPY.devicesWhichUnknown}</p>}
           <ul className="stack">
@@ -315,13 +321,13 @@ export function RememberedDevices({ devices, proved, canAsk, cantAsk, email }: {
           </ul>
         </>
       )}
-      {listed.some((d) => d.thisOne) && <p className="help">{COPY.forgetHere}</p>}
+      {listed.some((d) => d.thisOne) && <p className="help">{words.forgetHere}</p>}
       {canForget && others.length > 0 && listed.length > 1 && (
         <button type="button" className="btn btn-line" aria-disabled={busy !== null || undefined}
           onClick={() => void forget("others")}>{busy === "others" ? COPY.forgetBusy : knowsThisOne ? COPY.forgetOthers : COPY.forgetAll}</button>
       )}
       {!canForget && listed.length > 0 && (canAsk
-        ? <AskAgain email={email} proved={false} lede={COPY.askAgainForDevices}><WhenDrawn then={() => setProvedHere(true)} /></AskAgain>
+        ? <AskAgain email={email} proved={false} lede={words.askAgainForDevices}><WhenDrawn then={() => setProvedHere(true)} /></AskAgain>
         : <p>{cantAsk}</p>)}
     </div>
   );
