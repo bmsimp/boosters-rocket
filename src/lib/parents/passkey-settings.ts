@@ -15,7 +15,7 @@ import { writeAudit } from "@/lib/audit/log";
 import type { ParentCtx } from "@/lib/guards";
 import { currentPassword, sessionProvedRecently, sessionStrongAt } from "./asking-again";
 import { hasAuthenticator, makeBackupCodes, removeBackupCodes } from "./authenticator";
-import { namePasskey, passkeyCount, passkeyOfPerson, readPasskeyName, removePasskey } from "./passkeys";
+import { namePasskey, passkeyCount, passkeyOfPerson, passkeysAddedBefore, readPasskeyName, removePasskey } from "./passkeys";
 import { giveBackRateLimit, takeRateLimit, takeRateLimitPlace } from "./rate-limit";
 import { provedRecently } from "./reask-rule";
 import { enterableGuardianRows, lockedPerson, parentActor } from "./sessions";
@@ -37,6 +37,18 @@ export const isPasskeyId = (v: unknown): v is string => typeof v === "string" &&
 
 /** The parents' settings lock, shared, before the person's row, for a press that reads the club's level (as authenticator-settings.ts holds it). */
 const holdParentSettings = (tx: Tx) => tx.execute(sql`select pg_advisory_xact_lock_shared(hashtext(${PARENTS_KEY}))`);
+
+/**
+ * The person's row FOR UPDATE, as SI-6b's presses take it (heldPerson(), authenticator-settings.ts), for the add's record
+ * and a remove: each decides by the person's passkeys (their first, their last), so two presses of one person, in two
+ * tabs or on two devices, go one at a time, and neither decides counting a passkey the other is removing or adding.
+ * lockedPerson()'s FOR KEY SHARE would let them run side by side. Renaming decides nothing by them, and keeps
+ * lockedPerson(). Null when the person is gone.
+ */
+async function heldPerson(tx: Tx, parentId: string): Promise<{ email: string; blocked: boolean } | null> {
+  const [p] = await tx.select({ email: parent.email, blocked: parent.blocked }).from(parent).where(eq(parent.id, parentId)).for("update");
+  return p ?? null;
+}
 
 /**
  * Whether this session of this person may add a passkey now (decisions 1 and 2 of SI-7b): sign-ins on, the person
@@ -121,11 +133,15 @@ type AddRefusal = "not_a_registration" | "bad_name" | "not_allowed" | "not_verif
  * (d) the library's verification and insert in process (`verify`, verifyRegistration()), never asked for a session;
  *     the portal's afterVerification confirms the user was verified and the credential is held by no passkey already,
  *     before the insert;
- * (e) one transaction under the person's row (lockedPerson()): not blocked, the new row (by the id the library
- *     answered) still the person's, its name set (the typed one, or none), `parent.passkey.add` (the row's id, its
- *     name, and how many the person now has), and, for a first passkey of a person with no authenticator app in force,
- *     ten backup codes made (makeBackupCodes(), any older ones deleted), `parent.backup_codes.make`. If it fails, the
- *     row the library inserted is deleted (forgetUnrecordedPasskey()): no passkey stands that no audit row names.
+ * (e) one transaction under the person's row FOR UPDATE (heldPerson()): not blocked, the new row (by the id the
+ *     library answered) still the person's, its name set (the typed one, or none), `parent.passkey.add` (the row's id,
+ *     its name, and how many the person now has), and, for a first passkey (none of theirs added before it,
+ *     passkeysAddedBefore(), so two adds at once make one set of codes, never none) of a person with no authenticator
+ *     app in force, ten backup codes made (makeBackupCodes(), any older ones deleted), `parent.backup_codes.make`. If it
+ *     fails, the row the library inserted is deleted (forgetUnrecordedPasskey()). One gap stays: a process that stops
+ *     between the library's insert and this transaction's commit (a restart, say) leaves the row with no name, no audit
+ *     row and no backup codes. It works, and the person's settings list it as "Passkey added" with its date, where they
+ *     can remove it; nothing sweeps such rows yet.
  * Devices stay remembered, and no session is ended or made; `strong_at` is left as it is, so the new passkey, now the
  * person's newest factor, makes this session's earlier proof stop counting (sessionStrongAt()).
  */
@@ -152,12 +168,12 @@ export async function addMyPasskey(who: Adder | null, body: unknown, verify: Ver
   let recorded: { codes: string[] | null } | "gone";
   try {
     recorded = await db.transaction(async (tx) => {
-      const live = await lockedPerson(tx, who.parentId);
+      const live = await heldPerson(tx, who.parentId);
       if (!live || live.blocked) return "gone" as const;
       if (!(await passkeyOfPerson(tx, who.parentId, verified.passkeyId))) return "gone" as const;
       await namePasskey(tx, who.parentId, verified.passkeyId, name === "" ? null : name);
       const passkeys = await passkeyCount(who.parentId, tx);
-      const firstBesideNoApp = passkeys === 1 && !(await hasAuthenticator(who.parentId, tx));
+      const firstBesideNoApp = (await passkeysAddedBefore(tx, who.parentId, verified.passkeyId)) === 0 && !(await hasAuthenticator(who.parentId, tx));
       const liveActor = parentActor({ id: who.parentId, email: live.email });
       await writeAudit({ actor: liveActor, action: "parent.passkey.add", targetType: "parent", targetId: who.parentId,
         after: { passkeyId: verified.passkeyId, name: name === "" ? null : name, passkeys }, ip }, tx);
@@ -180,13 +196,14 @@ export async function addMyPasskey(who: Adder | null, body: unknown, verify: Ver
 /**
  * The row the library inserted for a passkey the portal couldn't record (its transaction failed, or the person was
  * blocked or gone by then), deleted in a transaction of its own under the person's row, audited `parent.passkey.remove`
- * with `reason: "not_recorded"`, so no passkey stands that no audit row names. Best effort: a failure here leaves the
- * row, which the person can remove from their settings, or a staff reset removes (SI-9).
+ * with `reason: "not_recorded"`. Best effort, and its answer says whether it went (false when it didn't): a failure
+ * here leaves the row, unnamed and named by no audit row, which the person's settings list as "Passkey added" and its
+ * date, where they can remove it, and which a staff reset removes (SI-9); the add answers the refusal either way.
  */
 export async function forgetUnrecordedPasskey(who: Adder, passkeyId: string, ip: string | null): Promise<boolean> {
   try {
     return await db.transaction(async (tx) => {
-      await lockedPerson(tx, who.parentId);
+      await heldPerson(tx, who.parentId);
       if (!(await removePasskey(tx, who.parentId, passkeyId))) return false;
       await writeAudit({ actor: parentActor({ id: who.parentId, email: who.email }), action: "parent.passkey.remove", targetType: "parent", targetId: who.parentId,
         after: { passkeyId, reason: "not_recorded", passkeys: await passkeyCount(who.parentId, tx) }, ip }, tx);
@@ -226,7 +243,8 @@ export async function renameMyPasskey(ctx: Me, id: unknown, rawName: unknown, no
 /**
  * Removing a passkey ("Remove", decision 4 of SI-7b; open questions 28 and 33): asked again. The id checked for its
  * shape, then the window (sessionProvedRecently()), then `signin_settings_parent`, then one transaction: the parents'
- * settings lock shared (the club's level is read), the person's row (lockedPerson(), not blocked), the window again
+ * settings lock shared (the club's level is read), the person's row FOR UPDATE (heldPerson(), not blocked: two
+ * removes of one person go one at a time, so neither passes Q33's check counting the other's passkey), the window again
  * under it, the passkey found only among the person's own; then, when it is their last passkey and they have no
  * authenticator app in force: under Strict refused, changing nothing, in words that it is their only second step and
  * to add another first (Q33); under Standard removed, with their backup codes, which stand beside nothing once it goes
@@ -240,7 +258,7 @@ export async function removeMyPasskey(ctx: Me, id: unknown, now?: Date): Promise
   if ((await takeRateLimit("signin_settings_parent", ctx.parentId, now)) !== "taken") return TOO_MANY_PRESSES;
   const done = await db.transaction(async (tx) => {
     await holdParentSettings(tx);
-    const live = await lockedPerson(tx, ctx.parentId);
+    const live = await heldPerson(tx, ctx.parentId);
     if (!live || live.blocked) return "not_proved" as const;
     if (!provedRecently(await sessionStrongAt(tx, ctx), now ?? new Date())) return "not_proved" as const;
     if (!(await passkeyOfPerson(tx, ctx.parentId, id))) return "gone" as const;

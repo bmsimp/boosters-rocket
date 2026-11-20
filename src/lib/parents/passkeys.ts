@@ -9,7 +9,7 @@
 // is the door's own check, `other_person` in passkey-signin.ts), and, in the door's own transaction, that the passkey that verified is still the person's, with its `last_used_at` set. Adding,
 // naming, listing and removing passkeys (slice SI-7b) are read and written here too, below. Server only.
 import "server-only";
-import { and, asc, count, eq, inArray, max } from "drizzle-orm";
+import { and, asc, count, eq, inArray, max, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { parentAuthPasskey, parentAuthUser } from "@/lib/db/schema";
 import { hasAuthenticator } from "./authenticator";
@@ -133,6 +133,18 @@ export async function passkeysOf(parentId: string, q: Reader = db): Promise<List
 /** How many passkeys the person has. */
 export async function passkeyCount(parentId: string, q: Reader = db): Promise<number> {
   const [row] = await q.select({ n: count() }).from(parentAuthPasskey).where(inArray(parentAuthPasskey.userId, usersOf(q, parentId)));
+  return Number(row?.n ?? 0);
+}
+
+/**
+ * How many of the person's other passkeys were added before this one (by `created_at`, then the row's id): none makes
+ * it their first (the add's backup codes, decision 2 of SI-7b). Read under the person's row FOR UPDATE, after the
+ * library's insert, so two adds whose inserts both land before either is recorded still find exactly one first.
+ */
+export async function passkeysAddedBefore(q: Reader, parentId: string, passkeyId: string): Promise<number> {
+  const [row] = await q.select({ n: count() }).from(parentAuthPasskey)
+    .where(and(inArray(parentAuthPasskey.userId, usersOf(q, parentId)),
+      sql`(${parentAuthPasskey.createdAt}, ${parentAuthPasskey.id}) < (SELECT p.created_at, p.id FROM parent_auth_passkey p WHERE p.id = ${passkeyId})`));
   return Number(row?.n ?? 0);
 }
 

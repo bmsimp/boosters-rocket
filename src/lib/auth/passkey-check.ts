@@ -84,7 +84,8 @@ export async function verifyAssertion(headers: Headers, response: Record<string,
  * user verification), calls `registration.afterVerification` (afterRegistrationVerified(), below) and only then inserts
  * the passkey's row, outside any transaction of the portal's, and answers it.
  */
-type RegistrationBox = { refused: RegistrationRefusal | null };
+/** What the add's scope learns from the library's callback: why it refused, and the credential id it verified. */
+type RegistrationBox = { refused: RegistrationRefusal | null; credentialId?: string };
 const registering = new AsyncLocalStorage<RegistrationBox>();
 
 /** Why a registration was refused, for the add's audit row only. */
@@ -96,7 +97,9 @@ export type RegistrationRefusal = "not_verified" | "already_added" | "challenge_
  * other way) it throws: no passkey is added but through the portal's /portal-passkey/add. Inside it, the portal's own
  * reads of what the library verified: the user verified (`registrationInfo.userVerified`, whatever the library asked),
  * and the credential id held by no passkey already, anyone's (the unique `parent_auth_passkey_credential_id_uq` would
- * refuse the insert too, as a failure of the library's own; this says why first).
+ * refuse the insert too, as a failure of the library's own; this says why first). The id it verified is kept in the
+ * scope, so an insert the unique index refuses (two adds of one credential at once, each past this check) is told
+ * apart from any other failure (verifyRegistration()).
  */
 export async function afterRegistrationVerified(o: { verification: { registrationInfo?: { userVerified?: boolean; credential?: { id?: string } } } }): Promise<void> {
   const box = registering.getStore();
@@ -105,6 +108,7 @@ export async function afterRegistrationVerified(o: { verification: { registratio
   if (info?.userVerified !== true) { box.refused = "not_verified"; throw new Error("not user-verified"); }
   const id = info.credential?.id;
   if (typeof id !== "string" || id.length === 0) { box.refused = "registration_failed"; throw new Error("no credential id"); }
+  box.credentialId = id;
   if (await credentialTaken(id)) { box.refused = "already_added"; throw new Error("already added"); }
 }
 
@@ -124,7 +128,11 @@ export async function verifyRegistration(headers: Headers, response: Record<stri
     });
   } catch (e) {
     if (box.refused) return { ok: false, reason: box.refused };
-    return { ok: false, reason: codeOf(e) === PASSKEY_ERROR_CODES.CHALLENGE_NOT_FOUND.code ? "challenge_used" : "registration_failed" };
+    if (codeOf(e) === PASSKEY_ERROR_CODES.CHALLENGE_NOT_FOUND.code) return { ok: false, reason: "challenge_used" };
+    // Verified and past the check above, but the insert failed: when the credential is held now, another add of it won
+    // (the unique index refused this one, which the library reports as its own failure).
+    if (box.credentialId && (await credentialTaken(box.credentialId))) return { ok: false, reason: "already_added" };
+    return { ok: false, reason: "registration_failed" };
   }
   const id = typeof answered === "object" && answered !== null ? (answered as { id?: unknown }).id : undefined;
   // A session in the answer would mean the guard had failed: never taken.

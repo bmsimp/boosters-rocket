@@ -34,7 +34,8 @@ import { afterPasskeyVerified, afterRegistrationVerified } from "./passkey-check
  * onRequest (parent-code-plugin.ts), which refuses them, with this list's own 404 and no challenge row made, unless the
  * request carries a live parent session that may add a passkey now (mayAddPasskey(), passkey-settings.ts), and with
  * any query at all (the library would take a `name` query as the passkey's user name). Of the library's own routes,
- * /list-sessions and /unlink-account run its fresh-session middleware too (freshAge 0 skips it), and both are here.
+ * /list-sessions and /unlink-account run its fresh-session middleware too, and /delete-user reads `freshAge` itself
+ * (deleteUser(), better-auth's update-user.mjs); freshAge 0 skips both checks, and all three are here.
  */
 export const PARENT_DISABLED_PATHS = [
   "/sign-in/social", "/sign-up/email", "/sign-in/email", "/reset-password", "/request-password-reset", "/verify-password",
