@@ -273,7 +273,9 @@ lead's yes: "ok add it to the spec".
 - Kept anywhere: a phone, a computer, a password manager or a security key.
 - On a computer the offer says "passkey", with Face ID, fingerprint, Windows Hello or a password manager as examples.
 - A passkey belongs to the portal's address: if a club changes it, parents fall back to password and second step and
-  add their passkeys again, and setup warns about that.
+  add their passkeys again, and setup warns about that. (As built in SI-7a, a parent whose only second step is a
+  passkey has no such fallback: the portal asks for the passkey and sends no emailed code, so they wait for an Admin's
+  reset, SI-9, which must be able to remove every parent's passkeys at once; the first-install runbook says so.)
 
 **What stays:** staff sign-in with Microsoft or Google (the second step is theirs), 90-day sessions, blocking, the
 family chooser.
@@ -475,7 +477,7 @@ sign-in is. The other twenty-eight stand as recommended unless he objects to one
 | Someone talks a staff member into resetting a guardian's sign-in; under Strict that is the way in. | *(Proposed:)* only an Admin resets, with a reason, audited; the set-up link goes only to the guardian's own sign-in address, with words saying to call the club; the runbook says to call back on a number the club holds (Open questions, 22). |
 | A parent is locked out: a lost phone under Strict, Strict switched on before they had a passkey, a stranger's wrong tries, or a breach check that can't be reached. | *(Proposed:)* backup codes, the count shown before switching, a password that leads to adding a passkey, a passkey that signs in whatever the wrong tries, a breach check that lets the password through when it can't be reached, and the staff reset (Open questions, 21, 22, 25, 27). |
 | A sign-in email changed to a stranger's address (by staff, or taken from QuickBooks), then a password reset, hands the sign-in over. | *(Proposed:)* the confirm-by-link step and the notice to the old address; a guardian with a passkey or app never gets the emailed code; under Strict a staff change needs the reset's permission and call-back (Open questions, 8, 9, 24, 36). |
-| A club changes its address, and every passkey stops working. | Parents fall back to password and second step and add passkeys again; setup warns about it (section 6). |
+| A club changes its address, and every passkey stops working. | Parents fall back to password and second step and add passkeys again; setup warns about it (section 6). A parent whose only second step is a passkey can't fall back, and waits for the staff reset (SI-9). |
 | A fake email copies the set-up or reset email, which carry a link, as the code email never has. | *(Proposed:)* the emails say the club never asks for a password by email or phone; a passkey can't be given away to a fake page. |
 
 ---

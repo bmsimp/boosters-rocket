@@ -456,6 +456,11 @@ The proof-of-concept host has no Documenso. Forms need a full installation from 
     [backups, "Checking a backup can be restored"](backups.md#checking-a-backup-can-be-restored) says. If you want it
     proven end to end, start a second Documenso against the restored database.
     **Pass:** each says `Restored ...`. **If not:** its message and exit code.
+19. **Settle the portal's address before parents are offered passkeys.** A passkey belongs to `APP_URL`'s host name:
+    once parents have added passkeys, changing the address stops every one, and locks out each parent whose only
+    second step is a passkey until an Admin resets their sign-in ([a first installation, part 3](first-install.md#3-fill-in-the-settings)).
+    **Pass:** the address in `deploy/.env` is the one the club will keep. **If not:** change it now, before any parent
+    has a passkey.
 
 The Documenso verification's own owner checks (its section 9, in `docs/superpowers/specs/2026-11-15-documenso-verification.md`)
 are here: its 1 and 2 (signing on an iPhone and on Android) and 4 (the phone's address on the certificate page) are
