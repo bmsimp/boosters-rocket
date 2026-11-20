@@ -202,7 +202,10 @@ The emails the worker sends the day before each volunteer shift, and 14 and 3 da
 - **"Needs attention"**, with "The latest sign-ins have no address: the proxy in front of the portal doesn't send the
   header ...". `CLIENT_IP_HEADER` in `deploy/.env` names a header your proxy doesn't set. Find the one it does set
   ([a proxy of your own](first-install.md#a-proxy-of-your-own)), put it in `.env`, and `docker compose up -d app`.
-  With this installation's own proxy it is `x-forwarded-for`.
+  With this installation's own proxy it is `x-forwarded-for`. Until it is mended, no limit per address works: the
+  sign-in limits that count by address are skipped, and the passkey check's challenge, which any visitor may ask for,
+  is held only by the worker, which deletes expired challenges at every wake, so they never pile up beyond about
+  five minutes' worth.
 - **"Needs attention"**, with "Welcome emails are waiting because mail is failing: ...". The last welcome email (or
   link to choose a password) the worker tried to send failed, so until one goes it tries one person a minute instead of
   five, and the people counted wait their turn. Mend the mail first: the [Outgoing mail](#outgoing-mail) line, and

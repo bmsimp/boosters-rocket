@@ -26,7 +26,9 @@ const files = (dir: string): string[] => readdirSync(path.resolve(dir), { recurs
 const NOT_AUDITED: Record<string, string> = {
   // Caches for the Health page: what an outside service last answered, or what a job last did.
   "src/lib/forms/settings.ts#patchStatus": "a cache: when Documenso last answered, failed or sent a webhook, for the Health page",
-  "src/lib/jobs/marks.ts#markJob": "a cache: when the volunteer reminders, the buy-out check and the welcome emails last ran, and their counts, for the Health page; what they send or change is audited",
+  "src/lib/jobs/marks.ts#markJob": "a cache: when the volunteer reminders, the buy-out check, the welcome emails and the sweep of expired passkey challenges last ran, and their counts, for the Health page; what they send or change is audited",
+  // The library's own rows past their life.
+  "src/lib/jobs/cleanup.ts#sweepExpiredChallenges": "Better Auth's parent verification rows past their expiry (the passkey library's challenges, slice SI-7a), swept at every wake so a flood of challenges can't outlive five minutes; the library's rows, not the club's, counted in the worker's mark, and the daily clean-up's delete of the same rows is audited (cleanup.run)",
   "src/lib/parents/breach-mark.ts#markBreachCheck": "a cache: when the password breach service last answered or failed, with a short code, for the Health page; each password chosen is audited (parent.password.set, with whether it was checked)",
   // Rows a page load makes so that something has an id: nothing is sent or signed.
   "src/lib/forms/my-forms.ts#loadMyForms": "a placeholder: the family's signature requests are made, not opened and with nothing sent, the first time its Forms page is read, so each has an id; the open that makes a document is audited (form.document.create)",

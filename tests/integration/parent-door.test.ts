@@ -409,11 +409,13 @@ describe("the parent door", () => {
     expect(o.emailAndPassword?.enabled).toBe(false);
     // In front of the database limits, an in-memory cap per IP on the door's five routes (on when NODE_ENV is production;
     // /portal-app/check since slice SI-6a and /portal-passkey/check since SI-7a, under the code check's own limit per IP,
-    // code_check_ip).
+    // code_check_ip), and on the passkey library's challenge, which writes a row for every visitor who asks (SI-7a's
+    // second read: the passkey check's own cap).
     // A minute of it allows what the database allows in 15, so it is never the first limit a full room meets.
     expect(o.rateLimit?.customRules).toEqual({
       "/portal-password/check": { window: 60, max: 180 }, "/portal-code/resend": { window: 60, max: 60 }, "/portal-code/check": { window: 60, max: 180 },
       "/portal-app/check": { window: 60, max: 180 }, "/portal-passkey/check": { window: 60, max: 180 },
+      "/passkey/generate-authenticate-options": { window: 60, max: 180 },
     });
     expect((o.rateLimit as { enabled?: boolean } | undefined)?.enabled).toBeUndefined(); // Better Auth's default: on only in production
   });

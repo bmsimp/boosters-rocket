@@ -5,10 +5,19 @@ import { clientIpFrom } from "@/lib/request";
 import { refuseCodeWithoutStep, sendSecondStepCode, verifySecondFactor, verifySigninCode, type SecondFactorProof } from "@/lib/parents/signin-codes";
 import { checkPasskeySignin } from "@/lib/parents/passkey-signin";
 import { checkPasswordSignin, MOST_TYPED_ADDRESS, MOST_TYPED_PASSWORD } from "@/lib/parents/password-signin";
+import { getParentSettings, parentDoorClosed } from "@/lib/parents/settings";
 import { MAX_RETURN_PATH } from "./return-path";
 import { finishParentSignin } from "./parent-signin-finish";
 import { clearPendingStep, pendingStepEnd, readDeviceToken, readPendingStep, setPendingStep, type PendingStep } from "./parent-signin-step";
 import { verifyAssertion } from "./passkey-check";
+
+/** The passkey library's challenge, the one library path the door leaves open that writes a row (parent-auth.ts). */
+export const PASSKEY_CHALLENGE_PATH = "/passkey/generate-authenticate-options";
+/**
+ * Better Auth's own answer for a path the portal turned off (its router's onRequest, for PARENT_DISABLED_PATHS): the
+ * challenge answers it while the parent door is closed, the same as the library's six other passkey paths always do.
+ */
+const notFound = () => new Response("Not Found", { status: 404 });
 
 type Ctx = { headers?: Headers; request?: Request };
 const ipOf = (ctx: Ctx) => { const h = ctx.headers ?? ctx.request?.headers; return h ? clientIpFrom(h) : null; };
@@ -47,6 +56,14 @@ async function finishSecondStep(ctx: GenericEndpointContext, step: PendingStep, 
  */
 export const parentCodePlugin = () => ({
   id: "booster-parent-code",
+  // The passkey library's challenge (slice SI-7a) writes a row of parent_auth_verification for every visitor who asks,
+  // so while the parent door is closed (parentDoorClosed(), sign-ins switched off) it is refused before the library
+  // runs, after Better Auth's in-memory cap (customRules, parent-auth.ts), with the answer a disabled path gives: no
+  // row, no cookie, and no answer of its own to say why. The door's own endpoints refuse with their one answer.
+  onRequest: async (request: Request, context: { baseURL: string }) => {
+    if (new URL(request.url).pathname !== `${new URL(context.baseURL).pathname}${PASSKEY_CHALLENGE_PATH}`) return;
+    if (parentDoorClosed(await getParentSettings())) return { response: notFound() };
+  },
   endpoints: {
     portalPasswordCheck: createAuthEndpoint("/portal-password/check", {
       // `next` is the page the parent asked for before signing in. It comes from the browser: it is only ever used

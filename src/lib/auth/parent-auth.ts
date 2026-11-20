@@ -3,7 +3,7 @@ import { passkey } from "@better-auth/passkey";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db } from "@/lib/db/client";
 import { recordSignout } from "./signin-audit";
-import { parentCodePlugin } from "./parent-code-plugin";
+import { PASSKEY_CHALLENGE_PATH, parentCodePlugin } from "./parent-code-plugin";
 import { PARENT_SESSION_SECONDS } from "@/lib/parents/sessions";
 import { RATE_LIMITS } from "@/lib/parents/rate-limit";
 import { parentAuthUser, parentAuthSession, parentAuthAccount, parentAuthVerification, parentAuthPasskey } from "@/lib/db/schema";
@@ -18,7 +18,9 @@ import { afterPasskeyVerified } from "./passkey-check";
  * /get-session, /sign-out, the portal's own door (/portal-password/check, /portal-code/resend, /portal-code/check,
  * /portal-app/check and, since the sign-in release's slice SI-7a, /portal-passkey/check), the passkey library's
  * challenge (/passkey/generate-authenticate-options: it takes no query and no body, and lists in `allowCredentials` only
- * the passkeys of the session the request carries, if any), /ok, /error, and two routes with a path parameter
+ * the passkeys of the session the request carries, if any; it writes a row of parent_auth_verification, so it has a cap
+ * of its own below, answers as a disabled path while sign-ins are off (parent-code-plugin.ts) and its expired rows are
+ * swept at every wake of the worker), /ok, /error, and two routes with a path parameter
  * that can't be listed and can't act here: /callback/:id has no provider to call back to, and /reset-password/:token
  * only redirects with a reset row of Better Auth's own verification table, which the portal never writes (since the
  * sign-in release's slice SI-2 a person may have a password, but it is set and reset by the portal's own links,
@@ -101,6 +103,11 @@ function buildParentAuth() {
       "/portal-code/check": { window: 60, max: RATE_LIMITS.code_check_ip.max },
       "/portal-app/check": { window: 60, max: RATE_LIMITS.code_check_ip.max },
       "/portal-passkey/check": { window: 60, max: RATE_LIMITS.code_check_ip.max },
+      // The passkey library's challenge, which every visitor may ask for and which writes a row of
+      // parent_auth_verification each time, is held to the passkey check's own cap (slice SI-7a). With no client
+      // address (CLIENT_IP_HEADER none) no cap per address can work: the worker's sweep of expired challenges at every
+      // wake (sweepExpiredChallenges(), src/lib/jobs/cleanup.ts) bounds the table to about five minutes of requests.
+      [PASSKEY_CHALLENGE_PATH]: { window: 60, max: RATE_LIMITS.code_check_ip.max },
     } },
     account: { accountLinking: { enabled: false } },
     // The visitor's address comes from the portal's one reading of it (client-address.ts), not from a header named here.

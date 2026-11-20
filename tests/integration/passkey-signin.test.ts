@@ -6,13 +6,13 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, parent, parentAuthAccount, parentAuthPasskey, parentAuthSession, rateLimitEvent, signinCode } from "@/lib/db/schema";
+import { auditLog, parent, parentAuthAccount, parentAuthPasskey, parentAuthSession, parentAuthVerification, rateLimitEvent, signinCode } from "@/lib/db/schema";
 import { signinStands } from "@/lib/parents/signin-codes";
 import { checkPasskeySignin } from "@/lib/parents/passkey-signin";
 import { signOutEverywhere } from "@/lib/parents/signin-settings";
 import { resetDb, seedParent, seedGuardianInFamily, seedWorkingMail } from "../helpers/db";
 import { SIGNINS_ON, seedParentSettings } from "../helpers/roster-cache";
-import { DOOR_IP, DOOR_PASSWORD, appStep, codeStep, cookieNamed, passwordStep, postDoor, stepPersonFor } from "../helpers/parent-door";
+import { DOOR_IP, DOOR_PASSWORD, appStep, codeStep, cookieNamed, getDoor, passwordStep, postDoor, stepPersonFor } from "../helpers/parent-door";
 import { deviceRows, seedCode, seedDevice, seedPassword } from "../helpers/signin-links";
 import { appCode, seedAuthenticator, seedBackupCodes, wrongAppCode } from "../helpers/authenticator";
 import { ORIGIN, RP_ID, passkeyOptions, passkeyRows, passkeyStep, postPasskey, seedPasskey } from "../helpers/passkey";
@@ -221,8 +221,12 @@ describe("one person's passkey, and one answer for everything else", () => {
     await db.update(parent).set({ blocked: true }).where(eq(parent.id, ana.id));
     expect((await passkeyStep(ana.key!)).body).toEqual(REFUSED);
     await db.update(parent).set({ blocked: false }).where(eq(parent.id, ana.id));
+    // Sign-ins switched off between the challenge and the passkey (while they are off, the challenge itself is refused:
+    // below): the check refuses it.
+    const asked = await passkeyOptions();
     await seedParentSettings({ signin: false });
-    expect((await passkeyStep(ana.key!, { counter: 2 })).body).toEqual(REFUSED);
+    const offAssertion = assertionFor(ana.key!, asked.body.challenge, { origin: ORIGIN, rpId: RP_ID, counter: 2 });
+    expect((await postPasskey(offAssertion, { cookie: asked.challengeCookie })).body).toEqual(REFUSED);
     await seedParentSettings(SIGNINS_ON);
     const dan = await seedParent({ name: "Dan", email: "dan@example.com" });
     const danKey = await seedPasskey(dan.id);
@@ -390,6 +394,22 @@ describe("the challenge (generate-authenticate-options)", () => {
     }
     expect(Object.keys(asked.body).sort()).toEqual(Object.keys(plain.body).sort());
     expect(asked.body.challenge).not.toBe(plain.body.challenge);
+  });
+
+  it("while sign-ins are off, answers as a disabled path does, writing no row and setting no cookie", async () => {
+    await seedHolder("Ana");
+    await seedParentSettings({ signin: false });
+    const off = await getDoor("/passkey/generate-authenticate-options");
+    const disabled = await getDoor("/passkey/generate-register-options");
+    expect([off.status, await off.text()]).toEqual([disabled.status, await disabled.text()]);
+    expect(off.status).toBe(404);
+    expect(off.headers.getSetCookie()).toEqual([]);
+    expect(await db.select().from(parentAuthVerification)).toEqual([]);
+    // Switched on again, it answers and writes its one row.
+    await seedParentSettings(SIGNINS_ON);
+    const on = await passkeyOptions();
+    expect(on.res.status).toBe(200);
+    expect(await db.select().from(parentAuthVerification)).toHaveLength(1);
   });
 
   it("with a session, lists that session's own person's passkeys alone", async () => {

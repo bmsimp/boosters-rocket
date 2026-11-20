@@ -2,9 +2,8 @@ import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { parentAuthPasskey, parentAuthUser } from "@/lib/db/schema";
-import { getParentAuth } from "@/lib/auth/parent-auth";
 import { env } from "@/env";
-import { DOOR_IP, cookieNamed, postDoor, type DoorBody } from "./parent-door";
+import { cookieNamed, getDoor, postDoor, type DoorBody } from "./parent-door";
 import { assertionFor, makePasskeyKey, type AssertionJSON, type PasskeyKey } from "./passkey-keys";
 
 /**
@@ -42,10 +41,7 @@ export const passkeyRows = async (parentId: string) => {
  * Cookie header the browser sends: the options' answer and the signed challenge cookie it set (`name=value`).
  */
 export async function passkeyOptions(o: { cookie?: string; query?: string } = {}) {
-  const auth = await getParentAuth();
-  const res = await auth.handler(new Request(`${env.APP_URL}/api/auth/parent/passkey/generate-authenticate-options${o.query ?? ""}`, {
-    method: "GET", headers: { origin: env.APP_URL, "cf-connecting-ip": DOOR_IP, ...(o.cookie ? { cookie: o.cookie } : {}) },
-  }));
+  const res = await getDoor(`/passkey/generate-authenticate-options${o.query ?? ""}`, { cookie: o.cookie });
   const body = (await res.json()) as { challenge: string; rpId?: string; allowCredentials?: { id: string }[]; userVerification?: string };
   return { res, body, challengeCookie: cookieNamed(res, "better-auth-passkey") };
 }

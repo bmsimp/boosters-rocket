@@ -225,3 +225,20 @@ export async function runCleanup(now: Date = new Date()): Promise<{ ok: boolean;
     return { ok: false, counts: null };
   }
 }
+
+/** The job name of the sweep below, in a wake's answer, and the key of its mark (./marks.ts). */
+export const CHALLENGE_SWEEP_JOB = "parents.challenges_swept";
+
+/**
+ * Better Auth's parent verification rows past their expiry, at every wake of the worker, beside the daily clean-up's
+ * delete of the same rows (the sign-in release, slice SI-7a). The passkey library's challenge, which any visitor may ask
+ * for (/passkey/generate-authenticate-options), writes one for each ask, living 300 seconds; with no client address
+ * (CLIENT_IP_HEADER none) no cap per address can hold it, so this sweep is what bounds the table, to about five minutes
+ * of requests and one wake. Strictly past expiry, as cleanUp() deletes them: a row whose time is now or later stays.
+ * One delete, counted by the database and returning no row. The rows are the library's, not the club's: nothing of
+ * them is audited (the daily clean-up's count of them still is). `now` is the real time outside a test.
+ */
+export async function sweepExpiredChallenges(now: Date = new Date()): Promise<number> {
+  const r = await db.delete(parentAuthVerification).where(lt(parentAuthVerification.expiresAt, now));
+  return r.count;
+}
