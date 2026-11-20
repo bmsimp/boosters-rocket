@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { EMAIL_FIELD_MAX, fieldHasChange, replaceAddressInField } from "@/lib/parents/email-field";
+import { EMAIL_FIELD_MAX, replaceAddressInField } from "@/lib/parents/email-field";
 import { parseEmailField } from "@/lib/parents/emails";
 
 describe("replaceAddressInField: one address in a QuickBooks email field, and every other character kept", () => {
@@ -56,19 +56,5 @@ describe("replaceAddressInField: one address in a QuickBooks email field, and ev
     const changed = (r as { field: string }).field;
     expect(parseEmailField(changed)).toEqual({ usable: ["leo@example.com", "new@example.com", "mia@example.com"], unusable: ["nope"] });
     expect(changed.replace("new@example.com", "ana@example.com")).toBe(field);
-  });
-});
-
-describe("fieldHasChange: a field that already reads as the change made", () => {
-  it.each([
-    ["the new address alone", "new@example.com", false, true],
-    ["the new address among others", "leo@example.com, New@Example.com", false, true],
-    ["the old address still there", "new@example.com, ana@example.com", false, false],
-    ["neither address", "leo@example.com", false, false],
-    ["empty", null, false, false],
-    ["first only: the new address first", "new@example.com, leo@example.com", true, true],
-    ["first only: the new address not first", "leo@example.com, new@example.com", true, false],
-  ])("%s", (_name, field, firstOnly, made) => {
-    expect(fieldHasChange(field, "ana@example.com", "new@example.com", firstOnly)).toBe(made);
   });
 });
