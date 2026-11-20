@@ -11,7 +11,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, family, guardian, parent, qboConnection, qboCustomerType, setting, student, writeQueue } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, guardian, jobRun, parent, qboConnection, qboCustomerType, setting, student, writeQueue } from "@/lib/db/schema";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { filterLinkRows, loadAccountingLinks, type LinkRow, type LinksView } from "@/lib/accounting/mapping";
 import { parseLinksFilter } from "@/lib/accounting/status";
@@ -472,7 +472,7 @@ describe("the page", () => {
     let html = list(await renderPage(AccountingLinksPage, { searchParams: { status: "suggested" } }));
     expect(tableRows(html).map((r) => r[0])).toEqual(["The Patels"]);
     expect(html).toContain("1 family of 3 shown");
-    expect(html).toContain('<option value="">Every status (3)</option>');
+    expect(html).toContain('<option value="" selected="">Every status (3)</option>'); // no status asked for: React marks the empty option
     expect(html).toContain('<option value="carried_over">Carried over (2)</option>');
     expect(html).toContain('<option value="suggested" selected="">Suggested (1)</option>');
     expect(html).toContain('<option value="not_checked">Not checked (0)</option>');
@@ -689,7 +689,7 @@ describe("differences, for a link that stands (slice M2)", () => {
     await asAdmin();
     const whole = await renderPage(AccountingLinksPage);
     const html = list(whole);
-    expect(html).toContain('<option value="">Every status (3)</option>');
+    expect(html).toContain('<option value="" selected="">Every status (3)</option>'); // no status asked for: React marks the empty option
     expect(html).toContain('<option value="carried_over">Carried over (2)</option>');
     expect(html).toContain('<option value="linked">Linked (0)</option>');
     expect(html).toContain('<option value="with_differences">Linked, with differences (2)</option>');
@@ -727,6 +727,42 @@ describe("differences, for a link that stands (slice M2)", () => {
     // No button but the filter's own, and nothing of money.
     expect(html.split("<button").length - 1).toBe(1);
     expect(html).not.toContain("invoices");
+  });
+
+  it("says a stuck item, one QuickBooks took that the portal has to finish, a waiting student's create and a kept guardian's create each in the queue's words", async () => {
+    tag = await connectRoster(stub);
+    await seedAnaRivera();
+    const rivera = await recordOfCustomer("10", "family");
+    // A rename saved in the portal first, stuck.
+    await db.update(family).set({ name: "Riveras" }).where(eq(family.id, rivera));
+    await seedQueued({ op: "rename", role: "family", qboId: "10", syncToken: "0", name: "Riveras", was: "Rivera Family" }, { state: "stuck" });
+    // The Chens made inactive: QuickBooks took it, and the portal has yet to finish it on its side.
+    changeInBooks("20", { Active: false });
+    await readAgain();
+    await seedQueued({ op: "deactivate", role: "family", qboId: "20", syncToken: "0" }, { sent: true, code: "cache_failed" });
+    // A student added to the Riveras, their create waiting, filed under their record.
+    const [ivy] = await db.insert(student).values({ familyId: rivera, name: "Ivy Rivera", active: true }).returning({ id: student.id });
+    const create = await seedQueued({ op: "create", role: "student", name: "Ivy Rivera", typeQboId: "3", familyQboId: "10", email: null });
+    await db.update(writeQueue).set({ studentId: ivy!.id }).where(eq(writeQueue.id, create.id));
+    // A guardian's Parent customer QuickBooks refused, kept.
+    const sol = await guardianIn(rivera, "Sol Rivera", "sol@example.com");
+    await seedQueued({ op: "create", role: "parent", name: "Sol Rivera", typeQboId: "2", familyQboId: "10", email: "sol@example.com", guardianId: sol }, { state: "refused", code: "fault_6240" });
+    const view = await loadAccountingLinks();
+    const kept = "QuickBooks refused it: that name is already used in QuickBooks (by another customer, a vendor or an employee), and every name there must be different.";
+    const riveras = rowOf(view, "Riveras").differences;
+    expect(riveras).toContainEqual({ kind: "name", of: "family", portal: "Riveras", books: "Rivera Family", queue: { state: "stuck", words: "Stuck: it needs someone to look at it" } });
+    expect(riveras).toContainEqual({ kind: "student_unlinked", who: "Ivy Rivera", studentId: ivy!.id, queue: { state: "waiting", words: "Waiting to reach QuickBooks" } });
+    expect(riveras).toContainEqual({ kind: "guardians_unlinked", count: 1, queue: [{ note: { state: "refused", words: kept }, count: 1 }] });
+    expect(rowOf(view, "Chen Family").differences).toContainEqual({ kind: "active", of: "family", who: "Chen Family", portalActive: true,
+      queue: { state: "waiting", words: "Done in QuickBooks: the portal finishes it on its side after its next read of QuickBooks" } });
+    await asAdmin();
+    const html = list(await renderPage(AccountingLinksPage));
+    expect(rowNamed(html, "Riveras")![4]).toContain("Stuck: it needs someone to look at it. See the change on Reconciliation");
+    expect(rowNamed(html, "Riveras")![4]).toContain(`For 1 of them: ${kept} See the change on Reconciliation`);
+    expect(rowNamed(html, "Chen Family")![4]).toContain("Done in QuickBooks: the portal finishes it on its side after its next read of QuickBooks. See the change on Reconciliation");
+    // With no successful read of the books on record, the page says so rather than a time.
+    await db.delete(jobRun);
+    expect(await renderPage(AccountingLinksPage)).toContain("against its copy of the books, though it hasn&#x27;t read the books yet.");
   });
 
   it("none for a family with no link, a Not a family now row or a Customer gone row, and an inactive family record isn't listed", async () => {
@@ -775,7 +811,8 @@ describe("differences, for a link that stands (slice M2)", () => {
     const audits = (await db.select().from(auditLog)).length;
     const queue = await db.select().from(writeQueue);
     const whole = await renderPage(AccountingLinksPage);
-    const html = withoutIds(list(whole));
+    // Read as drawn: withoutIds() would put "<id>" in the family link's href, of which a cell's text would keep a piece.
+    const html = list(whole);
     expect(html).not.toContain("<b>Bold</b>");
     expect(html).toContain("In the books: “&lt;b&gt;Bold&lt;/b&gt; Rivera”.");
     expect(html).toContain("<details class=\"more\"><summary>Students, guardians and differences<span class=\"visually-hidden\">: Rivera Family</span></summary>");
