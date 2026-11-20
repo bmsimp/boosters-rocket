@@ -179,6 +179,30 @@ export function passwordResetMessage(b: Brand, to: string, o: { link: string; li
 }
 
 /**
+ * The mail of an Admin's reset of a parent's sign-in (the sign-in release, slice SI-9a; open question 22 of the
+ * app-owned families spec; resetSignin(), src/lib/parents/signin-reset.ts), to the sign-in address being reset, read
+ * under the person's lock: that their sign-in was reset and everything they signed in with no longer works, a new
+ * set-up link on a line of its own with its life in words, what to do next, and, since this mailbox may be the very
+ * one a caller holds, to contact the club straight away if they didn't ask (with the club's address, `contact`, when it
+ * has one: the reader is signed out everywhere and can't look it up in the portal). It names no family, student or
+ * other person, and no Admin: the reader is told to contact the club, not whom. Standard's words; under Strict a later
+ * slice (SI-10) says what the link leads to first.
+ */
+export function signinResetMessage(b: Brand, to: string, o: { link: string; life: string; contact: string | null }): MailMessage {
+  const lines: Line[] = [
+    `Someone at ${b.clubName} reset how you sign in to the portal with this email address. Your password, passkeys, authenticator app and backup codes no longer work, and every phone and computer that was signed in has been signed out.`,
+    "To choose a new password, open this link:",
+    { link: o.link },
+    `The link works once, for ${o.life}. Once you've chosen your password, you can add a passkey or an authenticator app again under Sign-in settings.`,
+    "If you asked the club for this, that's all there is to do.",
+    "If you didn't ask the club for this, please contact the club straight away: someone may be trying to get into your account.",
+    ...(o.contact ? [`You can write to the club at ${o.contact}.`] : []),
+    NEVER_ASKS(b),
+  ];
+  return { to, subject: `Your ${b.clubName} sign-in was reset`, text: text(lines), html: html(b, lines) };
+}
+
+/**
  * The notice after a parent changed their password in sign-in settings (the sign-in release, slice SI-5a;
  * changeMyPassword(), src/lib/parents/signin-settings.ts), to the address read under their lock: that it was changed
  * and every device signed out, what to do if it wasn't them (set a new one from "Set up or reset my password" at
