@@ -96,10 +96,10 @@ test("the grouped menu works with the keyboard alone: a group is a button, Escap
   await page.keyboard.press("Escape");
   await expect(families).toHaveAttribute("aria-expanded", "false");
   await expect(families).toBeFocused();
-  // Space opens it too, and tabbing on past its last link closes it.
+  // Space opens it too, and tabbing on past its last link closes it: one Tab per link of the group, and one more.
   await page.keyboard.press("Space");
   await expect(families).toHaveAttribute("aria-expanded", "true");
-  await page.keyboard.press("Tab"); await page.keyboard.press("Tab"); await page.keyboard.press("Tab");
+  for (let i = 0; i <= GROUPS.Families!.length; i++) await page.keyboard.press("Tab");
   await expect(group(page, "Season")).toBeFocused();
   await expect(families).toHaveAttribute("aria-expanded", "false");
   // Hovering opens nothing.
