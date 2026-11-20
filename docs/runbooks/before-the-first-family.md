@@ -469,8 +469,16 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    linked to (or on a parent record under it), and otherwise **Several possible** or **No match**. Don't press
    **Create a family from this** or **Create in QuickBooks and link** for a family that reads Suggested or Several
    possible: either makes a second family or customer, and nothing links the two yet; and the
-   count of customers with no family matches Reconciliation's list. **If not:** note the family, the status it read and
-   what you expected; a suggestion that names the wrong customer is the most important to report.
+   count of customers with no family matches Reconciliation's list. A linked family whose records differ from the
+   books' copy reads **Linked, with differences** instead, still saying how its link was made, and its row's opening
+   lists each difference with the portal's value and the books': a family you brought in has the Parent customers
+   QuickBooks holds under it counted until its guardians are linked to them; rename a student in QuickBooks, refresh
+   the roster, and that family shows both names; a student moved to another family in QuickBooks shows where
+   QuickBooks has them, in the words the family's page uses; a change waiting or kept on Reconciliation is named in
+   Reconciliation's words with a link there. Under the status filter, Carried over and Linked, with differences can
+   count the same family, and the page says so. **If not:** note the family, the status it read and
+   what you expected; a suggestion that names the wrong customer is the most important to report, then a difference
+   that isn't one (both values the same) or one the page misses.
 
 ## 7. A pilot with a few families
 
