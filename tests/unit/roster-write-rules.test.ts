@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { NOT_HERE, offers, shapeOperations, typeForNew, type RosterOperation } from "@/lib/roster/operations";
 import { checkName, freeName, NAME_MAX } from "@/lib/roster/names";
-import { afterFailedTry, beforeResend, classify, MAX_TRIES, type CachedCustomer } from "@/lib/roster/write-rules";
+import { afterFailedTry, beforeResend, classify, emailStands, MAX_TRIES, type CachedCustomer } from "@/lib/roster/write-rules";
 import type { MembershipShape } from "@/lib/roster/shape";
 
 const FULL: MembershipShape = { kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: "2" };
@@ -138,5 +138,28 @@ describe("the write queue's rules (v1 spec §4, §8.4)", () => {
     const off = { op: "deactivate" as const, role: "family" as const, qboId: "10", syncToken: "4" };
     expect(beforeResend(off, [c({ qboId: "10", active: false, syncToken: "5" })])).toEqual({ is: "done", qboId: "10" });
     expect(beforeResend(off, [c({ qboId: "10", active: true, syncToken: "6" })])).toEqual({ is: "stuck", code: "moved_on" });
+  });
+});
+
+describe("how an email field stands against a change of sign-in email (stage 3's slice S11e)", () => {
+  const own = { role: "parent" as const, from: "old@x.example", to: "new@x.example" };
+  const fam = { role: "family" as const, from: "old@x.example", to: "new@x.example" };
+  it("by the record's rule: the first address of a person's own record, any of a family's", () => {
+    expect(emailStands("old@x.example, g@x.example", own)).toEqual({ is: "sendable", held: "old@x.example" });
+    expect(emailStands("g@x.example, old@x.example", own)).toEqual({ is: "differs" });
+    expect(emailStands("g@x.example; old@x.example", fam)).toEqual({ is: "sendable", held: "old@x.example" });
+    expect(emailStands("new@x.example", own)).toEqual({ is: "in_place" });
+    expect(emailStands("old@x.example, new@x.example", own)).toEqual({ is: "sendable", held: "old@x.example" });
+  });
+  it("the new address in the field and none it replaces anywhere: nothing left to replace, so in place", () => {
+    expect(emailStands("g@x.example, new@x.example", own)).toEqual({ is: "in_place" });
+    expect(emailStands("g@x.example", own)).toEqual({ is: "differs" });
+  });
+  it("an address another person signs in with now is never one it replaces", () => {
+    const taken = new Set(["old@x.example"]);
+    expect(emailStands("old@x.example", fam, taken)).toEqual({ is: "differs" });
+    expect(emailStands("old@x.example, new@x.example", fam, taken)).toEqual({ is: "in_place" });
+    expect(emailStands("old@x.example", { ...fam, orFrom: ["mid@x.example"] }, taken)).toEqual({ is: "differs" });
+    expect(emailStands("mid@x.example; old@x.example", { ...fam, orFrom: ["mid@x.example"] }, taken)).toEqual({ is: "sendable", held: "mid@x.example" });
   });
 });

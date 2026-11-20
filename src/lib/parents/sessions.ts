@@ -64,8 +64,15 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * - confirmMyEmailChange() (email-change.ts) takes both address locks and the row FOR UPDATE, spends its request,
  *   reads under the row that the person isn't blocked and its own session still exists (stopping with the address
  *   unchanged otherwise), and changes the address, then deletes the person's other requests, then their unused codes,
- *   then their unused links, then their devices, then their sessions; it takes no roster lock and touches no app
- *   records or roster cache (since stage 3's slice 11d);
+ *   then their unused links, then their devices, then their sessions; then, since stage 3's slice S11e, it queues the
+ *   new address for each record of theirs in QuickBooks (queueEmailChange(), contact-queue.ts): the record's open email
+ *   items FOR UPDATE SKIP LOCKED (never waited for), then it closes those it may and inserts its own items (a key share
+ *   on each membership's family row, by the foreign key); it takes no roster lock and no "being sent" lock and waits for
+ *   neither, and touches no app records or roster cache (since stage 3's slice 11d). That key share can wait, briefly,
+ *   for a staff write holding the family's row FOR UPDATE (after the roster lock: a rename, an add, the family action,
+ *   changeOwnRecord() and the like), so the confirm may wait behind such a write: safe while no writer takes a person's
+ *   row, their sessions, codes or links, or their email items, after taking a family's row FOR UPDATE. A new writer
+ *   that would must take the person's row first;
  * - requestMyEmailChange() takes the row FOR UPDATE, then replaces the person's unused request;
  * - blockPerson() (people.ts) takes the row FOR UPDATE, then deletes the unused requests, then the codes, then the
  *   unused links, then the devices, then the sessions; renamePerson() (people.ts) takes the row FOR UPDATE, then the

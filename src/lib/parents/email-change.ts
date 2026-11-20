@@ -21,6 +21,7 @@ import { emailChangeConfirmMessage, emailChangeNoticeMessage } from "@/lib/mail/
 import { takeRateLimit } from "./rate-limit";
 import { deleteUnusedSigninCodes, deleteUnusedSigninLinks, endParentSessions, enterableGuardianRows, forgetDevices, lockEmail, parentActor } from "./sessions";
 import { getParentSettings } from "./settings";
+import { queueEmailChange } from "./contact-queue";
 
 /** How long the link mailed to the new address works. */
 export const EMAIL_CHANGE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -253,8 +254,10 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown): Prom
     const devicesForgotten = await forgetDevices(ctx.parentId, tx);
     // Every session was proved with the old address: the person signs in again, with the new one.
     const sessionsEnded = await endParentSessions(ctx.parentId, tx);
+    // Stage 3's slice S11e: the new address is sent on to each record of the person's in QuickBooks, by the worker.
+    const queueIds = await queueEmailChange(tx, ctx.parentId, { from: oldEmail, to: newEmail }, { actor, ip: ctx.ip });
     await writeAudit({ actor, action: "parent.email.save", targetType: "parent", targetId: ctx.parentId, before: { email: oldEmail },
-      after: { email: newEmail, familyId: String(ctx.familyId), sessionsEnded, linksDeleted, devicesForgotten }, ip: ctx.ip }, tx);
+      after: { email: newEmail, familyId: String(ctx.familyId), sessionsEnded, linksDeleted, devicesForgotten, queueIds }, ip: ctx.ip }, tx);
     return "changed";
   });
 

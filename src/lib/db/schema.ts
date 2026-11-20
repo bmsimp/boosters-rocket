@@ -563,7 +563,22 @@ export type RosterWrite =
    * Only `Id`, `SyncToken` and the fields of `change` are sent.
    */
   | { op: "contact"; role: "parent" | "family" | "member"; qboId: string; syncToken: string; change: ContactDetails; was: ContactDetails; orWas?: ContactDetails[];
-      checked?: true; guardianId?: string };
+      checked?: true; guardianId?: string }
+  /**
+   * A guardian's sign-in email, changed in the portal first by the parent's confirmed change (stage 3's slice S11e,
+   * queued in the confirm's own transaction by src/lib/parents/contact-queue.ts) and sent on by the queue's worker with
+   * today's body (EMAIL_UPDATE, the whole field): `role` `parent` for the own Parent customer of the membership
+   * `guardianId` names; `family` or `member` for the family's own linked customer, in books with no parent type, where
+   * `guardianId` still names the membership whose person's address it is (so two guardians' changes of one family's
+   * field are never taken for one). `from` is the person's sign-in address before the change, `to` after it (both
+   * trimmed and lower-cased); `orFrom`, the `to` of each earlier change of the same record and membership that may have
+   * been sent (and what each of those accepted so), any of which QuickBooks may hold instead of `from`. The field sent
+   * is made at each try from the field as read live, never stored: `from` (or an `orFrom` address) replaced by `to`,
+   * every other address left exactly as it was. `syncToken` is the link's own version (empty when it has none);
+   * `checked`, that it was sent with a version read live after the field read as `from` or `orFrom`. Only `Id`,
+   * `SyncToken` and the field are sent.
+   */
+  | { op: "email"; role: "parent" | "family" | "member"; qboId: string; syncToken: string; from: string; to: string; orFrom?: string[]; checked?: true; guardianId?: string };
 /** A phone and a mailing address as a contact item carries them (RosterWrite `contact`): each part a field of the portal's form. */
 export type ContactDetails = { phone?: string; address?: { line1: string; line2: string; city: string; region: string; postalCode: string; country: string } };
 /**
