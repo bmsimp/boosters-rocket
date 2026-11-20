@@ -71,13 +71,13 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   unused links, then the devices, then the sessions; renamePerson() (people.ts) takes the row FOR UPDATE, then the
  *   roster lock shared (at most three seconds, as the guardian writes below), and touches nothing that hangs on it;
  * - the staff writes of guardians.ts take the parents' settings lock shared first (setSignins() and setWelcome() take
- *   it before the people they touch), then the person's locks, and only then the roster lock shared, as the email
- *   confirm takes the roster after the person's locks: a write that held the roster lock while it waited for a person
- *   the confirm holds, as the confirm asked for the roster, would be a deadlock, which Postgres ends by aborting one of
- *   them (its check runs after a second, before the confirm's three-second wait is up). No roster read waits for a
- *   person's row, so waiting for the roster while holding one is safe against it; the change-of-company clear, which
- *   holds the roster as it takes everyone's rows, could meet these writes and the confirm alike, though nothing the
- *   portal runs reaches it until stage 4. So addGuardian() takes the address lock, then the row FOR UPDATE, then the
+ *   it before the people they touch), then the person's locks, and only then the roster lock shared, as renamePerson()
+ *   and each other guardian write take the roster after the person's locks: a write that held the roster lock while it
+ *   waited for a person another of them holds, as that one asked for the roster, would be a deadlock, which Postgres
+ *   ends by aborting one of them. (The email confirm took the roster after the person too until stage 3's slice 11d;
+ *   it takes no roster lock now.) No roster read waits for a person's row, so waiting for the roster while holding one
+ *   is safe against it; the change-of-company clear, which holds the roster as it takes everyone's rows, could meet
+ *   these writes, though nothing the portal runs reaches it until stage 4. So addGuardian() takes the address lock, then the row FOR UPDATE, then the
  *   roster lock, then makes the person if there is none, then takes their guardian row in the family FOR UPDATE;
  *   removeGuardian() and reinstateGuardian() take the row FOR UPDATE (no address lock: the address isn't changed or
  *   claimed), then the roster lock, then the guardian row FOR UPDATE, and removeGuardian() then deletes the person's
@@ -86,7 +86,7 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   Parent customer change in that transaction, after the roster lock, and sends nothing in it: every send is after the
  *   commit, holding only the guardian row's "being sent" advisory lock, taken before the transaction and only ever
  *   tried, never waited for. Each waits for the
- *   roster lock at most three seconds, as the confirm does, and gives up changing nothing: a roster read holds it
+ *   roster lock at most three seconds, as renamePerson() does, and gives up changing nothing: a roster read holds it
  *   through its whole QuickBooks read, and the person's row must not be held that long, since a code request waits for
  *   it (FOR KEY SHARE, below);
  * - saveDetails() (contact-edits.ts, a parent's save of their phone and mailing address, stage 3's slice 11b) takes the
