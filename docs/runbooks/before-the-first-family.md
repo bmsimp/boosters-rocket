@@ -478,9 +478,13 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    type, so is each guardian whose own Parent customer isn't linked yet (Confirm never links a guardian's), which is
    every confirmed Suggested family there. Its money is read at its next page load. A Several possible or No match family takes **Pick a different customer**, from the customers no family
    is linked to, with the same confirm step; **Leave unlinked** keeps a family with no customer in the books yet out
-   of the suggestions until you undo it. Don't press **Create a family from this** for a customer Accounting links
-   suggests or lists for a family the portal has (it would make a second family), nor **Create in QuickBooks and
-   link** for a family whose customer is already in the books (it would make a second customer); and the
+   of the suggestions until you undo it. With several Suggested rows, **Confirm all exact email matches** above the list
+   links every Suggested row the filter shows, its count on the button, each as its own **Confirm** would; narrow the
+   list with the status or the search first to link fewer. A link carried over from the roster (on an installation
+   that had families before) offers **Confirm this link** in its row, which records it as checked by you. Reconciliation
+   refuses **Create a family from this** for a customer Accounting links suggests or lists for a family the portal has,
+   and its row names that family and links to Accounting links; don't press **Create in QuickBooks and link** for a
+   family whose customer is already in the books (it would make a second customer); and the
    count of customers with no family matches Reconciliation's list. A linked family whose records differ from the
    books' copy reads **Linked, with differences** instead, still saying how its link was made, and its row's opening
    lists each difference with the portal's value and the books': a family you brought in has the Parent customers
