@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireStaffPage } from "@/lib/guards";
+import { can } from "@/lib/permissions/effective";
 import { writeAudit } from "@/lib/audit/log";
 import { formatMoney } from "@/lib/money/cents";
 import { loadBalances, SEARCH_MAX, type BalanceRow } from "@/lib/money/balances";
@@ -38,7 +39,7 @@ function FamilyTable({ rows, caption }: { rows: BalanceRow[]; caption: string })
   return (
     <DataTable caption={caption} rows={rows} rowKey={(r) => r.familyQboId} columns={[
       { key: "name", header: "Family", rowHeader: true, cell: (r) => (r.familyId === null ? r.name : <Link href={familyBalancePage(r.familyId)}>{r.name}</Link>) },
-      { key: "open", header: "Open invoices", cell: (r) => (r.figures === null ? "Not read from QuickBooks yet" : r.figures.openCount === 0 ? "Nothing owed"
+      { key: "open", header: "Open invoices", cell: (r) => (r.figures === null ? (r.familyId === null ? "No family in the portal" : "Not read from QuickBooks yet") : r.figures.openCount === 0 ? "Nothing owed"
         : <>{r.figures.openCount === 1 ? "1 open invoice" : `${r.figures.openCount} open invoices`}{r.figures.oldestDue && <>, oldest due <CalendarDate iso={r.figures.oldestDue} /></>}</>) },
       { key: "read", header: "Read from QuickBooks", cell: (r) => (
         <>{r.figures ? <LocalTime iso={r.figures.readAt} /> : "Never"}{r.failedAt && <span className="when">The last try to read it didn&apos;t work (<LocalTime iso={r.failedAt} />)</span>}</>) },
@@ -58,6 +59,8 @@ export default async function BalancesPage({ searchParams }: { searchParams: Pro
     targetType: "family_money", ip: ctx.ip, after: { onlyOwing: owing, search: search || null } });
   const [balances, run] = await Promise.all([loadBalances({ owing, search }), moneyRunView()]);
   const filtered = owing || search !== "";
+  // Families with no link have no row (stage 4's slice M3b): one line counts them, pointing at where they are linked.
+  const mayLink = can(ctx.effective, "Accounting.Link.ReadWrite") && can(ctx.effective, "Roster.Read");
   return (
     <main className="wrap single">
       <h1 className="page-title">Balances</h1>
@@ -73,6 +76,8 @@ export default async function BalancesPage({ searchParams }: { searchParams: Pro
       )}
 
       <section className="box" aria-labelledby="families-h"><h2 id="families-h">Families</h2>
+        {balances.unlinked > 0 && <Notice tone="info" live="none">{balances.unlinked === 1 ? "1 family in the portal isn't" : `${balances.unlinked} families in the portal aren't`} linked to a customer in the books, so {balances.unlinked === 1 ? "it has" : "they have"} no figures here.
+          {" "}{mayLink ? <Link href="/staff/links">{balances.unlinked === 1 ? "Link it" : "Link them"} on Accounting links</Link> : `Someone who may link families to accounting links ${balances.unlinked === 1 ? "it" : "them"} on Accounting links.`}</Notice>}
         <form method="get" action="/staff/balances" className="stack">
           <label className="field"><span>Find a family or a student</span><input name="q" type="search" maxLength={SEARCH_MAX} defaultValue={search} /></label>
           <fieldset className="checks"><legend>Which families</legend><label><input type="checkbox" name="owing" value="1" defaultChecked={owing} /> Only families that owe something</label></fieldset>
