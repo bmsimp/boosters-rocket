@@ -19,15 +19,18 @@ import type { ContactValues } from "@/lib/parents/contact-fields";
 import { CONTACT_COPY, saveDetails, saveMyContact } from "@/lib/parents/contact-edits";
 import { addGuardian, removeGuardian } from "@/lib/parents/guardians";
 import { renamePerson } from "@/lib/parents/people";
-import { askFamilyInactive, CONTACT_DIFFERS, CONTACT_NOT_OFFERED, coverStamp, familyCover, keptContactWords, portalValueStamp, SENDING_LOCK, sendPortalValue, whoStopped, WRITE_COPY } from "@/lib/roster/writes";
-import { giveUp, loadOpenWrites, runWriteQueue } from "@/lib/roster/queue";
-import { ROSTER_LOCK, type MembershipShape } from "@/lib/roster/shape";
+import { askFamilyInactive, CONTACT_AWAITS_READ, CONTACT_DIFFERS, CONTACT_NOT_OFFERED, coverStamp, familyCover, keptContactWords, portalValueStamp, SENDING_LOCK, sendPortalValue, whoStopped, WRITE_COPY } from "@/lib/roster/writes";
+import { giveUp, loadOpenWrites, runWriteQueue, tryAgainNow } from "@/lib/roster/queue";
+import { ROSTER_LOCK, saveShape, type MembershipShape } from "@/lib/roster/shape";
+import { refreshRoster } from "@/lib/roster/refresh";
+import { takeInContactDetails } from "@/lib/parents/contact-take-in";
 import ReconciliationPage from "@/app/staff/(app)/reconciliation/page";
 import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
-import { NO_DETAILS, inQuickBooks, personDetails, setPersonDetails } from "../helpers/contact";
+import { NO_DETAILS, inQuickBooks, personDetails, setPersonDetails, takeInDone, takeInNotRun } from "../helpers/contact";
 import { resetDb, seedGuardian, seedParent } from "../helpers/db";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
-import { asOp, auditsOf, connectRoster, queueItem, seedAnaRivera, staffWith } from "../helpers/roster-writes";
+import { asOp, auditsOf, connectRoster, queueItem, seedAnaRivera, staffWith, WORKER } from "../helpers/roster-writes";
+import { FZN_SHAPE } from "../helpers/qbo-stub";
 import { moveInQuickBooksOnly, storeShape } from "../helpers/roster-cache";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 
@@ -63,6 +66,8 @@ let rivera: AppFamilyId, chen: AppFamilyId;
 beforeEach(async () => {
   await resetDb(); stub.reset();
   tag = await connectRoster(stub);
+  // The take-in has run after a read under this shape, so a parent's change is sent on (item 1's gate, contactSendsMayGo()).
+  await takeInDone();
   op = asOp(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Parents.ReadWrite"]));
   rivera = await recordOfCustomer("10", "family"); chen = await recordOfCustomer("20", "family");
   stub.calls.length = 0;
@@ -162,6 +167,78 @@ describe("a parent's save queues the change for each record it goes to (items 1 
       const source = readFileSync(file, "utf8");
       for (const lock of ["advisory", "ROSTER_LOCK", "SENDING_LOCK", "lockRosterAs", "whileSending", "whileMaking"]) expect(source, `${file} ${lock}`).not.toContain(lock);
     }
+  });
+});
+
+describe("nothing is sent until the portal knows the details QuickBooks holds (the second read's item 1)", () => {
+  const getsOf = (id: string) => stub.apiCalls().filter((c) => c.method === "GET" && c.path.endsWith(`/customer/${id}`));
+
+  it("a save before the take-in has run is queued and left as it is across two wakes, no try counted; after a read and the take-in it is sent", async () => {
+    const a = await ana();
+    await takeInNotRun();
+    await saveMyContact(a.ctx, form({ phone: NEW_PHONE }, "p:1"));
+    await wake();
+    await wake(10 * MIN);
+    expect(posts()).toEqual([]);
+    expect(getsOf("11")).toEqual([]);
+    const [item] = await items();
+    expect(item).toMatchObject({ state: "waiting", sent: false, tries: 0, lastCode: null });
+    // Never stuck by its age for this: a day later it is still waiting, untried.
+    await runWriteQueue(new Date(Date.now() + 25 * 60 * MIN));
+    expect(await queueItem(item!.id)).toMatchObject({ state: "waiting", sent: false, tries: 0 });
+    expect(posts()).toEqual([]);
+    // The row says why, and "Try again now" says so too, changing nothing.
+    const [row] = await loadOpenWrites();
+    expect(row).toMatchObject({ state: "waiting", awaitsRead: true });
+    expect(await tryAgainNow(item!.id, op)).toEqual({ ok: false, errors: [CONTACT_AWAITS_READ] });
+    // A read under the shape, then the take-in (which leaves Ana's own saved details as they are): sent at the next wake.
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
+    expect(await takeInContactDetails()).toMatchObject({ ran: true });
+    expect(await personDetails(a.ana.id)).toMatchObject({ values: { phone: NEW_PHONE } });
+    expect((await loadOpenWrites())[0]).toMatchObject({ awaitsRead: false });
+    await wake(30 * 60 * MIN);
+    expect(bodies()).toEqual([{ Id: "11", SyncToken: "0", sparse: true, PrimaryPhone: { FreeFormNumber: NEW_PHONE } }]);
+    expect(await queueItem(item!.id)).toMatchObject({ state: "done" });
+  });
+
+  it("a save while a shape save has withdrawn the read's mark waits until the next read, and then goes", async () => {
+    const a = await ana();
+    await saveShape(FZN_SHAPE, { actor: WORKER.actor, ip: null });
+    await saveMyContact(a.ctx, form({ phone: NEW_PHONE }, "p:1"));
+    await wake();
+    expect(posts()).toEqual([]);
+    expect((await items())[0]).toMatchObject({ state: "waiting", sent: false, tries: 0 });
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
+    await wake(10 * MIN);
+    expect(bodies()).toEqual([expect.objectContaining({ Id: "11", PrimaryPhone: { FreeFormNumber: NEW_PHONE } })]);
+    expect((await items())[0]).toMatchObject({ state: "done" });
+  });
+
+  it("\"Send the portal's value\" while the mark is withdrawn sends nothing, in words, and keeps the change as it was", async () => {
+    const a = await ana({ phone: "" });
+    await saveMyContact(a.ctx, form({ phone: NEW_PHONE }, "p:1"));
+    await wake();
+    const kept = (await items())[0]!;
+    expect(kept).toMatchObject({ state: "refused", lastCode: CONTACT_DIFFERS });
+    await saveShape(FZN_SHAPE, { actor: WORKER.actor, ip: null });
+    stub.calls.length = 0;
+    expect((await loadOpenWrites())[0]).toMatchObject({ mayResend: false, notOffered: "awaits_read", awaitsRead: true });
+    expect(await sendPortalValue(kept.id, "anything", portalValueStamp(kept.id, "anything"), op)).toEqual({ ok: false, errors: [CONTACT_AWAITS_READ] });
+    expect(stub.apiCalls()).toEqual([]);
+    expect(await queueItem(kept.id)).toMatchObject({ state: "refused", lastCode: CONTACT_DIFFERS, tries: kept.tries });
+  });
+
+  it("over a cache row that holds no details, with nothing known before: QuickBooks is read first, and a phone found there is kept as a difference", async () => {
+    const a = await ana({ phone: "" });
+    // The portal's copy holds nothing for Ana's own record (as a row no read has filled), while QuickBooks holds her phone.
+    await db.update(qboCustomer).set({ phone: null }).where(eq(qboCustomer.qboId, "11"));
+    await saveMyContact(a.ctx, form({ phone: NEW_PHONE }, "p:1"));
+    expect((await items())[0]!.request).toMatchObject({ was: { phone: "" } });
+    await wake();
+    expect(posts()).toEqual([]);
+    expect(getsOf("11")).toHaveLength(1);
+    expect((await items())[0]).toMatchObject({ state: "refused", lastCode: CONTACT_DIFFERS });
+    expect(inQuickBooks(stub, "11")).toMatchObject({ PrimaryPhone: { FreeFormNumber: "555-0101" } });
   });
 });
 

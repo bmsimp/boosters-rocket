@@ -12,9 +12,10 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster } from "./refresh";
 import { getRosterSource, ROSTER_JOB } from "./source";
 import { lockRosterAs, rosterTagOf } from "@/lib/seasons/roster-lock";
-import { alignAfterWrite, applyWritten, balanceUnread, BEING_SENT_NOW, changeOwnRecord, closeEarlierContacts, contactShown, CREDIT_BALANCE, CUSTOMER_HAS_GUARDIAN, EMAIL_TOO_LONG, FAMILY_HELD, guardianCustomerLinked, guardianOf, isSavedFirst, NAME_UNUSABLE, itemLockFree, madeAfterGivingUp, markMoveMoneyStale, moveMoneyNotes, REFRESH_ASK_KEY,
+import { alignAfterWrite, applyWritten, balanceUnread, BEING_SENT_NOW, changeOwnRecord, closeEarlierContacts, CONTACT_AWAITS_READ, contactShown, CREDIT_BALANCE, CUSTOMER_HAS_GUARDIAN, EMAIL_TOO_LONG, FAMILY_HELD, guardianCustomerLinked, guardianOf, isSavedFirst, NAME_UNUSABLE, itemLockFree, madeAfterGivingUp, markMoveMoneyStale, moveMoneyNotes, REFRESH_ASK_KEY,
   replaceRefusedCreates, sendWrite, tryDeactivate, trySavedItem, whileItemHeld, whoStopped, contactStopNow, type ContactNotOffered, type MadeAfterGivingUp, type OwnRecordChange, type SavedTry } from "./writes";
 import { afterFailedTry, beforeResend, classify, heldInCache, type HeldContact } from "./write-rules";
+import { contactSendsMayGo } from "@/lib/parents/take-in-setting";
 import { isBuyoutWrite, sendBuyoutWrite } from "@/lib/buyouts/writes";
 import { formatMoney } from "@/lib/money/cents";
 import { customerOfFamily, familyLinkedTo, linksOf, linksOfCustomers } from "@/lib/families/links";
@@ -129,6 +130,8 @@ function savedStep(t: SavedTry): Step {
   if (t.is === "done") return t.cached ? "done" : "waiting";
   if (t.is === "waiting") return "waiting";
   if (t.is === "found" || t.is === "given_up") return "done";
+  // A parent's change of their details the portal may not send yet: left as it was, no try counted.
+  if (t.is === "not_yet") return "skipped";
   return "stuck";
 }
 
@@ -380,6 +383,12 @@ export type QueueView = {
    */
   finishing: boolean;
   /**
+   * A parent's change of their phone and address (stage 3's slice 11b) the portal may not send yet: the take-in, or a
+   * read of QuickBooks under the shape saved last, is still to come (contactSendsMayGo()), so the row says so and
+   * nothing is sent for it, by the worker or a press.
+   */
+  awaitsRead: boolean;
+  /**
    * For a refused rename: the name the roster cache holds for its customer, what QuickBooks has now; for a refused move,
    * where the cache has the student, by the portal's name of that family where it has a record, else the customer's
    * name (null: none, or neither).
@@ -536,6 +545,8 @@ export async function loadOpenWrites(o: { familyId?: AppFamilyId; showAmounts?: 
   // what the cache holds of each customer's details (sealed for "Send the portal's value", contactShown()), and, for a
   // kept one and staff who may see a person's details, what QuickBooks holds and the portal holds, as text.
   const contacts = rows.filter((r) => r.request.op === "contact");
+  // Whether any of them may be sent now, read once for the list (contactSendsMayGo()).
+  const mayGo = contacts.length ? await db.transaction((tx) => contactSendsMayGo(tx)) : true;
   const contactGuardians = [...new Set(contacts.flatMap((r) => { const g = guardianOf(r.request); return g === null ? [] : [g]; }))];
   const contactPeople = new Map((contactGuardians.length ? await db.select({ id: guardian.id, name: parent.name, ...detailColumns(parent) }).from(guardian)
     .innerJoin(parent, eq(parent.id, guardian.parentId)).where(inArray(guardian.id, contactGuardians)) : []).map((g) => [g.id, g]));
@@ -573,7 +584,7 @@ export async function loadOpenWrites(o: { familyId?: AppFamilyId; showAmounts?: 
     // A guardian's Parent customer create kept as a taken name, or as a name or address QuickBooks can't take: a rename
     // of the person takes its place, so nothing is offered to send it again as it is (stage 3's slice 9h).
     const guardianKept = refused && request.op === "create" && guardianOf(request) !== null && (r.lastCode === "fault_6240" || r.lastCode === NAME_UNUSABLE || r.lastCode === EMAIL_TOO_LONG);
-    const contactNotOffered = refused && request.op === "contact" ? (!names.has(request.qboId) ? "not_on_roster" : !activeHere.has(request.qboId) ? "inactive" : contactStopsOf.get(r.id) ?? null) : undefined;
+    const contactNotOffered = refused && request.op === "contact" ? (!mayGo ? "awaits_read" : !names.has(request.qboId) ? "not_on_roster" : !activeHere.has(request.qboId) ? "inactive" : contactStopsOf.get(r.id) ?? null) : undefined;
     const notOffered: QueueView["notOffered"] = contactNotOffered !== undefined ? contactNotOffered : guardianKept ? (r.lastCode === EMAIL_TOO_LONG ? "email_too_long" : r.lastCode === NAME_UNUSABLE ? "name_unusable" : "taken")
       : !refused || (request.op !== "rename" && request.op !== "move" && request.op !== "deactivate") ? null : request.op === "rename" && r.lastCode === "fault_6240" ? "taken"
       // A removed guardian's Parent customer QuickBooks has inactive now: the press finishes it as found (sendAgainHolding()).
@@ -586,6 +597,7 @@ export async function loadOpenWrites(o: { familyId?: AppFamilyId; showAmounts?: 
       familyId: r.familyId !== null && withPage.has(String(r.familyId)) ? r.familyId : null,
       studentId: r.studentId, moneyNote: noteOf.get(r.id) ?? null,
       finishing: finishingOf(r),
+      awaitsRead: request.op === "contact" && !mayGo,
       holds: !refused ? null : request.op === "rename" ? names.get(request.qboId) ?? null : request.op === "move" ? placeOf(request.qboId) : null,
       shown: !refused ? "" : request.op === "rename" ? names.get(request.qboId) ?? "" : request.op === "create" ? request.name : request.op === "move" ? parentOf.get(request.qboId) ?? ""
         : request.op === "contact" ? contactShown(heldThere.get(request.qboId) ?? heldInCache({}), request) : "",
@@ -643,6 +655,8 @@ export async function tryAgainNow(id: string, o: QueueOp & { mayLink?: boolean }
     // A change QuickBooks refused is never tried again by the worker: it is sent again only on purpose, or given up.
     if (item.state === "refused") return { ok: false as const, errors: [REFUSED_NOT_AGAIN] };
     if (isFamilyCreateItem(item.request) && !o.mayLink) return { ok: false as const, errors: [TRY_AGAIN_NEEDS_LINKING] };
+    // A parent's change of their details the portal may not send yet (stage 3's slice 11b): nothing would be sent.
+    if (item.request.op === "contact" && !(await contactSendsMayGo(tx))) return { ok: false as const, errors: [CONTACT_AWAITS_READ] };
     // One sender at a time (stage 3's slice 9e): a change saved first that is being sent at this moment (at once, by
     // "Send the portal's value", or by the worker, each holding its lock) isn't asked for again; the lock is held shared
     // to the end of this transaction, so no send starts before this ask is committed.

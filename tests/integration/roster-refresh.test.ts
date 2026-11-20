@@ -107,11 +107,14 @@ describe("the roster refresh", () => {
     expect(await refreshRoster(worker)).toMatchObject({ ok: true });
     const run = await lastRun();
     expect(await takeIn()).toEqual({ after, addressesReadAt: run.startedAt.toISOString() });
-    // Once the take-in has run, a read changes nothing of its setting.
+    // Once the take-in has run, a read still marks it, keeping `doneAt`, and a shape save still withdraws it: a
+    // parent's change of their details is sent on only while it stands (stage 3's slice 11b, contactSendsMayGo()).
     const done = { after, addressesReadAt: run.startedAt.toISOString(), doneAt: new Date().toISOString() };
     await db.update(setting).set({ value: done }).where(eq(setting.key, TAKE_IN_KEY));
     await refreshRoster(worker);
-    expect(await takeIn()).toEqual(done);
+    expect(await takeIn()).toEqual({ ...done, addressesReadAt: (await lastRun()).startedAt.toISOString() });
+    await saveShape(FZN_SHAPE, staffOp);
+    expect(await takeIn()).toEqual({ after, doneAt: done.doneAt });
   });
 
   it("marks nothing for the take-in from a read made under a shape that doesn't hold, and a shape save withdraws the mark", async () => {

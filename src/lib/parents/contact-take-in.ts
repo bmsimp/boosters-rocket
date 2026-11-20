@@ -57,18 +57,19 @@ function agreed<T extends string | AddressValues>(values: (T | null)[]): T | nul
 
 /**
  * Notes, in the savepoint that saves a successful roster read (refreshRoster(), src/lib/roster/refresh.ts), that the
- * cache now holds the billing addresses this build keeps, at the read's start: the take-in waits for it. A successful
+ * cache now holds the billing addresses this build keeps, at the read's start: the take-in waits for it, and, once it
+ * has run, so does every send of a parent's change of their details (contactSendsMayGo(), stage 3's slice 11b). A successful
  * read is not enough by itself: the build before migration 0044 answers the roster read the migration asks for too,
  * and while it still runs beside the migrated database (scripts/poc/deploy.sh migrates before it replaces the app) its
- * read leaves every address empty, so the take-in would run once over a cache that holds none. Nothing once the
- * take-in has run, or where the migration wrote no setting. Nor while the shape doesn't hold (none, or one naming a
+ * read leaves every address empty, so the take-in would run once over a cache that holds none. Nothing where the
+ * migration wrote no setting. Nor while the shape doesn't hold (none, or one naming a
  * type the read didn't find in QuickBooks): such a read kept the addresses only of the types it names, so once an
  * Admin chooses a shape that holds the take-in waits for a read made under it (a shape save withdraws a note too).
  */
 export async function noteAddressesKept(tx: Tx, readAt: Date): Promise<void> {
   if (!(await shapeHolds(tx))) return;
   await tx.update(setting).set({ value: sql`${setting.value} || ${JSON.stringify({ addressesReadAt: readAt.toISOString() })}::jsonb`, updatedAt: new Date() })
-    .where(and(eq(setting.key, TAKE_IN_KEY), sql`${setting.value}->'doneAt' is null`));
+    .where(eq(setting.key, TAKE_IN_KEY));
 }
 
 /**

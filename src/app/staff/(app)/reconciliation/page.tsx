@@ -11,7 +11,7 @@ import { Notice } from "@/app/components/notice";
 import { WorthALook } from "../balances/worth-a-look";
 import { OneButton, TextAction } from "../seasons/forms";
 import { giveUpAction, linkMadeStudentAction, sendPortalValueAction, tryAgainAction } from "../roster/write-actions";
-import { CONTACT_NOT_OFFERED, EMAIL_TOO_LONG, GUARDIAN_RENAME_TAKEN, GUARDIAN_TAKEN_NAME, guardianOf, keptRefusalWords, NAME_UNUSABLE, keptWordsFor, portalValueStamp, TAKEN_NAME_KEPT } from "@/lib/roster/writes";
+import { CONTACT_AWAITS_READ, CONTACT_NOT_OFFERED, EMAIL_TOO_LONG, GUARDIAN_RENAME_TAKEN, GUARDIAN_TAKEN_NAME, guardianOf, keptRefusalWords, NAME_UNUSABLE, keptWordsFor, portalValueStamp, TAKEN_NAME_KEPT } from "@/lib/roster/writes";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { BuyoutsToLook } from "./buyouts";
 import { CustomersWithNoFamily } from "./no-family";
@@ -52,7 +52,8 @@ const codeWords = (code: string | null) => (code === null ? null
 function Writes({ items, caption, canChange, mayLink }: { items: QueueView[]; caption: string; canChange: boolean; mayLink: boolean }) {
   const columns: Column<QueueView>[] = [
     { key: "what", header: "Change", rowHeader: true, cell: (i) => (
-      <>{i.words}<span className="when">{i.state === "stuck" ? "Stuck: it won't be tried again until someone asks" : waitingWords(i)}</span>{i.moneyNote ? <span className="when">{i.moneyNote}</span> : null}</>) },
+      <>{i.words}<span className="when">{i.state === "stuck" ? "Stuck: it won't be tried again until someone asks" : waitingWords(i)}</span>{i.moneyNote ? <span className="when">{i.moneyNote}</span> : null}
+        {i.awaitsRead ? <span className="when">{CONTACT_AWAITS_READ}</span> : null}</>) },
     { key: "asked", header: "Asked", cell: (i) => <><LocalTime iso={i.askedAt} />{i.askedBy ? <span className="when">by {i.askedBy}</span> : null}</> },
     { key: "tries", header: "Tries", cell: (i) => (
       <>{i.tries} {i.tries === 1 ? "time" : "times"}, last <LocalTime iso={i.lastTriedAt} />{i.state === "waiting" && i.nextTryAt ? <span className="when">Next try <LocalTime iso={i.nextTryAt} /></span> : null}</>) },
