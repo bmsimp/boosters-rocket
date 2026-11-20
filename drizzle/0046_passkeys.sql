@@ -4,7 +4,7 @@ CREATE TABLE "parent_auth_passkey" (
 	"public_key" text NOT NULL,
 	"user_id" text NOT NULL,
 	"credential_id" text NOT NULL,
-	"counter" integer NOT NULL,
+	"counter" bigint NOT NULL,
 	"device_type" text NOT NULL,
 	"backed_up" boolean NOT NULL,
 	"transports" text,

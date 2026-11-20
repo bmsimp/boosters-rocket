@@ -1376,7 +1376,8 @@ export const parentAuthVerification = parentAuth.verification;
  * COSE public key, standard base64 (`base64.encode()` of @better-auth/utils); `credential_id` the credential's id,
  * base64url as the browser sends it (unique here: one credential is one row, the portal's own rule, where the library
  * marks it indexed only); `counter` the signature counter, written by the library itself after each verified
- * assertion; `transports` comma-joined. `last_used_at` is the portal's alone (the library neither writes nor returns
+ * assertion, an unsigned 32-bit number as WebAuthn defines it (up to 4294967295), so a bigint, read as a number;
+ * `transports` comma-joined. `last_used_at` is the portal's alone (the library neither writes nor returns
  * it, as with the session's `strong_at`), set when a passkey signs someone in (src/lib/parents/passkeys.ts, the only
  * portal module that reads or writes this table). A passkey belongs to APP_URL's host (the relying party id): a club
  * that changes its address leaves them unusable. Kept until the guardian removes one (SI-7b) or a staff reset removes
@@ -1388,7 +1389,7 @@ export const parentAuthPasskey = pgTable("parent_auth_passkey", {
   publicKey: text("public_key").notNull(),
   userId: text("user_id").notNull().references(() => parentAuthUser.id, { onDelete: "cascade" }),
   credentialID: text("credential_id").notNull(),
-  counter: integer("counter").notNull(),
+  counter: bigint("counter", { mode: "number" }).notNull(),
   deviceType: text("device_type").notNull(),
   backedUp: boolean("backed_up").notNull(),
   transports: text("transports"),

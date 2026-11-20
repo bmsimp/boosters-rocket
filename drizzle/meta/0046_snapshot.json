@@ -1940,7 +1940,7 @@
         },
         "counter": {
           "name": "counter",
-          "type": "integer",
+          "type": "bigint",
           "primaryKey": false,
           "notNull": true
         },
