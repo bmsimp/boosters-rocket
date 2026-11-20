@@ -1,6 +1,7 @@
 // Parent-facing (PARENT_CODE_ELSEWHERE in tests/integration/page-guards.test.ts): the queueing of a change of a
 // guardian's phone and mailing address, a parent's own or (since stage 3's slice 11c) a staff member's, in the
-// transaction that saves it (./contact-edits.ts). It imports nothing staff-only and nothing from the QuickBooks client,
+// transaction that saves it (./contact-edits.ts), and, since stage 3's slice S11e, of a parent's confirmed change of
+// their sign-in email, in the confirm's own transaction (./email-change.ts). It imports nothing staff-only and nothing from the QuickBooks client,
 // and sends nothing: the write queue's worker sends each item at its next wake, and a staff member's is first tried at
 // once after the save's commit, each through the one try of a change saved first (trySavedItem(),
 // src/lib/roster/writes.ts). Whose details they are, and
@@ -18,6 +19,7 @@ import { whoseDetails } from "./my-family";
 /** Whose details a save changes: a person's own (books with a parent type), or an app family's (books with none). */
 export type DetailsOf = { kind: "person"; parentId: string } | { kind: "family"; familyId: AppFamilyId };
 type ContactWrite = Extract<RosterWrite, { op: "contact" }>;
+type EmailWrite = Extract<RosterWrite, { op: "email" }>;
 type Field = keyof ContactDetails;
 const FIELDS: readonly Field[] = ["phone", "address"];
 /** The note an earlier change is closed with when a later one of the same details takes its place (here, and once a later one is done or kept). */
@@ -44,7 +46,10 @@ type Target = { role: ContactWrite["role"]; qboId: string; syncToken: string; gu
  * sender's to check.
  */
 async function targetsOf(tx: Tx, of: DetailsOf): Promise<{ realmId: string; targets: Target[] } | null> {
-  const found = await recordTargetsOf(tx, of);
+  return withoutInactive(tx, await recordTargetsOf(tx, of));
+}
+/** The records found, but those whose customer the roster cache holds inactive. */
+async function withoutInactive(tx: Tx, found: { realmId: string; targets: Target[] } | null): Promise<{ realmId: string; targets: Target[] } | null> {
   if (found === null || !found.targets.length) return found;
   const inactive = new Set((await tx.select({ qboId: qboCustomer.qboId }).from(qboCustomer)
     .where(and(inArray(qboCustomer.qboId, found.targets.map((t) => t.qboId)), eq(qboCustomer.active, false)))).map((c) => c.qboId));
@@ -149,6 +154,92 @@ export async function queueContactChange(tx: Tx, of: DetailsOf, saved: { change:
     const [item] = await tx.insert(writeQueue).values({
       realmId: found.realmId, request: write, targetQboId: t.qboId, familyId: t.familyId, studentId: null,
       state: "waiting", sent: false, tries: 0, lastCode: null, nextTryAt: o.queueAs?.nextTryAt ?? new Date(), askedBy: o.queueAs?.askedBy ?? null, askedByLabel: o.actor.label,
+    }).returning({ id: writeQueue.id });
+    ids.push(item!.id);
+  }
+  return ids;
+}
+
+/**
+ * The records a person's sign-in email goes to (stage 3's slice S11e; app-owned families spec, Appendix B: "A guardian
+ * in two families has a Parent customer under each in QuickBooks, so their one sign-in email is sent to two records"),
+ * by the records' company (none while it is unknown): in layered books with a parent type, the own Parent customer of
+ * each of their open memberships in an active family record (recordTargetsOf()'s rule for a person's details); in books
+ * with no parent type (whoseDetails() says the family's: flat books included), each such membership's family's own
+ * linked customer, the family's (layered) or the member's own (flat). Each carries the membership it is for
+ * (`guardianId`), a family's too. Never a customer whose id isn't digits, nor one the roster cache holds inactive.
+ */
+async function emailTargetsOf(tx: Tx, parentId: string): Promise<{ realmId: string; targets: Target[] } | null> {
+  const realmId = await recordsCompany(tx);
+  if (realmId === null) return null;
+  const shape = await getShape(tx);
+  if (shape === null) return null;
+  if (whoseDetails(shape) === "person") return withoutInactive(tx, await recordTargetsOf(tx, { kind: "person", parentId }));
+  const rows = await tx.select({ id: guardian.id, familyId: guardian.familyId }).from(guardian).innerJoin(family, eq(family.id, guardian.familyId))
+    .where(and(eq(guardian.parentId, parentId), ne(guardian.status, "disabled"), eq(family.active, true))).orderBy(asc(guardian.id));
+  const targets: Target[] = [];
+  for (const r of rows) {
+    if (r.familyId === null) continue;
+    const link = await familyLinkOf(r.familyId, tx);
+    if (!link || !isCustomerId(link.customerId)) continue;
+    targets.push({ role: shape.kind === "flat" ? "member" : "family", qboId: link.customerId, syncToken: link.syncedToken ?? "", guardianId: r.id, familyId: r.familyId });
+  }
+  return withoutInactive(tx, { realmId, targets });
+}
+
+/**
+ * Queues a parent's confirmed change of their sign-in email, in the confirm's own transaction, after the person's
+ * address is changed (stage 3's slice S11e; the lead's decision 1): one change saved first (waiting, never sent, its next
+ * try now, asked by nobody on staff) for each record it goes to (emailTargetsOf()), filed under the membership's family,
+ * its target that customer, its company the records'. `from` is the person's sign-in address before the change, `to`
+ * after it. Returns the new items' ids, for `parent.email.save`.
+ *
+ * A later change takes the place of an earlier one, by queueContactChange()'s rule: each change of sign-in email of the
+ * same customer and membership that is kept refused, or waiting or stuck and never sent (`sent` false, conditioned in the
+ * update itself; one a sender holds locked at this moment is left alone, read as one that may have been sent), is
+ * closed as given up (`roster.write.replaced`). One that may have been sent is left to finish, and the new item accepts
+ * its `to` (and its `orFrom`) as what QuickBooks may hold instead (`orFrom`). The new item's `from` is the oldest of
+ * every open change of the record (what QuickBooks held before them, if none landed), else the person's address before
+ * this change. A change that would come back to the address the oldest one replaced queues nothing. It takes no roster
+ * lock and no "being sent" lock, and waits for none: it reads and writes the queue's rows after the person's row, in the
+ * order lockedPerson() (./sessions.ts) gives.
+ */
+export async function queueEmailChange(tx: Tx, parentId: string, change: { from: string; to: string }, o: { actor: Actor; ip: string | null }): Promise<string[]> {
+  const found = await emailTargetsOf(tx, parentId);
+  if (found === null) return [];
+  const to = change.to.trim().toLowerCase();
+  const ids: string[] = [];
+  for (const t of found.targets) {
+    const sameRecord = and(eq(writeQueue.realmId, found.realmId), eq(writeQueue.targetQboId, t.qboId), sql`${writeQueue.request}->>'op' = 'email'`,
+      t.guardianId === null ? sql`${writeQueue.request}->>'guardianId' is null` : sql`${writeQueue.request}->>'guardianId' = ${t.guardianId}`);
+    const open = await tx.select().from(writeQueue).where(and(sameRecord, inArray(writeQueue.state, ["waiting", "stuck", "refused"]))).orderBy(asc(writeQueue.createdAt), asc(writeQueue.id));
+    // Those this change may close: not locked by a sender at this moment (skipped, never waited for).
+    const free = new Set(open.length ? (await tx.select({ id: writeQueue.id }).from(writeQueue).where(inArray(writeQueue.id, open.map((r) => r.id))).for("update", { skipLocked: true })).map((r) => r.id) : []);
+    const maybeSent: EmailWrite[] = [];
+    for (const r of open) {
+      const [gone] = free.has(r.id) && (r.state === "refused" || !r.sent)
+        ? await tx.update(writeQueue).set({ state: "given_up", note: CONTACT_REPLACED_NOTE, nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
+          .where(and(eq(writeQueue.id, r.id), eq(writeQueue.state, r.state), r.state === "refused" ? undefined : eq(writeQueue.sent, false))).returning({ id: writeQueue.id })
+        : [];
+      if (gone) {
+        await writeAudit({ actor: o.actor, action: "roster.write.replaced", ip: o.ip, targetType: "write_queue", targetId: r.id,
+          before: { state: r.state, code: r.lastCode }, after: { state: "given_up", replacedBy: { op: "email" } } }, tx);
+      } else maybeSent.push(r.request as EmailWrite);
+    }
+    // The oldest before-value of every open change of the record (one that may have been sent included): what QuickBooks
+    // held before them, if none of them landed.
+    const from = (open.length ? (open[0]!.request as EmailWrite).from : change.from).trim().toLowerCase();
+    // What QuickBooks may hold instead: what each change that may have been sent asked for, and what each open change
+    // already accepted so, every one of them, but the two the item names.
+    const orFrom = [...new Set([...maybeSent.map((w) => w.to), ...open.flatMap((r) => (r.request as EmailWrite).orFrom ?? [])].map((a) => a.trim().toLowerCase()))]
+      .filter((a) => a !== "" && a !== from && a !== to);
+    // Back to the address the oldest open change replaced, with nothing that may have been sent: nothing to send.
+    if (from === to && !orFrom.length) continue;
+    const write: EmailWrite = { op: "email", role: t.role, qboId: t.qboId, syncToken: t.syncToken, from, to,
+      ...(orFrom.length ? { orFrom } : {}), ...(t.guardianId !== null ? { guardianId: t.guardianId } : {}) };
+    const [item] = await tx.insert(writeQueue).values({
+      realmId: found.realmId, request: write, targetQboId: t.qboId, familyId: t.familyId, studentId: null,
+      state: "waiting", sent: false, tries: 0, lastCode: null, nextTryAt: new Date(), askedBy: null, askedByLabel: o.actor.label,
     }).returning({ id: writeQueue.id });
     ids.push(item!.id);
   }
