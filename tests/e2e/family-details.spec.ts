@@ -51,7 +51,7 @@ test.describe("signed in", () => {
   test("Update my details leads from Family to the edit page, whose form holds the portal's own details", async ({ page }) => {
     await page.goto("/family");
     const details = page.getByRole("region", { name: "Your details" });
-    await expect(details).toContainText("You can change your phone and mailing address yourself.");
+    await expect(details).toContainText("You can change your phone and mailing address yourself, and your sign-in email below. The club changes your name for you.");
     await expect(details.locator("dd")).toHaveText(["Zelda Quetzalcoatl", "zelda@example.com", E2E_DETAILS.phone]);
     const link = details.getByRole("link", { name: "Update my details" });
     expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(44);
