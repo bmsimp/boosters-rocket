@@ -117,9 +117,15 @@ export type RecordFamily = { id: AppFamilyId; name: string; active: boolean; cus
 
 const COLLATOR = new Intl.Collator("en", { sensitivity: "base" });
 const numeric = (a: string, b: string) => a.localeCompare(b, "en", { numeric: true });
-/** By name, as the roster has always listed them (case and accents ignored), then by QuickBooks ID as numbers, then by the record's own id. */
+/**
+ * By name, as the roster has always listed them (case and accents ignored), then by the customer's QuickBooks ID as
+ * numbers (none first), then by the record's own id. Pure, so a page that lists the same records in its own reader (the
+ * accounting links screen, src/lib/accounting/mapping.ts) lists them in the same order.
+ */
+export const byRosterOrder = (a: { id: unknown; name: string; customerId: string | null }, b: { id: unknown; name: string; customerId: string | null }) =>
+  COLLATOR.compare(a.name, b.name) || numeric(a.customerId ?? "", b.customerId ?? "") || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0);
 const byName = (a: { id: unknown; name: string; customer: Cust | null }, b: { id: unknown; name: string; customer: Cust | null }) =>
-  COLLATOR.compare(a.name, b.name) || numeric(a.customer?.qboId ?? "", b.customer?.qboId ?? "") || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0);
+  byRosterOrder({ id: a.id, name: a.name, customerId: a.customer?.qboId ?? null }, { id: b.id, name: b.name, customerId: b.customer?.qboId ?? null });
 
 /**
  * The families the Families pages list, from the app's own records (stage 3 of the app-owned families spec): every

@@ -12,7 +12,7 @@ import { otherCompany } from "@/lib/families/links";
 import { recordNameWords } from "@/lib/families/words";
 import { buildRoster, type Cust } from "@/lib/roster/model";
 import { familyCreatesOnTheQueue, noFamilyPool } from "@/lib/roster/no-family";
-import { rosterShown } from "@/lib/roster/queries";
+import { byRosterOrder, rosterShown } from "@/lib/roster/queries";
 import { getShape, missingTypes } from "@/lib/roster/shape";
 import { getRosterSource, ROSTER_JOB } from "@/lib/roster/source";
 import { suggestCustomers, type Holder } from "./match";
@@ -71,6 +71,7 @@ export type LinksView = {
 };
 
 const COLLATOR = new Intl.Collator("en", { sensitivity: "base" });
+/** Guardians by name, then by their row's id. Families and students go in the roster's own order instead (byRosterOrder()). */
 const byName = <T extends { name: string; id: unknown }>(a: T, b: T) => COLLATOR.compare(a.name, b.name) || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0);
 
 /**
@@ -112,12 +113,23 @@ export async function loadAccountingLinks(): Promise<LinksView> {
   });
   const listedAsFamily = roster === null ? null : new Set(roster.kind === "flat" ? roster.members.map((m) => m.qboId) : roster.families.map((f) => f.customer.qboId));
 
-  const addressesOf = new Map<string, string[]>();
-  for (const g of guardians) {
-    const key = String(g.familyId);
-    const had = addressesOf.get(key) ?? [];
-    if (!had.includes(g.email)) addressesOf.set(key, [...had, g.email].sort());
-  }
+  // Each family's students, guardian rows and addresses, grouped once, so the rows' work grows with the club, not its square.
+  const group = <T>(items: readonly T[], keyOf: (t: T) => string) => {
+    const out = new Map<string, T[]>();
+    for (const t of items) { const k = keyOf(t); const had = out.get(k); if (had) had.push(t); else out.set(k, [t]); }
+    return out;
+  };
+  const studentsOf = group(students, (s) => String(s.familyId));
+  const guardiansOf = group(guardians, (g) => String(g.familyId));
+  const addressesOf = new Map([...guardiansOf].map(([key, gs]) => [key, [...new Set(gs.map((g) => g.email))].sort()]));
+  // What the Families pages break a tie of names by (rosterFamilies()): a family's linked customer where the roster lists
+  // it as a family, and a student's where the roster lists it under that family's; with no roster, where the cache holds it.
+  const studentsListedUnder = new Map(roster === null || roster.kind === "flat" ? [] : roster.families.map((f) => [f.customer.qboId, new Set(f.students.map((c) => c.qboId))]));
+  const familyTie = (customerId: string | undefined) => (customerId === undefined ? null
+    : listedAsFamily !== null ? (listedAsFamily.has(customerId) ? customerId : null) : customerById.has(customerId) ? customerId : null);
+  const studentTie = (familyCustomer: string | null, customerId: string | undefined) => (customerId === undefined ? null
+    : roster !== null ? (familyCustomer !== null && studentsListedUnder.get(familyCustomer)?.has(customerId) ? customerId : null)
+    : customerById.has(customerId) ? customerId : null);
   const unlinked = families.filter((f) => !linkOfFamily.has(String(f.id)));
   const suggestions = roster === null || pool === null ? null
     : suggestCustomers(unlinked.map((f) => ({ key: String(f.id), addresses: addressesOf.get(String(f.id)) ?? [] })), roster, new Set(pool.map((c) => c.qboId)));
@@ -131,9 +143,9 @@ export async function loadAccountingLinks(): Promise<LinksView> {
     const link = linkOfFamily.get(key);
     const base = {
       familyId: f.id, name: familyName.get(key)!, addresses: addressesOf.get(key) ?? [],
-      students: students.filter((s) => String(s.familyId) === key).map((s) => ({ id: s.id, name: recordNameWords(s.name, "student"), link: own(customerOfStudent.get(String(s.id))) }))
-        .sort(byName),
-      guardians: guardians.filter((g) => String(g.familyId) === key).map((g) => ({ id: g.id, name: g.name, email: g.email, link: own(customerOfGuardian.get(g.id)) }))
+      students: (studentsOf.get(key) ?? []).map((s) => ({ id: s.id, name: recordNameWords(s.name, "student"), customerId: studentTie(familyTie(link?.customerId), customerOfStudent.get(String(s.id))) }))
+        .sort(byRosterOrder).map((s) => ({ id: s.id, name: s.name, link: own(customerOfStudent.get(String(s.id))) })),
+      guardians: (guardiansOf.get(key) ?? []).map((g) => ({ id: g.id, name: g.name, email: g.email, link: own(customerOfGuardian.get(g.id)) }))
         .sort(byName),
     };
     if (link !== undefined) {
@@ -156,7 +168,11 @@ export async function loadAccountingLinks(): Promise<LinksView> {
   });
 
   return {
-    state, rows: rows.sort((a, b) => byName({ name: a.name, id: a.familyId }, { name: b.name, id: b.familyId })), noFamily: pool === null ? null : pool.length,
+    state, noFamily: pool === null ? null : pool.length,
+    // In the order the Families pages list them: by name, then the linked customer's id as a number, then the record's id.
+    rows: rows.map((r) => ({ r, customerId: familyTie(linkOfFamily.get(String(r.familyId))?.customerId) }))
+      .sort((a, b) => byRosterOrder({ id: a.r.familyId, name: a.r.name, customerId: a.customerId }, { id: b.r.familyId, name: b.r.name, customerId: b.customerId }))
+      .map((x) => x.r),
     familyPages: rosterShown({ connected: Boolean(connection?.realmId && connection.refreshTokenCiphertext), connectedRealmId: connection?.realmId ?? null, source,
       hasCache: typeRows.length > 0 || customerRows.length > 0, shape, readOnce: okRuns.length > 0, typeRows }),
   };
