@@ -15,7 +15,7 @@ import { family, qboCustomer, writeQueue, type RosterWrite } from "@/lib/db/sche
 import { AccessDenied, type ParentCtx } from "@/lib/guards";
 import type { AppFamilyId } from "@/lib/families/ids";
 import type { ContactValues } from "@/lib/parents/contact-fields";
-import { saveDetails, saveMyContact } from "@/lib/parents/contact-edits";
+import { CONTACT_COPY, loadMyContact, saveDetails, saveMyContact } from "@/lib/parents/contact-edits";
 import { CONTACT_REPLACED_NOTE } from "@/lib/parents/contact-queue";
 import { contactSavedWords, CONTACT_DIFFERS, keptContactWords, RosterBusyAtTry, SAVED_LEASE_MS, SENDING_LOCK, sendContactSaved, STAFF_DETAILS_COPY, trySavedItem } from "@/lib/roster/writes";
 import { giveUp, runWriteQueue } from "@/lib/roster/queue";
@@ -244,6 +244,39 @@ describe("the gate, a parent's change on the queue, and the version (items 3 to 
       .toEqual({ ok: false, errors: [STAFF_DETAILS_COPY.changed], current: asSaved({ phone: NEW_PHONE }, "p:2") });
     expect(await personDetails(a.ana.id)).toMatchObject({ values: { phone: NEW_PHONE }, version: 2 });
     expect((await auditsOf("parent.details.save")).filter((r) => r.actorId === registrar.id)).toEqual([]);
+  });
+
+  it("a parent's form drawn before a staff save: refused as changed, shown staff's values, nothing overwritten, nothing queued for it", async () => {
+    const a = await ana();
+    // The parent opens their details page: the form is drawn at version p:1.
+    const drawn = await loadMyContact(a.ctx);
+    expect(drawn).toMatchObject({ state: "ok", form: asSaved({ phone: "555-0101" }, "p:1") });
+    asStaff(registrar);
+    expect(await savePersonDetailsAction(a.ana.id, form({ phone: NEW_PHONE, line1: "12 Heron Lane", city: "Austin" }, "p:1"))).toMatchObject({ ok: true });
+    const staffItems = await items();
+    expect(staffItems).toEqual([expect.objectContaining({ askedBy: registrar.id })]);
+    const sentBefore = posts().length;
+    // The parent submits the form drawn before it.
+    expect(await saveMyContact(a.ctx, form({ phone: "512-555-0333" }, "p:1")))
+      .toEqual({ ok: false, errors: [CONTACT_COPY.changed], current: asSaved({ phone: NEW_PHONE, line1: "12 Heron Lane", city: "Austin" }, "p:2") });
+    expect(await personDetails(a.ana.id)).toEqual({ values: { ...NO_DETAILS, phone: NEW_PHONE, line1: "12 Heron Lane", city: "Austin" }, version: 2 });
+    expect((await auditsOf("parent.details.save.failed")).map((r) => [r.door, r.targetType, r.targetId, r.after]))
+      .toEqual([["parent", "parent", a.ana.id, { code: "stale" }]]);
+    // No second item for the refused submit, and nothing more sent.
+    expect((await items()).map((i) => i.id).sort()).toEqual(staffItems.map((i) => i.id).sort());
+    expect(posts().length).toBe(sentBefore);
+  });
+
+  it("in books with no parent type, a parent's form drawn before staff saved the family's details: refused as changed, shown staff's values", async () => {
+    const a = await ana();
+    await storeShape(NO_PARENT_TYPE);
+    expect(await loadMyContact(a.ctx)).toMatchObject({ state: "ok", form: { version: "f:0" } });
+    asStaff(registrar);
+    expect(await saveFamilyDetailsAction(String(rivera), form({ phone: NEW_PHONE }, "f:0"))).toMatchObject({ ok: true });
+    const staffItems = await items();
+    expect(await saveMyContact(a.ctx, form({ phone: "512-555-0333" }, "f:0"))).toEqual({ ok: false, errors: [CONTACT_COPY.changed], current: asSaved({ phone: NEW_PHONE }, "f:1") });
+    expect(await familyDetails(rivera)).toEqual({ values: { ...NO_DETAILS, phone: NEW_PHONE }, version: 1 });
+    expect((await items()).map((i) => i.id).sort()).toEqual(staffItems.map((i) => i.id).sort());
   });
 
   it("two staff at once from one version: one wins, the other is told it changed, nothing overwritten", async () => {
