@@ -712,11 +712,15 @@ describe("welcome emails", () => {
     expect(sink.messages.at(-1)!.to[0]).toBe("new.address@example.com");
   });
 
-  it("under Strict the worker's welcome says to ask the club once the link runs out", async () => {
+  it("under Strict the worker's welcome says what the password leads to, and to ask the club once the link runs out", async () => {
+    // Slice SI-10b's words, changed on purpose from SI-4's "send this email again".
     await seedParentSettings({ welcome: true, level: "strict" });
     await person("Parent 1", { welcomeOwed: true });
     expect(await sendOwedWelcomes()).toEqual({ sent: 1, failed: 0 });
-    expect(mailText(sink.messages[0]!.raw)).toContain("please ask the club to send this email again.");
+    const words = mailText(sink.messages[0]!.raw);
+    expect(words).toContain("If the link runs out before you use it, please ask the club to send you a new one.");
+    expect(words).toContain("Once you've chosen your password, the portal asks you to add a passkey or an authenticator app, which you'll use each time you sign in.");
+    expect(words).not.toContain("send this email again");
     expect(setupTokensIn(sink.messages[0]!.raw)).toHaveLength(1);
   });
 

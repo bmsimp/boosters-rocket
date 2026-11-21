@@ -386,6 +386,9 @@ describe("under Strict", () => {
     expect((await resetSignin(ana.id, asked, ADMIN)).ok).toBe(true);
     expect(await held(ana)).toMatchObject({ passwords: 0, apps: 0, passkeys: 0 });
     const token = tokenIn(mail.outbox[0]!);
+    // The mail says what the link leads to at Strict (slice SI-10b), in place of Standard's line.
+    expect(mail.outbox[0]!.text).toContain("The link works once, for 7 days. Once you've chosen your password, the portal asks you to add a passkey or an authenticator app before anything else.");
+    expect(mail.outbox[0]!.text).not.toContain("again under Sign-in settings");
     // Under Strict a set-up link, for a person left with no second factor, is Strict's enrolment (slice SI-10a), and so
     // is the password at the door: each leads to /one-more-step and nothing else.
     expect(await choosePasswordFromLink({ purpose: "setup", token, password: NEW_PASSWORD, again: NEW_PASSWORD }, { ip: IP }))
