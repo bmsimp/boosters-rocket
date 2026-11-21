@@ -233,12 +233,25 @@ describe("connecting a different company, by open question 16", () => {
     // Before: through A's link in the roster's company, its customer's row is A's.
     expect(await found()).toEqual(expect.arrayContaining([`family:${String(famA)}`, `qbo_customer:${a.spec.family.qboId}`]));
     expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
-    // After: the filter reads only the roster's company, where A has no link, so the customer's number finds nothing
-    // (the new company's customer of that number may be anyone), and B's row is never A's.
+    // After, until A is linked in the new company: the filter reads only the roster's company, where A has no link, so
+    // the customer's number finds nothing (the new company's customer of that number may be anyone), and B's row is not
+    // A's. Once A is linked there, its new customer's window is unbounded below, so rows of that number from the old
+    // company would match: bounding it by when the company changed is stage 4's slice M8's (the roadmap's M8 row).
     const after = await found();
     expect(after).toContain(`family:${String(famA)}`);
     expect(after).not.toContain(`qbo_customer:${a.spec.family.qboId}`);
     expect(after).not.toContain(`qbo_customer:${b.spec.family.qboId}`);
+  });
+
+  it("names the staff member who connected the new company as the one who ended each link", async () => {
+    await seedTwoFamilies();
+    const staff = await seedStaff({ email: "connector@club.org", admin: true });
+    const links = await db.select().from(accountingLink);
+    expect(links.length).toBeGreaterThan(0);
+    expect(await clearRosterOfOtherCompany("2222", { actor: { door: "staff", id: staff.id, label: staff.email }, ip: null })).toBe(true);
+    const ended = await db.select().from(accountingLinkEnded);
+    expect(ended.map((l) => l.id).sort()).toEqual(links.map((l) => l.id).sort());
+    for (const l of ended) expect(l).toMatchObject({ endedHow: "company_changed", endedBy: staff.id });
   });
 });
 
