@@ -438,7 +438,7 @@ describe("who may press it", () => {
 describe("the page", () => {
   beforeEach(layered);
 
-  it("draws each offered take's words and press, and none for a waiting change, an inactive record active in the books, another place, a student or guardian on one side only", async () => {
+  it("draws each offered take's words and press (since slice M4b an inactive record active in the books too), and none for a waiting change, another place, a student or guardian on one side only", async () => {
     // Imported before anything is changed in the portal: Zoe (13) and Max (14) under Rivera; Oak Family (80) with Ash Oak (81).
     await readAgain(qc("13", "Zoe Rivera", "3", under("10")), qc("14", "Max Rivera", "3", under("10")), qc("80", "Oak Family", "1"), qc("81", "Ash Oak", "3", under("80")));
     await syncAppRecords();
@@ -463,15 +463,17 @@ describe("the page", () => {
     const at = whole.indexOf('id="links-list-h"');
     const list = whole.slice(at, whole.indexOf("</section>", at)).replaceAll("&#x27;", "'").replaceAll("<!-- -->", "");
     const presses = [...list.matchAll(/Take QuickBooks' into the app<span class="visually-hidden">: ([^<]*)<\/span>/g)].map((m) => m[1]).sort();
-    expect(presses).toEqual(["Rivera Family's name"]);
+    expect(presses).toEqual(["Rivera Family's name", "Zoe Rivera's active status"]);
+    // Since slice M4b, Zoe's record, inactive here and active in the books, is taken as active, alone (the students rule is off: no hold).
+    expect(list).toContain("Makes Zoe Rivera active in the portal, as the books have them. Nothing is sent to the books.");
     expect(list).toContain("Takes “Rivera Household” as this family's name in the portal, as the books have it. Nothing is sent to the books.");
     // Leo's move, from Rivera's row and from Chen's, would be refused while the rename of Chen's customer waits: no
     // press, and the queue's sentence in its place, on both rows.
     expect(list).not.toContain("Moves Leo Rivera to Chen Family");
     expect(list.split(QUEUE_IN_THE_WAY).length - 1).toBe(2);
     expect(list).toContain("Ash Oak is still active in the books, so the family can't be taken as inactive until they are made inactive there or moved.");
-    // Nothing for Chen's waiting rename, Zoe, Max at the top, Kim with no record, Mei Chen's Parent customer.
-    expect(list).not.toMatch(/Chen Family's name<\/span>|Zoe Rivera's active status<\/span>|Max Rivera's family<\/span>|Kim Rivera<\/span>/);
+    // Nothing for Chen's waiting rename, Max at the top, Kim with no record, Mei Chen's Parent customer.
+    expect(list).not.toMatch(/Chen Family's name<\/span>|Max Rivera's family<\/span>|Kim Rivera<\/span>/);
     expect(whole).toContain("with Take QuickBooks&#x27; into the app, which changes only the portal&#x27;s records, except that a student&#x27;s move voids an unpaid volunteer buy-out invoice of theirs in the books, as any move does; every other difference is only shown.");
   });
 

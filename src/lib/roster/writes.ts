@@ -44,6 +44,7 @@ import { afterFailedTry, beforeResend, classify, contactStands, emailBefores, em
 import { EMAIL_FIELD_MAX, replaceAddressInField } from "@/lib/parents/email-field";
 import { parseEmailField } from "@/lib/parents/emails";
 import { takeStampHolds } from "@/lib/accounting/stamp";
+import { linkStanding } from "@/lib/accounting/status";
 
 /**
  * The setting that asks the worker for a roster refresh at its next wake: `{ at }`. One ask for the whole portal,
@@ -4117,25 +4118,36 @@ async function movedAnswer(saved: { quickbooks: "not_sent" | "sending" | "has_it
    books' value into the portal: a record's name, a record the books have inactive made inactive, or a student moved to
    the family the books have them under. Each is the press's own change of the portal's record, saved under the roster
    lock with the page's tag and audited (`accounting.difference.take`) in its transaction, and nothing is sent to
-   QuickBooks: no request, and no queue item but the buy-out void a move's follow-ups queue, as every move's do. A take
-   never makes anything active, and aligns no link. */
+   QuickBooks: no request, and no queue item but the buy-out void a move's follow-ups queue, as every move's do. Since
+   slice M4b a take also makes a record active again where the books have its customer active (takeActive()), the only
+   path that does (open question 12), and holds its family's sign-ins (`family.signin_held_at`) when the family comes
+   back or the take would open it to its guardians: they sign in only once someone who may change families lets them in
+   (releaseSigninHold(), src/lib/parents/guardians.ts). A take aligns no link. */
 
 /** What a press on the accounting links screen asked to take, as its page bound it: untrusted ids, looked up again under the roster lock. */
 export type TakeAsk =
-  | { field: "name" | "inactive"; kind: "family" | "student"; recordId: string; stamp: string }
+  | { field: "name" | "inactive" | "active"; kind: "family" | "student"; recordId: string; stamp: string }
   | { field: "place"; studentId: string; stamp: string };
 /** What a take answers when the value it would take isn't the one its row showed: nothing is changed. */
 export const TAKE_CHANGED = "The books or the portal changed since this page was drawn, so nothing was taken. Look at the row again.";
 const TAKE_NOT_LINKED = "That isn't linked to the books, so there is nothing to take from them. Look at the row again.";
 const TAKE_NO_FAMILY = "No family of the portal is linked to the family the books have this student under, so nothing was taken. Look at the row again.";
 const SENT_NOTHING = "Nothing was sent to the books.";
+const ACTIVE_HERE = "That is active in the portal already, so nothing was changed.";
+const FAMILY_INACTIVE_HERE = "This student's family is inactive in the portal, so they weren't made active: a family comes first. Take its active status from the books on its own row, then this student's.";
+const STUDENT_MOVE_PENDING_ACTIVE = "A move of this student hasn't reached QuickBooks yet (it is waiting, stuck or kept on the Reconciliation page), so they weren't made active. Finish it there, or give it up, then try again.";
+/** What a take that leaves a family's sign-ins held says, in its answer and beside its press (the owner's choice 5, as the lead recommends it). */
+export const heldWords = (familyWords: string) => `${familyWords}'s guardians can't sign in to it until someone who may change families lets them in, on its page.`;
+/** Said when a make-inactive of the customer is kept on Reconciliation: the portal's earlier change, which a take leaves as it is. */
+export const KEPT_OFF_STAYS = "A make-inactive of its customer kept on the Reconciliation page stays there, as the portal's earlier change: only Send the portal's value or Give up there settles it.";
 const isOrAre = (names: readonly string[]) => (names.length === 1 ? "is" : "are");
 
 /**
  * Takes the books' value of one difference into the portal (stage 4's slice M4a), from the accounting links screen's
  * press alone (takeDifferenceAction()), holding the record's "being sent" lock (whileSending(): the family's, or the
  * student's) for its whole run, so no rename, make-inactive or move of it runs meanwhile. A name (takeName()), a record
- * made inactive (takeInactive()) or the family a student is under (moveHolding() with `take`): each works the value
+ * made inactive (takeInactive()), a record made active again (takeActive(), slice M4b) or the family a student is
+ * under (moveHolding() with `take`): each works the value
  * out again under the roster lock and refuses, changing nothing, when the row's stamp doesn't seal it (TAKE_CHANGED).
  */
 export async function takeFromBooks(ask: TakeAsk, rosterTag: string, o: WriteOp & { staffUserId: string }): Promise<WriteResult> {
@@ -4144,7 +4156,8 @@ export async function takeFromBooks(ask: TakeAsk, rosterTag: string, o: WriteOp 
   const recordId = raw.toLowerCase();
   const kind = ask.field === "place" ? "student" : ask.kind;
   const held = await whileSending(recordId, () => (ask.field === "name" ? takeName(kind, recordId, ask.stamp, rosterTag, o)
-    : ask.field === "inactive" ? takeInactive(kind, recordId, ask.stamp, rosterTag, o) : takePlace(asAppStudentId(recordId), ask.stamp, rosterTag, o)));
+    : ask.field === "inactive" ? takeInactive(kind, recordId, ask.stamp, rosterTag, o)
+    : ask.field === "active" ? takeActive(kind, recordId, ask.stamp, rosterTag, o) : takePlace(asAppStudentId(recordId), ask.stamp, rosterTag, o)));
   return held ?? refuse(kind === "student" ? STUDENT_BEING_CHANGED : FAMILY_BEING_CHANGED);
 }
 
@@ -4302,6 +4315,108 @@ async function takeInactive(kind: "family" | "student", recordId: string, stamp:
     const noun = layered ? "family" : "member";
     const withThem = under.length === 0 ? "" : `, with ${under.length === 1 ? "its student" : `its ${under.length} students`} ${under.map((s) => recordNameWords(s.name, "student")).join(", ")}`;
     return { ok: true, message: `Made ${familyWords} inactive in the portal${withThem}, as the books have it. ${SENT_NOTHING} Its guardians can't sign in to the ${noun} now.${closedWords(replaced.length)}` };
+  });
+}
+
+/**
+ * Whether a make-inactive of this customer is kept refused on the queue (the portal's earlier change, QuickBooks refused
+ * it): a take of active leaves it as it is, and says so.
+ */
+async function offKept(tx: Tx, customer: string): Promise<boolean> {
+  return (await tx.select({ id: writeQueue.id }).from(writeQueue)
+    .where(and(eq(writeQueue.targetQboId, customer), eq(writeQueue.state, "refused"), sql`${writeQueue.request}->>'op' = 'deactivate'`)).limit(1)).length > 0;
+}
+
+/**
+ * A record made active again as the books have its customer (stage 4's slice M4b; open question 12: the only way a
+ * record becomes active again), in one transaction under the roster lock with the page's tag, sending nothing. A
+ * student: their record inactive, in a family record that is active (a student of an inactive family isn't taken: the
+ * family comes first, and its own take leaves its students inactive); linked, the cache holding the customer active and
+ * the roster listing it directly under the customer the family's own link names (differencesOf()'s condition for the
+ * difference); nothing waiting or stuck for the customer, no move of theirs waiting, stuck or kept, the family's create
+ * neither waiting nor being sent. A family or member: its record inactive; linked, the cache holding the customer active
+ * and the roster listing it as a family or member that stands (linkStanding()); nothing waiting or stuck for it, no move
+ * into or out of it pending, its create neither waiting nor being sent, and its name, when it has one, held by no active
+ * family. The stamp seals, for a student, whether the family's sign-ins are held after the take (`holds`: the take
+ * would open the family to its guardians, as the students rule is in force and the family has no active student, or a
+ * hold stands already), and for a family its own name, which the name check is made on. Then the record is made active
+ * alone (a family's students stay inactive, each with its own press once the family is listed), its family's sign-ins
+ * held when the family comes back, or when the student's take opens it (a family keeps a hold it has: its first), and
+ * one audit row, `accounting.difference.take`, saying whether this take set the hold. No guardian row is touched: none
+ * is opened, closed or reinstated. A make-inactive of the customer kept on Reconciliation stays as it is (the portal's
+ * earlier change: only Send or Give up settles it), said when there is one.
+ */
+async function takeActive(kind: "family" | "student", recordId: string, stamp: string, rosterTag: string, o: WriteOp & { staffUserId: string }): Promise<WriteResult> {
+  return db.transaction(async (tx): Promise<WriteResult> => {
+    const ready = await takeReady(tx, rosterTag);
+    if (!ready.ok) return refuse(ready.error);
+    const roster = buildRoster(ready.shape, ready.cache);
+    const now = new Date();
+    const hold = { signinHeldAt: now, signinHeldBy: o.staffUserId };
+    const audit = (targetType: "family" | "student", after: Record<string, unknown>) =>
+      writeAudit({ actor: o.actor, action: "accounting.difference.take", permission: o.permission, ip: o.ip, targetType, targetId: recordId, before: { active: false },
+        after: { field: "active", kind: targetType, ...after, active: true } }, tx);
+    const keptWords = async (customer: string) => ((await offKept(tx, customer)) ? ` ${KEPT_OFF_STAYS}` : "");
+
+    if (kind === "student") {
+      const [s] = await tx.select().from(student).where(eq(student.id, asAppStudentId(recordId))).for("update");
+      if (!s || s.familyId === null) return refuse(WRITE_COPY.gone);
+      const [f] = await tx.select().from(family).where(eq(family.id, s.familyId)).for("update");
+      if (!f) return refuse(WRITE_COPY.gone);
+      if (s.active) return refuse(ACTIVE_HERE);
+      if (!f.active) return refuse(FAMILY_INACTIVE_HERE);
+      const customer = await customerOfStudent(s.id, tx);
+      if (customer === null) return refuse(TAKE_NOT_LINKED);
+      const c = ready.cache.find((x) => x.qboId === customer);
+      if (!c) return refuse(WRITE_COPY.gone);
+      const familyCustomer = await customerOfFamily(f.id, tx);
+      const listedUnder = familyCustomer !== null && roster.kind === "layered"
+        && (roster.families.find((x) => x.customer.qboId === familyCustomer)?.students.some((x) => x.qboId === c.qboId) ?? false);
+      if (!c.active || !listedUnder) return refuse(TAKE_CHANGED);
+      if (await waitingForCustomer(tx, c.qboId)) return refuse(WRITE_COPY.waiting);
+      const moves = await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(movesOf(s.id), inArray(writeQueue.state, ["waiting", "stuck", "refused"]))).limit(1);
+      if (moves.length) return refuse(STUDENT_MOVE_PENDING_ACTIVE);
+      const making = await familyCreateWaiting(tx, f.id);
+      if (making) return refuse(making === "sending" ? FAMILY_SENDING : FAMILY_WAITING);
+      // Who may sign in goes by the family's active students while the students rule is in force (enterableGuardianRows()):
+      // a take that gives the family its first active student would open it, so it holds the family's sign-ins.
+      const others = await tx.select({ id: student.id }).from(student).where(and(eq(student.familyId, f.id), eq(student.active, true))).limit(1);
+      const opens = (await studentsRuleInForce(tx)) && others.length === 0;
+      const holds = opens || f.signinHeldAt !== null;
+      if (!takeStampHolds("active", recordId, c.qboId, [holds], stamp)) return refuse(TAKE_CHANGED);
+      const sets = opens && f.signinHeldAt === null;
+      await tx.update(student).set({ active: true, updatedAt: now }).where(eq(student.id, s.id));
+      if (sets) await tx.update(family).set({ ...hold, updatedAt: now }).where(eq(family.id, f.id));
+      await audit("student", { familyId: String(f.id), studentId: recordId, customerQboId: c.qboId, held: sets });
+      return { ok: true, message: `Made ${recordNameWords(s.name, "student")} active in the portal, as the books have them. ${SENT_NOTHING}`
+        + (holds ? ` ${heldWords(recordNameWords(f.name, "family"))}` : "") + (await keptWords(c.qboId)) };
+    }
+
+    const [f] = await tx.select().from(family).where(eq(family.id, asAppFamilyId(recordId))).for("update");
+    if (!f) return refuse(WRITE_COPY.gone);
+    if (f.active) return refuse(ACTIVE_HERE);
+    const customer = await customerOfFamily(f.id, tx);
+    if (customer === null) return refuse(TAKE_NOT_LINKED);
+    const c = ready.cache.find((x) => x.qboId === customer);
+    if (!c) return refuse(WRITE_COPY.gone);
+    const listedAsFamily = new Set(roster.kind === "flat" ? roster.members.map((m) => m.qboId) : roster.families.map((x) => x.customer.qboId));
+    if (!c.active || linkStanding(c, { cacheHasCustomers: true, listedAsFamily }).is !== "stands") return refuse(TAKE_CHANGED);
+    if (await waitingForCustomer(tx, c.qboId)) return refuse(WRITE_COPY.waiting);
+    if (await familyMovePending(tx, f.id, c.qboId)) return refuse(MOVE_PENDING);
+    const making = await familyCreateWaiting(tx, f.id);
+    if (making) return refuse(making === "sending" ? FAMILY_SENDING : FAMILY_WAITING);
+    const noun = ready.shape.kind === "flat" ? "member" : "family";
+    const familyWords = recordNameWords(f.name, "family");
+    if (f.name !== null && nameIn(f.name, await portalFamilyNames(tx, f.id))) {
+      return refuse(`Another ${noun} in the portal is called “${f.name}”, and every ${noun}'s name must be different, so ${familyWords} wasn't made active. Rename one of them on its page first.`);
+    }
+    if (!takeStampHolds("active", recordId, c.qboId, [f.name], stamp)) return refuse(TAKE_CHANGED);
+    const sets = f.signinHeldAt === null;
+    await tx.update(family).set({ active: true, ...(sets ? hold : {}), updatedAt: now }).where(eq(family.id, f.id));
+    await audit("family", { familyId: recordId, customerQboId: c.qboId, held: sets });
+    const [withStudents] = noun === "family" ? await tx.select({ id: student.id }).from(student).where(eq(student.familyId, f.id)).limit(1) : [];
+    const students = withStudents ? " Its students stay inactive in the portal: each the books have active shows on the family's row, with a press of its own." : "";
+    return { ok: true, message: `Made ${familyWords} active in the portal, as the books have it. ${SENT_NOTHING}${students} ${heldWords(familyWords)}${await keptWords(c.qboId)}` };
   });
 }
 

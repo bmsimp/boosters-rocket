@@ -51,7 +51,8 @@ const saidBy = (e: Error) => `${e.message} ${(e as { cause?: { message?: string 
 /** Every row of the tables the migration must not change, each in one order. */
 const everything = () => q(async (pg) => ({
   links: await pg`SELECT * FROM accounting_link ORDER BY id`,
-  families: await pg`SELECT * FROM family ORDER BY id`,
+  // Without the columns a later migration adds (0050's sign-in hold, stage 4's slice M4b), which this one never sees.
+  families: (await pg`SELECT * FROM family ORDER BY id`).map((f) => Object.fromEntries(Object.entries(f).filter(([column]) => column !== "signin_held_at" && column !== "signin_held_by"))),
   students: await pg`SELECT * FROM student ORDER BY id`,
   guardians: await pg`SELECT * FROM guardian ORDER BY id`,
   money: await pg`SELECT * FROM family_money ORDER BY family_id`,

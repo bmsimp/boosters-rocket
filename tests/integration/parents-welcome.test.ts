@@ -244,6 +244,25 @@ describe("welcome emails", () => {
     expect(await owedNames()).toEqual(["Inactive Family"]);
   });
 
+  it("a person whose only family's sign-ins are held after a take from the books is not welcomed, stays owed, and is welcomed once it is released", async () => {
+    // The hold is the test's own write here, as a take on Accounting links sets it (stage 4's slice M4b).
+    await seedParentSettings({ welcome: true });
+    const held = await person("Held Family", { family: "20", welcomeOwed: true });
+    const open = await person("Open Family", { family: "30", welcomeOwed: true });
+    await db.update(family).set({ signinHeldAt: new Date(), signinHeldBy: admin.actor.id }).where(eq(family.id, held.familyId));
+    expect(await sendOwedWelcomes()).toEqual({ sent: 1, failed: 0 });
+    expect(sink.messages.map((m) => m.to[0]!)).toEqual([open.email]);
+    expect(await owedNames()).toEqual(["Held Family"]);
+    const staff = { actor: { door: "staff" as const, id: null, label: "reg@club.org" }, ip: null, permission: "Parents.ReadWrite" };
+    expect(await resendWelcome(held.id, staff)).toEqual({ ok: false, reason: "no_access" });
+    // Released: the welcome still owed goes at the next run.
+    sink.messages.length = 0;
+    await db.update(family).set({ signinHeldAt: null, signinHeldBy: null }).where(eq(family.id, held.familyId));
+    expect(await sendOwedWelcomes()).toEqual({ sent: 1, failed: 0 });
+    expect(sink.messages.map((m) => m.to[0]!)).toEqual([held.email]);
+    expect(await owedNames()).toEqual([]);
+  });
+
   it("switching welcomes on, or sign-ins on with welcomes on, marks only people with a row that counts", async () => {
     await storeShape(); // the students rule is in force only while the shape names students
     await seedParentSettings({ signin: false, requireActiveStudents: true });

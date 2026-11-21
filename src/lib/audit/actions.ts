@@ -6,7 +6,7 @@
 export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "access.refused": "Refused: no permission for that page or action",
   "accounting.family.from_customer": "A family made in the portal from a QuickBooks customer no family was linked to, with its students, each linked to its customer",
-  "accounting.difference.take": "A difference between the portal and the books settled by staff on the accounting links screen by taking the books' value into the portal: a name, a record made inactive or a student moved, with nothing sent to the books but the void of an unpaid volunteer buy-out invoice a student's move brings, as any move does",
+  "accounting.difference.take": "A difference between the portal and the books settled by staff on the accounting links screen by taking the books' value into the portal: a name, a record made inactive or active again, or a student moved, with nothing sent to the books but the void of an unpaid volunteer buy-out invoice a student's move brings, as any move does",
   "accounting.link.bulk": "Families linked by staff in one press of Confirm all exact email matches, with how many: each family's link has its own row, and nothing was sent to the books",
   "accounting.link.carried_over": "The portal's own families and students made from the roster, each linked to its QuickBooks customer, with counts",
   "accounting.link.confirm": "A family linked by staff to a customer in the books, with the students and guardians paired with it, or a link carried over from the roster confirmed by staff as checked: nothing was sent to the books",
@@ -130,6 +130,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "roster.family.created_in_quickbooks": "Staff asked to make a family with no link, and its students with none, in QuickBooks and link them: what was made and linked, and where it stopped",
   "roster.family.deactivate": "Staff asked to make a family and everyone under it inactive in QuickBooks: who was made inactive, and where it stopped",
   "roster.family.read": "A family's record opened",
+  "roster.family.signin_released": "A family's guardians let sign in again by staff, after the family or one of its students was made active again from the books",
   "roster.record.follows": "A staff change QuickBooks showed made already: nothing was sent, and the portal's own record was changed to match",
   "roster.record.made_inactive": "A family or student with no link made inactive by staff in the portal only: nothing was sent to QuickBooks",
   "roster.record.moved": "A student moved to another family by staff in the portal, with what follows a move: saved here first, then sent to QuickBooks for a linked student, kept when it can't be",

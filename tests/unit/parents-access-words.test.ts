@@ -26,6 +26,7 @@ describe("accessWords: words for every closing reason, since old rows carry them
     [{ status: "invited", reason: null, blocked: false, family: "counts" }, "can", "Can sign in (hasn't yet)"],
     [{ status: "active", reason: null, blocked: false, family: "inactive" }, "cannot", "Can't sign in now: the family is inactive"],
     [{ status: "invited", reason: null, blocked: false, family: "no_students" }, "cannot", "Can't sign in now: the family has no active students"],
+    [{ status: "active", reason: null, blocked: false, family: "held" }, "cannot", "Can't sign in now: the family was made active again from the books, and its guardians wait for someone who may change families to let them in on its page"],
     [{ status: "active", reason: null, blocked: false, family: "no_record" }, "cannot", "Can't sign in now: the family isn't set up in the portal"],
     [{ status: "active", reason: null, blocked: true, family: "inactive" }, "blocked", "Blocked"],
     [{ status: "disabled", reason: "removed", blocked: false, family: "inactive" }, "cannot", "Can't sign in: removed by staff"],

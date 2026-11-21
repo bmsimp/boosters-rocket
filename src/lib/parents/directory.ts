@@ -51,12 +51,15 @@ const WHY: Record<DisabledReason, string> = {
 
 /**
  * Why an open row's family is not one its person can enter now, by the gate's rule (enterableGuardianRows(),
- * ./sessions.ts): no family record, an inactive one, or none with an active student while the Admin asks for one.
+ * ./sessions.ts): no family record, an inactive one, one whose sign-ins are held after a take from the books (stage 4's
+ * slice M4b), or none with an active student while the Admin asks for one.
  * `counts` when it is one to enter. Nothing closes the row for any of these: the gate keeps its person out.
  */
-export type FamilyStanding = "counts" | "no_record" | "inactive" | "no_students";
+export type FamilyStanding = "counts" | "no_record" | "inactive" | "held" | "no_students";
 const NOT_NOW: Record<Exclude<FamilyStanding, "counts">, string> = {
-  no_record: "the family isn't set up in the portal", inactive: "the family is inactive", no_students: "the family has no active students",
+  no_record: "the family isn't set up in the portal", inactive: "the family is inactive",
+  held: "the family was made active again from the books, and its guardians wait for someone who may change families to let them in on its page",
+  no_students: "the family has no active students",
 };
 
 /**
@@ -78,7 +81,7 @@ export function accessWords(o: { status: GuardianStatus; reason: DisabledReason 
 async function familyStandings(ids: (AppFamilyId | null)[]): Promise<(id: AppFamilyId | null) => FamilyStanding> {
   const unique = [...new Set(ids.filter((id): id is AppFamilyId => id !== null))];
   const [studentsRule, rows, withStudents] = await Promise.all([studentsRuleInForce(),
-    unique.length ? db.select({ id: family.id, active: family.active }).from(family).where(inArray(family.id, unique)) : Promise.resolve([]),
+    unique.length ? db.select({ id: family.id, active: family.active, held: family.signinHeldAt }).from(family).where(inArray(family.id, unique)) : Promise.resolve([]),
     unique.length ? db.select({ id: family.id }).from(family).where(and(inArray(family.id, unique), hasActiveStudent(family.id))) : Promise.resolve([])]);
   const found = new Map(rows.map((r) => [String(r.id), r]));
   const hasStudent = new Set(withStudents.map((r) => String(r.id)));
@@ -86,6 +89,7 @@ async function familyStandings(ids: (AppFamilyId | null)[]): Promise<(id: AppFam
     const f = id === null ? undefined : found.get(String(id));
     if (!f) return "no_record";
     if (!f.active) return "inactive";
+    if (f.held !== null) return "held";
     return studentsRule && !hasStudent.has(String(f.id)) ? "no_students" : "counts";
   };
 }

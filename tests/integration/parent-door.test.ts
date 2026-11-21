@@ -652,3 +652,83 @@ describe("the gate: while the club asks for an active student, a family with non
     expect(await statuses()).toEqual(["active", "active", "active"]);
   });
 });
+
+describe("the gate: a family whose sign-ins are held after a take from the books is not one to enter (stage 4's slice M4b)", () => {
+  // The hold is set by a take on Accounting links (accounting-take-active.test.ts) and cleared by staff who may change
+  // families (releaseSigninHold()); here it is the test's own write, as the blocks above make a family inactive.
+  beforeEach(async () => { await resetDb(); outbox.length = 0; await seedWorkingMail(); await seedParentSettings(SIGNINS_ON); });
+  const STAFF_ID = "00000000-0000-4000-8000-0000000000aa";
+  const hold = (familyId: AppFamilyId | null) => db.update(family).set({ signinHeldAt: new Date(), signinHeldBy: STAFF_ID }).where(eq(family.id, familyId!));
+  const release = (familyId: AppFamilyId | null) => db.update(family).set({ signinHeldAt: null, signinHeldBy: null }).where(eq(family.id, familyId!));
+  const refusedFor = async (action: string, reason: string) =>
+    (await db.select().from(auditLog)).filter((x) => x.action === action && (x.after as { reason?: string } | null)?.reason === reason);
+  const ageCodes = async () => { await db.update(signinCode).set({ createdAt: new Date(Date.now() - 5 * 60_000) }); await db.delete(rateLimitEvent); };
+
+  it("the code request: a person whose only family is held is sent no code, with the same answer as anyone's, and closes no row", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    const g = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1", status: "invited" });
+    await hold(g.familyId);
+    const res = await post("/portal-code/send", { email: "ana@example.com" });
+    expect([res.status, await res.text()]).toEqual([200, JSON.stringify({ ok: true })]);
+    expect(await refusedFor("signin.code_refused", "no_enabled_guardian")).toHaveLength(1);
+    expect(outbox).toEqual([]);
+    expect((await db.select().from(guardian))[0]).toMatchObject({ id: g.id, status: "invited" });
+    // Released: the same row lets her in.
+    await release(g.familyId);
+    await ageCodes();
+    expect((await signIn("ana@example.com")).body).toEqual({ ok: true, next: "/" });
+  });
+
+  it("the code check: a code sent before the hold is refused once it is set, and no session is made", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    const g = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
+    await post("/portal-code/send", { email: "ana@example.com" });
+    await vi.waitFor(() => expect(outbox.length).toBe(1));
+    const code = /sign-in code: (\d{6})/.exec(outbox[0]!.subject)![1]!;
+    await hold(g.familyId);
+    const checked = await post("/portal-code/verify", { email: "ana@example.com", code });
+    expect(checked.headers.getSetCookie().some((c) => c.startsWith("br_parent.session_token"))).toBe(false);
+    expect(await refusedFor("signin.refused", "no_enabled_guardian")).toHaveLength(1);
+    expect(await db.select().from(parentAuthSession)).toEqual([]);
+    expect((await db.select().from(guardian)).map((r) => r.status)).toEqual(["active"]);
+  });
+
+  it("the chooser offers only the family that isn't held, refuses the held one, and a session that chose it is sent back on its next request", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    const g1 = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" }), g2 = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F2" });
+    const { cookie } = await signIn("ana@example.com");
+    const s = await stateOf(cookie);
+    const sessionId = s.status === "choose" ? s.sessionId : "";
+    expect(await chooseFamily({ sessionId, parentId: a.id, guardianId: g1.id, ip: IP })).toBe(true);
+    expect(await stateOf(cookie)).toMatchObject({ status: "ok", identity: { guardianId: g1.id, familyId: g1.familyId } });
+    // Held: the session that chose it goes back to choose on its next request, offered the other family alone.
+    await hold(g1.familyId);
+    expect(await stateOf(cookie)).toEqual({ status: "choose", parentId: a.id, sessionId, name: "Ana", families: [{ guardianId: g2.id, familyId: g2.familyId }] });
+    expect((await sessionRow()).familyId).toBeNull();
+    expect((await refusedFor("signin.refused", "family_not_enabled")).map((x) => x.after)).toEqual([{ reason: "family_not_enabled", familyId: String(g1.familyId) }]);
+    expect(await chooseFamily({ sessionId, parentId: a.id, guardianId: g1.id, ip: IP })).toBe(false);
+    // Both families held: nothing counts, so the person is signed out as one with no open row; no row is closed.
+    await hold(g2.familyId);
+    expect(await stateOf(cookie)).toEqual({ status: "none" });
+    expect(await db.select().from(parentAuthSession)).toEqual([]);
+    expect((await db.select().from(guardian)).map((r) => r.status)).toEqual(["active", "active"]);
+    // Released: both count again, by the gate and by the SQL rule the welcome and the reminders read.
+    await release(g1.familyId); await release(g2.familyId);
+    expect((await enterableGuardianRows(a.id)).map((r) => r.id).sort()).toEqual([g1.id, g2.id].sort());
+    const rule = await studentsRuleInForce();
+    expect(await db.select({ id: guardian.id }).from(guardian).where(guardianRowCounts(rule))).toHaveLength(2);
+  });
+
+  it("the SQL rule: a held family's row doesn't count, and its person counts only by another family's row", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" }), b = await seedParent({ name: "Ben", email: "ben@example.com" });
+    const ga = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
+    await seedGuardianInFamily({ parentId: b.id, familyQboId: "F1" });
+    const gb2 = await seedGuardianInFamily({ parentId: b.id, familyQboId: "F2" });
+    await hold(ga.familyId);
+    const rule = await studentsRuleInForce();
+    expect((await db.select({ id: guardian.id }).from(guardian).where(guardianRowCounts(rule))).map((r) => r.id)).toEqual([gb2.id]);
+    expect((await db.select({ id: parent.id }).from(parent).where(hasRowThatCounts(rule))).map((p) => p.id)).toEqual([b.id]);
+    expect(await enterableGuardianRows(a.id)).toEqual([]);
+    expect((await enterableGuardianRows(b.id)).map((r) => r.id)).toEqual([gb2.id]);
+  });
+});
