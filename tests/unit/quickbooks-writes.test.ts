@@ -1018,14 +1018,14 @@ function queueOnlyProblems(writerText: string, linkWritesText: string): string[]
   if (bulk === "") problems.push(`${LINK_WRITES} has no exported function ${SEND_ALL}`);
   const bodies: [string, string][] = [[SEND_QUEUE, start < 0 || end <= start ? "" : writer.slice(start, end)], [SEND_ALL, bulk]];
   for (const [name, body] of bodies) {
-    for (const forbidden of NOT_IN_A_QUEUE_ONLY_BODY) if (new RegExp(`\b${forbidden}\b`).test(body)) problems.push(`${name}'s body names ${forbidden}: it queues, and never sends`);
+    for (const forbidden of NOT_IN_A_QUEUE_ONLY_BODY) if (new RegExp(`\\b${forbidden}\\b`).test(body)) problems.push(`${name}'s body names ${forbidden}: it queues, and never sends`);
   }
   return problems;
 }
 
 describe("and Send the app's for all, which queues and never sends at the press (stage 4's slice M5b)", () => {
   const everything = read("src");
-  const naming = (sources: { file: string; text: string }[], name: string) => sources.filter((s) => new RegExp(`\b${name}\b`).test(code(s.text))).map((s) => s.file).sort();
+  const naming = (sources: { file: string; text: string }[], name: string) => sources.filter((s) => new RegExp(`\\b${name}\\b`).test(code(s.text))).map((s) => s.file).sort();
   const writerSource = everything.find((s) => s.file === ROSTER_WRITER)?.text ?? "";
   const linkWritesSource = everything.find((s) => s.file === LINK_WRITES)?.text ?? "";
 
@@ -1041,8 +1041,8 @@ describe("and Send the app's for all, which queues and never sends at the press 
     expect(queueOnlyProblems(writerSource, linkWritesSource)).toEqual([]);
     // Each proved on a copy it must refuse: a try, the family action, sendWrite() or a client write put into either body,
     // or the queue's body's end gone.
-    const intoQueue = (line: string) => writerSource.replace(new RegExp(`(export async function ${SEND_QUEUE}\([^\n]*\{\n)`), `$1${line}\n`);
-    const intoBulk = (line: string) => linkWritesSource.replace(new RegExp(`(export async function ${SEND_ALL}\([^\n]*\{\n)`), `$1${line}\n`);
+    const intoQueue = (line: string) => writerSource.replace(new RegExp(`(export async function ${SEND_QUEUE}\\([^\\n]*\\{\\n)`), `$1${line}\n`);
+    const intoBulk = (line: string) => linkWritesSource.replace(new RegExp(`(export async function ${SEND_ALL}\\([^\\n]*\\{\\n)`), `$1${line}\n`);
     const cases: [string, string][] = [
       [intoQueue(`  await trySavedItem({} as never, {} as never, {} as never);`), linkWritesSource],
       [intoQueue(`  await tryDeactivate({} as never, "", {} as never);`), linkWritesSource],
