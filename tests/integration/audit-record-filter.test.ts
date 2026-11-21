@@ -178,6 +178,23 @@ describe("the audit page's filter for one family or student", () => {
     expect(await tagged(`student:${kai}`)).toEqual(["kai-left-chen"]);
   });
 
+  it("finds a move taken from the books on the accounting links screen under the student and under both families, and a take of another field by its target alone", async () => {
+    // Stage 4's slice M4a: a take's move names both families in its body, as the portal's own move's row does.
+    const take = (t: string, targetType: string, targetId: string, before: Record<string, unknown>, after: Record<string, unknown>) =>
+      bodied("accounting.difference.take", targetType, targetId, { before, after: { ...after, tag: t } });
+    await take("moved", "student", leo, { familyId: rivera }, { field: "place", kind: "student", studentId: leo, familyId: chen, fromFamilyId: rivera, customerQboId: "12", familyQboId: "20", replaced: [] });
+    await bodied("roster.student.move.followed", "student", leo, { after: { studentId: leo, fromFamilyId: rivera, toFamilyId: chen, cause: `accounting.difference.take#${leo}`, tag: "followed" } });
+    // Kai made inactive from the books: his row names the Chen family in its body, and is his alone.
+    await take("kai-inactive", "student", kai, { active: true }, { field: "inactive", kind: "student", studentId: kai, familyId: chen, customerQboId: "22", replaced: [], active: false });
+    await take("rivera-named", "family", rivera, { name: "Riveras" }, { field: "name", kind: "family", familyId: rivera, customerQboId: "10", name: "Rivera Family", replaced: [] });
+    const tagged = async (record: string) => (await auditPage(parseAuditFilters({ record }))).rows
+      .map((r) => (r.after as { tag?: string } | null)?.tag).filter((t): t is string => t !== undefined).sort();
+    expect(await tagged(`family:${rivera}`)).toEqual(["followed", "moved", "rivera-named"]);
+    expect(await tagged(`family:${chen}`)).toEqual(["followed", "moved"]);
+    expect(await tagged(`student:${leo}`)).toEqual(["followed", "moved"]);
+    expect(await tagged(`student:${kai}`)).toEqual(["kai-inactive"]);
+  });
+
   it("finds a confirm on the accounting links screen under its family and under each student it linked, and never under another student", async () => {
     // Stage 4's slice M3a: the row targets the family and names the students it linked only in its body.
     const confirm = (t: string, familyId: string, studentId: string, customerQboId: string) => bodied("accounting.link.confirm", "family", familyId,

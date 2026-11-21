@@ -55,7 +55,7 @@ describe("a family whose records match the books", () => {
 describe("names", () => {
   it("the family's and a student's: a difference of case, or of any visible character, shows", () => {
     expect(compare(rivera({ name: "Rivera family" })).differences).toEqual([{ kind: "name", of: "family", portal: "Rivera family", books: "Rivera Family", queue: null }]);
-    expect(compare(rivera({ students: [student(S1, "Leo Riviera", "12")] })).differences).toEqual([{ kind: "name", of: "student", portal: "Leo Riviera", books: "Leo Rivera", queue: null }]);
+    expect(compare(rivera({ students: [student(S1, "Leo Riviera", "12")] })).differences).toEqual([{ kind: "name", of: "student", studentId: S1, portal: "Leo Riviera", books: "Leo Rivera", queue: null }]);
   });
   it("compared after the portal's own name rule: a doubled or trailing space, or a decomposed accent, is no difference", () => {
     const books = (id: string, displayName: string) => changed(id, { displayName });
@@ -92,9 +92,9 @@ describe("whether each is active", () => {
   });
   it("an active student whose customer is inactive, and an inactive student record whose customer the roster lists active under the family", () => {
     expect(compare(rivera(), { customers: changed("12", { active: false }) }).differences)
-      .toEqual([{ kind: "active", of: "student", who: "Leo Rivera", portalActive: true, queue: null }]);
+      .toEqual([{ kind: "active", of: "student", studentId: S1, who: "Leo Rivera", portalActive: true, queue: null }]);
     const gone = compare(rivera({ students: [student(S1, "Leo Rivera", "12", false)] }));
-    expect(gone.differences).toEqual([{ kind: "active", of: "student", who: "Leo Rivera", portalActive: false, queue: null }]);
+    expect(gone.differences).toEqual([{ kind: "active", of: "student", studentId: S1, who: "Leo Rivera", portalActive: false, queue: null }]);
     expect(differenceWords(gone.differences[0]!)).toMatchObject({ portal: "Inactive", books: "Active" });
     // An inactive record whose customer is inactive too, or not under the family, differs in nothing.
     expect(compare(rivera({ students: [student(S1, "Leo Rivera", "12", false)] }), { customers: changed("12", { active: false }) }).differences).toEqual([]);
@@ -187,7 +187,7 @@ describe("a student customer under the family whose record the portal has elsewh
   it("the ordinary case is unchanged: a record of this family, active or inactive, is told as that record, never as elsewhere", () => {
     expect(compare(rivera()).differences).toEqual([]);
     expect(compare(rivera({ students: [student(S1, "Leo Rivera", "12", false)] }), { records: { "12": { id: S1, active: false, family: "Rivera Family" } } }).differences)
-      .toEqual([{ kind: "active", of: "student", who: "Leo Rivera", portalActive: false, queue: null }]);
+      .toEqual([{ kind: "active", of: "student", studentId: S1, who: "Leo Rivera", portalActive: false, queue: null }]);
     // An inactive customer whose record is elsewhere is neither told nor counted.
     const r = compare(rivera({ students: [] }), { customers: changed("12", { active: false }), records: { "12": { id: S1, active: true, family: "Chen Family" } } });
     expect(r).toEqual({ differences: [], inactiveUnrecorded: 0 });

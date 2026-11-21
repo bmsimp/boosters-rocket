@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireStaffAlso, requireStaffPage } from "@/lib/guards";
-import { BULK_MAX, filterLinkRows, filtersOf, givenUpCustomersOf, loadAccountingLinks, REVIEW_LEFT_WORDS, statusCounts, type BulkOffer, type ConfirmStep, type LinkMade, type LinkOffer, type LinkRow, type LinkStatus, type LinksState, type LinksView, type OwnLink, type ReviewOffer, type UnlinkOffer } from "@/lib/accounting/mapping";
+import { BULK_MAX, filterLinkRows, filtersOf, givenUpCustomersOf, loadAccountingLinks, REVIEW_LEFT_WORDS, statusCounts, type BulkOffer, type ConfirmStep, type LinkMade, type LinkOffer, type LinkRow, type LinkStatus, type LinksState, type LinksView, type OwnLink, type ReviewOffer, type TakeOffer, type UnlinkOffer } from "@/lib/accounting/mapping";
 import { differenceKinds, differenceWords, noteSentence, type Difference } from "@/lib/accounting/differences";
 import { NOT_A_FAMILY_WORDS, parseLinksFilter, searchMatches, SEARCH_MAX, STATUS_KEYS, STATUS_WORDS, type LinksFilter, type StatusKey } from "@/lib/accounting/status";
 import type { Holder } from "@/lib/accounting/match";
@@ -12,7 +12,7 @@ import { LocalTime } from "@/app/components/local-time";
 import { Notice } from "@/app/components/notice";
 import { StateWords } from "@/app/components/state-words";
 import { familyPage } from "@/app/staff/(app)/family-pages";
-import { confirmAllAction, confirmLinkAction, leaveUnlinkedAction, reviewLinkAction, undoLeaveUnlinkedAction, unlinkAction } from "./actions";
+import { confirmAllAction, confirmLinkAction, leaveUnlinkedAction, reviewLinkAction, takeDifferenceAction, undoLeaveUnlinkedAction, unlinkAction } from "./actions";
 import { LinkAnswers, LinkAnswersShown, LinkPress } from "./link-press";
 
 export const metadata = { title: "Accounting links" };
@@ -76,15 +76,20 @@ const RECONCILIATION_CHANGES = "/staff/reconciliation#writes-h";
 
 /**
  * One difference, with both values as text, and the change on the write queue that explains it, in the queue's own
- * words with a link to Reconciliation's list (never its buttons). Nothing here settles it.
+ * words with a link to Reconciliation's list (never its buttons). Since slice M4a, where a press takes the books' value
+ * into the portal (`take`), what it does is said after it, then the press; or, where none is offered now, why, in one
+ * sentence (`note`).
  */
-function DifferenceLine({ d }: { d: Difference }) {
+function DifferenceLine({ d, take, note, tag }: { d: Difference; take: TakeOffer | undefined; note: string | undefined; tag: string }) {
   const w = differenceWords(d);
   const notes = d.kind === "guardians_unlinked" ? d.queue.map((q) => `For ${q.count} of them: ${noteSentence(q.note)}`)
     : d.kind === "student_customer" || d.kind === "parent_customers" || d.queue === null ? [] : [noteSentence(d.queue)];
   return (
     <li>{w.what}. In the portal: {w.portal}. In the books: {w.books}.
-      {notes.length > 0 && <> {notes.join(" ")} <Link href={RECONCILIATION_CHANGES}>{notes.length === 1 ? "See the change on Reconciliation" : "See the changes on Reconciliation"}</Link></>}</li>
+      {notes.length > 0 && <> {notes.join(" ")} <Link href={RECONCILIATION_CHANGES}>{notes.length === 1 ? "See the change on Reconciliation" : "See the changes on Reconciliation"}</Link></>}
+      {note !== undefined && <> {note}</>}
+      {take !== undefined && <><p>{take.words.join(" ")}</p>
+        <div className="row-actions"><LinkPress label="Take QuickBooks' into the app" busy="Taking it…" about={take.about} act={takeDifferenceAction.bind(null, take.field, take.kind, take.recordId, tag, take.stamp)} /></div></>}</li>
   );
 }
 
@@ -125,7 +130,7 @@ function Opening({ row, tag }: { row: LinkRow; tag: string }) {
       {row.guardians.length > 0 && <ul>{row.guardians.map((g) => <li key={g.id}>{g.name} ({g.email}){g.blocked ? ", can't sign in, so this address isn't matched" : ""}: {ownLinkWords(g.link)}</li>)}</ul>}
       {row.status.key === "several" && <><p>Possible customers:</p><ul>{row.status.candidates.map((c) => <li key={c.qboId}>{c.name}{c.email ? ` (${c.email})` : ""} <Link href={pickHref(id, c.qboId)}>Look at it before linking<span className="visually-hidden">: {c.name}</span></Link></li>)}</ul></>}
       {row.status.key === "several" && row.status.alsoMatches.length > 0 && <p>Also matched by: {row.status.alsoMatches.join(", ")}.</p>}
-      {row.differences.length > 0 && <><p>Where the portal and the books differ:</p><ul>{row.differences.map((d, i) => <DifferenceLine key={i} d={d} />)}</ul></>}
+      {row.differences.length > 0 && <><p>Where the portal and the books differ:</p><ul>{row.differences.map((d, i) => <DifferenceLine key={i} d={d} tag={tag} take={row.takes.find((t) => t.at === i)} note={row.takeNotes.find((n) => n.at === i)?.words} />)}</ul></>}
       {row.inactiveUnrecorded > 0 && <p>The books also have {plural(row.inactiveUnrecorded, "inactive student customer", "inactive student customers")} under this family with no student record in the portal.</p>}
       {row.confirm !== null && row.customer !== null && <><p>Confirming links it to &ldquo;{row.customer.name}&rdquo;. Nothing is sent to the books.</p><ProposalsShown proposals={row.confirm.proposals} /><p>{LINK_EFFECT}</p></>}
       {row.review !== null && <ReviewShown review={row.review} />}
@@ -317,7 +322,7 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
         <h1 className="page-title">Accounting links</h1>
         <p className="lede">Every family in the portal, beside the customer in the books it is linked to, or the one that looks like its own.
           A family with no link can be linked here, to its suggestion or a customer you pick, or left unlinked. Nothing here is sent to the books.
-          For a family whose link stands, it also lists where the portal and the books differ, and settles none of it.</p>
+          For a family whose link stands, it also lists where the portal and the books differ. A name, a record the books have inactive, or the family the books have a student under can be taken into the portal with Take QuickBooks&apos; into the app, which changes only the portal&apos;s records, except that a student&apos;s move voids an unpaid volunteer buy-out invoice of theirs in the books, as any move does; every other difference is only shown.</p>
         <LinkAnswersShown />
 
         <section className="box" aria-labelledby="links-how-h"><h2 id="links-how-h">How links are made</h2>

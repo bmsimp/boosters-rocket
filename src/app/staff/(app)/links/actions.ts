@@ -5,11 +5,12 @@ import { confirmAllSuggested, leaveUnlinked, LINK_COPY, linkFamilyToCustomer, re
 import { BULK_MAX } from "@/lib/accounting/mapping";
 import { isStatusKey, SEARCH_MAX } from "@/lib/accounting/status";
 import { isChosen } from "@/lib/accounting/stamp";
+import { takeFromBooks } from "@/lib/roster/writes";
 
 // The accounting links screen's presses (stage 4's slice M3a; src/lib/accounting/link-writes.ts): Confirm (a Suggested
 // row's customer, a Several possible row's candidate, or one picked from the customers no family is linked to), Leave
 // unlinked and Undo; since slice M3a2, Confirm all exact email matches and Confirm this link (a carried-over link
-// confirmed as reviewed); since slice M3b, Unlink from the books. Each needs the linking permission, Accounting.Link.ReadWrite (not Admin-only), and also
+// confirmed as reviewed); since slice M3b, Unlink from the books; since slice M4a, Take QuickBooks' into the app. Each needs the linking permission, Accounting.Link.ReadWrite (not Admin-only), and also
 // Roster.Read, the page's own, checked here first and refused as the guard refuses (requireStaffActionAlso()). A server
 // action can be called with any values, not only the ones its page sends: each argument is checked here for its type
 // and size, and everything about the family, the customer and the students is checked again in the library, under the
@@ -80,6 +81,24 @@ export const unlinkAction = staffAction(P, async (ctx: StaffCtx, familyId: strin
   if (!str(familyId, ID_MAX) || !str(linkId, ID_MAX) || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return NOT_FROM_PAGE;
   const r = await unlinkFamily({ familyId, linkId, stamp }, rosterTag, op(ctx));
   // An unlink changes the family's page, the Families pages, Balances and every staff page that lists families.
+  if (r.ok) revalidatePath("/", "layout");
+  else again();
+  return r;
+});
+
+/**
+ * Take QuickBooks' into the app (slice M4a): what the row's difference takes (`name`, `inactive` or `place`), the kind
+ * of record (`family` or `student`; a place is always a student's), the record's app id, the roster tag and the stamp
+ * sealing the value the row showed. The linking permission and the page's Roster.Read settle it (the owner's choice 6,
+ * as recommended): nothing is sent to the books but the buy-out void a student's move brings, as any move's, and the
+ * library works the value out again under the roster lock.
+ */
+export const takeDifferenceAction = staffAction(P, async (ctx: StaffCtx, field: string, kind: string, recordId: string, rosterTag: string, stamp: string): Promise<LinkDone> => {
+  await requireStaffActionAlso(ctx, "Roster.Read");
+  if (!(field === "name" || field === "inactive" || field === "place") || !(kind === "family" || kind === "student") || (field === "place" && kind !== "student")
+    || !str(recordId, ID_MAX) || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return NOT_FROM_PAGE;
+  const r = await takeFromBooks(field === "place" ? { field, studentId: recordId, stamp } : { field, kind, recordId, stamp }, rosterTag, op(ctx));
+  // A name, a record made inactive or a student moved changes the Families pages, Balances and the family's pages.
   if (r.ok) revalidatePath("/", "layout");
   else again();
   return r;
