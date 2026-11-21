@@ -12,6 +12,9 @@ import { paidIn } from "./rules";
 /** A buy-out that stands with nothing paid on it as far as the portal knows: being invoiced, invoiced, being cancelled, or stuck. */
 const UNPAID_LIVE: BuyoutState[] = ["being_invoiced", "invoiced", "being_voided", "stuck"];
 
+/** The flags a void or a move leaves that a paid buy-out of an earlier company reads as a refund owed (earlierCompanyLook(), ./closing.ts). */
+const KEPT_AS_REFUND = new Set<string>(["paid_before_void", "student_moved"]);
+
 /**
  * Called inside clearRosterOfOtherCompanyLocked() (src/lib/roster/source.ts), under the roster lock, in its transaction,
  * before the queue is given up (stage 4's slice M7a, open question 16): a buy-out's customer, item and invoice are the
@@ -63,6 +66,9 @@ export async function endBuyoutsOfEarlierCompany(tx: Tx, o: { fromRealmId: strin
  * check's own (checksOwnFlag(), ./closing.ts, read with whether a void was ever queued for it), and a void's or a move's
  * stays, so a buy-out paid though its void was asked for still reads as a refund owed; its customer, item, invoice,
  * company, units and amount are kept; audited `volunteer.buyout.paid` with the clear's actor. Nothing is sent or queued.
+ * One flagged otherwise (`void_refused`: QuickBooks refused the void a switch back asked for; `given_up`) is not marked:
+ * paid, it would read as nothing to settle and leave every list (earlierCompanyLook(), ./closing.ts, reads a refund owed
+ * only for KEPT_AS_REFUND), so it ends with the rest and stays on the treasurer's list, as before this slice.
  *
  * The candidates are read FOR UPDATE, under the roster lock the caller holds: a void queued at that moment (queueVoid(),
  * src/lib/buyouts/writes.ts, holding no roster lock) either committed first, and its buy-out, being voided now, is no
@@ -87,6 +93,7 @@ async function markPaidAsStored(tx: Tx, o: { fromRealmId: string; actor: Actor; 
   for (const b of paid) {
     const f = of.get(b.familyId)!;
     const own = checksOwnFlag({ state: b.state, flag: b.flag, lastCode: b.lastCode, items: voidsFor.has(b.id) ? [{ op: "invoice_void" }] : [] });
+    if (b.flag !== null && !own && !KEPT_AS_REFUND.has(b.flag)) continue;
     const [done] = await tx.update(buyout).set({ state: "paid", ...(own ? { flag: null, flaggedAt: null } : {}), updatedAt: new Date() })
       .where(and(eq(buyout.id, b.id), eq(buyout.state, "invoiced"))).returning({ id: buyout.id });
     if (!done) continue;

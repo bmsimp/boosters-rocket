@@ -25,13 +25,14 @@ import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { MONEY_JOB } from "@/lib/money/run-keys";
 import { clearRosterOfOtherCompany, SOURCE_KEY } from "@/lib/roster/source";
 import VolunteerPage from "@/app/(parent)/volunteer/page";
+import SeasonPage from "@/app/(parent)/season/page";
 import { resetDb, untilALockIsAwaited } from "../helpers/db";
 import { CHENOWETH, RIVERA } from "../helpers/money";
 import { identityNow, MONEY_REALM, seedSignedInParent, type SeededParent } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { buyoutFamily, queueOf, seedBuyout, seedBuyoutRequirement, BUYOUT_ITEM } from "../helpers/buyouts";
 import { recordOfCustomer } from "../helpers/app-records";
-import { P_TYPES, storeShape } from "../helpers/roster-cache";
+import { moveInCache, P_TYPES, storeShape } from "../helpers/roster-cache";
 
 // Stage 4's slice M7b2 (the owner's reading of open question 16, 2026-11-21): at a change of company, an invoiced
 // buy-out whose own family's stored figures, of its own company, show its invoice paid is marked paid by the clear
@@ -210,6 +211,29 @@ describe("an invoiced buy-out its stored figures show paid, at a change of compa
     }
     expect(await loadEarlierCompanyBuyouts()).toEqual([]);
   });
+
+  it("ends as today one whose void QuickBooks refused, so it stays on the treasurer's list: paid with that flag it would read as nothing to settle", async () => {
+    const p = await buyoutFamily(stub);
+    // A switch back's void QuickBooks refused (voidKept()): invoiced, flagged void_refused, the fault kept, its item given up on that answer.
+    const refused = await buyoutOf(p, "Void refused QP65", { invoiceQboId: "6705", flag: "void_refused" });
+    await db.update(buyout).set({ lastCode: "fault_6240" }).where(eq(buyout.id, refused.id));
+    await voidItemFor(refused);
+    await figures(FAMILY, [paidInv("6705")]);
+    await clearAndExpectEnded([refused.id]);
+    expect(await row(refused.id)).toMatchObject({ flag: "void_refused", lastCode: "fault_6240" });
+    expect((await loadEarlierCompanyBuyouts()).find((l) => l.id === refused.id)).toMatchObject({ kind: "invoice_stands", words: EARLIER_WORDS.invoice_stands });
+  });
+
+  it("marks a per-student one by its own family's figures though its student has moved to another family since", async () => {
+    const p = await buyoutFamily(stub);
+    await seedSignedInParent(CHENOWETH);
+    const b = await buyoutOf(p, "Moved away QP66", { subjectQboId: S1, invoiceQboId: "6706" });
+    await moveInCache([S1], CHENOWETH.family.qboId);
+    await figures(FAMILY, [paidInv("6706", S1)]);
+    expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
+    expect(await row(b.id)).toMatchObject({ state: "paid", endReason: null, flag: null });
+    expect(await paidRows(b.id)).toHaveLength(1);
+  });
 });
 
 describe("what runs beside the mark", () => {
@@ -308,6 +332,10 @@ describe("a buy-out marked paid at the clear, after it", () => {
     const volunteer = await renderPage(VolunteerPage);
     expect(volunteer).toContain("Paid instead");
     expect(volunteer).not.toContain("Buy-out invoiced");
+    expect(volunteer).not.toMatch(/\/volunteer\/pay-instead\//);
+    const season = await renderPage(SeasonPage);
+    expect(season).toContain("Paid instead");
+    expect(season).not.toContain("Buy-out invoiced");
 
     // For staff: paid, its invoice in the earlier company's books, nothing to settle, on neither list.
     const marked = await row(b.id);
