@@ -48,8 +48,8 @@ export type OneFamilyImport = {
  * Imports the app's own families and students and their links from the roster cache (./plan.ts says what that is). It
  * changes only what differs, so a second run changes nothing.
  * It never deletes a record or a link: one nothing needs any more is made inactive and keeps its id and its link, and
- * is the same record, active again, when its customer is named again. Only a change of company removes them
- * (clearAppRecords(), ./company-change.ts). A cache that names no company leaves every record inactive. Every link a
+ * is the same record, active again, when its customer is named again. A change of company removes no record either: it
+ * ends every link, into the link history (endLinksOfEarlierCompany(), ./company-change.ts). A cache that names no company leaves every record inactive. Every link a
  * whole run makes is carried over from the roster, now, with nobody named.
  *
  * Given `one`, it runs by the same rules narrowed to that family customer (planForOneFamily()) and only makes what is

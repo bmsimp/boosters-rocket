@@ -5,7 +5,8 @@ type Msg = { to: string; subject: string; text: string; html: string };
 const mail = vi.hoisted(() => ({ outbox: [] as Msg[] }));
 vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", buildSender: async () => async (m: Msg) => { mail.outbox.push(m); } }));
 
-import { and, asc, eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
+import { createHash } from "node:crypto";
 import { db } from "@/lib/db/client";
 import {
   auditLog, formReminderClaim, formReminderRound, formWithdrawal, parent, qboCustomer, requirement, requirementProgress, role, roleAssignment, roleRule, season, setting, signatureConsent, signatureRequest,
@@ -29,8 +30,8 @@ import { runScheduledReminders } from "@/lib/signed-forms/reminders";
 import { resetDb, seedStaff, seedWorkingMail } from "../helpers/db";
 import { startDocumensoStub, type DocumensoStub } from "../helpers/documenso-stub";
 import { connectForms, formSetting, requestByCustomer, requestNow, seedConsent, seedFormRequirement, signedInStub } from "../helpers/forms";
-import { FAMILY_A, FAMILY_B, seedParentIn, seedTwoFamilies, type SeededParent } from "../helpers/parent";
-import { addToCache, fam, moveInCache, par, seedParentSettings, seedShape, stu } from "../helpers/roster-cache";
+import { FAMILY_A, FAMILY_B, seedTwoFamilies, type SeededParent } from "../helpers/parent";
+import { addToCache, fam, moveInCache, par, seedParentSettings } from "../helpers/roster-cache";
 import { subjectColumns, syncAppRecords } from "../helpers/app-records";
 import { familyRecord, studentRecord } from "../helpers/volunteer";
 
@@ -252,7 +253,7 @@ describe("a signed form kept with no QuickBooks company (its family had no link)
     expect(text).not.toContain("no longer connected");
     expect((await audits("forms.evidence.read")).find((r) => r.targetId === id)!.after).toMatchObject({ earlierCompany: false });
     const res = await staffDownload(new Request(`http://localhost/staff/forms/evidence/${id}/evidence-record-json`), { params: Promise.resolve({ id, file: "evidence-record-json" }) });
-    expect(JSON.parse(await res.text())).toMatchObject({ quickBooksCompany: null, fromAnEarlierCompany: false, family: { qboId: null }, signedFor: { kind: "student", qboId: null } });
+    expect(JSON.parse(await res.text())).toMatchObject({ quickBooksCompany: null, archivedAsEarlierCompany: false, family: { qboId: null }, signedFor: { kind: "student", qboId: null } });
   });
 });
 
@@ -530,65 +531,67 @@ describe("a student moved to another family", () => {
 });
 
 describe("a different QuickBooks company connected", () => {
-  it("keeps every byte and hash of the earlier evidence, shows it to no parent and leaves it out of the matrix, and lists it in the archive", async () => {
-    const before = await db.select().from(signedFormFile).orderBy(asc(signedFormFile.id));
+  // Stage 4's slice M7a (open question 16, decision 5): a change of company no longer archives anything. The families
+  // are kept, and so is their evidence, as their own: the matrix still counts it and its family still downloads it. The
+  // archive holds only evidence archived before that slice, seeded here as such a clear left it (marked, cut from its
+  // request and family). It was "keeps every byte ... shows it to no parent and leaves it out of the matrix, and lists it
+  // in the archive" while the clear archived the current company's evidence.
+  const archivedPdf = Buffer.from("%PDF-1.7\n% sealed Wrenhallow archive 6611\n%%EOF\n", "latin1");
+  const seedArchived = async () => {
+    const [own] = await db.select().from(signedFormEvidence).where(eq(signedFormEvidence.id, a.forms!.evidence.id));
+    const [row] = await db.insert(signedFormEvidence).values({ requestId: null, realmId: "EARLIER-COMPANY-REALM", earlierCompanyAt: new Date("2026-11-01T00:00:00Z"),
+      requirementId: own!.requirementId, familyQboId: "QBO-WRENHALLOW-EARLIER-6612", subjectQboId: "QBO-WRENHALLOW-EARLIER-6612", subjectKind: "family", familyId: null, studentId: null,
+      formTitle: "Wrenhallow Archive Waiver 6613", familyName: "Wrenhallow Earlier Family 6614", subjectName: "Wrenhallow Earlier Family 6614", seasonName: "Earlier season",
+      envelopeId: "envelope_wrenhallowearlier6615", signers: [], consents: [], originals: [], completedAt: new Date("2026-10-01T12:00:00Z") }).returning({ id: signedFormEvidence.id });
+    await db.insert(signedFormFile).values({ evidenceId: row!.id, kind: "sealed_pdf", position: 1, itemId: "envelope_item_wrenhallow", bytes: archivedPdf, size: archivedPdf.byteLength,
+      sha256: createHash("sha256").update(archivedPdf).digest("hex") });
+    return row!.id;
+  };
+
+  it("archives nothing more, keeps every row and byte of the evidence, and the matrix and each family still have their own", async () => {
+    const archivedId = await seedArchived();
+    const before = { evidence: await db.select().from(signedFormEvidence).orderBy(asc(signedFormEvidence.id)), files: await db.select().from(signedFormFile).orderBy(asc(signedFormFile.id)) };
+    expect(before.evidence).toHaveLength(3);
     await connectForms({ origin: "http://127.0.0.1:9", token: "api_never_called" });
     await seedWorkingMail();
     expect(await clearRosterOfOtherCompany("NEW-COMPANY-REALM", SYSTEM)).toBe(true);
-    const kept = await db.select().from(signedFormEvidence);
-    expect(kept).toHaveLength(2);
-    for (const e of kept) expect(e).toMatchObject({ requestId: null, earlierCompanyAt: expect.any(Date), realmId: "9130000000000001", familyId: null, studentId: null });
+    // Every row as it was: both families' evidence still names its request, family and student, with the earlier
+    // company's copies as signed (`realm_id` included), not archived; the archived row stays archived.
+    expect(await db.select().from(signedFormEvidence).orderBy(asc(signedFormEvidence.id))).toEqual(before.evidence);
     const after = await db.select().from(signedFormFile).orderBy(asc(signedFormFile.id));
-    expect(after.map((f) => [f.id, f.sha256, f.size, f.bytes.toString("base64")])).toEqual(before.map((f) => [f.id, f.sha256, f.size, f.bytes.toString("base64")]));
-    expect((await audits("form.records.cleared"))[0]!.after).toMatchObject({ evidenceKeptAsEarlierCompany: 2 });
-    expect(await db.select().from(formReminderClaim)).toEqual([]);
+    expect(after.map((f) => [f.id, f.sha256, f.size, f.bytes.toString("base64")])).toEqual(before.files.map((f) => [f.id, f.sha256, f.size, f.bytes.toString("base64")]));
+    expect(await audits("form.records.cleared")).toEqual([]);
+    for (const e of before.evidence.filter((x) => x.id !== archivedId)) expect(e).toMatchObject({ requestId: expect.any(String), earlierCompanyAt: null, realmId: "9130000000000001" });
 
-    // The new company has a family with the same QuickBooks id as A, and a parent of it. The change of company took
-    // the membership shape with the cache: an Admin chooses it again, as a roster read of the new company needs, so
-    // the family has an active record there and its parent can sign in to it.
-    await seedShape();
-    await addToCache([fam(FAMILY_A.family.qboId, "Newcomb Family"), par("NEW-P-1", "Nell Newcomb", FAMILY_A.family.qboId, "nell.newcomb@new.example"),
-      stu(FAMILY_A.students[1]!.qboId, "Nico Newcomb", FAMILY_A.family.qboId)]);
-    await seedParentSettings({ signin: true, welcome: true });
-    const nell = await seedParentIn({ familyQboId: FAMILY_A.family.qboId, name: "Nell Newcomb", email: "nell.newcomb@new.example", sourceQboId: "NEW-P-1" });
-    asParent(nell.identity);
-    const forms = await renderPage(FormsPage);
-    for (const m of [a.forms!.evidence.id, a.forms!.evidence.sealedSha256, "/signed", FAMILY_A.parent.name, "Ottoline"]) expect(forms).not.toContain(m);
-    expect(await findMySignedPdf({ ...nell.identity, ip: null }, a.forms!.ids.complete)).toBeNull();
-    // Her own new request for the same student and form finds nothing of the earlier company's evidence.
-    const newA = await familyRecord(FAMILY_A.family.qboId); // the new company's record of that number
-    const mine = await db.select().from(signatureRequest).where(eq(signatureRequest.familyId, newA));
-    for (const r of mine) {
-      await db.update(signatureRequest).set({ state: "complete", envelopeId: `envelope_new${r.id.slice(0, 8)}` }).where(eq(signatureRequest.id, r.id));
-      expect(await findMySignedPdf({ ...nell.identity, ip: null }, r.id)).toBeNull();
-    }
-    await db.update(signatureRequest).set({ state: "not_opened", envelopeId: null }).where(eq(signatureRequest.familyId, newA));
+    // Each family still downloads its own signed form, and only its own.
+    expect(Buffer.compare((await findMySignedPdf({ ...a.identity, ip: null }, a.forms!.ids.complete))!, a.forms!.evidence.sealed)).toBe(0);
+    expect(Buffer.compare((await findMySignedPdf({ ...b.identity, ip: null }, b.forms!.ids.complete))!, b.forms!.evidence.sealed)).toBe(0);
+    expect(await findMySignedPdf({ ...a.identity, ip: null }, b.forms!.ids.complete)).toBeNull();
 
-    // Reminders reach her about the forms of the new company only, never the earlier evidence.
-    asStaff(writer);
-    await remindFamilyAction(String(await familyRecord(FAMILY_A.family.qboId)));
-    for (const m of mail.outbox) {
-      expect(m.to).toBe("nell.newcomb@new.example");
-      for (const marker of [FAMILY_A.parent.name, FAMILY_A.students[1]!.name, a.forms!.evidence.id]) expect(`${m.text} ${m.html}`).not.toContain(marker);
-    }
-    // The matrix leaves it out; the archive lists it, opens it (audited) and downloads every file of it.
+    // The matrix still leads to both families' evidence; the archive lists only the one archived before.
     asStaff(reader);
     const html = await renderPage(SignedFormsPage, { searchParams: {} });
-    const [matrixPart, archivePart] = html.split("Earlier company");
-    expect(matrixPart).not.toContain(a.forms!.evidence.id);
-    expect(archivePart).toContain(`/staff/forms/evidence/${a.forms!.evidence.id}`);
-    expect(archivePart).toContain(`/staff/forms/evidence/${b.forms!.evidence.id}`);
-    expect(textOf(archivePart!)).toContain("Uniform agreement");
-    expect(textOf(await renderPage(EvidencePage, { params: { id: a.forms!.evidence.id } }))).toContain("no longer connected");
-    expect((await audits("forms.evidence.read")).at(-1)!.after).toMatchObject({ earlierCompany: true });
-    for (const key of ["sealed-pdf-1", "certificate-pdf", "audit-log-pdf", "audit-log-json", "evidence-record-json"]) {
-      const res = await staffDownload(new Request(`http://localhost/staff/forms/evidence/${a.forms!.evidence.id}/${key}`), { params: Promise.resolve({ id: a.forms!.evidence.id, file: key }) });
-      expect(res.status).toBe(200);
-      if (key === "sealed-pdf-1") expect(Buffer.compare(Buffer.from(await res.arrayBuffer()), a.forms!.evidence.sealed)).toBe(0);
+    // The matrix ends where the list of other kept forms starts, which would lead to them too were the matrix to drop them.
+    const matrixPart = html.split("Other kept signed forms")[0]!;
+    const othersPart = html.split("Other kept signed forms")[1]!.split("Earlier company")[0]!;
+    const archivePart = html.split("Earlier company")[1]!;
+    for (const id of [a.forms!.evidence.id, b.forms!.evidence.id]) {
+      expect(matrixPart).toContain(`/staff/forms/evidence/${id}`);
+      expect(othersPart).not.toContain(id);
+      expect(archivePart).not.toContain(id);
     }
-    expect(await audits("forms.evidence.download")).toHaveLength(5);
-    // And it is never deleted: a second change of company keeps it as it was.
+    expect(archivePart).toContain(`/staff/forms/evidence/${archivedId}`);
+    expect(textOf(archivePart!)).toContain("Wrenhallow Archive Waiver 6613");
+    // A kept family's evidence reads as current, though its company copy is the earlier one's; the archived one does not.
+    expect(textOf(await renderPage(EvidencePage, { params: { id: a.forms!.evidence.id } }))).not.toContain("no longer connected");
+    expect(textOf(await renderPage(EvidencePage, { params: { id: archivedId } }))).toContain("no longer connected");
+    expect((await audits("forms.evidence.read")).map((r) => (r.after as { earlierCompany: boolean }).earlierCompany)).toEqual([false, true]);
+    const res = await staffDownload(new Request(`http://localhost/staff/forms/evidence/${archivedId}/sealed-pdf-1`), { params: Promise.resolve({ id: archivedId, file: "sealed-pdf-1" }) });
+    expect(res.status).toBe(200);
+    expect(Buffer.compare(Buffer.from(await res.arrayBuffer()), archivedPdf)).toBe(0);
+
+    // And none of it is ever deleted or archived by a second change of company either.
     expect(await clearRosterOfOtherCompany("THIRD-REALM", SYSTEM)).toBe(true);
-    expect(await db.select().from(signedFormEvidence).where(and(eq(signedFormEvidence.id, a.forms!.evidence.id)))).toHaveLength(1);
+    expect(await db.select().from(signedFormEvidence).orderBy(asc(signedFormEvidence.id))).toEqual(before.evidence);
   });
 });
