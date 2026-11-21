@@ -5,8 +5,19 @@ phone with its passkey or authenticator app and their backup codes too, or one w
 the portal's address changed. An Admin can reset their sign-in, in the portal, on the parent's own page. Only Admins can
 do this.
 
-A parent who has only forgotten their password doesn't need this: **Set up or reset my password** on the sign-in page
-emails them a link. A parent who still has their phone, or a backup code, doesn't need it either.
+Most parents who are stuck don't need this:
+
+- **Forgotten password, club at Standard.** **Set up or reset my password** on the sign-in page emails them a link to
+  choose a new one.
+- **Forgotten password, club at Strict.** The same page emails a link only to a parent who has a passkey or an
+  authenticator app. A parent with neither who has forgotten their password needs this reset. (A parent who has never
+  chosen a password needs no reset at either level: press **Resend welcome email** on their page, and it carries a
+  link to choose one.)
+- **Phone kept.** A parent who still has the phone or computer with their passkey or authenticator app signs in with
+  it, and can change anything else under **Sign-in settings**.
+- **Phone lost, backup code kept.** A backup code they haven't used works in place of their passkey or authenticator
+  app: the sign-in page asks for one beside them. Once in, they can make new backup codes and set up their new phone
+  under **Sign-in settings**.
 
 ## Before you reset: call them back
 
@@ -39,11 +50,16 @@ At once, everywhere they were signed in, they are signed out. Their password, pa
 and remembered phones and computers are removed. Their families, forms, volunteering and everything else stay as they
 are.
 
-They are emailed a link to choose a new password. It works once, for 7 days. The email says that if they didn't ask the
-club for this, they should contact the club straight away. Choosing the password with the link signs them in on that
-phone or computer; on another one they sign in with the password and a code emailed to them. They can then add a passkey or an
-authenticator app again under **Sign-in settings**. When the club is at Strict instead, once they've chosen a password, the
-portal asks them to add a passkey or an authenticator app before they see anything else.
+They are emailed a link to choose a new password ("Your <club> sign-in was reset"). It works once, for 7 days. The
+email says that if they didn't ask the club for this, they should contact the club straight away, and gives the
+club's treasurer's address when the club has one.
+
+- **At Standard**, choosing the password with the link signs them in on that phone or computer; on another one they
+  sign in with the password and a code emailed to them. They can then add a passkey or an authenticator app again
+  under **Sign-in settings**.
+- **At Strict**, once they've chosen a password, the portal asks them to add a passkey or an authenticator app before
+  they see anything else, and shows them ten backup codes to keep. Choosing the password signs them in for that step
+  only; so does signing in with it later, until they have added one.
 
 ## When the email couldn't be sent
 
@@ -64,6 +80,15 @@ it).
 
 ## After a change of the portal's address
 
-A passkey belongs to the portal's address. If the address ever changes, every parent's passkeys stop working, and a
-parent whose only second step is a passkey is locked out until their sign-in is reset. Until the portal has a way to
-remove every parent's passkeys at once, each such parent is reset one by one, as above, each with a call back.
+A passkey belongs to the portal's address. If the address ever changes, every parent's passkeys stop working, though
+the sign-in page still asks for them. Not every parent with a passkey is locked out:
+
+- A parent who also has an authenticator app enters its code instead.
+- A parent with a backup code they haven't used enters it in the **Backup code** field beside **Use your passkey**
+  (a first passkey came with ten of them, unless they had the app already).
+- At Standard, on a phone or computer the portal still remembers, their password alone still signs them in.
+
+Right after signing in with the app or a backup code, they can remove the passkeys that stopped working and add new
+ones under **Sign-in settings**. A parent with none of these is locked out until their sign-in is reset, and so is one
+who is signed in but can't show it's them again (their passkey was all they had). The portal can't yet remove every
+parent's passkeys at once, so each such parent is reset one by one, as above, each with a call back.

@@ -203,6 +203,10 @@ The emails the worker sends the day before each volunteer shift, and 14 and 3 da
 
 ## Parent sign-ins
 
+- **"On"**, with "Parents sign in with their email and password, and on a device the portal doesn't know yet, a code
+  sent to their email." Nothing to do. That sentence is the Standard level's way for a guardian with no passkey or
+  authenticator app: one who has either is asked for it instead, never for an emailed code, and at Strict nobody is
+  sent one. The line doesn't say the level; **Settings**, **Parent sign-ins** does, under **Sign-in level**.
 - **"Off"**. No parent can sign in, not even a guardian staff have just added: the parent door stays closed until an
   Admin switches sign-ins on. It is a choice: **Settings**, **Parent sign-ins** switches them on (once outgoing mail works: QuickBooks plays no part in who can sign in). Reconnecting the same
   QuickBooks company leaves them as they are; a different company can't be connected until the mapping screen ships.
@@ -214,6 +218,11 @@ The emails the worker sends the day before each volunteer shift, and 14 and 3 da
   request (a passkey sign-in's first request among them, which any visitor may make) count every visitor together, so
   one stranger sending many requests can make every parent wait a minute to sign in. The expired passkey requests
   don't pile up: the worker deletes them at every wake, so there are never more than about five minutes' worth.
+- A note, with the line still **"On"**: "Visitors' addresses aren't recorded, because CLIENT_IP_HEADER is none: the
+  audit log shows no address, and sign-ins have no limit per address." It is what `CLIENT_IP_HEADER=none` in
+  `deploy/.env` means, and it is meant only for an installation where no proxy says who the visitor is. Behind any
+  proxy, put the header it sets in `.env` instead (as in the warning above) and `docker compose up -d app`: without
+  it, one stranger trying many passwords is stopped only by the limits per address typed and per device.
 - **"Needs attention"**, with "Welcome emails are waiting because mail is failing: ...". The last welcome email (or
   link to choose a password) the worker tried to send failed, so until one goes it tries one person a minute instead of
   five, and the people counted wait their turn. Mend the mail first: the [Outgoing mail](#outgoing-mail) line, and

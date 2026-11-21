@@ -66,8 +66,11 @@ if you use this installation's proxy.
 ## The update that brings password sign-in
 
 Up to this release, parents signed in with a code the portal emailed them. From it, they sign in with their email
-address and a password they choose from a link the portal emails them (and on a phone or computer the portal doesn't
-know yet, a code too). After the update:
+address and a password they choose from a link the portal emails them, and on a phone or computer the portal doesn't
+know yet, a code emailed to them too, or their own passkey or authenticator app once they have added one. The update
+adds no line to `.env`, and `BETTER_AUTH_SECRET` stays exactly as it is: no update ever changes it, and a changed one
+would stop every link and backup code already given out ([first install, part 3](first-install.md#3-fill-in-the-settings)).
+After the update:
 
 1. Parents who are signed in now stay signed in. Everyone else needs a password, and nobody has one yet.
 2. Sign in as an Admin and open **Settings**, **Parent sign-ins**. With parent sign-ins and welcome emails both on
@@ -156,10 +159,14 @@ of the backup from part 1:
    previous version in `BOOSTER_ROCKET_IMAGE` (not `stable`), then `docker compose pull`.
 2. Follow [restore, onto the same machine](restore.md#onto-the-same-machine), steps 3 to 7, with the backup from part 1.
 
-**Going back to a version from before password sign-in drops Strict.** That version knows no sign-in level: it signs
-parents in with a code the portal emails them, whatever the level was, and the first time its **Parent sign-ins**
-settings are saved, the level is lost. If you come forward again after that, open **Settings**, **Parent sign-ins**,
-**Change**, step 3, **Sign-in level**, and switch to Strict again if the club was at Strict.
+**Going back to a version from before password sign-in.** The restore puts back the databases as they were before
+the update, so every password, passkey, authenticator app, backup code and remembered phone or computer made since is
+gone, and parents sign in with a code the portal emails them again, as they did. That version knows no sign-in level
+either: it signs parents in with an emailed code whatever the level was, and the first time its **Parent sign-ins**
+settings are saved, the level is lost. Coming forward again is this update once more: parents need a password again,
+so press **Email a set-up link to everyone who can sign in and hasn't chosen a password** as in
+[the update that brings password sign-in](#the-update-that-brings-password-sign-in), and if the club was at Strict,
+open **Settings**, **Parent sign-ins**, **Change**, step 3, **Sign-in level**, and switch to Strict again.
 
 ## Documenso and the other images
 
