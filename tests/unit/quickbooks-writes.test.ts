@@ -125,6 +125,13 @@ const MAY_RENAME_TRY = [ROSTER_WRITER];
 const ROSTER_DEACTIVATE = "deactivateLinked";
 const MAY_ROSTER_DEACTIVATE = [ROSTER_WRITER, "src/app/staff/(app)/roster/write-actions.ts"];
 /**
+ * Take QuickBooks' into the app (stage 4's slice M4a): a name, an inactive customer or a student's family taken from
+ * the books into the portal's own record, sending nothing to QuickBooks. Started only by the module itself and the
+ * accounting links screen's press.
+ */
+const TAKE = "takeFromBooks";
+const MAY_TAKE = [ROSTER_WRITER, "src/app/staff/(app)/links/actions.ts"];
+/**
  * A guardian's own Parent customer (stage 3's slice 9h): queued in the guardian's own transaction (an add, a reinstate,
  * a removal, a person's rename) and tried at once after it commits, through the module's own try of a change saved
  * first. Each named only by the module itself and the two guardian modules, since guardians and people now cause sends.
@@ -578,6 +585,7 @@ describe("what the portal writes to QuickBooks, and who may send each", () => {
       for (const name of SAVED_FIRST) expect(naming(name), `${name} sends a change saved in the portal first. A new caller is a decision for a slice brief.`).toEqual([...MAY_SAVED_FIRST].sort());
       expect(naming(RENAME_TRY), `${RENAME_TRY} sends a rename, and resends it once after a live read. A new caller is a decision for a slice brief.`).toEqual([...MAY_RENAME_TRY].sort());
       expect(naming(ROSTER_DEACTIVATE), `${ROSTER_DEACTIVATE} makes a linked record inactive in QuickBooks. A new caller is a decision for a slice brief.`).toEqual([...MAY_ROSTER_DEACTIVATE].sort());
+      expect(naming(TAKE), `${TAKE} takes the books' value into the portal and sends nothing to QuickBooks. A new caller is a decision for a slice brief.`).toEqual([...MAY_TAKE].sort());
       expect(naming(SAVED_TRY), `${SAVED_TRY} sends a change saved first and settles its queue item. A new caller is a decision for a slice brief.`).toEqual([...MAY_SAVED_TRY].sort());
       for (const name of GUARDIAN_SENDS) expect(naming(name), `${name} queues or sends a guardian's Parent customer change. A new caller is a decision for a slice brief.`).toEqual([...MAY_GUARDIAN_SEND].sort());
       expect(naming(CONTACT_SEND), `${CONTACT_SEND} sends a staff member's change of a guardian's details at once. A new caller is a decision for a slice brief.`).toEqual([...MAY_CONTACT_SEND].sort());

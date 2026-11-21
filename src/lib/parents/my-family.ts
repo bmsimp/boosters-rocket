@@ -130,38 +130,40 @@ export type OwnRecord<R extends CachedRecord> = {
 
 /**
  * The QuickBooks record a guardian row's sign-in comes from, by the membership shape, from the roster cache's rows of
- * the family's own linked customer and those directly under it (`rows`), and the row's `source_qbo_id`. Pure: the one
- * rule for whose record a cached customer is, read by the take-in of contact details (./contact-take-in.ts). Until
- * stage 3's slice 11d the change of sign-in email read its record by it too; since then that change reads no record.
- * - Flat: the member itself, of a member type, when the row's source is it.
- * - Layered: the family customer of the family type, active; and the row's source an active customer of the parent type
- *   directly under it, or, when the books have no parent type, the family customer itself.
+ * the family's own linked customer and those directly under it (`rows`), and the customer the row's own link names
+ * (`ownCustomerId`: its `carried_over` membership link, the record its sign-in came from; null for a row with none).
+ * Pure: the one rule for whose record a cached customer is, read by the take-in of contact details
+ * (./contact-take-in.ts). Until stage 3's slice 11d the change of sign-in email read its record by it too; since then
+ * that change reads no record.
+ * - Flat: the member itself, of a member type, when the row's own customer is it.
+ * - Layered: the family customer of the family type, active; and the row's own customer an active customer of the parent
+ *   type directly under it, or, when the books have no parent type, the family customer itself.
  * Null whenever any of it doesn't hold. `signsIn` says whether the record's email field holds `email` by the record's
  * rule: the first address on a parent's own record or a flat member's, any of them on a family's with no parent type.
  * A record whose field doesn't hold it is not the person's.
  */
-export function ownRecordIn<R extends CachedRecord>(shape: MembershipShape, familyQboId: string, rows: readonly R[], sourceQboId: string | null, email: string): OwnRecord<R> | null {
+export function ownRecordIn<R extends CachedRecord>(shape: MembershipShape, familyQboId: string, rows: readonly R[], ownCustomerId: string | null, email: string): OwnRecord<R> | null {
   // By its ID, never by position: the rows come back in no order.
   const top = rows.find((r) => r.qboId === familyQboId);
   if (!top || !top.active) return null;
-  if (sourceQboId === null) return null;
+  if (ownCustomerId === null) return null;
 
   if (shape.kind === "flat") {
     // The member is its own family: its own record and nothing under it.
     if (top.typeQboId === null || !shape.memberTypeIds.includes(top.typeQboId)) return null;
-    if (sourceQboId !== familyQboId) return null;
+    if (ownCustomerId !== familyQboId) return null;
     // Every address on a member's record signs in through it, so its details are shared like a family's.
     return { row: top, edits: "family", signsInBy: "first", typeQboIds: shape.memberTypeIds, signsIn: fieldSignsIn(top.email, email, "first") };
   }
 
   if (top.typeQboId !== shape.familyTypeId) return null;
-  // The record a guardian row came from (its `source_qbo_id`): a parent directly under the family, or, when
+  // The record a guardian row came from (its own link's customer): a parent directly under the family, or, when
   // QuickBooks has no parent type, the family customer itself. A link that names anything else is ignored.
   if (shape.parentTypeId === null) {
-    if (sourceQboId !== familyQboId) return null;
+    if (ownCustomerId !== familyQboId) return null;
     return { row: top, edits: "family", signsInBy: "every", typeQboIds: [shape.familyTypeId], signsIn: fieldSignsIn(top.email, email, "every") };
   }
-  const mine = rows.find((r) => r.parentQboId === familyQboId && r.active && r.typeQboId !== shape.familyTypeId && r.qboId === sourceQboId && r.typeQboId === shape.parentTypeId);
+  const mine = rows.find((r) => r.parentQboId === familyQboId && r.active && r.typeQboId !== shape.familyTypeId && r.qboId === ownCustomerId && r.typeQboId === shape.parentTypeId);
   if (!mine) return null;
   return { row: mine, edits: "own", signsInBy: "first", typeQboIds: [shape.parentTypeId], signsIn: fieldSignsIn(mine.email, email, "first") };
 }

@@ -565,7 +565,7 @@ describe("differences, for a link that stands (slice M2)", () => {
     await readAgain();
     expect(await diffsOf("Rivera Family")).toEqual([
       { kind: "name", of: "family", portal: "Rivera Family", books: "Rivera family", queue: null },
-      { kind: "name", of: "student", portal: "Leo Rivera", books: "Leo M. Rivera", queue: null }]);
+      { kind: "name", of: "student", studentId: await recordOfCustomer("12", "student"), portal: "Leo Rivera", books: "Leo M. Rivera", queue: null }]);
     changeInBooks("10", { DisplayName: "Rivera  Family " }); // spaces alone, which the portal's names never hold
     changeInBooks("12", { DisplayName: "Leo Rivera" });
     await readAgain();
@@ -590,13 +590,13 @@ describe("differences, for a link that stands (slice M2)", () => {
     await readAgain();
     expect(await diffsOf("Rivera Family")).toEqual([
       { kind: "active", of: "family", who: "Rivera Family", portalActive: true, queue: null },
-      { kind: "active", of: "student", who: "Leo Rivera", portalActive: true, queue: null }]);
+      { kind: "active", of: "student", studentId: await recordOfCustomer("12", "student"), who: "Leo Rivera", portalActive: true, queue: null }]);
     changeInBooks("10", { Active: true });
     changeInBooks("12", { Active: true });
     await readAgain();
     await db.update(student).set({ active: false }).where(eq(student.id, await recordOfCustomer("12", "student")));
     const row = rowOf(await loadAccountingLinks(), "Rivera Family");
-    expect(row.differences).toEqual([{ kind: "active", of: "student", who: "Leo Rivera", portalActive: false, queue: null }]);
+    expect(row.differences).toEqual([{ kind: "active", of: "student", studentId: await recordOfCustomer("12", "student"), who: "Leo Rivera", portalActive: false, queue: null }]);
     expect(row.students).toEqual([]); // the opening still lists the active students only
   });
 
@@ -799,9 +799,11 @@ describe("differences, for a link that stands (slice M2)", () => {
     expect(rowNamed(html, "Chen Family")![4]).toContain("Where Leo Rivera is. In the portal: In this family. In the books: Under Rivera Family in QuickBooks. Waiting to reach QuickBooks. See the change on Reconciliation");
     expect(html.split('href="/staff/reconciliation#writes-h"').length - 1).toBe(3);
     // No button but the filter's own, since slice M3a2 each carried-over row's Confirm this link, and since slice M3b each
-    // linked row's Unlink from the books, and since slice M3c Ana Rivera's Unlink this guardian; nothing of money but each
-    // unlink's own words of what the guardians then read.
-    expect(html.split("<button").length - 1).toBe(6);
+    // linked row's Unlink from the books, since slice M3c Ana Rivera's Unlink this guardian, and since slice M4a the kept
+    // rename's Take QuickBooks' into the app (a waiting move offers none); nothing of money but each unlink's own words
+    // of what the guardians then read.
+    expect(html.split("<button").length - 1).toBe(7);
+    expect(html.split("Take QuickBooks&#x27; into the app<span").length - 1).toBe(1);
     expect(html.split("Confirm this link<span").length - 1).toBe(2);
     expect(html.split("Unlink from the books<span").length - 1).toBe(2);
     expect(html.split("invoices").length - 1).toBe(2);
@@ -896,10 +898,14 @@ describe("differences, for a link that stands (slice M2)", () => {
     expect(html).toContain("In the books: “&lt;b&gt;Bold&lt;/b&gt; Rivera”.");
     expect(html).toContain("<details class=\"more\"><summary>Students, guardians and differences<span class=\"visually-hidden\">: Rivera Family</span></summary>");
     expect(rowNamed(html, "Rivera Family")![4]).toBe("Students, guardians and differences: Rivera FamilyStudents:Leo Rivera: linked to Leo RiveraGuardians:Ana Rivera (ana@example.com): linked to Ana Rivera" + ANA_OWN
-      + "Where the portal and the books differ:The family's name. In the portal: “Rivera Family”. In the books: “<b>Bold</b> Rivera”." + riveraPresses("<b>Bold</b> Rivera"));
-    // The books' values are the portal's copy from its last read, said with its time; the page settles nothing.
+      + "Where the portal and the books differ:The family's name. In the portal: “Rivera Family”. In the books: “<b>Bold</b> Rivera”."
+      // Since slice M4a, the press that takes the books' name, with what it does, the books' name as text.
+      + "Takes “<b>Bold</b> Rivera” as this family's name in the portal, as the books have it. Nothing is sent to the books.Take QuickBooks' into the app: Rivera Family's name"
+      + riveraPresses("<b>Bold</b> Rivera"));
+    // The books' values are the portal's copy from its last read, said with its time; drawing the page settles nothing
+    // (since slice M4a a press may take some of them into the portal, and says which).
     expect(whole).toContain("against its copy of the books, from its last read of them on ");
-    expect(whole).toContain("and settles none of it.");
+    expect(whole).toContain("with Take QuickBooks&#x27; into the app, which changes only the portal&#x27;s records, except that a student&#x27;s move voids an unpaid volunteer buy-out invoice of theirs in the books, as any move does; every other difference is only shown.");
     expect((await db.select().from(auditLog)).length).toBe(audits);
     expect(await db.select().from(writeQueue)).toEqual(queue);
   });

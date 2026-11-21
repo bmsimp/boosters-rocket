@@ -104,7 +104,10 @@ beforeEach(async () => {
   await resetDb(); stub.reset();
   linker = await staffWith("linker@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
   tag = await connectRoster(stub);
-  await seedAnaRivera();
+  const { row } = await seedAnaRivera();
+  // Ana's row as one made before stage 3's slice 12b1 holds it: with its old copies of the customers, which nothing reads
+  // now and the unlink still clears (family_qbo_id) or leaves (source_qbo_id) until slice 12b2 drops them.
+  await db.update(guardian).set({ familyQboId: "10", sourceQboId: "11" }).where(eq(guardian.id, row.id));
   rivera = await recordOfCustomer("10", "family");
   chen = await recordOfCustomer("20", "family");
 });
@@ -490,7 +493,8 @@ describe("a relink: an unlink, then a link as Confirm or Pick a different custom
     const anaRows = await db.select().from(guardian).where(eq(guardian.parentId, ana.parentId));
     expect(anaRows).toHaveLength(2);
     expect(anaRows.find((g) => g.id === ana.id)).toMatchObject({ familyId: rivera, familyQboId: null, status: ana.status });
-    expect(anaRows.find((g) => g.id !== ana.id)).toMatchObject({ familyId: birch, familyQboId: "10" });
+    // The new row writes neither old copy (stage 3's slice 12b1): its family is its record, linked to customer 10.
+    expect(anaRows.find((g) => g.id !== ana.id)).toMatchObject({ familyId: birch, familyQboId: null, sourceQboId: null });
   });
 
   it("a swap of two families' customers is four presses: unlink both, then link each to the other's", async () => {

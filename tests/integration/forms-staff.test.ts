@@ -358,7 +358,10 @@ describe("the Health page's line for forms", () => {
 });
 
 describe("a different QuickBooks company", () => {
-  it("deletes every signature request and consent, keeps the requirements' templates, and records how many", async () => {
+  // Since stage 4's slice M7a the clear a change of company would run keeps every form (open question 16), as the
+  // families and students the requests name are kept: it was "deletes every signature request and consent" while the
+  // clear removed those records too. A change of company is still refused until slice M8.
+  it("keeps every signature request and consent, and the requirements' templates", async () => {
     const fall = await seedSeason({ name: "Fall", steps: [{ name: "Forms" }] });
     const form = formSetting({ id: "envelope_seedtemplate" });
     const requirementId = await seedFormRequirement({ stepId: fall.stepIds.Forms!, title: "Medical release", appliesTo: "student", form });
@@ -367,19 +370,18 @@ describe("a different QuickBooks company", () => {
     await seedRequest({ requirementId, familyQboId: "20", subjectQboId: "22" });
     await seedConsent(done, { parentId: crypto.randomUUID(), name: "Ana Rivera", email: "ana@example.com" });
     await db.transaction((tx) => setRosterSource(tx, "1111"));
-    // The same company keeps it all.
+    const rows = async () => ({ requests: await db.select().from(signatureRequest).orderBy(asc(signatureRequest.id)), consents: await db.select().from(signatureConsent).orderBy(asc(signatureConsent.id)),
+      requirements: await db.select().from(requirement).orderBy(asc(requirement.id)) });
+    const before = await rows();
+    expect([before.requests.length, before.consents.length]).toEqual([3, 1]);
+    // The same company keeps it all, and so does another.
     expect(await clearRosterOfOtherCompany("1111", SYSTEM)).toBe(false);
-    expect(await db.select().from(signatureRequest)).toHaveLength(3);
-
+    expect(await rows()).toEqual(before);
     expect(await clearRosterOfOtherCompany("2222", SYSTEM)).toBe(true);
-    expect(await db.select().from(signatureRequest)).toEqual([]);
-    expect(await db.select().from(signatureConsent)).toEqual([]);
+    expect(await rows()).toEqual(before);
     expect((await db.select().from(requirement).where(eq(requirement.id, requirementId)))[0]!.form).toEqual(form);
-    expect(await audits("form.records.cleared")).toEqual([expect.objectContaining({ door: "system", targetType: "signature_request", before: { realmId: "1111" },
-      after: { reason: "different_company", realmId: "2222", requests: 3, complete: 1, documentsLeftInDocumenso: 2, requirementsKeepingTheirTemplate: 1,
-        evidenceKeptAsEarlierCompany: 0, completeWithEvidenceNotYetKept: 1, reminderRecordsCleared: 0 } })]);
-    // Nothing to clear, nothing recorded.
     expect(await clearRosterOfOtherCompany("3333", SYSTEM)).toBe(true);
-    expect(await audits("form.records.cleared")).toHaveLength(1);
+    expect(await rows()).toEqual(before);
+    expect(await audits("form.records.cleared")).toEqual([]);
   });
 });

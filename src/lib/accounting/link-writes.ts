@@ -481,9 +481,10 @@ const OPEN_ITEM = ["waiting", "stuck", "refused"] as const;
  * Unlink from the books (stage 4's slice M3b; section 4, "Every link, unlink, import and alignment is audited"; open
  * question 13, "an admin picks again"): ends a linked family's link to its customer in the books, with every link of its
  * student records (active or inactive, whatever customer each names, so a later link pairs its students afresh) and of
- * its guardian rows (open or closed), and clears each of its guardian rows' `family_qbo_id`, so a family later linked
- * to that customer never finds the rows as its own and a removed guardian can be reinstated whatever the family is
- * linked to next. Its stored figures are forgotten at once (forgetFamilyMoney()). Sends nothing to the books; the
+ * its guardian rows (open or closed), and clears each of its guardian rows' `family_qbo_id`: nothing under src/ reads that
+ * copy since stage 3's slice 12b1, and this is its one writer left, kept until slice 12b2 drops the column, because
+ * migration 0048's fill reads it and the copy cleared with the guardian links ended keeps that fill from giving a
+ * relinked family's rows back a link this unlink ended. Its stored figures are forgotten at once (forgetFamilyMoney()). Sends nothing to the books; the
  * customer stays there as it is. A relink is this, then a link as Confirm or Pick a different customer makes it: nothing
  * is restored.
  *
