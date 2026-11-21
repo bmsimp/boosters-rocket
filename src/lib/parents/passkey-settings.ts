@@ -142,12 +142,18 @@ type AddRefusal = "not_a_registration" | "bad_name" | "not_allowed" | "not_verif
  *     its name, and how many the person now has), and, for a first passkey (none of theirs added before it,
  *     passkeysAddedBefore(), so two adds at once make one set of codes, never none) of a person with no authenticator
  *     app in force, ten backup codes made (makeBackupCodes(), any older ones deleted), `parent.backup_codes.make`; and,
- *     since slice SI-10a, when this session is enrolling, the session made whole (completeEnrolment(), enrolment.ts:
- *     `enrol_until` cleared and `strong_at` set, after the person's row), `enrolled: true` in the add's row. If it
+ *     since slice SI-10a, when this session is still enrolling (its window and the club's Strict read again here, and
+ *     this passkey the person's first factor), the session made whole (completeEnrolment(), enrolment.ts: `enrol_until`
+ *     cleared and `strong_at` set, after the person's row), `enrolled: true` in the add's row; a session that stopped
+ *     enrolling meanwhile gets the passkey recorded as a whole session's would be, and the gate ends it. If it
  *     fails, the row the library inserted is deleted (forgetUnrecordedPasskey()). One gap stays: a process that stops
  *     between the library's insert and this transaction's commit (a restart, say) leaves the row with no name, no audit
  *     row and no backup codes. It works, and the person's settings list it as "Passkey added" with its date, where they
- *     can remove it; nothing sweeps such rows yet.
+ *     can remove it; nothing sweeps such rows yet. And for an enrolling session, one more: in that same gap the
+ *     person already holds a passkey (hasPasskey() counts the unrecorded row), so a request of this same session that
+ *     the gate reads then (a second tab reloading) ends it (`enrol_ended`); the add then completes nothing (no
+ *     `enrolled: true`) and answers its codes to a session that is gone, and the guardian signs in again with the
+ *     passkey. Accepted (docs/agents/sign-in.md, SI-10a): the passkey is theirs, and nothing is let through.
  * Devices stay remembered, and no session is ended or made; `strong_at` is left as it is but for an enrolment's
  * session, so the new passkey, now the person's newest factor, makes this session's earlier proof stop counting
  * (sessionStrongAt()).
@@ -181,9 +187,11 @@ export async function addMyPasskey(who: Adder | null, body: unknown, verify: Ver
       await namePasskey(tx, who.parentId, verified.passkeyId, name === "" ? null : name);
       const passkeys = await passkeyCount(who.parentId, tx);
       const firstBesideNoApp = (await passkeysAddedBefore(tx, who.parentId, verified.passkeyId)) === 0 && !(await hasAuthenticator(who.parentId, tx));
-      // Strict's enrolment: the session is whole once the person holds the passkey. Its time is read here, after the
-      // library's insert, so the proof is never older than the passkey it follows (sessionStrongAt()).
-      const enrolled = await completeEnrolment(tx, who, new Date(Math.max(Date.now(), now.getTime())));
+      // Strict's enrolment: the session is whole once the person holds the passkey, when it is still enrolling: the
+      // window and the level read again here, under the person's row, and this passkey the person's first factor (no
+      // passkey added before it, no app). Its time is read here, after the library's insert, so the proof is never
+      // older than the passkey it follows (sessionStrongAt()).
+      const enrolled = await completeEnrolment(tx, who, new Date(Math.max(Date.now(), now.getTime())), firstBesideNoApp);
       const liveActor = parentActor({ id: who.parentId, email: live.email });
       await writeAudit({ actor: liveActor, action: "parent.passkey.add", targetType: "parent", targetId: who.parentId,
         after: { passkeyId: verified.passkeyId, name: name === "" ? null : name, passkeys, ...(enrolled ? { enrolled: true } : {}) }, ip }, tx);

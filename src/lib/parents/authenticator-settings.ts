@@ -277,7 +277,9 @@ export async function confirmMyAuthenticator(ctx: Me, code: unknown, stamp: unkn
     const codesDeleted = await deleteUnusedSigninCodes(ctx.parentId, tx);
     const made = await makeBackupCodes(tx, ctx.parentId, me.at);
     // Strict's enrolment (slice SI-10a): the session is whole once the person's app is in force, proved at that moment.
-    const enrolled = await completeEnrolment(tx, ctx, me.at);
+    // The app is the person's first factor whenever this session is enrolling: sessionMayAddFactor(), read above under
+    // the person's row, found an enrolling session's person with none (a proved session has no window to complete).
+    const enrolled = await completeEnrolment(tx, ctx, me.at, true);
     await writeAudit({ actor: who, action: "parent.authenticator.on", targetType: "parent", targetId: ctx.parentId,
       after: enrolled ? { codesDeleted, enrolled: true } : { codesDeleted }, ip: ctx.ip }, tx);
     await writeAudit({ actor: who, action: "parent.backup_codes.make", targetType: "parent", targetId: ctx.parentId,

@@ -3,12 +3,15 @@
 // set by the one finish for a password alone under Strict, src/lib/auth/parent-signin-finish.ts) may do exactly two
 // things: add a passkey (passkey-settings.ts) or set up and confirm an authenticator app (authenticator-settings.ts).
 // Each of those asks sessionMayAddFactor() where it asked for a proof within the window, and the transaction that puts
-// the person's first factor in force makes the session whole (completeEnrolment()). Every other press keeps asking for
-// a real proof (sessionProvedRecently(), asking-again.ts), so an enrolling session is refused there. Said plainly: the
+// the person's first factor in force makes the session whole (completeEnrolment()). Every other press that asks for a
+// proof keeps asking for a real one (sessionProvedRecently(), asking-again.ts), so an enrolling session is refused
+// there; renaming a passkey (renameMyPasskey()) and signing out everywhere (signOutEverywhere()) ask for none, by SI-7b's
+// and SI-5a's design, and are kept from an enrolling session only by their actions being parentActions, which the gate
+// refuses it (src/lib/guards.ts): a new path to either from the enrolment's door must refuse it itself. Said plainly: the
 // enrolment is reached by the password alone, so until a guardian adds a factor a stolen password lets a stranger add
 // theirs; the emailed code takes no part, and no remembered device does. Server only; parent code.
 import "server-only";
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { parentAuthSession, parentAuthUser, setting } from "@/lib/db/schema";
 import { sessionProvedRecently } from "./asking-again";
@@ -49,6 +52,16 @@ export async function sessionEnrolling(q: Reader, s: Session, now = new Date()):
 }
 
 /**
+ * Whether this session's enrolment window has passed at `now`: its `enrol_until` set and not after `now`. What the
+ * page's refusals say when it has (ENROLMENT_COPY.windowPassed), and only then: a session that stopped enrolling for
+ * another reason (a factor added through another session, the club's level) is told only to sign in again.
+ */
+export async function enrolWindowPassed(s: Session, now = new Date()): Promise<boolean> {
+  const enrolUntil = await sessionEnrolUntil(db, s);
+  return enrolUntil !== null && now.getTime() >= enrolUntil.getTime();
+}
+
+/**
  * Whether this session may add a second factor now (the lead's decision 6 of SI-10a): proved within the window, as
  * sessionProvedRecently() reads it, or enrolling (sessionEnrolling()). The one check of the passkey's add
  * (mayAddPasskey(), passkey-settings.ts) and the app's set-up and confirm (authenticator-settings.ts), read before each
@@ -60,15 +73,20 @@ export async function sessionMayAddFactor(q: Reader, s: Session, now = new Date(
 
 /**
  * The end of an enrolment, in the transaction that puts the person's first factor in force (the passkey's row recorded,
- * or the app's confirm), which holds the person's row and writes the audit row: when this session is enrolling, its
- * `enrol_until` cleared and its `strong_at` set to `now`, on this session's row alone (by its id, its user the
- * person's, and only while `enrol_until` is set), so the session is whole from the moment the person holds a factor.
- * True when it was enrolling (the audit row then says `enrolled: true`). Lock order as above lockedPerson()
- * (sessions.ts): the person's row, then the session's.
+ * or the app's confirm), which holds the person's row and writes the audit row: when this session is still enrolling
+ * at `now`, its `enrol_until` cleared and its `strong_at` set to `now`, on this session's row alone (by its id, its user
+ * the person's, and only while `enrol_until` is set and after `now`, with the club at Strict, read again here), so the
+ * session is whole from the moment the person holds a factor. The caller says whether the factor it records is the
+ * person's first (no other passkey, no app: the third half of sessionStanding()'s `enrolling`, which the factor being
+ * recorded already breaks), and passes `firstFactor: false` otherwise, when nothing is completed: a session that stopped
+ * enrolling is left for the gate to end. True when it completed one (the audit row then says `enrolled: true`). Lock
+ * order as above lockedPerson() (sessions.ts): the person's row, then the session's.
  */
-export async function completeEnrolment(tx: Tx, s: Session, now: Date): Promise<boolean> {
+export async function completeEnrolment(tx: Tx, s: Session, now: Date, firstFactor: boolean): Promise<boolean> {
+  if (!firstFactor || (await levelNow(tx)) !== "strict") return false;
   const rows = await tx.update(parentAuthSession).set({ enrolUntil: null, strongAt: now, updatedAt: now })
-    .where(and(eq(parentAuthSession.id, s.sessionId), isNotNull(parentAuthSession.enrolUntil), inArray(parentAuthSession.userId, usersOf(tx, s.parentId))))
+    .where(and(eq(parentAuthSession.id, s.sessionId), isNotNull(parentAuthSession.enrolUntil), gt(parentAuthSession.enrolUntil, now),
+      inArray(parentAuthSession.userId, usersOf(tx, s.parentId))))
     .returning({ id: parentAuthSession.id });
   return rows.length > 0;
 }
