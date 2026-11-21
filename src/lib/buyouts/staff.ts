@@ -12,7 +12,7 @@ import { customerOfFamily, linksOf } from "@/lib/families/links";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { moneyRows } from "@/lib/money/stored";
 import { getRosterSource } from "@/lib/roster/source";
-import { closeVerdict, type CloseItem, type CloseVerdict } from "./closing";
+import { closeVerdict, type CloseItem, type CloseVerdict, type LookItem } from "./closing";
 import { BUYOUT_WORDS, isLive } from "./rules";
 
 /** A refused buy-out is listed this long after it was refused: the family has been told, and may choose again. */
@@ -66,19 +66,20 @@ export const closeTag = (b: Pick<Row, "state" | "flag" | "updatedAt">): string =
 
 /**
  * Every queue item made for these buy-outs, by buy-out id (a buy-out's items name it in `request.buyoutId`), newest
- * first. In a transaction (`tx`) they are locked, for the close (./close.ts).
+ * first, each with the invoice QuickBooks made for it (`result_qbo_id`, kept on a create given up meanwhile too:
+ * earlierCompanyLook() reads it). In a transaction (`tx`) they are locked, for the close (./close.ts).
  */
-export async function itemsOf(ids: readonly string[], tx?: Tx): Promise<Map<string, (CloseItem & { id: string })[]>> {
-  const out = new Map<string, (CloseItem & { id: string })[]>();
+export async function itemsOf(ids: readonly string[], tx?: Tx): Promise<Map<string, (LookItem & { id: string })[]>> {
+  const out = new Map<string, (LookItem & { id: string })[]>();
   if (ids.length === 0) return out;
-  const q = (tx ?? db).select({ id: writeQueue.id, request: writeQueue.request, state: writeQueue.state, sent: writeQueue.sent }).from(writeQueue)
+  const q = (tx ?? db).select({ id: writeQueue.id, request: writeQueue.request, state: writeQueue.state, sent: writeQueue.sent, resultQboId: writeQueue.resultQboId }).from(writeQueue)
     .where(inArray(sql`${writeQueue.request}->>'buyoutId'`, [...ids])).orderBy(desc(writeQueue.createdAt));
   const rows = tx ? await q.for("update") : await q;
   for (const r of rows) {
     // A buy-out's invoice write is never kept as refused (only a roster change saved in the portal first is).
     if ((r.request.op !== "invoice_create" && r.request.op !== "invoice_void") || r.state === "refused") continue;
     const list = out.get(r.request.buyoutId) ?? [];
-    list.push({ id: r.id, op: r.request.op, state: r.state, sent: r.sent });
+    list.push({ id: r.id, op: r.request.op, state: r.state, sent: r.sent, resultQboId: r.resultQboId });
     out.set(r.request.buyoutId, list);
   }
   return out;
