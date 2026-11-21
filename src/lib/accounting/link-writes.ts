@@ -475,7 +475,7 @@ export function reviewedWords(s: { family: string; customer: string; confirmed: 
   return parts.join(" ");
 }
 
-/** A buy-out that isn't settled (the owner's choice 3 for slice M3b, recommended and awaiting his word): an unlink is refused while one stands. */
+/** A buy-out that isn't settled (the owner's choice 3 for slice M3b, which the owner confirmed on 2026-11-21): an unlink is refused while one stands. */
 const UNSETTLED_BUYOUT = ["being_invoiced", "invoiced", "being_voided", "stuck"] as const;
 /** A queue item that holds an unlink back: waiting, stuck, or kept (`refused`), of the roster's company (ofRosterCompany, src/lib/roster/source.ts). */
 const OPEN_ITEM = ["waiting", "stuck", "refused"] as const;
@@ -493,7 +493,7 @@ const OPEN_ITEM = ["waiting", "stuck", "refused"] as const;
  * links and its guardian rows' links locked; the stamp (unlinkStamp(): the family, the link, its customer and the
  * student links) sealing to what is read now. Then, refused keeping nothing: a buy-out of the family or its students
  * not settled (being invoiced, invoiced whatever the stored figures say, being voided or stuck: the owner's choice 3,
- * recommended and awaiting his word), so nobody is left with an unpaid invoice they can't reach; a student's move into
+ * which he confirmed on 2026-11-21), so nobody is left with an unpaid invoice they can't reach; a student's move into
  * or out of it, or any other change that blocks others (blocksOthers) filed under it or a student record of it, naming
  * one of its guardian rows, or targeting one of the customers its links name, waiting, stuck or kept; and the family's
  * "being made" or "being sent" lock, or the "being sent" lock of a student record or guardian row of it, held (each tried
