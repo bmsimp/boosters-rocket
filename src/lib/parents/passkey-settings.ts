@@ -6,7 +6,9 @@
 // person's own passkeys, and nothing of another person's is read, shown, named or removed. The rows themselves are read
 // and written by passkeys.ts alone, but for the one row the library inserts as it verifies. No row, log line or answer
 // holds a credential id, a public key, a counter, an AAGUID, transports or the browser's answer. Nothing here makes or
-// ends a session, forgets a device or touches `strong_at`. Server only; parent code.
+// ends a session or forgets a device; since slice SI-10a the add may be made by an enrolling session (Strict's
+// enrolment, enrolment.ts), which the add's own transaction then makes whole (`enrol_until` cleared, `strong_at` set):
+// the one place here that touches a session. Server only; parent code.
 import "server-only";
 import { eq, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
@@ -14,6 +16,7 @@ import { parent } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import type { ParentCtx } from "@/lib/guards";
 import { currentPassword, sessionProvedRecently, sessionStrongAt } from "./asking-again";
+import { completeEnrolment, sessionMayAddFactor } from "./enrolment";
 import { hasAuthenticator, makeBackupCodes, removeBackupCodes } from "./authenticator";
 import { namePasskey, passkeyCount, passkeyOfPerson, passkeysAddedBefore, readPasskeyName, removePasskey } from "./passkeys";
 import { giveBackRateLimit, takeRateLimit, takeRateLimitPlace } from "./rate-limit";
@@ -54,8 +57,9 @@ async function heldPerson(tx: Tx, parentId: string): Promise<{ email: string; bl
  * Whether this session of this person may add a passkey now (decisions 1 and 2 of SI-7b): sign-ins on, the person
  * there and not blocked, a row that counts, a password chosen (a person with none is offered the set-up link first and
  * nothing else), and the session proved within the window (sessionProvedRecently(): the portal's window, never the
- * session's age). Read by the library's options path before it makes a challenge (parent-code-plugin.ts) and again by
- * the add itself, before the library's verification. Adding is offered at both levels.
+ * session's age) or, since slice SI-10a, enrolling (Strict's enrolment: sessionMayAddFactor(), enrolment.ts). Read by
+ * the library's options path before it makes a challenge (parent-code-plugin.ts) and again by the add itself, before
+ * the library's verification. Adding is offered at both levels.
  */
 export async function mayAddPasskey(s: { sessionId: string; parentId: string }, now = new Date()): Promise<boolean> {
   if (parentDoorClosed(await getParentSettings())) return false;
@@ -63,7 +67,7 @@ export async function mayAddPasskey(s: { sessionId: string; parentId: string }, 
   if (!p || p.blocked) return false;
   if ((await enterableGuardianRows(s.parentId)).length === 0) return false;
   if ((await currentPassword(db, s.parentId)) === null) return false;
-  return sessionProvedRecently(db, s, now);
+  return sessionMayAddFactor(db, s, now);
 }
 
 /** The most the browser's answer to a registration may be, as JSON: a browser's is a few KiB. */
@@ -137,13 +141,16 @@ type AddRefusal = "not_a_registration" | "bad_name" | "not_allowed" | "not_verif
  *     library answered) still the person's, its name set (the typed one, or none), `parent.passkey.add` (the row's id,
  *     its name, and how many the person now has), and, for a first passkey (none of theirs added before it,
  *     passkeysAddedBefore(), so two adds at once make one set of codes, never none) of a person with no authenticator
- *     app in force, ten backup codes made (makeBackupCodes(), any older ones deleted), `parent.backup_codes.make`. If it
+ *     app in force, ten backup codes made (makeBackupCodes(), any older ones deleted), `parent.backup_codes.make`; and,
+ *     since slice SI-10a, when this session is enrolling, the session made whole (completeEnrolment(), enrolment.ts:
+ *     `enrol_until` cleared and `strong_at` set, after the person's row), `enrolled: true` in the add's row. If it
  *     fails, the row the library inserted is deleted (forgetUnrecordedPasskey()). One gap stays: a process that stops
  *     between the library's insert and this transaction's commit (a restart, say) leaves the row with no name, no audit
  *     row and no backup codes. It works, and the person's settings list it as "Passkey added" with its date, where they
  *     can remove it; nothing sweeps such rows yet.
- * Devices stay remembered, and no session is ended or made; `strong_at` is left as it is, so the new passkey, now the
- * person's newest factor, makes this session's earlier proof stop counting (sessionStrongAt()).
+ * Devices stay remembered, and no session is ended or made; `strong_at` is left as it is but for an enrolment's
+ * session, so the new passkey, now the person's newest factor, makes this session's earlier proof stop counting
+ * (sessionStrongAt()).
  */
 export async function addMyPasskey(who: Adder | null, body: unknown, verify: VerifyRegistration, ip: string | null, now = new Date()): Promise<AddAnswer> {
   if (!who) return REJECTED;
@@ -174,9 +181,12 @@ export async function addMyPasskey(who: Adder | null, body: unknown, verify: Ver
       await namePasskey(tx, who.parentId, verified.passkeyId, name === "" ? null : name);
       const passkeys = await passkeyCount(who.parentId, tx);
       const firstBesideNoApp = (await passkeysAddedBefore(tx, who.parentId, verified.passkeyId)) === 0 && !(await hasAuthenticator(who.parentId, tx));
+      // Strict's enrolment: the session is whole once the person holds the passkey. Its time is read here, after the
+      // library's insert, so the proof is never older than the passkey it follows (sessionStrongAt()).
+      const enrolled = await completeEnrolment(tx, who, new Date(Math.max(Date.now(), now.getTime())));
       const liveActor = parentActor({ id: who.parentId, email: live.email });
       await writeAudit({ actor: liveActor, action: "parent.passkey.add", targetType: "parent", targetId: who.parentId,
-        after: { passkeyId: verified.passkeyId, name: name === "" ? null : name, passkeys }, ip }, tx);
+        after: { passkeyId: verified.passkeyId, name: name === "" ? null : name, passkeys, ...(enrolled ? { enrolled: true } : {}) }, ip }, tx);
       if (!firstBesideNoApp) return { codes: null };
       const made = await makeBackupCodes(tx, who.parentId, now);
       await writeAudit({ actor: liveActor, action: "parent.backup_codes.make", targetType: "parent", targetId: who.parentId,

@@ -39,7 +39,8 @@ type Busy = "start" | "confirm" | "codes" | "off" | null;
 /**
  * The authenticator app on the sign-in settings page (slice SI-6b; src/lib/parents/authenticator-settings.ts). Off: what
  * an app is, and, asked again first (AskAgain) unless the session proved itself in the last 10 minutes, "Set up an
- * authenticator app" (not for a parent with no password, who is told to choose one first, and not under Strict). Being
+ * authenticator app" (not for a parent with no password, who is told to choose one first; at either level since slice
+ * SI-10a). Being
  * set up, in this component's state alone: the QR code drawn from the squares the press answered, the key to type with
  * its copy press, and the code field; a reload or leaving the page loses them, and the next press makes a new key. On:
  * since when, the backup codes left, and, asked again, new backup codes and turning it off (under Strict, words in
@@ -163,7 +164,6 @@ export function AuthenticatorBox({ email, app, proved, hasPassword, strict, pass
       <p>{COPY.appWhat}</p>
       <p className="help">{COPY.appKeepsDevices}</p>
       {!hasPassword ? <p>{COPY.appNeedsPassword}</p>
-        : strict ? <p>{COPY.appStrictOff}</p>
         : (
           <AskAgain email={email} proved={proved} lede={words.askAgainForApp} passkey={passkey} portalOrigin={portalOrigin}>
             <button type="button" className="btn" aria-disabled={busy !== null || undefined} onClick={() => void start()}>
