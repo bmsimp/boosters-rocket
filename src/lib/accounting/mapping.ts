@@ -10,13 +10,14 @@
 // same reads, made in the press's own transaction under the roster lock (readLinkBasics(tx)), are what the link presses
 // check against (./link-writes.ts): the suggestion, the pool and the students a link would link with it are worked out
 // by one rule for the page and the press, so the two never differ.
-import { and, desc, eq, inArray, isNotNull, ne, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, or } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { accountingLink, family, guardian, jobRun, parent, qboCustomer, qboCustomerType, staffUser, student } from "@/lib/db/schema";
 import { getConnection } from "@/lib/quickbooks/connection";
 import { QUICKBOOKS, type AppFamilyId, type AppStudentId } from "@/lib/families/ids";
 import { otherCompany } from "@/lib/families/links";
 import { recordNameWords } from "@/lib/families/words";
+import { parseEmailField } from "@/lib/parents/emails";
 import { buildRoster, type Cust } from "@/lib/roster/model";
 import { checkName, nameKey } from "@/lib/roster/names";
 import { familyCreatesFiled, noFamilyPool } from "@/lib/roster/no-family";
@@ -28,7 +29,7 @@ import { getRosterSource, ROSTER_JOB } from "@/lib/roster/source";
 import { differencesOf, type Difference, type LinkedStudent, type QueueFact } from "./differences";
 import { suggestCustomers, type Holder, type Suggestion } from "./match";
 import { pairKeys, proposeStudents, type Proposals } from "./proposals";
-import { bulkStamp, linkStamp, reviewStamp, takeStamp, unlinkStamp, type Chosen } from "./stamp";
+import { bulkStamp, guardianLinkStamp, guardianUnlinkStamp, linkStamp, reviewStamp, takeStamp, unlinkStamp, type Chosen } from "./stamp";
 import { linkStanding, searchMatches, STATUS_KEYS, type LinksFilter, type NotAFamilyReason, type StatusKey } from "./status";
 
 /**
@@ -117,6 +118,77 @@ export type UnlinkOffer = {
   stamp: string;
 };
 /**
+ * How a guardian row's own link stands (slice M3c), for an open row with a guardian link of the records' company, in the
+ * `listed` state: `own`, to a customer the cache holds as of the parent type directly under the family's customer, and
+ * no other open row is linked to it (ownParentCustomer()'s rule, src/lib/roster/writes.ts: what is sent for the row);
+ * `shared`, such a customer another open row is linked to too (`sharedWith`: the other families of those rows, by
+ * name, none when every one is this family's); `elsewhere`, the cache holds it, but not of the parent type or not
+ * directly under the family's customer (or the family has no link, or the books no parent type), shared or not;
+ * `gone`, the cache doesn't hold it.
+ */
+export type GuardianStanding = "own" | "shared" | "elsewhere" | "gone";
+/** A Parent customer a guardian row may be linked to (slice M3c), as the row's opening shows it: the books' text, shown as text only. */
+export type GuardianCandidate = { qboId: string; name: string; email: string | null };
+/**
+ * Link a guardian (slice M3c): the Parent customers the row may be linked to (`candidates`: active, of the parent type,
+ * directly under the family's customer in the roster, in the roster's order, with no guardian row of the company, open
+ * or closed, linked to it and no student or family link naming it), the one filled in (`suggested`: the one candidate whose name
+ * is the person's by nameKey() or whose email field holds the row's sign-in address, when exactly one does; null
+ * otherwise), and each candidate's stamp (guardianLinkStamp(), `suggested` for the one filled in, `picked` for the rest).
+ */
+export type GuardianLinkOffer = { familyLinkId: string; candidates: GuardianCandidate[]; suggested: string | null; stamps: Record<string, string> };
+/**
+ * Why a row that could be linked is offered no Parent customer (slice M3c): none under the family's customer that no
+ * guardian is linked to (`none`); or none, and the person's own active Parent customer of their name is under another
+ * family of theirs, an open row's there (`elsewhere`, that family's name: ownNamedElsewhere()'s rule), so the portal
+ * links it there and not here.
+ */
+export type GuardianNoOffer = { why: "none" } | { why: "elsewhere"; family: string };
+/** An open guardian row as the row's opening shows it (since slice M3c with its link's standing and its presses). */
+export type GuardianShown = {
+  id: string; name: string; email: string; blocked: boolean; link: OwnLink;
+  /** A row with a link, in the `listed` state: how it stands; null otherwise. */
+  standing: GuardianStanding | null;
+  /** For `shared`: the other families whose open rows are linked to the customer too, by name (none when they are all this family's). */
+  sharedWith: string[];
+  /**
+   * Unlink this guardian (slice M3c): a row with a link, in the `listed` state, while nothing on the write queue holds
+   * it back (`unlinkHeld` 0).
+   */
+  unlink: { linkId: string; stamp: string } | null;
+  /**
+   * How many items on the write queue, waiting, stuck or kept, hold Unlink this guardian back (unlinkGuardian()'s
+   * refusal): a change that blocks others naming the row or targeting its link's customer. 0 for none.
+   */
+  unlinkHeld: number;
+  /**
+   * Link this guardian (slice M3c): a row with no link of a family whose link stands, in the `listed` state, in layered
+   * books with a parent type, with candidates; only those the press would take now (linkGuardian()'s queue refusals): none
+   * while an item names the row, and none with a blocking change targeting it. The one filled in is dropped with its
+   * customer, and the rest keep their stamps.
+   */
+  offer: GuardianLinkOffer | null;
+  /**
+   * What on the write queue, waiting, stuck or kept, holds Link this guardian back, where the row has candidates:
+   * `row`, the items naming the row (any op); `customers`, the candidates a blocking change targets. Null for neither.
+   */
+  linkHeld: { row: number; customers: number } | null;
+  /** Where the row could be linked but has no candidate, why (slice M3c). */
+  noOffer: GuardianNoOffer | null;
+  /**
+   * Whether the row's family may have a guardian linked here now (guardianBooksOf()): what Unlink this guardian's warning
+   * says of linking them again.
+   */
+  relink: boolean;
+};
+/**
+ * A removed guardian of the family (slice M3c, the lead's decision 4): a closed row (not closed by a change of company)
+ * with a guardian link of the records' company, by the person's name, its customer's name as the cache holds it (null
+ * when the books' copy doesn't hold it) and whether the cache holds it active. Shown, never pressed: the customer is
+ * theirs again if they are reinstated, so no other guardian is offered it.
+ */
+export type RemovedGuardian = { id: string; name: string; customer: string | null; active: boolean };
+/**
  * Take QuickBooks' into the app (slice M4a), for one difference of a row: `at`, its index in the row's differences;
  * what it takes (`field`) of which record (`kind`, `recordId`: the family's or the student's app id; a place is a
  * student's); `about`, the record and the field in words, for the press's name; `words`, what it does, said beside the
@@ -151,7 +223,9 @@ export type LinkRow = {
   status: LinkStatus;
   students: { id: AppStudentId; name: string; link: OwnLink }[];
   /** Its open guardians; `blocked`: the person is blocked, so they can't sign in and their address isn't matched. */
-  guardians: { id: string; name: string; email: string; blocked: boolean; link: OwnLink }[];
+  guardians: GuardianShown[];
+  /** Its removed guardians whose link to a Parent customer stands (slice M3c), by name: shown, never pressed. */
+  removed: RemovedGuardian[];
   /** Where the portal and the books' copy differ (slice M2): only for a link that stands, in the `listed` state; none otherwise. */
   differences: Difference[];
   /** Inactive student customers under its customer with no student record: counted in words, never a difference. */
@@ -230,7 +304,7 @@ const group = <T>(items: readonly T[], keyOf: (t: T) => string) => {
  * and the link presses: each table read once, whatever the number of families. Ten reads at once (the roster's company,
  * the connection, the shape, the customer types, the last successful roster read, the cache's customers, the family
  * creates on the write queue with the family each is filed under, every family record with its Left unlinked mark, every
- * student record, the open guardian rows with their people), then the links: those of the records' company (the
+ * student record, every guardian row with its person, open or closed, since slice M3c), then the links: those of the records' company (the
  * roster's, while the books aren't connected to another; none while there is none), and beside them which family and
  * student records have a link of any other company, by their ids alone (a link press never links a record linked
  * anywhere), in one query. No row is
@@ -246,7 +320,7 @@ const group = <T>(items: readonly T[], keyOf: (t: T) => string) => {
  */
 export async function readLinkBasics(tx?: Tx) {
   const q = tx ?? db;
-  const [source, connection, shape, typeRows, okRuns, customerRows, filed, everyFamily, everyStudent, guardians] = await Promise.all([
+  const [source, connection, shape, typeRows, okRuns, customerRows, filed, everyFamily, everyStudent, guardianRows] = await Promise.all([
     getRosterSource(tx), getConnection(tx), getShape(tx),
     q.select({ qboId: qboCustomerType.qboId, name: qboCustomerType.name, active: qboCustomerType.active }).from(qboCustomerType),
     q.select({ id: jobRun.id, finishedAt: jobRun.finishedAt }).from(jobRun).where(and(eq(jobRun.job, ROSTER_JOB), eq(jobRun.outcome, "ok"))).orderBy(desc(jobRun.id)).limit(1),
@@ -257,9 +331,14 @@ export async function readLinkBasics(tx?: Tx) {
     // differences read an inactive one whose customer the books have active under the family, and where the portal has
     // the record of any student customer a family's customer holds (student_elsewhere).
     q.select({ id: student.id, familyId: student.familyId, name: student.name, active: student.active }).from(student),
-    q.select({ id: guardian.id, familyId: guardian.familyId, name: parent.name, email: parent.email, blocked: parent.blocked }).from(guardian).innerJoin(parent, eq(guardian.parentId, parent.id))
-      .where(and(ne(guardian.status, "disabled"), isNotNull(guardian.familyId))),
+    // Every guardian row, open or closed (slice M3c: a closed row's link is a removed guardian's, shown in the row's
+    // opening and offered to no other guardian); the matcher, the addresses and the rows' guardians read the open ones only.
+    q.select({ id: guardian.id, familyId: guardian.familyId, parentId: guardian.parentId, status: guardian.status, disabledReason: guardian.disabledReason,
+      name: parent.name, email: parent.email, blocked: parent.blocked }).from(guardian).innerJoin(parent, eq(guardian.parentId, parent.id)),
   ]);
+  const everyGuardian = guardianRows;
+  // The open guardian rows with a family: what the matcher, the addresses and the rows' guardians read (as before slice M3c).
+  const guardians = everyGuardian.filter((g) => g.status !== "disabled" && g.familyId !== null);
   const elsewhere = otherCompany(source, connection?.realmId);
   // The records' company (recordsCompany()'s meaning): links are read only of it, and none while there is none.
   const realm = source !== null && !elsewhere ? source : null;
@@ -371,9 +450,95 @@ export async function readLinkBasics(tx?: Tx) {
       stamp: unlinkStamp(familyKey, link.id, link.customerId, students.map((s) => s.linkId)) };
   };
 
+  // A guardian's own link (slice M3c): every guardian row by id, the customers any guardian row of the company is linked
+  // to (open or closed: a closed row's is a removed guardian's, which they take back if reinstated), and the open rows
+  // linked to each customer (several may share one, whatever their family).
+  const guardianById = new Map(everyGuardian.map((g) => [g.id, g]));
+  const guardianLinked = new Set(links.flatMap((l) => (l.guardianId === null ? [] : [l.customerId])));
+  const linkOfGuardian = new Map(links.flatMap((l) => (l.guardianId === null ? [] : [[l.guardianId, l] as const])));
+  const openRowsOn = group(links.flatMap((l) => {
+    const g = l.guardianId === null ? undefined : guardianById.get(l.guardianId);
+    return g === undefined || g.status === "disabled" ? [] : [{ customerId: l.customerId, row: g }];
+  }), (x) => x.customerId);
+  const familyNames = new Map(everyFamily.map((f) => [String(f.id), f.name]));
+  const familyNameOf = (familyId: string | null) => recordNameWords(familyId === null ? null : familyNames.get(familyId) ?? null, "family");
+  const parentTypeId = shape !== null && shape.kind === "layered" ? shape.parentTypeId : null;
+  /**
+   * Where a guardian of this family may be linked to a Parent customer (slice M3c): in the `listed` state, in layered
+   * books with a parent type, for an active family whose family link of the records' company stands (linkStanding()):
+   * that link and its customer; null otherwise.
+   */
+  const guardianBooksOf = (familyKey: string): { familyLink: (typeof links)[number]; familyCustomer: string; parentTypeId: string } | null => {
+    const link = linkOfFamily.get(familyKey);
+    if (state !== "listed" || parentTypeId === null || link === undefined || !families.some((f) => String(f.id) === familyKey)) return null;
+    if (linkStanding(customerById.get(link.customerId), { cacheHasCustomers: customers.length > 0, listedAsFamily }).is !== "stands") return null;
+    return { familyLink: link, familyCustomer: link.customerId, parentTypeId };
+  };
+  /**
+   * Link a guardian (slice M3c), for an open row of an active family with no guardian link of the records' company,
+   * where guardianBooksOf() holds: the offer, with its candidates (GuardianLinkOffer), or why there is none
+   * (GuardianNoOffer); null where nothing is offered (a closed row, a row with a link, or guardianBooksOf() null). The
+   * page and the press read it alike. No query of its own.
+   */
+  const guardianOfferOf = (guardianId: string): { offer: GuardianLinkOffer } | { none: GuardianNoOffer } | null => {
+    const g = guardianById.get(guardianId);
+    if (g === undefined || g.status === "disabled" || g.familyId === null || linkOfGuardian.has(g.id)) return null;
+    const books = guardianBooksOf(String(g.familyId));
+    if (books === null) return null;
+    const under = roster === null || roster.kind === "flat" ? [] : roster.families.find((f) => f.customer.qboId === books.familyCustomer)?.parents ?? [];
+    // No customer a link of any kind names: a guardian row's (open or closed), a student's, or a family record's (one
+    // retyped and moved under this family in the books keeps its family link until someone unlinks it).
+    const candidates = under.filter((c) => c.active && c.typeQboId === books.parentTypeId && c.parentQboId === books.familyCustomer
+      && !guardianLinked.has(c.qboId) && !studentLinked.has(c.qboId) && !familyOfCustomer.has(c.qboId)).map((c): GuardianCandidate => ({ qboId: c.qboId, name: c.displayName, email: c.email }));
+    if (candidates.length === 0) {
+      // ownNamedElsewhere()'s rule (src/lib/roster/writes.ts): another open row of the person's, linked to an active
+      // Parent customer of their name, the first by the row's id.
+      const key = nameKey(g.name);
+      const there = everyGuardian.filter((o) => o.parentId === g.parentId && o.id !== g.id && o.status !== "disabled").sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0))
+        .find((o) => {
+          const l = linkOfGuardian.get(o.id);
+          const c = l === undefined ? undefined : customerById.get(l.customerId);
+          return c !== undefined && c.active && c.typeQboId === books.parentTypeId && nameKey(c.displayName) === key;
+        });
+      return { none: there === undefined ? { why: "none" } : { why: "elsewhere", family: familyNameOf(there.familyId === null ? null : String(there.familyId)) } };
+    }
+    const address = g.email.toLowerCase();
+    const matching = candidates.filter((c) => nameKey(c.name) === nameKey(g.name) || parseEmailField(c.email).usable.includes(address));
+    const suggested = matching.length === 1 ? matching[0]!.qboId : null;
+    const stamps = Object.fromEntries(candidates.map((c) => [c.qboId, guardianLinkStamp(g.id, books.familyLink.id, c.qboId, c.qboId === suggested ? "suggested" : "picked")]));
+    return { offer: { familyLinkId: books.familyLink.id, candidates, suggested, stamps } };
+  };
+  /**
+   * An open row's own link (slice M3c), in the `listed` state, whatever it stands as: how it stands (GuardianStanding),
+   * the other families sharing its customer, and Unlink this guardian's link id and stamp (guardianUnlinkStamp()); null
+   * for a closed row, a row with no link, or another state. No query of its own.
+   */
+  const guardianLinkOf = (guardianId: string): { standing: GuardianStanding; sharedWith: string[]; linkId: string; customerId: string; stamp: string } | null => {
+    const g = guardianById.get(guardianId);
+    const link = linkOfGuardian.get(guardianId);
+    if (state !== "listed" || g === undefined || g.status === "disabled" || g.familyId === null || link === undefined) return null;
+    const c = customerById.get(link.customerId);
+    const others = (openRowsOn.get(link.customerId) ?? []).filter((x) => x.row.id !== g.id);
+    const familyLink = linkOfFamily.get(String(g.familyId));
+    // Where it is before whether it is shared: a customer that isn't a Parent customer directly under this family's is
+    // no guardian's own here however many rows are unlinked from it, so only one under it is said to be split.
+    const standing: GuardianStanding = c === undefined ? "gone"
+      : parentTypeId === null || familyLink === undefined || c.typeQboId !== parentTypeId || c.parentQboId !== familyLink.customerId ? "elsewhere"
+      : others.length > 0 ? "shared" : "own";
+    const sharedWith = standing !== "shared" ? [] : [...new Set(others.flatMap((x) => (x.row.familyId !== null && String(x.row.familyId) === String(g.familyId) ? []
+      : [familyNameOf(x.row.familyId === null ? null : String(x.row.familyId))])))].sort((x, y) => COLLATOR.compare(x, y));
+    return { standing, sharedWith, linkId: link.id, customerId: link.customerId, stamp: guardianUnlinkStamp(g.id, link.id, link.customerId) };
+  };
+  /** A family's removed guardians with a link of the records' company (slice M3c): closed rows, not closed by a change of company. By name. */
+  const removedOf = (familyKey: string): RemovedGuardian[] => everyGuardian
+    .filter((g) => g.status === "disabled" && g.disabledReason !== "company_changed" && g.familyId !== null && String(g.familyId) === familyKey && linkOfGuardian.has(g.id))
+    .map((g) => { const c = customerById.get(linkOfGuardian.get(g.id)!.customerId); return { id: g.id, name: g.name, customer: c?.displayName ?? null, active: c?.active ?? false }; })
+    .sort(byName);
+
   return { source, connection, shape, typeRows, okRuns, customerRows, customers, customerById, tokenOf, roster, realm, state, everyFamily, families, everyStudent, students,
     guardians, links, linkOfFamily, familyOfCustomer, customerOfStudent, customerOfGuardian, studentLinked, pool, poolIds, studentsOf, guardiansOf, addressesOf, leftOf,
-    unlinked, suggestions, listedAsFamily, proposalsFor, offerFor, chosenFor, reviewOf, unlinkOf, createQueuedFor, familyLinkedAnywhere, creates };
+    unlinked, suggestions, listedAsFamily, proposalsFor, offerFor, chosenFor, reviewOf, unlinkOf, createQueuedFor, familyLinkedAnywhere, creates,
+    everyGuardian, guardianById, linkOfGuardian, guardianBooksOf, guardianOfferOf, guardianLinkOf, removedOf };
 }
 export type LinkBasics = Awaited<ReturnType<typeof readLinkBasics>>;
 
@@ -398,8 +563,12 @@ export type LinkBasics = Awaited<ReturnType<typeof readLinkBasics>>;
  * nothing more but what a family's create given up after a try left (madeAfterGivingUp(): 4 to 8, the page's own).
  * Since slice M3a2 the rows' Confirm this link (reviewOf()) and Confirm all exact email matches (bulk(), by
  * suggestedRowsShown()) are worked out from the same reads, with no query of their own, and since slice M3b so is each
- * linked row's Unlink from the books (unlinkOf()). Since slice M4a so are the presses that take the books' value of a
- * difference into the portal (takeOffersOf()), with no query of their own: the count is unchanged.
+ * linked row's Unlink from the books (unlinkOf()). Since slice M3c so are each open guardian's link standing, Unlink
+ * this guardian and Link this guardian's candidates (guardianLinkOf(), guardianOfferOf()) and the removed guardians
+ * (removedOf()): the guardian query reads closed rows too, one query still, so the count is as it was; what on the
+ * write queue holds each guardian press back is read from the queue's open items it loads already (loadOpenWrites()).
+ * Since slice M4a so are the presses that take the books' value of a difference into the portal (takeOffersOf()), with
+ * no query of their own: the count is unchanged.
  * On four hundred families with two thousand customers that is the same number of queries; memory holds the two
  * thousand cached customers (twice, while the queue holds items, as loadOpenWrites() reads its own), the records,
  * guardian rows and links (a few thousand small rows), and the rows rendered are the four hundred families, each
@@ -442,6 +611,34 @@ export async function loadAccountingLinks(): Promise<LinksView> {
     : customerById.has(customerId) ? { state: "linked", customer: customerById.get(customerId)!.displayName } : { state: "gone" });
   const none = { leave: false, pick: false, undo: false };
   const listed = state === "listed";
+  // What on the write queue holds a guardian press back (linkGuardian(), unlinkGuardian(): the same items they refuse
+  // for, read here from the queue this view has already loaded): the items naming each row, of any op; of those, the
+  // ones that block others (not a parent's details or sign-in email: blocksOthers); and the blocking ones by the
+  // customer they target (none for a create), with those that do both counted once.
+  const itemsOfRow = new Map<string, number>(), blockingOfRow = new Map<string, number>(), blockingOn = new Map<string, number>(), blockingBoth = new Map<string, number>();
+  const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) ?? 0) + 1);
+  for (const i of queue) {
+    const w = i.write as unknown as Record<string, unknown>;
+    const rowId = typeof w.guardianId === "string" ? w.guardianId : null;
+    const blocks = i.write.op !== "contact" && i.write.op !== "email";
+    const target = blocks && i.write.op !== "create" && typeof w.qboId === "string" ? w.qboId : null;
+    if (rowId !== null) bump(itemsOfRow, rowId);
+    if (rowId !== null && blocks) bump(blockingOfRow, rowId);
+    if (target !== null) bump(blockingOn, target);
+    if (rowId !== null && target !== null) bump(blockingBoth, `${rowId} ${target}`);
+  }
+  /** Link this guardian's offer as the page draws it: only the candidates the press would take now, and what holds the rest back. */
+  const offerShown = (guardianId: string, offer: GuardianLinkOffer | null): { offer: GuardianLinkOffer | null; linkHeld: { row: number; customers: number } | null } => {
+    if (offer === null) return { offer: null, linkHeld: null };
+    const row = itemsOfRow.get(guardianId) ?? 0;
+    const free = row > 0 ? [] : offer.candidates.filter((c) => !blockingOn.has(c.qboId));
+    const customers = offer.candidates.filter((c) => blockingOn.has(c.qboId)).length;
+    return {
+      offer: free.length === 0 ? null : { familyLinkId: offer.familyLinkId, candidates: free, suggested: free.some((c) => c.qboId === offer.suggested) ? offer.suggested : null,
+        stamps: Object.fromEntries(free.map((c) => [c.qboId, offer.stamps[c.qboId]!])) },
+      linkHeld: row > 0 || customers > 0 ? { row, customers } : null,
+    };
+  };
 
   const rows: LinkRow[] = b.families.map((f) => {
     const key = String(f.id);
@@ -450,8 +647,20 @@ export async function loadAccountingLinks(): Promise<LinksView> {
       familyId: f.id, name: familyName.get(key)!, addresses: addressesOf.get(key) ?? [],
       students: (activeStudentsOf.get(key) ?? []).map((s) => ({ id: s.id, name: recordNameWords(s.name, "student"), customerId: studentTie(familyTie(link?.customerId), customerOfStudent.get(String(s.id))) }))
         .sort(byRosterOrder).map((s) => ({ id: s.id, name: s.name, link: own(customerOfStudent.get(String(s.id))) })),
-      guardians: (guardiansOf.get(key) ?? []).map((g) => ({ id: g.id, name: g.name, email: g.email, blocked: g.blocked, link: own(customerOfGuardian.get(g.id)) }))
-        .sort(byName),
+      guardians: (guardiansOf.get(key) ?? []).map((g): GuardianShown => {
+        // Slice M3c: the row's link, its standing and Unlink this guardian, or Link this guardian's candidates, from the same reads.
+        // Since its review, a press the write queue holds back isn't drawn, and what holds it is said instead.
+        const linked = b.guardianLinkOf(g.id);
+        const offered = linked === null ? b.guardianOfferOf(g.id) : null;
+        const unlinkHeld = linked === null ? 0
+          : (blockingOfRow.get(g.id) ?? 0) + (blockingOn.get(linked.customerId) ?? 0) - (blockingBoth.get(`${g.id} ${linked.customerId}`) ?? 0);
+        return { id: g.id, name: g.name, email: g.email, blocked: g.blocked, link: own(customerOfGuardian.get(g.id)),
+          standing: linked?.standing ?? null, sharedWith: linked?.sharedWith ?? [],
+          unlink: linked === null || unlinkHeld > 0 ? null : { linkId: linked.linkId, stamp: linked.stamp }, unlinkHeld,
+          ...offerShown(g.id, offered !== null && "offer" in offered ? offered.offer : null), noOffer: offered !== null && "none" in offered ? offered.none : null,
+          relink: b.guardianBooksOf(key) !== null };
+      }).sort(byName),
+      removed: b.removedOf(key),
       differences: [] as Difference[], inactiveUnrecorded: 0, confirm: null, review: null, unlink: null, takes: [] as TakeOffer[], takeNotes: [] as { at: number; words: string }[], offers: none,
     };
     if (link !== undefined) {

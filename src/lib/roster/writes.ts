@@ -4667,9 +4667,10 @@ async function sendAgainHolding(itemId: string, shown: string, o: WriteOp & { st
    guardian row is linked to it (ownParentCustomer()). Nothing is sent for a guardian in flat books, in books with no
    parent type (the family's email field, open question 7, is S11d's) or for a family with no link. The portal never
    matches a person to a customer by name or address by itself: when the family already has a customer of the person's
-   name under it, nothing is sent and nothing is kept, for stage 4's mapping screen to offer. A Parent customer made
-   here is linked `created`, never `carried_over`, so the take-in of contact details never reads it as a parent's own
-   record. */
+   name under it, nothing is sent and nothing is kept: a Parent customer there is linked to a row only by a staff
+   member's press on Accounting links (stage 4's slice M3c, src/lib/accounting/guardian-links.ts). A Parent customer
+   made here is linked `created`, never `carried_over`, so the take-in of contact details never reads it as a parent's
+   own record. */
 
 /** Who saves a change first: the staff member's actor, the permission used and their staff user id (null for none). */
 type SaverOp = { actor: Actor; ip: string | null; permission?: string; staffUserId: string | null };
@@ -4678,7 +4679,7 @@ export type GuardianOp = { actor: Actor; ip: string | null; permission?: string 
 const saverOf = (o: GuardianOp): SaverOp => ({ actor: o.actor, ip: o.ip, permission: o.permission, staffUserId: o.actor.door === "staff" ? o.actor.id : null });
 
 /** A Parent customer that is a portal guardian's own is changed through the guardian: askRosterWrite() refuses its forms. */
-export const GUARDIAN_HERE = "That Parent customer is linked to a guardian in the portal, so it isn't changed from here: a guardian's own Parent customer is changed through them (rename the person on their page, or remove them under Portal sign-ins on this page), and one several guardians share, or one linked to a guardian of another family, is changed in QuickBooks until the mapping screen sorts it out. Nothing was changed.";
+export const GUARDIAN_HERE = "That Parent customer is linked to a guardian in the portal, so it isn't changed from here: a guardian's own Parent customer is changed through them (rename the person on their page, or remove them under Portal sign-ins on this page), and one several guardians share, or one linked to a guardian of another family, is changed in QuickBooks, or sorted out on Accounting links: unlink from it each guardian whose it isn't, and once one guardian of this family alone is linked to it, it is theirs; if none of this family's is left on it, one who isn't linked to a customer can be linked to it there. Nothing was changed.";
 /** The family action while a guardian's Parent customer change for the family is waiting or stuck. */
 export const GUARDIAN_PENDING = "A change to a guardian's Parent customer in this family hasn't reached QuickBooks yet (it is waiting or stuck on the Reconciliation page), so nothing was changed. Once it has gone through, or been given up there, try again.";
 /** The code of a guardian's Parent customer create found made as a customer another open guardian row is linked to already (foundDone(), ./queue.ts). */
@@ -4690,9 +4691,9 @@ export const NAME_UNUSABLE = "name_unusable";
  * promised of a rename (the lead's decision 1 in slice 9h's last round): a person has one name, so a rename changes it
  * on their own record in QuickBooks, and replaces this only when the new name is free by the portal's knowledge.
  */
-export const GUARDIAN_TAKEN_NAME = "QuickBooks refused the person's name as taken: another customer in QuickBooks has that name, so it isn't sent again as it is. Renaming the person changes their name in the portal and on their own record in QuickBooks. “Give up” leaves the guardian as they are, with no record of their own in QuickBooks, for the mapping screen.";
+export const GUARDIAN_TAKEN_NAME = "QuickBooks refused the person's name as taken: another customer in QuickBooks has that name, so it isn't sent again as it is. Renaming the person changes their name in the portal and on their own record in QuickBooks. “Give up” leaves the guardian as they are, with no record of their own in QuickBooks; after that, a Parent customer under the family that no guardian is linked to can be linked to them on Accounting links, in the opening of the family's row.";
 /** A guardian's Parent customer rename QuickBooks refused as a taken name: another customer there has it. */
-export const GUARDIAN_RENAME_TAKEN = "QuickBooks refused that name as taken: another customer in QuickBooks has it, so it isn't sent again as it is. Renaming the person again changes their name in the portal and on their own record in QuickBooks. “Give up” leaves this Parent customer with the name it has in QuickBooks, for the mapping screen.";
+export const GUARDIAN_RENAME_TAKEN = "QuickBooks refused that name as taken: another customer in QuickBooks has it, so it isn't sent again as it is. Renaming the person again changes their name in the portal and on their own record in QuickBooks. “Give up” leaves this Parent customer with the name it has in QuickBooks.";
 /** A guardian's Parent customer create not sent at once, or on a press, while its family is being changed in QuickBooks (the family action: the lead's decision 2). */
 export const GUARDIAN_FAMILY_CHANGING = "The guardian's family is being changed in QuickBooks at this moment, so nothing was sent for their Parent customer just now. Try again in a minute.";
 /** How long a guardian's at-once send waits for the roster lock before it is left for the worker: the guardian writes' three seconds. */
@@ -4728,7 +4729,9 @@ export async function guardianCustomerLinked(tx: Tx, realmId: string, customerId
  * for a family's page, which offers them no forms (askRosterWrite() refuses them, GUARDIAN_HERE): `own`, one open row
  * of this family alone is linked to it, so it is that guardian's own and changed through them; `other`, it is shared by
  * several open rows or linked to a guardian of another family, so the portal sends nothing for it (ownParentCustomer()),
- * and it is changed in QuickBooks until the mapping screen sorts it out; `removed`, no open row is linked to it, a
+ * and it is changed in QuickBooks, or sorted out on Accounting links (stage 4's slice M3c): each guardian whose it isn't
+ * unlinked from it (Unlink this guardian), and where none of this family's is left on it, one linked to it there (Link
+ * this guardian); `removed`, no open row is linked to it, a
  * removed guardian's row of this family is, and the cache holds it active: their own, left active in QuickBooks (a removal makes it inactive only when
  * its balance allows), which they take back if reinstated.
  */
@@ -4817,10 +4820,10 @@ async function ownParentCustomer(tx: Tx, guardianId: string, b: Books): Promise<
   return { is: "own", customer, active: c.active, syncToken: link?.syncedToken ?? "", name: c.displayName };
 }
 /**
- * The name of the Parent customer this guardian row was linked to before its family was unlinked (stage 4's slice
- * M3b2: its latest ended link, whose customer the books still hold with no guardian link naming it, endedLinksHeld()),
+ * The name of the Parent customer this guardian row was linked to until that link ended (stage 4's slice
+ * M3b2: its latest ended link, by its family's unlink or, since slice M3c, its own (unlinkGuardian()), whose customer the books still hold with no guardian link naming it, endedLinksHeld()),
  * only while the cache holds it as a customer of the parent type directly under the family's customer now: a family
- * relinked to the same customer. Under another customer (a family relinked to another) it is null: one Parent customer
+ * relinked to the same customer, or a family still linked whose guardian's own link was ended alone. Under another customer (a family relinked to another) it is null: one Parent customer
  * per family is the portal's rule (ownNamedElsewhere()), and a new family customer gets its own.
  */
 async function linkedBefore(tx: Tx, guardianId: string, b: Books): Promise<string | null> {
@@ -4929,8 +4932,8 @@ export type GuardianOutcome = "not_sent" | "named_like" | "named_elsewhere" | "h
  * here; `name_held`, a create kept as a taken name stays kept at a rename, as the new name isn't free (`elsewhere` when
  * another record of theirs has it or is about to, else `holds` the new name, which another customer has); `name_once`,
  * a rename not queued, as the same rename gives the new name to another record of theirs first (`elsewhere`). Since
- * stage 4's slice M3b2, `linked_before`: at a grant, the Parent customer the row was linked to under this family before
- * the family was unlinked is still there (`holds`, its name: linkedBefore()), so none is made beside it.
+ * stage 4's slice M3b2, `linked_before`: at a grant, the Parent customer the row was linked to under this family until
+ * that link ended is still there (`holds`, its name: linkedBefore()), so none is made beside it.
  */
 export type GuardianQueued = { guardianId: string; familyName: string; outcome: GuardianOutcome; why?: GuardianNotSent; holds?: string; code?: string; elsewhere?: string;
   item?: QueueRow; write?: RenameWrite | CreateWrite | DeactivateWrite };
@@ -5156,19 +5159,19 @@ export function guardianSentWords(sent: readonly GuardianSent[], op: "grant" | "
       // the Portal sign-ins box and the person's page say which.
       case "not_sent": return s.why === "failed" ? ["Nothing was sent to QuickBooks for their Parent customer: the portal couldn't save that part of the change, so nothing will be sent for it. Their access in the portal is as said."] : [];
       case "nothing": case "not_own": return op === "remove" ? ["Nothing was sent to QuickBooks for them: they have no Parent customer of their own there."] : [];
-      case "named_like": return [`QuickBooks already has a customer named “${s.holds}” ${under} that isn't linked to ${who}, so no Parent customer was made for them. The mapping screen will offer to link the two.`];
+      case "named_like": return [`QuickBooks already has a customer named “${s.holds}” ${under} that isn't linked to ${who}, so no Parent customer was made for them. If it is a Parent customer no guardian is linked to, the two can be linked on Accounting links, in the opening of the family's row, by someone who may link families to accounting.`];
       // One person, one name (the lead's decision 1 in slice 9h's last round).
       case "named_elsewhere": return [`QuickBooks already has ${who}'s record under ${s.elsewhere}, and takes a name once, so no Parent customer was made for them ${under}.`];
       case "name_held": return [`Nothing was sent for their Parent customer ${under}, which QuickBooks refused before as a taken name: ${s.elsewhere !== undefined
         ? `the new name goes to their record under ${s.elsewhere}, and QuickBooks takes a name once`
         : `another customer in QuickBooks has the name “${s.holds}” already`}. It stays kept on the Reconciliation page, where you can give it up.`];
-      case "linked_before": return [`QuickBooks has the Parent customer “${s.holds}” ${under} that ${who} was linked to before the family was unlinked, so no second one was made for them. The portal doesn't link them to it now.`];
+      case "linked_before": return [`QuickBooks has the Parent customer “${s.holds}” ${under} that ${who} was linked to until that link ended, so no second one was made for them. While it is active in QuickBooks, it can be linked to them again on Accounting links, in the opening of the family's row.`];
       case "name_once": return [`Their Parent customer ${under} keeps the name it has in QuickBooks: QuickBooks takes a name once, and the new name goes to their record under ${s.elsewhere}.`];
       case "has_one": return op === "rename" ? [`Their Parent customer ${under} has that name in QuickBooks already.`] : [`${who} already has their own Parent customer ${under} in QuickBooks, so none was made.`];
       case "inactive_there": return [op === "remove" ? `Their Parent customer ${under} is inactive in QuickBooks already, so nothing was sent.`
         : `Their Parent customer ${under} is inactive in QuickBooks, and the portal never makes a customer active again, so nothing was sent there.`];
       case "create_open": return [`A change to their Parent customer ${under} is on the Reconciliation page already.`];
-      case "maybe_made": return [`Making their Parent customer ${under} may have reached QuickBooks already, so it was left to finish: QuickBooks may hold an active Parent customer for them, which the mapping screen will show.`];
+      case "maybe_made": return [`Making their Parent customer ${under} may have reached QuickBooks already, so it was left to finish: if QuickBooks made it, the portal links it to them when it finds it there, and it is theirs again if they are added back; if it is given up, one QuickBooks made anyway is linked to nobody in the portal, and once they are added back it can be linked to them on Accounting links, in the opening of the family's row.`];
       case "kept": return [`No Parent customer was made for them ${under}. ${keptRefusalWords(s.code ?? null, null)} It is kept on the Reconciliation page, where you can give it up.`];
       case "queued": break;
     }
@@ -5188,7 +5191,7 @@ export function guardianSentWords(sent: readonly GuardianSent[], op: "grant" | "
         : `${what} is waiting to reach QuickBooks: the portal tries again in a minute, then less often, and you'll find it on the Reconciliation page.`];
       case "refused": {
         if (s.write?.op === "create" && t.code === "fault_6240") {
-          return [`QuickBooks refused the name “${s.write.name}” as taken: another customer in QuickBooks has that name, so no Parent customer was made for ${who} ${under}. Renaming ${who} changes their name in the portal and on their own record in QuickBooks. “Give up” on the Reconciliation page leaves them as they are, with no record of their own in QuickBooks, for the mapping screen.`];
+          return [`QuickBooks refused the name “${s.write.name}” as taken: another customer in QuickBooks has that name, so no Parent customer was made for ${who} ${under}. Renaming ${who} changes their name in the portal and on their own record in QuickBooks. “Give up” on the Reconciliation page leaves them as they are, with no record of their own in QuickBooks; after that, a Parent customer under the family that no guardian is linked to can be linked to them on Accounting links, in the opening of the family's row.`];
         }
         if (s.write?.op === "deactivate") {
           const why = t.code === "open_balance" ? "QuickBooks shows an amount owed on it" : t.code === CREDIT_BALANCE ? "QuickBooks shows a credit on it"
@@ -5242,22 +5245,23 @@ async function parentCustomerStanding(tx: Tx, r: { guardianId: string; familyId:
     return b.why === "books" ? "Nothing is sent to QuickBooks for a guardian in this club's books."
       : b.why === "family" ? "Nothing is sent to QuickBooks for them: this family isn't linked to an active family there."
         // Nothing is sent later for what wasn't sent then: say so, never "for now" (no reconnect queues a create).
-        : "Nothing is sent to QuickBooks for them while QuickBooks isn't connected to the roster's company, or its customer types don't match the club's setup. Nothing that wasn't sent is sent later by itself: the mapping screen will offer to link a Parent customer to them.";
+        : "Nothing is sent to QuickBooks for them while QuickBooks isn't connected to the roster's company, or its customer types don't match the club's setup. Nothing that wasn't sent is sent later by itself: a Parent customer of theirs already under this family in QuickBooks can be linked to them on Accounting links, in the opening of the family's row, while the books' customer types match the club's setup.";
   }
   const own = await ownParentCustomer(tx, r.guardianId, b);
   if (own.is === "own") return own.active ? `Linked to their own Parent customer “${own.name}”.` : `Their own Parent customer “${own.name}” is inactive in QuickBooks; the portal never makes it active again.`;
   if (own.is === "not_own") return "Linked to a customer that isn't their own Parent customer under this family, so nothing is sent for them.";
   if (!r.open) return null;
-  // The Parent customer they were linked to under this family before it was unlinked (slice M3b2): none is made beside it.
+  // The Parent customer they were linked to under this family until that link ended (slice M3b2: a family's unlink, or
+  // since slice M3c Unlink this guardian): none is made beside it.
   const before = heldUnderFamily(held, b);
-  if (before !== null) return `QuickBooks has the Parent customer “${before}” under this family that they were linked to before the family was unlinked, so no second one is made. No Parent customer in QuickBooks is linked to them, and none is being made: the mapping screen will offer to link one.`;
+  if (before !== null) return `QuickBooks has the Parent customer “${before}” under this family that they were linked to until that link ended, so no second one is made. No Parent customer in QuickBooks is linked to them, and none is being made: while it is active, it can be linked to them again on Accounting links, in the opening of the family's row.`;
   const like = namedUnder(b, r.name);
   const elsewhere = like ? null : await ownNamedElsewhere(tx, b, r.guardianId, r.name);
   // An open row with no link and nothing on the queue has nothing coming (added while nothing could be sent, or its
   // create given up): nothing makes one later by itself.
   return like ? `QuickBooks has a customer named “${like.displayName}” under this family that isn't linked to them.`
     : elsewhere !== null ? `QuickBooks already has their record under ${elsewhere}, and takes a name once, so none is made under this family.`
-      : "No Parent customer in QuickBooks is linked to them, and none is being made: the mapping screen will offer to link one.";
+      : "No Parent customer in QuickBooks is linked to them, and none is being made: one under this family in QuickBooks that no guardian is linked to can be linked to them on Accounting links, in the opening of the family's row.";
 }
 /** Which of a guardian's details a contact change sends, in words. */
 const detailsWhat = (w: Pick<ContactWrite, "change">) =>
@@ -5550,7 +5554,7 @@ async function guardianPress(tx: Tx, item: QueueRow, w: RosterWrite, guardianId:
     if (familyCustomer === null || familyCustomer !== w.familyQboId || !cache.find((c) => c.qboId === familyCustomer)?.active) return no("The guardian's family isn't linked to that active family in QuickBooks now, so nothing was sent. Reload the page.");
     if (p.name !== shown) return no("The person was renamed since this page was shown, so nothing was sent. Reload the page to see the name that would be sent.");
     const like = cache.find((c) => c.active && c.parentQboId === familyCustomer && nameKey(c.displayName) === nameKey(p.name));
-    if (like) return no(`QuickBooks has a customer named “${like.displayName}” under this family now, which isn't linked to them, so nothing was sent: the mapping screen will offer to link the two. Give this up.`);
+    if (like) return no(`QuickBooks has a customer named “${like.displayName}” under this family now, which isn't linked to them, so nothing was sent. Give this up: then, if it is a Parent customer no guardian is linked to, the two can be linked on Accounting links, in the opening of the family's row.`);
     const shape = await getShape(tx);
     const parentType = shape?.kind === "layered" ? shape.parentTypeId : null;
     const elsewhere = parentType === null ? null : await ownNamedElsewhere(tx, { ok: true, realmId, parentTypeId: parentType, familyCustomer, cache }, guardianId, p.name);
