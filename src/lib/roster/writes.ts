@@ -35,7 +35,7 @@ import { volunteerForMovedStudent } from "@/lib/volunteer/moved-student";
 import { buyoutsForMovedStudent } from "@/lib/buyouts/moved";
 import { getShape, missingTypes, ROSTER_LOCK, shapeHolds, shapeTypeIds, type MembershipShape } from "./shape";
 import { buildRoster, type Cust, type Roster } from "./model";
-import { getRosterSource, GIVEN_UP_FOR_COMPANY_NOTE, ROSTER_JOB } from "./source";
+import { getRosterSource, GIVEN_UP_FOR_COMPANY_NOTE, ofRosterCompany, ROSTER_JOB } from "./source";
 import { familyCreatesOnTheQueue, noFamilyPool } from "./no-family";
 import { customerRow } from "./refresh";
 import { checkName, freeName, nameKey } from "./names";
@@ -279,7 +279,7 @@ function roleIn(roster: Roster, qboId: string): { role: RosterRole; familyQboId:
 
 /** The names a new or changed name must not be: every customer in the cache (inactive too) and every waiting create or rename. */
 async function namesTaken(tx: Tx, cache: Cust[], except: string | null): Promise<string[]> {
-  const open = await tx.select({ request: writeQueue.request }).from(writeQueue).where(inArray(writeQueue.state, ["waiting", "stuck"]));
+  const open = await tx.select({ request: writeQueue.request }).from(writeQueue).where(and(inArray(writeQueue.state, ["waiting", "stuck"]), ofRosterCompany));
   return [...cache.filter((c) => c.qboId !== except).map((c) => c.displayName),
     ...open.map((o) => o.request).filter((w) => w.op === "create" || w.op === "rename").map((w) => (w as { name: string }).name)];
 }
@@ -354,7 +354,7 @@ async function prepare(ask: WriteAsk, rosterTag: string): Promise<Prepared> {
     // A change still waiting or stuck for this record: a family's too, before anyone is added to it or moved into it
     // (a waiting "make inactive" would land after them).
     const waitingFor = async (qboId: string) => (await tx.select({ id: writeQueue.id }).from(writeQueue)
-      .where(and(eq(writeQueue.targetQboId, qboId), inArray(writeQueue.state, ["waiting", "stuck"]), blocksOthers)).limit(1)).length > 0;
+      .where(and(eq(writeQueue.targetQboId, qboId), inArray(writeQueue.state, ["waiting", "stuck"]), ofRosterCompany, blocksOthers)).limit(1)).length > 0;
 
     if (ask.op === "create") {
       const op: RosterOperation = ask.role === "family" ? "create_family" : ask.role === "member" ? "create_member" : "add_student";
@@ -1211,7 +1211,7 @@ async function deactivateHolding(kind: "family" | "student", recordId: string, r
     if (making) return no(making === "sending" ? FAMILY_SENDING : FAMILY_WAITING);
     if (filed.studentId !== null) {
       if (await studentCreateWaiting(tx, filed.studentId)) return no(STUDENT_WAITING);
-      const moves = await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(movesOf(filed.studentId), inArray(writeQueue.state, ["waiting", "stuck", "refused"]))).limit(1);
+      const moves = await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(movesOf(filed.studentId), inArray(writeQueue.state, ["waiting", "stuck", "refused"]), ofRosterCompany)).limit(1);
       if (moves.length) return no(STUDENT_MOVE_PENDING);
     }
     const [link] = await tx.select({ syncedToken: accountingLink.syncedToken }).from(accountingLink)
@@ -1369,7 +1369,7 @@ async function prepareFamily(familyId: AppFamilyId, stamp: string, rosterTag: st
     const under = activeUnder(cache, familyQboId);
     if (!coverStampHolds(String(familyId), [familyQboId, ...under.map((u) => u.qboId)], stamp)) return no(WRITE_COPY.coverChanged);
     const ids = [familyQboId, ...under.map((u) => u.qboId)];
-    const waiting = await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(inArray(writeQueue.targetQboId, ids), inArray(writeQueue.state, ["waiting", "stuck"]), blocksOthers)).limit(1);
+    const waiting = await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(inArray(writeQueue.targetQboId, ids), inArray(writeQueue.state, ["waiting", "stuck"]), ofRosterCompany, blocksOthers)).limit(1);
     if (waiting.length) return no(WRITE_COPY.waiting);
     // A student's move into or out of the family that hasn't reached QuickBooks (slice 9f): QuickBooks is never asked to
     // make a student inactive under a family the portal has moved them out of.
@@ -1734,7 +1734,7 @@ async function whileMaking<T>(familyId: AppFamilyId, send: () => Promise<T>): Pr
 /** Whether a family's own create (a new family's or member's, filed under its record) is waiting or stuck on the queue. */
 async function familyCreateQueued(tx: Tx, familyId: AppFamilyId): Promise<boolean> {
   return (await tx.select({ id: writeQueue.id }).from(writeQueue)
-    .where(and(eq(writeQueue.familyId, familyId), inArray(writeQueue.state, ["waiting", "stuck"]), isFamilyCreate)).limit(1)).length > 0;
+    .where(and(eq(writeQueue.familyId, familyId), inArray(writeQueue.state, ["waiting", "stuck"]), ofRosterCompany, isFamilyCreate)).limit(1)).length > 0;
 }
 
 /**
@@ -1753,7 +1753,7 @@ export async function familyCreateWaiting(tx: Tx, familyId: AppFamilyId): Promis
 /** Whether a student's own create (filed under the student record, `write_queue.student_id`) is waiting or stuck on the queue. */
 async function studentCreateWaiting(tx: Tx, studentId: AppStudentId): Promise<boolean> {
   return (await tx.select({ id: writeQueue.id }).from(writeQueue)
-    .where(and(eq(writeQueue.studentId, studentId), inArray(writeQueue.state, ["waiting", "stuck"]), isStudentCreate)).limit(1)).length > 0;
+    .where(and(eq(writeQueue.studentId, studentId), inArray(writeQueue.state, ["waiting", "stuck"]), ofRosterCompany, isStudentCreate)).limit(1)).length > 0;
 }
 /**
  * Whether a create filed under this record was given up after a try QuickBooks may have taken (`sent`), with no roster
@@ -2028,7 +2028,7 @@ async function prepareLink(rawFamilyId: string, chosenType: string | null, roste
       }
       // Nobody is added under a family customer with a change of its own waiting, as prepare() refuses an add.
       const waiting = await tx.select({ id: writeQueue.id }).from(writeQueue)
-        .where(and(eq(writeQueue.targetQboId, familyCustomer), inArray(writeQueue.state, ["waiting", "stuck"]), blocksOthers)).limit(1);
+        .where(and(eq(writeQueue.targetQboId, familyCustomer), inArray(writeQueue.state, ["waiting", "stuck"]), ofRosterCompany, blocksOthers)).limit(1);
       if (waiting.length) return no(WRITE_COPY.waiting);
     }
     let students: { id: AppStudentId; name: string | null }[] = [];
@@ -2325,7 +2325,7 @@ export async function changeInPortal(ask: PortalChange, rosterTag: string, o: Wr
 
 /** The family records whose own create is waiting or stuck on the queue (familyCreateWaiting(), for many at once): for the Families list's words. */
 export async function familiesBeingMade(): Promise<Set<string>> {
-  const rows = await db.select({ familyId: writeQueue.familyId }).from(writeQueue).where(and(inArray(writeQueue.state, ["waiting", "stuck"]), isFamilyCreate));
+  const rows = await db.select({ familyId: writeQueue.familyId }).from(writeQueue).where(and(inArray(writeQueue.state, ["waiting", "stuck"]), ofRosterCompany, isFamilyCreate));
   return new Set(rows.flatMap((r) => (r.familyId === null ? [] : [String(r.familyId)])));
 }
 
@@ -2333,7 +2333,7 @@ export async function familiesBeingMade(): Promise<Set<string>> {
 export async function studentsBeingMade(studentIds: AppStudentId[]): Promise<Set<string>> {
   if (!studentIds.length) return new Set();
   const rows = await db.select({ studentId: writeQueue.studentId }).from(writeQueue)
-    .where(and(inArray(writeQueue.studentId, studentIds), inArray(writeQueue.state, ["waiting", "stuck"]), isStudentCreate));
+    .where(and(inArray(writeQueue.studentId, studentIds), inArray(writeQueue.state, ["waiting", "stuck"]), ofRosterCompany, isStudentCreate));
   return new Set(rows.flatMap((r) => (r.studentId === null ? [] : [String(r.studentId)])));
 }
 
@@ -2943,7 +2943,7 @@ export async function closeEarlierContacts(tx: Tx, item: Pick<QueueRow, "id" | "
   const w = item.request;
   if (w.op !== "contact" && w.op !== "email") return;
   const earlier = await tx.select({ id: writeQueue.id, request: writeQueue.request }).from(writeQueue)
-    .where(and(sameContactRecord(w), inArray(writeQueue.state, ["waiting", "stuck", "refused"]), ne(writeQueue.id, item.id), sql`${writeQueue.createdAt} < ${item.createdAt.toISOString()}::timestamptz`));
+    .where(and(sameContactRecord(w), inArray(writeQueue.state, ["waiting", "stuck", "refused"]), ofRosterCompany, ne(writeQueue.id, item.id), sql`${writeQueue.createdAt} < ${item.createdAt.toISOString()}::timestamptz`));
   const covered = earlier.filter((r) => (w.op === "email" ? r.request.op === "email"
     : r.request.op === "contact" && (["phone", "address"] as const).every((f) => (r.request as ContactWrite).change[f] === undefined || w.change[f] !== undefined)));
   if (!covered.length) return;
@@ -3347,7 +3347,7 @@ export async function moveMoneyNotes(asks: readonly MoveMoneyAsk[], tx?: Tx): Pr
  */
 async function replaceRefused(tx: Tx, which: SQL | undefined, replacedBy: Record<string, unknown>, o: { actor: Actor; ip: string | null; permission?: string }): Promise<{ id: string; request: RosterWrite }[]> {
   const rows = await tx.update(writeQueue).set({ state: "given_up", note: "Replaced by a later change to the same record.", nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
-    .where(and(eq(writeQueue.state, "refused"), which)).returning({ id: writeQueue.id, lastCode: writeQueue.lastCode, request: writeQueue.request, createdAt: writeQueue.createdAt });
+    .where(and(eq(writeQueue.state, "refused"), ofRosterCompany, which)).returning({ id: writeQueue.id, lastCode: writeQueue.lastCode, request: writeQueue.request, createdAt: writeQueue.createdAt });
   rows.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   for (const r of rows) {
     await writeAudit({ actor: o.actor, action: "roster.write.replaced", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: r.id,
@@ -3367,7 +3367,7 @@ const renamesOf = (customer: string) => and(eq(writeQueue.targetQboId, customer)
 
 /** A change waiting or stuck for a customer (prepare()'s waitingFor()): a refused one blocks nothing, nor a parent's details (blocksOthers). */
 async function waitingForCustomer(tx: Tx, qboId: string): Promise<boolean> {
-  return (await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(eq(writeQueue.targetQboId, qboId), inArray(writeQueue.state, ["waiting", "stuck"]), blocksOthers)).limit(1)).length > 0;
+  return (await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(eq(writeQueue.targetQboId, qboId), inArray(writeQueue.state, ["waiting", "stuck"]), ofRosterCompany, blocksOthers)).limit(1)).length > 0;
 }
 
 /** The checks every change saved first makes before anything is saved, under the roster lock with the page's tag: a roster of the company QuickBooks is connected to, and a shape that holds. */
@@ -3924,7 +3924,7 @@ async function familyMovePending(tx: Tx, familyId: AppFamilyId | null, customer:
   const by = or(familyId === null ? undefined : eq(writeQueue.familyId, familyId), familyId === null ? undefined : sql`${writeQueue.request}->>'toFamilyId' = ${String(familyId)}`,
     customer === null ? undefined : sql`${writeQueue.request}->>'fromFamilyQboId' = ${customer}`, customer === null ? undefined : sql`${writeQueue.request}->>'toFamilyQboId' = ${customer}`);
   if (by === undefined) return false;
-  return (await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(inArray(writeQueue.state, ["waiting", "stuck", "refused"]), isMove, by)).limit(1)).length > 0;
+  return (await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(inArray(writeQueue.state, ["waiting", "stuck", "refused"]), ofRosterCompany, isMove, by)).limit(1)).length > 0;
 }
 
 /**
@@ -3944,7 +3944,7 @@ async function moveRefusals(tx: Tx, familyIds: readonly AppFamilyId[], o: { lock
   if (!ids.length) return out;
   const say = (id: string, why: string) => { if (!out.has(id)) out.set(id, why); };
   const queued = await tx.select({ familyId: writeQueue.familyId }).from(writeQueue)
-    .where(and(inArray(writeQueue.familyId, [...familyIds]), inArray(writeQueue.state, ["waiting", "stuck"]), isFamilyCreate));
+    .where(and(inArray(writeQueue.familyId, [...familyIds]), inArray(writeQueue.state, ["waiting", "stuck"]), ofRosterCompany, isFamilyCreate));
   for (const q of queued) if (q.familyId !== null) say(String(q.familyId), FAMILY_WAITING);
   if (o.locks) {
     const locks = (await tx.execute(sql`select id, pg_try_advisory_xact_lock_shared(${sql.raw(String(MAKING_LOCK))}, hashtext(id)) as making,
@@ -3958,7 +3958,7 @@ async function moveRefusals(tx: Tx, familyIds: readonly AppFamilyId[], o: { lock
   const customers = (await linksOf({ families: familyIds, students: [] }, tx)).customerOfFamily;
   if (customers.size) {
     const waiting = new Set((await tx.select({ target: writeQueue.targetQboId }).from(writeQueue)
-      .where(and(inArray(writeQueue.targetQboId, [...customers.values()]), inArray(writeQueue.state, ["waiting", "stuck"]), blocksOthers))).map((w) => w.target));
+      .where(and(inArray(writeQueue.targetQboId, [...customers.values()]), inArray(writeQueue.state, ["waiting", "stuck"]), ofRosterCompany, blocksOthers))).map((w) => w.target));
     for (const [f, c] of customers) if (waiting.has(c)) say(String(f), WRITE_COPY.waiting);
   }
   return out;
@@ -4331,7 +4331,7 @@ async function takeInactive(kind: "family" | "student", recordId: string, stamp:
 
     if (kind === "student") {
       if (await studentCreateWaiting(tx, r.studentId!)) return refuse(STUDENT_WAITING);
-      const moves = await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(movesOf(r.studentId!), inArray(writeQueue.state, ["waiting", "stuck", "refused"]))).limit(1);
+      const moves = await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(movesOf(r.studentId!), inArray(writeQueue.state, ["waiting", "stuck", "refused"]), ofRosterCompany)).limit(1);
       if (moves.length) return refuse(STUDENT_MOVE_PENDING);
       if (!takeStampHolds("inactive", recordId, c.qboId, [], stamp)) return refuse(TAKE_CHANGED);
       const replaced = await replaceRefused(tx, offs([c.qboId]), { op: "take", field: "inactive", recordId }, o);
@@ -4381,7 +4381,7 @@ async function takeInactive(kind: "family" | "student", recordId: string, stamp:
  */
 async function offKept(tx: Tx, customer: string): Promise<boolean> {
   return (await tx.select({ id: writeQueue.id }).from(writeQueue)
-    .where(and(eq(writeQueue.targetQboId, customer), eq(writeQueue.state, "refused"), sql`${writeQueue.request}->>'op' = 'deactivate'`)).limit(1)).length > 0;
+    .where(and(eq(writeQueue.targetQboId, customer), eq(writeQueue.state, "refused"), ofRosterCompany, sql`${writeQueue.request}->>'op' = 'deactivate'`)).limit(1)).length > 0;
 }
 
 /**
@@ -4431,7 +4431,7 @@ async function takeActive(kind: "family" | "student", recordId: string, stamp: s
         && (roster.families.find((x) => x.customer.qboId === familyCustomer)?.students.some((x) => x.qboId === c.qboId) ?? false);
       if (!c.active || !listedUnder) return refuse(TAKE_CHANGED);
       if (await waitingForCustomer(tx, c.qboId)) return refuse(WRITE_COPY.waiting);
-      const moves = await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(movesOf(s.id), inArray(writeQueue.state, ["waiting", "stuck", "refused"]))).limit(1);
+      const moves = await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(movesOf(s.id), inArray(writeQueue.state, ["waiting", "stuck", "refused"]), ofRosterCompany)).limit(1);
       if (moves.length) return refuse(STUDENT_MOVE_PENDING_ACTIVE);
       const making = await familyCreateWaiting(tx, f.id);
       if (making) return refuse(making === "sending" ? FAMILY_SENDING : FAMILY_WAITING);
@@ -4761,7 +4761,7 @@ async function sendInactive(kind: "family" | "student", recordId: string, stamp:
     if (making) return no(making === "sending" ? FAMILY_SENDING : FAMILY_WAITING);
     if (filed.studentId !== null) {
       if (await studentCreateWaiting(tx, filed.studentId)) return no(STUDENT_WAITING);
-      const moves = await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(movesOf(filed.studentId), inArray(writeQueue.state, ["waiting", "stuck", "refused"]))).limit(1);
+      const moves = await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(movesOf(filed.studentId), inArray(writeQueue.state, ["waiting", "stuck", "refused"]), ofRosterCompany)).limit(1);
       if (moves.length) return no(STUDENT_MOVE_PENDING);
     }
     if (!sendStampHolds("inactive", recordId, customer, [customer], stamp)) return no(SEND_CHANGED);
@@ -5279,7 +5279,7 @@ export async function recordSendingFree(tx: Tx, recordId: string): Promise<boole
 /** Whether a guardian's Parent customer change filed under this family is waiting or stuck (askFamilyInactive() refuses meanwhile). */
 async function guardianItemsWaiting(tx: Tx, familyId: AppFamilyId): Promise<boolean> {
   return (await tx.select({ id: writeQueue.id }).from(writeQueue)
-    .where(and(eq(writeQueue.familyId, familyId), inArray(writeQueue.state, ["waiting", "stuck"]), sql`${writeQueue.request}->>'guardianId' is not null`, blocksOthers)).limit(1)).length > 0;
+    .where(and(eq(writeQueue.familyId, familyId), inArray(writeQueue.state, ["waiting", "stuck"]), ofRosterCompany, sql`${writeQueue.request}->>'guardianId' is not null`, blocksOthers)).limit(1)).length > 0;
 }
 
 /**
@@ -5336,7 +5336,7 @@ const heldUnderFamily = (held: EndedHeld | undefined, b: Books): string | null =
 const namedUnder = (b: Books, name: string) => b.cache.find((c) => c.active && c.parentQboId === b.familyCustomer && nameKey(c.displayName) === nameKey(name)) ?? null;
 /** The guardian row's own queue items in these states, oldest first. */
 const itemsOfRow = (tx: Tx, guardianId: string, states: QueueRow["state"][]) =>
-  tx.select().from(writeQueue).where(and(ofGuardian(guardianId), inArray(writeQueue.state, states))).orderBy(asc(writeQueue.createdAt));
+  tx.select().from(writeQueue).where(and(ofGuardian(guardianId), inArray(writeQueue.state, states), ofRosterCompany)).orderBy(asc(writeQueue.createdAt));
 
 /**
  * Whether a guardian's change must wait (reinstating a row, renaming a person): a change of one of these rows' Parent
@@ -5362,7 +5362,7 @@ export async function guardianMaySend(rows: readonly { guardianId: string; famil
   if (!rows.length) return false;
   const ids = rows.map((r) => r.guardianId);
   const [item] = await (tx ?? db).select({ id: writeQueue.id }).from(writeQueue)
-    .where(and(inArray(sql`${writeQueue.request}->>'guardianId'`, ids), inArray(writeQueue.state, ["waiting", "stuck", "refused"]), blocksOthers)).limit(1);
+    .where(and(inArray(sql`${writeQueue.request}->>'guardianId'`, ids), inArray(writeQueue.state, ["waiting", "stuck", "refused"]), ofRosterCompany, blocksOthers)).limit(1);
   if (item) return true;
   const shape = await getShape(tx);
   if (!shape || shape.kind !== "layered" || shape.parentTypeId === null || !offers(shape, "add_parent")) return false;
@@ -5802,7 +5802,7 @@ export async function keptContactsOf(guardianIds: readonly string[]): Promise<Ma
   if (!guardianIds.length) return out;
   const rows = await db.select({ id: writeQueue.id, request: writeQueue.request, familyId: writeQueue.familyId, rowFamily: guardian.familyId, status: guardian.status, active: family.active })
     .from(writeQueue).innerJoin(guardian, sql`${guardian.id}::text = ${writeQueue.request}->>'guardianId'`).innerJoin(family, eq(family.id, guardian.familyId))
-    .where(and(eq(writeQueue.state, "refused"), sql`${writeQueue.request}->>'op' = 'contact'`, inArray(guardian.id, [...guardianIds]))).orderBy(desc(writeQueue.createdAt));
+    .where(and(eq(writeQueue.state, "refused"), ofRosterCompany, sql`${writeQueue.request}->>'op' = 'contact'`, inArray(guardian.id, [...guardianIds]))).orderBy(desc(writeQueue.createdAt));
   for (const r of rows) {
     const g = guardianOf(r.request);
     if (g === null || out.has(g) || r.status === "disabled" || !r.active || r.familyId === null || String(r.familyId) !== String(r.rowFamily)) continue;
