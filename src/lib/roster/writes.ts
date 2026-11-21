@@ -4655,7 +4655,7 @@ async function sendPlace(studentId: AppStudentId, stamp: string, rosterTag: stri
  * has the customer inactive. The record is never made active, nor changed but by applyWritten().
  */
 async function sendInactive(kind: "family" | "student", recordId: string, stamp: string, rosterTag: string, o: WriteOp & { staffUserId: string }): Promise<WriteResult> {
-  type Ready = { ok: true; write: DeactivateWrite; realmId: string; filed: Filed; name: string; who: string } | { ok: false; result: WriteResult };
+  type Ready = { ok: true; write: DeactivateWrite; realmId: string; filed: Filed; name: string; who: string; them: string } | { ok: false; result: WriteResult };
   const p = await db.transaction(async (tx): Promise<Ready> => {
     const no = (error: string): Ready => ({ ok: false, result: refuse(error) });
     const ready = await readyToSend(tx, rosterTag);
@@ -4694,7 +4694,7 @@ async function sendInactive(kind: "family" | "student", recordId: string, stamp:
       if (moves.length) return no(STUDENT_MOVE_PENDING);
     }
     if (!sendStampHolds("inactive", recordId, customer, [customer], stamp)) return no(SEND_CHANGED);
-    return { ok: true, write: { op: "deactivate", role: where.role, qboId: customer, syncToken: await linkVersionOf(tx, source, customer, kind) }, realmId: source, filed, name: c.displayName, who };
+    return { ok: true, write: { op: "deactivate", role: where.role, qboId: customer, syncToken: await linkVersionOf(tx, source, customer, kind) }, realmId: source, filed, name: c.displayName, who, them: kind === "student" ? "them" : "it" };
   });
   if (!p.ok) return p.result;
   const refused = (code: string, write: DeactivateWrite) => writeAudit({ actor: o.actor, action: "roster.write.refused", permission: o.permission, ip: o.ip,
@@ -4713,7 +4713,7 @@ async function sendInactive(kind: "family" | "student", recordId: string, stamp:
       const { cached } = await applyWritten(t.write, t.answer, { realmId: p.realmId, actor: o.actor, ip: o.ip, permission: o.permission, linkedBy: o.staffUserId, filed: p.filed,
         auditExtra: { sentFrom: "accounting.difference.send", ...(t.resent ? { resent: "stale" } : {}) } });
       await sendRow("sent");
-      return { ok: true, message: `Made ${p.who} inactive in QuickBooks, as the portal has it: QuickBooks showed no balance on the account first.${cached ? "" : " The roster here shows it after its next read of QuickBooks, usually within a few minutes."}` };
+      return { ok: true, message: `Made ${p.who} inactive in QuickBooks, as the portal has ${p.them}: QuickBooks showed no balance on the account first.${cached ? "" : " The roster here shows it after its next read of QuickBooks, usually within a few minutes."}` };
     }
     case "inactive_there": {
       // The cache is behind QuickBooks: the answer is stored and the roster read again. The link isn't aligned: it wasn't the portal's send that made it inactive.

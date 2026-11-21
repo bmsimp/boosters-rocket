@@ -850,9 +850,9 @@ function sendOffersOf(b: LinkBasics, s: SendFacts, f: { id: AppFamilyId; name: s
     if (c.parentQboId === toCustomer) return;
     const who = recordNameWords(st.name, "student"), toWords = recordNameWords(to.name, "family");
     const parent = c.parentQboId === null ? undefined : b.customerById.get(c.parentQboId);
-    const held = parent === undefined ? "at the top of the books' list, under no customer" : `under “${parent.displayName}”`;
+    const held = parent === undefined ? "at the top of its list, under no customer" : `under “${parent.displayName}”`;
     offer({ at, field: "place", kind: "student", recordId: String(studentId), about: `${who}'s family`,
-      words: [`Sends ${who}'s family to the books: QuickBooks will have them under ${toWords}'s customer, in place of ${held} there. The books' place is replaced. Nothing of theirs in the portal moves: their forms, volunteer places and buy-outs stay as they are.`,
+      words: [`Sends ${who}'s family to the books: QuickBooks will have them under ${toWords}'s customer, where it has them ${held} now. The books' place is replaced. Nothing of theirs in the portal moves: their forms, volunteer places and buy-outs stay as they are.`,
         ...(kept ? ["The move kept on the Reconciliation page is closed, as this takes its place."] : [])],
       stamp: sendStamp("place", String(studentId), studentCustomer, [studentCustomer, c.parentQboId ?? "", String(to.id), toCustomer]) },
     waitingFor(studentCustomer) || studentCreating(studentId) || familyCreating(to.id) || waitingFor(toCustomer) || waitingFor(c.parentQboId));
