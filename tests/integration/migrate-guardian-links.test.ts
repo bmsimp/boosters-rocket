@@ -75,11 +75,13 @@ describe("migration 0048: each guardian row's own link, from the record its sign
         ["14", "Cal Rivera", "10", "2"], ["15", "Cal R.", "10", "4"]] as const) {
         await pg`INSERT INTO qbo_customer (qbo_id, display_name, active, parent_qbo_id, type_qbo_id, sync_token) VALUES (${qboId}, ${name}, true, ${parentOf}, ${parentOf ? "P" : "F"}, ${token})`;
       }
-      for (const key of ["rivera", "oak", "pine"] as const) {
+      for (const key of ["rivera", "oak", "pine", "elm"] as const) {
         const [f] = await pg`INSERT INTO family (name, active) VALUES (${`${key} Family`}, true) RETURNING id`;
         ids[key] = f!.id as string;
       }
       await pg`INSERT INTO accounting_link (system, realm_id, customer_id, family_id, origin) VALUES ('quickbooks', ${REALM}, '10', ${ids.rivera!}, 'carried_over')`;
+      // Elm is linked again since an unlink ended its row's link (a copy kept from before the unlink cleared it).
+      await pg`INSERT INTO accounting_link (system, realm_id, customer_id, family_id, origin) VALUES ('quickbooks', ${REALM}, '40', ${ids.elm!}, 'carried_over')`;
       // Pine is linked in another company only.
       await pg`INSERT INTO accounting_link (system, realm_id, customer_id, family_id, origin) VALUES ('quickbooks', ${OTHER}, '30', ${ids.pine!}, 'carried_over')`;
       const row = async (key: string, o: { family: string | null; copy: string | null; source: string | null; closedByAChange?: boolean }) => {
@@ -96,11 +98,16 @@ describe("migration 0048: each guardian row's own link, from the record its sign
       await row("old", { family: null, copy: "10", source: "16", closedByAChange: true }); // a change of company closed it: nothing
       await row("gus", { family: ids.oak!, copy: null, source: "21" });        // its family unlinked, its link ended: nothing
       await row("hal", { family: ids.pine!, copy: "30", source: "31" });       // its family linked in another company only: nothing
+      // Its family linked, its copy naming that customer, but its own link ended by an unlink: the ended link alone keeps one from being made.
+      await row("ivy", { family: ids.elm!, copy: "40", source: "41" });
+      await row("jo", { family: ids.rivera!, copy: null, source: "18" });      // made while its family had no link, linked since: nothing
       await pg`INSERT INTO accounting_link (system, realm_id, customer_id, guardian_id, origin, synced_token) VALUES ('quickbooks', ${REALM}, '13', ${ids.bea!}, 'carried_over', '7')`;
       await pg`INSERT INTO accounting_link (system, realm_id, customer_id, guardian_id, origin) VALUES ('quickbooks', ${REALM}, '15', ${ids.cal!}, 'carried_over')`;
       await pg`INSERT INTO accounting_link (system, realm_id, customer_id, guardian_id, origin) VALUES ('quickbooks', ${OTHER}, '31', ${ids.hal!}, 'carried_over')`;
       await pg`INSERT INTO accounting_link_ended (id, system, realm_id, customer_id, guardian_id, origin, linked_at, ended_at, ended_how)
         VALUES (gen_random_uuid(), 'quickbooks', ${REALM}, '21', ${ids.gus!}, 'carried_over', now(), now(), 'unlinked')`;
+      await pg`INSERT INTO accounting_link_ended (id, system, realm_id, customer_id, guardian_id, origin, linked_at, ended_at, ended_how)
+        VALUES (gen_random_uuid(), 'quickbooks', ${REALM}, '41', ${ids.ivy!}, 'carried_over', now(), now(), 'unlinked')`;
     });
     const before = { links: await links(), guardians: await guardians() };
     await migrateWith(path.resolve("drizzle"));
@@ -122,10 +129,10 @@ describe("migration 0048: each guardian row's own link, from the record its sign
     const rows = await filled();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ door: "system", actor_label: "migration", actor_id: null, target_type: "accounting_link", target_id: null, ip: null, before: null });
-    expect(rows[0]!.after).toEqual({ cause: "migration 0048_guardian_links_additive", linksMade: 2, rowsAlreadyLinked: 1, linksDisagreeing: 1, rowsOfFamiliesUnlinked: 1, rowsWithASourceAndNoCompany: 0 });
+    expect(rows[0]!.after).toEqual({ cause: "migration 0048_guardian_links_additive", linksMade: 2, rowsAlreadyLinked: 1, linksDisagreeing: 1, rowsOfFamiliesUnlinked: 2, rowsWithASourceAndNoCompany: 0 });
     const said = JSON.stringify(rows[0]);
     for (const id of Object.values(ids)) expect(said).not.toContain(id);
-    for (const customer of ["11", "13", "17", "21"]) expect(said).not.toContain(`"${customer}"`);
+    for (const customer of ["11", "13", "17", "18", "21", "41"]) expect(said).not.toContain(`"${customer}"`);
   }, DATABASE_WORK);
 
   it("on an empty database: nothing made, and its audit row says so", async () => {
