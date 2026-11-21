@@ -448,10 +448,24 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
     (a private window, a cleared browser, another browser on the same phone) is offered again at its next sign-in,
     until the third **Not now**: the month is kept on a device the portal still knows. **If not:** note the phone or
     computer, the browser or installed app, and what Home showed.
+44. **Switching to Strict.** On a test host, with three test parents who can sign in: one with a passkey, one with an
+    authenticator app, and one with neither, signed in on a phone. As an Admin, open **Settings**, **Parent sign-ins**,
+    **Change**, step 3, **Sign-in level**, read the counts, open **Switch to Strict** and press it. Then, on the phone,
+    open any page. Sign in there as that parent with their password, add a passkey on **One more step** (on the iPhone
+    in Safari and in the installed app, and on Android in Chrome), tick that the backup codes are saved and press
+    **Continue**. Then, as the parent with the app, sign in on a computer the portal remembers for them.
+    **Pass:** the counts match the three parents; no email goes to anyone; the phone is signed out at its next page;
+    the password leads to "One more step" and to no other page; adding the passkey asks only for the phone's own unlock
+    and shows ten backup codes once; **Continue** lands on Home; the parent with the app is asked for its code on the
+    remembered computer too. **If not:** note what happened, and where.
+45. **Switching back to Standard.** Open step 3 again, open **Switch back to Standard** and press it.
+    **Pass:** nobody is signed out; the passkey and the app still sign in; a parent with neither, on a phone or
+    computer the portal doesn't know, signs in with their password and an emailed code. **If not:** note what happened.
 
-Checks 30 to 41 and 43 are what Playwright's own authenticator can't show (`tests/e2e/passkey-signin.spec.ts` and
-`tests/e2e/passkeys.spec.ts` say so in their heads): a real authenticator, a password manager, a synced passkey, a
-phone by its QR code, a security key, the installed app, Safari and Firefox. The browser's own passkey suggestions on
+Checks 30 to 41, 43 and 44 are what Playwright's own authenticator can't show (`tests/e2e/passkey-signin.spec.ts`,
+`tests/e2e/passkeys.spec.ts` and `tests/e2e/strict-enrolment.spec.ts` say so in their heads): a real authenticator, a
+password manager, a synced passkey, a phone by its QR code, a security key, a real phone's passkey at **One more
+step**, the installed app, Safari and Firefox. The browser's own passkey suggestions on
 the email field are not checked: the portal doesn't start them.
 
 The phone checks that sign a form need Documenso, so they are in part 4.

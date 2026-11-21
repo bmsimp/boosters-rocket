@@ -79,8 +79,9 @@ know yet, a code too). After the update:
 4. They go out five each time the worker wakes, and it wakes about once a minute: 300 people take about an hour, and
    500 about an hour and 40 minutes. While mail is failing it tries one a minute; Health's parent sign-ins line says so.
 5. Meanwhile, and after a link runs out, a parent can always ask for a new link themselves at `/sign-in/password`
-   ("Set up or reset my password" on the sign-in page), at the Standard level every club has until a later release
-   offers Strict.
+   ("Set up or reset my password" on the sign-in page), while the club is at Standard, where every club starts. Under
+   Strict (Settings, Parent sign-ins, step 3) nothing is emailed from there to someone with no password: they ask the
+   club, which sends the welcome again from their page on Parents.
 
 ## Parents' phones and addresses
 
@@ -154,6 +155,11 @@ of the backup from part 1:
 1. Put back the previous version's files and image: `git checkout <previous version>` and, for the published image, the
    previous version in `BOOSTER_ROCKET_IMAGE` (not `stable`), then `docker compose pull`.
 2. Follow [restore, onto the same machine](restore.md#onto-the-same-machine), steps 3 to 7, with the backup from part 1.
+
+**Going back to a version from before password sign-in drops Strict.** That version knows no sign-in level: it signs
+parents in with a code the portal emails them, whatever the level was, and the first time its **Parent sign-ins**
+settings are saved, the level is lost. If you come forward again after that, open **Settings**, **Parent sign-ins**,
+**Change**, step 3, **Sign-in level**, and switch to Strict again if the club was at Strict.
 
 ## Documenso and the other images
 
