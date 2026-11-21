@@ -128,7 +128,7 @@ describe("an earlier company's buy-out, for the treasurer (stage 4's slice M7b)"
     expect(kind({ flag: "void_refused", lastCode: "fault_6240", items: [voidKept(true), created()] })).toBe("invoice_stands");
     expect(EARLIER_WORDS.invoice_stands).toContain("waive the requirement");
     expect(EARLIER_WORDS.invoice_stands).toContain("void it there");
-    // It says nothing of whether it was paid: the stored figures may have shown it paid before the clear (slice M7b2's).
+    // It says nothing of whether it was paid: the stored figures may have shown it paid before the clear (one being cancelled or stuck: slice M7b2 marks an invoiced one paid instead of ending it).
     expect(EARLIER_WORDS.invoice_stands).not.toContain("unpaid");
   });
 
