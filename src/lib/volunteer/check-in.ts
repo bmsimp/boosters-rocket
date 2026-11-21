@@ -91,7 +91,8 @@ const RATE_LIMITED = "That's a lot of check-ins in a few minutes. Please wait a 
  * (`which` is "all"). The sign-up must be live, on that shift, and the session family's own; the shift and its event
  * must still be on; and it must be inside the window at this moment. Each sign-up is checked in at most once (a unique
  * index), so pressing twice gives one credit. The credit is the shift's length in minutes and one shift. Held beside
- * the roster lock, shared, so no change of company (which deletes every sign-up and credit) runs in between.
+ * the roster lock, shared, so no change of company runs in between (it keeps every sign-up and credit since stage 4's
+ * slice M7a, but ends the old company's links and copies).
  */
 export async function checkIn(ctx: ParentCtx, code: unknown, which: unknown, now: Date = new Date()): Promise<Result> {
   if (!isCheckInCode(code) || (which !== "all" && !isUuid(which))) return no(NOT_FROM_PAGE);

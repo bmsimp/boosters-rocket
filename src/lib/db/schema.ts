@@ -466,8 +466,8 @@ export type CustomerCheck = {
  * failed. Never a source of truth. Keyed by the app's own family (`family_id`, a `restrict` foreign key; migrations
  * 0032 and 0033 of stage 2 of the app-owned families spec): a row is only ever written for a family that has a record.
  * What is inside stays QuickBooks': the invoices and the check each name the customer they are of, and those ids
- * belong to the company in `realm_id`. A company change deletes every row (before the app's records it names), and so
- * does a change of membership shape, which changes whose invoices are a family's.
+ * belong to the company in `realm_id`. A company change deletes every row (another company's invoices are never shown),
+ * and so does a change of membership shape, which changes whose invoices are a family's.
  */
 export const familyMoney = pgTable("family_money", {
   familyId: uuid("family_id").primaryKey().references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
@@ -1094,7 +1094,7 @@ export const signatureRequest = pgTable("signature_request", {
  * A guardian's agreement to sign one form electronically (v1 spec §9.2): who, when, from which address, and which
  * version of the consent text they were shown (src/lib/forms/consent.ts). Without a row for the signed-in guardian no
  * document is made and no signing token is handed out. Kept with the request as part of its evidence (§9.4). The
- * request is the family's (signature_request.family_id), and a company change, were it to run, deletes these with it.
+ * request is the family's (signature_request.family_id), and a company change keeps it and these (stage 4's slice M7a).
  */
 export const signatureConsent = pgTable("signature_consent", {
   id: uuid("id").primaryKey().defaultRandom(),
