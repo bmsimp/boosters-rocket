@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
 import type { MembershipShape } from "@/lib/roster/shape";
 import type { Cust, Family } from "@/lib/roster/model";
 import { NOT_HERE, shapeOperations, type RosterOperation } from "@/lib/roster/operations";
@@ -278,9 +279,11 @@ export function MoveStudents({ students, families, refusedHere, rosterTag, act }
  * (`inactiveRecords`, by customer) is offered nothing that would send. A move is MoveStudents' (slice 9f), for every
  * student of the family's record, wherever QuickBooks has them (the page says where).
  */
-export function FamilyChanges({ shape, family, edit, cover, inactiveRecords }: {
+export function FamilyChanges({ shape, family, edit, cover, inactiveRecords, linker = false }: {
   shape: Extract<MembershipShape, { kind: "layered" }>; family: Family; edit: Edit; cover: { family: Covered; under: Covered[] } | null;
   inactiveRecords: Set<string>;
+  /** Whether the reader may link families to accounting (Accounting.Link.ReadWrite): Accounting links is then a link. */
+  linker?: boolean;
 }) {
   const { offered } = shapeOperations(shape);
   const f = family.customer;
@@ -303,12 +306,12 @@ export function FamilyChanges({ shape, family, edit, cover, inactiveRecords }: {
       {family.parents.map((p) => (edit.guardianCustomers?.get(p.qboId) === "own"
         ? <Notice key={p.qboId} tone="info" live="none">{p.displayName} is a portal guardian&apos;s own Parent customer, so it is changed through them: rename the person on their page, or remove them under Portal sign-ins below.</Notice>
         : edit.guardianCustomers?.get(p.qboId) === "other"
-          ? <Notice key={p.qboId} tone="info" live="none">{p.displayName} is linked to a portal guardian, but isn&apos;t one guardian&apos;s own Parent customer under this family (several guardians share it, or the guardian is in another family), so the portal sends nothing for it: change it in QuickBooks, and the mapping screen will sort it out.</Notice>
+          ? <Notice key={p.qboId} tone="info" live="none">{p.displayName} is linked to a portal guardian, but isn&apos;t one guardian&apos;s own Parent customer under this family (several guardians share it, or the guardian is in another family), so the portal sends nothing for it: change it in QuickBooks, or make it one guardian&apos;s own by unlinking every other guardian from it on {linker ? <Link href="/staff/links">Accounting links</Link> : "Accounting links, which someone who may link families to accounting can do"}.</Notice>
         : edit.guardianCustomers?.get(p.qboId) === "removed"
           ? <RecordChanges key={p.qboId} who="the parent" c={p} rename={offered.has("rename_parent")} deactivate={offered.has("deactivate_parent")} edit={edit}
             warning="This is the own Parent customer of a guardian removed from this family, left active in QuickBooks because a removal makes it inactive only when its balance allows. Adding them back under Portal sign-ins uses it again, under whatever name it has then. A change here is made in QuickBooks only and changes nothing in the portal. A parent with any balance in QuickBooks, owed or a credit, isn't made inactive until it is settled there, nor while the portal can't read it." />
         : <RecordChanges key={p.qboId} who="the parent" c={p} rename={offered.has("rename_parent")} deactivate={offered.has("deactivate_parent")} edit={edit}
-          warning="This Parent customer isn't a portal guardian: who can sign in is the portal's own list of the family's guardians, adding the person under Portal sign-ins doesn't use it, and the mapping screen will offer to link it. Making it inactive changes nothing in the portal. A parent with any balance in QuickBooks, owed or a credit, isn't made inactive until it is settled there, nor while the portal can't read it." />))}
+          warning="This Parent customer isn't a portal guardian: who can sign in is the portal's own list of the family's guardians, adding the person under Portal sign-ins doesn't use it, and while it is active a guardian of this family with no Parent customer of their own can be linked to it on Accounting links, by someone who may link families to accounting. Making it inactive changes nothing in the portal. A parent with any balance in QuickBooks, owed or a credit, isn't made inactive until it is settled there, nor while the portal can't read it." />))}
     </section>
   );
 }

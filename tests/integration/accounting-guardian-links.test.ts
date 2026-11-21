@@ -354,11 +354,12 @@ describe("Unlink this guardian", () => {
     const g = await shown("Rivera Family", "Ana Rivera");
     expect(await unlinkGuardian({ guardianId: anaRow, linkId: g.unlink!.linkId, stamp: g.unlink!.stamp }, tag, linkOp())).toMatchObject({ ok: true });
     expect(await removeGuardian(anaRow, "Moved away.", reg)).toMatchObject({ ok: true, quickbooks: ["Nothing was sent to QuickBooks for them: they have no Parent customer of their own there."] });
-    expect(await reinstateGuardian(anaRow, reg)).toEqual({ ok: true, quickbooks: ["QuickBooks has the Parent customer “Ana Rivera” under Rivera Family that Ana Rivera was linked to before the family was unlinked, so no second one was made for them. The portal doesn't link them to it now."] });
+    expect(await reinstateGuardian(anaRow, reg)).toEqual({ ok: true, quickbooks: ["QuickBooks has the Parent customer “Ana Rivera” under Rivera Family that Ana Rivera was linked to until that link ended, so no second one was made for them."
+      + " While it is active in QuickBooks, it can be linked to them again on Accounting links, in the opening of the family's row."] });
     expect(await db.select().from(writeQueue)).toEqual([]);
     expect(stub.apiCalls()).toEqual([]);
     expect((await guardianStandings([{ guardianId: anaRow, familyId: rivera, name: "Ana Rivera", open: true }])).get(anaRow))
-      .toBe("QuickBooks has the Parent customer “Ana Rivera” under this family that they were linked to before the family was unlinked, so no second one is made. No Parent customer in QuickBooks is linked to them, and none is being made: the mapping screen will offer to link one.");
+      .toBe("QuickBooks has the Parent customer “Ana Rivera” under this family that they were linked to until that link ended, so no second one is made. No Parent customer in QuickBooks is linked to them, and none is being made: while it is active, it can be linked to them again on Accounting links, in the opening of the family's row.");
   });
 });
 

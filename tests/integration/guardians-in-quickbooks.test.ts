@@ -62,7 +62,7 @@ describe("adding a guardian (item 2)", () => {
     const r = await addGuardian(chen, { name: "Mei Chen", email: "mei@example.com" }, op);
     expect(r).toMatchObject({ ok: true, outcome: "added", person: "new" });
     if (!r.ok) return;
-    expect(r.quickbooks).toEqual(["QuickBooks already has a customer named “Mei Chen” under Chen Family that isn't linked to Mei Chen, so no Parent customer was made for them. The mapping screen will offer to link the two."]);
+    expect(r.quickbooks).toEqual(["QuickBooks already has a customer named “Mei Chen” under Chen Family that isn't linked to Mei Chen, so no Parent customer was made for them. If it is a Parent customer no guardian is linked to, the two can be linked on Accounting links, in the opening of the family's row, by someone who may link families to accounting."]);
     expect(posts()).toEqual([]);
     expect(await items()).toEqual([]);
     expect(await linkOfRow(r.guardianId)).toBeUndefined();
@@ -94,7 +94,7 @@ describe("adding a guardian (item 2)", () => {
     expect(r.quickbooks[0]).toContain("QuickBooks refused the name “Luis Rivera” as taken: another customer in QuickBooks has that name");
     // The words promise nothing of a rename (the lead's decision 1(b)): they say what it does, and what "Give up" leaves.
     expect(r.quickbooks[0]).toContain("Renaming Luis Rivera changes their name in the portal and on their own record in QuickBooks.");
-    expect(r.quickbooks[0]).toContain("leaves them as they are, with no record of their own in QuickBooks, for the mapping screen");
+    expect(r.quickbooks[0]).toContain("leaves them as they are, with no record of their own in QuickBooks; after that, a Parent customer under the family that no guardian is linked to can be linked to them on Accounting links, in the opening of the family's row.");
     expect(r.quickbooks[0]).not.toContain("takes its place");
     expect(await rowOf(r.guardianId)).toMatchObject({ status: "invited" });
     // "Send the portal's value" isn't offered for it: the rename of the person is the way out.
