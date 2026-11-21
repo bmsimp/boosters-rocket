@@ -885,12 +885,6 @@ describe("a layered family inactive in the portal, made inactive in the books wi
     const zoeElsewhere = familySendStudentsWords([], ["Zoe Rivera"]);
     expect(await offerNow()).toMatchObject({ send: null, sendNote: zoeElsewhere });
     expect(await pressWith("inactive", "family", String(rivera), stamp)).toMatchObject({ ok: false, errors: [zoeElsewhere] });
-    // Zoe active and in no family in the portal: no family row to send her place from, so said apart.
-    await db.update(student).set({ familyId: null }).where(eq(student.id, zoe));
-    const zoeNowhere = familySendStudentsWords([], [], ["Zoe Rivera"]);
-    expect(zoeNowhere).not.toContain("that family's row");
-    expect(await offerNow()).toMatchObject({ send: null, sendNote: zoeNowhere });
-    expect(await pressWith("inactive", "family", String(rivera), stamp)).toMatchObject({ ok: false, errors: [zoeNowhere] });
     // The words for a student of the family never send staff to a press the family's page refuses while it is inactive.
     expect(leoActive).not.toContain("first, or take");
     expect(leoActive).toContain("take the books' value instead");

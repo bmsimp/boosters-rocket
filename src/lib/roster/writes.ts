@@ -1269,12 +1269,12 @@ export const familySendSeal = (familyQboId: string, underIds: readonly string[])
  * Said, by the screen and by the press, when a family's inactive status isn't sent from its difference because the
  * portal's value of someone it covers isn't inactive (slice M5b): a student record of the family active in the portal
  * (`own`, whether or not QuickBooks has them under the family), or a customer under it linked to an active student
- * record of another family (`elsewhere`) or of none (`noFamily`). Names in the portal's words. Each says only what can
- * be done: a student of a family inactive in the portal can't be made inactive on its page (deactivateHolding() and
- * changeInPortal() refuse while the family is inactive), so the way on is to take the books' value first; a student in
- * no family has no family row to send their place from.
+ * record of another family (`elsewhere`: an active student record is always in a family, the check
+ * `student_active_in_family`). Names in the portal's words. Each says only what can be done: a student of a family
+ * inactive in the portal can't be made inactive on its page (deactivateHolding() and changeInPortal() refuse while the
+ * family is inactive), so the way on is to take the books' value first.
  */
-export function familySendStudentsWords(own: readonly string[], elsewhere: readonly string[], noFamily: readonly string[] = []): string {
+export function familySendStudentsWords(own: readonly string[], elsewhere: readonly string[]): string {
   const parts: string[] = [];
   if (own.length) {
     parts.push(`${listed([...own])} ${own.length === 1 ? "is" : "are"} active in the portal, so the family's inactive status isn't sent: the portal's value of them isn't inactive.`
@@ -1284,10 +1284,6 @@ export function familySendStudentsWords(own: readonly string[], elsewhere: reado
   if (elsewhere.length) {
     parts.push(`QuickBooks has ${listed([...elsewhere])} under this family, and the portal has them active in another family, so the family's inactive status isn't sent: QuickBooks would make them inactive with it.`
       + ` Send ${elsewhere.length === 1 ? "their" : "each one's"} family to the books first, from the difference on that family's row.`);
-  }
-  if (noFamily.length) {
-    parts.push(`QuickBooks has ${listed([...noFamily])} under this family, and the portal has them active and in no family, so the family's inactive status isn't sent: QuickBooks would make them inactive with it.`
-      + " It can be sent once the portal has them inactive, or has them in a family whose place for them has reached the books.");
   }
   return parts.join(" ");
 }
@@ -1396,11 +1392,10 @@ async function prepareFamily(familyId: AppFamilyId, stamp: string, rosterTag: st
       const ownActive = await tx.select({ name: student.name }).from(student).where(and(eq(student.familyId, familyId), eq(student.active, true)));
       const linked = await tx.select({ name: student.name, familyId: student.familyId }).from(accountingLink).innerJoin(student, eq(student.id, accountingLink.studentId))
         .where(and(eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, source), inArray(accountingLink.customerId, ids), eq(student.active, true)));
-      const elsewhere = linked.filter((s) => s.familyId !== null && String(s.familyId) !== String(familyId));
-      const noFamily = linked.filter((s) => s.familyId === null);
-      if (ownActive.length || elsewhere.length || noFamily.length) {
+      const elsewhere = linked.filter((s) => s.familyId === null || String(s.familyId) !== String(familyId));
+      if (ownActive.length || elsewhere.length) {
         const names = (rows: { name: string | null }[]) => rows.map((s) => recordNameWords(s.name, "student")).sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
-        return no(familySendStudentsWords(names(ownActive), names(elsewhere), names(noFamily)));
+        return no(familySendStudentsWords(names(ownActive), names(elsewhere)));
       }
     }
     const waiting = await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(inArray(writeQueue.targetQboId, ids), inArray(writeQueue.state, ["waiting", "stuck"]), blocksOthers)).limit(1);

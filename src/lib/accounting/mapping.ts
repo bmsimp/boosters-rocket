@@ -954,7 +954,7 @@ const inWords = (names: readonly string[]) => (names.length <= 1 ? names.join(""
  * to the roster's company; the queue in the way (anything waiting or stuck for anyone it covers, the family's own
  * create, a move into or out of it, a guardian's item filed under it); or someone it covers whose portal value isn't
  * inactive (a student record of the family active, or a customer under it linked to an active student record of another
- * family or of none), named, with what to do (familySendStudentsWords()).
+ * family), named, with what to do (familySendStudentsWords()).
  */
 function familySendOf(b: LinkBasics, queue: readonly QueueView[], f: { key: string; words: string; customer: Cust }): Pick<InactiveRow, "send" | "sendNote"> {
   const { key, words, customer: c } = f;
@@ -971,9 +971,8 @@ function familySendOf(b: LinkBasics, queue: readonly QueueView[], f: { key: stri
   if (inTheWay) return { send: null, sendNote: QUEUE_IN_THE_WAY_OF_SEND };
   const names = (rows: readonly { name: string | null }[]) => rows.map((s) => recordNameWords(s.name, "student")).sort((x, y) => x.localeCompare(y, "en", { sensitivity: "base" }));
   const ownActive = (b.studentsOf.get(key) ?? []).filter((s) => s.active);
-  const linkedActive = b.everyStudent.filter((s) => s.active && (s.familyId === null || String(s.familyId) !== key) && covered.has(b.customerOfStudent.get(String(s.id)) ?? ""));
-  const elsewhere = linkedActive.filter((s) => s.familyId !== null), noFamily = linkedActive.filter((s) => s.familyId === null);
-  if (ownActive.length || linkedActive.length) return { send: null, sendNote: familySendStudentsWords(names(ownActive), names(elsewhere), names(noFamily)) };
+  const elsewhere = b.everyStudent.filter((s) => s.active && (s.familyId === null || String(s.familyId) !== key) && covered.has(b.customerOfStudent.get(String(s.id)) ?? ""));
+  if (ownActive.length || elsewhere.length) return { send: null, sendNote: familySendStudentsWords(names(ownActive), names(elsewhere)) };
   const kept = queue.some((i) => i.state === "refused" && i.write.op === "deactivate" && covered.has(i.write.qboId));
   const order = [...under.map((u) => `“${u.customer.displayName}”`), `“${c.displayName}”`];
   const said = under.length === 0

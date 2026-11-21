@@ -245,7 +245,7 @@ describe("Send the app's for all", () => {
     const r = await pressWith(offer);
     expect(r).toMatchObject({ ok: true });
     expect(r.ok && r.message).toContain("Queued for QuickBooks: 2 students' families.");
-    expect(r.ok && r.message).not.toContain("waits");
+    expect(r.ok && r.message).not.toContain("more difference");
     expect((await items()).map((q) => `${q.request.op} ${q.targetQboId}`).sort()).toEqual(["move 12", "move 13"]);
     await runWriteQueue(new Date(Date.now() + SAVED_LEASE_MS + 60_000));
     expect(cust("12")).toMatchObject({ ParentRef: { value: "10" } });
