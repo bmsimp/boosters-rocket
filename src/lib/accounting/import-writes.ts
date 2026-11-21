@@ -175,8 +175,11 @@ export async function saveImport(raw: { customerIds: unknown; count: unknown; st
         r = await importGuardian(m.familyId, { name: g.name, email: g.email, person: g.person.kind === "new" ? "new" : g.person.id, parentCustomerId: g.link?.qboId ?? null,
           pressId, madeHere, linkedBy: o.staffUserId }, guardianOp, w);
       } catch (e) {
-        console.error(`the reviewed import ${pressId} couldn't add a guardian of family ${String(m.familyId)}:`, e);
+        // Audited, not logged (nothing here writes to the log): the guardian is said as not added, and added on the family's page.
         r = { ok: false, reason: "failed" };
+        const error = e instanceof Error ? e.name.slice(0, 40) : "unknown";
+        await writeAudit({ actor: o.actor, action: "accounting.import.guardian_failed", permission: o.permission, ip: o.ip, targetType: "family", targetId: String(m.familyId),
+          after: { pressId, family: String(m.familyId), error } }).catch(() => undefined);
       }
       if (r.ok && r.person === "new") madeHere.add(r.parentId);
       if (!r.ok && r.reason === "busy") stopped = "not_tried";
