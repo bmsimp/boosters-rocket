@@ -141,7 +141,7 @@ describe("Confirm on a Suggested row", () => {
     expect(row.confirm!.proposals).toEqual({
       pairs: [{ studentId: asha, recordName: "Asha Patel", customerQboId: "71", customerName: "Asha Patel", customerActive: true },
         { studentId: ravi, recordName: "ravi patel", customerQboId: "72", customerName: "Ravi Patel", customerActive: false }],
-      recordsLeft: [{ id: mia, name: "Mia Patel" }], customersLeft: [{ qboId: "73", name: "Dev Patel", active: true }] });
+      recordsLeft: [{ id: mia, name: "Mia Patel" }], customersLeft: [{ qboId: "73", name: "Dev Patel", active: true }], guardians: [], guardiansHeld: [] });
     // Before the press: no link, so a parent's page reads no figures and writes nothing.
     expect(await loadFamilyMoney(patels)).toMatchObject({ figures: null, notConnected: true });
     expect(await db.select().from(familyMoney).where(eq(familyMoney.familyId, patels))).toEqual([]);
@@ -198,7 +198,7 @@ describe("in flat books", () => {
     const patels = (await db.select({ id: family.id }).from(family).where(eq(family.name, "The Patels")))[0]!.id;
     await guardianIn(patels, "Asha Patel", "asha@example.com");
     const row = rowOf(await loadAccountingLinks(), "The Patels");
-    expect(row.confirm!.proposals).toEqual({ pairs: [], recordsLeft: [], customersLeft: [] });
+    expect(row.confirm!.proposals).toEqual({ pairs: [], recordsLeft: [], customersLeft: [], guardians: [], guardiansHeld: [] });
     const r = await linkFamilyToCustomer({ familyId: String(patels), customerId: "70", chosen: "suggested", stamp: row.confirm!.stamp }, tag, linkOp());
     expect(r).toMatchObject({ ok: true, message: expect.stringContaining("No student was linked with it.") });
     expect(await db.select().from(accountingLink).where(eq(accountingLink.customerId, "71"))).toEqual([]);

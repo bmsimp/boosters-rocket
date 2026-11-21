@@ -57,7 +57,7 @@ function aimShown(customerId: string, aim: CustomerAim): NonNullable<NoFamilyRow
  * linking permission; the page checks it. A server component: the client list is given each row's words and the action
  * bound to its customer, or the words and the link's address, nothing else. Names are QuickBooks text, and a family's
  * name the portal's own, shown as text only. Queries, whatever the number of customers: customersWithNoFamily()'s own
- * (a fixed handful), beside the page's one read of the aims (readCustomerAims(): 10 or 11, then 4 to 8).
+ * (a fixed handful), beside the page's one read of the aims (readCustomerAims(): 11 or 12, then 4 to 8).
  */
 export async function CustomersWithNoFamily({ mayChangeFamilies, aims }: { mayChangeFamilies: boolean; aims: ReadonlyMap<string, CustomerAim> }) {
   const list = await customersWithNoFamily();

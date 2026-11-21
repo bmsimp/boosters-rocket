@@ -10,9 +10,9 @@
 // same reads, made in the press's own transaction under the roster lock (readLinkBasics(tx)), are what the link presses
 // check against (./link-writes.ts): the suggestion, the pool and the students a link would link with it are worked out
 // by one rule for the page and the press, so the two never differ.
-import { and, desc, eq, inArray, isNotNull, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { accountingLink, family, guardian, jobRun, parent, qboCustomer, qboCustomerType, staffUser, student } from "@/lib/db/schema";
+import { accountingLink, family, guardian, jobRun, parent, qboCustomer, qboCustomerType, staffUser, student, writeQueue } from "@/lib/db/schema";
 import { getConnection } from "@/lib/quickbooks/connection";
 import { QUICKBOOKS, type AppFamilyId, type AppStudentId } from "@/lib/families/ids";
 import { otherCompany } from "@/lib/families/links";
@@ -21,14 +21,14 @@ import { parseEmailField } from "@/lib/parents/emails";
 import { buildRoster, type Cust } from "@/lib/roster/model";
 import { familyCreatesFiled, noFamilyPool } from "@/lib/roster/no-family";
 import { loadOpenWrites, waitingWords, type QueueView } from "@/lib/roster/queue";
-import { guardianOf, keptWordsFor, madeAfterGivingUp, type MadeAfterGivingUp } from "@/lib/roster/writes";
+import { blocksOthers, guardianOf, keptWordsFor, madeAfterGivingUp, type MadeAfterGivingUp } from "@/lib/roster/writes";
 import { byRosterOrder, rosterShown } from "@/lib/roster/queries";
 import { nameKey } from "@/lib/roster/names";
 import { getShape, missingTypes } from "@/lib/roster/shape";
 import { getRosterSource, ROSTER_JOB } from "@/lib/roster/source";
 import { differencesOf, type Difference, type LinkedStudent, type QueueFact } from "./differences";
 import { suggestCustomers, type Holder, type Suggestion } from "./match";
-import { pairKeys, proposeStudents, type Proposals } from "./proposals";
+import { pairKeys, proposeGuardians, proposeStudents, type Proposals } from "./proposals";
 import { bulkStamp, guardianLinkStamp, guardianUnlinkStamp, linkStamp, reviewStamp, unlinkStamp, type Chosen } from "./stamp";
 import { linkStanding, searchMatches, STATUS_KEYS, type LinksFilter, type NotAFamilyReason, type StatusKey } from "./status";
 
@@ -285,10 +285,11 @@ const group = <T>(items: readonly T[], keyOf: (t: T) => string) => {
 
 /**
  * The screen's reads, in the caller's transaction or none (`tx`), and what is worked out from them for the suggestions
- * and the link presses: each table read once, whatever the number of families. Ten reads at once (the roster's company,
+ * and the link presses: each table read once, whatever the number of families. Eleven reads at once (the roster's company,
  * the connection, the shape, the customer types, the last successful roster read, the cache's customers, the family
  * creates on the write queue with the family each is filed under, every family record with its Left unlinked mark, every
- * student record, every guardian row with its person, open or closed, since slice M3c), then the links: those of the records' company (the
+ * student record, every guardian row with its person, open or closed, since slice M3c, and since slice M3c2 the write
+ * queue's open items that name a guardian row or block others for a customer, which hold a guardian pair back), then the links: those of the records' company (the
  * roster's, while the books aren't connected to another; none while there is none), and beside them which family and
  * student records have a link of any other company, by their ids alone (a link press never links a record linked
  * anywhere), in one query. No row is
@@ -304,7 +305,7 @@ const group = <T>(items: readonly T[], keyOf: (t: T) => string) => {
  */
 export async function readLinkBasics(tx?: Tx) {
   const q = tx ?? db;
-  const [source, connection, shape, typeRows, okRuns, customerRows, filed, everyFamily, everyStudent, guardianRows] = await Promise.all([
+  const [source, connection, shape, typeRows, okRuns, customerRows, filed, everyFamily, everyStudent, guardianRows, queueHolds] = await Promise.all([
     getRosterSource(tx), getConnection(tx), getShape(tx),
     q.select({ qboId: qboCustomerType.qboId, name: qboCustomerType.name, active: qboCustomerType.active }).from(qboCustomerType),
     q.select({ id: jobRun.id, finishedAt: jobRun.finishedAt }).from(jobRun).where(and(eq(jobRun.job, ROSTER_JOB), eq(jobRun.outcome, "ok"))).orderBy(desc(jobRun.id)).limit(1),
@@ -319,6 +320,11 @@ export async function readLinkBasics(tx?: Tx) {
     // opening and offered to no other guardian); the matcher, the addresses and the rows' guardians read the open ones only.
     q.select({ id: guardian.id, familyId: guardian.familyId, parentId: guardian.parentId, status: guardian.status, disabledReason: guardian.disabledReason,
       name: parent.name, email: parent.email, blocked: parent.blocked }).from(guardian).innerJoin(parent, eq(guardian.parentId, parent.id)),
+    // Slice M3c2: the write queue's items waiting, stuck or kept that name a guardian row (any op, a parent's details and
+    // sign-in email among them) or that block others and target a customer: they hold a guardian pair back (proposalsFor()).
+    q.select({ guardianId: sql<string | null>`${writeQueue.request}->>'guardianId'`, targetQboId: writeQueue.targetQboId, blocks: sql<boolean>`(${blocksOthers})` })
+      .from(writeQueue).where(and(inArray(writeQueue.state, ["waiting", "stuck", "refused"]),
+        or(sql`${writeQueue.request}->>'guardianId' is not null`, and(blocksOthers, isNotNull(writeQueue.targetQboId))))),
   ]);
   const everyGuardian = guardianRows;
   // The open guardian rows with a family: what the matcher, the addresses and the rows' guardians read (as before slice M3c).
@@ -363,6 +369,11 @@ export async function readLinkBasics(tx?: Tx) {
     : suggestCustomers(unlinked.filter((f) => !leftOf.has(String(f.id))).map((f) => ({ key: String(f.id), addresses: addressesOf.get(String(f.id)) ?? [] })), roster, poolIds);
   const studentsUnder = new Map(roster === null || roster.kind === "flat" ? [] : roster.families.map((f) => [f.customer.qboId, f.students]));
   const pairsStudents = shape !== null && shape.kind === "layered" && shape.studentTypeId !== null;
+  // Slice M3c2: the customers the roster lists directly under each family customer, of any type, and each family's guardian rows, open or closed.
+  const parentsUnder = new Map(roster === null || roster.kind === "flat" ? [] : roster.families.map((f) => [f.customer.qboId, f.parents]));
+  const rowsOfFamily = group(guardianRows.flatMap((g) => (g.familyId === null ? [] : [g])), (g) => String(g.familyId));
+  const heldRows = new Set(queueHolds.flatMap((i) => (i.guardianId === null ? [] : [i.guardianId.toLowerCase()])));
+  const heldCustomers = new Set(queueHolds.flatMap((i) => (i.blocks && i.targetQboId !== null ? [i.targetQboId] : [])));
   // The customers the roster lists as families (members in flat books): a family's own link stands only to one of them (linkStanding()).
   const listedAsFamily = roster === null ? null : new Set(roster.kind === "flat" ? roster.members.map((m) => m.qboId) : roster.families.map((f) => f.customer.qboId));
   const studentLinkOfRecord = new Map(links.flatMap((l) => (l.studentId === null ? [] : [[String(l.studentId), l] as const])));
@@ -370,14 +381,29 @@ export async function readLinkBasics(tx?: Tx) {
    * The students a link of this family to this customer would link with it, and those it would leave (./proposals.ts):
    * the family's student records (active, with no student link of any company) against the student customers the roster
    * lists directly under the customer (with no student link of the records' company). None in flat books or a shape
-   * with no student type.
+   * with no student type. Since slice M3c2 the guardians with them (proposeGuardians()): the family's guardian rows
+   * (open, not blocked, with no guardian link of the records' company), by name then id, against the customers the
+   * roster lists directly under the customer (active, of the parent type, that no link of the records' company names),
+   * by sign-in address alone; a pair whose row an item on the write queue names, or whose customer a change that blocks
+   * others targets, held back (`guardiansHeld`), as Link this guardian refuses for them (linkGuardian()). None in books
+   * with no parent type.
    */
-  const proposalsFor = (familyKey: string, customerId: string): Proposals => proposeStudents({
-    students: pairsStudents,
-    // By name, then id, so the proposals read in one order whatever order the records were read in.
-    records: [...(studentsOf.get(familyKey) ?? [])].sort((x, y) => COLLATOR.compare(x.name ?? "", y.name ?? "") || (String(x.id) < String(y.id) ? -1 : String(x.id) > String(y.id) ? 1 : 0))
-      .map((s) => ({ id: s.id, name: s.name, active: s.active, linked: studentLinkedAnywhere.has(String(s.id)) })),
-    customers: (studentsUnder.get(customerId) ?? []).map((c) => ({ qboId: c.qboId, displayName: c.displayName, active: c.active, linked: studentLinked.has(c.qboId) })),
+  const proposalsFor = (familyKey: string, customerId: string): Proposals => ({
+    ...proposeStudents({
+      students: pairsStudents,
+      // By name, then id, so the proposals read in one order whatever order the records were read in.
+      records: [...(studentsOf.get(familyKey) ?? [])].sort((x, y) => COLLATOR.compare(x.name ?? "", y.name ?? "") || (String(x.id) < String(y.id) ? -1 : String(x.id) > String(y.id) ? 1 : 0))
+        .map((s) => ({ id: s.id, name: s.name, active: s.active, linked: studentLinkedAnywhere.has(String(s.id)) })),
+      customers: (studentsUnder.get(customerId) ?? []).map((c) => ({ qboId: c.qboId, displayName: c.displayName, active: c.active, linked: studentLinked.has(c.qboId) })),
+    }),
+    ...proposeGuardians({
+      parents: parentTypeId !== null && roster !== null && roster.kind === "layered", parentTypeId, customerId,
+      rows: [...(rowsOfFamily.get(familyKey) ?? [])].sort(byName)
+        .map((g) => ({ id: g.id, name: g.name, email: g.email, blocked: g.blocked, open: g.status !== "disabled", linked: linkOfGuardian.has(g.id) })),
+      customers: (parentsUnder.get(customerId) ?? []).map((c) => ({ qboId: c.qboId, displayName: c.displayName, email: c.email, active: c.active, typeQboId: c.typeQboId,
+        parentQboId: c.parentQboId, linked: guardianLinked.has(c.qboId) || studentLinked.has(c.qboId) || familyOfCustomer.has(c.qboId) })),
+      held: { rows: heldRows, customers: heldCustomers },
+    }),
   });
   /** The offer of a press: the proposals for the pair and the stamp that seals them with the way the customer was chosen. */
   const offerFor = (familyKey: string, customerId: string, chosen: Chosen) => {
@@ -533,17 +559,21 @@ export type LinkBasics = Awaited<ReturnType<typeof readLinkBasics>>;
  * the links and the Left unlinked marks name, in one query. loadOpenWrites() reads some of those tables again, a fixed
  * number of times and never per family (below). The rest is worked out here.
  *
- * Queries per view, whatever the number of families (statements, not counting a transaction's begin and end): ten at
+ * Queries per view, whatever the number of families (statements, not counting a transaction's begin and end): eleven at
  * once, then the links (one query, while the roster names a company the books aren't connected away from), then the
- * queue's open items, then the staff names when a link or a mark names one. With no company named, or the books
- * connected to another company, no link and no queue item is read: 10, or 11 with a mark's staff name. With the shape
- * missing or broken, the links but not the queue: 11 or 12. Listed with an empty queue: 12 or 13. loadOpenWrites()
+ * queue's open items, then the staff names when a link or a mark names one. Since slice M3c2 one of the eleven is the
+ * queue's open items that name a guardian row or block others for a customer (readLinkBasics()), read whatever the
+ * state: the guardian pairs a family's Confirm proposes are worked out in the press's own transaction from the same
+ * reads (./link-writes.ts), where loadOpenWrites() isn't read, so page and press hold the same pairs back by one rule.
+ * With no company named, or the books connected to another company, no link and no open item for the differences is
+ * read: 11, or 12 with a mark's staff name. With the shape missing or broken, the links but not the queue's open items
+ * for the differences: 12 or 13. Listed with an empty queue: 13 or 14. loadOpenWrites()
  * makes one query for its items and, when there are any, up to 38 more of its own, re-reads of tables the screen has
  * read already, each made only when an item needs it: the cache's customers; a move's families through their links
  * (3: each lookup through a link reads the roster's company and the connection first), their names (1), the items'
  * family records and links (4), refused students' and guardians' names (2), a parent's contact details' read state,
  * people, families and cache rows (4), the move money note (6), the families joined's links (3), and a kept contact
- * change's checks (14). So at most 39 for the queue and 51 a view: 10 to 51. The confirm step and the chooser read
+ * change's checks (14). So at most 39 for the queue and 52 a view: 11 to 52. The confirm step and the chooser read
  * nothing more but what a family's create given up after a try left (madeAfterGivingUp(): 4 to 8, the page's own).
  * Since slice M3a2 the rows' Confirm this link (reviewOf()) and Confirm all exact email matches (bulk(), by
  * suggestedRowsShown()) are worked out from the same reads, with no query of their own, and since slice M3b so is each
@@ -851,7 +881,7 @@ export function customerAims(b: LinkBasics, made: readonly MadeAfterGivingUp[]):
   return out;
 }
 /**
- * The aims of every customer, read in the caller's transaction or one of its own: readLinkBasics()'s reads (10 or 11)
+ * The aims of every customer, read in the caller's transaction or one of its own: readLinkBasics()'s reads (11 or 12)
  * and, in the `listed` state, madeAfterGivingUp()'s (4 to 8), a fixed number whatever the number of customers.
  * Reconciliation shows them, and "Create a family from this" refuses by them under its own roster lock
  * (customerAimedAt(), ./link-writes.ts).
