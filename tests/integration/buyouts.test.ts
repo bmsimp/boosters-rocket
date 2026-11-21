@@ -769,7 +769,7 @@ describe("how the requirement reads, on the parent's pages", () => {
 
   // Stage 4's slice M3b replaced the reading pinned here before ("a family that loses its link with a buy-out invoiced
   // still reads 'Buy-out invoiced' ... (stage 4 decides)"): an unlink is refused while a buy-out of the family or its
-  // students isn't settled (the owner's choice 3, recommended and awaiting his word), so no family is left with no link
+  // students isn't settled (the owner's choice 3, which the owner confirmed on 2026-11-21), so no family is left with no link
   // and an unpaid invoice nobody can reach; a paid one is kept and goes on reading "Paid instead" by its own state.
   const unlinkAsStaff = async (familyId: string) => {
     const staff = await staffWith("linker@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
