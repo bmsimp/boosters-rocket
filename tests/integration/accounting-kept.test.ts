@@ -13,8 +13,8 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { family, setting, student, writeQueue } from "@/lib/db/schema";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
-import { KEPT_GONE, keptOnLinksOf, loadAccountingLinks, readLinkBasics, type KeptOffer, type LinkRow, type LinksView } from "@/lib/accounting/mapping";
-import { loadOpenWrites } from "@/lib/roster/queue";
+import { KEPT_ASK, KEPT_GONE, KEPT_GONE_ASK, keptOnLinksOf, loadAccountingLinks, readLinkBasics, type KeptOffer, type LinkRow, type LinksView } from "@/lib/accounting/mapping";
+import { DEACTIVATE_GIVEN_UP, loadOpenWrites } from "@/lib/roster/queue";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { SHAPE_KEY } from "@/lib/roster/shape";
 import { CONTACT_DIFFERS, EMAIL_DIFFERS, KEPT_OFF_STAYS, portalValueStamp, sendToBooks } from "@/lib/roster/writes";
@@ -56,14 +56,14 @@ const rowOf = (view: LinksView, name: string): LinkRow => {
   return r;
 };
 const ALSO_BESIDE = "It is also shown on Accounting links, in its family's row, beside its difference: sent or given up on either page, it is settled on both.";
-const ALSO_GONE = "It is also shown on Accounting links, in its family's row, where the books' copy shows no difference for it now: sent or given up on either page, it is settled on both.";
+const ALSO_GONE = "It is also shown on Accounting links, in its family's row, as a change the roster's copy of QuickBooks has already: sent or given up on either page, it is settled on both.";
 const ALSO_INACTIVE = "It is also shown on Accounting links, with its family under Inactive in the portal, active in the books: sent or given up on either page, it is settled on both.";
 const ALSO = "It is also shown on Accounting links";
 const REFUSED = "QuickBooks refused it: QuickBooks wouldn't take it.";
 const GIVE_UP = '<details class="more"><summary>Give up</summary><p class="hint">The portal keeps its own value, and QuickBooks keeps what it has.</p>';
 
 let tag: string;
-let full: Awaited<ReturnType<typeof staffWith>>, reader: Awaited<ReturnType<typeof staffWith>>;
+let full: Awaited<ReturnType<typeof staffWith>>, reader: Awaited<ReturnType<typeof staffWith>>, linker: Awaited<ReturnType<typeof staffWith>>;
 const op = () => ({ actor: { door: "staff" as const, id: full.id, label: full.email }, ip: "203.0.113.9", permission: "Accounting.Link.ReadWrite", staffUserId: full.id });
 let rivera: AppFamilyId, chen: AppFamilyId, leo: AppStudentId;
 let anaRow: Awaited<ReturnType<typeof seedAnaRivera>>["row"];
@@ -73,6 +73,8 @@ beforeEach(async () => {
   stub.quirks.balances = true;
   full = await staffWith("full@club.org", ["Roster.Read", "Accounting.Link.ReadWrite", "Roster.Family.ReadWrite"]);
   reader = await staffWith("reader@club.org", ["Roster.Read"]);
+  // A treasurer's role: may link families to accounting, may not change them, so is shown no Give up.
+  linker = await staffWith("linker@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
 });
 async function layered() {
   tag = await connectRoster(stub);
@@ -165,7 +167,37 @@ describe("shown beside its difference, and still on Reconciliation", () => {
     expect(row.takes.find((t) => t.at === at)?.words).toContain(KEPT_OFF_STAYS);
     const list = await linksList();
     expect(list).toContain(`Send the app's to QuickBooks<span class="visually-hidden">: Leo Rivera's active status</span></button>${GIVE_UP}`);
+    expect(list.split("Kept in the portal: Make the student Leo Rivera inactive.")).toHaveLength(2);
     expect(await writes(full)).toContain(ALSO_BESIDE);
+    // Given up from the screen, it answers with a make-inactive's words, never a rename's.
+    asStaff(full);
+    expect(await giveUpAction(off.id, "Leave him active there.")).toMatchObject({ ok: true, message: DEACTIVATE_GIVEN_UP });
+    expect(await auditsOf("roster.write.given_up")).toEqual([expect.objectContaining({ targetId: off.id })]);
+    expect(await writes(full)).not.toContain("Not in QuickBooks, kept in the portal");
+  });
+
+  it("a kept move: once in the list, on the row of the family the portal has the student in", async () => {
+    changeInBooks("12", { ...under("20"), SyncToken: "1" });
+    await readAgain();
+    await seedQueued({ op: "move", role: "student", qboId: "12", syncToken: "1", fromFamilyQboId: "20", toFamilyQboId: "10", fromFamilyId: chen, toFamilyId: rivera },
+      { state: "refused", code: "fault_6000", nextTryAt: null });
+    const [kept] = await keptOffersOf("Rivera Family");
+    expect(kept?.at).not.toBeNull();
+    asStaff(full);
+    const html = await renderPage(AccountingLinksPage);
+    expect(section(html, "links-list-h").split(kept!.words)).toHaveLength(2);
+    expect(decode(rowNamed(html, "Chen Family")![4]!)).not.toContain(kept!.words);
+  });
+
+  it("a linker who may not change families: the kept change's words, who settles it, and no press of theirs", async () => {
+    changeInBooks("10", { DisplayName: "Rivera Household", SyncToken: "1" });
+    await readAgain();
+    await keptRenameOfRivera();
+    const list = await linksList(linker);
+    expect(list.split(RIVERA_WORDS)).toHaveLength(2);
+    expect(list).toContain(`${RIVERA_WORDS} ${KEPT_ASK}`);
+    expect(list).not.toContain("Give up");
+    expect(list).not.toContain("Why? (kept in the audit log)");
   });
 
   it("the books changed to the portal's value after it was kept: on its row as having no difference, with Give up and no Send", async () => {
@@ -179,9 +211,29 @@ describe("shown beside its difference, and still on Reconciliation", () => {
     expect(row.sends).toEqual([]);
     expect(row.kept).toEqual([{ at: null, itemId: kept.id, words: RIVERA_WORDS, giveUp: true }]);
     const opening = decode(rowNamed(await (async () => { asStaff(full); return renderPage(AccountingLinksPage); })(), "Rivera Family")![4]!);
-    expect(opening).toContain(`Changes kept in the portal that the books' copy shows no difference for now:${RIVERA_WORDS} ${KEPT_GONE}Give up`);
+    expect(opening).toContain(`Changes kept in the portal that the roster's copy of QuickBooks has already:${RIVERA_WORDS} ${KEPT_GONE}Give up`);
     expect(opening).not.toContain("Send the app's to QuickBooks");
     expect(await writes(full)).toContain(ALSO_GONE);
+    // A linker who may not give it up is told who does, and where.
+    asStaff(linker);
+    const theirs = decode(rowNamed(await renderPage(AccountingLinksPage), "Rivera Family")![4]!);
+    expect(theirs).toContain(`${RIVERA_WORDS} ${KEPT_GONE_ASK}`);
+    expect(theirs).not.toContain("Give up");
+  });
+
+  it("no difference, and the books don't have the portal's value either: on Reconciliation alone", async () => {
+    // Leo's rename kept while QuickBooks has "Leo M. Rivera", then Leo made inactive in the portal: an inactive record's
+    // name isn't compared, so nothing on the screen shows the two names differ, and it isn't said to be settled there.
+    changeInBooks("12", { DisplayName: "Leo M. Rivera", SyncToken: "1" });
+    await readAgain();
+    const kept = await seedQueued({ op: "rename", role: "student", qboId: "12", syncToken: "1", name: "Leo Rivera", was: "Leo M. Rivera" }, { state: "refused", code: "fault_6000", nextTryAt: null });
+    await db.update(student).set({ active: false }).where(eq(student.id, leo));
+    const view = await loadAccountingLinks({ mayChange: true });
+    expect(view.rows.flatMap((r) => r.kept)).toEqual([]);
+    expect(keptOnLinksOf(await readLinkBasics(), await loadOpenWrites()).has(kept.id)).toBe(false);
+    const recon = await writes(full);
+    expect(recon).toContain("Rename the student “Leo M. Rivera” to “Leo Rivera”");
+    expect(recon).not.toContain(ALSO);
   });
 
   it("family A's row never shows family B's kept item", async () => {

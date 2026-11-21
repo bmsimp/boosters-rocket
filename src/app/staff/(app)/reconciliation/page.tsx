@@ -183,11 +183,12 @@ function Refused({ items, canChange, compared, mayCompare, onLinks, linking }: {
 
 /**
  * Where else a kept change is shown (slice M5c, KeptPlace), in one sentence: on Accounting links, in its family's row
- * beside its difference (or with no difference now), or on its inactive families' list; settled from either page.
+ * beside its difference (or as one the roster's copy of QuickBooks has already), or on its inactive families' list;
+ * settled from either page.
  */
 function alsoOnLinks(p: KeptPlace): string {
   const where = "inactive" in p ? "with its family under Inactive in the portal, active in the books"
-    : p.at === null ? "in its family's row, where the books' copy shows no difference for it now" : "in its family's row, beside its difference";
+    : p.at === null ? "in its family's row, as a change the roster's copy of QuickBooks has already" : "in its family's row, beside its difference";
   return `It is also shown on Accounting links, ${where}: sent or given up on either page, it is settled on both.`;
 }
 const onLinksHref = (p: KeptPlace) => ("inactive" in p ? "/staff/links#links-inactive-h" : "/staff/links#links-list-h");

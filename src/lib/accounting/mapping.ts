@@ -19,7 +19,7 @@ import { otherCompany } from "@/lib/families/links";
 import { recordNameWords } from "@/lib/families/words";
 import { parseEmailField } from "@/lib/parents/emails";
 import { buildRoster, type Cust } from "@/lib/roster/model";
-import { checkName, nameKey } from "@/lib/roster/names";
+import { checkName, nameKey, normalName } from "@/lib/roster/names";
 import { familyCreatesFiled, noFamilyPool } from "@/lib/roster/no-family";
 import { isBalanceHold, loadOpenWrites, waitingWords, type QueueView } from "@/lib/roster/queue";
 import { blocksOthers, coverUnder, familySendSeal, familySendStudentsWords, guardianOf, heldWords, KEPT_OFF_STAYS, keptWordsFor, madeAfterGivingUp, type MadeAfterGivingUp } from "@/lib/roster/writes";
@@ -213,7 +213,8 @@ export type InactiveRow = { familyId: AppFamilyId; name: string; customer: strin
 /**
  * Where the screen shows a change saved in the portal first that didn't go through and is kept (slice M5c, a
  * `refused` item of the write queue; keptOnLinksOf()): on a family's row, beside the difference it explains (`at`, its
- * index in the row's differences), or after them when the books' copy shows no difference for it now (`at` null); or,
+ * index in the row's differences), or after them when the roster's copy of QuickBooks has the change it asked for
+ * already (`at` null: the name, the place or the inactive status it would send); or,
  * for an inactive family's or member's own make-inactive, on the inactive families' list (`inactive`).
  */
 export type KeptPlace = { familyId: AppFamilyId; at: number | null } | { familyId: AppFamilyId; inactive: true };
@@ -225,8 +226,12 @@ export type KeptPlace = { familyId: AppFamilyId; at: number | null } | { familyI
  * app's to QuickBooks, which closes it (the lead's decision 2); the screen has no press of its own that sends it.
  */
 export type KeptOffer = { at: number | null; itemId: string; words: string; giveUp: boolean };
-/** Said after a kept change whose difference the books' copy no longer shows (KeptOffer `at` null). */
-export const KEPT_GONE = "The portal's copy of the books shows no difference for this now (QuickBooks may hold the portal's value already), so nothing needs sending: give the kept change up to clear it.";
+/** Said after a kept change the roster's copy of QuickBooks has already (KeptOffer `at` null), for a reader who may give it up. */
+export const KEPT_GONE = "The roster's copy of QuickBooks has the portal's value now, so nothing needs sending: give the kept change up to clear it.";
+/** Said after a kept change beside its difference for a reader who may not change families, so is shown no Give up and no Send. */
+export const KEPT_ASK = "Someone who may change families sends it again or gives it up, here or on the Reconciliation page.";
+/** KEPT_GONE for a reader who may not change families, so is shown no Give up: who does it, and where. */
+export const KEPT_GONE_ASK = "The roster's copy of QuickBooks has the portal's value now, so nothing needs sending: someone who may change families gives the kept change up to clear it, here or on the Reconciliation page.";
 /**
  * Send the app's to QuickBooks (slice M5a), for one difference of a row (or an inactive row): `at`, its index in the
  * row's differences; what it sends (`field`) of which record (`kind`, `recordId`: the family's or the student's app id;
@@ -994,15 +999,19 @@ const rowStands = (r: Pick<LinkRow, "status">) => r.status.key === "linked" || r
  * phone, address or sign-in email change, or one whose family's row doesn't stand. On its row it sits beside the
  * difference whose note it gives (the first item of its kind, indexQueue()'s rule); a difference of its kind on that row
  * whose note is another item's, or one only another family's row shows (a student the books have under another family),
- * leaves it on Reconciliation alone; with no difference of its kind anywhere it shows after the row's differences (`at`
- * null). The inactive list shows one per family, the first. Everything else is shown on Reconciliation only, as before.
+ * leaves it on Reconciliation alone. With no difference of its kind anywhere it shows after the row's differences (`at`
+ * null) only when the roster's copy of QuickBooks has what it asked for (booksHave(): the name, the place, or the
+ * customer inactive): a field differencesOf() doesn't compare (an inactive record's name, an inactive record's customer
+ * listed elsewhere, a customer missing from the cache, a place unknown) proves nothing, so such an item stays on
+ * Reconciliation alone. The inactive list shows one per family, the first. Everything else is shown on Reconciliation
+ * only, as before.
  */
 export function keptOnLinksOf(b: LinkBasics, queue: readonly QueueView[]): Map<string, KeptPlace> {
   if (b.state !== "listed") return new Map();
   return keptPlacesOf(b, queue, linkRowsOf(b, queue, { studentsRule: false, staffNames: new Map() }), inactiveRowsOf(b, queue));
 }
 /** What keptPlacesOf() reads of the screen's reads: the state, the links and the student records. */
-export type KeptBasics = Pick<LinkBasics, "state" | "linkOfFamily" | "familyOfCustomer" | "customerOfStudent" | "everyStudent">;
+export type KeptBasics = Pick<LinkBasics, "state" | "linkOfFamily" | "familyOfCustomer" | "customerOfStudent" | "everyStudent" | "customerById">;
 /** keptOnLinksOf()'s rule over rows already worked out (the view's own, in loadAccountingLinks()): pure, and exported for its unit tests. */
 export function keptPlacesOf(b: KeptBasics, queue: readonly QueueView[], rows: readonly Pick<LinkRow, "familyId" | "status" | "differences">[],
   inactive: readonly Pick<InactiveRow, "familyId">[]): Map<string, KeptPlace> {
@@ -1069,9 +1078,19 @@ export function keptPlacesOf(b: KeptBasics, queue: readonly QueueView[], rows: r
       if (first.get(k) === i.id) out.set(i.id, { familyId: row.familyId, at: here.at });
       continue;
     }
-    if (on.length === 0) out.set(i.id, { familyId: row.familyId, at: null });
+    if (on.length === 0 && booksHave(b, w)) out.set(i.id, { familyId: row.familyId, at: null });
   }
   return out;
+}
+/**
+ * Whether the roster's copy of QuickBooks holds what a kept rename, move or make-inactive asked for: its customer's
+ * name (as the portal's name rule compares names, normalName()), its place under the family it moved to, or inactive.
+ * A customer missing from the cache holds nothing.
+ */
+function booksHave(b: Pick<KeptBasics, "customerById">, w: Extract<QueueView["write"], { op: "rename" | "move" | "deactivate" }>): boolean {
+  const c = b.customerById.get(w.qboId);
+  if (c === undefined) return false;
+  return w.op === "rename" ? normalName(w.name) === normalName(c.displayName) : w.op === "move" ? c.parentQboId === w.toFamilyQboId : !c.active;
 }
 /**
  * The rows and the inactive list with the kept changes each shows (keptPlacesOf()), in words as Reconciliation names

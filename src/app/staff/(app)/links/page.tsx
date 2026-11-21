@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireStaffAlso, requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
-import { BULK_MAX, filterLinkRows, filtersOf, givenUpCustomersOf, loadAccountingLinks, REVIEW_LEFT_WORDS, SEND_ALL_MAX, statusCounts, type BulkOffer, type ConfirmStep, type GuardianShown, type InactiveRow, type KeptOffer, KEPT_GONE, type LinkMade, type LinkOffer, type LinkRow, type LinkStatus, type LinksState, type LinksView, type OwnLink, type ReviewOffer, type SendAllOffer, type SendOffer, type TakeOffer, type UnlinkOffer } from "@/lib/accounting/mapping";
+import { BULK_MAX, filterLinkRows, filtersOf, givenUpCustomersOf, loadAccountingLinks, REVIEW_LEFT_WORDS, SEND_ALL_MAX, statusCounts, type BulkOffer, type ConfirmStep, type GuardianShown, type InactiveRow, type KeptOffer, KEPT_ASK, KEPT_GONE, KEPT_GONE_ASK, type LinkMade, type LinkOffer, type LinkRow, type LinkStatus, type LinksState, type LinksView, type OwnLink, type ReviewOffer, type SendAllOffer, type SendOffer, type TakeOffer, type UnlinkOffer } from "@/lib/accounting/mapping";
 import { differenceKinds, differenceWords, noteSentence, type Difference } from "@/lib/accounting/differences";
 import { NOT_A_FAMILY_WORDS, parseLinksFilter, searchMatches, SEARCH_MAX, STATUS_KEYS, STATUS_WORDS, type LinksFilter, type StatusKey } from "@/lib/accounting/status";
 import type { Holder } from "@/lib/accounting/match";
@@ -14,8 +14,7 @@ import { Notice } from "@/app/components/notice";
 import { StateWords } from "@/app/components/state-words";
 import { familyPage } from "@/app/staff/(app)/family-pages";
 import { confirmAllAction, confirmLinkAction, leaveUnlinkedAction, linkGuardianAction, reviewLinkAction, sendAllAction, sendDifferenceAction, takeDifferenceAction, undoLeaveUnlinkedAction, unlinkAction, unlinkGuardianAction } from "./actions";
-import { GuardianLinkPress, LinkAnswers, LinkAnswersShown, LinkPress } from "./link-press";
-import { TextAction } from "../seasons/forms";
+import { GuardianLinkPress, LinkAnswers, LinkAnswersShown, LinkGiveUp, LinkPress } from "./link-press";
 import { giveUpAction } from "../roster/write-actions";
 
 export const metadata = { title: "Accounting links" };
@@ -150,7 +149,8 @@ function GuardianLine({ g, row, tag }: { g: GuardianShown; row: LinkRow; tag: st
  * into the portal (`take`), what it does is said after it, then the press; or, where none is offered now, why, in one
  * sentence (`note`). Since slice M5c, a change kept in the portal that the difference explains (`kept`, keptOnLinksOf())
  * is said here in its own words in place of the queue's note and its link (it is on Reconciliation's list too), and
- * its Give up is drawn beside the Take and the Send, whose Send closes it.
+ * its Give up is drawn beside the Take and the Send, whose Send closes it; a reader who may not change families is
+ * told who settles it, and where (KEPT_ASK).
  */
 function DifferenceLine({ d, take, note, send, sendNote, kept, tag }: { d: Difference; take: TakeOffer | undefined; note: string | undefined; send: SendOffer | undefined;
   sendNote: string | undefined; kept: KeptOffer | undefined; tag: string }) {
@@ -160,7 +160,7 @@ function DifferenceLine({ d, take, note, send, sendNote, kept, tag }: { d: Diffe
   return (
     <li>{w.what}. In the portal: {w.portal}. In the books: {w.books}.
       {notes.length > 0 && <> {notes.join(" ")} <Link href={RECONCILIATION_CHANGES}>{notes.length === 1 ? "See the change on Reconciliation" : "See the changes on Reconciliation"}</Link></>}
-      {kept !== undefined && <> {kept.words}</>}
+      {kept !== undefined && <> {kept.giveUp ? kept.words : `${kept.words} ${KEPT_ASK}`}</>}
       {note !== undefined && <> {note}</>}
       {sendNote !== undefined && <> {sendNote}</>}
       {take !== undefined && <p>{take.words.join(" ")}</p>}
@@ -168,26 +168,31 @@ function DifferenceLine({ d, take, note, send, sendNote, kept, tag }: { d: Diffe
       {(take !== undefined || send !== undefined || kept?.giveUp === true) && <div className="row-actions">
         {take !== undefined && <LinkPress label="Take QuickBooks' into the app" busy="Taking it…" about={take.about} act={takeDifferenceAction.bind(null, take.field, take.kind, take.recordId, tag, take.stamp)} />}
         {send !== undefined && <SendPress send={send} tag={tag} />}
-        {kept !== undefined && kept.giveUp && <GiveUpPress kept={kept} />}</div>}</li>
+        {kept !== undefined && kept.giveUp && <GiveUpPress kept={kept} about={send?.about ?? take?.about ?? w.what} />}</div>}</li>
   );
 }
 
 /**
  * Give up, for a change kept in the portal (slice M5c): the same press as Reconciliation's (giveUpAction(), today's
- * giveUp(), its permission and its audit row), with the same words, given only its words and the bound action.
+ * giveUp(), its permission and its audit row), with the same words, given only its words (and whom it is about, read
+ * out) and the bound action. Its answer is kept above the list with every other press's (LinkGiveUp), as the kept
+ * change, and this press with it, leaves the row once it is given up.
  */
-function GiveUpPress({ kept }: { kept: KeptOffer }) {
+function GiveUpPress({ kept, about }: { kept: KeptOffer; about: string }) {
   return (
     <details className="more"><summary>Give up</summary>
       <p className="hint">The portal keeps its own value, and QuickBooks keeps what it has.</p>
-      <TextAction field="Why? (kept in the audit log)" label="Give up" pendingLabel="Giving up…" maxLength={500} multiline act={giveUpAction.bind(null, kept.itemId)} />
+      <LinkGiveUp about={about} act={giveUpAction.bind(null, kept.itemId)} />
     </details>
   );
 }
 
-/** A change kept in the portal whose difference the books' copy no longer shows (slice M5c, `at` null): its words, why nothing is sent, and Give up. */
-function KeptGoneLine({ kept }: { kept: KeptOffer }) {
-  return <li>{kept.words} {KEPT_GONE}{kept.giveUp && <div className="row-actions"><GiveUpPress kept={kept} /></div>}</li>;
+/**
+ * A change kept in the portal that the roster's copy of QuickBooks has already (slice M5c, `at` null): its words, why
+ * nothing is sent, and Give up; for a reader who may not give it up, who does, and where.
+ */
+function KeptGoneLine({ kept, about }: { kept: KeptOffer; about: string }) {
+  return <li>{kept.words} {kept.giveUp ? KEPT_GONE : KEPT_GONE_ASK}{kept.giveUp && <div className="row-actions"><GiveUpPress kept={kept} about={about} /></div>}</li>;
 }
 
 /**
@@ -213,13 +218,13 @@ function InactivePart({ rows, tag, familyPages, maySend }: { rows: InactiveRow[]
     { key: "do", header: "What you can do", quiet: true, cell: (r) => {
       const send = maySend ? r.send : null;
       const kept = r.kept;
-      return <>{kept !== null && <p>{kept.words}</p>}{r.take === null && <p>{r.note}</p>}{r.take !== null && <p>{r.take.words.join(" ")}</p>}
+      return <>{kept !== null && <p>{kept.giveUp ? kept.words : `${kept.words} ${KEPT_ASK}`}</p>}{r.take === null && <p>{r.note}</p>}{r.take !== null && <p>{r.take.words.join(" ")}</p>}
         {send !== null ? <p>{send.words.join(" ")}</p> : maySend && r.sendNote !== null && <p>{r.sendNote}</p>}
         {(r.take !== null || send !== null || kept?.giveUp === true) && <div className="row-actions">
           {r.take !== null && <LinkPress label="Take QuickBooks' into the app" busy="Taking it…" about={r.take.about}
             act={takeDifferenceAction.bind(null, r.take.field, r.take.kind, r.take.recordId, tag, r.take.stamp)} />}
           {send !== null && <SendPress send={send} tag={tag} />}
-          {kept !== null && kept.giveUp && <GiveUpPress kept={kept} />}</div>}</>;
+          {kept !== null && kept.giveUp && <GiveUpPress kept={kept} about={`${r.name}'s active status`} />}</div>}</>;
     } },
   ];
   return (
@@ -299,8 +304,8 @@ function Opening({ row, tag, guardianLinks, maySend }: { row: LinkRow; tag: stri
       {row.status.key === "several" && row.status.alsoMatches.length > 0 && <p>Also matched by: {row.status.alsoMatches.join(", ")}.</p>}
       {row.differences.length > 0 && <><p>Where the portal and the books differ:</p><ul>{row.differences.map((d, i) => <DifferenceLine key={i} d={d} tag={tag} take={row.takes.find((t) => t.at === i)} note={row.takeNotes.find((n) => n.at === i)?.words}
         send={maySend ? row.sends.find((x) => x.at === i) : undefined} sendNote={maySend ? row.sendNotes.find((n) => n.at === i)?.words : undefined} kept={row.kept.find((k) => k.at === i)} />)}</ul></>}
-      {row.kept.some((k) => k.at === null) && <><p>Changes kept in the portal that the books&apos; copy shows no difference for now:</p>
-        <ul>{row.kept.filter((k) => k.at === null).map((k) => <KeptGoneLine key={k.itemId} kept={k} />)}</ul></>}
+      {row.kept.some((k) => k.at === null) && <><p>Changes kept in the portal that the roster&apos;s copy of QuickBooks has already:</p>
+        <ul>{row.kept.filter((k) => k.at === null).map((k) => <KeptGoneLine key={k.itemId} kept={k} about={row.name} />)}</ul></>}
       {row.inactiveUnrecorded > 0 && <p>The books also have {plural(row.inactiveUnrecorded, "inactive student customer", "inactive student customers")} under this family with no student record in the portal.</p>}
       {row.confirm !== null && row.customer !== null && <><p>Confirming links it to &ldquo;{row.customer.name}&rdquo;. Nothing is sent to the books.</p><ProposalsShown proposals={row.confirm.proposals} /><p>{LINK_EFFECT}</p>{guardianLinks && <p>{LINK_GUARDIANS_EFFECT}</p>}</>}
       {row.review !== null && <ReviewShown review={row.review} />}

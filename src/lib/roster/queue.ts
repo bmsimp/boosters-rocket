@@ -961,8 +961,16 @@ function refusedGivenUpWords(item: Item): string {
   if (w.op === "email") return EMAIL_GIVEN_UP;
   if (w.op === "move") return `Given up. Nothing more will be sent for it. The portal keeps the student in the family it moved them to, and QuickBooks keeps them where it has them: until QuickBooks has the move, the family QuickBooks has them under still sees their invoices. ${MOVE_FOLLOWED_STAYS} ${GIVEN_UP_NEXT.move}`;
   if (w.op === "create") return "Given up. Nothing more will be sent for it. The student the portal saved first stays in the portal, unlinked: to make them in QuickBooks later, press “Create in QuickBooks and link” on their family's page.";
+  if (w.op === "deactivate") return DEACTIVATE_GIVEN_UP;
   return "Given up. Nothing more will be sent for it. The portal keeps its own name, and QuickBooks keeps the one it has. A later rename on the record's family's page is checked against QuickBooks' name first: while the two differ it is held back and kept, listed on the Reconciliation page, where “Send the portal's value” sends it, and, for a record linked to the books, beside its difference on Accounting links, where Send the app's to QuickBooks can send it too. Or rename it in QuickBooks.";
 }
+/**
+ * What giving up a kept make-inactive of a family, member or student leaves (a guardian's has its own words,
+ * GUARDIAN_GIVEN_UP), true of a press from either page since stage 4's slice M5c: each side keeps what it has, and while
+ * a linked record is inactive in the portal and its customer active in QuickBooks, the accounting links screen shows the
+ * two as a difference.
+ */
+export const DEACTIVATE_GIVEN_UP = "Given up. Nothing more will be sent for it. The portal keeps the record as it has it, and QuickBooks keeps the customer as it has it, active unless someone made it inactive there. While a record linked to the books is inactive in the portal and active in QuickBooks, Accounting links shows the two as a difference in its family's row, where Send the app's to QuickBooks (which checks the balance first) or Take QuickBooks' into the app settles it. Or make the customer inactive in QuickBooks once any balance is settled.";
 /**
  * What giving up a parent's phone and address change leaves (stage 3's slice 11b): the portal keeps its details, and
  * QuickBooks the ones it has, for stage 4's mapping screen to show as a difference.

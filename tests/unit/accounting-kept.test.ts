@@ -4,6 +4,7 @@ import type { Difference } from "@/lib/accounting/differences";
 import { asAppFamilyId, asAppStudentId, type AppFamilyId } from "@/lib/families/ids";
 import type { QueueView } from "@/lib/roster/queue";
 import type { QueuedWrite } from "@/lib/db/schema";
+import type { Cust } from "@/lib/roster/model";
 
 /**
  * Where the accounting links screen shows a change kept in the portal (stage 4's slice M5c; keptPlacesOf(), the rule
@@ -19,6 +20,8 @@ const basics = (o: Partial<KeptBasics> = {}): KeptBasics => ({
   familyOfCustomer: new Map<string, AppFamilyId>([["10", RIVERA], ["20", CHEN], ["30", PATEL]]),
   customerOfStudent: new Map([[String(LEO), "12"], [String(SAM), "22"]]),
   everyStudent: [{ id: LEO, familyId: RIVERA, name: "Leo Rivera", active: true }, { id: SAM, familyId: CHEN, name: "Sam Chen", active: true }],
+  // No customer cached by default: nothing is proved held by the books (booksHave()), so nothing is placed at null.
+  customerById: new Map(),
   ...o,
 });
 const NOTE = { state: "refused" as const, words: "QuickBooks refused it." };
@@ -41,6 +44,8 @@ const moveLeo = (o: Partial<QueueView> = {}) => item({ op: "move", role: "studen
   { familyId: CHEN, studentId: LEO, ...o });
 const offLeo = (o: Partial<QueueView> = {}) => item({ op: "deactivate", role: "student", qboId: "12", syncToken: "0" }, { familyId: RIVERA, studentId: LEO, ...o });
 const offPatel = (o: Partial<QueueView> = {}) => item({ op: "deactivate", role: "member", qboId: "30", syncToken: "0" }, { familyId: PATEL, ...o });
+const cust = (qboId: string, displayName: string, o: Partial<Cust> = {}): Cust => ({ qboId, displayName, active: true, parentQboId: null, typeQboId: null, email: null, phone: null, ...o });
+const cached = (...cs: Cust[]) => basics({ customerById: new Map(cs.map((c) => [c.qboId, c])) });
 const places = (queue: QueueView[], rows = [row(RIVERA, [familyName, leoName, leoInactive, leoPlace]), row(CHEN, [])], b = basics()) =>
   keptPlacesOf(b, queue, rows, [{ familyId: PATEL }]);
 
@@ -64,11 +69,18 @@ describe("what the screen shows beside its difference", () => {
     expect(got.has(b.id)).toBe(false);
   });
 
-  it("one whose difference the books' copy no longer shows: on its row with no difference (`at` null)", () => {
-    const f = renameFamily(), m = moveLeo();
-    const got = places([f, m], [row(RIVERA, []), row(CHEN, [])]);
+  it("one the roster's copy of QuickBooks has already: on its row with no difference (`at` null)", () => {
+    const f = renameFamily(), m = moveLeo(), off = offLeo();
+    const books = cached(cust("10", "Rivera  Family "), cust("12", "Leo Rivera", { parentQboId: "10", active: false }));
+    const got = places([f, m, off], [row(RIVERA, []), row(CHEN, [])], books);
     expect(got.get(f.id)).toEqual({ familyId: RIVERA, at: null });
     expect(got.get(m.id)).toEqual({ familyId: RIVERA, at: null });
+    expect(got.get(off.id)).toEqual({ familyId: RIVERA, at: null });
+  });
+
+  it("a kept make-inactive of a layered family, inactive in the portal and active in the books: on the inactive list", () => {
+    const off = item({ op: "deactivate", role: "family", qboId: "30", syncToken: "0" }, { familyId: PATEL });
+    expect(places([off]).get(off.id)).toEqual({ familyId: PATEL, inactive: true });
   });
 });
 
@@ -115,6 +127,19 @@ describe("what stays on Reconciliation alone", () => {
     // Leo inactive in the portal, his customer active under Chen in the books: only Chen's row tells it.
     const off = offLeo();
     expect(places([off], [row(RIVERA, []), row(CHEN, [leoElsewhere("inactive")])]).has(off.id)).toBe(false);
+  });
+
+  it("one with no difference that the books don't hold either: a field the screen doesn't compare proves nothing", () => {
+    // Leo inactive in the portal: his name isn't compared, and the books still have the old one.
+    const rename = renameLeo();
+    expect(places([rename], [row(RIVERA, []), row(CHEN, [])], cached(cust("12", "Leo M. Rivera", { parentQboId: "10" }))).has(rename.id)).toBe(false);
+    // Leo inactive in the portal, his customer active in the books under a customer no family is linked to: no row tells it.
+    const off = offLeo();
+    expect(places([off], [row(RIVERA, []), row(CHEN, [])], cached(cust("12", "Leo Rivera", { parentQboId: "99" }))).has(off.id)).toBe(false);
+    // A move the books don't have (Leo under another customer), and a customer missing from the cache.
+    const m = moveLeo();
+    expect(places([m], [row(RIVERA, []), row(CHEN, [])], cached(cust("12", "Leo Rivera", { parentQboId: "99" }))).has(m.id)).toBe(false);
+    expect(places([renameFamily(), moveLeo(), offLeo()], [row(RIVERA, []), row(CHEN, [])])).toEqual(new Map());
   });
 
   it("family A's row never shows family B's kept item", () => {

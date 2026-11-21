@@ -4291,10 +4291,11 @@ const STUDENT_MOVE_PENDING_ACTIVE = "A move of this student hasn't reached Quick
 export const heldWords = (familyWords: string) => `${familyWords}'s guardians can't sign in to it until someone who may change families lets them in, on its page.`;
 /**
  * Said when a make-inactive of the customer is kept: the portal's earlier change, which a take leaves as it is. Since
- * stage 4's slice M5c it is shown beside its difference on Accounting links too, unless a balance held it
- * (keptOnLinksOf()), and both pages settle it.
+ * stage 4's slice M5c it names every press that settles it: the difference's Send the app's to QuickBooks on Accounting
+ * links (which closes it by replaceRefused() once QuickBooks has the customer inactive), Reconciliation's Send the
+ * portal's value, and Give up (on Reconciliation always, and beside its difference where keptOnLinksOf() shows it).
  */
-export const KEPT_OFF_STAYS = "A make-inactive of its customer kept in the portal stays, as the portal's earlier change. It is listed on the Reconciliation page, and shown with its family on Accounting links unless a balance held it: only Send the portal's value, on Reconciliation, or Give up, on either page, settles it.";
+export const KEPT_OFF_STAYS = "A make-inactive of its customer kept in the portal stays, as the portal's earlier change: Send the app's to QuickBooks, which closes it once QuickBooks has the customer inactive, Send the portal's value on the Reconciliation page, or Give up settles it.";
 const isOrAre = (names: readonly string[]) => (names.length === 1 ? "is" : "are");
 
 /**
