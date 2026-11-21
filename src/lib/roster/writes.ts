@@ -5029,10 +5029,14 @@ async function sendFamilyInactive(familyId: AppFamilyId, stamp: string, rosterTa
    theirs in every family and on their sign-in, and a guardian row is opened or closed only on Portal sign-ins), and
    nothing is made active (open question 12). Locks, in the guardian writes' order (lockedRow(), src/lib/parents/guardians.ts):
    the row's "being sent" lock first (sendToBooks()'s whileSending(), tried, never waited for), then in one transaction
-   the person's row FOR UPDATE, the roster lock with the page's tag (readyToSend()) and the guardian row FOR UPDATE. The
+   the person's row FOR UPDATE, the roster lock with the page's tag (readyToSend(), waited for at most
+   GUARDIAN_ROSTER_WAIT_MS first, as the guardian writes wait for it, so a roster read never keeps the person's row
+   locked for its length: SEND_GUARDIAN_ROSTER_BUSY past that) and the guardian row FOR UPDATE. The
    parents' settings lock lockedRow() takes first is left out: nothing here reads a sign-in setting or changes a sign-in,
    and a settings save takes that lock and then people's rows, never the roster lock, so no wait goes round. */
 
+/** A guardian's send that found the roster lock held past GUARDIAN_ROSTER_WAIT_MS (a roster read under way): nothing sent, nothing written. */
+export const SEND_GUARDIAN_ROSTER_BUSY = "The roster is being read from QuickBooks just now, so nothing was sent. Try again in a minute.";
 /** A guardian's name the portal can't send to QuickBooks as it is: renamed on their own page instead. */
 const SEND_GUARDIAN_NAME_UNUSABLE = (error: string) => `The person's name can't be sent to QuickBooks as it is: ${error} Rename them on their page under Parents instead.`;
 /** A guardian's name another customer in the books holds: the person's is the one sent, so no other is offered. */
@@ -5046,19 +5050,42 @@ type HeldGuardian = { ok: true; ready: SendReady; person: { id: string; name: st
   | { ok: false; error: string };
 /**
  * The guardian row and its person, held for a send of the row's difference, in the caller's transaction: the person's
- * row FOR UPDATE (found by the row, read unlocked: a row's person never changes), then readyToSend() (the roster lock
- * with the page's tag, a connection to the roster's company, the shape, the cache), then the guardian row FOR UPDATE.
+ * row FOR UPDATE (found by the row, read unlocked: a row's person never changes), then the roster lock, waited for at
+ * most GUARDIAN_ROSTER_WAIT_MS (rosterExclusiveWithin(): a roster read holds it across its read of every customer, and
+ * the person's row is held meanwhile, so it is never waited for longer than the guardian writes wait, holdRoster()), then
+ * readyToSend() (the roster lock again, held already, with the page's tag, a connection to the roster's company, the
+ * shape, the cache), then the guardian row FOR UPDATE.
  */
 async function guardianHeldForSend(tx: Tx, guardianId: string, rosterTag: string): Promise<HeldGuardian> {
   const [seen] = await tx.select({ parentId: guardian.parentId }).from(guardian).where(eq(guardian.id, guardianId));
   if (!seen) return { ok: false, error: WRITE_COPY.gone };
   const [person] = await tx.select({ id: parent.id, name: parent.name }).from(parent).where(eq(parent.id, seen.parentId)).for("update");
+  if (!(await rosterExclusiveWithin(tx, GUARDIAN_ROSTER_WAIT_MS))) return { ok: false, error: SEND_GUARDIAN_ROSTER_BUSY };
   const ready = await readyToSend(tx, rosterTag);
   if (!ready.ok) return ready;
   const [row] = await tx.select({ id: guardian.id, familyId: guardian.familyId, status: guardian.status, disabledReason: guardian.disabledReason }).from(guardian)
     .where(eq(guardian.id, guardianId)).for("update");
   if (!person || !row) return { ok: false, error: WRITE_COPY.gone };
   return { ok: true, ready, person, row };
+}
+
+/**
+ * The roster lock taken exclusively in the caller's transaction, waited for at most `waitMs` in a savepoint (the lock,
+ * once taken, is the transaction's until it ends, so readyToSend()'s lockRosterAs() then has it at once); false when a
+ * roster read held it that long, with nothing taken.
+ */
+async function rosterExclusiveWithin(tx: Tx, waitMs: number): Promise<boolean> {
+  try {
+    await tx.transaction(async (sp) => {
+      await sp.execute(sql.raw(`set local lock_timeout = '${Math.max(1, Math.floor(waitMs))}ms'`));
+      await sp.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
+      await sp.execute(sql`set local lock_timeout to default`);
+    });
+    return true;
+  } catch (e) {
+    if (lockTimedOut(e)) return false;
+    throw e;
+  }
 }
 
 /**
