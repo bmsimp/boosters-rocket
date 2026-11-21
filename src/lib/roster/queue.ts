@@ -500,13 +500,25 @@ function detailsInWords(held: HeldContact, w: Extract<RosterWrite, { op: "contac
 /** The codes of an item QuickBooks took that the portal still has to finish on its side (QueueView.finishing). */
 const FINISHING_CODES = new Set(["cache_failed", "answer_other", "finish_failed"]);
 
+/**
+ * The codes of a make-inactive kept for a balance (stage 4's slice M5c names the set): an amount owed or a credit the
+ * portal read (`open_balance`, CREDIT_BALANCE), and QuickBooks' own refusal for a balance (`fault_6220`); with them a
+ * balance the portal couldn't read (balanceUnread()). Not a field difference: nothing in QuickBooks differs from what the
+ * portal asked but the balance, so such a change is shown on the Reconciliation page alone, never beside a difference on
+ * Accounting links (keptOnLinksOf(), src/lib/accounting/mapping.ts), and waitingWords() says it is held back without
+ * saying QuickBooks has something else.
+ */
+export const BALANCE_HOLD_CODES: readonly string[] = ["open_balance", CREDIT_BALANCE, "fault_6220"];
+/** Whether a kept item's code is a balance hold (BALANCE_HOLD_CODES, or a balance that couldn't be read). */
+export const isBalanceHold = (code: string | null) => code !== null && (BALANCE_HOLD_CODES.includes(code) || balanceUnread(code));
 /** Where a waiting or stuck item stands, in words, for the Reconciliation page and a family's page. */
 export function waitingWords(i: Pick<QueueView, "state" | "finishing" | "lastCode">): string {
   if (i.state === "refused") {
     const who = whoStopped(i.lastCode);
     // Held back for a balance, an unread balance, or a name or address QuickBooks can't take (a guardian's Parent
-    // customer, stage 3's slice 9h): nothing in QuickBooks differs, so the words don't say it does.
-    const heldHere = i.lastCode === "open_balance" || i.lastCode === CREDIT_BALANCE || i.lastCode === EMAIL_TOO_LONG || i.lastCode === NAME_UNUSABLE || balanceUnread(i.lastCode);
+    // customer, stage 3's slice 9h): nothing in QuickBooks differs, so the words don't say it does. (`fault_6220` among
+    // the balance holds is QuickBooks' refusal, never the portal's holding back, so it is never read here.)
+    const heldHere = isBalanceHold(i.lastCode) || i.lastCode === EMAIL_TOO_LONG || i.lastCode === NAME_UNUSABLE;
     return who === "quickbooks" ? "Refused by QuickBooks: the portal keeps its own value"
       : who === "held" ? (heldHere ? "Held back by the portal, which keeps its own value" : "Held back by the portal, as QuickBooks has something else: the portal keeps its own value")
         : "Not sent: the portal couldn't send it to QuickBooks at the time, and keeps its own value";
@@ -907,7 +919,7 @@ export async function giveUpIn(tx: Tx, id: string, note: string, o: QueueOp): Pr
     return { ok: true as const, message: `Given up. Nothing more will be sent for it. The portal keeps the student in the family it moved them to. ${MOVE_FOLLOWED_STAYS} QuickBooks has the move only if a try got through, which the roster's copy of QuickBooks shows after its next read; if it didn't, QuickBooks keeps them where it has them, and until it has the move the family QuickBooks has them under still sees their invoices. ${GIVEN_UP_NEXT.move}` };
   }
   if (item.request.op === "rename" && isSavedFirst(item)) {
-    return { ok: true as const, message: "Given up. Nothing more will be sent for it. The portal keeps the name it saved. QuickBooks has it only if a try got through, which the roster's copy of QuickBooks shows after its next read; if it didn't, the two names differ, and a later rename on the record's family's page is checked against QuickBooks' name first: while they differ it is held back and listed on this page, where “Send the portal's value” sends it. Or rename it in QuickBooks." };
+    return { ok: true as const, message: "Given up. Nothing more will be sent for it. The portal keeps the name it saved. QuickBooks has it only if a try got through, which the roster's copy of QuickBooks shows after its next read; if it didn't, the two names differ, and a later rename on the record's family's page is checked against QuickBooks' name first: while they differ it is held back and kept, listed on the Reconciliation page, where “Send the portal's value” sends it, and, for a record linked to the books, beside its difference on Accounting links, where Send the app's to QuickBooks can send it too. Or rename it in QuickBooks." };
   }
   // Since stage 3's slice 9c no roster read changes the app's own records: a roster change QuickBooks did make is in its
   // copy of the roster after the next read, but the portal's own family or student keeps what it had, until staff bring
@@ -953,8 +965,16 @@ function refusedGivenUpWords(item: Item): string {
   if (w.op === "email") return EMAIL_GIVEN_UP;
   if (w.op === "move") return `Given up. Nothing more will be sent for it. The portal keeps the student in the family it moved them to, and QuickBooks keeps them where it has them: until QuickBooks has the move, the family QuickBooks has them under still sees their invoices. ${MOVE_FOLLOWED_STAYS} ${GIVEN_UP_NEXT.move}`;
   if (w.op === "create") return "Given up. Nothing more will be sent for it. The student the portal saved first stays in the portal, unlinked: to make them in QuickBooks later, press “Create in QuickBooks and link” on their family's page.";
-  return "Given up. Nothing more will be sent for it. The portal keeps its own name, and QuickBooks keeps the one it has. A later rename on the record's family's page is checked against QuickBooks' name first: while the two differ it is held back and listed on this page, where “Send the portal's value” sends it. Or rename it in QuickBooks.";
+  if (w.op === "deactivate") return DEACTIVATE_GIVEN_UP;
+  return "Given up. Nothing more will be sent for it. The portal keeps its own name, and QuickBooks keeps the one it has. A later rename on the record's family's page is checked against QuickBooks' name first: while the two differ it is held back and kept, listed on the Reconciliation page, where “Send the portal's value” sends it, and, for a record linked to the books, beside its difference on Accounting links, where Send the app's to QuickBooks can send it too. Or rename it in QuickBooks.";
 }
+/**
+ * What giving up a kept make-inactive of a family, member or student leaves (a guardian's has its own words,
+ * GUARDIAN_GIVEN_UP), true of a press from either page since stage 4's slice M5c: each side keeps what it has, and while
+ * a linked record is inactive in the portal and its customer active in QuickBooks, the accounting links screen shows the
+ * two as a difference.
+ */
+export const DEACTIVATE_GIVEN_UP = "Given up. Nothing more will be sent for it. The portal keeps the record as it has it, and QuickBooks keeps the customer as it has it, active unless someone made it inactive there. While a record linked to the books is inactive in the portal and active in QuickBooks, Accounting links shows the two as a difference in its family's row, where Send the app's to QuickBooks (which checks the balance first) or Take QuickBooks' into the app settles it. Or make the customer inactive in QuickBooks once any balance is settled.";
 /**
  * What giving up a parent's phone and address change leaves (stage 3's slice 11b): the portal keeps its details, and
  * QuickBooks the ones it has, for stage 4's mapping screen to show as a difference.

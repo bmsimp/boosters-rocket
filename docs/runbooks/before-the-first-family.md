@@ -683,8 +683,12 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    lists each difference with the portal's value and the books': a family you brought in has the Parent customers
    QuickBooks holds under it counted until its guardians are linked to them; rename a student in QuickBooks, refresh
    the roster, and that family shows both names; a student moved to another family in QuickBooks shows where
-   QuickBooks has them, in the words the family's page uses; a change waiting or kept on Reconciliation is named in
-   Reconciliation's words with a link there. Under the status filter, Carried over and Linked, with differences can
+   QuickBooks has them, in the words the family's page uses; a change waiting or stuck on Reconciliation is named in
+   Reconciliation's words with a link there, and a rename, move or make-inactive kept in the portal of a family, member
+   or student still linked is named in its own words beside its difference, with Give up beside the difference's
+   presses for someone who may change families (it stays on Reconciliation too; a guardian's, one held for a balance,
+   one refused as a taken name, and one with no difference whose value QuickBooks doesn't hold either show only
+   there). Under the status filter, Carried over and Linked, with differences can
    count the same family, and the page says so. **If not:** note the family, the status it read and
    what you expected; a suggestion that names the wrong customer is the most important to report, then a difference
    that isn't one (both values the same) or one the page misses.
