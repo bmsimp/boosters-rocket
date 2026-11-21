@@ -1,6 +1,7 @@
 // The links an unlink ended whose customer is still in the books (stage 4's slice M3b2 of
 // docs/superpowers/specs/2026-11-18-app-owned-families-design.md: after an unlink, no press makes a second customer in
-// the books for a family, student or guardian whose customer is still there). One read, endedLinksHeld(), for
+// the books for a family or student whose customer is still there, nor a second Parent customer for a guardian under
+// the same family customer). One read, endedLinksHeld(), for
 // "Create in QuickBooks and link" and the family create prepare() sends (src/lib/roster/writes.ts), a guardian's
 // Parent customer create there, a family's page and the Families list. It reads any family's history and any
 // customer of the roster cache, so it is staff code only, never imported by a parent page (STAFF_ONLY_IMPORTS in

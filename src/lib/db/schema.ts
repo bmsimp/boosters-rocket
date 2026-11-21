@@ -250,8 +250,10 @@ export const accountingLink = pgTable("accounting_link", {
  * it, and it is read only by the audit filter (customersOfRecord(), src/lib/audit/query.ts), a change of company's clear,
  * which deletes every row (clearAppRecords()), and, since stage 4's slice M3b2, endedLinksHeld()
  * (src/lib/accounting/ended-links.ts): a record's latest ended link whose customer the books still hold, so that no press
- * makes a second customer for it ("Create in QuickBooks and link", the family create prepare() sends, a guardian's
- * Parent customer) and a family's page and the Families list say so. A link that exists is in `accounting_link`, and
+ * makes a second customer for a family or student wherever the books hold the first ("Create in QuickBooks and link",
+ * the family create prepare() sends), nor a second Parent customer for a guardian row whose old one is directly under
+ * the family's customer now (a family relinked to another customer gets one under it: one Parent customer per family),
+ * and a family's page and the Families list say so. A link that exists is in `accounting_link`, and
  * every reader of the links that are reads that table alone.
  */
 export const accountingLinkEnded = pgTable("accounting_link_ended", {
