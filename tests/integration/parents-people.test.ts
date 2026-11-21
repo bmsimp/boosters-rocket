@@ -94,7 +94,7 @@ describe("blocking and unblocking", () => {
     const c = await seedParent({ name: "Cy Three" }); await seedGuardianInFamily({ parentId: c.id, familyQboId: "F1", status: "disabled", disabledReason: "removed" });
     await blockPerson(c.id, "r", staff); await unblockPerson(c.id, staff);       // no open link
     // An open row that names no family record is no row that counts either: the gate wouldn't let them in.
-    const d = await seedParent({ name: "Di Four" }); await seedGuardian({ parentId: d.id, familyQboId: "F9", status: "invited" });
+    const d = await seedParent({ name: "Di Four" }); await seedGuardian({ parentId: d.id, familyId: null, status: "invited" });
     await blockPerson(d.id, "r", staff); await unblockPerson(d.id, staff);
     expect((await db.select().from(parent).orderBy(parent.createdAt, parent.id)).map((x) => [x.name, x.welcomeOwed])).toEqual(
       [["Ann One", false], ["Bea Two", false], ["Cy Three", false], ["Di Four", false]]);

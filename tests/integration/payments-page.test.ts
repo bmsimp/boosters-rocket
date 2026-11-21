@@ -10,7 +10,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, buyout, familyMoney, qboConnection, qboCustomer, setting, type StoredInvoice } from "@/lib/db/schema";
+import { accountingLink, auditLog, buyout, familyMoney, guardian, qboConnection, qboCustomer, setting, type StoredInvoice } from "@/lib/db/schema";
 import { setRosterSource } from "@/lib/roster/source";
 import { calendarDayIn } from "@/lib/settings/club";
 import PaymentsPage from "@/app/(parent)/payments/page";
@@ -237,8 +237,10 @@ describe("the Payments page", () => {
     const there = await recordOfCustomer(RIVERA.family.qboId, "family");
     await db.update(familyMoney).set({ familyId: there });
     expect((await db.select().from(familyMoney)).map((m) => m.realmId)).toEqual([MONEY_REALM]);
-    // The sync left the first company's record inactive and moved the guardian row to the record linked in this one:
-    // the session stored the first record, so the gate has it choose again, and it enters the family its row names now.
+    // The sync left the first company's record inactive; the guardian row is put in the record linked in this one by
+    // hand (no import moves a row since stage 3's slice 12b1; stage 4's reviewed import would): the session stored the
+    // first record, so the gate has it choose again, and it enters the family its row names now.
+    await db.update(guardian).set({ familyId: there }).where(eq(guardian.id, r.identity.guardianId));
     const now = await identityAfterChoosingAgain(r.session.id);
     expect(String(now.familyId)).toBe(String(there));
     asParent(now);

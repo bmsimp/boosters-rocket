@@ -75,8 +75,9 @@ describe("a guardian who can no longer sign for the family", () => {
     const inTen = await seedRequest({ requirementId: r.any, familyQboId: "10", subjectQboId: "10", state: "waiting", envelopeId: "envelope_ten", signers: [signer(ana.id, "Ana")] });
     const inTwenty = await seedRequest({ requirementId: r.any, familyQboId: "20", subjectQboId: "20", state: "waiting", envelopeId: "envelope_twenty", signers: [signer(ana.id, "Ana")] });
 
+    const ten = await recordOfCustomer("10", "family");
     await db.transaction(async (tx) => {
-      const [row] = await tx.select().from(guardian).where(and(eq(guardian.parentId, ana.id), eq(guardian.familyQboId, "10"))).for("update");
+      const [row] = await tx.select().from(guardian).where(and(eq(guardian.parentId, ana.id), eq(guardian.familyId, ten))).for("update");
       expect(await closeMembership(tx, row!, { reason: "removed", actor: staff.actor })).toMatchObject({ wasOpen: true });
     });
 

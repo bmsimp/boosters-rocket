@@ -14,9 +14,9 @@ import { credentialRows, linkRows, mintLink, seedDevice, seedPassword } from "..
  * or not. Each row is in a family record of its own QuickBooks id (seedGuardianInFamily()), as the gate needs.
  */
 const ROSTER = { door: "system" as const, id: null, label: "roster" };
-/** The family each of a person's sessions chose, named by the QuickBooks id of the rows in that family record. */
-const sessionsOf = async (authUserId: string) => {
-  const names = new Map((await db.select({ id: guardian.familyId, qboId: guardian.familyQboId }).from(guardian)).map((g) => [String(g.id), g.qboId]));
+/** The family each of a person's sessions chose, named by the QuickBooks id its rows were seeded under (`rows`, by that id). */
+const sessionsOf = async (authUserId: string, rows: Record<string, { familyId: unknown }>) => {
+  const names = new Map(Object.entries(rows).map(([qboId, g]) => [String(g.familyId), qboId]));
   return (await db.select({ family: parentAuthSession.familyId }).from(parentAuthSession).where(eq(parentAuthSession.userId, authUserId)))
     .map((s) => (s.family === null ? "(none yet)" : names.get(String(s.family)) ?? "(another family)")).sort();
 };
@@ -37,16 +37,18 @@ describe("closeMembership() with no stillOpenElsewhere", () => {
     await seedParentSession(other.authUserId, { familyQboId: "F1" });
 
     expect(await close(f1)).toEqual({ wasOpen: true, sessionsEnded: 1 });
-    expect(await sessionsOf(ana.authUserId)).toEqual(["(none yet)", "F2"]);
+    const families = { F1: f1, F2: f2 };
+    expect(await sessionsOf(ana.authUserId, families)).toEqual(["(none yet)", "F2"]);
 
     expect(await close(f2)).toEqual({ wasOpen: true, sessionsEnded: 2 });
-    expect(await sessionsOf(ana.authUserId)).toEqual([]);
+    expect(await sessionsOf(ana.authUserId, families)).toEqual([]);
     // Ben's open row in F1 and his session there are his own: untouched.
-    expect(await sessionsOf(other.authUserId)).toEqual(["F1"]);
+    expect(await sessionsOf(other.authUserId, families)).toEqual(["F1"]);
 
+    // Each names its family record, and the customer its link names: none, for these families with no link.
     const ended = await db.select().from(auditLog).where(and(eq(auditLog.action, "parent.access.ended")));
-    expect(ended.find((r) => r.targetId === f1.id)!.after).toMatchObject({ parentId: ana.id, familyQboId: "F1", reason: "removed", sessionsEnded: 1 });
-    expect(ended.find((r) => r.targetId === f2.id)!.after).toMatchObject({ parentId: ana.id, familyQboId: "F2", reason: "removed", sessionsEnded: 2 });
+    expect(ended.find((r) => r.targetId === f1.id)!.after).toMatchObject({ parentId: ana.id, familyId: String(f1.familyId), familyQboId: null, reason: "removed", sessionsEnded: 1 });
+    expect(ended.find((r) => r.targetId === f2.id)!.after).toMatchObject({ parentId: ana.id, familyId: String(f2.familyId), familyQboId: null, reason: "removed", sessionsEnded: 2 });
     expect((await db.select().from(guardian).where(eq(guardian.parentId, ana.id))).map((g) => [g.status, g.disabledReason, g.statusBeforeDisable]))
       .toEqual([["disabled", "removed", "active"], ["disabled", "removed", "active"]]);
   });
@@ -58,7 +60,7 @@ describe("closeMembership() with no stillOpenElsewhere", () => {
     await seedParentSession(ana.authUserId, { familyQboId: "F2" });
     await seedParentSession(ana.authUserId, { familyQboId: null });
     expect(await close(f2)).toEqual({ wasOpen: true, sessionsEnded: 2 });
-    expect(await sessionsOf(ana.authUserId)).toEqual([]);
+    expect(await sessionsOf(ana.authUserId, { F2: f2 })).toEqual([]);
   });
 
   it("keeps the person's unused links and devices while another row is open, and deletes them, keeping the password, once the last open row closes", async () => {

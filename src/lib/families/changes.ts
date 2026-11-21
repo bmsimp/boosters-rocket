@@ -6,14 +6,13 @@
 export type AppRecordChanges = {
   families: { made: number; changed: number };
   students: { made: number; changed: number };
-  memberships: { linked: number; relinked: number; pointed: number };
 };
 
-export const noAppRecordChanges = (): AppRecordChanges => ({ families: { made: 0, changed: 0 }, students: { made: 0, changed: 0 }, memberships: { linked: 0, relinked: 0, pointed: 0 } });
+export const noAppRecordChanges = (): AppRecordChanges => ({ families: { made: 0, changed: 0 }, students: { made: 0, changed: 0 } });
 
 /** Whether a run made or changed anything: then the audit row of the change that ran it says what (appRecordsAudit()). */
 export const changedAppRecords = (c: AppRecordChanges): boolean =>
-  [c.families.made, c.families.changed, c.students.made, c.students.changed, c.memberships.linked, c.memberships.relinked, c.memberships.pointed].some((n) => n > 0);
+  [c.families.made, c.families.changed, c.students.made, c.students.changed].some((n) => n > 0);
 
 /** The part of an audit row's `after` that says what a run made or changed: nothing when it changed nothing. */
 export const appRecordsAudit = (c: AppRecordChanges): { appRecords?: AppRecordChanges } => (changedAppRecords(c) ? { appRecords: c } : {});
