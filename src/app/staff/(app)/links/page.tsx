@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireStaffAlso, requireStaffPage } from "@/lib/guards";
-import { BULK_MAX, filterLinkRows, filtersOf, givenUpCustomersOf, loadAccountingLinks, REVIEW_LEFT_WORDS, statusCounts, type BulkOffer, type ConfirmStep, type InactiveRow, type LinkMade, type LinkOffer, type LinkRow, type LinkStatus, type LinksState, type LinksView, type OwnLink, type ReviewOffer, type TakeOffer, type UnlinkOffer } from "@/lib/accounting/mapping";
+import { can } from "@/lib/permissions/effective";
+import { BULK_MAX, filterLinkRows, filtersOf, givenUpCustomersOf, loadAccountingLinks, REVIEW_LEFT_WORDS, statusCounts, type BulkOffer, type ConfirmStep, type InactiveRow, type LinkMade, type LinkOffer, type LinkRow, type LinkStatus, type LinksState, type LinksView, type OwnLink, type ReviewOffer, type SendOffer, type TakeOffer, type UnlinkOffer } from "@/lib/accounting/mapping";
 import { differenceKinds, differenceWords, noteSentence, type Difference } from "@/lib/accounting/differences";
 import { NOT_A_FAMILY_WORDS, parseLinksFilter, searchMatches, SEARCH_MAX, STATUS_KEYS, STATUS_WORDS, type LinksFilter, type StatusKey } from "@/lib/accounting/status";
 import type { Holder } from "@/lib/accounting/match";
@@ -12,7 +13,7 @@ import { LocalTime } from "@/app/components/local-time";
 import { Notice } from "@/app/components/notice";
 import { StateWords } from "@/app/components/state-words";
 import { familyPage } from "@/app/staff/(app)/family-pages";
-import { confirmAllAction, confirmLinkAction, leaveUnlinkedAction, reviewLinkAction, takeDifferenceAction, undoLeaveUnlinkedAction, unlinkAction } from "./actions";
+import { confirmAllAction, confirmLinkAction, leaveUnlinkedAction, reviewLinkAction, sendDifferenceAction, takeDifferenceAction, undoLeaveUnlinkedAction, unlinkAction } from "./actions";
 import { LinkAnswers, LinkAnswersShown, LinkPress } from "./link-press";
 
 export const metadata = { title: "Accounting links" };
@@ -80,7 +81,8 @@ const RECONCILIATION_CHANGES = "/staff/reconciliation#writes-h";
  * into the portal (`take`), what it does is said after it, then the press; or, where none is offered now, why, in one
  * sentence (`note`).
  */
-function DifferenceLine({ d, take, note, tag }: { d: Difference; take: TakeOffer | undefined; note: string | undefined; tag: string }) {
+function DifferenceLine({ d, take, note, send, sendNote, tag }: { d: Difference; take: TakeOffer | undefined; note: string | undefined; send: SendOffer | undefined;
+  sendNote: string | undefined; tag: string }) {
   const w = differenceWords(d);
   const notes = d.kind === "guardians_unlinked" ? d.queue.map((q) => `For ${q.count} of them: ${noteSentence(q.note)}`)
     : d.kind === "student_customer" || d.kind === "parent_customers" || d.queue === null ? [] : [noteSentence(d.queue)];
@@ -88,9 +90,21 @@ function DifferenceLine({ d, take, note, tag }: { d: Difference; take: TakeOffer
     <li>{w.what}. In the portal: {w.portal}. In the books: {w.books}.
       {notes.length > 0 && <> {notes.join(" ")} <Link href={RECONCILIATION_CHANGES}>{notes.length === 1 ? "See the change on Reconciliation" : "See the changes on Reconciliation"}</Link></>}
       {note !== undefined && <> {note}</>}
-      {take !== undefined && <><p>{take.words.join(" ")}</p>
-        <div className="row-actions"><LinkPress label="Take QuickBooks' into the app" busy="Taking it…" about={take.about} act={takeDifferenceAction.bind(null, take.field, take.kind, take.recordId, tag, take.stamp)} /></div></>}</li>
+      {sendNote !== undefined && <> {sendNote}</>}
+      {take !== undefined && <p>{take.words.join(" ")}</p>}
+      {send !== undefined && <p>{send.words.join(" ")}</p>}
+      {(take !== undefined || send !== undefined) && <div className="row-actions">
+        {take !== undefined && <LinkPress label="Take QuickBooks' into the app" busy="Taking it…" about={take.about} act={takeDifferenceAction.bind(null, take.field, take.kind, take.recordId, tag, take.stamp)} />}
+        {send !== undefined && <SendPress send={send} tag={tag} />}</div>}</li>
   );
+}
+
+/**
+ * Send the app's to QuickBooks (slice M5a): the press, a bound action given only its words. It reads QuickBooks first
+ * (a make-inactive's balance, or a change's answer) and sends, so its busy words say both, as Reconciliation's do.
+ */
+function SendPress({ send, tag }: { send: SendOffer; tag: string }) {
+  return <LinkPress label="Send the app's to QuickBooks" busy="Reading QuickBooks, then sending…" about={send.about} act={sendDifferenceAction.bind(null, send.field, send.kind, send.recordId, tag, send.stamp)} />;
 }
 
 /**
@@ -99,14 +113,20 @@ function DifferenceLine({ d, take, note, tag }: { d: Difference; take: TakeOffer
  * QuickBooks' into the app with what it does said beside it, or the one sentence that stands in its place. Drawn only
  * when there is one. The press is a bound action, given only its words.
  */
-function InactivePart({ rows, tag, familyPages }: { rows: InactiveRow[]; tag: string; familyPages: boolean }) {
+function InactivePart({ rows, tag, familyPages, maySend }: { rows: InactiveRow[]; tag: string; familyPages: boolean; maySend: boolean }) {
   const columns: Column<InactiveRow>[] = [
     { key: "family", header: "Family", rowHeader: true, cell: (r) => (familyPages ? <Link href={familyPage(r.familyId)}>{r.name}</Link> : r.name) },
     { key: "customer", header: "Customer in the books", cell: (r) => r.customer },
     { key: "students", header: "Its students, inactive in the portal", cell: (r) => (r.students.length === 0 ? "None" : r.students.join(", ")) },
-    { key: "do", header: "What you can do", quiet: true, cell: (r) => (r.take === null ? r.note : <><p>{r.take.words.join(" ")}</p>
-      <div className="row-actions"><LinkPress label="Take QuickBooks' into the app" busy="Taking it…" about={r.take.about}
-        act={takeDifferenceAction.bind(null, r.take.field, r.take.kind, r.take.recordId, tag, r.take.stamp)} /></div></>) },
+    { key: "do", header: "What you can do", quiet: true, cell: (r) => {
+      const send = maySend ? r.send : null;
+      return <>{r.take === null && <p>{r.note}</p>}{r.take !== null && <p>{r.take.words.join(" ")}</p>}
+        {send !== null ? <p>{send.words.join(" ")}</p> : maySend && r.sendNote !== null && <p>{r.sendNote}</p>}
+        {(r.take !== null || send !== null) && <div className="row-actions">
+          {r.take !== null && <LinkPress label="Take QuickBooks' into the app" busy="Taking it…" about={r.take.about}
+            act={takeDifferenceAction.bind(null, r.take.field, r.take.kind, r.take.recordId, tag, r.take.stamp)} />}
+          {send !== null && <SendPress send={send} tag={tag} />}</div>}</>;
+    } },
   ];
   return (
     <section className="box" aria-labelledby="links-inactive-h"><h2 id="links-inactive-h">Inactive in the portal, active in the books</h2>
@@ -144,7 +164,7 @@ const LINK_EFFECT = "Once linked, this family's guardians see this customer's op
 const pickHref = (familyId: string, customerId?: string) => `/staff/links?pick=${encodeURIComponent(familyId)}${customerId ? `&customer=${encodeURIComponent(customerId)}` : ""}#${PICK}`;
 
 /** The row's opening: the family's active students and its open guardians, each with their own link, then its differences, then what can be done. */
-function Opening({ row, tag }: { row: LinkRow; tag: string }) {
+function Opening({ row, tag, maySend }: { row: LinkRow; tag: string; maySend: boolean }) {
   const id = String(row.familyId);
   return (
     <details className="more"><summary>{row.differences.length > 0 ? "Students, guardians and differences" : "Students and guardians"}<span className="visually-hidden">: {row.name}</span></summary>
@@ -154,7 +174,8 @@ function Opening({ row, tag }: { row: LinkRow; tag: string }) {
       {row.guardians.length > 0 && <ul>{row.guardians.map((g) => <li key={g.id}>{g.name} ({g.email}){g.blocked ? ", can't sign in, so this address isn't matched" : ""}: {ownLinkWords(g.link)}</li>)}</ul>}
       {row.status.key === "several" && <><p>Possible customers:</p><ul>{row.status.candidates.map((c) => <li key={c.qboId}>{c.name}{c.email ? ` (${c.email})` : ""} <Link href={pickHref(id, c.qboId)}>Look at it before linking<span className="visually-hidden">: {c.name}</span></Link></li>)}</ul></>}
       {row.status.key === "several" && row.status.alsoMatches.length > 0 && <p>Also matched by: {row.status.alsoMatches.join(", ")}.</p>}
-      {row.differences.length > 0 && <><p>Where the portal and the books differ:</p><ul>{row.differences.map((d, i) => <DifferenceLine key={i} d={d} tag={tag} take={row.takes.find((t) => t.at === i)} note={row.takeNotes.find((n) => n.at === i)?.words} />)}</ul></>}
+      {row.differences.length > 0 && <><p>Where the portal and the books differ:</p><ul>{row.differences.map((d, i) => <DifferenceLine key={i} d={d} tag={tag} take={row.takes.find((t) => t.at === i)} note={row.takeNotes.find((n) => n.at === i)?.words}
+        send={maySend ? row.sends.find((x) => x.at === i) : undefined} sendNote={maySend ? row.sendNotes.find((n) => n.at === i)?.words : undefined} />)}</ul></>}
       {row.inactiveUnrecorded > 0 && <p>The books also have {plural(row.inactiveUnrecorded, "inactive student customer", "inactive student customers")} under this family with no student record in the portal.</p>}
       {row.confirm !== null && row.customer !== null && <><p>Confirming links it to &ldquo;{row.customer.name}&rdquo;. Nothing is sent to the books.</p><ProposalsShown proposals={row.confirm.proposals} /><p>{LINK_EFFECT}</p></>}
       {row.review !== null && <ReviewShown review={row.review} />}
@@ -314,6 +335,9 @@ function PickPart({ view, familyId, customerId, cq, tag, made }: { view: LinksVi
 export default async function AccountingLinksPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireStaffPage("Accounting.Link.ReadWrite");
   await requireStaffAlso(ctx, "Roster.Read");
+  // Send the app's to QuickBooks (slice M5a) needs the permission that changes families too: the offers are worked out for
+  // every reader, and its press is drawn only for one who holds it.
+  const maySend = can(ctx.effective, "Roster.Family.ReadWrite");
   const sp = await searchParams;
   const filter = parseLinksFilter(sp);
   // Read before the roster: a press made on this page is refused when the roster was read from another company since.
@@ -338,15 +362,16 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
     { key: "customer", header: "Customer in the books", cell: (r) => (r.customer === null ? (r.status.key === "not_checked" ? "Not checked now" : "None")
       : <>{r.customer.name}<span className="when">{r.customer.email ?? "No email address"}</span></>) },
     { key: "status", header: "Status", cell: (r) => <><StateWords state={ICON[r.status.key]} words={STATUS_WORDS[r.status.key]} /><span className="when"><StatusDetail status={r.status} row={r} /></span></> },
-    { key: "more", header: "Students and guardians", cell: (r) => <Opening row={r} tag={tag} /> },
+    { key: "more", header: "Students and guardians", cell: (r) => <Opening row={r} tag={tag} maySend={maySend} /> },
   ];
   return (
     <main className="wrap single">
       <LinkAnswers>
         <h1 className="page-title">Accounting links</h1>
         <p className="lede">Every family in the portal, beside the customer in the books it is linked to, or the one that looks like its own.
-          A family with no link can be linked here, to its suggestion or a customer you pick, or left unlinked. Nothing here is sent to the books.
-          For a family whose link stands, it also lists where the portal and the books differ. A name, a record the books have inactive or active, or the family the books have a student under can be taken into the portal with Take QuickBooks&apos; into the app, which changes only the portal&apos;s records, except that a student&apos;s move voids an unpaid volunteer buy-out invoice of theirs in the books, as any move does; every other difference is only shown.
+          A family with no link can be linked here, to its suggestion or a customer you pick, or left unlinked. Only two things here send anything to the books: Send the app&apos;s to QuickBooks, and a student&apos;s move taken from the books, which voids an unpaid volunteer buy-out invoice of theirs there.
+          For a family whose link stands, it also lists where the portal and the books differ. A name, a record the books have inactive or active, or the family the books have a student under can be taken into the portal with Take QuickBooks&apos; into the app, which changes only the portal&apos;s records, except that a student&apos;s move voids an unpaid volunteer buy-out invoice of theirs in the books, as any move does.
+          A name, the family a student is in, or a student or member inactive in the portal whose customer the books have active can instead be sent to the books with Send the app&apos;s to QuickBooks, by someone who may also change families: it replaces the books&apos; value with the portal&apos;s, and a make-inactive reads the balance first and sends nothing while there is any. Every other difference is only shown.
           A linked family inactive in the portal whose customer the books have active is listed after the families, and made active again the same way, but its guardians sign in to it only once someone who may change families lets them in, on its page.</p>
         <LinkAnswersShown />
 
@@ -399,7 +424,7 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
                 columns={columns} rows={rows} rowKey={(r) => String(r.familyId)} />}
         </section>
 
-        {view.inactive.length > 0 && <InactivePart rows={view.inactive} tag={tag} familyPages={view.familyPages} />}
+        {view.inactive.length > 0 && <InactivePart rows={view.inactive} tag={tag} familyPages={view.familyPages} maySend={maySend} />}
       </LinkAnswers>
     </main>
   );

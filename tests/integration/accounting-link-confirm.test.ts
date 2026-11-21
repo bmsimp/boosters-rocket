@@ -658,7 +658,10 @@ describe("who may press, and the page", () => {
     expect(pick(await renderPage(AccountingLinksPage, { searchParams: { pick: String(quiet), customer: "20" } }))).toContain("That customer isn&#x27;t one with no family in the portal now");
     // The words of the screen, each true now.
     expect(html).toContain("A family the portal has is linked here");
-    expect(html).toContain("Nothing here is sent to the books.");
+    // Since slice M5a the lede says which two presses send anything to the books (Send the app's to QuickBooks, and a
+    // student's move taken from the books, for its buy-out void): "Nothing here is sent to the books." was no longer true.
+    expect(html).toContain("Only two things here send anything to the books: Send the app&#x27;s to QuickBooks, and a student&#x27;s move taken from the books, which voids an unpaid volunteer buy-out invoice of theirs there.");
+    expect(html).not.toContain("Nothing here is sent to the books.");
     expect(await auditsOf("accounting.link.confirm")).toEqual([]);
   });
 
