@@ -397,7 +397,7 @@ describe("setting it up", () => {
     expect(await audits("parent.authenticator.on")).toHaveLength(1);
   });
 
-  it("is refused while an app is in force, under Strict and with no password, changing nothing", async () => {
+  it("is refused while an app is in force and with no password, changing nothing; under Strict it begins as at Standard (slice SI-10a)", async () => {
     const a = await provedParent();
     const app = await seedAuthenticator(a.identity.parentId);
     expect(await startMyAuthenticator(ctxOf(a.identity))).toEqual({ ok: false, errors: [COPY.appAlreadyOn] });
@@ -409,10 +409,12 @@ describe("setting it up", () => {
     expect(await authenticatorRows(second.identity.parentId)).toEqual([]);
     const b = await seedSignedInParent(FAMILY_B);
     await proveRecently(b.identity);
-    await seedParentSettings({ level: "strict" });
-    expect(await startMyAuthenticator(ctxOf(b.identity))).toEqual({ ok: false, errors: [COPY.appStrictOff] });
-    expect(await authenticatorRows(b.identity.parentId)).toEqual([]);
     expect(await audits("parent.authenticator.setup_started")).toEqual([]);
+    // Strict's own refusal is gone: a proved session sets an app up there as at Standard (an unfinished set-up, its row).
+    await seedParentSettings({ level: "strict" });
+    expect((await startMyAuthenticator(ctxOf(b.identity))).ok).toBe(true);
+    expect((await authenticatorRows(b.identity.parentId)).map((r) => r.confirmedAt)).toEqual([null]);
+    expect(await audits("parent.authenticator.setup_started")).toHaveLength(1);
   });
 });
 
@@ -487,7 +489,7 @@ describe("turning it off", () => {
     expect(await turnOffAuthenticatorAction()).toEqual({ ok: false, errors: [COPY.appNotOn] });
   });
 
-  it("waits for a move to Strict under way (the parents' settings lock, shared, before the person's row), then reads it: setting up and turning off are refused", async () => {
+  it("waits for a move to Strict under way (the parents' settings lock, shared, before the person's row), then reads it: turning off is refused, and setting up begins as at Standard", async () => {
     /** Runs `press` while an Admin's save of the level, holding the settings lock as switches.ts does, moves it to Strict. */
     const whileStrictIsSaved = async <T,>(press: () => Promise<T>): Promise<T> => {
       let locked!: () => void;
@@ -509,8 +511,10 @@ describe("turning it off", () => {
     };
     const a = await provedParent();
     await seedParentSettings({ level: "standard" }); // the row the save changes, stored
-    expect(await whileStrictIsSaved(() => startMyAuthenticator(ctxOf(a.identity)))).toEqual({ ok: false, errors: [COPY.appStrictOff] });
-    expect(await authenticatorRows(a.identity.parentId)).toEqual([]);
+    // Since slice SI-10a Strict refuses no set-up: the press waits for the save, and begins one.
+    expect((await whileStrictIsSaved(() => startMyAuthenticator(ctxOf(a.identity)))).ok).toBe(true);
+    expect((await authenticatorRows(a.identity.parentId)).map((r) => r.confirmedAt)).toEqual([null]);
+    await db.delete(parentAuthenticator).where(eq(parentAuthenticator.parentId, a.identity.parentId));
     await seedParentSettings({ level: "standard" });
     await seedAuthenticator(a.identity.parentId);
     await seedBackupCodes(a.identity.parentId, 2);

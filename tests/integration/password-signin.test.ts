@@ -89,7 +89,6 @@ describe("the password step", () => {
       return "ana@example.com";
     }, "no_enabled_guardian", true],
     ["sign-ins switched off", async () => { await seedAna(); await seedParentSettings({ signin: false }); return "ana@example.com"; }, "signins_off", true],
-    ["the club at Strict", async () => { await seedAna(); await seedParentSettings({ level: "strict" }); return "ana@example.com"; }, "strict_no_factor", true],
     ["a malformed address", async () => { await seedAna(); return "not an address"; }, "not_an_address", false],
     ["a person with no sign-in account", async () => {
       const a = await seedAna();
@@ -291,13 +290,32 @@ describe("the password step", () => {
     expect(await audits("signin.device_used")).toEqual([]);
   });
 
-  it("under Strict, a remembered device signs nobody in by password either", async () => {
+  it("under Strict, a guardian with neither a passkey nor an app is signed in at once as Strict's enrolment, on a remembered device too, which is neither used nor renewed (slice SI-10a)", async () => {
     const ana = await seedAna();
     const { token } = await seedDevice(ana.id);
     await seedParentSettings({ level: "strict" });
-    expect(await answerTo("ana@example.com", DOOR_PASSWORD, `br_parent.device=${token}`)).toEqual([200, REFUSED, []]);
-    expect((await audits("signin.password_refused")).map((r) => r.after)).toEqual([{ reason: "strict_no_factor" }]);
-    expect(await sessions()).toEqual([]);
+    const devicesBefore = await deviceRows(ana.id);
+    for (const cookie of [undefined, `br_parent.device=${token}`]) {
+      const res = await postDoor("/portal-password/check", { email: "ana@example.com", password: DOOR_PASSWORD, next: "/payments" }, { cookie });
+      expect(await res.json()).toEqual({ ok: true, next: "/one-more-step?next=%2Fpayments" });
+      expect(cookieNamed(res, "session_token")).not.toBe("");
+      expect(cookieNamed(res, "device")).toBe("");
+    }
+    expect(await audits("signin.password_refused")).toEqual([]);
+    expect((await audits("signin.second_step_asked")).map((r) => r.after)).toEqual([{ step: "enrol" }, { step: "enrol" }]);
+    expect((await audits("signin")).map((r) => (r.after as { enrolling?: boolean }).enrolling)).toEqual([true, true]);
+    expect(await audits("signin.device_used")).toEqual([]);
+    expect(await audits("signin.device_remembered")).toEqual([]);
+    expect(await deviceRows(ana.id)).toEqual(devicesBefore);
+    // Each session is enrolling: no proof, no device, and a window that ends.
+    const made = await sessions();
+    expect(made).toHaveLength(2);
+    for (const s of made) {
+      expect(s).toMatchObject({ strongAt: null, deviceId: null });
+      expect(s.enrolUntil).not.toBeNull();
+    }
+    expect(outbox).toEqual([]);
+    expect(await db.select().from(signinCode)).toEqual([]);
   });
 
   it("under Strict, a guardian with a passkey is asked for it, on a remembered device too, and sent no code (slice SI-7a)", async () => {

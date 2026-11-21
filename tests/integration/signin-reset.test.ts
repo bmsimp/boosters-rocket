@@ -380,17 +380,20 @@ describe("the way back in for a parent whose only second step is a passkey", () 
 });
 
 describe("under Strict", () => {
-  it("the reset is the same; with a password chosen from its link, the door refuses for want of a second factor and emails no code", async () => {
+  it("the reset is the same; with a password chosen from its link, the link and the door lead only to adding a second factor, and email no code", async () => {
     await seedParentSettings({ ...SIGNINS_ON, level: "strict" });
     const ana = await seedAnaWithEverything();
     expect((await resetSignin(ana.id, asked, ADMIN)).ok).toBe(true);
     expect(await held(ana)).toMatchObject({ passwords: 0, apps: 0, passkeys: 0 });
     const token = tokenIn(mail.outbox[0]!);
-    // A set-up link signs nobody in under Strict (SI-10 leads them to a passkey or an app first).
-    expect(await choosePasswordFromLink({ purpose: "setup", token, password: NEW_PASSWORD, again: NEW_PASSWORD }, { ip: IP })).toMatchObject({ ok: true, signIn: null });
+    // Under Strict a set-up link, for a person left with no second factor, is Strict's enrolment (slice SI-10a), and so
+    // is the password at the door: each leads to /one-more-step and nothing else.
+    expect(await choosePasswordFromLink({ purpose: "setup", token, password: NEW_PASSWORD, again: NEW_PASSWORD }, { ip: IP }))
+      .toMatchObject({ ok: true, signIn: { parentId: ana.id, enrol: true } });
     const since = mail.outbox.length;
-    expect((await passwordStep("ana@example.com", { password: NEW_PASSWORD })).body).toEqual({ ok: false, error: "rejected" });
-    expect((await audits("signin.password_refused")).at(-1)).toMatchObject({ after: { reason: "strict_no_factor" } });
+    expect((await passwordStep("ana@example.com", { password: NEW_PASSWORD })).body).toEqual({ ok: true, next: "/one-more-step" });
+    expect((await audits("signin.second_step_asked")).at(-1)).toMatchObject({ targetId: ana.id, after: { step: "enrol" } });
+    expect(await audits("signin.password_refused")).toEqual([]);
     expect(mail.outbox.slice(since)).toEqual([]);
   });
 });

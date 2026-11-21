@@ -1035,15 +1035,15 @@ describe("the authenticator app box (slice SI-6b)", () => {
     expect(page).not.toContain(COPY.appSetUp);
   });
 
-  it("off and proved: the set-up press; with no password: choose one first; under Strict: words and no press", async () => {
+  it("off and proved: the set-up press, under Strict too (slice SI-10a); with no password: choose one first", async () => {
     const a = await seedSignedInParent(FAMILY_A);
     await proveRecently(a.identity);
     asParent(a.identity);
     expect(box(await renderPage(SignInSettingsPage))).toContain(COPY.appSetUp);
+    // Strict's own words are gone: a proved session sets an app up there as at Standard.
     await seedParentSettings({ level: "strict" });
     const strict = box(await renderPage(SignInSettingsPage));
-    expect(strict).toContain(html(COPY.appStrictOff));
-    expect(strict).not.toContain(COPY.appSetUp);
+    expect(strict).toContain(COPY.appSetUp);
     await seedParentSettings({ level: "standard" });
     const b = await seedSignedInParent(FAMILY_B);
     asParent(b.identity);
