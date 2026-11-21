@@ -10,7 +10,7 @@ import { getConnection } from "@/lib/quickbooks/connection";
 import { WORKER_ACTOR } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster } from "./refresh";
-import { getRosterSource, GIVEN_UP_FOR_COMPANY_NOTE, ROSTER_JOB } from "./source";
+import { getRosterSource, GIVEN_UP_FOR_COMPANY_NOTE, ofRosterCompany, ROSTER_JOB } from "./source";
 import { ROSTER_LOCK } from "./shape";
 import { lockRosterAs, rosterTagOf } from "@/lib/seasons/roster-lock";
 import { alignAfterWrite, applyWritten, balanceUnread, BEING_SENT_NOW, changeOwnRecord, closeEarlierContacts, CONTACT_AWAITS_READ, contactShown, CREDIT_BALANCE, CUSTOMER_HAS_GUARDIAN, EMAIL_TOO_LONG, FAMILY_HELD, guardianCustomerLinked, guardianOf, isSavedFirst, NAME_UNUSABLE, itemLockFree, madeAfterGivingUp, markMoveMoneyStale, moveMoneyNotes, REFRESH_ASK_KEY,
@@ -559,7 +559,7 @@ export function describeWrite(w: QueuedWrite, names: Map<string, string>, o: { s
  */
 export async function loadOpenWrites(o: { familyId?: AppFamilyId; showAmounts?: boolean } = {}): Promise<QueueView[]> {
   const customer = o.familyId === undefined ? null : await customerOfFamily(o.familyId);
-  const where = and(inArray(writeQueue.state, ["waiting", "stuck", "refused"]), o.familyId === undefined ? undefined
+  const where = and(inArray(writeQueue.state, ["waiting", "stuck", "refused"]), ofRosterCompany, o.familyId === undefined ? undefined
     : or(eq(writeQueue.familyId, o.familyId), sql`${writeQueue.request}->>'toFamilyId' = ${String(o.familyId)}`, customer === null ? undefined : eq(writeQueue.targetQboId, customer),
       customer === null ? undefined : sql`${writeQueue.request}->>'toFamilyQboId' = ${customer}`));
   const rows = await db.select().from(writeQueue).where(where).orderBy(desc(writeQueue.createdAt));
@@ -803,7 +803,7 @@ export async function loadMadeAfterGivingUp(): Promise<GivenUpMadeView[]> {
 
 /** How many items are waiting, how many are stuck, and how many changes the portal keeps that QuickBooks refused, for the Health page. */
 export async function queueCounts(): Promise<{ waiting: number; stuck: number; refused: number }> {
-  const rows = await db.select({ state: writeQueue.state, n: sql<number>`count(*)::int` }).from(writeQueue).where(inArray(writeQueue.state, ["waiting", "stuck", "refused"])).groupBy(writeQueue.state);
+  const rows = await db.select({ state: writeQueue.state, n: sql<number>`count(*)::int` }).from(writeQueue).where(and(inArray(writeQueue.state, ["waiting", "stuck", "refused"]), ofRosterCompany)).groupBy(writeQueue.state);
   const n = (state: string) => rows.find((r) => r.state === state)?.n ?? 0;
   return { waiting: n("waiting"), stuck: n("stuck"), refused: n("refused") };
 }
