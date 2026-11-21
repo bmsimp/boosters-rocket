@@ -74,8 +74,8 @@ const uniqueViolated = (e: unknown): string | null => {
  * the row open (its person blocked or not: a link is the books' side, not a sign-in) in an active family record whose
  * family link of the records' company stands; the row with no guardian link of that company; the customer one the row
  * is offered now (guardianOfferOf(): active, of the parent type, directly under the family's customer, with no guardian
- * row of the company, open or closed, linked to it, guardianCustomerLinked() read again too, and no student link naming
- * it); `chosen` what the row offers it as; the stamp holding (guardianLinkStamp()). Then refused, keeping nothing: any
+ * row of the company, open or closed, linked to it, guardianCustomerLinked() read again too, and no student or
+ * family link naming it); `chosen` what the row offers it as; the stamp holding (guardianLinkStamp()). Then refused, keeping nothing: any
  * queue item naming the row, of any op (a parent's change of their details among them), waiting, stuck or kept, so no
  * change asked before the link is sent to a customer it wasn't asked for (the lead's decision 5); any change that blocks
  * others waiting, stuck or kept that targets the customer; the row's or the family's "being sent" lock held. Then one
@@ -192,7 +192,9 @@ export async function unlinkGuardian(raw: { guardianId: unknown; linkId: unknown
       before: { link: { id: link.id, guardianId: row.id, customerQboId: link.customerId, realmId: link.realmId, origin: link.origin, linkedAt: link.linkedAt.toISOString(), linkedBy: link.linkedBy } },
       after: { guardianId: row.id, familyId: String(row.familyId), customerQboId: link.customerId, realmId: link.realmId, endedAt: endedAt.toISOString(),
         detailsWaiting: details.waiting, detailsHeld: details.held } }, tx);
-    return { ok: true, message: guardianUnlinkedWords({ who: row.name, customer: b.customerById.get(link.customerId)?.displayName ?? null, details }), familyId: row.familyId };
+    // Whether the row's opening offers to link them again (guardianBooksOf(), which the row's own link doesn't change).
+    const relink = b.guardianBooksOf(String(row.familyId)) !== null;
+    return { ok: true, message: guardianUnlinkedWords({ who: row.name, customer: b.customerById.get(link.customerId)?.displayName ?? null, details, relink }), familyId: row.familyId };
   });
 }
 
@@ -202,9 +204,11 @@ export async function unlinkGuardian(raw: { guardianId: unknown; linkId: unknown
  * one given up unsent at its next try, contactStopFrom()'s `not_own`; a stuck or kept one left on Reconciliation, which
  * runWriteQueue() never tries by itself); that no Parent customer is made for them by this or by itself later (nothing
  * is queued here, and at a later reinstate queueForGuardian()'s grant holds a second one back while this one stays under
- * the family with no guardian linked to it: `linked_before`, slice M3b2); and that the row can be linked again here.
+ * the family with no guardian linked to it: `linked_before`, slice M3b2); and whether the row can be linked again here:
+ * only where its family may have a guardian linked now (`relink`: guardianBooksOf(), a family link that stands in
+ * layered books with a parent type), and otherwise when that is so.
  */
-export function guardianUnlinkedWords(s: { who: string; customer: string | null; details: { waiting: number; held: number } }): string {
+export function guardianUnlinkedWords(s: { who: string; customer: string | null; details: { waiting: number; held: number }; relink: boolean }): string {
   const parts = [s.customer === null ? `${s.who} is no longer linked to their customer in the books, which the books' copy doesn't hold now.` : `${s.who} is no longer linked to “${s.customer}” in the books.`];
   parts.push(s.customer === null ? "Nothing was sent to the books, and their access in the portal is as it was." : "Nothing was sent to the books, the customer stays there as it is, and their access in the portal is as it was.");
   if (s.details.waiting > 0) parts.push(s.details.waiting === 1 ? "A change of their details on its way to the books is given up unsent at its next try, as that customer is no longer theirs."
@@ -212,6 +216,7 @@ export function guardianUnlinkedWords(s: { who: string; customer: string | null;
   if (s.details.held > 0) parts.push(s.details.held === 1 ? "A change of their details that is stuck or kept stays on the Reconciliation page, where it can be given up."
     : `${s.details.held} changes of their details that are stuck or kept stay on the Reconciliation page, where they can be given up.`);
   parts.push("Nothing is sent for them to a Parent customer now, and no Parent customer is made for them by this, or later by itself.");
-  parts.push("They can be linked to a Parent customer again in the family's row on this page.");
+  parts.push(s.relink ? "They can be linked to a Parent customer again in the family's row on this page."
+    : "Linking them to a Parent customer again isn't offered on this page until their family is linked to a family customer that stands in the books and the membership shape has a parent type.");
   return parts.join(" ");
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
-import { asStaff, revalidatedPaths } from "../helpers/signed-in";
+import { asStaff, renderPage, revalidatedPaths } from "../helpers/signed-in";
 
 // Every request goes to the QuickBooks stub, never Intuit.
 const stubBase = vi.hoisted(() => ({ url: "" }));
@@ -11,7 +11,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, accountingLinkEnded, auditLog, guardian, student, writeQueue, type RosterWrite } from "@/lib/db/schema";
+import { accountingLink, accountingLinkEnded, auditLog, family, guardian, student, writeQueue, type RosterWrite } from "@/lib/db/schema";
 import { QUICKBOOKS, type AppFamilyId } from "@/lib/families/ids";
 import { AccessDenied } from "@/lib/guards";
 import { loadAccountingLinks, type GuardianShown, type LinksView } from "@/lib/accounting/mapping";
@@ -26,6 +26,7 @@ import { saveShape } from "@/lib/roster/shape";
 import { ROSTER_MOVED } from "@/lib/seasons/roster-lock";
 import { linkGuardianAction, unlinkGuardianAction } from "@/app/staff/(app)/links/actions";
 import { familyPage } from "@/app/staff/(app)/family-pages";
+import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
 import { resetDb, seedParent } from "../helpers/db";
 import { fznCompany, startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { asOp, auditsOf, connectRoster, REALM, seedAnaRivera, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
@@ -215,6 +216,15 @@ describe("what Link this guardian refuses, keeping nothing", () => {
     await refused(() => pressMei("21", "suggested"), GUARDIAN_LINK_COPY.notOffered);
   });
 
+  it("a Parent customer a family record's link names (slice M3c's review)", async () => {
+    // May Chen 22, free of every guardian and student link, linked to another family record (one retyped and moved
+    // under the Chens' in the books keeps its family link until someone unlinks it): no longer offered to Mei Chen.
+    const [odd] = await db.insert(family).values({ name: "Odd Family", active: true }).returning({ id: family.id });
+    await db.insert(accountingLink).values({ system: QUICKBOOKS, realmId: REALM, customerId: "22", familyId: odd!.id, origin: "confirmed", linkedBy: linker.id });
+    expect((await shown("Chen Family", "Mei Chen")).offer?.candidates.map((c) => c.qboId)).toEqual(["21"]);
+    await refused(() => pressMei("22", "picked"), GUARDIAN_LINK_COPY.notOffered);
+  });
+
   it("a row linked already, a closed row, and a family with no link, its customer gone or not a family now", async () => {
     await linkRowTo(meiRow, "22");
     await refused(() => pressMei("21", "suggested"), GUARDIAN_LINK_COPY.linkedAlready);
@@ -247,6 +257,8 @@ describe("what Link this guardian refuses, keeping nothing", () => {
     const create: RosterWrite = { op: "create", role: "parent", name: "Mei Chen", typeQboId: "2", familyQboId: "20", email: "mei@example.com", guardianId: meiRow };
     for (const state of ["waiting", "stuck", "refused"] as const) {
       const item = await seedQueued(create, { state });
+      // The row's opening draws no Link this guardian, and says why (slice M3c's review).
+      expect(await shown("Chen Family", "Mei Chen")).toMatchObject({ offer: null, linkHeld: { row: 1, customers: 0 } });
       await refused(() => pressMei("21", "suggested"), GUARDIAN_LINK_COPY.rowWaiting(1));
       await db.delete(writeQueue).where(eq(writeQueue.id, item.id));
     }
@@ -255,6 +267,10 @@ describe("what Link this guardian refuses, keeping nothing", () => {
     await db.delete(writeQueue).where(eq(writeQueue.id, contact.id));
     // A rename of the Parent customer asked from the family's page (QuickBooks first, naming no guardian).
     await seedQueued({ op: "rename", role: "parent", qboId: "21", syncToken: "0", name: "M. Chen", was: "Mei Chen" });
+    // 21 isn't drawn, so none is filled in; May Chen 22 still is, picked, and its stamp is the one the press takes.
+    const g = await shown("Chen Family", "Mei Chen");
+    expect(g).toMatchObject({ offer: { candidates: [{ qboId: "22" }], suggested: null }, linkHeld: { row: 0, customers: 1 } });
+    expect(g.offer!.stamps["22"]).toBe(guardianLinkStamp(meiRow, await chenLinkId(), "22", "picked"));
     await refused(() => pressMei("21", "suggested"), GUARDIAN_LINK_COPY.customerWaiting(1));
   });
 
@@ -275,6 +291,7 @@ describe("what Link this guardian refuses, keeping nothing", () => {
     await refused(() => linkGuardian({ guardianId: "not a uuid", customerId: "21", chosen: "suggested", stamp: "x" }, tag, linkOp()), LINK_COPY.notFromPage);
     asStaff(linker);
     await refused(() => linkGuardianAction(meiRow, "21", "suggested", tag, null as never), LINK_COPY.notFromPage);
+    for (const customerId of ["not an id", "", "1".repeat(20), 21 as never]) await refused(() => linkGuardianAction(meiRow, customerId, "suggested", tag, "x"), LINK_COPY.notFromPage);
   });
 
   it("a holder of the linking permission without Roster.Read, and one without the linking permission, as the guard refuses", async () => {
@@ -296,7 +313,7 @@ describe("Unlink this guardian", () => {
     const rowBefore = (await db.select().from(guardian).where(eq(guardian.id, anaRow)))[0];
     asStaff(linker);
     const r = await unlinkGuardianAction(anaRow, g.unlink!.linkId, tag, g.unlink!.stamp);
-    expect(r).toEqual({ ok: true, message: guardianUnlinkedWords({ who: "Ana Rivera", customer: "Ana Rivera", details: { waiting: 0, held: 0 } }) });
+    expect(r).toEqual({ ok: true, message: guardianUnlinkedWords({ who: "Ana Rivera", customer: "Ana Rivera", details: { waiting: 0, held: 0 }, relink: true }) });
     expect(r.ok && r.message).toBe("Ana Rivera is no longer linked to “Ana Rivera” in the books. Nothing was sent to the books, the customer stays there as it is, and their access in the portal is as it was."
       + " Nothing is sent for them to a Parent customer now, and no Parent customer is made for them by this, or later by itself. They can be linked to a Parent customer again in the family's row on this page.");
     expect(revalidatedPaths()).toEqual(expect.arrayContaining(["/staff/links", familyPage(rivera)]));
@@ -346,9 +363,82 @@ describe("Unlink this guardian", () => {
     expect(await everything()).toEqual(before);
     await seedQueued({ op: "contact", role: "parent", qboId: "11", syncToken: "0", change: { phone: "555-0102" }, was: { phone: "555-0101" }, guardianId: anaRow });
     const r = await press();
-    expect(r).toEqual({ ok: true, message: guardianUnlinkedWords({ who: "Ana Rivera", customer: "Ana Rivera", details: { waiting: 1, held: 0 } }), familyId: rivera });
+    expect(r).toEqual({ ok: true, message: guardianUnlinkedWords({ who: "Ana Rivera", customer: "Ana Rivera", details: { waiting: 1, held: 0 }, relink: true }), familyId: rivera });
     expect(r.ok && r.message).toContain("A change of their details on its way to the books is given up unsent at its next try, as that customer is no longer theirs.");
     expect((await db.select().from(writeQueue))).toEqual([expect.objectContaining({ state: "waiting" })]);
+    expect(stub.apiCalls()).toEqual([]);
+  });
+
+  it("is refused while a change naming the row waits, the family's lock is held, with a stale stamp or another roster tag, keeping nothing", async () => {
+    const g = await shown("Rivera Family", "Ana Rivera");
+    const press = (o: { stamp?: string; tag?: string } = {}) => unlinkGuardian({ guardianId: anaRow, linkId: g.unlink!.linkId, stamp: o.stamp ?? g.unlink!.stamp }, o.tag ?? tag, linkOp());
+    // A rename of her Parent customer through her row: one item naming the row and targeting 11, counted once.
+    const rename = await seedQueued({ op: "rename", role: "parent", qboId: "11", syncToken: "0", name: "A. Rivera", was: "Ana Rivera", guardianId: anaRow });
+    expect(await shown("Rivera Family", "Ana Rivera")).toMatchObject({ unlink: null, unlinkHeld: 1 });
+    let before = await everything();
+    expect(await press()).toEqual({ ok: false, errors: [GUARDIAN_LINK_COPY.unlinkWaiting(1)] });
+    expect(await everything()).toEqual(before);
+    await db.delete(writeQueue).where(eq(writeQueue.id, rename.id));
+    before = await everything();
+    const release = await holdLock(SENDING_LOCK, String(rivera));
+    expect(await press()).toEqual({ ok: false, errors: [GUARDIAN_LINK_COPY.unlinkBusy] });
+    await release();
+    expect(await press({ stamp: "x".repeat(22) })).toEqual({ ok: false, errors: [GUARDIAN_LINK_COPY.unlinkChanged] });
+    expect(await press({ tag: "another company" })).toEqual({ ok: false, errors: [ROSTER_MOVED] });
+    expect(await unlinkGuardian({ guardianId: anaRow, linkId: "not a uuid", stamp: g.unlink!.stamp }, tag, linkOp())).toEqual({ ok: false, errors: [LINK_COPY.notFromPage] });
+    expect(await everything()).toEqual(before);
+    expect(stub.apiCalls()).toEqual([]);
+  });
+
+  it("through the action, refuses anything the page doesn't send, and a reader the guard refuses", async () => {
+    const g = await shown("Rivera Family", "Ana Rivera");
+    const before = await everything();
+    asStaff(linker);
+    const call = unlinkGuardianAction as unknown as (...a: unknown[]) => Promise<unknown>;
+    for (const args of [["not a uuid", g.unlink!.linkId, tag, g.unlink!.stamp], [anaRow, "not a uuid", tag, g.unlink!.stamp], [anaRow, g.unlink!.linkId, tag, 7], [anaRow, g.unlink!.linkId, null, g.unlink!.stamp]]) {
+      expect(await call(...args)).toEqual({ ok: false, errors: [LINK_COPY.notFromPage] });
+    }
+    for (const who of [await staffWith("onlylink@club.org", ["Accounting.Link.ReadWrite"]), await staffWith("onlyread@club.org", ["Roster.Read", "Roster.Family.ReadWrite"])]) {
+      asStaff(who);
+      await expect(unlinkGuardianAction(anaRow, g.unlink!.linkId, tag, g.unlink!.stamp)).rejects.toBeInstanceOf(AccessDenied);
+    }
+    expect(await everything()).toEqual(before);
+    expect(stub.apiCalls()).toEqual([]);
+  });
+
+  it("ends a link to a customer the books' copy doesn't hold, and one to a customer elsewhere in the books", async () => {
+    const gone = await rowIn(chen, "20", "Gus Chen", "gus@example.com");
+    await linkRowTo(gone, "999");
+    const elsewhere = await rowIn(chen, "20", "Eli Chen", "eli@example.com");
+    await linkRowTo(elsewhere, "24");
+    const view = await loadAccountingLinks();
+    const gus = guardianIn(view, "Chen Family", "Gus Chen"), eli = guardianIn(view, "Chen Family", "Eli Chen");
+    expect(gus).toMatchObject({ standing: "gone", relink: true });
+    expect(eli).toMatchObject({ standing: "elsewhere", link: { state: "linked", customer: "Kim Chen" } });
+    asStaff(linker);
+    expect(await unlinkGuardianAction(gone, gus.unlink!.linkId, tag, gus.unlink!.stamp))
+      .toEqual({ ok: true, message: guardianUnlinkedWords({ who: "Gus Chen", customer: null, details: { waiting: 0, held: 0 }, relink: true }) });
+    expect(await unlinkGuardianAction(elsewhere, eli.unlink!.linkId, tag, eli.unlink!.stamp))
+      .toEqual({ ok: true, message: guardianUnlinkedWords({ who: "Eli Chen", customer: "Kim Chen", details: { waiting: 0, held: 0 }, relink: true }) });
+    expect(await linkOfRow(gone)).toBeUndefined();
+    expect(await linkOfRow(elsewhere)).toBeUndefined();
+    expect((await db.select().from(accountingLinkEnded)).map((e) => e.customerId).sort()).toEqual(["24", "999"]);
+    expect(stub.apiCalls()).toEqual([]);
+    expect(await db.select().from(writeQueue)).toEqual([]);
+  });
+
+  it("where the family's link doesn't stand, doesn't say they can be linked again here", async () => {
+    await linkRowTo(meiRow, "21");
+    stub.customers = stub.customers.map((c) => (c.Id === "20" ? { ...c, CustomerTypeRef: { value: "4" } } : c));
+    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    // The read's own requests are the roster's, not the press's.
+    stub.calls.length = 0;
+    const linked = await shown("Chen Family", "Mei Chen");
+    expect(linked).toMatchObject({ relink: false, unlink: { linkId: expect.any(String) } });
+    const r = await unlinkGuardian({ guardianId: meiRow, linkId: linked.unlink!.linkId, stamp: linked.unlink!.stamp }, tag, linkOp());
+    expect(r).toEqual({ ok: true, message: guardianUnlinkedWords({ who: "Mei Chen", customer: "Mei Chen", details: { waiting: 0, held: 0 }, relink: false }), familyId: chen });
+    expect(r.ok && r.message).toContain("Linking them to a Parent customer again isn't offered on this page until their family is linked to a family customer that stands in the books and the membership shape has a parent type.");
+    expect(r.ok && r.message).not.toContain("again in the family's row");
     expect(stub.apiCalls()).toEqual([]);
   });
 
@@ -362,6 +452,30 @@ describe("Unlink this guardian", () => {
     expect(stub.apiCalls()).toEqual([]);
     expect((await guardianStandings([{ guardianId: anaRow, familyId: rivera, name: "Ana Rivera", open: true }])).get(anaRow))
       .toBe("QuickBooks has the Parent customer “Ana Rivera” under this family that they were linked to until that link ended, so no second one is made. No Parent customer in QuickBooks is linked to them, and none is being made: while it is active, it can be linked to them again on Accounting links, in the opening of the family's row.");
+  });
+});
+
+describe("the family's page points at Accounting links only for a reader who may link (slice M3c)", () => {
+  const sectionOf = (html: string, id: string) => { const at = html.indexOf(`id="${id}"`); return html.slice(at, html.indexOf("</section>", at)); };
+  const text = (html: string) => html.replace(/<[^>]+>/g, "").replaceAll("&#x27;", "'").replaceAll("&quot;", '"').replaceAll("&amp;", "&");
+  it("a Parent customer two of the family's guardians share: how it is sorted out, with a link or in words", async () => {
+    await linkRowTo(await rowIn(rivera, "10", "Rafa Rivera", "rafa@example.com"), "11");
+    const sortedOut = "unlink from it each guardian whose it isn't; once one guardian of this family alone is linked to it, it is theirs, and if none of this family's is left on it, one who isn't linked to a customer can be linked to it there";
+    asStaff(await staffWith("both@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Accounting.Link.ReadWrite"]));
+    let html = await renderPage(RosterEntryPage, { params: { id: String(rivera) } });
+    let parents = sectionOf(html, "entry-parents-h"), changes = sectionOf(html, "family-changes-h");
+    expect(text(parents)).toContain(`so the portal sends nothing for it: change it in QuickBooks, or on Accounting links ${sortedOut}`);
+    expect(parents).toContain('href="/staff/links"');
+    expect(text(changes)).toContain("so the portal sends nothing for it: change it in QuickBooks, or on Accounting links unlink from it each guardian whose it isn't. Once one guardian of this family alone is linked to it, it is theirs;");
+    expect(changes).toContain('href="/staff/links"');
+    asStaff(await staffWith("reader@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    html = await renderPage(RosterEntryPage, { params: { id: String(rivera) } });
+    parents = sectionOf(html, "entry-parents-h"); changes = sectionOf(html, "family-changes-h");
+    expect(text(parents)).toContain(`change it in QuickBooks, or on Accounting links, by someone who may link families to accounting, ${sortedOut}`);
+    expect(text(changes)).toContain("change it in QuickBooks, or on Accounting links, by someone who may link families to accounting, unlink from it each guardian whose it isn't.");
+    expect(parents).not.toContain('href="/staff/links"');
+    expect(changes).not.toContain('href="/staff/links"');
+    expect(stub.apiCalls()).toEqual([]);
   });
 });
 

@@ -82,8 +82,9 @@ function standingWords(g: GuardianShown): string {
   switch (g.standing) {
     case null: return "";
     case "own": return ", their own Parent customer under this family";
-    case "shared": return g.sharedWith.length === 0 ? ", which another guardian of this family is linked to as well, so it is nobody's own and nothing is sent for them: unlink all but one guardian from it to make it that guardian's own"
-      : `, which a guardian of ${listed(g.sharedWith)} is linked to as well, so it is nobody's own and nothing is sent for them: unlink all but one guardian from it to make it that guardian's own`;
+    // Only a Parent customer directly under this family's customer is `shared` (guardianLinkOf()): one guardian of this family left on it alone is theirs.
+    case "shared": return g.sharedWith.length === 0 ? ", which another guardian of this family is linked to as well, so it is nobody's own and nothing is sent for them: unlink every guardian from it but one of this family's to make it that guardian's own"
+      : `, which a guardian of ${listed(g.sharedWith)} is linked to as well, so it is nobody's own and nothing is sent for them: unlink every guardian from it but one of this family's to make it that guardian's own`;
     case "elsewhere": return ", which isn't a Parent customer directly under this family's customer in the books, so nothing is sent for them";
     case "gone": return ", so nothing is sent for them";
   }
@@ -91,8 +92,26 @@ function standingWords(g: GuardianShown): string {
 
 /** What Link this guardian does, said beside every one (linkGuardian(), src/lib/accounting/guardian-links.ts). */
 const GUARDIAN_LINK_EFFECT = "Linking sends nothing to the books and changes nothing of their access in the portal. From then on, a rename of them, their removal from this family and a change of their phone, mailing address or sign-in email go to that Parent customer, by the portal's own rules, while it is theirs alone under this family. The details the portal holds for them now aren't sent by it.";
-/** What Unlink this guardian does, as a warning beside every one (unlinkGuardian()). */
-const GUARDIAN_UNLINK_EFFECT = (who: string) => `Unlinking ends only ${who}'s own link: nothing is sent to the books, the customer stays there as it is, and their access in the portal is as it was. A change of their details still waiting to reach it is given up unsent at its next try. Nothing is sent for them to a Parent customer then, and no Parent customer is made for them by this, or later by itself. They can be linked again here. It isn't unlinked while a change of theirs or of that customer waits on Reconciliation.`;
+/**
+ * What Unlink this guardian does, as a warning beside every one (unlinkGuardian()): a change of their details refuses
+ * it nothing (a waiting one is given up at its next try, a stuck or kept one stays on Reconciliation), and linking them
+ * again is offered here only where the family may have a guardian linked (`relink`). The press is drawn only while
+ * nothing on the queue holds it back (`unlinkHeld`), so the warning needn't say what does.
+ */
+const GUARDIAN_UNLINK_EFFECT = (who: string, relink: boolean) => `Unlinking ends only ${who}'s own link: nothing is sent to the books, the customer stays there as it is, and their access in the portal is as it was. A change of their details waiting to reach it is given up unsent at its next try, and one that is stuck or kept stays on the Reconciliation page, where it can be given up. Nothing is sent for them to a Parent customer then, and no Parent customer is made for them by this, or later by itself. ${relink ? "They can be linked again here." : "Linking them again isn't offered here until this family is linked to a family customer that stands in the books and the membership shape has a parent type."}`;
+
+/** Reconciliation's list of changes, where a change the queue holds is shown with what can be done about it. */
+const RECONCILIATION_CHANGES = "/staff/reconciliation#writes-h";
+const isAre = (n: number) => (n === 1 ? "is" : "are");
+/** What on the write queue holds Link this guardian back (GuardianShown.linkHeld), in words; null for nothing. */
+function linkHeldWords(g: GuardianShown): string | null {
+  const h = g.linkHeld;
+  if (h === null) return null;
+  if (h.row > 0) return `${h.row === 1 ? "A change" : `${h.row} changes`} for ${g.name} ${isAre(h.row)} waiting, stuck or kept on the Reconciliation page, so linking them isn't offered until ${h.row === 1 ? "it has" : "they have"} gone through or been given up there.`;
+  return `${h.customers === 1 ? "A Parent customer" : `${h.customers} Parent customers`} under this family that no guardian is linked to ${h.customers === 1 ? "has" : "have"} a change waiting, stuck or kept on the Reconciliation page, so ${h.customers === 1 ? "it isn't" : "they aren't"} offered until it has gone through or been given up there.`;
+}
+/** What on the write queue holds Unlink this guardian back (GuardianShown.unlinkHeld), in words. */
+const unlinkHeldWords = (g: GuardianShown) => `${g.unlinkHeld === 1 ? "A change" : `${g.unlinkHeld} changes`} of ${g.name}'s Parent customer, or of the customer they are linked to, ${isAre(g.unlinkHeld)} waiting, stuck or kept on the Reconciliation page, so unlinking them isn't offered until ${g.unlinkHeld === 1 ? "it has" : "they have"} gone through or been given up there.`;
 
 /** One open guardian of the row's opening (since slice M3c with its link's standing, Link this guardian or Unlink this guardian). */
 function GuardianLine({ g, row, tag }: { g: GuardianShown; row: LinkRow; tag: string }) {
@@ -108,20 +127,19 @@ function GuardianLine({ g, row, tag }: { g: GuardianShown; row: LinkRow; tag: st
           <p>{GUARDIAN_LINK_EFFECT}</p>
         </>
       )}
+      {linkHeldWords(g) !== null && <p>{linkHeldWords(g)} <Link href={RECONCILIATION_CHANGES}>See the changes on Reconciliation<span className="visually-hidden">: {g.name}</span></Link></p>}
+      {g.unlinkHeld > 0 && <p>{unlinkHeldWords(g)} <Link href={RECONCILIATION_CHANGES}>See the changes on Reconciliation<span className="visually-hidden">: {g.name}</span></Link></p>}
       {g.noOffer !== null && <p>{g.noOffer.why === "elsewhere" ? `Their own record in the books is under ${g.noOffer.family}, and the portal links it there, so none is offered here.`
         : "There is no active Parent customer under this family in the books that no guardian is linked to, so none can be linked to them here."}</p>}
       {g.unlink !== null && (
         <>
-          <Notice tone="warning" live="none">{GUARDIAN_UNLINK_EFFECT(g.name)}</Notice>
+          <Notice tone="warning" live="none">{GUARDIAN_UNLINK_EFFECT(g.name, g.relink)}</Notice>
           <div className="row-actions"><LinkPress label={`Unlink ${g.name} from this Parent customer`} busy="Unlinking…" about={row.name} act={unlinkGuardianAction.bind(null, g.id, g.unlink.linkId, tag, g.unlink.stamp)} /></div>
         </>
       )}
     </li>
   );
 }
-
-/** Reconciliation's list of changes, where a change the queue holds is shown with what can be done about it. */
-const RECONCILIATION_CHANGES = "/staff/reconciliation#writes-h";
 
 /**
  * One difference, with both values as text, and the change on the write queue that explains it, in the queue's own
