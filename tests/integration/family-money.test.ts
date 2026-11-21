@@ -23,14 +23,15 @@ vi.mock("@/lib/families/links", async (original) => {
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, family, familyMoney, qboConnection, qboCustomer, setting } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, familyMoney, qboConnection, qboCustomer, qboCustomerType, setting, type StoredInvoice } from "@/lib/db/schema";
 import { asAppFamilyId, type AppFamilyId } from "@/lib/families/ids";
 import { loadFamilyMoney, MAX_LIVE_READS, readFamilyForRun, RELINKED, RETRY_AFTER_FAILURE_MS } from "@/lib/money/family-money";
 import { saveShape } from "@/lib/roster/shape";
 import { linkFamilyToCustomer, unlinkFamily } from "@/lib/accounting/link-writes";
 import { loadAccountingLinks } from "@/lib/accounting/mapping";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
-import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
+import { clearRosterOfOtherCompany, getRosterSource, setRosterSource } from "@/lib/roster/source";
+import { mayShow } from "@/lib/money/stored";
 import { calendarDayIn } from "@/lib/settings/club";
 import { resetDb, untilALockIsAwaited } from "../helpers/db";
 import { staffWith } from "../helpers/roster-writes";
@@ -38,7 +39,7 @@ import { syncAppRecords } from "../helpers/app-records";
 import { ageMoney, connectCompany, familyRecordOf, invoiceQueries, moneyRow, setFreshSeconds, stubInvoice as inv } from "../helpers/money";
 import { FAMILY_A, MONEY_REALM, seedFamilyMoney } from "../helpers/parent";
 import { seedConnected, startQboStub, type QboStub } from "../helpers/qbo-stub";
-import { addToCache, fam, moveInCache, par, seedShape, stu } from "../helpers/roster-cache";
+import { addToCache, fam, moveInCache, P_TYPES, par, seedShape, storeShape, stu } from "../helpers/roster-cache";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -828,6 +829,37 @@ describe("never the wrong company", () => {
     expect(await clearRosterOfOtherCompany("2222", SYSTEM)).toBe(true);
     expect(await db.select().from(familyMoney)).toHaveLength(0);
     expect(await db.select().from(qboCustomer)).toHaveLength(0);
+  });
+
+  // Stage 4's slice M7a: the families outlive a change of company, so a read of the old company that finishes just
+  // after the clear (readAndKeep() holds only the family's own lock) no longer trips a foreign key: its row is stored,
+  // with the old company's `realm_id`. It is never shown (mayShow()), and the next read in the new company replaces it.
+  it("never shows a row the old company's read kept after the clear, and replaces it at the next read", async () => {
+    await twoFamilies();
+    await connectCompany(stub);
+    const rivera = (await familyRecordOf("10"))!;
+    expect(await clearRosterOfOtherCompany("2222", SYSTEM)).toBe(true);
+    expect(await db.select().from(familyMoney)).toEqual([]);
+    // The old company's read upserts as it finishes, fresh and complete.
+    const late: StoredInvoice = { qboId: "1", number: "INV-1", customerQboId: "10", forName: null, date: "2026-11-01", dueDate: "2026-12-01", totalCents: 8500, balanceCents: 8500,
+      currency: "USD", payLink: null, itemQboIds: [] };
+    await db.insert(familyMoney).values({ familyId: rivera, realmId: MONEY_REALM, readAt: new Date(), invoices: [late], totalCents: 8500, currency: "USD", balanceWithJobsCents: 8500 });
+    const [row] = await db.select().from(familyMoney).where(eq(familyMoney.familyId, rivera));
+    const customers = { familyName: "Rivera Family", customers: new Map<string, string | null>([["10", null]]), othersUnder: false };
+    expect(mayShow(row, await getRosterSource(), customers)).toBe(false);
+    expect(mayShow(row, MONEY_REALM, customers)).toBe(true); // only the company decides it
+    // The new company: connected, its types and its customer 10 read, the shape saved, and the family linked to that
+    // customer on the accounting links screen (each written here, so no import runs).
+    await seedConnected(stub, { realmId: "2222" });
+    await db.insert(qboCustomerType).values(P_TYPES.map((t) => ({ ...t, active: true })));
+    await db.insert(qboCustomer).values({ qboId: "10", displayName: "Rivera Family", active: true, parentQboId: null, typeQboId: "F", syncToken: "0" });
+    await storeShape();
+    await db.insert(accountingLink).values({ system: "quickbooks", realmId: "2222", customerId: "10", familyId: rivera, origin: "confirmed", linkedBy: randomUUID() });
+    stub.invoices = [inv("7", "10", { TotalAmt: 42, Balance: 42 })];
+    const shown = await moneyOf("10");
+    expect(shown.figures).toMatchObject({ current: true, totalCents: 4200 });
+    expect(JSON.stringify(shown)).not.toContain("INV-1\"");
+    expect((await db.select().from(familyMoney).where(eq(familyMoney.familyId, rivera)))[0]).toMatchObject({ realmId: "2222", totalCents: 4200 });
   });
 
   it("refuses at once when only an Admin can fix the connection, and shows the last figures", async () => {
