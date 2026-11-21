@@ -87,18 +87,19 @@ export const unlinkAction = staffAction(P, async (ctx: StaffCtx, familyId: strin
 });
 
 /**
- * Take QuickBooks' into the app (slice M4a): what the row's difference takes (`name`, `inactive` or `place`), the kind
- * of record (`family` or `student`; a place is always a student's), the record's app id, the roster tag and the stamp
- * sealing the value the row showed. The linking permission and the page's Roster.Read settle it (the owner's choice 6,
- * as recommended): nothing is sent to the books but the buy-out void a student's move brings, as any move's, and the
- * library works the value out again under the roster lock.
+ * Take QuickBooks' into the app (slice M4a): what the row's difference takes (`name`, `inactive` or `place`, and since
+ * slice M4b `active`), the kind of record (`family` or `student`; a place is always a student's), the record's app id,
+ * the roster tag and the stamp sealing the value the row showed. The linking permission and the page's Roster.Read
+ * settle it (the owner's choice 6, as recommended): nothing is sent to the books but the buy-out void a student's move
+ * brings, as any move's, and the library works the value out again under the roster lock. A record made active again
+ * holds its family's sign-ins, which only Roster.Family.ReadWrite releases (releaseSigninHoldAction(), ../parents/actions.ts).
  */
 export const takeDifferenceAction = staffAction(P, async (ctx: StaffCtx, field: string, kind: string, recordId: string, rosterTag: string, stamp: string): Promise<LinkDone> => {
   await requireStaffActionAlso(ctx, "Roster.Read");
-  if (!(field === "name" || field === "inactive" || field === "place") || !(kind === "family" || kind === "student") || (field === "place" && kind !== "student")
+  if (!(field === "name" || field === "inactive" || field === "active" || field === "place") || !(kind === "family" || kind === "student") || (field === "place" && kind !== "student")
     || !str(recordId, ID_MAX) || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return NOT_FROM_PAGE;
   const r = await takeFromBooks(field === "place" ? { field, studentId: recordId, stamp } : { field, kind, recordId, stamp }, rosterTag, op(ctx));
-  // A name, a record made inactive or a student moved changes the Families pages, Balances and the family's pages.
+  // A name, a record made inactive or active again, or a student moved changes the Families pages, Balances and the family's pages.
   if (r.ok) revalidatePath("/", "layout");
   else again();
   return r;
