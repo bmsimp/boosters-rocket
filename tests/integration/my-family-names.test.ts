@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { family, guardian } from "@/lib/db/schema";
+import { accountingLink, family } from "@/lib/db/schema";
+import { setRosterSource } from "@/lib/roster/source";
 import { recordNameWords } from "@/lib/families/words";
 import { myFamilyNames, numberedWhereRepeated } from "@/lib/parents/my-family-names";
 import { enterableGuardianRows } from "@/lib/parents/sessions";
@@ -15,11 +16,9 @@ import { resetDb, seedGuardian, seedParent } from "../helpers/db";
 const UNKNOWN = recordNameWords(null, "family");
 
 /** A guardian row of this person in a new family record of this name (null: the portal knows none). */
-async function rowIn(parentId: string, familyQboId: string, name: string | null) {
-  const g = await seedGuardian({ parentId, familyQboId });
+async function rowIn(parentId: string, name: string | null) {
   const [f] = await db.insert(family).values({ name, active: true }).returning({ id: family.id });
-  await db.update(guardian).set({ familyId: f!.id }).where(eq(guardian.id, g.id));
-  return g.id;
+  return (await seedGuardian({ parentId, familyId: f!.id })).id;
 }
 
 describe("numberedWhereRepeated()", () => {
@@ -43,7 +42,7 @@ describe("myFamilyNames()", () => {
 
   it("gives a family named like another's numbered label a number of its own", async () => {
     const ana = await seedParent({ name: "Ana", email: "ana@example.com" });
-    const named = await rowIn(ana.id, "F1", `${UNKNOWN} (1)`), first = await rowIn(ana.id, "F2", null), second = await rowIn(ana.id, "F3", null);
+    const named = await rowIn(ana.id, `${UNKNOWN} (1)`), first = await rowIn(ana.id, null), second = await rowIn(ana.id, null);
     const names = await myFamilyNames(ana.id, [named, first, second]);
     expect([...names.entries()]).toEqual([[named, `${UNKNOWN} (1)`], [first, `${UNKNOWN} (2)`], [second, `${UNKNOWN} (3)`]]);
   });
@@ -51,8 +50,8 @@ describe("myFamilyNames()", () => {
   it("answers nothing for a row that isn't the person's, and does not count it toward the numbering", async () => {
     const ana = await seedParent({ name: "Ana", email: "ana@example.com" });
     const ben = await seedParent({ name: "Ben", email: "ben@example.com" });
-    const bens = await rowIn(ben.id, "F9", null);
-    const first = await rowIn(ana.id, "F1", null), only = await rowIn(ana.id, "F2", "Birch Family");
+    const bens = await rowIn(ben.id, null);
+    const first = await rowIn(ana.id, null), only = await rowIn(ana.id, "Birch Family");
     const nobody = "5b0e7f0a-3c1d-4a52-9f0e-3a1b2c3d4e72";
     const names = await myFamilyNames(ana.id, [bens, first, nobody, only]);
     // Ben's row and an id of no row get no entry; Ana's one unnamed family is alone, so it has no number.
@@ -63,22 +62,40 @@ describe("myFamilyNames()", () => {
 });
 
 describe("the chooser's order (enterableGuardianRows())", () => {
-  beforeEach(async () => { await resetDb(); });
+  const REALM = "9130000000000079";
+  beforeEach(async () => { await resetDb(); await db.transaction((tx) => setRosterSource(tx, REALM)); });
 
-  it("keeps the rows that name a customer in their place, by customer, and puts those that name none (slice 9d) after them, by row", async () => {
+  /** A family record of this name linked to `customer` in the roster's company, as the import makes one. */
+  async function linkedFamily(customer: string, name: string) {
+    const [f] = await db.insert(family).values({ name, active: true }).returning({ id: family.id });
+    await db.insert(accountingLink).values({ system: "quickbooks", realmId: REALM, customerId: customer, familyId: f!.id, origin: "carried_over" });
+    return f!.id;
+  }
+  const rowOf = async (parentId: string, familyId: Awaited<ReturnType<typeof linkedFamily>>) => (await seedGuardian({ parentId, familyId })).id;
+
+  it("orders the rows by the customer their family's own link names, then those of families with no link (slice 9d), by row", async () => {
     const ana = await seedParent({ name: "Ana", email: "ana@example.com" });
-    const second = await rowIn(ana.id, "F2", "Birch Family"), first = await rowIn(ana.id, "F1", "Ash Family");
-    // Two families staff added in the portal while they had no link: rows naming no customer.
-    const byHand: string[] = [];
-    for (const name of ["Ash Family", "Cedar Family"]) {
-      const [f] = await db.insert(family).values({ name, active: true }).returning({ id: family.id });
-      const [g] = await db.insert(guardian).values({ parentId: ana.id, familyQboId: null, familyId: f!.id, status: "invited" }).returning({ id: guardian.id });
-      byHand.push(g!.id);
-    }
-    byHand.sort();
+    const second = await rowOf(ana.id, await linkedFamily("F2", "Birch Family")), first = await rowOf(ana.id, await linkedFamily("F1", "Ash Family"));
+    // Two families staff added in the portal, with no link.
+    const byHand = [await rowIn(ana.id, "Ash Family"), await rowIn(ana.id, "Cedar Family")].sort();
     expect((await enterableGuardianRows(ana.id)).map((r) => r.id)).toEqual([first, second, ...byHand]);
     // The two Ash families are told apart by that place: the linked one stays "(1)".
     const names = await myFamilyNames(ana.id, [first, second, ...byHand]);
     expect(names.get(first)).toBe("Ash Family (1)");
+  });
+
+  it("places a row made while its family had no link among the linked ones once the family is linked, and at the end again once it is unlinked", async () => {
+    const ana = await seedParent({ name: "Ana", email: "ana@example.com" });
+    const ash = await rowOf(ana.id, await linkedFamily("F1", "Ash Family")), cedar = await rowOf(ana.id, await linkedFamily("F3", "Cedar Family"));
+    const [birch] = await db.insert(family).values({ name: "Birch Family", active: true }).returning({ id: family.id });
+    const made = await rowOf(ana.id, birch!.id);
+    expect((await enterableGuardianRows(ana.id)).map((r) => r.id)).toEqual([ash, cedar, made]);
+    // Linked since (a Confirm on the accounting links screen): its row takes its family's customer's place.
+    await db.insert(accountingLink).values({ system: "quickbooks", realmId: REALM, customerId: "F2", familyId: birch!.id, origin: "confirmed" });
+    expect((await enterableGuardianRows(ana.id)).map((r) => r.id)).toEqual([ash, made, cedar]);
+    // Another company's link names no place: only the roster's company's does.
+    await db.delete(accountingLink).where(eq(accountingLink.familyId, birch!.id));
+    await db.insert(accountingLink).values({ system: "quickbooks", realmId: "9130000000000080", customerId: "F0", familyId: birch!.id, origin: "carried_over" });
+    expect((await enterableGuardianRows(ana.id)).map((r) => r.id)).toEqual([ash, cedar, made]);
   });
 });

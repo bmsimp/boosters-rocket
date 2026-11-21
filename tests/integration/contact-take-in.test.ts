@@ -11,9 +11,9 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 // The worker's wake (runDueJobs()) reaches modules that read request headers; it has none.
 vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: async () => ({ get: () => undefined }) }));
 
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, family, jobRun, parent, qboCustomer, setting } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, jobRun, parent, qboCustomer, setting } from "@/lib/db/schema";
 import { TAKE_IN_ASK_EVERY_MS, TAKE_IN_JOB, TAKE_IN_KEY, noteAddressesKept, planContactTakeIn, takeInContactDetails, writeContactTakeIn } from "@/lib/parents/contact-take-in";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { saveShape } from "@/lib/roster/shape";
@@ -193,6 +193,26 @@ describe("the take-in of a guardian's phone and mailing address, once", () => {
     expect(await takeInContactDetails()).toMatchObject({ ran: true, counts: { peopleGivenPhone: 0, peopleGivenAddress: 0, peopleWithNoRecord: 2 } });
     for (const id of [a.identity.parentId, added.identity.parentId]) expect(await personDetails(id)).toEqual({ values: NO_DETAILS, version: 0 });
     expect(Date.parse((await takeInSetting()).doneAt!)).not.toBeNaN();
+  });
+
+  it("finds a row's own record through its carried-over link alone, never a created one, and never by anything else the row holds", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    // A second Parent customer under the family with her address in its field, and a phone of its own.
+    await addToCache([par("QBO-ALDERQUIST-OTHER-7009", "Ansgar A.", FAMILY_A.family.qboId, FAMILY_A.parent.email, { phone: "512-555-0444" })]);
+    const ownLink = and(eq(accountingLink.guardianId, a.identity.guardianId), eq(accountingLink.realmId, MONEY_REALM));
+    // Her row's own link moved to it: that record's phone is hers, not the one her row was first seeded from.
+    await db.update(accountingLink).set({ customerId: "QBO-ALDERQUIST-OTHER-7009" }).where(ownLink);
+    await asMigrated();
+    expect(await takeInContactDetails()).toMatchObject({ ran: true, counts: { peopleGivenPhone: 1, peopleWithNoRecord: 0 } });
+    expect(await personDetails(a.identity.parentId)).toEqual({ values: { ...NO_DETAILS, phone: "512-555-0444" }, version: 1 });
+
+    // The same link as the portal makes one for a Parent customer it creates (slice 9h): never the person's own record.
+    await resetDb();
+    const b = await seedSignedInParent(FAMILY_A);
+    await db.update(accountingLink).set({ origin: "created" }).where(and(eq(accountingLink.guardianId, b.identity.guardianId), eq(accountingLink.realmId, MONEY_REALM)));
+    await asMigrated();
+    expect(await takeInContactDetails()).toMatchObject({ ran: true, counts: { peopleGivenPhone: 0, peopleGivenAddress: 0, peopleWithNoRecord: 1 } });
+    expect(await personDetails(b.identity.parentId)).toEqual({ values: NO_DETAILS, version: 0 });
   });
 
   it("leaves alone a person who saved their details before it ran", async () => {

@@ -20,14 +20,13 @@ export const REALM = "9130000000000001";
 /**
  * Ana Rivera as the portal holds her, beside fznCompany()'s parent record of hers (customer 11, under the Rivera
  * Family, 10): the person, her sign-in account and an invited guardian row in that family from that record, written
- * directly (since stage 3 of the app-owned families spec nothing makes a sign-in from QuickBooks), and the records
- * imported after it (syncAppRecords()): with the roster read first (connectRoster()), her row is in the Rivera family's
- * record and linked to customer 11. A roster read made after it changes neither.
+ * directly (since stage 3 of the app-owned families spec nothing makes a sign-in from QuickBooks). Seeded after the
+ * roster read (connectRoster()), her row is in the Rivera family's record and linked to customer 11, as seedGuardian()
+ * writes them, with no import. A roster read made after it changes neither.
  */
 export async function seedAnaRivera(o: { status?: "invited" | "active" } = {}) {
   const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
   const row = await seedGuardian({ parentId: ana.id, familyQboId: "10", sourceQboId: "11", status: o.status ?? "invited" });
-  await syncAppRecords();
   return { ana, row };
 }
 

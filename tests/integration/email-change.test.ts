@@ -37,7 +37,7 @@ vi.mock("@/lib/parents/sessions", async (original) => {
 
 import { asc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, parent, parentAuthAccount, parentAuthSession, parentAuthUser, parentDevice, parentEmailChange, qboCustomer, rateLimitEvent, signinCode, writeQueue } from "@/lib/db/schema";
+import { accountingLink, auditLog, guardian, parent, parentAuthAccount, parentAuthSession, parentAuthUser, parentDevice, parentEmailChange, qboCustomer, rateLimitEvent, signinCode, writeQueue } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import { EMAIL_COPY, confirmMyEmailChange, findMyEmailChange } from "@/lib/parents/email-change";
 import { addGuardian, removeGuardian } from "@/lib/parents/guardians";
@@ -329,7 +329,9 @@ describe("confirming: the portal alone", () => {
 
     expect(await person(r.identity.parentId)).toMatchObject({ email: NEW, name: RIVERA.parent.name });
     expect(await accountEmail(r.identity.parentId)).toBe(NEW);
-    expect(await db.select({ status: guardian.status, sourceQboId: guardian.sourceQboId }).from(guardian).where(eq(guardian.parentId, r.identity.parentId))).toEqual([{ status: "active", sourceQboId: R_PARENT }]);
+    // Her row as it was: open, and still linked to her own record in the books.
+    expect(await db.select({ status: guardian.status, customer: accountingLink.customerId }).from(guardian).leftJoin(accountingLink, eq(accountingLink.guardianId, guardian.id))
+      .where(eq(guardian.parentId, r.identity.parentId))).toEqual([{ status: "active", customer: R_PARENT }]);
     // The old address signs in nowhere: no session, no code, no set-up or reset link, and no device remembered for it.
     expect(await sessionsOf(r.identity.parentId)).toEqual([]);
     expect(await codesOf(r.identity.parentId)).toEqual([]);
@@ -394,7 +396,8 @@ describe("confirming: the portal alone", () => {
     expect(await confirmEmailChangeAction(linkTo(NEW))).toEqual(DONE(NEW));
     expect((await person(r.identity.parentId)).email).toBe(NEW);
     // Both families keep the person: their rows are as they were, and each still lets them in.
-    expect((await enterableGuardianRows(r.identity.parentId)).map((g) => g.familyQboId).sort()).toEqual([C_FAMILY, R_FAMILY].sort());
+    expect((await enterableGuardianRows(r.identity.parentId)).map((g) => String(g.familyId)).sort())
+      .toEqual([String(await recordOfCustomer(C_FAMILY, "family")), String(await recordOfCustomer(R_FAMILY, "family"))].sort());
     expect(await cachedEmail(R_PARENT)).toBe("someone.else@family-r.example");
     expect(await cachedEmail(C_PARENT)).toBe(CHENOWETH.parent.email);
     expect(stub.apiCalls()).toEqual([]);

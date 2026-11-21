@@ -31,8 +31,9 @@ import { NO_CHANGES, appRecordRows, appRecordsByCustomer, recordIds, syncAppReco
  * then they stand alone: no roster read, read-again or shape save changes one, and a staff write changes its own record
  * (changeOwnRecord(), src/lib/roster/writes.ts), the way the import would have, so after each a fresh import still finds
  * nothing to change (whatAFreshRunWouldChange()). The test helpers run the import after writing the cache
- * (connectRoster(), syncAppRecords()), so the records here are those 0023 made of the same roster. Outside a change of
- * company nothing is deleted, so a record keeps its id.
+ * (connectRoster(), syncAppRecords()), so the families and students here are those 0023 made of the same roster; a
+ * guardian row is given its family and its own link by whoever makes it (seedGuardian(), as staff's add does), never by
+ * the import (stage 3's slice 12b1). Outside a change of company nothing is deleted, so a record keeps its id.
  */
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -49,12 +50,13 @@ const withTheRosterLock = <T>(f: (tx: Parameters<Parameters<typeof db.transactio
 const keptEvery = (before: Record<string, string>, now: Record<string, string>) => { for (const [key, id] of Object.entries(before)) expect(now[key], key).toBe(id); };
 
 describe("the import, as migration 0023 made the records", () => {
-  it("each family and student of the cache has one record and one link, each sign-in is in its family, and its own record is linked", async () => {
+  it("each family and student of the cache has one record and one link, and a sign-in seeded after it is in its family, linked to its own record", async () => {
     await seedParentSettings(SIGNINS_ON);
-    await seedAnaRivera();
     await connectRoster(stub);
+    await seedAnaRivera();
     const ana = await anasLink();
-    expect(ana).toMatchObject({ familyQboId: "10", sourceQboId: "11", status: "invited" });
+    // The row stands on its family record and its own link: neither old copy is written.
+    expect(ana).toMatchObject({ familyQboId: null, sourceQboId: null, status: "invited" });
 
     const got = await appRecordsByCustomer();
     expect(got.families).toEqual([
@@ -77,25 +79,32 @@ describe("the import, as migration 0023 made the records", () => {
 
   it("run again, it changes nothing", async () => {
     await seedParentSettings(SIGNINS_ON);
-    await seedAnaRivera();
     await connectRoster(stub);
+    await seedAnaRivera();
     const before = await appRecordRows();
     expect(await withTheRosterLock((tx) => importRecordsFromRoster(tx))).toEqual(NO_CHANGES);
     expect(await appRecordRows()).toEqual(before);
   });
 
-  it("a guardian row added later is put in its family, and linked to its own record, by the import", async () => {
+  it("touches no guardian row: a row's family and own link are its own, and a row's old copies are read by nothing", async () => {
     await connectRoster(stub);
     expect((await appRecordsByCustomer()).families.map((f) => f.customer)).toEqual(["10", "20", "40"]);
     expect(await db.select().from(guardian)).toEqual([]);
-    // Nothing makes a sign-in from QuickBooks: Ana is written as the portal holds her.
+    // Nothing makes a sign-in from QuickBooks: Ana is written as the portal holds her, in her family with her own link.
     const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
     const row = await seedGuardian({ parentId: ana.id, familyQboId: "10", sourceQboId: "11", status: "invited" });
-    const r = await withTheRosterLock((tx) => importRecordsFromRoster(tx));
-    expect(r).toMatchObject({ memberships: { linked: 1, pointed: 1 } });
     const got = await appRecordsByCustomer();
     expect(got.memberships).toEqual([{ guardianId: row.id, family: "10" }]);
-    expect(got.links.filter((l) => l.kind === "membership")).toMatchObject([{ customer: "11", guardianId: row.id }]);
+    expect(got.links.filter((l) => l.kind === "membership")).toMatchObject([{ customer: "11", guardianId: row.id, origin: "carried_over" }]);
+    // A row that holds only the old copies (as one made before stage 3's slice 12b1 might), with no family record: the
+    // import neither puts it in the family its copy names nor links it to the record its copy names.
+    const mei = await seedParent({ name: "Mei Chen", email: "mei@example.com" });
+    const [old] = await db.insert(guardian).values({ parentId: mei.id, familyQboId: "20", sourceQboId: "21", status: "invited" }).returning();
+    const before = await appRecordRows();
+    expect(await withTheRosterLock((tx) => importRecordsFromRoster(tx))).toEqual(NO_CHANGES);
+    expect(await appRecordRows()).toEqual(before);
+    expect((await db.select().from(guardian).where(eq(guardian.id, old!.id)))[0]!.familyId).toBeNull();
+    expect(await db.select().from(accountingLink).where(eq(accountingLink.guardianId, old!.id))).toEqual([]);
     expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
   });
 
@@ -116,8 +125,8 @@ describe("the import, as migration 0023 made the records", () => {
 
   it("keeps the records, inactive and named from what the portal last knew, of customers the cache no longer returns", async () => {
     await seedParentSettings(SIGNINS_ON);
-    await seedAnaRivera();
     await connectRoster(stub);
+    await seedAnaRivera();
     const ids = await recordIds();
     // Leo has a place on a shift; then his family's customers leave the roster QuickBooks sends.
     const { shifts: [shift] } = await seedEvent({ inDays: 20 });
@@ -147,8 +156,8 @@ describe("the import, as migration 0023 made the records", () => {
 describe("the records stand alone: what QuickBooks holds changes none of them (stage 3's slice 9c)", () => {
   it("a roster read takes no rename, move, inactive flag, new customer or vanished customer into them", async () => {
     await seedParentSettings(SIGNINS_ON);
-    await seedAnaRivera();
     await connectRoster(stub);
+    await seedAnaRivera();
     const before = await appRecordRows();
     Object.assign(inStub("12"), { DisplayName: "Leonardo Rivera", ParentRef: { value: "20" }, SyncToken: "4" }); // renamed and moved in QuickBooks
     Object.assign(inStub("20"), { Active: false, SyncToken: "2" });                                               // made inactive there
@@ -207,8 +216,8 @@ describe("the records stand alone: what QuickBooks holds changes none of them (s
 
   it("a new membership shape changes no record, and neither does changing it back", async () => {
     await seedParentSettings(SIGNINS_ON);
-    await seedAnaRivera();
     await connectRoster(stub);
+    await seedAnaRivera();
     const before = await appRecordRows();
     // The family and student types swapped, as an Admin might by mistake, and then swapped back.
     await saveShape({ kind: "layered", familyTypeId: "3", studentTypeId: "1", parentTypeId: "2" }, { actor: WORKER.actor, ip: null });
@@ -225,8 +234,8 @@ describe("another company", () => {
   // never read over this one's: the seasons keep their records against these families.
   it("a roster read of a different company is refused, and every record and link stays as it was", async () => {
     await seedParentSettings(SIGNINS_ON);
-    await seedAnaRivera();
     await connectRoster(stub);
+    await seedAnaRivera();
     const before = await appRecordRows();
     const OTHER = "9130000000000002";
     // A connection to another company stored without a connect's refusal (from before it, or by hand).
@@ -239,8 +248,8 @@ describe("another company", () => {
 
   it("connecting a different company leaves the new tables empty and every sign-in in no family", async () => {
     await seedParentSettings(SIGNINS_ON);
-    await seedAnaRivera();
     await connectRoster(stub);
+    await seedAnaRivera();
     expect(await clearRosterOfOtherCompany("9130000000000002", { actor: WORKER.actor, ip: null })).toBe(true);
     expect(await db.select().from(family)).toEqual([]);
     expect(await db.select().from(student)).toEqual([]);

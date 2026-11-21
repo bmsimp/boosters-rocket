@@ -11,7 +11,7 @@ export const TOKEN_FILL_MIGRATION = "drizzle/0041_link_synced_token.sql";
 /**
  * The lines of 0023's fill that read a column a later migration removed: stage 2 re-keyed those tables to the app's own
  * ids, so their rows name a record by its id and no longer name a customer for the fill to make one of. Each is taken
- * out of the fill when it is run on today's tables, as the import's refsQuery left it out
+ * out of the fill when it is run on today's tables, as the import reads no record's customer
  * (importRecordsFromRoster(), src/lib/families/roster-import.ts). A later slice that re-keys a table adds its line here.
  */
 export const RE_KEYED_SINCE_0023: { line: string; by: string }[] = [
@@ -47,8 +47,33 @@ export const RE_KEYED_SINCE_0023: { line: string; by: string }[] = [
 ];
 
 /**
+ * 0023's guardian statements, which the import no longer follows (stage 3's slice 12b1): a guardian row is given its
+ * family record and its own link by whoever makes it (src/lib/parents/guardians.ts; in tests, seedGuardian()), never
+ * from its `family_qbo_id` or `source_qbo_id`, which nothing reads now. So when the fill is run on today's tables the
+ * guardian rows' line of its refs is replaced by one that reads nothing (the refs query stays valid SQL, with no rows),
+ * and the two statements that put rows in their families and linked them are left out. Each is found once, as written,
+ * or the fill throws, as for RE_KEYED_SINCE_0023.
+ */
+export const GUARDIANS_LEFT_OUT = {
+  refLine: {
+    line: `    SELECT "family_qbo_id" AS customer_id, 'family' AS kind FROM "guardian" WHERE "disabled_reason" IS DISTINCT FROM 'company_changed'`,
+    with: `    SELECT NULL::text AS customer_id, NULL::text AS kind WHERE false`,
+  },
+  statements: [
+    `-- Each guardian row in its family, but one a change of company closed: its ids are another company's.
+UPDATE "guardian" g SET "family_id" = f.id FROM app_fill_family f
+  WHERE f.customer_id = g."family_qbo_id" AND g."disabled_reason" IS DISTINCT FROM 'company_changed';`,
+    `-- Each such row whose sign-in came from a record of its own, open or closed, linked to that record.
+INSERT INTO "accounting_link" ("system", "realm_id", "customer_id", "guardian_id", "origin")
+  SELECT 'quickbooks', s.realm_id, g."source_qbo_id", g."id", 'carried_over'
+  FROM "guardian" g CROSS JOIN app_fill_source s
+  WHERE g."disabled_reason" IS DISTINCT FROM 'company_changed' AND g."source_qbo_id" IS NOT NULL AND g."source_qbo_id" <> g."family_qbo_id";`,
+  ],
+};
+
+/**
  * The statements from the fill's begin marker to its end marker, and the last one, which drops its scratch tables, with
- * the lines of RE_KEYED_SINCE_0023 taken out, then 0041's fill of each link's `synced_token` from the roster cache, so the
+ * the lines of RE_KEYED_SINCE_0023 and the guardian statements (GUARDIANS_LEFT_OUT) taken out, then 0041's fill of each link's `synced_token` from the roster cache, so the
  * links stand as a migrated database's do (a rename is sent with the link's own version). The carry-over's audit row is
  * left out: it belongs to the migration's own run. Run them in order on one connection (a transaction): the scratch
  * tables are that session's.
@@ -60,7 +85,14 @@ export function appRecordsFillStatements(): string[] {
     if (text.split(`${line}\n`).length !== 2) throw new Error(`${FILL_MIGRATION} no longer holds, once, the line ${by} made stale: ${line.trim()}`);
     text = text.replace(`${line}\n`, "");
   }
-  const chunks = text.split("--> statement-breakpoint").map((c) => c.trim()).filter(Boolean);
+  const { refLine } = GUARDIANS_LEFT_OUT;
+  if (text.split(`${refLine.line}\n`).length !== 2) throw new Error(`${FILL_MIGRATION} no longer holds, once, the guardian rows' line of its refs: ${refLine.line.trim()}`);
+  text = text.replace(`${refLine.line}\n`, `${refLine.with}\n`);
+  let chunks = text.split("--> statement-breakpoint").map((c) => c.trim()).filter(Boolean);
+  for (const statement of GUARDIANS_LEFT_OUT.statements) {
+    if (chunks.filter((c) => c === statement).length !== 1) throw new Error(`${FILL_MIGRATION} no longer holds, once, the guardian statement: ${statement.split("\n")[1]}`);
+    chunks = chunks.filter((c) => c !== statement);
+  }
   const begin = chunks.findIndex((c) => c.includes("app-records fill: begin"));
   const end = chunks.findIndex((c) => c.includes("app-records fill: end"));
   const drop = chunks.at(-1) ?? "";
