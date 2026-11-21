@@ -7,9 +7,11 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 
+import { createHash } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, qboConnection } from "@/lib/db/schema";
-import { parseQboAppForm, saveQboApp, beginConnect, completeConnect, disconnect, connectionView, qboRedirectUri } from "@/lib/quickbooks/connection";
+import { auditLog, qboConnection, setting } from "@/lib/db/schema";
+import { parseQboAppForm, saveQboApp, beginConnect, beginSwitchConnect, completeConnect, disconnect, connectionView, qboRedirectUri } from "@/lib/quickbooks/connection";
 import { resetDb, seedStaff } from "../helpers/db";
 import { startQboStub, seedConnected, type QboStub } from "../helpers/qbo-stub";
 
@@ -261,6 +263,52 @@ describe("connecting QuickBooks", () => {
     const first = await start(), second = await start();
     expect(await finish(first)).toEqual({ ok: false, reason: "state" });
     expect(await finish(second)).toEqual({ ok: true });
+  });
+
+  // Stage 4's slice M8: the ask to switch companies lives beside the state, and goes wherever the state goes.
+  const switchRow = async () => (await db.select().from(setting).where(eq(setting.key, "quickbooks.switch")))[0]?.value ?? null;
+  const rosterOf = (realmId: string) => db.insert(setting).values({ key: "roster.source", value: { realmId } });
+  const startSwitch = async () => { const r = await beginSwitchConnect(admin.id, op); if (!r.ok) throw new Error("not configured"); return stateOf(r.url); };
+
+  it("an ask to switch is written with its state, the same hash and expiry, and audited; a plain start drops it", async () => {
+    await app();
+    await rosterOf(REALM);
+    const s = await startSwitch();
+    const c = await row();
+    expect(c.stateHash).toBe(createHash("sha256").update(s).digest("hex"));
+    expect(await switchRow()).toEqual({ asked: { stateHash: c.stateHash, staffUserId: admin.id, expiresAt: c.stateExpiresAt!.toISOString(), fromRealmId: REALM } });
+    expect((await audits("quickbooks.switch.asked")).map((a) => [a.after, a.permission, a.ip])).toEqual([[{ fromRealmId: REALM }, "Settings.QuickBooks.ReadWrite", "203.0.113.9"]]);
+    await start();
+    expect(await switchRow()).toBeNull();
+  });
+
+  it("an ask is dropped with its state when the keys change, and kept by a secret-only change", async () => {
+    await app();
+    await rosterOf(REALM);
+    await startSwitch();
+    expect(await saveQboApp({ clientId: "ABclientid1234567890", clientSecret: "a-new-secret-value-123", environment: "sandbox" }, op)).toEqual({ ok: true });
+    expect(await switchRow()).toMatchObject({ asked: { fromRealmId: REALM } });
+    expect(await saveQboApp({ clientId: "ABotherclient1234567", clientSecret: null, environment: "sandbox" }, op)).toEqual({ ok: true });
+    expect(await switchRow()).toBeNull();
+    expect((await row()).stateHash).toBeNull();
+  });
+
+  it("asks nothing while the roster names no company: a first connect is a plain one", async () => {
+    await app();
+    await startSwitch();
+    expect(await switchRow()).toBeNull();
+    expect(await audits("quickbooks.switch.asked")).toEqual([]);
+    expect(await finish(await startSwitch())).toEqual({ ok: true });
+  });
+
+  it("an ask is spent with its state, even when the return is refused", async () => {
+    await app();
+    await rosterOf(REALM);
+    expect(await finish(await startSwitch(), { code: null, error: "access_denied" })).toEqual({ ok: false, reason: "denied" });
+    expect(await switchRow()).toBeNull();
+    await startSwitch();
+    expect(await finish("not-the-state")).toEqual({ ok: false, reason: "state" });
+    expect(await switchRow()).toMatchObject({ asked: { fromRealmId: REALM } }); // a stray return spends neither
   });
 
   it("refuses when the Admin said no at Intuit", async () => {
