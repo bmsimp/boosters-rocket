@@ -42,6 +42,16 @@ export function movedAwayByTheCheck(f: { state: BuyoutState; flag: Flag | null; 
   return f.state === "invoiced" && f.flag === "student_moved" && f.lastCode === null && !f.items.some((i) => i.op === "invoice_void");
 }
 
+/**
+ * Whether an invoiced buy-out's flag is the daily check's own, which finding its invoice paid takes off: an invoice the
+ * check didn't find (`missing`) or found on another customer (`other_customer`), or a `student_moved` it set by itself
+ * (movedAwayByTheCheck()). A flag a void or a staff move set (`paid_before_void`, their `student_moved`, `void_refused`,
+ * `given_up`) is the treasurer's to settle, and stays. The daily check (./daily-check.ts) and the change of company's
+ * mark (./company-change.ts) both read it, so the two can't disagree.
+ */
+export const checksOwnFlag = (f: Parameters<typeof movedAwayByTheCheck>[0]): boolean =>
+  f.flag === "missing" || f.flag === "other_customer" || movedAwayByTheCheck(f);
+
 const keep = (why: KeepWhy, words: string): CloseVerdict => ({ may: false, why, words });
 const close = (why: CloseWhy): CloseVerdict => ({ may: true, why, words: CLOSE_WORDS[why] });
 

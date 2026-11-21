@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { BUYOUT_NOTE_PREFIX, CLOSE_WORDS, closeVerdict, EARLIER_WORDS, earlierCompanyLook, MADE_AFTER_WORDS, type CloseFacts, type CloseItem, type EarlierFacts, type EarlierKind,
+import { BUYOUT_NOTE_PREFIX, checksOwnFlag, CLOSE_WORDS, closeVerdict, EARLIER_WORDS, earlierCompanyLook, MADE_AFTER_WORDS, type CloseFacts, type CloseItem, type EarlierFacts, type EarlierKind,
   type LookItem } from "@/lib/buyouts/closing";
 import type { BuyoutState } from "@/lib/db/schema";
 
@@ -238,5 +238,29 @@ describe("an earlier company's buy-out, for the treasurer (stage 4's slice M7b)"
     expect([...kinds].sort()).toEqual(["invoice_stands", "last_seen_gone", "may_be_made", "nothing_to_settle", "part_paid", "refund_owed", "void_may_have_gone"]);
     // Each kind's words name "the earlier QuickBooks company", never a company of its own.
     for (const words of Object.values(EARLIER_WORDS)) expect(words).toContain("earlier QuickBooks company");
+  });
+});
+
+// Which flags finding an invoiced buy-out paid takes off (checksOwnFlag()): the daily check's own, never a void's or a
+// move's. The daily check and the change of company's mark (stage 4's slice M7b2) both read it.
+describe("the daily check's own flags, which a paid finding takes off", () => {
+  const own = (f: Partial<CloseFacts>) => { const x = facts(f); return checksOwnFlag({ state: x.state, flag: x.flag, lastCode: x.lastCode, items: x.items }); };
+
+  it("are an invoice the check didn't find or found on another customer, and a student_moved it set by itself", () => {
+    expect(own({ flag: "missing" })).toBe(true);
+    expect(own({ flag: "other_customer" })).toBe(true);
+    expect(own({ flag: "student_moved" })).toBe(true);
+  });
+
+  it("are never a void's or a move's: a student_moved beside a void item or a void's code, paid_before_void, void_refused, given_up", () => {
+    expect(own({ flag: "student_moved", items: [create("done", true), voidItem("done", true)] })).toBe(false);
+    expect(own({ flag: "student_moved", lastCode: "paid" })).toBe(false);
+    expect(own({ flag: "paid_before_void", lastCode: "paid" })).toBe(false);
+    expect(own({ flag: "void_refused", lastCode: "fault_6240" })).toBe(false);
+    expect(own({ flag: "given_up" })).toBe(false);
+  });
+
+  it("is nothing to take off when there is no flag", () => {
+    expect(own({ flag: null })).toBe(false);
   });
 });
