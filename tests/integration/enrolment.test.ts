@@ -393,7 +393,8 @@ describe("what an enrolling session may press", () => {
     expect(await confirmEnrolmentAppAction(appCode(started.key.replace(/ /g, "")), started.stamp))
       .toEqual({ ok: false, errors: [ENROLMENT_COPY.windowPassed, ENROLMENT_COPY.appEntryDead], signInAgain: true });
     expect(await confirmEnrolmentAppAction("123456", "not a stamp")).toMatchObject({ ok: false });
-    expect(await authenticatorRows(ana.id)).toEqual([]);
+    // Nothing came into force: the set-up begun in the window is left unfinished, to lapse with its life, as on Sign-in settings.
+    expect((await authenticatorRows(ana.id)).map((r) => r.confirmedAt)).toEqual([null]);
     // The library's options are refused too, making no challenge: the session may add nothing now.
     expect((await registerOptions({ cookie: s.cookie })).res.status).toBe(404);
     expect(await stateOf(s.sessionId)).toEqual({ status: "none" });
