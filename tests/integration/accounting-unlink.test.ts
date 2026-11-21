@@ -436,7 +436,7 @@ describe("who may press", () => {
 });
 
 describe("a relink: an unlink, then a link as Confirm or Pick a different customer makes it, restoring nothing", () => {
-  it("to the same customer: a new link, the ended one kept, the students paired again", async () => {
+  it("to the same customer: a new link, the ended one kept, the students and the guardian paired again", async () => {
     const leo = await recordOfCustomer("12", "student");
     const before = await linksOfFamily(rivera);
     expect(await unlinkRow("Rivera Family")).toMatchObject({ ok: true });
@@ -448,8 +448,12 @@ describe("a relink: an unlink, then a link as Confirm or Pick a different custom
     expect(before.map((l) => l.id)).not.toContain(familyLink!.id);
     const [leoLink] = await db.select().from(accountingLink).where(eq(accountingLink.studentId, leo));
     expect(leoLink).toMatchObject({ customerId: "12", origin: "confirmed" });
-    // Nothing restored: no guardian link, no row's customer, no money row; the history kept.
-    expect(await db.select().from(accountingLink).where(inArray(accountingLink.guardianId, (await db.select().from(guardian)).map((g) => g.id)))).toEqual([]);
+    // Nothing restored: Ana's row is linked again to Ana Rivera 11 because its email field holds her sign-in address
+    // (slice M3c2's pairing, a new link, not the ended one), no row's customer, no money row; the history kept.
+    const anaRow = (await db.select().from(guardian).where(eq(guardian.familyId, rivera)))[0]!;
+    const guardianLinks = await db.select().from(accountingLink).where(inArray(accountingLink.guardianId, (await db.select().from(guardian)).map((g) => g.id)));
+    expect(guardianLinks).toEqual([expect.objectContaining({ guardianId: anaRow.id, customerId: "11", origin: "confirmed", linkedBy: linker.id })]);
+    expect(before.map((l) => l.id)).not.toContain(guardianLinks[0]!.id);
     expect((await db.select().from(guardian).where(eq(guardian.familyId, rivera))).map((g) => g.familyQboId)).toEqual([null]);
     expect(await db.select().from(familyMoney).where(eq(familyMoney.familyId, rivera))).toEqual([]);
     expect((await db.select().from(accountingLinkEnded)).map((e) => e.id).sort()).toEqual(before.map((l) => l.id).sort());
