@@ -17,7 +17,7 @@ import { giveUpAction, linkMadeStudentAction, sendPortalValueAction, tryAgainAct
 import { CONTACT_AWAITS_READ, CONTACT_NOT_OFFERED, EMAIL_NOT_OFFERED, EMAIL_TOO_LONG, GUARDIAN_RENAME_TAKEN, GUARDIAN_TAKEN_NAME, guardianOf, keptRefusalWords, NAME_UNUSABLE, keptWordsFor, portalValueStamp,
   TAKEN_NAME_KEPT } from "@/lib/roster/writes";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
-import { BuyoutsToLook } from "./buyouts";
+import { BuyoutsToLook, EarlierCompanyBuyouts } from "./buyouts";
 import { CustomersWithNoFamily } from "./no-family";
 import { familyPage } from "@/app/staff/(app)/family-pages";
 
@@ -291,6 +291,8 @@ export default async function ReconciliationPage({ searchParams }: { searchParam
       {madeAnyway.length > 0 && <MadeAfterGivingUp items={madeAnyway} linking={linking} canChange={canChange} rosterTag={rosterTag} aims={aims} />}
 
       <BuyoutsToLook showAmounts={money} canChange={canChange} />
+
+      <EarlierCompanyBuyouts showAmounts={money} canChange={canChange} />
 
       {linking && aims !== null && <CustomersWithNoFamily mayChangeFamilies={canChange} aims={aims} />}
 

@@ -43,6 +43,7 @@ export default async function PayInsteadPage({ params }: { params: Promise<{ req
       <section className="box" aria-labelledby="where-h"><h2 id="where-h">Where it stands</h2>
         <p className="state">{v.standing}</p>
         {v.refusedBefore && <p className="help">The last time, the club&apos;s invoice couldn&apos;t be set up, so nothing was billed. You can try again, or ask the club.</p>}
+        {v.endedForCompany && <p className="help">The club moved its books to a new QuickBooks company, so your earlier buy-out for this was ended. If anything is still owed on it, the club will be in touch.</p>}
       </section>
 
       {/* The answer to a confirm or a switch-back outlives the section it was pressed in: the page redraws into another. */}
