@@ -1,18 +1,19 @@
 import { cache } from "react";
 import type { Metadata, Viewport } from "next";
-import { Atkinson_Hyperlegible, Barlow_Condensed } from "next/font/google";
+import { Inter } from "next/font/google";
 import { getClubSettings, DEFAULT_COLOR } from "@/lib/settings/club";
 import { deriveClubTokens, clubCssVars, normalizeHex } from "@/lib/theme/contrast";
+import { THEME_COLOR } from "@/lib/theme/palette";
 import { appLabel } from "@/lib/pwa/label";
 import { ICONS, iconHref, iconVersion, type IconName } from "@/lib/pwa/icons";
 import { DISPLAY_SCRIPT } from "./display-script";
 import { AppInstall } from "./components/pwa/app-install";
 import "./booster.css";
 
-const read = Atkinson_Hyperlegible({ subsets: ["latin"], weight: ["400", "700"], variable: "--font-read", display: "swap" });
-const mark = Barlow_Condensed({ subsets: ["latin"], weight: ["500", "600", "700"], variable: "--font-mark", display: "swap" });
+/** Inter, the one typeface, self-hosted by next/font (fetched at build time, served from the portal). A variable font: every weight. */
+const sans = Inter({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
 
-/** The club's settings, read once for each request: the head tags, the viewport and the layout all need them. */
+/** The club's settings, read once for each request: the head tags and the layout both need them. */
 const clubSettings = cache(getClubSettings);
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -36,10 +37,12 @@ export async function generateMetadata(): Promise<Metadata> {
  * viewportFit "cover" lets the page reach under the notch and the home indicator; booster.css keeps its content clear
  * of them with env(safe-area-inset-*). Zoom is never limited (no maximumScale, no userScalable): WCAG 2.2 AA.
  */
-export async function generateViewport(): Promise<Viewport> {
-  const club = await clubSettings();
-  return { width: "device-width", initialScale: 1, viewportFit: "cover", themeColor: club.color, colorScheme: "light dark" };
-}
+export const viewport: Viewport = {
+  width: "device-width", initialScale: 1, viewportFit: "cover", colorScheme: "light dark",
+  // The browser's own bar matches the portal's top bar: its white surface in light, the dark surface in dark. The club's
+  // color is an accent inside the page, not the frame around it (it stays the installed app's splash, src/lib/pwa/manifest.ts).
+  themeColor: [{ media: "(prefers-color-scheme: light)", color: THEME_COLOR.light }, { media: "(prefers-color-scheme: dark)", color: THEME_COLOR.dark }],
+};
 export const dynamic = "force-dynamic";
 
 /** A bad stored color must never take every page down: fall back to the default. */
@@ -58,7 +61,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   }
   const vars = safeVars(club.color); // values are hex only
   return (
-    <html lang="en" className={`${read.variable} ${mark.variable}`} style={vars as React.CSSProperties} suppressHydrationWarning>
+    <html lang="en" className={sans.variable} style={vars as React.CSSProperties} suppressHydrationWarning>
       <head><script dangerouslySetInnerHTML={{ __html: DISPLAY_SCRIPT }} /></head>
       <body>
         {children}

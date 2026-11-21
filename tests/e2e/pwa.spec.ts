@@ -78,7 +78,10 @@ test("the head of the sign-in page carries what a phone needs to install the por
   await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute("href", /^\/icons\/apple-touch-icon\.png\?v=[0-9a-f]{12}$/);
   await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute("sizes", "180x180");
   await expect(page.locator('link[rel="icon"]').first()).toHaveAttribute("href", /^\/icons\/favicon\.png\?v=[0-9a-f]{12}$/);
-  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", CLUB.color);
+  // The browser's bar matches the portal's white top bar in light and its dark surface in dark (src/lib/theme/palette.ts);
+  // the club's color stays the manifest's, for the installed app's splash.
+  await expect(page.locator('meta[name="theme-color"][media="(prefers-color-scheme: light)"]')).toHaveAttribute("content", "#ffffff");
+  await expect(page.locator('meta[name="theme-color"][media="(prefers-color-scheme: dark)"]')).toHaveAttribute("content", "#16181c");
   await expect(page.locator('meta[name="color-scheme"]')).toHaveAttribute("content", "light dark");
   const viewport = await page.locator('meta[name="viewport"]').getAttribute("content");
   expect(viewport).toContain("width=device-width");
@@ -481,6 +484,6 @@ test("with a notch and a home indicator, the bar, the gutters, the tabs and the 
   await cdp.send("Emulation.setSafeAreaInsetsOverride" as never, { insets: { top: 0, bottom: 0, left: 0, right: 0 } } as never);
   await page.reload();
   expect(await px("header.bar", "padding-top")).toBe("0px");
-  expect(await px("main.wrap", "padding-left")).toBe("24px");
+  expect(await px("main.wrap", "padding-left")).toBe(testInfo.project.name === "phone" ? "16px" : "24px"); // the gutter, --cell
   expect(await px("body", "padding-bottom")).toBe(testInfo.project.name === "phone" ? "88px" : "0px");
 });
