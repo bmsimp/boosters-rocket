@@ -176,7 +176,7 @@ function UnlinkShown({ unlink }: { unlink: UnlinkOffer }) {
       <p>Its guardians then read that the club hasn&apos;t connected their payments to the portal yet, with no invoices, Pay or buy-out offer, until it is linked again, and its stored figures are forgotten at once.
         The family, its students, guardians, sign-ins, season, volunteering and forms stay as they are.
         It isn&apos;t unlinked while a buy-out of the family or its students isn&apos;t settled, or while a change of it waits on Reconciliation.</p>
-      <p>To link it again, use this page, with Confirm or Pick a different customer once its row shows them. &ldquo;Create in QuickBooks and link&rdquo; on its page would make a second customer in the books.</p>
+      <p>To link it again, use this page, with Confirm or Pick a different customer once its row shows them. While its customer is still in the books, &ldquo;Create in QuickBooks and link&rdquo; isn&apos;t offered on its page, nor for its students whose customers are, so that no second customer is made for them.</p>
     </>
   );
 }
@@ -328,7 +328,7 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
             Nothing is sent to the books: the press ties the family to its customer in the portal, with each of its students whose name is on exactly one student on each side.
             Students left that way aren&apos;t linked, and show with the family&apos;s row among its differences, but for a student customer inactive in the books, which is only counted there. Leave unlinked keeps a family out of the suggestions until someone undoes it.</p>
           <p>A link also comes with something new. &ldquo;Create a family from this&rdquo;, on Reconciliation, makes a new family in the portal from a customer no family is linked to.
-            &ldquo;Create in QuickBooks and link&rdquo;, on a family&apos;s page, makes a new customer in the books for a family that has none, and so does adding a family under Families, when someone who may link families adds it while the books are connected.</p>
+            &ldquo;Create in QuickBooks and link&rdquo;, on a family&apos;s page, makes a new customer in the books for a family that has none, but not for one unlinked while its customer is still in the books, nor for a student of it whose customer is; and adding a family under Families makes one too, when someone who may link families adds it while the books are connected.</p>
           <p>For each family whose link stands, the portal compares the names, whether each is active, the family each student is under, and the students and Parent customers only one side has,
             against its copy of the books{view.readAt ? <>, from its last read of them on <LocalTime iso={view.readAt} /></> : ", though it hasn't read the books yet"}.
             A family whose link was carried over and that has differences is found under both Carried over and Linked, with differences, and counted under both.</p>
@@ -337,7 +337,7 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
             A linked family is unlinked in its row&apos;s opening with Unlink from the books, which ends its link with its students&apos; and guardians&apos; links and sends nothing to the books: to link it to a different customer, unlink it, then link it again here.</p>
           <Notice tone="warning" live="none">For a family this page suggests a customer for, or lists possible customers of, link it here with Confirm.
             Reconciliation refuses &ldquo;Create a family from this&rdquo; for a customer this page suggests or lists for a family the portal has, or that a given-up change of a family the portal saved first made.
-            And &ldquo;Create in QuickBooks and link&rdquo; on the family&apos;s page would make a second customer in the books for a family whose customer is already there.</Notice>
+            And &ldquo;Create in QuickBooks and link&rdquo; on the family&apos;s page would make a second customer in the books for a family whose customer is already there but was never linked to it; it isn&apos;t offered for one unlinked while its customer is still in the books.</Notice>
           {view.noFamily !== null && (
             <p>{view.noFamily === 0 ? "Every active customer the books list as a family at the top level, under no other customer, is linked to a family in the portal, or is about to be by a change on Reconciliation."
               : `${plural(view.noFamily, "active customer the books list as a family at the top level, under no other customer, has", "active customers the books list as a family at the top level, under no other customer, have")} no family in the portal.`}
