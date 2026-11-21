@@ -18,7 +18,7 @@ export const PERMISSION_WORDS: Record<Permission, string> = {
   "Settings.QuickBooks.ReadWrite": "Connect QuickBooks and choose the membership shape",
   "Settings.Forms.ReadWrite": "Connect the club's Documenso",
   "Roster.Read": "See the roster: families, students and parents",
-  "Roster.Family.ReadWrite": "Add, rename, move and make inactive families, students and parents in QuickBooks, and give or end a guardian's sign-in for a family: add, remove and reinstate its guardians; and change a family's phone and mailing address, where the books keep them on the family",
+  "Roster.Family.ReadWrite": "Add, rename, move and make inactive families, students and parents in QuickBooks, and give or end a guardian's sign-in for a family: add, remove and reinstate its guardians, and let them sign in again after the family, or one of its students, was made active again from the books; and change a family's phone and mailing address, where the books keep them on the family",
   "Settings.Parents.ReadWrite": "Switch parent sign-ins and welcome emails on or off",
   "Parents.ReadWrite": "See every parent, change a parent's name, block or unblock a parent, and resend a welcome email; and see and change a parent's phone and mailing address (and see a family's, where the books keep them on the family)",
   "Season.Steps.Read": "See the seasons, their steps and requirements",
@@ -31,7 +31,7 @@ export const PERMISSION_WORDS: Record<Permission, string> = {
   "Forms.Signature.Read": "See who has signed each form, and download signed forms",
   "Forms.Signature.ReadWrite": "Remind guardians to sign, and start an unfinished form again",
   "Volunteer.Credit.ReadWrite": "Add, remove and correct a family's volunteer credit",
-  "Accounting.Link.ReadWrite": "Link families to accounting: see every family's link to the books, with every family's guardians' names and sign-in addresses; make a family in the portal from a QuickBooks customer no family is linked to; and take a name, an inactive customer or a student's family from the books into the portal",
+  "Accounting.Link.ReadWrite": "Link families to accounting: see every family's link to the books, with every family's guardians' names and sign-in addresses; make a family in the portal from a QuickBooks customer no family is linked to; and take a name, an inactive customer or an active one, or a student's family from the books into the portal",
 };
 
 /** The areas of the checklist, in the order the Roles page shows them. Each grantable permission is in exactly one. */

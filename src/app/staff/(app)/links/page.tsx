@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireStaffAlso, requireStaffPage } from "@/lib/guards";
-import { BULK_MAX, filterLinkRows, filtersOf, givenUpCustomersOf, loadAccountingLinks, REVIEW_LEFT_WORDS, statusCounts, type BulkOffer, type ConfirmStep, type LinkMade, type LinkOffer, type LinkRow, type LinkStatus, type LinksState, type LinksView, type OwnLink, type ReviewOffer, type TakeOffer, type UnlinkOffer } from "@/lib/accounting/mapping";
+import { BULK_MAX, filterLinkRows, filtersOf, givenUpCustomersOf, loadAccountingLinks, REVIEW_LEFT_WORDS, statusCounts, type BulkOffer, type ConfirmStep, type InactiveRow, type LinkMade, type LinkOffer, type LinkRow, type LinkStatus, type LinksState, type LinksView, type OwnLink, type ReviewOffer, type TakeOffer, type UnlinkOffer } from "@/lib/accounting/mapping";
 import { differenceKinds, differenceWords, noteSentence, type Difference } from "@/lib/accounting/differences";
 import { NOT_A_FAMILY_WORDS, parseLinksFilter, searchMatches, SEARCH_MAX, STATUS_KEYS, STATUS_WORDS, type LinksFilter, type StatusKey } from "@/lib/accounting/status";
 import type { Holder } from "@/lib/accounting/match";
@@ -90,6 +90,30 @@ function DifferenceLine({ d, take, note, tag }: { d: Difference; take: TakeOffer
       {note !== undefined && <> {note}</>}
       {take !== undefined && <><p>{take.words.join(" ")}</p>
         <div className="row-actions"><LinkPress label="Take QuickBooks' into the app" busy="Taking it…" about={take.about} act={takeDifferenceAction.bind(null, take.field, take.kind, take.recordId, tag, take.stamp)} /></div></>}</li>
+  );
+}
+
+/**
+ * The inactive families the books have active (slice M4b), after the list: each family by name (a link to its page while
+ * those stand), its customer in the books (the books' text, as text), its inactive students by name, and Take
+ * QuickBooks' into the app with what it does said beside it, or the one sentence that stands in its place. Drawn only
+ * when there is one. The press is a bound action, given only its words.
+ */
+function InactivePart({ rows, tag, familyPages }: { rows: InactiveRow[]; tag: string; familyPages: boolean }) {
+  const columns: Column<InactiveRow>[] = [
+    { key: "family", header: "Family", rowHeader: true, cell: (r) => (familyPages ? <Link href={familyPage(r.familyId)}>{r.name}</Link> : r.name) },
+    { key: "customer", header: "Customer in the books", cell: (r) => r.customer },
+    { key: "students", header: "Its students, inactive in the portal", cell: (r) => (r.students.length === 0 ? "None" : r.students.join(", ")) },
+    { key: "do", header: "What you can do", quiet: true, cell: (r) => (r.take === null ? r.note : <><p>{r.take.words.join(" ")}</p>
+      <div className="row-actions"><LinkPress label="Take QuickBooks' into the app" busy="Taking it…" about={r.take.about}
+        act={takeDifferenceAction.bind(null, r.take.field, r.take.kind, r.take.recordId, tag, r.take.stamp)} /></div></>) },
+  ];
+  return (
+    <section className="box" aria-labelledby="links-inactive-h"><h2 id="links-inactive-h">Inactive in the portal, active in the books</h2>
+      <p>Each of these families is inactive in the portal and linked to a customer the books have active. Taking the books&apos; value makes the family active again in the portal, alone, and sends nothing to the books.
+        Its guardians can&apos;t sign in to it until someone who may change families lets them in, on its page.</p>
+      <DataTable caption={plural(rows.length, "inactive family the books have active", "inactive families the books have active")} captionHidden columns={columns} rows={rows} rowKey={(r) => String(r.familyId)} />
+    </section>
   );
 }
 
@@ -322,7 +346,8 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
         <h1 className="page-title">Accounting links</h1>
         <p className="lede">Every family in the portal, beside the customer in the books it is linked to, or the one that looks like its own.
           A family with no link can be linked here, to its suggestion or a customer you pick, or left unlinked. Nothing here is sent to the books.
-          For a family whose link stands, it also lists where the portal and the books differ. A name, a record the books have inactive, or the family the books have a student under can be taken into the portal with Take QuickBooks&apos; into the app, which changes only the portal&apos;s records, except that a student&apos;s move voids an unpaid volunteer buy-out invoice of theirs in the books, as any move does; every other difference is only shown.</p>
+          For a family whose link stands, it also lists where the portal and the books differ. A name, a record the books have inactive or active, or the family the books have a student under can be taken into the portal with Take QuickBooks&apos; into the app, which changes only the portal&apos;s records, except that a student&apos;s move voids an unpaid volunteer buy-out invoice of theirs in the books, as any move does; every other difference is only shown.
+          A linked family inactive in the portal whose customer the books have active is listed after the families, and made active again the same way, but its guardians sign in to it only once someone who may change families lets them in, on its page.</p>
         <LinkAnswersShown />
 
         <section className="box" aria-labelledby="links-how-h"><h2 id="links-how-h">How links are made</h2>
@@ -373,6 +398,8 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
             : <DataTable caption={filtered ? `${plural(rows.length, "family", "families")} of ${view.rows.length} shown` : `Every family, by name: ${plural(rows.length, "family", "families")}`}
                 columns={columns} rows={rows} rowKey={(r) => String(r.familyId)} />}
         </section>
+
+        {view.inactive.length > 0 && <InactivePart rows={view.inactive} tag={tag} familyPages={view.familyPages} />}
       </LinkAnswers>
     </main>
   );
