@@ -781,8 +781,10 @@ describe("differences, for a link that stands (slice M2)", () => {
     expect(rowNamed(html, "Chen Family")![4]).toContain("Where Leo Rivera is. In the portal: In this family. In the books: Under Rivera Family in QuickBooks. Waiting to reach QuickBooks. See the change on Reconciliation");
     expect(html.split('href="/staff/reconciliation#writes-h"').length - 1).toBe(3);
     // No button but the filter's own, since slice M3a2 each carried-over row's Confirm this link, and since slice M3b each
-    // linked row's Unlink from the books; nothing of money but each unlink's own words of what the guardians then read.
-    expect(html.split("<button").length - 1).toBe(5);
+    // linked row's Unlink from the books, and since slice M4a the kept rename's Take QuickBooks' into the app (a waiting
+    // move offers none); nothing of money but each unlink's own words of what the guardians then read.
+    expect(html.split("<button").length - 1).toBe(6);
+    expect(html.split("Take QuickBooks&#x27; into the app<span").length - 1).toBe(1);
     expect(html.split("Confirm this link<span").length - 1).toBe(2);
     expect(html.split("Unlink from the books<span").length - 1).toBe(2);
     expect(html.split("invoices").length - 1).toBe(2);
