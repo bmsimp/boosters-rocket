@@ -60,7 +60,7 @@ export async function evidenceDownload(id: unknown, key: unknown): Promise<Evide
 export function evidenceRecord(view: EvidenceView) {
   const e = view.evidence;
   return {
-    evidenceId: e.id, requestId: e.requestId, quickBooksCompany: e.realmId, fromAnEarlierCompany: view.earlier, earlierCompanySince: e.earlierCompanyAt?.toISOString() ?? null,
+    evidenceId: e.id, requestId: e.requestId, quickBooksCompany: e.realmId, archivedAsEarlierCompany: view.earlier, earlierCompanySince: e.earlierCompanyAt?.toISOString() ?? null,
     form: e.formTitle, season: e.seasonName, family: { qboId: e.familyQboId, name: e.familyName }, signedFor: { kind: e.subjectKind, qboId: e.subjectQboId, name: e.subjectName },
     documenso: { envelopeId: e.envelopeId, templateId: e.templateId, templateUpdatedAt: e.templateUpdatedAt?.toISOString() ?? null, completedAt: e.completedAt?.toISOString() ?? null },
     signers: e.signers, consents: e.consents,

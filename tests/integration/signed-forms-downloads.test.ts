@@ -207,7 +207,7 @@ describe("staff download a signed form's evidence", () => {
       expect([r.status, r.headers.get("content-disposition"), r.headers.get("content-type")]).toEqual([200, `attachment; filename="${name}"`, type]);
     }
     const record = JSON.parse(await (await askStaff(a.forms!.evidence.id, "evidence-record-json")).text());
-    expect(record).toMatchObject({ evidenceId: a.forms!.evidence.id, requestId: a.forms!.ids.complete, fromAnEarlierCompany: false, form: "Uniform agreement" });
+    expect(record).toMatchObject({ evidenceId: a.forms!.evidence.id, requestId: a.forms!.ids.complete, archivedAsEarlierCompany: false, form: "Uniform agreement" });
     expect(record.files.find((f: { kind: string }) => f.kind === "sealed_pdf").sha256).toBe(a.forms!.evidence.sealedSha256);
     expect(await audits("forms.evidence.download")).toHaveLength(6);
   });

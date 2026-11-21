@@ -253,7 +253,7 @@ describe("a signed form kept with no QuickBooks company (its family had no link)
     expect(text).not.toContain("no longer connected");
     expect((await audits("forms.evidence.read")).find((r) => r.targetId === id)!.after).toMatchObject({ earlierCompany: false });
     const res = await staffDownload(new Request(`http://localhost/staff/forms/evidence/${id}/evidence-record-json`), { params: Promise.resolve({ id, file: "evidence-record-json" }) });
-    expect(JSON.parse(await res.text())).toMatchObject({ quickBooksCompany: null, fromAnEarlierCompany: false, family: { qboId: null }, signedFor: { kind: "student", qboId: null } });
+    expect(JSON.parse(await res.text())).toMatchObject({ quickBooksCompany: null, archivedAsEarlierCompany: false, family: { qboId: null }, signedFor: { kind: "student", qboId: null } });
   });
 });
 
@@ -571,9 +571,13 @@ describe("a different QuickBooks company connected", () => {
     // The matrix still leads to both families' evidence; the archive lists only the one archived before.
     asStaff(reader);
     const html = await renderPage(SignedFormsPage, { searchParams: {} });
-    const [matrixPart, archivePart] = html.split("Earlier company");
+    // The matrix ends where the list of other kept forms starts, which would lead to them too were the matrix to drop them.
+    const matrixPart = html.split("Other kept signed forms")[0]!;
+    const othersPart = html.split("Other kept signed forms")[1]!.split("Earlier company")[0]!;
+    const archivePart = html.split("Earlier company")[1]!;
     for (const id of [a.forms!.evidence.id, b.forms!.evidence.id]) {
       expect(matrixPart).toContain(`/staff/forms/evidence/${id}`);
+      expect(othersPart).not.toContain(id);
       expect(archivePart).not.toContain(id);
     }
     expect(archivePart).toContain(`/staff/forms/evidence/${archivedId}`);
