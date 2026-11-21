@@ -31,7 +31,7 @@ export const IMPORT_WORDS = {
     "Each family is made linked to its customer, and each student to theirs, confirmed by you. Each guardian is then added as on a family's page, and where the books have Parent customers, linked to their own.",
     welcomes
       ? "Welcome emails are on, so each person added who has never been welcomed is mailed a welcome with a link to set up their sign-in. The portal sends a few at a time, so it can take a little while for everyone."
-      : "Welcome emails are off, so nobody is mailed now: each person added is welcomed, with a link to set up their sign-in, once an Admin switches welcome emails on.",
+      : "Welcome emails are off, so nobody is mailed now: each person added who has never been welcomed is welcomed, with a link to set up their sign-in, once an Admin switches welcome emails on.",
     "A family you untick stays in the list of customers with no family, to make later, here or with “Create a family from this”.",
   ],
   aimed: (n: number) => `${plural(n, "customer listed here isn't", "customers listed here aren't")} proposed, as this page suggests ${n === 1 ? "it" : "each"} for, or lists ${n === 1 ? "it" : "each"} as a possible customer of, a family the portal has: ${n === 1 ? "it is" : "they are"} linked on this page instead.`,

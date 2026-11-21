@@ -19,7 +19,6 @@ import { writeAudit } from "@/lib/audit/log";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { importRecordsFromRoster } from "@/lib/families/roster-import";
 import { importGuardian, type ImportGuardianResult, type Waits } from "@/lib/parents/guardians";
-import { getParentSettings } from "@/lib/parents/settings";
 import { isQboId } from "@/lib/quickbooks/client";
 import { handful, isSecondFamilyLink, NO_FAMILY_COPY } from "@/lib/roster/no-family";
 import { madeAfterGivingUp } from "@/lib/roster/writes";
@@ -33,9 +32,11 @@ const no = (...errors: string[]): LinkDone => ({ ok: false, errors });
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /** Why a guardian of the import wasn't added, in words (the lead's decision 4: each sentence in one place). */
-export const GUARDIAN_NOT_ADDED: Record<Exclude<ImportGuardianResult, { ok: true }>["reason"] | "not_tried", string> = {
+export const GUARDIAN_NOT_ADDED: Record<NotAdded, string> = {
   busy: "the portal was busy reading QuickBooks for longer than it waits",
   not_tried: "it wasn't tried, as the portal was busy reading QuickBooks",
+  failed: "something went wrong in the portal as they were added, so nothing was saved for them",
+  not_tried_failed: "it wasn't tried, as something went wrong in the portal adding an earlier guardian",
   taken: "someone else in the portal took that address meanwhile",
   moved: "the person who held that address changed it meanwhile",
   blocked: "the person who holds that address was blocked meanwhile",
@@ -64,9 +65,12 @@ export const IMPORT_COPY = {
   linked: (linked: number, notLinked: number) => [linked === 0 ? null : `${plural(linked, "guardian was", "guardians were")} linked to their own Parent customer in the books.`,
     notLinked === 0 ? null : `${plural(notLinked, "guardian wasn't", "guardians weren't")} linked to the Parent customer the list showed, as it is linked to someone or a change waits for it now: link them in their family's row on this page.`].filter((x) => x !== null).join(" "),
   notAdded: (who: string, email: string, family: string, why: string) => `${who} (${email}) wasn't added to ${family}: ${why}. Add them on the family's page, under Families.`,
-  welcomes: (owed: number, on: boolean) => (owed > 0 ? `${plural(owed, "person is", "people are")} owed a welcome email with a link to set up their sign-in: the portal sends a few at a time, so it can take a little while for everyone.`
-    : on ? "Nobody is owed a welcome email by this: everyone added was welcomed before."
-    : "Welcome emails are off, so nobody was mailed: each person added is welcomed, with a link to set up their sign-in, once an Admin switches welcome emails on."),
+  /** Each sentence counts people, each once however many families they were added to, by where their welcome stands once added (ImportGuardianResult's `welcome`). */
+  welcomes: (w: { owed: number; welcomedBefore: number; whileOff: number }) => [
+    w.owed === 0 ? null : `${plural(w.owed, "person added is", "people added are")} owed an email with a link to set up their sign-in (a welcome, for anyone never welcomed): the portal sends a few at a time, so it can take a little while for everyone.`,
+    w.whileOff === 0 ? null : `Welcome emails were off as they were added, so nobody was mailed: ${w.whileOff === 1 ? "the 1 person added who was never welcomed is" : `the ${w.whileOff} people added who were never welcomed are`} welcomed, with a link to set up their sign-in, once an Admin switches welcome emails on.`,
+    w.welcomedBefore === 0 ? null : `${plural(w.welcomedBefore, "person added was", "people added were")} welcomed before: this owes them no new welcome.`,
+  ].filter((x) => x !== null).join(" "),
   nothingSent: "Nothing was sent to QuickBooks.",
   money: "Each family's money is read from the books the next time a parent opens Home or Payments, when someone presses “Read every family now” on Balances, or at the daily read of every family's invoices, while the books are connected.",
 } as const;
@@ -83,7 +87,9 @@ const uniqueViolated = (e: unknown): string | null => {
 };
 
 /** One guardian's end, for the answer and the tests: what importGuardian() answered, or that it wasn't tried. */
-export type ImportGuardianEnd = { family: string; familyId: AppFamilyId; guardian: ProposedGuardian; result: ImportGuardianResult | { ok: false; reason: "not_tried" } };
+/** Why a guardian wasn't added: what importGuardian() answered; an unexpected error as one was added (`failed`); or not tried after a `busy` or a `failed`. */
+type NotAdded = Exclude<ImportGuardianResult, { ok: true }>["reason"] | "failed" | "not_tried" | "not_tried_failed";
+export type ImportGuardianEnd = { family: string; familyId: AppFamilyId; guardian: ProposedGuardian; result: ImportGuardianResult | { ok: false; reason: "failed" | "not_tried" | "not_tried_failed" } };
 export type ImportDone = (LinkDone & { ok: false }) | { ok: true; message: string; pressId: string; familyIds: AppFamilyId[]; guardians: ImportGuardianEnd[] };
 
 /**
@@ -101,7 +107,9 @@ export type ImportDone = (LinkDone & { ok: false }) | { ok: true; message: strin
  * that changed. Then it commits.
  *
  * Then the guardians, each in its own transaction, in the review's order (importGuardian()); on the first `busy` the
- * rest aren't tried, and are said. A guardian not added leaves its family made and linked, said, to be added on the
+ * rest aren't tried, and are said. An unexpected error in a guardian's transaction (a dropped connection, a statement
+ * timeout) is caught and said as that guardian not added (`failed`), the rest not tried, so the answer still names every
+ * family made and every guardian not added, and the action still revalidates: the families are committed by then. A guardian not added leaves its family made and linked, said, to be added on the
  * family's page. Nothing is queued or sent; no link is minted (the worker's welcome holds each set-up link when it
  * sends: sendOwedWelcomes(), src/lib/parents/welcome.ts).
  */
@@ -158,36 +166,48 @@ export async function saveImport(raw: { customerIds: unknown; count: unknown; st
   const guardianOp = { actor: o.actor, ip: o.ip, permission: "Roster.Family.ReadWrite" };
   const madeHere = new Set<string>();
   const ends: ImportGuardianEnd[] = [];
-  let busy = false;
+  let stopped: "not_tried" | "not_tried_failed" | null = null;
   for (const m of made) {
     for (const g of m.f.guardians) {
-      if (busy) { ends.push({ family: m.f.name, familyId: m.familyId, guardian: g, result: { ok: false, reason: "not_tried" } }); continue; }
-      const r = await importGuardian(m.familyId, { name: g.name, email: g.email, person: g.person.kind === "new" ? "new" : g.person.id, parentCustomerId: g.link?.qboId ?? null,
-        pressId, madeHere, linkedBy: o.staffUserId }, guardianOp, w);
+      if (stopped !== null) { ends.push({ family: m.f.name, familyId: m.familyId, guardian: g, result: { ok: false, reason: stopped } }); continue; }
+      let r: ImportGuardianEnd["result"];
+      try {
+        r = await importGuardian(m.familyId, { name: g.name, email: g.email, person: g.person.kind === "new" ? "new" : g.person.id, parentCustomerId: g.link?.qboId ?? null,
+          pressId, madeHere, linkedBy: o.staffUserId }, guardianOp, w);
+      } catch (e) {
+        console.error(`the reviewed import ${pressId} couldn't add a guardian of family ${String(m.familyId)}:`, e);
+        r = { ok: false, reason: "failed" };
+      }
       if (r.ok && r.person === "new") madeHere.add(r.parentId);
-      if (!r.ok && r.reason === "busy") busy = true;
+      if (!r.ok && r.reason === "busy") stopped = "not_tried";
+      if (!r.ok && r.reason === "failed") stopped = "not_tried_failed";
       ends.push({ family: m.f.name, familyId: m.familyId, guardian: g, result: r });
     }
   }
-  const welcomesOn = (await getParentSettings()).welcome;
   return { ok: true, pressId, familyIds: made.map((m) => m.familyId), guardians: ends,
-    message: importedWords({ families: made.map((m) => m.f.name), ...counts, ends, welcomesOn }) };
+    message: importedWords({ families: made.map((m) => m.f.name), ...counts, ends }) };
 }
 
 /**
  * What staff read after the press, each sentence true by the code: the families made and linked (named up to a
  * handful), the students made and left alone, the guardians added (new people and people reused), the Parent customers
  * linked and those that couldn't be now, each guardian not added with why and that they are added on the family's page,
- * whether welcomes go now or once an Admin switches them on, that nothing was sent, and when the money is read.
+ * whether welcomes go now or once an Admin switches them on (by where each person's welcome stands once added, never by
+ * a read of the switch after), that nothing was sent, and when the money is read.
  */
-export function importedWords(s: { families: string[]; studentsMade: number; studentsLeftAlone: number; ends: readonly ImportGuardianEnd[]; welcomesOn: boolean }): string {
+export function importedWords(s: { families: string[]; studentsMade: number; studentsLeftAlone: number; ends: readonly ImportGuardianEnd[] }): string {
   const added = s.ends.flatMap((e) => (e.result.ok ? [e.result] : []));
   const parts = [IMPORT_COPY.families(s.families), IMPORT_COPY.students(s.studentsMade, s.studentsLeftAlone),
     IMPORT_COPY.guardians(added.length, added.filter((a) => a.person === "new").length, added.filter((a) => a.person === "existing").length)];
   const linked = IMPORT_COPY.linked(added.filter((a) => a.link === "linked").length, added.filter((a) => a.link === "not_linked").length);
   if (linked !== "") parts.push(linked);
   for (const e of s.ends) if (!e.result.ok) parts.push(IMPORT_COPY.notAdded(e.guardian.name, e.guardian.email, e.family, GUARDIAN_NOT_ADDED[e.result.reason]));
-  if (added.length > 0) parts.push(IMPORT_COPY.welcomes(added.filter((a) => a.welcomeOwed).length, s.welcomesOn));
+  if (added.length > 0) {
+    // Each person once, as they stand after their last add (a person in two families is one welcome).
+    const stands = new Map(added.map((a) => [a.parentId, a.welcome]));
+    const count = (w: string) => [...stands.values()].filter((x) => x === w).length;
+    parts.push(IMPORT_COPY.welcomes({ owed: count("owed"), welcomedBefore: count("welcomed_before"), whileOff: count("while_off") }));
+  }
   parts.push(IMPORT_COPY.nothingSent, IMPORT_COPY.money);
   return parts.join(" ");
 }

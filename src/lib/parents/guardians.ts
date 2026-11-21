@@ -273,14 +273,17 @@ export type ImportGuardian = { name: string; email: string; person: "new" | stri
   madeHere: ReadonlySet<string>; linkedBy: string };
 /**
  * What became of one: added (a new person, a person this press made for an earlier family, or a person the portal had),
- * with whether a welcome is now owed and what became of the link (`linked`; `none`, none sealed; `not_linked`, the link
+ * with whether this add owed them a welcome (`welcomeOwed`, as its audit row records it), where their welcome stands
+ * once it is written (`welcome`: owed a mail with a set-up link, now or from before; welcomed before and owed nothing;
+ * or never welcomed and owed nothing, since welcome emails were off) and what became of the link (`linked`; `none`, none sealed; `not_linked`, the link
  * the review showed can't be made now by Link this guardian's rules); or not added, and why: the roster lock busy past
  * the wait, the family refusing as an add refuses, the address taken by someone else meanwhile (`taken`), the person
  * reused no longer holding it (`moved`), the person blocked, the person a guardian of the family already (`already`) or
  * removed from it meanwhile (`removed`), or a name or address the portal can't take (`invalid`).
  */
 export type ImportGuardianResult =
-  | { ok: true; person: "new" | "made_here" | "existing"; parentId: string; guardianId: string; welcomeOwed: boolean; link: "linked" | "none" | "not_linked" }
+  | { ok: true; person: "new" | "made_here" | "existing"; parentId: string; guardianId: string; welcomeOwed: boolean; welcome: "owed" | "welcomed_before" | "while_off";
+      link: "linked" | "none" | "not_linked" }
   | { ok: false; reason: "busy" | "taken" | "moved" | "blocked" | "already" | "removed" | "invalid" | "no_family" | "inactive" | "waiting" | "making" | "changing" | "other_company" };
 
 /** The permission the import's guardian links are audited under: the linking one, as Link this guardian's. */
@@ -342,7 +345,9 @@ export async function importGuardian(familyId: AppFamilyId, g: ImportGuardian, o
         person: person === "existing" ? "existing" : "new", welcomeOwed: owed.welcomeOwed === true } }, tx);
     const link = g.parentCustomerId === null ? "none" as const
       : (await linkImported(tx, { guardianId, familyId, familyCustomer: fam.customer, customerId: g.parentCustomerId, linkedBy: g.linkedBy, pressId: g.pressId }, o)) ? "linked" as const : "not_linked" as const;
-    return { ok: true, person, parentId: who.id, guardianId, welcomeOwed: owed.welcomeOwed === true, link };
+    // Where their welcome stands now: oweWelcome() leaves `who.welcomeOwed` as it is written (owed by it, or from before).
+    const welcome = who.welcomeOwed ? "owed" as const : who.welcomedAt !== null ? "welcomed_before" as const : "while_off" as const;
+    return { ok: true, person, parentId: who.id, guardianId, welcomeOwed: owed.welcomeOwed === true, welcome, link };
   });
 }
 

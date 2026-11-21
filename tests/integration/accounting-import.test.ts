@@ -12,10 +12,21 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 type Msg = { to: string; subject: string };
 const outbox = vi.hoisted(() => [] as Msg[]);
 vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", buildSender: async () => async (m: Msg) => { outbox.push(m); } }));
+// A guardian's transaction that fails as a dropped connection would, for the address a test names: the real one otherwise.
+const failing = vi.hoisted(() => ({ email: null as string | null }));
+vi.mock("@/lib/parents/guardians", async (original) => {
+  const m = await original<typeof import("@/lib/parents/guardians")>();
+  return { ...m, importGuardian: async (...a: Parameters<typeof m.importGuardian>) => {
+    if (a[1].email === failing.email) throw new Error("Connection terminated unexpectedly");
+    return m.importGuardian(...a);
+  } };
+});
 
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, auditLog, family, guardian, parent, parentSigninToken, qboCustomer, student, writeQueue } from "@/lib/db/schema";
+import { QUICKBOOKS } from "@/lib/families/ids";
+import type { MembershipShape } from "@/lib/roster/shape";
 import { AccessDenied } from "@/lib/guards";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { loadAccountingLinks } from "@/lib/accounting/mapping";
@@ -49,7 +60,7 @@ vi.setConfig({ testTimeout: 60_000 });
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
 afterAll(() => stub.close());
-beforeEach(async () => { await resetDb(); stub.reset(); outbox.length = 0; });
+beforeEach(async () => { await resetDb(); stub.reset(); outbox.length = 0; failing.email = null; });
 
 const qc = (Id: string, DisplayName: string, typeId: string | null, extra: Record<string, unknown> = {}) => ({
   Id, DisplayName, Active: true, SyncToken: "0", MetaData: { LastUpdatedTime: "2026-11-01T12:00:00-06:00" },
@@ -60,7 +71,7 @@ const mail = (address: string) => ({ PrimaryEmailAddr: { Address: address } });
 const BOOKS = [
   qc("70", "Patel Family", "1", mail("patels@example.com")), qc("71", "Asha Patel", "3", { ...under("70"), ...mail("asha@example.com") }), qc("72", "Ravi Patel", "3", { ...under("70"), Active: false }),
   qc("73", "Nita Patel", "2", { ...under("70"), ...mail("Nita@Example.com") }), qc("74", "Raj Patel", "2", { ...under("70"), ...mail("raj@example.com") }),
-  qc("80", "Okafor Family", "1"), qc("81", "Ike Okafor", "3", under("80")), qc("83", "Ada Okafor", "2", { ...under("80"), ...mail("ada@example.com") }),
+  qc("80", "Okafor Family", "1", mail("okafors@example.com")), qc("81", "Ike Okafor", "3", under("80")), qc("83", "Ada Okafor", "2", { ...under("80"), ...mail("ada@example.com") }),
   qc("84", "Nita Okafor", "2", { ...under("80"), ...mail("nita@example.com") }),
 ];
 
@@ -174,7 +185,8 @@ describe("Make these families", () => {
       + " 3 students made, each linked to their own customer. 1 student under them already had a record in the portal and was left as it was."
       + " 4 guardians added, as on a family's page, for 2 new people and 1 person the portal had already, their names as they were."
       + " 4 guardians were linked to their own Parent customer in the books."
-      + " Welcome emails are off, so nobody was mailed: each person added is welcomed, with a link to set up their sign-in, once an Admin switches welcome emails on."
+      + " Welcome emails were off as they were added, so nobody was mailed: the 2 people added who were never welcomed are welcomed, with a link to set up their sign-in, once an Admin switches welcome emails on."
+      + " 1 person added was welcomed before: this owes them no new welcome."
       + " " + IMPORT_COPY.nothingSent + " " + IMPORT_COPY.money);
 
     // The families and students, linked confirmed by the staff member with the cache's versions.
@@ -234,7 +246,8 @@ describe("Make these families", () => {
     const r = await review();
     expect(r.welcomes).toBe(true);
     const done = await saveImport({ customerIds: r.ids, count: 2, stamp: r.stamp }, tag, linkOp(linker));
-    expect(done.ok && done.message).toContain("2 people are owed a welcome email with a link to set up their sign-in");
+    expect(done.ok && done.message).toContain("2 people added are owed an email with a link to set up their sign-in (a welcome, for anyone never welcomed)");
+    expect(done.ok && done.message).toContain("1 person added was welcomed before: this owes them no new welcome."); // Raj
     const nita = (await personAt("nita@example.com"))!, ada = (await personAt("ada@example.com"))!;
     expect([nita.welcomeOwed, ada.welcomeOwed, (await personAt("raj@example.com"))!.welcomeOwed]).toEqual([true, true, false]);
     expect(await db.select().from(parentSigninToken)).toEqual([]);
@@ -243,6 +256,20 @@ describe("Make these families", () => {
     expect(outbox.map((m) => m.to).sort()).toEqual(["ada@example.com", "nita@example.com"]);
     expect(JSON.stringify(outbox.find((m) => m.to === "nita@example.com"))).toContain("/sign-in/set-up/");
     expect((await linkRows(nita.id)).map((l) => l.purpose)).toEqual(["setup"]);
+  });
+
+  it("counts a reused person owed a welcome from before as owed, never as welcomed before", async () => {
+    const { tag, raj, linker } = await club({ welcomes: true });
+    // Welcomes switched on before: Raj, never welcomed, waits for the worker.
+    await db.update(parent).set({ welcomedAt: null, welcomeOwed: true }).where(eq(parent.id, raj.id));
+    const r = await review();
+    const done = await saveImport({ customerIds: r.ids, count: 2, stamp: r.stamp }, tag, linkOp(linker));
+    expect(done.ok).toBe(true);
+    if (!done.ok) return;
+    expect(done.guardians.find((g) => g.guardian.email === "raj@example.com")!.result).toMatchObject({ ok: true, person: "existing", welcomeOwed: false, welcome: "owed" });
+    expect(done.message).toContain("3 people added are owed an email with a link to set up their sign-in");
+    expect(done.message).not.toContain("welcomed before");
+    expect(done.message).not.toContain("Welcome emails were off");
   });
 
   it("owes no welcome while welcomes are off, the person left to be welcomed when an Admin switches them on", async () => {
@@ -273,18 +300,27 @@ describe("what the press refuses, making nothing", () => {
     const before = await madeSoFar();
     const changed = { ok: false, errors: [IMPORT_COPY.changed] };
     const press = (o: Partial<{ customerIds: unknown; count: unknown; stamp: unknown }>, t = tag) => saveImport({ customerIds: r.ids, count: 2, stamp: r.stamp, ...o }, t, linkOp(linker));
-    expect(await press({ stamp: `${r.stamp.slice(0, -1)}x` })).toEqual(changed);
+    // Its last character swapped for another, never itself (a stamp ends in any of 64).
+    expect(await press({ stamp: `${r.stamp.slice(0, -1)}${r.stamp.endsWith("A") ? "B" : "A"}` })).toEqual(changed);
+    expect(await press({ stamp: `${r.stamp}x` })).toEqual(changed);
     expect(await press({ customerIds: ["70", "90"] })).toEqual(changed); // one not shown
     expect(await press({}, "another-tag")).toEqual({ ok: false, errors: [ROSTER_MOVED] });
     for (const odd of [{ customerIds: [] }, { customerIds: "70" }, { customerIds: ["70", "70"], count: 2 }, { customerIds: ["7O"], count: 1 }, { customerIds: [70], count: 1 },
       { count: 3 }, { count: "2" }, { count: 2.5 }, { stamp: null }, { customerIds: Array.from({ length: IMPORT_MAX + 1 }, (_, n) => String(n + 1)), count: IMPORT_MAX + 1 }]) {
       expect(await press(odd), JSON.stringify(odd)).toEqual({ ok: false, errors: [IMPORT_COPY.notFromPage] });
     }
-    // A guardian of an unlinked family signs in with Ada's address: the Okafors are suggested for it, so the list changed.
+    // A guardian of an unlinked family signs in with the Okafors' own address, which no proposed guardian uses: the
+    // Okafors are suggested for that family, so they are left out of the list, which changed.
     const [theirs] = await db.insert(family).values({ name: "The Okafors, saved first", active: true }).returning();
-    const ada = await seedParent({ name: "Ada", email: "ada@example.com" });
-    await db.insert(guardian).values({ parentId: ada.id, familyId: theirs!.id, status: "invited" });
+    const okafors = await seedParent({ name: "Ike's mother", email: "okafors@example.com" });
+    await db.insert(guardian).values({ parentId: okafors.id, familyId: theirs!.id, status: "invited" });
+    const now = await review();
+    expect(now.ids).toEqual(["70"]);
+    expect(now.proposal.aimed).toBe(1);
+    // The Patels' guardians are as they were: only the aim changed the list.
+    expect(importKeys(now.proposal.families)).toEqual(importKeys(r.proposal.families.filter((f) => f.customerId === "70")));
     expect(await press({})).toEqual(changed);
+    expect(await press({ customerIds: ["80"], count: 1 })).toEqual(changed);
     const shown = await madeSoFar();
     expect(shown.families).toBe(before.families + 1);
     expect({ ...shown, families: before.families, people: before.people, rows: before.rows }).toEqual(before);
@@ -367,6 +403,121 @@ describe("the guardian half", () => {
     expect(await db.select().from(guardian).where(eq(guardian.parentId, someone.id))).toEqual([]);
     // Ada's Parent customer is left with no guardian, as the family's row on Accounting links shows.
     expect(await linkOf("83", "guardian")).toBeUndefined();
+  });
+});
+
+describe("the guardian half, when something goes wrong", () => {
+  it("says every family made and every guardian not added when a guardian's transaction throws, and the action still revalidates", async () => {
+    const { tag, linker } = await club();
+    const r = await review();
+    failing.email = "nita@example.com"; // Nita's add for the Okafors, the second guardian tried
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    asStaff(linker);
+    const done = await saveImportAction(tag, r.stamp, r.ids, 2);
+    quiet.mockRestore();
+    expect(done.ok).toBe(true);
+    if (!done.ok) return;
+    expect(done.message).toMatch(/^2 families made in the portal, each linked to its customer: Okafor Family and Patel Family\./);
+    expect(done.message).toContain("Nita Okafor (nita@example.com) wasn't added to Okafor Family: something went wrong in the portal as they were added, so nothing was saved for them.");
+    expect(done.message).toContain("Nita Patel (nita@example.com) wasn't added to Patel Family: it wasn't tried, as something went wrong in the portal adding an earlier guardian.");
+    expect(done.message).toContain("Raj Patel (raj@example.com) wasn't added to Patel Family: it wasn't tried, as something went wrong in the portal adding an earlier guardian.");
+    expect(done.message).toContain("1 guardian added, as on a family's page, for 1 new person.");
+    expect(revalidatedPaths()).toContain("/");
+    expect(await familyOf("70")).not.toBeNull();
+    expect(await familyOf("80")).not.toBeNull();
+    expect(await personAt("ada@example.com")).toBeDefined();
+    expect(await personAt("nita@example.com")).toBeUndefined();
+  });
+
+  it("adds a guardian whose Parent customer was linked meanwhile, and says it isn't linked", async () => {
+    const { tag, linker } = await club();
+    const r = await review();
+    const settings = await hold("settings");
+    const press = saveImport({ customerIds: ["70"], count: 1, stamp: r.stamp }, tag, linkOp(linker));
+    await untilALockIsAwaited(15_000, 1);
+    // Nita's Parent customer (73) taken by another guardian row meanwhile.
+    const [holders] = await db.insert(family).values({ name: "Holders", active: true }).returning();
+    const holder = await seedParent({ name: "Holder", email: "holder@example.com" });
+    const [row] = await db.insert(guardian).values({ parentId: holder.id, familyId: holders!.id, status: "invited" }).returning();
+    await db.insert(accountingLink).values({ system: QUICKBOOKS, realmId: REALM, customerId: "73", guardianId: row!.id, origin: "confirmed", linkedBy: linker.id });
+    await settings.release();
+    const done = await press;
+    expect(done.ok).toBe(true);
+    if (!done.ok) return;
+    expect(done.guardians.map((g) => [g.guardian.email, g.result.ok ? g.result.link : g.result.reason])).toEqual([["nita@example.com", "not_linked"], ["raj@example.com", "linked"]]);
+    expect(done.message).toContain("1 guardian was linked to their own Parent customer in the books. 1 guardian wasn't linked to the Parent customer the list showed");
+    const nita = (await personAt("nita@example.com"))!;
+    expect(await rowsOf((await familyOf("70"))!)).toEqual(expect.arrayContaining([expect.objectContaining({ parentId: nita.id, status: "invited" })]));
+    expect((await linkOf("73", "guardian"))!.guardianId).toBe(row!.id);
+    expect(await db.select().from(writeQueue)).toEqual([]);
+  });
+});
+
+describe("the other shapes of the books", () => {
+  /** A club in books of `shape`, with `books` added in QuickBooks and read. */
+  async function shaped(shape: MembershipShape, books: ReturnType<typeof qc>[]) {
+    const tag = await connectRoster(stub, { shape });
+    stub.customers.push(...books);
+    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    await seedParentSettings({ signin: true });
+    const linker = await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Accounting.Link.ReadWrite"]);
+    return { tag, linker };
+  }
+  /** The press of the whole review, proving it sent nothing, queued nothing and linked no guardian. */
+  async function pressAll(tag: string, linker: { id: string; email: string }) {
+    const r = await review();
+    const calls = stub.apiCalls().length;
+    const done = await saveImport({ customerIds: r.ids, count: r.ids.length, stamp: r.stamp }, tag, linkOp(linker));
+    expect(done.ok).toBe(true);
+    expect(stub.apiCalls().slice(calls)).toEqual([]);
+    expect(await db.select().from(writeQueue)).toEqual([]);
+    expect(await db.select().from(accountingLink).where(isNotNull(accountingLink.guardianId))).toEqual([]);
+    return { r, done };
+  }
+
+  it("in books with no parent type, adds one guardian per address of the family customer's field, named as it, linked to nothing", async () => {
+    const { tag, linker } = await shaped({ kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: null },
+      [qc("80", "Okafor Family", "1", mail("ada@example.com, ike.parent@example.com")), qc("81", "Ike Okafor", "3", { ...under("80"), ...mail("ike.student@example.com") })]);
+    const { r, done } = await pressAll(tag, linker);
+    expect(r.ids).toEqual(["80"]);
+    expect(r.proposal.from).toBe("family_field");
+    expect(done.ok && done.guardians.map((g) => [g.guardian.email, g.result.ok ? g.result.link : g.result.reason])).toEqual([["ada@example.com", "none"], ["ike.parent@example.com", "none"]]);
+    const okafors = (await familyOf("80"))!;
+    expect((await personAt("ada@example.com"))!.name).toBe("Okafor Family");
+    expect((await rowsOf(okafors)).map((g) => g.status)).toEqual(["invited", "invited"]);
+    expect(await personAt("ike.student@example.com")).toBeUndefined(); // a student customer's email never counts
+    expect(await linkOf("81", "student")).toMatchObject({ origin: "confirmed", linkedBy: linker.id });
+  });
+
+  it("in flat books, adds the member's first address as one guardian, named as the member, linked to nothing", async () => {
+    const { tag, linker } = await shaped({ kind: "flat", memberTypeIds: ["1"] }, [qc("80", "Okafor Family", "1", mail("Ada@Example.com, second@example.com"))]);
+    const { r, done } = await pressAll(tag, linker);
+    expect(r.ids).toEqual(["80"]);
+    expect(r.proposal.from).toBe("member");
+    expect(done.ok && done.guardians.map((g) => [g.guardian.email, g.result.ok ? g.result.person : g.result.reason])).toEqual([["ada@example.com", "new"]]);
+    expect((await personAt("ada@example.com"))!.name).toBe("Okafor Family");
+    expect(await personAt("second@example.com")).toBeUndefined();
+    expect(await rowsOf((await familyOf("80"))!)).toHaveLength(1);
+  });
+});
+
+describe("the offer", () => {
+  it("isn't made while every customer listed is aimed at a family the portal has", async () => {
+    const { linker } = await club();
+    // An unlinked family for each, by an address in the family customer's own field.
+    for (const [name, email] of [["The Patels, saved first", "patels@example.com"], ["The Okafors, saved first", "okafors@example.com"]] as const) {
+      const [f] = await db.insert(family).values({ name, active: true }).returning();
+      const p = await seedParent({ name, email });
+      await db.insert(guardian).values({ parentId: p.id, familyId: f!.id, status: "invited" });
+    }
+    const r = await review();
+    expect(r.ids).toEqual([]);
+    expect(r.proposal.aimed).toBe(2);
+    asStaff(linker);
+    const html = await renderPage(AccountingLinksPage, { searchParams: {} });
+    const part = html.slice(html.indexOf('id="no-family-h"'), html.indexOf("</section>", html.indexOf('id="no-family-h"')));
+    expect(part).toContain("Okafor Family");
+    expect(part).not.toContain('href="/staff/links?import=1#import-h"');
   });
 });
 
