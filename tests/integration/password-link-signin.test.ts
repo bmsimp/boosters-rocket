@@ -27,13 +27,15 @@ import { resetDb, seedGuardianInFamily, seedParent, seedWorkingMail } from "../h
 import { SIGNINS_ON, seedParentSettings } from "../helpers/roster-cache";
 import { deviceRows, mintLink, seedDevice, seedPassword } from "../helpers/signin-links";
 import { signInThroughDoor } from "../helpers/parent-door";
+import { seedPasskey } from "../helpers/passkey";
 import { hashDeviceToken } from "@/lib/parents/devices";
 
 /**
  * A set-up link signs the parent in (the sign-in release, slice SI-3a): once its password is set while the club's level
  * is Standard, through the one finish every sign-in goes through (src/lib/auth/parent-signin-finish.ts), with the cookie
  * the door sets. Since slice SI-3b it also remembers the device it was used on and marks the session strong, since the
- * link proved the mailbox and its form set the password. Under Strict, and for a reset, nobody is signed in.
+ * link proved the mailbox and its form set the password. Under Strict (since slice SI-10a) a set-up for a person with no
+ * second factor is Strict's enrolment instead: a session that reaches only /one-more-step. For a reset nobody is signed in.
  */
 const IP = "203.0.113.30";
 const GOOD = "correct horse battery staple, the club's own";
@@ -150,8 +152,26 @@ describe("a set-up link signs the parent in", () => {
     expect(cookiesSetByActions().filter((c) => c.name.endsWith(".signin_step"))).toEqual([]);
   });
 
-  it("at Strict, the password is set and nobody is signed in", async () => {
+  it("at Strict, with no second factor: the password is set and the sign-in is Strict's enrolment, on /one-more-step, with no device and no proof (slice SI-10a)", async () => {
+    const { ana, rows: [row] } = await seedAna({ level: "strict" });
+    expect(await choose(await mintLink(ana.id, "setup"))).toEqual({ ok: true, message: PASSWORD_COPY.signingIn, next: "/one-more-step" });
+    const [session] = await sessions();
+    expect(await sessions()).toHaveLength(1);
+    expect(session).toMatchObject({ strongAt: null, deviceId: null });
+    expect(session!.enrolUntil).not.toBeNull();
+    expect(sessionCookies()).toHaveLength(1);
+    expect(deviceCookies()).toEqual([]);
+    expect(await deviceRows(ana.id)).toEqual([]);
+    expect(await audits("signin.device_remembered")).toEqual([]);
+    // The gate reads the cookie as an enrolling session: no name, no family, whatever family it holds.
+    fromBrowser(cookieFromActions());
+    expect(await getParentState()).toEqual({ status: "enrol", parentId: ana.id, sessionId: session!.id, email: "ana@example.com" });
+    expect((await audits("signin")).map((r) => r.after)).toEqual([{ familyId: String(row!.familyId), enrolling: true }]);
+  });
+
+  it("at Strict, for a person who has a second factor already: the password is set and nobody is signed in", async () => {
     const { ana } = await seedAna({ level: "strict" });
+    await seedPasskey(ana.id);
     expect(await choose(await mintLink(ana.id, "setup"))).toEqual({ ok: true, message: PASSWORD_COPY.set });
     expect(await sessions()).toEqual([]);
     expect(sessionCookies()).toEqual([]);

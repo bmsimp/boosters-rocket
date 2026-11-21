@@ -11,6 +11,8 @@ import { codeFor, passOffer } from "./journey-helpers";
 import { E2E_SIGNIN, deviceTokenHash } from "./signin-seed";
 import { removeZeldaDevicesMadeHere, resetPasskeyOffer } from "./signin-links";
 import { appCodeAt, clearZeldaCounts, keepZeldaProof, nextAppCode, removeZeldaSecondSteps, setZeldaProof } from "./authenticator-steps";
+import { STRICT_PARENT, makeStrictParent, removeStrictParent, storeLevel } from "./strict-seed";
+import { ENROLMENT_COPY } from "../../src/lib/parents/enrolment-copy";
 
 /**
  * The parent journeys docs/accessibility-checks.md walked by hand, walked here by the keyboard alone: Tab, Shift+Tab,
@@ -799,6 +801,58 @@ test.describe("13. the passkey offer on Home, by keyboard: reached, Not now, the
     expect((await sql`SELECT passkey_offer_declines AS n FROM parent WHERE email = 'zelda@example.com'`)[0]?.n).toBe(1);
     expect((await sql`SELECT passkey_offered_at FROM parent_device WHERE id = ${offerDevice}`)[0]?.passkey_offered_at).not.toBeNull();
     await tabsOut(page);
+    ringsShown();
+  });
+});
+
+test.describe("14. Strict's enrolment, by keyboard: signed in by the password, the app set up on /one-more-step, the backup codes, the box ticked, Continue, Home", () => {
+  // Strict is stored for this journey alone and Standard put back after; the guardian is the journey's own, made with a
+  // password and no second factor in the seeded family and removed after with all she made (tests/e2e/strict-seed.ts),
+  // never Zelda, whose seeded session the gate would sign out at Strict.
+  test.beforeAll(async () => { await removeStrictParent(sql); await storeLevel(sql, "strict"); await makeStrictParent(sql); });
+  test.afterAll(async () => { await removeStrictParent(sql); await storeLevel(sql, "standard"); });
+
+  test("the email, the password and Enter; Set up, the app's code and Enter; the box ticked with Space; Continue by Enter, and Home", async ({ page, baseURL }) => {
+    test.setTimeout(120_000);
+    await page.goto("/sign-in");
+    await page.keyboard.press("Tab");
+    await expect(page.getByLabel("Email")).toBeFocused();
+    await page.keyboard.type(STRICT_PARENT.email);
+    await page.keyboard.press("Tab");
+    await expect(page.getByLabel("Password")).toBeFocused();
+    await page.keyboard.type(STRICT_PARENT.password);
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/one-more-step$/);
+
+    // The app's set-up: Tab past the passkey's press to the app's, Enter puts the focus on the words above the QR code.
+    const box = page.getByRole("region", { name: ENROLMENT_COPY.appTitle });
+    await fromTheTop(page);
+    await tabTo(page, box.getByRole("button", { name: ENROLMENT_COPY.appSetUp, exact: true }));
+    await page.keyboard.press("Enter");
+    await expect(box.getByText("Scan this QR code with your authenticator app.")).toBeFocused();
+    const key = ((await box.locator(".app-key").textContent()) ?? "").trim();
+    await tabTo(page, box.getByLabel("Code from your authenticator app", { exact: true }));
+    await page.keyboard.type(appCodeAt(key, await page.evaluate(() => Date.now())));
+    await page.keyboard.press("Enter");
+    // Done: the words and the backup codes, the words taking the focus.
+    await expect(page.getByRole("status").filter({ hasText: ENROLMENT_COPY.doneApp })).toBeFocused();
+    await expect(page.getByRole("list", { name: "Your backup codes" }).getByRole("listitem")).toHaveCount(10);
+    // Continue unticked says why and goes nowhere; the box ticked with Space, Continue takes her home.
+    const saved = page.getByLabel(ENROLMENT_COPY.saved);
+    await tabTo(page, saved);
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("button", { name: ENROLMENT_COPY.continue })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.getByText(ENROLMENT_COPY.tickFirst)).toBeVisible();
+    await expect(page).toHaveURL(/\/one-more-step$/);
+    await page.keyboard.press("Shift+Tab");
+    await expect(saved).toBeFocused();
+    await page.keyboard.press("Space");
+    await expect(saved).toBeChecked();
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(`${baseURL}/`);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(`Hi, ${STRICT_PARENT.first}`);
     ringsShown();
   });
 });

@@ -10,11 +10,11 @@ export const RETURN_PARAM = "next";
 export const MAX_RETURN_PATH = 512;
 
 /**
- * First segments that are not parent pages: the staff side, setup, the API, the pages before sign-in, and what Next.js
- * and the installable app serve. tests/unit/return-path.test.ts reads src/app from disk and fails when a folder there
+ * First segments that are not parent pages: the staff side, setup, the API, the pages before sign-in, the chooser and
+ * (since the sign-in release's slice SI-10a) Strict's enrolment, and what Next.js and the installable app serve. tests/unit/return-path.test.ts reads src/app from disk and fails when a folder there
  * that holds a page or a route handler outside src/app/(parent)/ is missing from this list.
  */
-export const NOT_PARENT_SECTIONS: readonly string[] = ["api", "staff", "setup", "sign-in", "choose-family", "refused", "icons", "_next"];
+export const NOT_PARENT_SECTIONS: readonly string[] = ["api", "staff", "setup", "sign-in", "choose-family", "one-more-step", "refused", "icons", "_next"];
 
 /**
  * The whole value, written out: a path of plain segments and, optionally, a plain query string. Everything else is
@@ -41,8 +41,11 @@ export function safeReturnPath(raw: unknown): string | null {
 /** Where to go after signing in: the return path when it is safe, the parent home when it is not. */
 export const landingPath = (raw: unknown): string => safeReturnPath(raw) ?? "/";
 
-/** /sign-in or /choose-family, carrying the return path when there is a safe one. "/" is where everyone lands anyway, so it is not carried. */
-export function withReturnPath(page: "/sign-in" | "/choose-family", raw: unknown): string {
+/**
+ * /sign-in, /choose-family or (since slice SI-10a) /one-more-step, carrying the return path when there is a safe one.
+ * "/" is where everyone lands anyway, so it is not carried.
+ */
+export function withReturnPath(page: "/sign-in" | "/choose-family" | "/one-more-step", raw: unknown): string {
   const next = safeReturnPath(raw);
   return next && next !== "/" ? `${page}?${RETURN_PARAM}=${encodeURIComponent(next)}` : page;
 }

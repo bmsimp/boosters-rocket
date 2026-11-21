@@ -65,7 +65,15 @@ export type LinkSigninProof = { linkId: string; credentialId: string; credential
  * them signs anybody in.
  */
 export type SigninProof = { password: PasswordProof; codeId: string } | ({ password: PasswordProof } & SecondFactorProof)
-  | PasskeyProof | { password: PasswordProof; deviceId: string } | { link: LinkSigninProof };
+  | PasskeyProof | { password: PasswordProof; deviceId: string } | { link: LinkSigninProof } | EnrolmentProof;
+
+/**
+ * Strict's enrolment (the sign-in release, slice SI-10a; open questions 21 and 22): a password alone, at the door or
+ * chosen from a set-up link, of a person with no second factor in force while the club is at Strict. It makes a session
+ * that reaches only /one-more-step, where the person adds a passkey or an authenticator app (the one finish,
+ * src/lib/auth/parent-signin-finish.ts, marks it `enrol_until`): no device is remembered and nothing is proved strong.
+ */
+export type EnrolmentProof = { password: PasswordProof; enrol: true } | { link: LinkSigninProof; enrol: true };
 
 /**
  * What an authenticator app's code or a backup code spent (verifySecondFactor()): the app's row or the spent code's,
@@ -520,6 +528,9 @@ export async function refuseCodeWithoutStep(ip: string | null, now = new Date())
  * - a remembered device: its row is still there, the person's and unexpired (`device_gone` otherwise: a block, a reset
  *   or anything else that ends all of a person's sign-in forgets every device).
  * - a set-up link: the link's row is still there and spent (`link_gone` otherwise).
+ * - Strict's enrolment (since SI-10a), by a password or a set-up link: as for either, and then the club still at Strict
+ *   and the person still with no second factor in force (`enrol_not_strict` and `second_factor_in_force` otherwise:
+ *   they sign in again by whatever now applies).
  * Every refusal is audited `signin.refused` with its short reason, and the caller answers it as one refusal.
  */
 export async function signinStands(parentId: string, rawEmail: string, ip: string | null, proof: SigninProof, now = new Date(),
@@ -532,6 +543,10 @@ export async function signinStands(parentId: string, rawEmail: string, ip: strin
     if ("passkeyId" in proof && !("password" in proof)) return { live, spent: await passkeyGoneOrSignedOut(tx, parentId, proof) };
     const password = "link" in proof ? proof.link : "password" in proof ? proof.password : null;
     if (password === null || !samePassword(await credentialNow(tx, parentId, password.credentialId), password)) return { live, spent: "password_changed" as const };
+    if ("enrol" in proof) {
+      if ((await getParentSettings(tx)).level !== "strict") return { live, spent: "enrol_not_strict" as const };
+      if (await hasSecondFactor(parentId, tx)) return { live, spent: "second_factor_in_force" as const };
+    }
     if ("codeId" in proof) {
       if (await secondFactorFor(parentId, use, tx)) return { live, spent: "second_factor_in_force" as const };
       const [code] = await tx.select({ id: signinCode.id }).from(signinCode).where(and(eq(signinCode.id, proof.codeId), eq(signinCode.parentId, parentId)));
@@ -551,6 +566,8 @@ export async function signinStands(parentId: string, rawEmail: string, ip: strin
         .where(and(eq(parentDevice.id, proof.deviceId), eq(parentDevice.parentId, parentId), gt(parentDevice.expiresAt, now)));
       return { live, spent: device !== undefined ? null : "device_gone" as const };
     }
+    // The password's enrolment spent nothing else: what it needs was read above.
+    if (!("link" in proof)) return { live, spent: null };
     const [link] = await tx.select({ usedAt: parentSigninToken.usedAt }).from(parentSigninToken)
       .where(and(eq(parentSigninToken.id, proof.link.linkId), eq(parentSigninToken.parentId, parentId)));
     return { live, spent: !link || link.usedAt === null ? "link_gone" as const : null };

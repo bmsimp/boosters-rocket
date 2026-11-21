@@ -1397,11 +1397,19 @@ export const staffAuthVerification = staffAuth.verification;
 // field. `ON DELETE SET NULL`: forgetting a device, a block, a reset, a password change, the clean-up and the
 // change-of-company clear delete device rows, and the sessions they named go on with none. Null for a session made
 // before SI-5b (nothing tells which device made it), and for one whose device is gone.
+// `enrol_until` (the sign-in release, slice SI-10a, migration 0049): set on a session that is enrolling, one made under
+// Strict by a password alone for a person with no second factor (a password at the door, or a set-up link's), to the
+// sign-in's time plus ENROL_WINDOW_MS (src/lib/parents/enrolment-rule.ts), by the one finish before any cookie
+// (src/lib/auth/parent-signin-finish.ts); cleared, with `strong_at` set, in the transaction that puts the person's first
+// factor in force (src/lib/parents/enrolment.ts). While it is set the gate lets the session reach /one-more-step and
+// nothing else (sessionStanding(), src/lib/auth/resolve.ts). Like `strong_at` it is the portal's alone and not a Better
+// Auth additional field, read by the portal's own query by the session's id. Null for every other session; no fill, no index.
 const parentAuth = authTables("parent_auth",
   { parentId: uuid("parent_id").notNull().unique().references(() => parent.id, { onDelete: "cascade" }) },
   { familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
     strongAt: timestamp("strong_at", { withTimezone: true }),
-    deviceId: uuid("device_id").references(() => parentDevice.id, { onDelete: "set null" }) },
+    deviceId: uuid("device_id").references(() => parentDevice.id, { onDelete: "set null" }),
+    enrolUntil: timestamp("enrol_until", { withTimezone: true }) },
   (t) => [index("parent_auth_session_family_ix").on(t.familyId!), index("parent_auth_session_device_ix").on(t.deviceId!)]);
 export const parentAuthUser = parentAuth.user;
 export const parentAuthSession = parentAuth.session;

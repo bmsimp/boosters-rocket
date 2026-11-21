@@ -220,6 +220,13 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   UPDATE, a lock it holds already), then deletes their password, then their app (an unfinished set-up included) and
  *   every backup code, then their passkeys, then forgets their devices, then ends their sessions. It is the one writer
  *   that removes everything a person signs in with; its mail goes after the commit;
+ * - Strict's enrolment (enrolment.ts, since the sign-in release's slice SI-10a): the one finish writes a new session's
+ *   `enrol_until` just after making it, before its last check takes the person's row (the session is the finish's
+ *   alone then, with no cookie yet); the gate ends one session that is no longer enrolling, or under Strict one of a
+ *   person with no factor, by its row alone, taking no person's row; and the transaction that puts the person's first
+ *   factor in force (a passkey's add, passkey-settings.ts, or the app's confirm, authenticator-settings.ts), which holds
+ *   the person's row FOR UPDATE, then clears `enrol_until` and sets `strong_at` on that one session's row
+ *   (completeEnrolment()): the person's row, then the session's;
  * - "Not now" on the passkey offer on Home (declinePasskeyOffer(), passkey-offer.ts, since the sign-in release's slice
  *   SI-8), in a transaction of its own, takes the person's row FOR UPDATE and no other lock, reads the session, its
  *   device and the person's count under it, then updates the device the session names (`passkey_offered_at`), then the

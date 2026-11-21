@@ -23,7 +23,8 @@ export async function signInFromLink(s: LinkSignin): Promise<string | null> {
   try {
     const auth = await getParentAuth();
     const { headers: set, response } = await auth.api.finishLinkSignin({
-      body: { parentId: s.parentId, email: s.email, linkId: s.proof.linkId, credentialId: s.proof.credentialId, credentialUpdatedAt: s.proof.credentialUpdatedAt.getTime() },
+      body: { parentId: s.parentId, email: s.email, linkId: s.proof.linkId, credentialId: s.proof.credentialId, credentialUpdatedAt: s.proof.credentialUpdatedAt.getTime(),
+        ...(s.enrol ? { enrol: true } : {}) },
       headers: stampClientIp(await headers()),
       returnHeaders: true,
     });

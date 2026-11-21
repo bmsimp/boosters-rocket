@@ -69,11 +69,14 @@ export async function addPasskeyHere(name: string): Promise<AddOutcome> {
  * words of how to keep them (beside an app, or in place of a passkey; `keep` in their place, for a page other than
  * Sign-in settings, whose words say "this page"), the list and its copy button.
  */
-export function BackupCodesShown({ message, list, app, lineRef, keep }: { message: string; list: string[]; app: boolean; lineRef: Ref<HTMLParagraphElement>; keep?: string }) {
+export function BackupCodesShown({ message, list, app, lineRef, keep, heading = 3 }: { message: string; list: string[]; app: boolean;
+  lineRef: Ref<HTMLParagraphElement>; keep?: string; heading?: 2 | 3 }) {
+  // Under a box's h2 on Sign-in settings (h3, the default); straight under the page's h1 on /one-more-step (h2).
+  const Heading = heading === 2 ? "h2" : "h3";
   return (
     <div className="stack">
       <p ref={lineRef} role="status" tabIndex={-1} className="paid-up"><Tick />{message}</p>
-      <h3>{COPY.backupCodesTitle}</h3>
+      <Heading>{COPY.backupCodesTitle}</Heading>
       <p>{keep ?? (app ? COPY.backupCodesKeep : COPY.backupCodesKeepPasskey)}</p>
       <ul className="backup-codes" aria-label={COPY.backupCodesTitle}>
         {list.map((c) => <li key={c}><code>{c}</code></li>)}

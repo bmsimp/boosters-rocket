@@ -9,7 +9,10 @@
 // telling whether it is still the one its page shows (setupStamp()). The rows themselves are read and written only by authenticator.ts. The secret is answered once, at the
 // first press, as the key to type and the QR code's squares (drawn here, on the server: authenticator-qr.ts), and never
 // again; the backup codes once, as they are made. No audit row holds a secret, a code, a hash, the key URI or the
-// QR code. Nothing here makes or ends a session, forgets a device or touches `strong_at`. Server only; parent code.
+// QR code. Nothing here makes or ends a session or forgets a device. Since slice SI-10a the set-up and its confirm
+// may be pressed by an enrolling session (Strict's enrolment, enrolment.ts: sessionMayAddFactor() in place of the
+// window), and the confirm then makes it whole (`enrol_until` cleared and `strong_at` set): the one place here that
+// touches a session. Server only; parent code.
 import "server-only";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
@@ -20,6 +23,7 @@ import type { ParentCtx } from "@/lib/guards";
 import { env } from "@/env";
 import { currentBrand } from "@/lib/mail/send";
 import { currentPassword, sessionProvedRecently, sessionStrongAt } from "./asking-again";
+import { completeEnrolment, sessionMayAddFactor } from "./enrolment";
 import { AUTHENTICATOR_SETUP_LIFE_MS, authenticatorRowOf, beginAuthenticatorSetup, confirmAuthenticator, hasAuthenticator, makeBackupCodes, removeAuthenticator } from "./authenticator";
 import { authenticatorKeyUri, qrSquares, type QrSquares } from "./authenticator-qr";
 import { readSecondStepCode } from "./backup-codes";
@@ -142,11 +146,13 @@ const windowStands = async (tx: Tx, ctx: Me, at: Date) => provedRecently(await s
 
 /**
  * "Set up an authenticator app", the first press (decision 2 of SI-6b). It takes no argument. In this order:
- * (a) the window, read for this session: refused in the words that say to show it's them again;
+ * (a) the window, read for this session, or since slice SI-10a an enrolling session (sessionMayAddFactor(),
+ *     enrolment.ts): refused in the words that say to show it's them again;
  * (b) the limit per person (`signin_settings_parent`, these settings' presses), taken after the window;
  * (c) one transaction: the parents' settings lock shared (holdParentSettings()), the person's row FOR UPDATE, the
- *     window again under it (and the person not blocked), the club not at Strict (where the club's own enrolment sets the app up, SI-10: refused in words), a password chosen, and no app
- *     in force (refused in words); then any unfinished set-up of theirs replaced by a new one, its secret sealed
+ *     window (or the enrolment) again under it (and the person not blocked), a password chosen, and no app in force
+ *     (refused in words); at either level since slice SI-10a, on Strict's enrolment and on Sign-in settings alike;
+ *     then any unfinished set-up of theirs replaced by a new one, its secret sealed
  *     (beginAuthenticatorSetup(), authenticator.ts), with one `parent.authenticator.setup_started` row (how many it
  *     replaced, nothing of the secret).
  * The answer carries the key to type (grouped in fours) and the QR code's squares of the key URI, labelled with the
@@ -155,14 +161,13 @@ const windowStands = async (tx: Tx, ctx: Me, at: Date) => provedRecently(await s
  * force until a code from the app is checked (confirmMyAuthenticator()).
  */
 export async function startMyAuthenticator(ctx: Me, now?: Date): Promise<SetupAnswer> {
-  if (!(await sessionProvedRecently(db, ctx, now))) return PROVE_AGAIN;
+  if (!(await sessionMayAddFactor(db, ctx, now))) return PROVE_AGAIN;
   if ((await takeRateLimit("signin_settings_parent", ctx.parentId, now)) !== "taken") return TOO_MANY_PRESSES;
   const brand = await currentBrand();
   const begun = await db.transaction(async (tx) => {
     await holdParentSettings(tx);
-    const me = await provedUnderLock(tx, ctx, now);
-    if (!me) return "not_proved" as const;
-    if ((await getParentSettings(tx)).level === "strict") return "strict" as const;
+    const me = await heldPerson(tx, ctx, now);
+    if (!me || !(await sessionMayAddFactor(tx, ctx, me.at))) return "not_proved" as const;
     if (!(await currentPassword(tx, ctx.parentId))) return "no_password" as const;
     const made = await beginAuthenticatorSetup(tx, ctx.parentId, me.at);
     if (!made) return "on" as const;
@@ -170,7 +175,6 @@ export async function startMyAuthenticator(ctx: Me, now?: Date): Promise<SetupAn
       after: { replaced: made.replaced }, ip: ctx.ip }, tx);
     return { secret: made.secret, id: made.id, email: me.email };
   });
-  if (begun === "strict") return { ok: false, errors: [COPY.appStrictOff] };
   if (begun === "no_password") return { ok: false, errors: [COPY.appNeedsPassword] };
   if (begun === "on") return { ok: false, errors: [COPY.appAlreadyOn] };
   if (typeof begun === "string") return PROVE_AGAIN;
@@ -191,7 +195,8 @@ export async function startMyAuthenticator(ctx: Me, now?: Date): Promise<SetupAn
  *     the settings' presses (`signin_settings_parent`) is taken for it, so a stale stamp replayed writes at most ten rows
  *     an hour (past that it is told the same words, unaudited). This comes before the window, so a set-up finished in
  *     another window is told as such and never as the window run out;
- * (b) the window, read for this session; when it has run out, the set-up's standing is read again (nothing holds the
+ * (b) the window, read for this session (or since slice SI-10a an enrolling session, sessionMayAddFactor(),
+ *     enrolment.ts, as at the start); when it has run out, the set-up's standing is read again (nothing holds the
  *     row between the two reads, and a set-up finished meanwhile leaves this session's proof older than the app), and
  *     only a set-up still current is answered `appSetupTimedOut`, any other as at (a);
  * (c) the try's place under the person (`second_step_parent`, SI-6a's count, so set-up tries and sign-in tries share its
@@ -206,10 +211,12 @@ export async function startMyAuthenticator(ctx: Me, now?: Date): Promise<SetupAn
  *     app); a wrong code is `parent.authenticator.confirm_wrong` (`factor`, `try`, `reason` `wrong`), and a secret that
  *     won't open is `parent.authenticator.confirm_refused` (`setup_unreadable`), never a throw. Taken: the person's unused
  *     emailed codes deleted (an emailed code's proof is refused beside an app in force anyway, signinStands()), ten
- *     backup codes made, any older ones deleted (makeBackupCodes()), with `parent.authenticator.on` and
- *     `parent.backup_codes.make` (counts only);
+ *     backup codes made, any older ones deleted (makeBackupCodes()), and, when this session is enrolling (since slice
+ *     SI-10a), the session made whole (completeEnrolment(), enrolment.ts), with `parent.authenticator.on` (with
+ *     `enrolled: true` then) and `parent.backup_codes.make` (counts only);
  * (e) a right code gives its place back, and so does a secret that won't open (no guess was possible), as at the door.
- * The answer carries the ten codes, once. Devices stay remembered, no session is made or ended, `strong_at` stays. The
+ * The answer carries the ten codes, once. Devices stay remembered, no session is made or ended, `strong_at` stays but
+ * for an enrolment's session. The
  * window run out is answered with `setupOver` too, in its own words (`appSetupTimedOut`).
  */
 export async function confirmMyAuthenticator(ctx: Me, code: unknown, stamp: unknown, now?: Date): Promise<CodesAnswer> {
@@ -231,7 +238,7 @@ export async function confirmMyAuthenticator(ctx: Me, code: unknown, stamp: unkn
   };
   const before = await setupStanding(db, ctx, rowMac, now ?? new Date());
   if (before.standing !== "current") return overOutside(before.standing);
-  if (!(await sessionProvedRecently(db, ctx, now))) {
+  if (!(await sessionMayAddFactor(db, ctx, now))) {
     // Nothing holds the row between the two reads: a confirm that finished this set-up meanwhile leaves this session's
     // proof older than the app, so the set-up is read again, and only one still current is told the window ran out.
     const after = await setupStanding(db, ctx, rowMac, now ?? new Date());
@@ -253,7 +260,7 @@ export async function confirmMyAuthenticator(ctx: Me, code: unknown, stamp: unkn
     if (!me) return "not_proved" as const;
     const setup = await setupStanding(tx, ctx, rowMac, me.at);
     if (setup.standing !== "current") return over(setup.standing, tx);
-    if (!(await windowStands(tx, ctx, me.at))) return "not_proved" as const;
+    if (!(await sessionMayAddFactor(tx, ctx, me.at))) return "not_proved" as const;
     const who = parentActor({ id: ctx.parentId, email: me.email });
     const took = typed.kind === "app" ? await confirmAuthenticator(tx, ctx.parentId, setup.id, typed.code, me.at) : { miss: "wrong" as const };
     if ("miss" in took) {
@@ -269,8 +276,12 @@ export async function confirmMyAuthenticator(ctx: Me, code: unknown, stamp: unkn
     }
     const codesDeleted = await deleteUnusedSigninCodes(ctx.parentId, tx);
     const made = await makeBackupCodes(tx, ctx.parentId, me.at);
+    // Strict's enrolment (slice SI-10a): the session is whole once the person's app is in force, proved at that moment.
+    // The app is the person's first factor whenever this session is enrolling: sessionMayAddFactor(), read above under
+    // the person's row, found an enrolling session's person with none (a proved session has no window to complete).
+    const enrolled = await completeEnrolment(tx, ctx, me.at, true);
     await writeAudit({ actor: who, action: "parent.authenticator.on", targetType: "parent", targetId: ctx.parentId,
-      after: { codesDeleted }, ip: ctx.ip }, tx);
+      after: enrolled ? { codesDeleted, enrolled: true } : { codesDeleted }, ip: ctx.ip }, tx);
     await writeAudit({ actor: who, action: "parent.backup_codes.make", targetType: "parent", targetId: ctx.parentId,
       after: { made: made.codes.length, replaced: made.replaced }, ip: ctx.ip }, tx);
     return { codes: made.codes };

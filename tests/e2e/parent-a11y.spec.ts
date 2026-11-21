@@ -7,7 +7,8 @@ import { PARAMS } from "./parent-params";
 import { MIN_TARGET, focusStop, layoutProblems } from "./a11y-checks";
 import { mintZeldaLink, NO_SUCH_LINK, removeZeldaLinks, resetPasskeyOffer, takeZeldaPassword, type LinkPurpose } from "./signin-links";
 import { E2E_SIGNIN } from "./signin-seed";
-import { clearZeldaCounts, keepZeldaProof, proveZeldaSinceHerApp, removeZeldaSecondSteps, setUpAppOnPage, setZeldaProof } from "./authenticator-steps";
+import { appCodeAt, clearZeldaCounts, keepZeldaProof, proveZeldaSinceHerApp, removeZeldaSecondSteps, setUpAppOnPage, setZeldaProof } from "./authenticator-steps";
+import { enrollingSession, makeStrictParent, removeStrictParent, storeLevel } from "./strict-seed";
 
 /**
  * Every page a parent sees, in every display mode, at a phone's width and a desktop's (step 6 of the roadmap; PRODUCT.md:
@@ -65,7 +66,7 @@ const summary = (text: string | undefined) => (text ?? "").replace(/\s+/g, " ").
  * the end of `address`; the links are removed as each page is closed (and after the run), so the seed is as it was.
  */
 type Target = { label: string; address: string; signedIn: boolean; deviceStore?: Record<string, string>; status?: number; link?: LinkPurpose; app?: AppState;
-  offer?: true };
+  offer?: true; enrol?: EnrolState };
 /**
  * A state of the "Authenticator app" box of /family/sign-in that only presses reach (the sign-in release, slice SI-6b):
  * the set-up shown (the QR code, the key and its copy press, the code field), the backup codes shown once, the box with
@@ -151,7 +152,22 @@ async function offerSession(): Promise<() => Promise<void>> {
   };
 }
 
-const TARGETS = [...parentTargets(), ...APP_TARGETS, ...OFFER_TARGETS, ...BEFORE_SIGN_IN];
+/**
+ * Strict's enrolment (the sign-in release, slice SI-10a): /one-more-step as an enrolling session meets it, and with the
+ * backup codes shown under the box to tick, once an app is set up through the page's own presses. The seed is at
+ * Standard and gives nobody a session that enrols, so for each opening Strict is stored, a guardian of the spec's own is
+ * made with a password and no second factor (never Zelda, whose seeded session the gate would sign out at Strict), and
+ * an enrolling session of hers is given to the browser (tests/e2e/strict-seed.ts); she goes, and Standard comes back,
+ * as the page is closed. Chromium here holds WebAuthn at the portal's address, so the passkey's press is drawn.
+ */
+type EnrolState = "page" | "codes";
+const ENROL_TARGETS: Target[] = [
+  { label: "/one-more-step", address: "/one-more-step", signedIn: false, enrol: "page" },
+  { label: "/one-more-step (the backup codes and the box to tick)", address: "/one-more-step", signedIn: false, enrol: "codes" },
+];
+const ENROL_SESSION_TOKEN = "e2e-a11y-enrolling-session-token";
+
+const TARGETS = [...parentTargets(), ...APP_TARGETS, ...OFFER_TARGETS, ...ENROL_TARGETS, ...BEFORE_SIGN_IN];
 
 /** The pages under src/app/sign-in, from disk: "set-up/[token]/page.tsx" is "/sign-in/set-up/[token]". */
 const signInRoutes = () => parentRoutes("src/app/sign-in").map((route) => (route === "/" ? "/sign-in" : `/sign-in${route}`));
@@ -165,12 +181,16 @@ test("every page under src/app/sign-in is opened here", () => {
 test.skip(({ viewport }) => (viewport?.width ?? 0) < 760, "one pass, in the desktop project, at its own widths: the phone project would repeat it");
 test.describe.configure({ timeout: 120_000 });
 let putProofBack: () => Promise<void> = async () => undefined;
-test.afterAll(async () => { await removeZeldaLinks(sql); await removeZeldaSecondSteps(sql); await clearZeldaCounts(sql); await putProofBack(); await sql.end(); });
+test.afterAll(async () => { await removeZeldaLinks(sql); await removeZeldaSecondSteps(sql); await clearZeldaCounts(sql); await putProofBack();
+  await removeStrictParent(sql); await storeLevel(sql, "standard"); await sql.end(); });
 // A run cut off in the gold pass leaves the club gold: put the seeded color back first.
 test.beforeAll(async () => {
   await sql`UPDATE setting SET value = jsonb_set(value, '{color}', to_jsonb(${SEEDED_COLOR}::text)) WHERE key = 'club' AND value->>'color' = ${GOLD}`;
-  // A run cut off with an app set up for Zelda leaves it: nobody seeded has one.
+  // A run cut off with an app set up for Zelda leaves it: nobody seeded has one. And one cut off at /one-more-step leaves
+  // Strict stored and its guardian behind: the seed is at Standard and has no such guardian.
   await removeZeldaSecondSteps(sql);
+  await removeStrictParent(sql);
+  await storeLevel(sql, "standard");
   putProofBack = await keepZeldaProof(sql);
 });
 
@@ -196,6 +216,21 @@ async function prepareApp(page: Page, state: AppState) {
   await expect(box.getByLabel("Code from your authenticator app, or a backup code")).toBeVisible();
 }
 
+/** Brings /one-more-step to an enrolment state (EnrolState): the page as drawn, or an app set up there and its codes shown. */
+async function prepareEnrolment(page: Page, state: EnrolState) {
+  // Drawn once the page has read the browser: the passkey's press.
+  await expect(page.getByRole("button", { name: "Add a passkey" })).toBeVisible();
+  if (state === "page") return;
+  const box = page.getByRole("region", { name: "Use an authenticator app" });
+  await box.getByRole("button", { name: "Set up an authenticator app", exact: true }).click();
+  await expect(box.getByRole("img", { name: "QR code to scan with your authenticator app" })).toBeVisible();
+  const key = ((await box.locator(".app-key").textContent()) ?? "").trim();
+  await box.getByLabel("Code from your authenticator app", { exact: true }).fill(appCodeAt(key, await page.evaluate(() => Date.now())));
+  await box.getByRole("button", { name: "Finish setting up" }).click();
+  await expect(page.getByRole("list", { name: "Your backup codes" }).getByRole("listitem")).toHaveCount(10);
+  await expect(page.getByLabel("I've saved my backup codes somewhere safe")).toBeVisible();
+}
+
 /** Opens a target in a context of its own, as the seeded parent or nobody, and waits for its fonts. */
 async function open(browser: Browser, target: Target, width: number): Promise<{ page: Page; close: () => Promise<void> }> {
   const context = await browser.newContext({ viewport: { width, height: HEIGHT } });
@@ -204,6 +239,12 @@ async function open(browser: Browser, target: Target, width: number): Promise<{ 
   if (target.offer) await sql`DELETE FROM parent_auth_session WHERE token = ${OFFER_SESSION_TOKEN}`;
   const removeOffer = target.offer ? await offerSession() : null;
   if (target.offer) await context.addCookies([parentSessionCookie(OFFER_SESSION_TOKEN)]);
+  if (target.enrol) {
+    await storeLevel(sql, "strict");
+    const { authUserId } = await makeStrictParent(sql);
+    await enrollingSession(sql, authUserId, ENROL_SESSION_TOKEN);
+    await context.addCookies([parentSessionCookie(ENROL_SESSION_TOKEN)]);
+  }
   if (target.deviceStore) {
     // A code step must be live to be picked up: give it the time it is opened at.
     await context.addInitScript((store) => {
@@ -226,6 +267,7 @@ async function open(browser: Browser, target: Target, width: number): Promise<{ 
   if (target.app) await prepareApp(page, target.app);
   // The box is drawn once the page has read the browser (WebAuthn, the address, a phone or a computer).
   if (target.offer) await expect(page.locator('[data-passkey-offer="shown"]')).toBeVisible();
+  if (target.enrol) await prepareEnrolment(page, target.enrol);
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
   const close = async () => {
     await context.close();
@@ -235,6 +277,7 @@ async function open(browser: Browser, target: Target, width: number): Promise<{ 
     if (target.link) await removeZeldaLinks(sql);
     if (target.app) { await removeZeldaSecondSteps(sql); await clearZeldaCounts(sql); await putProofBack(); }
     if (removeOffer) await removeOffer();
+    if (target.enrol) { await removeStrictParent(sql); await storeLevel(sql, "standard"); }
   };
   return { page, close };
 }

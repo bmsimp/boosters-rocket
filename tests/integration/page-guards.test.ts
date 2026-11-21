@@ -94,6 +94,7 @@ const OTHER_PAGES: Record<string, string> = {
   "src/app/staff/sign-in/page.tsx": "Public: the staff sign-in buttons. Shows no family data (tests/e2e/public-pages.spec.ts).",
   "src/app/refused/page.tsx": "Public: one fixed message, the same whoever is refused and whatever the reason.",
   "src/app/choose-family/page.tsx": "Reads getParentState() itself and redirects to /sign-in without a session; it lists only the signed-in parent's own families (tests/integration/choose-family-action.test.ts).",
+  "src/app/one-more-step/page.tsx": "requireEnrolmentPage() (src/lib/guards.ts), its first line: only an enrolling session under Strict (the gate's `enrol`) sees it; a whole session goes home and none to /sign-in. It shows nothing of a person or a family, and its actions (enrolmentAction, src/app/one-more-step/actions.ts) only set up the session's own person's first second factor (tests/integration/enrolment.test.ts, tests/integration/parent-isolation.test.ts).",
   "src/app/setup/page.tsx": "Answers 404 once setup is finished; while it is open, everything past the unlock form needs the setup session cookie (tests/integration/setup-state.test.ts, tests/e2e/setup.spec.ts).",
 };
 
@@ -261,6 +262,12 @@ describe("every page guards itself", () => {
       + `Move each under one of those folders, or add it to OTHER_PAGES in tests/integration/page-guards.test.ts with a sentence saying how it is protected.`).toEqual([]);
     const gone = Object.keys(OTHER_PAGES).filter((f) => !others.includes(f));
     expect(gone, `OTHER_PAGES lists pages that no longer exist: ${gone.join(", ")}. Remove them.`).toEqual([]);
+  });
+
+  it("guards Strict's enrolment page with requireEnrolmentPage(), the first line of the page", () => {
+    const file = "src/app/one-more-step/page.tsx";
+    expect(importsFromGuards(read(file), "requireEnrolmentPage")).toBe(true);
+    expect(pageBody(read(file))).toMatch(/^export\s+default\s+async\s+function\s+\w+\([^)]*\)[^{]*\{\s*const\s+ctx\s*=\s*await\s+requireEnrolmentPage\(\s*\);/);
   });
 });
 
@@ -448,6 +455,11 @@ const PARENT_CODE_ELSEWHERE = [
   "src/lib/parents/passkey-offer.ts",
   "src/lib/parents/passkey-offer-rule.ts",
   "src/lib/parents/passkey-offer-copy.ts",
+  // Strict's enrolment on /one-more-step (slice SI-10a): whether a session may add a factor and its end, for the
+  // session's own person alone, the pure rule of a session's standing, and the page's words.
+  "src/lib/parents/enrolment.ts",
+  "src/lib/parents/enrolment-rule.ts",
+  "src/lib/parents/enrolment-copy.ts",
 ];
 
 /**
@@ -456,6 +468,8 @@ const PARENT_CODE_ELSEWHERE = [
  * families.
  */
 const BEFORE_SIGN_IN_CODE = "src/app/sign-in/";
+/** Strict's enrolment (/one-more-step, slice SI-10a): its page, its client parts and its actions, scanned whole as parent code. */
+const ENROLMENT_CODE = "src/app/one-more-step/";
 
 /**
  * Parent-facing folders under src/lib/: code that parent pages call to read one family's data. The scan reads every
@@ -468,6 +482,7 @@ describe("parent code never imports the staff-only queries", () => {
   const parentCode = [
     ...app.filter((f) => f.startsWith(PARENT_PAGES) && isSource(f)),
     ...app.filter((f) => f.startsWith(BEFORE_SIGN_IN_CODE) && isSource(f)),
+    ...app.filter((f) => f.startsWith(ENROLMENT_CODE) && isSource(f)),
     ...PARENT_CODE_ELSEWHERE,
     ...PARENT_FACING_LIB.flatMap(filesUnder).filter(isSource),
   ];
@@ -479,6 +494,7 @@ describe("parent code never imports the staff-only queries", () => {
     expect(parentCode).toEqual(expect.arrayContaining(["src/app/sign-in/page.tsx", "src/app/sign-in/password-link-page.tsx", "src/app/sign-in/password-form.tsx",
       "src/app/sign-in/password-actions.ts", "src/app/sign-in/set-up/[token]/page.tsx", "src/app/sign-in/reset/[token]/page.tsx",
       "src/app/sign-in/password/page.tsx", "src/app/sign-in/password-request-form.tsx"]));
+    expect(parentCode).toEqual(expect.arrayContaining(["src/app/one-more-step/page.tsx", "src/app/one-more-step/actions.ts", "src/app/one-more-step/enrolment-steps.tsx"]));
     // read() throws for a file that is gone, so a module renamed or removed can't stay listed and unscanned.
     for (const file of PARENT_CODE_ELSEWHERE) expect(read(file).length, file).toBeGreaterThan(0);
   });

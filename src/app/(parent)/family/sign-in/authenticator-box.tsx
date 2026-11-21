@@ -5,25 +5,15 @@ import { LocalTime } from "@/app/components/local-time";
 import { SIGNIN_SETTINGS_COPY as COPY, howYouSignIn } from "@/lib/parents/signin-settings-copy";
 import { confirmAuthenticatorAction, newBackupCodesAction, startAuthenticatorAction, turnOffAuthenticatorAction } from "./actions";
 import { AskAgain } from "./signin-forms";
+import { AppSetupForm, CopyButton } from "./app-setup";
 
 type Result = { ok: true; message: string } | { ok: false; errors: string[] };
 const FAILED = { ok: false as const, errors: [COPY.failed] };
 const Errors = ({ errors }: { errors: string[] }) => <ul role="alert" className="errors">{errors.map((e) => <li key={e}>{e}</li>)}</ul>;
 const Tick = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M4 12.5l5 5 11-11" /></svg>;
 
-/** A press that copies `text`, and only it, saying in words whether it did. */
-export function CopyButton({ text, label }: { text: string; label: string }) {
-  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
-  const copy = async () => {
-    try { await navigator.clipboard.writeText(text); setState("copied"); } catch { setState("failed"); }
-  };
-  return (
-    <div className="stack">
-      <button type="button" className="btn btn-line" onClick={() => void copy()}>{label}</button>
-      <p role="status" className="help">{state === "copied" ? COPY.copied : state === "failed" ? COPY.copyFailed : ""}</p>
-    </div>
-  );
-}
+// The copy press and the set-up's form live in app-setup.tsx since slice SI-10a, shared with Strict's enrolment.
+export { CopyButton } from "./app-setup";
 
 /** The parent's app as the page shows it (MyApp, src/lib/parents/signin-settings.ts): when it was set up, and the backup codes left. */
 export type ShownApp = { since: string; backupCodesLeft: number };
@@ -39,7 +29,8 @@ type Busy = "start" | "confirm" | "codes" | "off" | null;
 /**
  * The authenticator app on the sign-in settings page (slice SI-6b; src/lib/parents/authenticator-settings.ts). Off: what
  * an app is, and, asked again first (AskAgain) unless the session proved itself in the last 10 minutes, "Set up an
- * authenticator app" (not for a parent with no password, who is told to choose one first, and not under Strict). Being
+ * authenticator app" (not for a parent with no password, who is told to choose one first; at either level since slice
+ * SI-10a). Being
  * set up, in this component's state alone: the QR code drawn from the squares the press answered, the key to type with
  * its copy press, and the code field; a reload or leaving the page loses them, and the next press makes a new key. On:
  * since when, the backup codes left, and, asked again, new backup codes and turning it off (under Strict, words in
@@ -130,31 +121,8 @@ export function AuthenticatorBox({ email, app, proved, hasPassword, strict, pass
 
   // Being set up: the QR code and the key, once, from the press's answer, then the code that finishes it.
   if (setup) {
-    return (
-      <div className="stack">
-        <p ref={landing} tabIndex={-1}>{COPY.appScan}</p>
-        <svg className="app-qr" viewBox={`0 0 ${setup.qr.size} ${setup.qr.size}`} role="img" aria-label={COPY.appQrLabel} shapeRendering="crispEdges" xmlns="http://www.w3.org/2000/svg">
-          <rect width={setup.qr.size} height={setup.qr.size} fill="white" />
-          <path d={setup.qr.path} fill="black" />
-        </svg>
-        <div>
-          <p>{COPY.appKey}</p>
-          <code className="app-key">{setup.key}</code>
-        </div>
-        <CopyButton text={setup.key.replace(/ /g, "")} label={COPY.copyKey} />
-        <form className="stack" onSubmit={(e) => { e.preventDefault(); void confirm(); }}>
-          <p id="app-confirm-lede">{COPY.appConfirmLede}</p>
-          <label className="field"><span>{COPY.appConfirmCode}</span>
-            <input name="code" aria-describedby="app-confirm-lede" inputMode="numeric" autoComplete="one-time-code" maxLength={20} required
-              value={code} onChange={(e) => setCode(e.target.value)} />
-          </label>
-          {answered}
-          {/* Busy is aria-disabled, not disabled: a disabled button drops the focus, and the keyboard's place with it. */}
-          <button className="btn" aria-disabled={busy !== null || undefined}>{busy === "confirm" ? COPY.checking : COPY.appConfirm}</button>
-        </form>
-        <p className="help">{COPY.appSetupLost}</p>
-      </div>
-    );
+    return <AppSetupForm setup={setup} code={code} onCode={setCode} onConfirm={() => void confirm()} busy={busy !== null} answered={answered}
+      landing={landing} lost={COPY.appSetupLost} />;
   }
 
   return (
@@ -163,7 +131,6 @@ export function AuthenticatorBox({ email, app, proved, hasPassword, strict, pass
       <p>{COPY.appWhat}</p>
       <p className="help">{COPY.appKeepsDevices}</p>
       {!hasPassword ? <p>{COPY.appNeedsPassword}</p>
-        : strict ? <p>{COPY.appStrictOff}</p>
         : (
           <AskAgain email={email} proved={proved} lede={words.askAgainForApp} passkey={passkey} portalOrigin={portalOrigin}>
             <button type="button" className="btn" aria-disabled={busy !== null || undefined} onClick={() => void start()}>

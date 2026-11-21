@@ -91,8 +91,6 @@ export const SIGNIN_SETTINGS_COPY = {
   /** Setting one up keeps the remembered devices (open question 26 lists what forgets them): said beside the device list. */
   appKeepsDevices: "Setting up an app doesn't forget the devices we remember for you.",
   appNeedsPassword: "To set up an authenticator app, please choose a password first.",
-  /** Under Strict (SI-10 stores it) the app is set up when the club first asks for one, not here. */
-  appStrictOff: "For now, an authenticator app can't be set up here. Please ask the club if you'd like to use one.",
   askAgainForApp: "Before you set up an authenticator app, please show it's you: enter your password, then the code we email you.",
   askAgainForPasskeys: "Before you add a passkey, please show it's you: enter your password, then the code we email you.",
   appSetUp: "Set up an authenticator app",

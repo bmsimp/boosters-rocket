@@ -26,6 +26,7 @@ in the page's order, and a page the keyboard can't Tab out of; and after each ac
 | 10. Sign-in settings: asking again | From Family, "Sign-in settings" by Tab and Enter; the password field, then Continue; Enter puts the focus in the code field; a wrong code is an alert with the focus left in the field; the emailed code by Enter, and the thank-you takes the focus; then New password, New password again, Change my password (never pressed) and Sign out everywhere (never pressed); Tab then leaves the page. The seeded session's `strong_at` is put back after, and the codes the journey made are deleted (the seed has none). |
 | 11. The authenticator app | In the Authenticator app box: its own asking again (the password, Continue, the emailed code), the thank-you taking the focus; Set up an authenticator app by Enter puts the focus on the words above the QR code; Copy the key by Tab and Enter copies the key alone; the code field, Finish setting up, and the backup codes' words take the focus; Copy the backup codes copies the ten alone. Drawn again with no recent proof: the password, then the app's own code, the thank-you; Make new backup codes (not pressed), Turn off the authenticator app by Enter, and what happened takes the focus; Tab then leaves the page. The app, its codes and the counts are removed after, and the seeded session's `strong_at` put back (added with the sign-in release's slice SI-6b). |
 | 13. The passkey offer on Home | A session made and proved just now on a device of its own (as a sign-in by the password and the emailed code leaves one): on Home, Tab from the top reaches **Turn on**, then **Not now**; Enter on Not now replaces the box with its answer ("No problem. We'll leave it for now."), which takes the focus; Tab then goes on through Home and leaves it. The session, its device and Zelda's count are removed and put back after (added with the sign-in release's slice SI-8). |
+| 14. Strict's enrolment (`/one-more-step`) | Strict stored for the journey alone and Standard put back after, with a guardian of its own (a password, no second factor, never Zelda): the email, the password and Enter land on `/one-more-step`; Tab past **Add a passkey** reaches **Set up an authenticator app**, and Enter puts the focus on the words above the QR code; the app's code typed in its field and Enter finish it, and the done words above the ten backup codes take the focus; Tab reaches the box to tick, then **Continue**, whose Enter while unticked asks for the tick and goes nowhere; Shift+Tab, Space ticks it, Tab and Enter go home (added with the sign-in release's slice SI-10a). |
 
 Still walked only by hand, or not at all, because the browser run can't reach the service: agreeing to sign and the
 signing frame (journey 3's second half, against the local Documenso as in step 6), saving the phone and address form
@@ -284,6 +285,21 @@ or computer's prompt does is on the owner's list (`docs/runbooks/before-the-firs
   sign in here, use your passkey." take the focus, or, for a first passkey with no app, the words above the ten backup
   codes; a refused or cancelled add is an alert under the buttons, which takes the focus, with the offer still there;
   the third Not now's answer, with its **Sign-in settings** link after it.
+
+### 14. Strict's enrolment (`/one-more-step`)
+
+Added with the sign-in release's slice SI-10a. Journey 14 of `tests/e2e/keyboard-journeys.spec.ts` walks the app's way
+by keyboard alone; `tests/e2e/parent-a11y.spec.ts` checks the page at 360 and 1440 in every mode (its targets
+"/one-more-step" and "/one-more-step (the backup codes and the box to tick)"); `tests/e2e/strict-enrolment.spec.ts`
+adds a passkey there once with Playwright's own authenticator. What a real phone's passkey prompt does there, and the page in
+the installed app, stay unproved in a browser: nothing can store Strict until SI-10b's switch, which adds them to the
+owner's list (`docs/runbooks/before-the-first-family.md`).
+
+- Walked: the two boxes in order, the passkey's press then the app's; the set-up's words take the focus; the done words
+  above the backup codes take the focus; Continue is `aria-disabled` until the box is ticked, and pressed unticked says
+  why in its status line, the focus staying on it.
+- Not walked by keyboard: **Add a passkey** (the prompt is the browser's own); a press once the half hour since signing
+  in has passed, whose alert takes the focus with a **Sign in** link after it.
 
 ### On a phone: the tab bar and the focus
 

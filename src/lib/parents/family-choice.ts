@@ -19,8 +19,13 @@ import type { AppFamilyId } from "@/lib/families/ids";
  * enter since the code was checked (verifySigninCode() refuses one before) is refused here as the gate refuses them:
  * nothing is activated, their sessions end, `signin.refused` `no_enabled_guardian` is audited, and `sessionEnded` says
  * so, so the finish refuses and sets no cookie.
+ *
+ * `enrolling` (since the sign-in release's slice SI-10a): the sign-in is Strict's enrolment, a password alone for a
+ * person with no second factor, and its `signin` row says so (`enrolling: true`). The family is entered on the session
+ * as for any sign-in; the gate lets an enrolling session reach /one-more-step alone, whatever family it holds.
  */
-export async function completeParentSignin(parentId: string, ip: string | null, sessionId?: string): Promise<{ familyId: AppFamilyId | null; sessionEnded?: true }> {
+export async function completeParentSignin(parentId: string, ip: string | null, sessionId?: string,
+  o: { enrolling?: boolean } = {}): Promise<{ familyId: AppFamilyId | null; sessionEnded?: true }> {
   const [p] = await db.select().from(parent).where(eq(parent.id, parentId));
   if (!p) return { familyId: null };
   const actor = parentActor(p);
@@ -54,7 +59,8 @@ export async function completeParentSignin(parentId: string, ip: string | null, 
       const session = await tx.update(parentAuthSession).set({ familyId, updatedAt: new Date() }).where(eq(parentAuthSession.id, sessionId)).returning({ id: parentAuthSession.id });
       if (!session.length) return false;
     }
-    await writeAudit({ actor, action: "signin", targetType: "parent", targetId: parentId, after: { familyId: String(familyId) }, ip }, tx);
+    await writeAudit({ actor, action: "signin", targetType: "parent", targetId: parentId,
+      after: o.enrolling ? { familyId: String(familyId), enrolling: true } : { familyId: String(familyId) }, ip }, tx);
     return true;
   });
   return entered ? { familyId } : ENDED;

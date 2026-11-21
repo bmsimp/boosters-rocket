@@ -175,7 +175,9 @@ const TOO_MANY = { ok: false as const, errors: [COPY.tooManyTries] };
  * not awaited, and the answer never says what became of it), for a step ending CODE_TTL_MS after the password proved right, which the stamp carries.
  * Since slice SI-6a a person with an authenticator app in force (the door's own read, PasswordCheck.step) is sent no
  * code: the answer asks for the app's code or a backup code (`step: "app"`), with the same stamp. Under Strict the door
- * refuses a person with no second factor (`strict_no_factor`), so only an app holder is asked again there.
+ * answers a person with no second factor with Strict's enrolment (`step: "enrol"`, since slice SI-10a), which is no
+ * step of asking again: refused, as a wrong password is (the gate signs such a session out anyway, or it is enrolling,
+ * and an enrolling session reaches no page that asks again), so only a holder of a second factor is asked again there.
  */
 export async function askAgainPassword(ctx: Asker, password: unknown, now = new Date()): Promise<AskAgainAnswer> {
   if (typeof password !== "string" || password.length > MOST_TYPED_PASSWORD) return PASSWORD_REFUSED;
@@ -183,6 +185,7 @@ export async function askAgainPassword(ctx: Asker, password: unknown, now = new 
   const check = await checkPasswordSignin(ctx.email, password, deviceId ? { deviceId } : null, ctx.ip, now, undefined, { kind: "password_reask_parent", subject: ctx.parentId });
   if (!check.ok) return check.limited ? TOO_MANY : PASSWORD_REFUSED;
   if (check.person.id !== ctx.parentId) return PASSWORD_REFUSED; // one address is one person: never another's
+  if (check.step === "enrol") return PASSWORD_REFUSED; // Strict with no second factor: nothing to ask again with
   const endsAt = new Date(check.at.getTime() + CODE_TTL_MS);
   const asker = { sessionId: ctx.sessionId, parentId: ctx.parentId, email: check.person.email };
   // A passkey holder (since slice SI-7b) is sent no code: their passkey, with the app's code or a backup code beside it
