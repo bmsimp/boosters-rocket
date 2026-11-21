@@ -46,7 +46,7 @@ describe("the staff menu", () => {
       "Season: Seasons, Progress, Signed forms, Volunteering, Volunteer credit",
       "Money: Balances, Reconciliation",
       "Settings",
-      "Admin: Staff, Roles, Audit, Health",
+      "Admin: Staff, Roles, Audit, Health, Design system",
     ]);
   });
 
@@ -71,14 +71,14 @@ describe("the staff menu", () => {
       [["Volunteer.Credit.ReadWrite"], ["Home", "Season: Volunteer credit"]],
       [["Finance.Balance.Read"], ["Home", "Money: Balances"]],
       [["Staff.Users.Read"], ["Home", "Admin: Staff"]],
-      [["Settings.Club.Read"], ["Home", "Settings"]],
+      [["Settings.Club.Read"], ["Home", "Settings", "Admin: Design system"]],
     ];
     for (const [held, menu] of cases) expect(shape(staffMenu(only(...held))), held.join(", ")).toEqual(menu);
   });
 
   it("never shows Roles, Audit or Health to a custom role, however wide", () => {
     const widest = only(...expandRules({ include: ["*"], exclude: [] }));
-    expect(shape(staffMenu(widest)).at(-1)).toBe("Admin: Staff");
+    expect(shape(staffMenu(widest)).at(-1)).toBe("Admin: Staff, Design system");
     for (const h of ["/staff/roles", "/staff/audit", "/staff/health"]) expect(menuHrefs(staffMenu(widest))).not.toContain(h);
   });
 });

@@ -11,7 +11,7 @@ const SEASONS = 'href="/staff/seasons"', PROGRESS = 'href="/staff/seasons/progre
 const BALANCES = 'href="/staff/balances"', VOLUNTEERING = 'href="/staff/volunteer"', SETTINGS = 'href="/staff/settings"';
 const RECONCILIATION = 'href="/staff/reconciliation"', CREDIT = 'href="/staff/volunteer/credit"', SIGNED = 'href="/staff/forms"';
 const ROLES = 'href="/staff/roles"', AUDIT = 'href="/staff/audit"', STAFF = 'href="/staff/people"';
-const LINKS = 'href="/staff/links"';
+const LINKS = 'href="/staff/links"', DESIGN = 'href="/staff/design-system"';
 
 async function staffWith(...patterns: string[]) {
   const s = await seedStaff({ email: "helper@club.org", name: "Hal Helper" });
@@ -50,7 +50,7 @@ describe("the staff menu", () => {
       "Season: Seasons, Progress, Signed forms, Volunteering, Volunteer credit",
       "Money: Balances, Reconciliation",
       "Settings",
-      "Admin: Staff, Roles, Audit, Health",
+      "Admin: Staff, Roles, Audit, Health, Design system",
     ]);
   });
 
@@ -89,15 +89,17 @@ describe("the staff menu", () => {
     const nav = await menu();
     for (const entry of [SEASONS, PROGRESS, STAFF, SETTINGS]) expect(nav).toContain(entry);
     for (const entry of [HEALTH, ROLES, AUDIT]) expect(nav).not.toContain(entry);
-    expect((await entries()).at(-1)).toBe("Admin: Staff");
+    expect((await entries()).at(-1)).toBe("Admin: Staff, Design system");
   });
 
   it("shows Settings to someone who may read the club settings, and to nobody without a settings permission", async () => {
     await staffWith("Settings.Club.Read");
-    expect(await entries()).toEqual(["Home", "Settings"]);
+    // The design system gallery is for anyone who may read the club's settings, the look it is drawn in.
+    expect(await entries()).toEqual(["Home", "Settings", "Admin: Design system"]);
     await resetDb();
     await staffWith("Roster.Read", "Season.Steps.ReadWrite", "Finance.Balance.Read");
     expect(await menu()).not.toContain(SETTINGS);
+    expect(await menu()).not.toContain(DESIGN);
   });
 
   it("shows Balances only to someone who may read balances", async () => {
@@ -168,6 +170,7 @@ describe("the staff menu", () => {
     expect(await current("/staff/forms/evidence/0b0f2a8e-0000-4000-8000-000000000001")).toEqual(["/staff/forms"]);
     expect(await current("/staff/reconciliation")).toEqual(["/staff/reconciliation"]);
     expect(await current("/staff/links")).toEqual(["/staff/links"]);
+    expect(await current("/staff/design-system")).toEqual(["/staff/design-system"]);
     // Every settings page is under the one Settings entry.
     for (const path of ["/staff/settings", "/staff/settings/forms", "/staff/settings/parents/setup", "/staff/settings/club/edit"]) {
       expect(await current(path), path).toEqual(["/staff/settings"]);

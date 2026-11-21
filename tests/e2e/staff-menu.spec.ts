@@ -9,7 +9,7 @@ const GROUPS: Record<string, string[]> = {
   Families: ["Roster", "Parents", "Accounting links"],
   Season: ["Seasons", "Progress", "Signed forms", "Volunteering", "Volunteer credit"],
   Money: ["Balances", "Reconciliation"],
-  Admin: ["Staff", "Roles", "Audit", "Health"],
+  Admin: ["Staff", "Roles", "Audit", "Health", "Design system"],
 };
 const nav = (page: Page) => page.locator("header.bar nav.top-nav");
 /** The menu's own entries, in order: the links and group buttons of the bar, not the links inside a group. */

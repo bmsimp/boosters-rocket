@@ -33,6 +33,8 @@ const groups: { label: string; links: Rule[] }[] = [
     { href: "/staff/roles", label: "Roles", when: holds("Admin.Roles.ReadWrite") },
     { href: "/staff/audit", label: "Audit", when: holds("Audit.Log.Read") },
     { href: "/staff/health", label: "Health", when: holds("Admin.Health.Read") },
+    // The components pages are built from, with sample content only: for anyone who may read the club's own settings.
+    { href: "/staff/design-system", label: "Design system", when: holds("Settings.Club.Read") },
   ] },
 ];
 
