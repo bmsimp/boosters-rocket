@@ -11,18 +11,21 @@ import { CreateBox, WhatChanges } from "./changes";
 import { familyPage } from "@/app/staff/(app)/family-pages";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { familiesBeingMade } from "@/lib/roster/writes";
+import { endedLinksHeld } from "@/lib/accounting/ended-links";
 
 export const metadata = { title: "Roster" };
 export const dynamic = "force-dynamic";
 
 /**
  * `status`: the customer's own standing in QuickBooks; null for a family the roster lists no customer for. `linked`:
- * the family has a link at all; `making`: it has none yet, and its own create is waiting on the queue (stage 3's slice 9d).
+ * the family has a link at all; `making`: it has none yet, and its own create is waiting on the queue (stage 3's slice 9d);
+ * `held`: it has none since it was unlinked, and its customer is still in the books (stage 4's slice M3b2,
+ * endedLinksHeld()). The row names the family only, never that customer.
  */
-type Row = { id: AppFamilyId; name: string; students: number | null; parents: number | null; status: boolean | null; linked: boolean; making: boolean };
+type Row = { id: AppFamilyId; name: string; students: number | null; parents: number | null; status: boolean | null; linked: boolean; making: boolean; held: boolean };
 /** Whether a family is linked to QuickBooks, in words, and its customer's standing there when it is. */
 const linkWords = (r: Row) => (r.status !== null ? (r.status ? "Linked: active" : "Linked: inactive") : r.linked ? "Linked: not listed as a family now"
-  : r.making ? "Not linked yet: being made in QuickBooks" : "Not linked: in the portal only");
+  : r.making ? "Not linked yet: being made in QuickBooks" : r.held ? "Not linked: its customer is still in the books" : "Not linked: in the portal only");
 
 export default async function RosterPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireStaffPage("Roster.Read");
@@ -47,9 +50,11 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
   // for its customer, from the roster read above: every one has a page, addressed by its record.
   const families = roster ? await rosterFamilies(page) ?? [] : [];
   const making = families.some((f) => !f.linked) ? await familiesBeingMade() : new Set<string>();
+  // Those with no link unlinked from a customer the books still hold (slice M3b2): one read for them all, none when there are none.
+  const held = (await endedLinksHeld({ families: families.filter((f) => !f.linked).map((f) => f.id) })).families;
   const rows: Row[] = families.filter((f) => matches(f.name)).map((f) => ({ id: f.id, name: f.name,
     students: roster?.kind === "flat" ? null : f.students.length, parents: roster?.kind === "flat" ? null : f.parents.length, status: f.customer?.active ?? null,
-    linked: f.linked, making: making.has(String(f.id)) }));
+    linked: f.linked, making: making.has(String(f.id)), held: held.has(f.id) }));
   // Needs attention names QuickBooks' customers: each family's (or member's) is linked to its page through the family
   // kind of link, for the whole list in one lookup; a customer with none has no page, and its name links nowhere.
   const withPage = !roster ? [] : roster.kind === "flat" ? roster.members.map((m) => m.qboId) : roster.families.map((f) => f.customer.qboId);
