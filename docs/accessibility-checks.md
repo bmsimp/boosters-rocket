@@ -291,8 +291,9 @@ or computer's prompt does is on the owner's list (`docs/runbooks/before-the-firs
 Added with the sign-in release's slice SI-10a. Journey 14 of `tests/e2e/keyboard-journeys.spec.ts` walks the app's way
 by keyboard alone; `tests/e2e/parent-a11y.spec.ts` checks the page at 360 and 1440 in every mode (its targets
 "/one-more-step" and "/one-more-step (the backup codes and the box to tick)"); `tests/e2e/strict-enrolment.spec.ts`
-adds a passkey there once with Playwright's own authenticator. What a real phone's passkey prompt does, and the page in
-the installed app, are on the owner's list (`docs/runbooks/before-the-first-family.md`).
+adds a passkey there once with Playwright's own authenticator. What a real phone's passkey prompt does there, and the page in
+the installed app, stay unproved in a browser: nothing can store Strict until SI-10b's switch, which adds them to the
+owner's list (`docs/runbooks/before-the-first-family.md`).
 
 - Walked: the two boxes in order, the passkey's press then the app's; the set-up's words take the focus; the done words
   above the backup codes take the focus; Continue is `aria-disabled` until the box is ticked, and pressed unticked says
