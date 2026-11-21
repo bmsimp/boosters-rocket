@@ -3,6 +3,7 @@ import { db, type Tx } from "@/lib/db/client";
 import { familyMoney, jobRun, qboCustomer, qboCustomerType, setting, writeQueue } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { clearMoneyRecords } from "@/lib/money/company-change";
+import { endBuyoutsOfEarlierCompany } from "@/lib/buyouts/company-change";
 import { clearCheckRecords } from "@/lib/quickbooks/sandbox-check/view";
 import { endLinksOfEarlierCompany } from "@/lib/families/company-change";
 import { ROSTER_LOCK, SHAPE_KEY } from "./shape";
@@ -30,6 +31,8 @@ export const GIVEN_UP_FOR_COMPANY_NOTE = "Given up: the club connected a differe
  * change of company clears (stage 4's slice M7a), and nothing else. The same company, or a cache that says no company,
  * keeps it all and answers false. The caller owns the transaction and holds ROSTER_LOCK.
  *
+ * Ended: every unpaid live buy-out, `earlier_company`, nothing sent to QuickBooks, its invoice left in the old company's
+ * books for the treasurer (endBuyoutsOfEarlierCompany(), src/lib/buyouts/company-change.ts); a paid one keeps counting.
  * Cleared, each naming the old company's customers, products or invoices: every link, moved into the link history as
  * `company_changed` with every "Left unlinked" mark (endLinksOfEarlierCompany(), src/lib/families/company-change.ts);
  * what each family was last seen to owe (`family_money`: another company's invoices are never shown, and a row read
@@ -44,9 +47,12 @@ export const GIVEN_UP_FOR_COMPANY_NOTE = "Given up: the club connected a differe
  * waivers, chosen lists and reminders, every volunteer sign-up, credit and reminder, every form request, consent and
  * reminder record, and all kept evidence, which stays its family's (src/lib/forms/evidence-company.ts).
  *
- * The order: no foreign key orders it any more, as nothing the app's records are named by is deleted. The queue is
- * given up in one statement, after which nothing of the old company is still to be sent; the links end next, then
- * QuickBooks' copies, and the roster's company last, with the audit row.
+ * The order: no foreign key orders it any more, as nothing the app's records are named by is deleted, but the buy-outs
+ * end before the queue is given up. Their update takes each row's lock, so a void queued at that moment for an
+ * invoiced one (queueVoid(), which holds no roster lock) either committed first, and its buy-out ends here and its
+ * void is given up next, or waits, then finds the buy-out ended and queues nothing; given up first, a void queued
+ * after it would be left waiting. The queue is given up in one statement, after which nothing of the old company is
+ * still to be sent; the links end next, then QuickBooks' copies, and the roster's company last, with the audit row.
  *
  * Nothing the portal runs reaches it until stage 4's slice M8 turns a change of company back on: a different company
  * is refused wherever one is connected or read (completeConnect() in src/lib/quickbooks/connection.ts, refreshRoster()
@@ -56,6 +62,8 @@ export async function clearRosterOfOtherCompanyLocked(tx: Tx, realmId: string, o
   const from = await getRosterSource(tx);
   if (from === null || from === realmId) return false;
   const at = { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip };
+  // Every unpaid live buy-out ends as the earlier company's, under each row's lock, before its queued writes are given up.
+  await endBuyoutsOfEarlierCompany(tx, at);
   // Every queue item still to go, whatever its kind, is given up: its ids are the old company's, and it is never sent
   // there now. One done or given up already is kept as it was.
   const now = new Date();

@@ -315,16 +315,90 @@ describe("a void on the queue", () => {
 });
 
 describe("connecting a different company", () => {
-  it("deletes every buy-out, counted in the audit row, and their queued writes with the queue", async () => {
-    const { a } = await seedTwoFamilies();
-    // Filed under the family's own record: the queue goes before the records, or the clear would be refused.
-    await db.insert(writeQueue).values({ realmId: MONEY_REALM, request: { op: "invoice_void", buyoutId: "00000000-0000-4000-8000-000000000001", invoiceQboId: "9174", customerQboId: a.spec.family.qboId,
-      why: "switched_back" }, familyId: a.identity.familyId, sent: false, nextTryAt: new Date() });
-    expect((await db.select().from(buyout)).length).toBe(2);
-    expect(await clearRosterOfOtherCompany("2222", { actor: { door: "staff", id: null, label: "admin@club.org" }, ip: null })).toBe(true);
-    expect(await db.select().from(buyout)).toEqual([]);
-    expect(await db.select().from(writeQueue)).toEqual([]);
-    const [cleared] = await audits("volunteer.signups.cleared");
-    expect(cleared!.after).toMatchObject({ buyouts: 2 });
+  const admin = { actor: { door: "staff" as const, id: null, label: "admin@club.org" }, ip: null };
+  const NOTE = "Given up: the club connected a different QuickBooks company, so this was never sent there.";
+  /** The same choice made again, straight into the table, by the app's own records (a family may choose again once one ended). */
+  const chooseAgain = (b: typeof buyout.$inferSelect) => db.insert(buyout).values({ requirementId: b.requirementId, familyId: b.familyId, studentId: b.studentId,
+    customerQboId: b.customerQboId, itemQboId: b.itemQboId, unitCents: b.unitCents, units: b.units, amountCents: b.amountCents, state: "being_invoiced", realmId: "2222",
+    chosenBy: b.chosenBy, chosenByLabel: "a guardian" }).returning();
+
+  // Stage 4's slice M7a (open question 16): unpaid live buy-outs end as the earlier company's and paid ones keep counting.
+  // It was "deletes every buy-out" while a change of company removed the families they name.
+  it("ends every unpaid live buy-out as the earlier company's, keeps paid, voided and refused ones, and gives up their writes", async () => {
+    const p = await buyoutFamily(stub);
+    const by = p.identity.parentId;
+    const states = ["being_invoiced", "invoiced", "being_voided", "stuck", "paid", "voided", "refused"] as const;
+    const made = new Map<(typeof states)[number], typeof buyout.$inferSelect>();
+    for (const state of states) {
+      const requirementId = await seedBuyoutRequirement({ title: `In state ${state}` });
+      made.set(state, await seedBuyout({ requirementId, familyQboId: FAMILY, chosenBy: by, state, invoiceQboId: state === "being_invoiced" ? null : `77${states.indexOf(state)}`,
+        flag: state === "stuck" ? "missing" : undefined }));
+    }
+    // The being-voided one's void, and the stuck one's create, still to go in the old company.
+    const voiding = made.get("being_voided")!, stuck = made.get("stuck")!;
+    const [voidItem] = await db.insert(writeQueue).values({ realmId: MONEY_REALM, request: { op: "invoice_void", buyoutId: voiding.id, invoiceQboId: voiding.invoiceQboId!, customerQboId: FAMILY,
+      why: "switched_back" }, familyId: voiding.familyId, sent: false, nextTryAt: new Date() }).returning();
+    const [stuckItem] = await db.insert(writeQueue).values({ realmId: MONEY_REALM, request: { op: "invoice_create", buyoutId: stuck.id, customerQboId: FAMILY, itemQboId: BUYOUT_ITEM, units: 2, unitCents: 5000 },
+      familyId: stuck.familyId, state: "stuck", sent: true, nextTryAt: null }).returning();
+    const before = await db.select().from(buyout);
+    stub.calls.length = 0;
+
+    expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
+    const unpaid = ["being_invoiced", "invoiced", "being_voided", "stuck"] as const;
+    for (const state of states) {
+      const was = before.find((x) => x.id === made.get(state)!.id)!;
+      // Ended in the portal alone: its customer, item, invoice, company and flag as they were, for the treasurer.
+      if ((unpaid as readonly string[]).includes(state)) expect(await row(was.id)).toEqual({ ...was, state: "voided", endReason: "earlier_company", updatedAt: expect.any(Date) });
+      else expect(await row(was.id)).toEqual(was);
+    }
+    expect(await row(stuck.id)).toMatchObject({ flag: "missing", invoiceQboId: "773", realmId: MONEY_REALM });
+    expect(await queueOf(voiding.id)).toEqual([expect.objectContaining({ id: voidItem!.id, state: "given_up", note: NOTE, nextTryAt: null })]);
+    expect(await queueOf(stuck.id)).toEqual([expect.objectContaining({ id: stuckItem!.id, state: "given_up", note: NOTE, nextTryAt: null })]);
+    const [ended] = await audits("volunteer.buyouts.ended");
+    expect(ended).toMatchObject({ door: "staff", actorLabel: "admin@club.org", targetType: "buyout" });
+    expect(ended!.before).toEqual({ realmId: MONEY_REALM, being_invoiced: 1, invoiced: 1, being_voided: 1, stuck: 1 });
+    expect(ended!.after).toEqual({ reason: "different_company", realmId: "2222", state: "voided", endReason: "earlier_company", ended: 4,
+      endedIds: unpaid.map((s) => made.get(s)!.id).sort(), paidKept: 1, sentToQuickBooks: false });
+    expect(await audits("volunteer.signups.cleared")).toEqual([]);
+    // Nothing was asked of QuickBooks.
+    expect(stub.calls).toEqual([]);
+    // As far as the database goes the family may choose again where one ended (the live indexes no longer hold it),
+    // and not where the paid one still counts.
+    expect(await chooseAgain(made.get("invoiced")!)).toHaveLength(1);
+    await expect(chooseAgain(made.get("paid")!)).rejects.toThrow();
+  });
+
+  it("a void queued at that moment commits first, then its buy-out ends and its void is given up", async () => {
+    const p = await buyoutFamily(stub);
+    const b = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Racing" }), familyQboId: FAMILY, chosenBy: p.identity.parentId, invoiceQboId: "9301" });
+    let commit!: () => void, queued!: () => void;
+    const held = new Promise<void>((r) => { commit = r; }), ready = new Promise<void>((r) => { queued = r; });
+    // As switchMyBuyoutBack() queues it: no roster lock, the buy-out moved to being voided and its void inserted, the commit still to come.
+    const voiding = db.transaction(async (tx) => {
+      const item = await queueVoid(tx, b, "switched_back", { actor: WORKER_ACTOR, label: "a guardian", nextTryAt: later(5) });
+      queued(); await held;
+      return item;
+    });
+    await ready;
+    const clearing = clearRosterOfOtherCompany("2222", admin);
+    // The clear waits for the buy-out's row.
+    await untilALockIsAwaited();
+    commit();
+    const item = await voiding;
+    expect(item).not.toBeNull();
+    expect(await clearing).toBe(true);
+    expect(await row(b.id)).toMatchObject({ state: "voided", endReason: "earlier_company", invoiceQboId: "9301" });
+    expect(await queueOf(b.id)).toEqual([expect.objectContaining({ id: item!.id, state: "given_up", note: NOTE })]);
+    expect((await audits("volunteer.buyouts.ended"))[0]!.before).toEqual({ realmId: MONEY_REALM, being_invoiced: 0, invoiced: 0, being_voided: 1, stuck: 0 });
+  });
+
+  it("a void asked for after the clear finds the buy-out ended and queues nothing", async () => {
+    const p = await buyoutFamily(stub);
+    const b = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Late" }), familyQboId: FAMILY, chosenBy: p.identity.parentId, invoiceQboId: "9302" });
+    expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
+    // The guardian's page was drawn before: it still holds the buy-out as invoiced.
+    expect(await db.transaction((tx) => queueVoid(tx, b, "switched_back", { actor: WORKER_ACTOR, label: "a guardian", nextTryAt: later(5) }))).toBeNull();
+    expect(await queueOf(b.id)).toEqual([]);
+    expect(await row(b.id)).toMatchObject({ state: "voided", endReason: "earlier_company" });
   });
 });
