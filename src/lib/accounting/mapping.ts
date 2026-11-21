@@ -123,6 +123,11 @@ export type UnlinkOffer = {
  * press; and the stamp sealing the value the row showed (takeStamp()).
  */
 export type TakeOffer = { at: number; field: "name" | "inactive" | "place"; kind: "family" | "student"; recordId: string; about: string; words: string[]; stamp: string };
+/**
+ * Said beside a difference in place of Take QuickBooks' into the app when a change on the write queue would make the
+ * take refuse (takeOffersOf()): one waiting to reach QuickBooks or stuck, or a move kept on the Reconciliation page.
+ */
+export const QUEUE_IN_THE_WAY = "Another change on the Reconciliation page stands in the way (waiting to reach QuickBooks, stuck, or a move kept there), so this can't be taken from the books until it is done or given up.";
 /** At most this many families are linked by one press of Confirm all exact email matches (the lead's decision 3 for slice M3a2). */
 export const BULK_MAX = 200;
 /** A Suggested row the filter shows, as the bulk press links it: the family, its name in words, its suggested customer and the row's own offer. */
@@ -465,7 +470,7 @@ export async function loadAccountingLinks(): Promise<LinksView> {
         guardians: (guardiansOf.get(key) ?? []).map((g) => ({ id: g.id, customerId: customerOfGuardian.get(g.id) ?? null })),
       });
       const status: LinkStatus = found !== null && found.differences.length > 0 ? { key: "with_differences", made } : made;
-      const takes = found === null ? { takes: [], takeNotes: [] } : takeOffersOf(b, f, link.customerId, found.differences);
+      const takes = found === null ? { takes: [], takeNotes: [] } : takeOffersOf(b, f, link.customerId, found.differences, queue);
       return { ...base, customer: shownCustomer, status, differences: found?.differences ?? [], inactiveUnrecorded: found?.inactiveUnrecorded ?? 0, review: b.reviewOf(key), unlink, ...takes };
     }
     // Left unlinked, in every state: the matcher was never given it (readLinkBasics()).
@@ -543,9 +548,27 @@ export async function loadAccountingLinks(): Promise<LinksView> {
  *   family of the portal is linked to it.
  * Nothing else: an inactive record active in the books, any other place, a student or Parent customer on one side only
  * and a guardian's link are only shown. The books' text (a name) is said as text.
+ * Nor is a press drawn that the queue would make the take refuse, by the open writes the view read (`queue`): a change
+ * waiting or stuck for a customer the take checks (the record's, those of the students a family goes with, either
+ * family's of a move), a family's or a student's create waiting, or a move waiting, stuck or kept that the take refuses
+ * on (the student's, for a student's inactive; one into or out of the family, for a family's or member's). The queue's
+ * sentence stands in its place (QUEUE_IN_THE_WAY). The "being made" and "being sent" locks, held for the seconds of a
+ * send, are left to the press, as the move form's list leaves them (moveRefusals(), src/lib/roster/writes.ts).
  */
-function takeOffersOf(b: LinkBasics, f: { id: AppFamilyId; name: string | null }, familyCustomer: string, differences: readonly Difference[]): { takes: TakeOffer[]; takeNotes: { at: number; words: string }[] } {
+function takeOffersOf(b: LinkBasics, f: { id: AppFamilyId; name: string | null }, familyCustomer: string, differences: readonly Difference[], queue: readonly QueueView[]): { takes: TakeOffer[]; takeNotes: { at: number; words: string }[] } {
   const takes: TakeOffer[] = [], takeNotes: { at: number; words: string }[] = [];
+  // What the press's own checks refuse on, read from the queue's open items (takeFromBooks(), moveRefusals()).
+  const open = (i: QueueView) => i.state === "waiting" || i.state === "stuck";
+  const waitingFor = (customer: string | null | undefined) => customer != null && queue.some((i) => open(i) && i.write.op !== "create" && i.write.op !== "contact"
+    && i.write.op !== "email" && "qboId" in i.write && i.write.qboId === customer);
+  const familyCreating = (id: AppFamilyId) => queue.some((i) => open(i) && i.write.op === "create" && (i.write.role === "family" || i.write.role === "member") && String(i.familyId) === String(id));
+  const studentCreating = (id: AppStudentId) => queue.some((i) => open(i) && i.write.op === "create" && i.write.role === "student" && String(i.studentId) === String(id));
+  const studentMoving = (id: AppStudentId) => queue.some((i) => i.write.op === "move" && String(i.studentId) === String(id));
+  const familyMoving = (id: AppFamilyId, customer: string) => queue.some((i) => i.write.op === "move" && (String(i.familyId) === String(id)
+    || String(i.write.toFamilyId) === String(id) || i.write.fromFamilyQboId === customer || i.write.toFamilyQboId === customer));
+  const customerOfFamily = (id: AppFamilyId) => b.linkOfFamily.get(String(id))?.customerId;
+  /** The take, or in its place the queue's sentence when the queue stands in its way. */
+  const offer = (t: TakeOffer, blocked: boolean) => { if (blocked) takeNotes.push({ at: t.at, words: QUEUE_IN_THE_WAY }); else takes.push(t); };
   const key = String(f.id);
   const familyWords = recordNameWords(f.name, "family");
   const studentOf = (id: AppStudentId) => b.everyStudent.find((s) => String(s.id) === String(id));
@@ -558,8 +581,9 @@ function takeOffersOf(b: LinkBasics, f: { id: AppFamilyId; name: string | null }
     const s = studentOf(studentId);
     if (studentCustomer === undefined || s === undefined || !s.active || activeFamily(fromFamilyId) === undefined || String(to.id) === String(fromFamilyId)) return;
     const who = recordNameWords(s.name, "student");
-    takes.push({ at, field: "place", kind: "student", recordId: String(studentId), about: `where ${who} is`, words: moveWords(who, recordNameWords(to.name, "family")),
-      stamp: takeStamp("place", String(studentId), studentCustomer, [studentCustomer, toCustomer, String(fromFamilyId), String(to.id)]) });
+    offer({ at, field: "place", kind: "student", recordId: String(studentId), about: `${who}'s family`, words: moveWords(who, recordNameWords(to.name, "family")),
+      stamp: takeStamp("place", String(studentId), studentCustomer, [studentCustomer, toCustomer, String(fromFamilyId), String(to.id)]) },
+    waitingFor(studentCustomer) || studentCreating(studentId) || [fromFamilyId, to.id].some((id) => familyCreating(id) || waitingFor(customerOfFamily(id))));
   };
   differences.forEach((d, at) => {
     if ("queue" in d && d.kind !== "guardians_unlinked" && d.queue !== null && d.queue.state !== "refused") return;
@@ -570,13 +594,13 @@ function takeOffersOf(b: LinkBasics, f: { id: AppFamilyId; name: string | null }
         const customer = b.customerOfStudent.get(String(d.studentId));
         if (customer === undefined) return;
         const who = recordNameWords(studentOf(d.studentId)?.name ?? null, "student");
-        takes.push({ at, field: "name", kind: "student", recordId: String(d.studentId), about: `${who}'s name`, words: [`Takes “${d.books}” as ${who}'s name in the portal, as the books have it. ${sent}`],
-          stamp: takeStamp("name", String(d.studentId), customer, [d.books]) });
+        offer({ at, field: "name", kind: "student", recordId: String(d.studentId), about: `${who}'s name`, words: [`Takes “${d.books}” as ${who}'s name in the portal, as the books have it. ${sent}`],
+          stamp: takeStamp("name", String(d.studentId), customer, [d.books]) }, waitingFor(customer));
         return;
       }
       if (b.families.some((x) => String(x.id) !== key && x.name !== null && nameKey(x.name) === nameKey(name.name))) return;
-      takes.push({ at, field: "name", kind: "family", recordId: key, about: `${familyWords}'s name`, words: [`Takes “${d.books}” as this ${d.of}'s name in the portal, as the books have it. ${sent}`],
-        stamp: takeStamp("name", key, familyCustomer, [d.books]) });
+      offer({ at, field: "name", kind: "family", recordId: key, about: `${familyWords}'s name`, words: [`Takes “${d.books}” as this ${d.of}'s name in the portal, as the books have it. ${sent}`],
+        stamp: takeStamp("name", key, familyCustomer, [d.books]) }, waitingFor(familyCustomer));
       return;
     }
     if (d.kind === "active") {
@@ -584,13 +608,15 @@ function takeOffersOf(b: LinkBasics, f: { id: AppFamilyId; name: string | null }
       if (d.of === "student") {
         const customer = b.customerOfStudent.get(String(d.studentId));
         if (customer === undefined) return;
-        takes.push({ at, field: "inactive", kind: "student", recordId: String(d.studentId), about: `whether ${d.who} is active`,
-          words: [`Makes ${d.who} inactive in the portal, as the books have them. ${sent}`], stamp: takeStamp("inactive", String(d.studentId), customer, []) });
+        offer({ at, field: "inactive", kind: "student", recordId: String(d.studentId), about: `${d.who}'s active status`,
+          words: [`Makes ${d.who} inactive in the portal, as the books have them. ${sent}`], stamp: takeStamp("inactive", String(d.studentId), customer, []) },
+        waitingFor(customer) || studentCreating(d.studentId) || studentMoving(d.studentId) || familyCreating(f.id));
         return;
       }
       if (d.of === "member") {
-        takes.push({ at, field: "inactive", kind: "family", recordId: key, about: `whether ${familyWords} is active`,
-          words: [`Makes ${familyWords} inactive in the portal, as the books have it. Its guardians can't sign in to the member then. ${sent}`], stamp: takeStamp("inactive", key, familyCustomer, []) });
+        offer({ at, field: "inactive", kind: "family", recordId: key, about: `${familyWords}'s active status`,
+          words: [`Makes ${familyWords} inactive in the portal, as the books have it. Its guardians can't sign in to the member then. ${sent}`], stamp: takeStamp("inactive", key, familyCustomer, []) },
+        waitingFor(familyCustomer) || familyCreating(f.id) || familyMoving(f.id, familyCustomer));
         return;
       }
       const under = b.students.filter((s) => String(s.familyId) === key && s.active)
@@ -612,9 +638,11 @@ function takeOffersOf(b: LinkBasics, f: { id: AppFamilyId; name: string | null }
         return;
       }
       const withThem = under.length === 0 ? "" : `, with ${under.length === 1 ? "its student" : `its ${under.length} students`} ${under.map((s) => recordNameWords(s.name, "student")).join(", ")}`;
-      takes.push({ at, field: "inactive", kind: "family", recordId: key, about: `whether ${familyWords} is active`,
+      offer({ at, field: "inactive", kind: "family", recordId: key, about: `${familyWords}'s active status`,
         words: [`Makes ${familyWords} inactive in the portal${withThem}, as the books have it. Its guardians can't sign in to the family then. ${sent}`],
-        stamp: takeStamp("inactive", key, familyCustomer, under.map((s) => String(s.id)).sort()) });
+        stamp: takeStamp("inactive", key, familyCustomer, under.map((s) => String(s.id)).sort()) },
+      waitingFor(familyCustomer) || familyCreating(f.id) || familyMoving(f.id, familyCustomer)
+        || under.some((s) => { const c = b.customerOfStudent.get(String(s.id)); return c === undefined ? studentCreating(s.id) : waitingFor(c); }));
       return;
     }
     if (d.kind === "place" && d.place.at === "other_family") {

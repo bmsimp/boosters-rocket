@@ -6,7 +6,7 @@
 export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "access.refused": "Refused: no permission for that page or action",
   "accounting.family.from_customer": "A family made in the portal from a QuickBooks customer no family was linked to, with its students, each linked to its customer",
-  "accounting.difference.take": "A difference between the portal and the books settled by staff on the accounting links screen by taking the books' value into the portal: a name, a record made inactive or a student moved, with nothing sent to the books",
+  "accounting.difference.take": "A difference between the portal and the books settled by staff on the accounting links screen by taking the books' value into the portal: a name, a record made inactive or a student moved, with nothing sent to the books but the void of an unpaid volunteer buy-out invoice a student's move brings, as any move does",
   "accounting.link.bulk": "Families linked by staff in one press of Confirm all exact email matches, with how many: each family's link has its own row, and nothing was sent to the books",
   "accounting.link.carried_over": "The portal's own families and students made from the roster, each linked to its QuickBooks customer, with counts",
   "accounting.link.confirm": "A family linked by staff to a customer in the books, with the students paired with it, or a link carried over from the roster confirmed by staff as checked: nothing was sent to the books",

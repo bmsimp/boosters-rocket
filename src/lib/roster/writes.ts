@@ -3969,7 +3969,7 @@ async function moveHolding(studentId: AppStudentId, toFamilyId: AppFamilyId, ros
           ...(studentCustomer !== null ? { customerQboId: studentCustomer } : {}), ...(item && write ? { queueId: item.id, comparedWith: write.fromFamilyQboId } : {}),
           ...(replaced.length ? { replaced: replaced.map((r) => r.id) } : {}) } }, tx);
       const said = { student: recordNameWords(s.name, "student"), from: recordNameWords(from.name, "family"), to: recordNameWords(to.name, "family") };
-      return { ok: true, quickbooks, item, write, tell, said, notes: moveNotes(said, { buyouts, leftCloses, joinedOpens }) };
+      return { ok: true, quickbooks, item, write, tell, said, notes: moveNotes(said, { buyouts, leftCloses, joinedOpens, taken: Boolean(take) }) };
     });
   } catch {
     // A follow-up, the save or its audit row failed: the transaction kept nothing (no record moved, no follow-up, no item).
@@ -3986,11 +3986,17 @@ async function moveHolding(studentId: AppStudentId, toFamilyId: AppFamilyId, ros
   return { ...answer, message: `${answer.message} ${saved.notes.join(" ")}` };
 }
 
-/** What the follow-ups and the sign-in rule did beside the move itself, in words for the staff member's answer. */
-function moveNotes(said: { student: string; from: string; to: string }, o: { buyouts: { voiding: number; flagged: number }; leftCloses: boolean; joinedOpens: boolean }): string[] {
+/**
+ * What the follow-ups and the sign-in rule did beside the move itself, in words for the staff member's answer. A move
+ * taken from the books (`taken`, slice M4a) has no move on its way to QuickBooks, so its void is said without one.
+ */
+function moveNotes(said: { student: string; from: string; to: string }, o: { buyouts: { voiding: number; flagged: number }; leftCloses: boolean; joinedOpens: boolean; taken: boolean }): string[] {
   const notes: string[] = [];
   // Voided whatever becomes of the move in QuickBooks: the family that chose the buy-out is no longer the student's.
-  if (o.buyouts.voiding) notes.push(`${said.student}'s unpaid volunteer buy-out invoice is to be voided all the same, whatever QuickBooks does with the move, since the family that chose it is no longer theirs.`);
+  if (o.buyouts.voiding) {
+    notes.push(o.taken ? `${said.student}'s unpaid volunteer buy-out invoice is to be voided in the books, since the family that chose it is no longer theirs.`
+      : `${said.student}'s unpaid volunteer buy-out invoice is to be voided all the same, whatever QuickBooks does with the move, since the family that chose it is no longer theirs.`);
+  }
   if (o.buyouts.flagged) notes.push(`A volunteer buy-out of ${said.student}'s that can't simply be voided (a paid one, say) is flagged for the club on the Reconciliation page.`);
   if (o.leftCloses) notes.push(`${said.from} has no active student now, so its guardians can't sign in to it until it has one again.`);
   if (o.joinedOpens) notes.push(`${said.to} has an active student now, so its guardians can sign in to it.`);

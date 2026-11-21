@@ -322,7 +322,7 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
         <h1 className="page-title">Accounting links</h1>
         <p className="lede">Every family in the portal, beside the customer in the books it is linked to, or the one that looks like its own.
           A family with no link can be linked here, to its suggestion or a customer you pick, or left unlinked. Nothing here is sent to the books.
-          For a family whose link stands, it also lists where the portal and the books differ. A name, a record the books have inactive, or the family the books have a student under can be taken into the portal with Take QuickBooks&apos; into the app, which sends nothing to the books; every other difference is only shown.</p>
+          For a family whose link stands, it also lists where the portal and the books differ. A name, a record the books have inactive, or the family the books have a student under can be taken into the portal with Take QuickBooks&apos; into the app, which changes only the portal&apos;s records, except that a student&apos;s move voids an unpaid volunteer buy-out invoice of theirs in the books, as any move does; every other difference is only shown.</p>
         <LinkAnswersShown />
 
         <section className="box" aria-labelledby="links-how-h"><h2 id="links-how-h">How links are made</h2>

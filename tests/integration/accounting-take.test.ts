@@ -15,14 +15,16 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, family, guardian, student, volunteerSignup, writeQueue } from "@/lib/db/schema";
+import { auditLog, family, guardian, qboConnection, student, volunteerSignup, writeQueue } from "@/lib/db/schema";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
 import { AccessDenied } from "@/lib/guards";
-import { loadAccountingLinks, type LinkRow, type LinksView, type TakeOffer } from "@/lib/accounting/mapping";
+import { loadAccountingLinks, QUEUE_IN_THE_WAY, type LinkRow, type LinksView, type TakeOffer } from "@/lib/accounting/mapping";
 import { LINK_COPY } from "@/lib/accounting/link-writes";
 import { takeStamp } from "@/lib/accounting/stamp";
+import { auditPage, parseAuditFilters } from "@/lib/audit/query";
 import { refreshRoster } from "@/lib/roster/refresh";
-import { FAMILY_BEING_CHANGED, SENDING_LOCK, STUDENT_BEING_CHANGED, TAKE_CHANGED, takeFromBooks, WRITE_COPY } from "@/lib/roster/writes";
+import { ROSTER_MOVED } from "@/lib/seasons/roster-lock";
+import { FAMILY_BEING_CHANGED, FAMILY_WAITING, MOVE_PENDING, SENDING_LOCK, STUDENT_BEING_CHANGED, TAKE_CHANGED, takeFromBooks, WRITE_COPY } from "@/lib/roster/writes";
 import { enterableGuardianRows } from "@/lib/parents/sessions";
 import { takeDifferenceAction } from "@/app/staff/(app)/links/actions";
 import AccountingLinksPage from "@/app/staff/(app)/links/page";
@@ -245,7 +247,7 @@ describe("a record the books have inactive, taken as inactive", () => {
     await readAgain();
     expect((await enterableGuardianRows(ana.id)).map((g) => g.familyId)).toEqual([rivera]);
     const offer = await offerOf("Rivera Family", "inactive");
-    expect(offer).toMatchObject({ kind: "student", recordId: String(leo), about: "whether Leo Rivera is active",
+    expect(offer).toMatchObject({ kind: "student", recordId: String(leo), about: "Leo Rivera's active status",
       words: ["Makes Leo Rivera inactive in the portal, as the books have them. Nothing is sent to the books."] });
     stub.calls.length = 0;
     expect(await press(offer)).toEqual({ ok: true,
@@ -318,7 +320,7 @@ describe("the family a student is under, taken from the books", () => {
   const MOVE_WORDS = "Moves Leo Rivera to Chen Family in the portal, where the books have them, as a move made on the family's page does: their forms not yet complete start again under Chen Family, "
     + "their volunteer places still to come are given up and their guardians told by email, and an unpaid volunteer buy-out invoice of theirs is voided in the books. Nothing about the student is sent to the books.";
   const MOVED = "Moved Leo Rivera to Chen Family in the portal, as the books have them. Nothing about the student was sent to the books. "
-    + "Leo Rivera's unpaid volunteer buy-out invoice is to be voided all the same, whatever QuickBooks does with the move, since the family that chose it is no longer theirs.";
+    + "Leo Rivera's unpaid volunteer buy-out invoice is to be voided in the books, since the family that chose it is no longer theirs.";
 
   for (const from of ["Rivera Family", "Chen Family"] as const) {
     it(`from ${from}'s row (${from === "Rivera Family" ? "where Leo is" : "a student the books have under this family"}): moved as a portal move is, with its follow-ups, sending nothing`, async () => {
@@ -329,7 +331,7 @@ describe("the family a student is under, taken from the books", () => {
       const fromRivera = rowOf(view, "Rivera Family").takes.find((t) => t.field === "place")!;
       const fromChen = rowOf(view, "Chen Family").takes.find((t) => t.field === "place")!;
       // One move, the same press from either row.
-      expect(fromRivera).toMatchObject({ kind: "student", recordId: String(leo), about: "where Leo Rivera is", words: [MOVE_WORDS] });
+      expect(fromRivera).toMatchObject({ kind: "student", recordId: String(leo), about: "Leo Rivera's family", words: [MOVE_WORDS] });
       expect(fromChen).toMatchObject({ kind: "student", recordId: String(leo), words: [MOVE_WORDS], stamp: fromRivera.stamp });
       expect(rowOf(view, "Rivera Family").differences[fromRivera.at]).toMatchObject({ kind: "place" });
       expect(rowOf(view, "Chen Family").differences[fromChen.at]).toMatchObject({ kind: "student_elsewhere" });
@@ -349,6 +351,13 @@ describe("the family a student is under, taken from the books", () => {
       expect(await auditsOf("roster.record.moved")).toEqual([]);
       expect(await auditsOf("roster.student.move")).toEqual([]);
       expect(await db.select().from(writeQueue).where(sql`${writeQueue.request}->>'op' = 'move'`)).toEqual([]);
+      // The one thing for the books: the unpaid buy-out invoice's void, on the queue, as every move's follow-ups put it there.
+      expect((await db.select().from(writeQueue)).map((q) => [q.request.op, "invoiceQboId" in q.request ? q.request.invoiceQboId : null, q.state])).toEqual([["invoice_void", "5001", "waiting"]]);
+      // The audit page's record filter finds the take's own row under the family left and the family joined.
+      const take = (await takes())[0]!;
+      for (const f of [rivera, chen]) {
+        expect((await auditPage(parseAuditFilters({ record: `family:${f}` }), {}, 500)).rows.map((r) => r.id)).toContain(take.id);
+      }
       // The difference is gone from both rows.
       const after = await loadAccountingLinks();
       expect(after.rows.flatMap((r) => r.differences).filter((d) => d.kind === "place" || d.kind === "student_elsewhere")).toEqual([]);
@@ -454,14 +463,184 @@ describe("the page", () => {
     const at = whole.indexOf('id="links-list-h"');
     const list = whole.slice(at, whole.indexOf("</section>", at)).replaceAll("&#x27;", "'").replaceAll("<!-- -->", "");
     const presses = [...list.matchAll(/Take QuickBooks' into the app<span class="visually-hidden">: ([^<]*)<\/span>/g)].map((m) => m[1]).sort();
-    expect(presses).toEqual(["Rivera Family's name", "where Leo Rivera is", "where Leo Rivera is"].sort());
+    expect(presses).toEqual(["Rivera Family's name"]);
     expect(list).toContain("Takes “Rivera Household” as this family's name in the portal, as the books have it. Nothing is sent to the books.");
-    expect(list).toContain("Moves Leo Rivera to Chen Family in the portal, where the books have them, as a move made on the family's page does:");
+    // Leo's move, from Rivera's row and from Chen's, would be refused while the rename of Chen's customer waits: no
+    // press, and the queue's sentence in its place, on both rows.
+    expect(list).not.toContain("Moves Leo Rivera to Chen Family");
+    expect(list.split(QUEUE_IN_THE_WAY).length - 1).toBe(2);
     expect(list).toContain("Ash Oak is still active in the books, so the family can't be taken as inactive until they are made inactive there or moved.");
     // Nothing for Chen's waiting rename, Zoe, Max at the top, Kim with no record, Mei Chen's Parent customer.
-    expect(list).not.toMatch(/Chen Family's name<\/span>|Zoe Rivera is active<\/span>|where Max Rivera is<\/span>|Kim Rivera<\/span>/);
-    // Each press is given only its words and its bound action: no stamp reaches the markup.
-    for (const r of view.rows) for (const t of r.takes) expect(whole).not.toContain(t.stamp);
-    expect(whole).toContain("with Take QuickBooks&#x27; into the app, which sends nothing to the books; every other difference is only shown.");
+    expect(list).not.toMatch(/Chen Family's name<\/span>|Zoe Rivera's active status<\/span>|Max Rivera's family<\/span>|Kim Rivera<\/span>/);
+    expect(whole).toContain("with Take QuickBooks&#x27; into the app, which changes only the portal&#x27;s records, except that a student&#x27;s move voids an unpaid volunteer buy-out invoice of theirs in the books, as any move does; every other difference is only shown.");
+  });
+
+  it("draws a move's press and a record's inactive press with their words when nothing on the queue stands in the way", async () => {
+    // Leo under Chen in the books; Chen's own row offers the same move. Oak Family (80) inactive in the books, with no student.
+    await readAgain(qc("80", "Oak Family", "1"));
+    await syncAppRecords();
+    changeInBooks("12", under("20"));
+    changeInBooks("80", { Active: false });
+    await readAgain();
+    asStaff(linker);
+    const whole = await renderPage(AccountingLinksPage);
+    const at = whole.indexOf('id="links-list-h"');
+    const list = whole.slice(at, whole.indexOf("</section>", at)).replaceAll("&#x27;", "'").replaceAll("<!-- -->", "");
+    const presses = [...list.matchAll(/Take QuickBooks' into the app<span class="visually-hidden">: ([^<]*)<\/span>/g)].map((m) => m[1]).sort();
+    expect(presses).toEqual(["Leo Rivera's family", "Leo Rivera's family", "Oak Family's active status"]);
+    expect(list).toContain("Moves Leo Rivera to Chen Family in the portal, where the books have them, as a move made on the family's page does:");
+    expect(list).toContain("Makes Oak Family inactive in the portal, as the books have it. Its guardians can't sign in to the family then. Nothing is sent to the books.");
+    expect(list).not.toContain(QUEUE_IN_THE_WAY);
+  });
+});
+
+describe("a press the queue would refuse is not drawn", () => {
+  beforeEach(layered);
+
+  it("a student's inactive, while a move of theirs is kept, or a change of their customer waits: the queue's sentence, and a press called anyway refused", async () => {
+    changeInBooks("12", { Active: false });
+    await readAgain();
+    const drawn = await offerOf("Rivera Family", "inactive");
+    const atOf = (row: LinkRow) => row.differences.findIndex((d) => d.kind === "active" && d.of === "student");
+    // A move of Leo the books refused, kept on Reconciliation.
+    const kept = await seedQueued({ op: "move", role: "student", qboId: "12", syncToken: "0", fromFamilyQboId: "10", toFamilyQboId: "20", fromFamilyId: rivera, toFamilyId: chen },
+      { state: "refused", code: "fault_6240" });
+    let row = rowOf(await loadAccountingLinks(), "Rivera Family");
+    expect(row.takes.filter((t) => t.field === "inactive")).toEqual([]);
+    expect(row.takeNotes).toEqual([{ at: atOf(row), words: QUEUE_IN_THE_WAY }]);
+    stub.calls.length = 0;
+    expect(await press(drawn)).toEqual({ ok: false, errors: [expect.stringContaining("A move of this student hasn't reached QuickBooks yet")] });
+    await db.delete(writeQueue).where(eq(writeQueue.id, kept.id));
+    // A rename of Leo's customer waiting: his name has no difference, but his inactive is held back by it too.
+    const waiting = await seedQueued({ op: "rename", role: "student", qboId: "12", syncToken: "0", name: "Leo Rivera", was: "Leo Rivera" }, { state: "waiting" });
+    row = rowOf(await loadAccountingLinks(), "Rivera Family");
+    expect(row.takes).toEqual([]);
+    expect(row.takeNotes).toEqual([{ at: atOf(row), words: QUEUE_IN_THE_WAY }]);
+    expect(await press(drawn)).toEqual({ ok: false, errors: [WRITE_COPY.waiting] });
+    await db.delete(writeQueue).where(eq(writeQueue.id, waiting.id));
+    expect(rowOf(await loadAccountingLinks(), "Rivera Family").takes.map((t) => t.field)).toEqual(["inactive"]);
+    expect(sentSince()).toEqual([]);
+    expect(await studentRow(leo)).toMatchObject({ active: true });
+    expect(await takes()).toEqual([]);
+  });
+
+  it("a family's inactive, while a change of its student's customer waits, or a move out of it is kept", async () => {
+    changeInBooks("10", { Active: false });
+    changeInBooks("12", { Active: false });
+    await readAgain();
+    const drawn = rowOf(await loadAccountingLinks(), "Rivera Family").takes.find((t) => t.field === "inactive" && t.kind === "family")!;
+    const atOf = (row: LinkRow) => row.differences.findIndex((d) => d.kind === "active" && d.of === "family");
+    const waiting = await seedQueued({ op: "rename", role: "student", qboId: "12", syncToken: "0", name: "Leo Rivera", was: "Leo Rivera" }, { state: "waiting" });
+    let row = rowOf(await loadAccountingLinks(), "Rivera Family");
+    expect(row.takes.filter((t) => t.kind === "family")).toEqual([]);
+    expect(row.takeNotes).toContainEqual({ at: atOf(row), words: QUEUE_IN_THE_WAY });
+    stub.calls.length = 0;
+    expect(await press(drawn)).toEqual({ ok: false, errors: [WRITE_COPY.waiting] });
+    await db.delete(writeQueue).where(eq(writeQueue.id, waiting.id));
+    const kept = await seedQueued({ op: "move", role: "student", qboId: "12", syncToken: "0", fromFamilyQboId: "10", toFamilyQboId: "20", fromFamilyId: rivera, toFamilyId: chen },
+      { state: "refused", code: "fault_6240" });
+    row = rowOf(await loadAccountingLinks(), "Rivera Family");
+    expect(row.takes.filter((t) => t.kind === "family")).toEqual([]);
+    expect(row.takeNotes).toContainEqual({ at: atOf(row), words: QUEUE_IN_THE_WAY });
+    expect(await press(drawn)).toEqual({ ok: false, errors: [MOVE_PENDING] });
+    await db.delete(writeQueue).where(eq(writeQueue.id, kept.id));
+    expect(sentSince()).toEqual([]);
+    expect(await familyRow(rivera)).toMatchObject({ active: true });
+    expect(await takes()).toEqual([]);
+  });
+
+  it("a move, while a change of either family's customer waits", async () => {
+    changeInBooks("12", under("20"));
+    await readAgain();
+    const drawn = await offerOf("Rivera Family", "place");
+    for (const [qboId, name] of [["10", "Rivera Family"], ["20", "Chen Family"]] as const) {
+      const waiting = await seedQueued({ op: "rename", role: "family", qboId, syncToken: "0", name: `${name} Household`, was: name }, { state: "waiting" });
+      const view = await loadAccountingLinks();
+      for (const r of [rowOf(view, "Rivera Family"), rowOf(view, "Chen Family")]) {
+        expect(r.takes.filter((t) => t.field === "place")).toEqual([]);
+        expect(r.takeNotes).toContainEqual({ at: r.differences.findIndex((d) => d.kind === "place" || d.kind === "student_elsewhere"), words: QUEUE_IN_THE_WAY });
+      }
+      stub.calls.length = 0;
+      expect(await press(drawn)).toEqual({ ok: false, errors: [WRITE_COPY.waiting] });
+      await db.delete(writeQueue).where(eq(writeQueue.id, waiting.id));
+    }
+    expect(sentSince()).toEqual([]);
+    expect(await studentRow(leo)).toMatchObject({ familyId: rivera });
+    expect(await takes()).toEqual([]);
+  });
+});
+
+describe("a take's own checks, under the roster lock", () => {
+  beforeEach(layered);
+
+  it("inactive, refused changing nothing: a stamp gone stale (a student added to the family, a customer active again), a family's or a student's create waiting", async () => {
+    changeInBooks("10", { Active: false });
+    changeInBooks("12", { Active: false });
+    await readAgain();
+    const view = rowOf(await loadAccountingLinks(), "Rivera Family");
+    const theFamily = view.takes.find((t) => t.field === "inactive" && t.kind === "family")!;
+    const leos = view.takes.find((t) => t.field === "inactive" && t.kind === "student")!;
+    expect(leos.recordId).toBe(String(leo));
+    stub.calls.length = 0;
+    // A student record added to the family after the page was drawn (the test's own write: nothing imports after it).
+    const [ivy] = await db.insert(student).values({ familyId: rivera, name: "Ivy Rivera", active: true }).returning({ id: student.id });
+    expect(await press(theFamily)).toEqual({ ok: false, errors: [TAKE_CHANGED] });
+    const withIvy = takeStamp("inactive", String(rivera), "10", [String(ivy!.id), String(leo)].sort());
+    // Ivy's own create waiting on the queue (filed under her record by the test's own write, as a student's add files it).
+    const ivyCreate = await seedQueued({ op: "create", role: "student", name: "Ivy Rivera", typeQboId: "3", familyQboId: "10", email: null });
+    await db.update(writeQueue).set({ studentId: ivy!.id }).where(eq(writeQueue.id, ivyCreate.id));
+    expect(rowOf(await loadAccountingLinks(), "Rivera Family").takes.filter((t) => t.kind === "family")).toEqual([]);
+    expect(await pressWith("inactive", "family", String(rivera), withIvy)).toEqual({ ok: false, errors: [expect.stringContaining("Making this student in QuickBooks is still waiting")] });
+    await db.delete(writeQueue).where(eq(writeQueue.id, ivyCreate.id));
+    // The family's own create waiting.
+    const familyCreate = await seedQueued({ op: "create", role: "family", name: "Rivera Family", typeQboId: "1", familyQboId: null, email: null }, { familyId: rivera });
+    const blocked = rowOf(await loadAccountingLinks(), "Rivera Family");
+    expect(blocked.takes.filter((t) => t.field === "inactive")).toEqual([]);
+    expect(blocked.takeNotes.map((n) => n.words)).toContain(QUEUE_IN_THE_WAY);
+    expect(await pressWith("inactive", "family", String(rivera), withIvy)).toEqual({ ok: false, errors: [FAMILY_WAITING] });
+    await db.delete(writeQueue).where(eq(writeQueue.id, familyCreate.id));
+    // Leo's customer active again in the books after the page was drawn.
+    changeInBooks("12", { Active: true });
+    await readAgain();
+    expect(await press(leos)).toEqual({ ok: false, errors: [TAKE_CHANGED] });
+    expect(sentSince()).toEqual([]);
+    expect(await familyRow(rivera)).toMatchObject({ active: true });
+    expect(await studentRow(leo)).toMatchObject({ active: true });
+    expect(await takes()).toEqual([]);
+  });
+
+  it("needs no live connection, refuses while the books are connected to another company, and refuses a page drawn before the roster's company changed", async () => {
+    changeInBooks("10", { DisplayName: "Rivera Household" });
+    await readAgain();
+    const offer = await offerOf("Rivera Family", "name");
+    stub.calls.length = 0;
+    expect(await pressWith(offer.field, offer.kind, offer.recordId, offer.stamp, "a tag from another read")).toEqual({ ok: false, errors: [ROSTER_MOVED] });
+    await db.update(qboConnection).set({ realmId: "9130000000000099" });
+    expect(await press(offer)).toEqual({ ok: false, errors: [WRITE_COPY.otherCompany] });
+    expect(await familyRow(rivera)).toMatchObject({ name: "Rivera Family" });
+    // QuickBooks disconnected: a take reads nothing live and sends nothing, so it goes through.
+    await db.delete(qboConnection);
+    expect(await press(offer)).toEqual({ ok: true, message: "Renamed Rivera Household in the portal, as the books have it. Nothing was sent to the books." });
+    expect(sentSince()).toEqual([]);
+    expect(await familyRow(rivera)).toMatchObject({ name: "Rivera Household" });
+    expect(await takes()).toHaveLength(1);
+  });
+
+  it("a move takes the place of one the books refused, and says the doors it closes and opens while the students rule is in force", async () => {
+    await seedParentSettings({ requireActiveStudents: true });
+    const kept = await seedQueued({ op: "move", role: "student", qboId: "12", syncToken: "0", fromFamilyQboId: "10", toFamilyQboId: "20", fromFamilyId: rivera, toFamilyId: chen },
+      { state: "refused", code: "fault_6240" });
+    changeInBooks("12", under("20"));
+    await readAgain();
+    const offer = await offerOf("Rivera Family", "place");
+    stub.calls.length = 0;
+    expect(await press(offer)).toEqual({ ok: true, message: "Moved Leo Rivera to Chen Family in the portal, as the books have them. Nothing about the student was sent to the books. "
+      + "Rivera Family has no active student now, so its guardians can't sign in to it until it has one again. Chen Family has an active student now, so its guardians can sign in to it." });
+    expect(sentSince()).toEqual([]);
+    expect(await studentRow(leo)).toMatchObject({ familyId: chen });
+    expect((await db.select().from(writeQueue).where(eq(writeQueue.id, kept.id)))[0]).toMatchObject({ state: "given_up" });
+    expect(await takes()).toEqual([expect.objectContaining({ targetId: String(leo), after: expect.objectContaining({ field: "place", replaced: [kept.id] }) })]);
+    expect((await auditsOf("roster.write.replaced")).map((a) => a.targetId)).toEqual([kept.id]);
+    expect(await auditsOf("roster.record.moved")).toEqual([]);
   });
 });

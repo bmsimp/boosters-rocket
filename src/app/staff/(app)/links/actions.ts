@@ -90,7 +90,8 @@ export const unlinkAction = staffAction(P, async (ctx: StaffCtx, familyId: strin
  * Take QuickBooks' into the app (slice M4a): what the row's difference takes (`name`, `inactive` or `place`), the kind
  * of record (`family` or `student`; a place is always a student's), the record's app id, the roster tag and the stamp
  * sealing the value the row showed. The linking permission and the page's Roster.Read settle it (the owner's choice 6,
- * as recommended): nothing is sent to the books, and the library works the value out again under the roster lock.
+ * as recommended): nothing is sent to the books but the buy-out void a student's move brings, as any move's, and the
+ * library works the value out again under the roster lock.
  */
 export const takeDifferenceAction = staffAction(P, async (ctx: StaffCtx, field: string, kind: string, recordId: string, rosterTag: string, stamp: string): Promise<LinkDone> => {
   await requireStaffActionAlso(ctx, "Roster.Read");

@@ -886,7 +886,7 @@ describe("differences, for a link that stands (slice M2)", () => {
     // The books' values are the portal's copy from its last read, said with its time; drawing the page settles nothing
     // (since slice M4a a press may take some of them into the portal, and says which).
     expect(whole).toContain("against its copy of the books, from its last read of them on ");
-    expect(whole).toContain("with Take QuickBooks&#x27; into the app, which sends nothing to the books; every other difference is only shown.");
+    expect(whole).toContain("with Take QuickBooks&#x27; into the app, which changes only the portal&#x27;s records, except that a student&#x27;s move voids an unpaid volunteer buy-out invoice of theirs in the books, as any move does; every other difference is only shown.");
     expect((await db.select().from(auditLog)).length).toBe(audits);
     expect(await db.select().from(writeQueue)).toEqual(queue);
   });
