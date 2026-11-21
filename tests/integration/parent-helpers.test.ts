@@ -8,7 +8,7 @@ import { setRosterSource } from "@/lib/roster/source";
 import { resolveParentSession } from "@/lib/auth/resolve";
 import { AccessDenied, parentAction, requireStaffPage } from "@/lib/guards";
 import ParentHome from "@/app/(parent)/page";
-import { familyOfSession, resetDb, seedGuardian, seedGuardianInFamily, seedParent, seedStaff } from "../helpers/db";
+import { familyOfSession, resetDb, seedGuardian, seedGuardianInFamily, seedInactiveFamily, seedParent, seedStaff } from "../helpers/db";
 import { addToCache, fam, par, seedShape } from "../helpers/roster-cache";
 import { FAMILY_A, FAMILY_B, seedSignedInParent, seedTwoFamilies } from "../helpers/parent";
 import { NO_CHANGES, recordOfCustomer, syncAppRecords, whatAFreshRunWouldChange } from "../helpers/app-records";
@@ -114,9 +114,13 @@ describe("the signed-in parent helpers", () => {
     expect(await db.select().from(accountingLink)).toEqual([]);
     // A session in F1 names that record.
     expect(await familyOfSession(ana.authUserId, "F1")).toBe(a1.familyId);
-    // A row in no family, when asked for.
-    const bare = await seedGuardian({ parentId: ben.id, familyId: null });
-    expect(bare.familyId).toBeNull();
+    // A row in no family is refused, as the database refuses one (the check), unless a change of company closed it.
+    await expect(seedGuardian({ parentId: ben.id, familyId: null })).rejects.toThrow(/guardian_family_unless_company_changed/);
+    // A row that doesn't count, when asked for: in an inactive family record linked to nothing.
+    const idle = await seedInactiveFamily();
+    const bare = await seedGuardian({ parentId: ben.id, familyId: idle });
+    expect(bare.familyId).toBe(idle);
+    expect((await db.select().from(family).where(eq(family.id, idle)))[0]).toMatchObject({ active: false });
     // After a reset the record remembered for F1 is gone: a new one is made, active.
     await resetDb();
     const cy = await seedParent({ name: "Cy", email: "cy@example.com" });

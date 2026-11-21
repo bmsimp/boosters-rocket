@@ -11,7 +11,7 @@ import { blockPerson, unblockPerson } from "@/lib/parents/people";
 import { hashLinkToken } from "@/lib/parents/signin-links";
 import { credentialRows, linkRows, mintLink, seedDevice, seedPassword } from "../helpers/signin-links";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
-import { resetDb, seedParent, seedGuardian, seedGuardianInFamily, seedParentSession, seedWorkingMail } from "../helpers/db";
+import { resetDb, seedParent, seedGuardian, seedGuardianInFamily, seedInactiveFamily, seedParentSession, seedWorkingMail } from "../helpers/db";
 
 const o = { actor: { door: "staff" as const, id: null, label: "board@club.org" }, ip: "203.0.113.5" };
 const staff = { actor: { door: "staff" as const, id: "00000000-0000-4000-8000-000000000002", label: "reg@club.org" }, ip: "203.0.113.9", permission: "Parents.ReadWrite" };
@@ -93,8 +93,8 @@ describe("blocking and unblocking", () => {
     await blockPerson(b.id, "r", staff); await unblockPerson(b.id, staff);       // already welcomed
     const c = await seedParent({ name: "Cy Three" }); await seedGuardianInFamily({ parentId: c.id, familyQboId: "F1", status: "disabled", disabledReason: "removed" });
     await blockPerson(c.id, "r", staff); await unblockPerson(c.id, staff);       // no open link
-    // An open row that names no family record is no row that counts either: the gate wouldn't let them in.
-    const d = await seedParent({ name: "Di Four" }); await seedGuardian({ parentId: d.id, familyId: null, status: "invited" });
+    // An open row in an inactive family record is no row that counts either: the gate wouldn't let them in.
+    const d = await seedParent({ name: "Di Four" }); await seedGuardian({ parentId: d.id, familyId: await seedInactiveFamily(), status: "invited" });
     await blockPerson(d.id, "r", staff); await unblockPerson(d.id, staff);
     expect((await db.select().from(parent).orderBy(parent.createdAt, parent.id)).map((x) => [x.name, x.welcomeOwed])).toEqual(
       [["Ann One", false], ["Bea Two", false], ["Cy Three", false], ["Di Four", false]]);

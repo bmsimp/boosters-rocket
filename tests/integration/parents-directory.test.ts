@@ -3,7 +3,7 @@ import { db } from "@/lib/db/client";
 import { eq } from "drizzle-orm";
 import { accountingLink, auditLog, family, guardian, parent, student } from "@/lib/db/schema";
 import { familyNames, familySignins, getPerson, listPeople } from "@/lib/parents/directory";
-import { resetDb, seedGuardian, seedParent } from "../helpers/db";
+import { resetDb, seedGuardian, seedInactiveFamily, seedParent } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par } from "../helpers/roster-cache";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 import { setRosterSource } from "@/lib/roster/source";
@@ -16,8 +16,8 @@ import { setRosterSource } from "@/lib/roster/source";
 const withCompany = () => db.transaction((tx) => setRosterSource(tx, "1111"));
 const signinsOf = async (customer: string) => familySignins(await recordOfCustomer(customer, "family"));
 const HELD_WORDS = "Can't sign in: the address was under more than one family, and held for staff to review";
-/** An open row with no family record: the gate lets nobody in through it. */
-const NO_RECORD_WORDS = "Can't sign in now: the family isn't set up in the portal";
+/** An open row in an inactive family record: the gate lets nobody in through it. */
+const INACTIVE_WORDS = "Can't sign in now: the family is inactive";
 
 describe("the people directory", () => {
   beforeEach(async () => { await resetDb(); await seedShape(); await seedParentSettings(SIGNINS_ON); });
@@ -60,14 +60,16 @@ describe("the people directory", () => {
     ]);
   });
 
-  it("names a current row in no family record in words, never from the cache, and lists it with the rows of families with no link", async () => {
+  it("names a current row in a family record with no name and no link in words, never from the cache, and lists it with the rows of families with no link", async () => {
     await withCompany(); await seedCache(ALL);
     const { ana } = await seedPeople();
-    // A row made before its family had a record (the cache still holds "20", the Chen Family): in no family record.
-    const bare = await seedGuardian({ parentId: ana.id, familyId: null, status: "invited" });
+    // A row in an inactive family record the portal knows no name of, linked to nothing (the cache still holds "20", the
+    // Chen Family, which names nothing here).
+    const idle = await seedInactiveFamily();
+    const bare = await seedGuardian({ parentId: ana.id, familyId: idle, status: "invited" });
     const [person] = await listPeople("ana");
     expect(person!.families.map((f) => [f.familyQboId, f.familyName])).toEqual([["10", "Rivera Family"], [null, "A family whose name the portal doesn't know"]]);
-    expect(person!.families[1]).toMatchObject({ guardianId: bare.id, familyId: null, pageStands: false, kind: "cannot", words: NO_RECORD_WORDS });
+    expect(person!.families[1]).toMatchObject({ guardianId: bare.id, familyId: idle, pageStands: false, kind: "cannot", words: INACTIVE_WORDS });
   });
 
   it("names a row that names no customer (slice 9d) from its family record, listing it after the rows that name one", async () => {

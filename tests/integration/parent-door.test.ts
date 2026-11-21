@@ -24,7 +24,7 @@ import { env } from "@/env";
 import { asAppFamilyId, type AppFamilyId } from "@/lib/families/ids";
 // Each person is seeded in a family of the app's own (seedGuardianInFamily()): the gate lets a parent in only through an
 // open row naming an active family record.
-import { resetDb, seedParent, seedGuardian, seedGuardianInFamily, seedParentSession, seedWorkingMail } from "../helpers/db";
+import { resetDb, seedParent, seedGuardian, seedGuardianInFamily, seedInactiveFamily, seedParentSession, seedWorkingMail } from "../helpers/db";
 import { SIGNINS_ON, seedParentSettings, storeShape } from "../helpers/roster-cache";
 
 const IP = "203.0.113.30";
@@ -464,10 +464,10 @@ describe("the gate: a parent enters only an active family of the app's own (app-
     expect(await stateOf(cookie)).toMatchObject({ status: "ok", identity: { familyId: g2.familyId } });
   });
 
-  it("offers no row that names no family record, and refuses a person with no row that counts as one with no open row", async () => {
+  it("offers no row of a family record that was never active, and refuses a person with no row that counts as one with no open row", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
-    // A row the records were never brought into step for: it names no family record.
-    const bare = await seedGuardian({ parentId: a.id, familyId: null });
+    // An open row in a family record that is inactive and linked to nothing: it doesn't count.
+    const bare = await seedGuardian({ parentId: a.id, familyId: await seedInactiveFamily() });
     const g2 = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F2" });
     // The code is sent and checked because one row counts, and that one family is entered at once.
     const { body, cookie } = await signIn("ana@example.com");
@@ -486,10 +486,10 @@ describe("the gate: a parent enters only an active family of the app's own (app-
 
   it.each([
     ["names an inactive family record", "inactive"],
-    ["names no family record", "none"],
+    ["names a family record that was never active", "none"],
   ] as const)("a person whose only open row %s is sent no code and never signed in, as one with no open row", async (_, kind) => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
-    const g = kind === "none" ? await seedGuardian({ parentId: a.id, familyId: null, status: "invited" })
+    const g = kind === "none" ? await seedGuardian({ parentId: a.id, familyId: await seedInactiveFamily(), status: "invited" })
       : await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1", status: "invited" });
     if (kind === "inactive") await makeInactive(g.familyId);
     const res = await post("/portal-code/send", { email: "ana@example.com" });
