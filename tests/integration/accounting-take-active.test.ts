@@ -250,8 +250,10 @@ describe("a family made active again", () => {
     expect(await guardianRows()).toEqual(guardiansBefore);
     expect(sentSince()).toEqual([]);
   });
+});
 
-  it("in flat books, a member: made active, held, its guardian counted only after the release", async () => {
+describe("a member made active again, in flat books", () => {
+  it("made active, held, its guardian counted only after the release", async () => {
     tag = await connectRoster(stub, { shape: { kind: "flat", memberTypeIds: ["1"] } });
     [rivera, chen] = [await recordOfCustomer("10", "family"), await recordOfCustomer("20", "family")];
     // A guardian of the member's record, written here (no import after it).
