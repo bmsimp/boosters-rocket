@@ -1,4 +1,3 @@
-import Link from "next/link";
 import type { ParentCtx } from "@/lib/guards";
 import type { StoredInvoice } from "@/lib/db/schema";
 import { formatMoney } from "@/lib/money/cents";
@@ -7,6 +6,8 @@ import { buyoutTitleOf, type MyBuyoutInvoices } from "@/lib/money/my-buyout-invo
 import { CalendarDate } from "../components/calendar-date";
 import { LocalTime } from "../components/local-time";
 import { DueLine } from "./due-line";
+import { Card } from "../components/ui/card";
+import { LinkButton } from "../components/ui/button";
 
 /**
  * The money box for Home: what the signed-in family owes, each open invoice with its Pay button, and when QuickBooks
@@ -34,7 +35,8 @@ function BuyoutLine({ title }: { title: string | null }) {
 
 function OpenLine({ invoice, today, current, filled, buyouts }: { invoice: StoredInvoice; today: string; current: boolean; filled: boolean; buyouts?: MyBuyoutInvoices }) {
   const amount = formatMoney(invoice.balanceCents, invoice.currency);
-  const style = filled ? "btn pay" : "btn btn-line pay";
+  // The soonest-due invoice that can be paid is the primary button, the others secondary (their class: "btn pay", "btn btn-line pay").
+  const variant = filled ? "primary" : "secondary";
   return (
     <li>
       <span>
@@ -46,11 +48,11 @@ function OpenLine({ invoice, today, current, filled, buyouts }: { invoice: Store
       <span className="amount num">{amount}</span>
       {invoice.payLink && (current ? (
         // A plain link in the same tab: an installed app opens it in the phone's in-app browser, with a way back.
-        <a className={style} href={invoice.payLink} rel="noopener noreferrer" referrerPolicy="no-referrer" aria-label={`Pay ${amount}, ${payName(invoice)}`}>
+        <LinkButton plain variant={variant} className="pay" href={invoice.payLink} rel="noopener noreferrer" referrerPolicy="no-referrer" aria-label={`Pay ${amount}, ${payName(invoice)}`}>
           Pay{filled && <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>}
-        </a>
+        </LinkButton>
       ) : (
-        <a className={style} aria-disabled="true" role="link" aria-label={`Pay ${amount}, paused until the figures are up to date`}>Pay</a>
+        <LinkButton plain variant={variant} className="pay" aria-disabled="true" role="link" aria-label={`Pay ${amount}, paused until the figures are up to date`}>Pay</LinkButton>
       ))}
     </li>
   );
@@ -99,8 +101,8 @@ function Figures({ f, today, buyouts }: { f: MoneyFigures; today: string; buyout
  */
 export function MoneySection({ money, more = false, buyouts }: { money: FamilyMoney; more?: boolean; buyouts?: MyBuyoutInvoices }) {
   return (
-    <section className="box money" aria-labelledby="money-h">
-      <h2 id="money-h">{money.familyName ?? "What you owe"}</h2>
+    <Card className="money" title={money.familyName ?? "What you owe"} titleId="money-h"
+      actions={more && !money.notConnected && <LinkButton variant="secondary" href="/payments">See your payments</LinkButton>}>
       {money.figures
         ? <Figures f={money.figures} today={money.today} buyouts={buyouts} />
         : money.notConnected
@@ -108,8 +110,7 @@ export function MoneySection({ money, more = false, buyouts }: { money: FamilyMo
           // The way to Payments is left off, since it would show only these words again.
           ? <p className="help" role="status">The club hasn&apos;t connected your payments to the portal yet. Until then, the treasurer can tell you what you owe.</p>
           : <p className="help" role="status">We can&apos;t show what you owe right now. Please check back in a little while.</p>}
-      {more && !money.notConnected && <div className="box-foot"><Link className="btn btn-line" href="/payments">See your payments</Link></div>}
-    </section>
+    </Card>
   );
 }
 
@@ -118,8 +119,7 @@ export function PaidSection({ money, buyouts }: { money: FamilyMoney; buyouts?: 
   if (!money.figures) return null;
   const { paid } = money.figures;
   return (
-    <section className="box paid-box" aria-labelledby="paid-h">
-      <h2 id="paid-h">Paid in the last 12 months</h2>
+    <Card className="paid-box" title="Paid in the last 12 months" titleId="paid-h">
       {paid.length > 0 ? (
         <ul className="lines">
           {paid.map((i) => (
@@ -136,6 +136,6 @@ export function PaidSection({ money, buyouts }: { money: FamilyMoney; buyouts?: 
       ) : (
         <p className="help">No paid invoices from the last 12 months.</p>
       )}
-    </section>
+    </Card>
   );
 }

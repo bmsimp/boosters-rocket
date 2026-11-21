@@ -3,6 +3,7 @@ import { linesLeft, type Line, type StepStanding } from "@/lib/seasons/progress"
 import { dueState } from "@/lib/money/due";
 import { CalendarDate } from "../components/calendar-date";
 import { StateWords } from "../components/state-words";
+import { StepIndicator } from "../components/ui/step-indicator";
 
 /**
  * The season as a parent sees it: the ruler on Home, and each requirement's progress in words. Server components.
@@ -17,8 +18,8 @@ const initial = (name: string) => (Array.from(name.trim())[0] ?? "?").toUpperCas
 const first = (name: string) => name.trim().split(/\s+/)[0] || name;
 
 /**
- * The season ruler (DESIGN.md, Season set ruler): the steps as cells in order, the finished ones behind the current
- * one ticked, the current one filled with the club's color, and a dot for each student on it. Not a control. The dots are decoration: the same
+ * The season ruler (StepIndicator, docs/agents/ui.md): the steps in order on a thin track, the finished ones behind the
+ * current one ticked, the current one in the club's color, and a dot for each student on it. Not a control. The dots are decoration: the same
  * facts are in words in the students box. Nothing is drawn for a season with no steps. To a parent a step is a "set",
  * the word the ruler's design uses; staff, who build the season, call it a step.
  *
@@ -41,30 +42,22 @@ export function SeasonRuler({ season }: { season: MySeason }) {
             : steps.length === 1 ? <>The one set is done</> : <>All {steps.length} sets done</>}</b></p>
           <a href="/season">See the whole season</a>
         </div>
-        <ol className={steps.length > 6 ? "sets many" : "sets"} style={{ ["--count" as string]: steps.length }}>
-          {steps.map((step, i) => {
-            const isCurrent = i === currentIndex;
-            // The ruler reads from left to right: only a set behind the current one is ticked. One still ahead is
-            // drawn as still to come, even when it asks nothing of this family and so is done already.
-            const behind = currentIndex === null || i < currentIndex;
-            const ticked = behind && step.done && !nothingAsked;
-            return (
-              <li key={step.id} className={ticked ? "done" : undefined} aria-current={isCurrent ? "step" : undefined}>
-                <span className="n">
-                  {ticked && <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M3 8.5l3 3 7-7" /></svg>}
-                  {i + 1}
-                </span>
-                <span className="label">{step.name}</span>
-                <span className="visually-hidden">{isCurrent ? ", current set" : ticked ? ", done" : behind && !nothingAsked ? ", not finished" : ""}</span>
-                {isCurrent && step.students.length > 0 && (
-                  <span className="on-set" aria-hidden="true">
-                    {step.students.map((s) => <i key={String(s.id)} className={s.done ? "done" : undefined} title={s.done ? `${first(s.name)} is done` : `${first(s.name)} has more to do`}>{initial(s.name)}</i>)}
-                  </span>
-                )}
-              </li>
-            );
-          })}
-        </ol>
+        <StepIndicator steps={steps.map((step, i) => {
+          const isCurrent = i === currentIndex;
+          // The ruler reads from left to right: only a set behind the current one is ticked. One still ahead is
+          // drawn as still to come, even when it asks nothing of this family and so is done already.
+          const behind = currentIndex === null || i < currentIndex;
+          const ticked = behind && step.done && !nothingAsked;
+          return {
+            key: step.id, label: step.name, done: ticked, current: isCurrent,
+            words: isCurrent ? ", current set" : ticked ? ", done" : behind && !nothingAsked ? ", not finished" : "",
+            marker: isCurrent && step.students.length > 0 && (
+              <span className="on-set" aria-hidden="true">
+                {step.students.map((s) => <i key={String(s.id)} className={s.done ? "done" : undefined} title={s.done ? `${first(s.name)} is done` : `${first(s.name)} has more to do`}>{initial(s.name)}</i>)}
+              </span>
+            ),
+          };
+        })} />
       </div>
     </section>
   );

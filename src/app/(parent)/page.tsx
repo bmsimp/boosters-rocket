@@ -11,6 +11,7 @@ import { MoneySection } from "./money-box";
 import { SeasonRuler } from "./season-parts";
 import { passkeyOfferFor } from "@/lib/parents/passkey-offer";
 import { PasskeyOffer } from "./passkey-offer";
+import { PageHeader } from "../components/ui/page-header";
 
 export const metadata = { title: "Home" };
 
@@ -42,9 +43,7 @@ export default async function ParentHome() {
     <>
       {season && <SeasonRuler season={season} />}
       <main className="wrap home">
-        <div className="home-head">
-          <h1 className="page-title">{first ? `Hi, ${first}` : "Hi"}</h1>
-        </div>
+        <PageHeader className="home-head" title={first ? `Hi, ${first}` : "Hi"} />
         {offer.offered && <PasskeyOffer portalOrigin={offer.portalOrigin} />}
         {family ? (
           <>
