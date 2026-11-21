@@ -156,6 +156,16 @@ const MAY_SAVED_TRY = [ROSTER_WRITER, "src/lib/roster/queue.ts"];
  */
 const SEND = "sendToBooks";
 const MAY_SEND = [ROSTER_WRITER, "src/app/staff/(app)/links/actions.ts"];
+/**
+ * Send the app's to QuickBooks for a guardian's difference (stage 4's slice M3c4): a guardian's name sent to their own
+ * Parent customer, and a removed guardian's Parent customer made inactive by the balance rule. Each is a private function
+ * of sendToBooks()'s block, named only by the roster's write module, and reaches QuickBooks only through the saved-first
+ * try (queueSaved(), trySavedItem()) and the make-inactive's try (tryDeactivate()), never through the guardian functions
+ * (GUARDIAN_SENDS), whose rename compares QuickBooks' name with the last agreed one rather than the one the row showed.
+ * GUARDIAN_SENDS, MAY_GUARDIAN_SEND, MAY_SAVED_TRY and MAY_SEND are unchanged by it.
+ */
+const GUARDIAN_DIFFERENCE_SENDS = ["sendGuardianName", "sendGuardianInactive"];
+const MAY_GUARDIAN_DIFFERENCE_SEND = [ROSTER_WRITER];
 /** Which body each roster write sends. */
 const ROSTER_BODY = { qboCreateCustomer: "create", qboRenameCustomer: "rename", qboMoveCustomer: "reparent", qboSetCustomerActive: "active" } as const;
 /** The fields the roster writes' bodies can carry, in the order CUSTOMER_WRITES writes them. */
@@ -481,6 +491,24 @@ function sendBlockProblems(writerText: string): string[] {
   if (!new RegExp(`\\b${SEND_FAMILY}\\(`).test(block)) problems.push(`${SEND}'s block doesn't make a layered family inactive through ${SEND_FAMILY}(), the family action's own body`);
   for (const name of FAMILY_ACTION_PARTS) {
     if (new RegExp(`\\b${name}\\b`).test(block)) problems.push(`${SEND}'s block reaches the family action otherwise than through ${SEND_FAMILY}(): it names ${name}`);
+  }
+  // Slice M3c4: a guardian's sends are the block's own functions, so the checks above read them too.
+  for (const name of GUARDIAN_DIFFERENCE_SENDS) if (!new RegExp(`\\basync function ${name}\\(`).test(block)) problems.push(`${SEND}'s block doesn't define ${name}()`);
+  return problems;
+}
+/**
+ * What is wrong with a guardian's sends from a difference (slice M3c4): nothing when each is a function of the roster's
+ * write module whose body names neither of GUARDIAN_SENDS (it queues through queueSaved() and tries through
+ * trySavedItem() and tryDeactivate(), with `was` the books' name the row showed).
+ */
+function guardianDifferenceSendProblems(writerText: string): string[] {
+  const writer = code(writerText), problems: string[] = [];
+  for (const name of GUARDIAN_DIFFERENCE_SENDS) {
+    const at = writer.indexOf(`async function ${name}(`);
+    if (at < 0) { problems.push(`${ROSTER_WRITER} doesn't define ${name}()`); continue; }
+    const end = writer.indexOf("\n}\n", at);
+    const body = writer.slice(at, end < 0 ? undefined : end);
+    for (const forbidden of GUARDIAN_SENDS) if (new RegExp(`\\b${forbidden}\\b`).test(body)) problems.push(`${name}() names ${forbidden}: a difference's send overwrites only what the row showed`);
   }
   return problems;
 }
@@ -961,10 +989,37 @@ describe("what the portal writes to QuickBooks, and who may send each", () => {
         inSendBlock(writerSource, (b) => b.replaceAll(`${SEND_FAMILY}(`, "familyInactiveElsewhere(")),
         intoSendName(`  void prepareFamily;`),
         intoSendName(`  void sendDeactivate;`),
+        // Slice M3c4: a guardian's send not defined in the block (moved out of it, or gone).
+        inSendBlock(writerSource, (b) => b.replace("async function sendGuardianName(", "async function sendGuardianNameMoved(")),
+        inSendBlock(writerSource, (b) => b.replace("async function sendGuardianInactive(", "async function sendGuardianInactiveMoved(")),
       ];
       for (const text of cases) {
         expect(text, `case ${cases.indexOf(text)} didn't change the writer`).not.toBe(writerSource);
         expect(sendBlockProblems(text), `case ${cases.indexOf(text)}`).not.toEqual([]);
+      }
+    });
+
+    it("a guardian's send from a difference is the roster's write module's own, and never goes through the guardian functions (slice M3c4)", () => {
+      const naming = (sources: { file: string; text: string }[], name: string) => sources.filter((s) => new RegExp(`\\b${name}\\b`).test(code(s.text))).map((s) => s.file).sort();
+      for (const name of GUARDIAN_DIFFERENCE_SENDS) {
+        expect(naming(everything, name), `${name} sends a guardian's difference to QuickBooks. A new caller is a decision for a slice brief.`).toEqual([...MAY_GUARDIAN_DIFFERENCE_SEND].sort());
+        const another = [...everything, { file: "src/lib/accounting/guardian-send.ts", text: `import { ${name} } from "@/lib/roster/writes";\nexport const go = () => ${name};\n` }];
+        expect(naming(another, name)).not.toEqual([...MAY_GUARDIAN_DIFFERENCE_SEND].sort());
+      }
+      const writerSource = everything.find((s) => s.file === ROSTER_WRITER)!.text;
+      expect(guardianDifferenceSendProblems(writerSource)).toEqual([]);
+      // Each proved on a copy of the writer it must refuse: a guardian function called from either send, or a send gone.
+      const into = (name: string, line: string) => writerSource.replace(new RegExp(`(async function ${name}\\([^\\n]*\\{\\n)`), `$1${line}\n`);
+      const cases = [
+        into("sendGuardianName", `  await queueForGuardian({} as never, {} as never, {} as never);`),
+        into("sendGuardianName", `  await sendGuardianSaved([], {} as never, {} as never);`),
+        into("sendGuardianInactive", `  await queueForGuardian({} as never, {} as never, {} as never);`),
+        into("sendGuardianInactive", `  void sendGuardianSaved;`),
+        writerSource.replace("async function sendGuardianInactive(", "async function sendRemovedGuardianInactive("),
+      ];
+      for (const text of cases) {
+        expect(text, `case ${cases.indexOf(text)} didn't change the writer`).not.toBe(writerSource);
+        expect(guardianDifferenceSendProblems(text), `case ${cases.indexOf(text)}`).not.toEqual([]);
       }
     });
 
