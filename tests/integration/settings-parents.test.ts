@@ -369,8 +369,25 @@ describe("the Parent sign-ins settings", () => {
       expect(unknown).not.toContain(">Set up</a>");
     });
 
+    /** The presses a page draws (SwitchButton's `label` and `act`), found in the element tree it returns, not its markup. */
+    type Press = { label: string; act: () => Promise<unknown> };
+    const presses = (node: unknown): Press[] => {
+      if (Array.isArray(node)) return node.flatMap(presses);
+      if (!node || typeof node !== "object" || !("props" in node)) return [];
+      const p = (node as { props: Record<string, unknown> }).props;
+      const own = typeof p.act === "function" && typeof p.label === "string" ? [{ label: p.label, act: p.act as Press["act"] }] : [];
+      return [...own, ...presses(p.children)];
+    };
+    /** Step 3 as drawn: its markup, decoded, and its presses. */
+    const drawn = async () => {
+      const page = await ParentSetupPage({ searchParams: Promise.resolve({ step: "level" }) });
+      return { html: decoded(renderToStaticMarkup(page)), presses: presses(page) };
+    };
+
     it("step 3 at Standard shows the counts, and the confirm for 1, for 2 or more and for 0 guardians with neither", async () => {
       const ana = await ready();
+      // ready() leaves parent sign-ins off, whose words are the next test's (slice SI-11): these are the words with them on.
+      await setSigninsAction(true);
       let html = await stepThree();
       expect(html).toContain("The club is at Standard: a password, and on a phone or computer the portal doesn't know yet, a code we email, or the guardian's own passkey or authenticator app.");
       expect(html).toContain("<dt>Can sign in</dt><dd>1 person</dd><dt>Have a passkey</dt><dd>0</dd><dt>Have an authenticator app</dt><dd>0</dd><dt>Have neither</dt><dd>1</dd>");
@@ -388,6 +405,49 @@ describe("the Parent sign-ins settings", () => {
       expect(html).toContain("<dt>Can sign in</dt><dd>2 people</dd><dt>Have a passkey</dt><dd>1</dd><dt>Have an authenticator app</dt><dd>2</dd><dt>Have neither</dt><dd>0</dd>");
       expect(html).toContain("Switching to Strict signs nobody out: every guardian who can sign in has a passkey or an authenticator app.");
       expect(html).toContain('<a class="link-line" href="/staff/settings/parents">Back to Parent sign-ins</a>');
+    });
+
+    it("step 3 with parent sign-ins off counts who could sign in once they are on, and its confirm signs nobody out, for 0, 1 and 2 with neither", async () => {
+      const ana = await ready();
+      expect((await getParentSettings()).signin).toBe(false);
+      const off = "Parent sign-ins are off, so switching to Strict signs nobody out. Once they are on, a guardian with neither a passkey nor an authenticator app adds one after their password, before they see their family's page.";
+      let html = await stepThree();
+      expect(html).toContain("<dt>Could sign in once sign-ins are on</dt><dd>1 person</dd><dt>Have a passkey</dt><dd>0</dd><dt>Have an authenticator app</dt><dd>0</dd><dt>Have neither</dt><dd>1</dd>");
+      expect(html).not.toContain("<dt>Can sign in</dt>");
+      expect(html).toContain(off);
+      expect(html).not.toContain("Switching to Strict signs out");
+      const sam = await seedSam();
+      html = await stepThree();
+      expect(html).toContain("<dt>Could sign in once sign-ins are on</dt><dd>2 people</dd>");
+      expect(html).toContain(off);
+      expect(html).not.toContain("Switching to Strict signs out");
+      await seedPasskey(ana.id); await seedAuthenticator(sam.id);
+      html = await stepThree();
+      expect(html).toContain("<dt>Could sign in once sign-ins are on</dt><dd>2 people</dd><dt>Have a passkey</dt><dd>1</dd><dt>Have an authenticator app</dt><dd>1</dd><dt>Have neither</dt><dd>0</dd>");
+      expect(html).toContain("Parent sign-ins are off, so switching to Strict signs nobody out. Every guardian who could sign in once they are on has a passkey or an authenticator app.");
+      expect(html).not.toContain("Switching to Strict signs nobody out:");
+      // Switched on, every word is as it was.
+      await setSigninsAction(true);
+      html = await stepThree();
+      expect(html).toContain("<dt>Can sign in</dt><dd>2 people</dd>");
+      expect(html).toContain("Switching to Strict signs nobody out: every guardian who can sign in has a passkey or an authenticator app.");
+      expect(html).not.toContain("Parent sign-ins are off");
+    });
+
+    it("the page's own Switch to Strict with parent sign-ins off answers that nobody was signed out, its audit row's after as with them on", async () => {
+      await ready();
+      await seedSam();
+      const page = await drawn();
+      expect(page.html).toContain("<dt>Have neither</dt><dd>2</dd>");
+      const toStrict = page.presses.find((p) => p.label === "Switch to Strict");
+      expect(toStrict).toBeDefined();
+      expect(await toStrict!.act()).toEqual({ ok: true, message: "The club is at Strict. Parent sign-ins are off, so nobody was signed out." });
+      expect((await getParentSettings()).level).toBe("strict");
+      const row = (await audits("settings.parents.save")).find((r) => (r.after as { level?: unknown } | null)?.level === "strict")!;
+      expect(row).toBeDefined();
+      expect(row).toMatchObject({ actorId: admin.id, permission: "Settings.Parents.ReadWrite",
+        after: { signin: false, level: "strict", signedOut: 0, sessionsEnded: 0, counts: { people: 2, passkey: 0, app: 0, neither: 2 } } });
+      expect(Object.keys(row.after as Record<string, unknown>).sort()).toEqual(["counts", "level", "proofsCleared", "requireActiveStudents", "sessionsEnded", "signedOut", "signin", "welcome"]);
     });
 
     it("step 3 at Strict offers only switching back, and with the level unknown says so and offers both", async () => {
@@ -433,19 +493,6 @@ describe("the Parent sign-ins settings", () => {
     });
 
     it("binds the press to the count the step shows: the page's own Switch to Strict works, and so does its Switch back", async () => {
-      /** The presses a page draws (SwitchButton's `label` and `act`), found in the element tree it returns, not its markup. */
-      type Press = { label: string; act: () => Promise<unknown> };
-      const presses = (node: unknown): Press[] => {
-        if (Array.isArray(node)) return node.flatMap(presses);
-        if (!node || typeof node !== "object" || !("props" in node)) return [];
-        const p = (node as { props: Record<string, unknown> }).props;
-        const own = typeof p.act === "function" && typeof p.label === "string" ? [{ label: p.label, act: p.act as Press["act"] }] : [];
-        return [...own, ...presses(p.children)];
-      };
-      const drawn = async () => {
-        const page = await ParentSetupPage({ searchParams: Promise.resolve({ step: "level" }) });
-        return { html: decoded(renderToStaticMarkup(page)), presses: presses(page) };
-      };
       const ana = await ready();
       const sam = await seedSam();
       await setSigninsAction(true);

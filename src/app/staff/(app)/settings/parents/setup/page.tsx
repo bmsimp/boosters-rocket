@@ -17,18 +17,26 @@ const STEPS: { step: Step; label: string }[] = [{ step: "signins", label: "1. Pa
 const SETUP = "/staff/settings/parents/setup";
 const n = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
-/** What switching to Strict does, for the count of guardians with neither a passkey nor an authenticator app (slice SI-10b). */
-function strictConfirm(neither: number): string {
+/**
+ * What switching to Strict does, for the count of guardians with neither a passkey nor an authenticator app (slice SI-10b).
+ * With parent sign-ins off nobody can be signed in (the gate ends any session while the door is closed), so the switch
+ * signs out nobody who could reach anything, and the count is of who could sign in once they are on.
+ */
+function strictConfirm(neither: number, signinOn: boolean): string {
+  if (!signinOn) {
+    if (neither === 0) return "Parent sign-ins are off, so switching to Strict signs nobody out. Every guardian who could sign in once they are on has a passkey or an authenticator app.";
+    return "Parent sign-ins are off, so switching to Strict signs nobody out. Once they are on, a guardian with neither a passkey nor an authenticator app adds one after their password, before they see their family's page.";
+  }
   if (neither === 0) return "Switching to Strict signs nobody out: every guardian who can sign in has a passkey or an authenticator app.";
   if (neither === 1) return "Switching to Strict signs out the 1 guardian who has neither a passkey nor an authenticator app. The next time they sign in, their password takes them to add one before they see their family's page. If they've forgotten their password, they'll need you to reset their sign-in from their page on Parents.";
   return `Switching to Strict signs out the ${neither} guardians who have neither a passkey nor an authenticator app. The next time they sign in, their password takes them to add one before they see their family's page. Anyone who has forgotten their password will need you to reset their sign-in from their page on Parents.`;
 }
 
-/** The counts step 3 shows: who can sign in, and with what second step of their own. */
-function FactorDetails({ c }: { c: FactorCounts }) {
+/** The counts step 3 shows: who can sign in (with sign-ins off, who could once they are on), and with what second step of their own. */
+function FactorDetails({ c, signinOn }: { c: FactorCounts; signinOn: boolean }) {
   return (
     <dl className="details">
-      <dt>Can sign in</dt><dd>{n(c.people, "person", "people")}</dd>
+      <dt>{signinOn ? "Can sign in" : "Could sign in once sign-ins are on"}</dt><dd>{n(c.people, "person", "people")}</dd>
       <dt>Have a passkey</dt><dd>{c.passkey}</dd>
       <dt>Have an authenticator app</dt><dd>{c.app}</dd>
       <dt>Have neither</dt><dd>{c.neither}</dd>
@@ -100,11 +108,11 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
           {level === "standard" && <Notice tone="info">The club is at Standard: a password, and on a phone or computer the portal doesn&apos;t know yet, a code we email, or the guardian&apos;s own passkey or authenticator app.</Notice>}
           {level === "strict" && <Notice tone="info">The club is at Strict: a password and a passkey or an authenticator app, every time. An emailed code never signs anyone in.</Notice>}
           {level === null && <Notice tone="warning">{LEVEL_UNREADABLE}</Notice>}
-          <FactorDetails c={factors} />
+          <FactorDetails c={factors} signinOn={settings.signin} />
           {level === "standard" && <p>Strict asks every guardian for a passkey or an authenticator app each time they sign in, and an emailed code never signs anyone in. Switch once most guardians have one.</p>}
           {level !== "strict" && (
             <details><summary>Switch to Strict</summary>
-              <Notice tone="warning" live="none">{strictConfirm(factors.neither)}</Notice>
+              <Notice tone="warning" live="none">{strictConfirm(factors.neither, settings.signin)}</Notice>
               <SwitchButton label="Switch to Strict" pendingLabel="Switching…" act={setLevelAction.bind(null, "strict", factors.neither)} />
             </details>
           )}

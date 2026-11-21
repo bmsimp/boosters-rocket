@@ -21,7 +21,9 @@ import { PASSKEY_OFFER_COPY as OFFER } from "../../src/lib/parents/passkey-offer
  * page runs the library's own ceremonies, and the spec watches their verify requests reach the portal's own add and
  * asking again, never the library's verify paths. Nothing of it stays: Zelda's passkeys and backup codes, the sessions
  * and devices its sign-ins made, her counts and her session's proof are put back before (for a run cut off midway) and
- * after, so both passes read one seed.
+ * after, so both passes read one seed. What Playwright's own authenticator can't show (a real phone's or computer's
+ * passkey, a password manager, a synced passkey, a security key, the installed app) is the owner's checks 23 to 34 and
+ * 45 (docs/runbooks/before-the-first-family.md, part 3).
  */
 const sql = postgres(process.env.DATABASE_URL!);
 let sink: MailSink;

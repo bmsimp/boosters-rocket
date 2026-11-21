@@ -28,7 +28,9 @@ somewhere safe that is not this machine (the board's password manager):
    app: they sign in with a backup code or ask the club. After changing it, keep the old one as
    `SETTINGS_ENCRYPTION_KEY_PREVIOUS` for good, and in the safe place too: each app is sealed again under the new key
    the next time its holder signs in with it, but an app not used since still needs the old key, and a second change
-   (which replaces `SETTINGS_ENCRYPTION_KEY_PREVIOUS`) loses the apps not used since the first.
+   (which replaces `SETTINGS_ENCRYPTION_KEY_PREVIOUS`) loses the apps not used since the first. Its
+   `BETTER_AUTH_SECRET` matters too: with a different one, every parent's backup codes, remembered phones and computers
+   and emailed links stop working ([first install, part 3](first-install.md#3-fill-in-the-settings)).
 2. Documenso's signing certificate (the `.p12` file named by `DOCUMENSO_SIGNING_CERTIFICATE`) and its passphrase.
 3. A copy of the backups themselves: a backup that lives only on the machine it protects is lost with it.
 

@@ -319,25 +319,90 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
 22. **The staff home for someone with one permission.** Give a test staff member a role with one of the staff home's
     four permissions only, and sign in as them.
     **Pass:** the Today box shows only that permission's line. **If not:** note what else showed.
-23. **An authenticator app from the QR code, on another phone.** On a laptop, as a test parent: Family, **Sign-in
-    settings**, the **Authenticator app** box; show it's you if it asks; **Set up an authenticator app**. Scan the QR
-    code with Google Authenticator and finish with the code it shows. Then **Turn off the authenticator app** (the box
-    asks you to show it's you again first, this time with the app's code, since a proof from before the app was set up
-    no longer counts) and set it up again with Microsoft Authenticator, and once more with a password manager's authenticator (1Password, Bitwarden,
-    or the iPhone's Passwords app).
+
+Checks 23 to 45 are the sign-in's, in this order: passkeys (23 to 34), the authenticator apps (35 to 41), the Strict
+level (42 and 43), an Admin's reset of a parent's sign-in (44) and the passkey offer on Home (45). Make them with the
+club at Standard, where every club starts (Settings, Parent sign-ins, step 3, **Sign-in level**), until check 42 moves
+it to Strict and check 43 back; where a check says what happens at Strict too, it says so.
+
+23. **A passkey on the iPhone, in Safari and in the installed app.** As a test parent: Family, **Sign-in settings**,
+    show it's you, then under **Passkeys** type a name and **Add a passkey**; unlock with Face ID or the passcode.
+    Then sign out, and on the sign-in page **Sign in with a passkey**. Do it once in Safari and once in the installed
+    app.
+    **Pass:** the passkey is listed with its name, "Not used yet", then a last-used time after the sign-in; the first
+    passkey of a parent with no authenticator app shows ten backup codes once; signing in asks for no address and no
+    password. **If not:** note the browser or app and what the phone or the page said.
+24. **A passkey on Android, in Chrome and in the installed app,** the same as check 23 (fingerprint or the screen
+    lock). Then add a passkey in Chrome and try to sign in with it in the installed app.
+    **Pass:** each adds and signs in; note whether the installed app offered the passkey made in Chrome (whether the two
+    count as one device for passkeys), and whether **Remembered devices** lists them as one device or two. **If not:**
+    note what was offered.
+25. **A passkey on a Windows PC with Windows Hello,** in Edge and in Chrome, and **on a Mac,** in Safari and in Chrome
+    (Touch ID or the Mac's password).
+    **Pass:** each browser adds a passkey and signs in with it alone. **If not:** note the browser and what it said.
+26. **Bitwarden's passkey,** on a desktop browser with the Bitwarden extension and on a phone with Bitwarden as its
+    password manager: **Add a passkey** with the name "Bitwarden", and choose Bitwarden when the browser asks where to
+    keep it.
+    **Pass:** Bitwarden keeps it under the portal's address, with the parent's sign-in email as its user name (never
+    the passkey's name), and signs in with it. **If not:** note what Bitwarden showed.
+27. **What a password manager shows.** In the phone's or computer's saved passkeys (iCloud Keychain, Google Password
+    Manager, Windows, Bitwarden), find the passkey you added.
+    **Pass:** it is under the portal's own address, named by the parent's sign-in email. **If not:** note what it shows.
+28. **A synced passkey on a second device.** Add a passkey on one iPhone or Android phone signed in to iCloud Keychain
+    or Google Password Manager, then on a second device signed in to the same account, **Sign in with a passkey**.
+    **Pass:** the second device offers the synced passkey and signs in with it. **If not:** note the two devices.
+29. **A phone's passkey on a computer, by its QR code** (open question 24). On a computer that holds no passkey of the
+    parent's, **Sign in with a passkey**, choose to use a phone, and scan the QR code with the phone that holds it.
+    **Pass:** the computer is signed in. **If not:** note the computer, the browser and what the phone said.
+30. **A hardware security key** (a YubiKey or similar, with a PIN set): add one as a passkey, then sign in with it on
+    another computer.
+    **Pass:** it adds and signs in, asking for the key's PIN. **If not:** note the key and what was asked.
+31. **Firefox,** on a computer and on Android: add a passkey and sign in with it.
+    **Pass:** both work. **If not:** note what Firefox said.
+32. **Removing a passkey the device still holds.** As a test parent with one passkey and no authenticator app, remove
+    it on **Sign-in settings** (show it's you first; the page says the backup codes go with it), then on the device that
+    holds it, **Sign in with a passkey**.
+    **Pass:** the device still offers it, and the portal refuses it with "That passkey didn't work. Try it again, or
+    sign in with your email and password."; the parent signs in with their password instead and, with no passkey or
+    app left, is emailed a code on a device the portal doesn't know. **If not:** note what happened.
+33. **Asking again with a passkey.** Signed in more than 10 minutes, on **Sign-in settings** press **Use your passkey**
+    in the password box, then change the password.
+    **Pass:** the passkey alone shows it's you, with no code emailed. **If not:** note what was asked.
+34. **A change of sign-in email keeps the passkeys working, and a change of `APP_URL` stops them.** Change a test
+    parent's sign-in email, then sign in with their passkey. Then, on a test host only, give two test parents with no
+    authenticator app a passkey each: one who keeps the ten backup codes it came with, and one with none left (use
+    each code once, in a new private window each time, until **Backup codes left** on **Sign-in settings** says 0).
+    Change `APP_URL` to another address, and on a phone or computer the portal doesn't know (a private window), sign
+    in as each with their password.
+    **Pass:** after the email change the passkey still signs in (the password manager may still show the old address
+    as the user name). After the address change no passkey works (each is bound to the old address), and the portal
+    still asks for the passkey after the password, never for an emailed code: the first parent's step says "If you
+    don't have your passkey with you, enter one of your backup codes instead. If you have neither, ask the club for
+    help." and one backup code in the **Backup code** field signs them in; the second's says "If you don't have your
+    passkey with you, ask the club for help.", and only an Admin's reset of their sign-in (check 44) brings them back.
+    The portal can't yet remove every parent's passkeys at once, so after a real change of address each parent left
+    like the second is reset one at a time, each with a call back
+    ([resetting a parent's sign-in](resetting-a-parents-sign-in.md)). Put `APP_URL` back afterwards. **If not:** note
+    what happened.
+35. **An authenticator app from the QR code, on another phone.** On a laptop, as a test parent with no passkey: Family,
+    **Sign-in settings**, the **Authenticator app** box; show it's you if it asks; **Set up an authenticator app**. Scan
+    the QR code with Google Authenticator and finish with the code it shows. Then **Turn off the authenticator app**
+    (the box asks you to show it's you again first, this time with the app's code, since a proof from before the app
+    was set up no longer counts) and set it up again with Microsoft Authenticator, and once more with a password
+    manager's authenticator (1Password, Bitwarden, or the iPhone's Passwords app).
     **Pass:** each app names the club and the parent's address, shows a 6-digit code that changes every 30 seconds, and
     that code finishes the set-up; ten backup codes show, once, and are gone when the page is reloaded. **If not:** note
     the app and what it showed.
-24. **The same phone, by the typed key.** On the iPhone, in the installed app: **Set up an authenticator app**, then
+36. **The same phone, by the typed key.** On the iPhone, in the installed app: **Set up an authenticator app**, then
     **Copy the key**; in the authenticator app, add an account by hand ("Enter a setup key" or similar, time based) and
     paste the key, or type it from the screen with or without its spaces. The same on Android, in Chrome.
     **Pass:** the app's code finishes the set-up. **If not:** note the app, and whether the paste or the typing failed.
-25. **The code field's keyboard and autofill.** At the set-up's code field, and at the sign-in page's app step on a
+37. **The code field's keyboard and autofill.** At the set-up's code field, and at the sign-in page's app step on a
     device the portal doesn't know (a private window).
     **Pass:** the set-up's field opens the number keypad; the sign-in's opens a keyboard with letters too (it takes a
     backup code); where the phone's own password manager holds the code, the keyboard offers it and filling it in works.
     **If not:** note the phone, the field and the keyboard.
-26. **A phone whose clock is off.** The portal takes the app's code for the 30 seconds before now, now, and the 30
+38. **A phone whose clock is off.** The portal takes the app's code for the 30 seconds before now, now, and the 30
     seconds after, so a clock under about 30 seconds off always works and one a minute or more off never does. On the
     phone with the authenticator app, turn off setting the time automatically and put the clock a minute behind, then a
     minute ahead, and each time try one sign-in on a device the portal doesn't know (a new private window). Then put
@@ -345,19 +410,20 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
     **Pass:** a minute behind and a minute ahead are each refused with "That code didn't work", and nothing else
     changes; with the clock right again, the app's newest code signs in. (Five wrong codes in 15 minutes stop the tries
     for a while, so make only these.) **If not:** note how far off it was and what happened.
-27. **Backup codes typed on a phone keyboard.** In **Sign-in settings**, **Make new backup codes**, and write two down.
-    A device the portal knows asks for no code, so make each of the three tries below in a new private window, closed
-    after the try: sign in with one code typed on the phone's keyboard in lower case with its dash; then with the other
-    with a space for the dash; then with the first code again.
+39. **Backup codes typed on a phone keyboard.** With an authenticator app set up as in check 35, in **Sign-in
+    settings**, **Make new backup codes**, and write two down. At Standard a device the portal knows asks for no code,
+    so make each of the three tries below in a new private window, closed after the try: sign in with one code typed
+    on the phone's keyboard in lower case with its dash; then with the other with a space for the dash; then with the
+    first code again.
     **Pass:** the first two sign in; the third is refused; **Backup codes left** on Sign-in settings has gone down by
     two. **If not:** note what was typed, and in which window.
-28. **The installed app beside the browser.** With the authenticator app set up from Safari (or Chrome), sign in from
-    the installed app as a device the portal doesn't know yet (step 3 says how), then turn the app off in one and reload
-    the other.
+40. **The installed app beside the browser.** With the authenticator app set up from Safari (or Chrome) for a test
+    parent with no passkey, sign in from the installed app as a device the portal doesn't know yet (check 3 says how),
+    then turn the app off in one and reload the other.
     **Pass:** the installed app asks for the authenticator app's code, not an emailed one, and the code works there;
     after the turn-off, both say the app is off and the next new device gets an emailed code. **If not:** note which
     showed what.
-29. **Away from the page for over a minute, and back.** On the iPhone in the installed app, and on Android in Chrome
+41. **Away from the page for over a minute, and back.** On the iPhone in the installed app, and on Android in Chrome
     and in the installed app: **Set up an authenticator app**, then leave for the authenticator app and stay there for
     more than a minute (time it) before coming back to the portal and typing the app's code. Then, with the ten backup
     codes on the screen, leave for Notes (or a password manager), paste them, wait more than a minute and come back.
@@ -367,76 +433,47 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
     finishes the set-up; the ten backup codes are still shown. **If not:** note the phone, browser or installed app,
     how long you were away and what the page showed instead (a page that starts over has lost the set-up: the app's
     entry from it won't work; a page that lost the codes can make new ones with **Make new backup codes**).
-30. **A passkey on the iPhone, in Safari and in the installed app.** As a test parent: Family, **Sign-in settings**,
-    show it's you, then under **Passkeys** type a name and **Add a passkey**; unlock with Face ID or the passcode.
-    Then sign out, and on the sign-in page **Sign in with a passkey**. Do it once in Safari and once in the installed
-    app.
-    **Pass:** the passkey is listed with its name, "Not used yet", then a last-used time after the sign-in; the first
-    passkey shows ten backup codes once; signing in asks for no address and no password. **If not:** note the browser
-    or app and what the phone or the page said.
-31. **A passkey on Android, in Chrome and in the installed app,** the same as check 30 (fingerprint or the screen
-    lock). Then add a passkey in Chrome and try to sign in with it in the installed app.
-    **Pass:** each adds and signs in; note whether the installed app offered the passkey made in Chrome (whether the two
-    count as one device for passkeys), and whether **Remembered devices** lists them as one device or two. **If not:**
-    note what was offered.
-32. **A passkey on a Windows PC with Windows Hello,** in Edge and in Chrome, and **on a Mac,** in Safari and in Chrome
-    (Touch ID or the Mac's password).
-    **Pass:** each browser adds a passkey and signs in with it alone. **If not:** note the browser and what it said.
-33. **Bitwarden's passkey,** on a desktop browser with the Bitwarden extension and on a phone with Bitwarden as its
-    password manager: **Add a passkey** with the name "Bitwarden", and choose Bitwarden when the browser asks where to
-    keep it.
-    **Pass:** Bitwarden keeps it under the portal's address, with the parent's sign-in email as its user name (never
-    the passkey's name), and signs in with it. **If not:** note what Bitwarden showed.
-34. **What a password manager shows.** In the phone's or computer's saved passkeys (iCloud Keychain, Google Password
-    Manager, Windows, Bitwarden), find the passkey you added.
-    **Pass:** it is under the portal's own address, named by the parent's sign-in email. **If not:** note what it shows.
-35. **A synced passkey on a second device.** Add a passkey on one iPhone or Android phone signed in to iCloud Keychain
-    or Google Password Manager, then on a second device signed in to the same account, **Sign in with a passkey**.
-    **Pass:** the second device offers the synced passkey and signs in with it. **If not:** note the two devices.
-36. **A phone's passkey on a computer, by its QR code** (open question 24). On a computer that holds no passkey of the
-    parent's, **Sign in with a passkey**, choose to use a phone, and scan the QR code with the phone that holds it.
-    **Pass:** the computer is signed in. **If not:** note the computer, the browser and what the phone said.
-37. **A hardware security key** (a YubiKey or similar, with a PIN set): add one as a passkey, then sign in with it on
-    another computer.
-    **Pass:** it adds and signs in, asking for the key's PIN. **If not:** note the key and what was asked.
-38. **Firefox,** on a computer and on Android: add a passkey and sign in with it.
-    **Pass:** both work. **If not:** note what Firefox said.
-39. **Removing a passkey the device still holds.** Remove a passkey on **Sign-in settings** (show it's you first), then
-    on the device that holds it, **Sign in with a passkey**.
-    **Pass:** the device still offers it, and the portal refuses it with "That passkey didn't work"; the parent signs
-    in with their password instead, and, with no other passkey or app, is emailed a code. **If not:** note what happened.
-40. **Asking again with a passkey.** Signed in more than 10 minutes, on **Sign-in settings** press **Use your passkey**
-    in the password box, then change the password.
-    **Pass:** the passkey alone shows it's you, with no code emailed. **If not:** note what was asked.
-41. **A change of sign-in email keeps the passkeys working, and a change of `APP_URL` drops them.** Change a test
-    parent's sign-in email, then sign in with their passkey. Then, on a test host only, change `APP_URL` to another
-    address and try the passkey again.
-    **Pass:** after the email change the passkey still signs in (the password manager may still show the old address
-    as the user name); after the address change no passkey works (each is bound to the old address), and the parent
-    signs in with their password and the second step. **If not:** note what happened.
-42. **An Admin resets a parent's sign-in** ([resetting a parent's sign-in](resetting-a-parents-sign-in.md)). Give a test
+42. **Switching to Strict.** On a test host, with three test parents who can sign in: one with a passkey, one with an
+    authenticator app, and one with neither, signed in on a phone. As an Admin, open **Settings**, **Parent sign-ins**,
+    **Change**, step 3, **Sign-in level**, read the counts, open **Switch to Strict** and press it. Then, on the phone,
+    open any page. Sign in there as that parent with their password, add a passkey on **One more step** (on the iPhone
+    in Safari and in the installed app, and on Android in Chrome), tick "I've saved my backup codes somewhere safe" and
+    press **Continue**. Then, as the parent with the app, sign in on a computer the portal remembers for them.
+    **Pass:** the counts match the three parents; no email goes to anyone; the answer says "The club is at Strict. 1
+    guardian with neither a passkey nor an authenticator app was signed out."; the phone is signed out at its next
+    page; the password leads to "One more step" and to no other page; adding the passkey asks only for the phone's own
+    unlock and shows ten backup codes once; **Continue** lands on Home; the parent with the app is asked for its code on
+    the remembered computer too. **If not:** note what happened, and where.
+43. **Switching back to Standard.** Open step 3 again, open **Switch back to Standard** and press it.
+    **Pass:** the answer says "The club is at Standard. Nobody was signed out."; nobody is signed out; the passkey and
+    the app still sign in; a parent with neither, on a phone or computer the portal doesn't know, signs in with their
+    password and an emailed code. **If not:** note what happened.
+44. **An Admin resets a parent's sign-in** ([resetting a parent's sign-in](resetting-a-parents-sign-in.md)). Give a test
     parent a passkey and an authenticator app, and sign them in on two devices. As an Admin, open **Parents**, the
     parent's page, **Reset sign-in**: tick the call-back box, give a reason and press **Reset sign-in**. Then, as a
     second Admin, open the staff home.
-    **Pass:** both devices are signed out at their next page; the email arrives at the parent's address with a link,
-    which chooses a new password; signing in with it on a new device asks for an emailed code; the portal no longer
-    asks for the passkey (the device may still offer it, and the portal refuses it with "That passkey didn't work");
-    the second Admin's home page shows "Sign-in resets this week" with who reset whose sign-in and when, and the first
-    Admin's doesn't. **If not:** note what happened, and where.
-43. **The passkey offer on Home.** The offer comes only after a sign-in that asks for the emailed code, and a device
-    the portal remembers asks for the password alone under Standard (checks 27 and 28): signing out keeps the device
-    remembered. So under Standard, before each sign-in below, on that phone or computer open **Sign-in settings**,
-    press **Forget this device** and then sign out, or use a test parent who has never signed in there (under Strict
-    every sign-in asks for the second step, and nothing need be forgotten). A private window does for a computer; it
-    does not for the installed app. As a test parent with no passkey: on the iPhone in the installed app, forget the
-    device and sign out, then sign in with the password and the emailed code. Home shows "Sign in with Face ID or your
-    fingerprint next time?" after the greeting, with **Turn on** and **Not now**; press **Turn on** and unlock with
-    Face ID or the passcode. Do the same on Android in the installed app (the fingerprint or the screen lock), and on a
-    computer in a browser, where the box asks "Sign in with a passkey next time?" and names Windows Hello and a
-    password manager. Then, as a second test parent with no passkey, sign in with the password and the emailed code on
-    three different devices the portal doesn't know, pressing **Not now** on each, and sign in the same way on a
-    fourth. Last, as a third test parent with no passkey, sign in on a computer the portal doesn't know, leave Home
-    open for eleven minutes, then press **Turn on**.
+    **Pass:** both devices are signed out at their next page; the email ("Your <club> sign-in was reset") arrives at
+    the parent's address with a link, which chooses a new password and signs them in on that device; signing in with
+    the password on another device the portal doesn't know asks for an emailed code; the portal no longer asks for the
+    passkey (the device may still offer it, and the portal refuses it with "That passkey didn't work. Try it again, or
+    sign in with your email and password."); the second Admin's home page shows "Sign-in resets this week" with who
+    reset whose sign-in and when, and the first Admin's doesn't. (At Strict the password chosen from the link leads to
+    "One more step" first, and the email says so.) **If not:** note what happened, and where.
+45. **The passkey offer on Home.** The offer comes only right after a sign-in that asked for a second step (the
+    emailed code, or the authenticator app's code), to a parent with no passkey. Under Standard a device the portal
+    remembers asks for the password alone and is offered nothing, and signing out keeps the device remembered. So
+    under Standard, before each sign-in below, on that phone or computer open **Sign-in settings**, press **Forget this
+    device** and then sign out, or use a test parent who has never signed in there (under Strict every sign-in asks
+    for the second step, and nothing need be forgotten). A private window does for a computer; it does not for the
+    installed app. As a test parent with no passkey: on the iPhone in the installed app, forget the device and sign
+    out, then sign in with the password and the emailed code. Home shows "Sign in with Face ID or your fingerprint next
+    time?" after the greeting, with **Turn on** and **Not now**; press **Turn on** and unlock with Face ID or the
+    passcode. Do the same on Android in the installed app (the fingerprint or the screen lock), and on a computer in a
+    browser, where the box asks "Sign in with a passkey next time?" and names Windows Hello and a password manager.
+    Then, as a second test parent with no passkey, sign in with the password and the emailed code on three different
+    devices the portal doesn't know, pressing **Not now** on each, and sign in the same way on a fourth. Last, as a
+    third test parent with no passkey, sign in on a computer the portal doesn't know, leave Home open for eleven
+    minutes, then press **Turn on**.
     **Pass:** a phone shows the phone's words and a computer the computer's; **Turn on** asks for nothing but the
     device's own unlock, then says "Done. Next time you sign in here, use your passkey.", and for a parent with no
     authenticator app shows the ten backup codes once; Sign-in settings then lists it as "Passkey added" with its date,
@@ -448,21 +485,8 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
     (a private window, a cleared browser, another browser on the same phone) is offered again at its next sign-in,
     until the third **Not now**: the month is kept on a device the portal still knows. **If not:** note the phone or
     computer, the browser or installed app, and what Home showed.
-44. **Switching to Strict.** On a test host, with three test parents who can sign in: one with a passkey, one with an
-    authenticator app, and one with neither, signed in on a phone. As an Admin, open **Settings**, **Parent sign-ins**,
-    **Change**, step 3, **Sign-in level**, read the counts, open **Switch to Strict** and press it. Then, on the phone,
-    open any page. Sign in there as that parent with their password, add a passkey on **One more step** (on the iPhone
-    in Safari and in the installed app, and on Android in Chrome), tick that the backup codes are saved and press
-    **Continue**. Then, as the parent with the app, sign in on a computer the portal remembers for them.
-    **Pass:** the counts match the three parents; no email goes to anyone; the phone is signed out at its next page;
-    the password leads to "One more step" and to no other page; adding the passkey asks only for the phone's own unlock
-    and shows ten backup codes once; **Continue** lands on Home; the parent with the app is asked for its code on the
-    remembered computer too. **If not:** note what happened, and where.
-45. **Switching back to Standard.** Open step 3 again, open **Switch back to Standard** and press it.
-    **Pass:** nobody is signed out; the passkey and the app still sign in; a parent with neither, on a phone or
-    computer the portal doesn't know, signs in with their password and an emailed code. **If not:** note what happened.
 
-Checks 30 to 41, 43 and 44 are what Playwright's own authenticator can't show (`tests/e2e/passkey-signin.spec.ts`,
+Checks 23 to 34, 42 and 45 are what Playwright's own authenticator can't show (`tests/e2e/passkey-signin.spec.ts`,
 `tests/e2e/passkeys.spec.ts` and `tests/e2e/strict-enrolment.spec.ts` say so in their heads): a real authenticator, a
 password manager, a synced passkey, a phone by its QR code, a security key, a real phone's passkey at **One more
 step**, the installed app, Safari and Firefox. The browser's own passkey suggestions on
@@ -558,9 +582,11 @@ The proof-of-concept host has no Documenso. Forms need a full installation from 
     proven end to end, start a second Documenso against the restored database.
     **Pass:** each says `Restored ...`. **If not:** its message and exit code.
 19. **Settle the portal's address before parents are offered passkeys.** A passkey belongs to `APP_URL`'s host name:
-    once parents have added passkeys, changing the address stops every one, and locks out each parent whose only
-    second step is a passkey until an Admin resets their sign-in, one parent at a time, each with a call back
-    ([a first installation, part 3](first-install.md#3-fill-in-the-settings); [resetting a parent's sign-in](resetting-a-parents-sign-in.md)).
+    once parents have added passkeys, changing the address stops every one. A parent with an authenticator app, or a
+    backup code they haven't used, still signs in; one whose only second step was the passkey, with no backup code
+    left, is locked out until an Admin resets their sign-in, one parent at a time, each with a call back: the portal
+    can't yet remove every parent's passkeys at once (check 34 of part 3;
+    [a first installation, part 3](first-install.md#3-fill-in-the-settings); [resetting a parent's sign-in](resetting-a-parents-sign-in.md)).
     **Pass:** the address in `deploy/.env` is the one the club will keep. **If not:** change it now, before any parent
     has a passkey.
 
@@ -662,9 +688,10 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    don't press **Remind now** on Signed forms during the pilot: it emails every guardian still to sign that form.
    **If not:** the step lists what is missing first (working mail).
 3. **Tell the pilot families** the portal's address and to sign in with their email and a password. With welcome
-   emails off, nobody is sent the link that chooses a password by themselves: tell each family to start at **Set up or
-   reset my password** on the sign-in page (`/sign-in/password`), type their email, and choose a password from the
-   link mailed to them, which signs them in. Or send each pilot guardian their welcome from their page under
+   emails off, nobody is sent the link that chooses a password by themselves: with the club at Standard, tell each
+   family to start at **Set up or reset my password** on the sign-in page (`/sign-in/password`), type their email, and
+   choose a password from the link mailed to them, which signs them in. (At Strict that page mails no link to choose a
+   first password: use **Resend welcome email** instead.) Or send each pilot guardian their welcome from their page under
    **Parents**, **Resend welcome email**: it carries the same kind of link, working for 7 days. Ask each to, on their own phone:
    look at Home and Payments, sign a form, sign up for a shift and check in at it, update their details, and try
    Display.

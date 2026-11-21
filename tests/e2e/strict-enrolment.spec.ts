@@ -15,7 +15,7 @@ import { STRICT_PARENT, makeStrictParent, removeStrictParent, storeLevel } from 
  * the new backup codes she makes stay until she ticks that she saved them and presses Done. Strict is stored at the start and Standard put back
  * after; the guardian is the spec's own, never Zelda (tests/e2e/strict-seed.ts), and goes with everything she made.
  * What Playwright's own authenticator can't show (a real phone's passkey at /one-more-step, the installed app) is the
- * owner's check 44 (docs/runbooks/before-the-first-family.md). The Admin's switch to Strict is pressed by no browser
+ * owner's check 42 (docs/runbooks/before-the-first-family.md). The Admin's switch to Strict is pressed by no browser
  * spec: it would sign out the seeded parents later specs use (tests/integration/parents-switches.test.ts proves it).
  */
 const sql = postgres(process.env.DATABASE_URL!);

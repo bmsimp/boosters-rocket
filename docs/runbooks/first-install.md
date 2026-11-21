@@ -56,11 +56,14 @@ Documenso seals every signed form with a certificate of the club's own. Follow
 2. Open `.env` in an editor (`nano .env`). Each line says what it is. Fill in every empty line:
    - `APP_URL` and `DOCUMENSO_URL`: the two addresses, with `https://` and nothing after the name, not even a `/`
      (this installation's proxy refuses to start with one, and says which line). Choose `APP_URL` for good: parents'
-     passkeys belong to that address, so changing it later stops every one of them. A parent whose only second step
-     is a passkey (no authenticator app) is then locked out: on a new device the portal asks for that passkey, which
-     no longer works, and sends no emailed code in its place, so they can't sign in until an Admin resets their
-     sign-in, one parent at a time ([resetting a parent's sign-in](resetting-a-parents-sign-in.md)). Don't change the
-     address lightly once parents have passkeys.
+     passkeys belong to that address, so changing it later stops every one of them, while the sign-in page still asks
+     for them and never sends an emailed code in their place. A parent who also has an authenticator app signs in with
+     its code. A parent whose only second step is a passkey can still sign in with a backup code they haven't used
+     (the sign-in page asks for one beside the passkey); with neither, they can't sign in until an Admin resets their
+     sign-in. A new address also signs every parent and staff member out and leaves no phone or computer remembered,
+     since browsers keep those sign-ins for the old address. The portal can't yet remove every parent's passkeys at once, so the way back is that reset, one parent at a time,
+     each with a call back ([resetting a parent's sign-in](resetting-a-parents-sign-in.md)). Don't change the address
+     lightly once parents have passkeys.
    - `CLUB_TIME_ZONE`: for example `America/Chicago`.
    - `CLIENT_IP_HEADER`: `x-forwarded-for` if you will use this installation's own proxy (step 5). With a proxy of your
      own, see [A proxy of your own](#a-proxy-of-your-own) below.
@@ -69,6 +72,13 @@ Documenso seals every signed form with a certificate of the club's own. Follow
      `SETTINGS_ENCRYPTION_KEY` safe: it also seals parents' authenticator apps, so losing it loses every parent's app
      (they sign in with a backup code or ask the club), and after changing it the old one must stay as
      `SETTINGS_ENCRYPTION_KEY_PREVIOUS` for good ([backups](backups.md)).
+   - `BETTER_AUTH_SECRET`: choose it once and keep it for good. The portal has no list of old values to fall back on,
+     so changing it later, on the same database, at once: signs every parent and every staff member out; stops every
+     set-up and reset link already emailed (each parent asks for a new one, or staff press **Resend welcome email**)
+     and every sign-in code; makes the portal forget every remembered phone and computer, so each asks for the second
+     step again; stops every parent's backup codes, so a parent who has lost their passkey or app can't use one until
+     they make new ones; and starts the counts of wrong passwords and of link requests again. Passwords, passkeys and
+     authenticator apps keep working: the apps are sealed with `SETTINGS_ENCRYPTION_KEY`, not with this.
    - `DOCUMENSO_SIGNING_CERTIFICATE`: `/srv/booster-rocket/documenso-signing.p12`, and `DOCUMENSO_SIGNING_PASSPHRASE`
      its passphrase.
    - `DOCUMENSO_SMTP_*`: Documenso's own account mail ([outgoing mail](mail.md#documensos-account-mail)).
@@ -148,13 +158,19 @@ APP_COMMIT="$(git rev-parse --short HEAD)" docker compose -f compose.yml -f comp
    and sign in as them with Microsoft or Google. Setup closes and the staff home opens: you are signed in as the Admin.
 7. Open **Health** in the staff menu (under **Admin**). Every line should be there;
    [Health page warnings](health-warnings.md) says what each one means. QuickBooks, Forms and parent sign-ins say "Not
-   set up" or "Off" until the next steps.
+   set up" or "Off" until the next steps; the password breach check says "Not used yet" until a parent chooses a
+   password.
 
 ## 7. The rest of the set-up
 
 1. QuickBooks: [Intuit](intuit.md).
 2. Forms: [Documenso, parts 2 to 4](documenso.md#2-the-first-documenso-account).
-3. Parent sign-ins: under **Settings**, **Parent sign-ins**, once QuickBooks has read the roster. A guardian is
+3. Parent sign-ins: under **Settings**, **Parent sign-ins**, **Set up**, in its three steps: **1. Parent sign-ins**
+   (switched on once outgoing mail works), **2. Welcome emails**, and **3. Sign-in level**. A club starts at
+   Standard: a password, and on a phone or computer the portal doesn't know yet, a code emailed to the guardian, or
+   their own passkey or authenticator app. Strict, which asks every guardian for a passkey or an authenticator app,
+   is for later, once most guardians have one (the counts are on step 3, and on **Parents**). Do this once QuickBooks
+   has read the roster. A guardian is
    added on their family's page, and a fresh installation has no families yet: a read of QuickBooks brings no
    customer into the portal's own families by itself. Bring each family in from **Reconciliation** in the staff menu:
    under **Customers with no family**, **Create a family from this** makes the family and its students, linked to

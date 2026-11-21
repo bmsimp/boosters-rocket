@@ -35,8 +35,9 @@ const n = (count: number, one: string, many: string) => `${count} ${count === 1 
  * "Sign-in"; the sign-in release's slice SI-10b): counts only, naming nobody, so showing them writes no audit row. An
  * Admin is told where the level is chosen.
  */
-function FactorLine({ c, strict, admin }: { c: FactorCounts; strict: boolean; admin: boolean }) {
-  const counts = `Of the ${n(c.people, "person", "people")} who can sign in, ${n(c.passkey, "has", "have")} a passkey and ${c.app} an authenticator app (someone with both is counted twice); ${n(c.neither, "has", "have")} neither.`;
+function FactorLine({ c, strict, admin, signinOn }: { c: FactorCounts; strict: boolean; admin: boolean; signinOn: boolean }) {
+  const who = signinOn ? "who can sign in" : "who could sign in once sign-ins are on";
+  const counts = `Of the ${n(c.people, "person", "people")} ${who}, ${n(c.passkey, "has", "have")} a passkey and ${c.app} an authenticator app (someone with both is counted twice); ${n(c.neither, "has", "have")} neither.`;
   const level = strict ? " The club is at Strict: anyone with neither adds one the next time they sign in."
     : admin ? " You can ask everyone for one under Settings, Parent sign-ins, step 3, once most have one." : "";
   return <p>{counts}{level}</p>;
@@ -52,7 +53,7 @@ export default async function ParentsPage({ searchParams }: { searchParams: Prom
       <h1 className="page-title">Parents</h1>
       <p className="lede">Everyone who can sign in to the portal, or once could, and each family they belong to. Who can sign in is kept by the portal itself: a change made in QuickBooks no longer gives anyone a sign-in or ends one.</p>
       {!settings.signin && <Notice tone="warning">Parent sign-ins are off, so nobody can sign in, not even a guardian added here. An Admin switches them on under Parent sign-ins.</Notice>}
-      <FactorLine c={factors} strict={settings.level === "strict"} admin={can(ctx.effective, "Settings.Parents.ReadWrite")} />
+      <FactorLine c={factors} strict={settings.level === "strict"} admin={can(ctx.effective, "Settings.Parents.ReadWrite")} signinOn={settings.signin} />
 
       <section className="box" aria-labelledby="people-h"><h2 id="people-h">People</h2>
         <form method="get" role="search" className="stack">

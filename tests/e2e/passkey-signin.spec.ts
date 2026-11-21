@@ -19,7 +19,7 @@ import { PASSKEY_ASKED, PASSKEY_BUTTON, PASSKEY_ONLY, PASSKEY_USE } from "../../
  * before (for a run cut off midway) and after, so both passes read one seed; Zelda's seeded password, device and session
  * are never touched.
  *
- * What this cannot prove, which real devices must (on the owner's list since SI-7b, docs/runbooks/before-the-first-family.md, part 3): a real authenticator (a
+ * What this cannot prove, which real devices must (the owner's checks 23 to 34, docs/runbooks/before-the-first-family.md, part 3): a real authenticator (a
  * phone's Face ID or fingerprint, Windows Hello, a Mac's Touch ID), a password manager's passkey (Bitwarden), a
  * passkey synced between devices, a phone's passkey used on a computer by its QR code, a security key, the installed
  * app, Safari and Firefox (both projects are Chromium), and the browser's own passkey suggestions on the email field
