@@ -97,7 +97,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "parent.welcome.failed": "Welcome email couldn't be sent",
   "parent.welcome.sent": "Welcome email sent",
   "parents.guardian_links.filled": "Each guardian's link to the QuickBooks record their sign-in came from made where the portal had none, with counts",
-  "parents.retired_records.dropped":"The retired reviews' records removed: addresses held for staff to review, families matched across QuickBooks companies, the QuickBooks record an email change named, and the review's settings, with counts",
+  "parents.retired_records.dropped": "The retired reviews' records removed: addresses held for staff to review, families matched across QuickBooks companies, the QuickBooks record an email change named, and the review's settings, with counts",
   "quickbooks.check.cut_off": "An unfinished check of the portal's QuickBooks requests was found cut off",
   "quickbooks.check.end": "Check of the portal's QuickBooks requests finished",
   "quickbooks.check.record.asked": "The request check asked QuickBooks to make one of its test records",
