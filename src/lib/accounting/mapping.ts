@@ -261,6 +261,8 @@ export type LinksView = {
   step: (familyId: string, customerId: string) => ConfirmStep;
   /** Confirm all exact email matches for the rows this filter shows (suggestedRowsShown()), from this view's reads; null when it shows no Suggested row, or in any state but `listed`. */
   bulk: (filter: Pick<LinksFilter, "status" | "q">) => BulkOffer | null;
+  /** Whether the books have a parent type (layered books whose shape names one), so a family's Confirm may link guardians with it (slice M3c2). */
+  guardianLinks: boolean;
 };
 
 /**
@@ -298,8 +300,10 @@ const group = <T>(items: readonly T[], keyOf: (t: T) => string) => {
  * finish, a guardian's add, removal and reinstatement, and every change to a student or family record. Some writers of
  * what is read here don't take it, and may commit between these reads: blocking a person (parent.blocked), a parent's
  * confirmed change of sign-in email (parent.email, which waits for the roster lock only to write the cache, and commits
- * without it past its wait) and giving up a queue item (write_queue.state, read by familyCreatesFiled()). None of
- * them can make a press link anything but the customer and the student pairs its page sealed (linkStampHolds()); they
+ * without it past its wait), giving up a queue item (write_queue.state, read by familyCreatesFiled() and since slice
+ * M3c2 by the guardian holds) and, since slice M3c2, a parent's save of their details or sign-in email, which queues an
+ * item naming their row without it (src/lib/parents/contact-queue.ts). None of
+ * them can make a press link anything but the customer and the student and guardian pairs its page sealed (linkStampHolds()); they
  * only change which suggestion the press works out again, and a press whose row now reads otherwise is refused as one
  * that changed. A reader that needs these to hold still has to lock them itself.
  */
@@ -747,6 +751,7 @@ export async function loadAccountingLinks(): Promise<LinksView> {
       hasCache: b.typeRows.length > 0 || b.customerRows.length > 0, shape, readOnce: b.okRuns.length > 0, typeRows: b.typeRows }),
     readAt: b.okRuns[0]?.finishedAt?.toISOString() ?? null,
     pool: poolShown, step, bulk,
+    guardianLinks: shape !== null && shape.kind === "layered" && shape.parentTypeId !== null,
   };
 }
 

@@ -158,8 +158,27 @@ function DifferenceLine({ d }: { d: Difference }) {
 /**
  * What a link press would link with the family, and what it would leave on each side, in words: every pair as "<the
  * record's name> with <the customer's name>", the records and customers left, and that those left aren't linked by it.
+ * Since slice M3c2 the guardians it would link, each "<the person's name> with <the Parent customer's name>", and those
+ * the write queue holds back, each with what holds it and how it is linked once that has cleared (proposalsFor()). The
+ * Parent customers no guardian is paired with aren't listed: once the family is linked they show among its differences.
  */
 function ProposalsShown({ proposals }: { proposals: Proposals }) {
+  const { guardians, guardiansHeld } = proposals;
+  return (
+    <>
+      <StudentProposalsShown proposals={proposals} />
+      {guardians.length > 0 && <><p>Guardians linked with it, by the sign-in address their Parent customer&apos;s email field holds:</p>
+        <ul>{guardians.map((g) => <li key={g.guardianId}>{g.who} with {g.customerName}</li>)}</ul></>}
+      {guardiansHeld.length > 0 && <><p>Not linked with it, though their Parent customer&apos;s email field holds their sign-in address:</p>
+        <ul>{guardiansHeld.map((g) => <li key={g.guardianId}>{g.who} with {g.customerName}: a change for {g.who} or for {g.customerName} is waiting, stuck or kept on the Reconciliation page, so they aren&apos;t linked with it.
+          Once it has gone through or been given up there, they can be linked in this row&apos;s opening, with Link this guardian, if the family is linked by then and that Parent customer is still free for them.
+          {" "}<Link href={RECONCILIATION_CHANGES}>See the changes on Reconciliation<span className="visually-hidden">: {g.who}</span></Link></li>)}</ul></>}
+    </>
+  );
+}
+
+/** The students a link press would link with the family, and those it would leave (slice M3a). */
+function StudentProposalsShown({ proposals }: { proposals: Proposals }) {
   const { pairs, recordsLeft, customersLeft } = proposals;
   if (pairs.length === 0 && recordsLeft.length === 0 && customersLeft.length === 0) return <p>No student would be linked with it.</p>;
   return (
@@ -177,12 +196,18 @@ function ProposalsShown({ proposals }: { proposals: Proposals }) {
 
 /** What a link does on the parents' side, and how it is taken back: said beside every Confirm. */
 const LINK_EFFECT = "Once linked, this family's guardians see this customer's open invoices and Pay links, and those of the students and parents the books hold directly under it, the next time they open Home or Payments, and a pay-instead choice for the family bills it. A link can be removed again on this page, with Unlink from the books in the family's row, but its guardians may have seen those invoices by then, so check it is the right household.";
+/**
+ * What a guardian linked with a family's Confirm has from then on (slice M3c2), said beside every Confirm only where the
+ * books have a parent type (LinksView.guardianLinks): the same as Link this guardian's (GUARDIAN_LINK_EFFECT), so the two
+ * are kept true together.
+ */
+const LINK_GUARDIANS_EFFECT = "A guardian linked with it has, from then on, a rename of them, their removal from this family and a change of their phone, mailing address or sign-in email sent to that Parent customer, by the portal's own rules, while it is theirs alone under this family. Linking sends nothing to the books, and the details the portal holds for them now aren't sent by it.";
 
 /** The address of the chooser for a family, or of its confirm step for a customer. */
 const pickHref = (familyId: string, customerId?: string) => `/staff/links?pick=${encodeURIComponent(familyId)}${customerId ? `&customer=${encodeURIComponent(customerId)}` : ""}#${PICK}`;
 
 /** The row's opening: the family's active students and its open guardians, each with their own link, then its differences, then what can be done. */
-function Opening({ row, tag }: { row: LinkRow; tag: string }) {
+function Opening({ row, tag, guardianLinks }: { row: LinkRow; tag: string; guardianLinks: boolean }) {
   const id = String(row.familyId);
   return (
     <details className="more"><summary>{row.differences.length > 0 ? "Students, guardians and differences" : "Students and guardians"}<span className="visually-hidden">: {row.name}</span></summary>
@@ -197,7 +222,7 @@ function Opening({ row, tag }: { row: LinkRow; tag: string }) {
       {row.status.key === "several" && row.status.alsoMatches.length > 0 && <p>Also matched by: {row.status.alsoMatches.join(", ")}.</p>}
       {row.differences.length > 0 && <><p>Where the portal and the books differ:</p><ul>{row.differences.map((d, i) => <DifferenceLine key={i} d={d} />)}</ul></>}
       {row.inactiveUnrecorded > 0 && <p>The books also have {plural(row.inactiveUnrecorded, "inactive student customer", "inactive student customers")} under this family with no student record in the portal.</p>}
-      {row.confirm !== null && row.customer !== null && <><p>Confirming links it to &ldquo;{row.customer.name}&rdquo;. Nothing is sent to the books.</p><ProposalsShown proposals={row.confirm.proposals} /><p>{LINK_EFFECT}</p></>}
+      {row.confirm !== null && row.customer !== null && <><p>Confirming links it to &ldquo;{row.customer.name}&rdquo;. Nothing is sent to the books.</p><ProposalsShown proposals={row.confirm.proposals} /><p>{LINK_EFFECT}</p>{guardianLinks && <p>{LINK_GUARDIANS_EFFECT}</p>}</>}
       {row.review !== null && <ReviewShown review={row.review} />}
       {row.unlink !== null && <UnlinkShown unlink={row.unlink} />}
       {row.offers.pick && <p className="link-line"><Link href={pickHref(id)}>Pick a different customer<span className="visually-hidden">: {row.name}</span></Link></p>}
@@ -270,7 +295,7 @@ function BulkPress({ bulk, filter, tag }: { bulk: BulkOffer; filter: LinksFilter
   return (
     <div className="stack">
       {held}
-      <p>Confirm all exact email matches links each of the {plural(bulk.count, "family", "families")} this list shows as Suggested to the customer filled in on its row, with the students its row&apos;s opening lists by name.
+      <p>Confirm all exact email matches links each of the {plural(bulk.count, "family", "families")} this list shows as Suggested to the customer filled in on its row, with the students and guardians its row&apos;s opening lists.
         Only the rows this filter shows now are linked: if the list has changed by the time you press, nothing is linked and it is shown again. Nothing is sent to the books.</p>
       <p>Once linked, each family&apos;s guardians see its customer&apos;s open invoices and Pay links, and those of the students and parents the books hold directly under it, the next time they open Home or Payments. A link can be removed again in its row, with Unlink from the books, but by then its guardians may have seen those invoices, so look the rows over first.</p>
       <div className="row-actions">
@@ -319,8 +344,9 @@ function PickPart({ view, familyId, customerId, cq, tag, made }: { view: LinksVi
           {step.parents !== null && (step.parents.length === 0 ? <p>The books hold no Parent customers directly under it.</p>
             : <><p>Parent customers the books hold directly under it:</p><ul>{step.parents.map((c) => <li key={c.qboId}>{c.name}{c.active ? "" : " (inactive in the books)"}</li>)}</ul></>)}
           <ProposalsShown proposals={step.offer.proposals} />
-          <p>Nothing is sent to the books. The family&apos;s guardians&apos; own records in the books aren&apos;t linked by this.</p>
+          <p>Nothing is sent to the books.</p>
           <p>{LINK_EFFECT}</p>
+          {view.guardianLinks && <p>{LINK_GUARDIANS_EFFECT}</p>}
           <div className="row-actions"><ConfirmPress familyId={id} about={row.name} offer={step.offer} tag={tag} /></div>
         </div>
       )}
@@ -382,7 +408,7 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
     { key: "customer", header: "Customer in the books", cell: (r) => (r.customer === null ? (r.status.key === "not_checked" ? "Not checked now" : "None")
       : <>{r.customer.name}<span className="when">{r.customer.email ?? "No email address"}</span></>) },
     { key: "status", header: "Status", cell: (r) => <><StateWords state={ICON[r.status.key]} words={STATUS_WORDS[r.status.key]} /><span className="when"><StatusDetail status={r.status} row={r} /></span></> },
-    { key: "more", header: "Students and guardians", cell: (r) => <Opening row={r} tag={tag} /> },
+    { key: "more", header: "Students and guardians", cell: (r) => <Opening row={r} tag={tag} guardianLinks={view.guardianLinks} /> },
   ];
   return (
     <main className="wrap single">
@@ -398,7 +424,8 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
             in its own email field, or on a parent record under it. A name never suggests a customer, and a customer another family is linked to is never suggested.
             A guardian who can&apos;t sign in, because they are blocked, is listed under the family, but their address is never matched.</p>
           <p>A family the portal has is linked here: Confirm its suggestion, or one of its possible customers, or pick a different customer from those no family is linked to.
-            Nothing is sent to the books: the press ties the family to its customer in the portal, with each of its students whose name is on exactly one student on each side.
+            Nothing is sent to the books: the press ties the family to its customer in the portal, with each of its students whose name is on exactly one student on each side,
+            and, where the books have Parent customers, each of its guardians whose sign-in address is in the email field of exactly one Parent customer under it that no one is linked to and that holds no other of its guardians&apos; addresses, unless a change for them waits on Reconciliation.
             Students left that way aren&apos;t linked, and show with the family&apos;s row among its differences, but for a student customer inactive in the books, which is only counted there. Leave unlinked keeps a family out of the suggestions until someone undoes it.</p>
           <p>A link also comes with something new. &ldquo;Create a family from this&rdquo;, on Reconciliation, makes a new family in the portal from a customer no family is linked to.
             &ldquo;Create in QuickBooks and link&rdquo;, on a family&apos;s page, makes a new customer in the books for a family that has none, but not for one unlinked while its customer is still in the books, nor for a student of it whose customer is; and adding a family under Families makes one too, when someone who may link families adds it while the books are connected.</p>

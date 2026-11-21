@@ -472,11 +472,12 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    **Suggested** only where one of its guardians signs in with an address that really is on a customer no family is
    linked to (or on a parent record under it), and otherwise **Several possible** or **No match**. For such a family,
    open its row: a Suggested one lists the students **Confirm** would link with it (a name on exactly one student on
-   each side) and those it would leave; press **Confirm** where the customer really is that family's, and it reads
-   **Linked**, confirmed by you, or **Linked, with differences** while anything is left over: a student left is shown
-   among its differences (an inactive student customer left is only counted on the row), and, in books with a parent
-   type, so is each guardian whose own Parent customer isn't linked yet (Confirm never links a guardian's), which is
-   every confirmed Suggested family there. Its money is read at its next page load. A Several possible or No match family takes **Pick a different customer**, from the customers no family
+   each side) and those it would leave, and, in books with a parent type, the guardians it would link to the Parent
+   customer under it whose email field holds their sign-in address; press **Confirm** where the customer really is
+   that family's, and it reads **Linked**, confirmed by you, or **Linked, with differences** while anything is left
+   over: a student left is shown among its differences (an inactive student customer left is only counted on the
+   row), and, in books with a parent type, so is each guardian Confirm didn't link to a Parent customer of their own,
+   whom you can link in the row's opening with **Link this guardian**. Its money is read at its next page load. A Several possible or No match family takes **Pick a different customer**, from the customers no family
    is linked to, with the same confirm step; **Leave unlinked** keeps a family with no customer in the books yet out
    of the suggestions until you undo it. With several Suggested rows, **Confirm all exact email matches** above the list
    links every Suggested row the filter shows, its count on the button, each as its own **Confirm** would; narrow the
