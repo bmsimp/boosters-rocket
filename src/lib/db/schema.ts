@@ -109,8 +109,8 @@ export const parent = pgTable("parent", {
  * with it; since then they stand alone: a staff roster write changes its own record (changeOwnRecord(),
  * src/lib/roster/writes.ts), and nothing QuickBooks holds changes one (the import that made them,
  * src/lib/families/roster-import.ts, has no caller in the portal). Every link belongs to the company the cache came
- * from. Nothing deletes a record or a link but a change of company, which empties all three tables
- * (src/lib/families/company-change.ts).
+ * from. Nothing deletes a record. A link is removed only by an unlink or a change of company, each of which moves it
+ * into `accounting_link_ended` (src/lib/accounting/link-writes.ts, src/lib/families/company-change.ts).
  */
 
 /**
@@ -174,8 +174,8 @@ export const guardian = pgTable("guardian", {
   id: uuid("id").primaryKey().defaultRandom(),
   familyQboId: text("family_qbo_id"),
   // The same family as the app's own record: written by whoever makes or reinstates the row (src/lib/parents/guardians.ts),
-  // never by a roster read (stage 3's slice 9c). Null for a row a change of company closed (its QuickBooks ids are
-  // another company's), and for a row made before its family had a record that nothing has given one since.
+  // never by a roster read (stage 3's slice 9c). Null for a row a change of company closed before stage 4's slice M7a
+  // (its QuickBooks ids are another company's; a change of company touches no guardian row now), and for a row made before its family had a record that nothing has given one since.
   familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
   parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "restrict" }),
   isPrimary: boolean("is_primary").notNull().default(false),
@@ -207,7 +207,7 @@ export const guardian = pgTable("guardian", {
  * was linked to and the students under it, is `confirmed`, with `linked_by` the staff member with the linking
  * permission (Accounting.Link.ReadWrite, not Admin-only) who pressed it. Since stage 4's slice M3b Unlink from the books
  * moves a family's link, with its student records' and guardian rows' links, to `accounting_link_ended`; nothing else
- * removes one but a change of company, which deletes every row of both. A lookup always asks for one kind (src/lib/families/links.ts).
+ * removes one but a change of company, which moves every row there too (stage 4's slice M7a). A lookup always asks for one kind (src/lib/families/links.ts).
  * `synced_token` is the customer's QuickBooks version (its SyncToken) the portal last aligned with, and `synced_at` when
  * (stage 3's slice 9e): set from the answer of a send the portal made that carried the link's own version (or the one
  * resend made after a live read found the field as the portal held it), from a create's answer, from the roster cache
@@ -245,10 +245,12 @@ export const accountingLink = pgTable("accounting_link", {
  * A link that was ended, kept for the audit page's record filter (stage 4's slice M3b): the row an `accounting_link` was,
  * with its own id, origin, `linked_at` and `linked_by`, and when it ended, by whom (staff_user.id, with no foreign key,
  * as `linked_by` has none) and how (`unlinked`: Unlink from the books on the accounting links screen, which ends a
- * family's link with every link of its student records and guardian rows, src/lib/accounting/link-writes.ts). No unique
- * index: a customer may have been several records' in turn, and a record several customers'. Nothing but an unlink writes
- * it, and nothing but the audit filter (customersOfRecord(), src/lib/audit/query.ts) and a change of company's clear,
- * which deletes every row (clearAppRecords()), reads it: a link that exists is in `accounting_link`, and every reader of
+ * family's link with every link of its student records and guardian rows, src/lib/accounting/link-writes.ts;
+ * `company_changed`: a change of company, which ends every link, by the staff member who connected the new company or
+ * nobody, src/lib/families/company-change.ts, stage 4's slice M7a). No unique
+ * index: a customer may have been several records' in turn, and a record several customers'. Nothing but an unlink and
+ * a change of company writes it, nothing deletes a row, and nothing but the audit filter (customersOfRecord(),
+ * src/lib/audit/query.ts) reads it: a link that exists is in `accounting_link`, and every reader of
  * the links that are reads that table alone.
  */
 export const accountingLinkEnded = pgTable("accounting_link_ended", {
@@ -264,7 +266,7 @@ export const accountingLinkEnded = pgTable("accounting_link_ended", {
   linkedBy: uuid("linked_by"),
   endedAt: timestamp("ended_at", { withTimezone: true }).notNull(),
   endedBy: uuid("ended_by"),
-  endedHow: text("ended_how", { enum: ["unlinked"] }).notNull(),
+  endedHow: text("ended_how", { enum: ["unlinked", "company_changed"] }).notNull(), // no CHECK (migration 0047): a value is added here alone
   createdAt: created(),
 }, (t) => [
   index("accounting_link_ended_family_ix").on(t.familyId),
@@ -618,7 +620,8 @@ export type QueuedWrite = RosterWrite | BuyoutWrite;
  * family a student moves from, the family that chose a buy-out), and `student_id`, the student a rename, move or
  * make-inactive is for. Each is null where there is no such record: a new family or member (made after QuickBooks
  * answers), a parent's own customer, an invoice's student. A done or given-up item is kept 30 days (the daily
- * clean-up); every item goes when a different company is connected, before the app's records.
+ * clean-up); when a different company is connected every item still to go (waiting, stuck or refused) is given up, with
+ * one note, and one done or given up is kept as it was (stage 4's slice M7a).
  * `refused` (stage 3's slice 9e): a change the portal saved first (a rename of a linked family, member or student, or a
  * student's create filed under the student record; since slice 11b a parent's phone and mailing address too) that
  * QuickBooks refused, or the portal held back: the portal keeps its value, and the item
@@ -983,8 +986,8 @@ export const volunteerReminder = pgTable("volunteer_reminder", {
  * credit earned later does not lower it. One live buy-out at most per requirement and family where it is the family's
  * (`buyout_family_live_uq`), and per requirement and student whichever family chose it (`buyout_student_live_uq`), so a
  * guardian can never make two invoices for one requirement. `flag` is set for the treasurer (the daily check, a move, a
- * paid invoice the portal would not void) and shown on the Reconciliation page. Never expires; a company change deletes
- * every row. The row keeps the requirement, the family and the student from being deleted.
+ * paid invoice the portal would not void) and shown on the Reconciliation page. Never expires; a company change ends
+ * every unpaid live one (`earlier_company`, below) and keeps every other as it is (stage 4's slice M7a). The row keeps the requirement, the family and the student from being deleted.
  */
 export const buyout = pgTable("buyout", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -999,8 +1002,10 @@ export const buyout = pgTable("buyout", {
   // Where it stands (src/lib/buyouts/rules.ts). All but voided and refused are live: one at most per requirement and subject.
   state: text("state", { enum: ["being_invoiced", "invoiced", "paid", "being_voided", "voided", "refused", "stuck"] }).notNull(),
   // Why a voided one ended: its invoice voided (switched back, student moved, or in QuickBooks), or closed by staff from
-  // Reconciliation once no unpaid invoice of it stood, with nothing sent to QuickBooks (src/lib/buyouts/close.ts).
-  endReason: text("end_reason", { enum: ["switched_back", "student_moved", "voided_in_quickbooks", "closed_by_staff"] }),
+  // Reconciliation once no unpaid invoice of it stood, with nothing sent to QuickBooks (src/lib/buyouts/close.ts), or
+  // ended by a change of company while unpaid, with nothing sent either, its invoice left in the old company's books
+  // (`earlier_company`: src/lib/buyouts/company-change.ts). No CHECK (migration 0020): a value is added here alone.
+  endReason: text("end_reason", { enum: ["switched_back", "student_moved", "voided_in_quickbooks", "closed_by_staff", "earlier_company"] }),
   invoiceQboId: text("invoice_qbo_id"),
   invoiceSyncToken: text("invoice_sync_token"),
   realmId: text("realm_id").notNull(),                 // the QuickBooks company the invoice is in
@@ -1349,7 +1354,7 @@ export const staffAuthVerification = staffAuth.verification;
 // family record the session chose, null until it chooses one. The gate matches it to the person's own open guardian
 // rows by their `family_id` on every request (src/lib/auth/resolve.ts); it is never a QuickBooks id. Migration 0037
 // carried each session's QuickBooks family over to it (clearing one it couldn't), and 0038 dropped `family_qbo_id`. A
-// change of company deletes every session before the app's records go (clearParentAccess()).
+// change of company leaves every session as it is (stage 4's slice M7a): the family it chose is kept.
 // `strong_at` (the sign-in release, slice SI-1): when this session last proved the password and the second step, null
 // until a later slice stamps it. It is the portal's alone: it is not a Better Auth additional field, so the library
 // never names it. Its drizzle adapter inserts and updates only the fields its own schema knows, leaving this column at

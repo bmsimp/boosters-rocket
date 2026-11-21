@@ -500,14 +500,19 @@ describe("the club's day and hour", () => {
 });
 
 describe("a change of QuickBooks company", () => {
-  it("deletes every sign-up, cancelled ones too, and keeps the events and shifts", async () => {
+  // Since stage 4's slice M7a the clear keeps every sign-up (open question 16): it was "deletes every sign-up" while the
+  // clear removed the families they name. A change of company is still refused until slice M8.
+  it("keeps every sign-up, cancelled ones too, and the events and shifts", async () => {
     const { a } = await seedTwoFamilies();
     await seedSignup({ shiftId: a.volunteer!.shiftId, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, student: AZALEA!, cancelled: true });
+    const before = { signups: await db.select().from(volunteerSignup).orderBy(asc(volunteerSignup.id)), shifts: await db.select().from(volunteerShift).orderBy(asc(volunteerShift.id)),
+      credits: await db.select().from(volunteerCredit).orderBy(asc(volunteerCredit.id)) };
+    expect(before.signups.filter((s) => s.cancelledAt !== null)).toHaveLength(1);
     await db.transaction((tx) => setRosterSource(tx, "9130000000000001"));
     expect(await clearRosterOfOtherCompany("9130000000000002", { actor: { door: "staff", id: null, label: "admin" }, ip: null })).toBe(true);
-    expect(await signups()).toEqual([]);
-    const [audit] = await audits("volunteer.signups.cleared");
-    expect(audit!.after).toEqual({ reason: "different_company", realmId: "9130000000000002", signups: 2, cancelledSignups: 1, credits: 2, removedCredits: 0, reminders: 0, buyouts: 2 });
+    expect({ signups: await db.select().from(volunteerSignup).orderBy(asc(volunteerSignup.id)), shifts: await db.select().from(volunteerShift).orderBy(asc(volunteerShift.id)),
+      credits: await db.select().from(volunteerCredit).orderBy(asc(volunteerCredit.id)) }).toEqual(before);
+    expect(await audits("volunteer.signups.cleared")).toEqual([]);
   });
 });
 

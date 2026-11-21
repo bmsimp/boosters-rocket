@@ -350,19 +350,25 @@ describe("credit already earned stays", () => {
 });
 
 describe("a different QuickBooks company", () => {
-  it("clears every credit and reminder claim with the sign-ups, removed ones too, and counts them in its audit row", async () => {
+  // Since stage 4's slice M7a the clear a change of company would run keeps volunteering (open question 16), as the
+  // families and students it names are kept: it was "clears every credit and reminder claim with the sign-ups" while the
+  // clear removed those records too. A change of company is still refused until slice M8.
+  it("keeps every credit, removed ones too, every reminder claim and sign-up, and every shift as it was", async () => {
     const { b, forB } = await shared();
     await seedCheckIn({ signupId: forB.id, familyQboId: FAMILY_B.family.qboId, by: b.identity.parentId, removed: { by: writer.id, reason: "Mistake" } });
     await db.insert(volunteerReminder).values({ kind: "day_before", key: `${forB.id}|2027-01-01`, familyId: await familyOf(FAMILY_B.family.qboId), triedAt: new Date(), outcome: "sent" });
-    const codes = (await db.select().from(volunteerShift)).map((s) => s.checkinCode);
+    const rows = async () => ({
+      credits: await db.select().from(volunteerCredit).orderBy(asc(volunteerCredit.id)),
+      reminders: await db.select().from(volunteerReminder).orderBy(asc(volunteerReminder.id)),
+      signups: await db.select().from(volunteerSignup).orderBy(asc(volunteerSignup.id)),
+      shifts: await db.select().from(volunteerShift).orderBy(asc(volunteerShift.id)),
+    });
+    const before = await rows();
+    expect([before.credits.length, before.credits.filter((c) => c.removedAt !== null).length, before.reminders.length, before.signups.length]).toEqual([2, 1, 1, 2]);
     await db.transaction((tx) => setRosterSource(tx, "9130000000000001"));
     expect(await clearRosterOfOtherCompany("9130000000000002", { actor: { door: "staff", id: null, label: "admin" }, ip: null })).toBe(true);
-    expect(await credits()).toEqual([]);
-    expect(await db.select().from(volunteerReminder)).toEqual([]);
-    expect(await db.select().from(volunteerSignup)).toEqual([]);
-    expect((await db.select().from(volunteerShift)).map((s) => s.checkinCode)).toEqual(codes);
-    expect((await audits("volunteer.signups.cleared"))[0]!.after).toEqual({ reason: "different_company", realmId: "9130000000000002", signups: 2, cancelledSignups: 0,
-      credits: 2, removedCredits: 1, reminders: 1, buyouts: 2 });
+    expect(await rows()).toEqual(before);
+    expect(await audits("volunteer.signups.cleared")).toEqual([]);
   });
 });
 
