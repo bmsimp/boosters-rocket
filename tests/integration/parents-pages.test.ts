@@ -252,7 +252,7 @@ describe("the staff pages for parents", () => {
     const ana = (await db.select().from(parent)).find((p) => p.email === "ana@example.com")!;
     const [rivera] = await db.select().from(guardian).where(eq(guardian.parentId, ana.id));
     // A row with no family record behind it: the portal knows no name for it.
-    const unknown = await seedGuardian({ parentId: ana.id, familyQboId: "NOPE" });
+    const unknown = await seedGuardian({ parentId: ana.id, familyId: null });
     who.parentState = { status: "choose", parentId: ana.id, sessionId: "s1", name: ana.name,
       families: [{ guardianId: rivera!.id, familyQboId: "10" }, { guardianId: unknown.id, familyQboId: "NOPE" }] };
     const html = renderToStaticMarkup(await ChooseFamily());

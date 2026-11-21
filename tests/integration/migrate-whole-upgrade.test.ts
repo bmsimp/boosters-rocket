@@ -242,6 +242,14 @@ describe("the whole upgrade from the release at 0022, in one run of the migrator
       expect(rows.map((r) => r.after)).toEqual([{ cause: "migration 0046_retired_records_dropped", heldAddresses: 1, familyMatches: 1, emailChangesNamingARecord: 1, retiredSettings: 0 }]);
     });
 
+    it("finds each guardian row linked already to the record its sign-in came from, as 0023 linked it, and makes no link (0048)", async () => {
+      const rows = await q((pg) => pg`SELECT after FROM audit_log WHERE action = 'parents.guardian_links.filled'`);
+      expect(rows.map((r) => r.after)).toEqual([{ cause: "migration 0048_guardian_links_additive", linksMade: 0, rowsAlreadyLinked: 2, linksDisagreeing: 0,
+        rowsOfFamiliesUnlinked: 0, rowsWithASourceAndNoCompany: 0 }]);
+      const links = await q((pg) => pg`SELECT customer_id FROM accounting_link WHERE guardian_id IS NOT NULL ORDER BY customer_id COLLATE "C"`);
+      expect(links.map((l) => l.customer_id)).toEqual(["P1", "P2"]);
+    });
+
     it("re-keys the season: the chosen list, the ticks, the waiver with its reason, and the reminder claim", async () => {
       const [cover] = await q((pg) => pg.unsafe(`SELECT ${customerOf("t.family_id", "family")} AS family, t.student_id FROM requirement_cover t WHERE t.requirement_id = $1`, [ids.locker!]));
       expect(cover).toEqual({ family: "F1", student_id: null });
@@ -342,6 +350,8 @@ describe("the whole upgrade from the release at 0022, in one run of the migrator
       const [kept] = await q((pg) => pg`SELECT (SELECT count(*)::int FROM held_address) AS held, (SELECT count(*)::int FROM family_match) AS matched,
         (SELECT count(*)::int FROM parent_email_change WHERE record_qbo_id = 'P1') AS changes`);
       expect(kept).toEqual({ held: 1, matched: 1, changes: 1 });
+      // Nor did 0048: no audit row of its fill.
+      expect(await q((pg) => pg`SELECT id FROM audit_log WHERE action = 'parents.guardian_links.filled'`)).toEqual([]);
       const columns = await q((pg) => pg`SELECT table_name, column_name FROM information_schema.columns
         WHERE table_schema = 'public' AND (column_name::text IN ('family_id', 'student_id') OR (table_name::text, column_name::text) IN
           (('requirement_progress', 'subject_qbo_id'), ('volunteer_signup', 'family_qbo_id'), ('signature_request', 'family_qbo_id'), ('buyout', 'family_qbo_id'), ('family_money', 'family_qbo_id')))`);

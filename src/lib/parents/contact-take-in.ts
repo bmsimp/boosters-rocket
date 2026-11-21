@@ -3,13 +3,13 @@
 import "server-only";
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { family, guardian, parent, qboCustomer, qboCustomerType, setting } from "@/lib/db/schema";
+import { accountingLink, family, guardian, parent, qboCustomer, qboCustomerType, setting } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { getShape, missingTypes, ROSTER_LOCK, shapeHolds, type MembershipShape } from "@/lib/roster/shape";
 import { TAKE_IN_KEY } from "./take-in-setting";
 import { getRosterSource } from "@/lib/roster/source";
 import { connectedToAnotherCompany, linksOf } from "@/lib/families/links";
-import type { AppFamilyId } from "@/lib/families/ids";
+import { QUICKBOOKS, type AppFamilyId } from "@/lib/families/ids";
 import { asShown, detailKey, type AddressValues } from "./contact-fields";
 import { ownRecordIn, whoseDetails, type CachedRecord } from "./my-family";
 
@@ -185,20 +185,30 @@ export async function planContactTakeIn(): Promise<TakeInPlan | null> {
     const under = new Map<string, Cached[]>();
     for (const c of cache) if (c.parentQboId !== null) under.set(c.parentQboId, [...(under.get(c.parentQboId) ?? []), c]);
     const familyRows = (customer: string): Cached[] => [...(byId.has(customer) ? [byId.get(customer)!] : []), ...(under.get(customer) ?? [])];
-    const plan = whoseDetails(shape) === "person" ? await planPeople(tx, shape, familyRows) : await planFamilies(tx, byId);
+    const plan = whoseDetails(shape) === "person" ? await planPeople(tx, source, shape, familyRows) : await planFamilies(tx, byId);
     return { notedAt, ...plan };
   });
 }
 
 
-/** Books with a parent type: each person not yet given details, from the records their open guardian rows sign in from. */
-async function planPeople(tx: Tx, shape: MembershipShape, familyRows: (customer: string) => Cached[]): Promise<Omit<TakeInPlan, "notedAt">> {
+/**
+ * Books with a parent type: each person not yet given details, from the records their open guardian rows sign in from.
+ * A row's own record is the customer its membership link of the roster's company names, `carried_over` only: the link
+ * the import made from the record the row's sign-in came from (`source_qbo_id`, which migration 0048 made a link of
+ * wherever the import hadn't). A `created` link is a Parent customer the portal made for a guardian (stage 3's slice 9h),
+ * never a record the person's sign-in came from, and is not read as their own.
+ */
+async function planPeople(tx: Tx, realmId: string, shape: MembershipShape, familyRows: (customer: string) => Cached[]): Promise<Omit<TakeInPlan, "notedAt">> {
   const people = await tx.select({ id: parent.id, email: parent.email }).from(parent).where(eq(parent.contactVersion, 0)).orderBy(asc(parent.id));
-  const rows = people.length === 0 ? [] : await tx.select({ parentId: guardian.parentId, familyId: guardian.familyId, familyQboId: guardian.familyQboId, sourceQboId: guardian.sourceQboId })
+  const rows = people.length === 0 ? [] : await tx.select({ id: guardian.id, parentId: guardian.parentId, familyId: guardian.familyId })
     .from(guardian).innerJoin(family, eq(family.id, guardian.familyId))
     .where(and(ne(guardian.status, "disabled"), eq(family.active, true), inArray(guardian.parentId, people.map((p) => p.id))));
   const families = [...new Set(rows.map((r) => r.familyId).filter((f): f is AppFamilyId => f !== null))];
   const links = await linksOf({ families, students: [] }, tx);
+  const ownLinks = rows.length === 0 ? [] : await tx.select({ guardianId: accountingLink.guardianId, customerId: accountingLink.customerId }).from(accountingLink)
+    .where(and(eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId), eq(accountingLink.origin, "carried_over"),
+      inArray(accountingLink.guardianId, rows.map((r) => r.id))));
+  const ownCustomerOf = new Map(ownLinks.map((l) => [l.guardianId, l.customerId]));
   const out: Omit<TakeInPlan, "notedAt"> = { people: [], families: [], counts: { peopleWithNoRecord: 0, peopleDisagreeing: 0 } };
   for (const person of people) {
     // The records the person's sign-in comes from, by the rule ownRecordIn() gives each of their rows:
@@ -206,8 +216,8 @@ async function planPeople(tx: Tx, shape: MembershipShape, familyRows: (customer:
     const records = new Map<string, Cached>();
     for (const row of rows.filter((r) => r.parentId === person.id)) {
       const customer = row.familyId === null ? undefined : links.customerOfFamily.get(row.familyId);
-      if (customer === undefined || row.familyQboId !== customer) continue; // the row of that same customer, as the session's must be
-      const own = ownRecordIn(shape, customer, familyRows(customer), row.sourceQboId, person.email);
+      if (customer === undefined) continue; // a family with no link has no record in the books
+      const own = ownRecordIn(shape, customer, familyRows(customer), ownCustomerOf.get(row.id) ?? null, person.email);
       if (own && own.signsIn && own.edits === "own") records.set(own.row.qboId, own.row);
     }
     if (records.size === 0) { out.counts.peopleWithNoRecord++; continue; }

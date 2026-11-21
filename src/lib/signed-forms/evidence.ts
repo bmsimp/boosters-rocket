@@ -5,7 +5,6 @@ import "server-only";
 import { and, asc, desc, eq, isNotNull, notInArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { family, requirement, student, signatureConsent, signatureRequest, signedFormCopy, signedFormEvidence, signedFormFile } from "@/lib/db/schema";
-import { getRosterSource } from "@/lib/roster/source";
 import { currentEvidence, isCurrentEvidence } from "@/lib/forms/evidence-company";
 import { isUuid } from "@/lib/seasons/ids";
 
@@ -15,7 +14,7 @@ export type EvidenceView = {
   evidence: EvidenceRow;
   files: EvidenceFileInfo[];
   copies: { parentId: string; outcome: string; how: string | null; doneAt: Date | null }[];
-  /** True when this evidence is from a QuickBooks company other than the roster's: shown in the archive only. Evidence kept with no company is current. */
+  /** True when this evidence was archived as an earlier company's (before stage 4's slice M7a): shown in the archive only. Whatever company copy the rest holds, it is current. */
   earlier: boolean;
 };
 
@@ -40,8 +39,7 @@ export async function loadEvidence(id: unknown): Promise<EvidenceView | null> {
     .map((f) => ({ ...f, key: FILES[f.kind].key(f.position), label: `${FILES[f.kind].label}${f.kind === "sealed_pdf" && rows.filter((r) => r.kind === "sealed_pdf").length > 1 ? `, part ${f.position}` : ""}` }));
   const copies = await db.select({ parentId: signedFormCopy.parentId, outcome: signedFormCopy.outcome, how: signedFormCopy.how, doneAt: signedFormCopy.doneAt }).from(signedFormCopy)
     .where(eq(signedFormCopy.evidenceId, id)).orderBy(asc(signedFormCopy.claimedAt));
-  const realmId = await getRosterSource();
-  return { evidence, files, copies, earlier: !isCurrentEvidence(evidence, realmId) };
+  return { evidence, files, copies, earlier: !isCurrentEvidence(evidence) };
 }
 
 export type EvidenceDownload = { bytes: Buffer; filename: string; contentType: string; kind: string; sha256: string | null };
@@ -62,7 +60,7 @@ export async function evidenceDownload(id: unknown, key: unknown): Promise<Evide
 export function evidenceRecord(view: EvidenceView) {
   const e = view.evidence;
   return {
-    evidenceId: e.id, requestId: e.requestId, quickBooksCompany: e.realmId, fromAnEarlierCompany: view.earlier, earlierCompanySince: e.earlierCompanyAt?.toISOString() ?? null,
+    evidenceId: e.id, requestId: e.requestId, quickBooksCompany: e.realmId, archivedAsEarlierCompany: view.earlier, earlierCompanySince: e.earlierCompanyAt?.toISOString() ?? null,
     form: e.formTitle, season: e.seasonName, family: { qboId: e.familyQboId, name: e.familyName }, signedFor: { kind: e.subjectKind, qboId: e.subjectQboId, name: e.subjectName },
     documenso: { envelopeId: e.envelopeId, templateId: e.templateId, templateUpdatedAt: e.templateUpdatedAt?.toISOString() ?? null, completedAt: e.completedAt?.toISOString() ?? null },
     signers: e.signers, consents: e.consents,
@@ -73,7 +71,7 @@ export function evidenceRecord(view: EvidenceView) {
 }
 
 export type ArchiveEntry = { id: string; formTitle: string; subjectName: string | null; familyName: string | null; seasonName: string | null; completedAt: Date | null; realmId: string | null; earlierCompanyAt: Date | null };
-/** Evidence kept from an earlier QuickBooks company, newest signing first, by the names it kept. */
+/** Evidence archived as an earlier QuickBooks company's (a change of company before stage 4's slice M7a), newest signing first, by the names it kept. */
 export async function loadArchive(): Promise<ArchiveEntry[]> {
   return db.select({ id: signedFormEvidence.id, formTitle: signedFormEvidence.formTitle, subjectName: signedFormEvidence.subjectName, familyName: signedFormEvidence.familyName,
     seasonName: signedFormEvidence.seasonName, completedAt: signedFormEvidence.completedAt, realmId: signedFormEvidence.realmId, earlierCompanyAt: signedFormEvidence.earlierCompanyAt })
@@ -83,17 +81,17 @@ export async function loadArchive(): Promise<ArchiveEntry[]> {
 /** At most this many other kept signed forms are listed at once; a search narrows them. */
 export const OTHER_KEPT_LIMIT = 200;
 /**
- * The company's own kept signed forms the matrix doesn't lead to (`shown` are the ones it does): an earlier season's,
- * or a family's or student's no longer on the roster. Evidence kept with no company (a family with no QuickBooks link)
- * is among them, never in the earlier company's archive. Newest signing first, by the names kept with them, narrowed by
+ * The kept signed forms, not archived, the matrix doesn't lead to (`shown` are the ones it does): an earlier season's,
+ * or a family's or student's no longer on the roster. Evidence kept with no company (a family with no QuickBooks link),
+ * or with a company the roster no longer names (a family kept across a change of company), is among them, never in
+ * the earlier company's archive. Newest signing first, by the names kept with them, narrowed by
  * `search` (a form, student, family or season name).
  */
 export async function loadOtherKept(shown: readonly string[], search: string): Promise<{ entries: ArchiveEntry[]; more: boolean }> {
-  const realmId = await getRosterSource();
   const rows = await db.select({ id: signedFormEvidence.id, formTitle: signedFormEvidence.formTitle, subjectName: signedFormEvidence.subjectName, familyName: signedFormEvidence.familyName,
     seasonName: signedFormEvidence.seasonName, completedAt: signedFormEvidence.completedAt, realmId: signedFormEvidence.realmId, earlierCompanyAt: signedFormEvidence.earlierCompanyAt })
     .from(signedFormEvidence)
-    .where(and(currentEvidence(realmId), shown.length ? notInArray(signedFormEvidence.id, [...shown]) : undefined))
+    .where(and(currentEvidence(), shown.length ? notInArray(signedFormEvidence.id, [...shown]) : undefined))
     .orderBy(desc(signedFormEvidence.completedAt), asc(signedFormEvidence.id));
   const needle = search.toLowerCase();
   const found = needle === "" ? rows : rows.filter((r) => [r.formTitle, r.subjectName, r.familyName, r.seasonName].some((t) => t?.toLowerCase().includes(needle)));
@@ -118,9 +116,8 @@ export async function loadRequest(id: unknown): Promise<RequestView | null> {
   const [theirs] = found.row.studentId === null ? [] : await db.select({ name: student.name }).from(student).where(eq(student.id, found.row.studentId));
   const consents = await db.select({ parentName: signatureConsent.parentName, textVersion: signatureConsent.textVersion, agreedAt: signatureConsent.agreedAt }).from(signatureConsent)
     .where(eq(signatureConsent.requestId, id)).orderBy(asc(signatureConsent.agreedAt));
-  const realmId = await getRosterSource();
   const [evidence] = await db.select({ id: signedFormEvidence.id }).from(signedFormEvidence)
-    .where(and(eq(signedFormEvidence.requestId, id), currentEvidence(realmId)));
+    .where(and(eq(signedFormEvidence.requestId, id), currentEvidence()));
   return { row: found.row, title: found.title, appliesTo: found.appliesTo, signersMode: found.form?.signers ?? found.row.signersMode,
     familyName: mine?.name ?? null, subjectName: (found.row.studentId === null ? mine?.name : theirs?.name) ?? found.row.subjectName, consents, evidenceId: evidence?.id ?? null };
 }

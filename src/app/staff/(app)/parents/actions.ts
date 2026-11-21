@@ -145,7 +145,6 @@ const REINSTATE_REFUSED = {
   making: MAKING_WORDS.replace("nobody can be added to it", "this sign-in can't be brought back just now"),
   changing: CHANGING_WORDS.replace("nobody can be added to it", "this sign-in can't be brought back just now"),
   other_company: OTHER_COMPANY_WORDS.replace("and nobody was added", "and this sign-in wasn't brought back"),
-  other_customer: "This sign-in was made for a different customer in QuickBooks than this family's own, so it can't be brought back here.",
   busy: BUSY_WORDS,
   qbo_pending: QBO_PENDING_WORDS,
   being_changed: BEING_CHANGED_WORDS,

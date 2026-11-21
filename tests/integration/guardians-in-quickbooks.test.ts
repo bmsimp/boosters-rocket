@@ -66,8 +66,8 @@ describe("adding a guardian (item 2)", () => {
     expect(posts()).toEqual([]);
     expect(await items()).toEqual([]);
     expect(await linkOfRow(r.guardianId)).toBeUndefined();
-    // The membership is slice 7b's, whatever QuickBooks holds.
-    expect(await rowOf(r.guardianId)).toMatchObject({ status: "invited", familyId: chen, familyQboId: "20", sourceQboId: null });
+    // The membership is slice 7b's, whatever QuickBooks holds: in its family record, writing neither old copy (slice 12b1).
+    expect(await rowOf(r.guardianId)).toMatchObject({ status: "invited", familyId: chen, familyQboId: null, sourceQboId: null });
   });
 
   it("a new guardian gets their own Parent customer under the family, with their name and address, linked to their row", async () => {
@@ -81,8 +81,9 @@ describe("adding a guardian (item 2)", () => {
     expect(r.quickbooks).toEqual(["QuickBooks has a Parent customer for Luis Rivera under Rivera Family now, linked to them."]);
     const [item] = await items();
     expect(item).toMatchObject({ state: "done", familyId: rivera, studentId: null, request: { op: "create", role: "parent", guardianId: r.guardianId } });
-    // No record becomes a parent's own: the row names no source, and its family's customer as before.
-    expect(await rowOf(r.guardianId)).toMatchObject({ status: "invited", sourceQboId: null, familyQboId: "10" });
+    // No record becomes a parent's own: the row's link is `created`, never `carried_over` (the take-in reads only those),
+    // and the row writes neither old copy (slice 12b1).
+    expect(await rowOf(r.guardianId)).toMatchObject({ status: "invited", familyId: rivera, sourceQboId: null, familyQboId: null });
   });
 
   it("a name QuickBooks refuses as taken is kept refused; renaming the person takes its place, and is sent", async () => {

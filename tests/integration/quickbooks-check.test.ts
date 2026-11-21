@@ -11,7 +11,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, qboCheckRecord, qboCheckRun, qboConnection, qboCustomer } from "@/lib/db/schema";
+import { accountingLink, auditLog, guardian, qboCheckRecord, qboCheckRun, qboConnection, qboCustomer } from "@/lib/db/schema";
 import { runCheckAction } from "@/app/staff/(app)/settings/quickbooks/check/actions";
 import CheckRequestsPage from "@/app/staff/(app)/settings/quickbooks/check/page";
 import QuickBooksSettingsPage from "@/app/staff/(app)/settings/quickbooks/page";
@@ -133,8 +133,11 @@ describe("the check of the portal's requests against an Intuit sandbox company (
     const theirs = cached.filter((c) => ids.includes(c.qboId));
     expect(theirs).toHaveLength(4);
     expect(theirs.every((c) => !c.active && c.displayName.startsWith("Booster Rocket check"))).toBe(true);
-    const links = await db.select().from(guardian);
-    expect(links.filter((g) => ids.includes(g.familyQboId ?? "") || ids.includes(g.sourceQboId ?? ""))).toEqual([]);
+    // No guardian row is linked to one, or in a family record linked to one.
+    const theirLinks = (await db.select().from(accountingLink)).filter((l) => ids.includes(l.customerId));
+    expect(theirLinks.filter((l) => l.guardianId !== null)).toEqual([]);
+    const theirFamilies = theirLinks.flatMap((l) => (l.familyId === null ? [] : [String(l.familyId)]));
+    expect((await db.select().from(guardian)).filter((g) => g.familyId !== null && theirFamilies.includes(String(g.familyId)))).toEqual([]);
   });
 
   it("checks pass links, empty answers and the list form without a write when the writes are off", async () => {

@@ -16,7 +16,8 @@ import type { MembershipShape } from "@/lib/roster/shape";
 export type QueueNote = { state: "waiting" | "stuck" | "refused"; words: string };
 /**
  * A queue item as this module needs it: what it changes, by the ids it names, and its words. Every item the queue
- * gives is of the roster's company: a change of company's clear deletes the queue, and a different company is refused.
+ * gives is of the roster's company: a change of company's clear gives up every item still to go, and a different company
+ * is refused (one queued outside the roster lock at that moment could outlive the clear: stage 4's slice M7a2).
  */
 export type QueueFact = QueueNote & { op: string; role: string | null; qboId: string | null; studentId: string | null; guardianId: string | null };
 

@@ -8,37 +8,40 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 });
 
 import { asc, eq, sql } from "drizzle-orm";
+import type { PgTable } from "drizzle-orm/pg-core";
 import { db } from "@/lib/db/client";
 import {
-  accountingLink, accountingLinkEnded, auditLog, buyout, family, familyMoney, formReminderClaim, formReminderRound, guardian, parentAuthSession, parentEmailChange, qboConnection, requirementCover, requirementProgress, signatureConsent, signatureRequest,
-  signedFormCopy, signedFormEvidence, signedFormFile, student, volunteerCredit, requirementReminder, volunteerReminder, volunteerSignup, writeQueue,
+  accountingLink, accountingLinkEnded, auditLog, buyout, family, familyMoney, formReminderClaim, formReminderRound, formWithdrawal, guardian, jobRun, parent, parentAuthAccount,
+  parentAuthSession, parentAuthUser, parentDevice, parentEmailChange, parentSigninToken, qboCheckRecord, qboCheckRun, qboConnection, qboCustomer, qboCustomerType, qboItem, requirement,
+  requirementCover, requirementProgress, requirementReminder, season, seasonStep, setting, signatureConsent, signatureRequest, signedFormCopy, signedFormEvidence, signedFormFile,
+  signinCode, student, volunteerCredit, volunteerEvent, volunteerReminder, volunteerShift, volunteerShiftRequirement, volunteerSignup, writeQueue,
 } from "@/lib/db/schema";
+import { writeAudit } from "@/lib/audit/log";
+import { auditPage, parseAuditFilters } from "@/lib/audit/query";
 import { beginConnect, completeConnect, disconnect } from "@/lib/quickbooks/connection";
 import { refreshRoster } from "@/lib/roster/refresh";
-import { clearRosterOfOtherCompany, getRosterSource, setRosterSource } from "@/lib/roster/source";
-import { ROSTER_LOCK } from "@/lib/roster/shape";
+import { clearRosterOfOtherCompany, getRosterSource, GIVEN_UP_FOR_COMPANY_NOTE, ROSTER_JOB, setRosterSource, SOURCE_KEY } from "@/lib/roster/source";
+import { ROSTER_LOCK, SHAPE_KEY } from "@/lib/roster/shape";
+import { RUN_KEY } from "@/lib/money/run-keys";
 import { resetDb, seedStaff, untilALockIsAwaited } from "../helpers/db";
 import { seedTwoFamilies } from "../helpers/parent";
 import { recordOfCustomer } from "../helpers/app-records";
 import { seedConsent } from "../helpers/forms";
+import { mintLink, seedCode, seedDevice } from "../helpers/signin-links";
 import { seedConnected, startQboStub, type QboStub } from "../helpers/qbo-stub";
 
 /**
- * Everything step 5 stores against a QuickBooks id goes when a different company is connected (AGENTS.md: the same id
- * may name another customer there), in clearRosterOfOtherCompanyLocked() or the clear functions it calls: the form
- * reminder claims and rounds, volunteer credit and its reminder claims, the staff write queue and parents' email
- * change requests, and the app's own families, students and links (stage 1 of the app-owned families spec), made from
- * that company's customers. Signed-form evidence is the one exception: it is the club's record, kept with every byte and hash,
- * marked as the earlier company's and cut from its request (tests/integration/signed-forms-staff.test.ts shows the
- * archive and that no parent of the new company reaches it).
+ * What a change of company clears, and keeps, by open question 16 of the app-owned families spec (stage 4's slice
+ * M7a): clearRosterOfOtherCompanyLocked() (src/lib/roster/source.ts). It ends every unpaid live buy-out as the earlier
+ * company's and keeps paid ones counting; gives up the write queue's items still to go; deletes the money cache; moves
+ * every link into the link history (`company_changed`) and clears the "Left unlinked" marks; and clears QuickBooks' own
+ * copies (the customer list and types, the products and each payment requirement's product, the money run's place, the
+ * check's records, the membership shape, the roster's runs and company). Everything else is kept as it was, row for
+ * row: families, students, guardian rows, every sign-in, the seasons, volunteering and forms, and every signed form's
+ * evidence, which stays its family's. Until slice M7a this file proved the clear deleted most of that; it flipped then.
  *
- * From stage 2 the seasons, volunteering and forms are the exception too: their ticks, waivers, chosen lists and
- * reminder claims, every sign-up, credit and volunteer reminder claim, and every form request and the current
- * company's evidence, name the app's own families and students, so
- * connecting a different company is refused until stage 4 ships (open question 18), and nothing the portal runs
- * reaches the clear. The last describe proves that part; the clear itself is kept for the areas that have not moved
- * yet, whose part stays below until their own slice. Called directly, it still empties volunteering and the form
- * requests first, and cuts the evidence from the app's records, before the app's own records they name (the first test).
+ * Connecting a different company is still refused until stage 4's slice M8 (open question 18), so nothing the portal
+ * runs reaches the clear: the first describe calls it directly, and the last proves the refusal.
  */
 const admin = { actor: { door: "staff" as const, id: null, label: "admin@club.org" }, ip: null };
 
@@ -46,98 +49,151 @@ let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
 afterAll(() => stub.close());
 
-describe("connecting a different company after step 5", () => {
+/** Every row of a table, in a fixed order whatever order Postgres returns them in. */
+const rowsOf = async (t: PgTable) => (await db.select().from(t)).map((r) => JSON.stringify(r)).sort();
+/** The tables the clear keeps whole, each row for row. */
+const KEPT = {
+  parent, parentAuthUser, parentAuthAccount, parentAuthSession, parentDevice, signinCode, parentSigninToken, parentEmailChange, guardian, student,
+  season, seasonStep, requirementCover, requirementProgress, requirementReminder,
+  volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup, volunteerCredit, volunteerReminder,
+  signatureRequest, signatureConsent, formReminderClaim, formReminderRound, formWithdrawal, signedFormEvidence, signedFormFile, signedFormCopy,
+  qboConnection, qboCheckRun,
+} as const;
+const keptRows = async () => Object.fromEntries(await Promise.all(Object.entries(KEPT).map(async ([name, t]) => [name, await rowsOf(t)] as const)));
+/** The settings but the three QuickBooks ones the clear changes: the shape, the roster's company, the money run's place. */
+const otherSettings = async () => (await db.select().from(setting)).filter((s) => ![SHAPE_KEY, SOURCE_KEY, RUN_KEY].includes(s.key)).map((s) => JSON.stringify(s)).sort();
+/** Every table, for "changed nothing". */
+const everything = async () => ({ ...(await keptRows()), family: await rowsOf(family), requirement: await rowsOf(requirement), buyout: await rowsOf(buyout), writeQueue: await rowsOf(writeQueue),
+  links: await rowsOf(accountingLink), ended: await rowsOf(accountingLinkEnded), money: await rowsOf(familyMoney), customers: await rowsOf(qboCustomer), types: await rowsOf(qboCustomerType),
+  items: await rowsOf(qboItem), records: await rowsOf(qboCheckRecord), runs: await rowsOf(jobRun), settings: await rowsOf(setting), audit: await rowsOf(auditLog) });
+const actionsWritten = async (...actions: string[]) => (await db.select().from(auditLog).orderBy(asc(auditLog.id))).filter((r) => actions.includes(r.action));
+
+describe("connecting a different company, by open question 16", () => {
   beforeEach(async () => {
     await resetDb();
     await db.transaction((tx) => setRosterSource(tx, "1111"));
   });
 
-  it("clears every new record keyed by a QuickBooks id and keeps the signed forms' evidence as the earlier company's", async () => {
+  it("ends the links into their history, gives up the queue, ends unpaid buy-outs and clears QuickBooks' copies, and keeps every other record as it was", async () => {
     const { a, b } = await seedTwoFamilies();
-    const reqId = a.forms!.ids.waiting;
+    const famA = await recordOfCustomer(a.spec.family.qboId, "family");
+    const famB = await recordOfCustomer(b.spec.family.qboId, "family");
+    const studentA = await recordOfCustomer(a.spec.students[0]!.qboId, "student");
+    // Something of every kept area beyond seedTwoFamilies()'s sessions, email changes, ticks, waivers, chosen lists,
+    // sign-ups, credit, requests and evidence: reminder claims of each kind, a consent, a device, a code and a link.
     const [req] = await db.select().from(signatureRequest).limit(1);
     await db.insert(formReminderClaim).values({ requirementId: req!.requirementId, parentId: a.identity.parentId, onDate: "2026-11-16" });
     await db.insert(formReminderRound).values({ requirementId: req!.requirementId, onDate: "2026-11-16" });
-    const famA = await recordOfCustomer(a.spec.family.qboId, "family");
+    await db.insert(requirementReminder).values({ kind: "due_14", familyId: famA, parentId: a.identity.parentId, dueOn: "2026-11-30", triedAt: new Date(), outcome: "sent" });
     await db.insert(volunteerReminder).values({ kind: "due_14", key: `${String(famA)}|2026-11-30|${a.identity.parentId}`, familyId: famA, triedAt: new Date(), outcome: "sent" });
-    // A queued change filed under the app's own family and student (stage 3): the database would refuse to remove the
-    // records while it names them, so the clear deletes the queue first, and counts it.
-    const studentA = await recordOfCustomer(a.spec.students[0]!.qboId, "student");
-    await db.insert(writeQueue).values({ realmId: "1111", request: { op: "deactivate", role: "student", qboId: a.spec.students[0]!.qboId, syncToken: "0" }, targetQboId: a.spec.students[0]!.qboId,
-      familyId: famA, studentId: studentA, state: "waiting", sent: false });
-    // A link an unlink ended (stage 4's slice M3b), kept for the audit filter: it names the app's family and goes with the links.
-    await db.insert(accountingLinkEnded).values({ id: crypto.randomUUID(), system: "quickbooks", realmId: "1111", customerId: "9001", familyId: famA, origin: "carried_over",
-      linkedAt: new Date(Date.now() - 60_000), endedAt: new Date(), endedBy: null, endedHow: "unlinked" });
-    // B's form was kept while B had no QuickBooks link (as the evidence job keeps one since migration 0036): no company
-    // and no copy. It is the club's record like any other: archived with the rest and never deleted, since the clear
-    // removes the families it names.
+    await seedConsent(a.forms!.ids.waiting, { parentId: a.identity.parentId, name: a.spec.parent.name, email: a.spec.parent.email });
+    await seedDevice(a.identity.parentId);
+    await seedCode(a.identity.parentId);
+    await mintLink(b.identity.parentId, "setup");
+    // A queued change of each state but done, filed under A's family and student, and a done one.
+    const rename = { op: "rename" as const, role: "student" as const, qboId: a.spec.students[0]!.qboId, syncToken: "0", name: "Aurelio Renamed", was: a.spec.students[0]!.name };
+    const queued = await db.insert(writeQueue).values((["waiting", "stuck", "refused", "given_up", "done"] as const).map((state) => ({
+      realmId: "1111", request: rename, targetQboId: rename.qboId, familyId: famA, studentId: studentA, state, sent: false,
+      nextTryAt: state === "waiting" ? new Date() : null, finishedAt: state === "done" || state === "given_up" ? new Date() : null }))).returning();
+    // A link an unlink ended (stage 4's slice M3b): kept, with the history the change of company adds.
+    const [earlier] = await db.insert(accountingLinkEnded).values({ id: crypto.randomUUID(), system: "quickbooks", realmId: "1111", customerId: "9001", familyId: famA, origin: "carried_over",
+      linkedAt: new Date(Date.now() - 60_000), endedAt: new Date(), endedBy: null, endedHow: "unlinked" }).returning();
+    // A third family a staff member left unlinked: a statement about the old company's books.
+    const [third] = await db.insert(family).values({ name: "Thornwick Unlinked Family", active: true, accountingLeftUnlinkedAt: new Date(), accountingLeftUnlinkedBy: crypto.randomUUID() }).returning();
+    // B's form was kept while B had no QuickBooks link (as the evidence job keeps one since migration 0036): no company and no copy.
     await db.update(signedFormEvidence).set({ realmId: null, familyQboId: null, subjectQboId: null }).where(eq(signedFormEvidence.id, b.forms!.evidence.id));
+
+    const kept = await keptRows();
     const before = {
-      credit: (await db.select().from(volunteerCredit)).length, emails: (await db.select().from(parentEmailChange)).length,
-      evidence: await db.select().from(signedFormEvidence), files: await db.select().from(signedFormFile),
+      families: await db.select().from(family).orderBy(asc(family.id)), requirements: await db.select().from(requirement).orderBy(asc(requirement.id)),
+      buyouts: await db.select().from(buyout).orderBy(asc(buyout.id)), queue: await db.select().from(writeQueue).orderBy(asc(writeQueue.id)),
+      links: await db.select().from(accountingLink).orderBy(asc(accountingLink.id)), settings: await otherSettings(), audit: await db.select().from(auditLog).orderBy(asc(auditLog.id)),
     };
-    // Something of each is there to clear, and both families have kept evidence.
-    expect(before.credit).toBeGreaterThan(0);
-    expect(before.emails).toBeGreaterThanOrEqual(2);
-    expect(before.evidence.map((e) => e.id).sort()).toEqual([a.forms!.evidence.id, b.forms!.evidence.id].sort());
-    // The current company's evidence names the app's own family and student (stage 2), beside its own copies of the ids.
-    expect(before.evidence.every((e) => e.familyId !== null && e.studentId !== null && e.earlierCompanyAt === null)).toBe(true);
-    expect(reqId).toBeTruthy();
-    // A buy-out of each family, by the app's own family record (stage 2).
-    expect((await db.select().from(buyout)).map((x) => String(x.familyId)).sort()).toEqual([String(famA), String(await recordOfCustomer(b.spec.family.qboId, "family"))].sort());
-    // Each family's stored figures, kept by the app's own family record (stage 2): the database would refuse to remove
-    // the record while they name it, so the clear removes them first.
-    expect((await db.select().from(familyMoney)).map((m) => String(m.familyId)).sort()).toEqual([String(famA), String(await recordOfCustomer(b.spec.family.qboId, "family"))].sort());
-    // seedTwoFamilies() made the app's own records of both families, linked in this company.
-    expect((await db.select().from(family)).length).toBeGreaterThanOrEqual(2);
-    expect((await db.select().from(student)).length).toBeGreaterThanOrEqual(4);
-    expect((await db.select().from(accountingLink)).every((l) => l.realmId === "1111")).toBe(true);
-    expect((await db.select().from(guardian)).every((g) => g.familyId !== null)).toBe(true);
-    // Each parent's session and pending change of sign-in address name the app's own family (stage 3's fifth slice):
-    // the database would refuse to remove the records while they do, so the clear's parent access part, which runs
-    // first, deletes them.
-    const familyIds = [String(a.identity.familyId), String(b.identity.familyId)].sort();
-    expect((await db.select().from(parentAuthSession)).map((s) => String(s.familyId)).sort()).toEqual(familyIds);
-    expect((await db.select().from(parentEmailChange)).map((e) => String(e.familyId)).sort()).toEqual(familyIds);
+    // Something of each is there: both families' sessions, email changes, evidence, money, links, a buy-out of each (A's invoiced, B's paid).
+    for (const name of ["parentAuthSession", "parentEmailChange", "parentDevice", "signinCode", "parentSigninToken", "requirementProgress", "requirementCover", "requirementReminder",
+      "volunteerSignup", "volunteerCredit", "volunteerReminder", "signatureRequest", "signatureConsent", "formReminderClaim", "formReminderRound", "signedFormEvidence", "signedFormFile"] as const) {
+      expect(kept[name]!.length, name).toBeGreaterThan(0);
+    }
+    expect(before.buyouts.map((x) => [String(x.familyId), x.state]).sort()).toEqual([[String(famA), "invoiced"], [String(famB), "paid"]].sort());
+    expect((await db.select().from(familyMoney)).length).toBe(2);
+    expect(before.links.length).toBeGreaterThanOrEqual(6);
+    expect(before.links.every((l) => l.realmId === "1111")).toBe(true);
+    expect(before.requirements.some((r) => r.itemQboId !== null)).toBe(true);
 
     expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
-    expect(await db.select().from(parentAuthSession)).toEqual([]);
 
-    expect(await db.select().from(formReminderClaim)).toEqual([]);
-    expect(await db.select().from(formReminderRound)).toEqual([]);
-    expect(await db.select().from(volunteerCredit)).toEqual([]);
-    expect(await db.select().from(volunteerReminder)).toEqual([]);
-    expect(await db.select().from(volunteerSignup)).toEqual([]);
-    // Every buy-out (seedTwoFamilies() gives each family one): they name the app's own families, so they go before those.
-    expect(await db.select().from(buyout)).toEqual([]);
-    expect(await db.select().from(familyMoney)).toEqual([]);
-    expect(await db.select().from(writeQueue)).toEqual([]);
-    expect((await db.select().from(auditLog).where(eq(auditLog.action, "roster.cleared")))[0]!.after).toMatchObject({ writesDeleted: 1 });
-    expect(await db.select().from(parentEmailChange)).toEqual([]);
-    expect(await db.select().from(signatureRequest)).toEqual([]);
-    // Nothing of the earlier company's is left in the app's own records: no link, no family or student, and no sign-in
-    // in a family of it.
+    // Kept, row for row.
+    expect(await keptRows()).toEqual(kept);
+    expect(await otherSettings()).toEqual(before.settings);
+    // Families: every one, every column, but the third's "Left unlinked" mark, cleared.
+    const families = await db.select().from(family).orderBy(asc(family.id));
+    expect(families).toEqual(before.families.map((f) => f.id === third!.id ? { ...f, accountingLeftUnlinkedAt: null, accountingLeftUnlinkedBy: null, updatedAt: expect.any(Date) } : f));
+    // Requirements: every one, but each payment's product, which is the old company's (clearMoneyRecords(), as before).
+    expect(await db.select().from(requirement).orderBy(asc(requirement.id)))
+      .toEqual(before.requirements.map((r) => r.itemQboId === null ? r : { ...r, itemQboId: null, updatedAt: expect.any(Date) }));
+    // Every open guardian row still names its app family.
+    expect((await db.select().from(guardian)).every((g) => g.familyId !== null && g.status !== "disabled")).toBe(true);
+    // Both families' evidence as it was: its request, family, student, company and copies, not archived.
+    for (const e of await db.select().from(signedFormEvidence)) expect(e).toMatchObject({ requestId: expect.any(String), earlierCompanyAt: null, familyId: expect.any(String) });
+
+    // The links: none left, every one in the history as it was, under its own id, `company_changed`; the earlier one kept.
     expect(await db.select().from(accountingLink)).toEqual([]);
-    expect(await db.select().from(accountingLinkEnded)).toEqual([]);
-    expect((await db.select().from(auditLog).where(eq(auditLog.action, "accounting.links.cleared")))[0]!.after).toMatchObject({ endedLinks: 1 });
-    expect(await db.select().from(family)).toEqual([]);
-    expect(await db.select().from(student)).toEqual([]);
-    expect((await db.select().from(guardian)).map((g) => g.familyId)).toEqual([null, null]);
+    const ended = await db.select().from(accountingLinkEnded);
+    expect(ended.find((l) => l.id === earlier!.id)).toEqual(earlier);
+    for (const l of before.links) {
+      expect(ended.find((x) => x.id === l.id)).toEqual({ id: l.id, system: l.system, realmId: l.realmId, customerId: l.customerId, familyId: l.familyId, studentId: l.studentId,
+        guardianId: l.guardianId, origin: l.origin, linkedAt: l.linkedAt, linkedBy: l.linkedBy, endedAt: expect.any(Date), endedBy: null, endedHow: "company_changed", createdAt: expect.any(Date) });
+    }
+    expect(ended).toHaveLength(before.links.length + 1);
 
-    const kept = await db.select().from(signedFormEvidence);
-    expect(kept.map((e) => e.id).sort()).toEqual(before.evidence.map((e) => e.id).sort());
-    // Kept, marked as the earlier company's and cut from its request and from the app's records, which are gone: every
-    // QuickBooks id, name, signer and consent it holds as it was.
-    for (const e of kept) expect(e).toMatchObject({ requestId: null, realmId: e.id === b.forms!.evidence.id ? null : "1111", earlierCompanyAt: expect.any(Date), familyId: null, studentId: null });
-    expect(kept.find((e) => e.id === b.forms!.evidence.id)).toMatchObject({ realmId: null, familyQboId: null, subjectQboId: null });
-    const asSigned = (e: typeof kept[number]) => ({ ...e, requestId: null, earlierCompanyAt: null, familyId: null, studentId: null });
-    for (const e of kept) expect(asSigned(e)).toEqual(asSigned(before.evidence.find((x) => x.id === e.id)!));
-    const files = await db.select().from(signedFormFile);
-    expect(files.map((f) => [f.id, f.sha256, f.size, Buffer.from(f.bytes).toString("hex")]).sort())
-      .toEqual(before.files.map((f) => [f.id, f.sha256, f.size, Buffer.from(f.bytes).toString("hex")]).sort());
+    // The queue: each item still to go given up, with the one note; the done and given-up ones as they were.
+    const queue = await db.select().from(writeQueue).orderBy(asc(writeQueue.id));
+    expect(queue).toEqual(before.queue.map((i) => ["waiting", "stuck", "refused"].includes(i.state)
+      ? { ...i, state: "given_up", note: GIVEN_UP_FOR_COMPANY_NOTE, nextTryAt: null, finishedAt: expect.any(Date), updatedAt: expect.any(Date) } : i));
+    expect(queued).toHaveLength(5);
+
+    // Buy-outs: A's invoiced one ended as the earlier company's, its invoice kept; B's paid one as it was.
+    const buyouts = await db.select().from(buyout).orderBy(asc(buyout.id));
+    expect(buyouts).toEqual(before.buyouts.map((x) => x.state === "invoiced" ? { ...x, state: "voided", endReason: "earlier_company", updatedAt: expect.any(Date) } : x));
+    expect(buyouts.find((x) => String(x.familyId) === String(famA))).toMatchObject({ invoiceQboId: "9174", realmId: before.buyouts.find((x) => String(x.familyId) === String(famA))!.realmId });
+
+    // Cleared: the money cache and QuickBooks' own copies, the shape, the roster's runs; the roster names the new company.
+    for (const t of [familyMoney, qboCustomer, qboCustomerType, qboItem, qboCheckRecord]) expect(await db.select().from(t)).toEqual([]);
+    expect(await db.select().from(setting).where(eq(setting.key, SHAPE_KEY))).toEqual([]);
+    expect(await db.select().from(jobRun).where(eq(jobRun.job, ROSTER_JOB))).toEqual([]);
+    expect(await getRosterSource()).toBe("2222");
+
+    // The audit rows: every earlier one kept, and those of the clear.
+    const audit = await db.select().from(auditLog).orderBy(asc(auditLog.id));
+    expect(audit.slice(0, before.audit.length)).toEqual(before.audit);
+    expect((await actionsWritten("roster.cleared")).map((r) => [r.before, r.after])).toEqual([[{ realmId: "1111" }, { reason: "different_company", realmId: "2222", writesGivenUp: 3 }]]);
+    const [links] = await actionsWritten("accounting.links.cleared");
+    expect(links!.after).toEqual({ reason: "different_company", realmId: "2222", links: before.links.length, endedAs: "company_changed",
+      familyLinks: before.links.filter((l) => l.familyId !== null).length, studentLinks: before.links.filter((l) => l.studentId !== null).length,
+      guardianLinks: before.links.filter((l) => l.guardianId !== null).length, leftUnlinkedCleared: 1, familiesKept: true, studentsKept: true, membershipsKept: true });
+    const [ends] = await actionsWritten("volunteer.buyouts.ended");
+    expect(ends!.after).toMatchObject({ ended: 1, endedIds: [before.buyouts.find((x) => x.state === "invoiced")!.id], paidKept: 1, sentToQuickBooks: false });
+    expect(await actionsWritten("money.records.cleared")).toHaveLength(1);
+    expect(await actionsWritten("parent.access.cleared", "season.records.cleared", "volunteer.signups.cleared", "form.records.cleared")).toEqual([]);
+
+    // The same company again (the roster names "2222" now): nothing at all changes.
+    const now = await everything();
+    expect(await clearRosterOfOtherCompany("2222", admin)).toBe(false);
+    expect(await everything()).toEqual(now);
   });
 
-  it("marks evidence the worker was storing at that moment as the earlier company's too, once its store commits", async () => {
+  it("changes nothing when the same company is connected, or the roster names none", async () => {
+    await seedTwoFamilies();
+    const before = await everything();
+    expect(await clearRosterOfOtherCompany("1111", admin)).toBe(false);
+    expect(await everything()).toEqual(before);
+    await db.delete(setting).where(eq(setting.key, SOURCE_KEY));
+    const none = await everything();
+    expect(await clearRosterOfOtherCompany("2222", admin)).toBe(false);
+    expect(await everything()).toEqual(none);
+  });
+
+  it("keeps evidence the worker was storing at that moment as its family's, with its request, once its store commits", async () => {
     const { a } = await seedTwoFamilies();
     const requestId = a.forms!.ids.signed;
     const familyId = a.identity.familyId;
@@ -162,7 +218,40 @@ describe("connecting a different company after step 5", () => {
     await storing;
     expect(await clearing).toBe(true);
     const [inFlight] = await db.select().from(signedFormEvidence).where(eq(signedFormEvidence.formTitle, "In flight"));
-    expect(inFlight).toMatchObject({ requestId: null, earlierCompanyAt: expect.any(Date), familyId: null, studentId: null });
+    expect(inFlight).toMatchObject({ requestId, realmId: "1111", earlierCompanyAt: null, familyId });
+  });
+
+  it("leaves the audit page's record filter finding a kept family's rows by its own id alone, never by its old customer's number", async () => {
+    const { a, b } = await seedTwoFamilies();
+    const famA = await recordOfCustomer(a.spec.family.qboId, "family");
+    const staffActor = { door: "staff" as const, id: null, label: "registrar@club.org" };
+    // A row naming A's app family, one naming A's customer (as rows did before the area moved to the app's ids), and one naming B's customer.
+    await writeAudit({ actor: staffActor, action: "roster.family.read", targetType: "family", targetId: String(famA) });
+    await writeAudit({ actor: staffActor, action: "roster.family.read", targetType: "qbo_customer", targetId: a.spec.family.qboId });
+    await writeAudit({ actor: staffActor, action: "roster.family.read", targetType: "qbo_customer", targetId: b.spec.family.qboId });
+    const found = async () => (await auditPage(parseAuditFilters({ record: `family:${String(famA)}` }))).rows.map((r) => `${r.targetType}:${r.targetId}`);
+    // Before: through A's link in the roster's company, its customer's row is A's.
+    expect(await found()).toEqual(expect.arrayContaining([`family:${String(famA)}`, `qbo_customer:${a.spec.family.qboId}`]));
+    expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
+    // After, until A is linked in the new company: the filter reads only the roster's company, where A has no link, so
+    // the customer's number finds nothing (the new company's customer of that number may be anyone), and B's row is not
+    // A's. Once A is linked there, its new customer's window is unbounded below, so rows of that number from the old
+    // company would match: bounding it by when the company changed is stage 4's slice M8's (the roadmap's M8 row).
+    const after = await found();
+    expect(after).toContain(`family:${String(famA)}`);
+    expect(after).not.toContain(`qbo_customer:${a.spec.family.qboId}`);
+    expect(after).not.toContain(`qbo_customer:${b.spec.family.qboId}`);
+  });
+
+  it("names the staff member who connected the new company as the one who ended each link", async () => {
+    await seedTwoFamilies();
+    const staff = await seedStaff({ email: "connector@club.org", admin: true });
+    const links = await db.select().from(accountingLink);
+    expect(links.length).toBeGreaterThan(0);
+    expect(await clearRosterOfOtherCompany("2222", { actor: { door: "staff", id: staff.id, label: staff.email }, ip: null })).toBe(true);
+    const ended = await db.select().from(accountingLinkEnded);
+    expect(ended.map((l) => l.id).sort()).toEqual(links.map((l) => l.id).sort());
+    for (const l of ended) expect(l).toMatchObject({ endedHow: "company_changed", endedBy: staff.id });
   });
 });
 

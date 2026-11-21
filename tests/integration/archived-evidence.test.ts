@@ -93,22 +93,25 @@ describe("an earlier company's signed forms", () => {
     for (const id of archivedIds) expect(await findMySignedPdf(ctx, id)).toBeNull();
   });
 
-  it("refuses family A's own form while its evidence is another company's or archived, and gives it while it was kept with no company", async () => {
+  // Stage 4's slice M7a (decision 5): evidence is current unless archived, whatever company copy it holds, so a family kept
+  // across a change of company keeps its forms. The "another company's" case flipped on purpose from refused to given.
+  it("gives family A its own form whatever company its evidence holds, or none, and refuses it once archived", async () => {
     const ctx = { ...a.identity, ip: null };
     const id = a.forms!.ids.complete, evidenceId = a.forms!.evidence.id;
     const [was] = await db.select().from(signedFormEvidence).where(eq(signedFormEvidence.id, evidenceId));
     const set = (values: Partial<typeof signedFormEvidence.$inferInsert>) => db.update(signedFormEvidence).set(values).where(eq(signedFormEvidence.id, evidenceId));
     try {
       expect(await findMySignedPdf(ctx, id)).not.toBeNull();
-      // Another company's, though it names A's own request and A's own family: refused, by request and family alike.
+      // Another company's copy (a family kept across a change of company), naming A's own request and A's own family:
+      // given, found by the request and the app family alone, never by a QuickBooks id.
       await set({ realmId: "ANOTHER-COMPANY-REALM" });
-      expect(await findMySignedPdf(ctx, id)).toBeNull();
-      expect(await mySignedDownloads(ctx, [id])).toEqual(new Map());
+      expect(Buffer.compare((await findMySignedPdf(ctx, id))!, a.forms!.evidence.sealed)).toBe(0);
+      expect([...(await mySignedDownloads(ctx, [id])).keys()]).toEqual([id]);
       // Kept while A had no QuickBooks link: no company and no copy, found by A's request and A's family alone.
       await set({ realmId: null, familyQboId: null, subjectQboId: null });
       expect(Buffer.compare((await findMySignedPdf(ctx, id))!, a.forms!.evidence.sealed)).toBe(0);
       expect([...(await mySignedDownloads(ctx, [id])).keys()]).toEqual([id]);
-      // The same, archived by a change of company: cut from its request and family, and refused.
+      // The same, archived by a change of company before slice M7a: cut from its request and family, and refused.
       await set({ earlierCompanyAt: new Date(), requestId: null, familyId: null, studentId: null });
       expect(await findMySignedPdf(ctx, id)).toBeNull();
       expect(await mySignedDownloads(ctx, [id])).toEqual(new Map());
