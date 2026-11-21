@@ -57,3 +57,20 @@ export async function staffMenuTo(page: Page, group: string | null, entry: strin
   if (group) await nav.getByRole("button", { name: new RegExp(`^${group}`) }).click();
   await nav.getByRole("link", { name: entry, exact: true }).click();
 }
+
+/**
+ * Presses "Not now" on the passkey offer on Home (the sign-in release, slice SI-8) when Home drew it, and waits for its
+ * answer: every spec that signs Zelda in by her password and the emailed code lands on Home with the offer, since that
+ * sign-in proved a second step on a new device. Call it once Home has loaded; with no offer drawn it does nothing. The
+ * box reads the browser first (an empty placeholder until then, `data-passkey-offer="pending"`), so this waits for that
+ * reading, never for a guessed time. Put Zelda's count back after the spec with resetPasskeyOffer() (signin-links.ts).
+ */
+export async function passOffer(page: Page): Promise<void> {
+  const offer = page.locator("[data-passkey-offer]");
+  if ((await offer.count()) === 0) return;
+  await expect(page.locator('[data-passkey-offer="pending"]')).toHaveCount(0);
+  const shown = page.locator('[data-passkey-offer="shown"]');
+  if ((await shown.count()) === 0) return;
+  await shown.getByRole("button", { name: "Not now", exact: true }).click();
+  await expect(page.locator('[data-passkey-offer="said"]').getByRole("status")).toBeVisible();
+}

@@ -71,6 +71,16 @@ export function asParentChoosing(identity: ParentIdentity): void {
   state.parentSession = true;
 }
 
+/**
+ * The same parent's session while it is enrolling (Strict's enrolment, the sign-in release's slice SI-10a): the gate's
+ * `enrol`, which reaches /one-more-step and nothing else. The session itself is the test's to mark (`enrol_until`), so
+ * the presses, which read it again, find it enrolling: asParentEnrolling() is only what the guards are told.
+ */
+export function asParentEnrolling(identity: Pick<ParentIdentity, "parentId" | "sessionId" | "email">): void {
+  state.parent = { status: "enrol", parentId: identity.parentId, sessionId: identity.sessionId, email: identity.email } satisfies ParentSessionState;
+  state.parentSession = true;
+}
+
 /** A browser that holds a parent session the portal refuses (blocked, or no family left): parent pages send it to /refused. */
 export function asRefusedParent(): void {
   state.parent = { status: "none" }; state.parentSession = true;

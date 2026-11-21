@@ -27,6 +27,11 @@ installation with. `docker compose ps` shows what is running, and `docker compos
 - **"Not yet run"** on a new installation is normal: it runs once a day.
 - **"The last clean-up couldn't finish."** The worker tries again in 15 minutes. If it keeps failing, the note under the
   line has the reason; check the worker line too.
+- **"The worker's sweep of expired passkey sign-in requests ... failed at its last try."** Besides the daily clean-up,
+  the worker removes expired passkey sign-in requests at every wake, so that they never pile up beyond about five
+  minutes' worth. Until a sweep works again they wait for the daily clean-up instead. It tries again each minute, and
+  the line clears at the first sweep that works. If it stays, check the worker line and the database line, and
+  `docker compose logs worker`.
 
 ## QuickBooks
 
@@ -137,9 +142,9 @@ holds under the family, is flagged for the club.
 
 ## Outgoing mail
 
-- **"Not set up"** or **"Not tested."** Parents can't get sign-in codes. **Settings**, **Outgoing mail**: save the
+- **"Not set up"** or **"Not tested."** Parents can't sign in: they can't get password links or sign-in codes. **Settings**, **Outgoing mail**: save the
   settings and **Send test email** ([outgoing mail](mail.md)).
-- **"Tested, but the last email failed."** The note has the mail service's reason. The usual ones: a changed or expired
+- **"Tested, but the last email failed."** Until a send works again, parents aren't sent sign-in codes, password links or welcome emails. The note has the mail service's reason. The usual ones: a changed or expired
   password (enter it again under **Outgoing mail**); for Microsoft 365, the mailbox renamed, or the app's permission removed
   (run the mail script again, [outgoing mail](mail.md#the-portal-microsoft-365)). Send a test email after the fix.
 
@@ -201,6 +206,10 @@ The emails the worker sends the day before each volunteer shift, and 14 and 3 da
 
 ## Parent sign-ins
 
+- **"On"**, with "Parents sign in with their email and password, and on a device the portal doesn't know yet, a code
+  sent to their email." Nothing to do. That sentence is the Standard level's way for a guardian with no passkey or
+  authenticator app: one who has either is asked for it instead, never for an emailed code, and at Strict nobody is
+  sent one. The line doesn't say the level; **Settings**, **Parent sign-ins** does, under **Sign-in level**.
 - **"Off"**. No parent can sign in, not even a guardian staff have just added: the parent door stays closed until an
   Admin switches sign-ins on. It is a choice: **Settings**, **Parent sign-ins** switches them on (once outgoing mail works: QuickBooks plays no part in who can sign in). Reconnecting the same
   QuickBooks company leaves them as they are, and so does a switch to a different company: it ends only each family's
@@ -208,7 +217,33 @@ The emails the worker sends the day before each volunteer shift, and 14 and 3 da
 - **"Needs attention"**, with "The latest sign-ins have no address: the proxy in front of the portal doesn't send the
   header ...". `CLIENT_IP_HEADER` in `deploy/.env` names a header your proxy doesn't set. Find the one it does set
   ([a proxy of your own](first-install.md#a-proxy-of-your-own)), put it in `.env`, and `docker compose up -d app`.
-  With this installation's own proxy it is `x-forwarded-for`.
+  With this installation's own proxy it is `x-forwarded-for`. Until it is mended, no limit per address works: the
+  portal's sign-in limits that count by address are skipped, and the caps the sign-in library keeps on each sign-in
+  request (a passkey sign-in's first request among them, which any visitor may make) count every visitor together, so
+  one stranger sending many requests can make every parent wait a minute to sign in. The expired passkey requests
+  don't pile up: the worker deletes them at every wake, so there are never more than about five minutes' worth.
+- A note, with the line still **"On"**: "Visitors' addresses aren't recorded, because CLIENT_IP_HEADER is none: the
+  audit log shows no address, and sign-ins have no limit per address." It is what `CLIENT_IP_HEADER=none` in
+  `deploy/.env` means, and it is meant only for an installation where no proxy says who the visitor is. Behind any
+  proxy, put the header it sets in `.env` instead (as in the warning above) and `docker compose up -d app`: without
+  it, one stranger trying many passwords is stopped only by the limits per address typed and per device.
+- **"Needs attention"**, with "Welcome emails are waiting because mail is failing: ...". The last welcome email (or
+  link to choose a password) the worker tried to send failed, so until one goes it tries one person a minute instead of
+  five, and the people counted wait their turn. Mend the mail first: the [Outgoing mail](#outgoing-mail) line, and
+  [outgoing mail](mail.md). The first welcome that goes clears it, and the rest go out five a minute again. Only
+  people who can sign in now are counted, and the note shows only while the mail settings are tested: with settings
+  saved and not tested the worker sends nothing, and the Outgoing mail line says "Not tested".
+  - **A mail server that refuses to relay** (to every outside address: "Relay access denied", "Unable to relay", a
+    sending account that may not send to other domains) shows this note, and the Outgoing mail line says "Needs
+    attention" with the error, `EENVELOPE` and the server's code. The test email may have gone to an address the
+    server delivers itself. Mend the mail settings or the account at your mail provider so it may send to any address,
+    send a test email to an outside address, and the welcomes go again. While this note shows, nobody the worker
+    tries is held back a day for being refused, so the welcomes start again within a few minutes of the mail working.
+  - **One address the mail server refuses** (a mailbox that doesn't exist, or one that is full) is not mail failing
+    and doesn't show this: the others still go, that person's `parent.welcome.failed` row in the audit log says
+    `recipientRefused`, and the worker tries them again a day later, not every fifteen minutes. If two or more are
+    refused in one wake and nobody is sent to, the portal takes it for the mail failing and shows this note. Check the
+    address with the family; once it is right, **Resend welcome email** on their page sends at once.
 
 ## Password breach check
 

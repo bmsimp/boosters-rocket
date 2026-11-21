@@ -8,7 +8,7 @@ import { auditLog, role, roleAssignment, roleRule } from "@/lib/db/schema";
 import { AccessDenied, guardOf } from "@/lib/guards";
 import { can, effectivePermissions } from "@/lib/permissions/effective";
 import { ADMIN_ONLY, type Permission } from "@/lib/permissions/registry";
-import { resetDb, seedStaff } from "../helpers/db";
+import { resetDb, seedStaff, seedWorkingMail } from "../helpers/db";
 import { moneyMarkers, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { mintLink, unknownToken } from "../helpers/signin-links";
 
@@ -123,13 +123,16 @@ describe("invariant 3: each door's pages refuse the other door's session", () =>
 
 describe("invariant 4: the public pages show no family data", () => {
   let a: SeededParent, b: SeededParent;
-  beforeAll(async () => { await resetDb(); ({ a, b } = await seedTwoFamilies()); });
+  // Mail working too, so the sign-in pages are ready and show their forms: the page a visitor meets.
+  beforeAll(async () => { await resetDb(); ({ a, b } = await seedTwoFamilies()); await seedWorkingMail(); });
 
   /** Every public page there is: the two sign-in doors, the refusal, the not-found page and the error pages (the set-up and reset links' pages, which need a link, below). */
-  const PUBLIC: { file: string; props?: object }[] = [
+  const PUBLIC: { file: string; props?: object; shows?: string }[] = [
     { file: "src/app/sign-in/page.tsx" },
     // With a return address that names one family's form: the page still says nothing about it.
     { file: "src/app/sign-in/page.tsx", props: { searchParams: { next: "/forms/00000000-0000-4000-8000-000000000000" } } },
+    // "Set up or reset my password" (slice SI-3a): no token and no session; opening it shows the one form.
+    { file: "src/app/sign-in/password/page.tsx", shows: 'type="email"' },
     { file: "src/app/staff/sign-in/page.tsx" },
     { file: "src/app/refused/page.tsx" },
     { file: "src/app/not-found.tsx" },
@@ -144,9 +147,10 @@ describe("invariant 4: the public pages show no family data", () => {
     expect(missing, "A page a visitor reaches before signing in is rendered here with no session: add it to PUBLIC (or, for a link's page, LINK_PAGES).").toEqual([]);
   });
 
-  it.each(PUBLIC)("$file shows a visitor with no session none of either family's data", async ({ file, props }) => {
+  it.each(PUBLIC)("$file shows a visitor with no session none of either family's data", async ({ file, props, shows }) => {
     const outcome = await pageOutcome(await load(file), props);
     if (!("html" in outcome)) expect.fail(`${file} did not render for a visitor with no session: ${JSON.stringify(outcome)}`);
+    if (shows) expect(outcome.html, `${file}: rendered in its ready state`).toContain(shows);
     const text = outcome.html.toLowerCase();
     expect(markers().filter((m) => text.includes(m.toLowerCase()))).toEqual([]);
   });

@@ -89,10 +89,12 @@ function staffPageProblem(file: string, source = read(file)): string | null {
 const OTHER_PAGES: Record<string, string> = {
   "src/app/sign-in/page.tsx": "Public: the parent sign-in form. Shows no family data (tests/e2e/public-pages.spec.ts).",
   "src/app/sign-in/set-up/[token]/page.tsx": "No session: the set-up link in its address is the guard (linkVerdict(), src/lib/parents/signin-links.ts). Opening it writes nothing; it shows the form or one message, the same for every refusal, and nothing of a person or family. Its action (beforeSignInAction, src/app/sign-in/password-actions.ts) checks the link again under the person's lock (tests/integration/password-links.test.ts).",
+  "src/app/sign-in/password/page.tsx": "No session and no token: its guard is its limits and its one answer. The page asks for an email address and its action (askPasswordLinkAction, a beforeSignInAction in src/app/sign-in/password-actions.ts) answers the same words for every address and every outcome, limited per address (counted under a keyed hash) and per IP address, and mails a set-up or reset link only to a person the portal may mail; opening the page writes nothing, and it shows nothing of a person or family (tests/integration/password-request.test.ts).",
   "src/app/sign-in/reset/[token]/page.tsx": "No session: the reset link in its address is the guard, as the set-up page's (linkVerdict(), src/lib/parents/signin-links.ts). Opening it writes nothing; it shows the form or one message, the same for every refusal, and nothing of a person or family (tests/integration/password-links.test.ts).",
   "src/app/staff/sign-in/page.tsx": "Public: the staff sign-in buttons. Shows no family data (tests/e2e/public-pages.spec.ts).",
   "src/app/refused/page.tsx": "Public: one fixed message, the same whoever is refused and whatever the reason.",
   "src/app/choose-family/page.tsx": "Reads getParentState() itself and redirects to /sign-in without a session; it lists only the signed-in parent's own families (tests/integration/choose-family-action.test.ts).",
+  "src/app/one-more-step/page.tsx": "requireEnrolmentPage() (src/lib/guards.ts), its first line: only an enrolling session under Strict (the gate's `enrol`) sees it; a whole session goes home and none to /sign-in. It shows nothing of a person or a family, and its actions (enrolmentAction, src/app/one-more-step/actions.ts) only set up the session's own person's first second factor (tests/integration/enrolment.test.ts, tests/integration/parent-isolation.test.ts).",
   "src/app/setup/page.tsx": "Answers 404 once setup is finished; while it is open, everything past the unlock form needs the setup session cookie (tests/integration/setup-state.test.ts, tests/e2e/setup.spec.ts).",
 };
 
@@ -159,6 +161,7 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/roster/no-family", names: "all", why: "the customers no family is linked to read every customer of the roster cache, and 'Create a family from this' makes a family of any of them" },
   { module: "@/lib/parents/guardians", names: "all", why: "staff add, remove and reinstate guardians: it gives any address a sign-in for any family" },
   { module: "@/lib/parents/people", names: "all", why: "staff block and rename people: a rename starts sends to QuickBooks for each membership's Parent customer (stage 3's slice 9h)" },
+  { module: "@/lib/parents/signin-reset", names: "all", why: "an Admin's reset of a parent's sign-in reads and removes any person's sign-in, and the staff home's line reads every recent reset (the sign-in release, slice SI-9a)" },
   { module: "@/lib/accounting/mapping", names: "all", why: "the accounting links screen reads every family's guardians' sign-in addresses and every customer of the roster cache (stage 4's slice M1)" },
   { module: "@/lib/accounting/link-writes", names: "all", why: "the accounting links screen's presses link any family to any customer, reading every family's guardians and every customer of the roster cache to check it (stage 4's slice M3a)" },
   { module: "@/lib/accounting/guardian-links", names: "all", why: "the accounting links screen's guardian presses link any guardian row to any Parent customer and end any row's link, reading every family's guardians and every customer of the roster cache to check it (stage 4's slice M3c)" },
@@ -262,6 +265,12 @@ describe("every page guards itself", () => {
       + `Move each under one of those folders, or add it to OTHER_PAGES in tests/integration/page-guards.test.ts with a sentence saying how it is protected.`).toEqual([]);
     const gone = Object.keys(OTHER_PAGES).filter((f) => !others.includes(f));
     expect(gone, `OTHER_PAGES lists pages that no longer exist: ${gone.join(", ")}. Remove them.`).toEqual([]);
+  });
+
+  it("guards Strict's enrolment page with requireEnrolmentPage(), the first line of the page", () => {
+    const file = "src/app/one-more-step/page.tsx";
+    expect(importsFromGuards(read(file), "requireEnrolmentPage")).toBe(true);
+    expect(pageBody(read(file))).toMatch(/^export\s+default\s+async\s+function\s+\w+\([^)]*\)[^{]*\{\s*const\s+ctx\s*=\s*await\s+requireEnrolmentPage\(\s*\);/);
   });
 });
 
@@ -400,7 +409,60 @@ const PARENT_CODE_ELSEWHERE = [
   // What a set-up or reset link's page and action run for a visitor with no session (the pages and their action are
   // under src/app/sign-in, BEFORE_SIGN_IN_CODE below): they read one person from a token anyone can send.
   "src/lib/parents/signin-links.ts",
+  "src/lib/parents/link-state.ts",
   "src/lib/parents/password-set.ts",
+  // What the page that mails a set-up or reset link runs (slice SI-3a): it reads one person from an address anyone can
+  // type. And the one finish of a sign-in, with the step that copies its cookie onto a link form's answer.
+  "src/lib/parents/password-request.ts",
+  "src/lib/parents/password-request-rule.ts",
+  // The delivery of a held link, which that page shares with the welcome (slice SI-4).
+  "src/lib/parents/link-delivery.ts",
+  "src/lib/auth/parent-signin-finish.ts",
+  "src/lib/auth/parent-link-signin.ts",
+  "src/lib/auth/session-cookie-copy.ts",
+  // What the door's password and code steps run (slice SI-3b): the password check, which reads one person from an
+  // address anyone can type, the second step's rule, remembered devices, and the pending step's and device's cookies.
+  "src/lib/parents/password-signin.ts",
+  "src/lib/parents/second-step-rule.ts",
+  "src/lib/parents/devices.ts",
+  "src/lib/auth/parent-signin-step.ts",
+  // What a parent's sign-in settings (/family/sign-in) and the email change's asking again run (slice SI-5a): the
+  // page's loader, the password change and signing out everywhere, asking again with its window rule, and their words.
+  // Each reads and changes the session's own person alone.
+  "src/lib/parents/signin-settings.ts",
+  "src/lib/parents/asking-again.ts",
+  "src/lib/parents/reask-rule.ts",
+  "src/lib/parents/signin-settings-copy.ts",
+  // The authenticator app and backup codes as the second step, at the door's /portal-app/check and in asking again
+  // (slice SI-6a): the time-based code, the backup codes' form and hash, and the one module that reads and writes the
+  // person's app and codes. Each reads the one person a pending step or a session names.
+  "src/lib/parents/totp.ts",
+  "src/lib/parents/backup-codes.ts",
+  "src/lib/parents/authenticator.ts",
+  // Setting the app up, its backup codes shown once and made again, and turning it off, on /family/sign-in (slice
+  // SI-6b): the presses, for the session's own person alone, and the QR code of the set-up, drawn on the server.
+  "src/lib/parents/authenticator-settings.ts",
+  "src/lib/parents/authenticator-qr.ts",
+  // A passkey at the door's /portal-passkey/check (slice SI-7a): the one module on the person's passkeys (read too by
+  // the settings page through sessionStrongAt()), the door's check, which reads the one person a passkey names, the
+  // library's verification run in process, and the finish's scope, which the parent instance's guard asks.
+  "src/lib/parents/passkeys.ts",
+  "src/lib/parents/passkey-signin.ts",
+  "src/lib/auth/passkey-check.ts",
+  "src/lib/auth/finish-scope.ts",
+  // Adding, naming and removing passkeys on /family/sign-in (slice SI-7b): the presses and the add's work at
+  // /portal-passkey/add, each for the session's own person alone, a passkey's id looked for only among theirs.
+  "src/lib/parents/passkey-settings.ts",
+  // The passkey offer on Home (slice SI-8): who is offered and "Not now", for the session's own person and device
+  // alone, the pure rule and the offer's words.
+  "src/lib/parents/passkey-offer.ts",
+  "src/lib/parents/passkey-offer-rule.ts",
+  "src/lib/parents/passkey-offer-copy.ts",
+  // Strict's enrolment on /one-more-step (slice SI-10a): whether a session may add a factor and its end, for the
+  // session's own person alone, the pure rule of a session's standing, and the page's words.
+  "src/lib/parents/enrolment.ts",
+  "src/lib/parents/enrolment-rule.ts",
+  "src/lib/parents/enrolment-copy.ts",
 ];
 
 /**
@@ -409,6 +471,8 @@ const PARENT_CODE_ELSEWHERE = [
  * families.
  */
 const BEFORE_SIGN_IN_CODE = "src/app/sign-in/";
+/** Strict's enrolment (/one-more-step, slice SI-10a): its page, its client parts and its actions, scanned whole as parent code. */
+const ENROLMENT_CODE = "src/app/one-more-step/";
 
 /**
  * Parent-facing folders under src/lib/: code that parent pages call to read one family's data. The scan reads every
@@ -421,6 +485,7 @@ describe("parent code never imports the staff-only queries", () => {
   const parentCode = [
     ...app.filter((f) => f.startsWith(PARENT_PAGES) && isSource(f)),
     ...app.filter((f) => f.startsWith(BEFORE_SIGN_IN_CODE) && isSource(f)),
+    ...app.filter((f) => f.startsWith(ENROLMENT_CODE) && isSource(f)),
     ...PARENT_CODE_ELSEWHERE,
     ...PARENT_FACING_LIB.flatMap(filesUnder).filter(isSource),
   ];
@@ -430,7 +495,9 @@ describe("parent code never imports the staff-only queries", () => {
     expect(parentCode).toEqual(expect.arrayContaining(["src/app/(parent)/payments/page.tsx", "src/app/(parent)/money-box.tsx", "src/lib/money/family-money.ts"]));
     expect(parentCode).toEqual(expect.arrayContaining(["src/app/(parent)/forms/[id]/page.tsx", "src/app/(parent)/forms/actions.ts", "src/lib/forms/my-forms.ts", "src/lib/forms/signing.ts", "src/lib/documenso/client.ts"]));
     expect(parentCode).toEqual(expect.arrayContaining(["src/app/sign-in/page.tsx", "src/app/sign-in/password-link-page.tsx", "src/app/sign-in/password-form.tsx",
-      "src/app/sign-in/password-actions.ts", "src/app/sign-in/set-up/[token]/page.tsx", "src/app/sign-in/reset/[token]/page.tsx"]));
+      "src/app/sign-in/password-actions.ts", "src/app/sign-in/set-up/[token]/page.tsx", "src/app/sign-in/reset/[token]/page.tsx",
+      "src/app/sign-in/password/page.tsx", "src/app/sign-in/password-request-form.tsx"]));
+    expect(parentCode).toEqual(expect.arrayContaining(["src/app/one-more-step/page.tsx", "src/app/one-more-step/actions.ts", "src/app/one-more-step/enrolment-steps.tsx"]));
     // read() throws for a file that is gone, so a module renamed or removed can't stay listed and unscanned.
     for (const file of PARENT_CODE_ELSEWHERE) expect(read(file).length, file).toBeGreaterThan(0);
   });

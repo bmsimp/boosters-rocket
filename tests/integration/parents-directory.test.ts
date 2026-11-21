@@ -39,9 +39,9 @@ describe("the people directory", () => {
     const { ana } = await seedPeople();
     await db.update(parent).set({ welcomedAt: new Date("2026-11-01T12:00:00Z") }).where(eq(parent.id, ana.id));
     await db.insert(auditLog).values({ door: "parent", actorId: ana.id, actorLabel: ana.email, action: "signin", targetType: "parent", targetId: ana.id, at: new Date("2026-11-05T12:00:00Z") });
-    expect((await listPeople("ana"))).toEqual([{ parentId: ana.id, name: "Ana Rivera", email: "ana@example.com", blocked: false,
+    expect((await listPeople("ana"))).toEqual([{ parentId: ana.id, name: "Ana Rivera", email: "ana@example.com", blocked: false, hasPassword: false,
       families: [{ guardianId: expect.any(String), familyQboId: "10", familyId: await recordOfCustomer("10", "family"), familyName: "Rivera Family", previousCompany: false, pageStands: true,
-        kind: "can", words: "Can sign in (hasn't yet)", open: true, reinstatable: false }],
+        kind: "can", words: "Hasn't chosen a password yet", open: true, reinstatable: false }],
       lastSigninAt: "2026-11-05T12:00:00.000Z", welcomedAt: "2026-11-01T12:00:00.000Z" }]);
     expect((await listPeople("RIVERA")).length).toBe(1);
     expect((await listPeople("ana@ex")).length).toBe(1);
@@ -99,7 +99,7 @@ describe("the people directory", () => {
     await withCompany(); await seedCache(ALL);
     const { ana, sam } = await seedPeople();
     const rows = await signinsOf("10");
-    expect(rows.map((s) => `${s.name}: ${s.words}`)).toEqual(["Ana Rivera: Can sign in (hasn't yet)", `Shared Sam: ${HELD_WORDS}`]);
+    expect(rows.map((s) => `${s.name}: ${s.words}`)).toEqual(["Ana Rivera: Hasn't chosen a password yet", `Shared Sam: ${HELD_WORDS}`]);
     expect(rows.map((s) => s.parentId)).toEqual([ana.id, sam.id]);
     // No Mail has a parent record in QuickBooks and no address: no sign-in, and no row of words for one.
     expect(JSON.stringify(rows)).not.toContain("No Mail");
@@ -113,7 +113,7 @@ describe("the people directory", () => {
     await withCompany(); await seedCache(ALL);
     const { ana } = await seedPeople();
     const rivera = await recordOfCustomer("10", "family");
-    expect((await signinsOf("10")).find((s) => s.parentId === ana.id)).toMatchObject({ kind: "can", words: "Can sign in (hasn't yet)" });
+    expect((await signinsOf("10")).find((s) => s.parentId === ana.id)).toMatchObject({ kind: "can", words: "Hasn't chosen a password yet" });
     // No active student in the family: nothing changes until the Admin asks for one.
     await seedParentSettings({ requireActiveStudents: true });
     expect((await signinsOf("10")).find((s) => s.parentId === ana.id)).toMatchObject({ kind: "cannot", words: "Can't sign in now: the family has no active students" });
@@ -136,7 +136,7 @@ describe("the people directory", () => {
     const p = await seedParent({ name: "Hand Seeded", email: "seeded@example.com", blocked: true });
     const g = await seedGuardian({ parentId: p.id, familyQboId: "10" });
     await syncAppRecords(); // the cache's families and students: the row has its family record already (seedGuardian())
-    expect(await signinsOf("10")).toEqual([{ guardianId: g.id, parentId: p.id, name: "Hand Seeded", email: "seeded@example.com", kind: "blocked", words: "Blocked", open: true, reinstatable: false }]);
+    expect(await signinsOf("10")).toEqual([{ guardianId: g.id, parentId: p.id, name: "Hand Seeded", email: "seeded@example.com", hasPassword: false, kind: "blocked", words: "Blocked", open: true, reinstatable: false }]);
   });
 
   it("keeps two same-named people in one family apart, one row each", async () => {
@@ -153,7 +153,7 @@ describe("the people directory", () => {
     const old = await seedGuardian({ parentId: ana.id, familyQboId: "20", status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "active" });
     // As a clear before stage 4's slice M7a left it: in no family.
     expect((await getPerson(ana.id))!.families).toEqual([
-      { guardianId: expect.any(String), familyQboId: "10", familyId: await recordOfCustomer("10", "family"), familyName: "Rivera Family", previousCompany: false, pageStands: true, kind: "can", words: "Can sign in (hasn't yet)", open: true, reinstatable: false },
+      { guardianId: expect.any(String), familyQboId: "10", familyId: await recordOfCustomer("10", "family"), familyName: "Rivera Family", previousCompany: false, pageStands: true, kind: "can", words: "Hasn't chosen a password yet", open: true, reinstatable: false },
       { guardianId: old.id, familyQboId: null, familyId: null, familyName: "A family in the previous QuickBooks company", previousCompany: true, pageStands: false, kind: "cannot", words: "Can't sign in: a different QuickBooks company was connected", open: false, reinstatable: false },
     ]);
   });

@@ -355,7 +355,7 @@ test.describe("the install hint on the sign-in page", () => {
     await expect(hint(page).getByRole("heading", { level: 2, name: "Add the portal to your home screen" })).toBeVisible();
     await expect(hint(page).locator("ol li")).toHaveCount(3);
     // Under the form and the staff link, set apart from them, and inside the page's width.
-    const send = (await page.getByRole("button", { name: "Send code" }).boundingBox())!;
+    const send = (await page.getByRole("button", { name: "Sign in", exact: true }).boundingBox())!;
     const staff = (await page.getByRole("link", { name: "Board and staff sign in here" }).boundingBox())!;
     const box = (await hint(page).boundingBox())!;
     expect(box.y).toBeGreaterThan(send.y + send.height);

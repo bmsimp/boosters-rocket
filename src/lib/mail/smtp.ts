@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 import { MailSendError, attachmentBytes, type MailSender, type SmtpSecurity } from "./types";
+import { refusedThisRecipient, type SmtpFailure } from "./refusal";
 
 /** A fixed sentence and the error code only: nodemailer's own message can quote the server's reply. */
 function smtpError(e: unknown): string {
@@ -28,7 +29,8 @@ export function createSmtpSender(o: {
       await transport.sendMail({ from: { name: o.fromName, address: o.from }, to: m.to, subject: m.subject, text: m.text, html: m.html,
         ...(m.attachments?.length ? { attachments: m.attachments.map((a) => ({ filename: a.filename, contentType: a.contentType, content: attachmentBytes(a) })) } : {}) });
     } catch (e) {
-      throw new MailSendError(smtpError(e));
+      // Whether the server refused this one recipient on their own account (./refusal.ts), read from nodemailer's error.
+      throw new MailSendError(smtpError(e), refusedThisRecipient((e ?? {}) as SmtpFailure));
     } finally {
       transport.close();
     }

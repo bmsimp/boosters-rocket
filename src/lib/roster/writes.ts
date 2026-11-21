@@ -4287,7 +4287,7 @@ const SENT_NOTHING = "Nothing was sent to the books.";
 const ACTIVE_HERE = "That is active in the portal already, so nothing was changed.";
 const FAMILY_INACTIVE_HERE = "This student's family is inactive in the portal, so they weren't made active: a family comes first. Take its active status from the books on its own row, then this student's.";
 const STUDENT_MOVE_PENDING_ACTIVE = "A move of this student hasn't reached QuickBooks yet (it is waiting, stuck or kept on the Reconciliation page), so they weren't made active. Finish it there, or give it up, then try again.";
-/** What a take that leaves a family's sign-ins held says, in its answer and beside its press (the owner's choice 5, as the lead recommends it). */
+/** What a take that leaves a family's sign-ins held says, in its answer and beside its press (the owner's choice 5, which he confirmed on 2026-11-21). */
 export const heldWords = (familyWords: string) => `${familyWords}'s guardians can't sign in to it until someone who may change families lets them in, on its page.`;
 /** Said when a make-inactive of the customer is kept on Reconciliation: the portal's earlier change, which a take leaves as it is. */
 export const KEPT_OFF_STAYS = "A make-inactive of its customer kept on the Reconciliation page stays there, as the portal's earlier change: only Send the portal's value or Give up there settles it.";

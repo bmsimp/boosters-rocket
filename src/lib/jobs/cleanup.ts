@@ -1,9 +1,10 @@
-import { and, eq, inArray, isNotNull, isNull, lt, notInArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { familyMoney, formReminderClaim, formReminderRound, jobRun, parent, parentAuthSession, parentAuthUser, parentAuthVerification, parentDevice, parentEmailChange, parentSigninToken, rateLimitEvent, requirementReminder, setting, signinCode, staffAuthSession, staffAuthVerification, writeQueue } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { RATE_LIMITS, type RateLimitKind } from "@/lib/parents/rate-limit";
 import { CODE_TTL_MS, RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
+import { cleanUpSecondSteps, secondStepPeopleToClean } from "@/lib/parents/authenticator";
 
 export const CLEANUP_JOB = "cleanup.daily";
 /** Job history is kept this long. The newest run of each job, and its newest run that worked, are kept whatever their age. */
@@ -23,13 +24,15 @@ const CLEANUP_ACTOR: Actor = { door: "system", id: null, label: "worker" };
 export const RETIRED_SETTINGS: readonly string[] = [];
 
 export type CleanupCounts = {
-  staffSessions: number; parentSessions: number; signinCodes: number; signinLinks: number; rememberedDevices: number; rateLimitEvents: number;
+  staffSessions: number; parentSessions: number; signinCodes: number; signinLinks: number; unfinishedAuthenticators: number; spentBackupCodes: number; rememberedDevices: number; rateLimitEvents: number;
   emailChanges: number; familyMoney: number; jobRuns: number; reminderClaims: number; writeQueue: number; verifications: number; retiredSettings: number;
 };
 const WORDS: Record<keyof CleanupCounts, [string, string]> = {
   staffSessions: ["expired staff session", "expired staff sessions"], parentSessions: ["expired parent session", "expired parent sessions"],
   signinCodes: ["sign-in code", "sign-in codes"],
   signinLinks: ["used or expired password link", "used or expired password links"],
+  unfinishedAuthenticators: ["unfinished authenticator app set-up", "unfinished authenticator app set-ups"],
+  spentBackupCodes: ["used backup code", "used backup codes"],
   rememberedDevices: ["expired remembered device", "expired remembered devices"],
   rateLimitEvents: ["rate-limit record", "rate-limit records"],
   emailChanges: ["expired email change", "expired email changes"], familyMoney: ["set of figures for a family no longer in the roster", "sets of figures for families no longer in the roster"],
@@ -45,11 +48,12 @@ const WORDS: Record<keyof CleanupCounts, [string, string]> = {
  * leaves alone, with why. A new table must join one list (tests/integration/cleanup.test.ts fails until it does); one
  * whose rows expire gets its delete below and a boundary test.
  */
-export const CLEANED_TABLES = ["staff_auth_session", "parent_auth_session", "signin_code", "parent_signin_token", "parent_device", "rate_limit_event", "parent_email_change", "family_money", "job_run",
+export const CLEANED_TABLES = ["staff_auth_session", "parent_auth_session", "signin_code", "parent_signin_token", "parent_authenticator", "parent_backup_code", "parent_device", "rate_limit_event", "parent_email_change", "family_money", "job_run",
   "form_reminder_claim", "form_reminder_round", "requirement_reminder", "write_queue", "staff_auth_verification", "parent_auth_verification"] as const;
 export const KEPT_TABLES: Record<string, string> = {
   staff_auth_user: "Better Auth's staff accounts", staff_auth_account: "Better Auth's staff accounts",
   parent_auth_user: "Better Auth's parent accounts", parent_auth_account: "Better Auth's parent accounts",
+  parent_auth_passkey: "a guardian's own passkeys, kept until they remove one (SI-7b) or a staff reset removes them (SI-9), and gone with the person; the passkey library's challenges live in parent_auth_verification, deleted when expired",
   setting: "the portal's settings, replaced in place; only a retired feature's (RETIRED_SETTINGS) is deleted",
   auth_provider: "the staff sign-in set-up", provider_certificate: "the staff sign-in set-up, rotated by an Admin",
   staff_user: "staff accounts, removed by an Admin", role: "roles", role_rule: "roles", role_assignment: "roles",
@@ -95,8 +99,13 @@ export function describeCleanup(c: CleanupCounts): string {
  *   the wait between two sends: until then the newest code, used or not, is what holds back the next one, and until a
  *   code's life has passed since it was spent, the sign-in that spent it reads it again at its last check
  *   (signinStands(), signin-codes.ts), which a reset refuses by deleting it.
- * - A person's set-up and reset links (`parent_signin_token`) that are used or past their expiry: a link works once,
- *   and only before it expires.
+ * - A person's set-up and reset links (`parent_signin_token`) spent more than a code's life ago (CODE_TTL_MS), or never
+ *   spent and past their expiry: a link works once, and only before it expires, and until a code's life has passed since it was spent,
+ *   the set-up link's sign-in that spent it reads it again at its last check (signinStands(), signin-codes.ts).
+ * - An authenticator app's set-up (`parent_authenticator`) never confirmed and older than AUTHENTICATOR_SETUP_LIFE_MS
+ *   (authenticator.ts): an app in force is never deleted by age. A backup code (`parent_backup_code`) spent more than
+ *   a code's life ago (CODE_TTL_MS), as a spent code is kept: the sign-in that spent it reads it again at its last
+ *   check (signinStands(), signin-codes.ts). An unspent backup code never expires.
  * - Remembered devices (`parent_device`) past their expiry: a device is remembered only until then, renewed by use.
  * - Rate-limit records older than their kind's window (rate-limit.ts counts only those inside it): the sign-in limits
  *   and the limits on a parent's own contact edits, each kind by its own window.
@@ -119,8 +128,9 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
   const n = (rows: unknown[]) => rows.length;
   const staffSessions = n(await tx.delete(staffAuthSession).where(lt(staffAuthSession.expiresAt, now)).returning({ id: staffAuthSession.id }));
   // What hangs on a person goes in the order src/lib/parents/sessions.ts gives (lockedPerson()): the rows of everyone
-  // it touches first, FOR UPDATE in id order, then their requests, then their codes, then their set-up and reset links
-  // and remembered devices (the sign-in release's, which hang on the person as a code does), then their sessions. So the
+  // it touches first, FOR UPDATE in id order, then their requests, then their codes, then their set-up and reset links,
+  // their authenticator apps and backup codes (since SI-6a) and remembered devices (the sign-in release's, which hang on
+  // the person as a code does), then their sessions. So the
   // clean-up never waits on a person's change of address while that change waits on it.
   const requestGone = lt(parentEmailChange.expiresAt, now);
   // A spent code stays for a code's life after it was spent: the code door's last check (signinStands()) reads it again,
@@ -128,19 +138,27 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
   const codeGone = and(
     or(lt(signinCode.usedAt, new Date(now.getTime() - CODE_TTL_MS)), and(isNull(signinCode.usedAt), lt(signinCode.expiresAt, now))),
     lt(signinCode.createdAt, new Date(now.getTime() - RESEND_AFTER_MS)));
-  const linkGone = or(isNotNull(parentSigninToken.usedAt), lt(parentSigninToken.expiresAt, now));
+  // A spent link stays for a code's life after it was spent, as a spent code does: a set-up link's sign-in reads it again
+  // at its last check (signinStands()), right after the set that spent it, and refuses the sign-in when it is gone. So
+  // only an unused link goes for its expiry: one spent a moment before it expired stays its code's life too. (A link
+  // the request page holds while its mail goes, used_at set to created_at, is a spent one here: gone after a code's
+  // life if the portal never came back to it.)
+  const linkGone = or(lt(parentSigninToken.usedAt, new Date(now.getTime() - CODE_TTL_MS)),
+    and(isNull(parentSigninToken.usedAt), lt(parentSigninToken.expiresAt, now)));
   const deviceGone = lt(parentDevice.expiresAt, now);
   const sessionGone = lt(parentAuthSession.expiresAt, now);
   await tx.select({ id: parent.id }).from(parent).where(or(
     inArray(parent.id, tx.select({ id: parentEmailChange.parentId }).from(parentEmailChange).where(requestGone)),
     inArray(parent.id, tx.select({ id: signinCode.parentId }).from(signinCode).where(codeGone)),
     inArray(parent.id, tx.select({ id: parentSigninToken.parentId }).from(parentSigninToken).where(linkGone)),
+    ...secondStepPeopleToClean(tx, now, CODE_TTL_MS).map((people) => inArray(parent.id, people)),
     inArray(parent.id, tx.select({ id: parentDevice.parentId }).from(parentDevice).where(deviceGone)),
     inArray(parent.id, tx.select({ id: parentAuthUser.parentId }).from(parentAuthUser).innerJoin(parentAuthSession, eq(parentAuthSession.userId, parentAuthUser.id)).where(sessionGone)),
   )).orderBy(parent.id).for("update");
   const emailChanges = n(await tx.delete(parentEmailChange).where(requestGone).returning({ id: parentEmailChange.id }));
   const signinCodes = n(await tx.delete(signinCode).where(codeGone).returning({ id: signinCode.id }));
   const signinLinks = n(await tx.delete(parentSigninToken).where(linkGone).returning({ id: parentSigninToken.id }));
+  const { unfinishedSetups: unfinishedAuthenticators, spentBackupCodes } = await cleanUpSecondSteps(tx, now, CODE_TTL_MS);
   const rememberedDevices = n(await tx.delete(parentDevice).where(deviceGone).returning({ id: parentDevice.id }));
   const parentSessions = n(await tx.delete(parentAuthSession).where(sessionGone).returning({ id: parentAuthSession.id }));
 
@@ -182,7 +200,7 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
   const retiredSettings = RETIRED_SETTINGS.length === 0 ? 0
     : n(await tx.delete(setting).where(inArray(setting.key, [...RETIRED_SETTINGS])).returning({ key: setting.key }));
 
-  return { staffSessions, parentSessions, signinCodes, signinLinks, rememberedDevices, rateLimitEvents, emailChanges, familyMoney: money, jobRuns, reminderClaims, writeQueue: writes, verifications, retiredSettings };
+  return { staffSessions, parentSessions, signinCodes, signinLinks, unfinishedAuthenticators, spentBackupCodes, rememberedDevices, rateLimitEvents, emailChanges, familyMoney: money, jobRuns, reminderClaims, writeQueue: writes, verifications, retiredSettings };
 }
 
 /**
@@ -207,4 +225,21 @@ export async function runCleanup(now: Date = new Date()): Promise<{ ok: boolean;
     await db.update(jobRun).set({ finishedAt: new Date(), outcome: "failed", detail: "The clean-up couldn't finish. Nothing was removed. (unexpected)" }).where(eq(jobRun.id, run!.id));
     return { ok: false, counts: null };
   }
+}
+
+/** The job name of the sweep below, in a wake's answer, and the key of its mark (./marks.ts). */
+export const CHALLENGE_SWEEP_JOB = "parents.challenges_swept";
+
+/**
+ * Better Auth's parent verification rows past their expiry, at every wake of the worker, beside the daily clean-up's
+ * delete of the same rows (the sign-in release, slice SI-7a). The passkey library's challenge, which any visitor may ask
+ * for (/passkey/generate-authenticate-options), writes one for each ask, living 300 seconds; with no client address
+ * (CLIENT_IP_HEADER none) no cap per address can hold it, so this sweep is what bounds the table, to about five minutes
+ * of requests and one wake. Strictly past expiry, as cleanUp() deletes them: a row whose time is now or later stays.
+ * One delete, counted by the database and returning no row. The rows are the library's, not the club's: nothing of
+ * them is audited (the daily clean-up's count of them still is). `now` is the real time outside a test.
+ */
+export async function sweepExpiredChallenges(now: Date = new Date()): Promise<number> {
+  const r = await db.delete(parentAuthVerification).where(lt(parentAuthVerification.expiresAt, now));
+  return r.count;
 }

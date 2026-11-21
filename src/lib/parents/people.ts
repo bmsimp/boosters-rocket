@@ -15,7 +15,8 @@ export type StaffOp = { actor: Actor; ip: string | null; permission?: string };
 
 /**
  * No codes, no unused set-up or reset links, no remembered devices, and every session ends. Family links keep their
- * status, and the password stays, so unblocking restores the same access. The reason is for staff only. Every unfinished form still waiting for this person's signature is reset and its document withdrawn,
+ * status, and the password stays, and so (since the sign-in release's slice SI-6a) do the authenticator app and the
+ * backup codes, and (since slice SI-7a) the passkeys, so unblocking restores the same access. The reason is for staff only. Every unfinished form still waiting for this person's signature is reset and its document withdrawn,
  * so a signing link the portal handed them earlier can't sign for a family any more (src/lib/forms/signer-gone.ts).
  */
 export async function blockPerson(parentId: string, rawReason: string, o: StaffOp): Promise<{ ok: true; sessionsEnded: number } | { ok: false; reason: "not_found" | "invalid" }> {

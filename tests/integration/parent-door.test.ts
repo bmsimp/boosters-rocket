@@ -9,7 +9,7 @@ import { fromBrowser } from "../helpers/page-request";
 
 import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, family, guardian, parent, parentAuthAccount, parentAuthSession, parentAuthUser, parentAuthVerification, rateLimitEvent, signinCode, student } from "@/lib/db/schema";
+import { auditLog, family, guardian, parent, parentAuthAccount, parentAuthenticator, parentAuthPasskey, parentAuthSession, parentBackupCode, parentAuthUser, parentAuthVerification, rateLimitEvent, signinCode, student } from "@/lib/db/schema";
 import { hashPassword, verifyPassword } from "better-auth/crypto";
 import { getParentAuth } from "@/lib/auth/parent-auth";
 import { getParentState } from "@/lib/auth/identity";
@@ -25,9 +25,15 @@ import { asAppFamilyId, type AppFamilyId } from "@/lib/families/ids";
 // Each person is seeded in a family of the app's own (seedGuardianInFamily()): the gate lets a parent in only through an
 // open row naming an active family record.
 import { resetDb, seedParent, seedGuardian, seedGuardianInFamily, seedInactiveFamily, seedParentSession, seedWorkingMail } from "../helpers/db";
+// Every sign-in goes through the door as a browser's does: the password, then the code it mails (the sign-in release, slice SI-3b).
+import { DOOR_IP, DOOR_PASSWORD, appStep, codeMailed, codeStep, cookieNamed, passwordStep, postDoor, signInThroughDoor } from "../helpers/parent-door";
+import { appCode, seedAuthenticator, seedBackupCodes } from "../helpers/authenticator";
+import { seedCode, seedPassword } from "../helpers/signin-links";
 import { SIGNINS_ON, seedParentSettings, storeShape } from "../helpers/roster-cache";
+import { ORIGIN, RP_ID, passkeyOptions, passkeyStep, postPasskey, registerOptions, seedPasskey } from "../helpers/passkey";
+import { assertionFor, makePasskeyKey, registrationFor } from "../helpers/passkey-keys";
 
-const IP = "203.0.113.30";
+const IP = DOOR_IP;
 const staff = { actor: { door: "staff" as const, id: null, label: "board" }, ip: null };
 /** A membership closed, as closeMembership() closes one: the row is disabled, and the sessions end if it was the last. */
 async function dropRow(guardianId: string) {
@@ -35,26 +41,17 @@ async function dropRow(guardianId: string) {
   const open = await db.select({ id: guardian.id }).from(guardian).where(and(eq(guardian.parentId, row!.parentId), ne(guardian.status, "disabled")));
   if (open.length === 0) await endParentSessions(row!.parentId);
 }
-async function post(path: string, body: unknown, cookie?: string) {
-  const auth = await getParentAuth();
-  return auth.handler(new Request(`${env.APP_URL}/api/auth/parent${path}`, {
-    method: "POST", body: JSON.stringify(body),
-    headers: { "content-type": "application/json", origin: env.APP_URL, "cf-connecting-ip": IP, ...(cookie ? { cookie } : {}) },
-  }));
-}
+const post = (path: string, body: unknown, cookie?: string) => postDoor(path, body, { cookie });
 const cookieFrom = (res: Response) => res.headers.getSetCookie().map((c) => c.split(";")[0]!).filter((c) => c.startsWith("br_parent")).join("; ");
 async function getSession(cookie: string) {
   const auth = await getParentAuth();
   const res = await auth.handler(new Request(`${env.APP_URL}/api/auth/parent/get-session`, { headers: { cookie, origin: env.APP_URL } }));
   return (await res.json()) as { session: { id: string; userId: string; familyId?: string | null; expiresAt: string } } | null;
 }
-async function signIn(email: string, extra: Record<string, unknown> = {}) {
-  const sent = outbox.length;
-  await post("/portal-code/send", { email });
-  await vi.waitFor(() => expect(outbox.length).toBeGreaterThan(sent));
-  const code = /sign-in code: (\d{6})/.exec(outbox.at(-1)!.subject)![1]!;
-  const res = await post("/portal-code/verify", { email, code, ...extra });
-  return { res, body: (await res.json()) as { ok: boolean; next?: string; error?: string }, cookie: cookieFrom(res) };
+/** Signed in through the door: the password (given one when the person has none), then the code it mails. The session's cookie alone. */
+async function signIn(email: string, extra: { next?: string } = {}) {
+  const r = await signInThroughDoor(outbox, email, extra);
+  return { res: r.res, body: r.body, cookie: cookieNamed(r.res, "session_token") };
 }
 const DAY = 86_400_000;
 /** What the portal makes of a page request from a browser holding this cookie. */
@@ -76,31 +73,96 @@ const stateOf = async (cookie: string) => {
 describe("the parent door", () => {
   beforeEach(async () => { await resetDb(); outbox.length = 0; await seedWorkingMail(); await seedParentSettings(SIGNINS_ON); });
 
-  it("answers the same for known, unknown, blocked and all-disabled, and only the known one gets mail", async () => {
-    const a = await seedParent({ name: "Ana", email: "ana@example.com" }); await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
-    const b = await seedParent({ name: "Ben", email: "ben@example.com", blocked: true }); await seedGuardianInFamily({ parentId: b.id, familyQboId: "F1" });
-    const c = await seedParent({ name: "Cy", email: "cy@example.com" }); await seedGuardianInFamily({ parentId: c.id, familyQboId: "F1", status: "disabled", disabledReason: "removed" });
+  it("answers the password step the same for unknown, blocked, all-disabled and a wrong password, and mails a code only for the right one", async () => {
+    for (const [email, o] of [["ana@example.com", {}], ["ben@example.com", { blocked: true }], ["cy@example.com", {}]] as const) {
+      const p = await seedParent({ name: email, email, ...o });
+      if (email === "cy@example.com") await seedGuardianInFamily({ parentId: p.id, familyQboId: "F1", status: "disabled", disabledReason: "removed" });
+      else await seedGuardianInFamily({ parentId: p.id, familyQboId: "F1" });
+      await seedPassword(p.authUserId, DOOR_PASSWORD);
+    }
     const answers = [];
-    for (const email of ["ana@example.com", "nobody@example.com", "ben@example.com", "cy@example.com"]) {
-      const res = await post("/portal-code/send", { email });
-      answers.push([res.status, await res.text()]);
+    for (const [email, password] of [["nobody@example.com", DOOR_PASSWORD], ["ben@example.com", DOOR_PASSWORD], ["cy@example.com", DOOR_PASSWORD],
+      ["ana@example.com", "not the password at all"]]) {
+      const res = await post("/portal-password/check", { email, password });
+      answers.push([res.status, await res.text(), res.headers.getSetCookie()]);
     }
     expect(new Set(answers.map((x) => JSON.stringify(x))).size).toBe(1);
-    expect(answers[0]).toEqual([200, JSON.stringify({ ok: true })]);
+    expect(answers[0]).toEqual([200, JSON.stringify({ ok: false, error: "rejected" }), []]);
+    expect(outbox).toEqual([]);
+    const right = await post("/portal-password/check", { email: "ana@example.com", password: DOOR_PASSWORD });
+    expect(await right.json()).toEqual({ ok: true, step: "code" });
     await vi.waitFor(() => expect(outbox).toHaveLength(1));
     expect(outbox[0]!.to).toBe("ana@example.com");
+    // A right password on a device the portal doesn't remember makes no session: only the pending step.
+    expect(cookieNamed(right, "session_token")).toBe("");
+    expect(cookieNamed(right, "signin_step")).not.toBe("");
+    expect(await db.select().from(parentAuthSession)).toEqual([]);
   });
 
-  it("a code check answers the same for an unknown email and a wrong code", async () => {
+  it("a code check answers the same for a wrong code with a pending step and for no pending step at all", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" }); await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
-    await post("/portal-code/send", { email: "ana@example.com" });
-    await vi.waitFor(() => expect(outbox).toHaveLength(1));
-    const code = /sign-in code: (\d{6})/.exec(outbox[0]!.subject)![1]!;
+    await seedPassword(a.authUserId, DOOR_PASSWORD);
+    const { pending } = await passwordStep("ana@example.com");
+    const code = await codeMailed(outbox, "ana@example.com", 0);
     const wrong = String((Number(code) + 1) % 1_000_000).padStart(6, "0");
-    const r1 = await post("/portal-code/verify", { email: "ana@example.com", code: wrong });
-    const r2 = await post("/portal-code/verify", { email: "nobody@example.com", code: wrong });
-    expect([r1.status, await r1.text()]).toEqual([r2.status, await r2.text()]);
-    expect(r1.headers.getSetCookie().some((c) => c.startsWith("br_parent.session_token"))).toBe(false);
+    const r1 = await codeStep(wrong, pending);
+    const r2 = await codeStep(wrong, "");
+    expect(r1.body).toEqual(r2.body);
+    expect(r1.body).toEqual({ ok: false, error: "rejected" });
+    expect(cookieNamed(r1.res, "session_token")).toBe("");
+  });
+
+  it("signs nobody in with a code alone: no pending step, a forged one, or another person's; and the old code doors are gone", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" }); await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
+    const b = await seedParent({ name: "Ben", email: "ben@example.com" }); await seedGuardianInFamily({ parentId: b.id, familyQboId: "F2" });
+    await seedPassword(b.authUserId, DOOR_PASSWORD);
+    // Ben's own pending step, from his right password.
+    const { pending: bens } = await passwordStep("ben@example.com");
+    expect(bens).not.toBe("");
+    // A live code for Ana, as if one had been mailed to her.
+    await seedCode(a.id, { code: "246810" });
+    const name = bens.split("=")[0]!;
+    const forged = Buffer.from(JSON.stringify({ p: a.id, e: "ana@example.com", c: "x", u: Date.now(), x: Date.now() + 60_000 })).toString("base64url");
+    for (const cookie of ["", `${name}=${forged}`, `${name}=${encodeURIComponent(`${forged}.${"A".repeat(43)}=`)}`, bens]) {
+      const r = await codeStep("246810", cookie);
+      expect([cookie, r.body]).toEqual([cookie, { ok: false, error: "rejected" }]);
+      expect(cookieNamed(r.res, "session_token")).toBe("");
+    }
+    expect(await db.select().from(parentAuthSession)).toEqual([]);
+    expect((await db.select().from(signinCode)).find((c) => c.parentId === a.id)).toMatchObject({ usedAt: null });
+    for (const path of ["/portal-code/send", "/portal-code/verify"]) {
+      const r = await post(path, { email: "ana@example.com", code: "246810" });
+      expect([path, r.status]).toEqual([path, 404]);
+    }
+    expect(await db.select().from(parentAuthSession)).toEqual([]);
+  });
+
+  it("signs nobody in at /portal-app/check with no pending step, a forged one, another person's, or a code for a person with no app", async () => {
+    // The sign-in release, slice SI-6a: the app's step is a fourth endpoint, guarded by the same pending step.
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" }); await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
+    const b = await seedParent({ name: "Ben", email: "ben@example.com" }); await seedGuardianInFamily({ parentId: b.id, familyQboId: "F2" });
+    await seedPassword(a.authUserId, DOOR_PASSWORD);
+    await seedPassword(b.authUserId, DOOR_PASSWORD);
+    const app = await seedAuthenticator(a.id);
+    const [backup] = await seedBackupCodes(a.id, 1);
+    // Ben has no app: his right password asks for the emailed code, and his pending step is his alone.
+    const { body, pending: bens } = await passwordStep("ben@example.com");
+    expect(body).toEqual({ ok: true, step: "code" });
+    const name = bens.split("=")[0]!;
+    const forged = Buffer.from(JSON.stringify({ p: a.id, e: "ana@example.com", c: "x", u: Date.now(), x: Date.now() + 60_000 })).toString("base64url");
+    for (const cookie of ["", `${name}=${forged}`, `${name}=${encodeURIComponent(`${forged}.${"A".repeat(43)}=`)}`, bens]) {
+      for (const code of [appCode(app.secret), backup!]) {
+        const r = await appStep(code, cookie);
+        // Ben's own step reaches the check, and, as he has no app in force, ends there (slice SI-6b): the answer says
+        // only that it ended. The others name no step this server signed.
+        expect([cookie, code, r.body]).toEqual([cookie, code, cookie === bens ? { ok: false, error: "rejected", ended: true } : { ok: false, error: "rejected" }]);
+        expect(cookieNamed(r.res, "session_token")).toBe("");
+      }
+    }
+    expect(await db.select().from(parentAuthSession)).toEqual([]);
+    // Nothing of Ana's was spent by any of it.
+    expect((await db.select().from(parentAuthenticator))[0]).toMatchObject({ lastUsedStep: null });
+    expect((await db.select().from(parentBackupCode))[0]).toMatchObject({ usedAt: null });
   });
 
   it("with one family, goes straight in, activates invited rows and audits the sign-in with the family", async () => {
@@ -347,15 +409,26 @@ describe("the parent door", () => {
     expect((o.session as { cookieCache?: { enabled?: boolean } } | undefined)?.cookieCache?.enabled ?? false).toBe(false);
     expect(o.advanced?.ipAddress?.ipAddressHeaders).toEqual(["x-booster-client-ip"]); // written by the portal itself: tests/integration/client-address.test.ts
     expect(o.emailAndPassword?.enabled).toBe(false);
-    // In front of the database limits, an in-memory cap per IP on the two code routes (on when NODE_ENV is production).
+    // In front of the database limits, an in-memory cap per IP on the door's five routes (on when NODE_ENV is production;
+    // /portal-app/check since slice SI-6a and /portal-passkey/check since SI-7a, under the code check's own limit per IP,
+    // code_check_ip), and on the passkey library's challenge, which writes a row for every visitor who asks (SI-7a's
+    // second read: the passkey check's own cap).
     // A minute of it allows what the database allows in 15, so it is never the first limit a full room meets.
-    expect(o.rateLimit?.customRules).toEqual({ "/portal-code/send": { window: 60, max: 60 }, "/portal-code/verify": { window: 60, max: 180 } });
+    expect(o.rateLimit?.customRules).toEqual({
+      "/portal-password/check": { window: 60, max: 180 }, "/portal-code/resend": { window: 60, max: 60 }, "/portal-code/check": { window: 60, max: 180 },
+      "/portal-app/check": { window: 60, max: 180 }, "/portal-passkey/check": { window: 60, max: 180 },
+      "/passkey/generate-authenticate-options": { window: 60, max: 180 },
+      // Adding a passkey and asking again with one (slice SI-7b): the registration options and the add at the code
+      // request's cap, asking again at the code check's.
+      "/passkey/generate-register-options": { window: 60, max: 60 }, "/portal-passkey/add": { window: 60, max: 60 },
+      "/portal-passkey/again": { window: 60, max: 180 },
+    });
     expect((o.rateLimit as { enabled?: boolean } | undefined)?.enabled).toBeUndefined(); // Better Auth's default: on only in production
   });
 
   it("over the check limit, says so", async () => {
-    for (let i = 0; i < 180; i++) await post("/portal-code/verify", { email: `n${i}@example.com`, code: "123456" });
-    const res = await post("/portal-code/verify", { email: "n@example.com", code: "123456" });
+    for (let i = 0; i < 180; i++) await post("/portal-code/check", { code: "123456" });
+    const res = await post("/portal-code/check", { code: "123456" });
     expect(await res.json()).toEqual({ ok: false, error: "rate_limited" });
   }, 60_000);
 
@@ -393,7 +466,14 @@ describe("the parent door", () => {
 
   it("leaves a parent only the endpoints the portal uses", async () => {
     const auth = await getParentAuth();
-    const reachable = ["/get-session", "/sign-out", "/portal-code/send", "/portal-code/verify", "/ok", "/error"];
+    // The door's five endpoints: since slice SI-6a, /portal-app/check takes an authenticator app's code or a backup code,
+    // and since SI-7a /portal-passkey/check a passkey; and the passkey library's challenge, which takes no query and no
+    // body. Since slice SI-7b the library's registration options (behind the portal's onRequest), the portal's own add
+    // and asking again with a passkey. The library's five other paths are disabled (its own sign-in makes a session;
+    // its registration is run in process by the add; listing, naming and removing are the portal's own).
+    const reachable = ["/get-session", "/sign-out", "/portal-password/check", "/portal-code/resend", "/portal-code/check", "/portal-app/check",
+      "/portal-passkey/check", "/passkey/generate-authenticate-options", "/passkey/generate-register-options", "/portal-passkey/add",
+      "/portal-passkey/again", "/ok", "/error"];
     // Path-parameter routes can't be listed in disabledPaths (it matches exact paths). Neither can do anything here:
     // there are no social providers to call back to, and /reset-password/:token only redirects with a reset row of
     // Better Auth's own verification table, which the portal never writes: a person's password is set and reset by the
@@ -402,6 +482,85 @@ describe("the parent door", () => {
     const paths = Object.values(auth.api).map((e) => (e as { path?: string }).path).filter((p): p is string => !!p);
     const disabled = new Set(auth.options.disabledPaths ?? []);
     expect(paths.filter((p) => !disabled.has(p)).sort()).toEqual([...reachable, ...parameterized].sort());
+  });
+
+  it("disables every path of the passkey library but its challenge and (since SI-7b) its registration options", async () => {
+    const disabled = new Set((await getParentAuth()).options.disabledPaths ?? []);
+    for (const path of ["/passkey/verify-authentication", "/passkey/verify-registration",
+      "/passkey/list-user-passkeys", "/passkey/delete-passkey", "/passkey/update-passkey"]) expect([path, disabled.has(path)]).toEqual([path, true]);
+    expect(disabled.has("/passkey/generate-authenticate-options")).toBe(false);
+    expect(disabled.has("/passkey/generate-register-options")).toBe(false);
+    // Freshness is the portal's own window: the library's fresh-session middleware is skipped (slice SI-7b).
+    expect((await getParentAuth()).options.session?.freshAge).toBe(0);
+  });
+
+  it("refuses the registration options, making no challenge row, without a session or without a recent proof (slice SI-7b)", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
+    await seedPassword(a.authUserId, DOOR_PASSWORD);
+    expect((await registerOptions()).res.status).toBe(404);
+    // A cookie the library can't read as a session (unsigned): the same answer. A session with no recent proof is
+    // refused the same way (tests/integration/passkey-settings.test.ts signs one in through the door).
+    expect((await registerOptions({ cookie: "br_parent.session_token=not-signed" })).res.status).toBe(404);
+    expect(await db.select().from(parentAuthVerification)).toEqual([]);
+  });
+
+  it("adds nothing at /portal-passkey/add with no session, a forged answer or an answer for no options, and the library's verify path answers 404 over HTTP (slice SI-7b)", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
+    const key = makePasskeyKey();
+    for (const body of [{}, { response: null }, { response: registrationFor(key, "bm8tb3B0aW9ucw", { origin: ORIGIN, rpId: RP_ID }) }]) {
+      expect(await (await post("/portal-passkey/add", body)).json()).toEqual({ ok: false, error: "rejected" });
+    }
+    expect((await post("/passkey/verify-registration", { response: registrationFor(key, "bm8tb3B0aW9ucw", { origin: ORIGIN, rpId: RP_ID }) })).status).toBe(404);
+    expect(await db.select().from(parentAuthPasskey)).toEqual([]);
+  });
+
+  it("does nothing at /portal-passkey/again with no session (slice SI-7b)", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
+    const key = await seedPasskey(a.id);
+    const options = await passkeyOptions();
+    const res = await post("/portal-passkey/again", { response: assertionFor(key, options.body.challenge, { origin: ORIGIN, rpId: RP_ID }) }, options.challengeCookie);
+    expect(await res.json()).toEqual({ ok: false, error: "rejected" });
+    expect(await db.select().from(parentAuthSession)).toEqual([]);
+    expect((await db.select().from(auditLog)).filter((x) => x.action === "signin.proved_again")).toEqual([]);
+  });
+
+  it("the passkey library's own verify path answers 404 over HTTP, and through auth.api with a valid assertion makes no session and sets no cookie", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
+    const key = await seedPasskey(a.id);
+    const options = await passkeyOptions();
+    const assertion = assertionFor(key, options.body.challenge, { origin: ORIGIN, rpId: RP_ID });
+    // Over HTTP: not found, whatever it is sent.
+    expect((await post("/passkey/verify-authentication", { response: assertion }, options.challengeCookie)).status).toBe(404);
+    // In process, as a later caller might: the library verifies, writes its counter, asks for a session, and the guard
+    // refuses it before any row exists, so it throws before it sets any cookie.
+    const auth = await getParentAuth();
+    const res = await auth.api.verifyPasskeyAuthentication({ body: { response: assertion as never },
+      headers: new Headers({ cookie: options.challengeCookie, origin: env.APP_URL }), asResponse: true });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.headers.getSetCookie().filter((l) => /session_token=[^;]/.test(l))).toEqual([]);
+    expect(await db.select().from(parentAuthSession)).toEqual([]);
+    expect((await db.select().from(auditLog)).filter((x) => x.action === "signin" || x.action === "signin.second_step")).toEqual([]);
+    // And the finish still makes one: the same person's passkey at the portal's own door.
+    expect((await passkeyStep(key, { counter: 2 })).body).toEqual({ ok: true, next: "/" });
+    expect(await db.select().from(parentAuthSession)).toHaveLength(1);
+  });
+
+  it("signs nobody in at /portal-passkey/check with no assertion, a forged one, or one for no options", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
+    const key = await seedPasskey(a.id);
+    const options = await passkeyOptions();
+    for (const body of [{}, { response: null }, { response: "x" }, { response: { id: "x" } }, { response: { ...assertionFor(key, options.body.challenge, { origin: ORIGIN, rpId: RP_ID }), extra: 1 } }]) {
+      const res = await post("/portal-passkey/check", body, options.challengeCookie);
+      expect(await res.json()).toEqual({ ok: false, error: "rejected" });
+    }
+    expect((await passkeyStep(key, { signWith: makePasskeyKey() })).body).toEqual({ ok: false, error: "rejected" });
+    expect((await postPasskey(assertionFor(key, "bm8tb3B0aW9ucy13ZXJlLWFza2Vk", { origin: ORIGIN, rpId: RP_ID }))).body).toEqual({ ok: false, error: "rejected" });
+    expect(await db.select().from(parentAuthSession)).toEqual([]);
   });
 
   it("keeps Better Auth's password routes shut for a person who has a password", async () => {
@@ -469,7 +628,7 @@ describe("the gate: a parent enters only an active family of the app's own (app-
     // An open row in a family record that is inactive and linked to nothing: it doesn't count.
     const bare = await seedGuardian({ parentId: a.id, familyId: await seedInactiveFamily() });
     const g2 = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F2" });
-    // The code is sent and checked because one row counts, and that one family is entered at once.
+    // The password is taken and the code sent and checked because one row counts, and that one family is entered at once.
     const { body, cookie } = await signIn("ana@example.com");
     expect(body).toEqual({ ok: true, next: "/" });
     const s = await stateOf(cookie);
@@ -487,14 +646,15 @@ describe("the gate: a parent enters only an active family of the app's own (app-
   it.each([
     ["names an inactive family record", "inactive"],
     ["names a family record that was never active", "none"],
-  ] as const)("a person whose only open row %s is sent no code and never signed in, as one with no open row", async (_, kind) => {
+  ] as const)("a person whose only open row %s is refused at the password, sent no code and never signed in, as one with no open row", async (_, kind) => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
     const g = kind === "none" ? await seedGuardian({ parentId: a.id, familyId: await seedInactiveFamily(), status: "invited" })
       : await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1", status: "invited" });
     if (kind === "inactive") await makeInactive(g.familyId);
-    const res = await post("/portal-code/send", { email: "ana@example.com" });
-    expect([res.status, await res.text()]).toEqual([200, JSON.stringify({ ok: true })]);   // the same answer as for anyone
-    expect((await db.select().from(auditLog)).find((x) => x.action === "signin.code_refused")!.after).toEqual({ reason: "no_enabled_guardian" });
+    await seedPassword(a.authUserId, DOOR_PASSWORD);
+    const res = await post("/portal-password/check", { email: "ana@example.com", password: DOOR_PASSWORD });
+    expect([res.status, await res.text()]).toEqual([200, JSON.stringify({ ok: false, error: "rejected" })]);   // the same answer as for anyone
+    expect((await db.select().from(auditLog)).find((x) => x.action === "signin.password_refused")!.after).toEqual({ reason: "no_enabled_guardian" });
     expect(outbox).toEqual([]);
     // Nothing was activated, and nobody signed in.
     expect((await db.select().from(guardian))[0]).toMatchObject({ id: g.id, status: "invited" });
@@ -539,7 +699,7 @@ describe("the gate: while the club asks for an active student, a family with non
     (await db.select().from(auditLog)).filter((x) => x.action === action && (x.after as { reason?: string } | null)?.reason === reason);
   const giveStudent = (familyId: AppFamilyId | null, active = true) => db.insert(student).values({ familyId: familyId!, name: "Sam", active });
   const statuses = async () => (await db.select().from(guardian)).map((g) => g.status).sort();
-  /** As if the last code had been sent a while ago, so the next may be asked for at once. */
+  /** As if the last code had been sent a while ago, so the next may be asked for at once, and no try is counted yet. */
   const ageCodes = async () => { await db.update(signinCode).set({ createdAt: new Date(Date.now() - 5 * 60_000) }); await db.delete(rateLimitEvent); };
 
   it("lets a family with no active student in while the setting is off, and with it on sends no code, refuses the check, and closes no row", async () => {
@@ -553,22 +713,21 @@ describe("the gate: while the club asks for an active student, a family with non
     // A code asked for while it is off, checked once it is on: refused at the check.
     outbox.length = 0;
     await ageCodes();
-    await post("/portal-code/send", { email: "ana@example.com" });
-    await vi.waitFor(() => expect(outbox.length).toBe(1));
-    const code = /sign-in code: (\d{6})/.exec(outbox[0]!.subject)![1]!;
+    const { pending } = await passwordStep("ana@example.com");
+    const code = await codeMailed(outbox, "ana@example.com", 0);
     expect(await setRequireStudents(true, admin)).toEqual({ ok: true });
-    const checked = await post("/portal-code/verify", { email: "ana@example.com", code });
+    const checked = (await codeStep(code, pending)).res;
     expect(checked.headers.getSetCookie().some((c) => c.startsWith("br_parent.session_token"))).toBe(false);
     expect(await refusedFor("signin.refused", "no_enabled_guardian")).toHaveLength(1);
     // The session already open is caught on its next request, as an inactive family's is.
     expect(await stateOf(before.cookie)).toEqual({ status: "none" });
     expect(await db.select().from(parentAuthSession)).toEqual([]);
-    // On: no code is sent at all, with the same answer as for anyone.
+    // On: the password is refused and no code is sent at all, with the same answer as for anyone.
     outbox.length = 0;
     await ageCodes();
-    const send = await post("/portal-code/send", { email: "ana@example.com" });
-    expect([send.status, await send.text()]).toEqual([200, JSON.stringify({ ok: true })]);
-    expect(await refusedFor("signin.code_refused", "no_enabled_guardian")).toHaveLength(1);
+    const send = await post("/portal-password/check", { email: "ana@example.com", password: DOOR_PASSWORD });
+    expect([send.status, await send.text()]).toEqual([200, JSON.stringify({ ok: false, error: "rejected" })]);
+    expect(await refusedFor("signin.password_refused", "no_enabled_guardian")).toHaveLength(1);
     expect(outbox).toEqual([]);
     // The setting closed nothing, and saved only itself.
     expect(await statuses()).toEqual(["active"]);
@@ -621,8 +780,8 @@ describe("the gate: while the club asks for an active student, a family with non
     expect(await sqlSays()).toEqual([false, false]);
     outbox.length = 0;
     await ageCodes();
-    await post("/portal-code/send", { email: "ana@example.com" });
-    expect(await refusedFor("signin.code_refused", "no_enabled_guardian")).toHaveLength(1);
+    await post("/portal-password/check", { email: "ana@example.com", password: DOOR_PASSWORD });
+    expect(await refusedFor("signin.password_refused", "no_enabled_guardian")).toHaveLength(1);
     expect(outbox).toEqual([]);
     await giveStudent(g.familyId);
     expect((await enterableGuardianRows(a.id)).map((r) => r.id)).toEqual([g.id]);
@@ -664,13 +823,14 @@ describe("the gate: a family whose sign-ins are held after a take from the books
     (await db.select().from(auditLog)).filter((x) => x.action === action && (x.after as { reason?: string } | null)?.reason === reason);
   const ageCodes = async () => { await db.update(signinCode).set({ createdAt: new Date(Date.now() - 5 * 60_000) }); await db.delete(rateLimitEvent); };
 
-  it("the code request: a person whose only family is held is sent no code, with the same answer as anyone's, and closes no row", async () => {
+  it("the password: a person whose only family is held is refused and sent no code, with the same answer as anyone's, and closes no row", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
     const g = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1", status: "invited" });
+    await seedPassword(a.authUserId, DOOR_PASSWORD);
     await hold(g.familyId);
-    const res = await post("/portal-code/send", { email: "ana@example.com" });
-    expect([res.status, await res.text()]).toEqual([200, JSON.stringify({ ok: true })]);
-    expect(await refusedFor("signin.code_refused", "no_enabled_guardian")).toHaveLength(1);
+    const res = await post("/portal-password/check", { email: "ana@example.com", password: DOOR_PASSWORD });
+    expect([res.status, await res.text()]).toEqual([200, JSON.stringify({ ok: false, error: "rejected" })]);
+    expect(await refusedFor("signin.password_refused", "no_enabled_guardian")).toHaveLength(1);
     expect(outbox).toEqual([]);
     expect((await db.select().from(guardian))[0]).toMatchObject({ id: g.id, status: "invited" });
     // Released: the same row lets her in.
@@ -682,11 +842,11 @@ describe("the gate: a family whose sign-ins are held after a take from the books
   it("the code check: a code sent before the hold is refused once it is set, and no session is made", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
     const g = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
-    await post("/portal-code/send", { email: "ana@example.com" });
-    await vi.waitFor(() => expect(outbox.length).toBe(1));
-    const code = /sign-in code: (\d{6})/.exec(outbox[0]!.subject)![1]!;
+    await seedPassword(a.authUserId, DOOR_PASSWORD);
+    const { pending } = await passwordStep("ana@example.com");
+    const code = await codeMailed(outbox, "ana@example.com", 0);
     await hold(g.familyId);
-    const checked = await post("/portal-code/verify", { email: "ana@example.com", code });
+    const checked = (await codeStep(code, pending)).res;
     expect(checked.headers.getSetCookie().some((c) => c.startsWith("br_parent.session_token"))).toBe(false);
     expect(await refusedFor("signin.refused", "no_enabled_guardian")).toHaveLength(1);
     expect(await db.select().from(parentAuthSession)).toEqual([]);

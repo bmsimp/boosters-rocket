@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import postgres from "postgres";
 import { startMailSink, type MailSink } from "../helpers/mail-sink";
-import { PARENT_SESSION_FAMILY, parentSessionCookie } from "./parent-session";
+import { PARENT_SESSION_FAMILY, PARENT_SESSION_TOKEN, parentSessionCookie } from "./parent-session";
 import { e2eMailPort } from "./run-config";
 import { E2E_EMAIL, emailTokenHash } from "./email-seed";
 
@@ -18,7 +18,7 @@ import { E2E_EMAIL, emailTokenHash } from "./email-seed";
 const sql = postgres(process.env.DATABASE_URL!);
 const NEW = "zelda.moved@e2e-moving.example";
 let sink: MailSink;
-let saved: { setting: unknown[] };
+let saved: { setting: unknown[]; strongAt: Date | null };
 
 const isPhone = (page: Page) => (page.viewportSize()?.width ?? 0) < 760;
 const noSidewaysScroll = async (page: Page) =>
@@ -39,14 +39,22 @@ test.describe("a parent changes their sign-in email", () => {
   test.skip(({ viewport }) => (viewport?.width ?? 0) >= 760, "asked and confirmed at phone width; the desktop pass would only do it again");
 
   test.beforeAll(async () => {
-    saved = { setting: [...await sql`SELECT value FROM setting WHERE key = 'parents.settings'`] };
+    saved = {
+      setting: [...await sql`SELECT value FROM setting WHERE key = 'parents.settings'`],
+      strongAt: ((await sql`SELECT strong_at FROM parent_auth_session WHERE token = ${PARENT_SESSION_TOKEN}`)[0]?.strong_at ?? null) as Date | null,
+    };
     const on = { signin: true, everEnabled: true, welcome: false, requireActiveStudents: false };
     await sql`INSERT INTO setting (key, value) VALUES ('parents.settings', ${sql.json(on)}) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
     // Another person signs in with the new address, so confirming changes nothing of Zelda's.
     await sql`INSERT INTO parent (name, email) VALUES ('Someone Else', ${NEW})`;
+    // The change is asked for only by a session that proved itself in the last 10 minutes (asking again, slice SI-5a):
+    // the seeded session is stamped as just proved, a few seconds back so the database's clock never puts it ahead of
+    // the app's, and put back after. Asking again in the browser is journey 10 of tests/e2e/keyboard-journeys.spec.ts.
+    await sql`UPDATE parent_auth_session SET strong_at = now() - interval '5 seconds' WHERE token = ${PARENT_SESSION_TOKEN}`;
   });
 
   test.afterAll(async () => {
+    await sql`UPDATE parent_auth_session SET strong_at = ${saved.strongAt} WHERE token = ${PARENT_SESSION_TOKEN}`;
     const p = await zelda();
     if (saved.setting.length) await sql`UPDATE setting SET value = ${sql.json((saved.setting[0] as { value: never }).value)} WHERE key = 'parents.settings'`;
     else await sql`DELETE FROM setting WHERE key = 'parents.settings'`;
