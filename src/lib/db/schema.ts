@@ -168,8 +168,8 @@ export const student = pgTable("student", {
  * in a family record at most once (`guardian_family_id_parent_uq`). `family_qbo_id` and `source_qbo_id` are old copies
  * nothing reads since stage 3's slice 12b1: a row is read through GUARDIAN_COLS (src/lib/parents/sessions.ts), which
  * leaves them out, and made by SQL that doesn't name them, so the build still reads and makes rows once they are gone;
- * only an unlink's clear of `family_qbo_id` (below) and the clear of a change of company (clearParentAccess(), which
- * nothing reaches since stage 2, selecting the whole row) still name them. Migration
+ * only an unlink's clear of `family_qbo_id` (below) still names them (a change of company's clear keeps every row as it
+ * is since stage 4's slice M7a). Migration
  * 0048 made a link of each `source_qbo_id` the import had left unlinked, for a row whose family's link names its
  * `family_qbo_id` and that had no link ended; its header says why each row it skips loses nothing. No row made since
  * writes them, only an unlink still clears `family_qbo_id` (stage 4's slice M3b), and slice 12b2 drops them with the
