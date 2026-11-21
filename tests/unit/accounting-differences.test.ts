@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { differenceKinds, differencesOf, differenceWords, indexQueue, noteSentence, type Difference, type FamilyToCompare, type LinkedStudent, type QueueFact } from "@/lib/accounting/differences";
+import { differenceKinds, differencesOf, differenceWords, guardianDifferenceNext, indexQueue, noteSentence, type Difference, type FamilyToCompare, type GuardianToCompare, type LinkedStudent, type QueueFact } from "@/lib/accounting/differences";
 import { asAppStudentId, type AppStudentId } from "@/lib/families/ids";
 import { buildRoster, type Cust } from "@/lib/roster/model";
 import type { MembershipShape } from "@/lib/roster/shape";
@@ -280,5 +280,93 @@ describe("the queue's words", () => {
   it("end in one full stop", () => {
     expect(noteSentence({ state: "waiting", words: "Waiting to reach QuickBooks" })).toBe("Waiting to reach QuickBooks.");
     expect(noteSentence({ state: "refused", words: "QuickBooks refused it." })).toBe("QuickBooks refused it.");
+  });
+});
+
+describe("a guardian compared with their own Parent customer (slice M3c3)", () => {
+  /** A guardian row with a link, as the reader passes it: open and alone on its customer unless said. */
+  const row = (guardianId: string, who: string, customerId: string, o: Partial<GuardianToCompare> = {}): GuardianToCompare =>
+    ({ guardianId, who, open: true, customerId, alone: true, namedElsewhere: false, ...o });
+  const ana = (o: Partial<GuardianToCompare> = {}) => row("g-ana", "Ana Rivera", "11", o);
+  const withAna = (o: Partial<GuardianToCompare> = {}) => rivera({ ownParents: [ana(o)] });
+  const named = (displayName: string) => changed("11", { displayName });
+
+  it("none while the names agree, and none when the reader passes no rows", () => {
+    expect(compare(withAna()).differences).toEqual([]);
+    expect(compare(rivera(), { customers: named("Ana R.") }).differences).toEqual([]);
+  });
+  it("an open row's own active Parent customer of another name: both names, as text", () => {
+    const { differences } = compare(withAna(), { customers: named("Ana R.") });
+    expect(differences).toEqual([{ kind: "guardian_name", guardianId: "g-ana", who: "Ana Rivera", portal: "Ana Rivera", books: "Ana R.", queue: null }]);
+    expect(differenceWords(differences[0]!)).toEqual({ what: "Ana Rivera's name on their Parent customer", portal: "“Ana Rivera”", books: "“Ana R.”" });
+    expect(differenceKinds(differences)).toEqual(["guardians' Parent customers"]);
+  });
+  it("by the portal's own name rule: a doubled space is no difference, case is", () => {
+    expect(compare(withAna(), { customers: named("Ana  Rivera") }).differences).toEqual([]);
+    expect(compare(withAna(), { customers: named(" Ana Rivera ") }).differences).toEqual([]);
+    expect(compare(withAna(), { customers: named("ana rivera") }).differences.map((d) => d.kind)).toEqual(["guardian_name"]);
+  });
+  it("not while another open row of the person's holds their name (one person, one name)", () => {
+    expect(compare(withAna({ namedElsewhere: true }), { customers: named("Ana R.") }).differences).toEqual([]);
+  });
+  it("an open row's own Parent customer inactive in the books: whether they are the guardian, and no name, though the names differ", () => {
+    const { differences } = compare(withAna(), { customers: changed("11", { displayName: "Ana R.", active: false }) });
+    expect(differences).toEqual([{ kind: "guardian_active", guardianId: "g-ana", who: "Ana Rivera", portalOpen: true, queue: null }]);
+    expect(differenceWords(differences[0]!)).toEqual({ what: "Whether Ana Rivera is this family's guardian", portal: "A guardian of this family", books: "Their Parent customer is inactive" });
+  });
+  it("a removed guardian's own Parent customer still active: whether they are the guardian; none once it is inactive, and no name compared", () => {
+    const { differences } = compare(withAna({ open: false }), { customers: named("Ana R.") });
+    expect(differences).toEqual([{ kind: "guardian_active", guardianId: "g-ana", who: "Ana Rivera", portalOpen: false, queue: null }]);
+    expect(differenceWords(differences[0]!)).toEqual({ what: "Whether Ana Rivera is this family's guardian", portal: "Removed from this family", books: "Their Parent customer is active" });
+    expect(compare(withAna({ open: false }), { customers: changed("11", { active: false }) }).differences).toEqual([]);
+  });
+  it("only a guardian's own: not a customer another open row shares, nor one under another customer, of another type, or gone", () => {
+    const customers = [...named("Ana R."), c("21", "Ana Chen", "2", "20"), c("16", "Ana Top", "2")];
+    expect(compare(withAna({ alone: false }), { customers }).differences).toEqual([]);
+    expect(compare(withAna({ open: false, alone: false }), { customers }).differences).toEqual([]);
+    expect(compare(rivera({ ownParents: [row("g-ana", "Ana Rivera", "21")] }), { customers }).differences).toEqual([]);
+    expect(compare(rivera({ ownParents: [row("g-ana", "Ana Rivera", "16")] }), { customers }).differences).toEqual([]);
+    // Leo Rivera's student customer, directly under the family but of the student type.
+    expect(compare(rivera({ ownParents: [row("g-ana", "Ana Rivera", "12")] }), { customers }).differences).toEqual([]);
+    expect(compare(rivera({ ownParents: [row("g-ana", "Ana Rivera", "99"), row("g-old", "Old Rivera", "99", { open: false })] }), { customers }).differences).toEqual([]);
+  });
+  it("isn't compared with no parent type, nor in flat books", () => {
+    const customers = changed("11", { displayName: "Ana R.", active: false });
+    expect(compare(withAna(), { shape: NO_PARENTS, customers }).differences).toEqual([]);
+    expect(compare({ ...withAna(), kind: "member", students: [], guardians: [] }, { shape: FLAT, customers }).differences).toEqual([]);
+  });
+  it("after every other kind, in the order the rows are given", () => {
+    const customers = [...changed("10", { displayName: "Rivera Household" }).map((x) => (x.qboId === "11" ? { ...x, displayName: "Ana R." } : x)),
+      c("15", "Raul R.", "2", "10"), c("17", "Sol Rivera", "2", "10", { active: false })];
+    const r = compare(rivera({ guardians: [{ id: "g-ana", customerId: "11" }, { id: "g-uma", customerId: null }],
+      ownParents: [ana(), row("g-sol", "Sol Rivera", "17"), row("g-raul", "Raul Rivera", "15", { open: false })] }), { customers, guardianLinked: ["11", "15", "17", "60"] });
+    expect(r.differences.map((d) => d.kind)).toEqual(["name", "guardians_unlinked", "guardian_name", "guardian_active", "guardian_active"]);
+    expect(r.differences.flatMap((d) => (d.kind === "guardian_active" ? [[d.guardianId, d.portalOpen]] : []))).toEqual([["g-sol", true], ["g-raul", false]]);
+    expect(differenceKinds(r.differences)).toEqual(["names", "Parent customers or guardians on one side only", "guardians' Parent customers"]);
+  });
+  it("the queue's words: a rename of the customer explains its name, a make-inactive a removed guardian's; nothing explains an open row's inactive one", () => {
+    const rename = fact({ op: "rename", role: "parent", qboId: "11", guardianId: "g-ana", state: "refused", words: "QuickBooks refused it: QuickBooks wouldn't take it." });
+    const off = fact({ op: "deactivate", role: "parent", qboId: "11", guardianId: "g-ana", state: "refused", words: "The portal held it back: this parent has a balance in QuickBooks." });
+    const i = indexQueue([rename, off]);
+    expect([i.rename.get("11"), i.deactivate.get("11"), i.guardianCreate.size]).toEqual([{ state: "refused", words: rename.words }, { state: "refused", words: off.words }, 0]);
+    expect(compare(withAna(), { customers: named("Ana R."), queue: [rename, off] }).differences).toEqual([
+      { kind: "guardian_name", guardianId: "g-ana", who: "Ana Rivera", portal: "Ana Rivera", books: "Ana R.", queue: { state: "refused", words: rename.words } }]);
+    expect(compare(withAna({ open: false }), { queue: [rename, off] }).differences).toEqual([
+      { kind: "guardian_active", guardianId: "g-ana", who: "Ana Rivera", portalOpen: false, queue: { state: "refused", words: off.words } }]);
+    expect(compare(withAna(), { customers: changed("11", { active: false }), queue: [rename, off] }).differences).toEqual([
+      { kind: "guardian_active", guardianId: "g-ana", who: "Ana Rivera", portalOpen: true, queue: null }]);
+    // A rename of another customer explains nothing here.
+    expect(compare(withAna(), { customers: named("Ana R."), queue: [fact({ op: "rename", qboId: "60", guardianId: "g-ana" })] }).differences[0]).toMatchObject({ queue: null });
+  });
+  it("say what staff can do instead of a press, and nothing for any other kind", () => {
+    const name = compare(withAna(), { customers: named("Ana R.") }).differences[0]!;
+    const removed = compare(withAna({ open: false }), { customers: named("Ana R.") }).differences[0]!;
+    const inactive = compare(withAna(), { customers: changed("11", { active: false }) }).differences[0]!;
+    expect(guardianDifferenceNext(name)).toBe("Neither name is taken or sent from this page. Rename their Parent customer in QuickBooks, and this row shows it after the portal's next roster read; or, if the person's name should change, rename them on their page under Parents once nothing for them or their Parent customers is waiting or stuck on Reconciliation. While QuickBooks is connected and the family's customer is active, that asks QuickBooks to rename it too, unless the same rename gives that name to their own Parent customer under another family first.");
+    expect(guardianDifferenceNext(removed)).toBe("Neither is taken or sent from this page. Make their Parent customer inactive in QuickBooks once its balance, owed or a credit, is settled; or, if they are added back under Portal sign-ins, it is theirs again.");
+    expect(guardianDifferenceNext(inactive)).toBe("Neither is taken or sent from this page, and the portal never makes a customer active in the books. If they are still this family's guardian, make it active in QuickBooks; if they aren't, remove them under Portal sign-ins. While it is inactive the portal sends it nothing for them: no rename, and no change of their phone, mailing address or sign-in email.");
+    const others = compare(rivera({ name: "Riveras", guardians: [{ id: "g-sol", customerId: null }] }), { customers: [...changed("10", { active: false }), c("15", "Raul R.", "2", "10")] }).differences;
+    expect(others.map((d) => d.kind)).toEqual(["name", "active", "parent_customers", "guardians_unlinked"]);
+    expect(others.map(guardianDifferenceNext)).toEqual([null, null, null, null]);
   });
 });

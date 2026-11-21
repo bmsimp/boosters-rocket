@@ -13,7 +13,7 @@ import { WORKER_ACTOR } from "@/lib/quickbooks/client";
 import { MONEY_JOB } from "@/lib/money/run-keys";
 import { moneyRows } from "@/lib/money/stored";
 import { getRosterSource } from "@/lib/roster/source";
-import { movedAwayByTheCheck } from "./closing";
+import { checksOwnFlag } from "./closing";
 import { judgeInvoice } from "./rules";
 import { buyoutRecords } from "./standing";
 import { markBuyoutMoneyStale } from "./writes";
@@ -99,9 +99,9 @@ export async function checkBuyoutInvoices(): Promise<BuyoutCheck> {
     if (!row?.readAt || !row.invoices || row.realmId !== source || row.readAt < run.startedAt || (row.staleAt && row.staleAt >= row.readAt)) continue;
     const verdict = judgeInvoice({ invoiceQboId: b.invoiceQboId, customerQboId: b.customerQboId, perStudent }, row.invoices, stillTheFamilys);
     // A flag of this check's own: an invoice it didn't find, or found on another customer, and a student it found no
-    // longer under the family, who is back (stillTheFamilys, or this point isn't reached).
-    const ownFlag = b.flag === "missing" || b.flag === "other_customer"
-      || movedAwayByTheCheck({ state: b.state, flag: b.flag, lastCode: b.lastCode, items: voidsFor.has(b.id) ? [{ op: "invoice_void" }] : [] });
+    // longer under the family, who is back (stillTheFamilys, or this point isn't reached). One rule, checksOwnFlag()
+    // (./closing.ts), which the change of company's mark of a paid one reads too (./company-change.ts).
+    const ownFlag = checksOwnFlag({ state: b.state, flag: b.flag, lastCode: b.lastCode, items: voidsFor.has(b.id) ? [{ op: "invoice_void" }] : [] });
     await db.transaction(async (tx) => {
       if (verdict === "ok" || verdict === "student_moved") {
         // A flag of this check's own that the figures no longer bear out (the invoice was made after the family was read,
@@ -117,8 +117,8 @@ export async function checkBuyoutInvoices(): Promise<BuyoutCheck> {
       }
       if (verdict === "paid") {
         // The figures show it, paid: a flag of this check's own (missing, other_customer, its own student_moved) is borne
-        // out no more. A flag a void or a staff move set (paid_before_void, their student_moved) is the treasurer's to
-        // settle, and stays.
+        // out no more. A flag a void or a staff move set (paid_before_void, void_refused, their student_moved) is the
+        // treasurer's to settle, and stays: closeVerdict() offers its close as paid in full.
         const [done] = await tx.update(buyout).set({ state: "paid", ...(ownFlag ? { flag: null, flaggedAt: null } : {}), updatedAt: new Date() })
           .where(and(eq(buyout.id, b.id), eq(buyout.state, "invoiced"))).returning({ id: buyout.id });
         if (!done) return;

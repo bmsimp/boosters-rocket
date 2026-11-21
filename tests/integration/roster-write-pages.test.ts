@@ -22,6 +22,7 @@ import { addStudentAction, addStudentHereAction, createAction, createAndLinkActi
 import RosterPage from "@/app/staff/(app)/roster/page";
 import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
 import ReconciliationPage from "@/app/staff/(app)/reconciliation/page";
+import AccountingLinksPage from "@/app/staff/(app)/links/page";
 import { resetDb } from "../helpers/db";
 import { seedSignedInParent } from "../helpers/parent";
 import { fznCompany, startQboStub, type QboStub } from "../helpers/qbo-stub";
@@ -636,8 +637,10 @@ describe("a family with no link on the pages", () => {
     expect(made).toContain("Handmade Family");
     expect(made).toContain("Customers with no family");
     expect(made).toContain(`href="/staff/roster/${hand!.id}"`);
-    // The customer is offered there, to bring in.
-    expect(sectionOf(html, "no-family-h")).toContain("Handmade Family");
+    // The customer is listed there, under Customers with no family, on Accounting links since slice M6 (on
+    // Reconciliation before): this test changed only where it reads the section.
+    expect(sectionOf(html, "no-family-h")).toBe("");
+    expect(sectionOf(await renderPage(AccountingLinksPage), "no-family-h")).toContain("Handmade Family");
     // With nothing of the kind, the section isn't drawn.
     await db.delete(writeQueue);
     expect(await renderPage(ReconciliationPage)).not.toContain('id="made-anyway-h"');

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { AFTER_ENDING, BUYOUT_NOTE_PREFIX, CLOSE_WORDS, closeVerdict, EARLIER_WORDS, earlierCompanyLook, HERE_WORDS, MADE_AFTER_WORDS, PAID_AFTER_ENDING_WORDS, type CloseFacts,
-  type CloseItem, type EarlierFacts, type EarlierKind, type LookItem } from "@/lib/buyouts/closing";
+import { AFTER_ENDING, BUYOUT_NOTE_PREFIX, checksOwnFlag, CLOSE_WORDS, closeVerdict, EARLIER_WORDS, earlierCompanyLook, HERE_WORDS, MADE_AFTER_WORDS,
+  PAID_AFTER_ENDING_WORDS, paidWhileToBeVoided, type CloseFacts, type CloseItem, type EarlierFacts, type EarlierKind, type LookItem } from "@/lib/buyouts/closing";
 import type { BuyoutState } from "@/lib/db/schema";
 
 // When staff may close a buy-out (src/lib/buyouts/closing.ts): only when the portal can tell no unpaid invoice of it
@@ -72,6 +72,17 @@ describe("closing a buy-out (v1 spec §11.5)", () => {
     expect(CLOSE_WORDS.paid_in_full).toContain("refund it in QuickBooks");
   });
 
+  it("is offered for a paid one whose void QuickBooks refused: the family paid an invoice that was to be cancelled", () => {
+    // voidKept() leaves it invoiced, flagged void_refused with the fault's code, its void given up on that answer; the
+    // daily check then marks it paid and keeps the flag.
+    expect(why({ state: "paid", flag: "void_refused", lastCode: "fault_6240", items: [create("done", true), voidItem("given_up", true)] })).toBe("close:paid_in_full");
+    expect(why({ state: "paid", flag: "void_refused" })).toBe("close:paid_in_full");
+    // A create given up that QuickBooks made all the same, paid: paid instead, as chosen, with no void ever asked for.
+    expect(why({ state: "paid", flag: "given_up", items: [create("given_up", true)] })).toBe("keep:nothing_to_do");
+    expect(paidWhileToBeVoided("void_refused")).toBe(true);
+    expect(paidWhileToBeVoided("given_up")).toBe(false);
+  });
+
   it("is not offered for a part-paid invoice: the rest is still owed, and is settled in QuickBooks first", () => {
     const v = closeVerdict(facts({ state: "invoiced", flag: "paid_before_void", lastCode: "paid" }));
     expect(v).toMatchObject({ may: false, why: "part_paid" });
@@ -128,7 +139,7 @@ describe("an earlier company's buy-out, for the treasurer (stage 4's slice M7b)"
     expect(kind({ flag: "void_refused", lastCode: "fault_6240", items: [voidKept(true), created()] })).toBe("invoice_stands");
     expect(EARLIER_WORDS.invoice_stands).toContain("waive the requirement");
     expect(EARLIER_WORDS.invoice_stands).toContain("void it there");
-    // It says nothing of whether it was paid: the stored figures may have shown it paid before the clear (slice M7b2's).
+    // It says nothing of whether it was paid: the stored figures may have shown it paid before the clear (one paid after the last read, or one whose void QuickBooks refused: slice M7b2 marks paid instead of ending it any other invoiced one its stored figures show paid).
     expect(EARLIER_WORDS.invoice_stands).not.toContain("unpaid");
   });
 
@@ -183,10 +194,13 @@ describe("an earlier company's buy-out, for the treasurer (stage 4's slice M7b)"
   });
 
   it("a paid one that was to be cancelled may be owed a refund; any other paid one has nothing to settle", () => {
-    for (const flag of ["paid_before_void", "student_moved"] as const) {
-      expect(earlierCompanyLook(earlier({ state: "paid", endReason: null, flag }))).toEqual({ kind: "refund_owed", invoiceQboId: "5001", madeAfter: false, note: null, words: EARLIER_WORDS.refund_owed });
+    // A void refused by QuickBooks among them: the daily check marked it paid and kept the flag.
+    for (const flag of ["paid_before_void", "student_moved", "void_refused"] as const) {
+      expect(earlierCompanyLook(earlier({ state: "paid", endReason: null, flag })), flag).toEqual({ kind: "refund_owed", invoiceQboId: "5001", madeAfter: false, note: null, words: EARLIER_WORDS.refund_owed });
     }
-    for (const flag of [null, "missing", "other_customer", "void_refused", "given_up"] as const) expect(kind({ state: "paid", endReason: null, flag }), String(flag)).toBe("nothing_to_settle");
+    expect(kind({ state: "paid", endReason: null, flag: "void_refused", lastCode: "fault_6240", items: [voidKept(true), created()] })).toBe("refund_owed");
+    // A given-up create QuickBooks made all the same, then paid: paid instead, nothing to settle.
+    for (const flag of [null, "missing", "other_customer", "given_up"] as const) expect(kind({ state: "paid", endReason: null, flag }), String(flag)).toBe("nothing_to_settle");
   });
 
   it("nothing to settle: an ended one with no invoice and no create left unanswered, a refused one, one whose void was done, and one that ended any other way", () => {
@@ -261,7 +275,7 @@ describe("an earlier company's buy-out, for the treasurer (stage 4's slice M7b)"
       // QuickBooks' answer after a change of company ended it (stage 4's slice M8), read only of one it ended.
       const after = state === "voided" && endReason === "earlier_company" ? lastCode : null;
       const expected: EarlierKind = state === "refused" ? "nothing_to_settle"
-        : state === "paid" ? (flag === "paid_before_void" || flag === "student_moved" ? "refund_owed" : "nothing_to_settle")
+        : state === "paid" ? (flag === "paid_before_void" || flag === "student_moved" || flag === "void_refused" ? "refund_owed" : "nothing_to_settle")
           : state === "voided" && endReason !== "earlier_company" ? "nothing_to_settle"
             : known === null ? (after !== AFTER_ENDING.refused && items.some((i) => i.op === "invoice_create" && i.sent && !i.answered) ? "may_be_made" : "nothing_to_settle")
               : after === AFTER_ENDING.voided ? "nothing_to_settle"
@@ -283,5 +297,29 @@ describe("an earlier company's buy-out, for the treasurer (stage 4's slice M7b)"
     expect([...kinds].sort()).toEqual(["invoice_stands", "last_seen_gone", "may_be_made", "nothing_to_settle", "part_paid", "refund_owed", "void_may_have_gone"]);
     // Each kind's words name "the earlier QuickBooks company", never a company of its own.
     for (const words of Object.values(EARLIER_WORDS)) expect(words).toContain("earlier QuickBooks company");
+  });
+});
+
+// Which flags finding an invoiced buy-out paid takes off (checksOwnFlag()): the daily check's own, never a void's or a
+// move's. The daily check and the change of company's mark (stage 4's slice M7b2) both read it.
+describe("the daily check's own flags, which a paid finding takes off", () => {
+  const own = (f: Partial<CloseFacts>) => { const x = facts(f); return checksOwnFlag({ state: x.state, flag: x.flag, lastCode: x.lastCode, items: x.items }); };
+
+  it("are an invoice the check didn't find or found on another customer, and a student_moved it set by itself", () => {
+    expect(own({ flag: "missing" })).toBe(true);
+    expect(own({ flag: "other_customer" })).toBe(true);
+    expect(own({ flag: "student_moved" })).toBe(true);
+  });
+
+  it("are never a void's or a move's: a student_moved beside a void item or a void's code, paid_before_void, void_refused, given_up", () => {
+    expect(own({ flag: "student_moved", items: [create("done", true), voidItem("done", true)] })).toBe(false);
+    expect(own({ flag: "student_moved", lastCode: "paid" })).toBe(false);
+    expect(own({ flag: "paid_before_void", lastCode: "paid" })).toBe(false);
+    expect(own({ flag: "void_refused", lastCode: "fault_6240" })).toBe(false);
+    expect(own({ flag: "given_up" })).toBe(false);
+  });
+
+  it("is nothing to take off when there is no flag", () => {
+    expect(own({ flag: null })).toBe(false);
   });
 });

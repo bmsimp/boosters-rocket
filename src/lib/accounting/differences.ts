@@ -2,7 +2,9 @@
 // section 5, "Differences"): for a family whose link stands, where the portal's own records and the portal's copy of
 // the books disagree, each with both values. Only the structural differences are here: names, whether each record is
 // active, the family a student is under, and students and Parent customers on one side only. Phone, mailing address
-// and email wait for a later slice. Worked out at each view from what the screen's one reader already reads
+// and email wait for a later slice. Since slice M3c3 a guardian's own Parent customer is compared with the guardian
+// too: its name with the person's, and whether it is active with whether they are the family's guardian. Worked out at
+// each view from what the screen's one reader already reads
 // (loadAccountingLinks(), ./mapping.ts) and stored nowhere. Pure: it reads nothing, and every input is passed in. It
 // settles nothing either: no difference here is sent, taken or promised to be.
 import type { AppStudentId } from "@/lib/families/ids";
@@ -35,7 +37,11 @@ export type QueueFact = QueueNote & { op: string; role: string | null; qboId: st
  * - `student_unlinked`: an active student record of the family with no link of its own;
  * - `parent_customers`: how many active Parent customers under the family's customer no guardian row is linked to;
  * - `guardians_unlinked`: how many of the family's open guardian rows have no link, with the queue's words for those a
- *   Parent customer create is on the queue for, as counts.
+ *   Parent customer create is on the queue for, as counts;
+ * - `guardian_name` (slice M3c3): an open guardian row's own Parent customer, active in the books, whose name (`books`)
+ *   isn't the person's (`portal`, and `who`);
+ * - `guardian_active` (slice M3c3): a guardian's own Parent customer inactive in the books while they are the family's
+ *   guardian (`portalOpen`), or active while they are removed from the family.
  * `of` names the record: the family (layered books), the member (flat books) or a student, by its record's id (`studentId`). `queue`: the change on the
  * write queue that explains it, if any (still a difference: the values differ until the books or the portal change).
  */
@@ -47,7 +53,9 @@ export type Difference =
   | { kind: "student_elsewhere"; books: string; studentId: AppStudentId; portal: StudentElsewhere; queue: QueueNote | null }
   | { kind: "student_unlinked"; who: string; studentId: AppStudentId; queue: QueueNote | null }
   | { kind: "parent_customers"; count: number }
-  | { kind: "guardians_unlinked"; count: number; queue: { note: QueueNote; count: number }[] };
+  | { kind: "guardians_unlinked"; count: number; queue: { note: QueueNote; count: number }[] }
+  | { kind: "guardian_name"; guardianId: string; who: string; portal: string; books: string; queue: QueueNote | null }
+  | { kind: "guardian_active"; guardianId: string; who: string; portalOpen: boolean; queue: QueueNote | null };
 /**
  * Whose `name` or `active` difference it is: the family's or the member's (the row's own record), or a student's, with
  * the student record's id (stage 4's slice M4a: Take QuickBooks' into the app names the record it changes).
@@ -75,7 +83,22 @@ export type FamilyToCompare = {
   students: readonly { id: AppStudentId; name: string | null; active: boolean; customerId: string | null }[];
   /** Its open guardian rows, by id, with their own link's customer (null: none). */
   guardians: readonly { id: string; customerId: string | null }[];
+  /**
+   * Since slice M3c3, its guardian rows with a link of the records' company, to compare with their own Parent customers,
+   * in the order the differences list them: the open rows, then the closed ones not closed by a change of company, each
+   * by name then id. None given, none compared.
+   */
+  ownParents?: readonly GuardianToCompare[];
 };
+
+/**
+ * A guardian row of the family with a link of the records' company, as differencesOf() compares it with its own Parent
+ * customer (slice M3c3): the person's name (`who`), whether the row is open (`open`: a guardian of the family) or closed
+ * (removed from it, but not by a change of company), its link's customer, whether no other open row is linked to that
+ * customer (`alone`), and, for an open row, ownNamedElsewhere()'s rule (src/lib/roster/writes.ts): another open row of
+ * the person's is linked to an active customer of the parent type with their name by nameKey() (`namedElsewhere`).
+ */
+export type GuardianToCompare = { guardianId: string; who: string; open: boolean; customerId: string; alone: boolean; namedElsewhere: boolean };
 
 /**
  * Which queue item explains which difference: the first in the order given (loadOpenWrites()'s, newest first) of each
@@ -117,6 +140,15 @@ export function indexQueue(items: readonly QueueFact[]) {
  * names are taken, not this one). A record with no name differs from any name. Nothing of students (a name, whether
  * active, a place, one on either side only) is compared unless the shape has a student type, in layered books; nothing
  * of Parent customers or guardians unless it has a parent type.
+ *
+ * A guardian with their own Parent customer (slice M3c3, `ownParents`): a customer the cache holds, of the parent type,
+ * directly under the family's customer, that no other open row is linked to (ownParentCustomer()'s rule in
+ * src/lib/roster/writes.ts, M3c's `own` standing). An open row's: inactive in the books, `guardian_active` (no name is
+ * compared, as nothing is renamed there); active, `guardian_name` where its name isn't the person's by the same name
+ * rule, but not while another open row of the person's holds their name (`namedElsewhere`: QuickBooks takes a name once,
+ * so this customer could never have it). A closed row's, active in the books: `guardian_active`, removed in the portal,
+ * with a make-inactive of it as its note. A shared, elsewhere or gone link has its own words in the row's opening, and
+ * is not compared here. After every other kind, in the order given.
  */
 export function differencesOf(o: { shape: MembershipShape; roster: Roster; customers: readonly Cust[]; studentRecords: ReadonlyMap<string, LinkedStudent>;
   guardianLinked: ReadonlySet<string>; queue: readonly QueueFact[] }): (f: FamilyToCompare) => FamilyDifferences {
@@ -125,7 +157,8 @@ export function differencesOf(o: { shape: MembershipShape; roster: Roster; custo
   const placeOf = placesOf(o.shape, o.roster, o.customers);
   const q = indexQueue(o.queue);
   const studentType = o.shape.kind === "layered" && o.shape.studentTypeId !== null;
-  const parentType = o.shape.kind === "layered" && o.shape.parentTypeId !== null;
+  const parentTypeId = o.shape.kind === "layered" ? o.shape.parentTypeId : null;
+  const parentType = parentTypeId !== null;
   const linked = (id: string) => o.studentRecords.has(id) || o.guardianLinked.has(id);
   return (f) => {
     const customer = byId.get(f.customerId);
@@ -185,6 +218,16 @@ export function differencesOf(o: { shape: MembershipShape; roster: Roster; custo
         out.push({ kind: "guardians_unlinked", count: rows.length, queue: [...notes.values()] });
       }
     }
+    for (const g of parentType ? f.ownParents ?? [] : []) {
+      const c = byId.get(g.customerId);
+      if (c === undefined || c.typeQboId !== parentTypeId || c.parentQboId !== f.customerId || !g.alone) continue;
+      if (!g.open) {
+        if (c.active) out.push({ kind: "guardian_active", guardianId: g.guardianId, who: g.who, portalOpen: false, queue: q.deactivate.get(c.qboId) ?? null });
+        continue;
+      }
+      if (!c.active) out.push({ kind: "guardian_active", guardianId: g.guardianId, who: g.who, portalOpen: true, queue: null });
+      else if (!g.namedElsewhere && !sameName(g.who, c.displayName)) out.push({ kind: "guardian_name", guardianId: g.guardianId, who: g.who, portal: g.who, books: c.displayName, queue: q.rename.get(c.qboId) ?? null });
+    }
     return { differences: out, inactiveUnrecorded };
   };
 }
@@ -215,14 +258,40 @@ export function differenceWords(d: Difference): { what: string; portal: string; 
       books: plural(d.count, "active Parent customer under this family", "active Parent customers under this family") };
     case "guardians_unlinked": return { what: "Guardians in the portal only", portal: plural(d.count, "guardian with no Parent customer of their own", "guardians with no Parent customer of their own"),
       books: "No Parent customer linked to them" };
+    case "guardian_name": return { what: `${d.who}'s name on their Parent customer`, portal: quoted(d.portal), books: quoted(d.books) };
+    case "guardian_active": return { what: `Whether ${d.who} is this family's guardian`, portal: d.portalOpen ? "A guardian of this family" : "Removed from this family",
+      books: d.portalOpen ? "Their Parent customer is inactive" : "Their Parent customer is active" };
   }
 }
+
+/**
+ * What staff can do about a guardian's difference (slice M3c3), in one sentence drawn in place of a press: neither
+ * value is taken or sent from the screen. Only what the code makes so: a person's rename is refused while a change of
+ * one of their rows' Parent customers is waiting or stuck (renamePerson(), guardianChangeWaiting()), and otherwise asks
+ * QuickBooks to rename their own active Parent customer only while QuickBooks is connected to the roster's company and
+ * the family's customer is active (queueForGuardian()'s rename, guardianBooks(), which gives a name to one record of
+ * theirs only); a guardian added back has their own Parent customer again (queueForGuardian()'s grant, `has_one`); and nothing
+ * the portal sends for a guardian goes to a customer the books have inactive (queueForGuardian(), and the targets of
+ * the details and sign-in email queues, src/lib/parents/contact-queue.ts), which it never makes active (open question
+ * 12). Null for any other kind.
+ */
+export function guardianDifferenceNext(d: Difference): string | null {
+  if (d.kind === "guardian_name") return GUARDIAN_NEXT.name;
+  if (d.kind === "guardian_active") return d.portalOpen ? GUARDIAN_NEXT.inactive : GUARDIAN_NEXT.removed;
+  return null;
+}
+const GUARDIAN_NEXT = {
+  name: "Neither name is taken or sent from this page. Rename their Parent customer in QuickBooks, and this row shows it after the portal's next roster read; or, if the person's name should change, rename them on their page under Parents once nothing for them or their Parent customers is waiting or stuck on Reconciliation. While QuickBooks is connected and the family's customer is active, that asks QuickBooks to rename it too, unless the same rename gives that name to their own Parent customer under another family first.",
+  removed: "Neither is taken or sent from this page. Make their Parent customer inactive in QuickBooks once its balance, owed or a credit, is settled; or, if they are added back under Portal sign-ins, it is theirs again.",
+  inactive: "Neither is taken or sent from this page, and the portal never makes a customer active in the books. If they are still this family's guardian, make it active in QuickBooks; if they aren't, remove them under Portal sign-ins. While it is inactive the portal sends it nothing for them: no rename, and no change of their phone, mailing address or sign-in email.",
+} as const;
 
 /** The kinds a row's differences are of, in words, each once, in a fixed order: for the row's status line. */
 export function differenceKinds(ds: readonly Difference[]): string[] {
   const groups: [string, Difference["kind"][]][] = [
     ["names", ["name"]], ["whether a record is active", ["active"]], ["where a student is", ["place", "student_elsewhere"]],
     ["students on one side only", ["student_customer", "student_unlinked"]], ["Parent customers or guardians on one side only", ["parent_customers", "guardians_unlinked"]],
+    ["guardians' Parent customers", ["guardian_name", "guardian_active"]],
   ];
   return groups.filter(([, kinds]) => ds.some((d) => kinds.includes(d.kind))).map(([words]) => words);
 }

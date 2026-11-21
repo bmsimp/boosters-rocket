@@ -21,6 +21,9 @@ export function LinkAnswers({ children }: { children: ReactNode }) {
   return <Answers.Provider value={{ outcomes, add }}>{children}</Answers.Provider>;
 }
 
+/** How a press of its own (the import's, slice M6) adds its answer to the ones above the list. */
+export const useLinkAnswer = () => useContext(Answers).add;
+
 /** The answers so far, newest first. */
 export function LinkAnswersShown() {
   const { outcomes } = useContext(Answers);
@@ -65,6 +68,30 @@ export function GuardianLinkPress({ name, who, about, options, suggested }: { na
           {pending ? "Linking…" : `Link ${who} to this Parent customer`}<span className="visually-hidden">: {about}</span>
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Give up, for a change kept in the portal (slice M5c): why (kept in the audit log, as Reconciliation's TextAction
+ * asks) and the press, bound to Reconciliation's own action with the item's id. A give-up re-reads the page and the
+ * kept change leaves its row, taking this press with it, so its answer is kept above the list with every other press's.
+ */
+export function LinkGiveUp({ about, act }: { about: string; act: (note: string) => Promise<Done> }) {
+  const { add } = useContext(Answers);
+  const [text, setText] = useState("");
+  const [pending, start] = useTransition();
+  const press = () => {
+    if (pending) return;
+    start(async () => { const r = await safely(() => act(text), failed); if (r.ok) setText(""); add(r.ok ? r : { ok: false, errors: r.errors.map((e) => `${about}: ${e}`) }); });
+  };
+  return (
+    <div className="stack">
+      <label className="field"><span>Why? (kept in the audit log)</span>
+        <textarea rows={2} maxLength={500} value={text} onChange={(e) => setText(e.target.value)} /></label>
+      <button type="button" className="btn btn-line" aria-disabled={pending} onClick={press}>
+        {pending ? "Giving up…" : "Give up"}<span className="visually-hidden">: {about}</span>
+      </button>
     </div>
   );
 }

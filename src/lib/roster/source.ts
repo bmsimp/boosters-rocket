@@ -91,7 +91,8 @@ export const GIVEN_UP_FOR_COMPANY_NOTE = "Given up: the club connected a differe
  * keeps it all and answers false. The caller owns the transaction and holds ROSTER_LOCK.
  *
  * Ended: every unpaid live buy-out, `earlier_company`, nothing sent to QuickBooks, its invoice left in the old company's
- * books for the treasurer (endBuyoutsOfEarlierCompany(), src/lib/buyouts/company-change.ts); a paid one keeps counting.
+ * books for the treasurer (endBuyoutsOfEarlierCompany(), src/lib/buyouts/company-change.ts); a paid one keeps counting,
+ * and so does an invoiced one its family's stored figures show paid, which is marked paid first (slice M7b2).
  * Cleared, each naming the old company's customers, products or invoices: every link, moved into the link history as
  * `company_changed` with every "Left unlinked" mark (endLinksOfEarlierCompany(), src/lib/families/company-change.ts);
  * what each family was last seen to owe (`family_money`: another company's invoices are never shown, and a row read
@@ -109,7 +110,7 @@ export const GIVEN_UP_FOR_COMPANY_NOTE = "Given up: the club connected a differe
  * The order: no foreign key orders it any more, as nothing the app's records are named by is deleted, but the buy-outs
  * end before the queue is given up. Their update takes each row's lock, so a void queued at that moment for an
  * invoiced one (queueVoid(), which holds no roster lock) either committed first, and its buy-out ends here and its
- * void is given up next, or waits, then finds the buy-out ended and queues nothing; given up first, a void queued
+ * void is given up next, or waits, then finds the buy-out ended (or, for one marked paid first, paid) and queues nothing; given up first, a void queued
  * after it would be left waiting. The queue is given up in one statement; the links end next, then QuickBooks' copies,
  * and the roster's company last, with the audit row.
  *

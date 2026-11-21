@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
-import { asParent, asStaff, renderPage, revalidatedPaths } from "../helpers/signed-in";
+import { asParent, asStaff, pageOutcome, renderPage, revalidatedPaths } from "../helpers/signed-in";
 
 // Every request goes to the QuickBooks stub, never Intuit.
 const stubBase = vi.hoisted(() => ({ url: "" }));
@@ -23,7 +23,8 @@ import { askRosterWrite } from "@/lib/roster/writes";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { ROSTER_LOCK, SHAPE_KEY } from "@/lib/roster/shape";
 import { SOURCE_KEY } from "@/lib/roster/source";
-import { familyFromCustomerAction } from "@/app/staff/(app)/reconciliation/family-actions";
+import { familyFromCustomerAction } from "@/app/staff/(app)/links/actions";
+import AccountingLinksPage from "@/app/staff/(app)/links/page";
 import ReconciliationPage from "@/app/staff/(app)/reconciliation/page";
 import { resetDb, seedParent, untilALockIsAwaited } from "../helpers/db";
 import { seedSignedInParent } from "../helpers/parent";
@@ -35,9 +36,10 @@ import { stubInvoice } from "../helpers/money";
 
 /**
  * Customers with no family (stage 3's slice 10 of the app-owned families spec, open question 19): since slice 9c a
- * family customer added in QuickBooks gets no family in the portal, so Reconciliation lists the customers the shape
- * calls a family that no family is linked to, and "Create a family from this" makes one, with its students, each linked
- * to its customer, confirmed by the staff member who asked (src/lib/roster/no-family.ts). The company is fznCompany()'s
+ * family customer added in QuickBooks gets no family in the portal, so the customers the shape calls a family that no
+ * family is linked to are listed (on Reconciliation until stage 4's slice M6, on Accounting links since: the page cases
+ * below moved with them), and "Create a family from this" makes one, with its students, each linked to its customer,
+ * confirmed by the staff member who asked (src/lib/roster/no-family.ts). The company is fznCompany()'s
  * (tests/helpers/qbo-stub.ts): Family 1, Parent 2, Student 3, School 4; the Rivera (10) and Chen (20) families have
  * their records. Customers added after it are read by a roster read, which makes no record, as in the portal.
  */
@@ -334,7 +336,7 @@ describe("Create a family from this", () => {
   });
 });
 
-describe("the action and the Reconciliation section", () => {
+describe("the action and the section on Accounting links (on Reconciliation until slice M6)", () => {
   const NOT_FROM_PAGE = { ok: false, errors: [NO_FAMILY_COPY.notFromPage] };
   /** The section from its heading to the end of its box: a count or a row read from anywhere else isn't its. */
   const section = (html: string) => {
@@ -374,13 +376,21 @@ describe("the action and the Reconciliation section", () => {
     expect(revalidatedPaths()).toContain("/");
   });
 
-  it("shows the list only to staff who may link families to accounting, the name as text, and what pressing makes", async () => {
+  it("shows the list only to staff who may link families to accounting, the name as text, and what pressing makes; Reconciliation says how many and links to it", async () => {
     await connectRoster(stub);
     await addInQuickBooks(...PATELS, qc("75", "<b>Bold</b> Family", "1"));
     asStaff(await staffWith("reader@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
-    expect(section(await renderPage(ReconciliationPage))).toBeNull();
+    const readers = await renderPage(ReconciliationPage);
+    expect(section(readers)).toBeNull();
+    expect(readers).not.toContain("no family in the portal: see");
+    expect(await pageOutcome(AccountingLinksPage)).toEqual({ redirect: "/refused" });
     asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]));
-    const html = section(await renderPage(ReconciliationPage))!;
+    // Reconciliation lists them no more: it says how many, with a link to them on Accounting links.
+    const recon = await renderPage(ReconciliationPage);
+    expect(section(recon)).toBeNull();
+    expect(recon).toContain("2 customers the books list as a family have no family in the portal: see them on Accounting links.");
+    expect(recon).toContain('href="/staff/links#no-family-h"');
+    const html = section(await renderPage(AccountingLinksPage))!;
     expect(html).toContain("Customers with no family");
     expect(html).toContain("It makes no guardian and gives nobody a sign-in: someone who may change families adds its guardians on the family&#x27;s page, under Families.");
     expect(tableRows(html)).toHaveLength(2);
@@ -393,14 +403,15 @@ describe("the action and the Reconciliation section", () => {
     expect(rowNamed(html, "<b>Bold</b> Family")).toEqual(["<b>Bold</b> Family", "None", "A family, linked to this customer.", "Create a family from this: <b>Bold</b> Family"]);
   });
 
-  it("says so when every family customer has a family, and why when nothing can be listed", async () => {
+  it("says so when every family customer has a family, and why when nothing can be listed; Reconciliation says nothing of them then", async () => {
     await connectRoster(stub);
     asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]));
-    let html = section(await renderPage(ReconciliationPage))!;
-    expect(html).toContain("Nothing: every active family customer QuickBooks has at the top level, under no other customer, is linked to a family in the portal, or is about to be by a change on this page.");
+    let html = section(await renderPage(AccountingLinksPage))!;
+    expect(html).toContain("Nothing: every active family customer the books have at the top level, under no other customer, is linked to a family in the portal, or is about to be by a change on Reconciliation.");
     expect(tableRows(html)).toEqual([]);
+    expect(await renderPage(ReconciliationPage)).not.toContain("no family in the portal: see");
     await db.delete(setting).where(eq(setting.key, SHAPE_KEY));
-    html = section(await renderPage(ReconciliationPage))!;
+    html = section(await renderPage(AccountingLinksPage))!;
     expect(html).toContain("the portal can&#x27;t tell which customers are families");
   });
 });
@@ -471,7 +482,7 @@ describe("a customer meant for a family the portal has (stage 4's slice M3a2)", 
     const staff = await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
     // The page: Patel Family offered, no row aiming at it.
     asStaff(staff);
-    expect(rowNamed(section(await renderPage(ReconciliationPage), "no-family-h"), "Patel Family")![3]).toBe("Create a family from this: Patel Family");
+    expect(rowNamed(section(await renderPage(AccountingLinksPage), "no-family-h"), "Patel Family")![3]).toBe("Create a family from this: Patel Family");
     // The press waits for the roster lock; meanwhile Asha's address joins the Patels (a write that takes no roster lock).
     let release = () => {};
     let held: Promise<void> = Promise.resolve();
@@ -492,7 +503,7 @@ describe("a customer meant for a family the portal has (stage 4's slice M3a2)", 
     expect(await audits("accounting.family.from_customer")).toEqual([]);
   });
 
-  it("shows the aimed customer's row with words naming the family and a link to Accounting links instead of the button, the books' text as text, and the action reads the page again on a refusal", async () => {
+  it("shows the aimed customer's row with words naming the family and a link within the page instead of the button, the books' text as text, and the action reads the page again on a refusal", async () => {
     await connectRoster(stub);
     await addInQuickBooks(qc("70", "<b>Patel</b> Family", "1", mail("asha@example.com")), qc("75", "Okafor Family", "1", mail("ike@example.com")),
       qc("76", "Okafor Household", "1", mail("ada@example.com")), qc("90", "Quiet Family", "1"), qc("95", "Plain Family", "1"));
@@ -505,28 +516,28 @@ describe("a customer meant for a family the portal has (stage 4's slice M3a2)", 
     await seedQueued({ op: "create", role: "family", name: "Quiet Family", typeQboId: "1", familyQboId: null, email: null }, { familyId: quiets, sent: true, state: "given_up", lastTriedAt: new Date() });
     asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]));
     const html = await renderPage(ReconciliationPage);
-    const list = section(html, "no-family-h");
-    expect(rowNamed(list, "<b>Patel</b> Family")![3]).toBe("Accounting links suggests it for The Patels, a family the portal has already, so it isn't made a family here. Link it on Accounting links: <b>Patel</b> Family");
+    const list = section(await renderPage(AccountingLinksPage), "no-family-h");
+    expect(rowNamed(list, "<b>Patel</b> Family")![3]).toBe("This page suggests it for The Patels, a family the portal has already, so it isn't made a family here. Link it in the Suggested rows: <b>Patel</b> Family");
     // Its "What it makes" cell says it makes nothing here, never what the press it isn't offered would make.
-    expect(rowNamed(list, "<b>Patel</b> Family")![2]).toBe("Nothing here: it is linked to a family on Accounting links.");
+    expect(rowNamed(list, "<b>Patel</b> Family")![2]).toBe("Nothing here: it is linked to a family on this page.");
     expect(rowNamed(list, "Plain Family")![2]).toBe("A family, linked to this customer.");
     expect(list).toContain('href="/staff/links?status=suggested"');
     expect(list).toContain("&lt;b&gt;Patel&lt;/b&gt; Family");
     expect(list).not.toContain("<b>Patel</b>");
-    expect(rowNamed(list, "Okafor Household")![3]).toBe("Accounting links lists it as a possible customer of The Okafors, a family the portal has already, so it isn't made a family here. Look at it for that family on Accounting links: Okafor Household");
+    expect(rowNamed(list, "Okafor Household")![3]).toBe("This page lists it as a possible customer of The Okafors, a family the portal has already, so it isn't made a family here. Look at it for that family: Okafor Household");
     expect(list).toContain(`href="/staff/links?pick=${String(okafors)}&amp;customer=76#links-pick-h"`);
-    expect(rowNamed(list, "Quiet Family")![3]).toBe("The portal saved The Quiets first, and QuickBooks made this customer for it before making it was given up, so it isn't made a family here. Pick it for that family on Accounting links: Quiet Family");
+    expect(rowNamed(list, "Quiet Family")![3]).toBe("The portal saved The Quiets first, and QuickBooks made this customer for it before making it was given up, so it isn't made a family here. Pick it for that family: Quiet Family");
     expect(list).toContain(`href="/staff/links?pick=${String(quiets)}&amp;customer=90#links-pick-h"`);
     expect(rowNamed(list, "Plain Family")![3]).toBe("Create a family from this: Plain Family");
     expect(list).not.toContain("nothing can link the two yet");
-    expect(list).toContain("isn&#x27;t made a family here: its row names that family and links to Accounting links, where the two are linked.");
+    expect(list).toContain("isn&#x27;t made a family here: its row names that family and says where the two are linked.");
     // The given-up create's own section points at picking it for the family saved first, with a link to that step.
     const madeAnyway = section(html, "made-anyway-h").replaceAll("<!-- -->", "");
     expect(madeAnyway).toContain("It isn&#x27;t offered to bring in under Customers with no family: if it is the family the portal saved first, pick it for that family on Accounting links");
     expect(madeAnyway).toContain(`href="/staff/links?pick=${String(quiets)}&amp;customer=90#links-pick-h"`);
-    // The action refuses as the library does, and asks Reconciliation to be read again.
+    // The action refuses as the library does, and asks Accounting links to be read again.
     expect(await familyFromCustomerAction("70")).toEqual({ ok: false, errors: [NO_FAMILY_COPY.suggestedFor(["The Patels"])] });
-    expect(revalidatedPaths()).toContain("/staff/reconciliation");
+    expect(revalidatedPaths()).toContain("/staff/links");
     expect(await familyLinksOf("70")).toEqual([]);
   });
 
@@ -544,10 +555,10 @@ describe("a customer meant for a family the portal has (stage 4's slice M3a2)", 
       + " Accounting links suggests another customer for that family: confirm that one there if it is the family's, or, if this one is, leave the family unlinked there first, then pick this one for it.");
     asStaff(linker);
     const html = await renderPage(ReconciliationPage);
-    const list = section(html, "no-family-h");
+    const list = section(await renderPage(AccountingLinksPage), "no-family-h");
     expect(rowNamed(list, "Quiet Family")![3]).toBe("The portal saved The Quiets first, and QuickBooks made this customer for it before making it was given up, so it isn't made a family here."
-      + " Accounting links suggests another customer for that family: confirm that one there if it is the family's, or, if this one is, leave the family unlinked there first, then pick this one for it."
-      + " See that family's row on Accounting links: Quiet Family");
+      + " This page suggests another customer for that family: confirm that one if it is the family's, or, if this one is, leave the family unlinked first, then pick this one for it."
+      + " See that family's row: Quiet Family");
     expect(list).not.toContain(`pick=${String(quiets)}`);
     const madeAnyway = section(html, "made-anyway-h").replaceAll("<!-- -->", "").replaceAll("&#x27;", "'");
     expect(madeAnyway).toContain("It isn't offered to bring in under Customers with no family: Accounting links suggests another customer for the family the portal saved first."
@@ -558,7 +569,7 @@ describe("a customer meant for a family the portal has (stage 4's slice M3a2)", 
     expect(await leaveUnlinked(String(quiets), tag, asLinker(linker))).toMatchObject({ ok: true });
     expect(await familyFromCustomer("90", asLinker(linker), customerAimedAt)).toEqual({ ok: false, errors: [NO_FAMILY_COPY.givenUpFor("The Quiets", true)] });
     const after = await renderPage(ReconciliationPage);
-    expect(rowNamed(section(after, "no-family-h"), "Quiet Family")![3]).toBe("The portal saved The Quiets first, and QuickBooks made this customer for it before making it was given up, so it isn't made a family here. Pick it for that family on Accounting links: Quiet Family");
+    expect(rowNamed(section(await renderPage(AccountingLinksPage), "no-family-h"), "Quiet Family")![3]).toBe("The portal saved The Quiets first, and QuickBooks made this customer for it before making it was given up, so it isn't made a family here. Pick it for that family: Quiet Family");
     expect(section(after, "made-anyway-h")).toContain(`href="/staff/links?pick=${String(quiets)}&amp;customer=90#links-pick-h"`);
     expect(await familyLinksOf("90")).toEqual([]);
   });

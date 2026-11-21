@@ -1,8 +1,10 @@
 // The import of the app's families and students from the roster cache, with their links: staff code only, never
 // imported by a parent page (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts). It touches no guardian row.
-// Its one caller under src/ is "Create a family from this" (src/lib/roster/no-family.ts), narrowed to one family
-// customer (`one`); the tests' helpers run it whole after they write the cache (syncAppRecords(),
-// tests/helpers/app-records.ts), and a whole run makes the records migration 0023's fill made (app-records-fill.test.ts).
+// Its callers under src/ are "Create a family from this" (src/lib/roster/no-family.ts) and, since stage 4's slice M6,
+// the reviewed import's press (src/lib/accounting/import-writes.ts), once per family it makes, each narrowed to one
+// family customer (`one`); nothing under src/ runs it whole. The tests' helpers run it whole after they write the cache
+// (syncAppRecords(), tests/helpers/app-records.ts), and a whole run makes the records migration 0023's fill made
+// (app-records-fill.test.ts).
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { Tx } from "@/lib/db/client";
@@ -28,7 +30,8 @@ export class AppRecordsFailed extends Error {}
 const inChunks = async <T>(rows: T[], f: (chunk: T[]) => Promise<unknown>) => { for (let i = 0; i < rows.length; i += CHUNK) await f(rows.slice(i, i + CHUNK)); };
 
 /**
- * One family customer to import alone, by a staff member who confirmed it ("Create a family from this"): the plan is
+ * One family customer to import alone, by a staff member who confirmed it ("Create a family from this", or the reviewed
+ * import's press for each family it makes): the plan is
  * narrowed to that customer's family record and its students' (planForOneFamily()), and each link made is `confirmed`
  * by `linkedBy` (a `staff_user.id`).
  */

@@ -27,14 +27,17 @@ import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 import { seedEmailChange } from "../helpers/email-change";
 import { identityNow, seedTwoFamilies } from "../helpers/parent";
 import { holdLink, mintLink, seedCode, seedDevice, seedPassword } from "../helpers/signin-links";
+import { passkeyRows, seedPasskey } from "../helpers/passkey";
+import { authenticatorRows, backupCodeRows, seedAuthenticator, seedBackupCodes } from "../helpers/authenticator";
 
 /**
  * What a change of company does to sign-ins (section 3 of the app-owned families spec, Appendix B, open question 16):
  * nothing. Since stage 4's slice M7a the clear (clearRosterOfOtherCompanyLocked(), src/lib/roster/source.ts) keeps every
  * membership open in its family, every session, device, code and set-up or reset link, every welcome, the sign-in
- * switches and every change of sign-in address. Until then it closed every link, signed everyone out and switched
- * sign-ins off, and this file proved that; it now proves the opposite. Most of these tests call the clear directly; since
- * stage 4's slice M8 the refresh's backstop and a real switch through the connect are proved here too.
+ * switches and every change of sign-in address, and every second factor (passkey, authenticator app, backup codes). Until
+ * then it closed every link, signed everyone out and switched sign-ins off, and this file proved that; it now proves the
+ * opposite. Most of these tests call the clear directly; since stage 4's slice M8 the refresh's backstop and a real
+ * switch through the connect are proved here too.
  */
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -110,6 +113,29 @@ describe("connecting a different QuickBooks company touches no sign-in", () => {
     expect(await signinRows()).toEqual(before);
     expect(await audits("parent.access.cleared")).toEqual([]);
     expect(await audits("roster.cleared")).toHaveLength(1);
+  });
+
+  it("keeps a parent's passkey, authenticator app and backup codes, so a second factor still lets them in", async () => {
+    const [ana] = await db.select().from(parent).where(eq(parent.email, "ana@example.com"));
+    const [mei] = await db.select().from(parent).where(eq(parent.email, "mei@example.com"));
+    await seedPasskey(ana!.id);
+    await seedAuthenticator(ana!.id, { lastUsedStep: 1234 });
+    await seedBackupCodes(ana!.id);
+    // A set-up of an app never finished, beside Mei's own passkey: kept too.
+    await seedAuthenticator(mei!.id, { confirmed: false });
+    await seedPasskey(mei!.id);
+    const factors = async () => ({
+      passkeys: [...await passkeyRows(ana!.id), ...await passkeyRows(mei!.id)],
+      apps: [...await authenticatorRows(ana!.id), ...await authenticatorRows(mei!.id)],
+      backupCodes: await backupCodeRows(ana!.id),
+    });
+    const before = await factors();
+    expect([before.passkeys.length, before.apps.length, before.backupCodes.length]).toEqual([2, 2, 10]);
+    const signinsBefore = await signinRows();
+
+    expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
+    expect(await factors()).toEqual(before);
+    expect(await signinRows()).toEqual(signinsBefore);
   });
 
   it("writes no snapshot of the old company, at a first change or a second", async () => {

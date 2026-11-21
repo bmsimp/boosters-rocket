@@ -223,6 +223,15 @@ What the page can't do is walk the portal's own screens. Do these in the sandbox
     is made, that nothing was sent to QuickBooks; it is listed as not linked, QuickBooks doesn't have it, and its
     guardian can sign in to it. After **Create in QuickBooks and link**, QuickBooks has the family once with the
     student under it, and both rows say linked. **If not:** note what each page said and what QuickBooks shows.
+14. **The reviewed import.** In the sandbox, add a family customer with a student and two Parent customers under it,
+    each with an email address you can read. With welcome emails on (Settings, Parent sign-ins), as an Admin open
+    **Accounting links**, under **Customers with no family** press **Propose families from the books**, untick every
+    family but that one, read the review against the books, and press **Make these families**.
+    **Pass:** the review names the family, its student and both parents as the books have them, with their addresses,
+    and says nothing is sent to QuickBooks; after the press the family is under **Families**, linked, with its student
+    and both guardians, each guardian linked to their Parent customer on **Accounting links**; QuickBooks shows no
+    change; within a few minutes each parent's mailbox has a welcome whose link sets up their sign-in. **If not:** note
+    what the review and the answer said, and what QuickBooks and the mailboxes show.
 
 ## 3. Real phones
 
@@ -619,14 +628,15 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    proof-of-concept host stays on the sandbox; the club's installation is a fresh one ([first install](first-install.md)).
    **Pass:** Health says QuickBooks is "Connected" to the club's company, with no word of a sandbox; Roster's counts
    line has the counts QuickBooks has. A fresh installation lists no families yet: a read of QuickBooks brings no
-   customer into the portal's own families by itself. On **Reconciliation**, **Customers with no family** lists the
+   customer into the portal's own families by itself. On **Accounting links**, **Customers with no family** lists the
    active family customers of the real books at the top level (under no other customer); a family that is inactive in
    QuickBooks, or sits under another customer there, isn't offered, so make it active, or move it to the top level, in
-   QuickBooks first; **Create a family from this** brings each in, with its students, linked to
-   their customers. Bring in the pilot families this way, then add their guardians on each family's page, and check
-   each family's page shows its students. Making a family reads none of its money: on **Balances** press **Read every
-   family now** (or wait for the next daily read), then check the Balances page shows each pilot family's money. The
-   reviewed import of every family at once comes with stage 4 of the roadmap.
+   QuickBooks first. **Propose families from the books** proposes each, with its students and guardians, up to 25 at a
+   time: untick all but the pilot families, read what it proposes for them against the books, and press **Make these
+   families**; or bring one in with **Create a family from this** and add its guardians on its page. Check each
+   family's page shows its students and guardians. Making a family reads none of its money: on **Balances** press
+   **Read every family now** (or wait for the next daily read), then check the Balances page shows each pilot family's
+   money.
    **If not:** [reconnecting QuickBooks](quickbooks-reconnect.md).
 2. **Check the portal's requests against the real books.** Settings, QuickBooks, **Check the portal's requests**,
    **Run the check**. Against the real books it only reads.
@@ -674,17 +684,21 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    offers **Unlink from the books**: unlink a test family you linked, and its row reads Suggested or No match again,
    its guardians' Home and Payments say the club hasn't connected their payments yet, and Balances counts it in one
    line; link it again with **Confirm** (a Suggested row), or, for another customer, **Leave unlinked** and then **Pick a
-   different customer**, and its money is read afresh. Reconciliation
-   refuses **Create a family from this** for a customer Accounting links suggests or lists for a family the portal has,
-   and its row names that family and links to Accounting links; don't press **Create in QuickBooks and link** for a
+   different customer**, and its money is read afresh. Under **Customers with no family** on Accounting links, a
+   customer the page suggests or lists for a family the portal has offers no **Create a family from this**: its row
+   names that family and links to its row on the page; don't press **Create in QuickBooks and link** for a
    family whose customer is already in the books (it would make a second customer); and the
-   count of customers with no family matches Reconciliation's list. A linked family whose records differ from the
+   count of customers with no family that Reconciliation's notice gives matches the list on Accounting links. A linked family whose records differ from the
    books' copy reads **Linked, with differences** instead, still saying how its link was made, and its row's opening
    lists each difference with the portal's value and the books': a family you brought in has the Parent customers
    QuickBooks holds under it counted until its guardians are linked to them; rename a student in QuickBooks, refresh
    the roster, and that family shows both names; a student moved to another family in QuickBooks shows where
-   QuickBooks has them, in the words the family's page uses; a change waiting or kept on Reconciliation is named in
-   Reconciliation's words with a link there. Under the status filter, Carried over and Linked, with differences can
+   QuickBooks has them, in the words the family's page uses; a change waiting or stuck on Reconciliation is named in
+   Reconciliation's words with a link there, and a rename, move or make-inactive kept in the portal of a family, member
+   or student still linked is named in its own words beside its difference, with Give up beside the difference's
+   presses for someone who may change families (it stays on Reconciliation too; a guardian's, one held for a balance,
+   one refused as a taken name, and one with no difference whose value QuickBooks doesn't hold either show only
+   there). Under the status filter, Carried over and Linked, with differences can
    count the same family, and the page says so. **If not:** note the family, the status it read and
    what you expected; a suggestion that names the wrong customer is the most important to report, then a difference
    that isn't one (both values the same) or one the page misses.

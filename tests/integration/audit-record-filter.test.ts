@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { db } from "@/lib/db/client";
-import { desc, eq, inArray, or } from "drizzle-orm";
-import { accountingLink, accountingLinkEnded, auditLog, guardian, student } from "@/lib/db/schema";
-import { asAppFamilyId } from "@/lib/families/ids";
+import { desc, eq, inArray, or, sql } from "drizzle-orm";
+import { accountingLink, accountingLinkEnded, auditLog, family, guardian, student } from "@/lib/db/schema";
+import { asAppFamilyId, asAppStudentId } from "@/lib/families/ids";
 import { writeAudit } from "@/lib/audit/log";
-import { auditExportScope, auditPage, parseAuditFilters } from "@/lib/audit/query";
-import { setRosterSource } from "@/lib/roster/source";
+import { auditExportRows, auditExportScope, auditPage, parseAuditFilters } from "@/lib/audit/query";
+import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import { resetDb, seedParent } from "../helpers/db";
 import { fam, seedCache, seedShape, stu } from "../helpers/roster-cache";
 import { recordOfCustomer } from "../helpers/app-records";
@@ -392,5 +392,193 @@ describe("the audit page's filter for a customer a family was linked to and anot
       origin: "carried_over", linkedAt: ago(500), linkedBy: null, endedAt: ago(150), endedBy: "00000000-0000-4000-8000-0000000000aa", endedHow: "unlinked" });
     await rowAt(ago(200), "season.progress.family.read", "qbo_customer", "12", { after: { tag: "leo-old" } });
     expect(await tagged(`student:${leo}`)).toEqual(["leo-old", "rivera-unlinked"]);
+  });
+});
+
+/**
+ * Stage 4's slice M8a: a change of company ends every link (`company_changed`, the clear of open question 16), and a
+ * customer's number means a customer only in its own company. Each link's window is cut to its company's time as the
+ * roster's, read from the clear's own `roster.cleared` rows: customer 10 of company A is never customer 10 of company
+ * B, a kept family finds its earlier company's rows by that company's numbers, and A to B to A gives A two periods.
+ * Every clear here is the real one (clearRosterOfOtherCompany()); rows are set to an instant only before the first.
+ */
+describe("the audit page's filter across a change of company", () => {
+  const [A, B] = ["4620000000000001", "4620000000000002"];
+  const STAFF = "00000000-0000-4000-8000-0000000000aa";
+  const PERSON = "7d1f0b2a-7777-4c3d-8e9f-000000000001";
+  const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+  const clearTo = (realmId: string) => clearRosterOfOtherCompany(realmId, { actor, ip: null });
+  /** A row, written now, or as of `at`. */
+  const put = async (at: Date | null, action: string, targetType: string, targetId: string, after: Record<string, unknown>) => {
+    await writeAudit({ actor, action, targetType, targetId, after });
+    if (at === null) return;
+    const [last] = await db.select({ id: auditLog.id }).from(auditLog).orderBy(desc(auditLog.id)).limit(1);
+    await db.update(auditLog).set({ at }).where(eq(auditLog.id, last!.id));
+  };
+  /**
+   * Rows naming a family's customer, each tagged: under a target, a buy-out's body key, a sign-in's key, a membership's
+   * key, a move's follow-up's key and a tick's key.
+   */
+  const namingFamily = async (customerId: string, tag: string, at: Date | null = null) => {
+    await put(at, "season.progress.family.read", "qbo_customer", customerId, { tag: `${tag}-target` });
+    await put(at, "volunteer.buyout.flagged", "buyout", crypto.randomUUID(), { flag: "missing", familyQboId: customerId, tag: `${tag}-buyout` });
+    await put(at, "signin", "parent", PERSON, { familyQboId: customerId, tag: `${tag}-signin` });
+    await put(at, "parent.access.granted", "guardian", crypto.randomUUID(), { parentId: PERSON, familyQboId: customerId, tag: `${tag}-access` });
+    await put(at, "roster.student.move.followed", "student", crypto.randomUUID(), { fromFamilyQboId: customerId, toFamilyQboId: "99", tag: `${tag}-move` });
+    await put(at, "season.requirement.tick", "requirement_progress", `${REQ}:${customerId}`, { tag: `${tag}-tick` });
+  };
+  /** Rows naming a student's customer, each tagged: under a target, a form request's body key and a tick's key. */
+  const namingStudent = async (customerId: string, tag: string, at: Date | null = null) => {
+    await put(at, "volunteer.signup.moved", "student", customerId, { tag: `${tag}-target` });
+    await put(at, "form.state.change", "signature_request", crypto.randomUUID(), { state: "waiting", subjectQboId: customerId, tag: `${tag}-form` });
+    await put(at, "season.requirement.tick", "requirement_progress", `${REQ}:${customerId}`, { tag: `${tag}-tick` });
+  };
+  const ofFamily = (tag: string) => ["access", "buyout", "move", "signin", "target", "tick"].map((k) => `${tag}-${k}`);
+  const ofStudent = (tag: string) => ["form", "target", "tick"].map((k) => `${tag}-${k}`);
+  const sorted = (...tags: string[][]) => tags.flat().sort();
+  /** A link as the accounting links screen makes one. */
+  const linkIn = (realmId: string, customerId: string, record: { familyId: string } | { studentId: string }) =>
+    db.insert(accountingLink).values({ system: "quickbooks", realmId, customerId, origin: "confirmed", linkedBy: STAFF,
+      ...("familyId" in record ? { familyId: asAppFamilyId(record.familyId) } : { studentId: asAppStudentId(record.studentId) }) });
+  const tagged = async (record: string) => (await auditPage(parseAuditFilters({ record }))).rows
+    .map((r) => (r.after as { tag?: string } | null)?.tag).filter((t): t is string => t !== undefined).sort();
+  /** The tags of the rows the export sends for a record, every batch. */
+  const exported = async (record: string) => {
+    const filters = parseAuditFilters({ record });
+    const tags: string[] = [];
+    for await (const batch of auditExportRows(filters, (await auditExportScope(filters)).upTo)) {
+      tags.push(...batch.map((r) => (r.after as { tag?: string } | null)?.tag).filter((t): t is string => t !== undefined));
+    }
+    return tags.sort();
+  };
+
+  describe("Rivera and Chen in company A, Chen and Mia linked to A's numbers in company B, and back to A", () => {
+    let rivera = "", chen = "", leo = "", mia = "";
+    beforeEach(async () => {
+      await resetDb();
+      await db.transaction((tx) => setRosterSource(tx, A));
+      await seedShape();
+      await seedCache([fam("10", "Rivera Family"), stu("12", "Leo Rivera", "10"), fam("20", "Chen Family"), stu("14", "Mia Chen", "20")]);
+      [rivera, chen, leo, mia] = [String(await recordOfCustomer("10", "family")), String(await recordOfCustomer("20", "family")),
+        String(await recordOfCustomer("12", "student")), String(await recordOfCustomer("14", "student"))];
+      // Company A's time: rows naming Rivera's 10, Leo's 12 and Chen's 20.
+      await namingFamily("10", "a1-10", ago(300));
+      await namingStudent("12", "a1-12", ago(300));
+      await namingFamily("20", "a1-20", ago(300));
+      // Rivera unlinked from 10: its family's link alone, ended by hand as an unlink ends one (a real unlink ends its
+      // students' too); Leo's is left live, so the change of company ends it. Then rows naming 10 while nobody is linked to it.
+      const [riveraLink] = await db.select().from(accountingLink).where(eq(accountingLink.familyId, asAppFamilyId(rivera)));
+      await db.insert(accountingLinkEnded).values({ id: riveraLink!.id, system: riveraLink!.system, realmId: riveraLink!.realmId, customerId: riveraLink!.customerId,
+        familyId: riveraLink!.familyId, origin: riveraLink!.origin, linkedAt: riveraLink!.linkedAt, linkedBy: riveraLink!.linkedBy, endedAt: ago(200), endedBy: STAFF, endedHow: "unlinked" });
+      await db.delete(accountingLink).where(eq(accountingLink.id, riveraLink!.id));
+      await namingFamily("10", "a-nobody-10", ago(150));
+      // The change of company to B: Leo's, Chen's and Mia's links end `company_changed`.
+      expect(await clearTo(B)).toBe(true);
+      expect((await db.select().from(accountingLinkEnded)).filter((l) => l.endedHow === "company_changed")).toHaveLength(3);
+      // In B's time, before anyone is linked to its 10: a row naming it, which is the first family linked to it there.
+      await put(null, "season.progress.family.read", "qbo_customer", "10", { tag: "b-before-link-10" });
+      // In B, Chen is linked to customer 10 and Mia to customer 12: other customers that happen to have A's numbers.
+      await linkIn(B, "10", { familyId: chen });
+      await linkIn(B, "12", { studentId: mia });
+      await namingFamily("10", "b-10");
+      await namingStudent("12", "b-12");
+    });
+
+    it("finds each record's rows only in the company it was linked in, however the numbers repeat", async () => {
+      // Rivera: A's 10 until its unlink, never the row of nobody's time, never B's 10.
+      expect(await tagged(`family:${rivera}`)).toEqual(sorted(ofFamily("a1-10")));
+      expect(await tagged(rivera)).toEqual(sorted(ofFamily("a1-10")));
+      // Chen, kept by the change: its earlier company's rows by A's 20, and B's 10 in B's time (its window opens at the
+      // period's start, as M3b's open at the latest other unlink, never at its own link), never A's 10.
+      expect(await tagged(`family:${chen}`)).toEqual(sorted(ofFamily("a1-20"), ["b-before-link-10"], ofFamily("b-10")));
+      expect(await tagged(chen)).toEqual(sorted(ofFamily("a1-20"), ["b-before-link-10"], ofFamily("b-10")));
+      // Leo, kept by the change and linked nowhere since: A's 12 only. Mia: B's 12 only.
+      expect(await tagged(`student:${leo}`)).toEqual(sorted(ofStudent("a1-12")));
+      expect(await tagged(leo)).toEqual(sorted(ofStudent("a1-12")));
+      expect(await tagged(`student:${mia}`)).toEqual(sorted(ofStudent("b-12")));
+      expect(await tagged(mia)).toEqual(sorted(ofStudent("b-12")));
+      // The rows naming 10 while nobody in A was linked to it are nobody's, in B too.
+      for (const record of [rivera, chen, leo, mia]) for (const t of ofFamily("a-nobody-10")) expect(await tagged(record), record).not.toContain(t);
+      // The export counts and sends what the page finds.
+      const filters = parseAuditFilters({ record: `family:${chen}` });
+      expect((await auditExportScope(filters)).rows).toBe((await auditPage(filters)).total);
+      expect((await auditPage(filters)).total).toBe(13);
+      expect(await exported(`family:${chen}`)).toEqual(await tagged(`family:${chen}`));
+      expect(await exported(`student:${mia}`)).toEqual(sorted(ofStudent("b-12")));
+    });
+
+    it("places a row written while the clear ran, before it ended the links, in the earlier company's time", async () => {
+      // An instant after the clear's transaction began (its roster.cleared row's `at`) and before its statement ended the
+      // links (their `ended_at`): rows naming A's 20 (Chen's there) and A's 10 (nobody's there by then), as another
+      // transaction that began then writes them, the roster still A's.
+      const cleared = sql`(select at from audit_log where action = 'roster.cleared')`;
+      const endedLinks = sql`(select max(ended_at) from accounting_link_ended where ended_how = 'company_changed')`;
+      const [span] = await db.select({ ok: sql<boolean>`${endedLinks} > ${cleared}` }).from(auditLog).limit(1);
+      expect(span!.ok).toBe(true);
+      await namingFamily("20", "during-20");
+      await namingFamily("10", "during-10");
+      const during = sql`${auditLog.after} ->> 'tag' like 'during-%'`;
+      await db.update(auditLog).set({ at: sql`${cleared} + (${endedLinks} - ${cleared}) / 2` }).where(during);
+      const [placed] = await db.select({ ok: sql<boolean>`bool_and(${auditLog.at} > ${cleared} and ${auditLog.at} < ${endedLinks})` }).from(auditLog).where(during);
+      expect(placed!.ok).toBe(true);
+      // A's 20 was Chen's until the clear ended its link: the row is Chen's. A's 10 then was nobody's: never Chen's in B.
+      expect(await tagged(`family:${chen}`)).toEqual(sorted(ofFamily("a1-20"), ofFamily("during-20"), ["b-before-link-10"], ofFamily("b-10")));
+      for (const record of [rivera, chen, leo, mia]) for (const t of ofFamily("during-10")) expect(await tagged(record), record).not.toContain(t);
+    });
+
+    it("gives company A two periods after a return from B: a record linked in both finds both, one linked only in the second finds nothing of the first", async () => {
+      // Back to A: Chen's and Mia's links of B end `company_changed`.
+      expect(await clearTo(A)).toBe(true);
+      // In A's second period: Leo linked to 12 again, and a third family, Diaz, to 10.
+      const [diaz] = await db.insert(family).values({ name: "Diaz Family", active: true }).returning({ id: family.id });
+      await linkIn(A, "12", { studentId: leo });
+      await linkIn(A, "10", { familyId: String(diaz!.id) });
+      await namingFamily("10", "a2-10");
+      await namingStudent("12", "a2-12");
+      // Diaz: the second period's 10 alone, nothing of the first (Rivera's, nobody's) and nothing of B's.
+      expect(await tagged(`family:${diaz!.id}`)).toEqual(sorted(ofFamily("a2-10")));
+      // Rivera: still its first-period rows only. Chen: its A rows and its B rows, nothing of A's second period.
+      expect(await tagged(`family:${rivera}`)).toEqual(sorted(ofFamily("a1-10")));
+      expect(await tagged(`family:${chen}`)).toEqual(sorted(ofFamily("a1-20"), ["b-before-link-10"], ofFamily("b-10")));
+      // Leo, linked to 12 in both of A's periods: both, and nothing of B's 12, which is Mia's alone.
+      expect(await tagged(`student:${leo}`)).toEqual(sorted(ofStudent("a1-12"), ofStudent("a2-12")));
+      expect(await tagged(leo)).toEqual(sorted(ofStudent("a1-12"), ofStudent("a2-12")));
+      expect(await tagged(`student:${mia}`)).toEqual(sorted(ofStudent("b-12")));
+      const filters = parseAuditFilters({ record: `student:${leo}` });
+      expect((await auditExportScope(filters)).rows).toBe((await auditPage(filters)).total);
+    });
+  });
+
+  it("bounds the next company's window by a change of company that had no link to end", async () => {
+    await resetDb();
+    await db.transaction((tx) => setRosterSource(tx, A));
+    // A family with no link at all in A, and rows naming 10 in A's time.
+    const [ortiz] = await db.insert(family).values({ name: "Ortiz Family", active: true }).returning({ id: family.id });
+    await namingFamily("10", "a-10");
+    expect(await clearTo(B)).toBe(true);
+    // The clear ended nothing, and said so with its own row alone.
+    expect(await db.select().from(accountingLinkEnded)).toEqual([]);
+    const actions = (await db.select({ action: auditLog.action }).from(auditLog)).map((r) => r.action);
+    expect(actions.filter((a) => a === "roster.cleared")).toHaveLength(1);
+    expect(actions).not.toContain("accounting.links.cleared");
+    // Linked in B to 10: A's rows of that number are never its, and those written since are.
+    await linkIn(B, "10", { familyId: String(ortiz!.id) });
+    await namingFamily("10", "b-10");
+    expect(await tagged(`family:${ortiz!.id}`)).toEqual(sorted(ofFamily("b-10")));
+  });
+
+  it("finds nothing by the number of a link of a company no change of company names", async () => {
+    await resetDb();
+    await db.transaction((tx) => setRosterSource(tx, A));
+    // A family whose one link was to customer 30 of a company C that was never the roster's (no roster.cleared row names
+    // it): the filter can't place that company's time, so it finds less, never more: the family's own row alone.
+    const [ortiz] = await db.insert(family).values({ name: "Ortiz Family", active: true }).returning({ id: family.id });
+    await namingFamily("30", "c-30-before", ago(120));
+    await db.insert(accountingLinkEnded).values({ id: crypto.randomUUID(), system: "quickbooks", realmId: "4620000000000003", customerId: "30", familyId: asAppFamilyId(String(ortiz!.id)),
+      origin: "confirmed", linkedAt: ago(200), linkedBy: STAFF, endedAt: ago(60), endedBy: STAFF, endedHow: "unlinked" });
+    await namingFamily("30", "c-30-after");
+    await put(null, "season.progress.family.read", "family", String(ortiz!.id), { tag: "ortiz-own" });
+    expect(await tagged(`family:${ortiz!.id}`)).toEqual(["ortiz-own"]);
+    expect(await tagged(String(ortiz!.id))).toEqual(["ortiz-own"]);
   });
 });

@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gt, gte, inArray, lt, lte, max, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, gte, inArray, lt, lte, max, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, accountingLinkEnded, auditLog, requirement } from "@/lib/db/schema";
 import { QUICKBOOKS } from "@/lib/families/ids";
@@ -104,10 +104,13 @@ const endsWithKey = (s: string) => `%:${s.replace(/[\\%_]/g, "\\$&")}`;
 export const CUSTOMER_TARGET_TYPES = { family: ["qbo_customer", "family"], student: ["qbo_customer", "student"] } as const;
 
 /**
- * The QuickBooks customers an app family or student record (a uuid) is linked to, in the company the roster was read
- * from, by the kind of record they are linked to, when the filter names one: "family:<id>", "student:<id>", or the id
- * alone. Open question 17 of the app-owned families spec: audit rows are never rewritten, and rows written before an
- * area moved to the app's ids name the customer, so a search for the record also finds those.
+ * The QuickBooks customers an app family or student record (a uuid) is or was linked to, in every company the roster
+ * was read from, by the kind of record they are linked to, when the filter names one: "family:<id>", "student:<id>",
+ * or the id alone. Open question 17 of the app-owned families spec: audit rows are never rewritten, and rows written
+ * before an area moved to the app's ids name the customer, so a search for the record also finds those. A customer's
+ * number means a customer only in its own company, so each link's window is cut to its company's time as the roster's
+ * (stage 4's slice M8a, companyPeriods()): after a change of company the earlier company's numbers still find the rows
+ * written in its time, and never those of the company after it, where the same number is another customer.
  */
 async function customersOfRecord(record: AuditFilters["record"]): Promise<RecordNames | null> {
   if (!record) return null;
@@ -117,55 +120,147 @@ async function customersOfRecord(record: AuditFilters["record"]): Promise<Record
   if (realmId === null) return { id, kind: type, families: [], students: [] };
   const ofRecord = (t: typeof accountingLink | typeof accountingLinkEnded) => (type === "family" ? sql`${t.familyId}::text = ${id}` : type === "student" ? sql`${t.studentId}::text = ${id}`
     : sql`(${t.familyId}::text = ${id} or ${t.studentId}::text = ${id})`);
-  // The record's link that is, and its links that were (stage 4's slice M3b: an unlink moves them to accounting_link_ended).
-  const [live, ended] = await Promise.all([
-    db.select({ customerId: accountingLink.customerId, familyId: accountingLink.familyId }).from(accountingLink)
-      .where(and(eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId), ofRecord(accountingLink))),
-    db.select({ customerId: accountingLinkEnded.customerId, familyId: accountingLinkEnded.familyId, endedAt: accountingLinkEnded.endedAt })
-      .from(accountingLinkEnded).where(and(eq(accountingLinkEnded.system, QUICKBOOKS), eq(accountingLinkEnded.realmId, realmId), ofRecord(accountingLinkEnded))),
+  // The record's links that are, and its links that were (stage 4's slice M3b: an unlink moves them to
+  // accounting_link_ended; slice M7a: so does a change of company, as `company_changed`), in every company; and the
+  // companies' times as the roster's. Every instant is read as text to the microsecond (usText()), never as a Date.
+  const [live, ended, periods] = await Promise.all([
+    db.select({ realmId: accountingLink.realmId, customerId: accountingLink.customerId, familyId: accountingLink.familyId }).from(accountingLink)
+      .where(and(eq(accountingLink.system, QUICKBOOKS), ofRecord(accountingLink))),
+    db.select({ realmId: accountingLinkEnded.realmId, customerId: accountingLinkEnded.customerId, familyId: accountingLinkEnded.familyId, endedAt: usText(accountingLinkEnded.endedAt) })
+      .from(accountingLinkEnded).where(and(eq(accountingLinkEnded.system, QUICKBOOKS), ofRecord(accountingLinkEnded))),
+    companyPeriods(realmId),
   ]);
-  const mine = [...live.map((l) => ({ ...l, endedAt: null as Date | null })), ...ended];
+  const mine = [...live.map((l) => ({ ...l, endedAt: null as Instant | null })), ...ended];
   if (mine.length === 0) return { id, kind: type, families: [], students: [] };
   // Each customer's other records of the same kind (a family's or a student's, never a guardian row's) whose links to
-  // it ended: the latest that ended before this record's link bounds its window from below (rows about the customer
-  // written then were that other record's). Two records of one kind are never linked to one customer at once (the
-  // unique indexes accounting_link_family_customer_uq and _student_customer_uq), so every other record's link to it
-  // ended before this record's live link was made, and before this record's ended link ended exactly when it ended
-  // first: the bound compares ended_at with ended_at, never with linked_at, which a link takes from its transaction's
-  // start, before it waited for the roster lock.
+  // it ended, in the same company: the latest that ended before this record's link bounds its window from below (rows
+  // about the customer written then were that other record's). Two records of one kind are never linked to one customer
+  // of a company at once (the unique indexes accounting_link_family_customer_uq and _student_customer_uq, on the realm
+  // and the customer), so every other record's link to it ended before this record's live link was made, and before
+  // this record's ended link ended exactly when it ended first: the bound compares ended_at with ended_at, never with
+  // linked_at, which a link takes from its transaction's start, before it waited for the roster lock. The same number
+  // in another company is another customer: its links never bound this one's (matched below by realm and customer).
   const others = ended.length === 0 && (await db.select({ id: accountingLinkEnded.id }).from(accountingLinkEnded).limit(1)).length === 0 ? []
-    : await db.select({ customerId: accountingLinkEnded.customerId, familyId: accountingLinkEnded.familyId, studentId: accountingLinkEnded.studentId, endedAt: accountingLinkEnded.endedAt })
+    : await db.select({ realmId: accountingLinkEnded.realmId, customerId: accountingLinkEnded.customerId, familyId: accountingLinkEnded.familyId,
+      studentId: accountingLinkEnded.studentId, endedAt: usText(accountingLinkEnded.endedAt) })
       .from(accountingLinkEnded)
-      .where(and(eq(accountingLinkEnded.system, QUICKBOOKS), eq(accountingLinkEnded.realmId, realmId), inArray(accountingLinkEnded.customerId, [...new Set(mine.map((l) => l.customerId))]),
-        sql`coalesce(${ofRecord(accountingLinkEnded)}, false) = false`));
-  const windowsOf = (asFamily: boolean): Window[] => mine.filter((l) => (l.familyId !== null) === asFamily).map((l) => {
-    const before = others.filter((o) => o.customerId === l.customerId && (asFamily ? o.familyId !== null : o.studentId !== null) && (l.endedAt === null || o.endedAt < l.endedAt))
-      .map((o) => o.endedAt.getTime());
-    return { customerId: l.customerId, from: before.length ? new Date(Math.max(...before)) : null, to: l.endedAt };
+      .where(and(eq(accountingLinkEnded.system, QUICKBOOKS), inArray(accountingLinkEnded.realmId, [...new Set(mine.map((l) => l.realmId))]),
+        inArray(accountingLinkEnded.customerId, [...new Set(mine.map((l) => l.customerId))]), sql`coalesce(${ofRecord(accountingLinkEnded)}, false) = false`));
+  const windowsOf = (asFamily: boolean): Window[] => mine.filter((l) => (l.familyId !== null) === asFamily).flatMap((l) => {
+    const period = periodOfLink(periods, realmId, l);
+    if (!period) return [];
+    const before = others.filter((o) => o.realmId === l.realmId && o.customerId === l.customerId && (asFamily ? o.familyId !== null : o.studentId !== null)
+      && (l.endedAt === null || o.endedAt < l.endedAt)).reduce<Instant | null>((a, o) => later(a, o.endedAt), null);
+    const from = later(before, period.from), to = earlier(l.endedAt, period.to);
+    // A window cut to nothing (a link that ended before its company's time began) finds nothing.
+    return from !== null && to !== null && from >= to ? [] : [{ customerId: l.customerId, from, to }];
   });
   return { id, kind: type, families: windowsOf(true), students: windowsOf(false) };
 }
+
+/**
+ * An instant as the database holds it, to the microsecond, in UTC: "2026-11-20T12:00:00.123456Z". A JavaScript Date
+ * keeps only the millisecond, and a bound cut to it puts the rest of that millisecond on the wrong side of it (a change
+ * of company's own rows, and a row written just before it, in the next company's time). Every one has the same width,
+ * so two compare as text as they do as instants; one goes back into a query as `<text>::timestamptz` (named()).
+ */
+type Instant = string;
+const usText = (col: SQL | AnyColumn) => sql<Instant>`to_char(${col} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+
+/** The later of two lower bounds, and the earlier of two upper bounds, null being no bound. */
+const later = (a: Instant | null, b: Instant | null) => (a === null ? b : b === null || a > b ? a : b);
+const earlier = (a: Instant | null, b: Instant | null) => (a === null ? b : b === null || a < b ? a : b);
+
+/**
+ * One company's time as the roster's: after `from` and at or before `to`, null bounding nothing (stage 4's slice M8a).
+ * `until` is where the time after it ended (the next change of company's boundary), null for none: a link of this
+ * company that ended after that lived in a later time of the company, or one the records lost, never this one.
+ */
+type Period = { realmId: string; from: Instant | null; to: Instant | null; until: Instant | null };
+
+/**
+ * Each company's times as the roster's, oldest first, from the change of company's own records: every clear writes one
+ * `roster.cleared` row (src/lib/roster/source.ts), `before.realmId` the company it ended and `after.realmId` the one it
+ * started, `after.reason` `different_company`, in its transaction, and the audit log is append-only. Each row, in id
+ * order, ends the period of its `before.realmId` and starts one of its `after.realmId` at its boundary: the later of
+ * the row's `at` (the clear's transaction start, the instant its own audit rows carry, so they fall in the earlier
+ * company's period) and the `ended_at` of the links it ended `company_changed` (one statement after its locks, nearer
+ * its commit: in the roster refresh's backstop the clear's transaction is the refresh's, begun before it read
+ * QuickBooks). A clear's links are those of its `before.realmId` ended `company_changed` at or after its `at`, the
+ * latest such clear's. The first company's first period is open below; the roster's company's current one is open
+ * above. A to B to A gives A two periods and B one. With no such row, the roster's company has one period, open at both
+ * ends, and nothing more is read: the filter is as before.
+ *
+ * Where the records can't place a company, it gets no period, so the filter finds less, never more: a row without
+ * `before.realmId` (as text) ends no period, so the company before it has none for that time; a row without
+ * `after.realmId` ends the period before it and starts none; a row whose `before.realmId` isn't the company the row
+ * before it started ends no period (neither company's time is known); and when the last row's `after.realmId` isn't
+ * the roster's company, the roster's company has no current period.
+ */
+async function companyPeriods(roster: string): Promise<Period[]> {
+  // The key is written here, never a value from the address.
+  const realm = (side: "before" | "after") => {
+    const v = side === "before" ? auditLog.before : auditLog.after;
+    return sql<string | null>`case when jsonb_typeof(${v} -> 'realmId') = 'string' and ${v} ->> 'realmId' <> '' then ${v} ->> 'realmId' end`;
+  };
+  // An indexed read (audit_action_ix: action, id), the rows of every clear; none in a database that never changed company.
+  const clears = await db.select({ at: usText(auditLog.at), from: realm("before"), to: realm("after") }).from(auditLog)
+    .where(and(eq(auditLog.action, "roster.cleared"), sql`${auditLog.after} ->> 'reason' = 'different_company'`)).orderBy(asc(auditLog.id));
+  if (clears.length === 0) return [{ realmId: roster, from: null, to: null, until: null }];
+  // Only once the company has changed: the instants the clears ended links at, one for each clear that ended any.
+  const ends = await db.selectDistinct({ realmId: accountingLinkEnded.realmId, endedAt: usText(accountingLinkEnded.endedAt) }).from(accountingLinkEnded)
+    .where(and(eq(accountingLinkEnded.system, QUICKBOOKS), eq(accountingLinkEnded.endedHow, "company_changed")));
+  const boundaries = clears.map((c) => c.at);
+  for (const e of ends) {
+    const i = clears.findLastIndex((c) => c.from === e.realmId && c.at <= e.endedAt);
+    if (i >= 0) boundaries[i] = later(boundaries[i]!, e.endedAt)!;
+  }
+  const periods: Period[] = [];
+  let open: { realmId: string | null; from: Instant | null } = { realmId: clears[0]!.from, from: null };
+  clears.forEach((c, i) => {
+    if (open.realmId !== null && open.realmId === c.from) periods.push({ realmId: open.realmId, from: open.from, to: boundaries[i]!, until: boundaries[i + 1] ?? null });
+    open = { realmId: c.to, from: boundaries[i]! };
+  });
+  if (open.realmId === roster) periods.push({ realmId: roster, from: open.from, to: null, until: null });
+  return periods;
+}
+
+/**
+ * The period a link of the record lived in: a live link's is the roster's company's current one (a live link of any
+ * other company finds nothing); an ended link's is the latest of its company's periods that began before it ended and
+ * whose next company's time hadn't ended by then (`until`). An unlink ends a link inside its period; a change of
+ * company ends one at its period's end. A link of a company no period holds then finds nothing.
+ */
+function periodOfLink(periods: readonly Period[], roster: string, l: { realmId: string; endedAt: Instant | null }): Period | undefined {
+  if (l.endedAt === null) return l.realmId === roster ? periods.find((p) => p.realmId === roster && p.to === null) : undefined;
+  const endedAt = l.endedAt;
+  return periods.filter((p) => p.realmId === l.realmId && (p.from === null || p.from < endedAt) && (p.until === null || endedAt <= p.until)).at(-1);
+}
 /**
  * One customer a record is or was linked to, and when it was the record's (stage 4's slice M3b): rows naming the customer
- * match only when written after `from` (the latest unlink of another record of the same kind from that customer, before
- * this record's link to it ended, or before now for its live link) and at or before `to` (this record's own unlink of
- * it); null bounds nothing. With no ended
- * link anywhere every window is unbounded, and the filter finds what it found before.
+ * match only when written after `from` (the latest unlink of another record of the same kind from that customer in its
+ * company, before this record's link to it ended, or before now for its live link) and at or before `to` (this record's
+ * own unlink of it); null bounds nothing. Since stage 4's slice M8a each is cut to its company's time as the roster's,
+ * the later `from` and the earlier `to`, every bound an Instant, to the microsecond. It carries no company: an audit
+ * row names a number only, so the company is applied when the window is made, and every reader through named() is
+ * right without a change of its own. With no ended link anywhere and no change of company every window is unbounded,
+ * and the filter finds what it found before.
  */
-type Window = { customerId: string; from: Date | null; to: Date | null };
+type Window = { customerId: string; from: Instant | null; to: Instant | null };
 /** A family or student record the filter names (`kind` null when the filter gave the id alone), and the customers it is or was linked to, each with its window. */
 type RecordNames = { id: string; kind: "family" | "student" | null; families: Window[]; students: Window[] };
 
 /**
  * The conditions that match an expression naming one of these customers, each inside its window: the unbounded ones in
- * one list, as before slice M3b, and each bounded one apart. None for no customer.
+ * one list, as before slice M3b, and each bounded one apart, its bounds compared to the microsecond. None for no customer.
  */
 function named(expr: SQL, ws: readonly Window[], match: (expr: SQL, customers: string[]) => SQL = (e, c) => inArray(e, c)): SQL[] {
   if (ws.length === 0) return [];
   const open = [...new Set(ws.filter((w) => w.from === null && w.to === null).map((w) => w.customerId))];
   const bounded = ws.filter((w) => (w.from !== null || w.to !== null) && !open.includes(w.customerId));
   return [...(open.length ? [match(expr, open)] : []),
-    ...bounded.map((w) => and(match(expr, [w.customerId]), w.from === null ? undefined : gt(auditLog.at, w.from), w.to === null ? undefined : lte(auditLog.at, w.to))!)];
+    ...bounded.map((w) => and(match(expr, [w.customerId]), w.from === null ? undefined : sql`${auditLog.at} > ${w.from}::timestamptz`,
+      w.to === null ? undefined : sql`${auditLog.at} <= ${w.to}::timestamptz`)!)];
 }
 
 /**
