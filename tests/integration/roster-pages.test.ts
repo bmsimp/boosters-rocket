@@ -32,7 +32,7 @@ import { disconnect } from "@/lib/quickbooks/connection";
 import { loadRosterPage } from "@/lib/roster/queries";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { saveShape } from "@/lib/roster/shape";
-import { resetDb, seedStaff, seedParent, seedGuardian } from "../helpers/db";
+import { resetDb, seedStaff, seedParent, seedGuardian, seedInactiveFamily } from "../helpers/db";
 import { startQboStub, seedConnected, fznCompany, FZN_SHAPE, type QboStub } from "../helpers/qbo-stub";
 import { rowNamed } from "../helpers/table";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
@@ -164,7 +164,7 @@ describe("the roster pages", () => {
     // has her name, so nothing is coming (tests/integration/guardians-in-quickbooks.test.ts holds the other words).
     const row = [...html.matchAll(/<tr role="row">([\s\S]*?)<\/tr>/g)].map((m) => m[1]!.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim())
       .find((r) => r.includes("ana.portal@example.com"));
-    expect(row).toMatch(/^Ana R\. Email ana\.portal@example\.com Sign-in Can sign in \(hasn&#x27;t yet\) In QuickBooks No Parent customer in QuickBooks is linked to them, and none is being made: the mapping screen will offer to link one\. Remove Ana R\. /);
+    expect(row).toMatch(/^Ana R\. Email ana\.portal@example\.com Sign-in Can sign in \(hasn&#x27;t yet\) In QuickBooks No Parent customer in QuickBooks is linked to them, and none is being made: one under this family in QuickBooks that no guardian is linked to can be linked to them on Accounting links, in the opening of the family&#x27;s row\. Remove Ana R\. /);
     expect((await audits("roster.family.read"))).toHaveLength(1);
     expect((await audits("roster.family.read"))[0]).toMatchObject({ actorId: reader.id, actorLabel: "registrar@club.org", permission: "Roster.Read",
       targetType: "family", targetId: await idOf("10"), ip: "203.0.113.40" });
@@ -292,17 +292,18 @@ describe("the roster pages", () => {
   });
 
   it("holds back the sign-in rule while the cache names no company, and keeps QuickBooks' own tidy rules", async () => {
-    // No company recorded, so the import makes no family record and the guardian rows are in none (as rows made before
-    // their family had a record): the sign-in rule can't hold a sign-in to anything yet, and waits for a read that
-    // records the company.
+    // No company recorded, so the import makes no family record of the roster's, and the guardian rows are each in an
+    // inactive family record of the app's own with no link: the sign-in rule can't hold a sign-in to anything yet, and
+    // waits for a read that records the company.
     await seedShape();
     await addToCache([fam("10", "Rivera Family"), stu("12", "Maya Rivera", "10"), fam("20", "Gone Family", { active: false }), stu("22", "Gil Gone", "20")]);
     await seedRosterRead();
     const ana = await seedParent({ name: "Ana Rivera" }), gil = await seedParent({ name: "Gail Gone" });
-    const anaRow = await seedGuardian({ parentId: ana.id, familyId: null }), gilRow = await seedGuardian({ parentId: gil.id, familyId: null });
+    const anaIdle = await seedInactiveFamily(), gilIdle = await seedInactiveFamily();
+    const anaRow = await seedGuardian({ parentId: ana.id, familyId: anaIdle }), gilRow = await seedGuardian({ parentId: gil.id, familyId: gilIdle });
     await syncAppRecords();
     const rules = async () => (await loadRosterPage()).attention.map((a) => `${a.rule}:${a.qboId ?? a.name}`);
-    expect((await loadRosterPage()).signIns.map((s) => [s.name, s.familyId, s.customerQboId]).sort()).toEqual([["Ana Rivera", null, null], ["Gail Gone", null, null]]);
+    expect((await loadRosterPage()).signIns.map((s) => [s.name, s.familyId, s.customerQboId]).sort()).toEqual([["Ana Rivera", anaIdle, null], ["Gail Gone", gilIdle, null]]);
     const before = await rules();
     expect(before).toContain("family_no_parent:10");
     expect(before.filter((r) => r.startsWith("signin_unknown"))).toEqual([]);

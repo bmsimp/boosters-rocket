@@ -19,6 +19,7 @@ import type { ParentIdentity } from "@/lib/auth/resolve";
 import type { ParentCtx } from "@/lib/guards";
 import { loadMyFamily } from "@/lib/parents/my-family";
 import { loadRosterPage } from "@/lib/roster/queries";
+import { getRosterSource } from "@/lib/roster/source";
 import ParentHome from "@/app/(parent)/page";
 import FamilyPage from "@/app/(parent)/family/page";
 import ParentLayout from "@/app/(parent)/layout";
@@ -148,7 +149,12 @@ describe("loadMyFamily: one family from the app's own records, for its own paren
 
   it("gives the person their own details whatever record their row names, and none of another family's", async () => {
     const { a, b } = await seedTwoFamilies();
-    const link = (sourceQboId: string | null) => db.update(guardian).set({ sourceQboId }).where(eq(guardian.id, a.identity.guardianId));
+    // The row's own link, pointed at `customerId` (none for null), as a link made by hand might be.
+    const link = async (customerId: string | null) => {
+      const realmId = (await getRosterSource())!;
+      await db.delete(accountingLink).where(eq(accountingLink.guardianId, a.identity.guardianId));
+      if (customerId !== null) await db.insert(accountingLink).values({ system: "quickbooks", realmId, customerId, guardianId: a.identity.guardianId, origin: "carried_over" });
+    };
     const mine = { name: "Ansgar Alderquist", email: FAMILY_A.parent.email, phone: FAMILY_A.parent.phone, edits: "own" };
     const me = async () => {
       const got = await loadMyFamily(ctxOf(a.identity));

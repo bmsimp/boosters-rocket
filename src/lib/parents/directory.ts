@@ -25,7 +25,8 @@ export type AccessKind = "can" | "cannot" | "blocked";
  */
 export type FamilySignin = { guardianId: string; parentId: string; name: string; email: string; kind: AccessKind; words: string; open: boolean; reinstatable: boolean };
 /**
- * `previousCompany`: the link was closed when a different QuickBooks company was connected: a page shows the family
+ * `previousCompany`: the link was closed when a different QuickBooks company was connected, before stage 4's slice M7a
+ * (a change of company closes no row now): a page shows the family
  * name as text and never links it to, or looks it up in, the roster. `familyId`: the membership's own app family
  * (`guardian.family_id`), which the family's page is addressed by; null for a previous company's link, which has none.
  * `familyQboId`: the customer the family record's own link names (stage 3's slice 12b1), null for a family with no link

@@ -8,14 +8,11 @@ import { getShape, shapeNamesStudents, type MembershipShape } from "@/lib/roster
 import { getParentSettings } from "./settings";
 
 /**
- * A guardian row as the code reads it: every column but the two old copies (`family_qbo_id`, `source_qbo_id`), which
- * nothing reads since stage 3's slice 12b1 and slice 12b2 drops. Drizzle names every column it declares in a whole-row
- * select (`select()`, or the table as one field of a select) and in an insert, so a guardian row is read through
- * GUARDIAN_COLS only and made by its own SQL (saveGuardian(), ./guardians.ts; tests/unit/guardian-columns.test.ts): the
- * gate, the chooser, staff's add, remove and reinstate and the Parents pages then keep working beside a database those
- * columns have left. An unlink's clear of the copy still names it, until slice 12b2.
+ * A guardian row as the code reads it, every column of it: what the gate, the chooser, staff's add, remove and
+ * reinstate and the Parents pages select (GUARDIAN_COLS). Kept by name since stage 3's slice 12b1, when it left out the
+ * row's two old copies of its customers, which slice 12b2 dropped (migration 0049).
  */
-export type GuardianRow = Omit<typeof guardian.$inferSelect, "familyQboId" | "sourceQboId">;
+export type GuardianRow = typeof guardian.$inferSelect;
 export const GUARDIAN_COLS = {
   id: guardian.id, familyId: guardian.familyId, parentId: guardian.parentId, isPrimary: guardian.isPrimary, status: guardian.status,
   disabledReason: guardian.disabledReason, statusBeforeDisable: guardian.statusBeforeDisable, createdAt: guardian.createdAt, updatedAt: guardian.updatedAt,
@@ -63,7 +60,7 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * `parent_auth_account`), their remembered devices (`parent_device`), their sessions. Links are made since the sign-in
  * release's slice SI-2 (mintSigninLink(), signin-links.ts); nothing makes a device yet. Everything that ends all of a
  * person's sign-in deletes their unused links (a password reset spends its own) and forgets their devices, in that
- * place, and keeps their password: blocking, sign-ins switched off, the change-of-company clear, a password reset, a
+ * place, and keeps their password: blocking, sign-ins switched off, a password reset, a
  * confirmed change of sign-in email, and closing a person's last open membership (closeMembership(), membership.ts;
  * the lead's choice 10 of the sign-in release). So:
  * - choosePasswordFromLink() (password-set.ts) takes the row FOR UPDATE, then, as its re-check, its link's row FOR
@@ -96,8 +93,8 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   waited for a person another of them holds, as that one asked for the roster, would be a deadlock, which Postgres
  *   ends by aborting one of them. (The email confirm took the roster after the person too until stage 3's slice 11d;
  *   it takes no roster lock now.) No roster read waits for a person's row, so waiting for the roster while holding one
- *   is safe against it; the change-of-company clear, which holds the roster as it takes everyone's rows, could meet
- *   these writes, though nothing the portal runs reaches it until stage 4. So addGuardian() takes the address lock, then the row FOR UPDATE, then the
+ *   is safe against it, and a change of company, which holds the roster, takes no person's or guardian row (stage 4's
+ *   slice M7a). So addGuardian() takes the address lock, then the row FOR UPDATE, then the
  *   roster lock, then makes the person if there is none, then takes their guardian row in the family FOR UPDATE;
  *   removeGuardian() and reinstateGuardian() take the row FOR UPDATE (no address lock: the address isn't changed or
  *   claimed), then the roster lock, then the guardian row FOR UPDATE, and removeGuardian() then deletes the person's
@@ -203,7 +200,7 @@ export async function studentsRuleInForce(tx?: Tx): Promise<boolean> {
  * slice 12b1). That is the order the rows' own copy of the customer (`family_qbo_id`) gave for every row whose copy
  * matched its family's link. Two kinds of row had a copy that didn't, and now sort among the linked families by their
  * family's customer instead of staying at the end: one made while its family had no link, of a family linked since,
- * and one of a family unlinked (an unlink clears the copy, stage 4's slice M3b) and linked again since. While
+ * and one of a family unlinked (an unlink cleared the copy, stage 4's slice M3b, until stage 3's slice 12b2 dropped it) and linked again since. While
  * QuickBooks is connected to another company than the records' (recordsCompany() answers null) no link is read, and
  * the rows come in row id order. A family's place in the chooser (and its "(1)", "(2)" in myFamilyNames()) moves when
  * the family is linked, unlinked or relinked, and in that one state. Closing a membership

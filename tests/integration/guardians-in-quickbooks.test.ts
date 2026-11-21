@@ -62,12 +62,12 @@ describe("adding a guardian (item 2)", () => {
     const r = await addGuardian(chen, { name: "Mei Chen", email: "mei@example.com" }, op);
     expect(r).toMatchObject({ ok: true, outcome: "added", person: "new" });
     if (!r.ok) return;
-    expect(r.quickbooks).toEqual(["QuickBooks already has a customer named “Mei Chen” under Chen Family that isn't linked to Mei Chen, so no Parent customer was made for them. The mapping screen will offer to link the two."]);
+    expect(r.quickbooks).toEqual(["QuickBooks already has a customer named “Mei Chen” under Chen Family that isn't linked to Mei Chen, so no Parent customer was made for them. If it is a Parent customer no guardian is linked to, the two can be linked on Accounting links, in the opening of the family's row, by someone who may link families to accounting."]);
     expect(posts()).toEqual([]);
     expect(await items()).toEqual([]);
     expect(await linkOfRow(r.guardianId)).toBeUndefined();
     // The membership is slice 7b's, whatever QuickBooks holds: in its family record, writing neither old copy (slice 12b1).
-    expect(await rowOf(r.guardianId)).toMatchObject({ status: "invited", familyId: chen, familyQboId: null, sourceQboId: null });
+    expect(await rowOf(r.guardianId)).toMatchObject({ status: "invited", familyId: chen });
   });
 
   it("a new guardian gets their own Parent customer under the family, with their name and address, linked to their row", async () => {
@@ -83,7 +83,7 @@ describe("adding a guardian (item 2)", () => {
     expect(item).toMatchObject({ state: "done", familyId: rivera, studentId: null, request: { op: "create", role: "parent", guardianId: r.guardianId } });
     // No record becomes a parent's own: the row's link is `created`, never `carried_over` (the take-in reads only those),
     // and the row writes neither old copy (slice 12b1).
-    expect(await rowOf(r.guardianId)).toMatchObject({ status: "invited", familyId: rivera, sourceQboId: null, familyQboId: null });
+    expect(await rowOf(r.guardianId)).toMatchObject({ status: "invited", familyId: rivera });
   });
 
   it("a name QuickBooks refuses as taken is kept refused; renaming the person takes its place, and is sent", async () => {
@@ -95,7 +95,7 @@ describe("adding a guardian (item 2)", () => {
     expect(r.quickbooks[0]).toContain("QuickBooks refused the name “Luis Rivera” as taken: another customer in QuickBooks has that name");
     // The words promise nothing of a rename (the lead's decision 1(b)): they say what it does, and what "Give up" leaves.
     expect(r.quickbooks[0]).toContain("Renaming Luis Rivera changes their name in the portal and on their own record in QuickBooks.");
-    expect(r.quickbooks[0]).toContain("leaves them as they are, with no record of their own in QuickBooks, for the mapping screen");
+    expect(r.quickbooks[0]).toContain("leaves them as they are, with no record of their own in QuickBooks; after that, a Parent customer under the family that no guardian is linked to can be linked to them on Accounting links, in the opening of the family's row.");
     expect(r.quickbooks[0]).not.toContain("takes its place");
     expect(await rowOf(r.guardianId)).toMatchObject({ status: "invited" });
     // "Send the portal's value" isn't offered for it: the rename of the person is the way out.
@@ -266,7 +266,7 @@ describe("removing a guardian (item 4)", () => {
 
   it("a removal while someone else holds the row's lock still gives up its create that never left, and the worker sends nothing", async () => {
     const [p] = await db.insert(parent).values({ name: "Kit Rivera", email: "kit@example.com" }).returning();
-    const [row] = await db.insert(guardian).values({ familyQboId: "10", familyId: rivera, parentId: p!.id, status: "invited" }).returning();
+    const [row] = await db.insert(guardian).values({ familyId: rivera, parentId: p!.id, status: "invited" }).returning();
     // Its at-once try got a 429, which surely sent nothing: waiting, never sent.
     const c = await seedQueued({ op: "create", role: "parent", name: "Kit Rivera", typeQboId: "2", familyQboId: "10", email: "kit@example.com", guardianId: row!.id },
       { familyQboId: "10", sent: false, code: "http_429", nextTryAt: new Date(Date.now() - MIN) });
@@ -282,7 +282,7 @@ describe("removing a guardian (item 4)", () => {
 
   it("a create left to finish when its row was removed, then tried again, finds the row closed and is given up, nothing sent", async () => {
     const [p] = await db.insert(parent).values({ name: "Kit Rivera", email: "kit@example.com" }).returning();
-    const [row] = await db.insert(guardian).values({ familyQboId: "10", familyId: rivera, parentId: p!.id, status: "disabled", disabledReason: "removed" }).returning();
+    const [row] = await db.insert(guardian).values({ familyId: rivera, parentId: p!.id, status: "disabled", disabledReason: "removed" }).returning();
     // Its earlier try reached nothing (a key to QuickBooks that couldn't be had), so it was put back as never sent.
     const c = await seedQueued({ op: "create", role: "parent", name: "Kit Rivera", typeQboId: "2", familyQboId: "10", email: "kit@example.com", guardianId: row!.id },
       { familyQboId: "10", sent: false, nextTryAt: new Date(Date.now() - MIN) });
@@ -332,7 +332,7 @@ describe("renaming a person (item 5)", () => {
   // taken name, its id chosen so the person's rows' order is known (the order a rename goes by: decision 1(d)).
   const anaInTwo = async (chenRowId: string) => {
     const { ana, row } = await seedAnaRivera({ status: "active" });
-    await db.insert(guardian).values({ id: chenRowId, familyQboId: "20", familyId: chen, parentId: ana.id, status: "active" });
+    await db.insert(guardian).values({ id: chenRowId, familyId: chen, parentId: ana.id, status: "active" });
     const kept = await seedQueued({ op: "create", role: "parent", name: "Ana Rivera", typeQboId: "2", familyQboId: "20", email: "ana@example.com", guardianId: chenRowId },
       { familyQboId: "20", state: "refused", code: "fault_6240", sent: true });
     stub.calls.length = 0;
@@ -427,7 +427,7 @@ describe("the queue (item 7)", () => {
 
   it("a crash between the save and the try leaves the item for the worker, which sends it once its lease runs out", async () => {
     const [p] = await db.insert(parent).values({ name: "Kit Rivera", email: "kit@example.com" }).returning();
-    const [row] = await db.insert(guardian).values({ familyQboId: "10", familyId: rivera, parentId: p!.id, status: "invited" }).returning();
+    const [row] = await db.insert(guardian).values({ familyId: rivera, parentId: p!.id, status: "invited" }).returning();
     // The save alone, as addGuardian() makes it, with no at-once try after it.
     await db.transaction((tx) => queueForGuardian(tx, { op: "grant", guardianId: row!.id, familyId: rivera, name: "Kit Rivera", email: "kit@example.com" }, op));
     expect(await items()).toEqual([expect.objectContaining({ state: "waiting", sent: false, tries: 0 })]);
@@ -445,7 +445,7 @@ describe("the last round's decisions: the family being changed, a found customer
   });
   const kit = async () => {
     const [p] = await db.insert(parent).values({ name: "Kit Rivera", email: "kit@example.com" }).returning();
-    const [row] = await db.insert(guardian).values({ familyQboId: "10", familyId: rivera, parentId: p!.id, status: "invited" }).returning();
+    const [row] = await db.insert(guardian).values({ familyId: rivera, parentId: p!.id, status: "invited" }).returning();
     return { p: p!, row: row! };
   };
 
@@ -499,8 +499,8 @@ describe("the last round's decisions: the family being changed, a found customer
 
   it("two creates for one person queued before either was made: at its try the second finds their record under the first family, and is given up, nothing sent", async () => {
     const [p] = await db.insert(parent).values({ name: "Sam Lee", email: "sam@example.com" }).returning();
-    const [inRivera] = await db.insert(guardian).values({ familyQboId: "10", familyId: rivera, parentId: p!.id, status: "invited" }).returning();
-    const [inChen] = await db.insert(guardian).values({ familyQboId: "20", familyId: chen, parentId: p!.id, status: "invited" }).returning();
+    const [inRivera] = await db.insert(guardian).values({ familyId: rivera, parentId: p!.id, status: "invited" }).returning();
+    const [inChen] = await db.insert(guardian).values({ familyId: chen, parentId: p!.id, status: "invited" }).returning();
     // QuickBooks couldn't be reached at either add: both saved, neither made, so neither save saw the other's record.
     await db.transaction((tx) => queueForGuardian(tx, { op: "grant", guardianId: inRivera!.id, familyId: rivera, name: "Sam Lee", email: "sam@example.com" }, op));
     await db.transaction((tx) => queueForGuardian(tx, { op: "grant", guardianId: inChen!.id, familyId: chen, name: "Sam Lee", email: "sam@example.com" }, op));

@@ -3,7 +3,7 @@ import { db } from "@/lib/db/client";
 import { eq } from "drizzle-orm";
 import { accountingLink, auditLog, family, guardian, parent, student } from "@/lib/db/schema";
 import { familyNames, familySignins, getPerson, listPeople } from "@/lib/parents/directory";
-import { resetDb, seedGuardian, seedParent } from "../helpers/db";
+import { resetDb, seedGuardian, seedInactiveFamily, seedParent } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par } from "../helpers/roster-cache";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 import { setRosterSource } from "@/lib/roster/source";
@@ -16,8 +16,8 @@ import { setRosterSource } from "@/lib/roster/source";
 const withCompany = () => db.transaction((tx) => setRosterSource(tx, "1111"));
 const signinsOf = async (customer: string) => familySignins(await recordOfCustomer(customer, "family"));
 const HELD_WORDS = "Can't sign in: the address was under more than one family, and held for staff to review";
-/** An open row with no family record: the gate lets nobody in through it. */
-const NO_RECORD_WORDS = "Can't sign in now: the family isn't set up in the portal";
+/** An open row in an inactive family record: the gate lets nobody in through it. */
+const INACTIVE_WORDS = "Can't sign in now: the family is inactive";
 
 describe("the people directory", () => {
   beforeEach(async () => { await resetDb(); await seedShape(); await seedParentSettings(SIGNINS_ON); });
@@ -60,14 +60,16 @@ describe("the people directory", () => {
     ]);
   });
 
-  it("names a current row in no family record in words, never from the cache, and lists it with the rows of families with no link", async () => {
+  it("names a current row in a family record with no name and no link in words, never from the cache, and lists it with the rows of families with no link", async () => {
     await withCompany(); await seedCache(ALL);
     const { ana } = await seedPeople();
-    // A row made before its family had a record (the cache still holds "20", the Chen Family): in no family record.
-    const bare = await seedGuardian({ parentId: ana.id, familyId: null, status: "invited" });
+    // A row in an inactive family record the portal knows no name of, linked to nothing (the cache still holds "20", the
+    // Chen Family, which names nothing here).
+    const idle = await seedInactiveFamily();
+    const bare = await seedGuardian({ parentId: ana.id, familyId: idle, status: "invited" });
     const [person] = await listPeople("ana");
     expect(person!.families.map((f) => [f.familyQboId, f.familyName])).toEqual([["10", "Rivera Family"], [null, "A family whose name the portal doesn't know"]]);
-    expect(person!.families[1]).toMatchObject({ guardianId: bare.id, familyId: null, pageStands: false, kind: "cannot", words: NO_RECORD_WORDS });
+    expect(person!.families[1]).toMatchObject({ guardianId: bare.id, familyId: idle, pageStands: false, kind: "cannot", words: INACTIVE_WORDS });
   });
 
   it("names a row that names no customer (slice 9d) from its family record, listing it after the rows that name one", async () => {
@@ -76,7 +78,7 @@ describe("the people directory", () => {
     // Two families staff added in the portal, with no link: one named, one whose name the portal never knew.
     const [oak] = await db.insert(family).values({ name: "Oak Family", active: true }).returning({ id: family.id });
     const [nameless] = await db.insert(family).values({ name: null, active: true }).returning({ id: family.id });
-    const rows = await db.insert(guardian).values([oak!, nameless!].map((f) => ({ parentId: ana.id, familyQboId: null, familyId: f.id, status: "invited" as const, sourceQboId: null }))).returning();
+    const rows = await db.insert(guardian).values([oak!, nameless!].map((f) => ({ parentId: ana.id, familyId: f.id, status: "invited" as const }))).returning();
     const [person] = await listPeople("ana");
     expect(person!.families.map((f) => [f.familyQboId, f.familyName])).toEqual([["10", "Rivera Family"],
       ...rows.sort((a, b) => (a.id < b.id ? -1 : 1)).map((r) => [null, r.familyId === oak!.id ? "Oak Family" : "A family whose name the portal doesn't know"])]);
@@ -149,21 +151,19 @@ describe("the people directory", () => {
     await withCompany(); await seedCache(ALL);
     const { ana } = await seedPeople();
     const old = await seedGuardian({ parentId: ana.id, familyQboId: "20", status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "active" });
-    // As the clear left it: in no family, holding the old company's copy of the customer, which nothing reads.
-    await db.update(guardian).set({ familyQboId: "20", sourceQboId: "21" }).where(eq(guardian.id, old.id));
+    // As a clear before stage 4's slice M7a left it: in no family.
     expect((await getPerson(ana.id))!.families).toEqual([
       { guardianId: expect.any(String), familyQboId: "10", familyId: await recordOfCustomer("10", "family"), familyName: "Rivera Family", previousCompany: false, pageStands: true, kind: "can", words: "Can sign in (hasn't yet)", open: true, reinstatable: false },
       { guardianId: old.id, familyQboId: null, familyId: null, familyName: "A family in the previous QuickBooks company", previousCompany: true, pageStands: false, kind: "cannot", words: "Can't sign in: a different QuickBooks company was connected", open: false, reinstatable: false },
     ]);
   });
 
-  it("reads a family's sign-ins by the membership's own family record, not by the QuickBooks ID the row was made with", async () => {
+  it("reads a family's sign-ins by the membership's own family record, and by nothing else", async () => {
     await seedParentSettings({ signin: false });
     await withCompany(); await seedCache(ALL);
     const p = await seedParent({ name: "Hand Seeded", email: "seeded@example.com" });
-    const [g] = await db.insert(guardian).values({ parentId: p.id, familyQboId: "10", status: "invited" }).returning();
-    // Until a membership is in a family record it is in no family's box, as a row a change of company closed never is;
-    // its old copy of the customer puts it in none, and no import does (stage 3's slice 12b1).
+    const [g] = await db.insert(guardian).values({ parentId: p.id, familyId: await seedInactiveFamily(), status: "invited" }).returning();
+    // A membership in another family record is in no box of the Riveras', and no import puts it in one (stage 3's slice 12b1).
     expect(await signinsOf("10")).toEqual([]);
     await syncAppRecords();
     expect(await signinsOf("10")).toEqual([]);
