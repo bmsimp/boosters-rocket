@@ -27,6 +27,27 @@ test("an Admin sees what is set for QuickBooks, and no inputs on the view", asyn
   await expect(page.getByText("Disconnect", { exact: true })).toBeVisible(); // the closed section's summary; never opened
 });
 
+// Stage 4's slice M8: the page an Admin says on, first, that they mean to connect a different company. The seed is
+// connected, so it lists what a switch ends and keeps, says to disconnect first, and offers no press. Nothing changes.
+test("the switch page lists what a switch ends and keeps, and while connected says to disconnect first, with no press", async ({ page }) => {
+  await page.goto("/staff/settings/quickbooks/setup?step=connect");
+  const toSwitch = page.getByRole("link", { name: "Connect a different company", exact: true });
+  await expect(toSwitch).toHaveAttribute("href", "/staff/settings/quickbooks/switch");
+  await page.goto("/staff/settings/quickbooks");
+  await expect(page.getByRole("link", { name: "Connect a different company", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Connect a different company", exact: true }).click();
+  await expect(page).toHaveURL(/\/staff\/settings\/quickbooks\/switch$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Connect a different QuickBooks company");
+  await expect(page.getByRole("heading", { name: "What a switch ends" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What is kept" })).toBeVisible();
+  await expect(page.getByText(/family links?, \d+ student links? and \d+ guardian links?\. You link them again on Accounting links\./)).toBeVisible();
+  await expect(page.getByText("Every signed form, still downloadable by its family and by staff.")).toBeVisible();
+  await expect(page.getByText("QuickBooks is connected now. Disconnect it first, from QuickBooks settings, then come back here.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Switch companies: sign in to Intuit" })).toHaveCount(0);
+  await expect(page.getByRole("checkbox")).toHaveCount(0);
+  await expect(page.locator("body")).not.toContainText("9130000000000001");
+});
+
 test("step 1 keeps what was typed after a refusal and empties the secret after a save", async ({ page, baseURL }) => {
   await page.goto("/staff/settings/quickbooks/setup?step=app");
   await expect(page.getByLabel("Redirect address")).toHaveValue(`${baseURL}/api/quickbooks/callback`);

@@ -41,9 +41,9 @@ function tied<T extends Named>(rows: readonly T[]): T[] {
 }
 
 async function activeFamilies(only?: AppFamilyId): Promise<SeasonFamily[]> {
-  // The one exception to reading the app's tables alone, kept on purpose until stage 4 (the mapping screen): while
-  // QuickBooks is connected to a company other than the roster's, the records are that other company's customers' and
-  // nobody is listed, as before stage 3 when this went through loadRosterPage(), so no page acts on them and no job mails them.
+  // The one exception to reading the app's tables alone, kept on purpose: while QuickBooks is connected to a company
+  // other than the roster's (since stage 4's slice M8, the moment between a switch's store and its clear, or a
+  // connection stored by hand), the records are that other company's customers' and nobody is listed, as before stage 3 when this went through loadRosterPage(), so no page acts on them and no job mails them.
   if (await connectedToAnotherCompany()) return [];
   const [families, students] = await Promise.all([
     db.select({ id: family.id, name: family.name }).from(family).where(only === undefined ? eq(family.active, true) : and(eq(family.active, true), eq(family.id, only))),
@@ -73,7 +73,7 @@ async function activeFamilies(only?: AppFamilyId): Promise<SeasonFamily[]> {
  * Read from the app's own tables alone (`family`, and `student` by its `family_id`): no link, no membership shape and
  * no QuickBooks connection is needed, so a family with no QuickBooks customer is here like any other, and the list
  * stands while the shape is broken or QuickBooks is disconnected. The one exception: while QuickBooks is connected to a
- * company other than the roster cache's (connectedToAnotherCompany()), nobody is listed, as before, until stage 4.
+ * company other than the roster cache's (connectedToAnotherCompany(): a switch between its store and its clear), nobody is listed.
  * The records stand alone (stage 3's slice 9c): a family or student made, renamed, moved or made inactive in QuickBooks
  * changes nobody here; a staff write sent to QuickBooks changes its own record, and a family with no link stays as it
  * is. In flat books a member is a family and nobody is a student. By name, as the roster lists them.

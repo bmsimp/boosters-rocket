@@ -18,8 +18,9 @@ import {
 } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { auditPage, parseAuditFilters } from "@/lib/audit/query";
-import { beginConnect, completeConnect, disconnect } from "@/lib/quickbooks/connection";
-import { refreshRoster } from "@/lib/roster/refresh";
+import { beginConnect, beginSwitchConnect, completeConnect, disconnect } from "@/lib/quickbooks/connection";
+import { NOT_SWITCHED_WORDS, refreshRoster } from "@/lib/roster/refresh";
+import { evidenceDownload } from "@/lib/signed-forms/evidence";
 import { clearRosterOfOtherCompany, getRosterSource, GIVEN_UP_FOR_COMPANY_NOTE, ROSTER_JOB, setRosterSource, SOURCE_KEY } from "@/lib/roster/source";
 import { ROSTER_LOCK, SHAPE_KEY } from "@/lib/roster/shape";
 import { RUN_KEY } from "@/lib/money/run-keys";
@@ -40,8 +41,8 @@ import { seedConnected, startQboStub, type QboStub } from "../helpers/qbo-stub";
  * row: families, students, guardian rows, every sign-in, the seasons, volunteering and forms, and every signed form's
  * evidence, which stays its family's. Until slice M7a this file proved the clear deleted most of that; it flipped then.
  *
- * Connecting a different company is still refused until stage 4's slice M8 (open question 18), so nothing the portal
- * runs reaches the clear: the first describe calls it directly, and the last proves the refusal.
+ * Since stage 4's slice M8 the portal reaches the clear when an Admin asks on the switch page and then connects another
+ * company: the first describe calls it directly, and the last goes through the connect and the refresh.
  */
 const admin = { actor: { door: "staff" as const, id: null, label: "admin@club.org" }, ip: null };
 
@@ -255,7 +256,7 @@ describe("connecting a different company, by open question 16", () => {
   });
 });
 
-describe("the seasons, volunteering and forms, from stage 2 until stage 4: a different company is refused, and every record stays", () => {
+describe("switching companies keeps the seasons', volunteering's and forms' records", () => {
   const worker = { startedBy: "worker", actor: { door: "system" as const, id: null, label: "worker" }, ip: null };
   const audits = async (...actions: string[]) => (await db.select().from(auditLog).orderBy(asc(auditLog.id))).filter((r) => actions.includes(r.action));
   /** Every season and volunteering record, ids and times and all, and the app's own records they name. */
@@ -282,9 +283,13 @@ describe("the seasons, volunteering and forms, from stage 2 until stage 4: a dif
     files: await db.select().from(signedFormFile).orderBy(asc(signedFormFile.id)),
     copies: await db.select().from(signedFormCopy).orderBy(asc(signedFormCopy.id)),
   });
+  /** What a switch keeps: all of it but the buy-outs (the unpaid ones end), the money cache and the links (both cleared). */
+  const keptOf = (r: Awaited<ReturnType<typeof seasonRecords>>) => Object.fromEntries(Object.entries(r).filter(([k]) => !["buyouts", "money", "links"].includes(k)));
   let staff: Awaited<ReturnType<typeof seedStaff>>;
-  const connect = async (realmId: string) => {
-    const r = await beginConnect(staff.id);
+  const op = () => ({ actor: { door: "staff" as const, id: staff.id, label: staff.email }, ip: "203.0.113.9", permission: "Settings.QuickBooks.ReadWrite" });
+  /** A connect through Intuit: a plain one, or one asked for on the switch page (beginSwitchConnect()). */
+  const connect = async (realmId: string, o: { switching?: boolean } = {}) => {
+    const r = o.switching ? await beginSwitchConnect(staff.id, op()) : await beginConnect(staff.id);
     if (!r.ok) throw new Error("not configured");
     stub.codes.add("code-1");
     return completeConnect({ code: "code-1", state: new URL(r.url).searchParams.get("state"), realmId, error: null },
@@ -297,7 +302,9 @@ describe("the seasons, volunteering and forms, from stage 2 until stage 4: a dif
     staff = await seedStaff({ email: "admin@example.org", admin: true });
   });
 
-  it("refuses to connect another company, keeps the season's and volunteering's records, and connects the same one again", { timeout: 30_000 }, async () => {
+  // Flipped on purpose in stage 4's slice M8: until then a different company was refused (open question 18). Now one
+  // connected after the ask clears what open question 16 says and keeps every season, volunteering and forms record.
+  it("connects another company after the ask, keeps the season's, volunteering's and forms' records, and its staff still download the evidence", { timeout: 30_000 }, async () => {
     const { a, b } = await seedTwoFamilies();
     // A due-date reminder claim of each, carried by the app's own family (src/lib/seasons/due-reminders.ts, src/lib/volunteer/reminders.ts).
     const famA = await recordOfCustomer(a.spec.family.qboId, "family");
@@ -328,35 +335,61 @@ describe("the seasons, volunteering and forms, from stage 2 until stage 4: a dif
     expect(before.credits.length).toBeGreaterThanOrEqual(2);
     expect(before.volunteerReminders).toHaveLength(1);
 
-    // The Admin disconnects, and signs in to Intuit with another company: refused before anything is stored or cleared.
-    await disconnect({ actor: { door: "staff", id: staff.id, label: staff.email }, ip: null });
-    expect(await connect("2222")).toEqual({ ok: false, reason: "roster_company" });
-    expect((await db.select().from(qboConnection))[0]).toMatchObject({ realmId: null, refreshTokenCiphertext: null });
-    expect(stub.calls.filter((c) => c.path === "/token")).toEqual([]); // no code was exchanged for that company
-    expect(await getRosterSource()).toBe("1111");
-    expect(await seasonRecords()).toEqual(before);
-    expect((await audits("quickbooks.connect_refused")).map((r) => r.after)).toEqual([{ reason: "roster_company" }]);
-    expect(await audits("roster.cleared", "season.records.cleared", "volunteer.signups.cleared", "accounting.links.cleared", "parent.access.cleared", "form.records.cleared")).toEqual([]);
+    expect(before.links.length).toBeGreaterThan(0);
+    expect(before.buyouts.map((x) => x.state).sort()).toEqual(["invoiced", "paid"]);
 
-    // The same company again: connected, and every record is as it was.
-    expect(await connect("1111")).toEqual({ ok: true });
-    expect((await db.select().from(qboConnection))[0]!.realmId).toBe("1111");
-    expect(await seasonRecords()).toEqual(before);
-    expect(await audits("roster.cleared", "season.records.cleared", "volunteer.signups.cleared", "accounting.links.cleared", "form.records.cleared")).toEqual([]);
+    // The Admin disconnects, says on the switch page they mean to, and signs in to Intuit with another company.
+    await disconnect({ actor: { door: "staff", id: staff.id, label: staff.email }, ip: null });
+    expect(await connect("2222", { switching: true })).toEqual({ ok: true });
+    expect((await db.select().from(qboConnection))[0]!.realmId).toBe("2222");
+    expect(await getRosterSource()).toBe("2222");
+    const after = await seasonRecords();
+    expect(keptOf(after)).toEqual(keptOf(before));
+    expect(after.links).toEqual([]);
+    expect(after.money).toEqual([]);
+    // The paid buy-out keeps counting, unchanged; the invoiced one ends as the earlier company's, its invoice kept on it.
+    const paid = before.buyouts.find((x) => x.state === "paid")!, invoiced = before.buyouts.find((x) => x.state === "invoiced")!;
+    expect(after.buyouts.find((x) => x.id === paid.id)).toEqual(paid);
+    expect(after.buyouts.find((x) => x.id === invoiced.id)).toMatchObject({ state: "voided", endReason: "earlier_company", invoiceQboId: invoiced.invoiceQboId, realmId: invoiced.realmId });
+    expect(await audits("roster.cleared")).toHaveLength(1);
+    expect(await audits("accounting.links.cleared")).toHaveLength(1);
+    expect(await audits("season.records.cleared", "volunteer.signups.cleared", "parent.access.cleared", "form.records.cleared")).toEqual([]);
+
+    // The first read of the new company changes none of it, and the evidence still downloads for staff (the owner's choice 2).
+    expect(await refreshRoster(worker)).toMatchObject({ ok: true });
+    expect(keptOf(await seasonRecords())).toEqual(keptOf(before));
+    for (const e of before.evidence) {
+      const sealed = before.files.find((x) => x.evidenceId === e.id && x.kind === "sealed_pdf" && x.position === 1)!;
+      const got = await evidenceDownload(e.id, "sealed-pdf-1");
+      expect(got && Buffer.from(got.bytes).equals(Buffer.from(sealed.bytes))).toBe(true);
+    }
+    expect(await audits("roster.cleared")).toHaveLength(1);
   });
 
-  it("refuses to read another company's roster over this one's, asking QuickBooks nothing, and keeps every season record", { timeout: 30_000 }, async () => {
+  // Flipped on purpose in stage 4's slice M8: a switch the connect stored, whose clear never ran, is cleared by the next
+  // refresh, keeping every season record; a connection to another company with no recorded switch is still never read.
+  it("a refresh clears for a switch the connect recorded, asking nothing first without one, and keeps every season record", { timeout: 30_000 }, async () => {
     await seedTwoFamilies();
-    // A connection to another company stored without a connect (from before the refusal, or by hand).
+    // A connection to another company stored without a connect (from before the refusal, or by hand): never read.
     await seedConnected(stub, { realmId: "2222" });
     const before = await seasonRecords();
-    expect(await refreshRoster(worker)).toEqual({ ok: false, reason: "failed",
-      error: "The roster was read from another QuickBooks company than the one connected now, so it wasn't read. Disconnect QuickBooks, then connect the company the roster was read from. (roster_company)" });
+    expect(await refreshRoster(worker)).toEqual({ ok: false, reason: "failed", error: NOT_SWITCHED_WORDS });
     expect(stub.apiCalls()).toEqual([]);
     expect(await getRosterSource()).toBe("1111");
     expect(await seasonRecords()).toEqual(before);
     expect((await audits("roster.refresh.failed")).map((r) => r.after)).toEqual([{ code: "roster_company" }]);
     expect(before.signups.length).toBeGreaterThanOrEqual(2);
-    expect(await audits("roster.cleared", "season.records.cleared", "volunteer.signups.cleared", "accounting.links.cleared", "form.records.cleared")).toEqual([]);
+    expect(await audits("roster.cleared")).toEqual([]);
+
+    // As the connect's store leaves it when its clear (step 3b) doesn't run: the switch recorded beside the connection.
+    await db.insert(setting).values({ key: "quickbooks.switch", value: { stored: { fromRealmId: "1111", toRealmId: "2222", staffUserId: staff.id, at: new Date().toISOString() } } });
+    expect(await refreshRoster(worker)).toMatchObject({ ok: true });
+    expect(await getRosterSource()).toBe("2222");
+    expect((await db.select().from(setting).where(eq(setting.key, "quickbooks.switch")))).toEqual([]);
+    const after = await seasonRecords();
+    expect(keptOf(after)).toEqual(keptOf(before));
+    expect(after.links).toEqual([]);
+    expect((await audits("roster.cleared")).map((r) => r.after)).toEqual([expect.objectContaining({ reason: "different_company", realmId: "2222" })]);
+    expect(await audits("season.records.cleared", "volunteer.signups.cleared", "parent.access.cleared", "form.records.cleared")).toEqual([]);
   });
 });

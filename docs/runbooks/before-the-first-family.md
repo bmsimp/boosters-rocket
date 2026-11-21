@@ -75,12 +75,14 @@ sandbox company and the club's Microsoft 365 mail, but no Documenso.
    page (under **Families**, the **Portal sign-ins** box, **Add guardian**, as in part 6, step 3).
    **Pass:** each step does what its line says; add a row for each to that runbook's Results table.
    **If not:** note the step and what you saw; that runbook's Troubleshooting table covers the usual causes.
-   **Check 25, a second sandbox company, waits for the mapping screen:** until
-   families can be linked to another company's customers, the portal refuses any company but the one its families were
-   read from ([reconnecting QuickBooks](quickbooks-reconnect.md#connecting-a-different-company)), so the host stays on
-   the first sandbox company, the one part 2 needs. Don't try it: it is refused and changes nothing, and the roster
-   refresh stops while another company's connection is stored.
-   **Pass:** Roster still lists the first sandbox company's families, and a test parent can sign in.
+   **Check 25, a second sandbox company, is a switch of company and back, walked by a person on the host** (only the
+   host has Intuit): make a second sandbox company on the developer site, then follow check 25 in that runbook, which
+   switches to it ([reconnecting QuickBooks](quickbooks-reconnect.md#connecting-a-different-company)) and then back to
+   the first sandbox company as a second switch, the one part 2 needs, with every family linked again on Accounting
+   links. Take the host's backup first.
+   **Pass:** after the first switch, every family is still on the portal unlinked, a test parent still signs in and
+   reads that payments aren't connected, and Reconciliation lists the unpaid buy-outs ended; after the second, Roster
+   lists the first sandbox company's families again, linked, and a test parent sees their balance.
 9. **Export the audit log once** (Audit in the staff menu, **Export ... (CSV)**) after a parent whose name has an accent
    has signed in, and open the file in Excel or Google Sheets.
    **Pass:** the accent shows as it should, and the columns read well. **If not:** note which program and what it
@@ -611,9 +613,9 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
 ## 6. Connect the club's real books
 
 1. **Connect the real books** by [Intuit, part 4](intuit.md#4-connect-the-clubs-real-books), as the first company of
-   the installation families will use. That installation must never have read a sandbox company's customers: until the
-   mapping screen ships it would refuse the real books
-   ([reconnecting QuickBooks, a different company](quickbooks-reconnect.md#connecting-a-different-company)). The
+   the installation families will use. That installation had best never have read a sandbox company's customers: if it
+   has, the real books come in only as a switch, which ends every family's link to the books until each is linked
+   again ([reconnecting QuickBooks, a different company](quickbooks-reconnect.md#connecting-a-different-company)). The
    proof-of-concept host stays on the sandbox; the club's installation is a fresh one ([first install](first-install.md)).
    **Pass:** Health says QuickBooks is "Connected" to the club's company, with no word of a sandbox; Roster's counts
    line has the counts QuickBooks has. A fresh installation lists no families yet: a read of QuickBooks brings no
@@ -745,9 +747,10 @@ work another. Any time before the pilot.
    QuickBooks holds none. Today coverage is everyone, or a hand-picked list of families or students.
 2. A waiver's reason stays hidden from the family (they read "Waived"); parents read "set" where staff read "step";
    all four season permissions are ordinary ones a custom role can hold.
-3. Until the mapping screen ships, a QuickBooks company other than the one the portal's families were read from is
-   refused, so nothing a season holds (ticks, waivers, chosen lists, reminders sent) can be lost to a change of company.
-   The lead's decision, with no exception for an installation that holds no season records yet.
+3. A QuickBooks company other than the one the portal's families were read from is connected only after an Admin
+   says, on the switch page, that they mean to: it ends every family's link to the books, and keeps everything a season
+   holds (ticks, waivers, chosen lists, reminders sent), every sign-in and every signed form, which stays downloadable.
+   The confirm before Intuit, and the signed forms staying downloadable, are the owner's to confirm (stage 4's slice M8).
 4. The cancelling cut-off for a shift is 48 hours before it; a staff tick no longer counts for volunteering; a declined
    form still gets reminders.
 5. A parent changes their own sign-in email in the portal, whatever families they are in. Until the staff email change

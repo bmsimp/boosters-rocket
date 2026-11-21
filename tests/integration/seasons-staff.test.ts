@@ -708,8 +708,8 @@ describe("one family's season, for staff", () => {
 describe("a different QuickBooks company", () => {
   const SYSTEM = { actor: { door: "system" as const, id: null, label: "test" }, ip: null };
 
-  // Connecting a different company is refused until stage 4's slice M8 (tests/integration/company-change-step5.test.ts),
-  // so nothing the portal runs reaches this clear. Since slice M7a it keeps every season record (open question 16), as
+  // Since stage 4's slice M8 a switch an Admin asks for reaches this clear through the connect
+  // (tests/integration/company-change-step5.test.ts); this calls it directly. Since slice M7a it keeps every season record (open question 16), as
   // the families and students they name are kept: it was "takes every tick, waiver and chosen list with it" while the
   // clear removed those records too.
   it("the clear a change of company would run keeps every tick, waiver and chosen list, and the season", async () => {

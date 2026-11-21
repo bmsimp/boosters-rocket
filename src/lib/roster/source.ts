@@ -12,6 +12,50 @@ export const ROSTER_JOB = "roster.refresh";
 /** Which QuickBooks company the cache was read from: `{ realmId }`, written with every cache swap. Never sent to a page. */
 export const SOURCE_KEY = "roster.source";
 
+/**
+ * A change of company an Admin asked for, and then the one a connect stored (stage 4's slice M8): one row, never sent to
+ * a page. `asked` is written with a connect's state by beginSwitchConnect() (src/lib/quickbooks/connection.ts), with
+ * the same hash and expiry, and the roster's company as read then; completeConnect() spends it with the state, and lets
+ * a company other than the roster's be connected only against it. `stored` is written by that connect's store, in its
+ * transaction, and spent by the clear below, in the clear's (step 3b, or the roster refresh's backstop when 3b never
+ * ran). A connection to another company with no such record is never read over the roster's company (refreshRoster()).
+ */
+export const SWITCH_KEY = "quickbooks.switch";
+export type SwitchAsked = { stateHash: string; staffUserId: string; expiresAt: string; fromRealmId: string };
+export type SwitchStored = { fromRealmId: string; toRealmId: string; staffUserId: string; at: string };
+export type SwitchRecord = { asked: SwitchAsked } | { stored: SwitchStored };
+
+const isText = (v: unknown): v is string => typeof v === "string" && v.length > 0;
+/** The switch row as stored, or null when there is none or it doesn't read as one. */
+export async function getSwitchRecord(tx?: Tx): Promise<SwitchRecord | null> {
+  const [row] = await (tx ?? db).select().from(setting).where(eq(setting.key, SWITCH_KEY));
+  const v = row?.value as { asked?: Record<string, unknown>; stored?: Record<string, unknown> } | undefined;
+  const a = v?.asked, s = v?.stored;
+  if (a && isText(a.stateHash) && isText(a.staffUserId) && isText(a.expiresAt) && isText(a.fromRealmId)) {
+    return { asked: { stateHash: a.stateHash, staffUserId: a.staffUserId, expiresAt: a.expiresAt, fromRealmId: a.fromRealmId } };
+  }
+  if (s && isText(s.fromRealmId) && isText(s.toRealmId) && isText(s.staffUserId) && isText(s.at)) {
+    return { stored: { fromRealmId: s.fromRealmId, toRealmId: s.toRealmId, staffUserId: s.staffUserId, at: s.at } };
+  }
+  return null;
+}
+
+/** Whether the switch row is a stored switch from `fromRealmId` to `toRealmId`: the licence to clear for that pair alone. */
+export const storedSwitchOf = (r: SwitchRecord | null, fromRealmId: string | null, toRealmId: string | null): boolean =>
+  r !== null && "stored" in r && fromRealmId !== null && toRealmId !== null && r.stored.fromRealmId === fromRealmId && r.stored.toRealmId === toRealmId;
+
+/**
+ * Drops an ask to switch companies, and only an ask: a stored switch is the clear's to spend, so a new sign-in to
+ * Intuit, or a connect that spends its state, never takes from the refresh the switch it is to finish.
+ */
+export async function dropSwitchAsk(tx: Tx): Promise<void> {
+  await tx.delete(setting).where(and(eq(setting.key, SWITCH_KEY), sql`(${setting.value} -> 'asked') is not null`));
+}
+
+export async function setSwitchRecord(tx: Tx, value: SwitchRecord): Promise<void> {
+  await tx.insert(setting).values({ key: SWITCH_KEY, value }).onConflictDoUpdate({ target: setting.key, set: { value, updatedAt: new Date() } });
+}
+
 export async function getRosterSource(tx?: Tx): Promise<string | null> {
   const [row] = await (tx ?? db).select().from(setting).where(eq(setting.key, SOURCE_KEY));
   const realmId = (row?.value as { realmId?: unknown } | undefined)?.realmId;
@@ -80,9 +124,12 @@ export const GIVEN_UP_FOR_COMPANY_NOTE = "Given up: the club connected a differe
  * roster lock (runWriteQueue(), ./queue.ts). Until it does, every reader of open items reads only the roster's
  * company's (ofRosterCompany above, stage 4's slice M7a3), so such an item holds nothing back, lists or counts nowhere.
  *
- * Nothing the portal runs reaches it until stage 4's slice M8 turns a change of company back on: a different company
- * is refused wherever one is connected or read (completeConnect() in src/lib/quickbooks/connection.ts, refreshRoster()
- * in ./refresh.ts; open question 18). Its tests call it directly (tests/integration/company-change-step5.test.ts).
+ * How it is reached (stage 4's slice M8): an Admin asks on the switch page first (beginSwitchConnect(),
+ * src/lib/quickbooks/connection.ts, which records the ask under SWITCH_KEY); the connect that follows stores the
+ * connection to the other company against that ask only, records the switch, and then runs this (step 3b of
+ * completeConnect(), through clearRosterOfOtherCompany() below); a 3b that never ran is run by the roster refresh, in
+ * its save's savepoint, for that recorded switch only (./refresh.ts). It spends the switch row, whatever it holds. A
+ * company connected without an ask is refused (`roster_company`), and one stored by hand is never read.
  */
 export async function clearRosterOfOtherCompanyLocked(tx: Tx, realmId: string, o: { actor: Actor; ip: string | null; keepRunId?: number }): Promise<boolean> {
   const from = await getRosterSource(tx);
@@ -105,6 +152,7 @@ export async function clearRosterOfOtherCompanyLocked(tx: Tx, realmId: string, o
   // The records the check of the portal's requests made in that company (src/lib/quickbooks/sandbox-check/).
   await clearCheckRecords(tx, { actor: o.actor, ip: o.ip });
   await tx.delete(setting).where(eq(setting.key, SHAPE_KEY));
+  await tx.delete(setting).where(eq(setting.key, SWITCH_KEY));
   await tx.delete(jobRun).where(o.keepRunId === undefined ? eq(jobRun.job, ROSTER_JOB) : and(eq(jobRun.job, ROSTER_JOB), ne(jobRun.id, o.keepRunId)));
   await setRosterSource(tx, realmId);
   await writeAudit({ actor: o.actor, action: "roster.cleared", targetType: "setting", targetId: SOURCE_KEY, ip: o.ip,

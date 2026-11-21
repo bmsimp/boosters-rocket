@@ -12,6 +12,8 @@ import { rosterCounts } from "./roster-counts";
 import { getParentSettings } from "@/lib/parents/settings";
 import { peopleWithAccess } from "@/lib/parents/switches";
 import { BackToSettings } from "../back-to-settings";
+import { disconnectWarning, SWITCH_PAGE, SWITCH_WORDS } from "./switch-words";
+import { getRosterSource } from "@/lib/roster/source";
 import { StateWords } from "@/app/components/state-words";
 import { lastCheck, lastCheckWords } from "@/lib/quickbooks/sandbox-check/view";
 
@@ -21,9 +23,9 @@ export const dynamic = "force-dynamic";
 /** What is set, shown plainly, with no inputs (spec §3 The settings view). Changing anything opens the steps. */
 export default async function QuickBooksSettingsPage() {
   await requireStaffPage("Settings.QuickBooks.ReadWrite");
-  const [conn, page, wake, problems, settings, people, checked] = await Promise.all([connectionView(), loadRosterPage(), lastWake(), quickbooksProblems(), getParentSettings(), peopleWithAccess(), lastCheck()]);
+  const [conn, page, wake, problems, settings, people, checked, source] = await Promise.all([connectionView(), loadRosterPage(), lastWake(), quickbooksProblems(), getParentSettings(), peopleWithAccess(), lastCheck(), getRosterSource()]);
   const when = (iso: string | null) => (iso ? <LocalTime iso={iso} /> : "Not yet");
-  const warning = settings.signin && people > 0 ? `${people} ${people === 1 ? "person" : "people"} can sign in to the portal now. Until families can be linked to another company's customers, only this same QuickBooks company can be connected again after a disconnect, and reconnecting it changes nothing for them.` : undefined;
+  const warning = settings.signin && people > 0 ? disconnectWarning(people) : undefined;
   return (
     <main className="wrap single">
       <BackToSettings />
@@ -67,6 +69,8 @@ export default async function QuickBooksSettingsPage() {
         <p>{conn.configured ? "Open the steps to change the Intuit app's keys, renew the connection or choose the shape again." : "Three steps: the Intuit app's keys, signing in to Intuit, and the shape of your membership."}</p>
         <p><a className="btn" href="/staff/settings/quickbooks/setup">{conn.configured ? "Change" : "Set up"}</a></p>
         <Disconnect connected={conn.connected} disconnect={disconnectAction} warning={warning} />
+        {/* A first connect needs no switch: offered only while the roster names a company. */}
+        {source !== null && <p>{SWITCH_WORDS.setupHint} <a className="link-line" href={SWITCH_PAGE}>{SWITCH_WORDS.setupLink}</a></p>}
       </section>
     </main>
   );

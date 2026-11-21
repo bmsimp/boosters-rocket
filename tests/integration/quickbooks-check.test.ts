@@ -24,7 +24,7 @@ import {
 } from "@/lib/quickbooks/sandbox-check/writes";
 import { healthReport } from "@/lib/health/report";
 import { refreshRoster } from "@/lib/roster/refresh";
-import { clearRosterOfOtherCompany } from "@/lib/roster/source";
+import { beginSwitchConnect, completeConnect, disconnect } from "@/lib/quickbooks/connection";
 import { resetDb, seedStaff } from "../helpers/db";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { REALM, staffWith, WORKER } from "../helpers/roster-writes";
@@ -410,13 +410,19 @@ describe("a run cut off part way", () => {
     expect(rec!.closedAt).not.toBeNull();
   });
 
-  it("forgets the records it made when a different company is connected, and keeps the runs", async () => {
+  it("forgets the records it made when a different company is connected, and keeps the runs", { timeout: 30_000 }, async () => {
     await checkCompany(stub);
     await run();
     const { run: r } = await lastRun();
     expect((await recordsOf(r.id)).length).toBeGreaterThan(0);
-    // The clear a change of company would run (until stage 4 a different company is refused before it can: open question 18).
-    expect(await clearRosterOfOtherCompany("9130000000000777", { actor: WORKER.actor, ip: null })).toBe(true);
+    // A switch, through the switch page's ask and the connect (stage 4's slice M8), which runs the clear.
+    const op = { actor: { door: "staff" as const, id: admin.id, label: admin.email }, ip: "203.0.113.9", permission: "Settings.QuickBooks.ReadWrite" };
+    await disconnect(op);
+    const asked = await beginSwitchConnect(admin.id, op);
+    if (!asked.ok) throw new Error("not configured");
+    stub.codes.add("code-switch");
+    expect(await completeConnect({ code: "code-switch", state: new URL(asked.url).searchParams.get("state"), realmId: "9130000000000777", error: null }, { staffUserId: admin.id, ...op })).toEqual({ ok: true });
+    expect(await audits("roster.cleared")).toHaveLength(1);
     expect(await db.select().from(qboCheckRecord)).toEqual([]);
     expect(await db.select().from(qboCheckRun)).toHaveLength(1);
     expect(await audits("quickbooks.check.records.cleared")).toHaveLength(1);

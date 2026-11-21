@@ -49,13 +49,15 @@ installation with. `docker compose ps` shows what is running, and `docker compos
     another family couldn't be brought up to date" (`follow_up_failed`). A refresh no longer does any of those, so none
     can happen again.) Press **Refresh** on the Roster page once. If a refresh that isn't Intuit's fails the same way
     again ("The roster couldn't be saved", `save_failed`), that is a fault in the portal for whoever maintains it.
-  - "The roster was read from another QuickBooks company than the one connected now, so it wasn't read. Disconnect
-    QuickBooks, then connect the company the roster was read from." (`roster_company`): the connection holds a different
-    company from the one the portal's families came from, stored before the portal refused that (or by hand). Until
-    families can be linked to another company's customers (the mapping screen, a later update), the portal reads only
-    the company it read first, and asks QuickBooks nothing meanwhile; the roster and every family's records stay as
-    they were. **Settings**, **QuickBooks**, open **Disconnect**, **Disconnect QuickBooks**, then **Change** and connect
-    the first company again ([Reconnecting QuickBooks: The same company](quickbooks-reconnect.md#the-same-company)).
+  - "The roster was read from another QuickBooks company than the one connected now, and nobody chose to switch to it,
+    so it wasn't read. Disconnect QuickBooks, then connect the company the roster was read from, or choose Connect a
+    different company first." (`roster_company`): the connection holds a different company from the one the portal's
+    families came from, and no Admin asked to switch to it: it was stored before the portal refused that, or by hand.
+    The portal reads another company only after a switch asked for on the switch page, and asks QuickBooks nothing
+    meanwhile; the roster and every family's records stay as they were. **Settings**, **QuickBooks**, open
+    **Disconnect**, **Disconnect QuickBooks**, then **Change** and connect the first company again ([Reconnecting
+    QuickBooks: The same company](quickbooks-reconnect.md#the-same-company)), or, to move to the other company, switch
+    ([Connecting a different company](quickbooks-reconnect.md#connecting-a-different-company)).
   - "The roster hasn't been refreshed from QuickBooks in more than 2 days": the worker isn't running (see Worker).
   - "The membership shape names a customer type QuickBooks no longer has": someone renamed or removed a customer type in
     QuickBooks. **Settings**, **QuickBooks**, **Change**, step 3: choose the shape again.
@@ -96,8 +98,8 @@ installation with. `docker compose ps` shows what is running, and `docker compos
     connected to the club's real books, run the check there when convenient (Settings, QuickBooks, **Check the portal's
     requests**): against the real books it only reads. The checks that make changes are run on a separate installation
     connected to an Intuit sandbox company, such as the proof-of-concept host, never by switching this installation's
-    company. Until the mapping screen ships, the portal refuses a company other than the one its families were read
-    from anyway: see [Reconnecting QuickBooks: Connecting a different
+    company: a switch ends every family's link to the books, and is for moving the club to other books for good. See
+    [Reconnecting QuickBooks: Connecting a different
     company](quickbooks-reconnect.md#connecting-a-different-company).
 - In any state, "Parents' phones and mailing addresses haven't been copied from QuickBooks into the portal yet": since
   the update that made a guardian's phone and mailing address the portal's own, the worker copies them once from each
@@ -187,9 +189,10 @@ The emails the worker sends the day before each volunteer shift, and 14 and 3 da
 - **"... signed forms can't be filed while QuickBooks is connected to a company other than the one the roster was read
   from"**, with the note "N signed forms can't be filed yet". Not a Documenso problem: while QuickBooks is connected to
   another company the portal can't look up which QuickBooks customers a form was signed for, so it keeps nothing and
-  asks Documenso nothing for it. The portal refuses to connect another company today, so this should never show: if it
-  does, report it. Open **Settings**, **QuickBooks**: disconnect, and connect the company the roster was read from (the
-  QuickBooks line on this page). The form stays signed in Documenso. The worker tries again on its own schedule, which
+  asks Documenso nothing for it. It shows only for a moment at a switch of company, between the new connection being
+  stored and the earlier company's records being cleared, or while a connection to another company stored with no
+  switch asked for (`roster_company` above) stands: if it stays, look at the QuickBooks line on this page, and either
+  let the next roster refresh finish the switch or disconnect and connect the company the roster was read from. The form stays signed in Documenso. The worker tries again on its own schedule, which
   after a few failed tries is every three hours, so the line can stay for up to that long after the right company is
   connected: it counts by each form's last try. A family or student with no QuickBooks link is no warning: its signed
   form is kept like any other, with no QuickBooks number.
@@ -209,7 +212,8 @@ The emails the worker sends the day before each volunteer shift, and 14 and 3 da
   sent one. The line doesn't say the level; **Settings**, **Parent sign-ins** does, under **Sign-in level**.
 - **"Off"**. No parent can sign in, not even a guardian staff have just added: the parent door stays closed until an
   Admin switches sign-ins on. It is a choice: **Settings**, **Parent sign-ins** switches them on (once outgoing mail works: QuickBooks plays no part in who can sign in). Reconnecting the same
-  QuickBooks company leaves them as they are; a different company can't be connected until the mapping screen ships.
+  QuickBooks company leaves them as they are, and so does a switch to a different company: it ends only each family's
+  link to the books.
 - **"Needs attention"**, with "The latest sign-ins have no address: the proxy in front of the portal doesn't send the
   header ...". `CLIENT_IP_HEADER` in `deploy/.env` names a header your proxy doesn't set. Find the one it does set
   ([a proxy of your own](first-install.md#a-proxy-of-your-own)), put it in `.env`, and `docker compose up -d app`.

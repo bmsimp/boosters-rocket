@@ -2,20 +2,21 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { env } from "@/env";
 import { db, type Tx } from "@/lib/db/client";
-import { qboConnection, type QboEnvironment } from "@/lib/db/schema";
+import { qboConnection, setting, type QboEnvironment } from "@/lib/db/schema";
 import { secretBox, SecretBoxError } from "@/lib/crypto/secret-box";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { errorNeedsAdmin, qboEndpoints, QboError, QBO_SCOPE } from "./endpoints";
 import { QBO_AAD, qboGet, sealTokens, tokenRequest, type TokenSet } from "./client";
-import { clearRosterOfOtherCompany, getRosterSource } from "@/lib/roster/source";
+import { clearRosterOfOtherCompany, dropSwitchAsk, getRosterSource, getSwitchRecord, setSwitchRecord, storedSwitchOf, SWITCH_KEY, type SwitchRecord } from "@/lib/roster/source";
 
 export type QboOp = { actor: Actor; ip: string | null; permission?: string };
 export type QboAppDraft = { clientId: string; clientSecret: string | null; environment: QboEnvironment };
 /**
- * Why a connect was refused. `roster_company`: the portal's families were read from another company, and until the
- * mapping screen ships (stage 4 of docs/superpowers/specs/2026-11-18-app-owned-families-design.md) only that company can
- * be connected again (open question 18): the seasons now keep their ticks, waivers and chosen lists against those
- * families, which a change of company would have to take away.
+ * Why a connect was refused. `roster_company`: the portal's families were read from another company, and no Admin
+ * asked first, on the switch page, to move the portal to a different one (stage 4's slice M8: a switch ends every
+ * family's link to the books, open question 16 of docs/superpowers/specs/2026-11-18-app-owned-families-design.md), or
+ * the ask didn't hold: made for another sign-in to Intuit, by someone else, expired, spent, or made while the roster
+ * named another company than it does now.
  */
 export type ConnectRefusal = "state" | "denied" | "other_company" | "roster_company" | "intuit" | "not_configured";
 export type QboConnectionView = {
@@ -80,6 +81,8 @@ export async function saveQboApp(d: QboAppDraft, o: QboOp): Promise<{ ok: true }
     // A connect started under the old keys must not finish under the new ones.
     const keysChanged = c !== undefined && (c.clientId !== d.clientId || c.environment !== d.environment);
     const dropState = keysChanged ? { stateHash: null, stateStaffUserId: null, stateExpiresAt: null } : {};
+    // An ask to switch companies goes with the state it was made for.
+    if (keysChanged) await dropSwitchAsk(tx);
     if (c) await tx.update(qboConnection).set({ clientId: d.clientId, environment: d.environment, ...secret, ...dropState, updatedAt: new Date() });
     else await tx.insert(qboConnection).values({ clientId: d.clientId, environment: d.environment, clientSecretCiphertext: sealed!.ciphertext, clientSecretKeyId: sealed!.keyId });
     await writeAudit({ actor: o.actor, action: "settings.quickbooks.save", permission: o.permission, ...TARGET, ip: o.ip,
@@ -105,19 +108,66 @@ async function revokeAtIntuit(refreshToken: string, app: { clientId: string; cli
   }
 }
 
-/** Starts a connect: a new single-use state for this Admin (replacing any earlier one) and the Intuit address to send them to. */
-export async function beginConnect(staffUserId: string): Promise<{ ok: true; url: string } | { ok: false; reason: "not_configured" }> {
+type Begun = { ok: true; url: string } | { ok: false; reason: "not_configured" };
+const newState = (staffUserId: string) => {
   const state = randomBytes(32).toString("base64url");
-  const [c] = await db.update(qboConnection).set({ stateHash: sha256(state), stateStaffUserId: staffUserId, stateExpiresAt: new Date(Date.now() + STATE_TTL_MS), updatedAt: new Date() }).returning();
-  if (!c) return { ok: false, reason: "not_configured" };
-  const q = new URLSearchParams({ client_id: c.clientId, response_type: "code", scope: QBO_SCOPE, redirect_uri: qboRedirectUri(), state });
-  return { ok: true, url: `${qboEndpoints().authorize}?${q}` };
+  return { state, set: { stateHash: sha256(state), stateStaffUserId: staffUserId, stateExpiresAt: new Date(Date.now() + STATE_TTL_MS), updatedAt: new Date() } };
+};
+const intuitUrl = (clientId: string, state: string) =>
+  `${qboEndpoints().authorize}?${new URLSearchParams({ client_id: clientId, response_type: "code", scope: QBO_SCOPE, redirect_uri: qboRedirectUri(), state })}`;
+
+/**
+ * Starts a connect: a new single-use state for this Admin (replacing any earlier one) and the Intuit address to send
+ * them to. Any ask to switch companies is dropped with the state it was made for, so this connect is a plain one: the
+ * same company again, or a first one. A stored switch whose clear hasn't run yet is kept for the clear: signing in
+ * again then renews the company it switched to (completeConnect()), and the next roster refresh still finishes it.
+ */
+export async function beginConnect(staffUserId: string): Promise<Begun> {
+  const { state, set } = newState(staffUserId);
+  const c = await db.transaction(async (tx) => {
+    const [row] = await tx.update(qboConnection).set(set).returning();
+    await dropSwitchAsk(tx);
+    return row;
+  });
+  return c ? { ok: true, url: intuitUrl(c.clientId, state) } : { ok: false, reason: "not_configured" };
 }
 
 /**
- * Whether this company may be connected: the one the roster cache was read from, or any while the cache names none (a
- * first connect). A different company is refused from stage 2 of the app-owned families spec until stage 4 ships
- * (open question 18), so the change-of-company clear (clearRosterOfOtherCompanyLocked()) never runs.
+ * Starts a connect after an Admin said, on the switch page, that they mean to connect a different company (stage 4's
+ * slice M8, the owner's choice 1): the state as beginConnect() writes it and, in the same transaction, the ask
+ * (SWITCH_KEY: the state's hash and expiry, this Admin, and the roster's company as read now), audited. Only a connect
+ * made with this state may then store a company other than the roster's (completeConnect()). While the roster names no
+ * company there is nothing to switch from, and it starts a plain connect.
+ */
+export async function beginSwitchConnect(staffUserId: string, o: QboOp): Promise<Begun> {
+  const { state, set } = newState(staffUserId);
+  const c = await db.transaction(async (tx) => {
+    const [row] = await tx.update(qboConnection).set(set).returning();
+    if (!row) return undefined;
+    const fromRealmId = await getRosterSource(tx);
+    if (fromRealmId === null) { await dropSwitchAsk(tx); return row; }
+    await setSwitchRecord(tx, { asked: { stateHash: set.stateHash, staffUserId, expiresAt: set.stateExpiresAt.toISOString(), fromRealmId } });
+    await writeAudit({ actor: o.actor, action: "quickbooks.switch.asked", permission: o.permission, ...TARGET, after: { fromRealmId }, ip: o.ip }, tx);
+    return row;
+  });
+  return c ? { ok: true, url: intuitUrl(c.clientId, state) } : { ok: false, reason: "not_configured" };
+}
+
+/**
+ * Whether an ask lets this connect store a company other than the roster's (the owner's choice 1, decided here alone):
+ * made with this connect's state, by this Admin, not expired, and while the roster named the company it names now.
+ * Without the confirm page, this would answer true while the roster names a company, and no ask would be needed.
+ */
+function askHolds(r: SwitchRecord | null, now: { stateHash: string | null; staffUserId: string; rosterRealmId: string | null }): boolean {
+  if (!r || !("asked" in r) || now.stateHash === null || now.rosterRealmId === null) return false;
+  const a = r.asked, expires = Date.parse(a.expiresAt);
+  return a.stateHash === now.stateHash && a.staffUserId === now.staffUserId && Number.isFinite(expires) && expires > Date.now() && a.fromRealmId === now.rosterRealmId;
+}
+
+/**
+ * Whether this company may be connected without a switch: the one the roster cache was read from, or any while the
+ * cache names none (a first connect). Another company is connected only against an Admin's ask (askHolds()), and then
+ * the change-of-company clear runs (clearRosterOfOtherCompanyLocked(), step 3b below).
  */
 async function sameRosterCompany(realmId: string, tx: Tx): Promise<boolean> {
   const source = await getRosterSource(tx);
@@ -135,20 +185,31 @@ export async function completeConnect(
     return { ok: false as const, reason };
   };
   // 1. Spend the state. It is cleared only when it matches, so a stray return can't cancel a connect in progress.
-  const claim = await db.transaction(async (tx): Promise<{ ok: true; clientId: string; clientSecret: string; environment: QboEnvironment } | { ok: false; reason: ConnectRefusal }> => {
+  const claim = await db.transaction(async (tx): Promise<{ ok: true; switchFrom: string | null; clientId: string; clientSecret: string; environment: QboEnvironment } | { ok: false; reason: ConnectRefusal }> => {
     const [c] = await tx.select().from(qboConnection).for("update");
     if (!c) return { ok: false, reason: "not_configured" };
     const given = Buffer.from(sha256(p.state ?? ""), "hex"), kept = Buffer.from(c.stateHash ?? "", "hex");
     const good = Boolean(p.state) && kept.length === given.length && timingSafeEqual(given, kept)
       && c.stateStaffUserId === o.staffUserId && c.stateExpiresAt !== null && c.stateExpiresAt.getTime() > Date.now();
     if (!good) return { ok: false, reason: "state" };
+    // The ask to switch companies, if any, is spent with the state it was made for (a stored switch is the clear's).
+    const ask = await getSwitchRecord(tx);
     await tx.update(qboConnection).set({ stateHash: null, stateStaffUserId: null, stateExpiresAt: null, updatedAt: new Date() });
+    if (ask && "asked" in ask) await dropSwitchAsk(tx);
     if (p.error || !p.code || !p.realmId || !/^\d{1,32}$/.test(p.realmId)) return { ok: false, reason: "denied" };
     if (c.realmId && c.realmId !== p.realmId) return { ok: false, reason: "other_company" };
-    // Only the company the roster was read from, until stage 4: nothing is exchanged or stored for another.
-    if (!(await sameRosterCompany(p.realmId!, tx))) return { ok: false, reason: "roster_company" };
+    // The company the roster was read from, or another only against the ask: nothing is exchanged or stored otherwise.
+    // One exception: signing in again to the company a stored switch moved to, while it is still connected and that
+    // switch's clear hasn't run (step 3b threw, and no refresh has finished it), renews it, and the clear then runs.
+    let switchFrom: string | null = null;
+    if (!(await sameRosterCompany(p.realmId!, tx))) {
+      const rosterRealmId = await getRosterSource(tx);
+      const renewing = c.realmId === p.realmId && storedSwitchOf(ask, rosterRealmId, p.realmId);
+      if (!renewing && !askHolds(ask, { stateHash: c.stateHash, staffUserId: o.staffUserId, rosterRealmId })) return { ok: false, reason: "roster_company" };
+      switchFrom = rosterRealmId;
+    }
     try {
-      return { ok: true, clientId: c.clientId, environment: c.environment, clientSecret: secretBox().open({ ciphertext: c.clientSecretCiphertext, keyId: c.clientSecretKeyId }, QBO_AAD.secret) };
+      return { ok: true, switchFrom, clientId: c.clientId, environment: c.environment, clientSecret: secretBox().open({ ciphertext: c.clientSecretCiphertext, keyId: c.clientSecretKeyId }, QBO_AAD.secret) };
     } catch (e) {
       if (e instanceof SecretBoxError) return { ok: false, reason: "not_configured" };
       throw e;
@@ -189,16 +250,37 @@ export async function completeConnect(
     // The tokens belong to the app and environment the code was exchanged under; the keys may have changed since.
     if (c.clientId !== claim.clientId || c.environment !== claim.environment) return "state" as const;
     if (c.realmId && c.realmId !== p.realmId) return "other_company" as const;
-    if (!(await sameRosterCompany(p.realmId!, tx))) return "roster_company" as const;
+    // Checked again under the row lock: another company only for a switch from the company the ask was made against,
+    // still the roster's.
+    const switching = !(await sameRosterCompany(p.realmId!, tx));
+    if (switching && (claim.switchFrom === null || (await getRosterSource(tx)) !== claim.switchFrom)) return "roster_company" as const;
     await tx.update(qboConnection).set({ realmId: p.realmId, connectedAt: new Date(), connectedBy: o.staffUserId, ...sealTokens(tokens) });
-    return "stored" as const;
+    // The switch is recorded in the store's transaction, so a clear that doesn't run below is still run by the roster
+    // refresh, for this switch alone; a connect that switches nothing leaves no record behind.
+    if (switching) await setSwitchRecord(tx, { stored: { fromRealmId: claim.switchFrom!, toRealmId: p.realmId!, staffUserId: o.staffUserId, at: new Date().toISOString() } });
+    else await tx.delete(setting).where(eq(setting.key, SWITCH_KEY));
+    return switching ? "switched" as const : "stored" as const;
   }).catch(async (e: unknown) => { await storeFailed(); throw e; });
-  if (stored !== "stored") return refuse(stored, { revoked: await revokeIssued() });
-  // 3b. A different company from the one the cache was read from would clear what belonged to that one before anything
-  // reads the new one. Until stage 4 one is refused above, so this finds the same company (or none) and clears nothing;
-  // it stays, so the store and the clear can't come apart. Run after the row lock above is released, never inside it
-  // (see clearRosterOfOtherCompany).
-  await clearRosterOfOtherCompany(p.realmId!, { actor: o.actor, ip: o.ip });
+  if (stored !== "stored" && stored !== "switched") return refuse(stored, { revoked: await revokeIssued() });
+  const switched = stored === "switched";
+  // 3b. A company other than the one the cache was read from (a switch the ask allowed) clears what belonged to that one
+  // before anything reads the new one (open question 16), and spends the recorded switch; the same company, or none,
+  // clears nothing. Run after the row lock above is released, never inside it (see clearRosterOfOtherCompany). Should
+  // it throw after a switch, the connection still stands: until the clear runs, every reader of the window holds back
+  // the old company's records (connectedToAnotherCompany(), src/lib/families/links.ts), and the next roster refresh
+  // (the callback's own, or the worker's) runs the clear for the recorded switch before it saves anything.
+  try {
+    await clearRosterOfOtherCompany(p.realmId!, { actor: o.actor, ip: o.ip });
+  } catch (e) {
+    if (!switched) throw e;
+    // Audited, not logged (nothing here writes to the log), so the audit log says a switch's clear is still to run,
+    // not only the roster's failed runs; the stored switch stays for the next refresh to spend.
+    const error = e instanceof Error ? e.name.slice(0, 40) : "unknown";
+    try {
+      await writeAudit({ actor: o.actor, action: "quickbooks.switch.clear_failed", permission: o.permission, ...TARGET,
+        after: { fromRealmId: claim.switchFrom, toRealmId: p.realmId, error }, ip: o.ip });
+    } catch { /* the connection stands whatever the audit write does */ }
+  }
   // 4. The company's name, for people. The connection stands even if this read fails.
   let companyName: string | null = null;
   try {
@@ -209,7 +291,7 @@ export async function completeConnect(
   }
   // Only while this company is still the connected one: a disconnect during the read must not get a name back.
   await db.update(qboConnection).set({ companyName, updatedAt: new Date() }).where(eq(qboConnection.realmId, p.realmId!));
-  await writeAudit({ actor: o.actor, action: "quickbooks.connect", permission: o.permission, ...TARGET, after: { companyName, realmId: p.realmId, environment: claim.environment }, ip: o.ip });
+  await writeAudit({ actor: o.actor, action: "quickbooks.connect", permission: o.permission, ...TARGET, after: { companyName, realmId: p.realmId, environment: claim.environment, ...(switched ? { switchedFrom: claim.switchFrom } : {}) }, ip: o.ip });
   return { ok: true };
 }
 

@@ -166,6 +166,7 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/accounting/link-writes", names: "all", why: "the accounting links screen's presses link any family to any customer, reading every family's guardians and every customer of the roster cache to check it (stage 4's slice M3a)" },
   { module: "@/lib/accounting/guardian-links", names: "all", why: "the accounting links screen's guardian presses link any guardian row to any Parent customer and end any row's link, reading every family's guardians and every customer of the roster cache to check it (stage 4's slice M3c)" },
   { module: "@/lib/accounting/ended-links", names: "all", why: "the links an unlink ended whose customer is still in the books: it reads any family's, student's and guardian row's history and the roster cache (stage 4's slice M3b2)" },
+  { module: "@/lib/quickbooks/switch", names: "all", why: "the switch page counts what a change of company ends and keeps: every family's links, records, requests and buy-outs (stage 4's slice M8)" },
   { module: "@/lib/parents/contact-take-in", names: "all", why: "the take-in of contact details reads every person, guardian row, family and cached customer at once (stage 3's slice 11a)" },
 ];
 

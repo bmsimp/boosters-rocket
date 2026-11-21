@@ -352,7 +352,7 @@ describe("credit already earned stays", () => {
 describe("a different QuickBooks company", () => {
   // Since stage 4's slice M7a the clear a change of company would run keeps volunteering (open question 16), as the
   // families and students it names are kept: it was "clears every credit and reminder claim with the sign-ups" while the
-  // clear removed those records too. A change of company is still refused until slice M8.
+  // clear removed those records too. Since slice M8 a switch an Admin asks for reaches it; this calls it directly.
   it("keeps every credit, removed ones too, every reminder claim and sign-up, and every shift as it was", async () => {
     const { b, forB } = await shared();
     await seedCheckIn({ signupId: forB.id, familyQboId: FAMILY_B.family.qboId, by: b.identity.parentId, removed: { by: writer.id, reason: "Mistake" } });

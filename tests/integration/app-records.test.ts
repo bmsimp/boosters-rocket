@@ -10,7 +10,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { asc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, accountingLinkEnded, auditLog, family, guardian, parent, qboConnection, student } from "@/lib/db/schema";
+import { accountingLink, accountingLinkEnded, auditLog, family, guardian, parent, qboConnection, setting, student } from "@/lib/db/schema";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { askRosterWrite, deactivateLinked, moveStudent, WRITE_COPY } from "@/lib/roster/writes";
 import { saveShape, ROSTER_LOCK } from "@/lib/roster/shape";
@@ -230,19 +230,29 @@ describe("the records stand alone: what QuickBooks holds changes none of them (s
 });
 
 describe("another company", () => {
-  // From stage 2 until stage 4 of the app-owned families spec (open question 18), a different company's roster is
-  // never read over this one's: the seasons keep their records against these families.
-  it("a roster read of a different company is refused, and every record and link stays as it was", async () => {
+  // Flipped on purpose in stage 4's slice M8: a different company's roster is read over this one's only for a switch an
+  // Admin asked for and the connect recorded, whose clear then keeps every record and ends only their links. A connection
+  // to another company with no such record is still refused, and changes nothing.
+  it("a roster read of a different company is refused with no recorded switch, and with one keeps every record and ends the links", async () => {
     await seedParentSettings(SIGNINS_ON);
     await connectRoster(stub);
     await seedAnaRivera();
     const before = await appRecordRows();
     const OTHER = "9130000000000002";
-    // A connection to another company stored without a connect's refusal (from before it, or by hand).
+    // A connection to another company stored without a connect's ask (from before stage 2, or by hand).
     await db.update(qboConnection).set({ realmId: OTHER });
     expect(await refreshRoster(WORKER)).toMatchObject({ ok: false, reason: "failed", error: expect.stringContaining("(roster_company)") });
     expect(await appRecordRows()).toEqual(before);
     expect(await audits("accounting.links.cleared")).toEqual([]);
+    // The switch the connect's store records, its clear never run: the refresh runs it first.
+    await db.insert(setting).values({ key: "quickbooks.switch", value: { stored: { fromRealmId: REALM, toRealmId: OTHER, staffUserId: "00000000-0000-4000-8000-000000000001", at: new Date().toISOString() } } });
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
+    const after = await appRecordRows();
+    expect(after.families).toEqual(before.families);
+    expect(after.students).toEqual(before.students);
+    expect(after.memberships).toEqual(before.memberships);
+    expect(after.links).toEqual([]);
+    expect(await audits("accounting.links.cleared")).toHaveLength(1);
   });
 
 

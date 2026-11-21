@@ -67,23 +67,32 @@ describe("what a volunteer copies off the machine", () => {
 
 describe("what the runbooks tell an Admin to do with QuickBooks", () => {
   const health = section(read("docs/runbooks/health-warnings.md"), "QuickBooks");
-  it("never tells an installation on the real books to connect the sandbox: a change of company is refused until the mapping screen ships", () => {
+  it("never tells an installation on the real books to connect the sandbox: a switch of company ends every family's link to the books", () => {
     expect(health).not.toMatch(/connect the Intuit sandbox company/i);
     expect(health).not.toMatch(/then reconnect the real company/i);
     expect(health).toMatch(/never by switching this installation's\s+company/);
     expect(health).toContain("(quickbooks-reconnect.md#connecting-a-different-company)");
-    // The refused read says to disconnect first, and the runbook has its entry (roster_company).
-    expect(read("src/lib/roster/refresh.ts")).toContain("Disconnect QuickBooks, then connect the company the roster was read from. (roster_company)");
+    // The refused read says to disconnect first, or to switch, and the runbook has its entry (roster_company).
+    expect(read("src/lib/roster/refresh.ts")).toContain("Disconnect QuickBooks, then connect the company the roster was read from, or choose Connect a different company first. (roster_company)");
     expect(health).toContain("(`roster_company`)");
   });
 
-  it("says a different company is refused for now, and sends a sandbox trial to the proof-of-concept host", () => {
+  // Stage 4's slice M8 turned a change of company back on: these pins said it was refused, and flipped on purpose.
+  it("gives a switch its steps, a backup first and the switch page before Intuit, and still sends a sandbox trial to the proof-of-concept host", () => {
     const reconnect = section(read("docs/runbooks/quickbooks-reconnect.md"), "Connecting a different company");
-    expect(reconnect).toMatch(/\*\*Not possible yet\.\*\*/);
+    const backup = reconnect.indexOf("docker compose run --rm backup --now"), disconnect = reconnect.indexOf("**Disconnect QuickBooks**"),
+      page = reconnect.indexOf("**Connect a different company**"), intuit = reconnect.indexOf("**Switch companies: sign in to Intuit**"), links = reconnect.indexOf("**Accounting links**");
+    expect(backup).toBeGreaterThan(0);
+    expect([disconnect > backup, page > disconnect, intuit > page, links > intuit]).toEqual([true, true, true, true]);
+    expect(reconnect).toMatch(/Going back to the first company later is a switch too/);
     expect(reconnect).toMatch(/proof-of-concept host/);
     expect(section(read("docs/runbooks/intuit.md"), "2. Try it on a sandbox company first")).toMatch(/proof-of-concept host/);
+    // The words the switch page's press and link use are the ones the runbook names.
+    const words = read("src/app/staff/(app)/settings/quickbooks/switch-words.ts");
+    expect(words).toContain(`press: "Switch companies: sign in to Intuit"`);
+    expect(words).toContain(`setupLink: "Connect a different company"`);
     for (const doc of ["docs/runbooks/quickbooks-reconnect.md", "docs/runbooks/intuit.md", "docs/runbooks/health-warnings.md", "docs/runbooks/before-the-first-family.md", "docs/runbooks/poc-linuxdev.md"]) {
-      expect(read(doc), doc).not.toMatch(/connecting a different (QuickBooks )?company (deletes|clears|ends|switches)/i);
+      expect(read(doc), doc).not.toMatch(/\*\*Not possible yet\.\*\*|until the mapping screen ships|waits for the mapping screen:/i);
     }
   });
 
@@ -109,11 +118,13 @@ describe("the owner's runbook, in its order", () => {
     expect(run).toBeGreaterThan(backup);
   });
 
-  it("leaves check 25, a second sandbox company, for the mapping screen, so the host stays on the first one part 2 needs", () => {
+  // Flipped on purpose in stage 4's slice M8: check 25 waited for the mapping screen; it is now a switch and back,
+  // walked by a person on the host, which ends on the first sandbox company part 2 needs.
+  it("has check 25, a second sandbox company, walked as a switch and back on the host, ending on the first one part 2 needs", () => {
     const checks = part1.slice(part1.indexOf("8. **Run checks 18 to 24**"), part1.indexOf("9. **Export"));
     expect(checks.length).toBeGreaterThan(0);
-    expect(checks).toMatch(/\*\*Check 25, a second sandbox company, waits for the mapping screen:\*\*/);
-    expect(checks).not.toMatch(/connect the first sandbox company/);
+    expect(checks).toMatch(/\*\*Check 25, a second sandbox company, is a switch of company and back, walked by a person on the host\*\*/);
+    expect(checks).toMatch(/back to\s+the first sandbox company as a second switch, the one part 2 needs/);
   });
 
   it("asks GitHub for Dependabot's security updates, which only the repository's settings switch on", () => {

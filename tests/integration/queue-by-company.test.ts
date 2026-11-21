@@ -42,8 +42,9 @@ import { recordOfCustomer } from "../helpers/app-records";
  * src/lib/roster/source.ts). A change of company's clear gives up every item still to go, but a parent's change saved
  * after reading the old company, as the clear ran, goes in after it and is open until the worker's next wake gives it
  * up (stage 4's slice M7a2). Until then it holds nothing back, takes no name, lists and counts nowhere, and is never
- * closed as replaced by the new company's change. A change of company is refused wherever one is connected or read until
- * slice M8 (open question 18), so each case seeds the earlier company's items itself (`old()`): filed under the same
+ * closed as replaced by the new company's change. Each case seeds the earlier company's items itself (`old()`), as a
+ * save that read the old company before a switch's clear committed leaves them (since slice M8 a switch an Admin asks for
+ * reaches the clear): filed under the same
  * family, student, guardian row and customer number as the current one, as such a save leaves it (the roster's is
  * REALM, tests/helpers/roster-writes.ts). The company is fznCompany()'s (tests/helpers/qbo-stub.ts): the Rivera Family 10
  * with Ana 11 and Leo 12, the Chen Family 20 with Mei 21.

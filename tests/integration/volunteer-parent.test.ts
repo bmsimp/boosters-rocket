@@ -501,7 +501,7 @@ describe("the club's day and hour", () => {
 
 describe("a change of QuickBooks company", () => {
   // Since stage 4's slice M7a the clear keeps every sign-up (open question 16): it was "deletes every sign-up" while the
-  // clear removed the families they name. A change of company is still refused until slice M8.
+  // clear removed the families they name. Since slice M8 a switch an Admin asks for reaches it; this calls it directly.
   it("keeps every sign-up, cancelled ones too, and the events and shifts", async () => {
     const { a } = await seedTwoFamilies();
     await seedSignup({ shiftId: a.volunteer!.shiftId, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, student: AZALEA!, cancelled: true });
