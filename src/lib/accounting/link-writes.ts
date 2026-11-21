@@ -18,7 +18,7 @@
 // would make a cycle. A parent's save of their phone, address or sign-in email takes no roster lock: it reads the row's
 // link as it stands when it saves (guardianLinksOf(), src/lib/parents/contact-queue.ts), before or after a press commits.
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { accountingLink, accountingLinkEnded, buyout, family, guardian, requirement, student, writeQueue } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
