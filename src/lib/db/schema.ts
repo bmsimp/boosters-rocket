@@ -202,9 +202,11 @@ export const guardian = pgTable("guardian", {
  * member's new family, member or student, stage 3's slice 9c) is `created`, with `linked_by` the staff member who asked;
  * one "Create a family from this" makes (stage 3's slice 10, src/lib/roster/no-family.ts), for a customer no family
  * was linked to and the students under it, is `confirmed`, with `linked_by` the staff member with the linking
- * permission (Accounting.Link.ReadWrite, not Admin-only) who pressed it. Since stage 4's slice M3b Unlink from the books
- * moves a family's link, with its student records' and guardian rows' links, to `accounting_link_ended`; nothing else
- * removes one but a change of company, which moves every row there too (stage 4's slice M7a). A lookup always asks for one kind (src/lib/families/links.ts).
+ * permission (Accounting.Link.ReadWrite, not Admin-only) who pressed it, and since stage 4's slice M3c so is a guardian
+ * row's link made by Link this guardian on the accounting links screen (src/lib/accounting/guardian-links.ts). Since
+ * stage 4's slice M3b Unlink from the books moves a family's link, with its student records' and guardian rows' links,
+ * to `accounting_link_ended`, and since slice M3c Unlink this guardian moves one open guardian row's link there alone;
+ * nothing else removes one but a change of company, which moves every row there too (stage 4's slice M7a). A lookup always asks for one kind (src/lib/families/links.ts).
  * `synced_token` is the customer's QuickBooks version (its SyncToken) the portal last aligned with, and `synced_at` when
  * (stage 3's slice 9e): set from the answer of a send the portal made that carried the link's own version (or the one
  * resend made after a live read found the field as the portal held it), from a create's answer, from the roster cache
@@ -242,10 +244,12 @@ export const accountingLink = pgTable("accounting_link", {
  * A link that was ended, kept for the audit page's record filter (stage 4's slice M3b): the row an `accounting_link` was,
  * with its own id, origin, `linked_at` and `linked_by`, and when it ended, by whom (staff_user.id, with no foreign key,
  * as `linked_by` has none) and how (`unlinked`: Unlink from the books on the accounting links screen, which ends a
- * family's link with every link of its student records and guardian rows, src/lib/accounting/link-writes.ts;
- * `company_changed`: a change of company, which ends every link, by the staff member who connected the new company or
- * nobody, src/lib/families/company-change.ts, stage 4's slice M7a). No unique
- * index: a customer may have been several records' in turn, and a record several customers'. Nothing but an unlink and
+ * family's link with every link of its student records and guardian rows, unlinkFamily() in
+ * src/lib/accounting/link-writes.ts; or, since stage 4's slice M3c, Unlink this guardian, which ends one open guardian
+ * row's link alone, unlinkGuardian() in src/lib/accounting/guardian-links.ts; `company_changed`: a change of company,
+ * which ends every link, guardian rows' included, by the staff member who connected the new company or nobody,
+ * src/lib/families/company-change.ts, stage 4's slice M7a). No unique
+ * index: a customer may have been several records' in turn, and a record several customers'. Nothing but those unlinks and
  * a change of company writes it, nothing deletes a row, and it is read only by the audit filter (customersOfRecord(),
  * src/lib/audit/query.ts) and, since stage 4's slice M3b2, endedLinksHeld() (src/lib/accounting/ended-links.ts): a
  * record's latest ended link whose customer the books still hold, so that no press makes a second customer for a

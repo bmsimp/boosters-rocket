@@ -55,6 +55,8 @@ const under = (id: string) => ({ ParentRef: { value: id }, Job: true });
 const mail = (address: string) => ({ PrimaryEmailAddr: { Address: address } });
 /** What the links page says beside every Confirm (src/app/staff/(app)/links/page.tsx), as the text of the page reads it. */
 const LINK_EFFECT = "Once linked, this family's guardians see this customer's open invoices and Pay links, and those of the students and parents the books hold directly under it, the next time they open Home or Payments, and a pay-instead choice for the family bills it. A link can be removed again on this page, with Unlink from the books in the family's row, but its guardians may have seen those invoices by then, so check it is the right household.";
+/** What it says beside every Confirm since slice M3c2, where the books have a parent type (fznCompany()'s Parent, 2). */
+const LINK_GUARDIANS_EFFECT = "A guardian linked with it has, from then on, a rename of them, their removal from this family and a change of their phone, mailing address or sign-in email sent to that Parent customer, by the portal's own rules, while it is theirs alone under this family. Linking sends nothing to the books, and the details the portal holds for them now aren't sent by it.";
 /** Customers added in QuickBooks, then read by a roster read (which makes no record of them). */
 async function readAgain(...customers: ReturnType<typeof qc>[]) {
   stub.customers.push(...customers);
@@ -141,7 +143,7 @@ describe("Confirm on a Suggested row", () => {
     expect(row.confirm!.proposals).toEqual({
       pairs: [{ studentId: asha, recordName: "Asha Patel", customerQboId: "71", customerName: "Asha Patel", customerActive: true },
         { studentId: ravi, recordName: "ravi patel", customerQboId: "72", customerName: "Ravi Patel", customerActive: false }],
-      recordsLeft: [{ id: mia, name: "Mia Patel" }], customersLeft: [{ qboId: "73", name: "Dev Patel", active: true }] });
+      recordsLeft: [{ id: mia, name: "Mia Patel" }], customersLeft: [{ qboId: "73", name: "Dev Patel", active: true }], guardians: [], guardiansHeld: [] });
     // Before the press: no link, so a parent's page reads no figures and writes nothing.
     expect(await loadFamilyMoney(patels)).toMatchObject({ figures: null, notConnected: true });
     expect(await db.select().from(familyMoney).where(eq(familyMoney.familyId, patels))).toEqual([]);
@@ -151,10 +153,10 @@ describe("Confirm on a Suggested row", () => {
     const r = await linkFamilyToCustomer({ familyId: String(patels), customerId: "70", chosen: "suggested", stamp: row.confirm!.stamp }, tag, linkOp());
     expect(r).toEqual({ ok: true, message: "The Patels is linked to “Patel Family” in the books. 2 students linked with it: Asha Patel and ravi patel."
       + " Left with no link: Mia Patel, of the portal's students. Left with no record in the portal: Dev Patel, of the student customers under it in the books."
-      + " Whoever was left shows with the family's row on this page, among its differences. Nothing was sent to the books."
+      + " Whoever was left shows with the family's row on this page, among its differences. No guardian was linked with it."
+      + " Another open guardian of the family can be linked in its row's opening on this page, with Link this guardian, where an active Parent customer directly under it is free for them and no change for them or that customer is waiting, stuck or kept on Reconciliation. Nothing was sent to the books."
       + " Its money is read from the books the next time a parent opens Home or Payments, when someone presses “Read every family now” on Balances, or at the daily read of every family's invoices, while the books are connected;"
-      + " its Balances page shows the figures once one of those has read them."
-      + " Its guardians' own records in the books aren't linked by this." });
+      + " its Balances page shows the figures once one of those has read them." });
     // Nothing asked of QuickBooks, and no record, guardian row, person, queue item or money row changed.
     expect(stub.apiCalls()).toEqual([]);
     expect(await untouched()).toEqual(before);
@@ -173,7 +175,7 @@ describe("Confirm on a Suggested row", () => {
     const after = audit!.after as Record<string, unknown>;
     expect(after).toEqual({ familyId: String(patels), customerQboId: "70", realmId: REALM, chosen: "suggested",
       studentsLinked: [{ studentId: String(asha), customerQboId: "71" }, { studentId: String(ravi), customerQboId: "72" }],
-      studentsLeft: [String(mia)], studentCustomersLeft: ["73"], linkIds: expect.any(Array) });
+      studentsLeft: [String(mia)], studentCustomersLeft: ["73"], guardiansLinked: [], guardiansHeld: [], linkIds: expect.any(Array) });
     expect([...(after.linkIds as string[])].sort()).toEqual(ids);
     expect(JSON.stringify(after)).not.toContain("asha@example.com");
 
@@ -198,7 +200,7 @@ describe("in flat books", () => {
     const patels = (await db.select({ id: family.id }).from(family).where(eq(family.name, "The Patels")))[0]!.id;
     await guardianIn(patels, "Asha Patel", "asha@example.com");
     const row = rowOf(await loadAccountingLinks(), "The Patels");
-    expect(row.confirm!.proposals).toEqual({ pairs: [], recordsLeft: [], customersLeft: [] });
+    expect(row.confirm!.proposals).toEqual({ pairs: [], recordsLeft: [], customersLeft: [], guardians: [], guardiansHeld: [] });
     const r = await linkFamilyToCustomer({ familyId: String(patels), customerId: "70", chosen: "suggested", stamp: row.confirm!.stamp }, tag, linkOp());
     expect(r).toMatchObject({ ok: true, message: expect.stringContaining("No student was linked with it.") });
     expect(await db.select().from(accountingLink).where(eq(accountingLink.customerId, "71"))).toEqual([]);
@@ -576,7 +578,7 @@ describe("after a confirm", () => {
   });
 
   it("says where an inactive student customer left goes once the family is linked: counted on its row, never among its differences", () => {
-    const base = { family: "The Patels", customer: "Patel Family", linked: [], recordsLeft: [], keptMoves: 0 };
+    const base = { family: "The Patels", customer: "Patel Family", linked: [], recordsLeft: [], keptMoves: 0, guardians: null };
     expect(confirmedWords({ ...base, customersLeft: [{ name: "Ravi Patel", active: false }] })).toContain(
       "Left with no record in the portal: Ravi Patel (inactive in the books), of the student customers under it in the books."
       + " That inactive student customer is counted with the family's row on this page, not listed among its differences.");
@@ -629,7 +631,7 @@ describe("who may press, and the page", () => {
       + "Guardians:Asha Patel (asha@example.com): no link of its own"
       + "Confirming links it to “Patel Family”. Nothing is sent to the books.Students linked with it, by name:Asha Patel with Asha Patelravi patel with Ravi Patel (inactive in the books)"
       + "Left with no link, of the portal's students:Mia PatelLeft with no record in the portal, of the student customers under it in the books:Dev Patel"
-      + "Students left aren't linked by this press. Once the family is linked, they show with its row among its differences." + LINK_EFFECT + "Confirm: The PatelsLeave unlinked: The Patels");
+      + "Students left aren't linked by this press. Once the family is linked, they show with its row among its differences." + LINK_EFFECT + LINK_GUARDIANS_EFFECT + "Confirm: The PatelsLeave unlinked: The Patels");
     expect(withoutIds(list(html))).toContain('href="/staff/links?pick=<id>#links-pick-h"');
     expect(pick(html)).toBeNull();
 
@@ -650,7 +652,8 @@ describe("who may press, and the page", () => {
     expect(part).toContain("Left with no record in the portal, of the student customers under it in the books:");
     expect(part).toContain("Confirm<span class=\"visually-hidden\">: The Quiets</span>");
     // What the link does on the parents' side, and how it is removed again; Patel Family has no Parent customer under it.
-    expect(part).toContain(`<p>${LINK_EFFECT.replaceAll("'", "&#x27;")}</p>`);
+    expect(part).toContain(`<p>${LINK_EFFECT.replaceAll("'", "&#x27;")}</p><p>${LINK_GUARDIANS_EFFECT.replaceAll("'", "&#x27;")}</p>`);
+    expect(part).not.toContain("own records in the books aren&#x27;t linked");
     expect(part).toContain("<p>The books hold no Parent customers directly under it.</p>");
     // Refused as plain notices: a family not on the list, a Suggested row (no pick), a customer not in the pool.
     expect(await renderPage(AccountingLinksPage, { searchParams: { pick: "00000000-0000-4000-8000-000000000999" } })).toContain("That family isn&#x27;t one a customer can be picked for here now");

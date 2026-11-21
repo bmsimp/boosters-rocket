@@ -1,4 +1,5 @@
 // Link, not <a>, for /staff/roster below: the no-html-link-for-pages lint rule treats it as the dynamic /staff/roster/[id] route.
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
@@ -43,7 +44,7 @@ const studentStanding = (s: RecordStudent, held: ReadonlyMap<AppStudentId, Ended
   : s.linked ? "Not under a family in QuickBooks" : held.has(s.id) ? "Not linked: their customer from before an unlink is still in the books" : "No customer");
 
 /** One row of a people table: a record's name (a student's) or a customer's (a parent's, a member's), with what QuickBooks holds for them. */
-type Person = { key: string; name: string; customer: Cust | null; standing?: string };
+type Person = { key: string; name: string; customer: Cust | null; standing?: ReactNode };
 const ofCustomer = (c: Cust): Person => ({ key: c.qboId, name: c.displayName, customer: c });
 
 /**
@@ -261,10 +262,13 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
         <>
           <People id="entry-students-h" title="Students" noun="Student" people={fam.students.map((s) => ({ key: String(s.id), name: s.name, customer: s.customer, standing: studentStanding(s, held.students) }))} contact={false} empty="The portal holds no students for this family." />
           <People id="entry-parents-h" title="Parents in QuickBooks" noun="Parent" contact empty="QuickBooks lists no parents under this family."
-            people={fam.parents.map((c) => ({ ...ofCustomer(c), standing: `${standing(c)}: ${ofGuardians.get(c.qboId) === "own" ? "a portal guardian's own, changed through them under Portal sign-ins and on their page"
-              : ofGuardians.get(c.qboId) === "other" ? "linked to a portal guardian, but not one guardian's own under this family (several share it, or theirs is another family), so the portal sends nothing for it: change it in QuickBooks, and the mapping screen will sort it out"
+            people={fam.parents.map((c) => ({ ...ofCustomer(c), standing: <>{standing(c)}: {ofGuardians.get(c.qboId) === "own" ? "a portal guardian's own, changed through them under Portal sign-ins and on their page"
+              // Stage 4's slice M3c: a shared customer, or one only another family's guardian is linked to, is sorted out on
+              // Accounting links by unlinking each guardian whose it isn't (and linking one of this family's where none is
+              // left on it), and one no guardian is linked to is linked to one there; a link only for a reader who may link.
+              : ofGuardians.get(c.qboId) === "other" ? <>linked to a portal guardian, but not one guardian&apos;s own under this family (several share it, or theirs is another family), so the portal sends nothing for it: change it in QuickBooks, or on {linker ? <Link href="/staff/links">Accounting links</Link> : "Accounting links, by someone who may link families to accounting,"} unlink from it each guardian whose it isn&apos;t; once one guardian of this family alone is linked to it, it is theirs, and if none of this family&apos;s is left on it, one who isn&apos;t linked to a customer can be linked to it there</>
               : ofGuardians.get(c.qboId) === "removed" ? "the own Parent customer of a guardian removed from this family, left active in QuickBooks (a removal makes it inactive only when its balance allows): adding them back under Portal sign-ins uses it again"
-              : "not a portal guardian; adding the person under Portal sign-ins doesn't use it, and the mapping screen will offer to link it"}` }))} />
+              : <>not a portal guardian; adding the person under Portal sign-ins doesn&apos;t use it, and while it is active a guardian of this family who isn&apos;t linked to a customer can be linked to it on {linker ? <Link href="/staff/links">Accounting links</Link> : "Accounting links, by someone who may link families to accounting"}</>}</> }))} />
         </>
       ) : (
         <People id="entry-member-h" title="In QuickBooks" noun="Member" people={customer ? [ofCustomer(customer)] : []} contact empty="QuickBooks lists no customer for this member." />
@@ -279,7 +283,7 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
         credit={entry.kind === "family" && fam.active && can(ctx.effective, "Volunteer.Credit.ReadWrite")} />
       {familyDetails && <FamilyDetails familyId={familyId} details={familyDetails} editable={can(ctx.effective, "Roster.Family.ReadWrite") && fam.active} />}
       <Waiting items={waiting} compare={compareIds} />
-      {edit && inQuickBooks && entry.kind === "family" && page.shape?.kind === "layered" && <FamilyChanges shape={page.shape} family={inQuickBooks} edit={edit} cover={cover} inactiveRecords={inactiveRecords} />}
+      {edit && inQuickBooks && entry.kind === "family" && page.shape?.kind === "layered" && <FamilyChanges shape={page.shape} family={inQuickBooks} edit={edit} cover={cover} inactiveRecords={inactiveRecords} linker={linker} />}
       {moves && <MoveStudents students={movable} families={moveTo.families} refusedHere={moveTo.refusedHere} rosterTag={rosterTag} act={moveAction} />}
       {edit && inQuickBooks && entry.kind === "member" && <MemberChanges member={inQuickBooks.customer} edit={edit} />}
       {changesHere && page.shape && <PortalChanges familyId={String(familyId)} name={fam.name} noun={entry.kind} unlinked={!fam.linked}
