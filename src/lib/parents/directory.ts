@@ -10,7 +10,7 @@
 import { and, eq, inArray, max, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, family, guardian, parent, qboCustomer, type DisabledReason, type GuardianStatus } from "@/lib/db/schema";
-import { hasActiveStudent, studentsRuleInForce } from "./sessions";
+import { GUARDIAN_COLS, hasActiveStudent, studentsRuleInForce } from "./sessions";
 import { familyLabel } from "@/app/components/family-label";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { linksOf } from "@/lib/families/links";
@@ -100,7 +100,10 @@ export async function familyNames(ids: string[]): Promise<Map<string, string>> {
 const numeric = (a: string, b: string) => a.localeCompare(b, "en", { numeric: true });
 /**
  * A person's rows in the order the Parents pages list them: a previous company's last; then by the customer each
- * family's own link names, as numbers; then the rows of families with no link, by row id.
+ * family's own link names, as numbers; then the rows of families with no link, by row id. As the chooser's order
+ * (enterableGuardianRows()), a row of a family linked since it was made, or relinked after an unlink, sorts by its
+ * family's customer now; while QuickBooks is connected to another company than the records' no link is read, and the
+ * rows of the current company come by row id.
  */
 type Placed = { id: string; disabledReason: DisabledReason | null; customer: string | null };
 const byCustomerThenRow = (a: Placed, b: Placed) =>
@@ -118,7 +121,7 @@ async function people(where?: ReturnType<typeof eq>): Promise<PersonDetail[]> {
   if (!persons.length) return [];
   const ids = persons.map((p) => p.id);
   const [links, signins] = await Promise.all([
-    db.select().from(guardian).where(inArray(guardian.parentId, ids)),
+    db.select(GUARDIAN_COLS).from(guardian).where(inArray(guardian.parentId, ids)),
     db.select({ id: auditLog.targetId, at: max(auditLog.at) }).from(auditLog)
       .where(and(eq(auditLog.action, "signin"), eq(auditLog.door, "parent"), inArray(auditLog.targetId, ids))).groupBy(auditLog.targetId),
   ]);
@@ -170,7 +173,7 @@ export async function getPerson(parentId: string): Promise<PersonDetail | null> 
  */
 export async function familySignins(familyId: AppFamilyId): Promise<FamilySignin[]> {
   // A link from a previous company is in no family's record (its family_id is null): it is not one of this family's sign-ins.
-  const links = await db.select({ g: guardian, p: parent }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
+  const links = await db.select({ g: GUARDIAN_COLS, p: parent }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
     .where(and(eq(guardian.familyId, familyId), sql`${guardian.disabledReason} is distinct from 'company_changed'`));
   const standing = await familyStandings([familyId]);
   return links.map(({ g, p }): FamilySignin => ({ guardianId: g.id, parentId: p.id, name: p.name, email: p.email,

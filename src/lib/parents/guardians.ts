@@ -39,7 +39,7 @@ import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { familyCreateWaiting, familySendingFree, guardianChangeWaiting, guardianSentWords, queueForGuardian, sendGuardianSaved, whileGuardiansHeld, type GuardianQueued } from "@/lib/roster/writes";
 import { closeMembership } from "./membership";
 import type { StaffOp } from "./people";
-import { lockEmail } from "./sessions";
+import { GUARDIAN_COLS, lockEmail, type GuardianRow } from "./sessions";
 import { getParentSettings, PARENTS_KEY } from "./settings";
 
 /** The longest name staff may give a person, and the longest address the portal reads. */
@@ -90,7 +90,7 @@ export async function holdRoster(tx: Tx, w: Waits): Promise<boolean> {
 }
 
 type Person = typeof parent.$inferSelect;
-type Row = typeof guardian.$inferSelect;
+type Row = GuardianRow;
 
 /**
  * Marks the person as owed a welcome when welcomes are on and they were never welcomed, aren't owed one already and
@@ -234,7 +234,7 @@ async function saveGuardian(familyId: AppFamilyId, name: string, email: string, 
     if ("refusal" in fam) return { ok: false, reason: fam.refusal };
     if (p?.blocked) return { ok: false, reason: "blocked" };
     // The person's row in this family record, by the record alone.
-    const [held] = p ? await tx.select().from(guardian).where(and(eq(guardian.parentId, p.id), eq(guardian.familyId, familyId))).for("update") : [];
+    const [held] = p ? await tx.select(GUARDIAN_COLS).from(guardian).where(and(eq(guardian.parentId, p.id), eq(guardian.familyId, familyId))).for("update") : [];
     if (held && held.status !== "disabled") return { ok: false, reason: "already" };
     // The row whose "being sent" lock is held must be the one opened: another by now (an add raced this one) is `raced`.
     if (held ? held.id !== rowId : known) return { ok: false, reason: "raced" };
@@ -255,7 +255,11 @@ async function saveGuardian(familyId: AppFamilyId, name: string, email: string, 
       await reopen(tx, held, who, familyId, fam.customer, o, { addedBy: "staff", ...said });
       return { ok: true, result: { ok: true, outcome: "reinstated", person, name: who.name, guardianId: held.id, parentId: who.id }, queued: await grant(held.id) };
     }
-    const [made] = await tx.insert(guardian).values({ id: rowId, familyId, parentId: who.id, status: "invited" }).returning({ id: guardian.id });
+    // Its own SQL, naming only the columns it writes: drizzle's insert names every column the schema declares, the two
+    // old copies too (GuardianRow, ./sessions.ts), and the rest take their defaults.
+    const [made] = Array.from(await tx.execute<{ id: string }>(sql`insert into ${guardian} (${sql.identifier(guardian.id.name)},
+      ${sql.identifier(guardian.familyId.name)}, ${sql.identifier(guardian.parentId.name)}, ${sql.identifier(guardian.status.name)})
+      values (${rowId}, ${String(familyId)}, ${who.id}, 'invited') returning ${sql.identifier(guardian.id.name)}`));
     const guardianId = made!.id;
     const owed = await oweWelcome(tx, who);
     await writeAudit({ actor: o.actor, action: "parent.access.granted", permission: o.permission, targetType: "guardian", targetId: guardianId, ip: o.ip,
@@ -275,7 +279,7 @@ async function lockedRow(tx: Tx, guardianId: string, w: Waits): Promise<{ row: R
   if (!seen) return null;
   const [p] = await tx.select().from(parent).where(eq(parent.id, seen.parentId)).for("update");
   if (!(await holdRoster(tx, w))) return "busy";
-  const [row] = await tx.select().from(guardian).where(eq(guardian.id, guardianId)).for("update");
+  const [row] = await tx.select(GUARDIAN_COLS).from(guardian).where(eq(guardian.id, guardianId)).for("update");
   return p && row ? { row, p } : null;
 }
 
