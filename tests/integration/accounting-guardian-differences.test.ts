@@ -64,11 +64,17 @@ const rowOf = (view: LinksView, name: string): LinkRow => {
 };
 const isGuardians = (d: Difference) => d.kind === "guardian_name" || d.kind === "guardian_active";
 const guardianDiffs = (row: LinkRow) => row.differences.filter(isGuardians);
-/** No take or send, and no take or send note, at any guardian difference's place in the row. */
-const noPressAtGuardians = (row: LinkRow) => {
+/**
+ * No take or send, and no take or send note, at any guardian difference's place in the row; and Send the app's for all
+ * (slice M5b) over the row, whose differences are all a guardian's, sends nothing and passes nothing over: a guardian's
+ * Parent customer the books have inactive isn't counted as a difference the books have inactive.
+ */
+const noPressAtGuardians = async (row: LinkRow) => {
   const at = row.differences.flatMap((d, i) => (isGuardians(d) ? [i] : []));
   expect(at.length).toBeGreaterThan(0);
   for (const list of [row.takes, row.takeNotes, row.sends, row.sendNotes]) expect(list.filter((x) => at.includes(x.at))).toEqual([]);
+  expect(row.differences.every(isGuardians)).toBe(true);
+  expect((await view()).sendAll({ status: "with_differences", q: row.name })).toMatchObject({ count: 0, later: 0, passedOver: { inactive: 0, booksInactive: 0 }, stamp: null });
 };
 
 /** A guardian row of a new person in a family, written directly with nothing queued: open, removed, or closed by a change of company. */
@@ -137,7 +143,7 @@ describe("a rename of a guardian's Parent customer", () => {
     const waiting = await noteOfOnlyItem();
     let riveras = rowOf(await view(), "Rivera Family");
     expect(riveras.differences).toEqual([{ kind: "guardian_name", guardianId: row.id, who: "Ana Lopez", portal: "Ana Lopez", books: "Ana Rivera", queue: waiting }]);
-    noPressAtGuardians(riveras);
+    await noPressAtGuardians(riveras);
     expect((await cellsOf("Rivera Family"))[4]).toContain(`Ana Lopez's name on their Parent customer. In the portal: “Ana Lopez”. In the books: “Ana Rivera”. ${waiting.words}${waiting.words.endsWith(".") ? "" : "."} See the change on Reconciliation. ${NAME_NEXT}`);
 
     // Stuck, as later failed tries leave it; then given up.
@@ -150,7 +156,7 @@ describe("a rename of a guardian's Parent customer", () => {
     riveras = rowOf(await view(), "Rivera Family");
     expect(riveras.status).toEqual({ key: "with_differences", made: { key: "carried_over", at: expect.any(String) } });
     expect(riveras.differences).toEqual([{ kind: "guardian_name", guardianId: row.id, who: "Ana Lopez", portal: "Ana Lopez", books: "Ana Rivera", queue: null }]);
-    noPressAtGuardians(riveras);
+    await noPressAtGuardians(riveras);
     expect(guardianDifferenceNext(riveras.differences[0]!)).toBe(NAME_NEXT);
     const cells = await cellsOf("Rivera Family");
     expect(cells[3]).toContain("1 difference with the books: guardians' Parent customers.");
@@ -170,7 +176,7 @@ describe("a rename of a guardian's Parent customer", () => {
     expect(kept.state).toBe("refused");
     const riveras = rowOf(await view(), "Rivera Family");
     expect(riveras.differences).toEqual([{ kind: "guardian_name", guardianId: row.id, who: "Mei Chen", portal: "Mei Chen", books: "Ana Rivera", queue: kept }]);
-    noPressAtGuardians(riveras);
+    await noPressAtGuardians(riveras);
     expect((await cellsOf("Rivera Family"))[4]).toContain(`Mei Chen's name on their Parent customer. In the portal: “Mei Chen”. In the books: “Ana Rivera”. ${kept.words}${kept.words.endsWith(".") ? "" : "."} See the change on Reconciliation. ${NAME_NEXT}`);
     // Given up, it stays a difference, with no note.
     expect(await giveUp(item!.id, "Leaving it.", asGiver())).toEqual({ ok: true, message: RENAME_GIVEN_UP });
@@ -197,7 +203,7 @@ describe("a removed guardian's Parent customer left active", () => {
     const kept = await noteOfOnlyItem();
     let riveras = rowOf(await view(), "Rivera Family");
     expect(riveras.differences).toEqual([{ kind: "guardian_active", guardianId: row.id, who: "Ana Rivera", portalOpen: false, queue: kept }]);
-    noPressAtGuardians(riveras);
+    await noPressAtGuardians(riveras);
     expect((await cellsOf("Rivera Family"))[4]).toContain(`Whether Ana Rivera is this family's guardian. In the portal: Removed from this family. In the books: Their Parent customer is active. ${kept.words}${kept.words.endsWith(".") ? "" : "."} See the change on Reconciliation. ${REMOVED_NEXT}`);
 
     expect(await giveUp(item!.id, "Settled by hand.", asGiver())).toEqual({ ok: true, message: DEACTIVATE_GIVEN_UP });
@@ -205,7 +211,7 @@ describe("a removed guardian's Parent customer left active", () => {
     riveras = rowOf(await view(), "Rivera Family");
     expect(riveras.status).toMatchObject({ key: "with_differences" });
     expect(riveras.differences).toEqual([{ kind: "guardian_active", guardianId: row.id, who: "Ana Rivera", portalOpen: false, queue: null }]);
-    noPressAtGuardians(riveras);
+    await noPressAtGuardians(riveras);
     const cells = await cellsOf("Rivera Family");
     expect(cells[3]).toContain("1 difference with the books: guardians' Parent customers.");
     expect(cells[4]).toContain(`Whether Ana Rivera is this family's guardian. In the portal: Removed from this family. In the books: Their Parent customer is active. ${REMOVED_NEXT}`);
@@ -240,7 +246,7 @@ describe("a guardian's own Parent customer the books have inactive", () => {
     await readAgain();
     const riveras = rowOf(await view(), "Rivera Family");
     expect(riveras.differences).toEqual([{ kind: "guardian_active", guardianId: row.id, who: "Ana Rivera", portalOpen: true, queue: null }]);
-    noPressAtGuardians(riveras);
+    await noPressAtGuardians(riveras);
     expect((await cellsOf("Rivera Family"))[4]).toContain(`Whether Ana Rivera is this family's guardian. In the portal: A guardian of this family. In the books: Their Parent customer is inactive. ${INACTIVE_NEXT}`);
   });
 });
