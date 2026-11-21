@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
-import { asStaff, renderPage } from "../helpers/signed-in";
+import { asStaff, renderPage, revalidatedPaths } from "../helpers/signed-in";
 
 // Every request goes to the QuickBooks stub, never Intuit.
 const stubBase = vi.hoisted(() => ({ url: "" }));
@@ -23,7 +23,7 @@ import { sendStamp } from "@/lib/accounting/stamp";
 import { auditPage, parseAuditFilters } from "@/lib/audit/query";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { clearRosterOfOtherCompany } from "@/lib/roster/source";
-import { FAMILY_BUSY, SEND_CHANGED, SEND_FAMILY_INACTIVE, SEND_FAMILY_NOT_LINKED, SENDING_LOCK, sendNameQueuedWords, sendNameTakenWords, sendToBooks, STALE_TWICE, WRITE_COPY } from "@/lib/roster/writes";
+import { FAMILY_BEING_CHANGED, FAMILY_BUSY, familySendStudentsWords, MOVE_PENDING, SEND_CHANGED, SEND_FAMILY_NOT_LINKED, SENDING_LOCK, sendNameQueuedWords, sendNameTakenWords, sendToBooks, STALE_TWICE, WRITE_COPY } from "@/lib/roster/writes";
 import { sendDifferenceAction } from "@/app/staff/(app)/links/actions";
 import AccountingLinksPage from "@/app/staff/(app)/links/page";
 import { resetDb, seedWorkingMail } from "../helpers/db";
@@ -602,7 +602,7 @@ describe("a student or member inactive in the portal, made inactive in the books
     expect(posts()).toEqual([]);
   });
 
-  it("not offered, and refused, for a record active in the portal (that would make a customer active in the books) and for a layered family", async () => {
+  it("not offered, and refused, for a record active in the portal (that would make a customer active in the books) and for a layered family with a student active in the portal", async () => {
     changeInBooks("12", { Active: false, SyncToken: "1" });
     await readAgain();
     const row = rowOf(await loadAccountingLinks(), "Rivera Family");
@@ -611,13 +611,17 @@ describe("a student or member inactive in the portal, made inactive in the books
     expect(row.sendNotes).toEqual([{ at, words: "The portal never makes a customer active in the books, so this can only be taken from them." }]);
     stub.calls.length = 0;
     expect(await pressWith("inactive", "student", String(leo), sendStamp("inactive", String(leo), "12", ["12"]))).toEqual({ ok: false, errors: [SEND_CHANGED] });
-    // Rivera inactive in the portal, its customer active in the books: listed, and its make-inactive never sent from here.
+    // Rivera inactive in the portal, its customer active in the books, but Leo active in the portal (slice M5b): QuickBooks
+    // would make him inactive with the family, so no press, and the press refused, in words.
     changeInBooks("12", { Active: true, SyncToken: "2" });
     await readAgain();
     await db.update(family).set({ active: false }).where(eq(family.id, rivera));
     const inactive = (await loadAccountingLinks()).inactive.find((r) => r.name === "Rivera Family")!;
-    expect(inactive).toMatchObject({ send: null, sendNote: SEND_FAMILY_INACTIVE });
-    expect(await pressWith("inactive", "family", String(rivera), sendStamp("inactive", String(rivera), "10", ["10"]))).toEqual({ ok: false, errors: [SEND_FAMILY_INACTIVE] });
+    const leoActive = familySendStudentsWords(["Leo Rivera"], []);
+    expect(inactive).toMatchObject({ send: null, sendNote: leoActive });
+    expect(await pressWith("inactive", "family", String(rivera), sendStamp("inactive", String(rivera), "10", ["10", "11", "12"]))).toMatchObject({ ok: false, errors: [leoActive] });
+    // A stamp of the family alone, as M5a's member's was: whom it covers isn't whom the page drew.
+    expect(await pressWith("inactive", "family", String(rivera), sendStamp("inactive", String(rivera), "10", ["10"]))).toMatchObject({ ok: false, errors: [SEND_CHANGED] });
     expect(posts()).toEqual([]);
     expect(await sends()).toEqual([]);
     expect(await familyRow(rivera)).toMatchObject({ active: false });
@@ -721,14 +725,17 @@ describe("the page", () => {
     expect(list).toContain(NEVER_ACTIVE);
     expect(list).not.toMatch(/Send the app's to QuickBooks<span class="visually-hidden">: (Rivera Family's name|Max Rivera's family|Chen Family's active status|Kim Rivera)/);
     expect(rowOf(view, "Rivera Family").sends.map((x) => x.at)).not.toContain(rowOf(view, "Rivera Family").differences.findIndex((d) => d.kind === "student_customer"));
-    // Oak, inactive here and active in the books, a layered family: its Take, and the sentence in place of a Send.
+    // Oak, inactive here and active in the books, a layered family with nobody under it in the books: its Take, and
+    // since slice M5b its Send, beside it.
     const part = partOf(whole);
+    const OAK_SENT = "Makes “Oak Family” inactive in the books, as the portal has it, in place of active there.";
     expect(pressed(part, "Take QuickBooks' into the app")).toEqual(["Oak Family's active status"]);
-    expect(pressed(part, "Send the app's to QuickBooks")).toEqual([]);
-    expect(part).toContain(SEND_FAMILY_INACTIVE.replaceAll("'", "'"));
+    expect(pressed(part, "Send the app's to QuickBooks")).toEqual(["Oak Family's active status"]);
+    expect(part).toContain(OAK_SENT);
     // The props are only words and bound actions: no stamp is drawn into the page.
     for (const s of [...view.rows.flatMap((r) => [...r.sends, ...r.takes]), ...view.inactive.flatMap((r) => (r.take ? [r.take] : []))]) expect(whole).not.toContain(s.stamp);
     expect(whole).toContain("can instead be sent to the books with Send the app&#x27;s to QuickBooks, by someone who may also change families");
+    for (const s of view.inactive.flatMap((r) => (r.send ? [r.send] : []))) expect(whole).not.toContain(s.stamp);
 
     // A reader without Roster.Family.ReadWrite: the Takes as before, no Send and none of its sentences.
     const linker = await staffWith("linker@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
@@ -738,12 +745,217 @@ describe("the page", () => {
     expect(pressed(listOf(theirs), "Take QuickBooks' into the app")).toEqual(pressed(list, "Take QuickBooks' into the app"));
     expect(listOf(theirs)).not.toContain(HELD_ELSEWHERE);
     expect(listOf(theirs)).not.toContain(NEVER_ACTIVE);
-    expect(partOf(theirs)).not.toContain(SEND_FAMILY_INACTIVE);
+    expect(partOf(theirs)).not.toContain(OAK_SENT);
+    expect(pressed(partOf(theirs), "Send the app's to QuickBooks")).toEqual([]);
     expect(listOf(theirs)).not.toContain(QUEUE_IN_THE_WAY_OF_SEND);
     // Drawing the page sends and queues nothing.
     expect(posts()).toEqual([]);
     expect(await items()).toEqual([]);
     expect(await sends()).toEqual([]);
     expect((await db.select().from(writeQueue).where(sql`${writeQueue.request}->>'op' = 'move'`))).toEqual([]);
+  });
+});
+
+describe("a layered family inactive in the portal, made inactive in the books with everyone under it (slice M5b)", () => {
+  let zoe: AppStudentId;
+  beforeEach(async () => {
+    await layered();
+    // Zoe Rivera (13), a second student under Rivera, imported before anything is changed in the portal.
+    await readAgain(qc("13", "Zoe Rivera", "3", under("10")));
+    await syncAppRecords();
+    zoe = await recordOfCustomer("13", "student");
+    // In the portal: the family and both its students inactive. In the books: all of them, and Ana's Parent customer, active.
+    await db.update(student).set({ active: false }).where(eq(student.familyId, rivera));
+    await db.update(family).set({ active: false }).where(eq(family.id, rivera));
+  });
+  const offerNow = async () => (await loadAccountingLinks()).inactive.find((r) => r.name === "Rivera Family")!;
+  const familyRuns = () => auditsOf("roster.family.deactivate");
+  const COVER = "Makes Rivera Family's customer inactive in the books, as the portal has it, in place of active there, and with it everyone active under it, as QuickBooks asks: “Ana Rivera”, “Leo Rivera”, “Zoe Rivera” and “Rivera Family”, one at a time in that order, deepest first and the family last.";
+  const AGAIN = "Rivera Family is still active in QuickBooks. Press “Send the app's to QuickBooks” on its row on Accounting links again to carry on with whoever is still active.";
+
+  it("offered with whom it covers in words, and sent: one make-inactive each, deepest first and the family last, one family row and one send row, the records as they were", async () => {
+    // A make-inactive of Leo's customer kept on Reconciliation: closed once QuickBooks has it inactive.
+    const kept = await seedQueued({ op: "deactivate", role: "student", qboId: "12", syncToken: "0" }, { state: "refused", code: "fault_6000" });
+    const row = await offerNow();
+    expect(row.sendNote).toBeNull();
+    expect(row.send).toMatchObject({ field: "inactive", kind: "family", recordId: String(rivera), about: "Rivera Family's active status",
+      words: [COVER, "QuickBooks is asked what each of them owes first, and any balance on any of them, owed or a credit, or one that can't be read, stops it with nothing sent.",
+        "If QuickBooks stops it part way, whoever was made inactive before then stays inactive in the books, and the answer says who.", "The portal's records don't change.",
+        "A make-inactive kept on the Reconciliation page for any of them is closed once QuickBooks has that customer inactive, as this takes its place."] });
+    expect(row.send!.stamp).toBe(sendStamp("inactive", String(rivera), "10", ["10", "11", "12", "13"]));
+    stub.calls.length = 0;
+    const r = await press(row.send!);
+    expect(r).toMatchObject({ ok: true, changed: true });
+    expect(r.ok && r.message.startsWith("Made inactive in QuickBooks: Ana Rivera, Leo Rivera and Zoe Rivera, then Rivera Family.")).toBe(true);
+    // Each read first (its balance), then each made inactive, the family last.
+    const sent = posts();
+    expect(sent.map((b) => b.Id)).toEqual(["11", "12", "13", "10"]);
+    for (const b of sent) expect(b).toMatchObject({ Active: false });
+    expect(stub.apiCalls().filter((c) => c.method === "POST")).toHaveLength(4);
+    expect(stub.customers.filter((c) => ["10", "11", "12", "13"].includes(String(c.Id))).every((c) => c.Active === false)).toBe(true);
+    expect(await familyRuns()).toEqual([expect.objectContaining({ targetId: "10", after: expect.objectContaining({ outcome: "done", made: ["11", "12", "13", "10"], notMade: [] }) })]);
+    expect(await sends()).toEqual([expect.objectContaining({ targetType: "family", targetId: String(rivera), before: { active: true },
+      after: { field: "inactive", kind: "family", familyId: String(rivera), customerQboId: "10", covered: ["11", "12", "13", "10"], active: false, outcome: "sent", replaced: [kept.id] } })]);
+    expect((await items()).find((q) => q.id === kept.id)).toMatchObject({ state: "given_up" });
+    expect(await items()).toHaveLength(1);
+    // The portal's records as they were: nothing made active, nothing else changed.
+    expect(await familyRow(rivera)).toMatchObject({ active: false });
+    expect(await studentRow(leo)).toMatchObject({ active: false, familyId: rivera });
+    expect(await studentRow(zoe)).toMatchObject({ active: false, familyId: rivera });
+    expect((await loadAccountingLinks()).inactive).toEqual([]);
+  });
+
+  it("a balance owed on one and a credit on another: stopped with nothing sent, said in words, the amount only for a reader who may see balances", async () => {
+    stub.invoices.push(balance("9001", "12", 25), balance("9002", "13", -10));
+    const row = await offerNow();
+    stub.calls.length = 0;
+    const r = await press(row.send!);
+    expect(r.ok).toBe(false);
+    const errors = r.ok ? [] : r.errors;
+    expect(errors).toHaveLength(3);
+    expect(errors[0]).toContain("Leo Rivera");
+    expect(errors[1]).toContain("Zoe Rivera");
+    expect(errors[2]).toBe(`Nobody was made inactive. ${WRITE_COPY.balanceFix}`);
+    expect(errors.join(" ")).not.toContain("$");
+    expect(posts()).toEqual([]);
+    expect(await items()).toEqual([]);
+    expect(await familyRuns()).toEqual([expect.objectContaining({ after: expect.objectContaining({ outcome: "refused", made: [] }) })]);
+    expect(await sends()).toEqual([expect.objectContaining({ after: expect.objectContaining({ outcome: "stopped", code: "open_balance" }) })]);
+    // Through the press: the amount said only to a holder of Finance.Balance.Read.
+    const treasurer = await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite", "Roster.Family.ReadWrite", "Finance.Balance.Read"]);
+    asStaff(treasurer);
+    const told = await sendDifferenceAction("inactive", "family", row.send!.recordId, tag, row.send!.stamp);
+    expect(told.ok).toBe(false);
+    expect(told.ok ? "" : told.errors.join(" ")).toContain("$25.00");
+    expect(told).not.toHaveProperty("changed");
+    expect(posts()).toEqual([]);
+    // Nothing changed anywhere: only the links page is drawn again, not the layout.
+    expect(revalidatedPaths()).not.toContain("/");
+  });
+
+  it("an answer lost part way, through the press: stopped, the lost step held on the queue, the send row `queued`, and the pages drawn again on `changed`", async () => {
+    const row = await offerNow();
+    // Leo's make-inactive reaches QuickBooks, which makes him inactive, and its answer never comes back.
+    stub.onApiRequest = (c) => { stub.loseUpdateAnswer = c.method === "POST" && /"Id":"12"/.test(c.body); };
+    stub.calls.length = 0;
+    asStaff(sender);
+    const told = await sendDifferenceAction("inactive", "family", row.send!.recordId, tag, row.send!.stamp);
+    stub.onApiRequest = null; stub.loseUpdateAnswer = false;
+    expect(told.ok).toBe(false);
+    expect(told.ok ? [] : told.errors[0]).toBe("Made inactive in QuickBooks: Ana Rivera.");
+    expect(told).not.toHaveProperty("changed");
+    expect(posts().map((b) => b.Id)).toEqual(["11", "12"]);
+    expect(await items()).toEqual([expect.objectContaining({ state: "waiting", sent: true, targetQboId: "12" })]);
+    expect(await familyRuns()).toEqual([expect.objectContaining({ after: expect.objectContaining({ outcome: "stopped", made: ["11"], maybe: ["12"] }) })]);
+    expect(await sends()).toEqual([expect.objectContaining({ after: expect.objectContaining({ outcome: "queued", code: "unreachable" }) })]);
+    // Ana was made inactive in the books: the layout is drawn again (`changed`), though the press didn't go through.
+    expect(revalidatedPaths()).toContain("/");
+  });
+
+  it("a balance that can't be read stops it, with nothing sent", async () => {
+    const row = await offerNow();
+    stub.quirks.balances = false;
+    stub.calls.length = 0;
+    expect(await press(row.send!)).toMatchObject({ ok: false, errors: [WRITE_COPY.balanceUnknown] });
+    expect(posts()).toEqual([]);
+    expect(await sends()).toEqual([expect.objectContaining({ after: expect.objectContaining({ outcome: "stopped" }) })]);
+  });
+
+  it("the second step refused by QuickBooks: stopped part way, the words naming who was made inactive and who wasn't", async () => {
+    const row = await offerNow();
+    stub.onApiRequest = (c) => { if (c.method === "POST" && c.body.includes(`"Id":"12"`)) stub.updateFault = "6000"; };
+    stub.calls.length = 0;
+    const r = await press(row.send!);
+    stub.onApiRequest = null; stub.updateFault = null;
+    expect(r).toMatchObject({ ok: false, changed: true });
+    const errors = r.ok ? [] : r.errors;
+    expect(errors[0]).toBe("Made inactive in QuickBooks: Ana Rivera.");
+    expect(errors).toContain("Not made inactive yet: Zoe Rivera.");
+    expect(errors.at(-1)).toBe(AGAIN);
+    expect(posts().map((b) => b.Id)).toEqual(["11", "12"]);
+    expect(stub.customers.find((c) => c.Id === "11")).toMatchObject({ Active: false });
+    expect(stub.customers.find((c) => c.Id === "10")).toMatchObject({ Active: true });
+    expect(await familyRuns()).toEqual([expect.objectContaining({ after: expect.objectContaining({ outcome: "stopped", made: ["11"] }) })]);
+    expect(await sends()).toEqual([expect.objectContaining({ after: expect.objectContaining({ outcome: "stopped", covered: ["11", "12", "13", "10"] }) })]);
+  });
+
+  it("someone added under the family in the books after the page: the cover changed, nothing sent", async () => {
+    const row = await offerNow();
+    await readAgain(qc("16", "Ivy Rivera", "3", under("10")));
+    stub.calls.length = 0;
+    expect(await press(row.send!)).toMatchObject({ ok: false, errors: [SEND_CHANGED] });
+    expect(posts()).toEqual([]);
+    expect(await sends()).toEqual([]);
+    expect(await familyRuns()).toEqual([]);
+  });
+
+  it("a student of the family active in the portal, or a customer under it linked to an active student of another family: not offered, and refused, nothing sent", async () => {
+    const stamp = sendStamp("inactive", String(rivera), "10", ["10", "11", "12", "13"]);
+    await db.update(student).set({ active: true }).where(eq(student.id, leo));
+    const leoActive = familySendStudentsWords(["Leo Rivera"], []);
+    expect(await offerNow()).toMatchObject({ send: null, sendNote: leoActive });
+    stub.calls.length = 0;
+    expect(await pressWith("inactive", "family", String(rivera), stamp)).toMatchObject({ ok: false, errors: [leoActive] });
+    // Leo inactive again; Zoe moved to the Chens in the portal and active there, while the books keep her under Rivera.
+    await db.update(student).set({ active: false }).where(eq(student.id, leo));
+    await db.update(student).set({ active: true, familyId: chen }).where(eq(student.id, zoe));
+    const zoeElsewhere = familySendStudentsWords([], ["Zoe Rivera"]);
+    expect(await offerNow()).toMatchObject({ send: null, sendNote: zoeElsewhere });
+    expect(await pressWith("inactive", "family", String(rivera), stamp)).toMatchObject({ ok: false, errors: [zoeElsewhere] });
+    // The words for a student of the family never send staff to a press the family's page refuses while it is inactive.
+    expect(leoActive).not.toContain("first, or take");
+    expect(leoActive).toContain("take the books' value instead");
+    expect(posts()).toEqual([]);
+    expect(await sends()).toEqual([]);
+    expect(await familyRuns()).toEqual([]);
+  });
+
+  it("the family's lock held (a family-page press under way): refused as being changed; the family record active again: refused as changed", async () => {
+    const row = await offerNow();
+    stub.calls.length = 0;
+    expect(await holding(SENDING_LOCK, String(rivera), () => press(row.send!))).toMatchObject({ ok: false, errors: [FAMILY_BEING_CHANGED] });
+    // The record active again: refused by sendInactive()'s own first check, before the family action is reached
+    // (prepareFamily()'s check of the record is for a record made active between the two transactions).
+    await db.update(family).set({ active: true }).where(eq(family.id, rivera));
+    expect(await press(row.send!)).toMatchObject({ ok: false, errors: [SEND_CHANGED] });
+    expect(posts()).toEqual([]);
+    expect(await sends()).toEqual([]);
+  });
+
+  it("the family's customer made inactive in the books since the page, the record still inactive: refused as changed by the family action's own check, nothing read or sent", async () => {
+    const row = await offerNow();
+    changeInBooks("10", { Active: false, SyncToken: "1" });
+    await readAgain();
+    stub.calls.length = 0;
+    // sendInactive() hands a layered family on before it looks at the customer, so this is prepareFamily()'s refusal:
+    // without it the action would read every balance and answer that the family is inactive in QuickBooks already.
+    expect(await press(row.send!)).toMatchObject({ ok: false, errors: [SEND_CHANGED] });
+    expect(posts()).toEqual([]);
+    expect(await familyRuns()).toEqual([]);
+    expect(await sends()).toEqual([]);
+  });
+
+  it("not offered, and refused, while a change waits for the family's customer or a move out of the family is kept", async () => {
+    const row = await offerNow();
+    const waiting = await seedQueued({ op: "rename", role: "family", qboId: "10", syncToken: "0", name: "Rivera Household", was: "Rivera Family" }, { state: "waiting" });
+    expect(await offerNow()).toMatchObject({ send: null, sendNote: QUEUE_IN_THE_WAY_OF_SEND });
+    stub.calls.length = 0;
+    expect(await press(row.send!)).toMatchObject({ ok: false, errors: [WRITE_COPY.waiting] });
+    await db.delete(writeQueue).where(eq(writeQueue.id, waiting.id));
+    await seedQueued({ op: "move", role: "student", qboId: "12", syncToken: "0", fromFamilyQboId: "10", toFamilyQboId: "20", fromFamilyId: rivera, toFamilyId: chen },
+      { state: "refused", code: "fault_6240" });
+    expect(await offerNow()).toMatchObject({ send: null, sendNote: QUEUE_IN_THE_WAY_OF_SEND });
+    expect(await press(row.send!)).toMatchObject({ ok: false, errors: [MOVE_PENDING] });
+    expect(posts()).toEqual([]);
+    expect(await familyRuns()).toEqual([]);
+    expect(await sends()).toEqual([]);
+  });
+
+  it("not offered while a change waits for anyone it covers, or while QuickBooks isn't connected", async () => {
+    await seedQueued({ op: "rename", role: "parent", qboId: "11", syncToken: "0", name: "Ana R. Rivera", was: "Ana Rivera" });
+    expect(await offerNow()).toMatchObject({ send: null, sendNote: QUEUE_IN_THE_WAY_OF_SEND });
+    await db.delete(writeQueue);
+    await db.delete(qboConnection);
+    expect(await offerNow()).toMatchObject({ send: null, sendNote: SEND_NOT_CONNECTED });
   });
 });
