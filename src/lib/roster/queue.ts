@@ -500,13 +500,25 @@ function detailsInWords(held: HeldContact, w: Extract<RosterWrite, { op: "contac
 /** The codes of an item QuickBooks took that the portal still has to finish on its side (QueueView.finishing). */
 const FINISHING_CODES = new Set(["cache_failed", "answer_other", "finish_failed"]);
 
+/**
+ * The codes of a make-inactive kept for a balance (stage 4's slice M5c names the set): an amount owed or a credit the
+ * portal read (`open_balance`, CREDIT_BALANCE), and QuickBooks' own refusal for a balance (`fault_6220`); with them a
+ * balance the portal couldn't read (balanceUnread()). Not a field difference: nothing in QuickBooks differs from what the
+ * portal asked but the balance, so such a change is shown on the Reconciliation page alone, never beside a difference on
+ * Accounting links (keptOnLinksOf(), src/lib/accounting/mapping.ts), and waitingWords() says it is held back without
+ * saying QuickBooks has something else.
+ */
+export const BALANCE_HOLD_CODES: readonly string[] = ["open_balance", CREDIT_BALANCE, "fault_6220"];
+/** Whether a kept item's code is a balance hold (BALANCE_HOLD_CODES, or a balance that couldn't be read). */
+export const isBalanceHold = (code: string | null) => code !== null && (BALANCE_HOLD_CODES.includes(code) || balanceUnread(code));
 /** Where a waiting or stuck item stands, in words, for the Reconciliation page and a family's page. */
 export function waitingWords(i: Pick<QueueView, "state" | "finishing" | "lastCode">): string {
   if (i.state === "refused") {
     const who = whoStopped(i.lastCode);
     // Held back for a balance, an unread balance, or a name or address QuickBooks can't take (a guardian's Parent
-    // customer, stage 3's slice 9h): nothing in QuickBooks differs, so the words don't say it does.
-    const heldHere = i.lastCode === "open_balance" || i.lastCode === CREDIT_BALANCE || i.lastCode === EMAIL_TOO_LONG || i.lastCode === NAME_UNUSABLE || balanceUnread(i.lastCode);
+    // customer, stage 3's slice 9h): nothing in QuickBooks differs, so the words don't say it does. (`fault_6220` among
+    // the balance holds is QuickBooks' refusal, never the portal's holding back, so it is never read here.)
+    const heldHere = isBalanceHold(i.lastCode) || i.lastCode === EMAIL_TOO_LONG || i.lastCode === NAME_UNUSABLE;
     return who === "quickbooks" ? "Refused by QuickBooks: the portal keeps its own value"
       : who === "held" ? (heldHere ? "Held back by the portal, which keeps its own value" : "Held back by the portal, as QuickBooks has something else: the portal keeps its own value")
         : "Not sent: the portal couldn't send it to QuickBooks at the time, and keeps its own value";
