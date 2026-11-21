@@ -30,7 +30,8 @@ trial to the club's real books. The portal keeps its own families, students and 
 the seasons' ticks, waivers and chosen lists, volunteering and every signed form, which its family and staff can still
 download. What belonged to the earlier company's books ends: every link between a family, student or guardian and a
 customer there, what each family was last seen to owe, every request still waiting to be sent there, every unpaid
-volunteer buy-out, and the membership shape. Paid buy-outs keep counting.
+volunteer buy-out, the product or service chosen for each payment and buy-out requirement, and the membership shape.
+Paid buy-outs keep counting.
 
 The portal refuses a different company unless an Admin has said, on the switch page, that they mean to connect one:
 picking the wrong company on Intuit's page changes nothing.
@@ -46,16 +47,19 @@ picking the wrong company on Intuit's page changes nothing.
 5. Choose the membership shape for the new company and save it. The portal reads its roster.
 6. Open **Accounting links** (under **Families**) and link each family, its students and its guardians to the new
    company's customers.
+7. Open each season under **Seasons**, and on each payment requirement and each volunteer requirement that offers a
+   buy-out, choose its product or service again from the new company's list. Until then a payment requirement shows
+   families no invoice, and no family is offered to pay instead of volunteering.
 
 Until a family is linked again, its guardians still sign in and see their students, forms and volunteering as before,
 and the money box says the club hasn't connected their payments to the portal yet: no balance, no invoices and no Pay
-button. Each unpaid volunteer buy-out ended in the switch is listed for the treasurer on **Reconciliation**, under "From
-the earlier QuickBooks company", with its invoice or the note to search for: it stays in the earlier company's books,
-to settle there by hand.
+button. Each unpaid volunteer buy-out ended in the switch that may leave something to settle is listed for the
+treasurer on **Reconciliation**, under "From the earlier QuickBooks company", with its invoice or the note to search
+for: any invoice made for it stays in the earlier company's books, to settle there by hand.
 
 Going back to the first company later is a switch too, the same way, and ends the links made to the second one. A
 buy-out ended at the first switch stays on the treasurer's list, in words that say its invoice is in the company
-connected now.
+connected now, and the section is headed "Ended by a change of QuickBooks company" while it lists such a row.
 
 What you see if it was refused:
 

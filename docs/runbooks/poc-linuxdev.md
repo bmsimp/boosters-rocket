@@ -301,7 +301,9 @@ switch ends and keeps, then its checkbox and **Switch companies: sign in to Intu
 ([reconnecting QuickBooks](quickbooks-reconnect.md#connecting-a-different-company)). The families, students and
 guardians stay, unlinked, to be linked again on **Accounting links**; sessions and welcomes survive, and the audit log
 has no `parent.access.cleared`; each family's money reads as not connected until it is linked; unpaid buy-outs end and
-are listed on **Reconciliation**, and paid ones keep counting. Going back to the first company is a second switch. With
+are listed on **Reconciliation**, and paid ones keep counting; every requirement's product or service is chosen again
+from the new company's list on its season, since until then no family is offered to pay instead of volunteering.
+Going back to the first company is a second switch. With
 no switch asked for, step 2 says "That is a different QuickBooks company from the one the portal's families were read
 from", nothing is stored, and a connection to another company stored by hand stops the roster refresh
 (`roster_company`). Reconnecting the same company works as before. The club's real books go on an installation of

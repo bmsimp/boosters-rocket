@@ -238,7 +238,8 @@ describe("QuickBooks settings", () => {
     const ends = html.slice(html.indexOf("What a switch ends"), html.indexOf("What is kept"));
     expect(ends).toContain("1 family link, 0 student links and 0 guardian links. You link them again on Accounting links.");
     expect(ends).toContain("0 requests still waiting to be sent to the earlier company.");
-    expect(ends).toContain("0 unpaid volunteer buy-out invoices.");
+    expect(ends).toContain("0 unpaid volunteer buy-outs. Each one ends, and any that may leave something to settle is listed for the treasurer on Reconciliation; any invoice made for one stays in the earlier company&#x27;s books, to settle there.");
+    expect(ends).toContain("The product or service chosen for each payment and buy-out requirement. You choose each one again from the new company&#x27;s list on the requirement&#x27;s page in Seasons; until then, a payment requirement has no invoice to show and families can&#x27;t choose to pay instead of volunteering.");
     expect(ends).toContain("The membership shape. You choose it again for the new company in step 3.");
     const kept = html.slice(html.indexOf("What is kept"), html.indexOf("Before you start"));
     expect(kept).toContain("Every family, student and guardian: 1 family, 0 students and 0 guardian rows.");
