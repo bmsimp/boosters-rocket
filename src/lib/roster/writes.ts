@@ -21,7 +21,7 @@ import { connectedToAnotherCompany, customerOfFamily, customerOfGuardian, custom
 import { asAppFamilyId, asAppStudentId, QUICKBOOKS, type AppFamilyId, type AppStudentId } from "@/lib/families/ids";
 import { recordNameWords } from "@/lib/families/words";
 import { clearLeftUnlinked } from "@/lib/families/left-unlinked";
-import { endedLinksHeld } from "@/lib/accounting/ended-links";
+import { endedLinksHeld, type EndedHeld } from "@/lib/accounting/ended-links";
 import { isUuid } from "@/lib/seasons/ids";
 import { askForRosterRefresh, ROSTER_ASK_KEY } from "@/lib/parents/refresh-ask";
 import { studentsRuleInForce } from "@/lib/parents/sessions";
@@ -1610,12 +1610,12 @@ export const ENDED_HELD = (name: string, customer: string, offered: boolean) =>
     : ` The Accounting links page can't offer “${customer}” for it until it is sorted out in QuickBooks, where it may be inactive, under another customer or of another type; once it is, someone who may link families to accounting links the two there.`}`;
 /**
  * A student left out of "Create in QuickBooks and link" (slice M3b2): linked to a customer the books still hold until
- * its family was unlinked, so a second customer isn't made for the same child, wherever the books hold the first (the
+ * the family they were in was unlinked (this family, or one they have since been moved out of), so a second customer isn't made for the same child, wherever the books hold the first (the
  * lead's decision 4). `underFamily`: that customer is an active student customer directly under the family's customer,
  * which Accounting links shows among the family's differences as a student in the books only (differencesOf()).
  */
 export const STUDENT_HELD = (who: string, customer: string, underFamily: boolean) =>
-  `${who} isn't made in QuickBooks: they were linked to “${customer}” there until their family was unlinked, and “${customer}” is still there with no record linked to it, so a second customer isn't made for the same child. Accounting links shows ${who} among the family's differences as a student in the portal only${underFamily ? `, and “${customer}” as a student in the books only` : ""}.`;
+  `${who} isn't made in QuickBooks: they were linked to “${customer}” there until the family they were in was unlinked, and “${customer}” is still there with no record linked to it, so a second customer isn't made for the same child. Accounting links shows ${who} among the family's differences as a student in the portal only${underFamily ? `, and “${customer}” as a student in the books only` : ""}.`;
 
 /**
  * The refusal of a create of this family's own customer while the customer of its ended link is still in the books
@@ -1626,9 +1626,23 @@ export const STUDENT_HELD = (who: string, customer: string, underFamily: boolean
 async function endedHeldRefusal(tx: Tx, familyId: AppFamilyId, name: string, shape: MembershipShape, cache: Cust[]): Promise<string | null> {
   const held = (await endedLinksHeld({ families: [familyId] }, tx)).families.get(familyId);
   if (!held) return null;
-  const offered = noFamilyPool(buildRoster(shape, cache), cache, await familyCreatesOnTheQueue(tx), { familyLinked: new Set(), studentLinked: new Set() })
-    .some((c) => c.qboId === held.customerId);
-  return ENDED_HELD(name, held.customerName, offered);
+  return ENDED_HELD(name, held.customerName, await poolOffers(tx, shape, cache, held.customerId));
+}
+/** Whether Accounting links can offer this customer for a family: it is among the customers no family is linked to (noFamilyPool()). */
+async function poolOffers(tx: Tx, shape: MembershipShape, cache: Cust[], customerId: string): Promise<boolean> {
+  return noFamilyPool(buildRoster(shape, cache), cache, await familyCreatesOnTheQueue(tx), { familyLinked: new Set(), studentLinked: new Set() })
+    .some((c) => c.qboId === customerId);
+}
+/**
+ * For a family's page (slice M3b2): whether Accounting links can offer the customer of the family's ended link that
+ * endedLinksHeld() answered, by the same rule as the refusal (ENDED_HELD()'s `offered`), from the shape and the cache as
+ * they are now. Three queries (the shape, the cache, the family creates on the queue); false with no shape.
+ */
+export async function heldCustomerOffered(customerId: string): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const shape = await getShape(tx);
+    return shape !== null && poolOffers(tx, shape, await cacheRows(tx), customerId);
+  });
 }
 /** A family whose own create is waiting or stuck: nothing else is changed on it until it goes through or is given up. */
 export const FAMILY_WAITING = "Making this family in QuickBooks is still waiting on the queue, so nothing else can be changed on it for now. Once it has gone through, or been given up on the Reconciliation page, try again.";
@@ -1896,7 +1910,7 @@ type LinkPlan = {
   students: { id: AppStudentId; name: string | null }[]; studentTypeId: string | null;
   /** The names a new customer must not be (namesTaken(), read under the lock): each student's is held against them before it is sent. */
   taken: string[];
-  /** A sentence for each active student with no link left out as its customer from before its family's unlink is still in the books (STUDENT_HELD()). */
+  /** A sentence for each active student with no link left out as its customer from before an unlink is still in the books (STUDENT_HELD()). */
   leftOut: string[];
 } | { ok: false; result: WriteResult };
 
@@ -1971,7 +1985,7 @@ async function prepareLink(rawFamilyId: string, chosenType: string | null, roste
         // A student whose given-up create QuickBooks made, or may have made, is not made again (the Reconciliation page lists those it made).
         if (links.customerOfStudent.has(r.id) || (await studentCreateWaiting(tx, r.id)) || (await givenUpMaybeMade(tx, { studentId: r.id }))
           || (await madeAfterGivingUp(tx, { studentId: r.id })).length > 0) continue;
-        // Nor one whose customer from before its family's unlink is still in the books, wherever the books have it (the
+        // Nor one whose customer from before an unlink is still in the books, wherever the books have it (the
         // lead's decision 4): one child is one customer. It is said, by name; nothing links it here.
         const was = held.get(r.id);
         if (was) {
@@ -1986,7 +2000,7 @@ async function prepareLink(rawFamilyId: string, chosenType: string | null, roste
     const leftWords = leftOut.sort((a, b) => COLLATOR.compare(a.name ?? "", b.name ?? "")).map((l) => l.words);
     if (familyWrite === null && students.length === 0) {
       if (leftWords.length === 0) return no("Everything in this family that can be made in QuickBooks is linked already, waiting to be, or was made there after making it was given up (the Reconciliation page lists those), so nothing was made.");
-      return { ok: false, result: { ok: false, errors: ["Everything in this family that can be made in QuickBooks is linked already, waiting to be, was made there after making it was given up (the Reconciliation page lists those), or is still in the books from before its family was unlinked, so nothing was made.", ...leftWords] } };
+      return { ok: false, result: { ok: false, errors: ["Everything in this family that can be made in QuickBooks is linked already, waiting to be, was made there after making it was given up (the Reconciliation page lists those), or is still in the books from before an unlink, so nothing was made.", ...leftWords] } };
     }
     return { ok: true, realmId: source, familyId: f.id, familyName: recordNameWords(f.name, "family"), familyWrite, familyCustomer, students,
       studentTypeId: shape.kind === "layered" ? shape.studentTypeId : null, taken, leftOut: leftWords };
@@ -4578,9 +4592,11 @@ async function ownParentCustomer(tx: Tx, guardianId: string, b: Books): Promise<
  * per family is the portal's rule (ownNamedElsewhere()), and a new family customer gets its own.
  */
 async function linkedBefore(tx: Tx, guardianId: string, b: Books): Promise<string | null> {
-  const held = (await endedLinksHeld({ guardians: [guardianId] }, tx)).guardians.get(guardianId);
-  return held !== undefined && held.parentQboId === b.familyCustomer && held.typeQboId === b.parentTypeId ? held.customerName : null;
+  return heldUnderFamily((await endedLinksHeld({ guardians: [guardianId] }, tx)).guardians.get(guardianId), b);
 }
+/** linkedBefore()'s rule, for a row's answer from endedLinksHeld() read already (guardianStandings() reads every row's at once). */
+const heldUnderFamily = (held: EndedHeld | undefined, b: Books): string | null =>
+  held !== undefined && held.parentQboId === b.familyCustomer && held.typeQboId === b.parentTypeId ? held.customerName : null;
 /** An active customer directly under the family's customer with the person's name, by the portal's comparison (nameKey()): item 2(a). */
 const namedUnder = (b: Books, name: string) => b.cache.find((c) => c.active && c.parentQboId === b.familyCustomer && nameKey(c.displayName) === nameKey(name)) ?? null;
 /** The guardian row's own queue items in these states, oldest first. */
@@ -4967,9 +4983,12 @@ export async function guardianStandings(rows: readonly { guardianId: string; fam
   const out = new Map<string, string>();
   if (!rows.length) return out;
   return db.transaction(async (tx) => {
+    // Each open row's ended link whose Parent customer the books still hold (slice M3b2), read once for them all: two
+    // queries whatever the number of rows, none with no open row.
+    const held = (await endedLinksHeld({ guardians: rows.filter((r) => r.open).map((r) => r.guardianId) }, tx)).guardians;
     for (const r of rows) {
       const items = await itemsOfRow(tx, r.guardianId, ["waiting", "stuck", "refused"]);
-      const said = [await parentCustomerStanding(tx, r, items.filter((i) => !isDetailsSend(i.request))), contactStanding(items.filter((i) => i.request.op === "contact")),
+      const said = [await parentCustomerStanding(tx, r, items.filter((i) => !isDetailsSend(i.request)), held.get(r.guardianId)), contactStanding(items.filter((i) => i.request.op === "contact")),
         emailStanding(items.filter((i) => i.request.op === "email"))]
         .filter((w): w is string => w !== null);
       if (said.length) out.set(r.guardianId, said.join(" "));
@@ -4978,7 +4997,8 @@ export async function guardianStandings(rows: readonly { guardianId: string; fam
   });
 }
 /** guardianStandings()' words for one row's own Parent customer, from its items that aren't a change of its details. */
-async function parentCustomerStanding(tx: Tx, r: { guardianId: string; familyId: AppFamilyId | null; name: string; open: boolean }, items: QueueRow[]): Promise<string | null> {
+async function parentCustomerStanding(tx: Tx, r: { guardianId: string; familyId: AppFamilyId | null; name: string; open: boolean }, items: QueueRow[],
+  held: EndedHeld | undefined): Promise<string | null> {
   const kept = items.find((i) => i.state === "refused"), open = items.find((i) => i.state !== "refused");
   if (open) return open.state === "stuck" ? "A change to their Parent customer is stuck: see the Reconciliation page." : "A change to their Parent customer is waiting to reach QuickBooks.";
   if (kept) {
@@ -4997,7 +5017,7 @@ async function parentCustomerStanding(tx: Tx, r: { guardianId: string; familyId:
   if (own.is === "not_own") return "Linked to a customer that isn't their own Parent customer under this family, so nothing is sent for them.";
   if (!r.open) return null;
   // The Parent customer they were linked to under this family before it was unlinked (slice M3b2): none is made beside it.
-  const before = await linkedBefore(tx, r.guardianId, b);
+  const before = heldUnderFamily(held, b);
   if (before !== null) return `QuickBooks has the Parent customer “${before}” under this family that they were linked to before the family was unlinked, so no second one is made. No Parent customer in QuickBooks is linked to them, and none is being made: the mapping screen will offer to link one.`;
   const like = namedUnder(b, r.name);
   const elsewhere = like ? null : await ownNamedElsewhere(tx, b, r.guardianId, r.name);

@@ -12,13 +12,14 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 import { randomUUID } from "node:crypto";
 import { eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, accountingLinkEnded, family, guardian, parent, qboCustomer, writeQueue } from "@/lib/db/schema";
+import { accountingLink, accountingLinkEnded, family, guardian, parent, qboCustomer, setting, student, writeQueue } from "@/lib/db/schema";
 import { QUICKBOOKS, type AppFamilyId, type AppStudentId } from "@/lib/families/ids";
 import { endedLinksHeld } from "@/lib/accounting/ended-links";
 import { leaveUnlinked, linkFamilyToCustomer } from "@/lib/accounting/link-writes";
 import { loadAccountingLinks, type LinkRow } from "@/lib/accounting/mapping";
 import { addFamily, askRosterWrite, changeInPortal, createInQuickBooksAndLink, ENDED_HELD, STUDENT_HELD } from "@/lib/roster/writes";
 import { refreshRoster } from "@/lib/roster/refresh";
+import { SOURCE_KEY } from "@/lib/roster/source";
 import { reinstateGuardian } from "@/lib/parents/guardians";
 import { createAndLinkAction } from "@/app/staff/(app)/roster/write-actions";
 import RosterPage from "@/app/staff/(app)/roster/page";
@@ -144,6 +145,40 @@ describe("endedLinksHeld(): a record's latest ended link whose customer the book
     await ended({ familyId: birch, customerId: "30", endedAt: new Date() });
     expect((await endedLinksHeld({ families: [birch] })).families.get(birch)?.customerName).toBe("<b>Bold</b> & “Lincoln”");
   });
+
+  it("answers nothing for a student or guardian row with a live link of its own, or whose old customer another record of its kind is linked to now", async () => {
+    await unlinkThroughThePress(rivera, linker);
+    const both = async () => { const h = await endedLinksHeld({ students: [leo], guardians: [anaRow] }); return [h.students.size, h.guardians.size]; };
+    expect(await both()).toEqual([1, 1]);
+    // Another student record (Birch's, added in the portal) linked to Leo's old customer 12, and another guardian row
+    // (Kim's, of Birch) to Ana's 11, by hand: each kind's customer is another record's now, so nothing is answered.
+    const birch = await handFamily("Birch Family");
+    expect(await changeInPortal({ op: "add_student", familyId: String(birch), name: "Kai Birch" }, tag, createOp())).toMatchObject({ ok: true });
+    const [kai] = await db.select({ id: student.id }).from(student).where(eq(student.name, "Kai Birch"));
+    const kim = await seedParent({ name: "Kim Birch", email: "kim@example.com" });
+    const [kimRow] = await db.insert(guardian).values({ parentId: kim.id, familyId: birch }).returning();
+    const others = await db.insert(accountingLink).values([
+      { system: QUICKBOOKS, realmId: REALM, customerId: "12", studentId: kai!.id, origin: "confirmed", linkedBy: linker.id },
+      { system: QUICKBOOKS, realmId: REALM, customerId: "11", guardianId: kimRow!.id, origin: "confirmed", linkedBy: linker.id },
+    ]).returning();
+    expect(await both()).toEqual([0, 0]);
+    // Those links gone, and Leo and Ana each linked to another customer of their own: a live link of its kind, nothing.
+    await db.delete(accountingLink).where(inArray(accountingLink.id, others.map((o) => o.id)));
+    expect(await both()).toEqual([1, 1]);
+    await db.insert(accountingLink).values([
+      { system: QUICKBOOKS, realmId: REALM, customerId: "30", studentId: leo, origin: "confirmed", linkedBy: linker.id },
+      { system: QUICKBOOKS, realmId: REALM, customerId: "21", guardianId: anaRow, origin: "confirmed", linkedBy: linker.id },
+    ]);
+    expect(await both()).toEqual([0, 0]);
+  });
+
+  it("answers nothing at all while the roster's company is unknown", async () => {
+    await unlinkThroughThePress(rivera, linker);
+    expect((await endedLinksHeld({ families: [rivera] })).families.size).toBe(1);
+    // The roster's company forgotten by hand (as before a first read); nothing is read or imported after it.
+    await db.delete(setting).where(eq(setting.key, SOURCE_KEY));
+    expect(await endedLinksHeld({ families: [rivera], students: [leo], guardians: [anaRow] })).toEqual({ families: new Map(), students: new Map(), guardians: new Map() });
+  });
 });
 
 describe("\"Create in QuickBooks and link\" after an unlink: no second customer while the old one is still in the books", () => {
@@ -167,7 +202,14 @@ describe("\"Create in QuickBooks and link\" after an unlink: no second customer 
     const inactive = await press(rivera);
     expect(inactive).toEqual({ changed: false, result: { ok: false, errors: [ENDED_HELD("Rivera Family", "Rivera Family", false)] } });
     expect(inactive.result.ok ? "" : inactive.result.errors[0]).toContain("can't offer “Rivera Family” for it until it is sorted out in QuickBooks");
+    // Active again but under another customer (Lincoln High 30), then at the top level as a student customer: still in
+    // the books, so refused, and outside the customers no family is linked to, so the same sort-it-out words.
+    await db.update(qboCustomer).set({ active: true, parentQboId: "30" }).where(eq(qboCustomer.qboId, "10"));
+    expect(await press(rivera)).toEqual({ changed: false, result: { ok: false, errors: [ENDED_HELD("Rivera Family", "Rivera Family", false)] } });
+    await db.update(qboCustomer).set({ parentQboId: null, typeQboId: "3" }).where(eq(qboCustomer.qboId, "10"));
+    expect(await press(rivera)).toEqual({ changed: false, result: { ok: false, errors: [ENDED_HELD("Rivera Family", "Rivera Family", false)] } });
     expect(stub.apiCalls()).toEqual([]);
+    expect(await auditsOf("roster.family.created_in_quickbooks")).toEqual([]);
   });
 
   it("refuses it through the action too, for a staff member holding both permissions", async () => {
@@ -199,7 +241,7 @@ describe("\"Create in QuickBooks and link\" after an unlink: no second customer 
     expect(textOf(ledeOf(html))).toContain("not linked to QuickBooks: it is in the portal only, and a change to it is saved here only.");
     const section = sectionOf(html, "create-link-h");
     expect(textOf(section)).toContain("This makes Rivera Household a customer in QuickBooks, and links each to its record here.");
-    expect(textOf(section)).toContain("Leo Rivera isn't offered: they were linked to “Leo Rivera” in QuickBooks until their family was unlinked, and “Leo Rivera” is still there, so a second customer isn't made for them.");
+    expect(textOf(section)).toContain("Leo Rivera isn't offered: they were linked to “Leo Rivera” in QuickBooks until the family they were in was unlinked, and “Leo Rivera” is still there, so a second customer isn't made for them.");
     const r = await press(rivera);
     expect(r).toEqual({ changed: true, result: { ok: true, message: `Made in QuickBooks and linked: Rivera Household. ${STUDENT_HELD("Leo Rivera", "Leo Rivera", false)}` } });
     expect(sent()).toEqual([{ DisplayName: "Rivera Household", CustomerTypeRef: { value: "1" } }]);
@@ -242,9 +284,13 @@ describe("a relink to the same customer: the students left unpaired are made onl
     expect(await db.select().from(accountingLink).where(eq(accountingLink.studentId, mia))).toEqual([]);
     asStaff(linker);
     const html = await renderPage(RosterEntryPage, { params: { id: String(rivera) } });
+    // The Students table says it of Mia, and of Zoe, who never had one, that she has no customer.
+    const students = sectionOf(html, "entry-students-h");
+    expect(rowNamed(students, "Mia R. Rivera")?.at(-1)).toBe("Not linked: their customer from before an unlink is still in the books");
+    expect(rowNamed(students, "Zoe Rivera")?.at(-1)).toBe("No customer");
     const section = textOf(sectionOf(html, "create-link-h"));
     expect(section).toContain("This makes Zoe Rivera customers in QuickBooks under Rivera Family, one by one, and links each to their record here.");
-    expect(section).toContain("Mia R. Rivera isn't offered: they were linked to “Mia Rivera” in QuickBooks until their family was unlinked, and “Mia Rivera” is still there, so a second customer isn't made for them.");
+    expect(section).toContain("Mia R. Rivera isn't offered: they were linked to “Mia Rivera” in QuickBooks until the family they were in was unlinked, and “Mia Rivera” is still there, so a second customer isn't made for them.");
     const left = STUDENT_HELD("Mia R. Rivera", "Mia Rivera", true);
     expect(left).toContain("Accounting links shows Mia R. Rivera among the family's differences as a student in the portal only, and “Mia Rivera” as a student in the books only.");
     expect(await press(rivera)).toEqual({ changed: true, result: { ok: true, message: `Made in QuickBooks and linked: Zoe Rivera. ${left}` } });
@@ -252,10 +298,51 @@ describe("a relink to the same customer: the students left unpaired are made onl
     // Only Mia left: nothing is made, and the words name her; the page offers no create.
     stub.calls.length = 0;
     expect(await press(rivera)).toEqual({ changed: false, result: { ok: false, errors: [
-      "Everything in this family that can be made in QuickBooks is linked already, waiting to be, was made there after making it was given up (the Reconciliation page lists those), or is still in the books from before its family was unlinked, so nothing was made.",
+      "Everything in this family that can be made in QuickBooks is linked already, waiting to be, was made there after making it was given up (the Reconciliation page lists those), or is still in the books from before an unlink, so nothing was made.",
       left] } });
     expect(stub.apiCalls()).toEqual([]);
     expect(await renderPage(RosterEntryPage, { params: { id: String(rivera) } })).not.toContain('id="create-link-h"');
+  });
+
+  /** Rivera unlinked, Mia renamed so the relink leaves her unpaired, Zoe added with no customer, and Rivera linked again to 10. */
+  async function unpaired() {
+    await unlinkThroughThePress(rivera, linker);
+    expect(await changeInPortal({ op: "rename_student", studentId: String(mia), name: "Mia R. Rivera" }, tag, createOp())).toMatchObject({ ok: true });
+    expect(await changeInPortal({ op: "add_student", familyId: String(rivera), name: "Zoe Rivera" }, tag, createOp())).toMatchObject({ ok: true });
+    await relinkRivera();
+    stub.calls.length = 0;
+  }
+
+  it("a press stopped at a student's step still names the student it left out", async () => {
+    await unpaired();
+    // A customer named "Zoe Rivera" in the books, read in (a read makes no record): Zoe's step stops before anything is sent.
+    stub.customers.push(qc("80", "Zoe Rivera", "1"));
+    const read = await refreshRoster(WORKER);
+    if (!read.ok) throw new Error("the roster couldn't be read from the stub");
+    stub.calls.length = 0;
+    const r = await press(rivera);
+    expect(r.changed).toBe(false);
+    const errors = r.result.ok ? [] : r.result.errors;
+    expect(errors[0]).toBe("Nothing was made in QuickBooks.");
+    expect(errors[1]).toContain("“Zoe Rivera” is already a name in QuickBooks");
+    expect(errors.at(-2)).toBe(STUDENT_HELD("Mia R. Rivera", "Mia Rivera", true));
+    expect(stub.apiCalls()).toEqual([]);
+  });
+
+  it("says only what Accounting links shows when her old customer is inactive, or no longer a student customer", async () => {
+    await unpaired();
+    // The cache's own row changed by hand, with no read or import after: the press reads nothing else of it.
+    await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, "13"));
+    const left = STUDENT_HELD("Mia R. Rivera", "Mia Rivera", false);
+    expect(left).not.toContain("as a student in the books only");
+    expect(await press(rivera)).toEqual({ changed: true, result: { ok: true, message: `Made in QuickBooks and linked: Zoe Rivera. ${left}` } });
+    expect(sent().map((b) => b.DisplayName)).toEqual(["Zoe Rivera"]);
+    stub.calls.length = 0;
+    await db.update(qboCustomer).set({ active: true, typeQboId: "2" }).where(eq(qboCustomer.qboId, "13"));
+    expect(await press(rivera)).toEqual({ changed: false, result: { ok: false, errors: [
+      "Everything in this family that can be made in QuickBooks is linked already, waiting to be, was made there after making it was given up (the Reconciliation page lists those), or is still in the books from before an unlink, so nothing was made.",
+      left] } });
+    expect(stub.apiCalls()).toEqual([]);
   });
 });
 
@@ -296,6 +383,14 @@ describe("a guardian's Parent customer: none made beside the one their row was l
     expect(rowNamed(html, "Beatrice Rivera")?.[3]).toBe("QuickBooks has the Parent customer “Bea Rivera” under this family that they were linked to before the family was unlinked, so no second one is made. No Parent customer in QuickBooks is linked to them, and none is being made: the mapping screen will offer to link one.");
   });
 
+  it("held back the same when her name is still her old customer's, in words of its own", async () => {
+    await db.update(parent).set({ name: "Bea Rivera" }).where(eq(parent.name, "Beatrice Rivera"));
+    await relinkRivera();
+    expect(await reinstateGuardian(beaRow, staff)).toEqual({ ok: true, quickbooks: ["QuickBooks has the Parent customer “Bea Rivera” under Rivera Family that Bea Rivera was linked to before the family was unlinked, so no second one was made for them. The portal doesn't link them to it now."] });
+    expect(await rowItems()).toEqual([]);
+    expect(stub.apiCalls()).toEqual([]);
+  });
+
   it("reinstated after the family is linked to another customer: her Parent customer is made under it, as today", async () => {
     expect(await leaveUnlinked(String(rivera), tag, linkOp())).toMatchObject({ ok: true });
     const step = (await loadAccountingLinks()).step(String(rivera), "70");
@@ -329,6 +424,21 @@ describe("the family's pages after an unlink", () => {
     expect(textOf(theirs)).toBe(`${LEDE} Someone who may link families to accounting links it again on Accounting links. Back to the roster`);
     expect(theirs).not.toContain('href="/staff/links"');
     expect(stub.apiCalls()).toEqual([]);
+  });
+
+  it("where Accounting links can't offer its customer, its lede says to sort it out in QuickBooks first", async () => {
+    await unlinkThroughThePress(rivera, linker);
+    // Made inactive in the books: the cache's own row, by hand, with no read or import after it.
+    await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, "10"));
+    const SORT = "Accounting links can't offer “Rivera Family” for it until it is sorted out in QuickBooks, where it may be inactive, under another customer or of another type; once it is,";
+    asStaff(linker);
+    const lede = ledeOf(await renderPage(RosterEntryPage, { params: { id: String(rivera) } }));
+    expect(textOf(lede)).toBe(`${LEDE} ${SORT} link it again on Accounting links. Back to the roster`);
+    expect(lede).toContain('href="/staff/links"');
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    const theirs = ledeOf(await renderPage(RosterEntryPage, { params: { id: String(rivera) } }));
+    expect(textOf(theirs)).toBe(`${LEDE} ${SORT} someone who may link families to accounting links it again there. Back to the roster`);
+    expect(theirs).not.toContain('href="/staff/links"');
   });
 
   it("the Families list says its customer is still in the books, beside a family that never had a link and one being made", async () => {

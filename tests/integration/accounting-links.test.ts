@@ -457,6 +457,7 @@ describe("the page", () => {
     expect(whole).not.toContain("would still make a second family");
     expect(whole).toContain("Reconciliation refuses “Create a family from this” for a customer this page suggests or lists for a family the portal has, or that a given-up change of a family the portal saved first made.");
     expect(whole).toContain("would make a second customer in the books for a family whose customer is already there but was never linked to it; it isn&#x27;t offered for one unlinked while its customer is still in the books.");
+    expect(whole).toContain("makes a new customer in the books for a family that has none, but not for one unlinked while its customer is still in the books, nor for a student of it whose customer is; and adding a family under Families makes one too, when someone who may link families adds it while the books are connected.");
     // And Reconciliation's section links back here.
     const recon = await renderPage(ReconciliationPage);
     const at = recon.indexOf('id="no-family-h"');
