@@ -284,7 +284,7 @@ describe("switching companies keeps the seasons', volunteering's and forms' reco
     copies: await db.select().from(signedFormCopy).orderBy(asc(signedFormCopy.id)),
   });
   /** What a switch keeps: all of it but the buy-outs (the unpaid ones end), the money cache and the links (both cleared). */
-  const keptOf = ({ buyouts: _b, money: _m, links: _l, ...kept }: Awaited<ReturnType<typeof seasonRecords>>) => kept;
+  const keptOf = (r: Awaited<ReturnType<typeof seasonRecords>>) => Object.fromEntries(Object.entries(r).filter(([k]) => !["buyouts", "money", "links"].includes(k)));
   let staff: Awaited<ReturnType<typeof seedStaff>>;
   const op = () => ({ actor: { door: "staff" as const, id: staff.id, label: staff.email }, ip: "203.0.113.9", permission: "Settings.QuickBooks.ReadWrite" });
   /** A connect through Intuit: a plain one, or one asked for on the switch page (beginSwitchConnect()). */
