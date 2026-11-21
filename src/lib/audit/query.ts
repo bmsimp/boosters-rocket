@@ -258,6 +258,8 @@ function moveRowsOf(r: RecordNames): SQL | undefined {
     // A move taken from the books on the accounting links screen (stage 4's slice M4a) names both families as a portal move's row does.
     and(eq(auditLog.action, "accounting.difference.take"), eq(said("after", "field"), "place"),
       or(eq(said("before", "familyId"), r.id), eq(said("after", "familyId"), r.id), eq(said("after", "fromFamilyId"), r.id))),
+    // A student's family sent to the books from the accounting links screen (slice M5a): the family they are in, and the family record the books had them under, when one is.
+    and(eq(auditLog.action, "accounting.difference.send"), eq(said("after", "field"), "place"), or(eq(said("after", "familyId"), r.id), eq(said("after", "fromFamilyId"), r.id))),
     and(eq(auditLog.action, "roster.student.move.followed"), or(eq(said("after", "fromFamilyId"), r.id), eq(said("after", "toFamilyId"), r.id),
       ...named(said("after", "fromFamilyQboId"), r.families), ...named(said("after", "toFamilyQboId"), r.families))),
     ...(r.families.length ? [and(eq(auditLog.action, "roster.student.move"), or(...named(said("before", "familyQboId"), r.families), ...named(said("after", "familyQboId"), r.families)))] : []),

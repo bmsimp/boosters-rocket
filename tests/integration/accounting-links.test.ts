@@ -800,10 +800,12 @@ describe("differences, for a link that stands (slice M2)", () => {
     expect(html.split('href="/staff/reconciliation#writes-h"').length - 1).toBe(3);
     // No button but the filter's own, since slice M3a2 each carried-over row's Confirm this link, and since slice M3b each
     // linked row's Unlink from the books, since slice M3c Ana Rivera's Unlink this guardian, and since slice M4a the kept
-    // rename's Take QuickBooks' into the app (a waiting move offers none); nothing of money but each unlink's own words
-    // of what the guardians then read.
-    expect(html.split("<button").length - 1).toBe(7);
+    // rename's Take QuickBooks' into the app, and since slice M5a its Send the app's to QuickBooks for an Admin, who may
+    // change families (a waiting move offers none); nothing of money but each unlink's own words of what the guardians
+    // then read.
+    expect(html.split("<button").length - 1).toBe(8);
     expect(html.split("Take QuickBooks&#x27; into the app<span").length - 1).toBe(1);
+    expect(html.split("Send the app&#x27;s to QuickBooks<span").length - 1).toBe(1);
     expect(html.split("Confirm this link<span").length - 1).toBe(2);
     expect(html.split("Unlink from the books<span").length - 1).toBe(2);
     expect(html.split("invoices").length - 1).toBe(2);
@@ -900,12 +902,17 @@ describe("differences, for a link that stands (slice M2)", () => {
     expect(rowNamed(html, "Rivera Family")![4]).toBe("Students, guardians and differences: Rivera FamilyStudents:Leo Rivera: linked to Leo RiveraGuardians:Ana Rivera (ana@example.com): linked to Ana Rivera" + ANA_OWN
       + "Where the portal and the books differ:The family's name. In the portal: “Rivera Family”. In the books: “<b>Bold</b> Rivera”."
       // Since slice M4a, the press that takes the books' name, with what it does, the books' name as text.
-      + "Takes “<b>Bold</b> Rivera” as this family's name in the portal, as the books have it. Nothing is sent to the books.Take QuickBooks' into the app: Rivera Family's name"
+      + "Takes “<b>Bold</b> Rivera” as this family's name in the portal, as the books have it. Nothing is sent to the books."
+      // Since slice M5a, for an Admin, who may change families, the press that sends the portal's name over the books'.
+      + "Sends “Rivera Family” to the books as this family's name, in place of “<b>Bold</b> Rivera” there. The books' name is replaced."
+      + "Take QuickBooks' into the app: Rivera Family's nameSend the app's to QuickBooks: Rivera Family's name"
       + riveraPresses("<b>Bold</b> Rivera"));
     // The books' values are the portal's copy from its last read, said with its time; drawing the page settles nothing
     // (since slice M4a a press may take some of them into the portal, and says which).
     expect(whole).toContain("against its copy of the books, from its last read of them on ");
-    expect(whole).toContain("with Take QuickBooks&#x27; into the app, which changes only the portal&#x27;s records, except that a student&#x27;s move voids an unpaid volunteer buy-out invoice of theirs in the books, as any move does; every other difference is only shown.");
+    expect(whole).toContain("with Take QuickBooks&#x27; into the app, which changes only the portal&#x27;s records, except that a student&#x27;s move voids an unpaid volunteer buy-out invoice of theirs in the books, as any move does.");
+    // Since slice M5a, Send the app's to QuickBooks beside it, and only then is the rest only shown.
+    expect(whole).toContain("can instead be sent to the books with Send the app&#x27;s to QuickBooks, by someone who may also change families: it replaces the books&#x27; value with the portal&#x27;s, and a make-inactive reads the balance first and sends nothing while there is any. Every other difference is only shown.");
     expect((await db.select().from(auditLog)).length).toBe(audits);
     expect(await db.select().from(writeQueue)).toEqual(queue);
   });
