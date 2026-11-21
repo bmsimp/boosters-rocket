@@ -1,6 +1,6 @@
-import { and, eq, exists, gt, inArray, isNull, notExists, or, sql, type SQL } from "drizzle-orm";
+import { and, count, eq, exists, gt, inArray, isNotNull, isNull, not, notExists, or, sql, type SQL } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { family, guardian, parent, parentAuthAccount, parentAuthSession, parentAuthUser, parentDevice, parentSigninToken, signinCode, student } from "@/lib/db/schema";
+import { family, guardian, parent, parentAuthAccount, parentAuthenticator, parentAuthPasskey, parentAuthSession, parentAuthUser, parentDevice, parentSigninToken, signinCode, student } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { mailWorking } from "@/lib/mail/settings";
 import { getShape, shapeNamesStudents } from "@/lib/roster/shape";
@@ -8,9 +8,20 @@ import type { StaffOp } from "./people";
 import { heldLink, unspentLink } from "./link-state";
 import { hasRowThatCounts, studentsRuleInForce } from "./sessions";
 import { RESEND_AFTER_MS } from "./signin-codes";
-import { getParentSettings, putParentSettings, PARENTS_KEY, type ParentSettings } from "./settings";
+import { getParentSettings, putParentSettings, PARENTS_KEY, readStoredSettings, type ParentSettings, type SigninLevel } from "./settings";
 
-export type SwitchResult = { ok: true } | { ok: false; errors: string[] };
+/** A switch's answer. `did` is what change()'s work recorded in the audit row, which setLevel() reads; no other caller passes it on. */
+export type SwitchResult = { ok: true; did?: Record<string, unknown> } | { ok: false; errors: string[] };
+/** A switch's answer without `did`, for the switches whose answer is only whether it was done. */
+const answered = (r: SwitchResult): SwitchResult => (r.ok ? { ok: true } : r);
+
+/**
+ * Why a save is refused when the stored value fails to parse and names no readable level (storedLevel()): until a
+ * level is chosen, nothing but that choice is saved (slice SI-10b).
+ */
+export const LEVEL_UNREADABLE = "The saved sign-in settings can't be read, so the sign-in level isn't known. Choose Standard or Strict first.";
+/** Why the switch to Strict is refused when the count it was shown is no longer the count (setLevel()). */
+export const LEVEL_COUNT_CHANGED = "Since this page was drawn, the number of guardians with neither a passkey nor an authenticator app has changed. Nothing was switched. Please reload the page and look again.";
 
 /**
  * Who can sign in now, by the gate's own rule (a guardian row that counts, ./sessions.ts) and never blocked: how many
@@ -27,25 +38,32 @@ export type StudentsEffect = { families: number; people: number };
 /**
  * One settings change: lock, write, do the work the change needs, and audit it with what happened (spec §7). A patch
  * that changes nothing (a stale press) does nothing and records nothing. `refuse`, checked under the lock and before
- * that, can stop the change with its reasons before anything is written, a stale press included. The lock is the settings' own: nothing a switch does reads
- * or waits for the roster.
+ * that, can stop the change with its reasons before anything is written, a stale press included; it is given the level
+ * stored (null when unreadable). The lock is the settings' own: nothing a switch does reads or waits for the roster.
+ *
+ * The settings are read through readStoredSettings() (slice SI-10b): a stored value that fails to parse is the closed
+ * state's switches with the level it names (storedLevel()), so any switch keeps a readable level; when it names none,
+ * every patch with no `level` is refused (LEVEL_UNREADABLE), and a patch with one is always written (the closed state's
+ * other switches with the level chosen), its audit row's `before` saying `level: null`. Returns what `work` recorded.
  */
 async function change(patch: Partial<ParentSettings>, o: StaffOp, work: (tx: Tx, next: ParentSettings, before: ParentSettings) => Promise<Record<string, unknown>>,
-  refuse?: (before: ParentSettings, tx: Tx) => string[] | null | Promise<string[] | null>): Promise<SwitchResult> {
+  refuse?: (before: ParentSettings, tx: Tx, stored: SigninLevel | null) => string[] | null | Promise<string[] | null>): Promise<SwitchResult> {
   return db.transaction(async (tx): Promise<SwitchResult> => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${PARENTS_KEY}))`);
-    const before = await getParentSettings(tx);
+    const { settings, level } = await readStoredSettings(tx);
+    const before: ParentSettings = { ...settings, level: level ?? settings.level };
+    if (level === null && !("level" in patch)) return { ok: false, errors: [LEVEL_UNREADABLE] };
     const next = { ...before, ...patch };
     // Refused before a patch that changes nothing is answered: a value stored already is refused for the same reason
     // as one that isn't (the students rule stored on beside a shape that names no students is not in force).
-    const errors = await refuse?.(before, tx);
+    const errors = await refuse?.(before, tx, level);
     if (errors) return { ok: false, errors };
-    if ((Object.keys(patch) as (keyof ParentSettings)[]).every((k) => before[k] === next[k])) return { ok: true };
+    if (level !== null && (Object.keys(patch) as (keyof ParentSettings)[]).every((k) => before[k] === next[k])) return { ok: true };
     await putParentSettings(tx, next);
     const did = await work(tx, next, before);
     await writeAudit({ actor: o.actor, action: "settings.parents.save", permission: o.permission, targetType: "setting", targetId: PARENTS_KEY, ip: o.ip,
-      before, after: { ...next, ...did } }, tx);
-    return { ok: true };
+      before: level === null ? { ...settings, level: null } : before, after: { ...next, ...did } }, tx);
+    return { ok: true, did };
   });
 }
 
@@ -92,7 +110,7 @@ export async function setSignins(on: boolean, o: StaffOp): Promise<SwitchResult>
     // Off already (or never on): there is nothing to close, and nothing to record.
     if (!(await getParentSettings()).signin) return { ok: true };
     // Welcome emails go off with sign-ins: switching sign-ins on again must never start emailing families by itself.
-    return change({ signin: false, welcome: false }, o, async (tx, _next, before) => {
+    return answered(await change({ signin: false, welcome: false }, o, async (tx, _next, before) => {
       // Everyone's rows first, in id order, then what hangs on them in the order ./sessions.ts gives: the owed welcomes
       // (on the person's row), the unused codes, the unused set-up and reset links, the remembered devices, the
       // sessions. Passwords stay: switching sign-ins on again lets the same people in the same way.
@@ -108,13 +126,13 @@ export async function setSignins(on: boolean, o: StaffOp): Promise<SwitchResult>
       const ended = await tx.delete(parentAuthSession).returning({ id: parentAuthSession.id });
       return { sessionsEnded: ended.length, codesDeleted: codes.length, linksDeleted: links.length, devicesForgotten: devices.length,
         ...(before.welcome ? { welcomeSwitchedOff: true, owedCleared: owed.length } : {}) };
-    });
+    }));
   }
   if ((await getParentSettings()).signin) return { ok: true }; // already on: a stale press changes nothing
   const errors = await missingForSignins();
   if (errors.length) return { ok: false, errors };
   // Who can sign in is the guardian rows the app holds, as they are: switching on opens and closes none of them.
-  return change({ signin: true }, o, async (tx, next) => (next.welcome ? { welcomeOwed: await oweWelcomes(tx) } : {}));
+  return answered(await change({ signin: true }, o, async (tx, next) => (next.welcome ? { welcomeOwed: await oweWelcomes(tx) } : {})));
 }
 
 /** Why "Families with no active student" can't be switched on, when it can't. */
@@ -137,8 +155,8 @@ export const STUDENTS_RULE_NOT_IN_USE = "On, but not in use: the membership shap
  * is saved.
  */
 export async function setRequireStudents(on: boolean, o: StaffOp): Promise<SwitchResult> {
-  return change({ requireActiveStudents: on }, o, async () => ({}),
-    async (_before, tx) => (on && !shapeNamesStudents(await getShape(tx)) ? [NO_STUDENTS_IN_SHAPE] : null));
+  return answered(await change({ requireActiveStudents: on }, o, async () => ({}),
+    async (_before, tx) => (on && !shapeNamesStudents(await getShape(tx)) ? [NO_STUDENTS_IN_SHAPE] : null)));
 }
 
 /**
@@ -171,6 +189,89 @@ export async function signinCounts(): Promise<SigninCounts> {
   return { people: people.length, families: new Set(rows.map((r) => r.familyId)).size, welcomeNow: people.filter((p) => p.welcomedAt === null).length };
 }
 
+/**
+ * Who can sign in by a second step of their own (the sign-in release, slice SI-10b; section 9 of the app-owned
+ * families spec: staff see on Parents how many guardians have a passkey): over the people signinCounts() counts (not
+ * blocked, a row that counts by the students rule in force), how many have a passkey (hasPasskey()'s condition: a
+ * `parent_auth_passkey` row of their sign-in account, readable or not), how many an authenticator app in force
+ * (hasAuthenticator()'s: `confirmed_at` set), and how many neither. Someone with both is counted in `passkey` and in
+ * `app`. Counts only: nobody is named.
+ */
+export type FactorCounts = { people: number; passkey: number; app: number; neither: number };
+
+/** hasPasskey()'s condition (passkeys.ts) on a query of `parent`. */
+const holdsPasskey = (): SQL => exists(db.select({ id: parentAuthPasskey.id }).from(parentAuthPasskey)
+  .innerJoin(parentAuthUser, eq(parentAuthUser.id, parentAuthPasskey.userId)).where(eq(parentAuthUser.parentId, parent.id)));
+/** hasAuthenticator()'s condition (authenticator.ts) on a query of `parent`. */
+const holdsApp = (): SQL => exists(db.select({ id: parentAuthenticator.id }).from(parentAuthenticator)
+  .where(and(eq(parentAuthenticator.parentId, parent.id), isNotNull(parentAuthenticator.confirmedAt))));
+/** The people signinCounts() counts, as a condition on a query of `parent`. */
+const canSignIn = (studentsRule: boolean): SQL => and(eq(parent.blocked, false), hasRowThatCounts(studentsRule))!;
+
+/** FactorCounts now, in one query, read in `tx` when given (the switch reads it under the parents' settings lock). */
+export async function factorCounts(tx?: Tx): Promise<FactorCounts> {
+  const studentsRule = await studentsRuleInForce(tx);
+  const [row] = await (tx ?? db).select({ people: count(),
+    passkey: sql<number>`count(*) filter (where ${holdsPasskey()})`.mapWith(Number),
+    app: sql<number>`count(*) filter (where ${holdsApp()})`.mapWith(Number),
+    neither: sql<number>`count(*) filter (where not ${holdsPasskey()} and not ${holdsApp()})`.mapWith(Number) })
+    .from(parent).where(canSignIn(studentsRule));
+  return { people: row?.people ?? 0, passkey: row?.passkey ?? 0, app: row?.app ?? 0, neither: row?.neither ?? 0 };
+}
+
+/** setLevel()'s answer: for Strict, how many people with neither were signed out. */
+export type LevelResult = { ok: true; signedOut: number } | { ok: false; errors: string[] };
+
+/**
+ * The Admin's choice of the club's sign-in level (the sign-in release, slice SI-10b; section 6 of the app-owned
+ * families spec, "Signing in", and open question 21 (a)), through change(): the parents' settings lock, the setting and
+ * one `settings.parents.save` row with its before and after, all in one transaction. Strict may be chosen with sign-ins
+ * on or off: the level is the club's, not the door's.
+ *
+ * To Strict from Standard (or from a level that can't be read), refused, changing nothing and recording nothing, when
+ * the count of people with neither read under the lock differs from the count the Admin was shown (`shownNeither`,
+ * LEVEL_COUNT_CHANGED). Then, in the same transaction, in the lock order above lockedPerson() (sessions.ts): the row
+ * of every person with a session, in id order (lockPeople()); the sessions of everyone FactorCounts counts as neither,
+ * read again here, deleted; and `strong_at` cleared on every other session that has one, so no proof made under
+ * Standard (an emailed code, a proof older than a factor) is a proof under Strict. Devices, passwords, apps, backup
+ * codes and passkeys stay, and nobody is mailed: the gate and the enrolment tell each guardian at their next sign-in.
+ * The audit row's `after` holds the counts read here, `signedOut` (people), `sessionsEnded` and `proofsCleared`.
+ * Every press that adds or removes a factor holds the parents' settings lock shared, except the passkey library's own
+ * insert of a new passkey's row before the portal records it (SI-7b): a person whose row lands between the count and
+ * this work has a factor, is not signed out, and the counts recorded are the ones read here. A session the switch
+ * misses (one made by a sign-in that commits after it) is ended by the gate at its next request (sessionStanding(),
+ * enrolment-rule.ts): the gate is the invariant, and this ending is for the count and its record.
+ *
+ * Back to Standard (`shownNeither` null) does no work: passkeys, apps and backup codes stay, nobody is signed out, an
+ * enrolling session ends at its next request (the gate's `enrol_ended`), and remembered devices stand in for the
+ * emailed code again. A press for the level stored already changes nothing and records nothing (change()'s rule).
+ */
+export async function setLevel(level: SigninLevel, shownNeither: number | null, o: StaffOp): Promise<LevelResult> {
+  const r = level === "strict"
+    ? await change({ level }, o, async (tx) => strictNow(tx), async (_before, tx, stored) => {
+      if (stored === "strict") return null; // stored already: change() does nothing
+      return (await factorCounts(tx)).neither === shownNeither ? null : [LEVEL_COUNT_CHANGED];
+    })
+    : await change({ level }, o, async () => ({}));
+  if (!r.ok) return r;
+  return { ok: true, signedOut: typeof r.did?.signedOut === "number" ? r.did.signedOut : 0 };
+}
+
+/** The switch to Strict's work (setLevel()), in change()'s transaction, after the setting is stored. */
+async function strictNow(tx: Tx): Promise<Record<string, unknown>> {
+  const withSession = inArray(parent.id, tx.select({ id: parentAuthUser.parentId }).from(parentAuthUser)
+    .innerJoin(parentAuthSession, eq(parentAuthSession.userId, parentAuthUser.id)));
+  await lockPeople(tx, withSession);
+  const counts = await factorCounts(tx);
+  const neither = tx.select({ id: parent.id }).from(parent)
+    .where(and(canSignIn(await studentsRuleInForce(tx)), not(holdsPasskey()), not(holdsApp())));
+  const ended = await tx.delete(parentAuthSession)
+    .where(inArray(parentAuthSession.userId, tx.select({ id: parentAuthUser.id }).from(parentAuthUser).where(inArray(parentAuthUser.parentId, neither))))
+    .returning({ id: parentAuthSession.id, userId: parentAuthSession.userId });
+  const cleared = await tx.update(parentAuthSession).set({ strongAt: null }).where(isNotNull(parentAuthSession.strongAt)).returning({ id: parentAuthSession.id });
+  return { counts, signedOut: new Set(ended.map((e) => e.userId)).size, sessionsEnded: ended.length, proofsCleared: cleared.length };
+}
+
 /** StudentsEffect, worked out from the rows that count with the setting off. */
 export async function studentsEffect(): Promise<StudentsEffect> {
   const rows = await countingRows();
@@ -194,14 +295,14 @@ async function countingRows(): Promise<{ parentId: string; familyId: string; has
  * never welcomed is owed one. Refused while sign-ins are off; off always works.
  */
 export async function setWelcome(on: boolean, o: StaffOp): Promise<SwitchResult> {
-  return change({ welcome: on }, o, async (tx) => {
+  return answered(await change({ welcome: on }, o, async (tx) => {
     if (!on) {
       await lockPeople(tx, eq(parent.welcomeOwed, true));
       const owed = await tx.update(parent).set({ welcomeOwed: false, updatedAt: new Date() }).where(eq(parent.welcomeOwed, true)).returning({ id: parent.id });
       return { owedCleared: owed.length };
     }
     return { owed: await oweWelcomes(tx) };
-  }, (before) => (on && !before.signin ? ["Switch parent sign-ins on first."] : null));
+  }, (before) => (on && !before.signin ? ["Switch parent sign-ins on first."] : null)));
 }
 
 /**
