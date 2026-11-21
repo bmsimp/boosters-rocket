@@ -15,7 +15,7 @@ import type { MembershipShape } from "@/lib/roster/shape";
  *   is one the cache holds.
  *
  * The answer lists what must exist. Records that exist and are not in it are kept, inactive (./roster-import.ts): nothing
- * but a change of company deletes one.
+ * deletes one, not even a change of company (since stage 4's slice M7a).
  */
 export type PlanCustomer = { qboId: string; displayName: string; active: boolean; parentQboId: string | null; typeQboId: string | null };
 export type RecordKind = "family" | "student";

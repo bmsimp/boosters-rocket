@@ -14,7 +14,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "accounting.link.leave_unlinked": "A family left unlinked by staff on the accounting links screen, so no customer in the books is suggested for it",
   "accounting.link.leave_unlinked.undo": "A family's Left unlinked mark taken off by staff, so customers in the books are suggested for it again",
   "accounting.link.remove": "A family unlinked by staff from its customer in the books, with its students' and guardians' links, and its stored figures forgotten: nothing was sent to the books",
-  "accounting.links.cleared": "The portal's own families, students and their QuickBooks links cleared after a company change",
+  "accounting.links.cleared": "QuickBooks links cleared after a company change: a row that says the families were kept (endedAs company_changed) moved the links into the link history and kept the families and students; an older row removed the links with the families and students",
   "admin.bootstrap": "First Admin made",
   "audit.export": "Audit log exported",
   "certificate.activate": "Sign-in certificate put into use",
@@ -240,6 +240,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "volunteer.buyout.unflagged": "A buy-out's flag taken off: its invoice is where it belongs",
   "volunteer.buyout.limit": "Buy-out choices refused: too many in a short time",
   "volunteer.buyout.closed": "Staff closed a buy-out: nothing was sent to QuickBooks",
+  "volunteer.buyouts.ended": "Unpaid buy-outs ended after a company change: nothing was sent to QuickBooks, and their invoices stay in the earlier company's books",
   "volunteer.buyout.family.read": "Staff opened a family's buy-outs",
 };
 

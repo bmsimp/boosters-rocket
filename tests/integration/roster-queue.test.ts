@@ -42,7 +42,7 @@ import { db } from "@/lib/db/client";
 import { accountingLink, family, formWithdrawal, jobRun, qboCustomer, setting, student, writeQueue } from "@/lib/db/schema";
 import { giveUp, loadOpenWrites, queueCounts, runWriteQueue, tryAgainNow, TRY_AGAIN_NEEDS_LINKING, waitingWords, WRITE_QUEUE_JOB } from "@/lib/roster/queue";
 import { addFamily, applyWritten, askRosterWrite, moveStudent, REFRESH_ASK_KEY } from "@/lib/roster/writes";
-import { clearRosterOfOtherCompany, ROSTER_JOB } from "@/lib/roster/source";
+import { clearRosterOfOtherCompany, GIVEN_UP_FOR_COMPANY_NOTE, ROSTER_JOB } from "@/lib/roster/source";
 import { runDueJobs } from "@/lib/jobs/runner";
 import { resetDb } from "../helpers/db";
 import { requestByCustomer, seedFormRequirement, seedRequest } from "../helpers/forms";
@@ -516,13 +516,30 @@ describe("the queue and the company", () => {
     expect(posts()).toEqual([]);
   });
 
-  it("a different company connected deletes every item, counted in the clear's audit row", async () => {
-    await seedQueued(RENAME);
-    await seedQueued(RENAME, { state: "done", finishedAt: new Date() });
+  // Stage 4's slice M7a (open question 16): the old company's items still to go are given up, not deleted, and one
+  // finished is kept as it was. It was "deletes every item" while a change of company removed the app's records too.
+  it("a different company connected gives up every item still to go, with one note, counted in the clear's audit row, and keeps the finished ones", async () => {
+    const waiting = await seedQueued(RENAME);
+    const stuck = await seedQueued(RENAME, { state: "stuck", nextTryAt: null });
+    const refused = await seedQueued(RENAME, { state: "refused", nextTryAt: null });
+    const done = await seedQueued(RENAME, { state: "done", finishedAt: new Date(), nextTryAt: null });
+    const givenUp = await seedQueued(RENAME, { state: "given_up", finishedAt: new Date(), nextTryAt: null });
+    const before = await db.select().from(writeQueue).orderBy(writeQueue.id);
+    const finished = before.filter((i) => i.id === done.id || i.id === givenUp.id);
     expect(await clearRosterOfOtherCompany("2222", { actor: { door: "staff", id: null, label: "admin@club.org" }, ip: null })).toBe(true);
-    expect(await db.select().from(writeQueue)).toEqual([]);
-    expect((await auditsOf("roster.cleared"))[0]!.after).toMatchObject({ reason: "different_company", realmId: "2222", writesDeleted: 2 });
+    const after = await db.select().from(writeQueue).orderBy(writeQueue.id);
+    expect(after.map((i) => i.id)).toEqual(before.map((i) => i.id));
+    for (const id of [waiting.id, stuck.id, refused.id]) {
+      const was = before.find((i) => i.id === id)!, now = after.find((i) => i.id === id)!;
+      expect(now).toEqual({ ...was, state: "given_up", note: GIVEN_UP_FOR_COMPANY_NOTE, nextTryAt: null, finishedAt: expect.any(Date), updatedAt: expect.any(Date) });
+    }
+    expect(after.filter((i) => i.id === done.id || i.id === givenUp.id)).toEqual(finished);
+    expect((await auditsOf("roster.cleared"))[0]!.after).toEqual({ reason: "different_company", realmId: "2222", writesGivenUp: 3 });
     expect(REALM).not.toBe("2222");
+    // Nothing given up is tried again, here or by the worker.
+    expect(await queueCounts()).toMatchObject({ waiting: 0, stuck: 0, refused: 0 });
+    expect(await runWriteQueue()).toEqual({ ran: false, ok: true });
+    expect(posts()).toEqual([]);
   });
 });
 

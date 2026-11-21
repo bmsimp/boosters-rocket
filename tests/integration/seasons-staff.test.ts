@@ -708,34 +708,29 @@ describe("one family's season, for staff", () => {
 describe("a different QuickBooks company", () => {
   const SYSTEM = { actor: { door: "system" as const, id: null, label: "test" }, ip: null };
 
-  // Connecting a different company is refused until stage 4 of the app-owned families spec ships
-  // (tests/integration/company-change-step5.test.ts), so nothing the portal runs reaches this clear. It is kept whole for
-  // the areas that have not moved yet, and the season's records go before the app's records they name.
-  it("the clear a change of company would run takes every tick, waiver and chosen list with it, before the records they name", async () => {
-    const fall = await seedSeason({ name: "Fall 2026", steps: [{ name: "Uniforms", requirements: [
+  // Connecting a different company is refused until stage 4's slice M8 (tests/integration/company-change-step5.test.ts),
+  // so nothing the portal runs reaches this clear. Since slice M7a it keeps every season record (open question 16), as
+  // the families and students they name are kept: it was "takes every tick, waiver and chosen list with it" while the
+  // clear removed those records too.
+  it("the clear a change of company would run keeps every tick, waiver and chosen list, and the season", async () => {
+    await seedSeason({ name: "Fall 2026", steps: [{ name: "Uniforms", requirements: [
       { title: "Uniform fitting attended", appliesTo: "student", ticked: ["12", "22"], waived: [{ qboId: "13", reason: "Borrowed one" }] },
       { title: "Guard gloves", appliesTo: "student", chosen: ["13"], ticked: ["13"] }] }] });
     await db.transaction((tx) => setRosterSource(tx, "1111"));
     // The same company keeps it all.
     expect(await clearRosterOfOtherCompany("1111", SYSTEM)).toBe(false);
+    const ticks = await db.select().from(requirementProgress).orderBy(asc(requirementProgress.id));
+    const covers = await db.select().from(requirementCover).orderBy(asc(requirementCover.requirementId), asc(requirementCover.studentId));
+    const requirements = await db.select().from(requirement).orderBy(asc(requirement.id));
     expect(await recorded()).toHaveLength(4);
-    expect(await db.select().from(requirementCover)).toHaveLength(1);
+    expect(covers).toHaveLength(1);
 
     expect(await clearRosterOfOtherCompany("2222", SYSTEM)).toBe(true);
-    expect(await recorded()).toEqual([]);
-    expect(await db.select().from(requirementCover)).toEqual([]);
-    // The season is the club's own and stays. The chosen list is empty, not "everyone": it asks nobody until staff choose again.
+    expect(await db.select().from(requirementProgress).orderBy(asc(requirementProgress.id))).toEqual(ticks);
+    expect(await db.select().from(requirementCover).orderBy(asc(requirementCover.requirementId), asc(requirementCover.studentId))).toEqual(covers);
+    expect(await db.select().from(requirement).orderBy(asc(requirement.id))).toEqual(requirements);
     expect((await seasons()).map((x) => x.name)).toEqual(["Fall 2026"]);
-    expect((await db.select().from(requirement).orderBy(asc(requirement.position))).map((r) => [r.title, r.covers])).toEqual([["Uniform fitting attended", "everyone"], ["Guard gloves", "chosen"]]);
-    expect(await audits("season.records.cleared")).toEqual([expect.objectContaining({ door: "system", targetType: "season", before: { realmId: "1111" },
-      after: { reason: "different_company", realmId: "2222", ticks: 3, waivers: 1, chosenListEntries: 1, requirementsLeftWithNobodyChosen: 1 } })]);
-
-    // The new company's customer 13 is somebody else: nothing is ticked for them, and the gloves aren't asked of them.
-    await seedShape(); await addToCache(ROSTER);
-    asStaff(reader);
-    const text = textOf(await renderPage(RequirementProgressPage, { params: { requirementId: fall.requirementIds["Uniform fitting attended"]! } }));
-    expect(text).toContain("0 of 3 done, 3 still to do.");
-    expect(textOf(await renderPage(RequirementProgressPage, { params: { requirementId: fall.requirementIds["Guard gloves"]! } }))).toContain("It is asked of no students on the roster right now.");
+    expect(await audits("season.records.cleared")).toEqual([]);
   });
 
   it("refuses a tick, a waiver or a chosen list from a page that was shown another company's roster", async () => {
