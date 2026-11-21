@@ -53,6 +53,12 @@ export type MyBuyout = {
   may: "choose" | "switch_back" | "wait" | "nothing";
   /** A buy-out the club couldn't set up, the last time one was tried: the page says so calmly. */
   refusedBefore: boolean;
+  /**
+   * The family's own last buy-out for this ended when the club connected a different QuickBooks company, and none
+   * stands now (stage 4's slice M7b): the page says so calmly, naming no amount, invoice or company. Of the family's own
+   * buy-outs alone, never another family's.
+   */
+  endedForCompany: boolean;
 };
 /**
  * What the server alone keeps of a choice, for the confirm: the session's app family, the app's student a per-student
@@ -187,6 +193,7 @@ async function loadTargets(ctx: Pick<ParentCtx, "familyId" | "parentId">, only?:
           buyout: live && fact ? { state: live.state, units: live.units, unitCents: live.unitCents, amountCents: live.amountCents, invoicePaid: fact.invoicePaid,
             clubLooking: live.flag !== null } : null,
           may: live?.flag ? "nothing" : guardianMay(fact, quote), refusedBefore: !live && last?.state === "refused",
+          endedForCompany: !live && last?.state === "voided" && last.endReason === "earlier_company",
         },
       });
     }
