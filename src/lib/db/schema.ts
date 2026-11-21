@@ -83,6 +83,11 @@ const DISABLED_REASONS = ["no_active_students", "removed", "inactive", "family_i
  * Filled once from the person's own QuickBooks records by the take-in (src/lib/parents/contact-take-in.ts); nothing
  * QuickBooks holds changes them after that. `contact_version` is raised by every change of either: 0 means nobody
  * has ever set them, which is what the take-in fills.
+ * `passkey_offer_declines` (the sign-in release, slice SI-8, migration 0053): how many times the person has pressed
+ * "Not now" on the passkey offer on Home, on any device (declinePasskeyOffer(), src/lib/parents/passkey-offer.ts);
+ * from the third, Home offers a passkey no more and Sign-in settings is the place to add one (open question 31). Kept
+ * by everything that ends or resets a person's sign-in, a staff reset included; never shown, sent to the browser or
+ * audited.
  */
 export const parent = pgTable("parent", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -98,6 +103,7 @@ export const parent = pgTable("parent", {
   welcomedAt: timestamp("welcomed_at", { withTimezone: true }),
   welcomeOwed: boolean("welcome_owed").notNull().default(false),
   welcomeTriedAt: timestamp("welcome_tried_at", { withTimezone: true }),
+  passkeyOfferDeclines: integer("passkey_offer_declines").notNull().default(0),
   createdAt: created(),
   updatedAt: updated(),
 }, (t) => [uniqueIndex("parent_email_uq").on(t.email)]);
@@ -306,8 +312,11 @@ export const signinCode = pgTable("signin_code", {
  * a token is spent by setting `used_at`. An unused token past its expiry still holds that place until the clean-up
  * deletes it, so making a link first deletes or spends the person's unused link of that purpose, expired or not, under
  * the person's lock and in the same transaction, as a new sign-in code replaces the old one (signin-codes.ts); an insert
- * alone would fail on `parent_signin_token_one_live_uq`. It goes with the person. The daily clean-up deletes one past its expiry or
- * used. Made by mintSigninLink() and spent by choosePasswordFromLink() since slice SI-2 (src/lib/parents/signin-links.ts,
+ * alone would fail on `parent_signin_token_one_live_uq`. It goes with the person. The daily clean-up deletes an unused one past its
+ * expiry, and one spent a code's life ago. A link whose mail is still on its way (slice SI-3a, the request page) is held:
+ * `used_at` set to its own `created_at`, so it works for nobody and holds no place, until the mail has been handed over
+ * and it is put in place (holdSigninLink(), putHeldLinkInPlace()).
+ * Made by mintSigninLink() and spent by choosePasswordFromLink() since slice SI-2 (src/lib/parents/signin-links.ts,
  * password-set.ts); blocking, sign-ins switched off, a confirmed change of sign-in email
  * and closing a person's last open membership delete the unused ones.
  */
@@ -327,9 +336,15 @@ export const parentSigninToken = pgTable("parent_signin_token", {
 /**
  * A device remembered as having passed the second step of a sign-in, for a person (the sign-in release): the keyed
  * hash of the token its cookie holds, never the token; renewed by use (`last_used_at`, `expires_at`). It goes with the
- * person. The daily clean-up deletes one past its expiry. Nothing makes one yet (slice SI-3b will); since slice SI-2
- * blocking, sign-ins switched off, a password reset, a confirmed change of sign-in email
- * and closing a person's last open membership delete them (src/lib/parents/sessions.ts).
+ * person. The daily clean-up deletes one past its expiry. Made since slice SI-3b (recordStrongSignin(),
+ * src/lib/parents/devices.ts), renewed since SI-5b while a session that names it (`parent_auth_session.device_id`) is
+ * used, and forgotten by the person on their sign-in settings; since slice SI-2 blocking, sign-ins switched off, a
+ * password reset, a confirmed change of sign-in email and closing a person's last open
+ * membership delete them (src/lib/parents/sessions.ts).
+ * `passkey_offered_at` (the sign-in release, slice SI-8, migration 0053): when "Not now" was last pressed on the
+ * passkey offer on Home in a session made on this device, null until it is; the offer comes back on this device only
+ * 30 days after it (open question 31; src/lib/parents/passkey-offer-rule.ts). It goes with the row: a device the
+ * portal forgets, by whatever path, is a new device to the offer.
  */
 export const parentDevice = pgTable("parent_device", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -338,10 +353,49 @@ export const parentDevice = pgTable("parent_device", {
   createdAt: created(),
   lastUsedAt: timestamp("last_used_at", { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  passkeyOfferedAt: timestamp("passkey_offered_at", { withTimezone: true }),
 }, (t) => [
   uniqueIndex("parent_device_token_uq").on(t.tokenHash),
   index("parent_device_parent_ix").on(t.parentId),
 ]);
+
+/**
+ * A person's authenticator app (the sign-in release, slice SI-6a; open questions 24, 25 and 35 of the app-owned
+ * families spec): at most one per person, being set up or in force. The secret it makes its codes from, sealed with the
+ * portal's own box (secretBox(), src/lib/crypto/secret-box.ts, under SETTINGS_ENCRYPTION_KEY, its key id beside it),
+ * bound to this row and person, so a copy moved to another row or person doesn't open; never the secret itself.
+ * `confirmed_at` is null while a set-up is unfinished, and the app is in force, a second step, only once it is set.
+ * `last_used_step` is the newest 30-second step a code was taken for, null until one is: a code is taken only for a
+ * newer step, so it works once. Read and written only by src/lib/parents/authenticator.ts. It goes with the person; the
+ * daily clean-up deletes an unfinished set-up older than its life (AUTHENTICATOR_SETUP_LIFE_MS). Since SI-6a it is a
+ * second step at the door and in asking again; SI-6b sets it up on the sign-in settings and turns it off, and the
+ * staff reset (SI-9) removes it. Nothing else that ends a person's sign-in removes it.
+ */
+export const parentAuthenticator = pgTable("parent_authenticator", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "cascade" }),
+  secretCiphertext: text("secret_ciphertext").notNull(),
+  secretKeyId: text("secret_key_id").notNull(),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+  lastUsedStep: bigint("last_used_step", { mode: "number" }),
+  createdAt: created(),
+}, (t) => [uniqueIndex("parent_authenticator_parent_uq").on(t.parentId)]);
+
+/**
+ * A person's backup codes (the sign-in release, slice SI-6a; open question 25): each works once as a second step in
+ * place of the authenticator app (and, from SI-7, a passkey). Only the keyed hash of a code is stored (hashBackupCode(),
+ * src/lib/parents/backup-codes.ts), never the code; a code is spent by setting `used_at`. Read and written only by
+ * src/lib/parents/authenticator.ts; made (ten at a time, shown once) by SI-6b. It goes with the person. The daily
+ * clean-up deletes a spent one once a code's life has passed since it was spent, as a spent sign-in code is kept: the
+ * sign-in that spent it reads it again at its last check (signinStands(), signin-codes.ts).
+ */
+export const parentBackupCode = pgTable("parent_backup_code", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "cascade" }),
+  codeHash: text("code_hash").notNull(),
+  createdAt: created(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+}, (t) => [index("parent_backup_code_parent_ix").on(t.parentId)]);
 
 /** One row per counted event; rate-limit.ts counts rows in a sliding window (spec §1 Rate limits). */
 export const rateLimitEvent = pgTable("rate_limit_event", {
@@ -1381,15 +1435,54 @@ export const staffAuthVerification = staffAuth.verification;
 // field. `ON DELETE SET NULL`: forgetting a device, a block, a reset, a password change and the clean-up delete
 // device rows, and the sessions they named go on with none. Null for a session made
 // before SI-5b (nothing tells which device made it), and for one whose device is gone.
-// The column lands on `main` ahead of the sign-in release's code, so migrations keep one order: until that release
-// merges, nothing here writes or reads it.
+// `enrol_until` (the sign-in release, slice SI-10a, migration 0054): set on a session that is enrolling, one made under
+// Strict by a password alone for a person with no second factor (a password at the door, or a set-up link's), to the
+// sign-in's time plus ENROL_WINDOW_MS (src/lib/parents/enrolment-rule.ts), by the one finish before any cookie
+// (src/lib/auth/parent-signin-finish.ts); cleared, with `strong_at` set, in the transaction that puts the person's first
+// factor in force (src/lib/parents/enrolment.ts). While it is set the gate lets the session reach /one-more-step and
+// nothing else (sessionStanding(), src/lib/auth/resolve.ts). Like `strong_at` it is the portal's alone and not a Better
+// Auth additional field, read by the portal's own query by the session's id. Null for every other session; no fill, no index.
 const parentAuth = authTables("parent_auth",
   { parentId: uuid("parent_id").notNull().unique().references(() => parent.id, { onDelete: "cascade" }) },
   { familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
     strongAt: timestamp("strong_at", { withTimezone: true }),
-    deviceId: uuid("device_id").references(() => parentDevice.id, { onDelete: "set null" }) },
+    deviceId: uuid("device_id").references(() => parentDevice.id, { onDelete: "set null" }),
+    enrolUntil: timestamp("enrol_until", { withTimezone: true }) },
   (t) => [index("parent_auth_session_family_ix").on(t.familyId!), index("parent_auth_session_device_ix").on(t.deviceId!)]);
 export const parentAuthUser = parentAuth.user;
 export const parentAuthSession = parentAuth.session;
 export const parentAuthAccount = parentAuth.account;
 export const parentAuthVerification = parentAuth.verification;
+
+/**
+ * A guardian's passkeys (the sign-in release, slice SI-7a; section 6 of the app-owned families spec, "Passkeys
+ * anywhere", and open questions 24, 30 and 35): the parent door's alone, beside its Better Auth tables and not through
+ * authTables(), so the staff door has none. Its columns are the ones @better-auth/passkey's model names, under the
+ * library's own JavaScript names, which its drizzle adapter matches by (`credentialID` above all): `public_key` is the
+ * COSE public key, standard base64 (`base64.encode()` of @better-auth/utils); `credential_id` the credential's id,
+ * base64url as the browser sends it (unique here: one credential is one row, the portal's own rule, where the library
+ * marks it indexed only); `counter` the signature counter, written by the library itself after each verified
+ * assertion, an unsigned 32-bit number as WebAuthn defines it (up to 4294967295), so a bigint, read as a number;
+ * `transports` comma-joined. `last_used_at` is the portal's alone (the library neither writes nor returns
+ * it, as with the session's `strong_at`), set when a passkey signs someone in (src/lib/parents/passkeys.ts, the only
+ * portal module that reads or writes this table). A passkey belongs to APP_URL's host (the relying party id): a club
+ * that changes its address leaves them unusable. Kept until the guardian removes one (SI-7b) or a staff reset removes
+ * them all (SI-9), and gone with the person's sign-in account; nothing else that ends a person's sign-in removes it.
+ */
+export const parentAuthPasskey = pgTable("parent_auth_passkey", {
+  id: text("id").primaryKey(),
+  name: text("name"),
+  publicKey: text("public_key").notNull(),
+  userId: text("user_id").notNull().references(() => parentAuthUser.id, { onDelete: "cascade" }),
+  credentialID: text("credential_id").notNull(),
+  counter: bigint("counter", { mode: "number" }).notNull(),
+  deviceType: text("device_type").notNull(),
+  backedUp: boolean("backed_up").notNull(),
+  transports: text("transports"),
+  createdAt: created(),
+  aaguid: text("aaguid"),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+}, (t) => [
+  index("parent_auth_passkey_user_ix").on(t.userId),
+  uniqueIndex("parent_auth_passkey_credential_id_uq").on(t.credentialID),
+]);

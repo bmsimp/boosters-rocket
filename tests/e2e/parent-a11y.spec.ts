@@ -1,11 +1,14 @@
 import { test, expect, type Browser, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import postgres from "postgres";
-import { parentSessionCookie } from "./parent-session";
+import { PARENT_SESSION_TOKEN, parentSessionCookie } from "./parent-session";
 import { addressOf, isDynamic, parentRoutes } from "./parent-routes";
 import { PARAMS } from "./parent-params";
 import { MIN_TARGET, focusStop, layoutProblems } from "./a11y-checks";
-import { mintZeldaLink, NO_SUCH_LINK, removeZeldaLinks, type LinkPurpose } from "./signin-links";
+import { mintZeldaLink, NO_SUCH_LINK, removeZeldaLinks, resetPasskeyOffer, takeZeldaPassword, type LinkPurpose } from "./signin-links";
+import { E2E_SIGNIN } from "./signin-seed";
+import { appCodeAt, clearZeldaCounts, keepZeldaProof, proveZeldaSinceHerApp, removeZeldaSecondSteps, setUpAppOnPage, setZeldaProof } from "./authenticator-steps";
+import { enrollingSession, makeStrictParent, removeStrictParent, storeLevel } from "./strict-seed";
 
 /**
  * Every page a parent sees, in every display mode, at a phone's width and a desktop's (step 6 of the roadmap; PRODUCT.md:
@@ -60,9 +63,18 @@ const summary = (text: string | undefined) => (text ?? "").replace(/\s+/g, " ").
 /**
  * A page to open: where, signed in as the seeded parent or not, and anything the device holds before it loads. `link` is
  * a set-up or reset link made for Zelda just before the page is opened (tests/e2e/signin-links.ts), its token added to
- * the end of `address`; the links are removed after the run, so the seed is as it was.
+ * the end of `address`; the links are removed as each page is closed (and after the run), so the seed is as it was.
  */
-type Target = { label: string; address: string; signedIn: boolean; deviceStore?: Record<string, string>; status?: number; link?: LinkPurpose };
+type Target = { label: string; address: string; signedIn: boolean; deviceStore?: Record<string, string>; status?: number; link?: LinkPurpose; app?: AppState;
+  offer?: true; enrol?: EnrolState };
+/**
+ * A state of the "Authenticator app" box of /family/sign-in that only presses reach (the sign-in release, slice SI-6b):
+ * the set-up shown (the QR code, the key and its copy press, the code field), the backup codes shown once, the box with
+ * the app on, and asking again for the app's code. Nobody seeded has an app: it is set up for Zelda through the page's
+ * own presses each time the page is opened (prepareApp()), in a session stamped as proved just now, and removed after,
+ * her session's proof and her counts put back as they were (tests/e2e/authenticator-steps.ts).
+ */
+type AppState = "setup" | "codes" | "on" | "asked";
 
 /** The parent pages, from disk. A dynamic one is opened with its `own` params: the seeded family's thing. */
 function parentTargets(): Target[] {
@@ -73,14 +85,26 @@ function parentTargets(): Target[] {
 }
 
 /**
- * The pages a parent sees before the parent pages: the sign-in page (both its steps: the code step is the one the
- * device keeps while a code is live, src/app/sign-in/code-step.ts, so no code is sent), the family chooser (Zelda has
+ * The pages a parent sees before the parent pages: the sign-in page (both its steps: the password step as a visitor
+ * meets it, and the code step, the one the device keeps while a code is live, src/app/sign-in/code-step.ts, which since
+ * slice SI-3b holds no address; nothing is submitted, so no password is checked and no code sent), the family chooser (Zelda has
  * two families), the refusal, the page the service worker shows offline, and the page for an address with no page.
  */
 const BEFORE_SIGN_IN: Target[] = [
   { label: "/sign-in", address: "/sign-in", signedIn: false },
   { label: "/sign-in (code step)", address: "/sign-in", signedIn: false,
-    deviceStore: { "booster.signin.code-step": JSON.stringify({ email: "zelda@example.com", sentAt: 0, next: null }) } },
+    deviceStore: { "booster.signin.code-step": JSON.stringify({ sentAt: 0, next: null, kind: "code" }) } },
+  // The app step (slice SI-6a): the second step of a parent with an authenticator app, its code or a backup code. Nobody
+  // seeded has an app, so the device's kept step draws it; nothing is submitted.
+  { label: "/sign-in (app step)", address: "/sign-in", signedIn: false,
+    deviceStore: { "booster.signin.code-step": JSON.stringify({ sentAt: 0, next: null, kind: "app" }) } },
+  // The passkey step (slice SI-7a): the second step of a parent with a passkey, drawn with the app's code beside it (the
+  // fuller of its two forms). Nobody seeded has a passkey, so the device's kept step draws it; nothing is pressed.
+  { label: "/sign-in (passkey step)", address: "/sign-in", signedIn: false,
+    deviceStore: { "booster.signin.code-step": JSON.stringify({ sentAt: 0, next: null, kind: "passkey", app: true }) } },
+  // And with a backup code beside it alone (slice SI-7b): a parent with a passkey, no app and unspent backup codes.
+  { label: "/sign-in (passkey step, backup code)", address: "/sign-in", signedIn: false,
+    deviceStore: { "booster.signin.code-step": JSON.stringify({ sentAt: 0, next: null, kind: "passkey", app: false, backup: true }) } },
   { label: "/choose-family", address: "/choose-family", signedIn: true },
   { label: "/refused", address: "/refused", signedIn: false },
   // The pages a set-up or reset link opens: the form, with a live link (never submitted here), and the one message for a
@@ -88,13 +112,65 @@ const BEFORE_SIGN_IN: Target[] = [
   { label: "/sign-in/set-up/[token]", address: "/sign-in/set-up/", signedIn: false, link: "setup" },
   { label: "/sign-in/reset/[token]", address: "/sign-in/reset/", signedIn: false, link: "reset" },
   { label: "/sign-in/set-up/[token], a link that can't be used", address: `/sign-in/set-up/${NO_SUCH_LINK}`, signedIn: false },
+  // "Set up or reset my password" (slice SI-3a): the form, never submitted here.
+  { label: "/sign-in/password", address: "/sign-in/password", signedIn: false },
   { label: "/offline.html", address: "/offline.html", signedIn: false },
   // An address with no page: a signed-in parent keeps the frame around it (src/app/not-found.tsx), anyone else gets it plain.
   { label: "not found, signed in", address: "/no-such-page", signedIn: true, status: 404 },
   { label: "not found, signed out", address: "/no-such-page", signedIn: false, status: 404 },
 ];
 
-const TARGETS = [...parentTargets(), ...BEFORE_SIGN_IN];
+/** The authenticator app's states (AppState), on /family/sign-in, which parentTargets() checks as the seeded session sees it. */
+const APP_TARGETS: Target[] = [
+  { label: "/family/sign-in (authenticator app being set up)", address: "/family/sign-in", signedIn: true, app: "setup" },
+  { label: "/family/sign-in (backup codes shown)", address: "/family/sign-in", signedIn: true, app: "codes" },
+  { label: "/family/sign-in (authenticator app on)", address: "/family/sign-in", signedIn: true, app: "on" },
+  { label: "/family/sign-in (asking again for the app's code)", address: "/family/sign-in", signedIn: true, app: "asked" },
+];
+
+/**
+ * Home with the passkey offer (the sign-in release, slice SI-8): drawn only in a session made and proved just now, on a
+ * device of the person's with no "Not now", so the seeded session (made at the seed, its `strong_at` null) never meets
+ * it. A session of Zelda's own is made for it as each page is opened, on a device of its own (offerSession()), made and
+ * proved five seconds before (the database's clock may run a little ahead of the app's), and removed with Zelda's count
+ * as the page is closed. Nothing is pressed. Chromium here says it is a computer at both widths, so the computer's words
+ * are the ones checked; a phone's are the owner's to see (docs/runbooks/before-the-first-family.md).
+ */
+const OFFER_TARGETS: Target[] = [{ label: "/ (the passkey offer)", address: "/", signedIn: false, offer: true }];
+const OFFER_SESSION_TOKEN = "e2e-a11y-offer-session-token";
+async function offerSession(): Promise<() => Promise<void>> {
+  await resetPasskeyOffer(sql);
+  const [device] = await sql`INSERT INTO parent_device (parent_id, token_hash, expires_at)
+    SELECT id, ${`a11y-offer-${Date.now()}`}, now() + interval '90 days' FROM parent WHERE email = 'zelda@example.com' RETURNING id`;
+  await sql`INSERT INTO parent_auth_session (id, token, user_id, family_id, device_id, expires_at, created_at, strong_at)
+    SELECT 'e2e-a11y-offer-session', ${OFFER_SESSION_TOKEN}, user_id, family_id, ${device!.id as string}, now() + interval '1 day', now() - interval '5 seconds', now() - interval '5 seconds'
+    FROM parent_auth_session WHERE token = ${PARENT_SESSION_TOKEN}`;
+  return async () => {
+    await sql`DELETE FROM parent_auth_session WHERE token = ${OFFER_SESSION_TOKEN}`;
+    await sql`DELETE FROM parent_device WHERE id = ${device!.id as string}`;
+    await resetPasskeyOffer(sql);
+  };
+}
+
+/**
+ * Strict's enrolment (the sign-in release, slice SI-10a): /one-more-step as an enrolling session meets it, and with the
+ * backup codes shown under the box to tick, once an app is set up through the page's own presses. The seed is at
+ * Standard and gives nobody a session that enrols, so for each opening Strict is stored, a guardian of the spec's own is
+ * made with a password and no second factor (never Zelda, whose seeded session the gate would sign out at Strict), and
+ * an enrolling session of hers is given to the browser (tests/e2e/strict-seed.ts); she goes, and Standard comes back,
+ * as the page is closed. Chromium here holds WebAuthn at the portal's address, so the passkey's press is drawn. Since
+ * slice SI-10b also Sign-in settings at Strict with new backup codes and the box to tick under them: the same guardian
+ * enrols with an app, goes on, and presses "Make new backup codes" there, within the 10 minutes the enrolment proved.
+ */
+type EnrolState = "page" | "codes" | "settings-codes";
+const ENROL_TARGETS: Target[] = [
+  { label: "/one-more-step", address: "/one-more-step", signedIn: false, enrol: "page" },
+  { label: "/one-more-step (the backup codes and the box to tick)", address: "/one-more-step", signedIn: false, enrol: "codes" },
+  { label: "/family/sign-in at Strict (new backup codes and the box to tick)", address: "/one-more-step", signedIn: false, enrol: "settings-codes" },
+];
+const ENROL_SESSION_TOKEN = "e2e-a11y-enrolling-session-token";
+
+const TARGETS = [...parentTargets(), ...APP_TARGETS, ...OFFER_TARGETS, ...ENROL_TARGETS, ...BEFORE_SIGN_IN];
 
 /** The pages under src/app/sign-in, from disk: "set-up/[token]/page.tsx" is "/sign-in/set-up/[token]". */
 const signInRoutes = () => parentRoutes("src/app/sign-in").map((route) => (route === "/" ? "/sign-in" : `/sign-in${route}`));
@@ -107,16 +183,82 @@ test("every page under src/app/sign-in is opened here", () => {
 
 test.skip(({ viewport }) => (viewport?.width ?? 0) < 760, "one pass, in the desktop project, at its own widths: the phone project would repeat it");
 test.describe.configure({ timeout: 120_000 });
-test.afterAll(async () => { await removeZeldaLinks(sql); await sql.end(); });
+let putProofBack: () => Promise<void> = async () => undefined;
+test.afterAll(async () => { await removeZeldaLinks(sql); await removeZeldaSecondSteps(sql); await clearZeldaCounts(sql); await putProofBack();
+  await removeStrictParent(sql); await storeLevel(sql, "standard"); await sql.end(); });
 // A run cut off in the gold pass leaves the club gold: put the seeded color back first.
 test.beforeAll(async () => {
   await sql`UPDATE setting SET value = jsonb_set(value, '{color}', to_jsonb(${SEEDED_COLOR}::text)) WHERE key = 'club' AND value->>'color' = ${GOLD}`;
+  // A run cut off with an app set up for Zelda leaves it: nobody seeded has one. And one cut off at /one-more-step leaves
+  // Strict stored and its guardian behind: the seed is at Standard and has no such guardian.
+  await removeZeldaSecondSteps(sql);
+  await removeStrictParent(sql);
+  await storeLevel(sql, "standard");
+  putProofBack = await keepZeldaProof(sql);
 });
+
+/** Brings the open /family/sign-in to an app state (AppState) by the page's own presses, as a parent would. */
+async function prepareApp(page: Page, state: AppState) {
+  const box = page.getByRole("region", { name: "Authenticator app" });
+  if (state === "setup") {
+    await box.getByRole("button", { name: "Set up an authenticator app", exact: true }).click();
+    await expect(box.getByRole("img", { name: "QR code to scan with your authenticator app" })).toBeVisible();
+    return;
+  }
+  await setUpAppOnPage(page, box);
+  if (state === "codes") return;
+  // Asking again is drawn for a session with no proof that counts: it is taken away before the page is drawn again. The
+  // app on with its presses needs a proof at least as new as the app (one from before it no longer counts).
+  if (state === "asked") await setZeldaProof(sql, false);
+  else await proveZeldaSinceHerApp(sql);
+  await page.reload();
+  await expect(box.getByText("Your authenticator app is set up.")).toBeVisible();
+  if (state === "on") return;
+  await box.getByLabel("Your password").fill(E2E_SIGNIN.password);
+  await box.getByRole("button", { name: "Continue" }).click();
+  await expect(box.getByLabel("Code from your authenticator app, or a backup code")).toBeVisible();
+}
+
+/** Brings /one-more-step to an enrolment state (EnrolState): the page as drawn, or an app set up there and its codes shown. */
+async function prepareEnrolment(page: Page, state: EnrolState) {
+  // Drawn once the page has read the browser: the passkey's press.
+  await expect(page.getByRole("button", { name: "Add a passkey" })).toBeVisible();
+  if (state === "page") return;
+  const box = page.getByRole("region", { name: "Use an authenticator app" });
+  await box.getByRole("button", { name: "Set up an authenticator app", exact: true }).click();
+  await expect(box.getByRole("img", { name: "QR code to scan with your authenticator app" })).toBeVisible();
+  const key = ((await box.locator(".app-key").textContent()) ?? "").trim();
+  await box.getByLabel("Code from your authenticator app", { exact: true }).fill(appCodeAt(key, await page.evaluate(() => Date.now())));
+  await box.getByRole("button", { name: "Finish setting up" }).click();
+  await expect(page.getByRole("list", { name: "Your backup codes" }).getByRole("listitem")).toHaveCount(10);
+  await expect(page.getByLabel("I've saved my backup codes somewhere safe")).toBeVisible();
+  if (state === "codes") return;
+  // Whole now: on, and to Sign-in settings at Strict, where new codes are shown with the box to tick under them.
+  await page.getByLabel("I've saved my backup codes somewhere safe").check();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await page.goto("/family/sign-in");
+  const settings = page.getByRole("region", { name: "Authenticator app", exact: true });
+  await settings.getByRole("button", { name: "Make new backup codes" }).click();
+  await expect(settings.getByRole("list", { name: "Your backup codes" }).getByRole("listitem")).toHaveCount(10);
+  await expect(settings.getByLabel("I've saved my backup codes somewhere safe")).toBeVisible();
+  await expect(settings.getByRole("button", { name: "Done", exact: true })).toHaveAttribute("aria-disabled", "true");
+}
 
 /** Opens a target in a context of its own, as the seeded parent or nobody, and waits for its fonts. */
 async function open(browser: Browser, target: Target, width: number): Promise<{ page: Page; close: () => Promise<void> }> {
   const context = await browser.newContext({ viewport: { width, height: HEIGHT } });
   if (target.signedIn) await context.addCookies([parentSessionCookie()]);
+  // A session left by an opening cut off midway goes first; then one made and proved just now.
+  if (target.offer) await sql`DELETE FROM parent_auth_session WHERE token = ${OFFER_SESSION_TOKEN}`;
+  const removeOffer = target.offer ? await offerSession() : null;
+  if (target.offer) await context.addCookies([parentSessionCookie(OFFER_SESSION_TOKEN)]);
+  if (target.enrol) {
+    await storeLevel(sql, "strict");
+    const { authUserId } = await makeStrictParent(sql);
+    await enrollingSession(sql, authUserId, ENROL_SESSION_TOKEN);
+    await context.addCookies([parentSessionCookie(ENROL_SESSION_TOKEN)]);
+  }
   if (target.deviceStore) {
     // A code step must be live to be picked up: give it the time it is opened at.
     await context.addInitScript((store) => {
@@ -127,12 +269,31 @@ async function open(browser: Browser, target: Target, width: number): Promise<{ 
     }, target.deviceStore);
   }
   const page = await context.newPage();
+  // A set-up link works only for a person with no password: the seed's of Zelda's is taken away for it, and put back
+  // as the page is closed (removeZeldaLinks()). A reset link works with it, or without.
+  if (target.link === "setup") await takeZeldaPassword(sql);
+  // An app state starts from none, in a session proved just now, with no count of an earlier opening in the way.
+  if (target.app) { await removeZeldaSecondSteps(sql); await clearZeldaCounts(sql); await setZeldaProof(sql, true); }
   const address = target.link ? `${target.address}${await mintZeldaLink(sql, target.link)}` : target.address;
   const res = await page.goto(address);
   expect(res?.status(), `${target.label} answered ${res?.status()} at ${address}: it can't be checked with the seeded data. `
     + `A dynamic parent page needs its ids in PARAMS (tests/e2e/parent-params.ts).`).toBe(target.status ?? 200);
+  if (target.app) await prepareApp(page, target.app);
+  // The box is drawn once the page has read the browser (WebAuthn, the address, a phone or a computer).
+  if (target.offer) await expect(page.locator('[data-passkey-offer="shown"]')).toBeVisible();
+  if (target.enrol) await prepareEnrolment(page, target.enrol);
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
-  return { page, close: () => context.close() };
+  const close = async () => {
+    await context.close();
+    // A link's page leaves nothing behind for the next target: its link goes, and the password a set-up link took is
+    // put back, or every target after it (the gold pass's /family/sign-in and its app states among them) would find
+    // Zelda with none.
+    if (target.link) await removeZeldaLinks(sql);
+    if (target.app) { await removeZeldaSecondSteps(sql); await clearZeldaCounts(sql); await putProofBack(); }
+    if (removeOffer) await removeOffer();
+    if (target.enrol) { await removeStrictParent(sql); await storeLevel(sql, "standard"); }
+  };
+  return { page, close };
 }
 
 /** Draws the page in a mode: the Display page's attributes on <html>, and the media features that match them. */

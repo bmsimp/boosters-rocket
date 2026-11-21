@@ -79,7 +79,9 @@ describe("the page a parent asked for", () => {
     it("renders with a page to return to, and with anything else in its place", async () => {
       for (const next of ["/payments", ...HOSTILE, undefined]) {
         const html = await renderPage(ParentSignIn, { searchParams: { next: next as string } });
-        expect(html).toContain("Send code");
+        // The password form (the sign-in release, slice SI-3b): the email, the password and its one button.
+        expect(html).toContain('type="password"');
+        expect(html).toContain(">Sign in</button>");
         expect(html).not.toContain("evil.example");
       }
     });

@@ -17,6 +17,8 @@ export default async function ChooseFamily({ searchParams }: { searchParams?: Pr
   // again by the action when a family is chosen.
   const next = safeReturnPath(query?.[RETURN_PARAM]);
   if (state.status === "none") redirect(withReturnPath("/sign-in", next));
+  // Strict's enrolment (the sign-in release, slice SI-10a): no family is chosen before a passkey or an app is added.
+  if (state.status === "enrol") redirect(withReturnPath("/one-more-step", next));
   const families = state.status === "ok" ? state.identity.families : state.families;
   const parentId = state.status === "ok" ? state.identity.parentId : state.parentId;
   const current = state.status === "ok" ? state.identity.guardianId : null;

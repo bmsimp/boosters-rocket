@@ -25,7 +25,7 @@ import { startQboStub, seedConnected, fznCompany, type QboStub } from "../helper
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 import { seedEmailChange } from "../helpers/email-change";
 import { identityNow, seedTwoFamilies } from "../helpers/parent";
-import { mintLink, seedCode, seedDevice, seedPassword } from "../helpers/signin-links";
+import { holdLink, mintLink, seedCode, seedDevice, seedPassword } from "../helpers/signin-links";
 
 /**
  * What a change of company does to sign-ins (section 3 of the app-owned families spec, Appendix B, open question 16):
@@ -92,13 +92,15 @@ describe("connecting a different QuickBooks company touches no sign-in", () => {
     const used = await mintLink(ana!.id, "setup");
     await db.update(parentSigninToken).set({ usedAt: new Date() }).where(eq(parentSigninToken.tokenHash, hashLinkToken("setup", used)));
     await mintLink(ana!.id, "reset");
+    // A link held while its mail is on its way (the request page) is kept with the rest.
+    await holdLink(ana!.id, "setup");
     await seedDevice(ana!.id);
     await seedPassword(u!.id, "a password long enough to keep");
     await seedEmailChange({ parentId: ana!.id, guardianId: row!.id, familyId: row!.familyId, newEmail: "ana.new@example.com" });
     const before = await signinRows();
     // Something of each is there to keep: every open row names its app family.
     expect(before.memberships.filter((g) => g.status !== "disabled").every((g) => g.familyId !== null)).toBe(true);
-    expect([before.sessions.length, before.devices.length, before.codes.length, before.links.length, before.emailChanges.length]).toEqual([1, 1, 2, 2, 1]);
+    expect([before.sessions.length, before.devices.length, before.codes.length, before.links.length, before.emailChanges.length]).toEqual([1, 1, 2, 3, 1]);
     expect(before.accounts.some((x) => x.providerId === "credential")).toBe(true);
     expect(before.people.filter((p) => p.welcomedAt !== null)).toHaveLength(3);
     expect(before.people.filter((p) => p.welcomeOwed)).toHaveLength(1);

@@ -8,7 +8,8 @@ import { mailConfigHash } from "./config-hash";
 import { testMessage, type Brand } from "./messages";
 import { MailSendError, type MailMessage, type MailPurpose, type StoredMailConfig } from "./types";
 
-export type SendOutcome = { ok: true } | { ok: false; error: string };
+/** `recipientRefused`: the server refused this one address on its own account (MailSendError), not a failure of the mail itself. */
+export type SendOutcome = { ok: true } | { ok: false; error: string; recipientRefused?: true };
 const MAIL_ACTOR: Actor = { door: "system", id: null, label: "mail" };
 
 export async function currentBrand(): Promise<Brand> {
@@ -25,7 +26,7 @@ async function deliver(stored: StoredMailConfig, m: MailMessage, o: { purpose: M
     await patchMailStatus({ lastFailureAt: new Date().toISOString(), lastError: error, lastFailed: true });
     await writeAudit({ actor: o.actor ?? MAIL_ACTOR, action: "mail.failed", targetType: "setting", targetId: MAIL_KEY,
       after: { purpose: o.purpose, method: stored.method, to: m.to, error }, ip: o.ip ?? null });
-    return { ok: false, error };
+    return { ok: false, error, ...(e instanceof MailSendError && e.recipientRefused ? { recipientRefused: true as const } : {}) };
   }
   await patchMailStatus({ lastSuccessAt: new Date().toISOString(), lastFailed: false });
   return { ok: true };

@@ -63,6 +63,29 @@ if you use this installation's proxy.
    ([Health page warnings](health-warnings.md) for any that doesn't).
 3. Open the portal as a parent would (a test family): Home, Payments, Forms.
 
+## The update that brings password sign-in
+
+Up to this release, parents signed in with a code the portal emailed them. From it, they sign in with their email
+address and a password they choose from a link the portal emails them, and on a phone or computer the portal doesn't
+know yet, a code emailed to them too, or their own passkey or authenticator app once they have added one. The update
+adds no line to `.env`, and `BETTER_AUTH_SECRET` stays exactly as it is: no update ever changes it, and a changed one
+would stop every link and backup code already given out ([first install, part 3](first-install.md#3-fill-in-the-settings)).
+After the update:
+
+1. Parents who are signed in now stay signed in. Everyone else needs a password, and nobody has one yet.
+2. Sign in as an Admin and open **Settings**, **Parent sign-ins**. With parent sign-ins and welcome emails both on
+   (welcome emails need sign-ins on first), the section **Passwords not chosen yet** counts everyone who can sign in and
+   has no password, and shows the email they will get. Press **Email a set-up link to everyone who can sign in and
+   hasn't chosen a password** once.
+3. Each person counted gets an email with a link to choose their password ("Choose your password for" the club). It
+   works once, for 7 days. Someone never welcomed gets the welcome instead, with the same kind of link.
+4. They go out five each time the worker wakes, and it wakes about once a minute: 300 people take about an hour, and
+   500 about an hour and 40 minutes. While mail is failing it tries one a minute; Health's parent sign-ins line says so.
+5. Meanwhile, and after a link runs out, a parent can always ask for a new link themselves at `/sign-in/password`
+   ("Set up or reset my password" on the sign-in page), while the club is at Standard, where every club starts. Under
+   Strict (Settings, Parent sign-ins, step 3) nothing is emailed from there to someone with no password: they ask the
+   club, which sends the welcome again from their page on Parents.
+
 ## Parents' phones and addresses
 
 The update that makes a guardian's phone and mailing address the portal's own (rather than read from QuickBooks each
@@ -155,6 +178,14 @@ of the backup from part 1:
    previous version in `BOOSTER_ROCKET_IMAGE` (not `stable`), then `docker compose pull`.
 2. Follow [restore, onto the same machine](restore.md#onto-the-same-machine), steps 3 to 7, with the backup from part 1.
 
+**Going back to a version from before password sign-in.** The restore puts back the databases as they were before
+the update, so every password, passkey, authenticator app, backup code and remembered phone or computer made since is
+gone, and parents sign in with a code the portal emails them again, as they did. The restored databases know no
+sign-in level either, so the club comes forward at Standard. Coming forward again is this update once more: parents
+need a password again, so press **Email a set-up link to everyone who can sign in and hasn't chosen a password** as in
+[the update that brings password sign-in](#the-update-that-brings-password-sign-in), and if the club was at Strict,
+open **Settings**, **Parent sign-ins**, **Change**, step 3, **Sign-in level**, and switch to Strict again.
+
 ## Documenso and the other images
 
 A dependency update (a pull request that changes `deploy/compose.yml`) may move Documenso, Postgres or the proxy to a new
@@ -166,6 +197,9 @@ version. Merge it like any change, then update as above. Documenso is the one to
 3. A dependency update never moves Postgres to a new major version: `.github/dependabot.yml` is told not to offer one
    (the build's lead chose this, so that a move is always a release of its own with the section below). It may move
    Postgres within its version (18.7 to 18.8, say): that is an ordinary update.
+4. `better-auth` and `@better-auth/passkey` are updated together, to the same version: the passkey package asks for
+   the `better-auth` of its own version. Dependabot offers them in separate pull requests, so merge neither alone:
+   put both on one branch at the same version and merge that.
 
 ## Moving to a new major version of Postgres
 

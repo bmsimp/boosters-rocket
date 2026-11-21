@@ -3,6 +3,7 @@ import { db } from "@/lib/db/client";
 import { auditLog, jobRun, requirement, season, seasonStep } from "@/lib/db/schema";
 import { lastWake } from "@/lib/jobs/runner";
 import { CLEANUP_JOB } from "@/lib/jobs/cleanup";
+import { CHALLENGE_SWEEP_MARK, failedLast, readMark, WELCOME_MARK } from "@/lib/jobs/marks";
 import { connectionView } from "@/lib/quickbooks/connection";
 import { quickbooksProblems } from "@/lib/quickbooks/health";
 import { QUICKBOOKS_USE, QUICKBOOKS_WRITE_ACTION } from "@/lib/quickbooks/what-it-does";
@@ -10,6 +11,7 @@ import { loadRosterPage } from "@/lib/roster/queries";
 import { queueCounts } from "@/lib/roster/queue";
 import { mailFailing, mailSummary } from "@/lib/mail/settings";
 import { getParentSettings } from "@/lib/parents/settings";
+import { welcomesToSend } from "@/lib/parents/welcome";
 import { takeInWaitingFor, takeInWaitWords } from "@/lib/parents/contact-take-in";
 import { readBreachMark, type BreachMark } from "@/lib/parents/breach-mark";
 import { BREACH_TIMEOUT_MS, type BreachNotChecked } from "@/lib/parents/breach-check";
@@ -85,6 +87,8 @@ export function breachCheckLine(mark: BreachMark | null): HealthLine {
     says: "Answering. Each password a parent chooses is checked against passwords known from data breaches, sending only the first five characters of a hash of it." };
 }
 
+/** The clean-up line's words while the sweep of expired passkey challenges at every wake is failing (runner.ts). */
+export const SWEEP_FAILED = "The worker's sweep of expired passkey sign-in requests, which runs every minute, failed at its last try. The daily clean-up still removes them once a day; until the sweep works again, they can pile up for a day instead of five minutes. The worker tries again at its next wake.";
 const bytesWords = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / (1024 * 1024)).toFixed(1)} MB`);
 
 export async function healthReport(now: Date = new Date()): Promise<HealthLine[]> {
@@ -120,12 +124,20 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
       : { state: "ok", word: "Working", says: "Waking every minute to run the scheduled jobs." };
   lines.push({ key: "worker", title: "Worker", ...worker, times: [{ label: "Last woke", at: wake }], notes: [], fix: null });
 
-  const cleaned: Verdict = !cleanup ? { state: "off", word: "Not yet run", says: "Hasn't run yet. The worker runs it once a day: it removes expired sessions, used sign-in codes and other records that are past use." }
+  // The sweep of expired passkey challenges at every wake (sweepExpiredChallenges(), runner.ts) has no line of its own:
+  // it is the clean-up's delete of those rows, run more often. While its latest word is a failure the line says so; the
+  // daily clean-up still removes them once a day.
+  const sweep = await readMark(CHALLENGE_SWEEP_MARK);
+  const sweepFailed = failedLast(sweep);
+  const cleaned: Verdict = sweepFailed && cleanup?.outcome !== "failed" ? { state: "attention", word: "Needs attention", says: SWEEP_FAILED }
+    : !cleanup ? { state: "off", word: "Not yet run", says: "Hasn't run yet. The worker runs it once a day: it removes expired sessions, used sign-in codes and other records that are past use." }
     : cleanup.outcome === "failed" ? { state: "attention", word: "Needs attention", says: "The last clean-up couldn't finish. The worker tries again in 15 minutes." }
       : { state: "ok", word: "Working", says: "Once a day, removes expired sessions, used sign-in codes and other records that are past use." };
   lines.push({
-    key: "cleanup", title: "Daily clean-up", ...cleaned, notes: cleanup?.detail ? [cleanup.detail] : [], fix: null,
-    times: [{ label: cleanup && cleanup.outcome !== "ok" ? "Last tried" : "Last ran", at: cleanup ? (cleanup.finishedAt ?? cleanup.startedAt).toISOString() : null }],
+    key: "cleanup", title: "Daily clean-up", ...cleaned,
+    notes: [...(cleanup?.detail ? [cleanup.detail] : []), ...(sweepFailed && cleanup?.outcome === "failed" ? [SWEEP_FAILED] : [])], fix: null,
+    times: [{ label: cleanup && cleanup.outcome !== "ok" ? "Last tried" : "Last ran", at: cleanup ? (cleanup.finishedAt ?? cleanup.startedAt).toISOString() : null },
+      ...(sweepFailed ? [{ label: "Challenge sweep last failed", at: sweep?.failedAt ?? null }] : [])],
   });
 
   const rosterTimes = [{ label: "Last token refresh", at: conn.lastTokenRefreshAt }, { label: "Last roster read", at: roster.lastOkAt },
@@ -182,11 +194,11 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
   const mailFix = { href: "/staff/settings/mail", label: "Open mail settings" };
   const failing = mailFailing(mail.status);
   if (!mail.config) {
-    lines.push({ key: "mail", title: "Outgoing mail", state: "attention", word: "Not set up", says: "Not set up, so parents can't be sent sign-in codes.", times: [], notes: [], fix: mailFix });
+    lines.push({ key: "mail", title: "Outgoing mail", state: "attention", word: "Not set up", says: "Not set up, so parents can't sign in.", times: [], notes: [], fix: mailFix });
   } else if (!mail.working) {
     lines.push({ key: "mail", title: "Outgoing mail", state: "attention", word: "Not tested", says: "Not tested with the settings it has now, so parents can't sign in. Send a test email from mail settings.", times: mailTimes, notes: [], fix: mailFix });
   } else if (failing) {
-    lines.push({ key: "mail", title: "Outgoing mail", state: "attention", word: "Needs attention", says: "Tested, but the last email failed. Parents can't get sign-in codes until a send works again.", times: mailTimes,
+    lines.push({ key: "mail", title: "Outgoing mail", state: "attention", word: "Needs attention", says: "Tested, but the last email failed. Parents can't be sent sign-in codes, password links or welcome emails until a send works again.", times: mailTimes,
       notes: mail.status.lastError ? [mail.status.lastError] : [], fix: mailFix });
   } else {
     lines.push({ key: "mail", title: "Outgoing mail", state: "ok", word: "Working", says: `Tested and working, sending ${mail.config.method === "graph" ? "through Microsoft 365" : "by SMTP"}.`, times: mailTimes, notes: [], fix: null });
@@ -238,10 +250,21 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
   const addressNote = !noAddresses ? null : env.CLIENT_IP_HEADER === "none"
     ? "Visitors' addresses aren't recorded, because CLIENT_IP_HEADER is none: the audit log shows no address, and sign-ins have no limit per address."
     : `The latest sign-ins have no address: the proxy in front of the portal doesn't send the header ${env.CLIENT_IP_HEADER}. Set CLIENT_IP_HEADER in the server's env file to the header it does send (.env.example lists them).`;
+  // Welcome emails waiting because mail is failing: the last welcome the worker tried to send failed, and while that is
+  // so it tries one person a wake, not five (sendOwedWelcomes(), src/lib/parents/welcome.ts; its mark, WELCOME_MARK).
+  // It counts only the people the worker can send to (welcomesToSend(): owed, not blocked, and able to sign in), so the
+  // note goes once none is left to send to, even though no wake has tried anyone since the failure. It shows only while
+  // the worker would really try: while the saved mail settings are untested it tries nobody, and the mail line says so.
+  const [welcomeMark, owed] = await Promise.all([readMark(WELCOME_MARK), welcomesToSend()]);
+  const welcomesNote = parents.signin && parents.welcome && mail.working && failedLast(welcomeMark) && owed > 0
+    ? `Welcome emails are waiting because mail is failing: ${owed === 1 ? "1 person is" : `${owed} people are`} owed a welcome or a link to choose a password, and the last one the worker tried to send failed. Until a send works, it tries one person a minute instead of five.`
+    : null;
+  const headerMissing = addressNote !== null && env.CLIENT_IP_HEADER !== "none";
+  const parentsAttention = headerMissing || welcomesNote !== null;
   lines.push(parents.signin
-    ? addressNote && env.CLIENT_IP_HEADER !== "none"
-      ? { key: "parents", title: "Parent sign-ins", state: "attention", word: "Needs attention", says: "On. Parents sign in with a code sent to their email.", times: [], notes: [addressNote], fix: null }
-      : { key: "parents", title: "Parent sign-ins", state: "ok", word: "On", says: "On. Parents sign in with a code sent to their email.", times: [], notes: addressNote ? [addressNote] : [], fix: null }
+    ? { key: "parents", title: "Parent sign-ins", state: parentsAttention ? "attention" : "ok", word: parentsAttention ? "Needs attention" : "On",
+      says: "On. Parents sign in with their email and password, and on a device the portal doesn't know yet, a code sent to their email.", times: [],
+      notes: [addressNote, welcomesNote].filter((x): x is string => x !== null), fix: welcomesNote ? mailFix : null }
     : { key: "parents", title: "Parent sign-ins", state: "off", word: "Off", times: [], notes: [], fix: { href: "/staff/settings/parents", label: "Open parent sign-ins" },
       says: "Off. No parent can sign in until an Admin switches them on." });
 

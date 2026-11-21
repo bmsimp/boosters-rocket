@@ -11,15 +11,17 @@ import { getIP } from "better-auth/api";
 import { db } from "@/lib/db/client";
 import { withClientIp } from "@/lib/request";
 import { clientAddress } from "@/lib/auth/client-address";
-import { requestSigninCode, verifySigninCode } from "@/lib/parents/signin-codes";
+import { refuseCodeWithoutStep, sendSecondStepCode, verifySigninCode } from "@/lib/parents/signin-codes";
+import { checkPasswordSignin } from "@/lib/parents/password-signin";
 import { RATE_LIMITS } from "@/lib/parents/rate-limit";
 import { auditLog, parentAuthSession, rateLimitEvent, staffAuthSession, staffAuthUser } from "@/lib/db/schema";
-import { getParentAuth } from "@/lib/auth/parent-auth";
 import { getStaffAuth } from "@/lib/auth/staff-auth";
 import { getParentState } from "@/lib/auth/identity";
 import { env } from "@/env";
 import { resetDb, seedParent, seedGuardianInFamily, seedWorkingMail } from "../helpers/db";
 import { SIGNINS_ON, seedParentSettings } from "../helpers/roster-cache";
+// Signed in through the door, as a browser is: the password, then the code it mails (the sign-in release, slice SI-3b).
+import { DOOR_PASSWORD, ensurePassword, signInThroughDoor } from "../helpers/parent-door";
 
 /**
  * The address a request came from is read in one place (src/lib/request.ts) from the header the deployment names
@@ -30,22 +32,11 @@ import { SIGNINS_ON, seedParentSettings } from "../helpers/roster-cache";
 const TRUE = "203.0.113.77";
 const LIES = { "x-booster-client-ip": "6.6.6.1", "x-real-ip": "6.6.6.2", forwarded: "for=6.6.6.3", "x-client-ip": "6.6.6.4", "true-client-ip": "6.6.6.5" };
 
-async function post(path: string, body: unknown, headers: Record<string, string>, cookie?: string) {
-  const auth = await getParentAuth();
-  return auth.handler(new Request(`${env.APP_URL}/api/auth/parent${path}`, {
-    method: "POST", body: JSON.stringify(body),
-    headers: { "content-type": "application/json", origin: env.APP_URL, ...headers, ...(cookie ? { cookie } : {}) },
-  }));
-}
-const cookieFrom = (res: Response) => res.headers.getSetCookie().map((c) => c.split(";")[0]!).filter((c) => c.startsWith("br_parent")).join("; ");
+/** Signed in through the door with every request carrying these headers; the Cookie header the browser then holds. */
 async function signIn(email: string, headers: Record<string, string>) {
-  const sent = outbox.length;
-  await post("/portal-code/send", { email }, headers);
-  await vi.waitFor(() => expect(outbox.length).toBeGreaterThan(sent));
-  const code = /sign-in code: (\d{6})/.exec(outbox.at(-1)!.subject)![1]!;
-  const res = await post("/portal-code/verify", { email, code }, headers);
-  expect(await res.json()).toMatchObject({ ok: true });
-  return cookieFrom(res);
+  const r = await signInThroughDoor(outbox, email, { headers });
+  expect(r.body).toMatchObject({ ok: true });
+  return r.cookie;
 }
 /** Every address the portal wrote down, wherever it wrote one. */
 async function addressesStored() {
@@ -109,17 +100,23 @@ describe("the address a client comes from", () => {
   });
 
   it("with no address, one visitor's flood doesn't close the door to every other parent", async () => {
-    // Past the per-IP cap, from visitors the portal can't tell apart, for addresses that aren't on file.
-    for (let i = 0; i <= RATE_LIMITS.code_send_ip.max; i++) await requestSigninCode(`nobody${i}@example.com`, null);
-    for (let i = 0; i <= RATE_LIMITS.code_check_ip.max; i++) await verifySigninCode(`nobody${i % 50}@example.com`, "000000", null);
+    // Past the per-IP caps, from visitors the portal can't tell apart: passwords for addresses that aren't on file, and
+    // codes with no pending step. (A code is sent only after a right password, so its own per-IP count can't be run up
+    // by strangers: each person's codes are held by their own limits.)
+    for (let i = 0; i <= RATE_LIMITS.password_try_ip.max; i++) await checkPasswordSignin(`nobody${i}@example.com`, "not a password", null, null);
+    for (let i = 0; i <= RATE_LIMITS.code_check_ip.max; i++) await refuseCodeWithoutStep(null);
+    await ensurePassword("ana@example.com");
+    const right = await checkPasswordSignin("ana@example.com", DOOR_PASSWORD, null, null);
+    if (!right.ok) throw new Error("Ana's password was refused");
     const sent = outbox.length;
-    await (await requestSigninCode("ana@example.com", null)).delivery;
+    await (await sendSecondStepCode({ parentId: right.person.id, email: right.person.email, password: right.password }, null)).delivery;
     expect(outbox.length).toBe(sent + 1);
     const code = /sign-in code: (\d{6})/.exec(outbox.at(-1)!.subject)![1]!;
-    expect(await verifySigninCode("ana@example.com", code, null)).toMatchObject({ ok: true });
-    expect((await db.select().from(auditLog)).filter((r) => r.action === "signin.code_refused").map((r) => (r.after as { reason?: string }).reason))
-      .not.toContain("rate_limited");
-  }, 60_000);
+    expect(await verifySigninCode({ parentId: right.person.id, email: right.person.email }, code, null)).toMatchObject({ ok: true });
+    const reasons = (await db.select().from(auditLog)).filter((r) => r.action === "signin.code_refused" || r.action === "signin.password_refused")
+      .map((r) => (r.after as { reason?: string }).reason);
+    expect(reasons).not.toContain("rate_limited");
+  }, 120_000);
 
   it("with the setting none, Better Auth is told there is no address, so its limiter doesn't put everyone in one bucket", () => {
     env.CLIENT_IP_HEADER = "none";
