@@ -2,7 +2,7 @@
 -- accounting_left_unlinked_by has none), after a take from the books on the accounting links screen made the family, or
 -- a student who opens it, active again. The gate reads it: while it is set, no guardian of the family signs in to it,
 -- until someone who may change families lets them in on its page. Additive: two nullable columns and a check that the
--- staff member is named only while the time is. It fills nothing and changes no row. Numbered after S12b1's 0048.
+-- staff member is named only while the time is. It fills nothing and changes no row. Numbered after S12b2's 0049.
 ALTER TABLE "family" ADD COLUMN "signin_held_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "family" ADD COLUMN "signin_held_by" uuid;--> statement-breakpoint
 ALTER TABLE "family" ADD CONSTRAINT "family_signin_held_by_with_at" CHECK ("family"."signin_held_by" is null or "family"."signin_held_at" is not null);

@@ -9,7 +9,7 @@ import { scratchDatabase } from "../setup/database-url";
 import { dropScratchDatabase, makeScratchDatabase } from "../setup/worker-databases";
 
 /**
- * Migration 0049 (stage 4's slice M4b; numbered after S12b1's 0048, and found here by its tag, so a renumbering at a
+ * Migration 0050 (stage 4's slice M4b; numbered after S12b2's 0049, and found here by its tag, so a renumbering at a
  * merge doesn't break it): a family's sign-ins held after a take from the books made it, or a student who opens it,
  * active again. Two nullable columns on `family` (`signin_held_at`, `signin_held_by`) with a check that the staff member
  * is named only while the time is. Additive: it fills nothing and changes no row of any family, active or not, nor
@@ -63,7 +63,7 @@ const newColumns = () => q(async (pg) => (await pg`SELECT column_name, is_nullab
 
 const ids: Record<string, string> = {};
 
-describe("migration 0049: a family's sign-ins held", { timeout: 60_000 }, () => {
+describe("migration 0050: a family's sign-ins held", { timeout: 60_000 }, () => {
   beforeAll(async () => {
     await makeScratchDatabase("migrate_held"); // marked as this run's: a database of that name the run didn't make is refused
     await migrateWith(migrationsUpTo(indexOf("_family_signin_hold") - 1));

@@ -55,8 +55,8 @@ describe("the import, as migration 0023 made the records", () => {
     await connectRoster(stub);
     await seedAnaRivera();
     const ana = await anasLink();
-    // The row stands on its family record and its own link: neither old copy is written.
-    expect(ana).toMatchObject({ familyQboId: null, sourceQboId: null, status: "invited" });
+    // The row stands on its family record and its own link.
+    expect(ana).toMatchObject({ status: "invited" });
 
     const got = await appRecordsByCustomer();
     expect(got.families).toEqual([
@@ -86,7 +86,7 @@ describe("the import, as migration 0023 made the records", () => {
     expect(await appRecordRows()).toEqual(before);
   });
 
-  it("touches no guardian row: a row's family and own link are its own, and a row's old copies are read by nothing", async () => {
+  it("touches no guardian row: a row's family and own link are its own, and a previous company's row stays in none", async () => {
     await connectRoster(stub);
     expect((await appRecordsByCustomer()).families.map((f) => f.customer)).toEqual(["10", "20", "40"]);
     expect(await db.select().from(guardian)).toEqual([]);
@@ -96,15 +96,15 @@ describe("the import, as migration 0023 made the records", () => {
     const got = await appRecordsByCustomer();
     expect(got.memberships).toEqual([{ guardianId: row.id, family: "10" }]);
     expect(got.links.filter((l) => l.kind === "membership")).toMatchObject([{ customer: "11", guardianId: row.id, origin: "carried_over" }]);
-    // A row that holds only the old copies (as one made before stage 3's slice 12b1 might), with no family record: the
-    // import neither puts it in the family its copy names nor links it to the record its copy names.
+    // A row a change of company closed before stage 4's slice M7a, the one kind in no family record: the import neither
+    // puts it in a family nor links it.
     const mei = await seedParent({ name: "Mei Chen", email: "mei@example.com" });
-    const [old] = await db.insert(guardian).values({ parentId: mei.id, familyQboId: "20", sourceQboId: "21", status: "invited" }).returning();
+    const old = await seedGuardian({ parentId: mei.id, familyQboId: "20", sourceQboId: "21", status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "invited" });
     const before = await appRecordRows();
     expect(await withTheRosterLock((tx) => importRecordsFromRoster(tx))).toEqual(NO_CHANGES);
     expect(await appRecordRows()).toEqual(before);
-    expect((await db.select().from(guardian).where(eq(guardian.id, old!.id)))[0]!.familyId).toBeNull();
-    expect(await db.select().from(accountingLink).where(eq(accountingLink.guardianId, old!.id))).toEqual([]);
+    expect((await db.select().from(guardian).where(eq(guardian.id, old.id)))[0]!.familyId).toBeNull();
+    expect(await db.select().from(accountingLink).where(eq(accountingLink.guardianId, old.id))).toEqual([]);
     expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
   });
 
@@ -114,7 +114,7 @@ describe("the import, as migration 0023 made the records", () => {
     // row's family is what is under test.
     const [byHand] = await db.insert(family).values({ name: "Oak Family", active: false }).returning({ id: family.id });
     const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
-    const [row] = await db.insert(guardian).values({ parentId: ana.id, familyQboId: null, familyId: byHand!.id, status: "invited", sourceQboId: null }).returning();
+    const [row] = await db.insert(guardian).values({ parentId: ana.id, familyId: byHand!.id, status: "invited" }).returning();
     const before = await appRecordRows();
     expect(await withTheRosterLock((tx) => importRecordsFromRoster(tx))).toEqual(NO_CHANGES);
     expect(await appRecordRows()).toEqual(before);

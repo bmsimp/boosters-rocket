@@ -4,14 +4,19 @@ import { requireStaffActionAlso, staffAction, type StaffCtx } from "@/lib/guards
 import { confirmAllSuggested, leaveUnlinked, LINK_COPY, linkFamilyToCustomer, reviewCarriedOver, undoLeaveUnlinked, unlinkFamily, type LinkDone } from "@/lib/accounting/link-writes";
 import { BULK_MAX } from "@/lib/accounting/mapping";
 import { isStatusKey, SEARCH_MAX } from "@/lib/accounting/status";
-import { isChosen } from "@/lib/accounting/stamp";
+import { isChosen, isGuardianChosen } from "@/lib/accounting/stamp";
+import { linkGuardian, unlinkGuardian, type GuardianLinkDone } from "@/lib/accounting/guardian-links";
 import { can } from "@/lib/permissions/effective";
+import { isUuid } from "@/lib/seasons/ids";
+import { familyPage } from "@/app/staff/(app)/family-pages";
 import { sendToBooks, takeFromBooks } from "@/lib/roster/writes";
 
 // The accounting links screen's presses (stage 4's slice M3a; src/lib/accounting/link-writes.ts): Confirm (a Suggested
 // row's customer, a Several possible row's candidate, or one picked from the customers no family is linked to), Leave
 // unlinked and Undo; since slice M3a2, Confirm all exact email matches and Confirm this link (a carried-over link
-// confirmed as reviewed); since slice M3b, Unlink from the books; since slice M4a, Take QuickBooks' into the app. Each needs the linking permission, Accounting.Link.ReadWrite (not Admin-only), and also
+// confirmed as reviewed); since slice M3b, Unlink from the books; since slice M3c, Link this guardian and Unlink this
+// guardian (src/lib/accounting/guardian-links.ts); since slice M4a, Take QuickBooks' into the app. Each needs the
+// linking permission, Accounting.Link.ReadWrite (not Admin-only), and also
 // Roster.Read, the page's own, checked here first and refused as the guard refuses (requireStaffActionAlso()). A server
 // action can be called with any values, not only the ones its page sends: each argument is checked here for its type
 // and size, and everything about the family, the customer and the students is checked again in the library, under the
@@ -85,6 +90,32 @@ export const unlinkAction = staffAction(P, async (ctx: StaffCtx, familyId: strin
   if (r.ok) revalidatePath("/", "layout");
   else again();
   return r;
+});
+
+/** A guardian press's answer, its family's page shown again on success: the family's id stays on the server. */
+const shownAgain = (r: GuardianLinkDone): LinkDone => {
+  again();
+  if (!r.ok) return r;
+  if ("familyId" in r) revalidatePath(familyPage(r.familyId));
+  return { ok: true, message: r.message };
+};
+
+/**
+ * Link this guardian (slice M3c): the guardian row's id, the Parent customer chosen from its row's candidates, how it was
+ * chosen (`suggested` or `picked`), the roster tag and the stamp. The library works the row's candidates out again
+ * under the roster lock.
+ */
+export const linkGuardianAction = staffAction(P, async (ctx: StaffCtx, guardianId: string, customerId: string, chosen: string, rosterTag: string, stamp: string): Promise<LinkDone> => {
+  await requireStaffActionAlso(ctx, "Roster.Read");
+  if (!isUuid(guardianId) || !str(customerId, ID_MAX) || !/^\d{1,19}$/.test(customerId) || !isGuardianChosen(chosen) || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return NOT_FROM_PAGE;
+  return shownAgain(await linkGuardian({ guardianId, customerId, chosen, stamp }, rosterTag, op(ctx)));
+});
+
+/** Unlink this guardian (slice M3c): the guardian row's id, its link's id, the roster tag and the stamp. */
+export const unlinkGuardianAction = staffAction(P, async (ctx: StaffCtx, guardianId: string, linkId: string, rosterTag: string, stamp: string): Promise<LinkDone> => {
+  await requireStaffActionAlso(ctx, "Roster.Read");
+  if (!isUuid(guardianId) || !isUuid(linkId) || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return NOT_FROM_PAGE;
+  return shownAgain(await unlinkGuardian({ guardianId, linkId, stamp }, rosterTag, op(ctx)));
 });
 
 /**

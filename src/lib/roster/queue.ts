@@ -910,10 +910,11 @@ const guardianOp = (w: QueuedWrite): keyof typeof GUARDIAN_GIVEN_UP =>
   w.op === "create" ? "create" : w.op === "deactivate" ? "deactivate" : w.op === "contact" ? "contact" : w.op === "email" ? "email" : "rename";
 /**
  * What giving up a guardian's Parent customer change leaves (stage 3's slice 9h): the guardian's access in the portal is
- * as the portal has it; a Parent customer left active, or never made, waits for the mapping screen to show the difference.
+ * as the portal has it; a Parent customer left active waits for the mapping screen to show the difference, and one QuickBooks
+ * made from a create given up can be linked to the guardian on Accounting links (stage 4's slice M3c).
  */
 const GUARDIAN_GIVEN_UP = {
-  create: "Given up. Nothing more will be sent for it. The guardian keeps their access in the portal, with no Parent customer of their own in QuickBooks: if QuickBooks made one anyway, nothing in the portal is linked to it, and the mapping screen will show it.",
+  create: "Given up. Nothing more will be sent for it. The guardian keeps their access in the portal, with no Parent customer of their own in QuickBooks: if QuickBooks made one anyway, nothing in the portal is linked to it, and once the portal has read it from QuickBooks it can be linked to them on Accounting links, in the opening of the family's row.",
   deactivate: "Given up. Nothing more will be sent for it. The guardian stays removed in the portal, and their Parent customer stays active in QuickBooks, for the mapping screen to show as a difference. Or make it inactive in QuickBooks once its balance is settled.",
   rename: "Given up. Nothing more will be sent for it. The portal keeps the person's new name, and QuickBooks keeps the name it has on their Parent customer, for the mapping screen to show as a difference. Or rename it in QuickBooks.",
   contact: CONTACT_GIVEN_UP,

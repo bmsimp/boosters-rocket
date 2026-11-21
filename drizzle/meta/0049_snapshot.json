@@ -1,5 +1,5 @@
 {
-  "id": "a2997667-0d8d-4ad2-a474-dfddebed90c6",
+  "id": "4bab11de-681a-4efd-ab5c-4b8733f3ac0d",
   "prevId": "677d9717-d802-42e9-bc9d-4845455d87d5",
   "version": "7",
   "dialect": "postgresql",
@@ -1107,18 +1107,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "signin_held_at": {
-          "name": "signin_held_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "signin_held_by": {
-          "name": "signin_held_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1143,10 +1131,6 @@
         "family_left_unlinked_by_with_at": {
           "name": "family_left_unlinked_by_with_at",
           "value": "\"family\".\"accounting_left_unlinked_by\" is null or \"family\".\"accounting_left_unlinked_at\" is not null"
-        },
-        "family_signin_held_by_with_at": {
-          "name": "family_signin_held_by_with_at",
-          "value": "\"family\".\"signin_held_by\" is null or \"family\".\"signin_held_at\" is not null"
         }
       },
       "isRLSEnabled": false
@@ -1477,12 +1461,6 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "family_qbo_id": {
-          "name": "family_qbo_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "family_id": {
           "name": "family_id",
           "type": "uuid",
@@ -1508,12 +1486,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'invited'"
-        },
-        "source_qbo_id": {
-          "name": "source_qbo_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "disabled_reason": {
           "name": "disabled_reason",
@@ -1543,27 +1515,6 @@
         }
       },
       "indexes": {
-        "guardian_family_parent_uq": {
-          "name": "guardian_family_parent_uq",
-          "columns": [
-            {
-              "expression": "family_qbo_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "parent_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "guardian_family_id_parent_uq": {
           "name": "guardian_family_id_parent_uq",
           "columns": [
@@ -1582,21 +1533,6 @@
           ],
           "isUnique": true,
           "where": "family_id is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "guardian_family_ix": {
-          "name": "guardian_family_ix",
-          "columns": [
-            {
-              "expression": "family_qbo_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -1663,7 +1599,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "guardian_family_unless_company_changed": {
+          "name": "guardian_family_unless_company_changed",
+          "value": "\"guardian\".\"family_id\" is not null or \"guardian\".\"disabled_reason\" is not distinct from 'company_changed'"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.job_run": {

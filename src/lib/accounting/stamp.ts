@@ -62,6 +62,29 @@ export function unlinkStamp(familyId: string, linkId: string, customerId: string
 export const unlinkStampHolds = (familyId: string, linkId: string, customerId: string, studentLinkIds: readonly string[], stamp: string): boolean =>
   same(unlinkStamp(familyId, linkId, customerId, studentLinkIds), stamp);
 
+/** How a guardian's Parent customer was chosen (slice M3c): the one filled in on the row (`suggested`), or another of its candidates (`picked`). */
+export const GUARDIAN_CHOSEN = ["suggested", "picked"] as const;
+export type GuardianChosen = (typeof GUARDIAN_CHOSEN)[number];
+export const isGuardianChosen = (s: unknown): s is GuardianChosen => typeof s === "string" && (GUARDIAN_CHOSEN as readonly string[]).includes(s);
+
+/**
+ * Link a guardian to a Parent customer (slice M3c): the guardian row's id, the id of its family's link the row was
+ * drawn under, the customer, and how it was chosen, sealed in a domain of their own, so no family press's stamp is ever
+ * a guardian's. The press works the row's candidates out again under the roster lock and they must seal to the same stamp.
+ */
+export function guardianLinkStamp(guardianId: string, familyLinkId: string, customerId: string, chosen: GuardianChosen): string {
+  return sealed("accounting-guardian-link", [guardianId.toLowerCase(), familyLinkId.toLowerCase(), customerId, chosen]);
+}
+export const guardianLinkStampHolds = (guardianId: string, familyLinkId: string, customerId: string, chosen: GuardianChosen, stamp: string): boolean =>
+  same(guardianLinkStamp(guardianId, familyLinkId, customerId, chosen), stamp);
+
+/** Unlink a guardian from their Parent customer (slice M3c): the guardian row's id, its link's id and that link's customer, sealed in a domain of their own. */
+export function guardianUnlinkStamp(guardianId: string, linkId: string, customerId: string): string {
+  return sealed("accounting-guardian-unlink", [guardianId.toLowerCase(), linkId.toLowerCase(), customerId]);
+}
+export const guardianUnlinkStampHolds = (guardianId: string, linkId: string, customerId: string, stamp: string): boolean =>
+  same(guardianUnlinkStamp(guardianId, linkId, customerId), stamp);
+
 /**
  * Take QuickBooks' into the app (slice M4a): what a difference's press takes (`field`: `name`, `inactive` or `place`),
  * the record it changes (the family's or the student's app id), its customer, and the value the row showed, sealed in a

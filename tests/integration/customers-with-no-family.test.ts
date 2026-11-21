@@ -413,7 +413,7 @@ describe("a customer meant for a family the portal has (stage 4's slice M3a2)", 
   /** An open guardian row of a new person in this family record. */
   const guardianIn = async (familyId: Awaited<ReturnType<typeof unlinked>>, name: string, email: string) => {
     const p = await seedParent({ name, email });
-    await db.insert(guardian).values({ parentId: p.id, familyId, familyQboId: null, status: "invited" });
+    await db.insert(guardian).values({ parentId: p.id, familyId, status: "invited" });
   };
   /** Everything "Create a family from this" would make, read before and after a refusal. */
   const made = async () => ({ records: await appRecordRows(), audits: await audits("accounting.family.from_customer") });

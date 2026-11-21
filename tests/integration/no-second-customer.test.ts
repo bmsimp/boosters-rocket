@@ -360,7 +360,7 @@ describe("a guardian's Parent customer: none made beside the one their row was l
     staff = asOp(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     // Bea, a guardian of the Riveras removed before the unlink, whose row was linked to her Parent customer 14 under 10.
     const bea = await seedParent({ name: "Bea Rivera", email: "bea@example.com" });
-    const [row] = await db.insert(guardian).values({ parentId: bea.id, familyQboId: "10", familyId: rivera, status: "disabled", disabledReason: "removed", statusBeforeDisable: "invited" }).returning();
+    const [row] = await db.insert(guardian).values({ parentId: bea.id, familyId: rivera, status: "disabled", disabledReason: "removed", statusBeforeDisable: "invited" }).returning();
     beaRow = row!.id;
     await db.insert(accountingLink).values({ system: QUICKBOOKS, realmId: REALM, customerId: "14", guardianId: beaRow, origin: "confirmed", linkedBy: linker.id });
     await unlinkThroughThePress(rivera, linker);
@@ -373,20 +373,20 @@ describe("a guardian's Parent customer: none made beside the one their row was l
   it("reinstated after the family is linked to the same customer again: nothing queued or sent, linked_before said, and her row's standing says it", async () => {
     await relinkRivera();
     const r = await reinstateGuardian(beaRow, staff);
-    expect(r).toEqual({ ok: true, quickbooks: ["QuickBooks has the Parent customer “Bea Rivera” under Rivera Family that Beatrice Rivera was linked to before the family was unlinked, so no second one was made for them. The portal doesn't link them to it now."] });
+    expect(r).toEqual({ ok: true, quickbooks: ["QuickBooks has the Parent customer “Bea Rivera” under Rivera Family that Beatrice Rivera was linked to until that link ended, so no second one was made for them. While it is active in QuickBooks, it can be linked to them again on Accounting links, in the opening of the family's row."] });
     expect((await db.select().from(guardian).where(eq(guardian.id, beaRow)))[0]!.status).not.toBe("disabled");
     expect(await rowItems()).toEqual([]);
     expect(stub.apiCalls()).toEqual([]);
     expect(await db.select().from(accountingLink).where(eq(accountingLink.guardianId, beaRow))).toEqual([]);
     asStaff(linker);
     const html = await renderPage(RosterEntryPage, { params: { id: String(rivera) } });
-    expect(rowNamed(html, "Beatrice Rivera")?.[3]).toBe("QuickBooks has the Parent customer “Bea Rivera” under this family that they were linked to before the family was unlinked, so no second one is made. No Parent customer in QuickBooks is linked to them, and none is being made: the mapping screen will offer to link one.");
+    expect(rowNamed(html, "Beatrice Rivera")?.[3]).toBe("QuickBooks has the Parent customer “Bea Rivera” under this family that they were linked to until that link ended, so no second one is made. No Parent customer in QuickBooks is linked to them, and none is being made: while it is active, it can be linked to them again on Accounting links, in the opening of the family's row.");
   });
 
   it("held back the same when her name is still her old customer's, in words of its own", async () => {
     await db.update(parent).set({ name: "Bea Rivera" }).where(eq(parent.name, "Beatrice Rivera"));
     await relinkRivera();
-    expect(await reinstateGuardian(beaRow, staff)).toEqual({ ok: true, quickbooks: ["QuickBooks has the Parent customer “Bea Rivera” under Rivera Family that Bea Rivera was linked to before the family was unlinked, so no second one was made for them. The portal doesn't link them to it now."] });
+    expect(await reinstateGuardian(beaRow, staff)).toEqual({ ok: true, quickbooks: ["QuickBooks has the Parent customer “Bea Rivera” under Rivera Family that Bea Rivera was linked to until that link ended, so no second one was made for them. While it is active in QuickBooks, it can be linked to them again on Accounting links, in the opening of the family's row."] });
     expect(await rowItems()).toEqual([]);
     expect(stub.apiCalls()).toEqual([]);
   });

@@ -2,6 +2,7 @@
 import { createContext, useContext, useRef, useState, useTransition, type ReactNode } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { ActionOutcome } from "@/app/components/notice";
+import { ChoiceGroup } from "@/app/components/choice-group";
 
 // The accounting links screen's presses (stage 4's slice M3a): each a button bound to its server action, and what it
 // answered. A press re-reads the page, and a family linked or left unlinked changes its row (its button may go), so
@@ -36,5 +37,34 @@ export function LinkPress({ label, busy, about, act }: { label: string; busy: st
     <button type="button" className="btn btn-line" aria-disabled={pending} onClick={press}>
       {pending ? busy : label}<span className="visually-hidden">: {about}</span>
     </button>
+  );
+}
+
+/**
+ * Link this guardian (slice M3c): the Parent customers the row offers, as a choice (the one filled in checked, none
+ * otherwise), and the press. Each option is given only its words and its own bound action, which carries the guardian
+ * row's id, the customer's id, how it was chosen, the roster tag and the stamp the page drew.
+ */
+export function GuardianLinkPress({ name, who, about, options, suggested }: { name: string; who: string; about: string; suggested: string | null;
+  options: { value: string; label: string; hint: string; act: () => Promise<Done> }[] }) {
+  const { add } = useContext(Answers);
+  const [chosen, setChosen] = useState(suggested ?? "");
+  const [pending, start] = useTransition();
+  const press = () => {
+    if (pending) return;
+    const o = options.find((x) => x.value === chosen);
+    if (o === undefined) { add({ ok: false, errors: [`${about}: Choose which Parent customer is ${who}'s first. Nothing was linked.`] }); return; }
+    start(async () => { const r = await safely(() => o.act(), failed); add(r.ok ? r : { ok: false, errors: r.errors.map((e) => `${about}: ${e}`) }); });
+  };
+  return (
+    <div className="stack">
+      <ChoiceGroup name={name} legend={`Which Parent customer is ${who}'s`} cols={1} value={chosen} onChange={setChosen}
+        options={options.map((o) => ({ value: o.value, label: o.label, hint: o.hint }))} />
+      <div className="row-actions">
+        <button type="button" className="btn btn-line" aria-disabled={pending} onClick={press}>
+          {pending ? "Linking…" : `Link ${who} to this Parent customer`}<span className="visually-hidden">: {about}</span>
+        </button>
+      </div>
+    </div>
   );
 }

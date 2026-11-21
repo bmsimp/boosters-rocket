@@ -51,7 +51,7 @@ const saidBy = (e: Error) => `${e.message} ${(e as { cause?: { message?: string 
 /** Every row of the tables the migration must not change, each in one order. */
 const everything = () => q(async (pg) => ({
   links: await pg`SELECT * FROM accounting_link ORDER BY id`,
-  // Without the columns a later migration adds (0049's sign-in hold, stage 4's slice M4b), which this one never sees.
+  // Without the columns a later migration adds (0050's sign-in hold, stage 4's slice M4b), which this one never sees.
   families: (await pg`SELECT * FROM family ORDER BY id`).map((f) => Object.fromEntries(Object.entries(f).filter(([column]) => column !== "signin_held_at" && column !== "signin_held_by"))),
   students: await pg`SELECT * FROM student ORDER BY id`,
   guardians: await pg`SELECT * FROM guardian ORDER BY id`,
@@ -92,7 +92,8 @@ describe("migration 0047: the history of ended links", { timeout: 60_000 }, () =
     expect(await tableThere()).toBe(0);
     const before = await everything();
     expect(before.links).toHaveLength(3);
-    await migrateWith(path.resolve("drizzle"));
+    // To 0047 itself: a later migration (0049) drops guardian columns this compares row by row.
+    await migrateWith(migrationsUpTo(indexOf("_link_history")));
     expect(await tableThere()).toBe(1);
     expect(await q(async (pg) => (await pg`SELECT count(*)::int AS n FROM accounting_link_ended`)[0]!.n)).toBe(0);
     expect(await everything()).toEqual(before);

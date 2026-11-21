@@ -24,8 +24,8 @@
 // person (their requests, codes and sessions) last. The roster lock is waited for at most three seconds (a roster read holds it through its whole QuickBooks read, and the person's row held meanwhile would hold up
 // that person's code request and the daily clean-up): when it is busy, nothing has been written and the answer is
 // `busy`. A guardian row names the family itself in `family_id` (a person is in a family record once, the unique index
-// of migration 0040), and is found by it alone: nothing else gives a row its family, and since stage 3's slice 12b1 a
-// row made here writes neither `family_qbo_id` nor `source_qbo_id` (nothing reads them; slice 12b2 drops them). A
+// of migration 0040), and is found by it alone: nothing else gives a row its family, and every row has one but a
+// previous company's (the check of migration 0049, which dropped the row's old copies of its customers). A
 // family with no link takes guardians too (stage 3's slice 9d). The audit rows name the family's linked customer as it
 // stands at the write (`familyQboId`, the key the audit page's record filter reads), null for a family with no link.
 import { randomUUID } from "node:crypto";
@@ -190,8 +190,8 @@ async function rowToOpen(familyId: AppFamilyId, email: string): Promise<string |
  * record, audited `parent.access.granted` with the family's linked customer (null for a family with no link: stage 3's
  * slice 9d), whether the person was reused and the name staff typed; or, where the person's row in that family record
  * is closed, that row reinstated (reinstateGuardian()'s rule), and the answer says so. The person's row is found by its
- * family record alone (`guardian_family_id_parent_uq`): a row of theirs a change of company closed is in no family and
- * stays as it is, beside the new one. A welcome is owed by oweWelcome()'s rule. Refused, changing nothing: a name or address the
+ * family record alone (`guardian_family_id_parent_uq`): a row of theirs a change of company closed (before stage 4's
+ * slice M7a, which keeps every row in its family) is in no family and stays as it is, beside the new one. A welcome is owed by oweWelcome()'s rule. Refused, changing nothing: a name or address the
  * portal can't take, a family record that isn't there or is inactive, one whose own create is waiting on the queue or
  * being sent (`making`), one whose link the portal can't tell (`other_company`: familyRefusal()), a blocked person, one with an open row in the family already, and a roster read holding its lock past the wait
  * (`busy`). Emails nobody: the welcome job sends the welcome.
@@ -257,8 +257,8 @@ async function saveGuardian(familyId: AppFamilyId, name: string, email: string, 
       await reopen(tx, held, who, familyId, fam.customer, o, { addedBy: "staff", ...said });
       return { ok: true, result: { ok: true, outcome: "reinstated", person, name: who.name, guardianId: held.id, parentId: who.id }, queued: await grant(held.id) };
     }
-    // Its own SQL, naming only the columns it writes: drizzle's insert names every column the schema declares, the two
-    // old copies too (GuardianRow, ./sessions.ts), and the rest take their defaults.
+    // Its own SQL, naming only the columns it writes (since stage 3's slice 12b1, when the schema still declared the row's
+    // old copies, which drizzle's insert would have named); the rest take their defaults.
     const [made] = Array.from(await tx.execute<{ id: string }>(sql`insert into ${guardian} (${sql.identifier(guardian.id.name)},
       ${sql.identifier(guardian.familyId.name)}, ${sql.identifier(guardian.parentId.name)}, ${sql.identifier(guardian.status.name)})
       values (${rowId}, ${String(familyId)}, ${who.id}, 'invited') returning ${sql.identifier(guardian.id.name)}`));
@@ -333,8 +333,8 @@ export type ReinstateGuardianResult = { ok: true; quickbooks: string[] }
 
 /**
  * Opens a closed membership again: the same row, as it was before it closed (`status_before_disable`, else invited),
- * whatever closed it (staff, or a reason the retired reconcile recorded) but a change of company, whose row names no
- * family and is offered nothing. Audited `parent.access.granted`, `reinstated`; a welcome is owed by oweWelcome()'s
+ * whatever closed it (staff, or a reason the retired reconcile recorded) but a change of company before stage 4's slice
+ * M7a, whose row names no family and is offered nothing. Audited `parent.access.granted`, `reinstated`; a welcome is owed by oweWelcome()'s
  * rule. A family with no link takes it back too (stage 3's slice 9d): a row is in its family by its record alone, so it
  * is reopened there whatever customer the family is linked to now. Refused for a blocked person,
  * a family record that is gone or inactive, one whose own create is waiting on the queue or being sent, one whose link
