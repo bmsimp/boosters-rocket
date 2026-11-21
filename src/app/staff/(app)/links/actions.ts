@@ -3,7 +3,8 @@ import { revalidatePath } from "next/cache";
 import { requireStaffActionAlso, staffAction, type StaffCtx } from "@/lib/guards";
 import { confirmAllSuggested, customerAimedAt, leaveUnlinked, LINK_COPY, linkFamilyToCustomer, reviewCarriedOver, sendAllDifferences, undoLeaveUnlinked, unlinkFamily, type LinkDone } from "@/lib/accounting/link-writes";
 import { familyFromCustomer, NO_FAMILY_COPY } from "@/lib/roster/no-family";
-import { BULK_MAX } from "@/lib/accounting/mapping";
+import { BULK_MAX, IMPORT_MAX } from "@/lib/accounting/mapping";
+import { IMPORT_COPY, saveImport } from "@/lib/accounting/import-writes";
 import { isStatusKey, SEARCH_MAX } from "@/lib/accounting/status";
 import { isChosen, isGuardianChosen } from "@/lib/accounting/stamp";
 import { linkGuardian, unlinkGuardian, type GuardianLinkDone } from "@/lib/accounting/guardian-links";
@@ -16,7 +17,8 @@ import { sendToBooks, takeFromBooks } from "@/lib/roster/writes";
 // row's customer, a Several possible row's candidate, or one picked from the customers no family is linked to), Leave
 // unlinked and Undo; since slice M3a2, Confirm all exact email matches and Confirm this link (a carried-over link
 // confirmed as reviewed); since slice M3b, Unlink from the books; since slice M3c, Link this guardian and Unlink this
-// guardian (src/lib/accounting/guardian-links.ts); since slice M4a, Take QuickBooks' into the app. Each needs the
+// guardian (src/lib/accounting/guardian-links.ts); since slice M4a, Take QuickBooks' into the app; since slice M6,
+// "Create a family from this" (moved here from Reconciliation) and Make these families, the reviewed import. Each needs the
 // linking permission, Accounting.Link.ReadWrite (not Admin-only), and also
 // Roster.Read, the page's own, checked here first and refused as the guard refuses (requireStaffActionAlso()). A server
 // action can be called with any values, not only the ones its page sends: each argument is checked here for its type
@@ -179,6 +181,26 @@ export const familyFromCustomerAction = staffAction(P, async (ctx: StaffCtx, cus
   if (r.ok) revalidatePath("/", "layout");
   else again();
   return r;
+});
+
+/**
+ * Make these families, the reviewed import's press (slice M6; src/lib/accounting/import-writes.ts): the roster tag and the
+ * stamp sealing the whole list the review showed (bound by the page), then the customer ids the review left ticked and
+ * how many (sent by its form). It gives each
+ * guardian a family's sign-in, so it needs the permission that changes families too (the lead's decision 3), with the
+ * page's Roster.Read, checked first and refused as the guard refuses. Every argument is checked again in the library,
+ * which works the proposal out again under the roster lock.
+ */
+export const saveImportAction = staffAction(P, async (ctx: StaffCtx, rosterTag: string, stamp: string, customerIds: string[], count: number): Promise<LinkDone> => {
+  await requireStaffActionAlso(ctx, "Roster.Read");
+  await requireStaffActionAlso(ctx, "Roster.Family.ReadWrite");
+  if (!Array.isArray(customerIds) || customerIds.length > IMPORT_MAX || !customerIds.every((id) => str(id, ID_MAX)) || typeof count !== "number"
+    || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return { ok: false, errors: [IMPORT_COPY.notFromPage] };
+  const r = await saveImport({ customerIds, count, stamp }, rosterTag, op(ctx));
+  // New families show on the Families pages and every staff page that lists families.
+  if (r.ok) revalidatePath("/", "layout");
+  else again();
+  return r.ok ? { ok: true, message: r.message } : r;
 });
 
 /**

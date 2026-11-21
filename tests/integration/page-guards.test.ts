@@ -165,6 +165,7 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/accounting/mapping", names: "all", why: "the accounting links screen reads every family's guardians' sign-in addresses and every customer of the roster cache (stage 4's slice M1)" },
   { module: "@/lib/accounting/link-writes", names: "all", why: "the accounting links screen's presses link any family to any customer, reading every family's guardians and every customer of the roster cache to check it (stage 4's slice M3a)" },
   { module: "@/lib/accounting/guardian-links", names: "all", why: "the accounting links screen's guardian presses link any guardian row to any Parent customer and end any row's link, reading every family's guardians and every customer of the roster cache to check it (stage 4's slice M3c)" },
+  { module: "@/lib/accounting/import-writes", names: "all", why: "the reviewed import's press makes families of any customers and gives their addresses a family's sign-in, reading every customer of the roster cache, every family's guardians and the persons who hold the proposed addresses (stage 4's slice M6)" },
   { module: "@/lib/accounting/ended-links", names: "all", why: "the links an unlink ended whose customer is still in the books: it reads any family's, student's and guardian row's history and the roster cache (stage 4's slice M3b2)" },
   { module: "@/lib/parents/contact-take-in", names: "all", why: "the take-in of contact details reads every person, guardian row, family and cached customer at once (stage 3's slice 11a)" },
 ];

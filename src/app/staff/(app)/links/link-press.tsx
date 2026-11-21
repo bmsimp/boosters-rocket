@@ -21,6 +21,9 @@ export function LinkAnswers({ children }: { children: ReactNode }) {
   return <Answers.Provider value={{ outcomes, add }}>{children}</Answers.Provider>;
 }
 
+/** How a press of its own (the import's, slice M6) adds its answer to the ones above the list. */
+export const useLinkAnswer = () => useContext(Answers).add;
+
 /** The answers so far, newest first. */
 export function LinkAnswersShown() {
   const { outcomes } = useContext(Answers);

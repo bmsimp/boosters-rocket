@@ -1,6 +1,8 @@
 // Customers with no family (stage 3's slice 10 of the app-owned families spec, open question 19): the QuickBooks
 // customers the membership shape calls a family that no family record of the portal is linked to, and "Create a family
-// from this", the way in for one such customer at a time. Stage 4's mapping screen brings the reviewed import of many.
+// from this", the way in for one such customer at a time. Since stage 4's slice M6 both are on the accounting links
+// screen, beside its reviewed import of many (src/lib/accounting/import-writes.ts), which runs the same narrowed import
+// once per family it makes.
 // The list reads every customer of the roster cache, so this module is staff code only, never imported by a parent page
 // (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts).
 import { and, eq, inArray, sql } from "drizzle-orm";

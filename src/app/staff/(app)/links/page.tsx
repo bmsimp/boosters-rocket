@@ -16,6 +16,7 @@ import { familyPage } from "@/app/staff/(app)/family-pages";
 import { confirmAllAction, confirmLinkAction, leaveUnlinkedAction, linkGuardianAction, reviewLinkAction, sendAllAction, sendDifferenceAction, takeDifferenceAction, undoLeaveUnlinkedAction, unlinkAction, unlinkGuardianAction } from "./actions";
 import { GuardianLinkPress, LinkAnswers, LinkAnswersShown, LinkPress } from "./link-press";
 import { CustomersWithNoFamily } from "./no-family";
+import { ImportOffer, ImportReview } from "./import-review";
 
 export const metadata = { title: "Accounting links" };
 export const dynamic = "force-dynamic";
@@ -461,7 +462,9 @@ function PickPart({ view, familyId, customerId, cq, tag, made }: { view: LinksVi
  * from the books), and linked again with the presses above. Since slice M3c a guardian of a linked family is linked to
  * a Parent customer under it in the row's opening (Link this guardian), and one guardian's link ended alone (Unlink
  * this guardian, which splits a shared one), src/lib/accounting/guardian-links.ts; the removed guardians' Parent
- * customers are shown, never pressed. For holders of the linking
+ * customers are shown, never pressed. Since slice M6 the customers no family is linked to have their own part here
+ * (conformance L.15), each with "Create a family from this", and the reviewed import proposes families from the books
+ * for them (Propose families from the books, its review at `?import=1`, src/lib/accounting/import-writes.ts). For holders of the linking
  * permission (Accounting.Link.ReadWrite, not Admin-only), who also need Roster.Read, checked here and refused as the
  * guard refuses (requireStaffAlso()): a role written with patterns can hold the first without the second. The page
  * lists many families, so neither the page, a row's opening, the chooser nor the confirm step is audited as a read of
@@ -494,6 +497,11 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
   // A create of the picking family given up after a try the books may have taken, whose customer stands with no family linked to it.
   const pickRow = pick === null ? undefined : view.rows.find((r) => String(r.familyId) === pick.toLowerCase() && r.offers.pick);
   const made = pickRow === undefined ? [] : await givenUpCustomersOf(pickRow.familyId, view);
+  // The reviewed import (slice M6): offered while the part for the customers no family is linked to lists one this page
+  // aims at no family; its review step is this page at `?import=1`, which writes nothing and reads only the persons who
+  // hold its addresses (view.importReview(), one query), for a reader who may change families too.
+  const proposable = view.state !== "listed" ? 0 : (view.noFamilyList ?? []).filter((c) => !view.aims.has(c.qboId)).length;
+  const importAsked = sp.import === "1";
   const columns: Column<LinkRow>[] = [
     { key: "family", header: "Family", rowHeader: true, sorted: "ascending", cell: (r) => (view.familyPages ? <Link href={familyPage(r.familyId)}>{r.name}</Link> : r.name) },
     { key: "addresses", header: "Guardians' sign-in addresses", cell: (r) => (r.addresses.length > 0 ? r.addresses.join(", ") : r.guardians.length === 0 ? "None yet" : "None that can sign in") },
@@ -541,7 +549,11 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
 
         {pick !== null && <PickPart view={view} familyId={pick} customerId={customer} cq={cq} tag={tag} made={made} />}
 
-        <CustomersWithNoFamily view={view} mayChangeFamilies={maySend} />
+        <CustomersWithNoFamily view={view} mayChangeFamilies={maySend}>
+          <ImportOffer proposable={proposable} mayChangeFamilies={maySend} />
+        </CustomersWithNoFamily>
+
+        {importAsked && <ImportReview review={maySend && proposable > 0 ? await view.importReview() : null} mayChangeFamilies={maySend} tag={tag} />}
 
         <section className="box" aria-labelledby="links-list-h"><h2 id="links-list-h">Families</h2>
           <form method="get" action="/staff/links" role="search" className="matrix-filter">

@@ -29,16 +29,17 @@
 // family with no link takes guardians too (stage 3's slice 9d). The audit rows name the family's linked customer as it
 // stands at the write (`familyQboId`, the key the audit page's record filter reads), null for a family with no link.
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { family, guardian, parent, parentAuthUser, staffUser } from "@/lib/db/schema";
+import { accountingLink, family, guardian, parent, parentAuthUser, qboCustomer, staffUser, writeQueue } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { guardianEmail, personName } from "./guardian-input";
 import { familyLinkState } from "@/lib/families/links";
-import type { AppFamilyId } from "@/lib/families/ids";
+import { QUICKBOOKS, type AppFamilyId } from "@/lib/families/ids";
 import { recordNameWords } from "@/lib/families/words";
-import { ROSTER_LOCK } from "@/lib/roster/shape";
-import { familyCreateWaiting, familySendingFree, guardianChangeWaiting, guardianSentWords, queueForGuardian, sendGuardianSaved, whileGuardiansHeld, type GuardianQueued } from "@/lib/roster/writes";
+import { getShape, ROSTER_LOCK } from "@/lib/roster/shape";
+import { getRosterSource, ofRosterCompany } from "@/lib/roster/source";
+import { blocksOthers, familyCreateWaiting, familySendingFree, guardianChangeWaiting, guardianCustomerLinked, guardianSentWords, queueForGuardian, recordSendingFree, sendGuardianSaved, whileGuardiansHeld, type GuardianQueued } from "@/lib/roster/writes";
 import { closeMembership } from "./membership";
 import type { StaffOp } from "./people";
 import { GUARDIAN_COLS, guardianRowCounts, lockEmail, studentsRuleInForce, type GuardianRow } from "./sessions";
@@ -62,16 +63,17 @@ const pgCode = (e: unknown): unknown => {
 };
 
 /**
- * The roster lock, shared: after the person's locks, before the family is looked at or a guardian row taken. Waited for
- * at most `waitMs`, in a savepoint (the lock, once taken, is the transaction's until it ends); false when it was busy
- * that long, with nothing written.
+ * The roster lock, shared (or, given `exclusive`, exclusive): after the person's locks, before the family is looked at or
+ * a guardian row taken. Waited for at most `waitMs`, in a savepoint (the lock, once taken, is the transaction's until it
+ * ends); false when it was busy that long, with nothing written.
  */
-export async function holdRoster(tx: Tx, w: Waits): Promise<boolean> {
+export async function holdRoster(tx: Tx, w: Waits, exclusive = false): Promise<boolean> {
   const waitMs = Math.max(1, Math.floor(w.rosterWaitMs ?? ROSTER_WAIT_MS));
   try {
     await tx.transaction(async (sp) => {
       await sp.execute(sql.raw(`set local lock_timeout = '${waitMs}ms'`));
-      await sp.execute(sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`);
+      // Exclusive only for the import's guardian that writes a link (importGuardian(), stage 4's slice M6): every link write holds it so.
+      await sp.execute(exclusive ? sql`select pg_advisory_xact_lock(${ROSTER_LOCK})` : sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`);
       await sp.execute(sql`set local lock_timeout to default`);
     });
     return true;
@@ -258,6 +260,116 @@ async function saveGuardian(familyId: AppFamilyId, name: string, email: string, 
       after: { parentId: who.id, familyId: String(familyId), familyQboId: fam.customer, status: "invited", addedBy: "staff", ...said, ...owed } }, tx);
     return { ok: true, result: { ok: true, outcome: "added", person, name: who.name, guardianId, parentId: who.id }, queued: await grant(guardianId) };
   });
+}
+
+/**
+ * One guardian of the reviewed import (stage 4's slice M6), as the review sealed it: the name a new person is given, the
+ * address, the person (`new`: nobody held it; or the id of the person who did), the Parent customer to link the row to
+ * (null for none: books with no parent type, flat books, or one the review showed as taken or held), the press's id,
+ * the persons this press has made so far (an address two of its families give is one person, made by the first), and
+ * the staff member the link is confirmed by.
+ */
+export type ImportGuardian = { name: string; email: string; person: "new" | string; parentCustomerId: string | null; pressId: string;
+  madeHere: ReadonlySet<string>; linkedBy: string };
+/**
+ * What became of one: added (a new person, a person this press made for an earlier family, or a person the portal had),
+ * with whether a welcome is now owed and what became of the link (`linked`; `none`, none sealed; `not_linked`, the link
+ * the review showed can't be made now by Link this guardian's rules); or not added, and why: the roster lock busy past
+ * the wait, the family refusing as an add refuses, the address taken by someone else meanwhile (`taken`), the person
+ * reused no longer holding it (`moved`), the person blocked, the person a guardian of the family already (`already`) or
+ * removed from it meanwhile (`removed`), or a name or address the portal can't take (`invalid`).
+ */
+export type ImportGuardianResult =
+  | { ok: true; person: "new" | "made_here" | "existing"; parentId: string; guardianId: string; welcomeOwed: boolean; link: "linked" | "none" | "not_linked" }
+  | { ok: false; reason: "busy" | "taken" | "moved" | "blocked" | "already" | "removed" | "invalid" | "no_family" | "inactive" | "waiting" | "making" | "changing" | "other_company" };
+
+/** The permission the import's guardian links are audited under: the linking one, as Link this guardian's. */
+const LINKING = "Accounting.Link.ReadWrite";
+
+/**
+ * Adds one guardian of the reviewed import (stage 4's slice M6), after the press's families were made and committed, in
+ * a transaction of its own, by the add's rules where they apply (addGuardian()'s save), so the locks come in
+ * lockedPerson()'s order and never the other way: the parents' settings lock shared, the address lock, the `parent` row
+ * FOR UPDATE, then the roster lock, waited for at most ROSTER_WAIT_MS (`busy` past it, nothing written), held
+ * exclusively when a Parent customer is to be linked (every write of a link holds it so) and shared otherwise. No holder
+ * of the roster lock exclusively waits for a person's lock (a link press, a roster read, a family's create and the change
+ * of company's clear take no person's row or address lock), so taking it exclusively in this place closes no cycle.
+ *
+ * Under the locks: the family refuses as an add does (familyRefusal()); the person must be as the review sealed it (an
+ * address nobody held still held by nobody, or by a person this press made for it; a person reused still holding it and
+ * not blocked), else nothing is written and why is answered. Then, as an add: a new person and their sign-in account
+ * (`parent.create`), the row `invited` (or nothing, `already`, when the person has an open row in the family), a welcome
+ * owed by oweWelcome()'s rule (only while welcomes are on; the worker's welcome holds the set-up link when it sends), and
+ * `parent.access.granted` with `addedBy: "import"`, the press's id, the family's customer and whether a welcome is owed,
+ * under `o.permission` (Roster.Family.ReadWrite). And, where one is sealed, the row's link to its Parent customer by
+ * Link this guardian's rules (linkGuardian(), src/lib/accounting/guardian-links.ts): the customer in the cache, active,
+ * of the parent type, directly under the family's linked customer, named by no link of the company, and neither the
+ * row nor a blocking change of the customer on the queue; `confirmed` by `linkedBy` with the cache's version, audited
+ * `accounting.link.guardian` with the press's id. Nothing is queued and nothing is sent, in any books: unlike an add,
+ * this never calls queueForGuardian() or sendGuardianSaved(). addGuardian() is unchanged.
+ */
+export async function importGuardian(familyId: AppFamilyId, g: ImportGuardian, o: StaffOp, w: Waits = {}): Promise<ImportGuardianResult> {
+  const name = personName(g.name), email = guardianEmail(g.email);
+  if (name === null || email === null || email !== g.email) return { ok: false, reason: "invalid" };
+  return db.transaction(async (tx): Promise<ImportGuardianResult> => {
+    await holdSettings(tx);
+    await lockEmail(tx, email);
+    let [p] = await tx.select().from(parent).where(eq(parent.email, email)).for("update");
+    if (!(await holdRoster(tx, w, g.parentCustomerId !== null))) return { ok: false, reason: "busy" };
+    const fam = await familyRefusal(tx, familyId);
+    if ("refusal" in fam) return { ok: false, reason: fam.refusal };
+    // The person as the review sealed it.
+    if (g.person === "new" ? p !== undefined && !g.madeHere.has(p.id) : p === undefined || p.id !== g.person.toLowerCase()) return { ok: false, reason: g.person === "new" ? "taken" : "moved" };
+    if (p?.blocked) return { ok: false, reason: "blocked" };
+    const [held] = p ? await tx.select(GUARDIAN_COLS).from(guardian).where(and(eq(guardian.parentId, p.id), eq(guardian.familyId, familyId))).for("update") : [];
+    if (held) return { ok: false, reason: held.status === "disabled" ? "removed" : "already" };
+    const person = p === undefined ? "new" as const : g.madeHere.has(p.id) ? "made_here" as const : "existing" as const;
+    if (!p) {
+      [p] = await tx.insert(parent).values({ name, email }).returning();
+      await tx.insert(parentAuthUser).values({ id: randomUUID(), name, email, emailVerified: true, parentId: p!.id });
+      await writeAudit({ actor: o.actor, action: "parent.create", permission: o.permission, targetType: "parent", targetId: p!.id, ip: o.ip,
+        after: { name, email, familyId: String(familyId), import: g.pressId } }, tx);
+    }
+    const who = p!;
+    // Its own SQL, naming only the columns it writes, as the add's.
+    const [made] = Array.from(await tx.execute<{ id: string }>(sql`insert into ${guardian} (${sql.identifier(guardian.id.name)},
+      ${sql.identifier(guardian.familyId.name)}, ${sql.identifier(guardian.parentId.name)}, ${sql.identifier(guardian.status.name)})
+      values (${randomUUID()}, ${String(familyId)}, ${who.id}, 'invited') returning ${sql.identifier(guardian.id.name)}`));
+    const guardianId = made!.id;
+    const owed = await oweWelcome(tx, who);
+    await writeAudit({ actor: o.actor, action: "parent.access.granted", permission: o.permission, targetType: "guardian", targetId: guardianId, ip: o.ip,
+      after: { parentId: who.id, familyId: String(familyId), familyQboId: fam.customer, status: "invited", addedBy: "import", import: g.pressId,
+        person: person === "existing" ? "existing" : "new", welcomeOwed: owed.welcomeOwed === true } }, tx);
+    const link = g.parentCustomerId === null ? "none" as const
+      : (await linkImported(tx, { guardianId, familyId, familyCustomer: fam.customer, customerId: g.parentCustomerId, linkedBy: g.linkedBy, pressId: g.pressId }, o)) ? "linked" as const : "not_linked" as const;
+    return { ok: true, person, parentId: who.id, guardianId, welcomeOwed: owed.welcomeOwed === true, link };
+  });
+}
+
+/**
+ * The import's guardian link (importGuardian()), in its transaction, which holds the roster lock exclusively: by Link
+ * this guardian's rules, made `confirmed` by `linkedBy` with the cache's version and audited `accounting.link.guardian`,
+ * or nothing (false) when any fails now.
+ */
+async function linkImported(tx: Tx, l: { guardianId: string; familyId: AppFamilyId; familyCustomer: string | null; customerId: string; linkedBy: string; pressId: string }, o: StaffOp): Promise<boolean> {
+  const [realmId, shape] = await Promise.all([getRosterSource(tx), getShape(tx)]);
+  if (realmId === null || l.familyCustomer === null || shape === null || shape.kind !== "layered" || shape.parentTypeId === null) return false;
+  const [c] = await tx.select({ active: qboCustomer.active, typeQboId: qboCustomer.typeQboId, parentQboId: qboCustomer.parentQboId, syncToken: qboCustomer.syncToken })
+    .from(qboCustomer).where(eq(qboCustomer.qboId, l.customerId));
+  if (!c || !c.active || c.typeQboId !== shape.parentTypeId || c.parentQboId !== l.familyCustomer) return false;
+  // No link of the company names it (a guardian row's, open or closed, a student's or a family's: guardianCustomerLinked() and more).
+  const named = await tx.select({ id: accountingLink.id }).from(accountingLink)
+    .where(and(eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId), eq(accountingLink.customerId, l.customerId))).limit(1);
+  if (named.length > 0 || (await guardianCustomerLinked(tx, realmId, l.customerId, l.guardianId))) return false;
+  const open = and(inArray(writeQueue.state, ["waiting", "stuck", "refused"]), ofRosterCompany);
+  const waiting = await tx.select({ id: writeQueue.id }).from(writeQueue)
+    .where(and(open, or(sql`${writeQueue.request}->>'guardianId' = ${l.guardianId}`, and(blocksOthers, eq(writeQueue.targetQboId, l.customerId))))).limit(1);
+  if (waiting.length > 0 || !(await recordSendingFree(tx, l.guardianId))) return false;
+  const [link] = await tx.insert(accountingLink).values({ system: QUICKBOOKS, realmId, customerId: l.customerId, guardianId: l.guardianId, origin: "confirmed", linkedBy: l.linkedBy,
+    syncedToken: c.syncToken, syncedAt: new Date() }).returning({ id: accountingLink.id });
+  await writeAudit({ actor: o.actor, action: "accounting.link.guardian", permission: LINKING, ip: o.ip, targetType: "guardian", targetId: l.guardianId,
+    after: { guardianId: l.guardianId, familyId: String(l.familyId), customerQboId: l.customerId, realmId, chosen: "import", linkId: link!.id, import: l.pressId } }, tx);
+  return true;
 }
 
 /**
