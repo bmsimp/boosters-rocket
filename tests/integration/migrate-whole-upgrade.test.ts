@@ -220,8 +220,13 @@ describe("the whole upgrade from the release at 0022, in one run of the migrator
     });
 
     it("gives each guardian row its family, and carries each session and the pending email change over to it (0037, 0038)", async () => {
-      const guardians = await q((pg) => pg.unsafe(`SELECT t.family_qbo_id, ${customerOf("t.family_id", "family")} AS family FROM guardian t ORDER BY t.family_qbo_id COLLATE "C"`));
-      expect(guardians.map((g) => [g.family_qbo_id, g.family])).toEqual([["F1", "F1"], ["F2", "F2"]]);
+      // Each row's family through `family_id` and that record's link, and the record its sign-in came from through its own
+      // membership link: the row holds no copy of either since 0049.
+      const guardians = await q((pg) => pg.unsafe(`SELECT t.id, ${customerOf("t.family_id", "family")} AS family,
+        (SELECT l.customer_id FROM accounting_link l WHERE l.guardian_id = t.id AND l.system = 'quickbooks' AND l.realm_id = '${REALM}') AS own FROM guardian t`));
+      expect(guardians).toHaveLength(2);
+      expect(guardians.find((g) => g.id === ids["guardian-F1"])).toMatchObject({ family: "F1", own: "P1" });
+      expect(guardians.find((g) => g.id === ids["guardian-F2"])).toMatchObject({ family: "F2", own: "P2" });
       // Each session names the app's record of the family it chose, the one its person's row there names.
       const sessions = await q((pg) => pg.unsafe(`SELECT t.id, ${customerOf("t.family_id", "family")} AS family FROM parent_auth_session t ORDER BY t.id COLLATE "C"`));
       expect(sessions.map((s) => [s.id, s.family])).toEqual([[`session-${ASH}`, "F1"], [`session-${BIRCH}`, "F2"]].sort((a, b) => (a[0]! < b[0]! ? -1 : 1)));
@@ -248,6 +253,16 @@ describe("the whole upgrade from the release at 0022, in one run of the migrator
         rowsOfFamiliesUnlinked: 0, rowsWithASourceAndNoCompany: 0 }]);
       const links = await q((pg) => pg`SELECT customer_id FROM accounting_link WHERE guardian_id IS NOT NULL ORDER BY customer_id COLLATE "C"`);
       expect(links.map((l) => l.customer_id)).toEqual(["P1", "P2"]);
+    });
+
+    it("drops the guardian rows' old copies and their two indexes, counting what went, every row kept with its family (0049)", async () => {
+      const rows = await q((pg) => pg`SELECT after FROM audit_log WHERE action = 'parents.guardian_columns.dropped'`);
+      expect(rows.map((r) => r.after)).toEqual([{ cause: "migration 0049_guardian_columns_dropped", rowsWithAFamilyCopy: 2, rowsWithASource: 2, previousCompanyRowsWithNoFamily: 0 }]);
+      expect(await q((pg) => pg`SELECT column_name FROM information_schema.columns WHERE table_name = 'guardian' AND column_name IN ('family_qbo_id', 'source_qbo_id')`)).toHaveLength(0);
+      const indexes = (await q((pg) => pg`SELECT indexname FROM pg_indexes WHERE tablename = 'guardian'`)).map((r) => r.indexname as string);
+      expect(indexes).not.toContain("guardian_family_parent_uq");
+      expect(indexes).not.toContain("guardian_family_ix");
+      expect(await q((pg) => pg`SELECT count(*)::int AS n FROM guardian WHERE family_id IS NULL`)).toEqual([{ n: 0 }]);
     });
 
     it("re-keys the season: the chosen list, the ticks, the waiver with its reason, and the reminder claim", async () => {
@@ -352,6 +367,10 @@ describe("the whole upgrade from the release at 0022, in one run of the migrator
       expect(kept).toEqual({ held: 1, matched: 1, changes: 1 });
       // Nor did 0048: no audit row of its fill.
       expect(await q((pg) => pg`SELECT id FROM audit_log WHERE action = 'parents.guardian_links.filled'`)).toEqual([]);
+      // Nor 0049: no audit row of its drop, and each guardian row holds its copies as the release wrote them.
+      expect(await q((pg) => pg`SELECT id FROM audit_log WHERE action = 'parents.guardian_columns.dropped'`)).toEqual([]);
+      expect((await q((pg) => pg`SELECT family_qbo_id, source_qbo_id FROM guardian ORDER BY family_qbo_id COLLATE "C"`)).map((g) => [g.family_qbo_id, g.source_qbo_id]))
+        .toEqual([["F1", "P1"], ["F2", "P2"]]);
       const columns = await q((pg) => pg`SELECT table_name, column_name FROM information_schema.columns
         WHERE table_schema = 'public' AND (column_name::text IN ('family_id', 'student_id') OR (table_name::text, column_name::text) IN
           (('requirement_progress', 'subject_qbo_id'), ('volunteer_signup', 'family_qbo_id'), ('signature_request', 'family_qbo_id'), ('buyout', 'family_qbo_id'), ('family_money', 'family_qbo_id')))`);

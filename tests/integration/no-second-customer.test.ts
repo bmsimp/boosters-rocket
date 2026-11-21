@@ -360,7 +360,7 @@ describe("a guardian's Parent customer: none made beside the one their row was l
     staff = asOp(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     // Bea, a guardian of the Riveras removed before the unlink, whose row was linked to her Parent customer 14 under 10.
     const bea = await seedParent({ name: "Bea Rivera", email: "bea@example.com" });
-    const [row] = await db.insert(guardian).values({ parentId: bea.id, familyQboId: "10", familyId: rivera, status: "disabled", disabledReason: "removed", statusBeforeDisable: "invited" }).returning();
+    const [row] = await db.insert(guardian).values({ parentId: bea.id, familyId: rivera, status: "disabled", disabledReason: "removed", statusBeforeDisable: "invited" }).returning();
     beaRow = row!.id;
     await db.insert(accountingLink).values({ system: QUICKBOOKS, realmId: REALM, customerId: "14", guardianId: beaRow, origin: "confirmed", linkedBy: linker.id });
     await unlinkThroughThePress(rivera, linker);

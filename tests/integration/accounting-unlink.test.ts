@@ -9,7 +9,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 
-import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
+import { asc, eq, inArray, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, accountingLinkEnded, auditLog, family, familyMoney, guardian, qboConnection, setting, student, writeQueue, type RosterWrite } from "@/lib/db/schema";
 import type { AppFamilyId } from "@/lib/families/ids";
@@ -36,8 +36,8 @@ import { takeInDone } from "../helpers/contact";
 /**
  * Unlink from the books (stage 4's slice M3b of the app-owned families spec; section 4, "Every link, unlink, import and
  * alignment is audited"; open question 13; src/lib/accounting/link-writes.ts, unlinkFamily()): a linked family's link,
- * its student records' links and its guardian rows' links move to accounting_link_ended as they were, its rows'
- * family_qbo_id is cleared and its stored figures forgotten, sending nothing; and a relink is an unlink, then a link as
+ * its student records' links and its guardian rows' links move to accounting_link_ended as they were, and its stored
+ * figures are forgotten, sending nothing and touching no guardian row; and a relink is an unlink, then a link as
  * Confirm or Pick a different customer makes it, restoring nothing. The company is fznCompany()'s
  * (tests/helpers/qbo-stub.ts): Rivera Family 10 with Ana Rivera 11 (Parent) and Leo Rivera 12 (Student), Chen Family
  * 20 with Mei Chen 21 (Parent). Every helper that runs the whole import (syncAppRecords()) is called before an unlink,
@@ -99,15 +99,12 @@ async function holdLock(first: number, id: string) {
   return async () => { release(); await holder; };
 }
 
-let rivera: AppFamilyId, chen: AppFamilyId;
+let rivera: AppFamilyId, chen: AppFamilyId, anaRowId: string;
 beforeEach(async () => {
   await resetDb(); stub.reset();
   linker = await staffWith("linker@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
   tag = await connectRoster(stub);
-  const { row } = await seedAnaRivera();
-  // Ana's row as one made before stage 3's slice 12b1 holds it: with its old copies of the customers, which nothing reads
-  // now and the unlink still clears (family_qbo_id) or leaves (source_qbo_id) until slice 12b2 drops them.
-  await db.update(guardian).set({ familyQboId: "10", sourceQboId: "11" }).where(eq(guardian.id, row.id));
+  anaRowId = (await seedAnaRivera()).row.id;
   rivera = await recordOfCustomer("10", "family");
   chen = await recordOfCustomer("20", "family");
 });
@@ -150,7 +147,7 @@ describe("an unlink", () => {
     await db.insert(accountingLink).values({ system: "quickbooks", realmId: REALM, customerId: "13", studentId: oldLeo!.id, origin: "carried_over" });
     // A removed guardian of the Riveras, with a link of their own.
     const bea = await seedParent({ name: "Bea Rivera", email: "bea@example.com" });
-    const [beaRow] = await db.insert(guardian).values({ parentId: bea.id, familyQboId: "10", familyId: rivera, status: "disabled", disabledReason: "removed", statusBeforeDisable: "invited", sourceQboId: "14" }).returning();
+    const [beaRow] = await db.insert(guardian).values({ parentId: bea.id, familyId: rivera, status: "disabled", disabledReason: "removed", statusBeforeDisable: "invited" }).returning();
     await db.insert(accountingLink).values({ system: "quickbooks", realmId: REALM, customerId: "14", guardianId: beaRow!.id, origin: "carried_over" });
     // A student record of the Chens linked to a customer under the Riveras' customer: another family's, never touched.
     const [chenKid] = await db.insert(student).values({ familyId: chen, name: "Kim Chen", active: true }).returning();
@@ -159,7 +156,8 @@ describe("an unlink", () => {
     const before = await linksOfFamily(rivera);
     expect(before).toHaveLength(5); // the family, Leo, Old Leo, Ana's row, Bea's row
     const chenBefore = await linksOfFamily(chen);
-    const anaRow = (await db.select().from(guardian).where(and(eq(guardian.familyId, rivera), eq(guardian.sourceQboId, "11"))))[0]!;
+    const rowsBefore = await db.select().from(guardian).where(eq(guardian.familyId, rivera)).orderBy(asc(guardian.id));
+    expect(rowsBefore.map((g) => g.id).sort()).toEqual([anaRowId, beaRow!.id].sort());
     stub.calls.length = 0;
     const pressedAt = new Date();
 
@@ -186,11 +184,8 @@ describe("an unlink", () => {
     // Another family's student link, under the same customer, is as it was; and so is every Chen link.
     expect(await db.select().from(accountingLink).where(eq(accountingLink.id, chenKidLink!.id))).toEqual([chenKidLink]);
     expect(await linksOfFamily(chen)).toEqual(chenBefore);
-    // The rows' customer cleared, their source kept, nothing else of them changed.
-    const rows = await db.select().from(guardian).where(eq(guardian.familyId, rivera));
-    expect(rows.map((g) => g.familyQboId)).toEqual([null, null]);
-    expect(rows.find((g) => g.id === anaRow.id)).toMatchObject({ status: anaRow.status, sourceQboId: "11", parentId: anaRow.parentId });
-    expect(rows.find((g) => g.id === beaRow!.id)).toMatchObject({ status: "disabled", sourceQboId: "14" });
+    // The guardian rows are exactly as they were: an unlink touches none (stage 3's slice 12b2).
+    expect(await db.select().from(guardian).where(eq(guardian.familyId, rivera)).orderBy(asc(guardian.id))).toEqual(rowsBefore);
     expect(await db.select().from(familyMoney).where(eq(familyMoney.familyId, rivera))).toEqual([]);
     // The records stand as they were.
     expect(await db.select().from(family).where(eq(family.id, rivera))).toMatchObject([{ active: true, name: "Rivera Family" }]);
@@ -202,7 +197,8 @@ describe("an unlink", () => {
     expect(audit!.before).toMatchObject({ link: { id: familyLink.id, customerQboId: "10", realmId: REALM, origin: "carried_over", linkedBy: null } });
     expect((audit!.before as { studentLinks: unknown[] }).studentLinks).toHaveLength(2);
     expect((audit!.before as { guardianLinks: unknown[] }).guardianLinks).toHaveLength(2);
-    expect(audit!.after).toMatchObject({ familyId: String(rivera), customerQboId: "10", realmId: REALM, guardianLinksEnded: 2, guardianRowsCleared: 2, moneyForgotten: true, paidBuyoutsKept: 0 });
+    expect(audit!.after).toMatchObject({ familyId: String(rivera), customerQboId: "10", realmId: REALM, guardianLinksEnded: 2, moneyForgotten: true, paidBuyoutsKept: 0 });
+    expect(audit!.after).not.toHaveProperty("guardianRowsCleared");
     expect((audit!.after as { studentLinksEnded: { studentId: string }[] }).studentLinksEnded.map((s) => s.studentId).sort()).toEqual([String(leo), String(oldLeo!.id)].sort());
 
     // The row now reads as a family with no link: Ana's sign-in address is on the Parent customer under 10 again.
@@ -449,12 +445,11 @@ describe("a relink: an unlink, then a link as Confirm or Pick a different custom
     const [leoLink] = await db.select().from(accountingLink).where(eq(accountingLink.studentId, leo));
     expect(leoLink).toMatchObject({ customerId: "12", origin: "confirmed" });
     // Nothing restored: Ana's row is linked again to Ana Rivera 11 because its email field holds her sign-in address
-    // (slice M3c2's pairing, a new link, not the ended one), no row's customer, no money row; the history kept.
+    // (slice M3c2's pairing, a new link, not the ended one), no money row; the history kept.
     const anaRow = (await db.select().from(guardian).where(eq(guardian.familyId, rivera)))[0]!;
     const guardianLinks = await db.select().from(accountingLink).where(inArray(accountingLink.guardianId, (await db.select().from(guardian)).map((g) => g.id)));
     expect(guardianLinks).toEqual([expect.objectContaining({ guardianId: anaRow.id, customerId: "11", origin: "confirmed", linkedBy: linker.id })]);
     expect(before.map((l) => l.id)).not.toContain(guardianLinks[0]!.id);
-    expect((await db.select().from(guardian).where(eq(guardian.familyId, rivera))).map((g) => g.familyQboId)).toEqual([null]);
     expect(await db.select().from(familyMoney).where(eq(familyMoney.familyId, rivera))).toEqual([]);
     expect((await db.select().from(accountingLinkEnded)).map((e) => e.id).sort()).toEqual(before.map((l) => l.id).sort());
   });
@@ -462,10 +457,10 @@ describe("a relink: an unlink, then a link as Confirm or Pick a different custom
   it("to another customer, then that customer's turn for another family; a removed guardian reinstated after the unlink and after the relink; a former guardian added to the other family", async () => {
     await readAgain(qc("70", "Patel Family", "1"));
     const staff = asOp(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
-    // Two removed guardians of the Riveras, as a removal leaves them (named under the family's customer).
+    // Two removed guardians of the Riveras, as a removal leaves them.
     const bea = await seedParent({ name: "Bea Rivera", email: "bea@example.com" });
     const cal = await seedParent({ name: "Cal Rivera", email: "cal@example.com" });
-    const removed = (parentId: string) => db.insert(guardian).values({ parentId, familyQboId: "10", familyId: rivera, status: "disabled", disabledReason: "removed", statusBeforeDisable: "invited" }).returning();
+    const removed = (parentId: string) => db.insert(guardian).values({ parentId, familyId: rivera, status: "disabled", disabledReason: "removed", statusBeforeDisable: "invited" }).returning();
     const [beaRow] = await removed(bea.id);
     const [calRow] = await removed(cal.id);
     expect(await unlinkRow("Rivera Family")).toMatchObject({ ok: true });
@@ -487,14 +482,14 @@ describe("a relink: an unlink, then a link as Confirm or Pick a different custom
     const birchOffer = (birchStep as Extract<typeof birchStep, { ok: true }>).offer;
     expect(await linkFamilyToCustomer({ familyId: String(birch), customerId: "10", chosen: birchOffer.chosen, stamp: birchOffer.stamp }, tag, linkOp())).toMatchObject({ ok: true });
     // Ana, a guardian of the Riveras, added to Birch: a new row of Birch's, never her row of the Riveras.
-    const ana = (await db.select().from(guardian).where(and(eq(guardian.familyId, rivera), eq(guardian.sourceQboId, "11"))))[0]!;
+    const ana = (await db.select().from(guardian).where(eq(guardian.id, anaRowId)))[0]!;
     const added = await addGuardian(birch, { name: "Ana Rivera", email: "ana@example.com", samePerson: ana.parentId }, staff);
     expect(added).toMatchObject({ ok: true });
     const anaRows = await db.select().from(guardian).where(eq(guardian.parentId, ana.parentId));
     expect(anaRows).toHaveLength(2);
-    expect(anaRows.find((g) => g.id === ana.id)).toMatchObject({ familyId: rivera, familyQboId: null, status: ana.status });
-    // The new row writes neither old copy (stage 3's slice 12b1): its family is its record, linked to customer 10.
-    expect(anaRows.find((g) => g.id !== ana.id)).toMatchObject({ familyId: birch, familyQboId: null, sourceQboId: null });
+    expect(anaRows.find((g) => g.id === ana.id)).toMatchObject({ familyId: rivera, status: ana.status });
+    // The new row's family is its record, linked to customer 10.
+    expect(anaRows.find((g) => g.id !== ana.id)).toMatchObject({ familyId: birch });
   });
 
   it("a swap of two families' customers is four presses: unlink both, then link each to the other's", async () => {

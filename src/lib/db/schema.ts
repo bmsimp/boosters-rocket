@@ -165,37 +165,29 @@ export const student = pgTable("student", {
 /**
  * "This person is a guardian in this family." Name, email and phone live on the person (`parent`). A row stands on its
  * family record (`family_id`) and its own link (`accounting_link.guardian_id`), and is found by them alone; a person is
- * in a family record at most once (`guardian_family_id_parent_uq`). `family_qbo_id` and `source_qbo_id` are old copies
- * nothing reads since stage 3's slice 12b1: a row is read through GUARDIAN_COLS (src/lib/parents/sessions.ts), which
- * leaves them out, and made by SQL that doesn't name them, so the build still reads and makes rows once they are gone;
- * only an unlink's clear of `family_qbo_id` (below) still names them (a change of company's clear keeps every row as it
- * is since stage 4's slice M7a). Migration
- * 0048 made a link of each `source_qbo_id` the import had left unlinked, for a row whose family's link names its
- * `family_qbo_id` and that had no link ended; its header says why each row it skips loses nothing. No row made since
- * writes them, only an unlink still clears `family_qbo_id` (stage 4's slice M3b), and slice 12b2 drops them with the
- * two indexes on `family_qbo_id`.
+ * in a family record at most once (`guardian_family_id_parent_uq`, partial: a previous company's row has no family).
+ * Every row has its family but one a change of company closed before stage 4's slice M7a (`company_changed`), which
+ * nothing makes now: a change of company keeps every row with its family and ends only the links
+ * (`guardian_family_unless_company_changed`). The row's old copies of its customers (`family_qbo_id`, `source_qbo_id`)
+ * went in stage 3's slice 12b2 (migration 0049), after 0048 had made a link of each source the import left unlinked.
  */
 export const guardian = pgTable("guardian", {
   id: uuid("id").primaryKey().defaultRandom(),
-  familyQboId: text("family_qbo_id"),
-  // The same family as the app's own record: written by whoever makes or reinstates the row (src/lib/parents/guardians.ts),
-  // never by a roster read (stage 3's slice 9c). Null for a row a change of company closed before stage 4's slice M7a
-  // (its QuickBooks ids are another company's; a change of company touches no guardian row now), and for a row made before its family had a record that nothing has given one since.
+  // The family, the app's own record: written by whoever makes the row (src/lib/parents/guardians.ts), never by a roster
+  // read (stage 3's slice 9c). Null only for a row a change of company closed before stage 4's slice M7a, which nothing makes now.
   familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
   parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "restrict" }),
   isPrimary: boolean("is_primary").notNull().default(false),
   status: text("status", { enum: ["invited", "active", "disabled"] }).notNull().default("invited"),
-  sourceQboId: text("source_qbo_id"),                  // read by nothing since slice 12b1 (its record is the row's own link; GUARDIAN_COLS leaves it out); dropped in 12b2
   disabledReason: text("disabled_reason", { enum: DISABLED_REASONS }),
   statusBeforeDisable: text("status_before_disable", { enum: ["invited", "active"] }),
   createdAt: created(),
   updatedAt: updated(),
 }, (t) => [
-  uniqueIndex("guardian_family_parent_uq").on(t.familyQboId, t.parentId),
   uniqueIndex("guardian_family_id_parent_uq").on(t.familyId, t.parentId).where(sql`family_id is not null`),
-  index("guardian_family_ix").on(t.familyQboId),
   index("guardian_family_id_ix").on(t.familyId),
   index("guardian_parent_ix").on(t.parentId),
+  check("guardian_family_unless_company_changed", sql`${t.familyId} is not null or ${t.disabledReason} is not distinct from 'company_changed'`),
 ]);
 
 /**
@@ -311,7 +303,7 @@ export const signinCode = pgTable("signin_code", {
  * the person's lock and in the same transaction, as a new sign-in code replaces the old one (signin-codes.ts); an insert
  * alone would fail on `parent_signin_token_one_live_uq`. It goes with the person. The daily clean-up deletes one past its expiry or
  * used. Made by mintSigninLink() and spent by choosePasswordFromLink() since slice SI-2 (src/lib/parents/signin-links.ts,
- * password-set.ts); blocking, sign-ins switched off, the change-of-company clear, a confirmed change of sign-in email
+ * password-set.ts); blocking, sign-ins switched off, a confirmed change of sign-in email
  * and closing a person's last open membership delete the unused ones.
  */
 export const parentSigninToken = pgTable("parent_signin_token", {
@@ -331,7 +323,7 @@ export const parentSigninToken = pgTable("parent_signin_token", {
  * A device remembered as having passed the second step of a sign-in, for a person (the sign-in release): the keyed
  * hash of the token its cookie holds, never the token; renewed by use (`last_used_at`, `expires_at`). It goes with the
  * person. The daily clean-up deletes one past its expiry. Nothing makes one yet (slice SI-3b will); since slice SI-2
- * blocking, sign-ins switched off, the change-of-company clear, a password reset, a confirmed change of sign-in email
+ * blocking, sign-ins switched off, a password reset, a confirmed change of sign-in email
  * and closing a person's last open membership delete them (src/lib/parents/sessions.ts).
  */
 export const parentDevice = pgTable("parent_device", {
@@ -1381,8 +1373,8 @@ export const staffAuthVerification = staffAuth.verification;
 // carries the device's cookie (its path is the door's), so the session's renewal (renewParentSession(),
 // src/lib/parents/sessions.ts), which runs while a page renders, renews the device it names through this; and the
 // sign-in settings mark "This device" by it. Like `strong_at` it is the portal's alone and not a Better Auth additional
-// field. `ON DELETE SET NULL`: forgetting a device, a block, a reset, a password change, the clean-up and the
-// change-of-company clear delete device rows, and the sessions they named go on with none. Null for a session made
+// field. `ON DELETE SET NULL`: forgetting a device, a block, a reset, a password change and the clean-up delete
+// device rows, and the sessions they named go on with none. Null for a session made
 // before SI-5b (nothing tells which device made it), and for one whose device is gone.
 // The column lands on `main` ahead of the sign-in release's code, so migrations keep one order: until that release
 // merges, nothing here writes or reads it.

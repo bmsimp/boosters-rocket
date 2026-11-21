@@ -182,16 +182,19 @@ async function customerOfRecord(familyId: AppFamilyId, realmId: string): Promise
 
 /**
  * A guardian row standing on its own family record and its own link, as the portal holds one (stage 3's slice 12b1): it
- * writes `family_id` itself, never `family_qbo_id` or `source_qbo_id`, and runs no import.
- * - Its family: `familyId` when given (null: a row in no family record); else, for `familyQboId` while the roster names
+ * writes `family_id` itself and runs no import. `familyQboId` and `sourceQboId` are the customers it is seeded by, read
+ * through the links: the row holds no copy of either (migration 0049 dropped them).
+ * - Its family: `familyId` when given; else, for `familyQboId` while the roster names
  *   a company, the family record that customer's link names (recordOfCustomer(), which makes an inactive one with its
  *   link for a customer the import hasn't made yet: an import run once the cache holds the customer makes it active);
  *   while the roster names none, one active unlinked family record per `familyQboId` (rows of one id share it, and the
  *   gate lets their people in). That record does not survive an import run while the roster names no company
  *   (syncAppRecords(), and the cache helpers that run it): it has no link, so the import makes it inactive, the gate
  *   refuses its people and whatAFreshRunWouldChange() is not NO_CHANGES; seed such rows after the last import, or seed
- *   a roster company first. A row a change of company closed (`company_changed`) is in no family, as the clear
- *   leaves one.
+ *   a roster company first. A row a change of company closed (`company_changed`) is in no family, as a clear before
+ *   stage 4's slice M7a left one. Every other row has its family: the database refuses one with none
+ *   (`guardian_family_unless_company_changed`, migration 0049), and so does this, by name, for `familyId: null`. A row
+ *   that doesn't count is seeded in an inactive family record (seedInactiveFamily()), or as a `company_changed` one.
  * - Its own link: with a roster company, a `sourceQboId` that isn't its family's customer is the record its sign-in came
  *   from, and the row gets the `carried_over` membership link to it the import made, with the cache's version of that
  *   customer when the cache holds it. None for a row of a family with no link, as the import made none.
@@ -200,7 +203,10 @@ export async function seedGuardian(o: {
   parentId: string; familyQboId?: string; familyId?: AppFamilyId | null; status?: GuardianStatus; isPrimary?: boolean;
   disabledReason?: DisabledReason | null; statusBeforeDisable?: "invited" | "active" | null; sourceQboId?: string | null;
 }): Promise<GuardianRow> {
-  if (o.familyQboId === undefined && o.familyId === undefined) throw new Error("seedGuardian: give the row's familyQboId, or its familyId (null for none).");
+  if (o.familyQboId === undefined && o.familyId === undefined) throw new Error("seedGuardian: give the row's familyQboId, or its familyId.");
+  if (o.familyId === null && o.disabledReason !== "company_changed") {
+    throw new Error("seedGuardian: a guardian row has a family unless a change of company closed it (the check guardian_family_unless_company_changed). Seed a row that doesn't count in an inactive family record (seedInactiveFamily()), or with disabledReason \"company_changed\".");
+  }
   const realmId = await getRosterSource();
   const familyId: AppFamilyId | null = o.disabledReason === "company_changed" ? null
     : o.familyId !== undefined ? o.familyId
@@ -217,6 +223,12 @@ export async function seedGuardian(o: {
       ...(c ? { syncedToken: c.syncToken, syncedAt: new Date() } : {}) });
   }
   return g!;
+}
+
+/** A family record of the app's own that is inactive and linked to nothing: a row in it doesn't count (the gate refuses it). */
+export async function seedInactiveFamily(): Promise<AppFamilyId> {
+  const [f] = await db.insert(family).values({ name: null, active: false }).returning({ id: family.id });
+  return f!.id;
 }
 
 /**

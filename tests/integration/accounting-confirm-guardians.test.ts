@@ -75,7 +75,7 @@ async function unlinkedFamily(name: string, students: string[] = [], role: "fami
 async function rowIn(familyId: AppFamilyId, name: string, email: string, o: { status?: "invited" | "disabled"; blocked?: boolean } = {}) {
   const p = await seedParent({ name, email, blocked: o.blocked });
   const closed = o.status === "disabled";
-  const [row] = await db.insert(guardian).values({ parentId: p.id, familyId, familyQboId: null, status: o.status ?? "invited",
+  const [row] = await db.insert(guardian).values({ parentId: p.id, familyId, status: o.status ?? "invited",
     disabledReason: closed ? "removed" : null, statusBeforeDisable: closed ? "invited" : null }).returning({ id: guardian.id });
   return { id: row!.id, parentId: p.id };
 }

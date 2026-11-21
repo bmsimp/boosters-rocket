@@ -32,7 +32,7 @@ import { disconnect } from "@/lib/quickbooks/connection";
 import { loadRosterPage } from "@/lib/roster/queries";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { saveShape } from "@/lib/roster/shape";
-import { resetDb, seedStaff, seedParent, seedGuardian } from "../helpers/db";
+import { resetDb, seedStaff, seedParent, seedGuardian, seedInactiveFamily } from "../helpers/db";
 import { startQboStub, seedConnected, fznCompany, FZN_SHAPE, type QboStub } from "../helpers/qbo-stub";
 import { rowNamed } from "../helpers/table";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
@@ -292,17 +292,18 @@ describe("the roster pages", () => {
   });
 
   it("holds back the sign-in rule while the cache names no company, and keeps QuickBooks' own tidy rules", async () => {
-    // No company recorded, so the import makes no family record and the guardian rows are in none (as rows made before
-    // their family had a record): the sign-in rule can't hold a sign-in to anything yet, and waits for a read that
-    // records the company.
+    // No company recorded, so the import makes no family record of the roster's, and the guardian rows are each in an
+    // inactive family record of the app's own with no link: the sign-in rule can't hold a sign-in to anything yet, and
+    // waits for a read that records the company.
     await seedShape();
     await addToCache([fam("10", "Rivera Family"), stu("12", "Maya Rivera", "10"), fam("20", "Gone Family", { active: false }), stu("22", "Gil Gone", "20")]);
     await seedRosterRead();
     const ana = await seedParent({ name: "Ana Rivera" }), gil = await seedParent({ name: "Gail Gone" });
-    const anaRow = await seedGuardian({ parentId: ana.id, familyId: null }), gilRow = await seedGuardian({ parentId: gil.id, familyId: null });
+    const anaIdle = await seedInactiveFamily(), gilIdle = await seedInactiveFamily();
+    const anaRow = await seedGuardian({ parentId: ana.id, familyId: anaIdle }), gilRow = await seedGuardian({ parentId: gil.id, familyId: gilIdle });
     await syncAppRecords();
     const rules = async () => (await loadRosterPage()).attention.map((a) => `${a.rule}:${a.qboId ?? a.name}`);
-    expect((await loadRosterPage()).signIns.map((s) => [s.name, s.familyId, s.customerQboId]).sort()).toEqual([["Ana Rivera", null, null], ["Gail Gone", null, null]]);
+    expect((await loadRosterPage()).signIns.map((s) => [s.name, s.familyId, s.customerQboId]).sort()).toEqual([["Ana Rivera", anaIdle, null], ["Gail Gone", gilIdle, null]]);
     const before = await rules();
     expect(before).toContain("family_no_parent:10");
     expect(before.filter((r) => r.startsWith("signin_unknown"))).toEqual([]);

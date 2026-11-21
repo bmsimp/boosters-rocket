@@ -31,6 +31,16 @@ function migrationsUpTo(last: number): string {
   writeFileSync(journal, JSON.stringify(j));
   return folder;
 }
+/**
+ * Every migration before the one that drops `family_qbo_id` (0049, stage 3's slice 12b2, found by its tag so a renumbering
+ * at a merge still finds it): this names the column and its index, so it stops there.
+ */
+function beforeTheDrop(): string {
+  const j = JSON.parse(readFileSync(path.join("drizzle", "meta", "_journal.json"), "utf8")) as { entries: { idx: number; tag: string }[] };
+  const drop = j.entries.find((e) => e.tag.endsWith("_guardian_columns_dropped"));
+  if (!drop) throw new Error("no migration _guardian_columns_dropped");
+  return migrationsUpTo(drop.idx - 1);
+}
 async function migrateWith(folder: string) {
   const pg = postgres(DB_URL, { max: 1, onnotice: () => {} });
   try { await migrate(drizzle(pg), { migrationsFolder: folder }); } finally { await pg.end(); }
@@ -84,7 +94,7 @@ describe("migration 0040: a guardian row may name no customer, and a person is i
     const [twice] = await q((pg) => pg`INSERT INTO guardian (family_qbo_id, family_id, parent_id, status) VALUES ('F1-old', ${ids.ash!}, ${ids.ashParent!}, 'invited') RETURNING id`);
     const held = await rows();
     const appliedBefore = await applied();
-    const failure = await failureOf(migrateWith(path.resolve("drizzle")));
+    const failure = await failureOf(migrateWith(beforeTheDrop()));
     expect(saidBy(failure)).toMatch(/Migration 0040 stopped: 1 family membership\(s\) are held by more than one guardian row \(one person, two or more rows naming the same family record\)/);
     // It says that a closed row counts too, so closing the extra row from the staff pages is never offered as the way out.
     expect(saidBy(failure)).toMatch(/a closed row counts as much as an open one\. Nothing was changed\. Report it to the portal's maintainers/);
@@ -98,7 +108,7 @@ describe("migration 0040: a guardian row may name no customer, and a person is i
 
   it("changes no row; then a row takes no customer, and a second row of one person in one family record is refused", async () => {
     before = await rows();
-    await migrateWith(path.resolve("drizzle"));
+    await migrateWith(beforeTheDrop());
     expect(await rows()).toEqual(before);
     expect(await nullable()).toBe("YES");
     expect(await indexes()).toEqual(expect.arrayContaining(["guardian_family_parent_uq", "guardian_family_id_parent_uq", "guardian_family_ix", "guardian_family_id_ix", "guardian_parent_ix"]));

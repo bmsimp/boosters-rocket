@@ -6,6 +6,14 @@ the club's families. The portal's own family and student records stand alone: a 
 changes no record or sign-in, follows no student moved in QuickBooks, and a customer renamed, moved, made inactive, added or
 removed there changes nothing in the portal (stage 4 shows such a change as a difference); a staff write still goes to
 QuickBooks first and then changes its own record. The cache still decides whose invoices each family sees.
+**Changed since** (2026-11-20, stage 3 slices 9d to 12b2 of `2026-11-18-app-owned-families-design.md`): some writes
+of the roster pages (§5) change the portal's records first: a family staff add is the portal's own (9d), sent to
+QuickBooks only by someone who may link families; a rename of a linked record, and a student added to a linked family,
+are saved in the portal and then sent, the rename with the link's own QuickBooks version (9e); a student's move is saved
+first too, and sent with the link's version (9f); a linked record's make-inactive (9g) and a guardian's own Parent
+customer's forms still go to QuickBooks first; a customer no family is linked to can be made a family with
+"Create a family from this" (10); a guardian row is the portal's own, found by its family record and its own link, and
+holds no QuickBooks id (12b1, 12b2).
 **Revises:** the v1 design (`2026-11-06-booster-rocket-v1-design.md`), sections 3, 4, 7, 8.1, 8.4 and 14, as
 listed in "Changes to the v1 design" below. It delivers the first half of the roadmap's Plan 2. The second
 half (what a parent sees: balances, open invoices, Pay links) is a separate piece.

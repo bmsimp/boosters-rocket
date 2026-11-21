@@ -67,7 +67,7 @@ async function unlinkedFamily(name: string, students: string[] = []): Promise<Ap
 }
 async function guardianIn(familyId: AppFamilyId, name: string, email: string) {
   const p = await seedParent({ name, email });
-  await db.insert(guardian).values({ parentId: p.id, familyId, familyQboId: null, status: "invited" });
+  await db.insert(guardian).values({ parentId: p.id, familyId, status: "invited" });
 }
 const studentNamed = async (familyId: AppFamilyId, name: string): Promise<AppStudentId> =>
   (await db.select({ id: student.id }).from(student).where(and(eq(student.familyId, familyId), eq(student.name, name))))[0]!.id;
@@ -335,7 +335,7 @@ describe("a list that changed since the page", () => {
     expect((await refreshRoster(WORKER)).ok).toBe(true);
     const families = await db.insert(family).values(Array.from({ length: n }, (_, i) => ({ name: `Bulk ${i}`, active: true }))).returning({ id: family.id, name: family.name });
     const people = await db.insert(parent).values(families.map((_, i) => ({ name: `Bulk Parent ${i}`, email: `bulk${i}@example.com` }))).returning({ id: parent.id, email: parent.email });
-    await db.insert(guardian).values(families.map((f, i) => ({ parentId: people.find((p) => p.email === `bulk${i}@example.com`)!.id, familyId: f.id, familyQboId: null, status: "invited" as const })));
+    await db.insert(guardian).values(families.map((f, i) => ({ parentId: people.find((p) => p.email === `bulk${i}@example.com`)!.id, familyId: f.id, status: "invited" as const })));
     const view = await loadAccountingLinks();
     expect(bulkOf(view, null)).toEqual({ count: n, stamp: null, waiting: 0 });
     // Narrowed by the search, it is offered again.

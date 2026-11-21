@@ -85,9 +85,9 @@ const linkOfRow = async (id: string) => (await db.select().from(accountingLink).
 const pressMei = async (customerId: string, chosen: "suggested" | "picked", o: { stamp?: string; tag?: string } = {}) =>
   linkGuardian({ guardianId: meiRow, customerId, chosen, stamp: o.stamp ?? guardianLinkStamp(meiRow, await chenLinkId(), customerId, chosen) }, o.tag ?? tag, linkOp());
 /** An open guardian row, written directly with no link of its own and nothing queued. */
-async function rowIn(familyId: AppFamilyId, familyQboId: string, name: string, email: string, status: "invited" | "disabled" = "invited") {
+async function rowIn(familyId: AppFamilyId, name: string, email: string, status: "invited" | "disabled" = "invited") {
   const p = await seedParent({ name, email });
-  const [row] = await db.insert(guardian).values({ parentId: p.id, familyId, familyQboId, status, disabledReason: status === "disabled" ? "removed" : null,
+  const [row] = await db.insert(guardian).values({ parentId: p.id, familyId, status, disabledReason: status === "disabled" ? "removed" : null,
     statusBeforeDisable: status === "disabled" ? "invited" : null }).returning({ id: guardian.id });
   return row!.id;
 }
@@ -150,9 +150,10 @@ describe("Link this guardian", () => {
       after: { guardianId: meiRow, familyId: String(chen), customerQboId: "21", realmId: REALM, chosen: "suggested", linkId: link!.id } });
     expect(stub.apiCalls()).toEqual([]);
     expect(await db.select().from(writeQueue)).toEqual([]);
-    // The guardian row is as it was: no column of it is the link's.
+    // The guardian row is as it was: no column of it is the link's (since migration 0049 it has no copy of a customer at all).
     expect((await db.select().from(guardian).where(eq(guardian.id, meiRow)))[0]).toEqual(rowBefore);
-    expect(rowBefore).toMatchObject({ status: "invited", familyId: chen, sourceQboId: null });
+    expect(rowBefore).toMatchObject({ status: "invited", familyId: chen });
+    expect(Object.keys(rowBefore!).filter((k) => /qbo/i.test(k))).toEqual([]);
     // The family's page says it, and the row's opening now offers its Unlink.
     expect((await guardianStandings([{ guardianId: meiRow, familyId: chen, name: "Mei Chen", open: true }])).get(meiRow)).toBe("Linked to their own Parent customer “Mei Chen”.");
     expect(await shown("Chen Family", "Mei Chen")).toMatchObject({ standing: "own", offer: null, unlink: { linkId: link!.id } });
@@ -180,11 +181,11 @@ describe("Link this guardian", () => {
   });
 
   it("offers none where no Parent customer is free, saying why, and where their own record is under another family of theirs", async () => {
-    await linkRowTo(await rowIn(chen, "20", "Kai Chen", "kai@example.com"), "21");
-    await linkRowTo(await rowIn(chen, "20", "Pat Chen", "pat@example.com", "disabled"), "22");
+    await linkRowTo(await rowIn(chen, "Kai Chen", "kai@example.com"), "21");
+    await linkRowTo(await rowIn(chen, "Pat Chen", "pat@example.com", "disabled"), "22");
     expect((await shown("Chen Family", "Mei Chen"))).toMatchObject({ offer: null, noOffer: { why: "none" } });
     // Mei is in the Riveras too, linked there to a Parent customer of her name: that is her own record, and none is offered here.
-    const there = (await db.insert(guardian).values({ parentId: meiParent, familyId: rivera, familyQboId: "10", status: "invited" }).returning({ id: guardian.id }))[0]!.id;
+    const there = (await db.insert(guardian).values({ parentId: meiParent, familyId: rivera, status: "invited" }).returning({ id: guardian.id }))[0]!.id;
     await db.delete(accountingLink).where(eq(accountingLink.guardianId, anaRow));
     await linkRowTo(there, "11");
     // Her record there is named as she is: 11 renamed in the books, then read.
@@ -204,10 +205,10 @@ describe("what Link this guardian refuses, keeping nothing", () => {
   };
 
   it("a customer another guardian row is linked to, open or closed, of this family; one under another family; a student's; an inactive one", async () => {
-    await linkRowTo(await rowIn(chen, "20", "Kai Chen", "kai@example.com"), "22");
+    await linkRowTo(await rowIn(chen, "Kai Chen", "kai@example.com"), "22");
     await refused(() => pressMei("22", "picked"), GUARDIAN_LINK_COPY.notOffered);
     await db.delete(accountingLink).where(and(eq(accountingLink.customerId, "22"), sql`${accountingLink.guardianId} is not null`));
-    await linkRowTo(await rowIn(chen, "20", "Pat Chen", "pat@example.com", "disabled"), "22");
+    await linkRowTo(await rowIn(chen, "Pat Chen", "pat@example.com", "disabled"), "22");
     await refused(() => pressMei("22", "picked"), GUARDIAN_LINK_COPY.notOffered);
     await refused(() => pressMei("13", "picked"), GUARDIAN_LINK_COPY.notOffered);
     await refused(() => pressMei("24", "picked"), GUARDIAN_LINK_COPY.notOffered);
@@ -336,7 +337,7 @@ describe("Unlink this guardian", () => {
   });
 
   it("splits a shared customer: one of two open rows unlinked, the other then their own", async () => {
-    const rafa = await rowIn(rivera, "10", "Rafa Rivera", "rafa@example.com");
+    const rafa = await rowIn(rivera, "Rafa Rivera", "rafa@example.com");
     await linkRowTo(rafa, "11");
     const view = await loadAccountingLinks();
     expect(guardianIn(view, "Rivera Family", "Ana Rivera")).toMatchObject({ standing: "shared", sharedWith: [] });
@@ -409,9 +410,9 @@ describe("Unlink this guardian", () => {
   });
 
   it("ends a link to a customer the books' copy doesn't hold, and one to a customer elsewhere in the books", async () => {
-    const gone = await rowIn(chen, "20", "Gus Chen", "gus@example.com");
+    const gone = await rowIn(chen, "Gus Chen", "gus@example.com");
     await linkRowTo(gone, "999");
-    const elsewhere = await rowIn(chen, "20", "Eli Chen", "eli@example.com");
+    const elsewhere = await rowIn(chen, "Eli Chen", "eli@example.com");
     await linkRowTo(elsewhere, "24");
     const view = await loadAccountingLinks();
     const gus = guardianIn(view, "Chen Family", "Gus Chen"), eli = guardianIn(view, "Chen Family", "Eli Chen");
@@ -461,7 +462,7 @@ describe("the family's page points at Accounting links only for a reader who may
   const sectionOf = (html: string, id: string) => { const at = html.indexOf(`id="${id}"`); return html.slice(at, html.indexOf("</section>", at)); };
   const text = (html: string) => html.replace(/<[^>]+>/g, "").replaceAll("&#x27;", "'").replaceAll("&quot;", '"').replaceAll("&amp;", "&");
   it("a Parent customer two of the family's guardians share: how it is sorted out, with a link or in words", async () => {
-    await linkRowTo(await rowIn(rivera, "10", "Rafa Rivera", "rafa@example.com"), "11");
+    await linkRowTo(await rowIn(rivera, "Rafa Rivera", "rafa@example.com"), "11");
     const sortedOut = "unlink from it each guardian whose it isn't; once one guardian of this family alone is linked to it, it is theirs, and if none of this family's is left on it, one who isn't linked to a customer can be linked to it there";
     asStaff(await staffWith("both@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Accounting.Link.ReadWrite"]));
     let html = await renderPage(RosterEntryPage, { params: { id: String(rivera) } });
@@ -483,7 +484,7 @@ describe("the family's page points at Accounting links only for a reader who may
 
 describe("ids from the form are untrusted", () => {
   it("one family's guardian with another's stamp or customer, and one row's link id for another row, are refused", async () => {
-    const luz = await rowIn(rivera, "10", "Luz Rivera", "luz@example.com");
+    const luz = await rowIn(rivera, "Luz Rivera", "luz@example.com");
     const view = await loadAccountingLinks();
     const mei = guardianIn(view, "Chen Family", "Mei Chen"), luzShown = guardianIn(view, "Rivera Family", "Luz Rivera"), ana = guardianIn(view, "Rivera Family", "Ana Rivera");
     expect(luzShown.offer).toMatchObject({ suggested: "13" });
