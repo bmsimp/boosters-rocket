@@ -187,7 +187,10 @@ async function customerOfRecord(familyId: AppFamilyId, realmId: string): Promise
  *   a company, the family record that customer's link names (recordOfCustomer(), which makes an inactive one with its
  *   link for a customer the import hasn't made yet: an import run once the cache holds the customer makes it active);
  *   while the roster names none, one active unlinked family record per `familyQboId` (rows of one id share it, and the
- *   gate lets their people in). A row a change of company closed (`company_changed`) is in no family, as the clear
+ *   gate lets their people in). That record does not survive an import run while the roster names no company
+ *   (syncAppRecords(), and the cache helpers that run it): it has no link, so the import makes it inactive, the gate
+ *   refuses its people and whatAFreshRunWouldChange() is not NO_CHANGES; seed such rows after the last import, or seed
+ *   a roster company first. A row a change of company closed (`company_changed`) is in no family, as the clear
  *   leaves one.
  * - Its own link: with a roster company, a `sourceQboId` that isn't its family's customer is the record its sign-in came
  *   from, and the row gets the `carried_over` membership link to it the import made, with the cache's version of that
