@@ -940,7 +940,7 @@ describe("what the portal writes to QuickBooks, and who may send each", () => {
       const cases = [
         intoSendName(`  await sendWrite({ op: "rename", role: "family", qboId: "10", syncToken: "0", name: "x", was: "y" }, "", {});`),
         intoSendName(`  await qboRenameCustomer("10", "0", "x", {} as never);`),
-        writerSource.replace("const t = await tryDeactivate(p.write,", "const t = await (async (..._a: unknown[]) => ({}) as never)(p.write,"),
+        writerSource.replaceAll("tryDeactivate(", "tryDeactivateElsewhere("),
         `export function portalValueStamp(): void {}\n${writerSource.replace("export function portalValueStamp(", "function portalValueStampMoved(")}`,
       ];
       for (const text of cases) {
