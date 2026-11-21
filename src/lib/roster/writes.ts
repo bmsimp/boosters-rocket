@@ -1233,21 +1233,55 @@ const byDepthThenName = (a: Covered, b: Covered) => b.depth - a.depth || a.name.
 
 /** Every active customer the cache holds under the family, at any depth (an inactive one's own sub-customers too), deepest first, then by name. */
 function activeUnder(cache: (Cust & { syncToken: string })[], familyQboId: string): Covered[] {
-  const children = new Map<string, (Cust & { syncToken: string })[]>();
+  return coverUnder(cache, familyQboId).map(({ customer: c, depth }) => ({ qboId: c.qboId, name: c.displayName, syncToken: c.syncToken, depth })).sort(byDepthThenName);
+}
+/**
+ * The walk activeUnder() makes, over any rows of the cache (stage 4's slice M5b): every active customer under the
+ * family at any depth (an inactive one's own sub-customers too), with its depth, deepest first, then by name and id.
+ * Pure, so the accounting links screen works out whom a family's make-inactive covers from the cache rows its view
+ * holds already, by the family action's own rule, with no query of its own.
+ */
+export function coverUnder<C extends Pick<Cust, "qboId" | "displayName" | "active" | "parentQboId">>(cache: readonly C[], familyQboId: string): { customer: C; depth: number }[] {
+  const children = new Map<string, C[]>();
   for (const c of cache) if (c.parentQboId) children.set(c.parentQboId, [...(children.get(c.parentQboId) ?? []), c]);
-  const out: Covered[] = [], seen = new Set<string>([familyQboId]);
+  const out: { customer: C; depth: number }[] = [], seen = new Set<string>([familyQboId]);
   let level = children.get(familyQboId) ?? [], depth = 1;
   while (level.length) {
-    const next: (Cust & { syncToken: string })[] = [];
+    const next: C[] = [];
     for (const c of level) {
       if (seen.has(c.qboId)) continue; // a loop in the cache is walked once
       seen.add(c.qboId);
-      if (c.active) out.push({ qboId: c.qboId, name: c.displayName, syncToken: c.syncToken, depth });
+      if (c.active) out.push({ customer: c, depth });
       next.push(...(children.get(c.qboId) ?? []));
     }
     level = next; depth++;
   }
-  return out.sort(byDepthThenName);
+  return out.sort((a, b) => b.depth - a.depth || a.customer.displayName.localeCompare(b.customer.displayName, "en", { sensitivity: "base" })
+    || a.customer.qboId.localeCompare(b.customer.qboId, "en", { numeric: true }));
+}
+/**
+ * What a layered family's make-inactive sent from its difference seals (stage 4's slice M5b, sendStamp()'s `inactive`
+ * value): the family's customer, then the ids of everyone active under it, sorted. The screen's offer and the press's
+ * check both build it here, so someone added under the family, or made active or inactive there, since the page fails it.
+ */
+export const familySendSeal = (familyQboId: string, underIds: readonly string[]): string[] => [familyQboId, ...[...underIds].sort()];
+/**
+ * Said, by the screen and by the press, when a family's inactive status isn't sent from its difference because the
+ * portal's value of someone it would make inactive in the books isn't inactive (slice M5b): a student record of the
+ * family active in the portal (`own`), or a customer under it linked to an active student record of another family
+ * (`elsewhere`). Names in the portal's words.
+ */
+export function familySendStudentsWords(own: readonly string[], elsewhere: readonly string[]): string {
+  const parts: string[] = [];
+  if (own.length) {
+    parts.push(`${listed([...own])} ${own.length === 1 ? "is" : "are"} active in the portal, and QuickBooks would make them inactive with the family, so its inactive status isn't sent.`
+      + " Make them inactive on the family's page first, or take the books' value instead.");
+  }
+  if (elsewhere.length) {
+    parts.push(`QuickBooks has ${listed([...elsewhere])} under this family, and the portal has them active in another family, so the family's inactive status isn't sent: QuickBooks would make them inactive with it.`
+      + ` Send ${elsewhere.length === 1 ? "their" : "each one's"} family to the books first, from the difference on that family's row.`);
+  }
+  return parts.join(" ");
 }
 
 /**
@@ -1285,6 +1319,24 @@ const coverStampHolds = (familyId: string, qboIds: readonly string[], stamp: str
  */
 type FamilyStep = { write: Extract<RosterWrite, { op: "deactivate" }>; name: string; filed: Filed };
 type PreparedFamily = { ok: true; realmId: string; familyQboId: string; familyName: string; steps: FamilyStep[] } | { ok: false; result: WriteResult };
+/** Who asked for the family action (stage 4's slice M5b): the family's page, or its difference on the accounting links screen (prepareFamily()). */
+type FamilyFrom = "page" | "difference";
+/**
+ * How the family action ran, as its one `roster.family.deactivate` row says it, given to a caller that asks (the
+ * difference's send, for its own row): the outcome and code, whom QuickBooks took the make-inactive of (`made`), whose
+ * answer was lost (`maybe`), who it showed inactive already, everyone it covered, and the family's customer.
+ */
+export type FamilyRan = { outcome: "done" | "stopped" | "refused"; code: string | null; made: string[]; maybe: string[]; alreadyInactive: string[]; covered: string[]; familyQboId: string };
+/**
+ * Who asked for the family action and, for the difference, the words its answers use where the page's name the page's
+ * own press, and where its run is told (`report`). Nothing else differs.
+ */
+type FamilyAsk = { from: "page" } | { from: "difference"; report: (ran: FamilyRan) => void };
+/** The press a stopped family action says to press again, and what it says of the family still active, by who asked. */
+const FAMILY_AGAIN: Record<FamilyFrom, { press: (name: string) => string; still: string }> = {
+  page: { press: (name) => `“Make ${name} inactive”`, still: "is still active." },
+  difference: { press: () => "“Send the app's to QuickBooks” on its row on Accounting links", still: "is still active in QuickBooks." },
+};
 
 /**
  * Everything checked before anything is sent, under the roster lock, as prepare() checks one write: the page was shown
@@ -1295,8 +1347,15 @@ type PreparedFamily = { ok: true; realmId: string; familyQboId: string; familyNa
  * again and confirm it). A family QuickBooks has inactive already is refused only when its record is inactive too:
  * otherwise the action makes the record match, sending nothing for the family. Each step carries its own link's
  * version where it is a student of this family's record, else none (FamilyStep).
+ *
+ * `from` says who asked, and so how the record must stand and how the cover is sealed (stage 4's slice M5b): the
+ * family's page (`page`), as above; or its difference on the accounting links screen (`difference`): the record
+ * inactive in the portal and its customer active in the cache (otherwise the difference is gone: SEND_CHANGED), the
+ * cover sealed by the row's send stamp (sendStamp()'s `inactive`, familySendSeal()), and, beyond, nothing it covers
+ * whose portal value isn't inactive: no student record of the family active, and nobody under it linked to an active
+ * student record of another family (familySendStudentsWords()). Everything else is checked alike for both.
  */
-async function prepareFamily(familyId: AppFamilyId, stamp: string, rosterTag: string): Promise<PreparedFamily> {
+async function prepareFamily(familyId: AppFamilyId, stamp: string, rosterTag: string, from: FamilyFrom): Promise<PreparedFamily> {
   const no = (error: string): PreparedFamily => ({ ok: false, result: refuse(error) });
   return db.transaction(async (tx): Promise<PreparedFamily> => {
     if (!(await lockRosterAs(tx, rosterTag))) return no(ROSTER_MOVED);
@@ -1315,10 +1374,25 @@ async function prepareFamily(familyId: AppFamilyId, stamp: string, rosterTag: st
     const customer = cache.find((c) => c.qboId === familyQboId);
     if (!customer || !where || where.role !== "family") return no(WRITE_COPY.gone);
     const ownRecord = familyId;
-    if (!own.active) return no(customer.active ? WRITE_COPY.inactiveHere : "That family is inactive in QuickBooks already, so there was nothing to change.");
+    if (from === "page") {
+      if (!own.active) return no(customer.active ? WRITE_COPY.inactiveHere : "That family is inactive in QuickBooks already, so there was nothing to change.");
+    } else if (own.active || !customer.active) return no(SEND_CHANGED);
     const under = activeUnder(cache, familyQboId);
-    if (!coverStampHolds(String(familyId), [familyQboId, ...under.map((u) => u.qboId)], stamp)) return no(WRITE_COPY.coverChanged);
+    if (from === "page" ? !coverStampHolds(String(familyId), [familyQboId, ...under.map((u) => u.qboId)], stamp)
+      : !sendStampHolds("inactive", String(familyId), familyQboId, familySendSeal(familyQboId, under.map((u) => u.qboId)), stamp)) return no(from === "page" ? WRITE_COPY.coverChanged : SEND_CHANGED);
     const ids = [familyQboId, ...under.map((u) => u.qboId)];
+    if (from === "difference") {
+      // The portal's value of everyone it covers must be inactive: an active student record of the family, or one of
+      // another family linked to a customer under it, would be made inactive in the books with it.
+      const ownActive = await tx.select({ name: student.name }).from(student).where(and(eq(student.familyId, familyId), eq(student.active, true)));
+      const linked = await tx.select({ name: student.name, familyId: student.familyId }).from(accountingLink).innerJoin(student, eq(student.id, accountingLink.studentId))
+        .where(and(eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, source), inArray(accountingLink.customerId, ids), eq(student.active, true)));
+      const elsewhere = linked.filter((s) => s.familyId === null || String(s.familyId) !== String(familyId));
+      if (ownActive.length || elsewhere.length) {
+        const names = (rows: { name: string | null }[]) => rows.map((s) => recordNameWords(s.name, "student")).sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
+        return no(familySendStudentsWords(names(ownActive), names(elsewhere)));
+      }
+    }
     const waiting = await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(inArray(writeQueue.targetQboId, ids), inArray(writeQueue.state, ["waiting", "stuck"]), blocksOthers)).limit(1);
     if (waiting.length) return no(WRITE_COPY.waiting);
     // A student's move into or out of the family that hasn't reached QuickBooks (slice 9f): QuickBooks is never asked to
@@ -1371,7 +1445,7 @@ const listed = (names: string[]) => (names.length <= 1 ? names.join("") : `${nam
  * the app's own record inactive with it (since slice 9c no refresh does), never sending it twice. `maybe`: the step may
  * have been made. `changed`: the cache, the queue or the refresh ask changed, so the pages are made again.
  */
-async function stepStopped(code: string, step: FamilyStep, realmId: string, o: WriteOp & { staffUserId: string }): Promise<{ words: string; maybe: boolean; changed: boolean }> {
+async function stepStopped(code: string, step: FamilyStep, realmId: string, o: WriteOp & { staffUserId: string }, from: FamilyFrom = "page"): Promise<{ words: string; maybe: boolean; changed: boolean }> {
   const e = { code };
   const name = step.name, isFamily = step.write.role === "family";
   if (isFamily && e.code === `fault_${CUSTOMER_WRITES.faults.activeUnder}`) {
@@ -1386,7 +1460,7 @@ async function stepStopped(code: string, step: FamilyStep, realmId: string, o: W
       // Only a second stale answer comes here (slice 9g): the first is settled by a live read and one resend with the
       // version it showed (sendDeactivate()), so this is a change made while the action ran.
       await readAgain(step.write.qboId, realmId, o);
-      return { words: isFamily ? `${name} changed in QuickBooks while this was running, so it wasn't made inactive. Press “Make ${name} inactive” again.`
+      return { words: isFamily ? `${name} changed in QuickBooks while this was running, so it wasn't made inactive. Press ${FAMILY_AGAIN[from].press(name)} again.`
         : `${name} changed in QuickBooks twice while this was running, so it wasn't changed. Reload the page to see it as QuickBooks has it now.`, maybe: false, changed: true };
     case "retry":
       if (failure.sent) {
@@ -1440,16 +1514,25 @@ export async function askFamilyInactive(rawFamilyId: string, stamp: string, rost
   // no move is saved in the portal while QuickBooks is being asked to make the family's students inactive, and a step
   // never makes inactive a student the portal has just moved to another family. Held by someone else (a rename of the
   // family on its way, or a second press of this, say), nothing is checked or sent.
-  return (await whileSending(String(familyId), () => familyInactiveHolding(familyId, stamp, rosterTag, o))) ?? { result: refuse(FAMILY_BEING_CHANGED), changed: false };
+  return (await whileSending(String(familyId), () => familyInactiveHolding(familyId, stamp, rosterTag, o, { from: "page" }))) ?? { result: refuse(FAMILY_BEING_CHANGED), changed: false };
 }
 
-async function familyInactiveHolding(familyId: AppFamilyId, stamp: string, rosterTag: string, o: WriteOp & { staffUserId: string }): Promise<FamilyInactiveAnswer> {
-  const p = await prepareFamily(familyId, stamp, rosterTag);
+/**
+ * The family action's body, run holding the family's "being sent" lock: by askFamilyInactive() for the family's page,
+ * and since stage 4's slice M5b by sendToBooks() for the family's difference on the accounting links screen, which holds
+ * the lock already (`ask`: who asked, prepareFamily()'s `from`, and the press its words name). The order, the balance
+ * rule, the stops, a lost answer held for the queue and the one `roster.family.deactivate` row are the same for both.
+ */
+async function familyInactiveHolding(familyId: AppFamilyId, stamp: string, rosterTag: string, o: WriteOp & { staffUserId: string }, ask: FamilyAsk): Promise<FamilyInactiveAnswer> {
+  const p = await prepareFamily(familyId, stamp, rosterTag, ask.from);
   if (!p.ok) return { result: p.result, changed: false };
   const familyQboId = p.familyQboId;
-  const summary = (outcome: "done" | "stopped" | "refused", code: string | null, made: string[], notMade: string[], more: { maybe?: string[]; alreadyInactive?: string[] } = {}) =>
-    writeAudit({ actor: o.actor, action: "roster.family.deactivate", permission: o.permission, ip: o.ip, targetType: "qbo_customer", targetId: familyQboId,
+  const again = FAMILY_AGAIN[ask.from];
+  const summary = async (outcome: "done" | "stopped" | "refused", code: string | null, made: string[], notMade: string[], more: { maybe?: string[]; alreadyInactive?: string[] } = {}) => {
+    await writeAudit({ actor: o.actor, action: "roster.family.deactivate", permission: o.permission, ip: o.ip, targetType: "qbo_customer", targetId: familyQboId,
       after: { outcome, ...(code ? { code: code.slice(0, 40) } : {}), made, notMade, ...(more.maybe?.length ? { maybe: more.maybe } : {}), ...(more.alreadyInactive?.length ? { alreadyInactive: more.alreadyInactive } : {}) } });
+    if (ask.from === "difference") ask.report({ outcome, code, made, maybe: more.maybe ?? [], alreadyInactive: more.alreadyInactive ?? [], covered: ids, familyQboId });
+  };
   const ids = p.steps.map((s) => s.write.qboId);
   const how: DeactivateHow = { mayWait: false, name: p.familyName, showAmounts: o.showAmounts === true, actor: o.actor, ip: o.ip, permission: o.permission };
 
@@ -1523,8 +1606,8 @@ async function familyInactiveHolding(familyId: AppFamilyId, stamp: string, roste
       why.words,
       ...(after.length ? [`Not made inactive yet: ${listed(after)}.`] : []),
       step.write.role === "family" && why.maybe ? `Whether ${p.familyName} is still active shows once the roster is read again.`
-        : why.maybe ? `${p.familyName} is still active. Once the change waiting for ${step.name} has gone through (the Reconciliation page lists it until then), press “Make ${p.familyName} inactive” again to carry on with whoever is still active.`
-        : `${p.familyName} is still active. Press “Make ${p.familyName} inactive” again to carry on with whoever is still active.`,
+        : why.maybe ? `${p.familyName} ${again.still} Once the change waiting for ${step.name} has gone through (the Reconciliation page lists it until then), press ${again.press(p.familyName)} again to carry on with whoever is still active.`
+        : `${p.familyName} ${again.still} Press ${again.press(p.familyName)} again to carry on with whoever is still active.`,
     ];
     return { result: { ok: false as const, errors }, changed: made.length > 0 || followedLate.length > 0 || why.changed || already.size > 0 };
   };
@@ -1575,9 +1658,9 @@ async function familyInactiveHolding(familyId: AppFamilyId, stamp: string, roste
         // Said of this step alone: whoever was made inactive before it was (the lead's decision 1 for slice 9g's review).
         return stop(i, t.stop.code, { words: t.stop.alone, maybe: false, changed: true });
       case "stale_again":
-        return stop(i, "fault_5010", await stepStopped("fault_5010", { ...step, write: t.write }, p.realmId, o));
+        return stop(i, "fault_5010", await stepStopped("fault_5010", { ...step, write: t.write }, p.realmId, o, ask.from));
       case "failed":
-        return stop(i, t.code, await stepStopped(t.code, { ...step, write: t.write }, p.realmId, o));
+        return stop(i, t.code, await stepStopped(t.code, { ...step, write: t.write }, p.realmId, o, ask.from));
     }
   }
   await summary("done", null, made.map((s) => s.write.qboId), [], { alreadyInactive: [...alreadyInactive, ...followedLate.map((s) => s.write.qboId)] });
@@ -4463,8 +4546,6 @@ export const sendNameTakenWords = (name: string) =>
 export const sendNameQueuedWords = (name: string) =>
   `A change on its way to QuickBooks, on the Reconciliation page, gives another customer the name “${name}”, and every name there must be different, so nothing was sent. Rename the record on its page instead, or give that change up.`;
 const SEND_NAME_UNUSABLE =(error: string) => `The portal's name for this record can't be sent to QuickBooks as it is: ${error} Rename the record on its page instead.`;
-/** A family of layered books is made inactive only together with everyone under it: never sent from a difference. */
-export const SEND_FAMILY_INACTIVE = "The books make a family inactive only together with everyone under it, so this family's inactive status isn't sent from here.";
 const SEND_STUDENT_FAMILY_INACTIVE = "This student's family is inactive in the portal, so nothing was sent for the student.";
 
 /**
@@ -4472,10 +4553,13 @@ const SEND_STUDENT_FAMILY_INACTIVE = "This student's family is inactive in the p
  * press alone (sendDifferenceAction()), holding the record's "being sent" lock (whileSending(): the family's for a
  * family or member, the student's otherwise) for its whole run, so no rename, make-inactive, move or take of it runs
  * meanwhile, and a change saved first is tried at once under the lock it is sent under (lockOfItem()). A name
- * (sendName()), a student's family (sendPlace()) or a student or member made inactive (sendInactive()): each works the
- * value out again under the roster lock and refuses, sending nothing, when the row's stamp doesn't seal it (SEND_CHANGED).
+ * (sendName()), a student's family (sendPlace()) or a student, member or, since slice M5b, a layered family with
+ * everyone under it made inactive (sendInactive(), sendFamilyInactive()): each works the value out again under the
+ * roster lock and refuses, sending nothing, when the row's stamp doesn't seal it (SEND_CHANGED). `changed`, only for a
+ * layered family: something may have changed although the answer isn't a success (a stop part way), so the pages are
+ * made again, as the family's page's action does.
  */
-export async function sendToBooks(ask: SendAsk, rosterTag: string, o: WriteOp & { staffUserId: string }): Promise<WriteResult> {
+export async function sendToBooks(ask: SendAsk, rosterTag: string, o: WriteOp & { staffUserId: string }): Promise<WriteResult & { changed?: boolean }> {
   const raw = ask.field === "place" ? ask.studentId : ask.recordId;
   if (!isUuid(raw)) return refuse(WRITE_COPY.gone);
   const recordId = raw.toLowerCase();
@@ -4702,8 +4786,8 @@ async function sendPlace(studentId: AppStudentId, stamp: string, rosterTag: stri
  * A student or member inactive in the portal made inactive in QuickBooks, whose customer the books have active: in one
  * transaction under readyToSend() and the record's lock (held by sendToBooks()): the record inactive (a student in an
  * active family record), linked in its kind; its customer active in the cache, on the roster in the role a
- * make-inactive needs (a student directly under the family's own customer; a member; never a layered family, which goes
- * with everyone under it: SEND_FAMILY_INACTIVE), the shape offering it; nothing waiting or stuck for it, the family's
+ * make-inactive needs (a student directly under the family's own customer; a member; a layered family goes with
+ * everyone under it, through the family action: sendFamilyInactive()), the shape offering it; nothing waiting or stuck for it, the family's
  * create neither waiting nor being sent, the student's create not waiting, no move of the student waiting, stuck or
  * kept; the stamp sealing the customer. Then, outside it, one try by the one balance rule (tryDeactivate(): the balance
  * read live, and any balance, owed or a credit, or one that can't be read, stops it with nothing sent: open question 11,
@@ -4714,8 +4798,8 @@ async function sendPlace(studentId: AppStudentId, stamp: string, rosterTag: stri
  * went, in a transaction of its own, which closes a make-inactive of the customer kept on Reconciliation once QuickBooks
  * has the customer inactive. The record is never made active, nor changed but by applyWritten().
  */
-async function sendInactive(kind: "family" | "student", recordId: string, stamp: string, rosterTag: string, o: WriteOp & { staffUserId: string }): Promise<WriteResult> {
-  type Ready = { ok: true; write: DeactivateWrite; realmId: string; filed: Filed; name: string; who: string; them: string } | { ok: false; result: WriteResult };
+async function sendInactive(kind: "family" | "student", recordId: string, stamp: string, rosterTag: string, o: WriteOp & { staffUserId: string }): Promise<WriteResult & { changed?: boolean }> {
+  type Ready = { ok: true; write: DeactivateWrite; realmId: string; filed: Filed; name: string; who: string; them: string } | { ok: false; result: WriteResult } | { ok: "layered" };
   const p = await db.transaction(async (tx): Promise<Ready> => {
     const no = (error: string): Ready => ({ ok: false, result: refuse(error) });
     const ready = await readyToSend(tx, rosterTag);
@@ -4740,7 +4824,8 @@ async function sendInactive(kind: "family" | "student", recordId: string, stamp:
     const c = cache.find((x) => x.qboId === customer);
     const where = c ? roleIn(roster, customer) : null;
     if (!c || !where) return no(WRITE_COPY.gone);
-    if (kind === "family" && where.role === "family") return no(SEND_FAMILY_INACTIVE);
+    // A layered family: made inactive with everyone under it, by the family action's own body, after this transaction.
+    if (kind === "family" && where.role === "family") return { ok: "layered" };
     if (kind === "family" ? where.role !== "member" : where.role !== "student" || where.familyQboId !== familyCustomer) return no(SEND_CHANGED);
     // Inactive in the books already: the difference is gone, and nothing is sent.
     if (!c.active) return no(SEND_CHANGED);
@@ -4756,6 +4841,7 @@ async function sendInactive(kind: "family" | "student", recordId: string, stamp:
     if (!sendStampHolds("inactive", recordId, customer, [customer], stamp)) return no(SEND_CHANGED);
     return { ok: true, write: { op: "deactivate", role: where.role, qboId: customer, syncToken: await linkVersionOf(tx, source, customer, kind) }, realmId: source, filed, name: c.displayName, who, them: kind === "student" ? "them" : "it" };
   });
+  if (p.ok === "layered") return sendFamilyInactive(asAppFamilyId(recordId), stamp, rosterTag, o);
   if (!p.ok) return p.result;
   const refused = (code: string, write: DeactivateWrite) => writeAudit({ actor: o.actor, action: "roster.write.refused", permission: o.permission, ip: o.ip,
     targetType: "qbo_customer", targetId: write.qboId, after: { op: "deactivate", role: write.role, code: short(code) } });
@@ -4803,6 +4889,41 @@ async function sendInactive(kind: "family" | "student", recordId: string, stamp:
         : failure.kind === "other_company" ? WRITE_COPY.otherCompany : t.code === "bad_id" ? WRITE_COPY.notSent : WRITE_COPY.refused));
     }
   }
+}
+
+/**
+ * A layered family inactive in the portal made inactive in QuickBooks with everyone under it, from its difference
+ * (stage 4's slice M5b; open question 11: "A family keeps today's order (everyone under it first, the family last, never
+ * queued, stopping at the first refusal)"), under the family's "being sent" lock sendToBooks() already holds: the family
+ * action's own body (familyInactiveHolding(), never the family page's entry, which would try that lock again from
+ * another connection and be refused), asked as the difference (prepareFamily()'s `from`): the record inactive, the
+ * cover sealed by the row's stamp, nobody it covers active in the portal, and the rest of its checks, order, balance
+ * rule (any balance on any of them, owed or a credit, or one that can't be read, stops it with nothing sent), stops,
+ * lost answer and `roster.family.deactivate` row as on the family's page. Then the press's own
+ * `accounting.difference.send` row, in a transaction of its own, with how it went and whom it covered, which closes a
+ * make-inactive of anyone covered kept on Reconciliation once QuickBooks has them inactive (made so, or shown so
+ * already). Nothing changes the portal's records but what applyWritten() and recordFollows() do, as for the page;
+ * nothing is made active. Refused before anything was read (prepareFamily()), no row is written, as a single
+ * make-inactive refused under the lock writes none.
+ */
+async function sendFamilyInactive(familyId: AppFamilyId, stamp: string, rosterTag: string, o: WriteOp & { staffUserId: string }): Promise<WriteResult & { changed: boolean }> {
+  const ran: { value?: FamilyRan } = {};
+  const answer = await familyInactiveHolding(familyId, stamp, rosterTag, o, { from: "difference", report: (r) => { ran.value = r; } });
+  const r = ran.value;
+  if (r !== undefined) {
+    const outcome = r.outcome === "done" ? (r.made.includes(r.familyQboId) ? "sent" : "inactive_there")
+      : r.outcome === "refused" ? (r.code === "already_inactive" ? "inactive_there" : "stopped")
+      : r.maybe.length ? "queued" : "stopped";
+    const inactiveThere = [...new Set([...r.made, ...r.alreadyInactive])];
+    await db.transaction(async (tx) => {
+      const replaced = inactiveThere.length === 0 ? []
+        : await replaceRefused(tx, and(inArray(writeQueue.targetQboId, inactiveThere), sql`${writeQueue.request}->>'op' = 'deactivate'`), { op: "send", field: "inactive", recordId: String(familyId) }, o);
+      await writeAudit({ actor: o.actor, action: "accounting.difference.send", permission: o.permission, ip: o.ip, targetType: "family", targetId: String(familyId), before: { active: true },
+        after: { field: "inactive", kind: "family", familyId: String(familyId), customerQboId: r.familyQboId, covered: r.covered, active: false, outcome,
+          ...(r.code ? { code: short(r.code) } : {}), replaced: replaced.map((x) => x.id) } }, tx);
+    });
+  }
+  return { ...answer.result, changed: answer.changed };
 }
 
 /**

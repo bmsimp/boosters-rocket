@@ -151,10 +151,13 @@ export const sendDifferenceAction = staffAction(P, async (ctx: StaffCtx, field: 
   await requireStaffActionAlso(ctx, "Roster.Family.ReadWrite");
   if (!(field === "name" || field === "inactive" || field === "place") || !(kind === "family" || kind === "student") || (field === "place" && kind !== "student")
     || !str(recordId, ID_MAX) || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return NOT_FROM_PAGE;
-  const r = await sendToBooks(field === "place" ? { field, studentId: recordId, stamp } : { field, kind, recordId, stamp }, rosterTag,
+  const { changed, ...r } = await sendToBooks(field === "place" ? { field, studentId: recordId, stamp } : { field, kind, recordId, stamp }, rosterTag,
     { ...op(ctx), showAmounts: can(ctx.effective, "Finance.Balance.Read") });
-  // A name, a student's family or an inactive record sent changes the Families pages, Reconciliation and the family's pages.
-  if (r.ok) revalidatePath("/", "layout");
+  // A name, a student's family or an inactive record sent changes the Families pages, Reconciliation and the family's
+  // pages; since slice M5b a layered family's make-inactive stopped part way may have changed them too (`changed`, as
+  // the family page's own action revalidates on it), and `changed` itself stays on the server.
+  if (r.ok || changed === true) revalidatePath("/", "layout");
   else again();
   return r;
 });
+
