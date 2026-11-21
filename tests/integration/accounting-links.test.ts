@@ -69,7 +69,7 @@ const riveraPresses = (customer = "Rivera Family") => "Confirm this link records
   + "Its guardians then read that the club hasn't connected their payments to the portal yet, with no invoices, Pay or buy-out offer, until it is linked again, and its stored figures are forgotten at once."
   + " The family, its students, guardians, sign-ins, season, volunteering and forms stay as they are."
   + " It isn't unlinked while a buy-out of the family or its students isn't settled, or while a change of it waits on Reconciliation."
-  + "To link it again, use this page, with Confirm or Pick a different customer once its row shows them. “Create in QuickBooks and link” on its page would make a second customer in the books."
+  + "To link it again, use this page, with Confirm or Pick a different customer once its row shows them. While its customer is still in the books, “Create in QuickBooks and link” isn't offered on its page, nor for its students whose customers are, so that no second customer is made for them."
   + "Confirm this link: Rivera FamilyUnlink from the books: Rivera Family";
 
 /** Customers added or changed in QuickBooks, then read by a roster read (which makes no record of them). */
@@ -448,14 +448,16 @@ describe("the page", () => {
     expect((await db.select().from(auditLog)).length).toBe(audits);
     // The customers with no family stay on Reconciliation, linked from here, counted by the pool's own rule, and the
     // page says a family the portal has is linked here, that Reconciliation refuses "Create a family from this" for a
-    // customer it aims at a family (slice M3a2), and that "Create in QuickBooks and link" would make a second customer.
+    // customer it aims at a family (slice M3a2), and that "Create in QuickBooks and link" would make a second customer
+    // for a family never linked to its customer, and isn't offered for one unlinked while its customer is in the books (slice M3b2).
     const whole = await renderPage(AccountingLinksPage);
     expect(whole).toContain('href="/staff/reconciliation#no-family-h"');
     expect(whole).toContain("1 active customer the books list as a family at the top level, under no other customer, has no family in the portal.");
     expect(whole).toContain("A family the portal has is linked here: Confirm its suggestion, or one of its possible customers, or pick a different customer from those no family is linked to.");
     expect(whole).not.toContain("would still make a second family");
     expect(whole).toContain("Reconciliation refuses “Create a family from this” for a customer this page suggests or lists for a family the portal has, or that a given-up change of a family the portal saved first made.");
-    expect(whole).toContain("would make a second customer in the books for a family whose customer is already there.");
+    expect(whole).toContain("would make a second customer in the books for a family whose customer is already there but was never linked to it; it isn&#x27;t offered for one unlinked while its customer is still in the books.");
+    expect(whole).toContain("makes a new customer in the books for a family that has none, but not for one unlinked while its customer is still in the books, nor for a student of it whose customer is; and adding a family under Families makes one too, when someone who may link families adds it while the books are connected.");
     // And Reconciliation's section links back here.
     const recon = await renderPage(ReconciliationPage);
     const at = recon.indexOf('id="no-family-h"');
