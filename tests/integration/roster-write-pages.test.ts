@@ -286,7 +286,7 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
     // Mei Chen is in QuickBooks only: her forms stay, and the page says she isn't a portal guardian.
     const chen = await renderPage(RosterEntryPage, { params: { id: await idOf("20") } });
     expect(chen).toContain("Change the parent Mei Chen");
-    expect(chen).toContain("not a portal guardian; adding the person under Portal sign-ins doesn&#x27;t use it, and while it is active a guardian of this family with no Parent customer of their own can be linked to it on Accounting links, by someone who may link families to accounting");
+    expect(chen).toContain("not a portal guardian; adding the person under Portal sign-ins doesn&#x27;t use it, and while it is active a guardian of this family who isn&#x27;t linked to a customer can be linked to it on Accounting links, by someone who may link families to accounting");
   });
 
   it("says a removed guardian's Parent customer, left active, is their own and used again if they are added back (stage 3's slice 9h)", async () => {

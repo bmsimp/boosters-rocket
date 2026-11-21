@@ -4447,7 +4447,7 @@ export type GuardianOp = { actor: Actor; ip: string | null; permission?: string 
 const saverOf = (o: GuardianOp): SaverOp => ({ actor: o.actor, ip: o.ip, permission: o.permission, staffUserId: o.actor.door === "staff" ? o.actor.id : null });
 
 /** A Parent customer that is a portal guardian's own is changed through the guardian: askRosterWrite() refuses its forms. */
-export const GUARDIAN_HERE = "That Parent customer is linked to a guardian in the portal, so it isn't changed from here: a guardian's own Parent customer is changed through them (rename the person on their page, or remove them under Portal sign-ins on this page), and one several guardians share, or one linked to a guardian of another family, is changed in QuickBooks, or made one guardian's own on Accounting links by unlinking every other guardian from it there. Nothing was changed.";
+export const GUARDIAN_HERE = "That Parent customer is linked to a guardian in the portal, so it isn't changed from here: a guardian's own Parent customer is changed through them (rename the person on their page, or remove them under Portal sign-ins on this page), and one several guardians share, or one linked to a guardian of another family, is changed in QuickBooks, or sorted out on Accounting links: unlink from it each guardian whose it isn't, and once one guardian of this family alone is linked to it, it is theirs; if none of this family's is left on it, one who isn't linked to a customer can be linked to it there. Nothing was changed.";
 /** The family action while a guardian's Parent customer change for the family is waiting or stuck. */
 export const GUARDIAN_PENDING = "A change to a guardian's Parent customer in this family hasn't reached QuickBooks yet (it is waiting or stuck on the Reconciliation page), so nothing was changed. Once it has gone through, or been given up there, try again.";
 /** The code of a guardian's Parent customer create found made as a customer another open guardian row is linked to already (foundDone(), ./queue.ts). */
@@ -4497,8 +4497,9 @@ export async function guardianCustomerLinked(tx: Tx, realmId: string, customerId
  * for a family's page, which offers them no forms (askRosterWrite() refuses them, GUARDIAN_HERE): `own`, one open row
  * of this family alone is linked to it, so it is that guardian's own and changed through them; `other`, it is shared by
  * several open rows or linked to a guardian of another family, so the portal sends nothing for it (ownParentCustomer()),
- * and it is changed in QuickBooks, or made one guardian's own on Accounting links by unlinking every other guardian
- * from it (stage 4's slice M3c: Unlink this guardian); `removed`, no open row is linked to it, a
+ * and it is changed in QuickBooks, or sorted out on Accounting links (stage 4's slice M3c): each guardian whose it isn't
+ * unlinked from it (Unlink this guardian), and where none of this family's is left on it, one linked to it there (Link
+ * this guardian); `removed`, no open row is linked to it, a
  * removed guardian's row of this family is, and the cache holds it active: their own, left active in QuickBooks (a removal makes it inactive only when
  * its balance allows), which they take back if reinstated.
  */
@@ -4938,7 +4939,7 @@ export function guardianSentWords(sent: readonly GuardianSent[], op: "grant" | "
       case "inactive_there": return [op === "remove" ? `Their Parent customer ${under} is inactive in QuickBooks already, so nothing was sent.`
         : `Their Parent customer ${under} is inactive in QuickBooks, and the portal never makes a customer active again, so nothing was sent there.`];
       case "create_open": return [`A change to their Parent customer ${under} is on the Reconciliation page already.`];
-      case "maybe_made": return [`Making their Parent customer ${under} may have reached QuickBooks already, so it was left to finish: QuickBooks may hold an active Parent customer for them that nothing in the portal is linked to. If they are added back, it can be linked to them on Accounting links, in the opening of the family's row.`];
+      case "maybe_made": return [`Making their Parent customer ${under} may have reached QuickBooks already, so it was left to finish: if QuickBooks made it, the portal links it to them when it finds it there, and it is theirs again if they are added back; if it is given up, one QuickBooks made anyway is linked to nobody in the portal, and once they are added back it can be linked to them on Accounting links, in the opening of the family's row.`];
       case "kept": return [`No Parent customer was made for them ${under}. ${keptRefusalWords(s.code ?? null, null)} It is kept on the Reconciliation page, where you can give it up.`];
       case "queued": break;
     }
