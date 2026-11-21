@@ -1052,7 +1052,7 @@ export const volunteerReminder = pgTable("volunteer_reminder", {
  * (`buyout_family_live_uq`), and per requirement and student whichever family chose it (`buyout_student_live_uq`), so a
  * guardian can never make two invoices for one requirement. `flag` is set for the treasurer (the daily check, a move, a
  * paid invoice the portal would not void) and shown on the Reconciliation page. Never expires; a company change ends
- * every unpaid live one (`earlier_company`, below) and keeps every other as it is (stage 4's slice M7a). The row keeps the requirement, the family and the student from being deleted.
+ * every unpaid live one (`earlier_company`, below), marks paid first an invoiced one its family's stored figures show paid (slice M7b2), and keeps every other as it is (stage 4's slice M7a). The row keeps the requirement, the family and the student from being deleted.
  */
 export const buyout = pgTable("buyout", {
   id: uuid("id").primaryKey().defaultRandom(),

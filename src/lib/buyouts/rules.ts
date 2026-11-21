@@ -1,10 +1,11 @@
 /**
  * The rules of a volunteer buy-out (v1 spec §11.5), as pure functions: whether a requirement offers one, what it costs
- * a family or a student now, how a requirement reads while a buy-out is under way, and how staff type a price. Nothing
- * here reads the database or the clock: ./my-buyouts.ts and ./writes.ts read what these are given, and the volunteer
- * entry of src/lib/seasons/kinds.ts reads the requirement's standing through withBuyout().
+ * a family or a student now, how a requirement reads while a buy-out is under way, whether its invoice is paid in stored
+ * figures (paidIn()), and how staff type a price. Nothing here reads the database or the clock: ./my-buyouts.ts,
+ * ./writes.ts, ./standing.ts and the change of company's mark (./company-change.ts) read what these are given, and the
+ * volunteer entry of src/lib/seasons/kinds.ts reads the requirement's standing through withBuyout().
  */
-import type { BuyoutState } from "@/lib/db/schema";
+import type { BuyoutState, StoredInvoice } from "@/lib/db/schema";
 import type { Requirement, Standing } from "@/lib/seasons/progress";
 
 /** A requirement as far as a buy-out goes: its kind and amount, and what staff set for a buy-out. */
@@ -49,6 +50,10 @@ export const BUYOUT_WORDS = {
   being_voided: "Buy-out being cancelled",
   stuck: "Buy-out waiting for the club",
 } as const;
+
+/** Whether this invoice is paid in these stored figures: there, for something (a voided one has a total of 0), and nothing left to pay. */
+export const paidIn = (invoices: readonly StoredInvoice[] | null | undefined, invoiceQboId: string | null): boolean =>
+  invoiceQboId !== null && (invoices ?? []).some((i) => i.qboId === invoiceQboId && i.totalCents > 0 && i.balanceCents <= 0);
 
 /** Paid: QuickBooks says so in the stored figures (the invoice's balance is 0), or the daily check already marked it. */
 export const buyoutPaid = (b: BuyoutFact): boolean => b.state === "paid" || (b.state === "invoiced" && b.invoicePaid);

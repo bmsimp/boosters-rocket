@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { BUYOUT_WORDS, buyoutOffered, guardianMay, judgeInvoice, parsePrice, priceText, quoteBuyout, withBuyout, type BuyoutTerms } from "@/lib/buyouts/rules";
+import { BUYOUT_WORDS, buyoutOffered, guardianMay, judgeInvoice, paidIn, parsePrice, priceText, quoteBuyout, withBuyout, type BuyoutTerms } from "@/lib/buyouts/rules";
 import { volunteerStanding } from "@/lib/volunteer/rules";
+import type { StoredInvoice } from "@/lib/db/schema";
 
 const shifts: BuyoutTerms = { kind: "volunteer", amount: 2, amountUnit: "shifts", buyoutUnitCents: 5000, itemQboId: "77" };
 const hours: BuyoutTerms = { kind: "volunteer", amount: 6, amountUnit: "hours", buyoutUnitCents: 1500, itemQboId: "77" };
@@ -104,5 +105,32 @@ describe("the daily check's verdict on one invoice (spec §8.4)", () => {
     // A student moved in QuickBooks is a move whatever the family's figures still hold.
     expect(judgeInvoice(b, [inv()], false)).toBe("student_moved");
     expect(judgeInvoice({ ...b, perStudent: false }, [], false)).toBe("missing");
+  });
+});
+
+describe("whether an invoice is paid in stored figures (paidIn)", () => {
+  const inv = (qboId: string, o: Partial<StoredInvoice> = {}): StoredInvoice => ({ qboId, number: qboId, customerQboId: "10", forName: null, date: "2026-11-01", dueDate: null,
+    totalCents: 10000, balanceCents: 0, currency: "USD", payLink: null, itemQboIds: [], ...o });
+
+  it("is paid when the invoice is there, for something, with nothing left to pay", () => {
+    expect(paidIn([inv("5001")], "5001")).toBe(true);
+    expect(paidIn([inv("5002", { balanceCents: 2500 }), inv("5001")], "5001")).toBe(true);
+  });
+
+  it("is not paid when something is still owed on it, part paid or not", () => {
+    expect(paidIn([inv("5001", { balanceCents: 2500 })], "5001")).toBe(false);
+    expect(paidIn([inv("5001", { balanceCents: 10000 })], "5001")).toBe(false);
+  });
+
+  it("is not paid when it was voided: QuickBooks keeps it with a total of 0", () => {
+    expect(paidIn([inv("5001", { totalCents: 0, balanceCents: 0 })], "5001")).toBe(false);
+  });
+
+  it("is not paid when the figures don't hold it, hold none, or the buy-out has no invoice", () => {
+    expect(paidIn([inv("5002")], "5001")).toBe(false);
+    expect(paidIn([], "5001")).toBe(false);
+    expect(paidIn(null, "5001")).toBe(false);
+    expect(paidIn(undefined, "5001")).toBe(false);
+    expect(paidIn([inv("5001")], null)).toBe(false);
   });
 });

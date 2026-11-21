@@ -1,21 +1,17 @@
 // What the volunteer kind's rule (src/lib/seasons/kinds.ts) reads of buy-outs: for these requirements and these
 // families or students (the app's own records), each live buy-out's state and whether its invoice is paid in the stored
-// figures. Parent pages reach it with the session's family alone: with `asked` only those records' buy-outs and their
-// own families' stored figures are read. It imports no staff-only module (tests/integration/page-guards.test.ts scans
-// this file).
+// figures (paidIn(), ./rules.ts, the rule the change of company's mark reads too: ./company-change.ts). Parent pages
+// reach it with the session's family alone: with `asked` only those records' buy-outs and their own families' stored
+// figures are read. It imports no staff-only module (tests/integration/page-guards.test.ts scans this file).
 import "server-only";
 import { and, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { buyout, student, type StoredInvoice } from "@/lib/db/schema";
+import { buyout, student } from "@/lib/db/schema";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
 import type { SubjectId, SubjectsAsked } from "@/lib/seasons/progress";
 import { moneyRows } from "@/lib/money/stored";
 import { getRosterSource } from "@/lib/roster/source";
-import { LIVE_STATES, type BuyoutFact } from "./rules";
-
-/** Whether this invoice is paid in these stored figures: there, for something (a voided one has a total of 0), and nothing left to pay. */
-export const paidIn = (invoices: readonly StoredInvoice[] | null | undefined, invoiceQboId: string | null): boolean =>
-  invoiceQboId !== null && (invoices ?? []).some((i) => i.qboId === invoiceQboId && i.totalCents > 0 && i.balanceCents <= 0);
+import { LIVE_STATES, paidIn, type BuyoutFact } from "./rules";
 
 type Row = typeof buyout.$inferSelect;
 /** Whom a buy-out is for: its student for a per-student requirement, its family for a per-family one. */
