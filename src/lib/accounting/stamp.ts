@@ -97,3 +97,29 @@ export function takeStamp(field: string, recordId: string, customerId: string, v
 }
 export const takeStampHolds = (field: string, recordId: string, customerId: string, value: readonly unknown[], stamp: string): boolean =>
   same(takeStamp(field, recordId, customerId, value), stamp);
+
+/**
+ * Send the app's to QuickBooks (slice M5a): what a difference's press sends (`field`: `name`, `inactive` or `place`), the
+ * record it is of (the family's or the student's app id), its customer, and what the row showed, sealed in a domain of
+ * its own, so no take's or link press's stamp is ever a send's: for a name the books' name and the portal's; for a place
+ * the student's customer, the customer the cache has them under (`""` for the top of the tree), the family record they
+ * are in and that family's customer; for a make-inactive the record's customer. The press works each value out again
+ * under the roster lock and must seal to it, so what it sends over is only what the row showed.
+ */
+export function sendStamp(field: string, recordId: string, customerId: string, value: readonly unknown[]): string {
+  return sealed("accounting-send", [field, recordId.toLowerCase(), customerId, [...value]]);
+}
+export const sendStampHolds = (field: string, recordId: string, customerId: string, value: readonly unknown[], stamp: string): boolean =>
+  same(sendStamp(field, recordId, customerId, value), stamp);
+
+/**
+ * Send the app's for all (slice M5b): the filter as the page parsed it (its status key or none, and its search text),
+ * how many sends it showed, and each send's own sendStamp() inputs (sendAllKeys(), src/lib/accounting/mapping.ts),
+ * sorted, sealed in a domain of its own, so neither a row's send stamp nor the bulk confirm's is ever this one. The press
+ * works the sends out again under the roster lock and they must seal to the same stamp.
+ */
+export function sendAllStamp(filter: { status: string | null; q: string }, count: number, keys: readonly string[]): string {
+  return sealed("accounting-send-all", [filter.status, filter.q, count, [...keys].sort()]);
+}
+export const sendAllStampHolds = (filter: { status: string | null; q: string }, count: number, keys: readonly string[], stamp: string): boolean =>
+  same(sendAllStamp(filter, count, keys), stamp);

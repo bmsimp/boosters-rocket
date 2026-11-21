@@ -486,6 +486,32 @@ describe("the write queue's share of a buy-out", () => {
     expect(sentAsPosted).toBe(true);
   });
 
+  // Stage 4's slice M7a2: a buy-out write's finish leaves an item staff gave up meanwhile given up, as a roster write's
+  // does (stage 3's slice 9d), while its buy-out follows what QuickBooks did.
+  it("an item staff give up while its create is on its way stays given up, keeping the invoice, and the buy-out is invoiced as QuickBooks made it", async () => {
+    const p = await buyoutFamily(stub);
+    const req = await seedBuyoutRequirement();
+    const b = await seedBuyout({ requirementId: req, familyQboId: FAMILY, chosenBy: p.identity.parentId, state: "being_invoiced" });
+    const [item] = await db.insert(writeQueue).values({ realmId: b.realmId, request: { op: "invoice_create", buyoutId: b.id, customerQboId: FAMILY, itemQboId: BUYOUT_ITEM, units: 2, unitCents: 5000 },
+      familyId: b.familyId, sent: false, tries: 0, nextTryAt: new Date(Date.now() - 1000) }).returning();
+    const { giveUp } = await import("@/lib/roster/queue");
+    const op = { actor: { door: "staff" as const, id: null, label: "treasurer@club.org" }, ip: null, permission: "Roster.Family.ReadWrite" };
+    let gaveUp: unknown = null;
+    stub.onApiRequest = async (c) => {
+      if (c.method !== "POST") return;
+      stub.onApiRequest = null;
+      gaveUp = await giveUp(item!.id, "Making it by hand.", op);
+    };
+    expect(await runWriteQueue()).toEqual({ ran: true, ok: true });
+    expect(gaveUp).toMatchObject({ ok: true });
+    expect(stub.invoices).toHaveLength(1);
+    const made = String(stub.invoices[0]!.Id);
+    expect((await queueOf(b.id))[0]).toMatchObject({ state: "given_up", note: "Making it by hand.", sent: true, resultQboId: made });
+    expect((await buyoutsOf(FAMILY))[0]).toMatchObject({ state: "invoiced", invoiceQboId: made, flag: "given_up" });
+    expect(await audits("roster.write.done")).toEqual([]);
+    expect((await audits("volunteer.buyout.invoiced"))[0]!.after).toMatchObject({ invoiceQboId: made, queue: "given_up" });
+  });
+
   it("refuses 'Try again now' while the try made at once for the guardian may still be under way", async () => {
     const p = await buyoutFamily(stub);
     const req = await seedBuyoutRequirement();

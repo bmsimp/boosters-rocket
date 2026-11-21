@@ -133,78 +133,166 @@ export async function markBuyoutMoneyStale(tx: Tx, b: Pick<Row, "familyId" | "st
   if (underNow !== null && underNow !== b.familyId) await markMoneyStale(tx, underNow);
 }
 
-/** The queue item finished: done, with what QuickBooks made or changed, audited as the queue audits its own. */
+/**
+ * The first statements of every transaction that finishes a try (stage 4's slice M7a2): the roster lock taken shared,
+ * waiting at most 10 seconds for it (as the confirm and a staff close take it), then the item FOR UPDATE, then, in the
+ * finish, its buy-out (and the family's figures after it). A change of company holds the roster lock alone, so no finish
+ * runs beside its clear; "Give up" (src/lib/roster/queue.ts) and a staff close (./close.ts) take the same lock, and the
+ * item before the buy-out, so none of them crosses another. A lock not had in time fails the finish (Postgres'
+ * lock_not_available), as any failed finish does (a create's worker finish waits again, longer: created()). Whether
+ * the item is still waiting: one given up meanwhile, by staff or by a change of company's clear, stays given up,
+ * whatever QuickBooks answered.
+ */
+async function lockForFinish(tx: Tx, item: Item, wait: "10s" | "4min" = "10s"): Promise<boolean> {
+  await tx.execute(wait === "10s" ? sql`set local lock_timeout = '10s'` : sql`set local lock_timeout = '4min'`);
+  await tx.execute(sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`);
+  await tx.execute(sql`set local lock_timeout to default`);
+  const [now] = await tx.select({ state: writeQueue.state }).from(writeQueue).where(eq(writeQueue.id, item.id)).for("update");
+  return now?.state === "waiting";
+}
+/**
+ * What a try answers when its item was given up meanwhile and it left the buy-out neither invoiced, voided, refused nor
+ * kept: someone is to look at it (a buy-out a change of company ended is the treasurer's, stage 4's slice M7b).
+ */
+const GIVEN_UP_MEANWHILE: BuyoutStep = "stuck";
+
+/** The queue item finished: done, with what QuickBooks made or changed, audited as the queue audits its own. Only while it is still waiting. */
 async function itemDone(tx: Tx, item: Item, how: "sent" | "found", resultQboId: string | null, actor: Actor): Promise<void> {
   const [still] = await tx.update(writeQueue).set({ state: "done", resultQboId, tries: item.tries + 1, lastTriedAt: new Date(), nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
-    .where(eq(writeQueue.id, item.id)).returning({ id: writeQueue.id });
+    .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
   if (!still) return;
   await writeAudit({ actor, action: "roster.write.done", targetType: "write_queue", targetId: item.id,
     before: { state: item.state, tries: item.tries }, after: { state: "done", how, tries: item.tries + 1, op: item.request.op, ...(resultQboId ? { resultQboId } : {}) } }, tx);
 }
-/** The queue item closed without being sent again: QuickBooks refused it, or the portal would not send it. */
+/** The queue item closed without being sent again: QuickBooks refused it, or the portal would not send it. Only while it is still waiting. */
 async function itemClosed(tx: Tx, item: Item, code: string): Promise<void> {
   await tx.update(writeQueue).set({ state: "given_up", lastCode: short(code), tries: item.tries + 1, lastTriedAt: new Date(), nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
-    .where(eq(writeQueue.id, item.id));
+    .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting")));
+}
+/**
+ * An invoice QuickBooks made for an item given up while its create was on its way: kept on the item (`result_qbo_id`,
+ * where it has none), as a roster create given up meanwhile keeps the customer it made, so the item says what was made.
+ */
+async function keepInvoiceOnItem(tx: Tx, item: Item, invoiceQboId: string): Promise<void> {
+  await tx.update(writeQueue).set({ resultQboId: invoiceQboId, updatedAt: new Date() })
+    .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "given_up"), isNull(writeQueue.resultQboId)));
 }
 
 /**
  * A try that may go through later: the item waits for its next try (afterFailedTry: 1, 5, 15 and 60 minutes, then every
  * 6 hours), or is stuck once it is old or tried often; a stuck one's buy-out is stuck too, for staff to look at.
- * `sent` is kept once set: a write QuickBooks may have acted on is looked for before it is sent again.
+ * `sent` is kept once set: a write QuickBooks may have acted on is looked for before it is sent again. An item given up
+ * meanwhile stays given up and its buy-out is left as it is: one a change of company ended is never made stuck again.
  */
 async function tryFailed(item: Item, b: Row, code: string, sent: boolean, now: Date, actor: Actor): Promise<BuyoutStep> {
   const next = afterFailedTry(item.tries + 1, item.createdAt, now);
-  await db.transaction(async (tx) => {
+  const went = await db.transaction(async (tx) => {
+    if (!(await lockForFinish(tx, item))) return false;
     const [still] = await tx.update(writeQueue).set({ state: next.state, lastCode: short(code), sent, tries: item.tries + 1, lastTriedAt: now,
-      nextTryAt: next.state === "waiting" ? next.nextTryAt : null, updatedAt: new Date() }).where(eq(writeQueue.id, item.id)).returning({ id: writeQueue.id });
-    if (!still) return;
+      nextTryAt: next.state === "waiting" ? next.nextTryAt : null, updatedAt: new Date() }).where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
+    if (!still) return false;
     await writeAudit({ actor, action: next.state === "stuck" ? "roster.write.stuck" : "roster.write.retry", targetType: "write_queue", targetId: item.id,
       before: { state: item.state, tries: item.tries, code: item.lastCode }, after: { state: next.state, tries: item.tries + 1, code: short(code), sent, op: item.request.op } }, tx);
-    await tx.update(buyout).set({ lastCode: short(code), ...(next.state === "stuck" ? { state: "stuck" as const } : {}), updatedAt: new Date() }).where(eq(buyout.id, b.id));
-    if (next.state === "stuck") {
+    const [marked] = await tx.update(buyout).set({ lastCode: short(code), ...(next.state === "stuck" ? { state: "stuck" as const } : {}), updatedAt: new Date() })
+      .where(and(eq(buyout.id, b.id), inArray(buyout.state, ["being_invoiced", "being_voided", "stuck"]))).returning({ id: buyout.id });
+    if (marked && next.state === "stuck") {
       await writeAudit({ actor, action: "volunteer.buyout.stuck", targetType: "buyout", targetId: b.id, before: { state: b.state }, after: { state: "stuck", code: short(code), queueId: item.id } }, tx);
     }
+    return true;
   });
-  return next.state;
+  return went ? next.state : GIVEN_UP_MEANWHILE;
 }
 
-/** The invoice is made: the buy-out is invoiced, the item done, the family's figures marked behind, all in one transaction. */
-async function created(item: Item, w: Extract<BuyoutWrite, { op: "invoice_create" }>, b: Row, inv: Invoice, how: "sent" | "found", actor: Actor): Promise<BuyoutStep> {
-  let movedMeanwhile = false;
+/**
+ * An invoice QuickBooks made for a buy-out a change of company ended meanwhile (`voided`, `earlier_company`) with no
+ * invoice yet: recorded on it, its state unchanged, audited, so the treasurer's list (stage 4's slice M7b) can name it.
+ * The invoice is in the old company's books; nothing else is changed and nothing is sent.
+ */
+async function invoiceFoundAfterEnding(tx: Tx, item: Item, b: Row, inv: Invoice, how: "sent" | "found", actor: Actor): Promise<void> {
+  const [kept] = await tx.update(buyout).set({ invoiceQboId: inv.qboId, invoiceSyncToken: inv.syncToken, updatedAt: new Date() })
+    .where(and(eq(buyout.id, b.id), eq(buyout.state, "voided"), eq(buyout.endReason, "earlier_company"), isNull(buyout.invoiceQboId))).returning({ id: buyout.id });
+  if (!kept) return;
+  await writeAudit({ actor, action: "volunteer.buyout.invoice_found_after_ending", targetType: "buyout", targetId: b.id,
+    before: { state: "voided", endReason: "earlier_company", invoiceQboId: null },
+    after: { state: "voided", endReason: "earlier_company", invoiceQboId: inv.qboId, customerQboId: inv.customerQboId, amountCents: b.amountCents, realmId: b.realmId, how, queueId: item.id } }, tx);
+}
+
+/**
+ * The invoice is made: the item done, the buy-out invoiced, the family's figures marked behind, all in one transaction,
+ * in the finish's lock order (lockForFinish()). An item given up meanwhile stays given up and keeps the invoice; its
+ * buy-out, given up by staff (`stuck`), is invoiced all the same, and one a change of company ended stays ended, with
+ * the invoice recorded on it (invoiceFoundAfterEnding()).
+ *
+ * The invoice is kept on the item first (`result_qbo_id`, where it has none), in a statement of its own that touches the
+ * item alone, so it crosses no lock order and waits for nothing but that row: the finish then waits for the roster lock,
+ * and a roster read can hold it past that wait, with a change of company's clear after it that gives the item up and
+ * ends the buy-out, so no later try would look for the invoice. The worker's finish (`mayWait`) waits again, up to 4
+ * minutes, inside its claim's 5-minute lease; it holds no row while it waits, and the clear waits on no finish, so this
+ * can't deadlock. The guardian's try made at once never waits that long (tryAtOnce()): the worker finishes it, or, once
+ * a clear has given it up, its item still names the invoice.
+ */
+async function created(item: Item, w: Extract<BuyoutWrite, { op: "invoice_create" }>, b: Row, inv: Invoice, how: "sent" | "found", actor: Actor, mayWait: boolean): Promise<BuyoutStep> {
+  await db.update(writeQueue).set({ resultQboId: inv.qboId, updatedAt: new Date() })
+    .where(and(eq(writeQueue.id, item.id), inArray(writeQueue.state, ["waiting", "given_up"]), isNull(writeQueue.resultQboId)));
+  try {
+    return await finishCreated(item, w, b, inv, how, actor, "10s");
+  } catch (e) {
+    if (!mayWait || codeOf(e) !== "55P03") throw e;
+    return finishCreated(item, w, b, inv, how, actor, "4min");
+  }
+}
+/** created()'s transaction, its roster lock waited for at most `wait`. */
+async function finishCreated(item: Item, w: Extract<BuyoutWrite, { op: "invoice_create" }>, b: Row, inv: Invoice, how: "sent" | "found", actor: Actor, wait: "10s" | "4min"): Promise<BuyoutStep> {
+  let step: BuyoutStep = "done";
   await db.transaction(async (tx) => {
+    const live = await lockForFinish(tx, item, wait);
+    if (live) await itemDone(tx, item, how, inv.qboId, actor);
+    else await keepInvoiceOnItem(tx, item, inv.qboId);
     const elsewhere = inv.customerQboId !== w.customerQboId;
     const [made] = await tx.update(buyout).set({ state: "invoiced", invoiceQboId: inv.qboId, invoiceSyncToken: inv.syncToken, lastCode: null, updatedAt: new Date(),
       ...(elsewhere ? { flag: "other_customer" as const, flaggedAt: new Date() } : {}) })
       .where(and(eq(buyout.id, b.id), inArray(buyout.state, ["being_invoiced", "stuck"]))).returning();
-    await itemDone(tx, item, how, inv.qboId, actor);
-    if (!made) return;
+    if (!made) {
+      await invoiceFoundAfterEnding(tx, item, b, inv, how, actor);
+      if (!live) step = GIVEN_UP_MEANWHILE;
+      return;
+    }
     await markBuyoutMoneyStale(tx, b);
     await writeAudit({ actor, action: "volunteer.buyout.invoiced", targetType: "buyout", targetId: b.id,
-      before: { state: b.state }, after: { state: "invoiced", invoiceQboId: inv.qboId, customerQboId: inv.customerQboId, amountCents: b.amountCents, how, queueId: item.id, ...(elsewhere ? { flag: "other_customer" } : {}) } }, tx);
+      before: { state: b.state }, after: { state: "invoiced", invoiceQboId: inv.qboId, customerQboId: inv.customerQboId, amountCents: b.amountCents, how, queueId: item.id,
+        ...(elsewhere ? { flag: "other_customer" } : {}), ...(live ? {} : { queue: "given_up" }) } }, tx);
     // The student moved to another family while the invoice was being made: the old family's choice is not left billed.
-    if (made.flag === "student_moved") { await queueVoid(tx, made, "student_moved", { actor, label: "student moved", nextTryAt: new Date() }); movedMeanwhile = true; }
+    if (made.flag === "student_moved") { await queueVoid(tx, made, "student_moved", { actor, label: "student moved", nextTryAt: new Date() }); step = "waiting"; }
   });
-  return movedMeanwhile ? "waiting" : "done";
+  return step;
 }
 
-/** The invoice is voided: the buy-out ends, the item is done, the family's figures marked behind. */
+/**
+ * The invoice is voided: the item done, the buy-out ended, the family's figures marked behind, in the finish's lock
+ * order (lockForFinish()). An item given up meanwhile stays given up; a buy-out a change of company ended stays ended.
+ */
 async function voided(item: Item, w: Extract<BuyoutWrite, { op: "invoice_void" }>, b: Row, how: "sent" | "found", actor: Actor): Promise<BuyoutStep> {
+  let step: BuyoutStep = "done";
   await db.transaction(async (tx) => {
+    const live = await lockForFinish(tx, item);
+    if (live) await itemDone(tx, item, how, w.invoiceQboId, actor);
     const [ended] = await tx.update(buyout).set({ state: "voided", endReason: w.why, lastCode: null, updatedAt: new Date() })
       .where(and(eq(buyout.id, b.id), inArray(buyout.state, ["being_voided", "stuck"]))).returning({ id: buyout.id });
-    await itemDone(tx, item, how, w.invoiceQboId, actor);
-    if (!ended) return;
+    if (!ended) { if (!live) step = GIVEN_UP_MEANWHILE; return; }
     await markBuyoutMoneyStale(tx, b);
     await writeAudit({ actor, action: "volunteer.buyout.voided", targetType: "buyout", targetId: b.id,
-      before: { state: b.state, invoiceQboId: w.invoiceQboId, amountCents: b.amountCents }, after: { state: "voided", why: w.why, how, queueId: item.id } }, tx);
+      before: { state: b.state, invoiceQboId: w.invoiceQboId, amountCents: b.amountCents }, after: { state: "voided", why: w.why, how, queueId: item.id, ...(live ? {} : { queue: "given_up" }) } }, tx);
   });
-  return "done";
+  return step;
 }
 
-/** QuickBooks refused the invoice: not queued. The buy-out is refused, which the guardian reads calmly and staff see on Reconciliation. */
+/**
+ * QuickBooks refused the invoice: not queued. The buy-out is refused, which the guardian reads calmly and staff see on
+ * Reconciliation; one a change of company ended stays ended. The item is closed only while it is still waiting.
+ */
 async function createRefused(item: Item, b: Row, code: string, actor: Actor): Promise<BuyoutStep> {
   await db.transaction(async (tx) => {
-    await itemClosed(tx, item, code);
+    if (await lockForFinish(tx, item)) await itemClosed(tx, item, code);
     const [ended] = await tx.update(buyout).set({ state: "refused", lastCode: short(code), updatedAt: new Date() })
       .where(and(eq(buyout.id, b.id), inArray(buyout.state, ["being_invoiced", "stuck"]))).returning({ id: buyout.id });
     if (!ended) return;
@@ -216,11 +304,12 @@ async function createRefused(item: Item, b: Row, code: string, actor: Actor): Pr
 /**
  * A void the portal would not send, or QuickBooks refused: something was paid on the invoice, it is gone from the
  * customer's invoices, or QuickBooks said no. The invoice is left as it is, the buy-out goes back to where it stands
- * (`state`), and it is flagged for the treasurer, who sorts it out in QuickBooks.
+ * (`state`), and it is flagged for the treasurer, who sorts it out in QuickBooks; one a change of company ended stays
+ * ended. The item is closed only while it is still waiting.
  */
 async function voidKept(item: Item, b: Row, to: { state: BuyoutState; flag: NonNullable<Row["flag"]>; code: string }, actor: Actor): Promise<BuyoutStep> {
   await db.transaction(async (tx) => {
-    await itemClosed(tx, item, to.code);
+    if (await lockForFinish(tx, item)) await itemClosed(tx, item, to.code);
     const [kept] = await tx.update(buyout).set({ state: to.state, flag: to.flag, flaggedAt: new Date(), lastCode: short(to.code), updatedAt: new Date() })
       .where(and(eq(buyout.id, b.id), inArray(buyout.state, ["being_voided", "stuck"]))).returning({ id: buyout.id });
     if (!kept) return;
@@ -247,8 +336,9 @@ export async function sendBuyoutWrite(item: Item, now: Date, o: { mayWait: boole
   const actor = o.actor ?? WORKER_ACTOR;
   const [b] = await db.select().from(buyout).where(eq(buyout.id, w.buyoutId));
   if (!b) {
-    // Its buy-out was deleted with the rest of another company's records: nothing is sent for it.
-    await db.transaction((tx) => itemClosed(tx, item, "gone"));
+    // No buy-out row is ever deleted (since stage 4's slice M7a a change of company ends them and keeps them), so an
+    // item naming none names a buy-out the portal never had: nothing is sent for it, and it is closed while it waits.
+    await db.transaction(async (tx) => { if (await lockForFinish(tx, item)) await itemClosed(tx, item, "gone"); });
     return "refused";
   }
   if (w.op === "invoice_create") {
@@ -258,11 +348,14 @@ export async function sendBuyoutWrite(item: Item, now: Date, o: { mayWait: boole
         if (!(e instanceof QboError)) throw e;
         return tryFailed(item, b, `check_${e.code}`, true, now, actor);
       }
-      if (found) return created(item, w, b, found, "found", actor);
+      if (found) return created(item, w, b, found, "found", actor, o.mayWait);
     }
     // Marked as maybe sent before it goes: a try cut off mid-send (a restart) leaves the item `sent`, so whoever takes
     // it next looks for the invoice by the buy-out's id before sending again. A failure that surely sent nothing puts it back.
-    if (!item.sent) await db.update(writeQueue).set({ sent: true, updatedAt: new Date() }).where(eq(writeQueue.id, item.id));
+    // Only while it is still waiting: one given up meanwhile (by staff, or by a change of company) is not sent.
+    const [still] = await db.update(writeQueue).set({ sent: true, updatedAt: new Date() }).where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting")))
+      .returning({ id: writeQueue.id });
+    if (!still) return GIVEN_UP_MEANWHILE;
     let answer: Record<string, unknown>;
     try {
       // The bill-to address is the one the queued create carries: the chooser's own, as it was when they chose.
@@ -276,7 +369,7 @@ export async function sendBuyoutWrite(item: Item, now: Date, o: { mayWait: boole
     const inv = invoiceOf(answer);
     // An answer the portal can't read may still be an invoice made: it is looked for before anything is sent again.
     if (!inv) return tryFailed(item, b, "bad_answer", true, now, actor);
-    return created(item, w, b, inv, "sent", actor);
+    return created(item, w, b, inv, "sent", actor, o.mayWait);
   }
   let invoices: Invoice[];
   try { invoices = await invoicesOf(w.customerQboId, item.realmId, o.mayWait); } catch (e) {
@@ -293,6 +386,9 @@ export async function sendBuyoutWrite(item: Item, now: Date, o: { mayWait: boole
   }
   // A void is sent from the version just read; an invoice read without one is read again at the next try.
   if (inv.syncToken === null) return tryFailed(item, b, "check_bad_answer", item.sent, now, actor);
+  // Not sent for an item given up meanwhile (by staff, or by a change of company).
+  const [current] = await db.select({ state: writeQueue.state }).from(writeQueue).where(eq(writeQueue.id, item.id));
+  if (current?.state !== "waiting") return GIVEN_UP_MEANWHILE;
   try {
     await qboVoidInvoice(inv.qboId, inv.syncToken, sendOptions(item.realmId, o.mayWait));
   } catch (e) {
@@ -335,6 +431,15 @@ export async function queueVoid(tx: Tx, b: Row, why: "switched_back" | "student_
 
 /** Whether a Postgres error is a lock that wasn't free in time; Drizzle wraps the driver's error, so its cause is read too. */
 const codeOf = (e: unknown): unknown => (typeof e === "object" && e !== null ? (e as { code?: unknown }).code ?? codeOf((e as { cause?: unknown }).cause) : undefined);
+
+/**
+ * The try made at once for the guardian. Its finish takes the roster lock shared, and a roster read can hold it past the
+ * finish's wait: the try then fails, and its item is left to the worker as it stood (a create already marked as maybe
+ * sent, so the worker looks for the invoice by the buy-out's id before sending anything again, and an invoice
+ * QuickBooks made kept on the item: created()), which the guardian is told as a write still on its way.
+ */
+const tryAtOnce = (item: Item, actor: Actor): Promise<BuyoutStep> => sendBuyoutWrite(item, new Date(), { mayWait: false, actor })
+  .catch((e: unknown): BuyoutStep => { if (codeOf(e) === "55P03") return "waiting"; throw e; });
 
 /** A buy-out for this subject: the family's own (no student), or this student's. */
 const forSubject = (t: { studentId: AppStudentId | null }) => (t.studentId === null ? isNull(buyout.studentId) : eq(buyout.studentId, t.studentId));
@@ -423,7 +528,7 @@ export async function confirmMyBuyout(ctx: ParentCtx, requirementId: unknown, ke
   }).catch((e: unknown): { r: Result; item?: Item } => { if (codeOf(e) === "23505") return { r: no(BUYOUT_COPY.already) }; throw e; });
   if (made === "busy") return no(ROSTER_BUSY);
   if (!made.item) return made.r;
-  const step = await sendBuyoutWrite(made.item, new Date(), { mayWait: false, actor });
+  const step = await tryAtOnce(made.item, actor);
   if (step === "done") return { ok: true, message: BUYOUT_COPY.done(amount) };
   if (step === "refused") return no(BUYOUT_COPY.refused);
   return { ok: true, message: BUYOUT_COPY.waiting(amount) };
@@ -471,7 +576,7 @@ export async function switchMyBuyoutBack(ctx: ParentCtx, requirementId: unknown,
     ? queueVoid(tx, b, "switched_back", { actor, label: ctx.email, nextTryAt: new Date(Date.now() + LEASE_MS), ip: ctx.ip }) : "not_set_up" as const);
   if (item === "not_set_up") return no(BUYOUT_COPY.notSetUp);
   if (!item) return no(BUYOUT_COPY.nothingToSwitch);
-  const step = await sendBuyoutWrite(item, new Date(), { mayWait: false, actor });
+  const step = await tryAtOnce(item, actor);
   if (step === "done") return { ok: true, message: BUYOUT_COPY.switched };
   if (step === "kept") {
     // Why the void was kept is in the buy-out's code: only a payment is told as one.

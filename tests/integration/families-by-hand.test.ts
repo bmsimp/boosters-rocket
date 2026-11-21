@@ -10,17 +10,18 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, family, qboConnection, qboCustomerType, student, writeQueue } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, jobRun, qboConnection, qboCustomerType, student, writeQueue } from "@/lib/db/schema";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
 import { addFamily, changeInPortal, createInQuickBooksAndLink, FAMILY_SENDING, FAMILY_WAITING, linkStudentMadeAfterGivingUp, studentsBeingMade, WRITE_COPY } from "@/lib/roster/writes";
-import { ROSTER_LOCK } from "@/lib/roster/shape";
-import { CUSTOMER_HAS_FAMILY, FAMILY_HAS_CUSTOMER, giveUp, loadMadeAfterGivingUp, runWriteQueue, tryAgainNow, TRY_AGAIN_NEEDS_LINKING } from "@/lib/roster/queue";
-import { ROSTER_MOVED } from "@/lib/seasons/roster-lock";
+import { ROSTER_LOCK, saveShape } from "@/lib/roster/shape";
+import { clearRosterOfOtherCompany, ROSTER_JOB } from "@/lib/roster/source";
+import { CUSTOMER_HAS_FAMILY, FAMILY_HAS_CUSTOMER, giveUp, giveUpIn, loadMadeAfterGivingUp, runWriteQueue, tryAgainNow, TRY_AGAIN_NEEDS_LINKING } from "@/lib/roster/queue";
+import { currentRosterTag, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
 import { customersWithNoFamily } from "@/lib/roster/no-family";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { addGuardian } from "@/lib/parents/guardians";
 import { resetDb, untilALockIsAwaited } from "../helpers/db";
-import { startQboStub, type QboStub } from "../helpers/qbo-stub";
+import { FZN_SHAPE, startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { asOp, auditsOf, connectRoster, queueItem, REALM, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
 
 /**
@@ -459,6 +460,60 @@ describe("Create in QuickBooks and link", () => {
     expect(posts()).toEqual([]);
   });
 
+  // Stage 4's slice M7a2: givenUpMaybeMade() reads only the roster's company's items, as madeAfterGivingUp() does.
+  it("a create a change of company gave up after a send to the old company holds back nothing in the new one, even before a roster read", async () => {
+    const oak = await unlinkedFamily("Oak Family");
+    // Sent to the old company, its answer lost, still waiting when the club changed company.
+    await seedQueued(OAK_CREATE, { familyId: oak, sent: true, state: "waiting", lastTriedAt: new Date() });
+    expect(await clearRosterOfOtherCompany("2222", { actor: { door: "staff", id: null, label: "admin@club.org" }, ip: null })).toBe(true);
+    expect(await db.select().from(writeQueue)).toEqual([expect.objectContaining({ state: "given_up", sent: true, realmId: REALM })]);
+    // The new company connected and its roster read, then, as just after the clear (which drops the roster's run
+    // history), no roster read on record since the old try.
+    await db.update(qboConnection).set({ realmId: "2222" });
+    await saveShape(FZN_SHAPE, { actor: WORKER.actor, ip: null });
+    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    await db.delete(jobRun).where(eq(jobRun.job, ROSTER_JOB));
+    stub.calls.length = 0;
+    const r = await createInQuickBooksAndLink(String(oak), null, await currentRosterTag(), op);
+    expect(r.result).toMatchObject({ ok: true });
+    expect(sent()).toEqual([{ DisplayName: "Oak Family", CustomerTypeRef: { value: "1" } }]);
+    expect(await linkOfFamily(oak)).toMatchObject({ realmId: "2222", customerId: stubNamed("Oak Family")[0]!.Id });
+  });
+
+  // Stage 4's slice M7a2: a change of company's clear run as the family's create reaches QuickBooks.
+  const clearAsItArrives = (then: () => void = () => {}) => {
+    stub.onApiRequest = async (c) => {
+      if (c.method !== "POST") return;
+      stub.onApiRequest = null;
+      expect(await clearRosterOfOtherCompany("2222", { actor: { door: "staff", id: null, label: "admin@club.org" }, ip: null })).toBe(true);
+      then();
+    };
+  };
+  const COMPANY_NOTE = "Given up: the club connected a different QuickBooks company, so nothing more was sent for this.";
+
+  it("a family's create whose answer is lost as the club changes company goes on the queue given up, and the words say it won't be tried again", async () => {
+    const oak = await unlinkedFamily("Oak Family");
+    clearAsItArrives(() => { stub.loseUpdateAnswer = true; });
+    const r = await createInQuickBooksAndLink(String(oak), null, tag, op);
+    expect(r.result.ok).toBe(false);
+    expect(r.result.ok ? [] : r.result.errors).toContainEqual(expect.stringContaining("its answer didn't arrive, and the club has connected a different QuickBooks company since, so it won't be tried again."));
+    expect(await db.select().from(writeQueue)).toEqual([expect.objectContaining({ state: "given_up", note: COMPANY_NOTE, sent: true, familyId: oak, realmId: REALM, nextTryAt: null })]);
+    expect((await auditsOf("roster.write.queued"))[0]!.after).toMatchObject({ op: "create", role: "family", state: "given_up", why: "company_changed" });
+    expect(await linkOfFamily(oak)).toBeUndefined();
+  });
+
+  it("a family's create QuickBooks makes as the club changes company is said to be made there and not linked, with nothing queued", async () => {
+    const oak = await unlinkedFamily("Oak Family");
+    clearAsItArrives();
+    const r = await createInQuickBooksAndLink(String(oak), null, tag, op);
+    expect(r.result.ok).toBe(false);
+    expect(r.result.ok ? [] : r.result.errors).toContainEqual(expect.stringContaining("but the club has connected a different QuickBooks company since, so the portal won't link the two."));
+    expect(stubNamed("Oak Family")).toHaveLength(1);
+    expect(await linkOfFamily(oak)).toBeUndefined();
+    expect(await db.select().from(writeQueue)).toEqual([]);
+    expect((await auditsOf("roster.family.created_in_quickbooks"))[0]!.after).toMatchObject({ outcome: "stopped", code: "company_changed", maybe: true });
+  });
+
   it("a create given up while the worker's send is on its way stays given up: nothing linked, its customer kept and named, and no second one made", async () => {
     const oak = await unlinkedFamily("Oak Family");
     const item = await seedQueued(OAK_CREATE, { familyId: oak, sent: false, code: "http_429", nextTryAt: ago(1000) });
@@ -495,21 +550,26 @@ describe("Create in QuickBooks and link", () => {
     stub.customers.push({ Id: "77", SyncToken: "0", DisplayName: "Oak Family", Active: true, CustomerTypeRef: { value: "1" } });
     const item = await seedQueued(OAK_CREATE, { familyId: oak, sent: true, lastTriedAt: ago(60_000), nextTryAt: ago(1000) });
     expect((await refreshRoster(WORKER)).ok).toBe(true);
-    // The roster lock held elsewhere: the worker's look finds the customer, then waits for the lock, and staff give the item up meanwhile.
+    // The roster lock held elsewhere: the worker's look finds the customer, then waits for the lock, and staff give the
+    // item up meanwhile. Since stage 4's slice M7a2 "Give up" holds the roster lock itself (giveUp() takes it shared),
+    // so it can't run beside a finish waiting for it: the give-up is made holding the lock the worker waits for, as
+    // giveUp() would hold it had it taken it first, and commits before the worker's finish goes on.
     let release = () => {};
     let held: Promise<void> = Promise.resolve();
+    let gaveUp: unknown = null;
     await new Promise<void>((ready) => {
       held = db.transaction(async (tx) => {
         await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
         ready();
         await new Promise<void>((r) => { release = () => r(); });
+        gaveUp = await giveUpIn(tx, item.id, "Making it in QuickBooks by hand.", op);
       });
     });
     const wake = runWriteQueue();
     await untilALockIsAwaited();
-    expect(await giveUp(item.id, "Making it in QuickBooks by hand.", op)).toMatchObject({ ok: true });
     release();
     await held;
+    expect(gaveUp).toMatchObject({ ok: true });
     expect(await wake).toMatchObject({ ok: true });
     expect(await queueItem(item.id)).toMatchObject({ state: "given_up", resultQboId: "77" });
     expect(await linkOfFamily(oak)).toBeUndefined();

@@ -39,10 +39,11 @@ vi.mock("@/lib/families/links", async (original) => {
 
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, family, formWithdrawal, jobRun, qboCustomer, setting, student, writeQueue } from "@/lib/db/schema";
+import { accountingLink, auditLog, buyout, family, formWithdrawal, jobRun, qboConnection, qboCustomer, setting, student, writeQueue } from "@/lib/db/schema";
 import { giveUp, loadOpenWrites, queueCounts, runWriteQueue, tryAgainNow, TRY_AGAIN_NEEDS_LINKING, waitingWords, WRITE_QUEUE_JOB } from "@/lib/roster/queue";
 import { addFamily, applyWritten, askRosterWrite, moveStudent, REFRESH_ASK_KEY } from "@/lib/roster/writes";
 import { clearRosterOfOtherCompany, GIVEN_UP_FOR_COMPANY_NOTE, ROSTER_JOB } from "@/lib/roster/source";
+import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { runDueJobs } from "@/lib/jobs/runner";
 import { resetDb } from "../helpers/db";
 import { requestByCustomer, seedFormRequirement, seedRequest } from "../helpers/forms";
@@ -50,6 +51,7 @@ import { seedSeason } from "../helpers/season";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { asOp, auditsOf, connectRoster, queueItem, REALM, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
 import { recordOfCustomer } from "../helpers/app-records";
+import { seedBuyout, seedBuyoutRequirement } from "../helpers/buyouts";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -510,10 +512,12 @@ describe("staff try a change again, or give it up", () => {
 });
 
 describe("the queue and the company", () => {
-  it("an item is never sent to a company other than its own", async () => {
-    await seedQueued(RENAME, { realmId: "2222" });
-    expect(await runWriteQueue()).toEqual({ ran: false, ok: true });
+  // Since stage 4's slice M7a2 the worker gives such an item up (it was left waiting, never tried).
+  it("an item is never sent to a company other than its own: the worker gives it up", async () => {
+    const other = await seedQueued(RENAME, { realmId: "2222" });
+    expect(await runWriteQueue()).toEqual({ ran: true, ok: true });
     expect(posts()).toEqual([]);
+    expect(await queueItem(other.id)).toMatchObject({ state: "given_up", note: GIVEN_UP_FOR_COMPANY_NOTE });
   });
 
   // Stage 4's slice M7a (open question 16): the old company's items still to go are given up, not deleted, and one
@@ -539,6 +543,80 @@ describe("the queue and the company", () => {
     // Nothing given up is tried again, here or by the worker.
     expect(await queueCounts()).toMatchObject({ waiting: 0, stuck: 0, refused: 0 });
     expect(await runWriteQueue()).toEqual({ ran: false, ok: true });
+    expect(posts()).toEqual([]);
+  });
+
+  // Stage 4's slice M7a2: a parent's change of their details takes no roster lock (stage 3's slice 11d), so one saved
+  // after reading the old company, as the clear ran, goes in after the clear gave the rest up. The worker gives it up.
+  const admin = { actor: { door: "staff" as const, id: null, label: "admin@club.org" }, ip: null };
+  /** One open item of the old company in each state, inserted after the clear as a late parent save would leave it. */
+  const lateOldItems = async () => [await seedQueued(RENAME, { realmId: REALM, nextTryAt: ago(MIN) }), await seedQueued(RENAME, { realmId: REALM, state: "stuck", nextTryAt: null }),
+    await seedQueued(RENAME, { realmId: REALM, state: "refused", nextTryAt: null })];
+
+  it("the worker gives up every open item of a company other than the roster's, in one statement, audited once with the count, sending nothing and touching no buy-out", async () => {
+    const p = await seedBuyoutRequirement({ title: "Kept paid" });
+    await seedBuyout({ requirementId: p, familyQboId: "10", chosenBy: op.staffUserId, state: "paid", invoiceQboId: "9501", realmId: REALM });
+    expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
+    const late = await lateOldItems();
+    // The new company's own items, waiting for later and stuck, are its own.
+    const theirs = [await seedQueued(RENAME, { realmId: "2222", nextTryAt: new Date(Date.now() + HOUR) }), await seedQueued(RENAME, { realmId: "2222", state: "stuck", nextTryAt: null })];
+    const theirsBefore = await db.select().from(writeQueue).where(eq(writeQueue.realmId, "2222")).orderBy(writeQueue.id);
+    const buyoutsBefore = await db.select().from(buyout);
+    await db.update(qboConnection).set({ realmId: "2222" });
+    stub.calls.length = 0;
+    expect(await runWriteQueue()).toEqual({ ran: true, ok: true });
+    for (const item of late) {
+      expect(await queueItem(item.id)).toMatchObject({ state: "given_up", note: GIVEN_UP_FOR_COMPANY_NOTE, nextTryAt: null, finishedAt: expect.any(Date), realmId: REALM });
+    }
+    const audits = await db.select().from(auditLog).where(eq(auditLog.action, "roster.writes.given_up_other_company"));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ door: "system", targetType: "write_queue", after: { reason: "different_company", realmId: "2222", givenUp: 3 } });
+    expect(stub.apiCalls()).toEqual([]);
+    expect(await db.select().from(writeQueue).where(eq(writeQueue.realmId, "2222")).orderBy(writeQueue.id)).toEqual(theirsBefore);
+    expect(theirs).toHaveLength(2);
+    expect(await db.select().from(buyout)).toEqual(buyoutsBefore);
+    // A second wake finds nothing more to give up, and audits nothing.
+    await runWriteQueue();
+    expect(await db.select().from(auditLog).where(eq(auditLog.action, "roster.writes.given_up_other_company"))).toHaveLength(1);
+  });
+
+  it("the worker gives up nothing of the roster's company, nor anything while QuickBooks is connected to another company than the roster's", async () => {
+    // The roster's company's own items: kept as they are.
+    const stuck = await seedQueued(RENAME, { state: "stuck", nextTryAt: null });
+    const refused = await seedQueued(RENAME, { state: "refused", nextTryAt: null });
+    await runWriteQueue();
+    expect((await queueItem(stuck.id))!.state).toBe("stuck");
+    expect((await queueItem(refused.id))!.state).toBe("refused");
+    // After the clear, with QuickBooks still connected to the old company (the worker stops at its first look).
+    expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
+    const late = await lateOldItems();
+    expect(await runWriteQueue()).toEqual({ ran: false, ok: true });
+    expect((await Promise.all(late.map((i) => queueItem(i.id)))).map((i) => i!.state)).toEqual(["waiting", "stuck", "refused"]);
+    expect(await db.select().from(auditLog).where(eq(auditLog.action, "roster.writes.given_up_other_company"))).toEqual([]);
+    expect(posts()).toEqual([]);
+  });
+
+  it("the worker gives nothing up while a roster read holds the roster lock, and gives the earlier company's items up at its next wake", async () => {
+    expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
+    const late = await lateOldItems();
+    await db.update(qboConnection).set({ realmId: "2222" });
+    // A roster read holding the roster lock: the worker's give-up, tried once, leaves it to the next wake.
+    let release = () => {}, holding = () => {};
+    const held = new Promise<void>((r) => { holding = r; });
+    const reading = db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
+      holding();
+      await new Promise<void>((r) => { release = r; });
+    });
+    await held;
+    await runWriteQueue();
+    expect((await Promise.all(late.map((i) => queueItem(i.id)))).map((i) => i!.state)).toEqual(["waiting", "stuck", "refused"]);
+    expect(await db.select().from(auditLog).where(eq(auditLog.action, "roster.writes.given_up_other_company"))).toEqual([]);
+    release();
+    await reading;
+    expect(await runWriteQueue()).toEqual({ ran: true, ok: true });
+    expect((await Promise.all(late.map((i) => queueItem(i.id)))).map((i) => i!.state)).toEqual(["given_up", "given_up", "given_up"]);
+    expect(await db.select().from(auditLog).where(eq(auditLog.action, "roster.writes.given_up_other_company"))).toHaveLength(1);
     expect(posts()).toEqual([]);
   });
 });
