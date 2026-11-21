@@ -18,7 +18,8 @@ import type { ParentCtx } from "@/lib/guards";
 import { currentPassword, sessionProvedRecently, sessionStrongAt } from "./asking-again";
 import { completeEnrolment, sessionMayAddFactor } from "./enrolment";
 import { hasAuthenticator, makeBackupCodes, removeBackupCodes } from "./authenticator";
-import { namePasskey, passkeyCount, passkeyOfPerson, passkeysAddedBefore, readPasskeyName, removePasskey } from "./passkeys";
+import { passkeyOrigin } from "@/lib/auth/passkey-origin";
+import { namePasskey, passkeyCount, passkeyOfPerson, passkeysAddedBefore, readPasskeyName, recordPasskeyOrigin, removePasskey } from "./passkeys";
 import { giveBackRateLimit, takeRateLimit, takeRateLimitPlace } from "./rate-limit";
 import { provedRecently } from "./reask-rule";
 import { enterableGuardianRows, lockedPerson, parentActor } from "./sessions";
@@ -138,7 +139,8 @@ type AddRefusal = "not_a_registration" | "bad_name" | "not_allowed" | "not_verif
  *     the portal's afterVerification confirms the user was verified and the credential is held by no passkey already,
  *     before the insert;
  * (e) one transaction under the person's row FOR UPDATE (heldPerson()): not blocked, the new row (by the id the
- *     library answered) still the person's, its name set (the typed one, or none), `parent.passkey.add` (the row's id,
+ *     library answered) still the person's, its name set (the typed one, or none), the origin it was made for
+ *     recorded (recordPasskeyOrigin(), passkeyOrigin(): slice SI-9b), `parent.passkey.add` (the row's id,
  *     its name, and how many the person now has), and, for a first passkey (none of theirs added before it,
  *     passkeysAddedBefore(), so two adds at once make one set of codes, never none) of a person with no authenticator
  *     app in force, ten backup codes made (makeBackupCodes(), any older ones deleted), `parent.backup_codes.make`; and,
@@ -147,8 +149,8 @@ type AddRefusal = "not_a_registration" | "bad_name" | "not_allowed" | "not_verif
  *     cleared and `strong_at` set, after the person's row), `enrolled: true` in the add's row; a session that stopped
  *     enrolling meanwhile gets the passkey recorded as a whole session's would be, and the gate ends it. If it
  *     fails, the row the library inserted is deleted (forgetUnrecordedPasskey()). One gap stays: a process that stops
- *     between the library's insert and this transaction's commit (a restart, say) leaves the row with no name, no audit
- *     row and no backup codes. It works, and the person's settings list it as "Passkey added" with its date, where they
+ *     between the library's insert and this transaction's commit (a restart, say) leaves the row with no name, no origin,
+ *     no audit row and no backup codes (with no origin, an Admin's removal of passkeys from an earlier address takes it). It works, and the person's settings list it as "Passkey added" with its date, where they
  *     can remove it; nothing sweeps such rows yet. And for an enrolling session, one more: in that same gap the
  *     person already holds a passkey (hasPasskey() counts the unrecorded row), so a request of this same session that
  *     the gate reads then (a second tab reloading) ends it (`enrol_ended`); the add then completes nothing (no
@@ -185,6 +187,9 @@ export async function addMyPasskey(who: Adder | null, body: unknown, verify: Ver
       if (!live || live.blocked) return "gone" as const;
       if (!(await passkeyOfPerson(tx, who.parentId, verified.passkeyId))) return "gone" as const;
       await namePasskey(tx, who.parentId, verified.passkeyId, name === "" ? null : name);
+      // The origin the library verified it against (slice SI-9b), so a later change of the portal's address can tell it
+      // from a passkey made there. Here and nowhere else: a rename never stamps it.
+      await recordPasskeyOrigin(tx, who.parentId, verified.passkeyId, passkeyOrigin());
       const passkeys = await passkeyCount(who.parentId, tx);
       const firstBesideNoApp = (await passkeysAddedBefore(tx, who.parentId, verified.passkeyId)) === 0 && !(await hasAuthenticator(who.parentId, tx));
       // Strict's enrolment: the session is whole once the person holds the passkey, when it is still enrolling: the

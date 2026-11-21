@@ -11,6 +11,7 @@ import { env } from "@/env";
 import { clientAddress, stampingHandler } from "./client-address";
 import { isFinishing } from "./finish-scope";
 import { afterPasskeyVerified, afterRegistrationVerified } from "./passkey-check";
+import { passkeyOrigin, portal } from "./passkey-origin";
 
 /**
  * Every Better Auth route a parent doesn't need. Several write (/update-user, the revoke routes, /unlink-account) and
@@ -47,15 +48,15 @@ export const PARENT_DISABLED_PATHS = [
 ];
 
 const APP_NAME = "Booster Rocket";
-/** The portal's address, whose host is the passkeys' relying party id and whose origin is the only one they work at. */
-const portal = () => new URL(env.APP_URL);
 
 /**
  * The passkey library's server plugin (the sign-in release, slice SI-7a; the release's one new dependency): the WebAuthn
  * ceremony is its, the sign-in the portal's. The relying party is set here, never left to the library's defaults and
- * never taken from a request: its id is APP_URL's host name and its origin APP_URL's origin, so a passkey belongs to the
- * portal's address (a club that changes it leaves every parent's passkeys behind: docs/runbooks/first-install.md), and
- * a ceremony anywhere else is one refusal at the server; its name is the instance's. User verification is required and
+ * never taken from a request: its id is APP_URL's host name and its origin APP_URL's origin (passkey-origin.ts, which
+ * the add's record of each passkey's origin reads too), so a passkey belongs to the portal's address (a club that
+ * changes it leaves every parent's passkeys behind, until an Admin removes those made at an earlier address in one
+ * press, slice SI-9b: docs/runbooks/first-install.md), and a ceremony anywhere else is one refusal at the server; its
+ * name is the instance's. User verification is required and
  * a discoverable credential is required, so no address is ever asked (open question 30) and a passkey is two steps in
  * one (question 35); attestation is none (the library's, fixed); no authenticator attachment, so a phone, a computer, a
  * password manager and a security key are all taken. `afterVerification` records the passkey the library verified for
@@ -69,7 +70,7 @@ const portal = () => new URL(env.APP_URL);
 const parentPasskeys = () => passkey({
   rpID: portal().hostname,
   rpName: APP_NAME,
-  origin: portal().origin,
+  origin: passkeyOrigin(),
   authenticatorSelection: { residentKey: "required", requireResidentKey: true, userVerification: "required" },
   authentication: { afterVerification: afterPasskeyVerified },
   registration: { afterVerification: afterRegistrationVerified },

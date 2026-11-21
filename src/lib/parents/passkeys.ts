@@ -170,6 +170,25 @@ export async function namePasskey(tx: Tx, parentId: string, passkeyId: string, n
 }
 
 /**
+ * The origin a passkey of the person's was made for (slice SI-9b), set by the add's own record in the caller's
+ * transaction, beside its name (addMyPasskey(), passkey-settings.ts): the origin the library verified the registration
+ * against, passkeyOrigin() (src/lib/auth/passkey-origin.ts). Never by a rename, which may happen at a new address and
+ * must never mark an old passkey current. False when it isn't theirs.
+ */
+export async function recordPasskeyOrigin(tx: Tx, parentId: string, passkeyId: string, origin: string): Promise<boolean> {
+  const rows = await tx.update(parentAuthPasskey).set({ origin })
+    .where(and(eq(parentAuthPasskey.id, passkeyId), inArray(parentAuthPasskey.userId, usersOf(tx, parentId))))
+    .returning({ id: parentAuthPasskey.id });
+  return rows.length > 0;
+}
+
+/**
+ * A passkey made at an address other than `origin` (the portal's now): its recorded origin is distinct from it, so a
+ * row the portal never recorded (null) counts as one too (slice SI-9b). A condition on a query of the table.
+ */
+export const madeElsewhere = (origin: string) => sql`${parentAuthPasskey.origin} IS DISTINCT FROM ${origin}`;
+
+/**
  * A passkey of the person's removed, in the caller's transaction; false when it isn't theirs. A sign-in that verified
  * it just before and whose session is made after is refused at its last check (signinStands(): `passkey_gone`).
  */
@@ -183,11 +202,24 @@ export async function removePasskey(tx: Tx, parentId: string, passkeyId: string)
 /**
  * Every passkey of the person removed, in the caller's transaction, which holds the person's row and writes the audit
  * row: an Admin's reset of their sign-in (resetSignin(), signin-reset.ts; the sign-in release, slice SI-9a), which takes
- * away what they sign in with, the passkeys that no longer work after a change of the portal's address included.
- * Answers how many went. A sign-in that verified one just before and whose session is made after is refused at its last
+ * away what they sign in with, the passkeys that no longer work after a change of the portal's address included (for
+ * every parent at once, removeOldAddressPasskeysOf() below). Answers how many went. A sign-in that verified one just before and whose session is made after is refused at its last
  * check (signinStands(): `passkey_gone`).
  */
 export async function removeAllPasskeys(tx: Tx, parentId: string): Promise<number> {
   const rows = await tx.delete(parentAuthPasskey).where(inArray(parentAuthPasskey.userId, usersOf(tx, parentId))).returning({ id: parentAuthPasskey.id });
+  return rows.length;
+}
+
+/**
+ * The person's passkeys made at an address other than `origin` (madeElsewhere()) removed, in the caller's transaction,
+ * which holds the person's row and writes the audit row: an Admin's removal of every passkey made at an earlier address
+ * (removeOldAddressPasskeys(), signin-reset.ts; slice SI-9b). Their passkeys made at `origin` stay. Answers how many
+ * went. A sign-in that verified one just before and whose session is made after is refused at its last check
+ * (signinStands(): `passkey_gone`).
+ */
+export async function removeOldAddressPasskeysOf(tx: Tx, parentId: string, origin: string): Promise<number> {
+  const rows = await tx.delete(parentAuthPasskey).where(and(inArray(parentAuthPasskey.userId, usersOf(tx, parentId)), madeElsewhere(origin)))
+    .returning({ id: parentAuthPasskey.id });
   return rows.length;
 }

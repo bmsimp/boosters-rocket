@@ -17,16 +17,19 @@ export const ORIGIN = new URL(env.APP_URL).origin;
 
 /**
  * A passkey for the person, made `createdAt` (an hour ago unless told, so a proof a test stamps just now is newer than
- * it and counts beside it), with the counter it was last seen at (0 as a synced passkey keeps, unless told). The key,
+ * it and counts beside it), with the counter it was last seen at (0 as a synced passkey keeps, unless told), and the
+ * origin the portal recorded it for (slice SI-9b): the portal's own now, ORIGIN, unless told, so a seeded passkey is a
+ * current one; another origin, or null (a row the portal never recorded), is one made at an earlier address. The key,
  * which only the test holds, and the row's id.
  */
-export async function seedPasskey(parentId: string, o: { key?: PasskeyKey; counter?: number; createdAt?: Date; publicKey?: string } = {}): Promise<PasskeyKey & { rowId: string }> {
+export async function seedPasskey(parentId: string, o: { key?: PasskeyKey; counter?: number; createdAt?: Date; publicKey?: string; origin?: string | null } = {}): Promise<PasskeyKey & { rowId: string }> {
   const key = o.key ?? makePasskeyKey();
   const [user] = await db.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, parentId));
   if (!user) throw new Error("the person has no sign-in account");
   const rowId = randomUUID();
   await db.insert(parentAuthPasskey).values({ id: rowId, name: null, publicKey: o.publicKey ?? key.publicKey, userId: user.id, credentialID: key.id,
-    counter: o.counter ?? 0, deviceType: "multiDevice", backedUp: true, transports: "internal,hybrid", createdAt: o.createdAt ?? new Date(Date.now() - 60 * 60_000) });
+    counter: o.counter ?? 0, deviceType: "multiDevice", backedUp: true, transports: "internal,hybrid", createdAt: o.createdAt ?? new Date(Date.now() - 60 * 60_000),
+    origin: o.origin === undefined ? ORIGIN : o.origin });
   return { ...key, rowId };
 }
 
