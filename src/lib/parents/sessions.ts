@@ -1,11 +1,12 @@
 import { and, eq, exists, gt, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { accountingLink, family, guardian, parent, parentAuthSession, parentDevice, parentSigninToken, signinCode, student } from "@/lib/db/schema";
+import { accountingLink, family, guardian, parent, parentAuthSession, parentAuthUser, parentDevice, parentSigninToken, signinCode, student } from "@/lib/db/schema";
 import type { Actor } from "@/lib/audit/log";
 import { QUICKBOOKS, type AppFamilyId } from "@/lib/families/ids";
 import { recordsCompany } from "@/lib/families/links";
 import { getShape, shapeNamesStudents, type MembershipShape } from "@/lib/roster/shape";
 import { getParentSettings } from "./settings";
+import { unspentLink } from "./link-state";
 
 /**
  * A guardian row as the code reads it, every column of it: what the gate, the chooser, staff's add, remove and
@@ -30,20 +31,45 @@ export const parentActor = (p: { id: string; email: string }): Actor => ({ door:
 export const PARENT_SESSION_SECONDS = 90 * 24 * 60 * 60;
 export const PARENT_SESSION_COOKIE_SECONDS = 400 * 24 * 60 * 60;
 const RENEW_AFTER_MS = 24 * 60 * 60 * 1000;
+/**
+ * How long a remembered device is remembered from its last use: a password sign-in on it, or its session's renewal
+ * (open question 26). Kept here, beside the session's own life, since the renewal below renews both; devices.ts, which
+ * imports this module, exports it on.
+ */
+export const DEVICE_LIFE_MS = 90 * 24 * 60 * 60 * 1000;
 
 /**
  * Starts the session's 90 days again, at most once a day: a row made or renewed less than a day ago is left alone,
  * without a query. Called for a session the portal has just accepted (src/lib/auth/identity.ts). A row that has run
  * out is never brought back: the update only matches one that is still live.
+ *
+ * Since the sign-in release's slice SI-5b it renews the session's device with it (open question 26: a device is
+ * "renewed by use, like sessions"), in one transaction and in the order above lockedPerson() (devices before sessions):
+ * first the device the session names (`parent_auth_session.device_id`), its last use now and its end DEVICE_LIFE_MS on,
+ * but only while it is that session's own person's (through `parent_auth_user.parent_id`), unexpired (a device past its
+ * end, or forgotten, whose row is gone, is never brought back) and not renewed in the last day (so two renewals at once
+ * renew it once), and only while the session itself is still live and due its renewal; then the session, as before. A
+ * request that renews nothing reads nothing new. Unaudited, as a session's renewal is (tests/unit/audit-rows.test.ts,
+ * NOT_AUDITED): it is the portal keeping what the person already has, and runs on every day's first page.
  */
 export async function renewParentSession(s: { id: string; expiresAt: Date }, now = new Date()): Promise<boolean> {
   const expiresAt = new Date(now.getTime() + PARENT_SESSION_SECONDS * 1000);
   const renewable = new Date(expiresAt.getTime() - RENEW_AFTER_MS);
   if (s.expiresAt.getTime() > renewable.getTime()) return false;
-  const rows = await db.update(parentAuthSession).set({ expiresAt, updatedAt: now })
-    .where(and(eq(parentAuthSession.id, s.id), gt(parentAuthSession.expiresAt, now), lte(parentAuthSession.expiresAt, renewable)))
-    .returning({ id: parentAuthSession.id });
-  return rows.length > 0;
+  const deviceEnds = new Date(now.getTime() + DEVICE_LIFE_MS);
+  const deviceRenewable = new Date(deviceEnds.getTime() - RENEW_AFTER_MS);
+  return db.transaction(async (tx) => {
+    const thisSession = tx.select({ one: sql`1` }).from(parentAuthSession)
+      .innerJoin(parentAuthUser, eq(parentAuthUser.id, parentAuthSession.userId))
+      .where(and(eq(parentAuthSession.id, s.id), eq(parentAuthSession.deviceId, parentDevice.id), eq(parentAuthUser.parentId, parentDevice.parentId),
+        gt(parentAuthSession.expiresAt, now), lte(parentAuthSession.expiresAt, renewable)));
+    await tx.update(parentDevice).set({ lastUsedAt: now, expiresAt: deviceEnds })
+      .where(and(exists(thisSession), gt(parentDevice.expiresAt, now), lte(parentDevice.expiresAt, deviceRenewable)));
+    const rows = await tx.update(parentAuthSession).set({ expiresAt, updatedAt: now })
+      .where(and(eq(parentAuthSession.id, s.id), gt(parentAuthSession.expiresAt, now), lte(parentAuthSession.expiresAt, renewable)))
+      .returning({ id: parentAuthSession.id });
+    return rows.length > 0;
+  });
 }
 
 /**
@@ -58,32 +84,35 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * person's row (`parent`), then what hangs on the person, in this order: their email change requests, their sign-in
  * codes, their set-up and reset links (`parent_signin_token`), their password (the `credential` row of
  * `parent_auth_account`), their remembered devices (`parent_device`), their sessions. Links are made since the sign-in
- * release's slice SI-2 (mintSigninLink(), signin-links.ts); nothing makes a device yet. Everything that ends all of a
- * person's sign-in deletes their unused links (a password reset spends its own) and forgets their devices, in that
- * place, and keeps their password: blocking, sign-ins switched off, a password reset, a
- * confirmed change of sign-in email, and closing a person's last open membership (closeMembership(), membership.ts;
- * the lead's choice 10 of the sign-in release). So:
+ * release's slice SI-2 (mintSigninLink(), signin-links.ts); devices since SI-3b (recordStrongSignin(), devices.ts), and
+ * each session names the device it was made on since SI-5b (`parent_auth_session.device_id`). Everything that ends all of a
+ * person's sign-in deletes their unused links, a held one on its way included (unspentLink, ./link-state.ts) and forgets their devices, in that
+ * place, and keeps their password: blocking, sign-ins switched off, a confirmed change of
+ * sign-in email, and closing a person's last open membership (closeMembership(), membership.ts; the lead's choice 10 of
+ * the sign-in release). A password reset ends their sign-in too, in the same place, but sets the new password: it spends
+ * its own link and deletes their other unspent reset links, a held one included. So:
  * - choosePasswordFromLink() (password-set.ts) takes the row FOR UPDATE, then, as its re-check, its link's row FOR
  *   UPDATE, and only then, for a reset, deletes the unused codes and those spent within a code's life (so the code
- *   door's last check refuses a sign-in whose code was spent before the reset: signinStands(), below); then it
- *   spends the link, replaces or inserts the password, and for a reset forgets the devices and ends the sessions. That one link ahead of the codes is the one
+ *   door's last check refuses a sign-in whose code was spent before the reset: signinStands(), below), then their
+ *   other unspent reset links; then it spends the link, replaces or inserts the password, and for a reset forgets the devices and ends the sessions. That one link ahead of the codes is the one
  *   step out of the order above, and is safe because nothing else takes both without the person's row first: every
  *   writer of a person's links holds that row, and the code check of signin-codes.ts touches no link. A new writer of
- *   both that does not take the person's row first must take the link before the codes too. mintSigninLink() takes the row FOR UPDATE, then replaces the unused link
- *   of its purpose;
+ *   both that does not take the person's row first must take the link before the codes too. mintSigninLink() takes the row FOR UPDATE, then replaces the unspent links
+ *   of its purpose, a held one included;
  * - confirmMyEmailChange() (email-change.ts) takes both address locks and the row FOR UPDATE, spends its request,
- *   reads under the row that the person isn't blocked and its own session still exists (stopping with the address
- *   unchanged otherwise), and changes the address, then deletes the person's other requests, then their unused codes,
- *   then their unused links, then their devices, then their sessions; then, since stage 3's slice S11e, it queues the
- *   new address for each record of theirs in QuickBooks (queueEmailChange(), contact-queue.ts): the record's open email
- *   items FOR UPDATE SKIP LOCKED (never waited for), then it closes those it may and inserts its own items (a key share
- *   on each membership's family row, by the foreign key); it takes no roster lock and no "being sent" lock and waits for
- *   neither, and touches no app records or roster cache (since stage 3's slice 11d). That key share can wait, briefly,
- *   for a staff write holding the family's row FOR UPDATE (after the roster lock: a rename, an add, the family action,
- *   changeOwnRecord() and the like), so the confirm may wait behind such a write: safe while no writer takes a person's
- *   row, their sessions, codes or links, or their email items, after taking a family's row FOR UPDATE. A new writer
- *   that would must take the person's row first;
- * - requestMyEmailChange() takes the row FOR UPDATE, then replaces the person's unused request;
+ *   reads (since slice SI-5a) under the row that the person isn't blocked and its own session still exists (stopping
+ *   with the address unchanged otherwise), and changes the address, then deletes the person's other requests, then
+ *   their unused codes, then their unused links, then their devices, then their sessions; then, since stage 3's slice
+ *   S11e, it queues the new address for each record of theirs in QuickBooks (queueEmailChange(), contact-queue.ts): the
+ *   record's open email items FOR UPDATE SKIP LOCKED (never waited for), then it closes those it may and inserts its own
+ *   items (a key share on each membership's family row, by the foreign key); it takes no roster lock and no "being
+ *   sent" lock and waits for neither, and touches no app records or roster cache (since stage 3's slice 11d). That key
+ *   share can wait, briefly, for a staff write holding the family's row FOR UPDATE (after the roster lock: a rename, an
+ *   add, the family action, changeOwnRecord() and the like), so the confirm may wait behind such a write: safe while no
+ *   writer takes a person's row, their sessions, codes or links, or their email items, after taking a family's row FOR
+ *   UPDATE. A new writer that would must take the person's row first;
+ * - requestMyEmailChange() takes the row FOR UPDATE, then (since slice SI-5a) reads the asking session's `strong_at`
+ *   unlocked, refusing unless it proved itself within the window, then replaces the person's unused request;
  * - blockPerson() (people.ts) takes the row FOR UPDATE, then deletes the unused requests, then the codes, then the
  *   unused links, then the devices, then the sessions; renamePerson() (people.ts) takes the row FOR UPDATE, then the
  *   roster lock shared (at most three seconds, as the guardian writes below), and touches nothing that hangs on it;
@@ -117,8 +146,106 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * - the daily clean-up (cleanUp(), src/lib/jobs/cleanup.ts) takes FOR UPDATE, in id order, the row of every person
  *   with an expired request, a spent or expired code, a used or expired link, an expired device or an expired session,
  *   then deletes those requests, then the codes, then the links and devices, then the sessions;
- * - a code request calls this before it touches a code, and the code door's last check (signinStands(),
- *   signin-codes.ts) calls it and then reads the code it spent.
+ * - a code request calls this before it touches a code, and a sign-in's last check (signinStands(), signin-codes.ts,
+ *   run by the one finish of every sign-in, src/lib/auth/parent-signin-finish.ts) calls it and then reads, unlocked,
+ *   what the sign-in spent: the code, or a set-up link's row and the `credential` row the set wrote;
+ * - "Set up or reset my password" (askForPasswordLink(), password-request.ts) takes the row FOR UPDATE, reads the
+ *   password unlocked, then holds the link (holdSigninLink()); after the send it takes the row FOR UPDATE again and
+ *   puts the link in place (putHeldLinkInPlace(), which replaces the unused one), or removes it (dropHeldLink());
+ * - the welcome and Resend (welcome.ts, since slice SI-4) take the row FOR UPDATE, read the password unlocked, then
+ *   hold the link, as the request page does, and put it in place or remove it after the send the same way
+ *   (deliverHeldLink(), link-delivery.ts); the Admin's press (oweSetupMails(), switches.ts) takes the parents'
+ *   settings lock, then the rows it marks, in id order, as setWelcome() does;
+ * - the second step's code (sendSecondStepCode(), signin-codes.ts, since slice SI-3b) calls this, then reads the
+ *   password unlocked, before it touches a code; and a sign-in's strong step (recordStrongSignin(), devices.ts), after
+ *   completeParentSignin(), calls this, then makes or renews the person's device, then updates the session row (stamping
+ *   `strong_at` for every sign-in that proved a second step, on a new device or a renewed one): the person's row, their
+ *   devices, their sessions;
+ * - asking again (askAgainCode(), asking-again.ts, since slice SI-5a), once the door's own checks have taken the code,
+ *   calls this, then stamps `strong_at` on the session that asked and no other: the person's row, their sessions;
+ * - a password change in sign-in settings (changeMyPassword(), signin-settings.ts, since SI-5a) takes the row FOR
+ *   UPDATE, reads the session's `strong_at` and the `credential` row unlocked under it (every writer of a password
+ *   holds the person's row), then deletes the unused email change requests, then, as a reset does, the unused codes and
+ *   those spent within a code's life, then the unspent links, then replaces the password, then forgets the devices,
+ *   then ends every session, this one included;
+ * - "Sign out everywhere" (signOutEverywhere(), signin-settings.ts, since SI-5a, `parent.sessions.end_all`) takes the
+ *   row FOR UPDATE, then deletes the unused email change requests, then the unused codes and those spent within a
+ *   code's life, then forgets the devices, then ends every session; it keeps the password and the links;
+ * - a session's renewal (renewParentSession(), above, since SI-5b), at most once a day, takes no person's row: it
+ *   updates the device the session names (the device's row), then the session's row, in one transaction, so it waits
+ *   behind a block, a reset or any other writer that has taken the device or the session first, and finds them gone;
+ * - forgetting a device in sign-in settings (forgetMyDevice() and forgetMyOtherDevices(), signin-settings.ts, since
+ *   SI-5b) takes the row FOR UPDATE, reads the session's `strong_at` unlocked under it, then deletes the device, or every
+ *   device but the session's own (which sets `device_id` null on the sessions that named them), and touches no session
+ *   otherwise;
+ * - a person's authenticator app and backup codes (`parent_authenticator`, `parent_backup_code`, since slice SI-6a,
+ *   read and written only by authenticator.ts): a try at the second step (verifySecondFactor(), signin-codes.ts) calls
+ *   this, then reads the password and the person's newest "Sign out everywhere" row, then takes the app's code (its
+ *   `last_used_step`, sealing the secret again under the current key when it was sealed under the one before) or spends
+ *   a backup code by one conditional update each; a sign-in's last check (signinStands()) reads them, and that newest
+ *   row, unlocked under the person's row; the clean-up deletes them
+ *   after the person's rows and links, before the devices. Nothing that ends all of a person's sign-in removes them (a
+ *   block, a reset, a password change, Sign out everywhere, a change of sign-in email, sign-ins switched off, a change
+ *   of company, a last membership closed: each keeps them as it keeps the password). The one writer that takes them
+ *   beside those, the staff reset (resetSignin(), signin-reset.ts, since SI-9a, below), takes them after the person's
+ *   row and their password, and before their devices;
+ * - the authenticator app's presses in sign-in settings (authenticator-settings.ts, since slice SI-6b) each take the
+ *   person's row FOR UPDATE and read the session's `strong_at` under it (with when the person's app came into force,
+ *   since a proof older than it doesn't count: sessionStrongAt(), asking-again.ts; so do the password change, the email
+ *   request and the forgets above, reading the app row unlocked under the person's row, as every writer of it holds it);
+ *   setting it up and turning it off, which read the club's level, take the parents' settings lock shared before the
+ *   person's row (as the staff writes of guardians.ts do, below), so a change of level never falls between their read
+ *   and their write; then: setting it up deletes the person's
+ *   unfinished set-up and inserts the new one (their app row); confirming it reads and then updates the unfinished app
+ *   row, then deletes their unused emailed codes, then deletes their backup codes and inserts ten new ones; new backup
+ *   codes delete and insert the backup codes alone; turning it off deletes the app row, then the backup codes. None of
+ *   them touches a device or a session. A try at the second step (verifySecondFactor(), above) holds the person's row
+ *   FOR KEY SHARE, which a press's FOR UPDATE waits for and is waited for by, before it reads the app or a code, so a
+ *   try sees an app as it was before a press or after it, never midway;
+ * - a person's passkeys (`parent_auth_passkey`, since slice SI-7a, read and written by the portal only in passkeys.ts;
+ *   the passkey library writes a passkey's counter itself, outside any portal transaction, as it verifies): a passkey's
+ *   check at the door (checkPasskeySignin(), passkey-signin.ts) calls this, then sets the passkey's `last_used_at` by
+ *   one conditional update (still the person's) and reads their newest "Sign out everywhere" row; a sign-in's last
+ *   check (signinStands()) reads the passkey unlocked under the person's row. Nothing that ends all of a person's
+ *   sign-in removes them, as for the app (a block, a reset, a password change, Sign out everywhere, a change of sign-in
+ *   email, sign-ins switched off, a change of company, a last membership closed, turning the app off). The staff reset
+ *   (resetSignin(), since SI-9a, below) takes them after the person's row, after the app and backup codes, before
+ *   their devices;
+ * - a person's passkeys in sign-in settings (passkey-settings.ts, since slice SI-7b): adding one is the passkey
+ *   library's insert of the row first, as it verifies, outside any transaction of the portal's and before the
+ *   person's row is taken; then one transaction that takes the person's row FOR UPDATE (not this function's KEY SHARE:
+ *   the add's record and a remove each decide by the person's passkeys, their first or their last, so two of them go
+ *   one at a time, as SI-6b's presses do), reads the new row (still theirs) and names it, counts their passkeys and
+ *   those added before it, reads their app, and for a first passkey with no app deletes their backup codes and inserts
+ *   ten new ones (a failure there deletes the row the library inserted, in a transaction of its own that takes the
+ *   person's row FOR UPDATE first); renaming one calls this, then reads and updates the passkey; removing one takes the
+ *   parents' settings lock shared (the club's level is read), then the person's row FOR UPDATE, reads the session's
+ *   `strong_at` under it, reads the passkey, their app and their passkeys' count, then deletes the passkey and, with
+ *   its last one and no app, their backup codes.
+ *   Asking again with a passkey (provePasskeyAgain(), asking-again.ts) calls this, sets the passkey's `last_used_at`,
+ *   then updates the session's `strong_at`. Turning the app off beside a passkey (authenticator-settings.ts) reads
+ *   whether they have a passkey under the person's row and keeps their backup codes. None of them touches a device, and
+ *   only asking again touches a session;
+ * - an Admin's reset of a person's sign-in (resetSignin(), signin-reset.ts, since the sign-in release's slice SI-9a,
+ *   `parent.signin.reset`) takes the parents' settings lock shared (the door is read), then the person's row FOR UPDATE,
+ *   reads their sign-in account, rows that count, app, backup codes and passkeys under it, then deletes their unused
+ *   email change requests, then their unused codes and those spent within a code's life (as a password reset does),
+ *   then their unspent links, a held one included, then makes a new set-up link (mintSigninLink(), the row again FOR
+ *   UPDATE, a lock it holds already), then deletes their password, then their app (an unfinished set-up included) and
+ *   every backup code, then their passkeys, then forgets their devices, then ends their sessions. It is the one writer
+ *   that removes everything a person signs in with; its mail goes after the commit;
+ * - Strict's enrolment (enrolment.ts, since the sign-in release's slice SI-10a): the one finish writes a new session's
+ *   `enrol_until` just after making it, before its last check takes the person's row (the session is the finish's
+ *   alone then, with no cookie yet); the gate ends one session that is no longer enrolling, or under Strict one of a
+ *   person with no factor, by its row alone, taking no person's row; and the transaction that puts the person's first
+ *   factor in force (a passkey's add, passkey-settings.ts, or the app's confirm, authenticator-settings.ts), which holds
+ *   the person's row FOR UPDATE, then clears `enrol_until` and sets `strong_at` on that one session's row
+ *   (completeEnrolment()): the person's row, then the session's;
+ * - "Not now" on the passkey offer on Home (declinePasskeyOffer(), passkey-offer.ts, since the sign-in release's slice
+ *   SI-8), in a transaction of its own, takes the person's row FOR UPDATE and no other lock, reads the session, its
+ *   device and the person's count under it, then updates the device the session names (`passkey_offered_at`), then the
+ *   person's row (`passkey_offer_declines`). It touches no session, and every writer that deletes devices finds the
+ *   person's row held or waits for it.
  */
 export async function lockedPerson(tx: Tx, parentId: string): Promise<{ email: string; blocked: boolean } | null> {
   const [p] = await tx.select({ email: parent.email, blocked: parent.blocked }).from(parent).where(eq(parent.id, parentId)).for("key share");
@@ -249,9 +376,12 @@ export async function deleteUnusedSigninCodes(parentId: string, tx: Tx, o: { spe
   return rows.length;
 }
 
-/** The person's set-up and reset links not yet used (signin-links.ts), and how many there were. A used one stays until the daily clean-up. */
+/**
+ * The person's set-up and reset links not yet spent (unused, or held while their mail goes: unspentLink, ./link-state.ts), and
+ * how many there were. A used one stays until the daily clean-up.
+ */
 export async function deleteUnusedSigninLinks(parentId: string, tx: Tx): Promise<number> {
-  const rows = await tx.delete(parentSigninToken).where(and(eq(parentSigninToken.parentId, parentId), isNull(parentSigninToken.usedAt)))
+  const rows = await tx.delete(parentSigninToken).where(and(eq(parentSigninToken.parentId, parentId), unspentLink))
     .returning({ id: parentSigninToken.id });
   return rows.length;
 }

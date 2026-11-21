@@ -14,7 +14,7 @@ export default async function MailSetupPage() {
     <main className="wrap single">
       <p className="back-to-settings"><a href="/staff/settings/mail">Back to mail settings</a></p>
       <h1 className="page-title">Set up outgoing mail</h1>
-      <p className="lede">Parents sign in with a code the portal emails them, so the portal has to be able to send mail. Do these steps in order: mail works when the test email arrives.</p>
+      <p className="lede">Parents choose their password from a link the portal emails them, and on a new phone or computer the portal emails them a code too, so the portal has to be able to send mail. Do these steps in order: mail works when the test email arrives.</p>
       <MailGuide summary={summary} save={saveMailSettingsAction} test={sendTestMailAction} />
     </main>
   );

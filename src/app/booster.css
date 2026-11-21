@@ -377,7 +377,26 @@ dl.details dd { min-width: 0; overflow-wrap: anywhere; }
      has over them, so the details sit right under the students. */
   .home > .money { grid-column: 1; grid-row: 2 / span 2; }
   .home > .money ~ .students-box, .home > .money ~ .details-box { grid-column: 2; }
+  /* The passkey offer (slice SI-8), drawn after the greeting only once the browser is read: across both columns, the
+     boxes a row lower. */
+  main.wrap.home:has(> .passkey-offer) { grid-template-rows: auto auto auto 1fr; }
+  .home > .passkey-offer { grid-column: 1 / -1; grid-row: 2; max-width: 760px; }
+  .home:has(> .passkey-offer) > .money { grid-row: 3 / span 2; }
 }
+/* The passkey offer's two buttons sit side by side, wrapping under each other where there is no room. */
+.passkey-offer-buttons { display: flex; flex-wrap: wrap; gap: var(--s3); }
+/* Turned on with no codes, the done line is the box's first paragraph after its heading: a done line, not a subtitle. */
+.box.passkey-offer > h2 + .paid-up { color: var(--done); font-size: inherit; margin-top: var(--s3); }
+
+/* Sign-in settings, the authenticator app (slice SI-6b): its set-up's QR code, black on white whatever the theme (a
+   forced-colors theme changes currentColor but not a fill), as the check-in sheet draws its own; the key to type and
+   the backup codes in the reading face (made to tell characters apart) with even figures, selectable, grouped so they
+   read, wrapping rather than widening the page. */
+.app-qr { display: block; width: min(100%, 15rem); height: auto; margin: var(--s3) 0; background: white; forced-color-adjust: none; }
+.app-key, .backup-codes code { font-family: var(--read); font-variant-numeric: tabular-nums; font-size: 1.0625rem; font-weight: 700; letter-spacing: 0.06em;
+  overflow-wrap: anywhere; user-select: all; }
+.app-key { display: block; margin-top: var(--s2); }
+ul.backup-codes { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: var(--s2) var(--s4); margin-top: var(--s3); }
 /* ---- End of Home and Family ---- */
 
 /* ---- Season: the ruler's heading on Home, requirement lines, the Season page, and the staff season pages. Keep new rules for them inside this block. ---- */
@@ -552,38 +571,45 @@ main.wrap.single > .notice { margin-top: var(--cell); max-width: 760px; }
   background-image: linear-gradient(45deg, transparent 50%, var(--ink) 50%), linear-gradient(135deg, var(--ink) 50%, transparent 50%);
   background-position: calc(100% - 22px) 52%, calc(100% - 16px) 52%; background-size: 6px 6px; background-repeat: no-repeat; }
 .field textarea { resize: vertical; }
-.checks input[type="checkbox"], .checks input[type="radio"] { appearance: none; -webkit-appearance: none; width: 22px; height: 22px; margin: 0;
-  display: inline-grid; place-content: center; border: 2px solid var(--ink); border-radius: 0; background: var(--paper); cursor: pointer; }
-.checks input[type="radio"] { border-radius: 50%; }
-.checks input[type="checkbox"]::before { content: ""; width: 6px; height: 11px; border: solid var(--paper); border-width: 0 3px 3px 0;
+/* The mark is a 22px square (a circle for a radio) drawn by ::before at the middle of a 44px control, its tick or dot by
+   ::after: the control itself is the 44 by 44 tap target. Its 11px margins keep the square where a 22px control sat. */
+.checks input[type="checkbox"], .checks input[type="radio"] { appearance: none; -webkit-appearance: none; width: 44px; height: 44px;
+  margin: -11px -11px -11px -11px; display: inline-grid; place-content: center; place-items: center; border: 0; border-radius: 0;
+  background: transparent; cursor: pointer; }
+.checks input[type="checkbox"]::before, .checks input[type="radio"]::before { content: ""; grid-area: 1 / 1; width: 22px; height: 22px;
+  box-sizing: border-box; border: 2px solid var(--ink); background: var(--paper); }
+.checks input[type="radio"]::before { border-radius: 50%; }
+.checks input[type="checkbox"]::after { content: ""; grid-area: 1 / 1; width: 6px; height: 11px; border: solid var(--paper); border-width: 0 3px 3px 0;
   transform: translateY(-1px) rotate(45deg); visibility: hidden; }
-.checks input[type="radio"]::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--club-text); visibility: hidden; }
-.checks input:checked::before { visibility: visible; }
-.checks input[type="checkbox"]:checked { background: var(--club-text); border-color: var(--club-text); }
-.checks input[type="radio"]:checked { border-color: var(--club-text); }
-.checks label:hover input:not(:checked):not(:disabled) { background: var(--club-tint); }
-.checks input:focus-visible { outline: var(--ring) solid var(--club-text); outline-offset: 2px; }
+.checks input[type="radio"]::after { content: ""; grid-area: 1 / 1; width: 10px; height: 10px; border-radius: 50%; background: var(--club-text); visibility: hidden; }
+.checks input:checked::after { visibility: visible; }
+.checks input[type="checkbox"]:checked::before { background: var(--club-text); border-color: var(--club-text); }
+.checks input[type="radio"]:checked::before { border-color: var(--club-text); }
+.checks label:hover input:not(:checked):not(:disabled)::before { background: var(--club-tint); }
+.checks input:focus-visible { outline: var(--ring) solid var(--club-text); outline-offset: -9px; } /* hugs the square, 2px clear of it */
 .checks > p, .checks .hint { margin-top: var(--s1); }
 .stack > .setting { margin-top: 0; } /* a choice group inside a form keeps to the form's own gaps */
 .btn:disabled, .btn:disabled:hover { background: var(--hair); border-color: var(--hair); color: var(--ink-2); cursor: not-allowed; }
 .field input:disabled, .field textarea:disabled, .field select:disabled { background-color: var(--hair); border-color: var(--hair); color: var(--ink-2); cursor: not-allowed; }
-.checks input:disabled { background: var(--hair); border-color: var(--hair); cursor: not-allowed; }
+.checks input:disabled { cursor: not-allowed; }
+.checks input:disabled::before { background: var(--hair); border-color: var(--hair); }
 .checks label:has(input:disabled) { color: var(--ink-2); }
-:root[data-contrast="more"] .btn:disabled, :root[data-contrast="more"] .field :disabled, :root[data-contrast="more"] .checks input:disabled {
+:root[data-contrast="more"] .btn:disabled, :root[data-contrast="more"] .field :disabled, :root[data-contrast="more"] .checks input:disabled::before {
   background-color: var(--paper); border-style: dashed; border-color: var(--ink); color: var(--ink-2); }
 @media (prefers-contrast: more) {
-  :root:not([data-contrast="standard"]) .btn:disabled, :root:not([data-contrast="standard"]) .field :disabled, :root:not([data-contrast="standard"]) .checks input:disabled {
+  :root:not([data-contrast="standard"]) .btn:disabled, :root:not([data-contrast="standard"]) .field :disabled, :root:not([data-contrast="standard"]) .checks input:disabled::before {
     background-color: var(--paper); border-style: dashed; border-color: var(--ink); color: var(--ink-2); }
 }
 @media (forced-colors: active) {
   .notice > svg { forced-color-adjust: none; background: Canvas; color: CanvasText; border: 2px solid CanvasText; padding: 2px; } /* no fill here: the cell keeps its edge, the icon and word carry the tone */
   .field select { appearance: auto; background-image: none; padding-right: var(--s3); }
-  .checks input[type="checkbox"], .checks input[type="radio"] { forced-color-adjust: none; border-color: CanvasText; background: Canvas; }
-  .checks input[type="checkbox"]:checked { background: Highlight; border-color: Highlight; }
-  .checks input[type="checkbox"]::before { border-color: HighlightText; }
-  .checks input[type="radio"]:checked { border-color: Highlight; }
-  .checks input[type="radio"]::before { background: Highlight; }
-  .checks input:disabled { border-color: GrayText; }
+  .checks input[type="checkbox"], .checks input[type="radio"] { forced-color-adjust: none; outline-color: CanvasText; }
+  .checks input[type="checkbox"]::before, .checks input[type="radio"]::before { border-color: CanvasText; background: Canvas; }
+  .checks input[type="checkbox"]:checked::before { background: Highlight; border-color: Highlight; }
+  .checks input[type="checkbox"]::after { border-color: HighlightText; }
+  .checks input[type="radio"]:checked::before { border-color: Highlight; }
+  .checks input[type="radio"]::after { background: Highlight; }
+  .checks input:disabled::before { border-color: GrayText; }
   .btn:disabled, .field :disabled { border-style: dashed; color: GrayText; }
 }
 
@@ -734,6 +760,9 @@ details > summary { min-height: 44px; box-sizing: border-box; padding-block: 10p
   padding: 0 var(--s4); background: var(--paper); color: var(--ink); border: 2px solid var(--ink); font-weight: 700; }
 /* Where it lands: not a control, so the focus rests there with no ring, and the next Tab goes on into the page. */
 .page-start:focus { outline: none; }
+/* A passkey's name on Sign-in settings is the parent's own words, up to 50 characters with no space needed: it breaks
+   anywhere rather than push a 360px page sideways. */
+.passkey-name { overflow-wrap: anywhere; }
 /* ---- End of Accessibility fixes for parent pages ---- */
 
 /* ===== Installed app: safe areas and the install hint. Keep this block last. =====

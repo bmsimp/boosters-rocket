@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { db } from "@/lib/db/client";
 import { rateLimitEvent } from "@/lib/db/schema";
-import { RATE_LIMITS, takeRateLimit } from "@/lib/parents/rate-limit";
+import { RATE_LIMITS, giveBackRateLimit, takeRateLimit, takeRateLimitPlace } from "@/lib/parents/rate-limit";
 import { resetDb } from "../helpers/db";
 
 describe("database rate limits", () => {
@@ -38,6 +38,19 @@ describe("database rate limits", () => {
     expect(await takeRateLimit("code_send_email", "ana@example.com", plus(15 * 60_000 + 3))).toBe("refused");
   });
 
+  it("gives back the one place it is asked to, and nothing else", async () => {
+    const t = new Date("2026-11-10T12:00:00Z");
+    const places = [];
+    for (let i = 0; i < 5; i++) places.push(await takeRateLimitPlace("password_try_email", "h", t));
+    expect(places.map((p) => p.take)).toEqual(["taken", "taken", "taken", "taken", "taken"]);
+    expect(await takeRateLimitPlace("password_try_email", "h", t)).toEqual({ take: "first_refusal", placeId: null });
+    await giveBackRateLimit(places[4]!.placeId);
+    await giveBackRateLimit(null);
+    expect((await db.select().from(rateLimitEvent)).map((e) => e.id).sort((a, b) => a - b)).toEqual(places.slice(0, 4).map((p) => p.placeId));
+    expect((await takeRateLimitPlace("password_try_email", "h", t)).take).toBe("taken");
+    expect((await takeRateLimitPlace("password_try_email", "h", t)).take).toBe("refused");
+  });
+
   it("holds under a burst of parallel requests", async () => {
     const t = new Date("2026-11-10T12:00:00Z");
     const got = await Promise.all(Array.from({ length: 75 }, () => takeRateLimit("code_send_ip", "203.0.113.9", t)));
@@ -49,11 +62,24 @@ describe("database rate limits", () => {
     // 3 codes to one address; 60 requests and 180 checks from one IP address, which a school's shared Wi-Fi needs on a
     // registration night (spec §1 Rate limits). All in 15 minutes.
     const window = { windowMs: 15 * 60 * 1000 };
-    const { contact_save_parent, form_open_parent, volunteer_checkin_parent, volunteer_signup_parent, email_request_parent, email_confirm_parent, buyout_parent, ...signIn } = RATE_LIMITS;
+    const { contact_save_parent, form_open_parent, volunteer_checkin_parent, volunteer_signup_parent, email_request_parent, email_confirm_parent, buyout_parent,
+      password_reask_parent, password_change_parent, signin_settings_parent, signin_reset_person, ...signIn } = RATE_LIMITS;
     expect(signIn).toEqual({ code_send_email: { max: 3, ...window }, code_send_ip: { max: 60, ...window }, code_check_ip: { max: 180, ...window },
       // Choosing a password from a set-up or reset link (src/lib/parents/password-set.ts): a flood per IP address, as
       // the code request's, and the tries one link may take (a token can't be guessed).
-      password_link_ip: { max: 60, ...window }, password_link_token: { max: 10, ...window } });
+      password_link_ip: { max: 60, ...window }, password_link_token: { max: 10, ...window },
+      // Asking for a set-up or reset link by email (src/lib/parents/password-request.ts): as the code request, 3 per
+      // address (counted under a keyed hash of it) and a flood stop per IP address.
+      password_ask_email: { max: 3, ...window }, password_ask_ip: { max: 60, ...window },
+      // Signing in with a password (src/lib/parents/password-signin.ts; the sign-in release, slice SI-3b): 5 wrong tries
+      // per typed address (counted under a keyed hash of it; a right password gives its place back), or, on a device the
+      // portal remembers for the person, 5 wrong tries per device in its place, and a flood stop per IP address, as the
+      // code check.
+      password_try_email: { max: 5, ...window }, password_try_device: { max: 5, ...window }, password_try_ip: { max: 180, ...window },
+      // An authenticator app's code or a backup code as the second step (verifySecondFactor(), signin-codes.ts; the
+      // sign-in release, slice SI-6a): 5 wrong tries per person, the one a pending step or a stamp names, as the emailed
+      // code's 5 tries (a right code gives its place back); the per-IP flood stop is the code check's.
+      second_step_parent: { max: 5, ...window } });
     // A parent's own phone and address (src/lib/parents/contact-edits.ts), counted per person: a handful of saves an
     // hour. Opening the edit page takes no count.
     expect(contact_save_parent).toEqual({ max: 6, windowMs: 60 * 60 * 1000 });
@@ -73,5 +99,17 @@ describe("database rate limits", () => {
     // Paying instead of volunteering, and switching back (src/lib/buyouts/writes.ts), counted per person: each press
     // may make or void an invoice in the club's QuickBooks.
     expect(buyout_parent).toEqual({ max: 10, windowMs: 60 * 60 * 1000 });
+    // A parent's sign-in settings (src/lib/parents/signin-settings.ts; the sign-in release, slice SI-5a), counted per
+    // person: a password change, each try a breach-service call and a 32 MiB hash, and signing out everywhere, each a
+    // write and an audit row. Asking again counts password tries against the person, 5 wrong in 15 minutes as at the
+    // door, never against the address's count; its codes and its flood stop per IP address are the door's, and the
+    // set-up link offered there the request page's.
+    expect(password_reask_parent).toEqual({ max: 5, ...window });
+    expect(password_change_parent).toEqual({ max: 10, windowMs: 60 * 60 * 1000 });
+    expect(signin_settings_parent).toEqual({ max: 10, windowMs: 60 * 60 * 1000 });
+    // An Admin's reset of a parent's sign-in (src/lib/parents/signin-reset.ts; the sign-in release, slice SI-9a), counted
+    // per person reset: each ends every session of one person and mails their address, so three a day is far more than
+    // a genuine need, and one mailbox can't be flooded. Never per Admin: resetting several parents is the expected case.
+    expect(signin_reset_person).toEqual({ max: 3, windowMs: 24 * 60 * 60 * 1000 });
   });
 });
