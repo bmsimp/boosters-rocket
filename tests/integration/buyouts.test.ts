@@ -13,7 +13,7 @@ import { createHmac } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { env } from "@/env";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, buyout, familyMoney, qboCustomer, qboCustomerType, setting, writeQueue } from "@/lib/db/schema";
+import { accountingLink, auditLog, buyout, familyMoney, qboConnection, qboCustomer, qboCustomerType, requirement, setting, writeQueue } from "@/lib/db/schema";
 import { BUYOUT_COPY, confirmMyBuyout } from "@/lib/buyouts/writes";
 import { loadMyBuyouts } from "@/lib/buyouts/my-buyouts";
 import { loadBuyoutsToLook } from "@/lib/buyouts/staff";
@@ -22,17 +22,19 @@ import { LINK_COPY, unlinkFamily } from "@/lib/accounting/link-writes";
 import { loadAccountingLinks } from "@/lib/accounting/mapping";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { runWriteQueue } from "@/lib/roster/queue";
+import { clearRosterOfOtherCompany } from "@/lib/roster/source";
 import { describeWrite } from "@/lib/roster/queue";
 import { confirmBuyoutAction, switchBackAction } from "@/app/(parent)/volunteer/pay-instead/actions";
 import VolunteerPage from "@/app/(parent)/volunteer/page";
+import SeasonPage from "@/app/(parent)/season/page";
 import PayInsteadPage from "@/app/(parent)/volunteer/pay-instead/[requirementId]/[choice]/page";
 import { resetDb } from "../helpers/db";
-import { RIVERA } from "../helpers/money";
-import { seedFamilyMoney, seedParentIn, type SeededParent } from "../helpers/parent";
+import { CHENOWETH, RIVERA } from "../helpers/money";
+import { identityNow, MONEY_REALM, seedFamilyMoney, seedParentIn, seedSignedInParent, type SeededParent } from "../helpers/parent";
 import { startQboStub, STUB_PAID_VOID_FAULT, type QboStub } from "../helpers/qbo-stub";
 import { BUYOUT_ITEM, buyoutFamily, buyoutsOf, queueOf, seedBuyout, seedBuyoutRequirement } from "../helpers/buyouts";
 import { seedCheckIn, seedEvent, seedOutsideCredit, seedShift, seedSignup } from "../helpers/volunteer";
-import { addToCache, stu } from "../helpers/roster-cache";
+import { addToCache, P_TYPES, storeShape, stu } from "../helpers/roster-cache";
 import { staffWith } from "../helpers/roster-writes";
 import { SHAPE_KEY } from "@/lib/roster/shape";
 import { recordOfCustomer, subjectColumns, syncAppRecords } from "../helpers/app-records";
@@ -880,5 +882,67 @@ describe("how the requirement reads, on the parent's pages", () => {
       expect(await pageOutcome(PayInsteadPage, { params }), JSON.stringify(params)).toEqual({ notFound: true });
     }
     await db.delete(buyout);
+  });
+});
+
+// Stage 4's slice M7b: a parent's reads after a change of company's clear (open question 16), which is unreachable
+// until slice M8 (open question 18): the tests run it directly.
+describe("after the club connects a different QuickBooks company", () => {
+  const admin = { actor: { door: "staff" as const, id: null, label: "admin@club.org" }, ip: null };
+  const ENDED_LINE = "The club moved its books to a new QuickBooks company, so your earlier buy-out for this was ended. If anything is still owed on it, the club will be in touch.";
+  /**
+   * The new company connected and its roster read, and the family linked again there, as the accounting links screen
+   * leaves it: its customer, the shape, and the requirements' product chosen again.
+   */
+  async function linkAgain(familyId: SeededParent["identity"]["familyId"], customerId: string, name: string) {
+    await db.update(qboConnection).set({ realmId: "2222" });
+    await db.insert(qboCustomerType).values(P_TYPES.map((t) => ({ ...t, active: true })));
+    await db.insert(qboCustomer).values({ qboId: customerId, displayName: name, active: true, parentQboId: null, typeQboId: "F", syncToken: "0" });
+    await storeShape();
+    await db.insert(accountingLink).values({ system: "quickbooks", realmId: "2222", customerId, familyId, origin: "confirmed" });
+    await db.update(requirement).set({ itemQboId: BUYOUT_ITEM }).where(eq(requirement.kind, "volunteer"));
+  }
+
+  it("a kept paid buy-out goes on meeting its requirement; an ended one reads by credit, and once the family is linked again the choice is offered, saying calmly the earlier one ended", async () => {
+    const p = await buyoutFamily(stub);
+    const other = await seedSignedInParent(CHENOWETH);
+    const paidReq = await seedBuyoutRequirement({ title: "Paid before QM91" }), endedReq = await seedBuyoutRequirement({ title: "Ended QM92" }),
+      theirsReq = await seedBuyoutRequirement({ title: "Theirs QM93" });
+    await seedBuyout({ requirementId: paidReq, familyQboId: FAMILY, chosenBy: p.identity.parentId, state: "paid", invoiceQboId: "9901" });
+    await seedBuyout({ requirementId: endedReq, familyQboId: FAMILY, chosenBy: p.identity.parentId, invoiceQboId: "9902" });
+    // Family B's own buy-outs: one on the requirement only it chose for, and one on A's.
+    await seedBuyout({ requirementId: theirsReq, familyQboId: CHENOWETH.family.qboId, chosenBy: other.identity.parentId, invoiceQboId: "9903" });
+    await seedBuyout({ requirementId: paidReq, familyQboId: CHENOWETH.family.qboId, chosenBy: other.identity.parentId, invoiceQboId: "9904" });
+    asParent(p.identity);
+    expect(await renderPage(VolunteerPage)).toContain("Buy-out invoiced");
+
+    expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
+    const identity = await identityNow(p.session.id);
+    expect(identity.familyId).toBe(p.identity.familyId);
+    asParent(identity);
+    // With no link there is no offer, but the season's words: the paid one met, the ended one by credit.
+    const volunteer = await renderPage(VolunteerPage);
+    expect(volunteer).toContain("Paid instead");
+    expect(volunteer).not.toContain("Buy-out invoiced");
+    expect(volunteer).toContain("0 of 2 shifts done");
+    expect(volunteer).not.toMatch(/\/volunteer\/pay-instead\//);
+    const season = await renderPage(SeasonPage);
+    expect(season).toContain("Paid instead");
+    expect(season).not.toContain("Buy-out invoiced");
+
+    await linkAgain(p.identity.familyId, "8801", RIVERA.family.name);
+    const me = { ...p, identity };
+    expect(await shown(me, paidReq)).toMatchObject({ standing: "Paid instead", met: true, buyout: { state: "paid" }, endedForCompany: false, refusedBefore: false });
+    expect(await shown(me, endedReq)).toMatchObject({ standing: "0 of 2 shifts done", met: false, may: "choose", quote: { ok: true, amountCents: 10000 }, buyout: null,
+      endedForCompany: true, refusedBefore: false });
+    // B's ended buy-out never says anything on A's page.
+    expect(await shown(me, theirsReq)).toMatchObject({ may: "choose", buyout: null, endedForCompany: false });
+    const page = await renderPage(PayInsteadPage, { params: { requirementId: endedReq, choice: "family" } });
+    expect(page).toContain(ENDED_LINE);
+    expect(page).toContain("Confirm: invoice me $100.00");
+    expect(withoutIds(page)).not.toContain("9902");
+    expect(withoutIds(page)).not.toContain(MONEY_REALM);
+    expect(await renderPage(PayInsteadPage, { params: { requirementId: theirsReq, choice: "family" } })).not.toContain(ENDED_LINE);
+    expect(await renderPage(PayInsteadPage, { params: { requirementId: paidReq, choice: "family" } })).not.toContain(ENDED_LINE);
   });
 });

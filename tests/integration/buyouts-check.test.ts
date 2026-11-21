@@ -10,18 +10,23 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, buyout, familyMoney, jobRun, writeQueue, type StoredInvoice } from "@/lib/db/schema";
+import { accountingLink, auditLog, buyout, family, familyMoney, jobRun, requirement, seasonStep, setting, student, writeQueue, type StoredInvoice } from "@/lib/db/schema";
+import { recordNameWords } from "@/lib/families/words";
 import { queueVoid, sendBuyoutWrite } from "@/lib/buyouts/writes";
-import { WORKER_ACTOR } from "@/lib/quickbooks/client";
+import { INVOICE_WRITES, WORKER_ACTOR } from "@/lib/quickbooks/client";
 import { checkBuyoutInvoices } from "@/lib/buyouts/daily-check";
 import { buyoutFacts } from "@/lib/buyouts/standing";
-import { loadBuyoutsToLook } from "@/lib/buyouts/staff";
+import { closeTag, loadBuyoutsToLook, loadEarlierCompanyBuyouts, loadFamilyBuyouts, stateWords } from "@/lib/buyouts/staff";
+import { CLOSE_WORDS, EARLIER_WORDS, MADE_AFTER_WORDS } from "@/lib/buyouts/closing";
+import { CLOSE_COPY, closeBuyout } from "@/lib/buyouts/close";
+import { buyoutCheckLine } from "@/lib/health/job-lines";
+import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { MONEY_JOB } from "@/lib/money/run-keys";
 import { pairKey } from "@/lib/seasons/kinds";
 import { GIVE_UP_BUSY, giveUp, runWriteQueue } from "@/lib/roster/queue";
 import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { afterStudentMoved } from "@/lib/roster/writes";
-import { clearRosterOfOtherCompany, clearRosterOfOtherCompanyLocked } from "@/lib/roster/source";
+import { clearRosterOfOtherCompany, clearRosterOfOtherCompanyLocked, SOURCE_KEY } from "@/lib/roster/source";
 import { resetDb, untilALockIsAwaited } from "../helpers/db";
 import { CHENOWETH, RIVERA, stubInvoice } from "../helpers/money";
 import { MONEY_REALM, seedSignedInParent } from "../helpers/parent";
@@ -670,5 +675,180 @@ describe("connecting a different company", () => {
     stub.calls.length = 0;
     await runWriteQueue();
     expect(stub.apiCalls().filter((x) => x.method === "POST")).toEqual([]);
+  });
+
+  // Stage 4's slice M7b: what the clear ended or kept, as the treasurer and staff read it. Each case runs the real clear
+  // over buy-outs seeded in each state with their queue items, as the portal leaves them.
+  /** A queue item of the buy-out's, in the state given; a waiting one isn't due, so no worker's wake would claim it. */
+  const itemOf = (b: typeof buyout.$inferSelect, op: "invoice_create" | "invoice_void", o: { state: "waiting" | "stuck" | "done" | "given_up"; sent: boolean; resultQboId?: string }) =>
+    db.insert(writeQueue).values({ realmId: b.realmId, familyId: b.familyId, state: o.state, sent: o.sent, resultQboId: o.resultQboId ?? null, nextTryAt: o.state === "waiting" ? later(60) : null,
+      request: op === "invoice_create" ? { op, buyoutId: b.id, customerQboId: b.customerQboId, itemQboId: b.itemQboId, units: b.units, unitCents: b.unitCents }
+        : { op, buyoutId: b.id, invoiceQboId: b.invoiceQboId!, customerQboId: b.customerQboId, why: "switched_back" } }).returning().then((r) => r[0]!);
+  const EARLIER_ENDED = "Ended when the club connected a different QuickBooks company: nothing more was sent to the earlier one";
+
+  it("lists for the treasurer what each buy-out it ended or kept may still leave in the earlier company's books, and nothing of one that leaves nothing", async () => {
+    const p = await buyoutFamily(stub);
+    const by = p.identity.parentId, familyId = p.identity.familyId;
+    const seed = async (title: string, o: Omit<Parameters<typeof seedBuyout>[0], "requirementId" | "familyQboId" | "chosenBy">) =>
+      seedBuyout({ requirementId: await seedBuyoutRequirement({ title, appliesTo: o.subjectQboId ? "student" : "family" }), familyQboId: FAMILY, chosenBy: by, ...o });
+    // Left something in the old company's books.
+    const invoiced = await seed("Invoiced QM71", { subjectQboId: S1, invoiceQboId: "7701" });
+    await itemOf(invoiced, "invoice_create", { state: "done", sent: true, resultQboId: "7701" });
+    const voiding = await seed("Being voided QM72", { state: "being_voided", invoiceQboId: "7702" });
+    await itemOf(voiding, "invoice_create", { state: "done", sent: true, resultQboId: "7702" });
+    await itemOf(voiding, "invoice_void", { state: "waiting", sent: true });
+    const creating = await seed("Being invoiced QM73", { state: "being_invoiced" });
+    await itemOf(creating, "invoice_create", { state: "waiting", sent: true });
+    // M7a2's finish held past its wait: the invoice kept on its item before the clear gave the item up, never on the buy-out.
+    const heldPast = await seed("Held past its wait QM74", { state: "being_invoiced" });
+    await itemOf(heldPast, "invoice_create", { state: "waiting", sent: true, resultQboId: "7704" });
+    // As invoiceFoundAfterEnding() leaves one (its end state seeded: the next case drives it): ended, its given-up item and the buy-out both naming the invoice.
+    const found = await seed("Found after ending QM75", { state: "voided", invoiceQboId: "7705" });
+    await db.update(buyout).set({ endReason: "earlier_company" }).where(eq(buyout.id, found.id));
+    await itemOf(found, "invoice_create", { state: "given_up", sent: true, resultQboId: "7705" });
+    const refund = await seed("Paid, to be cancelled QM76", { state: "paid", invoiceQboId: "7706", flag: "paid_before_void" });
+    await itemOf(refund, "invoice_create", { state: "done", sent: true, resultQboId: "7706" });
+    await itemOf(refund, "invoice_void", { state: "done", sent: false });
+    // As voidKept() leaves a void whose live read found the invoice gone: stuck, flagged, the code, its item closed on that answer (no note).
+    const stuck = await seed("Stuck, flagged QM77", { state: "stuck", invoiceQboId: "7707", flag: "missing" });
+    await db.update(buyout).set({ lastCode: "invoice_gone" }).where(eq(buyout.id, stuck.id));
+    await itemOf(stuck, "invoice_create", { state: "done", sent: true, resultQboId: "7707" });
+    await itemOf(stuck, "invoice_void", { state: "given_up", sent: false });
+    // A void on its way as the clear runs: not marked sent before it goes (only a create is), so its item is waiting, unsent.
+    const inFlight = await seed("Void on its way QM86", { state: "being_voided", invoiceQboId: "7710" });
+    await itemOf(inFlight, "invoice_create", { state: "done", sent: true, resultQboId: "7710" });
+    await itemOf(inFlight, "invoice_void", { state: "waiting", sent: false });
+    // As voidKept() leaves a void that timed out once and then read the invoice part paid: invoiced, flagged, `paid`, its item closed on that answer, sent kept.
+    const partPaid = await seed("Part paid QM87", { state: "invoiced", invoiceQboId: "7711", flag: "paid_before_void" });
+    await db.update(buyout).set({ lastCode: "paid" }).where(eq(buyout.id, partPaid.id));
+    await itemOf(partPaid, "invoice_create", { state: "done", sent: true, resultQboId: "7711" });
+    await itemOf(partPaid, "invoice_void", { state: "given_up", sent: true });
+    // As voidKept() leaves a void QuickBooks refused: the invoice stands.
+    const voidRefused = await seed("Void refused QM88", { state: "invoiced", invoiceQboId: "7712", flag: "void_refused" });
+    await db.update(buyout).set({ lastCode: "fault_6240" }).where(eq(buyout.id, voidRefused.id));
+    await itemOf(voidRefused, "invoice_create", { state: "done", sent: true, resultQboId: "7712" });
+    await itemOf(voidRefused, "invoice_void", { state: "given_up", sent: false });
+    // Left nothing there.
+    const paid = await seed("Paid QM78", { state: "paid", invoiceQboId: "7708" });
+    await itemOf(paid, "invoice_create", { state: "done", sent: true, resultQboId: "7708" });
+    const neverSent = await seed("Never sent QM79", { state: "being_invoiced" });
+    await itemOf(neverSent, "invoice_create", { state: "waiting", sent: false });
+    const refused = await seed("Refused QM80", { state: "refused", invoiceQboId: null });
+    await db.update(buyout).set({ lastCode: "fault_6000" }).where(eq(buyout.id, refused.id));
+    await itemOf(refused, "invoice_create", { state: "given_up", sent: true });
+    const switchedBack = await seed("Switched back QM81", { state: "voided", invoiceQboId: "7709" });
+    await db.update(buyout).set({ endReason: "switched_back" }).where(eq(buyout.id, switchedBack.id));
+    await itemOf(switchedBack, "invoice_create", { state: "done", sent: true, resultQboId: "7709" });
+    await itemOf(switchedBack, "invoice_void", { state: "done", sent: true });
+    // Before the change of company every one of them is the roster's company's: none is listed as an earlier one's.
+    expect(await loadEarlierCompanyBuyouts()).toEqual([]);
+    expect((await loadBuyoutsToLook()).map((l) => l.id)).toEqual(expect.arrayContaining([refund.id, stuck.id, refused.id]));
+
+    stub.calls.length = 0;
+    expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
+
+    const list = await loadEarlierCompanyBuyouts();
+    expect(list.map((l) => l.id).sort()).toEqual([invoiced, voiding, creating, heldPast, found, refund, stuck, inFlight, partPaid, voidRefused].map((b) => b.id).sort());
+    const of = (b: typeof buyout.$inferSelect) => list.find((l) => l.id === b.id)!;
+    // Named by the app's own records: the roster cache holds none of the old company's customers now.
+    expect(of(invoiced)).toMatchObject({ familyId, familyName: RIVERA.family.name, subjectName: RIVERA.students[0]!.name, requirement: "Invoiced QM71", amountCents: 10000,
+      realmId: MONEY_REALM, kind: "invoice_stands", invoiceQboId: "7701", madeAfter: false, note: null, words: EARLIER_WORDS.invoice_stands, close: null });
+    expect(of(voiding)).toMatchObject({ kind: "void_may_have_gone", invoiceQboId: "7702", subjectName: null, words: EARLIER_WORDS.void_may_have_gone, close: null });
+    expect(of(creating)).toMatchObject({ kind: "may_be_made", invoiceQboId: null, note: `${INVOICE_WRITES.notePrefix}${creating.id}`, words: EARLIER_WORDS.may_be_made, close: null });
+    expect(of(heldPast)).toMatchObject({ kind: "invoice_stands", invoiceQboId: "7704", madeAfter: true, words: `${EARLIER_WORDS.invoice_stands} ${MADE_AFTER_WORDS}` });
+    expect(of(found)).toMatchObject({ kind: "invoice_stands", invoiceQboId: "7705", madeAfter: true });
+    expect(of(stuck)).toMatchObject({ kind: "last_seen_gone", invoiceQboId: "7707", words: EARLIER_WORDS.last_seen_gone });
+    expect(of(inFlight)).toMatchObject({ kind: "void_may_have_gone", invoiceQboId: "7710", words: EARLIER_WORDS.void_may_have_gone });
+    expect(of(partPaid)).toMatchObject({ kind: "part_paid", invoiceQboId: "7711", words: EARLIER_WORDS.part_paid, close: null });
+    expect(of(voidRefused)).toMatchObject({ kind: "invoice_stands", invoiceQboId: "7712", madeAfter: false, words: EARLIER_WORDS.invoice_stands });
+    // The family's roster page doesn't open until the new company's shape is set, so no row links it.
+    expect(list.every((l) => !l.familyPageStands)).toBe(true);
+    expect(of(refund)).toMatchObject({ kind: "refund_owed", invoiceQboId: "7706", words: EARLIER_WORDS.refund_owed, close: { may: true, why: "paid_in_full", words: CLOSE_WORDS.paid_in_full } });
+    // Every row's season is its requirement's, for the link to the family's season page.
+    const seasonId = (await db.select({ seasonId: seasonStep.seasonId }).from(requirement).innerJoin(seasonStep, eq(seasonStep.id, requirement.stepId)).where(eq(requirement.id, invoiced.requirementId)))[0]!.seasonId;
+    expect(list.every((l) => l.seasonId === seasonId)).toBe(true);
+    // Reconciliation's own list is the roster's company's: none of them, with a kept flag or refused, is listed there.
+    expect(await loadBuyoutsToLook()).toEqual([]);
+
+    // One buy-out's words, for staff.
+    for (const b of [invoiced, voiding, creating, heldPast, found, stuck, neverSent, inFlight, partPaid, voidRefused]) expect(stateWords(await row(b.id)), b.id).toBe(EARLIER_ENDED);
+    expect(stateWords(await row(paid.id))).toBe("Paid instead");
+    expect(stateWords(await row(refused.id))).toBe("Refused by QuickBooks: nothing was billed");
+    expect(stateWords(await row(switchedBack.id))).toBe("Ended: the family switched back to volunteering, and the invoice was voided");
+    // The family's buy-outs page, for a family the clear left with no link: every one listed, each invoice as in the earlier company's books, no figures.
+    const page = await loadFamilyBuyouts(familyId);
+    expect(page).toMatchObject({ familyQboId: null, familyName: null });
+    expect(page.buyouts).toHaveLength(14);
+    expect(page.recordName).toBe(RIVERA.family.name);
+    const shown = (b: typeof buyout.$inferSelect) => page.buyouts.find((x) => x.id === b.id)!;
+    // A student's name is the record's own, never the cache's by the old company's customer id.
+    expect(shown(invoiced)).toMatchObject({ subjectName: RIVERA.students[0]!.name });
+    expect(shown(invoiced)).toMatchObject({ words: EARLIER_ENDED, invoice: { kind: "earlier_company", qboId: "7701", owedCents: null, readAt: null }, earlier: { kind: "invoice_stands" } });
+    expect(shown(heldPast)).toMatchObject({ invoice: { kind: "earlier_company", qboId: "7704" }, earlier: { kind: "invoice_stands", madeAfter: true } });
+    expect(shown(creating)).toMatchObject({ invoice: { kind: "earlier_company", owedCents: null, readAt: null }, earlier: { kind: "may_be_made", note: `${INVOICE_WRITES.notePrefix}${creating.id}` } });
+    expect(shown(voiding)).toMatchObject({ earlier: { kind: "void_may_have_gone", words: EARLIER_WORDS.void_may_have_gone } });
+    expect(shown(paid)).toMatchObject({ words: "Paid instead", invoice: { kind: "earlier_company", qboId: "7708" }, earlier: { kind: "nothing_to_settle" } });
+    expect(shown(refund)).toMatchObject({ words: "Paid instead", earlier: { kind: "refund_owed" }, close: { may: true, why: "paid_in_full" } });
+    expect(shown(neverSent)).toMatchObject({ invoice: { kind: "none" }, earlier: { kind: "nothing_to_settle" } });
+    expect(shown(refused)).toMatchObject({ invoice: { kind: "none" }, earlier: { kind: "nothing_to_settle" } });
+
+    // The refund owed closes as today: in the portal alone, and it leaves the list.
+    expect(await closeBuyout(refund.id, closeTag(await row(refund.id)), await currentRosterTag(), "Refunded in the earlier company.", staff)).toEqual({ ok: true, message: CLOSE_COPY.done });
+    expect(await row(refund.id)).toMatchObject({ state: "voided", endReason: "closed_by_staff", invoiceQboId: "7706", realmId: MONEY_REALM });
+    expect((await loadEarlierCompanyBuyouts()).map((l) => l.id)).not.toContain(refund.id);
+    // Nothing of any of it was asked of QuickBooks.
+    expect(stub.calls).toEqual([]);
+  });
+
+  it("names a family or student whose record has no name in words, and lists nothing while the roster names no company", async () => {
+    const p = await buyoutFamily(stub);
+    const b = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Nameless QM89", appliesTo: "student" }), familyQboId: FAMILY, subjectQboId: S1, chosenBy: p.identity.parentId,
+      invoiceQboId: "7713" });
+    expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
+    await db.update(family).set({ name: "  " }).where(eq(family.id, p.identity.familyId));
+    await db.update(student).set({ name: null }).where(eq(student.id, b.studentId!));
+    expect(await loadEarlierCompanyBuyouts()).toEqual([expect.objectContaining({ id: b.id, kind: "invoice_stands",
+      familyName: recordNameWords(null, "family"), subjectName: recordNameWords(null, "student") })]);
+    const page = await loadFamilyBuyouts(p.identity.familyId);
+    expect(page.recordName).toBe(recordNameWords(null, "family"));
+    expect(page.buyouts[0]).toMatchObject({ id: b.id, subjectName: recordNameWords(null, "student") });
+    // With no roster company named, neither list says anything of any company's buy-outs.
+    await db.delete(setting).where(eq(setting.key, SOURCE_KEY));
+    expect(await loadEarlierCompanyBuyouts()).toEqual([]);
+    expect(await loadBuyoutsToLook()).toEqual([]);
+  });
+
+  it("an invoice QuickBooks makes as the clear runs is listed for the treasurer, made after its change was given up", async () => {
+    const p = await buyoutFamily(stub);
+    const b = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Made at that moment QM82" }), familyQboId: FAMILY, chosenBy: p.identity.parentId, state: "being_invoiced" });
+    await createFor(b);
+    clearAsItArrives("POST");
+    expect(await runWriteQueue()).toEqual({ ran: true, ok: true });
+    const made = String(stub.invoices[0]!.Id);
+    expect(await audits("volunteer.buyout.invoice_found_after_ending")).toHaveLength(1);
+    expect(await loadEarlierCompanyBuyouts()).toEqual([expect.objectContaining({ id: b.id, kind: "invoice_stands", invoiceQboId: made, madeAfter: true, familyName: RIVERA.family.name })]);
+    expect(stateWords(await row(b.id))).toBe(EARLIER_ENDED);
+  });
+
+  it("the daily check, after the clear, judges none of the earlier company's buy-outs, and the Health line counts none of their flags", async () => {
+    const p = await buyoutFamily(stub);
+    const by = p.identity.parentId, familyId = p.identity.familyId;
+    const invoiced = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Invoiced QM83" }), familyQboId: FAMILY, chosenBy: by, invoiceQboId: "7801" });
+    await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Paid QM84" }), familyQboId: FAMILY, chosenBy: by, state: "paid", invoiceQboId: "7802" });
+    await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Flagged QM85" }), familyQboId: FAMILY, chosenBy: by, invoiceQboId: "7803", flag: "missing" });
+    expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
+    const before = await db.select().from(buyout).orderBy(buyout.id);
+    expect(before.find((b) => b.id === invoiced.id)).toMatchObject({ state: "voided", endReason: "earlier_company" });
+    // A money run of the new company that read the family (its figures kept by its app record), which happen to hold
+    // the old invoices' ids, one of them paid: they are the new company's invoices, and say nothing of the old ones.
+    await db.insert(jobRun).values({ job: MONEY_JOB, startedAt: new Date(Date.now() - 60_000), finishedAt: new Date(), outcome: "ok", startedBy: "worker" });
+    await db.insert(familyMoney).values({ familyId, realmId: "2222", readAt: new Date(), totalCents: 10000, currency: "USD",
+      invoices: [stored("7801", FAMILY, { balanceCents: 0 }), stored("7802", FAMILY), stored("7803", FAMILY)] });
+    const auditsBefore = (await db.select().from(auditLog)).length;
+    expect(await checkBuyoutInvoices()).toEqual({ ran: true, paid: 0, flagged: 0, voided: 0, unflagged: 0 });
+    expect(await db.select().from(buyout).orderBy(buyout.id)).toEqual(before);
+    expect((await db.select().from(auditLog)).length).toBe(auditsBefore);
+    const line = await buyoutCheckLine({ connected: true, needsAdmin: false }, new Date());
+    expect(line.notes.join(" ")).not.toContain("flagged and waiting");
   });
 });
