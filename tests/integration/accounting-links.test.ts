@@ -803,7 +803,7 @@ describe("differences, for a link that stands (slice M2)", () => {
     // rename's Take QuickBooks' into the app, and since slice M5a its Send the app's to QuickBooks for an Admin, who may
     // change families (a waiting move offers none); nothing of money but each unlink's own words of what the guardians
     // then read.
-    expect(html.split("<button").length - 1).toBe(7);
+    expect(html.split("<button").length - 1).toBe(8);
     expect(html.split("Take QuickBooks&#x27; into the app<span").length - 1).toBe(1);
     expect(html.split("Send the app&#x27;s to QuickBooks<span").length - 1).toBe(1);
     expect(html.split("Confirm this link<span").length - 1).toBe(2);
