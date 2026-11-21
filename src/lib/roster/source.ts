@@ -66,7 +66,7 @@ export const GIVEN_UP_FOR_COMPANY_NOTE = "Given up: the club connected a differe
  * The order: no foreign key orders it any more, as nothing the app's records are named by is deleted, but the buy-outs
  * end before the queue is given up. Their update takes each row's lock, so a void queued at that moment for an
  * invoiced one (queueVoid(), which holds no roster lock) either committed first, and its buy-out ends here and its
- * void is given up next, or waits, then finds the buy-out ended and queues nothing; given up first, a void queued
+ * void is given up next, or waits, then finds the buy-out ended (or, for one marked paid first, paid) and queues nothing; given up first, a void queued
  * after it would be left waiting. The queue is given up in one statement; the links end next, then QuickBooks' copies,
  * and the roster's company last, with the audit row.
  *
