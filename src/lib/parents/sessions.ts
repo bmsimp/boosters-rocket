@@ -186,9 +186,11 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   row, unlocked under the person's row; the clean-up deletes them
  *   after the person's rows and links, before the devices. Nothing that ends all of a person's sign-in removes them (a
  *   block, a reset, a password change, Sign out everywhere, a change of sign-in email, sign-ins switched off, a change
- *   of company, a last membership closed: each keeps them as it keeps the password). The one writer that takes them
- *   beside those, the staff reset (resetSignin(), signin-reset.ts, since SI-9a, below), takes them after the person's
- *   row and their password, and before their devices;
+ *   of company, a last membership closed: each keeps them as it keeps the password). Two writers take them beside
+ *   those: the staff reset (resetSignin(), signin-reset.ts, since SI-9a, below) takes them after the person's row and
+ *   their password, and before their devices; and the removal of passkeys from an earlier address
+ *   (removeOldAddressPasskeys(), signin-reset.ts, since SI-9b, below) takes the backup codes of a person it leaves with
+ *   no passkey and no app, after their old passkeys and before their sessions;
  * - the authenticator app's presses in sign-in settings (authenticator-settings.ts, since slice SI-6b) each take the
  *   person's row FOR UPDATE and read the session's `strong_at` under it (with when the person's app came into force,
  *   since a proof older than it doesn't count: sessionStrongAt(), asking-again.ts; so do the password change, the email
@@ -202,7 +204,9 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   them touches a device or a session. A try at the second step (verifySecondFactor(), above) holds the person's row
  *   FOR KEY SHARE, which a press's FOR UPDATE waits for and is waited for by, before it reads the app or a code, so a
  *   try sees an app as it was before a press or after it, never midway;
- * - a person's passkeys (`parent_auth_passkey`, since slice SI-7a, read and written by the portal only in passkeys.ts;
+ * - a person's passkeys (`parent_auth_passkey`, since slice SI-7a, written by the portal only in passkeys.ts, and read
+ *   there for one person; switches.ts' counts and signin-reset.ts' count of those from an earlier address read it for
+ *   the whole club, locking nothing but what their own entries say;
  *   the passkey library writes a passkey's counter itself, outside any portal transaction, as it verifies): a passkey's
  *   check at the door (checkPasskeySignin(), passkey-signin.ts) calls this, then sets the passkey's `last_used_at` by
  *   one conditional update (still the person's) and reads their newest "Sign out everywhere" row; a sign-in's last
@@ -210,7 +214,8 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   sign-in removes them, as for the app (a block, a reset, a password change, Sign out everywhere, a change of sign-in
  *   email, sign-ins switched off, a change of company, a last membership closed, turning the app off). The staff reset
  *   (resetSignin(), since SI-9a, below) takes them after the person's row, after the app and backup codes, before
- *   their devices;
+ *   their devices; the removal of those from an earlier address (removeOldAddressPasskeys(), since SI-9b, below) takes
+ *   them after every holder's row, before that person's backup codes and sessions;
  * - a person's passkeys in sign-in settings (passkey-settings.ts, since slice SI-7b): adding one is the passkey
  *   library's insert of the row first, as it verifies, outside any transaction of the portal's and before the
  *   person's row is taken; then one transaction that takes the person's row FOR UPDATE (not this function's KEY SHARE:
@@ -234,6 +239,16 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   UPDATE, a lock it holds already), then deletes their password, then their app (an unfinished set-up included) and
  *   every backup code, then their passkeys, then forgets their devices, then ends their sessions. It is the one writer
  *   that removes everything a person signs in with; its mail goes after the commit;
+ * - an Admin's removal of every passkey made at an earlier address (removeOldAddressPasskeys(), signin-reset.ts, since
+ *   the sign-in release's slice SI-9b, `parent.passkeys.old_address_removed`) takes the parents' settings lock shared
+ *   (the level is read), then, in one statement ordered by id, the row FOR UPDATE of every person who holds such a
+ *   passkey, as the switches' lockPeople() (switches.ts) and the clean-up take theirs (the only other writers that lock
+ *   more than one person; the switches take the settings lock whole first, so a press and a switch go one after the
+ *   other, and the clean-up takes no settings lock and its people in the same id order); then, person by person in id
+ *   order, deletes their passkeys from an earlier address, reads their passkeys left and their app, then, for one not
+ *   blocked left with neither, deletes their backup codes and, at Strict, ends their sessions. It touches no device,
+ *   password, link or code request, and mails nothing. Every writer of one person takes at most the settings lock
+ *   shared before that person's row, so none waits for the press while holding something the press waits for;
  * - Strict's enrolment (enrolment.ts, since the sign-in release's slice SI-10a): the one finish writes a new session's
  *   `enrol_until` just after making it, before its last check takes the person's row (the session is the finish's
  *   alone then, with no cookie yet); the gate ends one session that is no longer enrolling, or under Strict one of a

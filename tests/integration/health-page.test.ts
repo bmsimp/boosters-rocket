@@ -12,7 +12,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, buyout, family, jobRun, qboConnection, qboCustomerType, role, roleAssignment, roleRule, setting, writeQueue } from "@/lib/db/schema";
+import { auditLog, buyout, family, jobRun, parentAuthPasskey, qboConnection, qboCustomerType, role, roleAssignment, roleRule, setting, writeQueue } from "@/lib/db/schema";
 import HealthPage from "@/app/staff/(app)/health/page";
 import QuickBooksSettingsPage from "@/app/staff/(app)/settings/quickbooks/page";
 import QuickBooksSetupPage from "@/app/staff/(app)/settings/quickbooks/setup/page";
@@ -396,6 +396,13 @@ describe("the health page", () => {
     const waiting = await parents();
     expect(waiting).toMatchObject({ state: "attention", word: "Needs attention", fix: { href: "/staff/settings/mail" } });
     expect(waiting.notes).toEqual(["Welcome emails are waiting because mail is failing: 1 person is owed a welcome or a link to choose a password, and the last one the worker tried to send failed. Until a send works, it tries one person a minute instead of five."]);
+    // A passkey from an earlier address beside it (slice SI-9b): both are said, the mail's first, and the fix stays the
+    // mail's, which nothing else can mend.
+    await seedPasskey(owedOne.id, { origin: "https://old.example.org" });
+    const both = await parents();
+    expect(both).toMatchObject({ state: "attention", fix: { href: "/staff/settings/mail" } });
+    expect(both.notes).toEqual([waiting.notes[0], "1 passkey of 1 person was made at an address other than the portal's address now, so it no longer works. An Admin can remove it under Settings, Parent sign-ins."]);
+    await db.delete(parentAuthPasskey);
     // Mail settings saved but not tested: the worker tries nobody, so the note says nothing (the mail line says why).
     const tested = (await getMailStatus()).verifiedHash;
     await patchMailStatus({ verifiedHash: "saved-since-and-not-tested" });

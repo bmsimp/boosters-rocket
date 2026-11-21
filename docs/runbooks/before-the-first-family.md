@@ -376,7 +376,10 @@ it to Strict and check 43 back; where a check says what happens at Strict too, i
     parent's sign-in email, then sign in with their passkey. Then, on a test host only, give two test parents with no
     authenticator app a passkey each: one who keeps the ten backup codes it came with, and one with none left (use
     each code once, in a new private window each time, until **Backup codes left** on **Sign-in settings** says 0).
-    Change `APP_URL` to another address, and on a phone or computer the portal doesn't know (a private window), sign
+    The checks before this one left passkeys with other test parents too, and the removal below counts every one on
+    the host: before the change, write down how many passkeys all the test parents hold between them (each one's
+    **Sign-in settings** lists theirs) as P, how many test parents hold one as G, and how many of those G have no
+    authenticator app as N. Change `APP_URL` to another address, and on a phone or computer the portal doesn't know (a private window), sign
     in as each with their password.
     **Pass:** after the email change the passkey still signs in (the password manager may still show the old address
     as the user name). After the address change no passkey works (each is bound to the old address), and the portal
@@ -384,12 +387,14 @@ it to Strict and check 43 back; where a check says what happens at Strict too, i
     don't have your passkey with you, enter one of your backup codes instead. If you have neither, ask the club for
     help." and one backup code in the **Backup code** field signs them in; the second's says "If you don't have your
     passkey with you, ask the club for help.". Then, as an Admin, the **Health** page's **Parent sign-ins** line says
-    "Needs attention", with "2 passkeys of 2 people were made at an address other than the portal's address now"; its
-    link opens **Settings**, **Parent sign-ins**, where **Passkeys from an earlier address** names the old address with
-    "2 passkeys", says "2 people have no authenticator app and no other passkey", and **Remove 2 passkeys made at an
-    earlier address** answers "Removed 2 passkeys made at an earlier address, from 2 people.". In a new private window
-    each test parent's password now asks for a code we email (at Standard), which signs them in, and **Sign-in
-    settings** shows no passkey and no backup codes; the Health line no longer says it. After a real change of address
+    "Needs attention", with "P passkeys of G people were made at an address other than the portal's address now"
+    (your numbers in place of P and G, "1 passkey" or "1 person" for one); its link opens **Settings**, **Parent
+    sign-ins**, where **Passkeys from an earlier address** names the old address with "P passkeys", says "N people
+    have no authenticator app and no other passkey" (with N at least 2, the two parents above), and **Remove P
+    passkeys made at an earlier address** answers "Removed P passkeys made at an earlier address, from G people.".
+    Every test parent's passkey is gone then, and must be added again for any later check that needs one. In a new
+    private window the password of each of the two test parents above now asks for a code we email (at Standard),
+    which signs them in, and **Sign-in settings** shows no passkey and no backup codes; the Health line no longer says it. After a real change of address
     that one press is the way back for everyone ([after a change of the portal's
     address](resetting-a-parents-sign-in.md#after-a-change-of-the-portals-address)); a reset (check 44) is only for a
     parent it doesn't bring back. Put `APP_URL` back afterwards. **If not:** note what happened.

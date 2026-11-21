@@ -205,7 +205,8 @@ export async function recentSigninResets(viewerStaffId: string, now = new Date()
  * and second step and add their passkeys again"). A passkey works only at the origin it was made for (the relying
  * party, parentPasskeys(), src/lib/auth/parent-auth.ts), yet the portal counts every row as a second factor. After a
  * change of APP_URL an Admin removes, in one press, every passkey whose recorded origin is not the portal's now
- * (madeElsewhere(), passkeys.ts: a null origin, a row the portal never recorded, counts as one). Until they press,
+ * (madeElsewhere(), passkeys.ts: a null origin, a row the portal never recorded, counts as one, once it is older than
+ * an add under way could be, ADD_UNDER_WAY_MINUTES). Until they press,
  * nothing at the door, the gate, asking again or the offer reads the origin.
  */
 
@@ -228,10 +229,14 @@ const byOriginText = (a: OldOrigin, b: OldOrigin) => (a.origin === b.origin ? 0 
 /** The people who hold a passkey from an earlier address, as a query of their ids. */
 const holdersElsewhere = (q: Reader, origin: string) => q.select({ id: parentAuthUser.parentId }).from(parentAuthPasskey)
   .innerJoin(parentAuthUser, eq(parentAuthUser.id, parentAuthPasskey.userId)).where(madeElsewhere(origin));
-/** On a query of `parent`: the person holds no passkey made at `origin` and no authenticator app in force. */
+/**
+ * On a query of `parent`: the person holds no passkey the press would keep (none but those madeElsewhere(), so a
+ * current one or an add under way at this address keeps them counted as holding one, as the press's passkeyCount()
+ * after its delete does) and no authenticator app in force.
+ */
 const leftWithNothing = (origin: string) => sql`not ${exists(db.select({ id: parentAuthPasskey.id }).from(parentAuthPasskey)
   .innerJoin(parentAuthUser, eq(parentAuthUser.id, parentAuthPasskey.userId))
-  .where(and(eq(parentAuthUser.parentId, parent.id), eq(parentAuthPasskey.origin, origin))))}
+  .where(and(eq(parentAuthUser.parentId, parent.id), sql`not ${madeElsewhere(origin)}`)))}
   and not ${exists(db.select({ id: parentAuthenticator.id }).from(parentAuthenticator)
     .where(and(eq(parentAuthenticator.parentId, parent.id), isNotNull(parentAuthenticator.confirmedAt))))}`;
 
@@ -283,9 +288,12 @@ export type OldPasskeysResult = { ok: true; passkeys: number; people: number; le
  *     go too (they work nowhere), with nothing else of theirs. Sign-ins off doesn't stop the press;
  * (d) one `parent.passkeys.old_address_removed` row of counts, with the portal's origin, the level and the origins.
  * No mail goes (the screens each parent reaches next say what to do) and no rate limit applies: the press is an
- * Admin's, and a second finds none. One gap is accepted: the library inserts a new passkey's row before the add records
- * its origin (passkey-settings.ts), so a press in that moment counts it as one from an earlier address and removes it;
- * the add then answers that it couldn't be added, and the parent adds it again.
+ * Admin's, and a second finds none. The library inserts a new passkey's row (origin null) just before the add records
+ * its origin (passkey-settings.ts), without the person's row: madeElsewhere() leaves such a row out while it is younger
+ * than ADD_UNDER_WAY_MINUTES, so a press in that moment neither counts nor removes a passkey being added at this
+ * address, and the people it locks are all whose rows it can delete (no row from an earlier address is made after the
+ * lock: every new one is such a row, and the add only ever records the portal's origin now). The summary's `byOrigin`
+ * is summed from the rows deleted.
  */
 export async function removeOldAddressPasskeys(shown: unknown, o: StaffOp): Promise<OldPasskeysResult> {
   if (typeof shown !== "number" || !Number.isSafeInteger(shown) || shown < 1) return { ok: false, reason: "invalid" };
@@ -304,9 +312,14 @@ export async function removeOldAddressPasskeys(shown: unknown, o: StaffOp): Prom
     }
     const level = (await readStoredSettings(tx)).level === "strict" ? "strict" as const : "standard" as const;
     let passkeys = 0, touched = 0, backupCodesDeleted = 0, leftWithNoFactor = 0, sessionsEnded = 0, signedOut = 0;
+    // The summary's origins are those of the rows this press deleted, so its counts agree with each other whatever the
+    // count read above saw.
+    const removedByOrigin = new Map<string | null, number>();
     for (const p of people) {
-      const removed = await removeOldAddressPasskeysOf(tx, p.id, origin);
+      const origins = await removeOldAddressPasskeysOf(tx, p.id, origin);
+      const removed = origins.length;
       if (removed === 0) continue;
+      for (const at of origins) removedByOrigin.set(at, (removedByOrigin.get(at) ?? 0) + 1);
       const left = await passkeyCount(p.id, tx);
       const nothing = !p.blocked && left === 0 && !(await hasAuthenticator(p.id, tx));
       const codes = nothing ? await removeBackupCodes(tx, p.id) : 0;
@@ -318,7 +331,8 @@ export async function removeOldAddressPasskeys(shown: unknown, o: StaffOp): Prom
         after: { reason: "old_address", removed, passkeys: left, backupCodesDeleted: codes, sessionsEnded: ended }, ip: o.ip }, tx);
     }
     await writeAudit({ actor: o.actor, action: "parent.passkeys.old_address_removed", permission, targetType: "setting", targetId: PARENTS_KEY,
-      after: { origin, level, passkeys, people: touched, backupCodesDeleted, leftWithNoFactor, sessionsEnded, byOrigin: found.byOrigin }, ip: o.ip }, tx);
+      after: { origin, level, passkeys, people: touched, backupCodesDeleted, leftWithNoFactor, sessionsEnded,
+        byOrigin: [...removedByOrigin].map(([at, n]) => ({ origin: at, passkeys: n })).sort(byOriginText) }, ip: o.ip }, tx);
     return { ok: true, passkeys, people: touched, leftWithNoFactor, signedOut };
   });
 }

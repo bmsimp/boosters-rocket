@@ -1,5 +1,9 @@
 // A guardian's passkeys (the sign-in release, slice SI-7a; section 6 of the app-owned families spec, "Passkeys
-// anywhere", and open questions 24, 30 and 35): the only portal module that reads or writes `parent_auth_passkey`. The
+// anywhere", and open questions 24, 30 and 35): the only portal module that writes `parent_auth_passkey`, and the only
+// one that reads it for one person. Two staff-only modules read it for the whole club, each in one query: the counts of
+// factors and Strict's switch (holdsPasskey(), switches.ts) and the count of passkeys from an earlier address
+// (oldAddressPasskeys(), signin-reset.ts, through madeElsewhere() below); a change to what counts as a person's
+// passkey here is a change to them too. The
 // WebAuthn ceremony is the passkey library's (@better-auth/passkey, on the parent instance, src/lib/auth/parent-auth.ts):
 // it makes the challenge, verifies an assertion against the stored public key and writes the signature counter itself.
 // What the portal reads here is whether a person has a passkey (who is asked which step at the door), when their newest
@@ -183,10 +187,20 @@ export async function recordPasskeyOrigin(tx: Tx, parentId: string, passkeyId: s
 }
 
 /**
- * A passkey made at an address other than `origin` (the portal's now): its recorded origin is distinct from it, so a
- * row the portal never recorded (null) counts as one too (slice SI-9b). A condition on a query of the table.
+ * How long a row with no origin may be an add still under way rather than one the portal never recorded: the library
+ * inserts a new passkey's row (origin null) just before the add's own transaction records its origin, in the same
+ * request (addMyPasskey(), passkey-settings.ts), so a press of the removal in that moment must neither count it nor
+ * remove it. Minutes, many times a request's length; a row the add never recorded is taken by a press after it.
  */
-export const madeElsewhere = (origin: string) => sql`${parentAuthPasskey.origin} IS DISTINCT FROM ${origin}`;
+export const ADD_UNDER_WAY_MINUTES = 10;
+
+/**
+ * A passkey made at an address other than `origin` (the portal's now): its recorded origin is distinct from it, so a
+ * row the portal never recorded (null) counts as one too (slice SI-9b), once it is older than ADD_UNDER_WAY_MINUTES
+ * (one younger may be an add under way at this address). A condition on a query of the table.
+ */
+export const madeElsewhere = (origin: string) => sql`(${parentAuthPasskey.origin} IS DISTINCT FROM ${origin}
+  and not (${parentAuthPasskey.origin} is null and ${parentAuthPasskey.createdAt} > now() - ${sql.raw(`interval '${ADD_UNDER_WAY_MINUTES} minutes'`)}))`;
 
 /**
  * A passkey of the person's removed, in the caller's transaction; false when it isn't theirs. A sign-in that verified
@@ -214,12 +228,13 @@ export async function removeAllPasskeys(tx: Tx, parentId: string): Promise<numbe
 /**
  * The person's passkeys made at an address other than `origin` (madeElsewhere()) removed, in the caller's transaction,
  * which holds the person's row and writes the audit row: an Admin's removal of every passkey made at an earlier address
- * (removeOldAddressPasskeys(), signin-reset.ts; slice SI-9b). Their passkeys made at `origin` stay. Answers how many
- * went. A sign-in that verified one just before and whose session is made after is refused at its last check
+ * (removeOldAddressPasskeys(), signin-reset.ts; slice SI-9b). Their passkeys made at `origin` stay. Answers the origin
+ * each one that went was made at (null for one the portal never recorded), so the press counts what it removed, never
+ * a credential id. A sign-in that verified one just before and whose session is made after is refused at its last check
  * (signinStands(): `passkey_gone`).
  */
-export async function removeOldAddressPasskeysOf(tx: Tx, parentId: string, origin: string): Promise<number> {
+export async function removeOldAddressPasskeysOf(tx: Tx, parentId: string, origin: string): Promise<(string | null)[]> {
   const rows = await tx.delete(parentAuthPasskey).where(and(inArray(parentAuthPasskey.userId, usersOf(tx, parentId)), madeElsewhere(origin)))
-    .returning({ id: parentAuthPasskey.id });
-  return rows.length;
+    .returning({ origin: parentAuthPasskey.origin });
+  return rows.map((r) => r.origin);
 }

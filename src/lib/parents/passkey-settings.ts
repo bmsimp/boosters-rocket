@@ -150,8 +150,10 @@ type AddRefusal = "not_a_registration" | "bad_name" | "not_allowed" | "not_verif
  *     enrolling meanwhile gets the passkey recorded as a whole session's would be, and the gate ends it. If it
  *     fails, the row the library inserted is deleted (forgetUnrecordedPasskey()). One gap stays: a process that stops
  *     between the library's insert and this transaction's commit (a restart, say) leaves the row with no name, no origin,
- *     no audit row and no backup codes (with no origin, an Admin's removal of passkeys from an earlier address takes it). It works, and the person's settings list it as "Passkey added" with its date, where they
- *     can remove it; nothing sweeps such rows yet. And for an enrolling session, one more: in that same gap the
+ *     no audit row and no backup codes (with no origin, an Admin's removal of passkeys from an earlier address takes
+ *     it once it is older than ADD_UNDER_WAY_MINUTES, passkeys.ts). It works, and the person's settings list it as
+ *     "Passkey added" with its date, where they can remove it; nothing sweeps such rows yet. And for an enrolling
+ *     session, one more: in that same gap the
  *     person already holds a passkey (hasPasskey() counts the unrecorded row), so a request of this same session that
  *     the gate reads then (a second tab reloading) ends it (`enrol_ended`); the add then completes nothing (no
  *     `enrolled: true`) and answers its codes to a session that is gone, and the guardian signs in again with the

@@ -15,6 +15,7 @@ import { DOOR_PASSWORD, passwordStep } from "../helpers/parent-door";
 import { seedPassword } from "../helpers/signin-links";
 import { authenticatorRows, backupCodeRows, seedAuthenticator, seedBackupCodes } from "../helpers/authenticator";
 import { ORIGIN, passkeyRows, seedPasskey } from "../helpers/passkey";
+import { ADD_UNDER_WAY_MINUTES, removePasskey } from "@/lib/parents/passkeys";
 
 /**
  * Passkeys from an earlier address of the portal (the sign-in release, slice SI-9b): the count an Admin is shown, and
@@ -145,6 +146,45 @@ describe("an Admin's removal of every passkey from an earlier address", () => {
     expect((await auditsOf("parent.passkeys.old_address_removed"))[0]!.after).toMatchObject({ level: "strict", sessionsEnded: 2, leftWithNoFactor: 1 });
   });
 
+  it("at Strict keeps the sessions and codes of a holder of a current passkey, and a blocked holder's codes", async () => {
+    await seedParentSettings({ ...SIGNINS_ON, level: "strict" });
+    const ben = await seedGuardianNamed("Ben", "F1");
+    const dee = await seedGuardianNamed("Dee", "F2");
+    await seedPasskey(ben.id, { origin: OLD }); await seedPasskey(ben.id);
+    await seedPasskey(dee.id, { origin: OLD });
+    await seedBackupCodes(ben.id); await seedBackupCodes(dee.id);
+    await seedParentSession(ben.authUserId);
+    // A blocked person's sessions were ended by the block; one seeded here stands for any the press might wrongly take.
+    await seedParentSession(dee.authUserId);
+    await db.update(parent).set({ blocked: true }).where(eq(parent.id, dee.id));
+    expect(await oldAddressPasskeys()).toMatchObject({ passkeys: 2, people: 2, leftWithNoFactor: 0 });
+    expect(await removeOldAddressPasskeys(2, ADMIN)).toEqual({ ok: true, passkeys: 2, people: 2, leftWithNoFactor: 0, signedOut: 0 });
+    expect(await originsOf(ben.id)).toEqual([ORIGIN]);
+    expect(await originsOf(dee.id)).toEqual([]);
+    for (const p of [ben, dee]) {
+      expect(await sessionsOf(p.authUserId)).toHaveLength(1);
+      expect((await backupCodeRows(p.id)).length).toBe(10);
+      expect((await removedRowOf(p.id))[0]!.after).toMatchObject({ backupCodesDeleted: 0, sessionsEnded: 0 });
+    }
+  });
+
+  it("neither counts nor removes a row with no origin young enough to be an add under way, and takes one older", async () => {
+    const ana = await seedGuardianNamed("Ana", "F1");
+    const ben = await seedGuardianNamed("Ben", "F2");
+    // Ana's add is under way: the library inserted the row a moment ago and the add hasn't recorded its origin yet.
+    const adding = await seedPasskey(ana.id, { origin: null, createdAt: new Date() });
+    await seedBackupCodes(ana.id);
+    // Ben's row was never recorded, and is older than any add could still be.
+    await seedPasskey(ben.id, { origin: null, createdAt: new Date(Date.now() - (ADD_UNDER_WAY_MINUTES + 1) * 60_000) });
+    await seedPasskey(ana.id, { origin: OLD });
+    // Ana keeps a passkey (the one being added), so she isn't left with nothing.
+    expect(await oldAddressPasskeys()).toMatchObject({ passkeys: 2, people: 2, leftWithNoFactor: 1, byOrigin: [{ origin: OLD, passkeys: 1 }, { origin: null, passkeys: 1 }] });
+    expect(await removeOldAddressPasskeys(2, ADMIN)).toEqual({ ok: true, passkeys: 2, people: 2, leftWithNoFactor: 1, signedOut: 0 });
+    expect((await passkeyRows(ana.id)).map((r) => r.id)).toEqual([adding.rowId]);
+    expect((await backupCodeRows(ana.id)).length).toBe(10);
+    expect(await passkeyRows(ben.id)).toEqual([]);
+  });
+
   it("works with sign-ins off", async () => {
     await seedParentSettings({ signin: false });
     const ana = await seedGuardianNamed("Ana", "F1");
@@ -156,13 +196,16 @@ describe("an Admin's removal of every passkey from an earlier address", () => {
 
 describe("what the press refuses", () => {
   it("a count that is no longer the count: changing nothing, with the refused row", async () => {
-    const { ana } = await seedClub();
+    const { ana, keys } = await seedClub();
     const before = await passkeyRows(ana.id);
     expect(await removeOldAddressPasskeys(5, ADMIN)).toEqual({ ok: false, reason: "count_changed" });
     expect(await passkeyRows(ana.id)).toEqual(before);
     expect((await backupCodeRows(ana.id)).length).toBe(10);
     const refused = await auditsOf("parent.passkeys.old_address_refused");
     expect(refused.map((r) => [r.targetType, r.targetId, r.after])).toEqual([["setting", PARENTS_KEY, { reason: "count_changed", shown: 5, found: 6 }]]);
+    const written = JSON.stringify(refused);
+    for (const k of keys) expect(written).not.toContain(k.id);
+    expect(written).not.toContain("Ana's phone");
     expect(await auditsOf("parent.passkey.remove")).toEqual([]);
     expect(await auditsOf("parent.passkeys.old_address_removed")).toEqual([]);
   });
@@ -192,6 +235,33 @@ describe("what the press refuses", () => {
     expect(answers.find((a) => !a.ok)).toEqual({ ok: false, reason: "none" });
     for (const p of [ana, ben, cal, dee]) expect(await removedRowOf(p.id)).toHaveLength(1);
     expect(await auditsOf("parent.passkeys.old_address_removed")).toHaveLength(1);
+  });
+});
+
+describe("a press beside one person's own write", () => {
+  it("waits for a person's own passkey remove under their row, then counts what it finds, with no deadlock", async () => {
+    const { ana, ben, cal, dee, keys } = await seedClub();
+    // Ben removes his current passkey in sign-in settings (removeMyPasskey() holds his row FOR UPDATE, as here) while an
+    // Admin presses: the press waits for his row, and finds him with only the old one, so his codes go with it.
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    let locked!: () => void;
+    const isLocked = new Promise<void>((r) => { locked = r; });
+    const own = db.transaction(async (tx) => {
+      await tx.select({ id: parent.id }).from(parent).where(eq(parent.id, ben.id)).for("update");
+      locked();
+      await held;
+      expect(await removePasskey(tx, ben.id, keys[4]!.rowId)).toBe(true);
+    });
+    await isLocked;
+    const press = removeOldAddressPasskeys(6, ADMIN);
+    await new Promise((r) => setTimeout(r, 200));
+    release();
+    const [, answer] = await Promise.all([own, press]);
+    expect(answer).toEqual({ ok: true, passkeys: 6, people: 4, leftWithNoFactor: 2, signedOut: 0 });
+    expect(await passkeyRows(ben.id)).toEqual([]);
+    expect((await backupCodeRows(ben.id)).length).toBe(0);
+    for (const p of [ana, ben, cal, dee]) expect(await removedRowOf(p.id)).toHaveLength(1);
   });
 });
 

@@ -1465,7 +1465,8 @@ export const parentAuthVerification = parentAuth.verification;
  * assertion, an unsigned 32-bit number as WebAuthn defines it (up to 4294967295), so a bigint, read as a number;
  * `transports` comma-joined. `last_used_at` is the portal's alone (the library neither writes nor returns
  * it, as with the session's `strong_at`), set when a passkey signs someone in (src/lib/parents/passkeys.ts, the only
- * portal module that reads or writes this table). A passkey belongs to APP_URL's host (the relying party id): a club
+ * portal module that writes this table and reads it for one person; switches.ts and signin-reset.ts, staff only, count
+ * it for the whole club). A passkey belongs to APP_URL's host (the relying party id): a club
  * that changes its address leaves them unusable. `origin`, the portal's alone too (slice SI-9b), is the origin the add
  * recorded it for, so an Admin can remove every passkey made at an earlier address in one press (signin-reset.ts).
  * Kept until the guardian removes one (SI-7b), a staff reset removes them all (SI-9a) or that press removes those from
