@@ -383,11 +383,16 @@ it to Strict and check 43 back; where a check says what happens at Strict too, i
     still asks for the passkey after the password, never for an emailed code: the first parent's step says "If you
     don't have your passkey with you, enter one of your backup codes instead. If you have neither, ask the club for
     help." and one backup code in the **Backup code** field signs them in; the second's says "If you don't have your
-    passkey with you, ask the club for help.", and only an Admin's reset of their sign-in (check 44) brings them back.
-    The portal can't yet remove every parent's passkeys at once, so after a real change of address each parent left
-    like the second is reset one at a time, each with a call back
-    ([resetting a parent's sign-in](resetting-a-parents-sign-in.md)). Put `APP_URL` back afterwards. **If not:** note
-    what happened.
+    passkey with you, ask the club for help.". Then, as an Admin, the **Health** page's **Parent sign-ins** line says
+    "Needs attention", with "2 passkeys of 2 people were made at an address other than the portal's address now"; its
+    link opens **Settings**, **Parent sign-ins**, where **Passkeys from an earlier address** names the old address with
+    "2 passkeys", says "2 people have no authenticator app and no other passkey", and **Remove 2 passkeys made at an
+    earlier address** answers "Removed 2 passkeys made at an earlier address, from 2 people.". In a new private window
+    each test parent's password now asks for a code we email (at Standard), which signs them in, and **Sign-in
+    settings** shows no passkey and no backup codes; the Health line no longer says it. After a real change of address
+    that one press is the way back for everyone ([after a change of the portal's
+    address](resetting-a-parents-sign-in.md#after-a-change-of-the-portals-address)); a reset (check 44) is only for a
+    parent it doesn't bring back. Put `APP_URL` back afterwards. **If not:** note what happened.
 35. **An authenticator app from the QR code, on another phone.** On a laptop, as a test parent with no passkey: Family,
     **Sign-in settings**, the **Authenticator app** box; show it's you if it asks; **Set up an authenticator app**. Scan
     the QR code with Google Authenticator and finish with the code it shows. Then **Turn off the authenticator app**
@@ -586,11 +591,12 @@ The proof-of-concept host has no Documenso. Forms need a full installation from 
     proven end to end, start a second Documenso against the restored database.
     **Pass:** each says `Restored ...`. **If not:** its message and exit code.
 19. **Settle the portal's address before parents are offered passkeys.** A passkey belongs to `APP_URL`'s host name:
-    once parents have added passkeys, changing the address stops every one. A parent with an authenticator app, or a
-    backup code they haven't used, still signs in; one whose only second step was the passkey, with no backup code
-    left, is locked out until an Admin resets their sign-in, one parent at a time, each with a call back: the portal
-    can't yet remove every parent's passkeys at once (check 34 of part 3;
-    [a first installation, part 3](first-install.md#3-fill-in-the-settings); [resetting a parent's sign-in](resetting-a-parents-sign-in.md)).
+    once parents have added passkeys, changing the address stops every one, and the sign-in page keeps asking for
+    them until an Admin removes them all in one press on **Settings**, **Parent sign-ins** (check 34 of part 3). After
+    it a parent with an authenticator app signs in with it; one with neither loses their backup codes with the
+    passkeys and, at Standard, gets a code by email on a new phone or computer, while at Strict they are signed out and
+    must add a passkey or an app after their password, and one who has forgotten their password then needs an Admin's
+    reset ([a first installation, part 3](first-install.md#3-fill-in-the-settings); [resetting a parent's sign-in](resetting-a-parents-sign-in.md)).
     **Pass:** the address in `deploy/.env` is the one the club will keep. **If not:** change it now, before any parent
     has a passkey.
 

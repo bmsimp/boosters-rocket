@@ -221,7 +221,8 @@ export async function addMyPasskey(who: Adder | null, body: unknown, verify: Ver
  * blocked or gone by then), deleted in a transaction of its own under the person's row, audited `parent.passkey.remove`
  * with `reason: "not_recorded"`. Best effort, and its answer says whether it went (false when it didn't): a failure
  * here leaves the row, unnamed and named by no audit row, which the person's settings list as "Passkey added" and its
- * date, where they can remove it, and which a staff reset removes (SI-9); the add answers the refusal either way.
+ * date, where they can remove it, and which a staff reset removes (SI-9a), and so does an Admin's removal of passkeys
+ * from an earlier address (SI-9b), its origin being null; the add answers the refusal either way.
  */
 export async function forgetUnrecordedPasskey(who: Adder, passkeyId: string, ip: string | null): Promise<boolean> {
   try {

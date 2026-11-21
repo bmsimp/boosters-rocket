@@ -57,7 +57,7 @@ export async function passkeyNamed(credentialId: string, q: Reader = db): Promis
 /**
  * A passkey sign-in's own write, in the caller's transaction (which holds the person's row, lockedPerson(), and writes
  * the `signin.second_step` row): the passkey that verified is still the person's, and its `last_used_at` is set, by one
- * update returning the row. False when it is gone or no longer theirs (removed since, SI-7b, or by a staff reset, SI-9).
+ * update returning the row. False when it is gone or no longer theirs (removed since, SI-7b, by a staff reset, SI-9a, or as one from an earlier address, SI-9b).
  */
 export async function usePasskey(tx: Tx, parentId: string, passkeyId: string, now: Date): Promise<boolean> {
   const rows = await tx.update(parentAuthPasskey).set({ lastUsedAt: now })
