@@ -41,9 +41,13 @@ export async function makeStrictParent(sql: postgres.Sql): Promise<{ parentId: s
 
 /**
  * An enrolling session for the guardian, as the door's finish makes one (enrol_until half an hour on, no proof, no
- * device), with the token given: for a page opened without signing in through the form (tests/e2e/parent-a11y.spec.ts).
+ * device, and her one family entered, as completeParentSignin() enters it), with the token given: for a page opened
+ * without signing in through the form (tests/e2e/parent-a11y.spec.ts). With no family, the page she goes on to once
+ * enrolled would be the chooser, not Home.
  */
 export async function enrollingSession(sql: postgres.Sql, authUserId: string, token: string): Promise<void> {
-  await sql`INSERT INTO parent_auth_session (id, token, user_id, expires_at, enrol_until)
-            VALUES (${`e2e-enrolling-${randomUUID()}`}, ${token}, ${authUserId}, now() + interval '1 day', now() + interval '30 minutes')`;
+  await sql`INSERT INTO parent_auth_session (id, token, user_id, expires_at, enrol_until, family_id)
+            SELECT ${`e2e-enrolling-${randomUUID()}`}, ${token}, ${authUserId}, now() + interval '1 day', now() + interval '30 minutes', g.family_id
+            FROM guardian g JOIN parent_auth_user u ON u.parent_id = g.parent_id
+            WHERE u.id = ${authUserId} AND g.family_qbo_id = 'E2E-FAMILY' AND g.family_id IS NOT NULL`;
 }
