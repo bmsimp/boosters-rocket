@@ -559,7 +559,7 @@ describe("the page", () => {
     expect(await renderPage(SignInPage)).toContain('href="/sign-in/password"');
   });
 
-  it("under Strict, says to ask the club, and promises no email", async () => {
+  it("under Strict, promises a link only to a holder of a passkey or an app, and says to ask the club", async () => {
     await seedParentSettings({ ...SIGNINS_ON, level: "strict" }); await seedWorkingMail();
     const html = await renderPage(RequestPage);
     expect(html).toContain(PASSWORD_COPY.askStrict.replaceAll("'", "&#x27;"));

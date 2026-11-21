@@ -295,8 +295,9 @@ export async function forgetMyOtherDevices(ctx: Me): Promise<SettingsResult> {
  * The set-up link offered to a person with no password (open question 34): "Set up or reset my password"
  * (askForPasswordLink(), password-request.ts) for the session's own address, called as it is, with its own limits
  * (`password_ask_email`, `password_ask_ip`), resend wait, rows and one answer (its mail is not awaited). Nothing in the
- * session alone sets a password: the link does, from the mailbox. At Strict nothing is mailed on request, and the answer
- * says so, as the request page's does (askWords()).
+ * session alone sets a password: the link does, from the mailbox. At Strict no set-up link is mailed on request (and a
+ * reset only to a holder of a passkey or an app: whichLinkToMail()), and the answer is the request page's Strict one
+ * (askWords(true).answer): a link only to an address that can reset here, and otherwise to ask the club.
  */
 export async function askMySetupLink(ctx: Me): Promise<SettingsResult> {
   const { delivery } = await askForPasswordLink(ctx.email, ctx.ip);

@@ -236,9 +236,13 @@ export type LevelResult = { ok: true; signedOut: number } | { ok: false; errors:
  * Standard (an emailed code, a proof older than a factor) is a proof under Strict. Devices, passwords, apps, backup
  * codes and passkeys stay, and nobody is mailed: the gate and the enrolment tell each guardian at their next sign-in.
  * The audit row's `after` holds the counts read here, `signedOut` (people), `sessionsEnded` and `proofsCleared`.
- * Every press that adds or removes a factor holds the parents' settings lock shared, except the passkey library's own
- * insert of a new passkey's row before the portal records it (SI-7b): a person whose row lands between the count and
- * this work has a factor, is not signed out, and the counts recorded are the ones read here. A session the switch
+ * Removing a factor (turnOffMyAuthenticator(), removeMyPasskey()) and starting an app's set-up (startMyAuthenticator())
+ * hold the parents' settings lock shared, so they wait for this press. Confirming an app (confirmMyAuthenticator()),
+ * recording a passkey (addMyPasskey()'s transaction) and the passkey library's own insert of its row before that
+ * (SI-7b) don't: the first two hold the person's row FOR UPDATE, which lockPeople() here waits for or makes wait, and
+ * the library's insert takes no lock of ours. So the counts are read again after lockPeople(): a factor that came
+ * into force before that read makes its person a holder, not signed out, and the counts recorded are the ones read
+ * there, never the first read's (which only refuses a stale page). A session the switch
  * misses (one made by a sign-in that commits after it) is ended by the gate at its next request (sessionStanding(),
  * enrolment-rule.ts): the gate is the invariant, and this ending is for the count and its record.
  *

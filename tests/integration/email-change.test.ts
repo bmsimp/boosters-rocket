@@ -173,8 +173,13 @@ describe("asking for the change", () => {
     expect(await requests()).toEqual([]);
     expect(outbox).toEqual([]);
     expect((await audits()).filter((a) => a.action === "parent.email.request.failed").map((a) => a.after)).toEqual([{ code: "not_proved" }]);
-    // Proved under Strict: asked, as at Standard.
+    // The page at Strict: the asking again with the app's code, and no Strict branch in place of the form.
+    const asksAgain = await renderPage(FamilyEmailPage);
+    expect(asksAgain).toContain("Before you change your sign-in email, please show it&#x27;s you: enter your password, then the code from your authenticator app.");
+    expect(asksAgain).not.toContain("Send me a link");
+    // Proved under Strict: the form, and the change asked, as at Standard.
     await proveRecently(r.identity);
+    expect(await renderPage(FamilyEmailPage)).toContain("Send me a link");
     expect(await asking(NEW)).toEqual({ ok: true, message: EMAIL_COPY.sent(NEW) });
     expect((await requests()).map((x) => x.newEmail)).toEqual([NEW]);
     expect(outbox.map((m) => m.to).sort()).toEqual([NEW, RIVERA.parent.email].sort());

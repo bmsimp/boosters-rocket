@@ -21,5 +21,10 @@ describe("the request form's words", () => {
     expect(w.answer).toBe("If that address can reset its password here, we've emailed it a link. It can take a minute, and the link works once. Check your spam folder too. If no email comes, please ask the club.");
     // Nothing promises a link to set up a password: none is mailed on request at Strict.
     for (const words of [w.lede, w.note!, w.answer!]) expect(words).not.toMatch(/link to set up|set up your password/i);
+    // And nothing promises an email unconditionally: whichLinkToMail() mails no one with neither, whatever is typed, so
+    // every sentence that says a link will be or was emailed begins with its condition.
+    const promises = [w.lede, w.note!, w.answer!].flatMap((words) => words.split(/(?<=\.)\s+/)).filter((s) => /we'll email|we've emailed/i.test(s));
+    expect(promises).toHaveLength(2);
+    for (const s of promises) expect(s).toMatch(/^If (you have a passkey or an authenticator app|that address can reset its password here), /);
   });
 });
