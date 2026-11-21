@@ -150,9 +150,10 @@ describe("Link this guardian", () => {
       after: { guardianId: meiRow, familyId: String(chen), customerQboId: "21", realmId: REALM, chosen: "suggested", linkId: link!.id } });
     expect(stub.apiCalls()).toEqual([]);
     expect(await db.select().from(writeQueue)).toEqual([]);
-    // The guardian row is as it was: no column of it is the link's.
+    // The guardian row is as it was: no column of it is the link's (since migration 0049 it has no copy of a customer at all).
     expect((await db.select().from(guardian).where(eq(guardian.id, meiRow)))[0]).toEqual(rowBefore);
-    expect(rowBefore).toMatchObject({ status: "invited", familyId: chen, sourceQboId: null });
+    expect(rowBefore).toMatchObject({ status: "invited", familyId: chen });
+    expect(Object.keys(rowBefore!).filter((k) => /qbo/i.test(k))).toEqual([]);
     // The family's page says it, and the row's opening now offers its Unlink.
     expect((await guardianStandings([{ guardianId: meiRow, familyId: chen, name: "Mei Chen", open: true }])).get(meiRow)).toBe("Linked to their own Parent customer “Mei Chen”.");
     expect(await shown("Chen Family", "Mei Chen")).toMatchObject({ standing: "own", offer: null, unlink: { linkId: link!.id } });
