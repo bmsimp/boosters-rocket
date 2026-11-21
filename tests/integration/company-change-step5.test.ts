@@ -399,4 +399,33 @@ describe("switching companies keeps the seasons', volunteering's and forms' reco
     expect((await audits("roster.cleared")).map((r) => r.after)).toEqual([expect.objectContaining({ reason: "different_company", realmId: "2222" })]);
     expect(await audits("season.records.cleared", "volunteer.signups.cleared", "parent.access.cleared", "form.records.cleared")).toEqual([]);
   });
+
+  // Stage 4's slice M8a: the audit page's record filter reads what the connect's clear writes (the `company_changed`
+  // links and the `roster.cleared` row), so a kept family's earlier rows are found in the old company's time only.
+  it("leaves the audit page's record filter finding a kept family's old company's rows after a switch through the connect, and never the new company's of the same number", { timeout: 30_000 }, async () => {
+    const { a, b } = await seedTwoFamilies();
+    const famA = await recordOfCustomer(a.spec.family.qboId, "family");
+    await seedConnected(stub, { realmId: "1111" });
+    const read = (customerId: string, tag: string) => writeAudit({ actor: { door: "staff", id: staff.id, label: staff.email }, action: "roster.family.read",
+      targetType: "qbo_customer", targetId: customerId, after: { tag } });
+    const found = async () => (await auditPage(parseAuditFilters({ record: `family:${String(famA)}` }))).rows
+      .map((r) => (r.after as { tag?: string } | null)?.tag).filter((t): t is string => t !== undefined).sort();
+    await read(a.spec.family.qboId, "a-old");
+    await read(b.spec.family.qboId, "b-old");
+    expect(await found()).toEqual(["a-old"]);
+
+    await disconnect({ actor: { door: "staff", id: staff.id, label: staff.email }, ip: null });
+    expect(await connect("2222", { switching: true })).toEqual({ ok: true });
+    expect(await refreshRoster(worker)).toMatchObject({ ok: true });
+    expect(await audits("roster.cleared")).toHaveLength(1);
+    // A's link of the old company ended `company_changed`; A has none in the new one.
+    expect((await db.select().from(accountingLinkEnded).where(eq(accountingLinkEnded.familyId, famA))).map((l) => [l.realmId, l.endedHow])).toEqual([["1111", "company_changed"]]);
+    // In the new company's time, a row naming A's old number is another customer's.
+    await read(a.spec.family.qboId, "a-number-since");
+    expect(await found()).toEqual(["a-old"]);
+    // Linked in the new company to B's old number: B's old row is never A's, and one written since is.
+    await db.insert(accountingLink).values({ system: "quickbooks", realmId: "2222", customerId: b.spec.family.qboId, familyId: famA, origin: "confirmed", linkedBy: staff.id });
+    await read(b.spec.family.qboId, "b-number-in-new-company");
+    expect(await found()).toEqual(["a-old", "b-number-in-new-company"]);
+  });
 });
