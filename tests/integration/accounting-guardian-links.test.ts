@@ -130,6 +130,7 @@ beforeEach(async () => {
 
 describe("Link this guardian", () => {
   it("offers a row's Parent customers, fills in the one named like them, links it through the action, sends nothing, and what follows goes to it", async () => {
+    const rowBefore = (await db.select().from(guardian).where(eq(guardian.id, meiRow)))[0];
     const g = await shown("Chen Family", "Mei Chen");
     // In the roster's order: May before Mei. Old Chen is inactive, Kim Chen a student: neither is offered.
     expect(g.offer).toEqual({ familyLinkId: await chenLinkId(), candidates: [{ qboId: "22", name: "May Chen", email: "may@example.com" }, expect.objectContaining({ qboId: "21", name: "Mei Chen" })],
@@ -150,7 +151,8 @@ describe("Link this guardian", () => {
     expect(stub.apiCalls()).toEqual([]);
     expect(await db.select().from(writeQueue)).toEqual([]);
     // The guardian row is as it was: no column of it is the link's.
-    expect((await db.select().from(guardian).where(eq(guardian.id, meiRow)))[0]).toMatchObject({ status: "invited", familyId: chen, familyQboId: "20", sourceQboId: null });
+    expect((await db.select().from(guardian).where(eq(guardian.id, meiRow)))[0]).toEqual(rowBefore);
+    expect(rowBefore).toMatchObject({ status: "invited", familyId: chen, sourceQboId: null });
     // The family's page says it, and the row's opening now offers its Unlink.
     expect((await guardianStandings([{ guardianId: meiRow, familyId: chen, name: "Mei Chen", open: true }])).get(meiRow)).toBe("Linked to their own Parent customer “Mei Chen”.");
     expect(await shown("Chen Family", "Mei Chen")).toMatchObject({ standing: "own", offer: null, unlink: { linkId: link!.id } });
