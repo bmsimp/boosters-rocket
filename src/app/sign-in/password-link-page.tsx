@@ -10,7 +10,8 @@ import { PasswordLinkBody } from "./password-form";
  * someone with a password, blocked, no family to sign in to, sign-ins off). Only the form's submit acts. It shows no
  * name, no address and nothing of any family; the form is given the token, already in the address, the purpose and
  * whether the link may be used. A set-up while the club's level is Standard signs the parent in once its password is
- * set (./password-actions.ts); a reset, and a set-up under Strict, point to sign in.
+ * set (./password-actions.ts), and under Strict signs a person with no second factor in as Strict's enrolment (to
+ * /one-more-step, since slice SI-10a); a reset, and a set-up under Strict for a person who holds one, point to sign in.
  */
 export async function PasswordLinkPage({ purpose, token }: { purpose: LinkPurpose; token: string }) {
   const [club, verdict] = await Promise.all([getClubSettings(), linkVerdict(purpose, token)]);
