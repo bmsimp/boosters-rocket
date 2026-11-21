@@ -42,7 +42,7 @@ import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
  * under the family's, on the family's row, and an inactive linked family the books have active, in the screen's own
  * list after the families. Nothing is sent to QuickBooks. Nobody is let in by it: the family's sign-ins are held until
  * someone who may change families releases them on its page (releaseSigninHold(), the lead's decision 2 on the owner's
- * choice 5, recommended and awaiting his word). The company is fznCompany()'s (tests/helpers/qbo-stub.ts): Rivera
+ * choice 5, which the owner confirmed on 2026-11-21). The company is fznCompany()'s (tests/helpers/qbo-stub.ts): Rivera
  * Family 10 with Ana Rivera 11 (Parent) and Leo Rivera 12 (Student), Chen Family 20 with Mei Chen 21 (Parent). A record
  * is made inactive in the portal only by the portal's own take of the books' inactive (press of M4a), and the books
  * change only through a roster read of the stub (readAgain(), changeInBooks()); customers added before any record is

@@ -40,8 +40,9 @@ forms without needing help; a volunteer can tell at a glance who still owes form
 
 ## Positioning
 
-Free, open-source and self-hosted by each club, built around QuickBooks Online as the system of
-record rather than replacing the club's accounting. Commercial booster platforms (for example
+Free, open-source and self-hosted by each club, built beside QuickBooks Online, which stays the
+club's books: the portal keeps its own families and sign-ins, links each family to its customer
+there, and never replaces the club's accounting. Commercial booster platforms (for example
 BoosterHub, and Charms, which is being retired) are paid services that hold the club's data
 themselves.
 
@@ -61,17 +62,19 @@ themselves.
 
 ## Capabilities and Constraints
 
-- v1: sign-in, family roster stored in QuickBooks, balances and open invoices with pay links,
-  parent contact edits, seasonal commitment forms with signature tracking, admin-configured season
-  steps holding requirements (forms, payments, volunteering, checklist items), volunteer sign-up
-  with shifts, self check-in and paid buy-outs, staff permissions, and an audit log.
+- v1: sign-in, a family roster the portal keeps, linked to the club's customers in QuickBooks,
+  balances and open invoices with pay links, parent contact edits, seasonal commitment forms with
+  signature tracking, admin-configured season steps holding requirements (forms, payments,
+  volunteering, checklist items), volunteer sign-up with shifts, self check-in and paid buy-outs,
+  staff permissions, and an audit log.
 - Not v1: messaging, a general events calendar, volunteer waitlists, inventory, medical forms,
   student logins.
 - Many clubs require volunteering per family or per student; requirements must be configurable,
   never hard-coded.
 - One family must never see another family's data; public pages show no family data at all.
-- Terminology: **family** (a QuickBooks customer), **student** (a sub-customer), **guardian**
-  (a person who signs in for a family), **staff**, **season**, **form**.
+- Terminology: **family** (a household the portal keeps, linked to its customer in
+  QuickBooks), **student** (a child the portal keeps in a family, linked to their own sub-customer),
+  **guardian** (a person who signs in for a family), **staff**, **season**, **form**.
 - Theming: each club supplies its name, short name and color at runtime, without a code change or
   rebuild. A logo is to follow the same way; it isn't built yet.
 
