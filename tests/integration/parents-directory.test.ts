@@ -153,7 +153,7 @@ describe("the people directory", () => {
     const old = await seedGuardian({ parentId: ana.id, familyQboId: "20", status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "active" });
     // As a clear before stage 4's slice M7a left it: in no family.
     expect((await getPerson(ana.id))!.families).toEqual([
-      { guardianId: expect.any(String), familyQboId: "10", familyId: await recordOfCustomer("10", "family"), familyName: "Rivera Family", previousCompany: false, pageStands: true, kind: "can", words: "Can sign in (hasn't yet)", open: true, reinstatable: false },
+      { guardianId: expect.any(String), familyQboId: "10", familyId: await recordOfCustomer("10", "family"), familyName: "Rivera Family", previousCompany: false, pageStands: true, kind: "can", words: "Hasn't chosen a password yet", open: true, reinstatable: false },
       { guardianId: old.id, familyQboId: null, familyId: null, familyName: "A family in the previous QuickBooks company", previousCompany: true, pageStands: false, kind: "cannot", words: "Can't sign in: a different QuickBooks company was connected", open: false, reinstatable: false },
     ]);
   });

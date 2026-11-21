@@ -823,13 +823,14 @@ describe("the gate: a family whose sign-ins are held after a take from the books
     (await db.select().from(auditLog)).filter((x) => x.action === action && (x.after as { reason?: string } | null)?.reason === reason);
   const ageCodes = async () => { await db.update(signinCode).set({ createdAt: new Date(Date.now() - 5 * 60_000) }); await db.delete(rateLimitEvent); };
 
-  it("the code request: a person whose only family is held is sent no code, with the same answer as anyone's, and closes no row", async () => {
+  it("the password: a person whose only family is held is refused and sent no code, with the same answer as anyone's, and closes no row", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
     const g = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1", status: "invited" });
+    await seedPassword(a.authUserId, DOOR_PASSWORD);
     await hold(g.familyId);
-    const res = await post("/portal-code/send", { email: "ana@example.com" });
-    expect([res.status, await res.text()]).toEqual([200, JSON.stringify({ ok: true })]);
-    expect(await refusedFor("signin.code_refused", "no_enabled_guardian")).toHaveLength(1);
+    const res = await post("/portal-password/check", { email: "ana@example.com", password: DOOR_PASSWORD });
+    expect([res.status, await res.text()]).toEqual([200, JSON.stringify({ ok: false, error: "rejected" })]);
+    expect(await refusedFor("signin.password_refused", "no_enabled_guardian")).toHaveLength(1);
     expect(outbox).toEqual([]);
     expect((await db.select().from(guardian))[0]).toMatchObject({ id: g.id, status: "invited" });
     // Released: the same row lets her in.
@@ -841,11 +842,11 @@ describe("the gate: a family whose sign-ins are held after a take from the books
   it("the code check: a code sent before the hold is refused once it is set, and no session is made", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
     const g = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
-    await post("/portal-code/send", { email: "ana@example.com" });
-    await vi.waitFor(() => expect(outbox.length).toBe(1));
-    const code = /sign-in code: (\d{6})/.exec(outbox[0]!.subject)![1]!;
+    await seedPassword(a.authUserId, DOOR_PASSWORD);
+    const { pending } = await passwordStep("ana@example.com");
+    const code = await codeMailed(outbox, "ana@example.com", 0);
     await hold(g.familyId);
-    const checked = await post("/portal-code/verify", { email: "ana@example.com", code });
+    const checked = (await codeStep(code, pending)).res;
     expect(checked.headers.getSetCookie().some((c) => c.startsWith("br_parent.session_token"))).toBe(false);
     expect(await refusedFor("signin.refused", "no_enabled_guardian")).toHaveLength(1);
     expect(await db.select().from(parentAuthSession)).toEqual([]);
