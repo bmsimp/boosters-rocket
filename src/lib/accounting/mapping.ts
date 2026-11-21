@@ -660,7 +660,8 @@ export async function loadAccountingLinks(): Promise<LinksView> {
   const b = await readLinkBasics();
   const { state, shape, roster, customers, customerById, links, realm, linkOfFamily, customerOfStudent, customerOfGuardian, pool, studentsOf, guardiansOf, addressesOf, leftOf, suggestions } = b;
   // The queue's open items only where differences are worked out: every one of them is of the roster's company, since a
-  // change of company's clear deletes the queue and a different company is refused.
+  // change of company's clear gives up every item still to go and a different company is refused, but for a parent's
+  // change saved as the clear ran, until the worker's next wake gives it up (stage 4's slice M7a3 filters these by company).
   const [queue, parentSettings] = state === "listed" ? await Promise.all([loadOpenWrites(), getParentSettings()]) : [[], null];
   // Whether a family's guardians sign in by its active students (enterableGuardianRows()): a student's take of active may open it.
   const studentsRule = parentSettings !== null && studentsRuleApplies(parentSettings.requireActiveStudents, shape);

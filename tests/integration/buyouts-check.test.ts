@@ -8,19 +8,20 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, auditLog, buyout, familyMoney, jobRun, writeQueue, type StoredInvoice } from "@/lib/db/schema";
-import { queueVoid } from "@/lib/buyouts/writes";
+import { queueVoid, sendBuyoutWrite } from "@/lib/buyouts/writes";
 import { WORKER_ACTOR } from "@/lib/quickbooks/client";
 import { checkBuyoutInvoices } from "@/lib/buyouts/daily-check";
 import { buyoutFacts } from "@/lib/buyouts/standing";
 import { loadBuyoutsToLook } from "@/lib/buyouts/staff";
 import { MONEY_JOB } from "@/lib/money/run-keys";
 import { pairKey } from "@/lib/seasons/kinds";
-import { runWriteQueue } from "@/lib/roster/queue";
+import { GIVE_UP_BUSY, giveUp, runWriteQueue } from "@/lib/roster/queue";
+import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { afterStudentMoved } from "@/lib/roster/writes";
-import { clearRosterOfOtherCompany } from "@/lib/roster/source";
+import { clearRosterOfOtherCompany, clearRosterOfOtherCompanyLocked } from "@/lib/roster/source";
 import { resetDb, untilALockIsAwaited } from "../helpers/db";
 import { CHENOWETH, RIVERA, stubInvoice } from "../helpers/money";
 import { MONEY_REALM, seedSignedInParent } from "../helpers/parent";
@@ -400,5 +401,274 @@ describe("connecting a different company", () => {
     expect(await db.transaction((tx) => queueVoid(tx, b, "switched_back", { actor: WORKER_ACTOR, label: "a guardian", nextTryAt: later(5) }))).toBeNull();
     expect(await queueOf(b.id)).toEqual([]);
     expect(await row(b.id)).toMatchObject({ state: "voided", endReason: "earlier_company" });
+  });
+
+  // Stage 4's slice M7a2: a buy-out write on its way when the clear runs. The stub runs the clear as the request arrives,
+  // before it answers, so the finish comes after the clear has ended the buy-out and given its item up.
+  const staff = { actor: { door: "staff" as const, id: null, label: "treasurer@club.org" }, ip: null, permission: "Roster.Family.ReadWrite" };
+  /** The buy-out's queued create as the confirm leaves it, due now. */
+  const createFor = (b: typeof buyout.$inferSelect) => db.insert(writeQueue).values({ realmId: b.realmId, request: { op: "invoice_create", buyoutId: b.id, customerQboId: b.customerQboId,
+    itemQboId: b.itemQboId, units: b.units, unitCents: b.unitCents }, familyId: b.familyId, sent: false, tries: 0, nextTryAt: new Date(Date.now() - 1000) }).returning().then((r) => r[0]!);
+  /** An invoiced buy-out's void as a switch back leaves it, due now, with its invoice open in QuickBooks. */
+  const voidFor = (b: typeof buyout.$inferSelect, o: { balance?: number } = {}) => {
+    stub.invoices.push(stubInvoice(b.invoiceQboId!, FAMILY, { TotalAmt: 100, Balance: o.balance ?? 100, SyncToken: "0" }));
+    return db.insert(writeQueue).values({ realmId: b.realmId, request: { op: "invoice_void", buyoutId: b.id, invoiceQboId: b.invoiceQboId!, customerQboId: FAMILY, why: "switched_back" },
+      familyId: b.familyId, sent: false, tries: 0, nextTryAt: new Date(Date.now() - 1000) }).returning().then((r) => r[0]!);
+  };
+  /** Runs the change of company's clear as the first request of `method` reaches QuickBooks, then `then` on the stub. */
+  const clearAsItArrives = (method: "GET" | "POST", then: () => void = () => {}) => {
+    stub.onApiRequest = async (c) => {
+      if (c.method !== method) return;
+      stub.onApiRequest = null;
+      expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
+      then();
+    };
+  };
+  const item = async (id: string) => (await db.select().from(writeQueue).where(eq(writeQueue.id, id)))[0]!;
+  const ended = { state: "voided", endReason: "earlier_company" };
+  const noQueueRows = async () => {
+    for (const action of ["roster.write.done", "roster.write.retry", "roster.write.stuck", "volunteer.buyout.invoiced", "volunteer.buyout.refused", "volunteer.buyout.stuck",
+      "volunteer.buyout.voided", "volunteer.buyout.kept"]) expect(await audits(action)).toEqual([]);
+  };
+
+  it("an invoice QuickBooks makes as the clear runs: the item stays given up with the invoice, the buy-out stays ended with it recorded, and nothing is marked done", async () => {
+    const p = await buyoutFamily(stub);
+    const b = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Made at that moment" }), familyQboId: FAMILY, chosenBy: p.identity.parentId, state: "being_invoiced" });
+    const queued = await createFor(b);
+    clearAsItArrives("POST");
+    expect(await runWriteQueue()).toEqual({ ran: true, ok: true });
+    expect(stub.invoices).toHaveLength(1);
+    const made = String(stub.invoices[0]!.Id);
+    expect(await item(queued.id)).toMatchObject({ state: "given_up", note: NOTE, sent: true, resultQboId: made });
+    expect(await row(b.id)).toMatchObject({ ...ended, invoiceQboId: made, invoiceSyncToken: "0", flag: null });
+    const [found] = await audits("volunteer.buyout.invoice_found_after_ending");
+    expect(found).toMatchObject({ targetType: "buyout", targetId: b.id, door: "system" });
+    expect(found!.after).toMatchObject({ state: "voided", endReason: "earlier_company", invoiceQboId: made, customerQboId: FAMILY, amountCents: b.amountCents, realmId: MONEY_REALM, queueId: queued.id });
+    await noQueueRows();
+  });
+
+  it("a create that times out as the clear runs leaves its item given up and its buy-out ended, not stuck, and the family may choose again", async () => {
+    const p = await buyoutFamily(stub);
+    const b = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Busy at that moment" }), familyQboId: FAMILY, chosenBy: p.identity.parentId, state: "being_invoiced" });
+    const queued = await createFor(b);
+    clearAsItArrives("POST", () => { stub.failNext = 1; });
+    expect(await runWriteQueue()).toEqual({ ran: true, ok: true });
+    expect(stub.invoices).toEqual([]);
+    expect(await item(queued.id)).toMatchObject({ state: "given_up", note: NOTE, sent: true, tries: 0, nextTryAt: null });
+    expect(await row(b.id)).toMatchObject({ ...ended, invoiceQboId: null, lastCode: null });
+    await noQueueRows();
+    // Ended, it holds nothing live: the same requirement and family take a new buy-out.
+    expect(await chooseAgain(b)).toHaveLength(1);
+  });
+
+  it("a create QuickBooks refuses as the clear runs leaves its buy-out ended, not refused", async () => {
+    const p = await buyoutFamily(stub);
+    const b = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Refused at that moment" }), familyQboId: FAMILY, chosenBy: p.identity.parentId, state: "being_invoiced" });
+    const queued = await createFor(b);
+    clearAsItArrives("POST", () => { stub.invoiceFault = "6000"; });
+    await runWriteQueue();
+    expect(await item(queued.id)).toMatchObject({ state: "given_up", note: NOTE, lastCode: null, tries: 0 });
+    expect(await row(b.id)).toMatchObject({ ...ended, lastCode: null });
+    await noQueueRows();
+  });
+
+  it("a void QuickBooks makes as the clear runs leaves its buy-out ended as the earlier company's", async () => {
+    const p = await buyoutFamily(stub);
+    const b = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Voided at that moment" }), familyQboId: FAMILY, chosenBy: p.identity.parentId, state: "being_voided", invoiceQboId: "9401" });
+    const queued = await voidFor(b);
+    clearAsItArrives("POST");
+    await runWriteQueue();
+    expect(stub.invoices[0]).toMatchObject({ Id: "9401", TotalAmt: 0 });
+    expect(await item(queued.id)).toMatchObject({ state: "given_up", note: NOTE, resultQboId: null });
+    expect(await row(b.id)).toMatchObject({ ...ended, invoiceQboId: "9401" });
+    await noQueueRows();
+  });
+
+  it("a void QuickBooks refuses as the clear runs leaves its buy-out ended and unflagged", async () => {
+    const p = await buyoutFamily(stub);
+    const refused = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Void refused" }), familyQboId: FAMILY, chosenBy: p.identity.parentId, state: "being_voided", invoiceQboId: "9402" });
+    const refusedItem = await voidFor(refused);
+    clearAsItArrives("POST", () => { stub.invoiceFault = "6000"; });
+    await runWriteQueue();
+    expect(await item(refusedItem.id)).toMatchObject({ state: "given_up", note: NOTE, lastCode: null });
+    expect(await row(refused.id)).toMatchObject({ ...ended, flag: null, lastCode: null });
+    await noQueueRows();
+  });
+
+  it("a void found paid as the clear runs leaves its buy-out ended and unflagged, and sends nothing", async () => {
+    // The invoice read before the void finds something paid on it: the void is kept, and the ended buy-out stays so.
+    const q = await buyoutFamily(stub);
+    const paid = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Paid meanwhile" }), familyQboId: FAMILY, chosenBy: q.identity.parentId, state: "being_voided", invoiceQboId: "9403" });
+    const paidItem = await voidFor(paid, { balance: 40 });
+    clearAsItArrives("GET");
+    await runWriteQueue();
+    expect(stub.apiCalls().filter((c) => c.method === "POST")).toEqual([]);
+    expect(await item(paidItem.id)).toMatchObject({ state: "given_up", note: NOTE, lastCode: null });
+    expect(await row(paid.id)).toMatchObject({ ...ended, flag: null, lastCode: null });
+    await noQueueRows();
+  });
+
+  it("an item the clear gave up before its send sends nothing", async () => {
+    const p = await buyoutFamily(stub);
+    const creating = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Not yet sent" }), familyQboId: FAMILY, chosenBy: p.identity.parentId, state: "being_invoiced" });
+    const voiding = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Void not yet sent" }), familyQboId: FAMILY, chosenBy: p.identity.parentId, state: "being_voided", invoiceQboId: "9404" });
+    // Each as the worker's claim returned it, still waiting, before the clear.
+    const create = await createFor(creating), voidIt = await voidFor(voiding);
+    expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
+    stub.calls.length = 0;
+    expect(await sendBuyoutWrite(create, new Date(), { mayWait: true })).toBe("stuck");
+    expect(stub.apiCalls()).toEqual([]);
+    expect(await item(create.id)).toMatchObject({ state: "given_up", sent: false });
+    // The void reads the invoice first, as every void does, and then sends nothing.
+    expect(await sendBuyoutWrite(voidIt, new Date(), { mayWait: true })).toBe("stuck");
+    expect(stub.apiCalls().filter((c) => c.method === "POST")).toEqual([]);
+    expect(stub.invoices[0]).toMatchObject({ Id: "9404", TotalAmt: 100 });
+    expect(await row(creating.id)).toMatchObject(ended);
+    expect(await row(voiding.id)).toMatchObject(ended);
+    await noQueueRows();
+  });
+
+  it("waits for a buy-out write's finish holding the roster lock shared before it clears anything", async () => {
+    await buyoutFamily(stub);
+    let release!: () => void, holding!: () => void;
+    const released = new Promise<void>((r) => { release = r; }), held = new Promise<void>((r) => { holding = r; });
+    const finishing = db.transaction(async (tx) => { await tx.execute(sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`); holding(); await released; });
+    await held;
+    let cleared = false;
+    const clearing = clearRosterOfOtherCompany("2222", admin).then((r) => { cleared = true; return r; });
+    await untilALockIsAwaited();
+    expect(cleared).toBe(false);
+    release();
+    await finishing;
+    expect(await clearing).toBe(true);
+  });
+
+  it("'Give up' waits while a change of company holds the roster lock, then finds the item given up and leaves the buy-out ended", async () => {
+    const p = await buyoutFamily(stub);
+    const b = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Given up at that moment" }), familyQboId: FAMILY, chosenBy: p.identity.parentId, state: "being_invoiced" });
+    const queued = await createFor(b);
+    let goOn!: () => void, holding!: () => void;
+    const proceed = new Promise<void>((r) => { goOn = r; }), held = new Promise<void>((r) => { holding = r; });
+    // The change of company holds the roster lock alone and has cleared nothing yet when "Give up" starts: only the
+    // roster lock can hold "Give up" back (without it, the item would be given up and the buy-out made stuck first).
+    const clearing = db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
+      holding(); await proceed;
+      return clearRosterOfOtherCompanyLocked(tx, "2222", admin);
+    });
+    await held;
+    const giving = giveUp(queued.id, "Sorting it out by hand.", staff);
+    await untilALockIsAwaited();
+    expect(await item(queued.id)).toMatchObject({ state: "waiting" });
+    expect(await row(b.id)).toMatchObject({ state: "being_invoiced", flag: null });
+    goOn();
+    expect(await clearing).toBe(true);
+    expect(await giving).toEqual({ ok: false, errors: [expect.stringContaining("no longer waiting")] });
+    expect(await item(queued.id)).toMatchObject({ state: "given_up", note: NOTE });
+    expect(await row(b.id)).toMatchObject({ ...ended, flag: null });
+    expect(await audits("roster.write.given_up")).toEqual([]);
+  });
+
+  it("'Give up' past its wait for the roster lock says to try again and changes nothing", { timeout: 40_000 }, async () => {
+    const p = await buyoutFamily(stub);
+    const b = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Busy roster" }), familyQboId: FAMILY, chosenBy: p.identity.parentId, state: "stuck" });
+    const queued = await createFor(b);
+    await db.update(writeQueue).set({ state: "stuck", nextTryAt: null }).where(eq(writeQueue.id, queued.id));
+    let release!: () => void, holding!: () => void;
+    const released = new Promise<void>((r) => { release = r; }), held = new Promise<void>((r) => { holding = r; });
+    // A roster read holding the lock longer than "Give up" waits.
+    const reading = db.transaction(async (tx) => { await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`); holding(); await released; });
+    await held;
+    expect(await giveUp(queued.id, "Sorting it out by hand.", staff)).toEqual({ ok: false, errors: [GIVE_UP_BUSY] });
+    release();
+    await reading;
+    expect(await item(queued.id)).toMatchObject({ state: "stuck", note: null });
+    expect(await row(b.id)).toMatchObject({ state: "stuck", flag: null });
+    expect(await audits("roster.write.given_up")).toEqual([]);
+  });
+
+  /**
+   * The roster lock held exclusively, as a roster read or a change of company holds it, until `release(clear)`: with
+   * `clear`, the change of company's clear runs in that transaction first, as a refresh's savepoint would run it.
+   */
+  const holdRosterLock = async () => {
+    let decide!: (clear: boolean) => void, holding!: () => void;
+    const letGo = new Promise<boolean>((r) => { decide = r; }), held = new Promise<void>((r) => { holding = r; });
+    const done = db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
+      holding();
+      if (await letGo) expect(await clearRosterOfOtherCompanyLocked(tx, "2222", admin)).toBe(true);
+    });
+    await held;
+    return async (clear: boolean) => { decide(clear); await done; };
+  };
+  /** Postgres' code for an error, through Drizzle's wrapping. */
+  const pgCode = (e: unknown): unknown => (typeof e === "object" && e !== null ? (e as { code?: unknown }).code ?? pgCode((e as { cause?: unknown }).cause) : undefined);
+
+  it("a create's finish waits for the roster lock a change of company holds, with the invoice already kept on the item, and then leaves the clear's endings alone", async () => {
+    const p = await buyoutFamily(stub);
+    const b = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Finish waits" }), familyQboId: FAMILY, chosenBy: p.identity.parentId, state: "being_invoiced" });
+    const queued = await createFor(b);
+    const release = await holdRosterLock();
+    const wake = runWriteQueue();
+    // QuickBooks has answered, and the finish waits for the lock: nothing of it is done but the invoice kept on the item.
+    await untilALockIsAwaited();
+    expect(stub.invoices).toHaveLength(1);
+    const made = String(stub.invoices[0]!.Id);
+    expect(await item(queued.id)).toMatchObject({ state: "waiting", sent: true, resultQboId: made });
+    expect(await row(b.id)).toMatchObject({ state: "being_invoiced", invoiceQboId: null });
+    await release(true);
+    expect(await wake).toEqual({ ran: true, ok: true });
+    expect(await item(queued.id)).toMatchObject({ state: "given_up", note: NOTE, resultQboId: made });
+    expect(await row(b.id)).toMatchObject({ ...ended, invoiceQboId: made });
+    expect(await audits("volunteer.buyout.invoice_found_after_ending")).toHaveLength(1);
+    await noQueueRows();
+  });
+
+  it("the worker's create finish waits again past its first wait for the roster lock, and finishes once the lock is free", { timeout: 40_000 }, async () => {
+    const p = await buyoutFamily(stub);
+    const b = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Long read" }), familyQboId: FAMILY, chosenBy: p.identity.parentId, state: "being_invoiced" });
+    const queued = await createFor(b);
+    const release = await holdRosterLock();
+    const wake = runWriteQueue();
+    await untilALockIsAwaited();
+    // Past the first wait (10 seconds), a roster read still holding the lock.
+    await new Promise((r) => setTimeout(r, 11_000));
+    expect(await item(queued.id)).toMatchObject({ state: "waiting", resultQboId: String(stub.invoices[0]!.Id) });
+    await release(false);
+    expect(await wake).toEqual({ ran: true, ok: true });
+    expect(await item(queued.id)).toMatchObject({ state: "done", resultQboId: String(stub.invoices[0]!.Id) });
+    expect(await row(b.id)).toMatchObject({ state: "invoiced", invoiceQboId: String(stub.invoices[0]!.Id) });
+    expect(stub.apiCalls().filter((c) => c.method === "POST")).toHaveLength(1);
+  });
+
+  it("a guardian's try made at once past its wait for the roster lock leaves the invoice on its item; the worker finishes it without sending again, and a clear keeps it named", { timeout: 60_000 }, async () => {
+    const p = await buyoutFamily(stub);
+    const b = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "At once, busy" }), familyQboId: FAMILY, chosenBy: p.identity.parentId, state: "being_invoiced" });
+    const c = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "At once, cleared" }), familyQboId: FAMILY, chosenBy: p.identity.parentId, state: "being_invoiced" });
+    const first = await createFor(b);
+    let release = await holdRosterLock();
+    // The try made at once (mayWait false) fails past its wait (lock_not_available), which the guardian reads as on its way.
+    expect(pgCode(await sendBuyoutWrite(first, new Date(), { mayWait: false }).catch((e: unknown) => e))).toBe("55P03");
+    const made = String(stub.invoices[0]!.Id);
+    expect(await item(first.id)).toMatchObject({ state: "waiting", sent: true, resultQboId: made });
+    expect(await row(b.id)).toMatchObject({ state: "being_invoiced", invoiceQboId: null });
+    await release(false);
+    // The worker looks for the invoice by the buy-out's id, finds it, and sends nothing again.
+    expect(await runWriteQueue()).toEqual({ ran: true, ok: true });
+    expect(stub.apiCalls().filter((x) => x.method === "POST")).toHaveLength(1);
+    expect(await item(first.id)).toMatchObject({ state: "done", resultQboId: made });
+    expect(await row(b.id)).toMatchObject({ state: "invoiced", invoiceQboId: made });
+    // The same, with a change of company's clear after the read: the item, given up, still names the invoice.
+    const second = await createFor(c);
+    release = await holdRosterLock();
+    expect(pgCode(await sendBuyoutWrite(second, new Date(), { mayWait: false }).catch((e: unknown) => e))).toBe("55P03");
+    const madeToo = String(stub.invoices[1]!.Id);
+    await release(true);
+    expect(await item(second.id)).toMatchObject({ state: "given_up", note: NOTE, sent: true, resultQboId: madeToo });
+    expect(await row(c.id)).toMatchObject(ended);
+    stub.calls.length = 0;
+    await runWriteQueue();
+    expect(stub.apiCalls().filter((x) => x.method === "POST")).toEqual([]);
   });
 });

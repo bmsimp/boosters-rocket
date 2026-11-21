@@ -57,15 +57,16 @@ export const GIVEN_UP_FOR_COMPANY_NOTE = "Given up: the club connected a differe
  * after it would be left waiting. The queue is given up in one statement; the links end next, then QuickBooks' copies,
  * and the roster's company last, with the audit row.
  *
- * Still open, stage 4's slice M7a2's (writes and queue code this slice leaves alone), both before slice M8 turns this
- * on. A roster write the worker is trying at that moment stays given up (every finish in ./queue.ts and ./writes.ts
- * is guarded by its state), but a buy-out write's finish (src/lib/buyouts/writes.ts) is not: itemDone() would mark the
- * given-up item done, and tryFailed() set it waiting or stuck again and its ended buy-out stuck. And the lock order:
- * this takes the buy-outs' row locks before the queue's, while giveUpIn() (staff "Give up") and the buy-out write's
- * tryFailed(), createRefused() and voidKept() take an item's before its buy-out's, holding no roster lock, so one of
- * them at that moment can deadlock with this (40P01, which rolls the change of company back). No order here suits
- * both: created() and voided() lock the buy-out first. Those paths are to hold the roster lock shared, as
- * closeBuyout() (src/lib/buyouts/close.ts) does.
+ * What runs beside it (stage 4's slice M7a2). A roster write the worker is trying at that moment stays given up (every
+ * finish in ./queue.ts and ./writes.ts is guarded by its state), and so does a buy-out write: its finish
+ * (src/lib/buyouts/writes.ts) and staff "Give up" (giveUp(), ./queue.ts) take the roster lock shared, then the item,
+ * then the buy-out, as closeBuyout() (src/lib/buyouts/close.ts) does, so none of them runs beside this, which holds
+ * the roster lock alone; after it, a finish changes an item only while it waits, and the buy-out only by its state
+ * guards, so the endings here stand (an invoice made at that moment is recorded on the ended buy-out). A staff insert
+ * into the queue after it goes in given up (holdForTheQueue(), enqueue(), ./writes.ts: each takes the roster lock and
+ * finds the roster another company's), and the worker gives up any parent's item inserted after it, which takes no
+ * roster lock (runWriteQueue(), ./queue.ts). Readers of open items that don't filter by company are stage 4's slice
+ * M7a3's.
  *
  * Nothing the portal runs reaches it until stage 4's slice M8 turns a change of company back on: a different company
  * is refused wherever one is connected or read (completeConnect() in src/lib/quickbooks/connection.ts, refreshRoster()
