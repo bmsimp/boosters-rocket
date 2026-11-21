@@ -12,15 +12,16 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, buyout, familyMoney, writeQueue, type BuyoutWrite } from "@/lib/db/schema";
+import { auditLog, buyout, family, familyMoney, writeQueue, type BuyoutWrite } from "@/lib/db/schema";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { AccessDenied } from "@/lib/guards";
-import { CLOSE_WORDS } from "@/lib/buyouts/closing";
+import { CLOSE_WORDS, EARLIER_WORDS } from "@/lib/buyouts/closing";
 import { CLOSE_COPY } from "@/lib/buyouts/close";
 import { closeTag, loadBuyoutsToLook } from "@/lib/buyouts/staff";
 import { loadMyBuyouts } from "@/lib/buyouts/my-buyouts";
 import { BUYOUT_COPY } from "@/lib/buyouts/writes";
 import { currentRosterTag, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
+import { clearRosterOfOtherCompany } from "@/lib/roster/source";
 import { closeBuyoutAction } from "@/app/staff/(app)/reconciliation/buyout-actions";
 import { confirmBuyoutAction } from "@/app/(parent)/volunteer/pay-instead/actions";
 import ReconciliationPage from "@/app/staff/(app)/reconciliation/page";
@@ -307,5 +308,88 @@ describe("a family's buy-outs page (Roster.Read)", () => {
     const entry = await renderPage(RosterEntryPage, { params: { id: await pageId() } });
     expect(entry).toContain(`href="/staff/roster/${await pageId()}/buyouts"`);
     expect(b.id && p).toBeTruthy();
+  });
+});
+
+// Stage 4's slice M7b: what a change of company left in the earlier company's books, on Reconciliation and the family's
+// buy-outs page. The clear is unreachable until slice M8 (open question 18): the tests run it directly.
+describe("an earlier QuickBooks company's buy-outs, for the treasurer", () => {
+  const admin = { actor: { door: "staff" as const, id: null, label: "admin@club.org" }, ip: null };
+  /** Text as React writes it into HTML. */
+  const esc = (t: string) => t.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("\"", "&quot;").replaceAll("'", "&#x27;");
+  /** The treasurer's section of Reconciliation alone, from its heading to its end; null when it isn't drawn. */
+  const sectionOf = (html: string) => {
+    const at = html.indexOf("id=\"earlier-buyouts-h\"");
+    return at < 0 ? null : html.slice(at, html.indexOf("</section>", at));
+  };
+  const TITLE = "Gate \"crew\" <i>shifts</i> & more";
+
+  it("is a section of Reconciliation drawn only with a row: amounts only for staff who may see money, the close only for staff who may change the roster, every name as text", async () => {
+    const { p, b } = await withBuyout({ state: "invoiced", invoiceQboId: "5001" });
+    const refund = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: TITLE }), familyQboId: FAMILY, chosenBy: p.identity.parentId, state: "paid", invoiceQboId: "5002",
+      flag: "paid_before_void", unitCents: 3719 });
+    const familyId = await pageId();
+    asStaff(await writer());
+    expect(sectionOf(await renderPage(ReconciliationPage))).toBeNull();
+
+    expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
+    // The app's own family name, as staff may have typed it, is text too.
+    await db.update(family).set({ name: "Rivera & <b>Sons</b>" }).where(eq(family.id, p.identity.familyId));
+    asStaff(await staffWith("reader@club.org", ["Roster.Read"]));
+    const html = await renderPage(ReconciliationPage);
+    const section = sectionOf(html)!;
+    expect(section).toContain("From the earlier QuickBooks company (2)");
+    expect(section).toContain(esc(EARLIER_WORDS.invoice_stands));
+    expect(section).toContain(esc(EARLIER_WORDS.refund_owed));
+    expect(section).toContain(CLOSE_WORDS.paid_in_full);
+    expect(section).toContain("Staff who may change the roster can close it.");
+    expect(section).toContain("Rivera &amp; &lt;b&gt;Sons&lt;/b&gt;");
+    expect(html).not.toContain("<b>Sons</b>");
+    expect(section).toContain(esc(TITLE));
+    expect(html).not.toContain("<i>shifts</i>");
+    expect(section).toContain("Invoice 5001");
+    expect(section).toContain("Invoice 5002");
+    expect(section).toContain(`Company ${MONEY_REALM}`);
+    // The family's roster page doesn't open until the new company's shape is set: its name is text, its buy-outs page linked.
+    expect(section).not.toContain(`href="/staff/roster/${familyId}"`);
+    expect(section).toContain(`href="/staff/roster/${familyId}/buyouts"`);
+    // The invoice that stands links to the family's season page, where a waiver is given; the refund owed offers the close instead.
+    expect(section.match(/href="\/staff\/seasons\/progress\/family\/[^"?]+\?season=[^"]+"/g)).toHaveLength(1);
+    expect(section).not.toContain("Close this buy-out");
+    expect(section).not.toContain(">Amount<");
+    expect(section).not.toContain("$100.00");
+    expect(section).not.toContain("$74.38");
+    // Reconciliation's own buy-outs list is the roster's company's: neither is there, though the refund's flag is kept.
+    expect(html).toContain("Nothing: every buy-out invoice is where QuickBooks says it should be, as last checked.");
+
+    asStaff(await staffWith("books@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Finance.Balance.Read"]));
+    const full = sectionOf(await renderPage(ReconciliationPage))!;
+    expect(full).toContain(">Amount<");
+    expect(full).toContain("$100.00");
+    expect(full).toContain("$74.38");
+    expect(full.match(/Close this buy-out/g)).toHaveLength(1);
+    expect(b.id && refund.id).toBeTruthy();
+  });
+
+  it("reads each on the family's buy-outs page, the family with no link left: its invoice in the earlier company's books and what is left to settle there", async () => {
+    const { p, b } = await withBuyout({ state: "invoiced", invoiceQboId: "5001" });
+    await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Paid gate shifts" }), familyQboId: FAMILY, chosenBy: p.identity.parentId, state: "paid", invoiceQboId: "5002" });
+    const id = await pageId();
+    expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
+    asStaff(await writer());
+    const html = await renderPage(FamilyBuyoutsPage, { params: { id } });
+    // Named by its own record, though the clear left it no link and the cache none of the old customers.
+    expect(html).not.toContain("A family no longer on the roster");
+    expect(html).toContain(`${esc(RIVERA.family.name)}: each time it chose`);
+    expect(html).toContain("Ended when the club connected a different QuickBooks company: nothing more was sent to the earlier one");
+    expect(html).toContain(esc("In the earlier QuickBooks company's books: invoice 5001"));
+    expect(html).toContain(esc("In the earlier QuickBooks company's books: invoice 5002"));
+    expect(html).toContain(esc(EARLIER_WORDS.invoice_stands));
+    // A kept paid one reads Paid instead by its state, with nothing to settle.
+    expect(html).toContain("Paid instead");
+    expect(html).toContain("Paid instead: nothing to look at.");
+    expect(html).not.toContain("Close this buy-out");
+    expect(html).not.toContain("Not in the family&#x27;s figures as last read");
+    expect(b.id).toBeTruthy();
   });
 });

@@ -37,7 +37,11 @@ export const isLive = (state: BuyoutState): boolean => LIVE_STATES.includes(stat
 /** What is known of a live buy-out for a requirement: its state, and whether its invoice's balance is 0 in the stored figures. */
 export type BuyoutFact = { state: BuyoutState; invoicePaid: boolean };
 
-/** How a requirement reads while a buy-out stands, in the words a parent and staff read alike. */
+/**
+ * How a requirement reads while a buy-out stands, in the words a parent and staff read alike: live states only. One
+ * that has ended (voided, a change of company's `earlier_company` too) or was refused is not live, so the requirement
+ * reads by credit again; staff read how it ended in stateWords() (./staff.ts), and a parent the pay-instead page's line.
+ */
 export const BUYOUT_WORDS = {
   being_invoiced: "Buy-out being set up",
   invoiced: "Buy-out invoiced",
