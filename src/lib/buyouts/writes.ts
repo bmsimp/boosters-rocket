@@ -139,11 +139,12 @@ export async function markBuyoutMoneyStale(tx: Tx, b: Pick<Row, "familyId" | "st
  * finish, its buy-out (and the family's figures after it). A change of company holds the roster lock alone, so no finish
  * runs beside its clear; "Give up" (src/lib/roster/queue.ts) and a staff close (./close.ts) take the same lock, and the
  * item before the buy-out, so none of them crosses another. A lock not had in time fails the finish (Postgres'
- * lock_not_available), as any failed finish does. Whether the item is still waiting: one given up meanwhile, by staff
- * or by a change of company's clear, stays given up, whatever QuickBooks answered.
+ * lock_not_available), as any failed finish does (a create's worker finish waits again, longer: created()). Whether
+ * the item is still waiting: one given up meanwhile, by staff or by a change of company's clear, stays given up,
+ * whatever QuickBooks answered.
  */
-async function lockForFinish(tx: Tx, item: Item): Promise<boolean> {
-  await tx.execute(sql`set local lock_timeout = '10s'`);
+async function lockForFinish(tx: Tx, item: Item, wait: "10s" | "4min" = "10s"): Promise<boolean> {
+  await tx.execute(wait === "10s" ? sql`set local lock_timeout = '10s'` : sql`set local lock_timeout = '4min'`);
   await tx.execute(sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`);
   await tx.execute(sql`set local lock_timeout to default`);
   const [now] = await tx.select({ state: writeQueue.state }).from(writeQueue).where(eq(writeQueue.id, item.id)).for("update");
@@ -221,11 +222,30 @@ async function invoiceFoundAfterEnding(tx: Tx, item: Item, b: Row, inv: Invoice,
  * in the finish's lock order (lockForFinish()). An item given up meanwhile stays given up and keeps the invoice; its
  * buy-out, given up by staff (`stuck`), is invoiced all the same, and one a change of company ended stays ended, with
  * the invoice recorded on it (invoiceFoundAfterEnding()).
+ *
+ * The invoice is kept on the item first (`result_qbo_id`, where it has none), in a statement of its own that touches the
+ * item alone, so it crosses no lock order and waits for nothing but that row: the finish then waits for the roster lock,
+ * and a roster read can hold it past that wait, with a change of company's clear after it that gives the item up and
+ * ends the buy-out, so no later try would look for the invoice. The worker's finish (`mayWait`) waits again, up to 4
+ * minutes, inside its claim's 5-minute lease; it holds no row while it waits, and the clear waits on no finish, so this
+ * can't deadlock. The guardian's try made at once never waits that long (tryAtOnce()): the worker finishes it, or, once
+ * a clear has given it up, its item still names the invoice.
  */
-async function created(item: Item, w: Extract<BuyoutWrite, { op: "invoice_create" }>, b: Row, inv: Invoice, how: "sent" | "found", actor: Actor): Promise<BuyoutStep> {
+async function created(item: Item, w: Extract<BuyoutWrite, { op: "invoice_create" }>, b: Row, inv: Invoice, how: "sent" | "found", actor: Actor, mayWait: boolean): Promise<BuyoutStep> {
+  await db.update(writeQueue).set({ resultQboId: inv.qboId, updatedAt: new Date() })
+    .where(and(eq(writeQueue.id, item.id), inArray(writeQueue.state, ["waiting", "given_up"]), isNull(writeQueue.resultQboId)));
+  try {
+    return await finishCreated(item, w, b, inv, how, actor, "10s");
+  } catch (e) {
+    if (!mayWait || codeOf(e) !== "55P03") throw e;
+    return finishCreated(item, w, b, inv, how, actor, "4min");
+  }
+}
+/** created()'s transaction, its roster lock waited for at most `wait`. */
+async function finishCreated(item: Item, w: Extract<BuyoutWrite, { op: "invoice_create" }>, b: Row, inv: Invoice, how: "sent" | "found", actor: Actor, wait: "10s" | "4min"): Promise<BuyoutStep> {
   let step: BuyoutStep = "done";
   await db.transaction(async (tx) => {
-    const live = await lockForFinish(tx, item);
+    const live = await lockForFinish(tx, item, wait);
     if (live) await itemDone(tx, item, how, inv.qboId, actor);
     else await keepInvoiceOnItem(tx, item, inv.qboId);
     const elsewhere = inv.customerQboId !== w.customerQboId;
@@ -328,7 +348,7 @@ export async function sendBuyoutWrite(item: Item, now: Date, o: { mayWait: boole
         if (!(e instanceof QboError)) throw e;
         return tryFailed(item, b, `check_${e.code}`, true, now, actor);
       }
-      if (found) return created(item, w, b, found, "found", actor);
+      if (found) return created(item, w, b, found, "found", actor, o.mayWait);
     }
     // Marked as maybe sent before it goes: a try cut off mid-send (a restart) leaves the item `sent`, so whoever takes
     // it next looks for the invoice by the buy-out's id before sending again. A failure that surely sent nothing puts it back.
@@ -349,7 +369,7 @@ export async function sendBuyoutWrite(item: Item, now: Date, o: { mayWait: boole
     const inv = invoiceOf(answer);
     // An answer the portal can't read may still be an invoice made: it is looked for before anything is sent again.
     if (!inv) return tryFailed(item, b, "bad_answer", true, now, actor);
-    return created(item, w, b, inv, "sent", actor);
+    return created(item, w, b, inv, "sent", actor, o.mayWait);
   }
   let invoices: Invoice[];
   try { invoices = await invoicesOf(w.customerQboId, item.realmId, o.mayWait); } catch (e) {
@@ -415,8 +435,8 @@ const codeOf = (e: unknown): unknown => (typeof e === "object" && e !== null ? (
 /**
  * The try made at once for the guardian. Its finish takes the roster lock shared, and a roster read can hold it past the
  * finish's wait: the try then fails, and its item is left to the worker as it stood (a create already marked as maybe
- * sent, so the worker looks for the invoice by the buy-out's id before sending anything again), which the guardian is
- * told as a write still on its way.
+ * sent, so the worker looks for the invoice by the buy-out's id before sending anything again, and an invoice
+ * QuickBooks made kept on the item: created()), which the guardian is told as a write still on its way.
  */
 const tryAtOnce = (item: Item, actor: Actor): Promise<BuyoutStep> => sendBuyoutWrite(item, new Date(), { mayWait: false, actor })
   .catch((e: unknown): BuyoutStep => { if (codeOf(e) === "55P03") return "waiting"; throw e; });
