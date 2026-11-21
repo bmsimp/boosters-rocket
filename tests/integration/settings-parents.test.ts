@@ -557,6 +557,28 @@ describe("the Parent sign-ins settings", () => {
       expect(html.indexOf("ps-status-h")).toBeLessThan(html.indexOf("ps-old-passkeys-h"));
     });
 
+    it("sits before Passwords not chosen yet when both are drawn", async () => {
+      const ana = await ready();
+      await seedParentSettings({ signin: true, welcome: true });
+      await db.update(parent).set({ welcomedAt: new Date("2026-01-01T00:00:00Z"), welcomeOwed: false }).where(eq(parent.id, ana.id));
+      await seedPasskey(ana.id, { origin: OLD_ORIGIN });
+      const { html } = await drawn();
+      expect(html.indexOf("ps-old-passkeys-h")).toBeGreaterThan(html.indexOf("ps-status-h"));
+      expect(html.indexOf(`<h2 id="ps-setup-h">`)).toBeGreaterThan(html.indexOf("ps-old-passkeys-h"));
+    });
+
+    it("counts a blocked holder left with nothing among nobody, and says only what the press does to them", async () => {
+      await ready();
+      // Cal, blocked, holds one passkey from the old address and nothing else: the press takes it and keeps the rest of
+      // his (his codes; a block already ended his sessions), so nobody is left to warn about.
+      const cal = await person("Cal");
+      await seedPasskey(cal.id, { origin: OLD_ORIGIN });
+      await db.update(parent).set({ blocked: true }).where(eq(parent.id, cal.id));
+      const { section } = await drawn();
+      expect(section).toContain(OLD.lede(ORIGIN, 1, 1));
+      expect(section).toContain("Everyone with one of these passkeys who isn't blocked has an authenticator app or another passkey, so nobody is signed out and no backup codes go.");
+    });
+
     it("is drawn only for a holder of the reset's permission, and its action refuses anyone else", async () => {
       const ana = await ready();
       await seedPasskey(ana.id, { origin: OLD_ORIGIN });
@@ -589,7 +611,7 @@ describe("the Parent sign-ins settings", () => {
       await seedPasskey(ben.id, { origin: OLD_ORIGIN }); await seedAuthenticator(ben.id);
       await expectAt(1, 1, 0, `<dt>${OLD_ORIGIN}</dt><dd>1 passkey</dd>`);
       expect(OLD.lede(ORIGIN, 1, 1)).toBe(`A passkey works only at the address it was made at. The portal's address is now ${ORIGIN}. 1 passkey of 1 person was made at another address, so it no longer works, but the portal still asks that person for it.`);
-      expect(OLD.warning(false, 0)).toBe("Everyone with one of these passkeys has an authenticator app or another passkey, so nobody is signed out and no backup codes go.");
+      expect(OLD.warning(false, 0)).toBe("Everyone with one of these passkeys who isn't blocked has an authenticator app or another passkey, so nobody is signed out and no backup codes go.");
       expect(OLD.warning(true, 0)).toBe(OLD.warning(false, 0));
       expect(OLD.button(1)).toBe("Remove 1 passkey made at an earlier address");
       // Cal: one the portal never recorded, and nothing else.

@@ -19,10 +19,13 @@ export const OLD_PASSKEYS_COPY = {
   unrecorded: "An address the portal didn't record",
   /** The list's count beside each earlier origin. */
   count: (passkeys: number) => passkeysWord(passkeys),
-  /** The warning before the press, by the club's level and how many would be left with no passkey and no app. */
+  /**
+   * The warning before the press, by the club's level and how many would be left with no passkey and no app (a blocked
+   * person not among them: the press keeps their codes and they have no session, so the sentence for none names them).
+   */
   warning: (strict: boolean, leftWithNoFactor: number) =>
     leftWithNoFactor === 0
-      ? "Everyone with one of these passkeys has an authenticator app or another passkey, so nobody is signed out and no backup codes go."
+      ? "Everyone with one of these passkeys who isn't blocked has an authenticator app or another passkey, so nobody is signed out and no backup codes go."
       : strict
         ? `${peopleHave(leftWithNoFactor)} no authenticator app and no other passkey: their backup codes go too, they are signed out, and after their password they add a passkey or an authenticator app before they see their family's page.`
         : `Removing them signs nobody out. ${peopleHave(leftWithNoFactor)} no authenticator app and no other passkey: their backup codes go too, and on a phone or computer the portal doesn't know yet they'll get an emailed code until they add a passkey again.`,
