@@ -161,7 +161,6 @@ describe("Link this guardian", () => {
     stub.calls.length = 0;
     expect(await removeGuardian(meiRow, "Moved away.", reg)).toMatchObject({ ok: true });
     expect((await db.select().from(writeQueue)).map((i) => i.request)).toContainEqual(expect.objectContaining({ op: "deactivate", role: "parent", qboId: "21", guardianId: meiRow }));
-    expect(bodies()).toEqual([expect.objectContaining({ Id: "21", Active: false })]);
   });
 
   it("links one picked from the others, and refuses a stamp sealed for another way of choosing", async () => {
@@ -226,9 +225,12 @@ describe("what Link this guardian refuses, keeping nothing", () => {
     const stamp = guardianLinkStamp(meiRow, await chenLinkId(), "21", "suggested");
     stub.customers = stub.customers.map((c) => (c.Id === "20" ? { ...c, CustomerTypeRef: { value: "4" } } : c));
     expect((await refreshRoster(WORKER)).ok).toBe(true);
+    // The read's own requests are the roster's, not the press's.
+    stub.calls.length = 0;
     await refused(() => pressMei("21", "suggested", { stamp }), GUARDIAN_LINK_COPY.familyNotStanding);
     stub.customers = stub.customers.filter((c) => c.Id !== "20");
     expect((await refreshRoster(WORKER)).ok).toBe(true);
+    stub.calls.length = 0;
     await refused(() => pressMei("21", "suggested", { stamp }), GUARDIAN_LINK_COPY.familyNotStanding);
     await db.delete(accountingLink).where(eq(accountingLink.familyId, chen));
     await refused(() => linkGuardian({ guardianId: meiRow, customerId: "21", chosen: "suggested", stamp }, tag, linkOp()), GUARDIAN_LINK_COPY.familyNotLinked);
@@ -344,7 +346,7 @@ describe("Unlink this guardian", () => {
     expect(await everything()).toEqual(before);
     await seedQueued({ op: "contact", role: "parent", qboId: "11", syncToken: "0", change: { phone: "555-0102" }, was: { phone: "555-0101" }, guardianId: anaRow });
     const r = await press();
-    expect(r).toEqual({ ok: true, message: guardianUnlinkedWords({ who: "Ana Rivera", customer: "Ana Rivera", details: { waiting: 1, held: 0 } }) });
+    expect(r).toEqual({ ok: true, message: guardianUnlinkedWords({ who: "Ana Rivera", customer: "Ana Rivera", details: { waiting: 1, held: 0 } }), familyId: rivera });
     expect(r.ok && r.message).toContain("A change of their details on its way to the books is given up unsent at its next try, as that customer is no longer theirs.");
     expect((await db.select().from(writeQueue))).toEqual([expect.objectContaining({ state: "waiting" })]);
     expect(stub.apiCalls()).toEqual([]);

@@ -698,8 +698,9 @@ describe("differences, for a link that stands (slice M2)", () => {
     const cell = rowNamed(list(await renderPage(AccountingLinksPage)), "Rivera Family")![4]!;
     expect(cell).toContain("Parent customers in the books only. In the portal: No guardian linked to them. In the books: 1 active Parent customer under this family.");
     expect(cell).toContain("Guardians in the portal only. In the portal: 2 guardians with no Parent customer of their own. In the books: No Parent customer linked to them. For 1 of them: Waiting to reach QuickBooks. See the change on Reconciliation");
-    // Nothing per guardian: no name of theirs beyond the opening's list of guardians.
-    expect(cell.split("Sol Rivera").length - 1).toBe(1);
+    // Nothing per guardian among the differences: no name of theirs there (the opening's list of guardians names each,
+    // with Link this guardian's choice since slice M3c).
+    expect(cell.slice(cell.indexOf("Where the portal and the books differ:")).includes("Sol Rivera")).toBe(false);
   });
 
   it("a family with several differences at once lists each, and its status line says how many of what kinds", async () => {
@@ -792,8 +793,9 @@ describe("differences, for a link that stands (slice M2)", () => {
     expect(rowNamed(html, "Chen Family")![4]).toContain("Where Leo Rivera is. In the portal: In this family. In the books: Under Rivera Family in QuickBooks. Waiting to reach QuickBooks. See the change on Reconciliation");
     expect(html.split('href="/staff/reconciliation#writes-h"').length - 1).toBe(3);
     // No button but the filter's own, since slice M3a2 each carried-over row's Confirm this link, and since slice M3b each
-    // linked row's Unlink from the books; nothing of money but each unlink's own words of what the guardians then read.
-    expect(html.split("<button").length - 1).toBe(5);
+    // linked row's Unlink from the books, and since slice M3c Ana Rivera's Unlink this guardian; nothing of money but each
+    // unlink's own words of what the guardians then read.
+    expect(html.split("<button").length - 1).toBe(6);
     expect(html.split("Confirm this link<span").length - 1).toBe(2);
     expect(html.split("Unlink from the books<span").length - 1).toBe(2);
     expect(html.split("invoices").length - 1).toBe(2);
@@ -978,7 +980,7 @@ describe("guardians' own links in a row's opening (slice M3c)", () => {
       + "A Parent customer under this family in the books that no guardian is linked to is named like Mei C. or holds their sign-in address, and is filled in. Any of them can be chosen instead."
       + "Which Parent customer is Mei C.'sMay Chenmei@example.comLink Mei C. to this Parent customer: Chen Family"
       + "Linking sends nothing to the books and changes nothing of their access in the portal. From then on, a rename of them, their removal from this family and a change of their phone, mailing address or sign-in email go to that Parent customer, by the portal's own rules, while it is theirs alone under this family. The details the portal holds for them now aren't sent by it.");
-    expect(html).toMatch(/<input type="radio" name="guardian-[0-9a-f-]{36}" value="22" checked=""/);
+    expect(html).toMatch(/<input type="radio" name="guardian-[0-9a-f-]{36}" checked="" value="22"/);
     expect(chenOpening).toContain("Kai Chen (kai@example.com): linked to Ana Rivera, which a guardian of Rivera Family is linked to as well, so it is nobody's own and nothing is sent for them: unlink all but one guardian from it to make it that guardian's own"
       + "Needs attention Unlinking ends only Kai Chen's own link:");
     expect(chenOpening).toContain("Unlink Kai Chen from this Parent customer: Chen Family");
