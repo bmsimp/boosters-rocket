@@ -222,26 +222,33 @@ describe("connecting a different company, by open question 16", () => {
     expect(inFlight).toMatchObject({ requestId, realmId: "1111", earlierCompanyAt: null, familyId });
   });
 
-  it("leaves the audit page's record filter finding a kept family's rows by its own id alone, never by its old customer's number", async () => {
+  // Flipped on purpose in stage 4's slice M8a: until then the filter read only the roster's company, so after the clear
+  // a kept family's old customer's row was no longer found. Now it is, inside its earlier company's window.
+  it("leaves the audit page's record filter finding a kept family's rows by its own id and by its old customer's number in the old company's time, never another's", async () => {
     const { a, b } = await seedTwoFamilies();
     const famA = await recordOfCustomer(a.spec.family.qboId, "family");
     const staffActor = { door: "staff" as const, id: null, label: "registrar@club.org" };
+    const read = (targetType: string, targetId: string, tag: string) => writeAudit({ actor: staffActor, action: "roster.family.read", targetType, targetId, after: { tag } });
     // A row naming A's app family, one naming A's customer (as rows did before the area moved to the app's ids), and one naming B's customer.
-    await writeAudit({ actor: staffActor, action: "roster.family.read", targetType: "family", targetId: String(famA) });
-    await writeAudit({ actor: staffActor, action: "roster.family.read", targetType: "qbo_customer", targetId: a.spec.family.qboId });
-    await writeAudit({ actor: staffActor, action: "roster.family.read", targetType: "qbo_customer", targetId: b.spec.family.qboId });
-    const found = async () => (await auditPage(parseAuditFilters({ record: `family:${String(famA)}` }))).rows.map((r) => `${r.targetType}:${r.targetId}`);
+    await read("family", String(famA), "a-record");
+    await read("qbo_customer", a.spec.family.qboId, "a-customer-old");
+    await read("qbo_customer", b.spec.family.qboId, "b-customer-old");
+    const found = async () => (await auditPage(parseAuditFilters({ record: `family:${String(famA)}` }))).rows
+      .map((r) => (r.after as { tag?: string } | null)?.tag).filter((t): t is string => t !== undefined).sort();
     // Before: through A's link in the roster's company, its customer's row is A's.
-    expect(await found()).toEqual(expect.arrayContaining([`family:${String(famA)}`, `qbo_customer:${a.spec.family.qboId}`]));
+    expect(await found()).toEqual(["a-customer-old", "a-record"]);
     expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
-    // After, until A is linked in the new company: the filter reads only the roster's company, where A has no link, so
-    // the customer's number finds nothing (the new company's customer of that number may be anyone), and B's row is not
-    // A's. Once A is linked there, its new customer's window is unbounded below, so rows of that number from the old
-    // company would match: bounding it by when the company changed is stage 4's slice M8's (the roadmap's M8 row).
-    const after = await found();
-    expect(after).toContain(`family:${String(famA)}`);
-    expect(after).not.toContain(`qbo_customer:${a.spec.family.qboId}`);
-    expect(after).not.toContain(`qbo_customer:${b.spec.family.qboId}`);
+    // After, until A is linked in the new company: the filter reads A's link the clear ended (`company_changed`), cut to
+    // the old company's time as the roster's (the `roster.cleared` row bounds it), so its old customer's row is still
+    // A's and B's row is not; a row of that number written since names the new company's customer, which may be anyone.
+    await read("qbo_customer", a.spec.family.qboId, "a-number-since");
+    expect(await found()).toEqual(["a-customer-old", "a-record"]);
+    // Linked in the new company to the number B's customer had in the old one: B's old row is still never A's, as the
+    // new link's window opens when the new company's time does, and a row naming that number written since is A's.
+    await db.insert(accountingLink).values({ system: "quickbooks", realmId: "2222", customerId: b.spec.family.qboId, familyId: famA, origin: "confirmed",
+      linkedBy: "00000000-0000-4000-8000-0000000000aa" });
+    await read("qbo_customer", b.spec.family.qboId, "b-number-in-new-company");
+    expect(await found()).toEqual(["a-customer-old", "a-record", "b-number-in-new-company"]);
   });
 
   it("names the staff member who connected the new company as the one who ended each link", async () => {
