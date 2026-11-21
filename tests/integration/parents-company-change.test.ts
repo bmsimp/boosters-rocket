@@ -98,7 +98,8 @@ describe("connecting a different QuickBooks company touches no sign-in", () => {
     const before = await signinRows();
     // Something of each is there to keep: every open row names its app family.
     expect(before.memberships.filter((g) => g.status !== "disabled").every((g) => g.familyId !== null)).toBe(true);
-    expect([before.sessions.length, before.devices.length, before.codes.length, before.links.length, before.emailChanges.length, before.accounts.length]).toEqual([1, 1, 2, 2, 1, 1]);
+    expect([before.sessions.length, before.devices.length, before.codes.length, before.links.length, before.emailChanges.length]).toEqual([1, 1, 2, 2, 1]);
+    expect(before.accounts.some((x) => x.providerId === "credential")).toBe(true);
     expect(before.people.filter((p) => p.welcomedAt !== null)).toHaveLength(3);
     expect(before.people.filter((p) => p.welcomeOwed)).toHaveLength(1);
 

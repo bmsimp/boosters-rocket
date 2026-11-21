@@ -850,7 +850,7 @@ describe("never the wrong company", () => {
     expect(mayShow(row, MONEY_REALM, customers)).toBe(true); // only the company decides it
     // The new company: connected, its types and its customer 10 read, the shape saved, and the family linked to that
     // customer on the accounting links screen (each written here, so no import runs).
-    await seedConnected(stub, { realmId: "2222" });
+    await db.update(qboConnection).set({ realmId: "2222" });
     await db.insert(qboCustomerType).values(P_TYPES.map((t) => ({ ...t, active: true })));
     await db.insert(qboCustomer).values({ qboId: "10", displayName: "Rivera Family", active: true, parentQboId: null, typeQboId: "F", syncToken: "0" });
     await storeShape();
