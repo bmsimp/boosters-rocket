@@ -103,7 +103,8 @@ export const WRITE_COPY = {
   waiting: "Another change to this is still waiting to reach QuickBooks. Once it has gone through, or been given up on the Reconciliation page, try again.",
   doneNotShown: "Done in QuickBooks. The roster here will show it after its next read of QuickBooks, usually within a few minutes.",
   queued: "QuickBooks couldn't take this just now, so it is waiting to reach QuickBooks. The portal tries again in a minute, then less often, and you'll find it on the Reconciliation page.",
-  givenUpForCompany: "QuickBooks didn't answer in time, and the club has connected a different QuickBooks company since, so this won't be tried again.",
+  givenUpForCompany: "QuickBooks couldn't take this just now, and the club has connected a different QuickBooks company since, so it won't be tried again.",
+  doneCompanySince: "Done in QuickBooks, but the club has connected a different QuickBooks company since, so the roster here won't show it.",
   balanceFix: "A balance has to be settled in QuickBooks first: paid or written off, or a credit used or refunded. Then try again.",
   balanceUnread: "QuickBooks couldn't be asked what is owed just now, so nothing was changed. Try again in a few minutes.",
   balanceUnknown: "QuickBooks didn't say what is owed, so nothing was changed. Check the balance in QuickBooks, then try again.",
@@ -122,6 +123,12 @@ export const WRITE_COPY = {
  * item went in given up, and nothing says whether the earlier company made it.
  */
 const COMPANY_SINCE = "its answer didn't arrive, and the club has connected a different QuickBooks company since, so it won't be tried again.";
+
+/**
+ * What "Create in QuickBooks and link" says of a customer QuickBooks made as the club connected a different company: the
+ * customer is in the earlier company's books, and no read of the new one links it (stage 4's slice M7a2).
+ */
+const madeBeforeCompany = (said: string) => `QuickBooks made ${said}, but the club has connected a different QuickBooks company since, so the portal won't link the two.`;
 
 /** A family is made inactive only with everyone under it: the refusal names the button as the family's page does. */
 export const familyHereWords = (name: string) =>
@@ -739,18 +746,22 @@ async function queuedNoLonger(tx: Tx, queueId: string): Promise<boolean> {
  * When that transaction fails (code cache_failed), or QuickBooks' answer isn't the record asked about (answer_other),
  * the change is still audited, a refresh asked for, and the write held for the queue to finish (holdForTheQueue());
  * `cached` is then false. `linkedBy` is the staff member who asked, for a link made to a new customer; `filed`, the
- * records a write sent at once is filed under should it go on the queue.
+ * records a write sent at once is filed under should it go on the queue. `companyChanged`: the roster was another
+ * company's by then (a change of company's clear ran while the write was on its way: stage 4's slice M7a2), so nothing
+ * was taken in and nothing is left for the queue to follow (an item held after a failed take-in went in given up): no
+ * later read of the roster will show the change.
  */
 export async function applyWritten(w: RosterWrite, answer: Record<string, unknown>, o: { realmId: string; actor: Actor; ip: string | null; permission?: string;
-  queueId?: string; linkedBy: string | null; filed?: Filed; inside?: (tx: Tx) => Promise<void>; auditExtra?: Record<string, unknown> }): Promise<{ cached: boolean }> {
+  queueId?: string; linkedBy: string | null; filed?: Filed; inside?: (tx: Tx) => Promise<void>; auditExtra?: Record<string, unknown> }): Promise<{ cached: boolean; companyChanged: boolean }> {
   const answerToken = typeof answer.SyncToken === "string" ? answer.SyncToken : null;
   const targetId = w.op === "create" ? (typeof answer.Id === "string" ? answer.Id.slice(0, 64) : "unknown") : w.qboId;
   // The customer a create was answered with, kept on a held item so that it is never sent again (holdForTheQueue()).
   const resultQboId = w.op === "create" && typeof answer.Id === "string" ? targetId : null;
-  let held = false;
+  let held = false, companyChanged = false;
   try {
     await db.transaction(async (tx) => {
       const ours = await lockRosterAs(tx, rosterTagOf(o.realmId));
+      companyChanged = !ours;
       const [cached] = w.op === "create" ? [] : await tx.select().from(qboCustomer).where(eq(qboCustomer.qboId, w.qboId));
       const fits = answerIsFor(w, answer);
       let refreshAsked = false, aligned = false;
@@ -798,10 +809,11 @@ export async function applyWritten(w: RosterWrite, answer: Record<string, unknow
       await writeAudit({ actor: o.actor, action: AUDIT_ACTION[w.op], permission: o.permission, ip: o.ip, targetType: "qbo_customer", targetId,
         before: w.op === "create" ? null : { syncToken: w.syncToken },
         after: { ...auditAfter(w, answer), ...(o.queueId ? { queueId: o.queueId } : {}), refreshAsked: heldAs === "held", code: "cache_failed", ...(heldAs === "held" ? {} : { queue: "given_up" }) } }, tx);
+      companyChanged = heldAs === "given_up";
     });
-    return { cached: false };
+    return { cached: false, companyChanged };
   }
-  return { cached: !held };
+  return { cached: !held, companyChanged };
 }
 
 /** The kind of link a write's record has: a family's (or a member's) or a student's; none for a parent or another customer. */
@@ -1033,8 +1045,8 @@ export async function askRosterWrite(ask: WriteAsk, rosterTag: string, o: WriteO
       }
     }
   }
-  const { cached } = await applyWritten(p.write, answer, { realmId: p.realmId, actor: o.actor, ip: o.ip, permission: o.permission, linkedBy: o.staffUserId, filed });
-  return { ok: true, message: cached ? DONE_WORDS[p.write.op] : WRITE_COPY.doneNotShown };
+  const { cached, companyChanged } = await applyWritten(p.write, answer, { realmId: p.realmId, actor: o.actor, ip: o.ip, permission: o.permission, linkedBy: o.staffUserId, filed });
+  return { ok: true, message: companyChanged ? WRITE_COPY.doneCompanySince : cached ? DONE_WORDS[p.write.op] : WRITE_COPY.doneNotShown };
 }
 
 const DONE_WORDS: Record<RosterWrite["op"], string> = {
@@ -1218,9 +1230,9 @@ async function deactivateHolding(kind: "family" | "student", recordId: string, r
   const t = await tryDeactivate(p.write, p.realmId, { mayWait: false, name: p.name, showAmounts: o.showAmounts === true, actor: o.actor, ip: o.ip, permission: o.permission });
   switch (t.is) {
     case "answer": {
-      const { cached } = await applyWritten(t.write, t.answer, { realmId: p.realmId, actor: o.actor, ip: o.ip, permission: o.permission, linkedBy: o.staffUserId, filed: p.filed,
+      const { cached, companyChanged } = await applyWritten(t.write, t.answer, { realmId: p.realmId, actor: o.actor, ip: o.ip, permission: o.permission, linkedBy: o.staffUserId, filed: p.filed,
         ...(t.resent ? { auditExtra: { resent: "stale" } } : {}) });
-      return { ok: true, message: cached ? DONE_WORDS.deactivate : WRITE_COPY.doneNotShown };
+      return { ok: true, message: companyChanged ? WRITE_COPY.doneCompanySince : cached ? DONE_WORDS.deactivate : WRITE_COPY.doneNotShown };
     }
     case "inactive_there": {
       // The cache is behind QuickBooks: the answer is stored, the roster read again, and the record follows (the link
@@ -1541,7 +1553,7 @@ async function familyInactiveHolding(familyId: AppFamilyId, stamp: string, roste
   // the family's own record followed, when it was the family QuickBooks had made inactive meanwhile.
   const recordsFollowed: FamilyStep[] = [];
   let familyFollowed = false;
-  let allShown = true;
+  let allShown = true, companySince = false;
   // Whoever a stale answer's read showed inactive meanwhile, said in both answers: nothing more was sent for them.
   const lateWords = (): string[] => {
     const late = followedLate.filter((s) => s.write.role !== "family");
@@ -1592,9 +1604,10 @@ async function familyInactiveHolding(familyId: AppFamilyId, stamp: string, roste
     const t = await sendDeactivate(write, read, p.realmId, { ...how, name: step.name });
     switch (t.is) {
       case "answer": {
-        const { cached } = await applyWritten(t.write, t.answer, { realmId: p.realmId, actor: o.actor, ip: o.ip, permission: o.permission, linkedBy: o.staffUserId, filed: step.filed,
+        const { cached, companyChanged } = await applyWritten(t.write, t.answer, { realmId: p.realmId, actor: o.actor, ip: o.ip, permission: o.permission, linkedBy: o.staffUserId, filed: step.filed,
           ...(t.resent ? { auditExtra: { resent: "stale" } } : {}) });
         if (!cached) allShown = false;
+        if (companyChanged) { companySince = true; allShown = false; }
         made.push(step);
         break;
       }
@@ -1623,7 +1636,8 @@ async function familyInactiveHolding(familyId: AppFamilyId, stamp: string, roste
   const said = !familyMade ? `${under.length ? `Made inactive in QuickBooks: ${listed(under)}. ` : ""}${p.familyName} is inactive in QuickBooks now, so nothing more was sent for it.${familyFollowed ? " The portal's own family is inactive now too." : ""}`
     : under.length ? `Made inactive in QuickBooks: ${listed(under)}, then ${p.familyName}.` : `Made ${p.familyName} inactive in QuickBooks.`;
   const message = [said, ...lateWords()].join(" ");
-  return { result: { ok: true, message: allShown ? message : `${message} The roster here shows it after its next read of QuickBooks, usually within a few minutes.` }, changed: true };
+  return { result: { ok: true, message: allShown ? message : companySince ? `${message} The club has connected a different QuickBooks company since, so the roster here won't show it.`
+    : `${message} The roster here shows it after its next read of QuickBooks, usually within a few minutes.` }, changed: true };
 }
 
 /* ---- Families by hand (stage 3's slice 9d of the app-owned families spec, section 4: "Staff add families, students and
@@ -2051,7 +2065,7 @@ async function prepareLink(rawFamilyId: string, chosenType: string | null, roste
   });
 }
 
-type StepSent = { ok: true; cached: boolean; customerQboId: string | null } | { ok: false; code: string; words: string; maybe: boolean };
+type StepSent = { ok: true; cached: boolean; companyChanged: boolean; customerQboId: string | null } | { ok: false; code: string; words: string; maybe: boolean };
 
 /**
  * One create of "Create in QuickBooks and link", sent at once (never queued to be sent later): QuickBooks first, then the
@@ -2087,8 +2101,8 @@ async function sendCreateStep(write: CreateWrite, filed: Filed, said: string, re
       default: return stop(e.code === "bad_id" ? `${said} couldn't be sent to QuickBooks, so it wasn't made there.` : `QuickBooks wouldn't make ${said}, so it isn't there. Check QuickBooks.`);
     }
   }
-  const { cached } = await applyWritten(write, answer, { realmId, actor: o.actor, ip: o.ip, permission: o.permission, linkedBy: o.staffUserId, filed });
-  return { ok: true, cached, customerQboId: typeof answer.Id === "string" ? answer.Id.slice(0, 64) : null };
+  const { cached, companyChanged } = await applyWritten(write, answer, { realmId, actor: o.actor, ip: o.ip, permission: o.permission, linkedBy: o.staffUserId, filed });
+  return { ok: true, cached, companyChanged, customerQboId: typeof answer.Id === "string" ? answer.Id.slice(0, 64) : null };
 }
 
 /** The customer of that name in the cache: QuickBooks takes a name once, so it is the one a create's answer was taken in as. */
@@ -2171,6 +2185,7 @@ async function createAndLinkHolding(familyId: string, typeQboId: string | null, 
     const at: Step = { kind: "family", id: String(p.familyId) };
     const sent = await sendCreateStep(p.familyWrite, { familyId: p.familyId, studentId: null }, p.familyName, p.realmId, o);
     if (!sent.ok) return stop(at, 0, sent.code, sent.words, sent.maybe);
+    if (sent.companyChanged) return stop(at, 0, "company_changed", madeBeforeCompany(p.familyName), true);
     if (!sent.cached || sent.customerQboId === null) {
       // QuickBooks made it, but the portal couldn't take it in at once: it is held for the queue, which links it after
       // the next roster read. Its students wait for that.
@@ -2198,6 +2213,7 @@ async function createAndLinkHolding(familyId: string, typeQboId: string | null, 
     // the student is linked (applyWritten(), or the found-done path after a lost answer): one that fails leaves it kept.
     const sent = await sendCreateStep(write, { familyId: p.familyId, studentId: s.id }, said, p.realmId, o);
     if (!sent.ok) return stop(at, i, sent.code, sent.words, sent.maybe);
+    if (sent.companyChanged) return stop(at, i, "company_changed", madeBeforeCompany(said), true);
     if (!sent.cached) return stop(at, i, "not_linked_yet", `QuickBooks made ${said}, but the portal links the two only after its next read of QuickBooks, usually within a few minutes.`, true);
     made.push({ ...at, customerQboId: sent.customerQboId, name: said });
     sentNames.push(write.name);

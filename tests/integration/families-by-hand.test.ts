@@ -480,6 +480,40 @@ describe("Create in QuickBooks and link", () => {
     expect(await linkOfFamily(oak)).toMatchObject({ realmId: "2222", customerId: stubNamed("Oak Family")[0]!.Id });
   });
 
+  // Stage 4's slice M7a2: a change of company's clear run as the family's create reaches QuickBooks.
+  const clearAsItArrives = (then: () => void = () => {}) => {
+    stub.onApiRequest = async (c) => {
+      if (c.method !== "POST") return;
+      stub.onApiRequest = null;
+      expect(await clearRosterOfOtherCompany("2222", { actor: { door: "staff", id: null, label: "admin@club.org" }, ip: null })).toBe(true);
+      then();
+    };
+  };
+  const COMPANY_NOTE = "Given up: the club connected a different QuickBooks company, so nothing more was sent for this.";
+
+  it("a family's create whose answer is lost as the club changes company goes on the queue given up, and the words say it won't be tried again", async () => {
+    const oak = await unlinkedFamily("Oak Family");
+    clearAsItArrives(() => { stub.loseUpdateAnswer = true; });
+    const r = await createInQuickBooksAndLink(String(oak), null, tag, op);
+    expect(r.result.ok).toBe(false);
+    expect(r.result.ok ? [] : r.result.errors).toContainEqual(expect.stringContaining("its answer didn't arrive, and the club has connected a different QuickBooks company since, so it won't be tried again."));
+    expect(await db.select().from(writeQueue)).toEqual([expect.objectContaining({ state: "given_up", note: COMPANY_NOTE, sent: true, familyId: oak, realmId: REALM, nextTryAt: null })]);
+    expect((await auditsOf("roster.write.queued"))[0]!.after).toMatchObject({ op: "create", role: "family", state: "given_up", why: "company_changed" });
+    expect(await linkOfFamily(oak)).toBeUndefined();
+  });
+
+  it("a family's create QuickBooks makes as the club changes company is said to be made there and not linked, with nothing queued", async () => {
+    const oak = await unlinkedFamily("Oak Family");
+    clearAsItArrives();
+    const r = await createInQuickBooksAndLink(String(oak), null, tag, op);
+    expect(r.result.ok).toBe(false);
+    expect(r.result.ok ? [] : r.result.errors).toContainEqual(expect.stringContaining("but the club has connected a different QuickBooks company since, so the portal won't link the two."));
+    expect(stubNamed("Oak Family")).toHaveLength(1);
+    expect(await linkOfFamily(oak)).toBeUndefined();
+    expect(await db.select().from(writeQueue)).toEqual([]);
+    expect((await auditsOf("roster.family.created_in_quickbooks"))[0]!.after).toMatchObject({ outcome: "stopped", code: "company_changed", maybe: true });
+  });
+
   it("a create given up while the worker's send is on its way stays given up: nothing linked, its customer kept and named, and no second one made", async () => {
     const oak = await unlinkedFamily("Oak Family");
     const item = await seedQueued(OAK_CREATE, { familyId: oak, sent: false, code: "http_429", nextTryAt: ago(1000) });

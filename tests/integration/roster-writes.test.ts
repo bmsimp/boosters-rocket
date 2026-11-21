@@ -1204,11 +1204,31 @@ describe("a change of company while a staff write is on its way", () => {
     expect(item).toMatchObject({ state: "given_up", note: NOTE, sent: true, lastCode: "http_500", nextTryAt: null, realmId: REALM, targetQboId: "12" });
     expect(item!.finishedAt).not.toBeNull();
     expect((await auditsOf("roster.write.queued"))[0]).toMatchObject({ targetId: item!.id, after: { op: "rename", sent: true, state: "given_up", why: "company_changed" } });
-    // Nothing more is sent for it: the worker tries only the roster's company's items.
+    // Nothing more is sent for it once QuickBooks is connected to the new company and the worker runs: it went in given
+    // up, so the worker's give-up of the earlier company's open items finds nothing to give up.
+    await db.update(qboConnection).set({ realmId: "2222" });
     stub.calls.length = 0;
     await runWriteQueue(new Date(Date.now() + 3_600_000));
     expect(posts()).toEqual([]);
     expect((await queue())[0]).toMatchObject({ state: "given_up", note: NOTE });
+    expect(await auditsOf("roster.writes.given_up_other_company")).toEqual([]);
+  });
+
+  it("a make-inactive QuickBooks couldn't take goes on the queue given up, and the staff member is told it won't be tried again", async () => {
+    tag = await connectRoster(stub);
+    clearAsItArrives(() => { stub.failNext = 1; });
+    expect(await offStudent("12")).toEqual({ ok: false, errors: [WRITE_COPY.givenUpForCompany] });
+    expect(await queue()).toEqual([expect.objectContaining({ state: "given_up", note: NOTE, sent: true, lastCode: "http_500", targetQboId: "12", nextTryAt: null })]);
+    expect((await auditsOf("roster.write.queued"))[0]!.after).toMatchObject({ op: "deactivate", role: "student", state: "given_up", why: "company_changed" });
+  });
+
+  it("a write QuickBooks takes as the club changes company is said to be done there, not that the roster here will show it", async () => {
+    tag = await connectRoster(stub);
+    clearAsItArrives(() => {});
+    expect(await askRosterWrite({ op: "rename", qboId: "12", syncToken: "0", name: "Leon Rivera" }, tag, op)).toEqual({ ok: true, message: WRITE_COPY.doneCompanySince });
+    expect(inStub("12").DisplayName).toBe("Leon Rivera");
+    expect(await queue()).toEqual([]);
+    expect((await auditsOf("roster.customer.rename"))[0]!.after).toMatchObject({ code: "company_changed" });
   });
 
   it("a family action's step whose answer is lost goes on the queue given up, no refresh is asked for, and the words say it won't be tried again", async () => {
