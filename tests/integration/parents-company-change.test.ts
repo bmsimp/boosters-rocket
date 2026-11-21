@@ -13,13 +13,14 @@ import { db } from "@/lib/db/client";
 import { auditLog, guardian, parent, parentAuthAccount, parentAuthSession, parentAuthUser, parentDevice, parentEmailChange, parentSigninToken, qboCustomer, setting, signinCode } from "@/lib/db/schema";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import { refreshRoster } from "@/lib/roster/refresh";
+import { beginSwitchConnect, completeConnect, disconnect } from "@/lib/quickbooks/connection";
 import { PARENTS_KEY } from "@/lib/parents/settings";
 import { familySignins } from "@/lib/parents/directory";
 import { hashLinkToken } from "@/lib/parents/signin-links";
 import ParentHome from "@/app/(parent)/page";
 import FormsPage from "@/app/(parent)/forms/page";
 import { GET as parentDownload } from "@/app/(parent)/forms/[id]/signed/route";
-import { resetDb, seedGuardian, seedParent, seedParentSession } from "../helpers/db";
+import { resetDb, seedGuardian, seedParent, seedParentSession, seedStaff } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, storeShape, SIGNINS_ON, fam, par } from "../helpers/roster-cache";
 import { startQboStub, seedConnected, fznCompany, type QboStub } from "../helpers/qbo-stub";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
@@ -32,8 +33,8 @@ import { mintLink, seedCode, seedDevice, seedPassword } from "../helpers/signin-
  * nothing. Since stage 4's slice M7a the clear (clearRosterOfOtherCompanyLocked(), src/lib/roster/source.ts) keeps every
  * membership open in its family, every session, device, code and set-up or reset link, every welcome, the sign-in
  * switches and every change of sign-in address. Until then it closed every link, signed everyone out and switched
- * sign-ins off, and this file proved that; it now proves the opposite. A change of company is still refused until stage
- * 4's slice M8 (open question 18), so these tests call the clear directly.
+ * sign-ins off, and this file proved that; it now proves the opposite. Most of these tests call the clear directly; since
+ * stage 4's slice M8 the refresh's backstop and a real switch through the connect are proved here too.
  */
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -139,20 +140,20 @@ describe("connecting a different QuickBooks company touches no sign-in", () => {
     for (const action of ["parent.create", "parent.access.granted", "parent.email.changed"]) expect(await audits(action)).toEqual([]);
   });
 
-  // From stage 2 of the app-owned families spec until stage 4 ships (open question 18), another company's roster is
-  // never read over this one's: the seasons keep their records against this company's families. So a connection to
-  // another company stored without the clear (from before the refusal, or by hand) clears nothing either.
-  it("a refresh that finds the cache came from another company reads nothing and clears nothing", { timeout: 30_000 }, async () => {
+  // Flipped on purpose in stage 4's slice M8: a switch the connect stored, whose clear never ran (step 3b threw), is
+  // cleared by the next refresh, the refresh's backstop, and that clear touches no sign-in either.
+  it("a refresh that clears for a switch the connect recorded touches no sign-in", { timeout: 30_000 }, async () => {
     Object.assign(stub, fznCompany());
-    const guardiansBefore = await db.select().from(guardian);
+    const before = await signinRows();
     await seedConnected(stub, { realmId: "2222" });        // the new company is stored, but the clear never ran
+    await db.insert(setting).values({ key: "quickbooks.switch", value: { stored: { fromRealmId: "1111", toRealmId: "2222", staffUserId: admin.actor.id, at: new Date().toISOString() } } });
     const worker = { startedBy: "worker", actor: { door: "system" as const, id: null, label: "worker" }, ip: null };
-    expect(await refreshRoster(worker)).toMatchObject({ ok: false, reason: "failed", error: expect.stringContaining("(roster_company)") });
-    expect(await db.select().from(guardian)).toEqual(guardiansBefore);
+    expect(await refreshRoster(worker)).toMatchObject({ ok: true });
+    expect(await signinRows()).toEqual(before);
     expect(await audits("parent.access.cleared")).toEqual([]);
-    expect(await audits("roster.cleared")).toEqual([]);
-    expect((await db.select().from(setting).where(eq(setting.key, "roster.source")))[0]!.value).toEqual({ realmId: "1111" });
-    expect(await audits("roster.refresh")).toEqual([]);
+    expect(await audits("roster.cleared")).toHaveLength(1);
+    expect((await db.select().from(setting).where(eq(setting.key, "roster.source")))[0]!.value).toEqual({ realmId: "2222" });
+    expect(await audits("roster.refresh")).toHaveLength(1);
   });
 
   it("does none of it when the same company is connected again", async () => {
@@ -167,11 +168,20 @@ describe("connecting a different QuickBooks company touches no sign-in", () => {
 describe("a family's guardian, the moment after a change of company", () => {
   const textOf = (html: string) => html.replace(/<svg[\s\S]*?<\/svg>/g, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").replaceAll("&#x27;", "'").replaceAll("&quot;", '"').replaceAll("&amp;", "&");
 
-  it("is still let in to their own family, sees its money as not connected, and still downloads its signed form", async () => {
+  // A real switch, through the switch page's ask and the connect (stage 4's slice M8): the owner's choice 2's proof.
+  it("is still let in to their own family, sees its money as not connected, and still downloads its signed form", { timeout: 30_000 }, async () => {
     await resetDb(); stub.reset();
     await db.transaction((tx) => setRosterSource(tx, "1111"));
     const { a, b } = await seedTwoFamilies();
-    expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
+    const staff = await seedStaff({ email: "admin@club.org", admin: true });
+    const op = { actor: { door: "staff" as const, id: staff.id, label: staff.email }, ip: "203.0.113.9", permission: "Settings.QuickBooks.ReadWrite" };
+    await seedConnected(stub, { realmId: "1111" });
+    await disconnect(op);
+    const asked = await beginSwitchConnect(staff.id, op);
+    if (!asked.ok) throw new Error("not configured");
+    stub.codes.add("code-1");
+    expect(await completeConnect({ code: "code-1", state: new URL(asked.url).searchParams.get("state"), realmId: "2222", error: null }, { staffUserId: staff.id, ...op })).toEqual({ ok: true });
+    expect(await audits("roster.cleared")).toHaveLength(1);
     // The gate, run again on A's own session: it still counts, in A's own app family.
     const identity = await identityNow(a.session.id);
     expect(identity.familyId).toBe(a.identity.familyId);
