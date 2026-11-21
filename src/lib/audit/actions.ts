@@ -12,7 +12,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "accounting.link.leave_unlinked": "A family left unlinked by staff on the accounting links screen, so no customer in the books is suggested for it",
   "accounting.link.leave_unlinked.undo": "A family's Left unlinked mark taken off by staff, so customers in the books are suggested for it again",
   "accounting.link.remove": "A family unlinked by staff from its customer in the books, with its students' and guardians' links, and its stored figures forgotten: nothing was sent to the books",
-  "accounting.links.cleared": "QuickBooks links cleared after a company change (since November 2026 into the link history, the families and students kept; before then with them)",
+  "accounting.links.cleared": "QuickBooks links cleared after a company change: a row that says the families were kept (endedAs company_changed) moved the links into the link history and kept the families and students; an older row removed the links with the families and students",
   "admin.bootstrap": "First Admin made",
   "audit.export": "Audit log exported",
   "certificate.activate": "Sign-in certificate put into use",
