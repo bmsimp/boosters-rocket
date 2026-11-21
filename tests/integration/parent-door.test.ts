@@ -465,7 +465,7 @@ describe("the gate: a parent enters only an active family of the app's own (app-
   it("offers no row that names no family record, and refuses a person with no row that counts as one with no open row", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
     // A row the records were never brought into step for: it names no family record.
-    const bare = await seedGuardian({ parentId: a.id, familyQboId: "F1" });
+    const bare = await seedGuardian({ parentId: a.id, familyId: null });
     const g2 = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F2" });
     // The code is sent and checked because one row counts, and that one family is entered at once.
     const { body, cookie } = await signIn("ana@example.com");
@@ -487,7 +487,7 @@ describe("the gate: a parent enters only an active family of the app's own (app-
     ["names no family record", "none"],
   ] as const)("a person whose only open row %s is sent no code and never signed in, as one with no open row", async (_, kind) => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
-    const g = kind === "none" ? await seedGuardian({ parentId: a.id, familyQboId: "F1", status: "invited" })
+    const g = kind === "none" ? await seedGuardian({ parentId: a.id, familyId: null, status: "invited" })
       : await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1", status: "invited" });
     if (kind === "inactive") await makeInactive(g.familyId);
     const res = await post("/portal-code/send", { email: "ana@example.com" });

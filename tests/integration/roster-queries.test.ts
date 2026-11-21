@@ -46,7 +46,7 @@ describe("what the roster pages load", () => {
     const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
     await seedGuardian({ parentId: ana.id, familyQboId: "10", status: "invited" });
     await seedGuardian({ parentId: ana.id, familyQboId: "POC-FAMILY-1" });
-    await syncAppRecords(); // the records imported from the read, each membership in its family record
+    await syncAppRecords(); // the records imported from the read; each row has its family record already (seedGuardian())
     const page = await loadRosterPage();
     expect(page.shapeWords).toBe("Layered: families are Family, students are Student, parents are Parent.");
     if (page.roster?.kind !== "layered") throw new Error("expected layered");
@@ -114,7 +114,7 @@ describe("what the roster pages load", () => {
     await refreshRoster(worker);
     const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
     await seedGuardian({ parentId: ana.id, familyQboId: "10" });
-    await syncAppRecords(); // the records imported from the read, each membership in its family record
+    await syncAppRecords(); // the records imported from the read; each row has its family record already (seedGuardian())
     const entry = await entryOf("10");
     if (entry?.kind !== "family") throw new Error("expected a family");
     expect(entry.family.parents.map((p) => [p.displayName, p.email, p.phone])).toEqual([["Ana Rivera", "ana@example.com", "555-0101"]]);
@@ -136,7 +136,7 @@ describe("what the roster pages load", () => {
     await seedGuardian({ parentId: raul.id, familyQboId: "10" });
     await seedGuardian({ parentId: mei.id, familyQboId: "20" });
     await seedGuardian({ parentId: lost.id, familyQboId: "POC-FAMILY-1" });
-    await syncAppRecords(); // the records imported from the read, each membership in its family record
+    await syncAppRecords(); // the records imported from the read; each row has its family record already (seedGuardian())
     const emails = async (id: string) => {
       const e = await entryOf(id);
       if (e?.kind !== "family") throw new Error("expected a family");
@@ -166,7 +166,7 @@ describe("what the roster pages load", () => {
     await refreshRoster(worker);
     const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
     await seedGuardian({ parentId: ana.id, familyQboId: "10", status: "invited" });
-    await syncAppRecords(); // the records imported from the read, each membership in its family record
+    await syncAppRecords(); // the records imported from the read; each row has its family record already (seedGuardian())
     const page = await loadRosterPage();
     const rivera = await recordOfCustomer("10", "family");
     expect(await familyEntry(page, rivera)).toMatchObject({ kind: "family", family: { name: "Rivera Family", customer: { displayName: "Rivera Family" } }, signIns: [{ email: "ana@example.com" }] });
