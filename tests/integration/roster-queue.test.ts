@@ -43,6 +43,7 @@ import { accountingLink, auditLog, buyout, family, formWithdrawal, jobRun, qboCo
 import { giveUp, loadOpenWrites, queueCounts, runWriteQueue, tryAgainNow, TRY_AGAIN_NEEDS_LINKING, waitingWords, WRITE_QUEUE_JOB } from "@/lib/roster/queue";
 import { addFamily, applyWritten, askRosterWrite, moveStudent, REFRESH_ASK_KEY } from "@/lib/roster/writes";
 import { clearRosterOfOtherCompany, GIVEN_UP_FOR_COMPANY_NOTE, ROSTER_JOB } from "@/lib/roster/source";
+import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { runDueJobs } from "@/lib/jobs/runner";
 import { resetDb } from "../helpers/db";
 import { requestByCustomer, seedFormRequirement, seedRequest } from "../helpers/forms";
@@ -592,6 +593,30 @@ describe("the queue and the company", () => {
     expect(await runWriteQueue()).toEqual({ ran: false, ok: true });
     expect((await Promise.all(late.map((i) => queueItem(i.id)))).map((i) => i!.state)).toEqual(["waiting", "stuck", "refused"]);
     expect(await db.select().from(auditLog).where(eq(auditLog.action, "roster.writes.given_up_other_company"))).toEqual([]);
+    expect(posts()).toEqual([]);
+  });
+
+  it("the worker gives nothing up while a roster read holds the roster lock, and gives the earlier company's items up at its next wake", async () => {
+    expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
+    const late = await lateOldItems();
+    await db.update(qboConnection).set({ realmId: "2222" });
+    // A roster read holding the roster lock: the worker's give-up, tried once, leaves it to the next wake.
+    let release = () => {}, holding = () => {};
+    const held = new Promise<void>((r) => { holding = r; });
+    const reading = db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
+      holding();
+      await new Promise<void>((r) => { release = r; });
+    });
+    await held;
+    await runWriteQueue();
+    expect((await Promise.all(late.map((i) => queueItem(i.id)))).map((i) => i!.state)).toEqual(["waiting", "stuck", "refused"]);
+    expect(await db.select().from(auditLog).where(eq(auditLog.action, "roster.writes.given_up_other_company"))).toEqual([]);
+    release();
+    await reading;
+    expect(await runWriteQueue()).toEqual({ ran: true, ok: true });
+    expect((await Promise.all(late.map((i) => queueItem(i.id)))).map((i) => i!.state)).toEqual(["given_up", "given_up", "given_up"]);
+    expect(await db.select().from(auditLog).where(eq(auditLog.action, "roster.writes.given_up_other_company"))).toHaveLength(1);
     expect(posts()).toEqual([]);
   });
 });
