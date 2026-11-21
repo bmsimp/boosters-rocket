@@ -56,7 +56,15 @@ const audits = async (action: string) => (await db.select().from(auditLog).order
 const BROWSER = "That didn't go through. Reload the page and try again.";
 const BUSY = "The roster is being read from QuickBooks just now, so nothing was changed. Try again in a minute.";
 const personOf = async (email: string) => (await db.select().from(parent).where(eq(parent.email, email)))[0];
-const rowsOf = async (parentId: string) => db.select().from(guardian).where(eq(guardian.parentId, parentId)).orderBy(guardian.familyQboId);
+/**
+ * A person's guardian rows, each with `customer`: the customer its family record's own link names (null for none). In
+ * that order, then by row id: a row names no customer of its own since stage 3's slice 12b1.
+ */
+const rowsOf = async (parentId: string) => (await db.select({ g: guardian, customer: accountingLink.customerId }).from(guardian)
+  .leftJoin(accountingLink, eq(accountingLink.familyId, guardian.familyId)).where(eq(guardian.parentId, parentId))
+  .orderBy(sql`${accountingLink.customerId} asc nulls last`, guardian.id)).map((r) => ({ ...r.g, customer: r.customer }));
+/** The customer a guardian row's own link names, or null for a row with none. */
+const ownLinkOf = async (guardianId: string) => (await db.select({ customer: accountingLink.customerId }).from(accountingLink).where(eq(accountingLink.guardianId, guardianId)))[0]?.customer ?? null;
 const sessionsOf = async (authUserId: string) => db.select({ familyId: parentAuthSession.familyId }).from(parentAuthSession).where(eq(parentAuthSession.userId, authUserId));
 const familyPage = async (customer: string) => renderToStaticMarkup(await RosterEntryPage({ params: Promise.resolve({ id: String(await recordOfCustomer(customer, "family")) }) }));
 const personPage = async (id: string) => renderToStaticMarkup(await PersonPage({ params: Promise.resolve({ id }) }));
@@ -99,14 +107,15 @@ describe("staff manage a family's guardians", () => {
   });
 
   describe("adding", () => {
-    it("makes the person, their sign-in account and an invited row naming the family record and its customer, in step, audited", async () => {
+    it("makes the person, their sign-in account and an invited row in the family record, audited with its customer, in step", async () => {
       const r = await addGuardianAction(String(rivera), "  Ana   Rivera ", " Ana@Example.COM ");
       expect(r).toEqual({ ok: true, message: "Added Ana Rivera. They sign in with this address and a code while parent sign-ins are on, and are sent a welcome email if they have never had one and welcome emails are on." });
       const ana = (await personOf("ana@example.com"))!;
       expect(ana).toMatchObject({ name: "Ana Rivera", blocked: false, welcomeOwed: false });
       expect(await db.select().from(parentAuthUser).where(eq(parentAuthUser.parentId, ana.id))).toEqual([expect.objectContaining({ name: "Ana Rivera", email: "ana@example.com", emailVerified: true })]);
       const [row] = await rowsOf(ana.id);
-      expect(row).toMatchObject({ familyId: rivera, familyQboId: "10", sourceQboId: null, status: "invited", disabledReason: null });
+      // The row stands on its family record alone (stage 3's slice 12b1): neither old copy is written.
+      expect(row).toMatchObject({ familyId: rivera, customer: "10", familyQboId: null, sourceQboId: null, status: "invited", disabledReason: null });
       expect(await audits("parent.create")).toEqual([expect.objectContaining({ actorId: registrar.id, permission: R, targetType: "parent", targetId: ana.id, ip: "203.0.113.41",
         after: { name: "Ana Rivera", email: "ana@example.com", familyId: String(rivera) } })]);
       // The grant records the permission used, that the person is new, and the name as staff typed it, tidied.
@@ -136,7 +145,7 @@ describe("staff manage a family's guardians", () => {
       await seedParentSettings({ welcome: true });
       const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
       await seedGuardian({ parentId: ana.id, familyQboId: "20", status: "active" });
-      await seedCache([...ALL, fam("40", "Third Family")]); // her row in Chen's record, as a roster read leaves it
+      await seedCache([...ALL, fam("40", "Third Family")]); // a third family of the roster
       const before = await counts();
       const first = await addGuardianAction(String(rivera), "Someone Else", " ANA@example.com");
       expect(first).toEqual({ ok: false, samePerson: ana.id, errors: [
@@ -148,7 +157,7 @@ describe("staff manage a family's guardians", () => {
       expect(await addGuardianAction(String(rivera), "Someone Else", "ana@example.com", ana.id)).toEqual({ ok: true,
         message: "Added Ana Rivera, who already had a sign-in with this address (their name is unchanged). They sign in with this address and a code while parent sign-ins are on, and are sent a welcome email if they have never had one and welcome emails are on." });
       expect((await personOf("ana@example.com"))!).toMatchObject({ name: "Ana Rivera", welcomeOwed: true });
-      expect((await rowsOf(ana.id)).map((g) => [g.familyQboId, g.status])).toEqual([["10", "invited"], ["20", "active"]]);
+      expect((await rowsOf(ana.id)).map((g) => [g.customer, g.status])).toEqual([["10", "invited"], ["20", "active"]]);
       expect(await audits("parent.create")).toEqual([]);
       expect((await audits("parent.access.granted")).map((a) => a.after)).toEqual([expect.objectContaining({ familyId: String(rivera), person: "existing", typedName: "Someone Else", welcomeOwed: true })]);
       expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
@@ -188,7 +197,7 @@ describe("staff manage a family's guardians", () => {
       expect(await db.select().from(guardian).where(eq(guardian.parentId, blocked.id))).toEqual([]);
     });
 
-    it("adds a guardian to a family with no link (stage 3's slice 9d): a row naming no customer, never given one later; a row made once it is linked names its customer", async () => {
+    it("adds a guardian to a family with no link (stage 3's slice 9d): audited with no customer; once the family is linked, each audit row names its customer", async () => {
       const [hand] = await db.insert(family).values({ name: "Hand Family", active: true }).returning({ id: family.id });
       expect(await addGuardianAction(String(hand!.id), "Hal Hand", "hal@example.com")).toMatchObject({ ok: true });
       const hal = (await personOf("hal@example.com"))!;
@@ -199,18 +208,21 @@ describe("staff manage a family's guardians", () => {
       expect(await addGuardian(hand!.id, { name: "Hal", email: "hal@example.com", samePerson: hal.id }, staffOp)).toEqual({ ok: false, reason: "already" });
       // Their row counts at the gate: an open row in an active family record, link or none.
       expect((await enterableGuardianRows(hal.id)).map((g) => g.familyId)).toEqual([hand!.id]);
-      // Linked later, as "Create in QuickBooks and link" links it: the row is never given a customer, and a new row names it.
+      // Linked later, as "Create in QuickBooks and link" links it: the rows are its own by its record, whatever it is linked to.
       await db.insert(accountingLink).values({ system: "quickbooks", realmId: REALM, customerId: "40", familyId: hand!.id, origin: "created" });
       expect(await addGuardian(hand!.id, { name: "Ivy Hand", email: "ivy@example.com" }, staffOp)).toMatchObject({ ok: true, outcome: "added" });
-      expect((await rowsOf(hal.id))[0]).toMatchObject({ id: row!.id, familyQboId: null });
-      expect((await rowsOf((await personOf("ivy@example.com"))!.id))[0]).toMatchObject({ familyId: hand!.id, familyQboId: "40" });
-      // Removed and reinstated: the row that names no customer comes back as it was.
+      expect((await rowsOf(hal.id))[0]).toMatchObject({ id: row!.id, customer: "40", familyQboId: null });
+      const ivy = (await rowsOf((await personOf("ivy@example.com"))!.id))[0]!;
+      expect(ivy).toMatchObject({ familyId: hand!.id, customer: "40", familyQboId: null, sourceQboId: null });
+      expect((await audits("parent.access.granted")).find((a) => a.targetId === ivy.id)!.after).toMatchObject({ familyId: String(hand!.id), familyQboId: "40" });
+      // Removed and reinstated: the row comes back as it was.
       expect(await removeGuardian(row!.id, "Moved away.", staffOp)).toMatchObject({ ok: true });
       expect(await reinstateGuardian(row!.id, staffOp)).toEqual({ ok: true, quickbooks: [] });
       expect((await rowsOf(hal.id))[0]).toMatchObject({ id: row!.id, familyQboId: null, status: "invited", disabledReason: null });
-      // Its audit row names the customer the row names (none), not the family's link made since.
+      // Its audit rows name the customer the family's link names at each write: "40" now.
+      expect((await audits("parent.access.ended")).find((a) => a.targetId === row!.id)!.after).toMatchObject({ familyId: String(hand!.id), familyQboId: "40" });
       const reinstated = (await audits("parent.access.granted")).filter((a) => a.targetId === row!.id && (a.after as { reinstated?: boolean }).reinstated === true);
-      expect(reinstated).toEqual([expect.objectContaining({ after: expect.objectContaining({ familyId: String(hand!.id), familyQboId: null }) })]);
+      expect(reinstated).toEqual([expect.objectContaining({ after: expect.objectContaining({ familyId: String(hand!.id), familyQboId: "40" }) })]);
     });
 
     it("a person's page links a family with no link while its record is active, and not once it is made inactive in the portal: its page is gone", async () => {
@@ -229,7 +241,7 @@ describe("staff manage a family's guardians", () => {
     it("reinstates the person's closed row in that family instead of making another, once staff say it is them, and says so", async () => {
       const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
       const old = await seedGuardian({ parentId: ana.id, familyQboId: "10", sourceQboId: "11", status: "disabled", disabledReason: "not_in_quickbooks", statusBeforeDisable: "active" });
-      await seedCache(ALL); // the row in its family record, as a roster read leaves it
+      await seedCache(ALL);
       expect(await addGuardianAction(String(rivera), "Ana Rivera", "ana@example.com")).toMatchObject({ ok: false, samePerson: ana.id });
       expect((await rowsOf(ana.id))[0]).toMatchObject({ status: "disabled" });
       expect(await addGuardianAction(String(rivera), "Ana R.", "ana@example.com", ana.id)).toEqual({ ok: true,
@@ -241,12 +253,23 @@ describe("staff manage a family's guardians", () => {
       expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
     });
 
-    it("takes a row a change of company closed under the same number as the new membership, as the unique index needs", async () => {
+    it("makes a new row beside one a change of company closed under the same customer, and leaves that one as it is", async () => {
       const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
-      const old = await seedGuardian({ parentId: ana.id, familyQboId: "10", sourceQboId: "99", status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "active" });
-      expect(await addKnown(rivera, "Ana Rivera", "ana@example.com")).toMatchObject({ ok: true, outcome: "added", person: "existing", guardianId: old.id });
-      expect(await rowsOf(ana.id)).toEqual([expect.objectContaining({ id: old.id, familyId: rivera, status: "invited", disabledReason: null, sourceQboId: null })]);
-      expect((await audits("parent.access.granted"))[0]!.after).toMatchObject({ reopenedFrom: "company_changed", familyId: String(rivera), person: "existing" });
+      const old = await seedGuardian({ parentId: ana.id, familyQboId: "10", status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "active" });
+      // As the clear left it: in no family, holding the old company's copies (which the old unique index by customer
+      // once made the new membership take over).
+      await db.update(guardian).set({ familyQboId: "10", sourceQboId: "99" }).where(eq(guardian.id, old.id));
+      const r = await addKnown(rivera, "Ana Rivera", "ana@example.com");
+      expect(r).toMatchObject({ ok: true, outcome: "added", person: "existing" });
+      const made = (r as { guardianId: string }).guardianId;
+      expect(made).not.toBe(old.id);
+      const rows = await rowsOf(ana.id);
+      expect(rows).toHaveLength(2);
+      expect(rows.find((g) => g.id === old.id)).toMatchObject({ familyId: null, status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "active", familyQboId: "10", sourceQboId: "99" });
+      expect(rows.find((g) => g.id === made)).toMatchObject({ familyId: rivera, status: "invited", disabledReason: null, familyQboId: null, sourceQboId: null });
+      const [granted] = await audits("parent.access.granted");
+      expect(granted).toMatchObject({ targetId: made, after: { familyId: String(rivera), familyQboId: "10", person: "existing" } });
+      expect(granted!.after).not.toHaveProperty("reopenedFrom");
       expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
     });
 
@@ -349,7 +372,7 @@ describe("staff manage a family's guardians", () => {
         await confirm.done;
         expect((await staff).ok).toBe(true);
       }
-      expect((await rowsOf(ana.id)).map((g) => [g.familyQboId, g.status])).toEqual([["10", "invited"], ["20", "invited"]]);
+      expect((await rowsOf(ana.id)).map((g) => [g.customer, g.status])).toEqual([["10", "invited"], ["20", "invited"]]);
       expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
     }, 60_000);
 
@@ -380,7 +403,7 @@ describe("staff manage a family's guardians", () => {
         expect(outbox.map((m) => m.to)).toEqual(["ana@example.com"]);
         expect(await addGuardian(chen, { name: "Ana", email: "ana@example.com", samePerson: ana.id }, staffOp, { rosterWaitMs: 50 })).toEqual({ ok: false, reason: "busy" });
         expect(await reinstateGuardian(closed.id, staffOp, { rosterWaitMs: 50 })).toEqual({ ok: false, reason: "busy" });
-        expect((await rowsOf(ana.id)).map((g) => [g.familyQboId, g.status])).toEqual([["10", "invited"], ["20", "disabled"]]);
+        expect((await rowsOf(ana.id)).map((g) => [g.customer, g.status])).toEqual([["10", "invited"], ["20", "disabled"]]);
       } finally {
         await lock.release();
       }
@@ -401,11 +424,11 @@ describe("staff manage a family's guardians", () => {
       const s = await seedSeason({ name: "2026-27", steps: [{ name: "Sign-up" }] });
       const req = await seedFormRequirement({ stepId: s.stepIds["Sign-up"]!, title: "Commitment form", appliesTo: "family", form: formSetting({ id: "envelope_t1" }) });
       const waiting = await seedRequest({ requirementId: req, familyQboId: "10", subjectQboId: "10", state: "waiting", envelopeId: "envelope_rivera", signers: [signer(ana.id, "Ana")] });
-      const [row] = await db.select().from(guardian).where(and(eq(guardian.parentId, ana.id), eq(guardian.familyQboId, "10")));
+      const [row] = await db.select().from(guardian).where(and(eq(guardian.parentId, ana.id), eq(guardian.familyId, rivera)));
 
       expect(await removeGuardianAction(row!.id, "  ")).toEqual({ ok: false, errors: ["Say why, in a few words. Only staff see it."] });
       expect(await removeGuardianAction(row!.id, "Custody order on file.")).toEqual({ ok: true, message: "Removed. They can't sign in to this family any more, and are signed out of it." });
-      expect((await rowsOf(ana.id)).map((g) => [g.familyQboId, g.status, g.disabledReason, g.statusBeforeDisable])).toEqual([["10", "disabled", "removed", "invited"], ["20", "invited", null, null]]);
+      expect((await rowsOf(ana.id)).map((g) => [g.customer, g.status, g.disabledReason, g.statusBeforeDisable])).toEqual([["10", "disabled", "removed", "invited"], ["20", "invited", null, null]]);
       expect(await sessionsOf(user!.id)).toEqual([{ familyId: chen }]);
       expect(await requestNow(waiting)).toMatchObject({ state: "not_opened", envelopeId: null });
       expect((await db.select().from(formWithdrawal)).map((w) => w.envelopeId)).toEqual(["envelope_rivera"]);
@@ -416,7 +439,7 @@ describe("staff manage a family's guardians", () => {
       expect(await removeGuardianAction(row!.id, "Again.")).toEqual({ ok: true, message: "This guardian can't sign in to this family already." });
       expect(await audits("parent.access.ended")).toHaveLength(1);
       // The last open row: every session ends.
-      const [other] = await db.select().from(guardian).where(and(eq(guardian.parentId, ana.id), eq(guardian.familyQboId, "20")));
+      const [other] = await db.select().from(guardian).where(and(eq(guardian.parentId, ana.id), eq(guardian.familyId, chen)));
       await seedParentSession(user!.id);
       expect(await removeGuardian(other!.id, "Moved away.", staffOp)).toEqual({ ok: true, sessionsEnded: 2, quickbooks: [] });
       expect(await sessionsOf(user!.id)).toEqual([]);
@@ -483,10 +506,11 @@ describe("staff manage a family's guardians", () => {
       const old = await seedGuardian({ parentId: ana.id, familyQboId: "10", sourceQboId: "11", status: "disabled", disabledReason: "held", statusBeforeDisable: "active" });
       await seedCache(ALL);
       expect(await reinstateGuardianAction(old.id)).toEqual({ ok: true, message: "Reinstated. Their sign-in for this family is back." });
-      expect(await rowsOf(ana.id)).toEqual([expect.objectContaining({ id: old.id, status: "active", disabledReason: null, sourceQboId: "11" })]);
+      expect(await rowsOf(ana.id)).toEqual([expect.objectContaining({ id: old.id, status: "active", disabledReason: null, familyId: rivera })]);
+      expect(await ownLinkOf(old.id)).toBe("11"); // its own link, as it was
       expect((await personOf("ana@example.com"))!.welcomeOwed).toBe(true);
       expect((await audits("parent.access.granted"))[0]).toMatchObject({ targetId: old.id, permission: R,
-        before: { status: "disabled", disabledReason: "held" }, after: { familyId: String(rivera), status: "active", reinstated: true, welcomeOwed: true } });
+        before: { status: "disabled", disabledReason: "held" }, after: { familyId: String(rivera), familyQboId: "10", status: "active", reinstated: true, welcomeOwed: true } });
       expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
       expect(await reinstateGuardianAction(old.id)).toEqual({ ok: true, message: "This guardian's sign-in for this family is open already." });
       expect(await audits("parent.access.granted")).toHaveLength(1);
@@ -516,29 +540,20 @@ describe("staff manage a family's guardians", () => {
       expect(await audits("parent.access.granted")).toEqual([]);
     });
 
-    it("refuses a row naming a customer other than its family's own, in words, changing nothing; a family with no link takes back a row that names none (slice 9d)", async () => {
+    it("reopens a row in its own family record whatever customer its old copy names, audited with the family's linked customer; a family with no link takes its row back too (slice 9d)", async () => {
       const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
-      const held = await seedGuardian({ parentId: ana.id, familyQboId: "10", status: "disabled", disabledReason: "held", statusBeforeDisable: "invited" });
-      const other = await seedGuardian({ parentId: ana.id, familyQboId: "20", status: "disabled", disabledReason: "held", statusBeforeDisable: "invited" });
+      const held = await seedGuardian({ parentId: ana.id, familyQboId: "20", status: "disabled", disabledReason: "held", statusBeforeDisable: "invited" });
       await seedCache(ALL);
-      // Her two rows swapped between the records (one row of a person per record, so through none): each now names the
-      // other family's customer, not its own family's row to reopen.
-      await db.update(guardian).set({ familyId: null }).where(eq(guardian.id, other.id));
-      await db.update(guardian).set({ familyId: chen }).where(eq(guardian.id, held.id));
-      await db.update(guardian).set({ familyId: rivera }).where(eq(guardian.id, other.id));
-      const OTHER = "This sign-in was made for a different customer in QuickBooks than this family's own, so it can't be brought back here.";
-      const errors = async (id: string) => ((await reinstateGuardianAction(id)) as { errors: string[] }).errors;
-      expect(await errors(other.id)).toEqual([OTHER]);
-      // Chen's link gone: a row naming its old customer names one the family isn't linked to.
-      await db.delete(accountingLink).where(eq(accountingLink.familyId, chen));
-      expect(await errors(held.id)).toEqual([OTHER]);
-      expect((await rowsOf(ana.id)).every((g) => g.status === "disabled")).toBe(true);
-      expect(await audits("parent.access.granted")).toEqual([]);
-      // A row that names no customer, in a family with no link: taken back as it was.
+      // An old copy naming another family's customer, as a row made before stage 3's slice 12b1 might hold: read by nothing.
+      await db.update(guardian).set({ familyQboId: "10" }).where(eq(guardian.id, held.id));
+      expect(await reinstateGuardianAction(held.id)).toMatchObject({ ok: true });
+      expect((await rowsOf(ana.id))[0]).toMatchObject({ id: held.id, familyId: chen, status: "invited", disabledReason: null });
+      expect((await audits("parent.access.granted"))[0]).toMatchObject({ targetId: held.id, after: { familyId: String(chen), familyQboId: "20", reinstated: true } });
+      // A row in a family with no link: taken back as it was, audited with no customer.
       const [hand] = await db.insert(family).values({ name: "Hand Family", active: true }).returning({ id: family.id });
       const [none] = await db.insert(guardian).values({ parentId: ana.id, familyQboId: null, familyId: hand!.id, status: "disabled", disabledReason: "removed", statusBeforeDisable: "invited" }).returning();
       expect(await reinstateGuardianAction(none!.id)).toEqual({ ok: true, message: "Reinstated. Their sign-in for this family is back." });
-      expect((await audits("parent.access.granted"))[0]).toMatchObject({ targetId: none!.id, after: { familyId: String(hand!.id), familyQboId: null, reinstated: true } });
+      expect((await audits("parent.access.granted")).find((a) => a.targetId === none!.id)).toMatchObject({ after: { familyId: String(hand!.id), familyQboId: null, reinstated: true } });
     });
   });
 

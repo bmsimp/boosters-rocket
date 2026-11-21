@@ -163,12 +163,12 @@ export const student = pgTable("student", {
 ]);
 
 /**
- * "This person is a guardian in this family." Name, email and phone live on the person (`parent`). `family_qbo_id` is
- * the customer the family's link named when the row was made: null for a membership made while its family had no link
- * (stage 3's slice 9d, migration 0040), which is never filled in later, even once the family is linked, and by which
- * nothing finds a family; an unlink of the family sets it null on every row of the family (stage 4's slice M3b), so a
- * family later linked to that customer never finds the rows as its own. A person is in a family record at most once (`guardian_family_id_parent_uq`); the old unique
- * index by customer stays, for the rows that name one.
+ * "This person is a guardian in this family." Name, email and phone live on the person (`parent`). A row stands on its
+ * family record (`family_id`) and its own link (`accounting_link.guardian_id`), and is found by them alone; a person is
+ * in a family record at most once (`guardian_family_id_parent_uq`). `family_qbo_id` and `source_qbo_id` are old copies
+ * nothing reads since stage 3's slice 12b1 (migration 0048 made a link of each `source_qbo_id` that had none): no row
+ * made since writes them, only an unlink still clears `family_qbo_id` (stage 4's slice M3b), and slice 12b2 drops them
+ * with the two indexes on `family_qbo_id`.
  */
 export const guardian = pgTable("guardian", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -180,7 +180,7 @@ export const guardian = pgTable("guardian", {
   parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "restrict" }),
   isPrimary: boolean("is_primary").notNull().default(false),
   status: text("status", { enum: ["invited", "active", "disabled"] }).notNull().default("invited"),
-  sourceQboId: text("source_qbo_id"),                  // the QuickBooks customer this link came from; null for one made by hand
+  sourceQboId: text("source_qbo_id"),                  // read by nothing since slice 12b1 (its record is the row's own link); dropped in 12b2
   disabledReason: text("disabled_reason", { enum: DISABLED_REASONS }),
   statusBeforeDisable: text("status_before_disable", { enum: ["invited", "active"] }),
   createdAt: created(),

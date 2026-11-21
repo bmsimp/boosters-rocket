@@ -4356,8 +4356,9 @@ async function sendAgainHolding(itemId: string, shown: string, o: WriteOp & { st
    guardian row is linked to it (ownParentCustomer()). Nothing is sent for a guardian in flat books, in books with no
    parent type (the family's email field, open question 7, is S11d's) or for a family with no link. The portal never
    matches a person to a customer by name or address by itself: when the family already has a customer of the person's
-   name under it, nothing is sent and nothing is kept, for stage 4's mapping screen to offer. `source_qbo_id` and
-   `family_qbo_id` are never written for a Parent customer made here, so no record becomes a parent's own (`me`). */
+   name under it, nothing is sent and nothing is kept, for stage 4's mapping screen to offer. A Parent customer made
+   here is linked `created`, never `carried_over`, so the take-in of contact details never reads it as a parent's own
+   record. */
 
 /** Who saves a change first: the staff member's actor, the permission used and their staff user id (null for none). */
 type SaverOp = { actor: Actor; ip: string | null; permission?: string; staffUserId: string | null };
