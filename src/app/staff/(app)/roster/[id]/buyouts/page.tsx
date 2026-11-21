@@ -22,8 +22,20 @@ function InvoiceWords({ b, money }: { b: FamilyBuyout; money: boolean }) {
   const i = b.invoice;
   const owed = money && i.owedCents !== null ? `: ${formatMoney(i.owedCents)} ${i.kind === "part_paid" ? "still owed" : "owed"}` : "";
   const words = { none: b.state === "refused" ? "None: nothing was billed" : "None made yet", not_read: "Not in the family's figures as last read", open: `Open${owed}`,
-    part_paid: `Part paid${owed}`, paid: "Paid", voided: "Voided" }[i.kind];
+    part_paid: `Part paid${owed}`, paid: "Paid", voided: "Voided", earlier_company: `In the earlier QuickBooks company's books: invoice ${i.qboId ?? ""}` }[i.kind];
   return <>{words}{i.readAt ? <span className="when">Read from QuickBooks <LocalTime iso={i.readAt} /></span> : null}</>;
+}
+
+/**
+ * What staff can do about one buy-out: close it where closeVerdict() allows (for staff who may change the roster), or
+ * what to do first. A buy-out of an earlier QuickBooks company says what it leaves to settle in that company's books
+ * (earlierCompanyLook()), but for a refund owed, whose close is offered as today, and one with nothing left to settle,
+ * which says what closeVerdict() says.
+ */
+function WhatToDo({ b, canChange, rosterTag }: { b: FamilyBuyout; canChange: boolean; rosterTag: string }) {
+  if (b.earlier && b.earlier.kind !== "refund_owed" && b.earlier.kind !== "nothing_to_settle") return <>{b.earlier.words}{b.earlier.note ? <span className="when">Note: {b.earlier.note}</span> : null}</>;
+  if (b.close.may && canChange) return <CloseBuyout what={b.close.words} act={closeBuyoutAction.bind(null, b.id, b.tag, rosterTag)} />;
+  return b.close.may ? <>{b.close.words} Staff who may change the roster can close it.</> : <>{b.close.words}</>;
 }
 
 /**
@@ -54,9 +66,7 @@ export default async function FamilyBuyoutsPage({ params }: { params: Promise<{ 
     { key: "stands", header: "How it stands", cell: (b) => <>{b.words}{b.flagWords ? <span className="when">{b.flagWords}</span> : null}{b.code ? <span className="when">Last code: {b.code}</span> : null}</> },
     { key: "invoice", header: "Its invoice", cell: (b) => <InvoiceWords b={b} money={money} /> },
     { key: "when", header: "Chosen", cell: (b) => <><LocalTime iso={b.chosenAt} /><span className="when">Changed <LocalTime iso={b.changedAt} /></span></> },
-    { key: "do", header: "What you can do", cell: (b) => (b.close.may && canChange
-      ? <CloseBuyout what={b.close.words} act={closeBuyoutAction.bind(null, b.id, b.tag, rosterTag)} />
-      : b.close.may ? <>{b.close.words} Staff who may change the roster can close it.</> : b.close.words) },
+    { key: "do", header: "What you can do", cell: (b) => <WhatToDo b={b} canChange={canChange} rosterTag={rosterTag} /> },
   ];
   return (
     <main className="wrap single">

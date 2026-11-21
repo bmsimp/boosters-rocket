@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { loadBuyoutsToLook } from "@/lib/buyouts/staff";
+import { loadBuyoutsToLook, loadEarlierCompanyBuyouts } from "@/lib/buyouts/staff";
 import { formatMoney } from "@/lib/money/cents";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { LocalTime } from "@/app/components/local-time";
@@ -7,7 +7,7 @@ import { DataTable } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
 import { closeBuyoutAction } from "./buyout-actions";
 import { CloseBuyout } from "./close-buyout";
-import { familyBuyoutsPage, familyPage } from "@/app/staff/(app)/family-pages";
+import { familyBuyoutsPage, familyPage, familyProgressPage } from "@/app/staff/(app)/family-pages";
 
 /**
  * The volunteer buy-outs staff must look at (v1 spec §8.4, §11.5): one QuickBooks no longer shows, one whose student
@@ -38,6 +38,41 @@ export async function BuyoutsToLook({ showAmounts, canChange = false }: { showAm
               : b.close.may ? <>{b.close.words} Staff who may change the roster can close it.</> : b.close.words) },
           ]} />
       )}
+    </section>
+  );
+}
+
+/**
+ * What a change of company left in the earlier QuickBooks company's books, for the treasurer to settle there by hand
+ * (stage 4's slice M7b, open question 16): every buy-out of another company than the roster's that leaves something to
+ * settle (src/lib/buyouts/staff.ts, loadEarlierCompanyBuyouts()), named by the app's own records, with the requirement,
+ * for staff who may see money the amount, the earlier company and the invoice or the note to search for, and what to
+ * do. Where the family may have paid there, a link to its season page, where a waiver is given; a refund owed offers
+ * the close, as Volunteer buy-outs does, for staff who may change the roster. Drawn only when it has a row. Nothing is
+ * sent to the browser but what it shows.
+ */
+export async function EarlierCompanyBuyouts({ showAmounts, canChange = false }: { showAmounts: boolean; canChange?: boolean }) {
+  const rosterTag = await currentRosterTag();
+  const items = await loadEarlierCompanyBuyouts();
+  if (items.length === 0) return null;
+  return (
+    <section className="box" aria-labelledby="earlier-buyouts-h"><h2 id="earlier-buyouts-h">From the earlier QuickBooks company ({items.length})</h2>
+      <p>When the club connected a different QuickBooks company, the portal ended these volunteer buy-outs, or kept them where they were paid, and sent nothing more to the earlier company.
+        Each may still have something to settle in that company&apos;s books, by hand: look it up there by its invoice, or by its note.</p>
+      <DataTable caption="Volunteer buy-outs from the earlier QuickBooks company" captionHidden rowKey={(b) => b.id} rows={items}
+        columns={[
+          { key: "family", header: "Family", rowHeader: true, cell: (b) => <><Link href={familyPage(b.familyId)}>{b.familyName}</Link>
+            <span className="when"><Link href={familyBuyoutsPage(b.familyId)}>Its buy-outs</Link></span></> },
+          { key: "requirement", header: "Requirement", cell: (b) => <>{b.requirement}{b.subjectName ? `, for ${b.subjectName}` : ""}</> },
+          ...(showAmounts ? [{ key: "amount", header: "Amount", numeric: true, cell: (b: (typeof items)[number]) => formatMoney(b.amountCents) }] : []),
+          { key: "books", header: "In the earlier company", cell: (b) => <>{b.invoiceQboId ? `Invoice ${b.invoiceQboId}` : `Note: ${b.note ?? ""}`}<span className="when">Company {b.realmId}</span></> },
+          { key: "what", header: "What is left to settle", cell: (b) => b.words },
+          { key: "since", header: "Since", cell: (b) => <LocalTime iso={b.at} /> },
+          { key: "do", header: "What you can do", cell: (b) => (b.close ? (b.close.may && canChange
+            ? <CloseBuyout what={b.close.words} act={closeBuyoutAction.bind(null, b.id, b.tag, rosterTag)} />
+            : b.close.may ? <>{b.close.words} Staff who may change the roster can close it.</> : b.close.words)
+            : <Link href={familyProgressPage(b.familyId, b.seasonId)}>Open the family&apos;s season page<span className="visually-hidden">: {b.familyName}, {b.requirement}</span></Link>) },
+        ]} />
     </section>
   );
 }
