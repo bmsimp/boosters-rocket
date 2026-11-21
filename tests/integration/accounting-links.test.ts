@@ -552,7 +552,7 @@ describe("differences, for a link that stands (slice M2)", () => {
     await readAgain();
     expect(await diffsOf("Rivera Family")).toEqual([
       { kind: "name", of: "family", portal: "Rivera Family", books: "Rivera family", queue: null },
-      { kind: "name", of: "student", portal: "Leo Rivera", books: "Leo M. Rivera", queue: null }]);
+      { kind: "name", of: "student", studentId: await recordOfCustomer("12", "student"), portal: "Leo Rivera", books: "Leo M. Rivera", queue: null }]);
     changeInBooks("10", { DisplayName: "Rivera  Family " }); // spaces alone, which the portal's names never hold
     changeInBooks("12", { DisplayName: "Leo Rivera" });
     await readAgain();
@@ -577,13 +577,13 @@ describe("differences, for a link that stands (slice M2)", () => {
     await readAgain();
     expect(await diffsOf("Rivera Family")).toEqual([
       { kind: "active", of: "family", who: "Rivera Family", portalActive: true, queue: null },
-      { kind: "active", of: "student", who: "Leo Rivera", portalActive: true, queue: null }]);
+      { kind: "active", of: "student", studentId: await recordOfCustomer("12", "student"), who: "Leo Rivera", portalActive: true, queue: null }]);
     changeInBooks("10", { Active: true });
     changeInBooks("12", { Active: true });
     await readAgain();
     await db.update(student).set({ active: false }).where(eq(student.id, await recordOfCustomer("12", "student")));
     const row = rowOf(await loadAccountingLinks(), "Rivera Family");
-    expect(row.differences).toEqual([{ kind: "active", of: "student", who: "Leo Rivera", portalActive: false, queue: null }]);
+    expect(row.differences).toEqual([{ kind: "active", of: "student", studentId: await recordOfCustomer("12", "student"), who: "Leo Rivera", portalActive: false, queue: null }]);
     expect(row.students).toEqual([]); // the opening still lists the active students only
   });
 

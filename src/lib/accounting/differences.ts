@@ -34,18 +34,23 @@ export type QueueFact = QueueNote & { op: string; role: string | null; qboId: st
  * - `parent_customers`: how many active Parent customers under the family's customer no guardian row is linked to;
  * - `guardians_unlinked`: how many of the family's open guardian rows have no link, with the queue's words for those a
  *   Parent customer create is on the queue for, as counts.
- * `of` names the record: the family (layered books), the member (flat books) or a student. `queue`: the change on the
+ * `of` names the record: the family (layered books), the member (flat books) or a student, by its record's id (`studentId`). `queue`: the change on the
  * write queue that explains it, if any (still a difference: the values differ until the books or the portal change).
  */
 export type Difference =
-  | { kind: "name"; of: "family" | "member" | "student"; portal: string | null; books: string; queue: QueueNote | null }
-  | { kind: "active"; of: "family" | "member" | "student"; who: string; portalActive: boolean; queue: QueueNote | null }
+  | ({ kind: "name"; portal: string | null; books: string; queue: QueueNote | null } & RecordOf)
+  | ({ kind: "active"; who: string; portalActive: boolean; queue: QueueNote | null } & RecordOf)
   | { kind: "place"; who: string; studentId: AppStudentId; place: Exclude<StudentPlace, { at: "here" } | { at: "unknown" }>; queue: QueueNote | null }
   | { kind: "student_customer"; books: string }
   | { kind: "student_elsewhere"; books: string; studentId: AppStudentId; portal: StudentElsewhere; queue: QueueNote | null }
   | { kind: "student_unlinked"; who: string; studentId: AppStudentId; queue: QueueNote | null }
   | { kind: "parent_customers"; count: number }
   | { kind: "guardians_unlinked"; count: number; queue: { note: QueueNote; count: number }[] };
+/**
+ * Whose `name` or `active` difference it is: the family's or the member's (the row's own record), or a student's, with
+ * the student record's id (stage 4's slice M4a: Take QuickBooks' into the app names the record it changes).
+ */
+export type RecordOf = { of: "family" | "member" } | { of: "student"; studentId: AppStudentId };
 /** Where the portal has a student record whose customer the books have under another family: by the record's words for its family, in none, or inactive. */
 export type StudentElsewhere = { at: "family"; family: string } | { at: "no_family" } | { at: "inactive" };
 /** A student record some student link names, as the screen needs it: its id, whether it is active, and its family's words (null: in none). */
@@ -138,11 +143,11 @@ export function differencesOf(o: { shape: MembershipShape; roster: Roster; custo
         // An inactive record shows here only where the roster lists its customer, active, directly under the family's (as
         // the Families pages list it). One whose customer the books have active under another family is told in that
         // family's row, as a student whose record is inactive (student_elsewhere, below).
-        if (c?.active && there?.students.some((x) => x.qboId === c.qboId)) out.push({ kind: "active", of: "student", who, portalActive: false, queue: q.deactivate.get(c.qboId) ?? null });
+        if (c?.active && there?.students.some((x) => x.qboId === c.qboId)) out.push({ kind: "active", of: "student", studentId: s.id, who, portalActive: false, queue: q.deactivate.get(c.qboId) ?? null });
         continue;
       }
-      if (c !== undefined && !sameName(s.name, c.displayName)) out.push({ kind: "name", of: "student", portal: s.name, books: c.displayName, queue: q.rename.get(c.qboId) ?? null });
-      if (c !== undefined && !c.active) out.push({ kind: "active", of: "student", who, portalActive: true, queue: q.deactivate.get(c.qboId) ?? null });
+      if (c !== undefined && !sameName(s.name, c.displayName)) out.push({ kind: "name", of: "student", studentId: s.id, portal: s.name, books: c.displayName, queue: q.rename.get(c.qboId) ?? null });
+      if (c !== undefined && !c.active) out.push({ kind: "active", of: "student", studentId: s.id, who, portalActive: true, queue: q.deactivate.get(c.qboId) ?? null });
       const place = placeOf(s.customerId, f.customerId);
       if (place.at !== "here" && place.at !== "unknown") out.push({ kind: "place", who, studentId: s.id, place, queue: q.move.get(String(s.id)) ?? null });
     }
