@@ -126,8 +126,8 @@ export const sendAllStampHolds = (filter: { status: string | null; q: string }, 
 
 /**
  * The reviewed import (slice M6): the whole list the review showed, not the ticks: for each family in its order, its
- * customer, its student customers made and left alone, and each guardian's address, Parent customer and person
- * (importKeys(), src/lib/accounting/import-proposals.ts), in that order (never sorted: the order is what is made first),
+ * customer and name, its student customers made (with their names and active flags) and left alone (with their names),
+ * and each guardian's name, address, Parent customer and person (importKeys(), src/lib/accounting/import-proposals.ts), in that order (never sorted: the order is what is made first),
  * sealed in a domain of its own, so no other press's stamp is ever the import's. The press works the proposal out again
  * under the roster lock and it must seal to the same stamp.
  */

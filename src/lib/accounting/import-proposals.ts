@@ -215,9 +215,13 @@ export function proposeImport(i: ImportInput, persons: ReadonlyMap<string, Impor
 
 /**
  * What the import's stamp seals (importStamp(), ./stamp.ts), for each family the review shows, in its order: its
- * customer, the student customers it makes and those it leaves alone, and each guardian's address, Parent customer
- * linked (`""` for none) and person (`new`, or the person's id). The ticks are the press's, not the stamp's.
+ * customer and the name the family is made with, the student customers it makes (each with the name and whether active
+ * it is made with) and those it leaves alone (by name, as shown), and each guardian's name, address, Parent customer
+ * linked (`""` for none) and person (`new`, or the person's id). So a read of the same company's roster between the
+ * review and the press that renames a customer or changes a student's active flag refuses the press, rather than make
+ * records or people under names the review never showed. A reused person's own name and families aren't sealed: the
+ * person is, by id, and keeps their name. The ticks are the press's, not the stamp's.
  */
-export const importKeys = (families: readonly ProposedFamily[]): string[] => families.map((f) => JSON.stringify([f.customerId,
-  f.students.made.map((s) => s.qboId), f.students.leftAlone.map((s) => s.qboId),
-  f.guardians.map((g) => [g.email, g.link?.qboId ?? "", g.person.kind === "new" ? "new" : g.person.id.toLowerCase()])]));
+export const importKeys = (families: readonly ProposedFamily[]): string[] => families.map((f) => JSON.stringify([f.customerId, f.name,
+  f.students.made.map((s) => [s.qboId, s.name, s.active]), f.students.leftAlone.map((s) => [s.qboId, s.name]),
+  f.guardians.map((g) => [g.name, g.email, g.link?.qboId ?? "", g.person.kind === "new" ? "new" : g.person.id.toLowerCase()])]));

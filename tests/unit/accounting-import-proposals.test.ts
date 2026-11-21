@@ -165,7 +165,7 @@ describe("the import's stamp", () => {
     expect(stamp).not.toBe(sendAllStamp({ status: null, q: "" }, k.length, k));
   });
 
-  it("changes with every field it seals: a family, its order, a student made or left alone, a guardian's address, Parent customer and person", () => {
+  it("changes with every field it seals: a family, its name, its order, a student made or left alone, their names and active flags, a guardian's name, address, Parent customer and person", () => {
     const stamp = importStamp(keys());
     const persons = new Map<string, ImportPerson>([["nita@example.com", { id: "00000000-0000-4000-8000-000000000001", name: "Nita", blocked: false, families: [] }]]);
     const changed = [
@@ -176,7 +176,15 @@ describe("the import's stamp", () => {
       keys({}, NOBODY, BOOKS.map((x) => (x.qboId === "73" ? { ...x, email: "nita.new@example.com" } : x))), // the guardian's address
       keys({ taken: ["73"] }), // the guardian's Parent customer no longer linked
       keys({}, persons), // the address held by a person now
+      keys({}, NOBODY, BOOKS.map((x) => (x.qboId === "70" ? { ...x, displayName: "Patel Household" } : x))), // the family's name
+      keys({}, NOBODY, BOOKS.map((x) => (x.qboId === "71" ? { ...x, displayName: "Asha P. Patel" } : x))), // a student's name
+      keys({}, NOBODY, BOOKS.map((x) => (x.qboId === "72" ? { ...x, active: false } : x))), // a student made inactive
+      keys({ studentLinked: ["72"] }, NOBODY, BOOKS.map((x) => (x.qboId === "72" ? { ...x, displayName: "Ravi P. Patel" } : x))), // a student left alone, renamed
+      keys({}, NOBODY, BOOKS.map((x) => (x.qboId === "73" ? { ...x, displayName: "Anita Okafor-Patel" } : x))), // the name a new guardian is given
     ];
+    // The student left alone, renamed, against the list that leaves it alone as it was.
+    expect(importStampHolds(keys({ studentLinked: ["72"] }, NOBODY, BOOKS.map((x) => (x.qboId === "72" ? { ...x, displayName: "Ravi P. Patel" } : x))),
+      importStamp(keys({ studentLinked: ["72"] })))).toBe(false);
     for (const k of changed) expect(importStampHolds(k, stamp), JSON.stringify(k)).toBe(false);
     // A person's name or families aren't sealed: the person is, by id.
     const renamed = new Map([["nita@example.com", { ...persons.get("nita@example.com")!, name: "Nita Renamed", families: ["The Riveras"] }]]);
