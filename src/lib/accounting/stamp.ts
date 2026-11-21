@@ -84,3 +84,16 @@ export function guardianUnlinkStamp(guardianId: string, linkId: string, customer
 }
 export const guardianUnlinkStampHolds = (guardianId: string, linkId: string, customerId: string, stamp: string): boolean =>
   same(guardianUnlinkStamp(guardianId, linkId, customerId), stamp);
+
+/**
+ * Take QuickBooks' into the app (slice M4a): what a difference's press takes (`field`: `name`, `inactive` or `place`),
+ * the record it changes (the family's or the student's app id), its customer, and the value the row showed, sealed in a
+ * domain of their own: for a name the books' name exactly; for a family taken as inactive the ids of the active student
+ * records it takes with it, sorted; for a place the student's customer, the books' family customer, the family record
+ * left and the family record joined. The press works each value out again under the roster lock and must seal to it.
+ */
+export function takeStamp(field: string, recordId: string, customerId: string, value: readonly unknown[]): string {
+  return sealed("accounting-take", [field, recordId.toLowerCase(), customerId, [...value]]);
+}
+export const takeStampHolds = (field: string, recordId: string, customerId: string, value: readonly unknown[], stamp: string): boolean =>
+  same(takeStamp(field, recordId, customerId, value), stamp);

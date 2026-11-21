@@ -7,7 +7,7 @@
 export const QUICKBOOKS_USE = {
   reads: "The portal reads the club's families and members, with the email, phone and mailing address on their records, what each family owes, and the products and services its invoices are for, from QuickBooks. "
     + "What it reads there decides whose invoices each family sees; it changes none of the portal's own families, students or sign-ins, "
-    + "so a name, a student's family or an inactive customer changed in QuickBooks stays as the portal has it. "
+    + "so a name, a student's family or an inactive customer changed in QuickBooks stays as the portal has it until someone who may link families to accounting takes it into the portal, on the accounting links screen. "
     + "A guardian's phone and mailing address are the portal's own: it takes them in once, from the guardian's own record, after the first roster read since the update that made them so, "
     + "and a change made to them in QuickBooks after that stays there.",
   writes: "It changes only what someone asks it to there: "

@@ -241,7 +241,8 @@ function parentRowsOf(r: RecordNames): SQL | undefined {
 /**
  * A student's move names both its families in its body, not its target (the student, or before slice 9f the student's
  * customer): the portal's save (`roster.record.moved`: the family left as `before.familyId` and `after.fromFamilyId`,
- * the family joined as `after.familyId`) and its follow-ups (`roster.student.move.followed`: `fromFamilyId` and
+ * the family joined as `after.familyId`; since stage 4's slice M4a, a move taken from the books on the accounting links
+ * screen likewise, `accounting.difference.take` with `after.field` `place`) and its follow-ups (`roster.student.move.followed`: `fromFamilyId` and
  * `toFamilyId` since, the customers `fromFamilyQboId` and `toFamilyQboId` before), and its send to QuickBooks
  * (`roster.student.move`, whose target is the student's customer: where the cache had them before, `before.familyQboId`,
  * and where QuickBooks' answer has them, `after.familyQboId`). A search for either family finds them; a search for the
@@ -250,10 +251,13 @@ function parentRowsOf(r: RecordNames): SQL | undefined {
 function moveRowsOf(r: RecordNames): SQL | undefined {
   if (r.kind === "student") return undefined;
   // The key is one of those written here, never a value from the address: written into the query as a text literal.
-  type Key = "familyId" | "fromFamilyId" | "toFamilyId" | "fromFamilyQboId" | "toFamilyQboId" | "familyQboId";
+  type Key = "familyId" | "fromFamilyId" | "toFamilyId" | "fromFamilyQboId" | "toFamilyQboId" | "familyQboId" | "field";
   const said = (side: "before" | "after", key: Key) => sql`(${side === "before" ? auditLog.before : auditLog.after}) ->> ${sql.raw(`'${key}'`)}`;
   return or(
     and(eq(auditLog.action, "roster.record.moved"), or(eq(said("before", "familyId"), r.id), eq(said("after", "familyId"), r.id), eq(said("after", "fromFamilyId"), r.id))),
+    // A move taken from the books on the accounting links screen (stage 4's slice M4a) names both families as a portal move's row does.
+    and(eq(auditLog.action, "accounting.difference.take"), eq(said("after", "field"), "place"),
+      or(eq(said("before", "familyId"), r.id), eq(said("after", "familyId"), r.id), eq(said("after", "fromFamilyId"), r.id))),
     and(eq(auditLog.action, "roster.student.move.followed"), or(eq(said("after", "fromFamilyId"), r.id), eq(said("after", "toFamilyId"), r.id),
       ...named(said("after", "fromFamilyQboId"), r.families), ...named(said("after", "toFamilyQboId"), r.families))),
     ...(r.families.length ? [and(eq(auditLog.action, "roster.student.move"), or(...named(said("before", "familyQboId"), r.families), ...named(said("after", "familyQboId"), r.families)))] : []),
