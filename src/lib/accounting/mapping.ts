@@ -649,7 +649,10 @@ export async function readLinkBasics(tx?: Tx) {
   return { source, connection, shape, typeRows, okRuns, customerRows, customers, customerById, tokenOf, roster, realm, state, everyFamily, families, everyStudent, students,
     guardians, links, linkOfFamily, familyOfCustomer, customerOfStudent, customerOfGuardian, studentLinked, pool, poolIds, studentsOf, guardiansOf, addressesOf, leftOf,
     unlinked, suggestions, listedAsFamily, proposalsFor, offerFor, chosenFor, reviewOf, unlinkOf, createQueuedFor, familyLinkedAnywhere, creates,
-    everyGuardian, guardianById, linkOfGuardian, guardianBooksOf, guardianOfferOf, guardianLinkOf, removedOf };
+    everyGuardian, guardianById, linkOfGuardian, guardianBooksOf, guardianOfferOf, guardianLinkOf, removedOf,
+    // Since slice M6, for the import's proposals (importInputOf()): the customers a guardian link names, those a row's
+    // ended link keeps, and those a change that blocks others targets.
+    guardianLinked, keptForRows, heldCustomers, parentTypeId };
 }
 export type LinkBasics = Awaited<ReturnType<typeof readLinkBasics>>;
 

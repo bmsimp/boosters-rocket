@@ -33,7 +33,7 @@ import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { family, guardian, parent, parentAuthUser, staffUser } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
-import { normalizeEmail } from "@/lib/email";
+import { guardianEmail, personName } from "./guardian-input";
 import { familyLinkState } from "@/lib/families/links";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { recordNameWords } from "@/lib/families/words";
@@ -44,24 +44,14 @@ import type { StaffOp } from "./people";
 import { GUARDIAN_COLS, guardianRowCounts, lockEmail, studentsRuleInForce, type GuardianRow } from "./sessions";
 import { getParentSettings, PARENTS_KEY } from "./settings";
 
-/** The longest name staff may give a person, and the longest address the portal reads. */
-export const PERSON_NAME_MAX = 100;
-const EMAIL_MAX = 320;
+// The name and address rules, pure since stage 4's slice M6 (./guardian-input.ts), so the import's proposer shares them.
+export { guardianEmail, PERSON_NAME_MAX, personName } from "./guardian-input";
 /** The longest note staff may keep when removing a guardian. */
 export const REMOVE_NOTE_MAX = 500;
 /** How long a staff guardian write (and renamePerson()) waits for the roster lock before it answers `busy`: three seconds. */
 export const ROSTER_WAIT_MS = 3000;
 /** How long the roster lock is waited for; a test may shorten or lengthen it. */
 export type Waits = { rosterWaitMs?: number };
-
-/** A person's name as staff typed it, trimmed, with its spaces closed up: 1 to 100 characters, none a control character. */
-export function personName(raw: string): string | null {
-  const name = raw.replace(/\s+/g, " ").trim();
-  return name.length >= 1 && name.length <= PERSON_NAME_MAX && !/\p{Cc}/u.test(name) ? name : null;
-}
-
-/** The address staff typed, by the portal's own rule (normalizeEmail(): trimmed, lower-cased, a valid address). */
-export const guardianEmail = (raw: string): string | null => (raw.length <= EMAIL_MAX ? normalizeEmail(raw) : null);
 
 /** The parents' settings lock, shared: the first lock of every write here, before the person's. */
 const holdSettings = (tx: Tx) => tx.execute(sql`select pg_advisory_xact_lock_shared(hashtext(${PARENTS_KEY}))`);
