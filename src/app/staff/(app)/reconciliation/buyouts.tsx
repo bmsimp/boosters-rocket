@@ -56,17 +56,23 @@ export async function EarlierCompanyBuyouts({ showAmounts, canChange = false }: 
   const rosterTag = await currentRosterTag();
   const items = await loadEarlierCompanyBuyouts();
   if (items.length === 0) return null;
+  // After a switch away and back, a row may be in the company connected now (`here`): the words around the rows then
+  // name no single company, and each row says which it is in.
+  const anyHere = items.some((b) => b.here);
   return (
-    <section className="box" aria-labelledby="earlier-buyouts-h"><h2 id="earlier-buyouts-h">From the earlier QuickBooks company ({items.length})</h2>
-      <p>When the club connected a different QuickBooks company, the portal ended these volunteer buy-outs, or kept them where they were paid, and sent nothing more to the earlier company.
-        Each may still have something to settle in that company&apos;s books, by hand: look it up there by its invoice, or by its note.</p>
-      <DataTable caption="Volunteer buy-outs from the earlier QuickBooks company" captionHidden rowKey={(b) => b.id} rows={items}
+    <section className="box" aria-labelledby="earlier-buyouts-h"><h2 id="earlier-buyouts-h">{anyHere ? "Ended by a change of QuickBooks company" : "From the earlier QuickBooks company"} ({items.length})</h2>
+      {anyHere
+        ? <p>When the club connected a different QuickBooks company, the portal ended these volunteer buy-outs, or kept them where they were paid, and sent nothing more for them.
+            Each may still have something to settle by hand in the books its row names, an earlier company&apos;s or the one connected now: look it up there by its invoice, or by its note.</p>
+        : <p>When the club connected a different QuickBooks company, the portal ended these volunteer buy-outs, or kept them where they were paid, and sent nothing more to the earlier company.
+            Each may still have something to settle in that company&apos;s books, by hand: look it up there by its invoice, or by its note.</p>}
+      <DataTable caption={anyHere ? "Volunteer buy-outs ended by a change of QuickBooks company" : "Volunteer buy-outs from the earlier QuickBooks company"} captionHidden rowKey={(b) => b.id} rows={items}
         columns={[
           { key: "family", header: "Family", rowHeader: true, cell: (b) => <>{b.familyPageStands ? <Link href={familyPage(b.familyId)}>{b.familyName}</Link> : b.familyName}
             <span className="when"><Link href={familyBuyoutsPage(b.familyId)}>Its buy-outs</Link></span></> },
           { key: "requirement", header: "Requirement", cell: (b) => <>{b.requirement}{b.subjectName ? `, for ${b.subjectName}` : ""}</> },
           ...(showAmounts ? [{ key: "amount", header: "Amount", numeric: true, cell: (b: (typeof items)[number]) => formatMoney(b.amountCents) }] : []),
-          { key: "books", header: "In the earlier company", cell: (b) => <>{b.invoiceQboId ? `Invoice ${b.invoiceQboId}` : `Note: ${b.note ?? ""}`}<span className="when">{b.here ? "The company connected now: the club switched away and back" : `Company ${b.realmId}`}</span></> },
+          { key: "books", header: anyHere ? "In QuickBooks" : "In the earlier company", cell: (b) => <>{b.invoiceQboId ? `Invoice ${b.invoiceQboId}` : `Note: ${b.note ?? ""}`}<span className="when">{b.here ? "The company connected now: the club switched away and back" : `Company ${b.realmId}`}</span></> },
           { key: "what", header: "What is left to settle", cell: (b) => b.words },
           { key: "since", header: "Since", cell: (b) => <LocalTime iso={b.at} /> },
           { key: "do", header: "What you can do", cell: (b) => (b.close ? (b.close.may && canChange

@@ -218,14 +218,21 @@ async function invoiceFoundAfterEnding(tx: Tx, item: Item, b: Row, inv: Invoice,
     after: { state: "voided", endReason: "earlier_company", invoiceQboId: inv.qboId, customerQboId: inv.customerQboId, amountCents: b.amountCents, realmId: b.realmId, how, queueId: item.id } }, tx);
 }
 
+/** Whether a code is QuickBooks' own answer, not a refusal the portal made before sending anything (classify()). */
+const answerFromQuickBooks = (code: string) => !["other_company", "not_connected", "needs_admin"].includes(classify(code).kind);
+
 /**
  * QuickBooks' answer to a write for a buy-out a change of company ended meanwhile (`voided`, `earlier_company`): kept as
  * its `last_code` (AFTER_ENDING, ./closing.ts), its state and end reason unchanged, audited in the finish's transaction,
  * so the treasurer's list reads what QuickBooks did there rather than what it may have done (stage 4's slice M8). A
  * create refused (`refused`: no invoice was made), a void carried out (`voided`), or a void QuickBooks found part paid,
- * paid in full or gone, or refused (`kept`). Nothing is sent and nothing else is changed.
+ * paid in full or gone, or refused (`kept`). Nothing is sent and nothing else is changed. A refusal the portal made
+ * itself is not recorded: the buy-out reads as it did, a void unanswered as one that may have gone.
  */
 async function answeredAfterEnding(tx: Tx, item: Item, b: Row, what: "refused" | "voided" | "kept", lastCode: (typeof AFTER_ENDING)[keyof typeof AFTER_ENDING], code: string, actor: Actor): Promise<void> {
+  // A refusal the portal made itself (another company connected, not connected, only an Admin can fix it) sent nothing
+  // and is no answer from QuickBooks: an earlier try may still have been sent, so nothing is recorded.
+  if (what !== "voided" && !answerFromQuickBooks(code)) return;
   const [kept] = await tx.update(buyout).set({ lastCode, updatedAt: new Date() })
     .where(and(eq(buyout.id, b.id), eq(buyout.state, "voided"), eq(buyout.endReason, "earlier_company"))).returning({ id: buyout.id });
   if (!kept) return;
