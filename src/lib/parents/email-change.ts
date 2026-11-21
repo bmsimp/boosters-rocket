@@ -166,7 +166,7 @@ class NotFinished extends Error { constructor(readonly why: "session_ended" | "b
  * Then the portal, in one transaction, in the order ./sessions.ts gives (lockedPerson()): both address locks, then the
  * person's row, then the request is spent (one already spent, by another press of the same link, ends it there: nothing
  * more is done or audited, and this press is told as that one was; one deleted since it was read, by a block, a
- * removal, a new ask or the change-of-company clear, is told as signed out when the person was blocked or the session
+ * removal or a new ask, is told as signed out when the person was blocked or the session
  * ended, and otherwise as a link that no longer works, `bad_link`); then, read again under that row, the person still
  * there and not blocked and the session that confirms still existing (ended meanwhile by any end of it, the change
  * stops: thrown, so the spend goes back with the rest, recorded with its own code, `session_ended`, `blocked` or
@@ -213,7 +213,7 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown): Prom
   const finish = () => db.transaction(async (tx): Promise<"changed" | "taken" | "gone" | null> => {
     // The person first, in the order ./sessions.ts gives (lockedPerson()): both addresses, then the person's row, then
     // what hangs on the person, their email change requests, sign-in codes, set-up and reset links, remembered devices
-    // and sessions, in that order. An ask, a block, the switches, the daily clean-up and the change-of-company clear
+    // and sessions, in that order. An ask, a block, the switches and the daily clean-up
     // take the same rows in the same order, so none of them can wait on this one while it waits on them.
     for (const address of [oldEmail, newEmail].sort()) await lockEmail(tx, address);
     const [me] = await tx.select({ blocked: parent.blocked }).from(parent).where(eq(parent.id, ctx.parentId)).for("update");
@@ -230,7 +230,7 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown): Prom
       // Nothing more is done or audited for it.
       const [still] = await tx.select({ id: parentEmailChange.id }).from(parentEmailChange).where(eq(parentEmailChange.id, row.id));
       if (still) return null;
-      // Gone since it was read: a block, a removal, the change-of-company clear or a new ask deleted it. A block or
+      // Gone since it was read: a block, a removal or a new ask deleted it. A block or
       // an end of the session is told as one; otherwise the link no longer works, as any other.
       await stopIfSignedOut();
       return "gone";

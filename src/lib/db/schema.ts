@@ -299,7 +299,7 @@ export const signinCode = pgTable("signin_code", {
  * the person's lock and in the same transaction, as a new sign-in code replaces the old one (signin-codes.ts); an insert
  * alone would fail on `parent_signin_token_one_live_uq`. It goes with the person. The daily clean-up deletes one past its expiry or
  * used. Made by mintSigninLink() and spent by choosePasswordFromLink() since slice SI-2 (src/lib/parents/signin-links.ts,
- * password-set.ts); blocking, sign-ins switched off, the change-of-company clear, a confirmed change of sign-in email
+ * password-set.ts); blocking, sign-ins switched off, a confirmed change of sign-in email
  * and closing a person's last open membership delete the unused ones.
  */
 export const parentSigninToken = pgTable("parent_signin_token", {
@@ -319,7 +319,7 @@ export const parentSigninToken = pgTable("parent_signin_token", {
  * A device remembered as having passed the second step of a sign-in, for a person (the sign-in release): the keyed
  * hash of the token its cookie holds, never the token; renewed by use (`last_used_at`, `expires_at`). It goes with the
  * person. The daily clean-up deletes one past its expiry. Nothing makes one yet (slice SI-3b will); since slice SI-2
- * blocking, sign-ins switched off, the change-of-company clear, a password reset, a confirmed change of sign-in email
+ * blocking, sign-ins switched off, a password reset, a confirmed change of sign-in email
  * and closing a person's last open membership delete them (src/lib/parents/sessions.ts).
  */
 export const parentDevice = pgTable("parent_device", {
@@ -1369,8 +1369,8 @@ export const staffAuthVerification = staffAuth.verification;
 // carries the device's cookie (its path is the door's), so the session's renewal (renewParentSession(),
 // src/lib/parents/sessions.ts), which runs while a page renders, renews the device it names through this; and the
 // sign-in settings mark "This device" by it. Like `strong_at` it is the portal's alone and not a Better Auth additional
-// field. `ON DELETE SET NULL`: forgetting a device, a block, a reset, a password change, the clean-up and the
-// change-of-company clear delete device rows, and the sessions they named go on with none. Null for a session made
+// field. `ON DELETE SET NULL`: forgetting a device, a block, a reset, a password change and the clean-up delete
+// device rows, and the sessions they named go on with none. Null for a session made
 // before SI-5b (nothing tells which device made it), and for one whose device is gone.
 // The column lands on `main` ahead of the sign-in release's code, so migrations keep one order: until that release
 // merges, nothing here writes or reads it.

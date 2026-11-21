@@ -197,7 +197,7 @@ export async function studentsRuleInForce(tx?: Tx): Promise<boolean> {
  * slice 12b1). That is the order the rows' own copy of the customer (`family_qbo_id`) gave for every row whose copy
  * matched its family's link. Two kinds of row had a copy that didn't, and now sort among the linked families by their
  * family's customer instead of staying at the end: one made while its family had no link, of a family linked since,
- * and one of a family unlinked (an unlink clears the copy, stage 4's slice M3b) and linked again since. While
+ * and one of a family unlinked (an unlink cleared the copy, stage 4's slice M3b, until stage 3's slice 12b2 dropped it) and linked again since. While
  * QuickBooks is connected to another company than the records' (recordsCompany() answers null) no link is read, and
  * the rows come in row id order. A family's place in the chooser (and its "(1)", "(2)" in myFamilyNames()) moves when
  * the family is linked, unlinked or relinked, and in that one state. Closing a membership

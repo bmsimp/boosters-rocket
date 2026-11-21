@@ -130,7 +130,7 @@ names when a parent asks for a new sign-in email, or opens or confirms its link.
 finishing and the new `app` taking over, such a parent sees an error page. Nothing is lost: once **Health** names the
 new version, they ask again or open the link again, and it works.
 
-## A staff press on a guardian while the update starts
+## Unlinking a family, or a parent's sign-in, while the update starts
 
 The update that drops each guardian row's old copies of its QuickBooks customers (migration 0049) removes two
 columns the version before it still names in one place: Unlink from the books, on **Accounting links**. In the seconds
