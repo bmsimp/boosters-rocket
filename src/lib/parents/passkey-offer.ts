@@ -8,8 +8,8 @@
 // Strict, where a remembered device asks for the second step again and its row is renewed, at every sign-in there;
 // under Standard a remembered device signs in by the password alone and is offered nothing, so the sessions offered
 // there are made on a device just remembered, and a cleared browser, another browser on one phone or a private window
-// is a new device, offered again at once. There the count of three is the limit (the lead's call, said in
-// docs/agents/sign-in.md). Everything is for the session's own person and device (`ctx.parentId`,
+// is a new device, offered again at once. There the count of three is the limit (the lead's call, said in "The
+// passkey offer" of docs/agents/sign-in.md). Everything is for the session's own person and device (`ctx.parentId`,
 // `ctx.sessionId`): no id comes from the browser. The rule itself is pure (passkey-offer-rule.ts). Server only; parent
 // code.
 import "server-only";

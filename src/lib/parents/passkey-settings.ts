@@ -153,7 +153,7 @@ type AddRefusal = "not_a_registration" | "bad_name" | "not_allowed" | "not_verif
  *     person already holds a passkey (hasPasskey() counts the unrecorded row), so a request of this same session that
  *     the gate reads then (a second tab reloading) ends it (`enrol_ended`); the add then completes nothing (no
  *     `enrolled: true`) and answers its codes to a session that is gone, and the guardian signs in again with the
- *     passkey. Accepted (docs/agents/sign-in.md, SI-10a): the passkey is theirs, and nothing is let through.
+ *     passkey. Accepted (docs/agents/sign-in.md, "Strict's enrolment"): the passkey is theirs, and nothing is let through.
  * Devices stay remembered, and no session is ended or made; `strong_at` is left as it is but for an enrolment's
  * session, so the new passkey, now the person's newest factor, makes this session's earlier proof stop counting
  * (sessionStrongAt()).
