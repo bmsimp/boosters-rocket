@@ -154,7 +154,7 @@ describe("Confirm on a Suggested row", () => {
     expect(r).toEqual({ ok: true, message: "The Patels is linked to “Patel Family” in the books. 2 students linked with it: Asha Patel and ravi patel."
       + " Left with no link: Mia Patel, of the portal's students. Left with no record in the portal: Dev Patel, of the student customers under it in the books."
       + " Whoever was left shows with the family's row on this page, among its differences. No guardian was linked with it."
-      + " Any other open guardian of the family can be linked in its row's opening on this page, with Link this guardian, to a Parent customer under it that no guardian is linked to. Nothing was sent to the books."
+      + " Another open guardian of the family can be linked in its row's opening on this page, with Link this guardian, where an active Parent customer directly under it is free for them and no change for them or that customer is waiting, stuck or kept on Reconciliation. Nothing was sent to the books."
       + " Its money is read from the books the next time a parent opens Home or Payments, when someone presses “Read every family now” on Balances, or at the daily read of every family's invoices, while the books are connected;"
       + " its Balances page shows the figures once one of those has read them." });
     // Nothing asked of QuickBooks, and no record, guardian row, person, queue item or money row changed.

@@ -170,8 +170,8 @@ function ProposalsShown({ proposals }: { proposals: Proposals }) {
       {guardians.length > 0 && <><p>Guardians linked with it, by the sign-in address their Parent customer&apos;s email field holds:</p>
         <ul>{guardians.map((g) => <li key={g.guardianId}>{g.who} with {g.customerName}</li>)}</ul></>}
       {guardiansHeld.length > 0 && <><p>Not linked with it, though their Parent customer&apos;s email field holds their sign-in address:</p>
-        <ul>{guardiansHeld.map((g) => <li key={g.guardianId}>{g.who} with {g.customerName}: a change for {g.who} or for {g.customerName} is waiting, stuck or kept on the Reconciliation page, so they aren&apos;t linked with it.
-          Once it has gone through or been given up there, they can be linked in this row&apos;s opening, with Link this guardian, if the family is linked by then and that Parent customer is still free for them.
+        <ul>{guardiansHeld.map((g) => <li key={g.guardianId}>{g.who} with {g.customerName}: a change for them or for their Parent customer is waiting, stuck or kept on the Reconciliation page, so they aren&apos;t linked with it.
+          Once it has gone through or been given up there, they can be linked in the opening of the family&apos;s row on this page, with Link this guardian, if the family is linked by then and that Parent customer is still free for them.
           {" "}<Link href={RECONCILIATION_CHANGES}>See the changes on Reconciliation<span className="visually-hidden">: {g.who}</span></Link></li>)}</ul></>}
     </>
   );
@@ -425,7 +425,7 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
             A guardian who can&apos;t sign in, because they are blocked, is listed under the family, but their address is never matched.</p>
           <p>A family the portal has is linked here: Confirm its suggestion, or one of its possible customers, or pick a different customer from those no family is linked to.
             Nothing is sent to the books: the press ties the family to its customer in the portal, with each of its students whose name is on exactly one student on each side,
-            and, where the books have Parent customers, each of its guardians whose sign-in address is in the email field of exactly one Parent customer under it that no one is linked to and that holds no other of its guardians&apos; addresses, unless a change for them waits on Reconciliation.
+            and, where the books have Parent customers, each of its guardians whose sign-in address is in the email field of exactly one Parent customer under it that no one is linked to (nor kept for another guardian whose link to it an unlink ended) and that holds no other of its guardians&apos; addresses, unless a change for them or that customer is waiting, stuck or kept on Reconciliation.
             Students left that way aren&apos;t linked, and show with the family&apos;s row among its differences, but for a student customer inactive in the books, which is only counted there. Leave unlinked keeps a family out of the suggestions until someone undoes it.</p>
           <p>A link also comes with something new. &ldquo;Create a family from this&rdquo;, on Reconciliation, makes a new family in the portal from a customer no family is linked to.
             &ldquo;Create in QuickBooks and link&rdquo;, on a family&apos;s page, makes a new customer in the books for a family that has none, but not for one unlinked while its customer is still in the books, nor for a student of it whose customer is; and adding a family under Families makes one too, when someone who may link families adds it while the books are connected.</p>

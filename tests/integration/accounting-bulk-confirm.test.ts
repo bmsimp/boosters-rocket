@@ -160,7 +160,7 @@ describe("the rows a filter shows", () => {
     const narrowed = await press({ status: "", q: "books@okafor" }, bulk);
     expect(narrowed).toEqual({ ok: true, message: bulkConfirmedWords({ families: ["The Okafors"], students: 1, recordsLeft: 0, activeCustomersLeft: 0, inactiveCustomersLeft: 0, keptMoves: 0, guardians: { linked: 0, held: 0 } }) });
     expect((narrowed as { message: string }).message).toContain("1 family linked, to the customer that was filled in on its row: The Okafors. 1 student linked with it in all. No guardian was linked with it. "
-      + "Any other open guardian of the family can be linked in its row's opening on this page, with Link this guardian, to a Parent customer under it that no guardian is linked to. Nothing was sent to the books.");
+      + "Another open guardian of the family can be linked in its row's opening on this page, with Link this guardian, where an active Parent customer directly under it is free for them and no change for them or that customer is waiting, stuck or kept on Reconciliation. Nothing was sent to the books.");
     expect(await linksOfFamily(okafors)).toEqual([expect.objectContaining({ realmId: REALM, customerId: "80", origin: "confirmed", linkedBy: linker.id, syncedToken: "5" })]);
     expect(await studentLinkOf(await studentNamed(okafors, "Ike Jr"))).toMatchObject({ customerId: "81", origin: "confirmed", linkedBy: linker.id, syncedToken: "6" });
     expect(await linksOfFamily(patels)).toEqual([]);
@@ -175,7 +175,7 @@ describe("the rows a filter shows", () => {
     const r = await press({ status: "", q: "" }, bulk);
     expect(r).toMatchObject({ ok: true, message: expect.stringContaining("1 family linked, to the customer that was filled in on its row: The Patels. 1 student linked with it in all."
       + " Whoever was left on either side shows with each family's row on this page, among its differences. No guardian was linked with it."
-      + " Any other open guardian of the family can be linked in its row's opening on this page, with Link this guardian, to a Parent customer under it that no guardian is linked to. Nothing was sent to the books.") });
+      + " Another open guardian of the family can be linked in its row's opening on this page, with Link this guardian, where an active Parent customer directly under it is free for them and no change for them or that customer is waiting, stuck or kept on Reconciliation. Nothing was sent to the books.") });
     expect(await linksOfFamily(patels)).toEqual([expect.objectContaining({ customerId: "70", origin: "confirmed", linkedBy: linker.id, syncedToken: "4" })]);
     expect(await studentLinkOf(await studentNamed(patels, "Asha Patel"))).toMatchObject({ customerId: "71", origin: "confirmed", syncedToken: "2" });
     expect(await studentLinkOf(await studentNamed(patels, "Mia Patel"))).toBeUndefined();
@@ -249,7 +249,12 @@ describe("the rows a filter shows", () => {
     expect(words).toContain("Each family's money is read from the books the next time a parent opens Home or Payments");
     expect(words).toContain("2 guardians linked with them in all, each to the Parent customer under their family's customer whose email field holds their sign-in address."
       + " A guardian whose sign-in address a Parent customer under them holds wasn't linked, as a change for that guardian or for that Parent customer is waiting, stuck or kept on the Reconciliation page."
-      + " Any other open guardian of these families can be linked in their row's opening on this page, with Link this guardian, to a Parent customer under theirs that no guardian is linked to.");
+      + " Another open guardian of these families can be linked in the opening of its family's row on this page, with Link this guardian,"
+      + " where an active Parent customer directly under that family's customer is free for them and no change for them or that customer is waiting, stuck or kept on Reconciliation.");
+    // More than one held: each by their own row or their own Parent customer.
+    expect(bulkConfirmedWords({ families: ["A", "B"], students: 0, recordsLeft: 0, activeCustomersLeft: 0, inactiveCustomersLeft: 0, keptMoves: 0, guardians: { linked: 0, held: 2 } }))
+      .toContain("No guardian was linked with them. 2 guardians whose sign-in addresses Parent customers under them hold weren't linked,"
+        + " as a change for each of them or for their Parent customer is waiting, stuck or kept on the Reconciliation page.");
     expect(words).not.toContain("guardians' own records");
     // In books with no parent type, nothing about guardians.
     expect(bulkConfirmedWords({ families: ["A"], students: 0, recordsLeft: 0, activeCustomersLeft: 0, inactiveCustomersLeft: 0, keptMoves: 0, guardians: null })).not.toContain("guardian");

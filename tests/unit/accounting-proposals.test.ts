@@ -69,7 +69,8 @@ describe("proposeStudents", () => {
 /**
  * Which guardians a family's link would link with it (stage 4's slice M3c2; src/lib/accounting/proposals.ts): an open,
  * unblocked row with no link and an active Parent customer directly under the chosen customer that no link names, by the
- * row's sign-in address in the customer's email field alone, one to one. Pure. The chosen customer is 70, the parent type P.
+ * row's sign-in address in the customer's email field alone, one to one, a customer an ended link keeps for a row being
+ * that row's alone. Pure. The chosen customer is 70, the parent type P.
  */
 const row = (id: string, name: string, email: string, o: Partial<GuardianSide> = {}): GuardianSide => ({ id: `g-${id}`, name, email, blocked: false, open: true, linked: false, ...o });
 const pc = (qboId: string, displayName: string, email: string | null, o: Partial<ParentCustomerSide> = {}): ParentCustomerSide =>
@@ -114,6 +115,18 @@ describe("proposeGuardians", () => {
     // A linked customer holding the same address takes no part: the other is the one.
     expect(guardians([row("1", "Asha Patel", "asha@example.com")], [pc("74", "Asha", "asha@example.com", { linked: true }), pc("75", "Asha P.", "asha@example.com")]))
       .toEqual({ linked: ["Asha Patel=Asha P."], held: [] });
+  });
+
+  it("gives a customer an ended link keeps for a row to that row alone, and to no other: it takes no part for them", () => {
+    const bea = row("1", "Bea Ru", "bea@example.com", { open: false }), cal = row("2", "Cal Ru", "cal@example.com");
+    // Kept for Bea, removed: Cal isn't paired with it, though it holds his address and no other row taking part's.
+    expect(guardians([bea, cal], [pc("501", "Bea Ru", "bea@example.com; cal@example.com", { keptFor: ["g-1"] })])).toEqual({ linked: [], held: [] });
+    // Kept for Cal himself: his.
+    expect(guardians([bea, cal], [pc("501", "Cal Ru", "cal@example.com", { keptFor: ["g-2"] })])).toEqual({ linked: ["Cal Ru=Cal Ru"], held: [] });
+    // Kept for Bea, it takes no part for Cal, so the other customer holding his address is the one.
+    expect(guardians([bea, cal], [pc("501", "Bea Ru", "cal@example.com", { keptFor: ["g-1"] }), pc("502", "C. Ru", "cal@example.com")])).toEqual({ linked: ["Cal Ru=C. Ru"], held: [] });
+    // Kept for no row: as any other.
+    expect(guardians([cal], [pc("501", "Cal Ru", "cal@example.com", { keptFor: [] })])).toEqual({ linked: ["Cal Ru=Cal Ru"], held: [] });
   });
 
   it("holds a pair back whose row an item names or whose customer a blocking change targets, the rest linked", () => {

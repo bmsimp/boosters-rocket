@@ -9,9 +9,10 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 
+import { randomUUID } from "node:crypto";
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, family, guardian, parent, student, writeQueue } from "@/lib/db/schema";
+import { accountingLink, accountingLinkEnded, auditLog, family, guardian, parent, student, writeQueue } from "@/lib/db/schema";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
 import { loadAccountingLinks, type LinkRow, type LinksView } from "@/lib/accounting/mapping";
 import { bulkConfirmedWords, confirmAllSuggested, confirmedWords, LINK_COPY, leaveUnlinked, linkFamilyToCustomer } from "@/lib/accounting/link-writes";
@@ -113,6 +114,9 @@ const openingOf = async (name: string) => {
   return rowNamed(html.slice(at, html.indexOf("</section>", at)), name)![4]!;
 };
 
+/** A page's text: tags and React's text markers gone, apostrophes and quotes as written. */
+const textOf = (html: string) => html.replaceAll("<!-- -->", "").replace(/<[^>]+>/g, "").replaceAll("&#x27;", "'").replaceAll("&quot;", '"').replaceAll("&amp;", "&");
+
 /** The Patels: Asha's address is on A. Patel 74, a Parent customer under the Patel Family 70; Raj Patel 75 holds no address. */
 const PATELS = [qc("70", "Patel Family", "1", { SyncToken: "4" }), qc("71", "Asha Jr", "3", { ...under("70"), SyncToken: "2" }),
   qc("74", "A. Patel", "2", { ...under("70"), ...mail("asha@example.com"), SyncToken: "7" }), qc("75", "Raj Patel", "2", under("70"))];
@@ -151,7 +155,7 @@ describe("a family's Confirm links the guardian a match was on", () => {
     expect(r).toEqual({ ok: true, message: confirmedWords({ family: "The Patels", customer: "Patel Family", linked: ["Asha Jr"], recordsLeft: [], customersLeft: [], keptMoves: 0,
       guardians: { linked: [{ who: "Asha Patel", customer: "A. Patel" }], held: 0 } }) });
     expect(r.ok && r.message).toContain("1 student linked with it: Asha Jr. 1 guardian linked with it, each to the Parent customer under it whose email field holds their sign-in address: Asha Patel to “A. Patel”."
-      + " Any other open guardian of the family can be linked in its row's opening on this page, with Link this guardian, to a Parent customer under it that no guardian is linked to. Nothing was sent to the books.");
+      + " Another open guardian of the family can be linked in its row's opening on this page, with Link this guardian, where an active Parent customer directly under it is free for them and no change for them or that customer is waiting, stuck or kept on Reconciliation. Nothing was sent to the books.");
     // Nothing asked of QuickBooks, nothing queued, and the guardian row as it was: no column of it is the link's.
     expect(stub.apiCalls()).toEqual([]);
     expect(await db.select().from(writeQueue)).toEqual([]);
@@ -189,6 +193,14 @@ describe("a family's Confirm links the guardian a match was on", () => {
     const bulk = view.bulk({ status: null, q: "" })!;
     expect(bulk.count).toBe(2);
     asStaff(linker);
+    // The page says what the bulk press and a family's Confirm link of guardians; the Okafors have no student, and their row says both.
+    const page = textOf(await renderPage(AccountingLinksPage));
+    expect(page).toContain("to the customer filled in on its row, with the students and guardians its row's opening lists.");
+    expect(page).toContain("and, where the books have Parent customers, each of its guardians whose sign-in address is in the email field of exactly one Parent customer under it"
+      + " that no one is linked to (nor kept for another guardian whose link to it an unlink ended) and that holds no other of its guardians' addresses,"
+      + " unless a change for them or that customer is waiting, stuck or kept on Reconciliation.");
+    expect(await openingOf("The Okafors")).toContain("No student would be linked with it."
+      + "Guardians linked with it, by the sign-in address their Parent customer's email field holds:Ike Okafor with Ike Okafor");
     stub.calls.length = 0;
     const r = await confirmAllAction("", "", bulk.count, tag, bulk.stamp!);
     // Asha Jr 71, a student customer under the Patel Family with no record in the portal, is left (a difference).
@@ -227,6 +239,12 @@ describe("a family's Confirm links the guardian a match was on", () => {
     expect(several.offer.proposals.guardians).toEqual([{ guardianId: jo.id, who: "Jo Lee", customerQboId: "92", customerName: "Jo Lee" },
       { guardianId: kim.id, who: "Kim Lee", customerQboId: "91", customerName: "Kim Lee" }]);
     expect(picked.offer).toMatchObject({ chosen: "picked", proposals: { guardians: [{ guardianId: mina.id, customerQboId: "98" }], guardiansHeld: [] } });
+    // The confirm step lists them, after the students: the Lees have none, on either side, and it says both.
+    asStaff(linker);
+    const html = await renderPage(AccountingLinksPage, { searchParams: { pick: String(lees), customer: "90" } });
+    const at = html.indexOf('id="links-pick-h"');
+    expect(textOf(html.slice(at, html.indexOf("</section>", at)))).toContain("No student would be linked with it."
+      + "Guardians linked with it, by the sign-in address their Parent customer's email field holds:Jo Lee with Jo LeeKim Lee with Kim Lee");
     stub.calls.length = 0;
     for (const [familyId, customerId, offer] of [[lees, "90", several.offer], [kos, "97", picked.offer]] as const) {
       expect(await linkFamilyToCustomer({ familyId: String(familyId), customerId, chosen: offer.chosen, stamp: offer.stamp }, tag, linkOp())).toMatchObject({ ok: true });
@@ -297,6 +315,30 @@ describe("who is never paired", () => {
     expect(r).toMatchObject({ ok: true, message: expect.stringContaining("No guardian was linked with them.") });
     expect(await guardianLinks()).toEqual(before);
     expect(await db.select().from(accountingLink).where(isNotNull(accountingLink.familyId))).toHaveLength(familyLinks + cases.length);
+    expect(stub.apiCalls()).toEqual([]);
+  });
+
+  it("never gives another guardian the Parent customer a removed guardian's ended link keeps for her (M3b2's hold), so her reinstate makes no second one", async () => {
+    // The Rus: Bea, removed, was linked to Bea Ru 501 until the family's unlink; its email field holds Cal's address too.
+    await readAgain(qc("500", "Ru Family", "1"), qc("501", "Bea Ru", "2", { ...under("500"), ...mail("bea@example.com; cal@example.com") }));
+    const rus = await unlinkedFamily("The Rus");
+    const bea = await rowIn(rus, "Bea Ru", "bea@example.com", { status: "disabled" });
+    const cal = await rowIn(rus, "Cal Ru", "cal@example.com");
+    // With no ended link, Cal alone takes part and 501 is his (a closed row takes no part).
+    expect(rowOf(await loadAccountingLinks(), "The Rus").confirm!.proposals.guardians).toEqual([{ guardianId: cal.id, who: "Cal Ru", customerQboId: "501", customerName: "Bea Ru" }]);
+    // Bea's link to 501, ended by an unlink; Cal's ended link to it in another company keeps nothing for him.
+    await db.insert(accountingLinkEnded).values([
+      { id: randomUUID(), system: "quickbooks", realmId: REALM, customerId: "501", guardianId: bea.id, origin: "confirmed", linkedAt: new Date("2026-11-01T12:00:00Z"),
+        linkedBy: linker.id, endedAt: new Date("2026-11-10T12:00:00Z"), endedBy: linker.id, endedHow: "unlinked" },
+      { id: randomUUID(), system: "quickbooks", realmId: "another-realm", customerId: "501", guardianId: cal.id, origin: "confirmed", linkedAt: new Date("2026-11-01T12:00:00Z"),
+        linkedBy: linker.id, endedAt: new Date("2026-11-11T12:00:00Z"), endedBy: linker.id, endedHow: "unlinked" },
+    ]);
+    const row = rowOf(await loadAccountingLinks(), "The Rus");
+    expect(row.status.key).toBe("suggested");
+    expect(row.confirm!.proposals).toMatchObject({ guardians: [], guardiansHeld: [] });
+    stub.calls.length = 0;
+    expect(await linkFamilyToCustomer({ familyId: String(rus), customerId: "500", chosen: "suggested", stamp: row.confirm!.stamp }, tag, linkOp())).toMatchObject({ ok: true });
+    expect(await guardianLinks()).toEqual([]);
     expect(stub.apiCalls()).toEqual([]);
   });
 
@@ -382,7 +424,9 @@ describe("what the write queue holds back", () => {
     }
     asStaff(linker);
     expect(await openingOf("Kept Family")).toContain("Not linked with it, though their Parent customer's email field holds their sign-in address:"
-      + "Kay Kept with Kay Kept: a change for Kay Kept or for Kay Kept is waiting, stuck or kept on the Reconciliation page, so they aren't linked with it.");
+      + "Kay Kept with Kay Kept: a change for them or for their Parent customer is waiting, stuck or kept on the Reconciliation page, so they aren't linked with it."
+      + " Once it has gone through or been given up there, they can be linked in the opening of the family's row on this page, with Link this guardian,"
+      + " if the family is linked by then and that Parent customer is still free for them.");
 
     for (const [familyId, customerId, name] of [[kept, "300", "Kept Family"], [stuck, "310", "Stuck Family"], [waiting, "320", "Waiting Family"]] as const) {
       const r = await linkFamilyToCustomer({ familyId: String(familyId), customerId, chosen: "suggested", stamp: rowOf(view, name).confirm!.stamp }, tag, linkOp());
@@ -403,6 +447,43 @@ describe("what the write queue holds back", () => {
     expect(rowOf(now, "Kept Family").guardians.find((g) => g.id === kay.id)).toMatchObject({ offer: null, linkHeld: { row: 1 } });
     expect(rowOf(now, "Stuck Family").guardians.find((g) => g.id === stu.id)).toMatchObject({ offer: null, linkHeld: { row: 1 } });
     expect(rowOf(now, "Waiting Family").guardians.find((g) => g.id === wes.id)).toMatchObject({ offer: null, linkHeld: { row: 0, customers: 1 } });
+  });
+});
+
+describe("what the write queue holds back, through the bulk press", () => {
+  connected();
+  it("links one family's paired guardian and holds the other family's back, the families and students linked, and says so", async () => {
+    await readAgain(...PATELS, qc("300", "Kept Family", "1"), qc("301", "Kay Kept", "2", { ...under("300"), ...mail("kay@example.com") }), qc("302", "Kit Kept", "3", under("300")));
+    const patels = await unlinkedFamily("The Patels", ["Asha Jr"]);
+    const asha = await rowIn(patels, "Asha Patel", "asha@example.com");
+    const kept = await unlinkedFamily("Kept Family", ["Kit Kept"]);
+    const kay = await rowIn(kept, "Kay Kept", "kay@example.com");
+    await seedQueued({ op: "contact", role: "parent", qboId: "301", syncToken: "0", change: { phone: "555-0102" }, was: { phone: "555-0101" }, guardianId: kay.id }, { state: "refused", code: "validation", familyQboId: null, familyId: kept });
+    const queue = await db.select().from(writeQueue).orderBy(asc(writeQueue.id));
+    const bulk = (await loadAccountingLinks()).bulk({ status: null, q: "" })!;
+    expect(bulk.count).toBe(2);
+    stub.calls.length = 0;
+    const r = await confirmAllSuggested({ status: "", q: "", count: bulk.count, stamp: bulk.stamp! }, tag, linkOp());
+    expect(r).toMatchObject({ ok: true, message: expect.stringContaining("1 guardian linked with them in all, each to the Parent customer under their family's customer whose email field holds their sign-in address."
+      + " A guardian whose sign-in address a Parent customer under them holds wasn't linked, as a change for that guardian or for that Parent customer is waiting, stuck or kept on the Reconciliation page.") });
+    expect(await linkOfRow(asha.id)).toMatchObject({ customerId: "74", origin: "confirmed" });
+    expect(await linkOfRow(kay.id)).toBeUndefined();
+    expect((await db.select().from(accountingLink).where(eq(accountingLink.familyId, kept)))[0]).toMatchObject({ customerId: "300", origin: "confirmed" });
+    expect((await db.select().from(accountingLink).where(eq(accountingLink.studentId, await studentNamed(kept, "Kit Kept"))))[0]).toMatchObject({ customerId: "302" });
+    const [press] = await auditsOf("accounting.link.bulk");
+    const pressId = (press!.after as { pressId: string }).pressId;
+    const confirms = await auditsOf("accounting.link.confirm");
+    expect(confirms.find((a) => a.targetId === String(patels))!.after).toMatchObject({ bulk: pressId, guardiansLinked: [{ guardianId: asha.id, customerQboId: "74" }], guardiansHeld: [] });
+    expect(confirms.find((a) => a.targetId === String(kept))!.after).toMatchObject({ bulk: pressId, guardiansLinked: [], guardiansHeld: [kay.id] });
+    expect(await db.select().from(writeQueue).orderBy(asc(writeQueue.id))).toEqual(queue);
+    expect(stub.apiCalls()).toEqual([]);
+  });
+
+  it("says more than one held guardian in the plural, each by their own row or Parent customer", () => {
+    const words = confirmedWords({ family: "The Patels", customer: "Patel Family", linked: [], recordsLeft: [], customersLeft: [], keptMoves: 0, guardians: { linked: [], held: 2 } });
+    expect(words).toContain("No guardian was linked with it. 2 guardians whose sign-in addresses Parent customers under it hold weren't linked,"
+      + " as a change for each of them or for their Parent customer is waiting, stuck or kept on the Reconciliation page.");
+    expect(words).not.toContain("that Parent customer");
   });
 });
 

@@ -222,9 +222,20 @@ export async function linkFamilyToCustomer(raw: { familyId: unknown; customerId:
   }
 }
 
-/** The guardians paired with a link that the write queue held back (proposalsFor()'s `guardiansHeld`), in words. */
-const heldWords = (n: number) => `${n === 1 ? "A guardian" : `${n} guardians`} whose sign-in address a Parent customer under it holds ${n === 1 ? "wasn't" : "weren't"} linked,`
-  + ` as a change for ${n === 1 ? "that guardian" : "those guardians"} or for that Parent customer is waiting, stuck or kept on the Reconciliation page.`;
+/**
+ * The guardians paired with a link that the write queue held back (proposalsFor()'s `guardiansHeld`), in words: each is
+ * held by an item naming their own row or blocking their own Parent customer. `under` names what the Parent customers
+ * are under ("it", or "them" after a bulk press).
+ */
+const heldWords = (n: number, under = "it") => n === 1
+  ? `A guardian whose sign-in address a Parent customer under ${under} holds wasn't linked, as a change for that guardian or for that Parent customer is waiting, stuck or kept on the Reconciliation page.`
+  : `${n} guardians whose sign-in addresses Parent customers under ${under} hold weren't linked, as a change for each of them or for their Parent customer is waiting, stuck or kept on the Reconciliation page.`;
+/**
+ * What Link this guardian may do after a confirm, said conditionally (guardianOfferOf() and linkGuardian() decide):
+ * `who` names the family or families, `where` their rows, `under` their customers.
+ */
+const byHandWords = (who: string, where: string, under: string) => `Another open guardian of ${who} can be linked in ${where} on this page, with Link this guardian,`
+  + ` where an active Parent customer directly under ${under} is free for them and no change for them or that customer is waiting, stuck or kept on Reconciliation.`;
 
 /** When a linked family's money is read from the books, said after a confirm. */
 const MONEY_WORDS = "Its money is read from the books the next time a parent opens Home or Payments, when someone presses “Read every family now” on Balances, or at the daily read of every family's invoices, while the books are connected; its Balances page shows the figures once one of those has read them.";
@@ -237,8 +248,8 @@ const MONEY_WORDS = "Its money is read from the books the next time a parent ope
  * the money run reads it when staff ask for it on Balances or daily, while the books are connected; the Balances pages
  * read nothing live, only the row one of those stored), and a kept move into it that Reconciliation now offers to send.
  * Since slice M3c2, only in layered books with a parent type (`guardians` null otherwise: nothing about guardians), the
- * guardians linked with it (linkIn()) by name and customer, how many the write queue held back and why, and that any
- * other open guardian can be linked in the row's opening, with Link this guardian (linkGuardian()).
+ * guardians linked with it (linkIn()) by name and customer, how many the write queue held back and why, and that another
+ * open guardian can be linked in the row's opening, with Link this guardian, where its rules let it (linkGuardian()).
  */
 export function confirmedWords(s: { family: string; customer: string; linked: string[]; recordsLeft: string[]; customersLeft: { name: string; active: boolean }[]; keptMoves: number;
   guardians: { linked: { who: string; customer: string }[]; held: number } | null }): string {
@@ -258,7 +269,7 @@ export function confirmedWords(s: { family: string; customer: string; linked: st
     parts.push(g.length ? `${plural(g.length, "guardian", "guardians")} linked with it, each to the Parent customer under it whose email field holds their sign-in address: ${list(g.map((x) => `${x.who} to “${x.customer}”`))}.`
       : "No guardian was linked with it.");
     if (s.guardians.held > 0) parts.push(heldWords(s.guardians.held));
-    parts.push("Any other open guardian of the family can be linked in its row's opening on this page, with Link this guardian, to a Parent customer under it that no guardian is linked to.");
+    parts.push(byHandWords("the family", "its row's opening", "it"));
   }
   parts.push("Nothing was sent to the books.");
   parts.push(MONEY_WORDS);
@@ -393,9 +404,8 @@ export function bulkConfirmedWords(s: { families: string[]; students: number; re
   if (s.guardians !== null) {
     parts.push(s.guardians.linked === 0 ? `No guardian was linked with ${n === 1 ? "it" : "them"}.`
       : `${plural(s.guardians.linked, "guardian", "guardians")} linked with ${n === 1 ? "it" : "them"} in all, each to the Parent customer under ${n === 1 ? "its" : "their family's"} customer whose email field holds their sign-in address.`);
-    if (s.guardians.held > 0) parts.push(`${s.guardians.held === 1 ? "A guardian" : `${s.guardians.held} guardians`} whose sign-in address a Parent customer under ${n === 1 ? "it" : "them"} holds ${s.guardians.held === 1 ? "wasn't" : "weren't"} linked,`
-      + ` as a change for ${s.guardians.held === 1 ? "that guardian" : "those guardians"} or for that Parent customer is waiting, stuck or kept on the Reconciliation page.`);
-    parts.push(`Any other open guardian of ${n === 1 ? "the family" : "these families"} can be linked in ${n === 1 ? "its" : "their"} row's opening on this page, with Link this guardian, to a Parent customer under ${n === 1 ? "it" : "theirs"} that no guardian is linked to.`);
+    if (s.guardians.held > 0) parts.push(heldWords(s.guardians.held, n === 1 ? "it" : "them"));
+    parts.push(n === 1 ? byHandWords("the family", "its row's opening", "it") : byHandWords("these families", "the opening of its family's row", "that family's customer"));
   }
   parts.push("Nothing was sent to the books.");
   parts.push(n === 1 ? MONEY_WORDS : "Each family's money is read from the books the next time a parent opens Home or Payments, when someone presses “Read every family now” on Balances, or at the daily read of every family's invoices, while the books are connected; its Balances page shows the figures once one of those has read them.");

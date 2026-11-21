@@ -477,7 +477,8 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    that family's, and it reads **Linked**, confirmed by you, or **Linked, with differences** while anything is left
    over: a student left is shown among its differences (an inactive student customer left is only counted on the
    row), and, in books with a parent type, so is each guardian Confirm didn't link to a Parent customer of their own,
-   whom you can link in the row's opening with **Link this guardian**. Its money is read at its next page load. A Several possible or No match family takes **Pick a different customer**, from the customers no family
+   whom you can link in the row's opening with **Link this guardian** where a Parent customer under it is free for them
+   and no change for them or that customer is waiting, stuck or kept on Reconciliation. Its money is read at its next page load. A Several possible or No match family takes **Pick a different customer**, from the customers no family
    is linked to, with the same confirm step; **Leave unlinked** keeps a family with no customer in the books yet out
    of the suggestions until you undo it. With several Suggested rows, **Confirm all exact email matches** above the list
    links every Suggested row the filter shows, its count on the button, each as its own **Confirm** would; narrow the
