@@ -17,8 +17,8 @@ type BuyoutInvoice = { customerQboId: string; requirementTitle: string };
 export type MyBuyoutInvoices = ReadonlyMap<string, BuyoutInvoice>;
 
 /**
- * The invoices of the family's own buy-outs, in the company the roster came from (a buy-out of another company is
- * cleared on a change of company anyway), while each buy-out is live: one that has ended (closed by staff after it was
+ * The invoices of the family's own buy-outs, in the company the roster came from (one of another company is never
+ * read here: a change of company ends the unpaid ones and keeps the paid ones), while each buy-out is live: one that has ended (closed by staff after it was
  * paid and refunded in QuickBooks, or voided) no longer pays instead of volunteering, so its invoice is shown like any
  * other. A buy-out another family chose, for a student who has since moved here, is not this family's either.
  */

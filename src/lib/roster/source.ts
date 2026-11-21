@@ -62,7 +62,11 @@ export const GIVEN_UP_FOR_COMPANY_NOTE = "Given up: the club connected a differe
  * (src/lib/buyouts/writes.ts) and staff "Give up" (giveUp(), ./queue.ts) take the roster lock shared, then the item,
  * then the buy-out, as closeBuyout() (src/lib/buyouts/close.ts) does, so none of them runs beside this, which holds
  * the roster lock alone; after it, a finish changes an item only while it waits, and the buy-out only by its state
- * guards, so the endings here stand (an invoice made at that moment is recorded on the ended buy-out).
+ * guards, so the endings here stand (an invoice made at that moment is recorded on the ended buy-out). A staff insert
+ * into the queue after it goes in given up (holdForTheQueue(), enqueue(), ./writes.ts: each takes the roster lock and
+ * finds the roster another company's), and the worker gives up any parent's item inserted after it, which takes no
+ * roster lock (runWriteQueue(), ./queue.ts). Readers of open items that don't filter by company are stage 4's slice
+ * M7a3's.
  *
  * Nothing the portal runs reaches it until stage 4's slice M8 turns a change of company back on: a different company
  * is refused wherever one is connected or read (completeConnect() in src/lib/quickbooks/connection.ts, refreshRoster()
