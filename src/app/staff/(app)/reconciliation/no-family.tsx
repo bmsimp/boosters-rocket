@@ -52,12 +52,14 @@ function aimShown(customerId: string, aim: CustomerAim): NonNullable<NoFamilyRow
 /**
  * Reconciliation's list of the QuickBooks customers no family is linked to, each with "Create a family from this"
  * (stage 3's slice 10 of the app-owned families spec), or, for a customer the accounting links screen aims at a family
- * the portal has (stage 4's slice M3a2: `aims`, read once by the page with readCustomerAims()), words naming that family
+ * the portal has (stage 4's slice M3a2: `aims`, read once by the page with readForReconciliation(), which since slice M5c
+ * the page also reads for any kept change, to say whether Accounting links shows it), words naming that family
  * and a link to where the two are linked, which "Create a family from this" would refuse. Shown only to staff with the
  * linking permission; the page checks it. A server component: the client list is given each row's words and the action
  * bound to its customer, or the words and the link's address, nothing else. Names are QuickBooks text, and a family's
  * name the portal's own, shown as text only. Queries, whatever the number of customers: customersWithNoFamily()'s own
- * (a fixed handful), beside the page's one read of the aims (readCustomerAims(): 11 or 12, then 4 to 8).
+ * (a fixed handful), beside the page's one read of the aims (readForReconciliation(): readLinkBasics()'s 12 or 13, then
+ * 4 to 8).
  */
 export async function CustomersWithNoFamily({ mayChangeFamilies, aims }: { mayChangeFamilies: boolean; aims: ReadonlyMap<string, CustomerAim> }) {
   const list = await customersWithNoFamily();
