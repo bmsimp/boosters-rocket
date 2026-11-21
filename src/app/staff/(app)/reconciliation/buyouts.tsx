@@ -66,7 +66,7 @@ export async function EarlierCompanyBuyouts({ showAmounts, canChange = false }: 
             <span className="when"><Link href={familyBuyoutsPage(b.familyId)}>Its buy-outs</Link></span></> },
           { key: "requirement", header: "Requirement", cell: (b) => <>{b.requirement}{b.subjectName ? `, for ${b.subjectName}` : ""}</> },
           ...(showAmounts ? [{ key: "amount", header: "Amount", numeric: true, cell: (b: (typeof items)[number]) => formatMoney(b.amountCents) }] : []),
-          { key: "books", header: "In the earlier company", cell: (b) => <>{b.invoiceQboId ? `Invoice ${b.invoiceQboId}` : `Note: ${b.note ?? ""}`}<span className="when">Company {b.realmId}</span></> },
+          { key: "books", header: "In the earlier company", cell: (b) => <>{b.invoiceQboId ? `Invoice ${b.invoiceQboId}` : `Note: ${b.note ?? ""}`}<span className="when">{b.here ? "The company connected now: the club switched away and back" : `Company ${b.realmId}`}</span></> },
           { key: "what", header: "What is left to settle", cell: (b) => b.words },
           { key: "since", header: "Since", cell: (b) => <LocalTime iso={b.at} /> },
           { key: "do", header: "What you can do", cell: (b) => (b.close ? (b.close.may && canChange

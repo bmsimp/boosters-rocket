@@ -22,7 +22,9 @@ function InvoiceWords({ b, money }: { b: FamilyBuyout; money: boolean }) {
   const i = b.invoice;
   const owed = money && i.owedCents !== null ? `: ${formatMoney(i.owedCents)} ${i.kind === "part_paid" ? "still owed" : "owed"}` : "";
   const words = { none: b.state === "refused" ? "None: nothing was billed" : "None made yet", not_read: "Not in the family's figures as last read", open: `Open${owed}`,
-    part_paid: `Part paid${owed}`, paid: "Paid", voided: "Voided", earlier_company: i.qboId ? `In the earlier QuickBooks company's books: invoice ${i.qboId}` : "None the portal knows of: it may have been made in the earlier QuickBooks company" }[i.kind];
+    part_paid: `Part paid${owed}`, paid: "Paid", voided: "Voided", earlier_company: i.here
+      ? (i.qboId ? `In the QuickBooks company connected now, from before the club switched away and back: invoice ${i.qboId}` : "None the portal knows of: it may have been made in the QuickBooks company connected now")
+      : (i.qboId ? `In the earlier QuickBooks company's books: invoice ${i.qboId}` : "None the portal knows of: it may have been made in the earlier QuickBooks company") }[i.kind];
   return <>{words}{i.readAt ? <span className="when">Read from QuickBooks <LocalTime iso={i.readAt} /></span> : null}</>;
 }
 

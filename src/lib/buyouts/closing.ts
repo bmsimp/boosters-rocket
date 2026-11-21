@@ -105,11 +105,36 @@ export function closeVerdict(f: CloseFacts): CloseVerdict {
  */
 export type LookItem = CloseItem & { resultQboId: string | null; answered: boolean };
 
-/** What the rule reads of one earlier company's buy-out: the row's own fields, and every queue item made for it, newest first. */
+/**
+ * What the rule reads of one earlier company's buy-out: the row's own fields, and every queue item made for it, newest
+ * first. `here`: its company (`realm_id`) is the roster's again, the club having switched away and back (stage 4's slice
+ * M8), so its invoice is in the QuickBooks company connected now, and the words say so.
+ */
 export type EarlierFacts = {
   id: string; state: BuyoutState; endReason: (typeof buyout.$inferSelect)["endReason"]; flag: Flag | null; lastCode: string | null; invoiceQboId: string | null;
-  items: readonly LookItem[];
+  items: readonly LookItem[]; here?: boolean;
 };
+
+/**
+ * QuickBooks' answer to a buy-out write that reached it after a change of company had ended the buy-out (stage 4's slice
+ * M8, M7b's leftover): kept as the buy-out's `last_code`, its state and end reason unchanged (src/lib/buyouts/writes.ts:
+ * createRefused(), voided(), voidKept()). Codes no QuickBooks answer or try ever leaves there, so the rule can tell one
+ * from what the portal knew before the change. QuickBooks' own code is in the audit row.
+ */
+export const AFTER_ENDING = {
+  /** The create was refused: no invoice was made. */
+  refused: "after_end_refused",
+  /** The void went through, or the invoice was read already voided. */
+  voided: "after_end_voided",
+  /** The void's read found something paid and the rest owed, so it wasn't sent. */
+  paid: "after_end_paid",
+  /** The void's read found it paid in full, so it wasn't sent. */
+  paidInFull: "after_end_paid_in_full",
+  /** The void's read found the invoice gone from the customer's. */
+  gone: "after_end_gone",
+  /** QuickBooks refused the void (or the read before it): the invoice stands. */
+  voidRefused: "after_end_void_refused",
+} as const;
 
 /**
  * What it leaves to settle in the earlier company's books: `invoice_stands` (an invoice is known, no void of it was
@@ -134,6 +159,36 @@ export type EarlierLook = {
 /** What every buy-out invoice's private note starts with (INVOICE_WRITES.notePrefix, src/lib/quickbooks/client.ts, which a pure rule can't import). */
 export const BUYOUT_NOTE_PREFIX = "Booster Rocket buy-out ";
 
+/**
+ * The words for a buy-out a change of company ended whose company the club has since connected again (`here`): its
+ * invoice is in the QuickBooks company connected now (stage 4's slice M8).
+ */
+export const HERE_WORDS: Record<EarlierKind, string> = {
+  invoice_stands: "This buy-out ended when the club connected a different QuickBooks company, and its invoice is still in the QuickBooks company connected now, as far as the portal knows: nothing was sent to void it. "
+    + "If the family paid it, they paid instead: waive the requirement for them on their season page. If they didn't, void it in QuickBooks, and the family can volunteer or choose to pay instead again.",
+  void_may_have_gone: "A void of its invoice was on its way when the club connected a different QuickBooks company, and the portal never heard back, so it may be voided already. "
+    + "Its invoice is in the QuickBooks company connected now: look at it there. If it still stands unpaid, void it; if the family paid it, waive the requirement for them on their season page.",
+  part_paid: "Something was paid on its invoice, and the rest was still owed when the portal last looked, so the portal didn't void it before the club connected a different QuickBooks company. "
+    + "Its invoice is in the QuickBooks company connected now: settle it there. If the family pays the rest, they paid instead, so waive the requirement for them on their season page; if they'll volunteer instead, refund what they paid and void it.",
+  last_seen_gone: "When the portal last looked, QuickBooks no longer showed this invoice to the family: it was most likely voided or deleted, and nothing is owed on it. "
+    + "It would be in the QuickBooks company connected now: look for it there if you'd like to be sure.",
+  may_be_made: "The portal asked QuickBooks for its invoice and never heard back before the club connected a different company, so the invoice may have been made in the QuickBooks company connected now. "
+    + "Look in its invoices for the note shown here, and void it if it is there and unpaid; if the family paid it, waive the requirement for them on their season page.",
+  refund_owed: "The family paid this in the QuickBooks company connected now, though the buy-out was to be cancelled. If they're owed the money back, refund it there. Closing it ends the buy-out here, and the family volunteers instead.",
+  nothing_to_settle: "Nothing is left to settle in QuickBooks for this.",
+};
+
+/**
+ * Said of a buy-out a change of company ended whose void QuickBooks then found paid in full (AFTER_ENDING.paidInFull):
+ * the family paid, though the buy-out was to be cancelled. It ended, so there is nothing to close here.
+ */
+export const PAID_AFTER_ENDING_WORDS = {
+  earlier: "The family paid this invoice in full in the earlier QuickBooks company, though the buy-out was to be cancelled, so the portal didn't void it. "
+    + "If they're owed the money back, refund it there; if they paid instead, waive the requirement for them on their season page.",
+  here: "The family paid this invoice in full in the QuickBooks company connected now, though the buy-out was to be cancelled, so the portal didn't void it. "
+    + "If they're owed the money back, refund it there; if they paid instead, waive the requirement for them on their season page.",
+} as const;
+
 export const EARLIER_WORDS: Record<EarlierKind, string> = {
   invoice_stands: "Its invoice is still in the earlier QuickBooks company's books as far as the portal knows: nothing was sent there to void it. "
     + "If the family paid it there, they paid instead: waive the requirement for them on their season page. If they didn't, void it there, and the family can volunteer or choose to pay instead again.",
@@ -151,8 +206,10 @@ export const EARLIER_WORDS: Record<EarlierKind, string> = {
 /** Said beside `invoice_stands` when a given-up create names the invoice. */
 export const MADE_AFTER_WORDS = "QuickBooks made this invoice for a request the portal had given up.";
 
-const look = (kind: EarlierKind, invoiceQboId: string | null, o: { madeAfter?: boolean; note?: string | null } = {}): EarlierLook =>
-  ({ kind, invoiceQboId, madeAfter: o.madeAfter ?? false, note: o.note ?? null, words: o.madeAfter ? `${EARLIER_WORDS[kind]} ${MADE_AFTER_WORDS}` : EARLIER_WORDS[kind] });
+const looker = (here: boolean) => (kind: EarlierKind, invoiceQboId: string | null, o: { madeAfter?: boolean; note?: string | null; words?: string } = {}): EarlierLook => {
+  const words = o.words ?? (here ? HERE_WORDS : EARLIER_WORDS)[kind];
+  return { kind, invoiceQboId, madeAfter: o.madeAfter ?? false, note: o.note ?? null, words: o.madeAfter ? `${words} ${MADE_AFTER_WORDS}` : words };
+};
 
 /**
  * What an earlier company's buy-out leaves to settle there (the caller has told it is one: its `realm_id` is not the
@@ -168,15 +225,30 @@ const look = (kind: EarlierKind, invoiceQboId: string | null, o: { madeAfter?: b
  * - A void QuickBooks answered left its answer on the buy-out (voidKept()): something paid and the rest owed (`paid`),
  *   or the invoice gone (`invoice_gone`, as the daily check's `missing` flag says from the stored figures); a refused
  *   void (`void_refused`) left the invoice standing.
+ * - An answer that came after the change of company ended it is on the buy-out too (AFTER_ENDING, stage 4's slice M8),
+ *   and is read first: a refused create made nothing, a void that went through left nothing, and a void's read that
+ *   found it part paid, paid in full or gone says so; a refused void left the invoice standing. A void still unanswered
+ *   may have gone through.
+ * One whose company the roster names again (`here`) reads the same, in words for the company connected now.
  */
 export function earlierCompanyLook(f: EarlierFacts): EarlierLook {
+  const here = f.here ?? false, look = looker(here);
   if (f.state === "refused") return look("nothing_to_settle", null);
   if (f.state === "paid") return f.flag === "paid_before_void" || f.flag === "student_moved" ? look("refund_owed", f.invoiceQboId) : look("nothing_to_settle", f.invoiceQboId);
   if (f.state === "voided" && f.endReason !== "earlier_company") return look("nothing_to_settle", f.invoiceQboId);
   const creates = f.items.filter((i) => i.op === "invoice_create");
   const invoice = f.invoiceQboId ?? creates.find((i) => i.resultQboId !== null)?.resultQboId ?? null;
+  const afterEnding = f.state === "voided" && f.endReason === "earlier_company" ? f.lastCode : null;
   if (invoice === null) {
+    if (afterEnding === AFTER_ENDING.refused) return look("nothing_to_settle", null);
     return creates.some((i) => i.sent && !i.answered) ? look("may_be_made", null, { note: `${BUYOUT_NOTE_PREFIX}${f.id}` }) : look("nothing_to_settle", null);
+  }
+  switch (afterEnding) {
+    case AFTER_ENDING.voided: return look("nothing_to_settle", invoice);
+    case AFTER_ENDING.gone: return look("last_seen_gone", invoice);
+    case AFTER_ENDING.paid: return look("part_paid", invoice);
+    case AFTER_ENDING.paidInFull: return look("refund_owed", invoice, { words: PAID_AFTER_ENDING_WORDS[here ? "here" : "earlier"] });
+    case AFTER_ENDING.voidRefused: return look("invoice_stands", invoice, { madeAfter: creates.some((i) => i.state === "given_up" && i.resultQboId === invoice) });
   }
   const lastVoid = f.items.find((i) => i.op === "invoice_void");
   if (lastVoid && !lastVoid.answered) return look("void_may_have_gone", invoice);

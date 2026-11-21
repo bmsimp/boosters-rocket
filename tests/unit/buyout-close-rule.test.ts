@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { BUYOUT_NOTE_PREFIX, CLOSE_WORDS, closeVerdict, EARLIER_WORDS, earlierCompanyLook, MADE_AFTER_WORDS, type CloseFacts, type CloseItem, type EarlierFacts, type EarlierKind,
-  type LookItem } from "@/lib/buyouts/closing";
+import { AFTER_ENDING, BUYOUT_NOTE_PREFIX, CLOSE_WORDS, closeVerdict, EARLIER_WORDS, earlierCompanyLook, HERE_WORDS, MADE_AFTER_WORDS, PAID_AFTER_ENDING_WORDS, type CloseFacts,
+  type CloseItem, type EarlierFacts, type EarlierKind, type LookItem } from "@/lib/buyouts/closing";
 import type { BuyoutState } from "@/lib/db/schema";
 
 // When staff may close a buy-out (src/lib/buyouts/closing.ts): only when the portal can tell no unpaid invoice of it
@@ -202,11 +202,49 @@ describe("an earlier company's buy-out, for the treasurer (stage 4's slice M7b)"
     expect(EARLIER_WORDS.nothing_to_settle).toContain("earlier QuickBooks company");
   });
 
+  // Stage 4's slice M8 (M7b's leftover): QuickBooks' answer to a write that reached it after the change of company ended
+  // the buy-out is kept as its last code, and read before what the items alone would say.
+  it("an ended one whose answer came after the change of company reads that answer, not what the items alone would say", () => {
+    // A create QuickBooks refused after the clear gave its item up: nothing was made.
+    expect(kind({ invoiceQboId: null, lastCode: AFTER_ENDING.refused, items: [item("invoice_create", "given_up", true)] })).toBe("nothing_to_settle");
+    expect(kind({ invoiceQboId: null, items: [item("invoice_create", "given_up", true)] })).toBe("may_be_made");
+    // A void QuickBooks carried out after the clear gave its item up, whether sent or found voided: nothing is left.
+    expect(kind({ lastCode: AFTER_ENDING.voided, items: [voidGivenUp(true), created()] })).toBe("nothing_to_settle");
+    expect(kind({ lastCode: AFTER_ENDING.voided, items: [voidGivenUp(false), created()] })).toBe("nothing_to_settle");
+    // A void QuickBooks answered but didn't carry out: part paid, paid in full, gone, or refused.
+    expect(kind({ lastCode: AFTER_ENDING.paid, items: [voidGivenUp(true), created()] })).toBe("part_paid");
+    expect(earlierCompanyLook(earlier({ lastCode: AFTER_ENDING.paidInFull, items: [voidGivenUp(true), created()] })))
+      .toEqual({ kind: "refund_owed", invoiceQboId: "5001", madeAfter: false, note: null, words: PAID_AFTER_ENDING_WORDS.earlier });
+    expect(kind({ lastCode: AFTER_ENDING.gone, items: [voidGivenUp(true), created()] })).toBe("last_seen_gone");
+    expect(kind({ lastCode: AFTER_ENDING.voidRefused, items: [voidGivenUp(true), created()] })).toBe("invoice_stands");
+    // A void still unanswered keeps reading as one that may have gone through.
+    expect(kind({ lastCode: "timeout", items: [voidGivenUp(true), created()] })).toBe("void_may_have_gone");
+    // Read only of one the change of company ended: the codes mean nothing on any other.
+    expect(kind({ endReason: "switched_back", lastCode: AFTER_ENDING.voidRefused })).toBe("nothing_to_settle");
+    for (const code of Object.values(AFTER_ENDING)) expect(code.length, code).toBeLessThanOrEqual(40);
+  });
+
+  it("one ended from the company the roster names again reads the same, in words for the company connected now", () => {
+    const cases: [Partial<EarlierFacts>, EarlierKind][] = [
+      [{}, "invoice_stands"], [{ items: [voidGivenUp(true), created()] }, "void_may_have_gone"], [{ lastCode: AFTER_ENDING.paid }, "part_paid"],
+      [{ lastCode: AFTER_ENDING.gone }, "last_seen_gone"], [{ invoiceQboId: null, items: [item("invoice_create", "given_up", true)] }, "may_be_made"],
+      [{ lastCode: AFTER_ENDING.voided }, "nothing_to_settle"],
+    ];
+    for (const [f, k] of cases) {
+      const v = earlierCompanyLook(earlier({ ...f, here: true }));
+      expect(v.kind, k).toBe(k);
+      expect(v.words, k).toBe(HERE_WORDS[k]);
+      expect(v.words, k).not.toContain("earlier QuickBooks company");
+    }
+    expect(earlierCompanyLook(earlier({ lastCode: AFTER_ENDING.paidInFull, here: true })).words).toBe(PAID_AFTER_ENDING_WORDS.here);
+    for (const k of ["invoice_stands", "void_may_have_gone", "part_paid", "last_seen_gone", "may_be_made", "refund_owed"] as const) expect(HERE_WORDS[k]).toContain("QuickBooks company connected now");
+  });
+
   it("puts every state, end reason, flag, last code and set of items in exactly one kind", () => {
     const states: BuyoutState[] = ["being_invoiced", "invoiced", "paid", "being_voided", "voided", "refused", "stuck"];
     const reasons: EarlierFacts["endReason"][] = [null, "switched_back", "student_moved", "voided_in_quickbooks", "closed_by_staff", "earlier_company"];
     const flags: EarlierFacts["flag"][] = [null, "missing", "other_customer", "student_moved", "paid_before_void", "void_refused", "given_up"];
-    const codes: (string | null)[] = [null, "paid", "invoice_gone", "fault_6240", "timeout"];
+    const codes: (string | null)[] = [null, "paid", "invoice_gone", "fault_6240", "timeout", ...Object.values(AFTER_ENDING)];
     const itemSets: LookItem[][] = [[], [item("invoice_create", "given_up", false)], [item("invoice_create", "given_up", true)], [item("invoice_create", "given_up", true, { answered: true })],
       [item("invoice_create", "given_up", true, { resultQboId: "7001" })], [created()],
       [voidGivenUp(false), created()], [voidGivenUp(true), created()], [voidKept(false), created()], [voidKept(true), created()],
@@ -220,16 +258,23 @@ describe("an earlier company's buy-out, for the treasurer (stage 4's slice M7b)"
       // The table, written out.
       const known = invoiceQboId ?? items.find((i) => i.op === "invoice_create" && i.resultQboId !== null)?.resultQboId ?? null;
       const lastVoid = items.find((i) => i.op === "invoice_void");
+      // QuickBooks' answer after a change of company ended it (stage 4's slice M8), read only of one it ended.
+      const after = state === "voided" && endReason === "earlier_company" ? lastCode : null;
       const expected: EarlierKind = state === "refused" ? "nothing_to_settle"
         : state === "paid" ? (flag === "paid_before_void" || flag === "student_moved" ? "refund_owed" : "nothing_to_settle")
           : state === "voided" && endReason !== "earlier_company" ? "nothing_to_settle"
-            : known === null ? (items.some((i) => i.op === "invoice_create" && i.sent && !i.answered) ? "may_be_made" : "nothing_to_settle")
+            : known === null ? (after !== AFTER_ENDING.refused && items.some((i) => i.op === "invoice_create" && i.sent && !i.answered) ? "may_be_made" : "nothing_to_settle")
+              : after === AFTER_ENDING.voided ? "nothing_to_settle"
+              : after === AFTER_ENDING.gone ? "last_seen_gone"
+              : after === AFTER_ENDING.paid ? "part_paid"
+              : after === AFTER_ENDING.paidInFull ? "refund_owed"
+              : after === AFTER_ENDING.voidRefused ? "invoice_stands"
               : lastVoid && !lastVoid.answered ? "void_may_have_gone"
                 : lastVoid?.state === "done" ? "nothing_to_settle"
                   : lastCode === "paid" && (flag === "paid_before_void" || flag === "student_moved") ? "part_paid"
                     : lastCode === "invoice_gone" || flag === "missing" ? "last_seen_gone" : "invoice_stands";
       expect(v.kind, at).toBe(expected);
-      expect(v.words.startsWith(EARLIER_WORDS[v.kind]), at).toBe(true);
+      expect(v.words.startsWith(after === AFTER_ENDING.paidInFull && known !== null ? PAID_AFTER_ENDING_WORDS.earlier : EARLIER_WORDS[v.kind]), at).toBe(true);
       expect(v.madeAfter && v.kind !== "invoice_stands", at).toBe(false);
       expect(v.note !== null, at).toBe(v.kind === "may_be_made");
       kinds.add(v.kind); n++;

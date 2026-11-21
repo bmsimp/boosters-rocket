@@ -9,7 +9,7 @@
 // the cache, and says what each leaves to settle in that company's books (earlierCompanyLook(), ./closing.ts); a
 // family's buy-outs page names such a buy-out's student by its record too.
 import "server-only";
-import { and, asc, desc, gt, inArray, isNotNull, ne, or, eq, sql } from "drizzle-orm";
+import { and, asc, desc, gt, inArray, isNotNull, isNull, ne, or, eq, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { buyout, family, qboCustomer, requirement, seasonStep, student, writeQueue } from "@/lib/db/schema";
 import { customerOfFamily, linksOf } from "@/lib/families/links";
@@ -101,17 +101,22 @@ async function namesOf(ids: string[]): Promise<Map<string, string>> {
   return new Map((await db.select({ qboId: qboCustomer.qboId, name: qboCustomer.displayName }).from(qboCustomer).where(inArray(qboCustomer.qboId, ids))).map((c) => [c.qboId, c.name]));
 }
 
+/** A buy-out a change of company ended (`voided`, `earlier_company`), whatever company it was ended from. */
+const endedByChange = and(eq(buyout.state, "voided"), eq(buyout.endReason, "earlier_company"))!;
+const isEndedByChange = (b: Pick<Row, "state" | "endReason">) => b.state === "voided" && b.endReason === "earlier_company";
+
 /**
  * Every buy-out of the roster's company flagged for staff, stuck, or refused in the last 30 days, newest first, with the
- * family, the requirement and the amount. An earlier company's (its `realm_id` not the roster's) is the treasurer's
- * list's alone (loadEarlierCompanyBuyouts()), so none is listed twice or with a kept flag's words; none while the
- * roster names no company.
+ * family, the requirement and the amount. An earlier company's (its `realm_id` not the roster's), and one a change of
+ * company ended whatever its company (one ended from a company the club has since connected again among them, stage
+ * 4's slice M8), is the treasurer's list's alone (loadEarlierCompanyBuyouts()), so none is listed twice or with a kept
+ * flag's words; none while the roster names no company.
  */
 export async function loadBuyoutsToLook(now: Date = new Date()): Promise<BuyoutToLook[]> {
   const source = await getRosterSource();
   if (source === null) return [];
   const rows = await db.select({ b: buyout, title: requirement.title }).from(buyout).innerJoin(requirement, eq(requirement.id, buyout.requirementId))
-    .where(and(eq(buyout.realmId, source),
+    .where(and(eq(buyout.realmId, source), or(isNull(buyout.endReason), ne(buyout.endReason, "earlier_company")),
       or(isNotNull(buyout.flag), eq(buyout.state, "stuck"), and(eq(buyout.state, "refused"), gt(buyout.updatedAt, new Date(now.getTime() - REFUSED_SHOWN_MS))))))
     .orderBy(desc(buyout.updatedAt));
   if (rows.length === 0) return [];
@@ -140,19 +145,22 @@ export async function loadBuyoutsToLook(now: Date = new Date()): Promise<BuyoutT
  */
 export type EarlierCompanyBuyout = {
   id: string; familyId: AppFamilyId; familyName: string; familyPageStands: boolean; subjectName: string | null; requirement: string; seasonId: string;
-  amountCents: number; realmId: string; invoiceQboId: string | null; note: string | null; at: string;
+  /** `here`: ended from the company the roster names again (switched away and back), so its invoice is in the company connected now. */
+  amountCents: number; realmId: string; here: boolean; invoiceQboId: string | null; note: string | null; at: string;
   kind: Exclude<EarlierKind, "nothing_to_settle">; madeAfter: boolean; words: string;
   close: CloseVerdict | null; tag: string;
 };
 
-const lookOf = (b: Row, items: readonly LookItem[]): EarlierLook =>
-  earlierCompanyLook({ id: b.id, state: b.state, endReason: b.endReason, flag: b.flag, lastCode: b.lastCode, invoiceQboId: b.invoiceQboId, items });
+const lookOf = (b: Row, items: readonly LookItem[], here: boolean): EarlierLook =>
+  earlierCompanyLook({ id: b.id, state: b.state, endReason: b.endReason, flag: b.flag, lastCode: b.lastCode, invoiceQboId: b.invoiceQboId, items, here });
 
 /**
  * Every buy-out of another QuickBooks company than the roster's (decision 4 of stage 4's slice M7b: by its `realm_id`,
- * so the paid ones a change of company kept are read beside the ones it ended), newest first, that leaves something to
- * settle there; none while the roster names no company. It lists many families, so it is not audited, as
- * Reconciliation is not.
+ * so the paid ones a change of company kept are read beside the ones it ended), and every one a change of company
+ * ended, whatever its company (stage 4's slice M8: after a switch away and back, one ended at the first switch has the
+ * roster's `realm_id` again, and its invoice may still stand in the books connected now, `here`), newest first, that
+ * leaves something to settle; none while the roster names no company. It lists many families, so it is not audited,
+ * as Reconciliation is not.
  */
 export async function loadEarlierCompanyBuyouts(): Promise<EarlierCompanyBuyout[]> {
   const source = await getRosterSource();
@@ -160,18 +168,20 @@ export async function loadEarlierCompanyBuyouts(): Promise<EarlierCompanyBuyout[
   const rows = await db.select({ b: buyout, title: requirement.title, seasonId: seasonStep.seasonId, familyName: family.name, familyActive: family.active, studentName: student.name }).from(buyout)
     .innerJoin(requirement, eq(requirement.id, buyout.requirementId)).innerJoin(seasonStep, eq(seasonStep.id, requirement.stepId))
     .innerJoin(family, eq(family.id, buyout.familyId)).leftJoin(student, eq(student.id, buyout.studentId))
-    .where(ne(buyout.realmId, source)).orderBy(desc(buyout.updatedAt), asc(buyout.id));
+    .where(or(ne(buyout.realmId, source), endedByChange)).orderBy(desc(buyout.updatedAt), asc(buyout.id));
   if (rows.length === 0) return [];
   const [items, pagesStand] = await Promise.all([itemsOf(rows.map(({ b }) => b.id)), familyPagesStand()]);
   return rows.flatMap(({ b, title, seasonId, familyName, familyActive, studentName }) => {
     const own = items.get(b.id) ?? [];
-    const look = lookOf(b, own);
+    const here = b.realmId === source;
+    const look = lookOf(b, own, here);
     if (look.kind === "nothing_to_settle") return [];
     return [{
       id: b.id, familyId: b.familyId, familyName: recordNameWords(familyName, "family"), familyPageStands: pagesStand && familyActive,
       subjectName: b.studentId === null ? null : recordNameWords(studentName, "student"),
-      requirement: title, seasonId, amountCents: b.amountCents, realmId: b.realmId, invoiceQboId: look.invoiceQboId, note: look.note, at: b.updatedAt.toISOString(),
-      kind: look.kind, madeAfter: look.madeAfter, words: look.words, close: look.kind === "refund_owed" ? verdictOf(b, own) : null, tag: closeTag(b),
+      requirement: title, seasonId, amountCents: b.amountCents, realmId: b.realmId, here, invoiceQboId: look.invoiceQboId, note: look.note, at: b.updatedAt.toISOString(),
+      // A refund owed is closed from here only while the buy-out is paid; one a change of company ended has nothing to close.
+      kind: look.kind, madeAfter: look.madeAfter, words: look.words, close: look.kind === "refund_owed" && b.state === "paid" ? verdictOf(b, own) : null, tag: closeTag(b),
     }];
   });
 }
@@ -197,7 +207,9 @@ export function stateWords(b: Pick<Row, "state" | "endReason">): string {
  * may have been made there, `may_be_made`). `owedCents`: what is
  * still owed on it, said only to staff who may see money.
  */
-export type InvoiceAsRead = { kind: "none" | "not_read" | "open" | "part_paid" | "paid" | "voided" | "earlier_company"; owedCents: number | null; readAt: string | null; qboId?: string };
+export type InvoiceAsRead = { kind: "none" | "not_read" | "open" | "part_paid" | "paid" | "voided" | "earlier_company"; owedCents: number | null; readAt: string | null; qboId?: string;
+  /** For `earlier_company`: ended from the company the roster names again, so the invoice is in the company connected now. */
+  here?: boolean };
 
 /**
  * `subjectName`: for a buy-out of the roster's company, the roster cache's name of the customer its invoice is billed
@@ -235,9 +247,11 @@ export async function loadFamilyBuyouts(familyId: AppFamilyId): Promise<{ family
     const figures = row?.invoices && row.readAt && row.realmId === b.realmId && row.realmId === source ? row : null;
     const inv = b.invoiceQboId && figures ? figures.invoices!.find((i) => i.qboId === b.invoiceQboId) ?? null : null;
     const own = items.get(b.id) ?? [];
-    const earlier = source !== null && b.realmId !== source ? lookOf(b, own) : null;
-    const invoice: InvoiceAsRead = earlier?.invoiceQboId ? { kind: "earlier_company", owedCents: null, readAt: null, qboId: earlier.invoiceQboId }
-      : earlier?.kind === "may_be_made" ? { kind: "earlier_company", owedCents: null, readAt: null }
+    // An earlier company's, or one a change of company ended from the company the roster names again (`here`).
+    const here = b.realmId === source;
+    const earlier = source !== null && (!here || isEndedByChange(b)) ? lookOf(b, own, here) : null;
+    const invoice: InvoiceAsRead = earlier?.invoiceQboId ? { kind: "earlier_company", owedCents: null, readAt: null, qboId: earlier.invoiceQboId, here }
+      : earlier?.kind === "may_be_made" ? { kind: "earlier_company", owedCents: null, readAt: null, here }
       : !b.invoiceQboId ? { kind: "none", owedCents: null, readAt: null }
       : !inv ? { kind: "not_read", owedCents: null, readAt: figures?.readAt?.toISOString() ?? null }
         : { kind: inv.totalCents === 0 ? "voided" : inv.balanceCents <= 0 ? "paid" : inv.balanceCents < inv.totalCents ? "part_paid" : "open",
