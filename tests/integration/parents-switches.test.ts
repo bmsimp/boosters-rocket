@@ -7,7 +7,7 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 import { db } from "@/lib/db/client";
 import { eq, sql } from "drizzle-orm";
 import { auditLog, family, guardian, parent, parentAuthSession, parentAuthUser, qboConnection, setting, signinCode, student } from "@/lib/db/schema";
-import { CLOSED_PARENT_SETTINGS, getParentSettings, PARENTS_KEY, readStoredSettings } from "@/lib/parents/settings";
+import { CLOSED_PARENT_SETTINGS, getParentSettings, PARENTS_KEY, putParentSettings, readStoredSettings } from "@/lib/parents/settings";
 import { factorCounts, LEVEL_COUNT_CHANGED, LEVEL_UNREADABLE, missingForSignins, NO_STUDENTS_IN_SHAPE, peopleWithAccess, setLevel, setRequireStudents, setSignins,
   setWelcome, signinCounts, studentsEffect } from "@/lib/parents/switches";
 import { resolveParentSession } from "@/lib/auth/resolve";
@@ -277,7 +277,7 @@ describe("the parent switches", () => {
     }
     expect(await audits("settings.parents.save")).toHaveLength(1);
     // Choosing Standard stores the closed state, and its row says the level it found couldn't be read.
-    expect(await setLevel("standard", null, admin)).toEqual({ ok: true, signedOut: 0 });
+    expect(await setLevel("standard", null, admin)).toEqual({ ok: true, signedOut: 0, signinOn: false });
     expect(await stored()).toEqual(CLOSED_PARENT_SETTINGS);
     const chosen = (await audits("settings.parents.save")).at(-1)!;
     expect(chosen.before).toEqual({ ...CLOSED_PARENT_SETTINGS, level: null });
@@ -369,7 +369,7 @@ describe("the club's sign-in level (slice SI-10b)", () => {
     const { ana, ben, cai, dee, sessions } = f;
     await setSignins(true, admin);
     const held = await heldBy(f);
-    expect(await setLevel("strict", 1, admin)).toEqual({ ok: true, signedOut: 1 });
+    expect(await setLevel("strict", 1, admin)).toEqual({ ok: true, signedOut: 1, signinOn: true });
     expect(await getParentSettings()).toEqual({ signin: true, welcome: false, requireActiveStudents: false, level: "strict" });
     // Ana's sessions are gone, the emailed code's among them; the others stay, with no proof.
     expect(await sessionsOf(ana.authUserId)).toEqual([]);
@@ -404,7 +404,7 @@ describe("the club's sign-in level (slice SI-10b)", () => {
   it("does nothing for a press when Strict is stored already, whatever count it carries", async () => {
     const { ana } = await seedFour();
     await seedParentSettings({ level: "strict" });
-    for (const shown of [1, 0, 7]) expect(await setLevel("strict", shown, admin)).toEqual({ ok: true, signedOut: 0 });
+    for (const shown of [1, 0, 7]) expect(await setLevel("strict", shown, admin)).toEqual({ ok: true, signedOut: 0, signinOn: false });
     expect(await audits("settings.parents.save")).toEqual([]);
     expect(await sessionsOf(ana.authUserId)).toHaveLength(2);
     expect(await provedSessions()).toBe(3);
@@ -414,14 +414,14 @@ describe("the club's sign-in level (slice SI-10b)", () => {
     const f = await seedFour();
     const { ana, sessions } = f;
     await setSignins(true, admin);
-    expect(await setLevel("strict", 1, admin)).toEqual({ ok: true, signedOut: 1 });
+    expect(await setLevel("strict", 1, admin)).toEqual({ ok: true, signedOut: 1, signinOn: true });
     // Ana signs in again at Strict: her password makes an enrolling session.
     expect((await passwordStep(ana.email, { password: PASSWORD })).body).toEqual({ ok: true, next: "/one-more-step" });
     const [enrolling] = await sessionsOf(ana.authUserId);
     const all = await db.select({ id: parentAuthSession.id }).from(parentAuthSession).orderBy(parentAuthSession.id);
     expect(all).toHaveLength(4);
     const held = await heldBy(f);
-    expect(await setLevel("standard", null, admin)).toEqual({ ok: true, signedOut: 0 });
+    expect(await setLevel("standard", null, admin)).toEqual({ ok: true, signedOut: 0, signinOn: true });
     expect((await getParentSettings()).level).toBe("standard");
     expect(await db.select({ id: parentAuthSession.id }).from(parentAuthSession).orderBy(parentAuthSession.id)).toEqual(all);
     expect(await heldBy(f)).toEqual(held);
@@ -432,7 +432,7 @@ describe("the club's sign-in level (slice SI-10b)", () => {
     expect(await stateOf(enrolling!.id)).toEqual({ status: "none" });
     for (const s of [sessions.ben, sessions.cai, sessions.dee]) expect((await stateOf(s.id)).status).toBe("ok");
     // A second press changes nothing and records nothing.
-    expect(await setLevel("standard", null, admin)).toEqual({ ok: true, signedOut: 0 });
+    expect(await setLevel("standard", null, admin)).toEqual({ ok: true, signedOut: 0, signinOn: true });
     expect(await audits("settings.parents.save")).toHaveLength(3);
     expect(outbox).toEqual([]);
   });
@@ -440,10 +440,40 @@ describe("the club's sign-in level (slice SI-10b)", () => {
   it("may be chosen with sign-ins off, and signs out those with neither then too", async () => {
     const { ana, sessions } = await seedFour();
     expect((await getParentSettings()).signin).toBe(false);
-    expect(await setLevel("strict", 1, admin)).toEqual({ ok: true, signedOut: 1 });
+    expect(await setLevel("strict", 1, admin)).toEqual({ ok: true, signedOut: 1, signinOn: false });
     expect(await getParentSettings()).toEqual({ ...CLOSED_PARENT_SETTINGS, level: "strict" });
     expect(await sessionsOf(ana.authUserId)).toEqual([]);
     expect((await db.select({ id: parentAuthSession.id }).from(parentAuthSession)).map((r) => r.id).sort()).toEqual([sessions.ben.id, sessions.cai.id, sessions.dee.id].sort());
+  });
+
+  it("answers signinOn, the stored sign-in switch as the press read it under the parents' settings lock", async () => {
+    await seedFour();
+    // A save that holds the lock switches sign-ins on: the press waits for it, and answers what it committed.
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    let locked!: () => void;
+    const isLocked = new Promise<void>((r) => { locked = r; });
+    const save = db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${PARENTS_KEY}))`);
+      locked();
+      await held;
+      await putParentSettings(tx, { ...(await getParentSettings(tx)), signin: true });
+    });
+    await isLocked;
+    expect((await getParentSettings()).signin).toBe(false);
+    const press = setLevel("strict", 1, admin);
+    await new Promise((r) => setTimeout(r, 200));
+    release();
+    await save;
+    expect(await press).toEqual({ ok: true, signedOut: 1, signinOn: true });
+    // Back to Standard with sign-ins on, then off: each answer says the switch as stored at that press.
+    expect(await setLevel("standard", null, admin)).toEqual({ ok: true, signedOut: 0, signinOn: true });
+    await setSignins(false, admin);
+    expect(await setLevel("strict", 1, admin)).toEqual({ ok: true, signedOut: 0, signinOn: false });
+    // Neither answer adds a key to the audit row: `after` holds `signin` among the stored switches, as it did.
+    for (const r of await audits("settings.parents.save")) expect(Object.keys(r.after as Record<string, unknown>)).not.toContain("signinOn");
+    const last = (await audits("settings.parents.save")).filter((r) => (r.after as { level?: string }).level === "strict").at(-1)!;
+    expect(last.after).toMatchObject({ signin: false, level: "strict", signedOut: 0 });
   });
 
   it("chooses Strict over an unreadable value with its count and confirm, storing the closed state's switches at Strict", async () => {
@@ -451,7 +481,7 @@ describe("the club's sign-in level (slice SI-10b)", () => {
     await db.insert(setting).values({ key: PARENTS_KEY, value: { signin: true, welcome: false, requireActiveStudents: false, level: "relaxed" } });
     expect(await setLevel("strict", 0, admin)).toEqual({ ok: false, errors: [LEVEL_COUNT_CHANGED] });
     expect(await audits("settings.parents.save")).toEqual([]);
-    expect(await setLevel("strict", 1, admin)).toEqual({ ok: true, signedOut: 1 });
+    expect(await setLevel("strict", 1, admin)).toEqual({ ok: true, signedOut: 1, signinOn: false });
     expect((await db.select().from(setting).where(eq(setting.key, PARENTS_KEY)))[0]!.value).toEqual({ ...CLOSED_PARENT_SETTINGS, level: "strict" });
     expect(await sessionsOf(ana.authUserId)).toEqual([]);
   });

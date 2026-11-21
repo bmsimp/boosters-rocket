@@ -12,8 +12,14 @@ import { getParentSettings, putParentSettings, PARENTS_KEY, readStoredSettings, 
 
 /** A switch's answer. `did` is what change()'s work recorded in the audit row, which setLevel() reads; no other caller passes it on. */
 export type SwitchResult = { ok: true; did?: Record<string, unknown> } | { ok: false; errors: string[] };
+/**
+ * change()'s own answer: a switch's, and on `ok` the stored `signin` as change() read it under the parents' settings
+ * lock (`signinOn`), which setLevel() answers; it is carried out beside the audit row, never added to it (whose
+ * `after` holds `signin` already among the stored switches).
+ */
+type ChangeResult = { ok: true; did?: Record<string, unknown>; signinOn: boolean } | { ok: false; errors: string[] };
 /** A switch's answer without `did`, for the switches whose answer is only whether it was done. */
-const answered = (r: SwitchResult): SwitchResult => (r.ok ? { ok: true } : r);
+const answered = (r: ChangeResult): SwitchResult => (r.ok ? { ok: true } : r);
 
 /**
  * Why a save is refused when the stored value fails to parse and names no readable level (storedLevel()): until a
@@ -47,8 +53,8 @@ export type StudentsEffect = { families: number; people: number };
  * other switches with the level chosen), its audit row's `before` saying `level: null`. Returns what `work` recorded.
  */
 async function change(patch: Partial<ParentSettings>, o: StaffOp, work: (tx: Tx, next: ParentSettings, before: ParentSettings) => Promise<Record<string, unknown>>,
-  refuse?: (before: ParentSettings, tx: Tx, stored: SigninLevel | null) => string[] | null | Promise<string[] | null>): Promise<SwitchResult> {
-  return db.transaction(async (tx): Promise<SwitchResult> => {
+  refuse?: (before: ParentSettings, tx: Tx, stored: SigninLevel | null) => string[] | null | Promise<string[] | null>): Promise<ChangeResult> {
+  return db.transaction(async (tx): Promise<ChangeResult> => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${PARENTS_KEY}))`);
     const { settings, level } = await readStoredSettings(tx);
     const before: ParentSettings = { ...settings, level: level ?? settings.level };
@@ -58,12 +64,12 @@ async function change(patch: Partial<ParentSettings>, o: StaffOp, work: (tx: Tx,
     // as one that isn't (the students rule stored on beside a shape that names no students is not in force).
     const errors = await refuse?.(before, tx, level);
     if (errors) return { ok: false, errors };
-    if (level !== null && (Object.keys(patch) as (keyof ParentSettings)[]).every((k) => before[k] === next[k])) return { ok: true };
+    if (level !== null && (Object.keys(patch) as (keyof ParentSettings)[]).every((k) => before[k] === next[k])) return { ok: true, signinOn: before.signin };
     await putParentSettings(tx, next);
     const did = await work(tx, next, before);
     await writeAudit({ actor: o.actor, action: "settings.parents.save", permission: o.permission, targetType: "setting", targetId: PARENTS_KEY, ip: o.ip,
       before: level === null ? { ...settings, level: null } : before, after: { ...next, ...did } }, tx);
-    return { ok: true, did };
+    return { ok: true, did, signinOn: before.signin };
   });
 }
 
@@ -195,7 +201,8 @@ export async function signinCounts(): Promise<SigninCounts> {
  * blocked, a row that counts by the students rule in force), how many have a passkey (hasPasskey()'s condition: a
  * `parent_auth_passkey` row of their sign-in account, readable or not), how many an authenticator app in force
  * (hasAuthenticator()'s: `confirmed_at` set), and how many neither. Someone with both is counted in `passkey` and in
- * `app`. Counts only: nobody is named.
+ * `app`. Counts only: nobody is named. With sign-ins off they are of who could sign in once sign-ins are on: the door is
+ * closed and nobody is signed in.
  */
 export type FactorCounts = { people: number; passkey: number; app: number; neither: number };
 
@@ -219,14 +226,19 @@ export async function factorCounts(tx?: Tx): Promise<FactorCounts> {
   return { people: row?.people ?? 0, passkey: row?.passkey ?? 0, app: row?.app ?? 0, neither: row?.neither ?? 0 };
 }
 
-/** setLevel()'s answer: for Strict, how many people with neither were signed out. */
-export type LevelResult = { ok: true; signedOut: number } | { ok: false; errors: string[] };
+/**
+ * setLevel()'s answer: for Strict, how many people with neither were signed out; and `signinOn`, the stored `signin`
+ * as change() read it under its lock (the press's own moment, not a read after it). With sign-ins off nobody is signed
+ * in (setSignins(false) ended every session), so there is nobody to sign out and `signedOut` is 0.
+ */
+export type LevelResult = { ok: true; signedOut: number; signinOn: boolean } | { ok: false; errors: string[] };
 
 /**
  * The Admin's choice of the club's sign-in level (the sign-in release, slice SI-10b; section 6 of the app-owned
  * families spec, "Signing in", and open question 21 (a)), through change(): the parents' settings lock, the setting and
  * one `settings.parents.save` row with its before and after, all in one transaction. Strict may be chosen with sign-ins
- * on or off: the level is the club's, not the door's.
+ * on or off: the level is the club's, not the door's. With sign-ins off nobody is signed in to sign out (setSignins(false)
+ * ended every session), and FactorCounts are of who could sign in once they are on; the answer's `signinOn` says which.
  *
  * To Strict from Standard (or from a level that can't be read), refused, changing nothing and recording nothing, when
  * the count of people with neither read under the lock differs from the count the Admin was shown (`shownNeither`,
@@ -258,7 +270,7 @@ export async function setLevel(level: SigninLevel, shownNeither: number | null, 
     })
     : await change({ level }, o, async () => ({}));
   if (!r.ok) return r;
-  return { ok: true, signedOut: typeof r.did?.signedOut === "number" ? r.did.signedOut : 0 };
+  return { ok: true, signedOut: typeof r.did?.signedOut === "number" ? r.did.signedOut : 0, signinOn: r.signinOn };
 }
 
 /** The switch to Strict's work (setLevel()), in change()'s transaction, after the setting is stored. */

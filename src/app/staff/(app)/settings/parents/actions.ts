@@ -42,7 +42,8 @@ export const oweSetupMailsAction = staffAction(P, async (ctx): Promise<Done> => 
 });
 // The club's sign-in level, step 3 (the sign-in release, slice SI-10b). For Strict the page sends the count of guardians
 // with neither a passkey nor an authenticator app it showed, which setLevel() checks again under the lock; for
-// Standard, null.
+// Standard, null. With sign-ins off (as setLevel() read them under its lock) nobody is signed in, so Strict's answer says
+// nobody was signed out, and why.
 export const setLevelAction = staffAction(P, async (ctx, level: unknown, shown: unknown): Promise<Done> => {
   if (level === "strict") {
     if (typeof shown !== "number" || !Number.isSafeInteger(shown) || shown < 0 || shown > 1_000_000) return NOT_FROM_PAGE;
@@ -50,6 +51,7 @@ export const setLevelAction = staffAction(P, async (ctx, level: unknown, shown: 
   const r = await setLevel(level, shown, op(ctx));
   if (!r.ok) return r;
   return done(r, level === "standard" ? "The club is at Standard. Nobody was signed out."
+    : !r.signinOn ? "The club is at Strict. Parent sign-ins are off, so nobody was signed out."
     : r.signedOut === 0 ? "The club is at Strict. Nobody needed signing out."
     : r.signedOut === 1 ? "The club is at Strict. 1 guardian with neither a passkey nor an authenticator app was signed out."
     : `The club is at Strict. ${r.signedOut} guardians with neither a passkey nor an authenticator app were signed out.`);

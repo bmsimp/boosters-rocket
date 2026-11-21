@@ -144,6 +144,13 @@ describe("the staff pages for parents", () => {
     expect(counts(await parentsPage())).toBe(`<p>Of the 2 people who can sign in, 1 has a passkey and 1 an authenticator app (someone with both is counted twice); 1 has neither.${strict}`);
     await seedParentSettings({ level: "standard" });
     expect(counts(await parentsPage())).not.toContain("step 3");
+    // With parent sign-ins off nobody can sign in: the counts are of who could once they are on (slice SI-11), the rest as it was.
+    await seedParentSettings({ signin: false });
+    expect(counts(await parentsPage())).toBe("<p>Of the 2 people who could sign in once sign-ins are on, 1 has a passkey and 1 an authenticator app (someone with both is counted twice); 1 has neither.");
+    await seedParentSettings({ level: "strict" });
+    expect(counts(await parentsPage())).toBe(`<p>Of the 2 people who could sign in once sign-ins are on, 1 has a passkey and 1 an authenticator app (someone with both is counted twice); 1 has neither.${strict}`);
+    await seedParentSettings({ signin: true, level: "standard" });
+    expect(counts(await parentsPage())).toBe("<p>Of the 2 people who can sign in, 1 has a passkey and 1 an authenticator app (someone with both is counted twice); 1 has neither.");
     // Counts only: reading them writes no audit row.
     expect((await db.select().from(auditLog)).length).toBe(readsBefore);
   });
