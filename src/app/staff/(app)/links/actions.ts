@@ -1,8 +1,10 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { requireStaffActionAlso, staffAction, type StaffCtx } from "@/lib/guards";
-import { confirmAllSuggested, leaveUnlinked, LINK_COPY, linkFamilyToCustomer, reviewCarriedOver, sendAllDifferences, undoLeaveUnlinked, unlinkFamily, type LinkDone } from "@/lib/accounting/link-writes";
-import { BULK_MAX } from "@/lib/accounting/mapping";
+import { confirmAllSuggested, customerAimedAt, leaveUnlinked, LINK_COPY, linkFamilyToCustomer, reviewCarriedOver, sendAllDifferences, undoLeaveUnlinked, unlinkFamily, type LinkDone } from "@/lib/accounting/link-writes";
+import { familyFromCustomer, NO_FAMILY_COPY } from "@/lib/roster/no-family";
+import { BULK_MAX, IMPORT_MAX } from "@/lib/accounting/mapping";
+import { IMPORT_COPY, saveImport } from "@/lib/accounting/import-writes";
 import { isStatusKey, SEARCH_MAX } from "@/lib/accounting/status";
 import { isChosen, isGuardianChosen } from "@/lib/accounting/stamp";
 import { linkGuardian, unlinkGuardian, type GuardianLinkDone } from "@/lib/accounting/guardian-links";
@@ -15,7 +17,8 @@ import { sendToBooks, takeFromBooks } from "@/lib/roster/writes";
 // row's customer, a Several possible row's candidate, or one picked from the customers no family is linked to), Leave
 // unlinked and Undo; since slice M3a2, Confirm all exact email matches and Confirm this link (a carried-over link
 // confirmed as reviewed); since slice M3b, Unlink from the books; since slice M3c, Link this guardian and Unlink this
-// guardian (src/lib/accounting/guardian-links.ts); since slice M4a, Take QuickBooks' into the app. Each needs the
+// guardian (src/lib/accounting/guardian-links.ts); since slice M4a, Take QuickBooks' into the app; since slice M6,
+// "Create a family from this" (moved here from Reconciliation) and Make these families, the reviewed import. Each needs the
 // linking permission, Accounting.Link.ReadWrite (not Admin-only), and also
 // Roster.Read, the page's own, checked here first and refused as the guard refuses (requireStaffActionAlso()). A server
 // action can be called with any values, not only the ones its page sends: each argument is checked here for its type
@@ -23,6 +26,7 @@ import { sendToBooks, takeFromBooks } from "@/lib/roster/writes";
 // roster lock. Every answer shows the screen again as it is now.
 const P = "Accounting.Link.ReadWrite" as const;
 const NOT_FROM_PAGE: LinkDone = { ok: false, errors: [LINK_COPY.notFromPage] };
+const NO_FAMILY_NOT_FROM_PAGE: LinkDone = { ok: false, errors: [NO_FAMILY_COPY.notFromPage] };
 const str = (v: unknown, max: number): v is string => typeof v === "string" && v.length > 0 && v.length <= max;
 const ID_MAX = 64, TAG_MAX = 64, STAMP_MAX = 64;
 const op = (ctx: StaffCtx) => ({ actor: { door: "staff" as const, id: ctx.staffUserId, label: ctx.email }, ip: ctx.ip, permission: P, staffUserId: ctx.staffUserId });
@@ -159,6 +163,44 @@ export const sendDifferenceAction = staffAction(P, async (ctx: StaffCtx, field: 
   if (r.ok || changed === true) revalidatePath("/", "layout");
   else again();
   return r;
+});
+
+/**
+ * "Create a family from this", in the screen's part for the customers no family is linked to (since slice M6; stage 3's
+ * slice 10 put it on Reconciliation): src/lib/roster/no-family.ts. It needs the linking permission and also Roster.Read,
+ * the page's own, and takes one value, the customer's QuickBooks id, checked here for its type and size and in the
+ * library for its digits; everything about the customer is checked again there, under the roster lock. It refuses a
+ * customer this screen aims at a family the portal has (customerAimedAt(), passed in: no-family.ts may not import this
+ * screen's modules).
+ */
+export const familyFromCustomerAction = staffAction(P, async (ctx: StaffCtx, customerQboId: string): Promise<LinkDone> => {
+  if (!can(ctx.effective, "Roster.Read") || typeof customerQboId !== "string" || customerQboId.length === 0 || customerQboId.length > ID_MAX) return NO_FAMILY_NOT_FROM_PAGE;
+  const r = await familyFromCustomer(customerQboId, { ...op(ctx), mayChangeFamilies: can(ctx.effective, "Roster.Family.ReadWrite") }, customerAimedAt);
+  // The new family shows on the Families pages and every staff page that lists families; a refusal shows the screen again
+  // as it is now, the row of a customer meant for a family the portal has with its words and link.
+  if (r.ok) revalidatePath("/", "layout");
+  else again();
+  return r;
+});
+
+/**
+ * Make these families, the reviewed import's press (slice M6; src/lib/accounting/import-writes.ts): the roster tag and the
+ * stamp sealing the whole list the review showed (bound by the page), then the customer ids the review left ticked and
+ * how many (sent by its form). It gives each
+ * guardian a family's sign-in, so it needs the permission that changes families too (the lead's decision 3), with the
+ * page's Roster.Read, checked first and refused as the guard refuses. Every argument is checked again in the library,
+ * which works the proposal out again under the roster lock.
+ */
+export const saveImportAction = staffAction(P, async (ctx: StaffCtx, rosterTag: string, stamp: string, customerIds: string[], count: number): Promise<LinkDone> => {
+  await requireStaffActionAlso(ctx, "Roster.Read");
+  await requireStaffActionAlso(ctx, "Roster.Family.ReadWrite");
+  if (!Array.isArray(customerIds) || customerIds.length > IMPORT_MAX || !customerIds.every((id) => str(id, ID_MAX)) || typeof count !== "number"
+    || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return { ok: false, errors: [IMPORT_COPY.notFromPage] };
+  const r = await saveImport({ customerIds, count, stamp }, rosterTag, op(ctx));
+  // New families show on the Families pages and every staff page that lists families.
+  if (r.ok) revalidatePath("/", "layout");
+  else again();
+  return r.ok ? { ok: true, message: r.message } : r;
 });
 
 /**

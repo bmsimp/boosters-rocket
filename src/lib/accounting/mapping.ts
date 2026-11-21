@@ -10,7 +10,7 @@
 // same reads, made in the press's own transaction under the roster lock (readLinkBasics(tx)), are what the link presses
 // check against (./link-writes.ts): the suggestion, the pool and the students a link would link with it are worked out
 // by one rule for the page and the press, so the two never differ.
-import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { accountingLink, accountingLinkEnded, family, guardian, jobRun, parent, qboCustomer, qboCustomerType, staffUser, student, writeQueue } from "@/lib/db/schema";
 import { getConnection } from "@/lib/quickbooks/connection";
@@ -20,7 +20,7 @@ import { recordNameWords } from "@/lib/families/words";
 import { parseEmailField } from "@/lib/parents/emails";
 import { buildRoster, type Cust } from "@/lib/roster/model";
 import { checkName, nameKey, normalName } from "@/lib/roster/names";
-import { familyCreatesFiled, noFamilyPool } from "@/lib/roster/no-family";
+import { familyCreatesFiled, noFamilyPool, type NoFamilyCustomer } from "@/lib/roster/no-family";
 import { isBalanceHold, loadOpenWrites, waitingWords, type QueueView } from "@/lib/roster/queue";
 import { blocksOthers, coverUnder, familySendSeal, familySendStudentsWords, guardianOf, heldWords, KEPT_OFF_STAYS, keptWordsFor, madeAfterGivingUp, type MadeAfterGivingUp } from "@/lib/roster/writes";
 import { deactivateOf, offers, renameOf } from "@/lib/roster/operations";
@@ -32,6 +32,7 @@ import { getRosterSource, ofRosterCompany, ROSTER_JOB } from "@/lib/roster/sourc
 import { differencesOf, type Difference, type GuardianToCompare, type LinkedStudent, type QueueFact } from "./differences";
 import { suggestCustomers, type Holder, type Suggestion } from "./match";
 import { pairKeys, proposeGuardians, proposeStudents, type Proposals } from "./proposals";
+import { importAddresses, proposeImport, type ImportInput, type ImportPerson, type ImportProposal } from "./import-proposals";
 import { bulkStamp, guardianLinkStamp, guardianUnlinkStamp, linkStamp, reviewStamp, sendAllStamp, sendStamp, takeStamp, unlinkStamp, type Chosen } from "./stamp";
 import { linkStanding, searchMatches, STATUS_KEYS, type LinksFilter, type NotAFamilyReason, type StatusKey } from "./status";
 
@@ -39,7 +40,7 @@ import { linkStanding, searchMatches, STATUS_KEYS, type LinksFilter, type NotAFa
  * Whether suggestions can be worked out, or why not: the roster cache names no company (`no_company`), the books are
  * connected to a company other than the roster's (`other_company`: no link is read at all), or the membership shape
  * is missing or names a customer type the books no longer have (`no_shape`). The same states, in the same order, as
- * Reconciliation's customers with no family (customersWithNoFamily()).
+ * the customers with no family (customersWithNoFamily()).
  */
 export type LinksState = "listed" | "no_company" | "other_company" | "no_shape";
 /** A customer as the row shows it: its name and its whole email field, the books' text, shown as text only. */
@@ -257,6 +258,8 @@ const sealOf = (field: SendOffer["field"], recordId: string, customerId: string,
 export const QUEUE_IN_THE_WAY_OF_SEND = "Another change on the Reconciliation page stands in the way (waiting to reach QuickBooks, stuck, or a move kept there), so the portal's value can't be sent to the books until it is done or given up.";
 /** At most this many families are linked by one press of Confirm all exact email matches (the lead's decision 3 for slice M3a2). */
 export const BULK_MAX = 200;
+/** At most this many families are made by one press of the reviewed import (slice M6): kept with its pure proposer, so its tests read it there. */
+export { IMPORT_MAX } from "./import-proposals";
 /** At most this many differences are queued by one press of Send the app's for all (the lead's decision 3 for slice M5b, after M5a's decision 5). */
 export const SEND_ALL_MAX = 100;
 /**
@@ -344,8 +347,26 @@ export type ConfirmStep =
 export type LinksView = {
   state: LinksState;
   rows: LinkRow[];
-  /** How many customers no family is linked to (Reconciliation's list); null when none can be listed. */
+  /** How many customers no family is linked to (the screen's own part for them, since slice M6); null when none can be listed. */
   noFamily: number | null;
+  /**
+   * The customers no family is linked to, as the screen's part for them lists them (slice M6, conformance L.15): the pool
+   * (noFamilyPool()'s rule, customersWithNoFamily()'s), in the roster's order, with their students counted; null when none
+   * can be listed.
+   */
+  noFamilyList: NoFamilyCustomer[] | null;
+  /**
+   * Which customers no family is linked to are meant for a family the portal has (customerAims(), "Create a family from
+   * this"'s refusal), worked out once from this view's reads and the creates given up after a try (madeAfterGivingUp()):
+   * empty in any state but `listed`.
+   */
+  aims: ReadonlyMap<string, CustomerAim>;
+  /**
+   * The reviewed import's review (slice M6): its proposal from this view's reads (importProposalOf(), which reads the
+   * persons who hold its addresses, one query, only when this is called), and whether welcome emails are on now; null
+   * in any state but `listed`.
+   */
+  importReview: () => Promise<{ proposal: ImportProposal; welcomes: boolean } | null>;
   /** Whether the families' own pages stand (loadRosterPage() has a roster: rosterShown()), so the rows may link to them. */
   familyPages: boolean;
   /** When the last successful roster read finished: the books' values are the portal's copy as of then. Null when none has. */
@@ -694,7 +715,10 @@ export async function readLinkBasics(tx?: Tx) {
   return { source, connection, shape, typeRows, okRuns, customerRows, customers, customerById, tokenOf, roster, realm, state, everyFamily, families, everyStudent, students,
     guardians, links, linkOfFamily, familyOfCustomer, customerOfStudent, customerOfGuardian, studentLinked, pool, poolIds, studentsOf, guardiansOf, addressesOf, leftOf,
     unlinked, suggestions, listedAsFamily, proposalsFor, offerFor, chosenFor, reviewOf, unlinkOf, createQueuedFor, familyLinkedAnywhere, creates,
-    everyGuardian, guardianById, linkOfGuardian, guardianBooksOf, guardianOfferOf, guardianLinkOf, removedOf, ownParentsOf };
+    everyGuardian, guardianById, linkOfGuardian, guardianBooksOf, guardianOfferOf, guardianLinkOf, removedOf, ownParentsOf,
+    // Since slice M6, for the import's proposals (importInputOf()): the customers a guardian link names, those a row's
+    // ended link keeps, and those a change that blocks others targets.
+    guardianLinked, keptForRows, heldCustomers, parentTypeId };
 }
 export type LinkBasics = Awaited<ReturnType<typeof readLinkBasics>>;
 
@@ -743,6 +767,10 @@ export type LinkBasics = Awaited<ReturnType<typeof readLinkBasics>>;
  * (keptPlacesOf(), from the rows worked out here and the queue's open items read above, with each one's words as
  * Reconciliation says them), with no query of their own: the count is unchanged, with kept items or without.
  * `reader.mayChange` (Roster.Family.ReadWrite) only says whether a kept change's Give up is drawn.
+ * Since slice M6, in the `listed` state, the creates given up after a try are read beside the queue's items, in a
+ * transaction of their own (madeAfterGivingUp(): 4 to 8, as readCustomerAims() counts them), for the aims of the
+ * customers no family is linked to (customerAims(), from the reads above): so a listed view is 19 to 62. The import's
+ * review adds one query more, and only when it is asked for (importReview(): the persons who hold its addresses).
  * On four hundred families with two thousand customers that is the same number of queries; memory holds the two
  * thousand cached customers (twice, while the queue holds items, as loadOpenWrites() reads its own), the records,
  * guardian rows and links (a few thousand small rows), and the rows rendered are the four hundred families, each
@@ -754,7 +782,10 @@ export async function loadAccountingLinks(reader: { mayChange?: boolean } = {}):
   // The queue's open items only where differences are worked out: only the roster's company's (ofRosterCompany,
   // src/lib/roster/source.ts, stage 4's slice M7a3), so a parent's change saved as a change of company's clear ran,
   // open until the worker's next wake gives it up, holds nothing back here.
-  const [queue, parentSettings] = state === "listed" ? await Promise.all([loadOpenWrites(), getParentSettings()]) : [[], null];
+  // Since slice M6, beside them, the creates given up after a try (madeAfterGivingUp()), for the aims of the customers no
+  // family is linked to (customerAims()), which the screen's part for them shows: read once, never a second readLinkBasics().
+  const [queue, parentSettings, givenUp] = state === "listed"
+    ? await Promise.all([loadOpenWrites(), getParentSettings(), db.transaction((tx) => madeAfterGivingUp(tx))]) : [[], null, []];
   // Whether a family's guardians sign in by its active students (enterableGuardianRows()): a student's take of active may open it.
   const studentsRule = parentSettings !== null && studentsRuleApplies(parentSettings.requireActiveStudents, shape);
   const staffIds = [...new Set([...links.flatMap((l) => (l.linkedBy === null ? [] : [l.linkedBy])), ...[...leftOf.values()].flatMap((m) => (m.by === null ? [] : [m.by]))])];
@@ -770,6 +801,7 @@ export async function loadAccountingLinks(reader: { mayChange?: boolean } = {}):
   // The families whose rows aim at each customer (a suggestion or a candidate), for the confirm step's warning: the one
   // rule "Create a family from this" refuses by too (aimIndex()).
   const aimedBy = aimIndex(b);
+  const aims: ReadonlyMap<string, CustomerAim> = listed ? customerAims(b, givenUp) : new Map<string, CustomerAim>();
   const poolShown: PoolCustomer[] | null = pool === null ? null : pool.map((c) => ({ qboId: c.qboId, name: c.name, email: customerById.get(c.qboId)?.email ?? null }));
   const rowOf = new Map(rows.map((r) => [String(r.familyId), r]));
   const step = (familyId: string, customerId: string): ConfirmStep => {
@@ -793,7 +825,12 @@ export async function loadAccountingLinks(reader: { mayChange?: boolean } = {}):
   };
 
   return {
-    state, noFamily: pool === null ? null : pool.length,
+    state, noFamily: pool === null ? null : pool.length, noFamilyList: pool,
+    aims,
+    importReview: async () => {
+      const proposal = await importProposalOf(b, aims);
+      return proposal === null ? null : { proposal, welcomes: parentSettings?.welcome ?? false };
+    },
     rows,
     familyPages: rosterShown({ connected: Boolean(b.connection?.realmId && b.connection.refreshTokenCiphertext), connectedRealmId: b.connection?.realmId ?? null, source: b.source,
       hasCache: b.typeRows.length > 0 || b.customerRows.length > 0, shape, readOnce: b.okRuns.length > 0, typeRows: b.typeRows }),
@@ -1633,7 +1670,8 @@ export function customerAims(b: LinkBasics, made: readonly MadeAfterGivingUp[]):
 /**
  * The aims of every customer, read in the caller's transaction or one of its own: readLinkBasics()'s reads (12 or 13)
  * and, in the `listed` state, madeAfterGivingUp()'s (4 to 8), a fixed number whatever the number of customers.
- * Reconciliation shows them, and "Create a family from this" refuses by them under its own roster lock
+ * Reconciliation shows them for its creates made after they were given up (the screen's own part reads them from its view,
+ * loadAccountingLinks()'s `aims`, since slice M6), and "Create a family from this" refuses by them under its own roster lock
  * (customerAimedAt(), ./link-writes.ts).
  */
 export async function readCustomerAims(tx?: Tx): Promise<Map<string, CustomerAim>> {
@@ -1655,6 +1693,50 @@ export async function readForReconciliation(queue: readonly QueueView[], o: { ai
     const aims = !o.aims ? null : b.state !== "listed" ? new Map<string, CustomerAim>() : customerAims(b, await madeAfterGivingUp(t));
     return { aims, kept: keptOnLinksOf(b, queue) };
   });
+}
+
+/**
+ * The reviewed import's input (slice M6), from the screen's reads alone: the shape, the roster and the cache, the pool
+ * (the customers no family is linked to), those of it the screen aims at a family the portal has (`aims`,
+ * customerAims()), the student customers with a student link, and the Parent customers no guardian may be linked to now
+ * by linkGuardian()'s rules (one a link names, or a row's ended link keeps) or that a blocking change targets. Null in
+ * any state but `listed`. No query of its own.
+ */
+export function importInputOf(b: LinkBasics, aims: ReadonlyMap<string, CustomerAim>): ImportInput | null {
+  if (b.state !== "listed" || b.shape === null || b.roster === null || b.pool === null) return null;
+  return { shape: b.shape, roster: b.roster, customers: b.customers, pool: b.pool, aimed: new Set(aims.keys()), studentLinked: b.studentLinked,
+    parentTaken: new Set([...b.guardianLinked, ...b.studentLinked, ...b.familyOfCustomer.keys(), ...b.keptForRows.keys()]), parentHeld: b.heldCustomers };
+}
+
+/**
+ * The persons who hold these addresses (slice M6), each with their name, whether they are blocked and the families they
+ * are an open guardian of, by name then id (openFamiliesOf()'s rule, src/lib/parents/guardians.ts): one query, whatever
+ * the number of addresses or families. Keyed by address.
+ */
+export async function personsHolding(emails: readonly string[], tx?: Tx): Promise<Map<string, ImportPerson>> {
+  if (emails.length === 0) return new Map();
+  const rows = await (tx ?? db).select({ id: parent.id, name: parent.name, email: parent.email, blocked: parent.blocked, familyId: family.id, family: family.name })
+    .from(parent).leftJoin(guardian, and(eq(guardian.parentId, parent.id), ne(guardian.status, "disabled"))).leftJoin(family, eq(family.id, guardian.familyId))
+    .where(inArray(parent.email, [...emails]));
+  const out = new Map<string, ImportPerson & { seen: { id: string; name: string }[] }>();
+  for (const r of rows) {
+    const had = out.get(r.email) ?? { id: r.id, name: r.name, blocked: r.blocked, families: [], seen: [] };
+    if (r.familyId !== null) had.seen.push({ id: String(r.familyId), name: recordNameWords(r.family, "family") });
+    out.set(r.email, had);
+  }
+  return new Map([...out].map(([email, { seen, ...p }]) => [email, { ...p,
+    families: seen.sort((x, y) => COLLATOR.compare(x.name, y.name) || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0)).map((f) => f.name) }]));
+}
+
+/**
+ * The reviewed import's proposal (slice M6) from the screen's reads and the aims, with the persons who hold its addresses
+ * read in the caller's transaction or none (personsHolding(): one query): the review's (loadAccountingLinks()'s
+ * importReview()) and the save's, under the roster lock (./import-writes.ts), by one rule. Null in any state but `listed`.
+ */
+export async function importProposalOf(b: LinkBasics, aims: ReadonlyMap<string, CustomerAim>, tx?: Tx): Promise<ImportProposal | null> {
+  const input = importInputOf(b, aims);
+  if (input === null) return null;
+  return proposeImport(input, await personsHolding(importAddresses(input), tx));
 }
 
 /**

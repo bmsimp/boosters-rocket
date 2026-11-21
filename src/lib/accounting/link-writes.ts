@@ -180,7 +180,7 @@ async function keptMovesInto(tx: Tx, b: LinkBasics, familyKeys: readonly string[
  * linked to (`picked`). Sends nothing (open question 3). In one transaction, under the roster lock held exclusively with
  * the page's tag, from reads made in it: the state `listed`; the family record active (locked), with no family link of
  * any company and its own create neither waiting, stuck nor being made (familyCreateWaiting()); the customer still in
- * the pool (noFamilyPool(), as Reconciliation lists it); the way it was chosen still what the row offers it as
+ * the pool (noFamilyPool(), as the customers with no family are listed); the way it was chosen still what the row offers it as
  * (`suggested`: the row's suggestion; `several`: one of its candidates; `picked`: any other customer of the pool, for a
  * Several possible, No match or Left unlinked row); and the students the press would link with it (./proposals.ts),
  * worked out again, sealing to the page's stamp. Then the family's link (`confirmed`, by the staff member, aligned
@@ -581,7 +581,7 @@ export async function unlinkFamily(raw: { familyId: unknown; linkId: unknown; st
         studentLinksEnded: studentLinks.map((l) => ({ studentId: String(l.studentId), customerQboId: l.customerId })),
         guardianLinksEnded: guardianLinks.length, moneyForgotten, paidBuyoutsKept: paidKept } }, tx);
 
-    // Whether Reconciliation lists the customer among those with no family now: the pool worked out again without the links ended.
+    // Whether this screen lists the customer among those with no family now (since slice M6; Reconciliation did before): the pool worked out again without the links ended.
     const familyLinked = new Set([...b.familyOfCustomer.keys()].filter((c) => c !== link.customerId));
     const endedStudents = new Set(studentLinks.map((l) => l.customerId));
     const studentLinked = new Set([...b.studentLinked].filter((c) => !endedStudents.has(c)));
@@ -601,7 +601,7 @@ export async function unlinkFamily(raw: { familyId: unknown; linkId: unknown; st
  * `not_the_family` for a family's), a stuck or kept one left on Reconciliation, which runWriteQueue() never tries by
  * itself; that nothing was sent and, for a customer the books' copy holds, that it stays; that the row now shows what
  * the page suggests for it, Pick a different customer only once the row offers it (never on a Suggested row); and,
- * where the customer is in the pool now, that Reconciliation lists it.
+ * where the customer is in the pool now, that this screen lists it under Customers with no family (since slice M6).
  */
 export function unlinkedWords(s: { family: string; customer: string | null; students: string[]; guardianLinks: number; paidKept: number; listedWithNoFamily: boolean;
   details: { waiting: number; held: number } }): string {
@@ -616,7 +616,7 @@ export function unlinkedWords(s: { family: string; customer: string | null; stud
     : `${s.details.held} changes of guardians' details that are stuck or kept stay on the Reconciliation page, where they can be given up: nothing is sent from them while the family has no link.`);
   parts.push(s.customer === null ? "Nothing was sent to the books." : "Nothing was sent to the books, and the customer stays there as it is.");
   parts.push("Its row on this page now shows what the page suggests for it: link it again there, with Confirm, or with Pick a different customer once the row offers it (a Suggested row offers it once it is left unlinked).");
-  if (s.listedWithNoFamily) parts.push("Reconciliation now lists the customer under Customers with no family, where “Create a family from this” would make a second family, unless this page suggests it for a family.");
+  if (s.listedWithNoFamily) parts.push("This page now lists the customer under Customers with no family, where “Create a family from this” would make a second family, unless this page suggests it for a family.");
   return parts.join(" ");
 }
 

@@ -172,12 +172,19 @@ APP_COMMIT="$(git rev-parse --short HEAD)" docker compose -f compose.yml -f comp
    is for later, once most guardians have one (the counts are on step 3, and on **Parents**). Do this once QuickBooks
    has read the roster. A guardian is
    added on their family's page, and a fresh installation has no families yet: a read of QuickBooks brings no
-   customer into the portal's own families by itself. Bring each family in from **Reconciliation** in the staff menu:
-   under **Customers with no family**, **Create a family from this** makes the family and its students, linked to
-   their customers in QuickBooks (an Admin can do it, and so can anyone given "Link families to accounting"). Then add
-   its guardians on its page, under **Families** (an Admin can, and so can anyone whose role may give or end a
-   guardian's sign-in for a family; "Link families to accounting" alone can't). The reviewed import of every family at once comes with stage 4 of
-   the roadmap. A family that isn't in QuickBooks yet is added under **Families** with **Make a family**: it is made in
+   customer into the portal's own families by itself. Bring the families in from **Accounting links**, under
+   **Families** in the staff menu: under **Customers with no family**, **Propose families from the books** proposes a
+   family for each customer listed there, up to 25 at a time, with its students and its guardians (from the Parent
+   customers' email fields, or the family's own field where the books have no parent type, or a member's), for you to
+   look over, untick any you don't want yet, and save with **Make these families**. It sends nothing to QuickBooks,
+   changes no family or person the portal has, and links each family and student to their own customer and, where the
+   books have Parent customers, each guardian to their own; each
+   new guardian is mailed a welcome with a link to set up their sign-in while welcome emails are on (its step 2, above),
+   or once they are switched on. It takes someone who may change families as well as link them (an Admin can). **Create a
+   family from this** makes one family and its students, linked to their customers (an Admin can, and so can anyone
+   given "Link families to accounting"), and its guardians are then added on its page, under **Families** (an Admin
+   can, and so can anyone whose role may give or end a guardian's sign-in for a family; "Link families to accounting"
+   alone can't). A family that isn't in QuickBooks yet is added under **Families** with **Make a family**: it is made in
    QuickBooks too, and linked, when the person adding it may link families to accounting; otherwise it is in the portal
    only until someone who may presses **Create in QuickBooks and link** on its page.
 4. Before any family signs in: [before the first family](before-the-first-family.md), the checks only a person can

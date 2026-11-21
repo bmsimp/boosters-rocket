@@ -16,6 +16,8 @@ import { familyPage } from "@/app/staff/(app)/family-pages";
 import { confirmAllAction, confirmLinkAction, leaveUnlinkedAction, linkGuardianAction, reviewLinkAction, sendAllAction, sendDifferenceAction, takeDifferenceAction, undoLeaveUnlinkedAction, unlinkAction, unlinkGuardianAction } from "./actions";
 import { GuardianLinkPress, LinkAnswers, LinkAnswersShown, LinkGiveUp, LinkPress } from "./link-press";
 import { giveUpAction } from "../roster/write-actions";
+import { CustomersWithNoFamily } from "./no-family";
+import { ImportOffer, ImportReview } from "./import-review";
 
 export const metadata = { title: "Accounting links" };
 export const dynamic = "force-dynamic";
@@ -495,7 +497,9 @@ function PickPart({ view, familyId, customerId, cq, tag, made }: { view: LinksVi
  * from the books), and linked again with the presses above. Since slice M3c a guardian of a linked family is linked to
  * a Parent customer under it in the row's opening (Link this guardian), and one guardian's link ended alone (Unlink
  * this guardian, which splits a shared one), src/lib/accounting/guardian-links.ts; the removed guardians' Parent
- * customers are shown, never pressed. For holders of the linking
+ * customers are shown, never pressed. Since slice M6 the customers no family is linked to have their own part here
+ * (conformance L.15), each with "Create a family from this", and the reviewed import proposes families from the books
+ * for them (Propose families from the books, its review at `?import=1`, src/lib/accounting/import-writes.ts). For holders of the linking
  * permission (Accounting.Link.ReadWrite, not Admin-only), who also need Roster.Read, checked here and refused as the
  * guard refuses (requireStaffAlso()): a role written with patterns can hold the first without the second. The page
  * lists many families, so neither the page, a row's opening, the chooser nor the confirm step is audited as a read of
@@ -529,6 +533,11 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
   // A create of the picking family given up after a try the books may have taken, whose customer stands with no family linked to it.
   const pickRow = pick === null ? undefined : view.rows.find((r) => String(r.familyId) === pick.toLowerCase() && r.offers.pick);
   const made = pickRow === undefined ? [] : await givenUpCustomersOf(pickRow.familyId, view);
+  // The reviewed import (slice M6): offered while the part for the customers no family is linked to lists one this page
+  // aims at no family; its review step is this page at `?import=1`, which writes nothing and reads only the persons who
+  // hold its addresses (view.importReview(), one query), for a reader who may change families too.
+  const proposable = view.state !== "listed" ? 0 : (view.noFamilyList ?? []).filter((c) => !view.aims.has(c.qboId)).length;
+  const importAsked = sp.import === "1";
   const columns: Column<LinkRow>[] = [
     { key: "family", header: "Family", rowHeader: true, sorted: "ascending", cell: (r) => (view.familyPages ? <Link href={familyPage(r.familyId)}>{r.name}</Link> : r.name) },
     { key: "addresses", header: "Guardians' sign-in addresses", cell: (r) => (r.addresses.length > 0 ? r.addresses.join(", ") : r.guardians.length === 0 ? "None yet" : "None that can sign in") },
@@ -557,7 +566,7 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
             Nothing is sent to the books: the press ties the family to its customer in the portal, with each of its students whose name is on exactly one student on each side,
             and, where the books have Parent customers, each of its guardians whose sign-in address is in the email field of exactly one Parent customer under it that no one is linked to (nor kept for another guardian whose link to it an unlink ended) and that holds no other of its guardians&apos; addresses, unless a change for them or that customer is waiting, stuck or kept on Reconciliation.
             Students left that way aren&apos;t linked, and show with the family&apos;s row among its differences, but for a student customer inactive in the books, which is only counted there. Leave unlinked keeps a family out of the suggestions until someone undoes it.</p>
-          <p>A link also comes with something new. &ldquo;Create a family from this&rdquo;, on Reconciliation, makes a new family in the portal from a customer no family is linked to.
+          <p>A link also comes with something new. &ldquo;Create a family from this&rdquo;, under Customers with no family on this page, makes a new family in the portal from a customer no family is linked to.
             &ldquo;Create in QuickBooks and link&rdquo;, on a family&apos;s page, makes a new customer in the books for a family that has none, but not for one unlinked while its customer is still in the books, nor for a student of it whose customer is; and adding a family under Families makes one too, when someone who may link families adds it while the books are connected.</p>
           <p>For each family whose link stands, the portal compares the names, whether each is active, the family each student is under, and the students and Parent customers only one side has,
             against its copy of the books{view.readAt ? <>, from its last read of them on <LocalTime iso={view.readAt} /></> : ", though it hasn't read the books yet"}.
@@ -568,18 +577,19 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
           <p>Where the books have Parent customers, a guardian of a linked family is linked in its row&apos;s opening to a Parent customer under it that no guardian is linked to, and one guardian&apos;s link is ended there alone: a Parent customer several guardians share is nobody&apos;s own, so the portal sends nothing for it until all but one are unlinked from it.
             Neither sends anything to the books. A removed guardian&apos;s Parent customer is shown with the family, and offered to nobody else.</p>
           <Notice tone="warning" live="none">For a family this page suggests a customer for, or lists possible customers of, link it here with Confirm.
-            Reconciliation refuses &ldquo;Create a family from this&rdquo; for a customer this page suggests or lists for a family the portal has, or that a given-up change of a family the portal saved first made.
+            &ldquo;Create a family from this&rdquo; is refused for a customer this page suggests or lists for a family the portal has, or that a given-up change of a family the portal saved first made.
             And &ldquo;Create in QuickBooks and link&rdquo; on the family&apos;s page would make a second customer in the books for a family whose customer is already there but was never linked to it; it isn&apos;t offered for one unlinked while its customer is still in the books.</Notice>
-          {view.noFamily !== null && (
-            <p>{view.noFamily === 0 ? "Every active customer the books list as a family at the top level, under no other customer, is linked to a family in the portal, or is about to be by a change on Reconciliation."
-              : `${plural(view.noFamily, "active customer the books list as a family at the top level, under no other customer, has", "active customers the books list as a family at the top level, under no other customer, have")} no family in the portal.`}
-              {" "}<Link href="/staff/reconciliation#no-family-h">See the customers with no family on Reconciliation</Link></p>
-          )}
         </section>
 
         {view.state !== "listed" && <Notice tone="warning" live="none">{WHY_NOT_CHECKED[view.state]}</Notice>}
 
         {pick !== null && <PickPart view={view} familyId={pick} customerId={customer} cq={cq} tag={tag} made={made} />}
+
+        <CustomersWithNoFamily view={view} mayChangeFamilies={maySend}>
+          <ImportOffer proposable={proposable} mayChangeFamilies={maySend} />
+        </CustomersWithNoFamily>
+
+        {importAsked && <ImportReview review={maySend && proposable > 0 ? await view.importReview() : null} mayChangeFamilies={maySend} tag={tag} />}
 
         <section className="box" aria-labelledby="links-list-h"><h2 id="links-list-h">Families</h2>
           <form method="get" action="/staff/links" role="search" className="matrix-filter">

@@ -25,14 +25,14 @@ const about = (name: string, r: Done): Done => (r.ok ? r : { ok: false, errors: 
  * above the table, not in the rows: a family made takes its customer off the list when the page is read again, and its
  * answer stays. Each press keeps its own, so two pressed one after the other both stay.
  */
-export function NoFamilyRows({ rows }: { rows: NoFamilyRow[] }) {
+export function NoFamilyRows({ rows, none }: { rows: NoFamilyRow[]; none: string }) {
   const [outcomes, setOutcomes] = useState<{ n: number; state: Done }[]>([]);
   const pressed = useRef(0);
   const onDone = (name: string, r: Done) => { const n = ++pressed.current; setOutcomes((had) => [{ n, state: about(name, r) }, ...had]); };
   return (
     <>
       {outcomes.map((o) => <ActionOutcome key={o.n} state={o.state} />)}
-      {rows.length === 0 ? <Notice tone="done" live="none">Nothing: every active family customer QuickBooks has at the top level, under no other customer, is linked to a family in the portal, or is about to be by a change on this page.</Notice> : (
+      {rows.length === 0 ? <Notice tone="done" live="none">{none}</Notice> : (
         <DataTable caption="Customers with no family" captionHidden rowKey={(r) => r.key} rows={rows}
           columns={[
             { key: "name", header: "Customer", rowHeader: true, cell: (r) => r.name },
