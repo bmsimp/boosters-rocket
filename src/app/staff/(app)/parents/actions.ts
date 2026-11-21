@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { staffAction, type StaffCtx } from "@/lib/guards";
 import { blockPerson, renamePerson, unblockPerson } from "@/lib/parents/people";
-import { addGuardian, reinstateGuardian, removeGuardian } from "@/lib/parents/guardians";
+import { addGuardian, reinstateGuardian, releaseSigninHold, removeGuardian } from "@/lib/parents/guardians";
 import { familyRecordAt } from "@/lib/families/address";
 import { resendWelcome } from "@/lib/parents/welcome";
 import { can } from "@/lib/permissions/effective";
@@ -160,6 +160,29 @@ export const reinstateGuardianAction = staffAction(R, async (ctx, guardianId: st
   }
   refresh();
   return { ok: true, message: withQuickBooks("Reinstated. Their sign-in for this family is back.", r.quickbooks) };
+});
+
+/**
+ * "Let its guardians sign in", on a family's page (stage 4's slice M4b): a family whose sign-ins a take from the books
+ * held (made active again, or opened by a student's take, on Accounting links) lets its guardians sign in again. Under
+ * the permission that gives and ends sign-ins, as reinstating does (the lead's decision 2 on the owner's choice 5): the
+ * linking permission alone brings a record back and lets nobody in. `familyId`, bound by the page, is the app's family
+ * record's id, checked here and found again (familyRecordAt()); the library clears the hold only while it is set.
+ */
+export const releaseSigninHoldAction = staffAction(R, async (ctx, familyId: string): Promise<Done> => {
+  if (!personId(familyId)) return NOT_FROM_PAGE;
+  const found = await familyRecordAt(familyId);
+  if (!found) return NOT_FROM_PAGE;
+  const r = await releaseSigninHold(found, op(ctx, R));
+  if (!r.ok) {
+    if (r.reason === "busy") return { ok: false, errors: [BUSY_WORDS] };
+    if (r.reason === "not_held") return { ok: false, errors: ["This family's guardians aren't held back from signing in, so nothing was changed. Reload the page."] };
+    return NOT_FROM_PAGE;
+  }
+  refresh();
+  return { ok: true, message: r.counting === 0
+    ? `Done. Nobody can sign in to ${r.name} yet all the same: it has no open guardian, or none the portal lets in now (the family may be inactive, or have no active student while the club asks for one).`
+    : `Done. ${r.counting === 1 ? "Its 1 open guardian" : `Its ${r.counting} open guardians`} can sign in to ${r.name} now.` };
 });
 
 /**

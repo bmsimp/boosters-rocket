@@ -14,9 +14,11 @@ import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { familyContact, familySignins, type FamilySignin } from "@/lib/parents/directory";
 import { whoseDetails } from "@/lib/parents/my-family";
 import type { ContactForm } from "@/lib/parents/contact-fields";
-import { AddGuardianForm, DetailsForm } from "@/app/staff/(app)/parents/forms";
+import { AddGuardianForm, DetailsForm, ReleaseHoldControl } from "@/app/staff/(app)/parents/forms";
 import { GuardianChange } from "@/app/staff/(app)/parents/guardian-change";
-import { addGuardianAction } from "@/app/staff/(app)/parents/actions";
+import { addGuardianAction, releaseSigninHoldAction } from "@/app/staff/(app)/parents/actions";
+import { signinHoldOf } from "@/lib/parents/guardians";
+import { studentsRuleInForce } from "@/lib/parents/sessions";
 import { DisconnectedNotice, Freshness } from "../freshness";
 import { CreateInQuickBooks, FamilyChanges, MemberChanges, MoveStudents, PortalChanges, Waiting, WhatChanges, type MovableStudent } from "../changes";
 import { moveAction, saveFamilyDetailsAction } from "../write-actions";
@@ -25,6 +27,7 @@ import { placeWords } from "@/lib/roster/place";
 import type { Cust, Family } from "@/lib/roster/model";
 import { DataTable, type Column } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
+import { LocalTime } from "@/app/components/local-time";
 import { familyBalancePage, familyBuyoutsPage, familyCreditPage, familyProgressPage } from "@/app/staff/(app)/family-pages";
 
 export const metadata = { title: "Roster" };
@@ -110,6 +113,28 @@ function SignIns({ familyId, signins, links, changes, addable, inQuickBooks }: {
 }
 
 /**
+ * A family whose sign-ins a take from the books held (stage 4's slice M4b): who held it and when, why, whether its
+ * guardians would count at the gate once let in (`wouldCount`, or why not), and, for staff who may change families
+ * (`release`), the one press that lets every open guardian of it sign in at once, with their names and count. Nobody
+ * else gets the press; a parent is shown nothing of the hold. Names are people's, shown as text.
+ */
+function SigninHold({ name, hold, notNow, guardians, release }: { name: string; hold: { at: string; by: string | null }; notNow: string | null; guardians: string[];
+  release: (() => Promise<{ ok: true; message: string } | { ok: false; errors: string[] }>) | null }) {
+  const who = guardians.length === 0 ? "It has no open guardian who isn't blocked now."
+    : `Every open guardian of it can then sign in to it at once: ${guardians.length === 1 ? "1 guardian" : `${guardians.length} guardians`}, ${guardians.join(", ")}.`;
+  return (
+    <section className="box" aria-labelledby="entry-hold-h"><h2 id="entry-hold-h">Sign-ins held</h2>
+      <Notice tone="warning" live="none">
+        {name}&apos;s guardians can&apos;t sign in to it now. It was made active again from the books on the accounting links screen (the family, or one of its students),
+        {hold.by ? ` by ${hold.by},` : ""} on <LocalTime iso={hold.at} />, and its sign-ins were held then, until someone who may change families lets its guardians in.
+        {" "}{notNow === null ? "Once let in, they count at once: the family is active and nothing else keeps them out." : `Even once let in, they can't sign in yet: ${notNow}.`}
+      </Notice>
+      {release !== null && <><p>Let its guardians sign in ends the hold. {who}</p><ReleaseHoldControl release={release} /></>}
+    </section>
+  );
+}
+
+/**
  * The family's phone and mailing address as the portal holds them (stage 3's slice 11c), in books where they are each
  * family's (no parent type, flat books included), shared by its guardians: shown only to a reader who may change
  * families or see parents' details, and the form only to one who may change families, for an active family record.
@@ -165,6 +190,10 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   const links = can(ctx.effective, "Parents.ReadWrite");
   const changesGuardians = can(ctx.effective, "Roster.Family.ReadWrite");
   const signins = await familySignins(familyId);
+  // A hold on its sign-ins after a take from the books (stage 4's slice M4b): one query, and the students rule only when held.
+  const hold = await signinHoldOf(familyId);
+  const holdNotNow = hold === null ? null : !fam.active ? "the family is inactive in the portal"
+    : (await studentsRuleInForce()) && !fam.students.some((s) => s.active) ? "the family has no active student, and the club asks for one" : null;
   const signinStandings = await guardianStandings(signins.map((s) => ({ guardianId: s.guardianId, familyId, name: s.name, open: s.open })));
   // The Parent customers a portal guardian is linked to (stage 3's slice 9h): shown as theirs, with no forms here.
   const ofGuardians = await guardianCustomers(fam.parents.map((p) => p.qboId), familyId);
@@ -289,6 +318,8 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
         may={can(ctx.effective, "Accounting.Link.ReadWrite")}
         types={page.shape?.kind === "flat" ? page.shape.memberTypeIds.map((t) => ({ qboId: t, name: page.types.find((x) => x.qboId === t)?.name ?? "A member type" })) : []} />}
       {page.shape && <WhatChanges shape={page.shape} canChange={canChange} unlinked={!fam.linked} />}
+      {hold !== null && <SigninHold name={fam.name} hold={hold} notNow={holdNotNow} guardians={signins.filter((s) => s.open && s.kind !== "blocked").map((s) => s.name)}
+        release={changesGuardians ? releaseSigninHoldAction.bind(null, String(familyId)) : null} />}
       <SignIns familyId={familyId} signins={signins} links={links} changes={changesGuardians} inQuickBooks={signinStandings}
         addable={!fam.active ? "This family is inactive in the portal, so nobody can be added to it."
           : making ? "Making this family in QuickBooks is still waiting on the queue, so nobody can be added to it for now." : null} />

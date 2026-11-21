@@ -8,6 +8,8 @@
 // only: called from src/app/staff/(app)/parents/actions.ts behind `Roster.Family.ReadWrite` (the lead's choice: giving
 // an address a family's sign-in goes with the permission that changes a family); never from parent code, which may not
 // import it (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts): it gives any address access to any family.
+// Since stage 4's slice M4b it also lets a family's guardians sign in again after a take from the books held them out
+// (releaseSigninHold(), at the end), under the same permission.
 //
 // Every write here holds what keeps a family record and its link still under it: the roster lock, shared, taken before
 // the family is looked at and before any guardian row is, so no staff roster write (which may change a family's
@@ -29,7 +31,7 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { family, guardian, parent, parentAuthUser } from "@/lib/db/schema";
+import { family, guardian, parent, parentAuthUser, staffUser } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { normalizeEmail } from "@/lib/email";
 import { customerOfFamily, familyLinkState } from "@/lib/families/links";
@@ -39,7 +41,7 @@ import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { familyCreateWaiting, familySendingFree, guardianChangeWaiting, guardianSentWords, queueForGuardian, sendGuardianSaved, whileGuardiansHeld, type GuardianQueued } from "@/lib/roster/writes";
 import { closeMembership } from "./membership";
 import type { StaffOp } from "./people";
-import { lockEmail } from "./sessions";
+import { guardianRowCounts, lockEmail, studentsRuleInForce } from "./sessions";
 import { getParentSettings, PARENTS_KEY } from "./settings";
 
 /** The longest name staff may give a person, and the longest address the portal reads. */
@@ -384,4 +386,42 @@ export async function reinstateGuardian(guardianId: string, o: StaffOp, w: Waits
     return { ok: true, quickbooks: guardianSentWords(await sendGuardianSaved(saved.queued, o, { hold, rosterWaitMs: w.rosterWaitMs }), "grant", saved.name) };
   });
   return r ?? { ok: false, reason: "being_changed" };
+}
+
+export type ReleaseSigninHoldResult = { ok: true; name: string; counting: number } | { ok: false; reason: "not_found" | "not_held" | "busy" };
+
+/**
+ * Lets a family's guardians sign in again after a take from the books held its sign-ins (stage 4's slice M4b, the
+ * lead's decision 2 on the owner's choice 5: the take settles the record, and this decides who signs in, under the
+ * permission that gives and ends sign-ins). In one transaction, with the parents' settings lock shared and then the
+ * roster lock shared as the guardian writes here take it (holdRoster(): at most ROSTER_WAIT_MS, `busy` otherwise), the
+ * family row FOR UPDATE, and the hold cleared only while it is set (`not_held` otherwise, changing nothing). Audited
+ * `roster.family.signin_released`: the hold's time and staff member before, and how many of the family's open guardian
+ * rows count now by the gate's rule (guardianRowCounts()) after. No guardian row is opened, closed or changed: each
+ * open one counts again at once, by the gate's own rule (an active family, and, while the students rule is in force,
+ * an active student), and every door follows. Nothing is sent to QuickBooks.
+ */
+export async function releaseSigninHold(familyId: AppFamilyId, o: StaffOp, w: Waits = {}): Promise<ReleaseSigninHoldResult> {
+  return db.transaction(async (tx): Promise<ReleaseSigninHoldResult> => {
+    await holdSettings(tx);
+    if (!(await holdRoster(tx, w))) return { ok: false, reason: "busy" };
+    const [f] = await tx.select({ name: family.name, at: family.signinHeldAt, by: family.signinHeldBy }).from(family).where(eq(family.id, familyId)).for("update");
+    if (!f) return { ok: false, reason: "not_found" };
+    if (f.at === null) return { ok: false, reason: "not_held" };
+    await tx.update(family).set({ signinHeldAt: null, signinHeldBy: null, updatedAt: new Date() }).where(eq(family.id, familyId));
+    const counting = (await tx.select({ id: guardian.id }).from(guardian)
+      .where(and(eq(guardian.familyId, familyId), guardianRowCounts(await studentsRuleInForce(tx))))).length;
+    await writeAudit({ actor: o.actor, action: "roster.family.signin_released", permission: o.permission, targetType: "family", targetId: String(familyId), ip: o.ip,
+      before: { heldAt: f.at.toISOString(), heldBy: f.by }, after: { counting } }, tx);
+    return { ok: true, name: recordNameWords(f.name, "family"), counting };
+  });
+}
+
+/**
+ * A family's sign-in hold as its page shows it (stage 4's slice M4b): when it was set and by whom (the staff member's
+ * name, null when none is found), or null when its sign-ins aren't held. One query.
+ */
+export async function signinHoldOf(familyId: AppFamilyId): Promise<{ at: string; by: string | null } | null> {
+  const [r] = await db.select({ at: family.signinHeldAt, by: staffUser.name }).from(family).leftJoin(staffUser, eq(staffUser.id, family.signinHeldBy)).where(eq(family.id, familyId));
+  return r?.at ? { at: r.at.toISOString(), by: r.by ?? null } : null;
 }
