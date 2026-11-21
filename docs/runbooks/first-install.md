@@ -177,7 +177,8 @@ APP_COMMIT="$(git rev-parse --short HEAD)" docker compose -f compose.yml -f comp
    family for each customer listed there, up to 25 at a time, with its students and its guardians (from the Parent
    customers' email fields, or the family's own field where the books have no parent type, or a member's), for you to
    look over, untick any you don't want yet, and save with **Make these families**. It sends nothing to QuickBooks,
-   changes no family or person the portal has, and links each family, student and guardian to their own customer; each
+   changes no family or person the portal has, and links each family and student to their own customer and, where the
+   books have Parent customers, each guardian to their own; each
    new guardian is mailed a welcome with a link to set up their sign-in while welcome emails are on (its step 2, above),
    or once they are switched on. It takes someone who may change families as well as link them (an Admin can). **Create a
    family from this** makes one family and its students, linked to their customers (an Admin can, and so can anyone

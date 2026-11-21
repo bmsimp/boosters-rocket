@@ -682,11 +682,11 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    offers **Unlink from the books**: unlink a test family you linked, and its row reads Suggested or No match again,
    its guardians' Home and Payments say the club hasn't connected their payments yet, and Balances counts it in one
    line; link it again with **Confirm** (a Suggested row), or, for another customer, **Leave unlinked** and then **Pick a
-   different customer**, and its money is read afresh. Reconciliation
-   refuses **Create a family from this** for a customer Accounting links suggests or lists for a family the portal has,
-   and its row names that family and links to Accounting links; don't press **Create in QuickBooks and link** for a
+   different customer**, and its money is read afresh. Under **Customers with no family** on Accounting links, a
+   customer the page suggests or lists for a family the portal has offers no **Create a family from this**: its row
+   names that family and links to its row on the page; don't press **Create in QuickBooks and link** for a
    family whose customer is already in the books (it would make a second customer); and the
-   count of customers with no family matches Reconciliation's list. A linked family whose records differ from the
+   count of customers with no family that Reconciliation's notice gives matches the list on Accounting links. A linked family whose records differ from the
    books' copy reads **Linked, with differences** instead, still saying how its link was made, and its row's opening
    lists each difference with the portal's value and the books': a family you brought in has the Parent customers
    QuickBooks holds under it counted until its guardians are linked to them; rename a student in QuickBooks, refresh
