@@ -8,8 +8,8 @@ import { getParentSettings, putParentSettings, PARENTS_KEY } from "./settings";
 
 /**
  * Called inside `clearRosterOfOtherCompany`, under the roster lock, as the first part of the clear. QuickBooks IDs are
- * small numbers that mean a different customer in every company, and every guardian row still holds the old company's
- * (`family_qbo_id`, `source_qbo_id`), so every link closes (keeping its old IDs, which nothing matches again), every
+ * small numbers that mean a different customer in every company, and every guardian row's family and own link were the
+ * old company's (clearAppRecords() takes each row's family away), so every link closes, every
  * session, unused code, unused set-up or reset link, remembered device and change of sign-in address goes (a session and
  * a change name the app's own family by a `restrict` key, and the app's records go next), "already welcomed" is cleared, and sign-ins and welcomes switch off until an Admin has
  * looked at the new company. Since stage 2 of the app-owned families spec nothing the portal runs reaches this (a

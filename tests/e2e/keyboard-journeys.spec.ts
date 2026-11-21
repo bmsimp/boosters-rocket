@@ -341,7 +341,8 @@ test.describe("7. the email change, by keyboard", () => {
     else await sql`DELETE FROM setting WHERE key = 'parents.settings'`;
     await sql`DELETE FROM parent WHERE email = ${NEW}`;
     // The request names the family it was asked in by the app's record, the one Zelda's row in it names.
-    const [link] = await sql`SELECT id, family_id FROM guardian WHERE parent_id = ${p.id} AND family_qbo_id = ${PARENT_SESSION_FAMILY}`;
+    const [link] = await sql`SELECT g.id, g.family_id FROM guardian g JOIN accounting_link fl ON fl.family_id = g.family_id
+            WHERE g.parent_id = ${p.id} AND fl.customer_id = ${PARENT_SESSION_FAMILY}`;
     await sql`DELETE FROM parent_email_change WHERE parent_id = ${p.id} AND (used_at IS NULL OR new_email = ${NEW})`;
     await sql`INSERT INTO parent_email_change (parent_id, guardian_id, family_id, new_email, token_hash, expires_at)
             VALUES (${p.id}, ${link!.id}, ${link!.family_id}, ${E2E_EMAIL.own.newEmail}, ${emailTokenHash(E2E_EMAIL.own.token)}, now() + interval '7 days')`;

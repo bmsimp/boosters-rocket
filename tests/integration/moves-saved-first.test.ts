@@ -437,8 +437,8 @@ describe("a move by the app's own records", () => {
 });
 
 describe("what each family sees while a move hasn't reached QuickBooks, and after (open question 14)", () => {
-  /** A guardian seeded before the roster is read, so the import gives their row its family record. */
-  async function guardianBeforeTheRead(o: { familyQboId: string; name: string; email: string; sourceQboId: string }) {
+  /** A guardian seeded after the roster is read, in their family's record with their own link (seedGuardian()). */
+  async function guardianAfterTheRead(o: { familyQboId: string; name: string; email: string; sourceQboId: string }) {
     const person = await seedParent({ name: o.name, email: o.email, welcomedAt: new Date() });
     await seedGuardian({ parentId: person.id, familyQboId: o.familyQboId, status: "active", isPrimary: true, sourceQboId: o.sourceQboId });
     return { authUserId: person.authUserId, familyQboId: o.familyQboId, parentId: person.id };
@@ -447,14 +447,14 @@ describe("what each family sees while a move hasn't reached QuickBooks, and afte
   const studentsOf = async (f: AppFamilyId) => (await sessionFamily(f))!.students.map((s) => s.name);
   const invoicesOf = async (f: AppFamilyId) => ((await loadFamilyMoney(f)).figures?.open ?? []).map((i) => i.qboId);
 
-  let ana: Awaited<ReturnType<typeof guardianBeforeTheRead>>, mei: Awaited<ReturnType<typeof guardianBeforeTheRead>>;
+  let ana: Awaited<ReturnType<typeof guardianAfterTheRead>>, mei: Awaited<ReturnType<typeof guardianAfterTheRead>>;
   let forms: { open: string; signed: string };
   beforeEach(async () => {
     const company = fznCompany();
     Object.assign(company.customers.find((c) => c.Id === "21")!, { PrimaryEmailAddr: { Address: "mei@example.com" } });
-    ana = await guardianBeforeTheRead({ familyQboId: RIVERA, name: "Ana Rivera", email: "ana@example.com", sourceQboId: "11" });
-    mei = await guardianBeforeTheRead({ familyQboId: CHEN, name: "Mei Chen", email: "mei@example.com", sourceQboId: "21" });
     tag = await connectRoster(stub, { company });
+    ana = await guardianAfterTheRead({ familyQboId: RIVERA, name: "Ana Rivera", email: "ana@example.com", sourceQboId: "11" });
+    mei = await guardianAfterTheRead({ familyQboId: CHEN, name: "Mei Chen", email: "mei@example.com", sourceQboId: "21" });
     op = asOp(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     [leo, rivera, chen] = [await recordOfCustomer(LEO, "student"), await recordOfCustomer(RIVERA, "family"), await recordOfCustomer(CHEN, "family")];
     // A per-student form open and one signed, a place to come and one done and checked in, an invoiced per-student buy-out, and an invoice of Leo's own.

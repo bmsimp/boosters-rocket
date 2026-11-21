@@ -203,8 +203,10 @@ describe("loadMyFamily: one family from the app's own records, for its own paren
     await seedConnected(stub, { realmId: REALM });
     await seedRosterRead({ realmId: OTHER_REALM });
     await db.update(qboConnection).set({ realmId: null, refreshTokenCiphertext: null, refreshTokenKeyId: null, accessTokenCiphertext: null, accessTokenKeyId: null });
-    // The records were made again from that cache's company, so the record the session chose no longer counts: the
-    // gate sends it to choose again, and the family it may enter is the one the person's row names now.
+    // The records were made again from that cache's company, so the record the session chose went inactive. No import
+    // moves a guardian row (stage 3's slice 12b1), so the row is put in the record of that company by hand, as stage 4's
+    // reviewed import would: the gate sends the session to choose again, and it enters the family the row names now.
+    await db.update(guardian).set({ familyId: await recordOfCustomer(FAMILY_A.family.qboId, "family") }).where(eq(guardian.id, a.identity.guardianId));
     const now = await identityAfterChoosingAgain(a.session.id);
     expect(await loadMyFamily(ctxOf(now))).toMatchObject({ name: "Alderquist Family", me: { name: "Ansgar Alderquist" } });
     expect((await loadRosterPage()).roster).not.toBeNull();

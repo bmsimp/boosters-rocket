@@ -64,16 +64,16 @@ const moveInQuickBooks = (id: string, toQboId: string | null, o: { active?: bool
   c.SyncToken = String(Number(c.SyncToken) + 1);
 };
 /**
- * A guardian in a family, seeded before the roster is read. Their session is made only after the read (signedInNow()):
- * a session names the app's own family record, which the import after the read (connectRoster()) makes and gives their
- * row, and the gate lets them in only once that record is active.
+ * A guardian in a family, seeded after the roster is read and the records imported from it (connectRoster()): the row
+ * stands on the family's record and its own link to the parent's customer (seedGuardian()), and their session, made
+ * after it (signedInNow()), names that record, which the gate lets them into while it is active.
  */
-async function guardianBeforeTheRead(o: { familyQboId: string; name: string; email: string; sourceQboId: string }) {
+async function guardianAfterTheRead(o: { familyQboId: string; name: string; email: string; sourceQboId: string }) {
   const person = await seedParent({ name: o.name, email: o.email, welcomedAt: new Date() });
   await seedGuardian({ parentId: person.id, familyQboId: o.familyQboId, status: "active", isPrimary: true, sourceQboId: o.sourceQboId });
   return { authUserId: person.authUserId, familyQboId: o.familyQboId };
 }
-/** A session for a guardian seeded before the read, in the family record their row names now. */
+/** A session for a guardian, in the family record their row names. */
 const signedInNow = async (g: { authUserId: string; familyQboId: string }) =>
   ({ session: await seedParentSession(g.authUserId, { familyQboId: g.familyQboId }) });
 const cached = async (qboId: string) => (await db.select().from(qboCustomer).where(eq(qboCustomer.qboId, qboId)))[0];
@@ -87,9 +87,9 @@ const anaId = async () => (await db.select().from(parent).where(eq(parent.email,
 const leoRecord = async () => (await db.select().from(student).where(eq(student.id, await recordOfCustomer(LEO, "student"))))[0]!;
 /**
  * Ana, the Rivera family's guardian, as the portal holds her: a roster read makes no sign-in from QuickBooks (stage 3's
- * slice 7a), so she is seeded before the read, and the import after it puts her row in the Rivera family's record.
+ * slice 7a), so she is seeded after the read, in the Rivera family's record.
  */
-const anaBeforeTheRead = () => guardianBeforeTheRead({ familyQboId: RIVERA, name: "Ana Rivera", email: "ana@example.com", sourceQboId: "11" });
+const anaAfterTheRead = () => guardianAfterTheRead({ familyQboId: RIVERA, name: "Ana Rivera", email: "ana@example.com", sourceQboId: "11" });
 
 /** Leo, under the Rivera family, with an open form, a signed one with its evidence, a place still to come, and one done and checked in. */
 async function seedLeo() {
@@ -125,7 +125,7 @@ beforeEach(async () => {
 });
 
 describe("a student moved, renamed or made inactive in QuickBooks, read by a refresh", () => {
-  beforeEach(async () => { await anaBeforeTheRead(); await connectRoster(stub); });
+  beforeEach(async () => { await connectRoster(stub); await anaAfterTheRead(); });
 
   const CHANGES: [string, { to: string; active?: boolean; name?: string }][] = [
     ["moved to another family", { to: CHEN }],
@@ -226,7 +226,7 @@ describe("a student moved, renamed or made inactive in QuickBooks, read by a ref
 });
 
 describe("buy-outs of a student QuickBooks moved are voided by nothing; a move in the portal voids once", () => {
-  beforeEach(async () => { await anaBeforeTheRead(); await connectRoster(stub); });
+  beforeEach(async () => { await connectRoster(stub); await anaAfterTheRead(); });
 
   /** A money run that read every family, as the daily check follows it. */
   const moneyRun = () => db.insert(jobRun).values({ job: MONEY_JOB, startedAt: new Date(Date.now() - 60_000), finishedAt: new Date(), outcome: "ok", startedBy: "worker" });
@@ -281,9 +281,9 @@ describe("what each family reads after a student QuickBooks moved", () => {
   it("the family the app holds the student in keeps their forms and places; the family QuickBooks moved them to sees none of them", async () => {
     const company = fznCompany();
     Object.assign(company.customers.find((c) => c.Id === "21")!, { PrimaryEmailAddr: { Address: "mei@example.com" } });
-    const anaRow = await guardianBeforeTheRead({ familyQboId: RIVERA, name: "Ana Rivera", email: "ana@example.com", sourceQboId: "11" });
-    const meiRow = await guardianBeforeTheRead({ familyQboId: CHEN, name: "Mei Chen", email: "mei@example.com", sourceQboId: "21" });
     await connectRoster(stub, { company });
+    const anaRow = await guardianAfterTheRead({ familyQboId: RIVERA, name: "Ana Rivera", email: "ana@example.com", sourceQboId: "11" });
+    const meiRow = await guardianAfterTheRead({ familyQboId: CHEN, name: "Mei Chen", email: "mei@example.com", sourceQboId: "21" });
     const ana = await signedInNow(anaRow);
     const mei = await signedInNow(meiRow);
     const leo = await seedLeo();
@@ -305,9 +305,9 @@ describe("what each family reads after a student QuickBooks moved", () => {
   it("after a move staff made: the new family reads the signed form as signed, never the old family's guardian or the PDF they signed; the old family sees neither", async () => {
     const company = fznCompany();
     Object.assign(company.customers.find((c) => c.Id === "21")!, { PrimaryEmailAddr: { Address: "mei@example.com" } });
-    const anaRow = await guardianBeforeTheRead({ familyQboId: RIVERA, name: "Ana Rivera", email: "ana@example.com", sourceQboId: "11" });
-    const meiRow = await guardianBeforeTheRead({ familyQboId: CHEN, name: "Mei Chen", email: "mei@example.com", sourceQboId: "21" });
     await connectRoster(stub, { company });
+    const anaRow = await guardianAfterTheRead({ familyQboId: RIVERA, name: "Ana Rivera", email: "ana@example.com", sourceQboId: "11" });
+    const meiRow = await guardianAfterTheRead({ familyQboId: CHEN, name: "Mei Chen", email: "mei@example.com", sourceQboId: "21" });
     const ana = await signedInNow(anaRow);
     const mei = await signedInNow(meiRow);
     const leo = await seedLeo();
