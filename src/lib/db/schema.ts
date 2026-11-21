@@ -1126,9 +1126,10 @@ export type EvidenceOriginal = { itemId: string; sha256: string; size: number };
  * from: it has no foreign key to the request, the requirement or the consents, and nothing in the portal deletes it.
  * The names, signers and consents are copies as they were. `realm_id` is the QuickBooks company the family belonged to
  * (the roster cache's company then), or null when the family had no link there, or the roster named no company: a
- * family the club keeps by hand signs forms like any other. When a different company is connected the row is kept,
- * `request_id` is cut (`earlier_company_at` is set), and from then on it is shown only in the staff archive: its
- * QuickBooks ids may name another family in the new company. `mismatch_at` is set when a later fetch gave a stored file
+ * family the club keeps by hand signs forms like any other. Since stage 4's slice M7a a change of company leaves the row
+ * as it is: the family it names is kept, and it is still that family's, whatever company copy it holds. Before that
+ * slice a change of company cut `request_id` and set `earlier_company_at`, and such a row is shown only in the staff
+ * archive: its QuickBooks ids may name another family in the new company. `mismatch_at` is set when a later fetch gave a stored file
  * a different hash.
  *
  * `family_qbo_id`, `subject_qbo_id` and `subject_kind` are the record's own copies of whose form it was, in QuickBooks'
@@ -1137,20 +1138,20 @@ export type EvidenceOriginal = { itemId: string; sha256: string; size: number };
  * removed once stored (a link made later fills nothing in), and never used to find a family. The current company's evidence also
  * names the app's own family whose form it is now (`family_id`, which moves with a student, as the request does) and,
  * for a per-student form, the app's own student (`student_id`): that is how the portal finds a family's evidence
- * (stage 2 of the app-owned families spec; migration 0028 filled them). An earlier company's evidence names neither,
- * and never gains them (signed_form_evidence_app_records): it is matched to nobody.
+ * (stage 2 of the app-owned families spec; migration 0028 filled them). Evidence archived as an earlier company's names
+ * neither, and never gains them (signed_form_evidence_app_records): it is matched to nobody.
  */
 export const signedFormEvidence = pgTable("signed_form_evidence", {
   id: uuid("id").primaryKey().defaultRandom(),
-  requestId: uuid("request_id"),                           // signature_request.id, with no foreign key; null once its company is an earlier one
+  requestId: uuid("request_id"),                           // signature_request.id, with no foreign key; null once archived as an earlier company's
   realmId: text("realm_id"),                               // the QuickBooks company the request's family belonged to; null with no link
   earlierCompanyAt: timestamp("earlier_company_at", { withTimezone: true }),
   requirementId: uuid("requirement_id"),                   // requirement.id, with no foreign key
   familyQboId: text("family_qbo_id"),                      // the record's copy, null with no link: never changed, never matched to a family
   subjectQboId: text("subject_qbo_id"),                    // the record's copy, null with no link: never changed, never matched to a family
   subjectKind: text("subject_kind", { enum: ["family", "student"] }).notNull(),
-  familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),   // the current company's only
-  studentId: uuid("student_id").references(() => student.id, { onDelete: "restrict" }).$type<AppStudentId>(), // a per-student form's, the current company's only
+  familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),   // every row but an archived one
+  studentId: uuid("student_id").references(() => student.id, { onDelete: "restrict" }).$type<AppStudentId>(), // a per-student form's, every row but an archived one
   formTitle: text("form_title").notNull(),                 // the names as they were
   familyName: text("family_name"),
   subjectName: text("subject_name"),
