@@ -358,12 +358,15 @@ describe("a guardian compared with their own Parent customer (slice M3c3)", () =
     // A rename of another customer explains nothing here.
     expect(compare(withAna(), { customers: named("Ana R."), queue: [fact({ op: "rename", qboId: "60", guardianId: "g-ana" })] }).differences[0]).toMatchObject({ queue: null });
   });
-  it("say what staff can do instead of a press, and nothing for any other kind", () => {
+  // Changed on purpose in slice M3c4: the name's and the removed guardian's sentences are drawn beside a Send now, so
+  // they never say nothing is sent from the page, and the name's says why no Take is offered.
+  it("say what staff can do besides a Send, and nothing for any other kind", () => {
     const name = compare(withAna(), { customers: named("Ana R.") }).differences[0]!;
     const removed = compare(withAna({ open: false }), { customers: named("Ana R.") }).differences[0]!;
     const inactive = compare(withAna(), { customers: changed("11", { active: false }) }).differences[0]!;
-    expect(guardianDifferenceNext(name)).toBe("Neither name is taken or sent from this page. Rename their Parent customer in QuickBooks, and this row shows it after the portal's next roster read; or, if the person's name should change, rename them on their page under Parents once nothing for them or their Parent customers is waiting or stuck on Reconciliation. While QuickBooks is connected and the family's customer is active, that asks QuickBooks to rename it too, unless the same rename gives that name to their own Parent customer under another family first.");
-    expect(guardianDifferenceNext(removed)).toBe("Neither is taken or sent from this page. Make their Parent customer inactive in QuickBooks once its balance, owed or a credit, is settled; or, if they are added back under Portal sign-ins, it is theirs again.");
+    expect(guardianDifferenceNext(name)).toBe("No name is taken from the books here, as their name in the portal is theirs in every family they belong to and on their sign-in. If it should change, rename them on their page under Parents once nothing for them or their Parent customers is waiting or stuck on Reconciliation: while QuickBooks is connected and the family's customer is active, that asks QuickBooks to rename this Parent customer too, unless the same rename gives that name to their own Parent customer under another family first. Or rename it in QuickBooks, and this row shows it after the portal's next roster read.");
+    expect(guardianDifferenceNext(removed)).toBe("Their removal isn't taken back from the books here: they are added back only under Portal sign-ins, and their Parent customer is theirs again if they are. Or make it inactive in QuickBooks once its balance, owed or a credit, is settled.");
+    for (const d of [name, removed]) expect(guardianDifferenceNext(d)).not.toMatch(/sent from this page|Neither/);
     expect(guardianDifferenceNext(inactive)).toBe("Neither is taken or sent from this page, and the portal never makes a customer active in the books. If they are still this family's guardian, make it active in QuickBooks; if they aren't, remove them under Portal sign-ins. While it is inactive the portal sends it nothing for them: no rename, and no change of their phone, mailing address or sign-in email.");
     const others = compare(rivera({ name: "Riveras", guardians: [{ id: "g-sol", customerId: null }] }), { customers: [...changed("10", { active: false }), c("15", "Raul R.", "2", "10")] }).differences;
     expect(others.map((d) => d.kind)).toEqual(["name", "active", "parent_customers", "guardians_unlinked"]);

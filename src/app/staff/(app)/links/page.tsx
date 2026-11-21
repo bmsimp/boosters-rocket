@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireStaffAlso, requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
-import { BULK_MAX, filterLinkRows, filtersOf, givenUpCustomersOf, loadAccountingLinks, REVIEW_LEFT_WORDS, SEND_ALL_MAX, statusCounts, type BulkOffer, type ConfirmStep, type GuardianShown, type InactiveRow, type LinkMade, type LinkOffer, type LinkRow, type LinkStatus, type LinksState, type LinksView, type OwnLink, type ReviewOffer, type SendAllOffer, type SendOffer, type TakeOffer, type UnlinkOffer } from "@/lib/accounting/mapping";
+import { BULK_MAX, filterLinkRows, filtersOf, givenUpCustomersOf, loadAccountingLinks, REVIEW_LEFT_WORDS, SEND_ALL_MAX, statusCounts, type BulkOffer, type ConfirmStep, type GuardianSendOffer, type GuardianShown, type InactiveRow, type LinkMade, type LinkOffer, type LinkRow, type LinkStatus, type LinksState, type LinksView, type OwnLink, type ReviewOffer, type SendAllOffer, type SendOffer, type TakeOffer, type UnlinkOffer } from "@/lib/accounting/mapping";
 import { differenceKinds, differenceWords, guardianDifferenceNext, noteSentence, type Difference } from "@/lib/accounting/differences";
 import { NOT_A_FAMILY_WORDS, parseLinksFilter, searchMatches, SEARCH_MAX, STATUS_KEYS, STATUS_WORDS, type LinksFilter, type StatusKey } from "@/lib/accounting/status";
 import type { Holder } from "@/lib/accounting/match";
@@ -148,7 +148,7 @@ function GuardianLine({ g, row, tag }: { g: GuardianShown; row: LinkRow; tag: st
  * into the portal (`take`), what it does is said after it, then the press; or, where none is offered now, why, in one
  * sentence (`note`).
  */
-function DifferenceLine({ d, take, note, send, sendNote, tag }: { d: Difference; take: TakeOffer | undefined; note: string | undefined; send: SendOffer | undefined;
+function DifferenceLine({ d, take, note, send, sendNote, tag }: { d: Difference; take: TakeOffer | undefined; note: string | undefined; send: SendOffer | GuardianSendOffer | undefined;
   sendNote: string | undefined; tag: string }) {
   const w = differenceWords(d);
   const notes = d.kind === "guardians_unlinked" ? d.queue.map((q) => `For ${q.count} of them: ${noteSentence(q.note)}`)
@@ -171,7 +171,7 @@ function DifferenceLine({ d, take, note, send, sendNote, tag }: { d: Difference;
  * Send the app's to QuickBooks (slice M5a): the press, a bound action given only its words. It reads QuickBooks first
  * (a make-inactive's balance, or a change's answer) and sends, so its busy words say both, as Reconciliation's do.
  */
-function SendPress({ send, tag }: { send: SendOffer; tag: string }) {
+function SendPress({ send, tag }: { send: SendOffer | GuardianSendOffer; tag: string }) {
   return <LinkPress label="Send the app's to QuickBooks" busy="Reading QuickBooks, then sending…" about={send.about} act={sendDifferenceAction.bind(null, send.field, send.kind, send.recordId, tag, send.stamp)} />;
 }
 
@@ -272,7 +272,7 @@ function Opening({ row, tag, guardianLinks, maySend }: { row: LinkRow; tag: stri
       {row.status.key === "several" && <><p>Possible customers:</p><ul>{row.status.candidates.map((c) => <li key={c.qboId}>{c.name}{c.email ? ` (${c.email})` : ""} <Link href={pickHref(id, c.qboId)}>Look at it before linking<span className="visually-hidden">: {c.name}</span></Link></li>)}</ul></>}
       {row.status.key === "several" && row.status.alsoMatches.length > 0 && <p>Also matched by: {row.status.alsoMatches.join(", ")}.</p>}
       {row.differences.length > 0 && <><p>Where the portal and the books differ:</p><ul>{row.differences.map((d, i) => <DifferenceLine key={i} d={d} tag={tag} take={row.takes.find((t) => t.at === i)} note={row.takeNotes.find((n) => n.at === i)?.words}
-        send={maySend ? row.sends.find((x) => x.at === i) : undefined} sendNote={maySend ? row.sendNotes.find((n) => n.at === i)?.words : undefined} />)}</ul></>}
+        send={maySend ? row.sends.find((x) => x.at === i) ?? row.guardianSends.find((x) => x.at === i) : undefined} sendNote={maySend ? row.sendNotes.find((n) => n.at === i)?.words : undefined} />)}</ul></>}
       {row.inactiveUnrecorded > 0 && <p>The books also have {plural(row.inactiveUnrecorded, "inactive student customer", "inactive student customers")} under this family with no student record in the portal.</p>}
       {row.confirm !== null && row.customer !== null && <><p>Confirming links it to &ldquo;{row.customer.name}&rdquo;. Nothing is sent to the books.</p><ProposalsShown proposals={row.confirm.proposals} /><p>{LINK_EFFECT}</p>{guardianLinks && <p>{LINK_GUARDIANS_EFFECT}</p>}</>}
       {row.review !== null && <ReviewShown review={row.review} />}
@@ -363,7 +363,8 @@ function BulkPress({ bulk, filter, tag }: { bulk: BulkOffer; filter: LinksFilter
  * for a reader who may change families, a press bound to the filter as parsed, the count, the roster tag and the stamp
  * sealing those sends, and nothing else; with more than SEND_ALL_MAX, no press but a notice to narrow the list. What it
  * passes over (each make-inactive, each difference whose customer the books have inactive) and what it leaves for a
- * later press are said in a notice, with why.
+ * later press are said in a notice, with why; since slice M3c4 so is that a guardian's Parent customer is sent from its
+ * own row, only where the list shows one.
  */
 function SendAllPress({ offer, filter, tag }: { offer: SendAllOffer; filter: LinksFilter; tag: string }) {
   const { inactive, booksInactive } = offer.passedOver;
@@ -371,6 +372,8 @@ function SendAllPress({ offer, filter, tag }: { offer: SendAllOffer; filter: Lin
     inactive > 0 ? `It passes over ${plural(inactive, "make-inactive", "make-inactives")} this list shows, as each reads a balance in QuickBooks first: send ${inactive === 1 ? "it" : "each"} on its own row.` : null,
     booksInactive > 0 ? `It passes over ${plural(booksInactive, "difference whose customer QuickBooks has inactive", "differences whose customer QuickBooks has inactive")}: the portal sends nothing there, and never makes a customer active.` : null,
     offer.later > 0 ? `${offer.later === 1 ? "One more difference waits" : `${offer.later} more differences wait`} for a change this press queues to reach QuickBooks first, as ${offer.later === 1 ? "it reads" : "they read"} the same customer: press again once it has.` : null,
+    // Slice M3c4: a guardian's send is never part of it, said only where the list shows one.
+    offer.guardians > 0 ? "A guardian's Parent customer is sent from its own row." : null,
   ].filter((x): x is string => x !== null);
   const notes = said.length === 0 ? null : (
     <Notice tone="info" live="none">Send the app&apos;s for all sends only names and students&apos; families. {said.join(" ")}{offer.inactiveListed && " The inactive families listed after the families aren't part of it."}</Notice>

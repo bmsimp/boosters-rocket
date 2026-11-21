@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
+import { asStaff, renderPage } from "../helpers/signed-in";
 
 // Every request goes to the QuickBooks stub, never Intuit.
 const stubBase = vi.hoisted(() => ({ url: "" }));
@@ -10,9 +11,15 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, guardian, parent, parentAuthUser, writeQueue } from "@/lib/db/schema";
+import { accountingLink, auditLog, guardian, parent, parentAuthUser, qboConnection, writeQueue } from "@/lib/db/schema";
 import { QUICKBOOKS, type AppFamilyId } from "@/lib/families/ids";
 import { sendStamp } from "@/lib/accounting/stamp";
+import { loadAccountingLinks, QUEUE_IN_THE_WAY_OF_SEND, SEND_NOT_CONNECTED, sendGuardianNameTakenNote, type GuardianSendOffer, type LinkRow, type LinksView } from "@/lib/accounting/mapping";
+import { LINK_COPY, sendAllDifferences } from "@/lib/accounting/link-writes";
+import { guardianDifferenceNext } from "@/lib/accounting/differences";
+import { AccessDenied } from "@/lib/guards";
+import { sendDifferenceAction } from "@/app/staff/(app)/links/actions";
+import AccountingLinksPage from "@/app/staff/(app)/links/page";
 import { auditPage, parseAuditFilters } from "@/lib/audit/query";
 import { removeGuardian } from "@/lib/parents/guardians";
 import { refreshRoster } from "@/lib/roster/refresh";
@@ -337,5 +344,246 @@ describe("a removed guardian's Parent customer made inactive in the books", () =
     for (const stamp of [inactiveStamp(row.id, "11"), sendStamp("guardian_active", row.id, "11", ["11"])]) expect(await pressInactive(row.id, stamp)).toEqual({ ok: false, errors: [SEND_CHANGED] });
     expect(posts()).toEqual([]);
     expect(stub.customers.find((c) => c.Id === "11")).toMatchObject({ Active: false });
+  });
+});
+
+const rowOf = (view: LinksView, name: string): LinkRow => {
+  const r = view.rows.find((x) => x.name === name);
+  if (!r) throw new Error(`no row named ${name}: ${view.rows.map((x) => x.name).join(", ")}`);
+  return r;
+};
+/** The row's guardian send of this field, as the page draws it now (for a reader who may change families). */
+const guardianSendOf = async (name: string, field: GuardianSendOffer["field"]): Promise<GuardianSendOffer> => {
+  const s = rowOf(await loadAccountingLinks(), name).guardianSends.find((x) => x.field === field);
+  if (!s) throw new Error(`the row ${name} offers no send of ${field}`);
+  return s;
+};
+const atOf = (row: LinkRow, kind: "guardian_name" | "guardian_active") => row.differences.findIndex((d) => d.kind === kind);
+/** The list's own section, its apostrophes as text, and the presses of one label it draws, by their hidden words. */
+const listOf = (whole: string) => { const at = whole.indexOf('id="links-list-h"'); return whole.slice(at, whole.indexOf("</section>", at)).replaceAll("&#x27;", "'").replaceAll("<!-- -->", ""); };
+const pressed = (part: string, label: string) => [...part.matchAll(new RegExp(`${label}<span class="visually-hidden">: ([^<]*)</span>`, "g"))].map((m) => m[1]).sort();
+
+describe("the offers on Accounting links", () => {
+  it("a name and a removed guardian's Parent customer: offered with their words and stamps, drawn for a reader who may change families, and pressed through the action", async () => {
+    changeInBooks("11", { DisplayName: "Ana R. Lopez" });
+    await readAgain(qc("14", "Bea Rivera", "2", under("10")));
+    const bea = await rowIn(rivera, "Bea Rivera", "bea@example.com", "removed");
+    await linkRowTo(bea, "14");
+    const r = rowOf(await loadAccountingLinks(), "Rivera Family");
+    expect(r.differences.map((d) => d.kind)).toEqual(["guardian_name", "guardian_active"]);
+    expect(r.guardianSends).toEqual([
+      { at: 0, field: "guardian_name", kind: "guardian", recordId: row.id, about: "Ana Rivera's name on their Parent customer",
+        words: ["Sends “Ana Rivera” to the books as the name on Ana Rivera's Parent customer, in place of “Ana R. Lopez” there. The books' name is replaced. Their name in the portal and on their sign-in doesn't change."],
+        stamp: nameStamp(row.id, "11", "Ana R. Lopez", "Ana Rivera"), seal: { customerId: "11", value: ["Ana R. Lopez", "Ana Rivera"] } },
+      { at: 1, field: "guardian_inactive", kind: "guardian", recordId: bea, about: "Bea Rivera's Parent customer's active status",
+        words: ["Makes Bea Rivera's Parent customer “Bea Rivera” inactive in the books, in place of active there. QuickBooks is asked what is owed first, and any balance, owed or a credit, or one that can't be read, stops it with nothing sent. Bea Rivera stays removed from this family in the portal."],
+        stamp: inactiveStamp(bea, "14"), seal: { customerId: "14", value: ["14"] } }]);
+    // No take, nor a record's send, nor any sentence in their place.
+    expect([...r.takes, ...r.takeNotes, ...r.sends, ...r.sendNotes]).toEqual([]);
+
+    // Drawn for a holder of the three permissions, each beside its words; none for a reader who may not change families.
+    asStaff(sender);
+    const list = listOf(await renderPage(AccountingLinksPage));
+    expect(pressed(list, "Send the app's to QuickBooks")).toEqual(["Ana Rivera's name on their Parent customer", "Bea Rivera's Parent customer's active status"]);
+    expect(pressed(list, "Take QuickBooks' into the app")).toEqual([]);
+    expect(list).toContain(r.guardianSends[0]!.words[0]);
+    expect(list).toContain(guardianDifferenceNext(r.differences[0]!)!);
+    for (const s of r.guardianSends) expect(list).not.toContain(s.stamp);
+    const linker = await staffWith("linker@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
+    asStaff(linker);
+    const theirs = listOf(await renderPage(AccountingLinksPage));
+    expect(pressed(theirs, "Send the app's to QuickBooks")).toEqual([]);
+    expect(theirs).not.toContain(r.guardianSends[0]!.words[0]);
+    expect(posts()).toEqual([]);
+    expect(await items()).toEqual([]);
+
+    // Pressed through the action, as the page binds it.
+    asStaff(sender);
+    const [name, inactive] = r.guardianSends;
+    expect(await sendDifferenceAction(name!.field, name!.kind, name!.recordId, tag, name!.stamp)).toMatchObject({ ok: true, message: expect.stringContaining("Sent the name “Ana Rivera” to their Parent customer in QuickBooks") });
+    expect(await sendDifferenceAction(inactive!.field, inactive!.kind, inactive!.recordId, tag, inactive!.stamp)).toMatchObject({ ok: true, message: expect.stringContaining("Made Bea Rivera's Parent customer “Bea Rivera” inactive in QuickBooks") });
+    expect(posts()).toEqual([expect.objectContaining({ Id: "11", DisplayName: "Ana Rivera" }), expect.objectContaining({ Id: "14", Active: false })]);
+    expect((await sends()).map((a) => [a.targetType, a.targetId, (a.after as { field: string }).field]).sort()).toEqual([["guardian", bea, "guardian_inactive"], ["guardian", row.id, "guardian_name"]].sort());
+    expect(rowOf(await loadAccountingLinks(), "Rivera Family").differences).toEqual([]);
+  });
+
+  it("a kept rename of the row: said closed beside the press", async () => {
+    changeInBooks("11", { DisplayName: "Ana R. Lopez" });
+    await readAgain();
+    await seedQueued({ op: "rename", role: "parent", qboId: "11", syncToken: "0", name: "Ana Rivera", was: "Ana Old", guardianId: row.id }, { state: "refused", code: "fault_6000" });
+    expect((await guardianSendOf("Rivera Family", "guardian_name")).words.slice(1)).toEqual(["The rename kept on the Reconciliation page is closed, as this takes its place."]);
+  });
+
+  it("in place of a press, one sentence: the name another customer holds, a change waiting for the row, QuickBooks not connected", async () => {
+    changeInBooks("11", { DisplayName: "Ana R. Lopez" });
+    await readAgain(qc("90", "Ana Rivera", "4"));
+    let r = rowOf(await loadAccountingLinks(), "Rivera Family");
+    expect(r.guardianSends).toEqual([]);
+    expect(r.sendNotes).toEqual([{ at: atOf(r, "guardian_name"), words: sendGuardianNameTakenNote("Ana Rivera") }]);
+    stub.customers = stub.customers.filter((c) => c.Id !== "90");
+    await readAgain();
+    // A create of the row's waiting on the queue: not the difference's own note, so the queue's sentence stands in for the press.
+    const create = await seedQueued({ op: "create", role: "parent", name: "Ana Rivera Elsewhere", typeQboId: "2", familyQboId: "10", email: "ana@example.com", guardianId: row.id }, { state: "waiting" });
+    r = rowOf(await loadAccountingLinks(), "Rivera Family");
+    expect(r.guardianSends).toEqual([]);
+    expect(r.sendNotes).toEqual([{ at: atOf(r, "guardian_name"), words: QUEUE_IN_THE_WAY_OF_SEND }]);
+    await db.delete(writeQueue).where(eq(writeQueue.id, create.id));
+    // A rename of its customer waiting: the difference's own queue note says it, and no press or sentence is added.
+    await seedQueued({ op: "rename", role: "parent", qboId: "11", syncToken: "0", name: "Ana Rivera", was: "Ana R. Lopez", guardianId: row.id }, { state: "waiting" });
+    r = rowOf(await loadAccountingLinks(), "Rivera Family");
+    expect(r.differences[atOf(r, "guardian_name")]).toMatchObject({ queue: { state: "waiting" } });
+    expect([...r.guardianSends, ...r.sendNotes]).toEqual([]);
+    await db.delete(writeQueue);
+    await db.delete(qboConnection);
+    r = rowOf(await loadAccountingLinks(), "Rivera Family");
+    expect(r.guardianSends).toEqual([]);
+    expect(r.sendNotes).toEqual([{ at: atOf(r, "guardian_name"), words: SEND_NOT_CONNECTED }]);
+  });
+
+  it("a removed guardian's Parent customer an open row is linked to since: no difference, no offer, and the press refused", async () => {
+    await removedHere(row.id);
+    const offer = await guardianSendOf("Rivera Family", "guardian_inactive");
+    await linkRowTo(await rowIn(rivera, "Raul Rivera", "raul@example.com"), "11");
+    const r = rowOf(await loadAccountingLinks(), "Rivera Family");
+    expect(r.differences.filter((d) => d.kind === "guardian_active")).toEqual([]);
+    // Raul's own now: his name may be sent to it, but nothing makes it inactive.
+    expect(r.guardianSends.map((x) => [x.field, x.recordId])).not.toContainEqual(["guardian_inactive", row.id]);
+    stub.calls.length = 0;
+    asStaff(sender);
+    expect(await sendDifferenceAction(offer.field, offer.kind, offer.recordId, tag, offer.stamp)).toEqual({ ok: false, errors: [SEND_CHANGED] });
+    expect(posts()).toEqual([]);
+  });
+
+  it("an open guardian whose Parent customer the books have inactive: no press, no take, no sentence of a send, only what staff can do", async () => {
+    changeInBooks("11", { Active: false });
+    await readAgain();
+    const r = rowOf(await loadAccountingLinks(), "Rivera Family");
+    expect(r.differences).toEqual([{ kind: "guardian_active", guardianId: row.id, who: "Ana Rivera", portalOpen: true, queue: null }]);
+    expect([...r.guardianSends, ...r.sends, ...r.sendNotes, ...r.takes, ...r.takeNotes]).toEqual([]);
+    asStaff(sender);
+    const list = listOf(await renderPage(AccountingLinksPage));
+    expect(pressed(list, "Send the app's to QuickBooks")).toEqual([]);
+    expect(list).toContain(guardianDifferenceNext(r.differences[0]!)!);
+  });
+});
+
+describe("Send the app's for all", () => {
+  it("never queues a guardian's send nor counts it as passed over, and says a guardian's is sent from its own row", async () => {
+    changeInBooks("10", { DisplayName: "Rivera Household" });
+    changeInBooks("11", { DisplayName: "Ana R. Lopez" });
+    await readAgain();
+    await removedHere(row.id);
+    // Ana's row removed and her Parent customer active: a guardian's make-inactive; the family's name: a record's.
+    const view = await loadAccountingLinks();
+    const r = rowOf(view, "Rivera Family");
+    expect(r.guardianSends.map((s) => s.field)).toEqual(["guardian_inactive"]);
+    const all = view.sendAll({ status: null, q: "" })!;
+    expect(all).toMatchObject({ count: 1, later: 0, passedOver: { inactive: 0, booksInactive: 0 }, guardians: 1 });
+    asStaff(sender);
+    expect((await renderPage(AccountingLinksPage)).replaceAll("&#x27;", "'")).toContain("A guardian's Parent customer is sent from its own row.");
+    expect(await sendAllDifferences({ status: "", q: "", count: all.count, stamp: all.stamp }, tag, sendOp())).toMatchObject({ ok: true });
+    expect((await items()).map((q) => [q.request.op, "role" in q.request ? q.request.role : null, q.familyId])).toEqual([["rename", "family", rivera]]);
+    expect((await items()).filter((q) => "guardianId" in q.request)).toEqual([]);
+    expect((await sends()).map((a) => a.targetType)).toEqual(["family"]);
+    expect(posts()).toEqual([]);
+    // Without a guardian's send the words don't say it.
+    const plain = rowOf(await loadAccountingLinks(), "Chen Family");
+    expect(plain.guardianSends).toEqual([]);
+    expect((await loadAccountingLinks()).sendAll({ status: null, q: "Chen" })).toMatchObject({ guardians: 0 });
+  });
+});
+
+describe("one family's row, one family's guardians", () => {
+  it("family A's row never offers a send of family B's guardian, and B's guardian's id pressed with A's stamp is refused, nothing sent", async () => {
+    changeInBooks("11", { DisplayName: "Ana R. Lopez" });
+    await readAgain(qc("23", "Old Chen", "2", under("20")));
+    const mei = await rowIn(chen, "Mei Lin", "mei@example.com"); await linkRowTo(mei, "21");
+    const old = await rowIn(chen, "Old Chen", "old@example.com", "removed"); await linkRowTo(old, "23");
+    const view = await loadAccountingLinks();
+    expect(rowOf(view, "Rivera Family").guardianSends.map((s) => s.recordId)).toEqual([row.id]);
+    expect(rowOf(view, "Chen Family").guardianSends.map((s) => [s.field, s.recordId])).toEqual([["guardian_name", mei], ["guardian_inactive", old]]);
+    const ana = rowOf(view, "Rivera Family").guardianSends[0]!;
+    asStaff(sender);
+    stub.calls.length = 0;
+    for (const [field, id] of [["guardian_name", mei], ["guardian_inactive", old], ["guardian_inactive", mei]] as const) {
+      expect(await sendDifferenceAction(field, "guardian", id, tag, ana.stamp), `${field} ${id}`).toEqual({ ok: false, errors: [SEND_CHANGED] });
+    }
+    expect(posts()).toEqual([]);
+    expect(await items()).toEqual([]);
+    expect(await sends()).toEqual([]);
+    expect(stub.customers.filter((c) => c.Id === "21" || c.Id === "23").map((c) => [c.DisplayName, c.Active])).toEqual([["Mei Chen", true], ["Old Chen", true]]);
+  });
+});
+
+describe("who may press it", () => {
+  it("the three permissions, any one missing refused as the guard refuses; every argument of the wrong type, size or pair refused", async () => {
+    changeInBooks("11", { DisplayName: "Ana R. Lopez" });
+    await readAgain();
+    const offer = await guardianSendOf("Rivera Family", "guardian_name");
+    const noChange = await staffWith("linkonly@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
+    const noLink = await staffWith("changeonly@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]);
+    const noRead = await staffWith("noread@club.org", ["Accounting.Link.ReadWrite", "Roster.Family.ReadWrite"]);
+    stub.calls.length = 0;
+    for (const who of [noChange, noLink, noRead]) {
+      asStaff(who);
+      await expect(sendDifferenceAction(offer.field, offer.kind, offer.recordId, tag, offer.stamp)).rejects.toBeInstanceOf(AccessDenied);
+    }
+    const refusals = (await db.select().from(auditLog)).filter((a) => a.action === "access.refused");
+    expect(refusals.filter((a) => a.actorId === noChange.id).map((a) => a.permission)).toEqual(["Roster.Family.ReadWrite"]);
+    expect(refusals.filter((a) => a.actorId === noLink.id).map((a) => a.permission)).toEqual(["Accounting.Link.ReadWrite"]);
+    expect(refusals.filter((a) => a.actorId === noRead.id).map((a) => a.permission)).toEqual(["Roster.Read"]);
+    asStaff(sender);
+    const NOT_FROM_PAGE = { ok: false, errors: [LINK_COPY.notFromPage] };
+    const id = offer.recordId;
+    for (const args of [
+      ["guardian_name", "family", id, tag, offer.stamp], ["guardian_name", "student", id, tag, offer.stamp], ["guardian_inactive", "family", id, tag, offer.stamp],
+      ["name", "guardian", id, tag, offer.stamp], ["inactive", "guardian", id, tag, offer.stamp], ["place", "guardian", id, tag, offer.stamp],
+      ["guardian_active", "guardian", id, tag, offer.stamp], ["guardian_name", "parent", id, tag, offer.stamp], [7, "guardian", id, tag, offer.stamp], ["guardian_name", null, id, tag, offer.stamp],
+      ["guardian_name", "guardian", "x".repeat(65), tag, offer.stamp], ["guardian_name", "guardian", "", tag, offer.stamp], ["guardian_name", "guardian", { id }, tag, offer.stamp],
+      ["guardian_name", "guardian", id, null, offer.stamp], ["guardian_name", "guardian", id, "t".repeat(65), offer.stamp],
+      ["guardian_name", "guardian", id, tag, "s".repeat(65)], ["guardian_name", "guardian", id, tag, { stamp: offer.stamp }],
+    ] as unknown[][]) {
+      expect(await (sendDifferenceAction as unknown as (...a: unknown[]) => Promise<unknown>)(...args), JSON.stringify(args)).toEqual(NOT_FROM_PAGE);
+    }
+    expect(posts()).toEqual([]);
+    expect(await sends()).toEqual([]);
+    expect(await sendDifferenceAction(offer.field, offer.kind, offer.recordId, tag, offer.stamp)).toMatchObject({ ok: true });
+    expect(await sends()).toEqual([expect.objectContaining({ actorId: sender.id, targetType: "guardian" })]);
+  });
+
+  it("a balance is said with its amount only to a reader who may see balances, through the press", async () => {
+    await removedHere(row.id);
+    stub.invoices.push(balance("9001", "11", 25));
+    const offer = await guardianSendOf("Rivera Family", "guardian_inactive");
+    const treasurer = await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite", "Roster.Family.ReadWrite", "Finance.Balance.Read"]);
+    asStaff(sender);
+    expect(await sendDifferenceAction(offer.field, offer.kind, offer.recordId, tag, offer.stamp))
+      .toEqual({ ok: false, errors: [`Ana Rivera has an open balance in QuickBooks. They weren't made inactive. ${WRITE_COPY.balanceFix}`] });
+    asStaff(treasurer);
+    expect(await sendDifferenceAction(offer.field, offer.kind, offer.recordId, tag, offer.stamp))
+      .toEqual({ ok: false, errors: [`Ana Rivera owes $25.00 in QuickBooks. They weren't made inactive. ${WRITE_COPY.balanceFix}`] });
+    expect(posts()).toEqual([]);
+  });
+});
+
+describe("the view's reads", () => {
+  it("reads as many times with guardians' sends as without: no query of its own", async () => {
+    const spy = vi.spyOn(db, "select");
+    try {
+      const plain = await loadAccountingLinks();
+      expect(rowOf(plain, "Rivera Family").guardianSends).toEqual([]);
+      const none = spy.mock.calls.length;
+      changeInBooks("11", { DisplayName: "Ana R. Lopez" });
+      await readAgain(qc("14", "Bea Rivera", "2", under("10")));
+      await linkRowTo(await rowIn(rivera, "Bea Rivera", "bea@example.com", "removed"), "14");
+      await linkRowTo(await rowIn(chen, "Mei Lin", "mei@example.com"), "21");
+      spy.mockClear();
+      const v = await loadAccountingLinks();
+      expect(rowOf(v, "Rivera Family").guardianSends.map((s) => s.field)).toEqual(["guardian_name", "guardian_inactive"]);
+      expect(rowOf(v, "Chen Family").guardianSends.map((s) => s.field)).toEqual(["guardian_name"]);
+      expect(spy.mock.calls.length).toBe(none);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

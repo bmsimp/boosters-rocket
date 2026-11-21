@@ -222,12 +222,19 @@ export type SendOffer = { at: number; field: "name" | "inactive" | "place"; kind
    */
   seal: { customerId: string; value: string[] } };
 /**
+ * Send the app's to QuickBooks for a guardian's difference (slice M3c4): as a SendOffer, of the guardian row
+ * (`kind` `guardian`, `recordId` its id), their name on their own Parent customer (`guardian_name`) or a removed
+ * guardian's own Parent customer made inactive (`guardian_inactive`). Kept apart from the record sends (a row's
+ * `guardianSends`), so nothing that takes a row's `sends`, Send the app's for all among them, ever takes one.
+ */
+export type GuardianSendOffer = Omit<SendOffer, "field" | "kind"> & { field: "guardian_name" | "guardian_inactive"; kind: "guardian" };
+/**
  * Said beside a difference in place of Take QuickBooks' into the app when a change on the write queue would make the
  * take refuse (takeOffersOf()): one waiting to reach QuickBooks or stuck, or a move kept on the Reconciliation page.
  */
 export const QUEUE_IN_THE_WAY = "Another change on the Reconciliation page stands in the way (waiting to reach QuickBooks, stuck, or a move kept there), so this can't be taken from the books until it is done or given up.";
 /** The stamp of a send and what it seals (SendOffer's `seal`), together, so the two never differ. */
-const sealOf = (field: SendOffer["field"], recordId: string, customerId: string, value: string[]): Pick<SendOffer, "seal" | "stamp"> =>
+const sealOf = (field: SendOffer["field"] | GuardianSendOffer["field"], recordId: string, customerId: string, value: string[]): Pick<SendOffer, "seal" | "stamp"> =>
   ({ seal: { customerId, value }, stamp: sendStamp(field, recordId, customerId, value) });
 /** Said beside a difference in place of Send the app's to QuickBooks when a change on the write queue would make the send refuse (sendOffersOf()). */
 export const QUEUE_IN_THE_WAY_OF_SEND = "Another change on the Reconciliation page stands in the way (waiting to reach QuickBooks, stuck, or a move kept there), so the portal's value can't be sent to the books until it is done or given up.";
@@ -243,11 +250,13 @@ export const SEND_ALL_MAX = 100;
  * over, by why: a make-inactive offered on its row (`inactive`: each reads a balance first, so it is sent there) or a
  * difference whose customer the books have inactive (`booksInactive`: the portal sends nothing there and never makes a
  * customer active, open question 12). `inactiveListed`: the inactive families' list is drawn below the families (it has
- * rows), which the press takes nothing from either.
+ * rows), which the press takes nothing from either. `guardians` (slice M3c4): how many guardians' sends the rows hold,
+ * which the press never takes (each is sent from its own row) and never counts as passed over: said only so its words
+ * stay true.
  */
-export type SendAllShown = { sends: SendOffer[]; later: SendOffer[]; passedOver: { inactive: number; booksInactive: number }; inactiveListed: boolean };
+export type SendAllShown = { sends: SendOffer[]; later: SendOffer[]; passedOver: { inactive: number; booksInactive: number }; inactiveListed: boolean; guardians: number };
 /** Send the app's for all as the page draws it: how many it queues, the stamp sealing them (null for none, or more than SEND_ALL_MAX: no press then), and what it leaves. */
-export type SendAllOffer = { count: number; stamp: string | null; later: number; passedOver: { inactive: number; booksInactive: number }; inactiveListed: boolean };
+export type SendAllOffer = { count: number; stamp: string | null; later: number; passedOver: { inactive: number; booksInactive: number }; inactiveListed: boolean; guardians: number };
 /** A Suggested row the filter shows, as the bulk press links it: the family, its name in words, its suggested customer and the row's own offer. */
 export type SuggestedShown = { familyId: AppFamilyId; familyKey: string; name: string; customerId: string; offer: LinkOffer };
 /**
@@ -291,6 +300,8 @@ export type LinkRow = {
   takeNotes: { at: number; words: string }[];
   /** Send the app's to QuickBooks (slice M5a): the differences of a link that stands whose portal value a press sends, in the `listed` state (sendOffersOf()); none otherwise. */
   sends: SendOffer[];
+  /** Since slice M3c4, a guardian's differences whose portal value a press sends (sendOffersOf()), by `at` as `sends`; none otherwise. */
+  guardianSends: GuardianSendOffer[];
   /** Why a difference offers no send, in one sentence beside it, only where it helps (sendOffersOf()). */
   sendNotes: { at: number; words: string }[];
   /**
@@ -769,7 +780,7 @@ export async function loadAccountingLinks(): Promise<LinksView> {
     sendAll: (filter) => {
       if (!listed) return null;
       const all = sendAllOf(rows, filter, inactive.length > 0);
-      return { count: all.sends.length, later: all.later.length, passedOver: all.passedOver, inactiveListed: all.inactiveListed,
+      return { count: all.sends.length, later: all.later.length, passedOver: all.passedOver, inactiveListed: all.inactiveListed, guardians: all.guardians,
         stamp: all.sends.length === 0 || all.sends.length > SEND_ALL_MAX ? null : sendAllStamp(filter, all.sends.length, sendAllKeys(all.sends)) };
     },
   };
@@ -867,7 +878,7 @@ function linkRowsOf(b: LinkBasics, queue: readonly QueueView[], o: { studentsRul
       }).sort(byName),
       removed: b.removedOf(key),
       differences: [] as Difference[], inactiveUnrecorded: 0, confirm: null, review: null, unlink: null, takes: [] as TakeOffer[], takeNotes: [] as { at: number; words: string }[],
-      sends: [] as SendOffer[], sendNotes: [] as { at: number; words: string }[], offers: none,
+      sends: [] as SendOffer[], guardianSends: [] as GuardianSendOffer[], sendNotes: [] as { at: number; words: string }[], offers: none,
     };
     if (link !== undefined) {
       const customer = customerById.get(link.customerId);
@@ -887,7 +898,7 @@ function linkRowsOf(b: LinkBasics, queue: readonly QueueView[], o: { studentsRul
       });
       const status: LinkStatus = found !== null && found.differences.length > 0 ? { key: "with_differences", made } : made;
       const takes = found === null ? { takes: [], takeNotes: [] } : takeOffersOf(b, f, link.customerId, found.differences, queue, studentsRule);
-      const sends = found === null || sendFacts === null ? { sends: [], sendNotes: [] } : sendOffersOf(b, sendFacts, f, link.customerId, found.differences, queue);
+      const sends = found === null || sendFacts === null ? { sends: [], guardianSends: [], sendNotes: [] } : sendOffersOf(b, sendFacts, f, link.customerId, found.differences, queue);
       return { ...base, customer: shownCustomer, status, differences: found?.differences ?? [], inactiveUnrecorded: found?.inactiveUnrecorded ?? 0, review: b.reviewOf(key), unlink, ...takes, ...sends };
     }
     // Left unlinked, in every state: the matcher was never given it (readLinkBasics()).
@@ -1178,6 +1189,16 @@ export const sendNameQueuedNote = (name: string) =>
 export const SEND_INACTIVE_THERE = "QuickBooks has this customer inactive, and the portal sends nothing to a customer inactive there.";
 /** Said beside a student's place in place of Send when the family's own customer is inactive in the books. Send the app's for all counts these too. */
 export const SEND_FAMILY_CUSTOMER_INACTIVE = "QuickBooks has this family's customer inactive, so no student is sent to it.";
+/** Said beside a guardian's name in place of Send when another customer in the books holds it (slice M3c4): the person is renamed on their own page. */
+export const sendGuardianNameTakenNote = (name: string) =>
+  `QuickBooks has another customer named “${name}”, and every name there must be different, so the person's name can't be sent: rename them on their page under Parents instead.`;
+/** Said beside a guardian's name in place of Send when only a create or rename waiting or stuck on the queue holds it. */
+export const sendGuardianNameQueuedNote = (name: string) =>
+  `A change on its way to QuickBooks, on the Reconciliation page, gives another customer the name “${name}”, and every name there must be different, so the person's name can't be sent: rename them on their page under Parents instead, or give that change up.`;
+/** Said beside a guardian's difference in place of Send when the family's own customer is inactive in the books: nothing is sent for its guardians. Not counted by Send the app's for all. */
+export const SEND_GUARDIAN_FAMILY_INACTIVE = "QuickBooks has this family's customer inactive, so nothing is sent for its guardians' Parent customers.";
+/** Said beside a guardian's difference in place of Send when this club's books don't let the portal change a Parent customer that way. */
+export const SEND_GUARDIAN_NOT_OFFERED = "This club's books don't let the portal change a Parent customer that way, so it can only be changed in QuickBooks.";
 /** Said with a send whose make-inactive of the customer is kept on Reconciliation: the send takes its place once QuickBooks has the customer inactive. */
 const KEPT_OFF_SENT = "The make-inactive kept on the Reconciliation page is closed once QuickBooks has the customer inactive, as this takes its place.";
 
@@ -1222,16 +1243,23 @@ function sendFactsOf(b: LinkBasics, queue: readonly QueueView[]): SendFacts {
  *   family's active in the cache;
  * - an inactive student record whose customer the books have active directly under the family's (`active` with
  *   `portalActive` false): made inactive in the books by the balance rule.
+ * - since slice M3c4, a guardian's name on their own Parent customer (`guardian_name`: the family's customer active in
+ *   the cache, the person's name as checkName() writes it, held by no other customer nor a change on its way, said as
+ *   which otherwise), and a removed guardian's own Parent customer active in the books (`guardian_active` with
+ *   `portalOpen` false): made inactive by the balance rule. A change waiting or stuck for the row or its customer stands
+ *   in the way, as for any send.
  * Not offered: `active` with `portalActive` true (it would make a customer active in the books: open question 12, said),
- * a place at `not_student` or `gone`, a student elsewhere with no family or inactive, and the links (a student or Parent
- * customer on one side only, a guardian with none). Nor is a press drawn that the queue would make the send refuse, by
+ * a guardian's Parent customer inactive in the books while they are the family's guardian (`guardian_active` with
+ * `portalOpen` true: never made active, and its own sentence says what can be done instead), a place at `not_student`
+ * or `gone`, a student elsewhere with no family or inactive, and the links (a student or Parent customer on one side
+ * only, a guardian with none). Nor is a press drawn that the queue would make the send refuse, by
  * the checks takeOffersOf() makes from the queue's open items (QUEUE_IN_THE_WAY_OF_SEND in its place). The books' text
  * is said as text.
  */
 function sendOffersOf(b: LinkBasics, s: SendFacts, f: { id: AppFamilyId; name: string | null }, familyCustomer: string, differences: readonly Difference[],
-  queue: readonly QueueView[]): { sends: SendOffer[]; sendNotes: { at: number; words: string }[] } {
-  const sends: SendOffer[] = [], sendNotes: { at: number; words: string }[] = [];
-  if (b.shape === null) return { sends, sendNotes };
+  queue: readonly QueueView[]): { sends: SendOffer[]; guardianSends: GuardianSendOffer[]; sendNotes: { at: number; words: string }[] } {
+  const sends: SendOffer[] = [], guardianSends: GuardianSendOffer[] = [], sendNotes: { at: number; words: string }[] = [];
+  if (b.shape === null) return { sends, guardianSends, sendNotes };
   const shape = b.shape;
   const open = (i: QueueView) => i.state === "waiting" || i.state === "stuck";
   const waitingFor = (customer: string | null | undefined) => customer != null && queue.some((i) => open(i) && i.write.op !== "create" && i.write.op !== "contact"
@@ -1243,6 +1271,11 @@ function sendOffersOf(b: LinkBasics, s: SendFacts, f: { id: AppFamilyId; name: s
     if (!s.connected) sendNotes.push({ at: o.at, words: SEND_NOT_CONNECTED });
     else if (blocked) sendNotes.push({ at: o.at, words: QUEUE_IN_THE_WAY_OF_SEND });
     else sends.push(o);
+  };
+  const offerGuardian = (o: GuardianSendOffer, blocked: boolean) => {
+    if (!s.connected) sendNotes.push({ at: o.at, words: SEND_NOT_CONNECTED });
+    else if (blocked) sendNotes.push({ at: o.at, words: QUEUE_IN_THE_WAY_OF_SEND });
+    else guardianSends.push(o);
   };
   const key = String(f.id);
   const familyWords = recordNameWords(f.name, "family");
@@ -1319,9 +1352,40 @@ function sendOffersOf(b: LinkBasics, s: SendFacts, f: { id: AppFamilyId; name: s
       const to = st?.familyId == null ? undefined : b.families.find((x) => String(x.id) === String(st.familyId));
       if (toCustomer === undefined || to === undefined) return;
       place(at, d.studentId, to, toCustomer, kept);
+      return;
+    }
+    // A guardian's own Parent customer (slice M3c4): their name, or a removed guardian's made inactive. An open guardian
+    // whose Parent customer the books have inactive has no press: the portal never makes a customer active.
+    if (d.kind === "guardian_name" || (d.kind === "guardian_active" && !d.portalOpen)) {
+      const customer = b.linkOfGuardian.get(d.guardianId)?.customerId;
+      const c = customer === undefined ? undefined : b.customerById.get(customer);
+      if (c === undefined) return;
+      const nameSend = d.kind === "guardian_name";
+      if (!offers(shape, nameSend ? "rename_parent" : "deactivate_parent")) { sendNotes.push({ at, words: SEND_GUARDIAN_NOT_OFFERED }); return; }
+      if (!b.customerById.get(familyCustomer)?.active) { sendNotes.push({ at, words: SEND_GUARDIAN_FAMILY_INACTIVE }); return; }
+      // Kept on Reconciliation for this row: the press closes it (replaceRefused(), by the customer and the row).
+      const keptForRow = queue.some((i) => i.state === "refused" && i.write.op === (nameSend ? "rename" : "deactivate") && "qboId" in i.write && i.write.qboId === c.qboId
+        && guardianOf(i.write) === d.guardianId);
+      // Anything waiting or stuck for the row or its customer (guardianChangeWaiting()): the press would refuse.
+      const blocked = waitingFor(c.qboId) || queue.some((i) => open(i) && i.write.op !== "contact" && i.write.op !== "email" && guardianOf(i.write) === d.guardianId);
+      if (nameSend) {
+        const name = checkName(d.portal);
+        if (!name.ok || name.name !== d.portal) return;
+        if ((s.holders.get(nameKey(name.name)) ?? []).some((id) => id !== c.qboId)) { sendNotes.push({ at, words: sendGuardianNameTakenNote(name.name) }); return; }
+        if (s.queuedNames.has(nameKey(name.name))) { sendNotes.push({ at, words: sendGuardianNameQueuedNote(name.name) }); return; }
+        offerGuardian({ at, field: "guardian_name", kind: "guardian", recordId: d.guardianId, about: `${d.who}'s name on their Parent customer`,
+          words: [`Sends “${name.name}” to the books as the name on ${d.who}'s Parent customer, in place of “${d.books}” there. The books' name is replaced. Their name in the portal and on their sign-in doesn't change.`,
+            ...(keptForRow ? ["The rename kept on the Reconciliation page is closed, as this takes its place."] : [])],
+          ...sealOf("guardian_name", d.guardianId, c.qboId, [d.books, name.name]) }, blocked);
+        return;
+      }
+      offerGuardian({ at, field: "guardian_inactive", kind: "guardian", recordId: d.guardianId, about: `${d.who}'s Parent customer's active status`,
+        words: [`Makes ${d.who}'s Parent customer “${c.displayName}” inactive in the books, in place of active there. QuickBooks is asked what is owed first, and any balance, owed or a credit, or one that can't be read, stops it with nothing sent. ${d.who} stays removed from this family in the portal.`,
+          ...(keptForRow ? [KEPT_OFF_SENT] : [])],
+        ...sealOf("guardian_inactive", d.guardianId, c.qboId, [c.qboId]) }, blocked);
     }
   });
-  return { sends, sendNotes };
+  return { sends, guardianSends, sendNotes };
 }
 
 /**
@@ -1475,7 +1539,7 @@ export async function readCustomerAims(tx?: Tx): Promise<Map<string, CustomerAim
  * state but `listed`.
  */
 export function sendAllShown(b: LinkBasics, queue: readonly QueueView[], filter: Pick<LinksFilter, "status" | "q">): SendAllShown {
-  if (b.state !== "listed") return { sends: [], later: [], passedOver: { inactive: 0, booksInactive: 0 }, inactiveListed: false };
+  if (b.state !== "listed") return { sends: [], later: [], passedOver: { inactive: 0, booksInactive: 0 }, inactiveListed: false, guardians: 0 };
   return sendAllOf(linkRowsOf(b, queue, { studentsRule: false, staffNames: new Map() }), filter, inactiveRowsOf(b, queue).length > 0);
 }
 /**
@@ -1492,15 +1556,18 @@ export function sendAllShown(b: LinkBasics, queue: readonly QueueView[], filter:
  * row offers a press for (an inactive record whose customer the books have active: sent on its own row, as it reads a
  * balance first) and every difference whose customer the books have inactive (an `active` difference of an active
  * record, or a name or a place said with SEND_INACTIVE_THERE or SEND_FAMILY_CUSTOMER_INACTIVE in place of a press); a
- * difference a change waiting or stuck on the queue explains is on its way already, and counted in neither.
+ * difference a change waiting or stuck on the queue explains is on its way already, and counted in neither. A
+ * guardian's send (slice M3c4) is neither taken nor passed over: counted apart (`guardians`), for the words alone.
  * `inactiveListed` is the caller's: whether the inactive families' list has rows.
  */
 function sendAllOf(rows: readonly LinkRow[], filter: Pick<LinksFilter, "status" | "q">, inactiveListed: boolean): SendAllShown {
   const sends: SendOffer[] = [], later: SendOffer[] = [];
-  const seen = new Set<string>(), queued = new Set<string>(), inactive = new Set<string>(), booksInactive = new Set<string>();
+  const seen = new Set<string>(), queued = new Set<string>(), inactive = new Set<string>(), booksInactive = new Set<string>(), guardians = new Set<string>();
   for (const r of filterLinkRows(rows, filter)) {
     for (const s of r.sends) {
       if (s.field === "inactive") { inactive.add(`${s.kind}:${s.recordId.toLowerCase()}`); continue; }
+      // Only the fields it queues (slice M3c4: a list, not everything but inactive).
+      if (!SEND_ALL_FIELDS.includes(s.field)) continue;
       const key = `${s.field}:${s.recordId}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -1511,6 +1578,9 @@ function sendAllOf(rows: readonly LinkRow[], filter: Pick<LinksFilter, "status" 
       queued.add(s.field === "name" ? s.seal.customerId : s.seal.value[0]!);
       sends.push(s);
     }
+    // A guardian's send (slice M3c4) takes the person's row before the roster lock, which the press holds before any
+    // record's, so it is sent from its own row only: counted for the words, never queued nor passed over.
+    for (const s of r.guardianSends) guardians.add(`${s.field}:${s.recordId.toLowerCase()}`);
     r.differences.forEach((d, at) => {
       if ("queue" in d && d.kind !== "guardians_unlinked" && d.queue !== null && d.queue.state !== "refused") return;
       if (d.kind === "active" && d.portalActive) booksInactive.add(`active:${d.of === "student" ? `student:${String(d.studentId)}` : `family:${String(r.familyId)}`}`);
@@ -1518,7 +1588,9 @@ function sendAllOf(rows: readonly LinkRow[], filter: Pick<LinksFilter, "status" 
       if (note === SEND_INACTIVE_THERE || note === SEND_FAMILY_CUSTOMER_INACTIVE) booksInactive.add(`${String(r.familyId)}:${at}`);
     });
   }
-  return { sends, later, passedOver: { inactive: inactive.size, booksInactive: booksInactive.size }, inactiveListed };
+  return { sends, later, passedOver: { inactive: inactive.size, booksInactive: booksInactive.size }, inactiveListed, guardians: guardians.size };
 }
+/** The fields Send the app's for all queues: names and students' families (queueSendIn()'s), never a make-inactive or a guardian's send. */
+const SEND_ALL_FIELDS: readonly SendOffer["field"][] = ["name", "place"];
 /** The sends as Send the app's for all's stamp seals them: each send's own sendStamp() inputs (field, record, customer, value), as a string. */
 export const sendAllKeys = (sends: readonly SendOffer[]): string[] => sends.map((s) => JSON.stringify([s.field, s.recordId.toLowerCase(), s.seal.customerId, s.seal.value]));

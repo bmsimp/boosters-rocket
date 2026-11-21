@@ -9,7 +9,7 @@ import { linkGuardian, unlinkGuardian, type GuardianLinkDone } from "@/lib/accou
 import { can } from "@/lib/permissions/effective";
 import { isUuid } from "@/lib/seasons/ids";
 import { familyPage } from "@/app/staff/(app)/family-pages";
-import { sendToBooks, takeFromBooks } from "@/lib/roster/writes";
+import { sendToBooks, takeFromBooks, type SendAsk } from "@/lib/roster/writes";
 
 // The accounting links screen's presses (stage 4's slice M3a; src/lib/accounting/link-writes.ts): Confirm (a Suggested
 // row's customer, a Several possible row's candidate, or one picked from the customers no family is linked to), Leave
@@ -145,14 +145,22 @@ export const takeDifferenceAction = staffAction(P, async (ctx: StaffCtx, field: 
  * "Create in QuickBooks and link" needs both), checked here first with the page's Roster.Read and refused as the guard
  * refuses. A balance that stops a make-inactive is said with its amount only for a holder of Finance.Balance.Read, as on
  * a family's page. The library works the value out again under the roster lock, and sends through today's writes alone.
+ * Since slice M3c4 a guardian's (`guardian_name` or `guardian_inactive`, only with the kind `guardian`, the record a
+ * guardian row's id), under the same three permissions: nothing of the person changes, so not Parents.ReadWrite.
  */
 export const sendDifferenceAction = staffAction(P, async (ctx: StaffCtx, field: string, kind: string, recordId: string, rosterTag: string, stamp: string): Promise<LinkDone> => {
   await requireStaffActionAlso(ctx, "Roster.Read");
   await requireStaffActionAlso(ctx, "Roster.Family.ReadWrite");
-  if (!(field === "name" || field === "inactive" || field === "place") || !(kind === "family" || kind === "student") || (field === "place" && kind !== "student")
-    || !str(recordId, ID_MAX) || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return NOT_FROM_PAGE;
-  const { changed, ...r } = await sendToBooks(field === "place" ? { field, studentId: recordId, stamp } : { field, kind, recordId, stamp }, rosterTag,
-    { ...op(ctx), showAmounts: can(ctx.effective, "Finance.Balance.Read") });
+  if (!str(recordId, ID_MAX) || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return NOT_FROM_PAGE;
+  let ask: SendAsk;
+  if (field === "guardian_name" || field === "guardian_inactive") {
+    if (kind !== "guardian") return NOT_FROM_PAGE;
+    ask = { field, guardianId: recordId, stamp };
+  } else {
+    if (!(field === "name" || field === "inactive" || field === "place") || !(kind === "family" || kind === "student") || (field === "place" && kind !== "student")) return NOT_FROM_PAGE;
+    ask = field === "place" ? { field, studentId: recordId, stamp } : { field, kind, recordId, stamp };
+  }
+  const { changed, ...r } = await sendToBooks(ask, rosterTag, { ...op(ctx), showAmounts: can(ctx.effective, "Finance.Balance.Read") });
   // A name, a student's family or an inactive record sent changes the Families pages, Reconciliation and the family's
   // pages; since slice M5b a layered family's make-inactive stopped part way may have changed them too (`changed`, as
   // the family page's own action revalidates on it), and `changed` itself stays on the server.
