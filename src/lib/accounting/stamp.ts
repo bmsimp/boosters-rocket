@@ -111,3 +111,15 @@ export function sendStamp(field: string, recordId: string, customerId: string, v
 }
 export const sendStampHolds = (field: string, recordId: string, customerId: string, value: readonly unknown[], stamp: string): boolean =>
   same(sendStamp(field, recordId, customerId, value), stamp);
+
+/**
+ * Send the app's for all (slice M5b): the filter as the page parsed it (its status key or none, and its search text),
+ * how many sends it showed, and each send's own sendStamp() inputs (sendAllKeys(), src/lib/accounting/mapping.ts),
+ * sorted, sealed in a domain of its own, so neither a row's send stamp nor the bulk confirm's is ever this one. The press
+ * works the sends out again under the roster lock and they must seal to the same stamp.
+ */
+export function sendAllStamp(filter: { status: string | null; q: string }, count: number, keys: readonly string[]): string {
+  return sealed("accounting-send-all", [filter.status, filter.q, count, [...keys].sort()]);
+}
+export const sendAllStampHolds = (filter: { status: string | null; q: string }, count: number, keys: readonly string[], stamp: string): boolean =>
+  same(sendAllStamp(filter, count, keys), stamp);
