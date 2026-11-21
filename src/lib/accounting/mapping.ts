@@ -18,6 +18,7 @@ import { QUICKBOOKS, type AppFamilyId, type AppStudentId } from "@/lib/families/
 import { otherCompany } from "@/lib/families/links";
 import { recordNameWords } from "@/lib/families/words";
 import { buildRoster, type Cust } from "@/lib/roster/model";
+import { checkName, nameKey } from "@/lib/roster/names";
 import { familyCreatesFiled, noFamilyPool } from "@/lib/roster/no-family";
 import { loadOpenWrites, waitingWords, type QueueView } from "@/lib/roster/queue";
 import { guardianOf, keptWordsFor, madeAfterGivingUp, type MadeAfterGivingUp } from "@/lib/roster/writes";
@@ -27,7 +28,7 @@ import { getRosterSource, ROSTER_JOB } from "@/lib/roster/source";
 import { differencesOf, type Difference, type LinkedStudent, type QueueFact } from "./differences";
 import { suggestCustomers, type Holder, type Suggestion } from "./match";
 import { pairKeys, proposeStudents, type Proposals } from "./proposals";
-import { bulkStamp, linkStamp, reviewStamp, unlinkStamp, type Chosen } from "./stamp";
+import { bulkStamp, linkStamp, reviewStamp, takeStamp, unlinkStamp, type Chosen } from "./stamp";
 import { linkStanding, searchMatches, STATUS_KEYS, type LinksFilter, type NotAFamilyReason, type StatusKey } from "./status";
 
 /**
@@ -115,6 +116,13 @@ export type UnlinkOffer = {
   guardianLinks: number;
   stamp: string;
 };
+/**
+ * Take QuickBooks' into the app (slice M4a), for one difference of a row: `at`, its index in the row's differences;
+ * what it takes (`field`) of which record (`kind`, `recordId`: the family's or the student's app id; a place is a
+ * student's); `about`, the record and the field in words, for the press's name; `words`, what it does, said beside the
+ * press; and the stamp sealing the value the row showed (takeStamp()).
+ */
+export type TakeOffer = { at: number; field: "name" | "inactive" | "place"; kind: "family" | "student"; recordId: string; about: string; words: string[]; stamp: string };
 /** At most this many families are linked by one press of Confirm all exact email matches (the lead's decision 3 for slice M3a2). */
 export const BULK_MAX = 200;
 /** A Suggested row the filter shows, as the bulk press links it: the family, its name in words, its suggested customer and the row's own offer. */
@@ -152,6 +160,10 @@ export type LinkRow = {
   review: ReviewOffer | null;
   /** Unlink from the books (slice M3b): a family with a family link of the records' company, in the `listed` state; null for any other row. */
   unlink: UnlinkOffer | null;
+  /** Take QuickBooks' into the app (slice M4a): the differences of a link that stands a press settles, in the `listed` state (takeOffersOf()); none otherwise. */
+  takes: TakeOffer[];
+  /** Why a difference a take would settle offers no press now, in one sentence beside it (takeOffersOf()). */
+  takeNotes: { at: number; words: string }[];
   /**
    * What else the row offers (slice M3a): Leave unlinked (a Suggested, Several possible or No match row, listed), Pick a
    * different customer (Several possible, No match or Left unlinked, listed), Undo (every Left unlinked row, any state).
@@ -381,7 +393,8 @@ export type LinkBasics = Awaited<ReturnType<typeof readLinkBasics>>;
  * nothing more but what a family's create given up after a try left (madeAfterGivingUp(): 4 to 8, the page's own).
  * Since slice M3a2 the rows' Confirm this link (reviewOf()) and Confirm all exact email matches (bulk(), by
  * suggestedRowsShown()) are worked out from the same reads, with no query of their own, and since slice M3b so is each
- * linked row's Unlink from the books (unlinkOf()).
+ * linked row's Unlink from the books (unlinkOf()). Since slice M4a so are the presses that take the books' value of a
+ * difference into the portal (takeOffersOf()), with no query of their own: the count is unchanged.
  * On four hundred families with two thousand customers that is the same number of queries; memory holds the two
  * thousand cached customers (twice, while the queue holds items, as loadOpenWrites() reads its own), the records,
  * guardian rows and links (a few thousand small rows), and the rows rendered are the four hundred families, each
@@ -434,7 +447,7 @@ export async function loadAccountingLinks(): Promise<LinksView> {
         .sort(byRosterOrder).map((s) => ({ id: s.id, name: s.name, link: own(customerOfStudent.get(String(s.id))) })),
       guardians: (guardiansOf.get(key) ?? []).map((g) => ({ id: g.id, name: g.name, email: g.email, blocked: g.blocked, link: own(customerOfGuardian.get(g.id)) }))
         .sort(byName),
-      differences: [] as Difference[], inactiveUnrecorded: 0, confirm: null, review: null, unlink: null, offers: none,
+      differences: [] as Difference[], inactiveUnrecorded: 0, confirm: null, review: null, unlink: null, takes: [] as TakeOffer[], takeNotes: [] as { at: number; words: string }[], offers: none,
     };
     if (link !== undefined) {
       const customer = customerById.get(link.customerId);
@@ -452,7 +465,8 @@ export async function loadAccountingLinks(): Promise<LinksView> {
         guardians: (guardiansOf.get(key) ?? []).map((g) => ({ id: g.id, customerId: customerOfGuardian.get(g.id) ?? null })),
       });
       const status: LinkStatus = found !== null && found.differences.length > 0 ? { key: "with_differences", made } : made;
-      return { ...base, customer: shownCustomer, status, differences: found?.differences ?? [], inactiveUnrecorded: found?.inactiveUnrecorded ?? 0, review: b.reviewOf(key), unlink };
+      const takes = found === null ? { takes: [], takeNotes: [] } : takeOffersOf(b, f, link.customerId, found.differences);
+      return { ...base, customer: shownCustomer, status, differences: found?.differences ?? [], inactiveUnrecorded: found?.inactiveUnrecorded ?? 0, review: b.reviewOf(key), unlink, ...takes };
     }
     // Left unlinked, in every state: the matcher was never given it (readLinkBasics()).
     const left = leftOf.get(key);
@@ -509,6 +523,116 @@ export async function loadAccountingLinks(): Promise<LinksView> {
     readAt: b.okRuns[0]?.finishedAt?.toISOString() ?? null,
     pool: poolShown, step, bulk,
   };
+}
+
+/**
+ * Take QuickBooks' into the app (slice M4a): which of a row's differences a press settles, from the screen's reads
+ * alone (no query of its own, so the view's count above is unchanged), each with what it does in words and the stamp
+ * sealing what the row showed; the press (takeFromBooks(), src/lib/roster/writes.ts) works each value out again under
+ * the roster lock. Only for a link that stands, in the `listed` state (its caller's), and only where the difference has
+ * no change on the queue explaining it or only a kept one: a change waiting or stuck is on its way, and its words stand
+ * alone. Offered:
+ * - a name, of the family, the member or an active student, that checkName() takes and, for a family or member, that
+ *   no other active family of the portal holds;
+ * - a record active in the portal whose customer the books have inactive: a student, the member, or a family in layered
+ *   books whose every active student record has no link or is linked to a customer the books' copy has inactive (it
+ *   goes with them); otherwise a note names those the books still have active, or whose customer the copy doesn't hold;
+ * - where a student is, as the books have it under another family (`place` at `other_family`, or this family's
+ *   `student_elsewhere` of a record in another family), when an active family of the portal other than the record's own
+ *   is linked to that customer: a move, with its follow-ups said beside it; otherwise, for a place, a note that no
+ *   family of the portal is linked to it.
+ * Nothing else: an inactive record active in the books, any other place, a student or Parent customer on one side only
+ * and a guardian's link are only shown. The books' text (a name) is said as text.
+ */
+function takeOffersOf(b: LinkBasics, f: { id: AppFamilyId; name: string | null }, familyCustomer: string, differences: readonly Difference[]): { takes: TakeOffer[]; takeNotes: { at: number; words: string }[] } {
+  const takes: TakeOffer[] = [], takeNotes: { at: number; words: string }[] = [];
+  const key = String(f.id);
+  const familyWords = recordNameWords(f.name, "family");
+  const studentOf = (id: AppStudentId) => b.everyStudent.find((s) => String(s.id) === String(id));
+  const activeFamily = (id: AppFamilyId | null | undefined) => (id == null ? undefined : b.families.find((x) => String(x.id) === String(id)));
+  const sent = "Nothing is sent to the books.";
+  /** The words of a move taken from the books, true by afterStudentMoved(): what a move made on a family's page does. */
+  const moveWords = (who: string, to: string) => [`Moves ${who} to ${to} in the portal, where the books have them, as a move made on the family's page does: their forms not yet complete start again under ${to}, their volunteer places still to come are given up and their guardians told by email, and an unpaid volunteer buy-out invoice of theirs is voided in the books. Nothing about the student is sent to the books.`];
+  const move = (at: number, studentId: AppStudentId, fromFamilyId: AppFamilyId, to: { id: AppFamilyId; name: string | null }, toCustomer: string) => {
+    const studentCustomer = b.customerOfStudent.get(String(studentId));
+    const s = studentOf(studentId);
+    if (studentCustomer === undefined || s === undefined || !s.active || activeFamily(fromFamilyId) === undefined || String(to.id) === String(fromFamilyId)) return;
+    const who = recordNameWords(s.name, "student");
+    takes.push({ at, field: "place", kind: "student", recordId: String(studentId), about: `where ${who} is`, words: moveWords(who, recordNameWords(to.name, "family")),
+      stamp: takeStamp("place", String(studentId), studentCustomer, [studentCustomer, toCustomer, String(fromFamilyId), String(to.id)]) });
+  };
+  differences.forEach((d, at) => {
+    if ("queue" in d && d.kind !== "guardians_unlinked" && d.queue !== null && d.queue.state !== "refused") return;
+    if (d.kind === "name") {
+      const name = checkName(d.books);
+      if (!name.ok) return;
+      if (d.of === "student") {
+        const customer = b.customerOfStudent.get(String(d.studentId));
+        if (customer === undefined) return;
+        const who = recordNameWords(studentOf(d.studentId)?.name ?? null, "student");
+        takes.push({ at, field: "name", kind: "student", recordId: String(d.studentId), about: `${who}'s name`, words: [`Takes “${d.books}” as ${who}'s name in the portal, as the books have it. ${sent}`],
+          stamp: takeStamp("name", String(d.studentId), customer, [d.books]) });
+        return;
+      }
+      if (b.families.some((x) => String(x.id) !== key && x.name !== null && nameKey(x.name) === nameKey(name.name))) return;
+      takes.push({ at, field: "name", kind: "family", recordId: key, about: `${familyWords}'s name`, words: [`Takes “${d.books}” as this ${d.of}'s name in the portal, as the books have it. ${sent}`],
+        stamp: takeStamp("name", key, familyCustomer, [d.books]) });
+      return;
+    }
+    if (d.kind === "active") {
+      if (!d.portalActive) return;
+      if (d.of === "student") {
+        const customer = b.customerOfStudent.get(String(d.studentId));
+        if (customer === undefined) return;
+        takes.push({ at, field: "inactive", kind: "student", recordId: String(d.studentId), about: `whether ${d.who} is active`,
+          words: [`Makes ${d.who} inactive in the portal, as the books have them. ${sent}`], stamp: takeStamp("inactive", String(d.studentId), customer, []) });
+        return;
+      }
+      if (d.of === "member") {
+        takes.push({ at, field: "inactive", kind: "family", recordId: key, about: `whether ${familyWords} is active`,
+          words: [`Makes ${familyWords} inactive in the portal, as the books have it. Its guardians can't sign in to the member then. ${sent}`], stamp: takeStamp("inactive", key, familyCustomer, []) });
+        return;
+      }
+      const under = b.students.filter((s) => String(s.familyId) === key && s.active)
+        .sort((x, y) => COLLATOR.compare(x.name ?? "", y.name ?? "") || (String(x.id) < String(y.id) ? -1 : String(x.id) > String(y.id) ? 1 : 0));
+      const stillActive: string[] = [], notHeld: string[] = [];
+      for (const s of under) {
+        const customer = b.customerOfStudent.get(String(s.id));
+        if (customer === undefined) continue;
+        const c = b.customerById.get(customer);
+        if (c === undefined) notHeld.push(recordNameWords(s.name, "student"));
+        else if (c.active) stillActive.push(recordNameWords(s.name, "student"));
+      }
+      if (stillActive.length) {
+        takeNotes.push({ at, words: `${stillActive.join(", ")} ${stillActive.length === 1 ? "is" : "are"} still active in the books, so the family can't be taken as inactive until they are made inactive there or moved.` });
+        return;
+      }
+      if (notHeld.length) {
+        takeNotes.push({ at, words: `The books' copy doesn't hold the customer of ${notHeld.join(", ")} now, so the family can't be taken as inactive.` });
+        return;
+      }
+      const withThem = under.length === 0 ? "" : `, with ${under.length === 1 ? "its student" : `its ${under.length} students`} ${under.map((s) => recordNameWords(s.name, "student")).join(", ")}`;
+      takes.push({ at, field: "inactive", kind: "family", recordId: key, about: `whether ${familyWords} is active`,
+        words: [`Makes ${familyWords} inactive in the portal${withThem}, as the books have it. Its guardians can't sign in to the family then. ${sent}`],
+        stamp: takeStamp("inactive", key, familyCustomer, under.map((s) => String(s.id)).sort()) });
+      return;
+    }
+    if (d.kind === "place" && d.place.at === "other_family") {
+      const to = activeFamily(b.familyOfCustomer.get(d.place.familyQboId));
+      if (to === undefined || String(to.id) === key) {
+        takeNotes.push({ at, words: `No active family of the portal is linked to ${d.place.familyName}.` });
+        return;
+      }
+      move(at, d.studentId, f.id, to, d.place.familyQboId);
+      return;
+    }
+    if (d.kind === "student_elsewhere" && d.portal.at === "family") {
+      const from = studentOf(d.studentId)?.familyId;
+      if (from === null || from === undefined) return;
+      move(at, d.studentId, from, f, familyCustomer);
+    }
+  });
+  return { takes, takeNotes };
 }
 
 /**

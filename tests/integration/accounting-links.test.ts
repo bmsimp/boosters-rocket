@@ -877,10 +877,14 @@ describe("differences, for a link that stands (slice M2)", () => {
     expect(html).toContain("In the books: “&lt;b&gt;Bold&lt;/b&gt; Rivera”.");
     expect(html).toContain("<details class=\"more\"><summary>Students, guardians and differences<span class=\"visually-hidden\">: Rivera Family</span></summary>");
     expect(rowNamed(html, "Rivera Family")![4]).toBe("Students, guardians and differences: Rivera FamilyStudents:Leo Rivera: linked to Leo RiveraGuardians:Ana Rivera (ana@example.com): linked to Ana Rivera"
-      + "Where the portal and the books differ:The family's name. In the portal: “Rivera Family”. In the books: “<b>Bold</b> Rivera”." + riveraPresses("<b>Bold</b> Rivera"));
-    // The books' values are the portal's copy from its last read, said with its time; the page settles nothing.
+      + "Where the portal and the books differ:The family's name. In the portal: “Rivera Family”. In the books: “<b>Bold</b> Rivera”."
+      // Since slice M4a, the press that takes the books' name, with what it does, the books' name as text.
+      + "Takes “<b>Bold</b> Rivera” as this family's name in the portal, as the books have it. Nothing is sent to the books.Take QuickBooks' into the app: Rivera Family's name"
+      + riveraPresses("<b>Bold</b> Rivera"));
+    // The books' values are the portal's copy from its last read, said with its time; drawing the page settles nothing
+    // (since slice M4a a press may take some of them into the portal, and says which).
     expect(whole).toContain("against its copy of the books, from its last read of them on ");
-    expect(whole).toContain("and settles none of it.");
+    expect(whole).toContain("with Take QuickBooks&#x27; into the app, which sends nothing to the books; every other difference is only shown.");
     expect((await db.select().from(auditLog)).length).toBe(audits);
     expect(await db.select().from(writeQueue)).toEqual(queue);
   });
