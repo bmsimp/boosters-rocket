@@ -175,6 +175,12 @@ export const SIGNIN_SETTINGS_COPY = {
   passkeyRemoveLastAppWords: "This is your only passkey. If you remove it, when you sign in on a device we don't know yet, we'll ask for the code from your authenticator app.",
   passkeyRemovedLast: "That passkey is removed, and your backup codes no longer work. When you sign in on a device we don't know yet, we'll email you a code again.",
   passkeyRemovedLastApp: "That passkey is removed. When you sign in on a device we don't know yet, we'll ask for the code from your authenticator app.",
+  /**
+   * The same two beside an app, at Strict (slice SI-10b): no remembered device stands in for a step there
+   * (checkPasswordSignin()), so the app's code is asked at every sign-in.
+   */
+  passkeyRemoveLastAppWordsStrict: "This is your only passkey. If you remove it, each time you sign in we'll ask for your password and then the code from your authenticator app.",
+  passkeyRemovedLastAppStrict: "That passkey is removed. Each time you sign in, we'll ask for your password and then the code from your authenticator app.",
   /** Under Strict the last second factor stays (open question 33): add another first. */
   passkeyRemoveStrict: "This passkey is your only second step, and the club asks everyone for one, so it can't be removed while it's your only one. Add another passkey or set up an authenticator app first, then you can remove this one.",
   passkeyNotFound: "That passkey isn't one of yours now. Please reload this page.",
@@ -185,13 +191,13 @@ export const SIGNIN_SETTINGS_COPY = {
    * sign-in page's passkey step (its backup-code field, offered while the person holds unspent ones) and when this page
    * asks again, so they are the way in when the passkey's device is lost.
    */
+  backupCodesKeepPasskey: "Each backup code works once, in place of your passkey, when you sign in and when this page asks you to show it's you. If you lose the phone or computer that holds your passkey, they're how you get in, so keep them somewhere safe that isn't on that device, like on paper or in a password manager on another device. We won't show them again.",
   /**
    * Under Strict, wherever this page shows new backup codes (open question 25; slice SI-10b): a press under the box's
    * "I've saved my backup codes somewhere safe" (ENROLMENT_COPY.saved) that puts them away, and what the box says then.
    */
   codesDone: "Done",
   codesPutAway: "Your backup codes aren't shown here any more. We won't show them again.",
-  backupCodesKeepPasskey: "Each backup code works once, in place of your passkey, when you sign in and when this page asks you to show it's you. If you lose the phone or computer that holds your passkey, they're how you get in, so keep them somewhere safe that isn't on that device, like on paper or in a password manager on another device. We won't show them again.",
   // Asking again with a passkey (slice SI-7b): the passkey alone, or the password and then the second step.
   usePasskey: "Use your passkey",
   orPassword: "Or enter your password",
@@ -295,6 +301,8 @@ function withPasskey(app: boolean): HowWords {
 // Under Strict a remembered device asks for the second step too (password-signin.ts: no device stands in for a step
 // there), so since slice SI-10b `how`, `devicesLede` and their kin are Strict's own for a person with a factor
 // (strictWords()), picked by the level beside the factors; every other key is the factor's own, true at either level.
+// Outside these keys, the last passkey's words beside an app have Strict versions of their own
+// (passkeyRemoveLastAppWordsStrict, passkeyRemovedLastAppStrict).
 export type HowWords = { [K in keyof typeof WITH_APP]: string };
 /**
  * What the person has of their own, for the words: an authenticator app in force, and (since slice SI-7b) a passkey;

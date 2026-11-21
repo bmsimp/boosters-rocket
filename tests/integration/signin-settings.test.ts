@@ -1268,6 +1268,20 @@ describe("the Passkeys box, drawn (slice SI-7b)", () => {
     expect(box).not.toContain(COPY.backupCodesLeft);
   });
 
+  it("beside an app at Strict: the last one's words say the app is asked at every sign-in, not only on a new device (slice SI-10b)", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await seedAuthenticator(a.identity.parentId);
+    await seedPasskey(a.identity.parentId);
+    await seedParentSettings({ level: "strict" });
+    await proveRecently(a.identity);
+    asParent(a.identity);
+    const box = passkeysBox(await renderPage(SignInSettingsPage));
+    expect(COPY.passkeyRemoveLastAppWordsStrict).toBe("This is your only passkey. If you remove it, each time you sign in we'll ask for your password and then the code from your authenticator app.");
+    expect(box).toContain(html(COPY.passkeyRemoveLastAppWordsStrict));
+    expect(box).not.toContain(html(COPY.passkeyRemoveLastAppWords));
+    expect(box).toContain(">Remove<");
+  });
+
   it("with no passkey: the sentence of what one is, none listed, and the add once proved", async () => {
     const a = await seedSignedInParent(FAMILY_A);
     await proveRecently(a.identity);
@@ -1298,6 +1312,7 @@ describe("Sign-in settings at Strict (slice SI-10b)", () => {
     expect(passkey.devicesNone).toBe("We don't remember any device for you right now. Wherever you sign in with your password, we ask for your passkey too.");
     const both = howYouSignIn({ app: true, passkey: true, strict: true });
     expect(both.how).toBe("You can sign in with your passkey alone. With this address and your password instead, we also ask for your passkey or the code from your authenticator app, every time, on every phone or computer.");
+    expect(both.devicesLede).toBe("These are the phones and computers we remember for you. The club asks everyone for a passkey or an authenticator app each time they sign in, so on these too, after your password we ask for your passkey or the code from your authenticator app.");
     expect(both.devicesNone).toBe("We don't remember any device for you right now. Wherever you sign in with your password, we ask for your passkey or the code from your authenticator app too.");
     for (const w of [app, passkey, both]) {
       expect(w.forgetHere).toBe("Forgetting the device you're using now doesn't sign you out here, and doesn't change how you sign in on it.");

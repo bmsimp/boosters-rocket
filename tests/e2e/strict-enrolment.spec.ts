@@ -114,6 +114,14 @@ test("she sets an authenticator app up there, ticks that she saved her backup co
     await expect(codes.getByRole("listitem")).toHaveCount(10);
     await settings.getByLabel(WORDS.saved).check();
     await expect(done).not.toHaveAttribute("aria-disabled", "true");
+    // New codes pressed for while these are ticked start unticked: the tick was for the set before.
+    const first = (await codes.getByRole("listitem").first().textContent())?.trim() ?? "";
+    await settings.getByRole("button", { name: SETTINGS.newCodes }).click();
+    await expect(codes.getByRole("listitem").first()).not.toHaveText(first);
+    await expect(codes.getByRole("listitem")).toHaveCount(10);
+    await expect(settings.getByLabel(WORDS.saved)).not.toBeChecked();
+    await expect(done).toHaveAttribute("aria-disabled", "true");
+    await settings.getByLabel(WORDS.saved).check();
     await done.click();
     await expect(codes).toHaveCount(0);
     await expect(settings.getByText(SETTINGS.codesPutAway)).toBeVisible();
@@ -134,5 +142,17 @@ test("she adds a passkey there instead, and goes home the same way", async ({ br
     expect(paths).not.toContain("/api/auth/parent/passkey/verify-registration");
     await confirmSavedAndGoOn(page, `${baseURL}/`);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(`Hi, ${STRICT_PARENT.first}`);
+    // The Passkeys box at Strict (slice SI-10b): her new backup codes beside the passkey stay until she ticks and presses Done.
+    await page.goto("/family/sign-in");
+    const settings = page.getByRole("region", { name: SETTINGS.passkeysTitle, exact: true });
+    await settings.getByRole("button", { name: SETTINGS.newCodes }).click();
+    const codes = settings.getByRole("list", { name: SETTINGS.backupCodesTitle });
+    await expect(codes.getByRole("listitem")).toHaveCount(10);
+    const done = settings.getByRole("button", { name: SETTINGS.codesDone, exact: true });
+    await expect(done).toHaveAttribute("aria-disabled", "true");
+    await settings.getByLabel(WORDS.saved).check();
+    await done.click();
+    await expect(codes).toHaveCount(0);
+    await expect(settings.getByText(SETTINGS.codesPutAway)).toBeVisible();
   } finally { await close(); }
 });

@@ -116,7 +116,8 @@ export function AuthenticatorBox({ email, app, proved, hasPassword, strict, pass
         </ul>
         <CopyButton text={codes.list.join("\n")} label={COPY.copyCodes} />
         {/* Under Strict (open question 25): put away once the parent says they saved them, the box drawn as after a press. */}
-        {strict && <CodesSaved onDone={() => { setCodes(null); setAnswer({ ok: true, message: COPY.codesPutAway }); }} />}
+        {/* Keyed by the list: new codes pressed again while these are shown start unticked. */}
+        {strict && <CodesSaved key={codes.list.join(" ")} onDone={() => { setCodes(null); setAnswer({ ok: true, message: COPY.codesPutAway }); }} />}
         {answered}
         {on}
       </div>

@@ -112,14 +112,16 @@ export function PasskeyBox({ email, passkeys, proved, hasPassword, strict, app, 
 
   const last = passkeys.length === 1;
   // Before the press, beside the last passkey (open question 33): what the second step will be afterwards.
-  const lastWords = !last ? null : app ? COPY.passkeyRemoveLastAppWords : strict ? COPY.passkeyRemoveStrict : COPY.passkeyRemoveLastWords;
+  const lastWords = !last ? null : app ? (strict ? COPY.passkeyRemoveLastAppWordsStrict : COPY.passkeyRemoveLastAppWords)
+    : strict ? COPY.passkeyRemoveStrict : COPY.passkeyRemoveLastWords;
 
   return (
     <div className="stack">
       <p>{COPY.passkeysWhat}</p>
       {codes && <BackupCodesShown message={codes.message} list={codes.list} app={app} lineRef={codesLine} />}
       {/* Under Strict (open question 25; slice SI-10b): put away once the parent says they saved them, and the box says so. */}
-      {codes && strict && <CodesSaved onDone={() => { setCodes(null); setAnswer({ ok: true, message: COPY.codesPutAway }); }} />}
+      {/* Keyed by the list: a new set of codes (new codes pressed again, or another passkey's) starts unticked. */}
+      {codes && strict && <CodesSaved key={codes.list.join(" ")} onDone={() => { setCodes(null); setAnswer({ ok: true, message: COPY.codesPutAway }); }} />}
       {answer && (
         <div ref={said} tabIndex={-1}>
           {answer.ok ? <p role="status" className="paid-up"><Tick />{answer.message}</p> : <Errors errors={answer.errors} />}

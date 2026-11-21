@@ -246,6 +246,18 @@ describe("renaming and removing", () => {
     expect((await passwordStep(ana.email)).body).toEqual({ ok: true, step: "app" });
   });
 
+  it("beside an app at Strict the last goes, and the answer says the app is asked at every sign-in (slice SI-10b)", async () => {
+    const ana = await seedPerson("Ana");
+    const s = await signedIn(ana);
+    await seedAuthenticator(ana.id);
+    const k = await seedPasskey(ana.id);
+    await seedParentSettings({ level: "strict" });
+    await proveNow(s.sessionId);
+    expect(await removeMyPasskey(s.ctx, k.rowId)).toEqual({ ok: true, message: COPY.passkeyRemovedLastAppStrict });
+    expect(COPY.passkeyRemovedLastAppStrict).toBe("That passkey is removed. Each time you sign in, we'll ask for your password and then the code from your authenticator app.");
+    expect(await passkeyRows(ana.id)).toEqual([]);
+  });
+
   it("under Strict the last second factor is refused and nothing changes, while one of two goes", async () => {
     const ana = await seedPerson("Ana");
     const s = await signedIn(ana);
