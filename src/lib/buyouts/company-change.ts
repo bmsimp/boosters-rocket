@@ -20,8 +20,8 @@ const UNPAID_LIVE: BuyoutState[] = ["being_invoiced", "invoiced", "being_voided"
  * in the old company's books for the treasurer. Its customer, item, invoice, company, flag and when it was flagged are
  * kept as they were, for the treasurer's list (stage 4's slice M7b). A paid one keeps counting, as it is, and so does
  * an invoiced one its family's stored figures show paid, which is marked paid first (markPaidAsStored(), slice M7b2); a
- * voided or refused one is history already. The family may choose again for that requirement, as far as the database goes: the
- * live indexes no longer hold it.
+ * voided or refused one is history already. The family may choose again for that requirement, as far as the database
+ * goes: the live indexes no longer hold it.
  *
  * One statement, which takes each row's lock: a void being queued at that moment (queueVoid(), src/lib/buyouts/writes.ts,
  * which moves an invoiced one to being voided holding no roster lock) either committed first, and its buy-out ends here
