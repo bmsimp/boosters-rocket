@@ -4804,7 +4804,11 @@ async function sendInactive(kind: "family" | "student", recordId: string, stamp:
     case "failed": {
       const failure = classify(t.code);
       if (failure.kind === "retry") {
-        await enqueue({ write: t.write, realmId: p.realmId, ...p.filed }, t.code, failure.sent, o);
+        // Given up when the roster is another company's by now (a change of company's clear ran while it was on its way).
+        if ((await enqueue({ write: t.write, realmId: p.realmId, ...p.filed }, t.code, failure.sent, o)) === "given_up") {
+          await sendRow("refused", { code: short(t.code), sent: failure.sent, queue: "given_up" });
+          return refuse(WRITE_COPY.givenUpForCompany);
+        }
         await sendRow("queued", { code: short(t.code), sent: failure.sent });
         return { ok: true, queued: true, status: "waiting", message: WRITE_COPY.queued };
       }
