@@ -6,7 +6,7 @@ import { compareContact, compareEmail, isFamilyCreateItem, loadMadeAfterGivingUp
 import { isUuid } from "@/lib/seasons/ids";
 import { loadBalances } from "@/lib/money/balances";
 import { linksOfCustomers } from "@/lib/families/links";
-import { readCustomerAims, type CustomerAim } from "@/lib/accounting/mapping";
+import { readForReconciliation, type CustomerAim, type KeptPlace } from "@/lib/accounting/mapping";
 import { handful } from "@/lib/roster/no-family";
 import { LocalTime } from "@/app/components/local-time";
 import { DataTable, type Column } from "@/app/components/data-table";
@@ -142,11 +142,18 @@ const notOfferedWords = (i: QueueView): string | null => {
  * QuickBooks has now for a rename (the roster cache's name) or a move (the family the cache has the student under, with
  * whose invoices each family sees meanwhile: slice 9f), who asked and when, the family's page, and, for staff who
  * may change families, "Send the portal's value" (bound to what the row showed, sealed so a value the form sends back
- * that isn't it is refused) and "Give up". Such a change is never tried again by itself.
+ * that isn't it is refused) and "Give up". Such a change is never tried again by itself. Since stage 4's slice M5c (the
+ * owner's decision of 2026-11-21: both places), one the accounting links screen shows beside its difference
+ * (`onLinks`, keptOnLinksOf()) stays here whole, with one line saying it is shown there too and settled from either;
+ * the link to that screen only for staff who may link families to accounting, who alone can open it (`linking`).
  */
-function Refused({ items, canChange, compared, mayCompare }: { items: QueueView[]; canChange: boolean; compared: ContactCompare | null; mayCompare: boolean }) {
+function Refused({ items, canChange, compared, mayCompare, onLinks, linking }: { items: QueueView[]; canChange: boolean; compared: ContactCompare | null; mayCompare: boolean;
+  onLinks: ReadonlyMap<string, KeptPlace>; linking: boolean }) {
   const columns: Column<QueueView>[] = [
-    { key: "what", header: "Change", rowHeader: true, cell: (i) => <>{i.words}<span className="when">{waitingWords(i)}</span>{i.moneyNote ? <span className="when">{i.moneyNote}</span> : null}</> },
+    { key: "what", header: "Change", rowHeader: true, cell: (i) => <>{i.words}<span className="when">{waitingWords(i)}</span>{i.moneyNote ? <span className="when">{i.moneyNote}</span> : null}
+      {onLinks.has(i.id) && <span className="when">{alsoOnLinks(onLinks.get(i.id)!)}{" "}{linking
+        ? <Link href={onLinksHref(onLinks.get(i.id)!)}>See it on Accounting links<span className="visually-hidden">: {i.words}</span></Link>
+        : "Someone who may link families to accounting sees it there."}</span>}</> },
     { key: "why", header: "Why it didn't go through", cell: (i) => <>{keptWordsFor(i.write, i.lastCode, i.holds, i.differs, i.joined)}{isCompared(i)
       ? <ContactCell i={i} compared={compared} mayCompare={isEmail(i) ? emailMayCompare(i, mayCompare) : mayCompare} /> : null}</> },
     { key: "asked", header: "Asked", cell: (i) => <><LocalTime iso={i.askedAt} />{i.askedBy ? <span className="when">by {i.askedBy}</span> : null}</> },
@@ -173,6 +180,17 @@ function Refused({ items, canChange, compared, mayCompare }: { items: QueueView[
   ];
   return <DataTable caption="Changes that didn't go through, kept in the portal" captionHidden columns={columns} rows={items} rowKey={(i) => i.id} />;
 }
+
+/**
+ * Where else a kept change is shown (slice M5c, KeptPlace), in one sentence: on Accounting links, in its family's row
+ * beside its difference (or with no difference now), or on its inactive families' list; settled from either page.
+ */
+function alsoOnLinks(p: KeptPlace): string {
+  const where = "inactive" in p ? "with its family under Inactive in the portal, active in the books"
+    : p.at === null ? "in its family's row, where the books' copy shows no difference for it now" : "in its family's row, beside its difference";
+  return `It is also shown on Accounting links, ${where}: sent or given up on either page, it is settled on both.`;
+}
+const onLinksHref = (p: KeptPlace) => ("inactive" in p ? "/staff/links#links-inactive-h" : "/staff/links#links-list-h");
 
 /**
  * The creates staff gave up here that QuickBooks made all the same (stage 3's slice 9d, the lead's decision): a given-up
@@ -259,9 +277,13 @@ export default async function ReconciliationPage({ searchParams }: { searchParam
   const linking = can(ctx.effective, "Accounting.Link.ReadWrite");
   // Which customers no family is linked to are meant for a family the portal has (stage 4's slice M3a2), read once for
   // both sections that say so: for staff who may link families, who are shown Customers with no family, and for anyone
-  // shown a family's or member's create made after it was given up, whose words go by it.
-  const aims = linking || madeAnyway.some((m) => m.role !== "student") ? await readCustomerAims() : null;
+  // shown a family's or member's create made after it was given up, whose words go by it. Since slice M5c the same one
+  // read of the accounting links screen's basics says, for any kept change, whether that screen shows it too
+  // (keptOnLinksOf()): read when either is needed, once.
   const stuck = writes.filter((w) => w.state === "stuck"), waiting = writes.filter((w) => w.state === "waiting"), refused = writes.filter((w) => w.state === "refused");
+  const wantAims = linking || madeAnyway.some((m) => m.role !== "student");
+  const { aims, kept: onLinks } = wantAims || refused.length > 0 ? await readForReconciliation(writes, { aims: wantAims })
+    : { aims: null, kept: new Map<string, KeptPlace>() };
   // The customers with a family page (the roster's families, or members in flat books), each by its family record, found
   // through the family kind of link in one lookup for the list: a customer with none links nowhere.
   const withPage = !roster.roster ? [] : roster.roster.kind === "flat" ? roster.roster.members.map((m) => m.qboId) : roster.roster.families.map((f) => f.customer.qboId);
@@ -281,7 +303,7 @@ export default async function ReconciliationPage({ searchParams }: { searchParam
               A change saved in the portal first that didn&apos;t go through (QuickBooks refused it, the portal held it back as QuickBooks has something else, or it couldn&apos;t be sent) is kept in the portal: send the portal&apos;s value again on purpose, or give it up and leave QuickBooks as it is.
               A guardian&apos;s phone and mailing address are among them: saved in the portal first, then sent on, and never sent over details QuickBooks holds that the portal didn&apos;t know of.
               So is a parent&apos;s new sign-in email, sent on to each record of theirs at the worker&apos;s next wake after they change it, and never over an address QuickBooks holds that the portal didn&apos;t know there.</p>
-            {refused.length > 0 && <><h3 className="table-head">Not in QuickBooks, kept in the portal ({refused.length})</h3><Refused items={refused} canChange={canChange} compared={compared} mayCompare={mayCompare} /></>}
+            {refused.length > 0 && <><h3 className="table-head">Not in QuickBooks, kept in the portal ({refused.length})</h3><Refused items={refused} canChange={canChange} compared={compared} mayCompare={mayCompare} onLinks={onLinks} linking={linking} /></>}
             {stuck.length > 0 && <><h3 className="table-head">Stuck ({stuck.length})</h3><Writes items={stuck} caption="Stuck changes" canChange={canChange} mayLink={linking} /></>}
             {waiting.length > 0 && <><h3 className="table-head">Waiting ({waiting.length})</h3><Writes items={waiting} caption="Changes waiting" canChange={canChange} mayLink={linking} /></>}
           </>

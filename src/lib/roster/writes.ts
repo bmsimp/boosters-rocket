@@ -4289,8 +4289,12 @@ const FAMILY_INACTIVE_HERE = "This student's family is inactive in the portal, s
 const STUDENT_MOVE_PENDING_ACTIVE = "A move of this student hasn't reached QuickBooks yet (it is waiting, stuck or kept on the Reconciliation page), so they weren't made active. Finish it there, or give it up, then try again.";
 /** What a take that leaves a family's sign-ins held says, in its answer and beside its press (the owner's choice 5, as the lead recommends it). */
 export const heldWords = (familyWords: string) => `${familyWords}'s guardians can't sign in to it until someone who may change families lets them in, on its page.`;
-/** Said when a make-inactive of the customer is kept on Reconciliation: the portal's earlier change, which a take leaves as it is. */
-export const KEPT_OFF_STAYS = "A make-inactive of its customer kept on the Reconciliation page stays there, as the portal's earlier change: only Send the portal's value or Give up there settles it.";
+/**
+ * Said when a make-inactive of the customer is kept: the portal's earlier change, which a take leaves as it is. Since
+ * stage 4's slice M5c it is shown beside its difference on Accounting links too, unless a balance held it
+ * (keptOnLinksOf()), and both pages settle it.
+ */
+export const KEPT_OFF_STAYS = "A make-inactive of its customer kept in the portal stays, as the portal's earlier change. It is listed on the Reconciliation page, and shown with its family on Accounting links unless a balance held it: only Send the portal's value, on Reconciliation, or Give up, on either page, settles it.";
 const isOrAre = (names: readonly string[]) => (names.length === 1 ? "is" : "are");
 
 /**
