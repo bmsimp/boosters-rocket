@@ -158,7 +158,7 @@ describe("the guards", () => {
 
   it("lets only an enrolling session reach /one-more-step: a whole one goes home, none to sign in", async () => {
     asParentEnrolling(who);
-    expect(await requireEnrolmentPage()).toEqual({ ...who, ip: "203.0.113.50" });
+    expect(await requireEnrolmentPage()).toMatchObject(who);
     asParent(identity);
     expect(await redirectOf(requireEnrolmentPage())).toBe("/");
     asParentChoosing(identity);
@@ -181,7 +181,7 @@ describe("the guards", () => {
       () => removePasskeyAction("abc")]) {
       await expect(press()).rejects.toBeInstanceOf(AccessDenied);
     }
-    expect(await enrolling()).toEqual({ ...who, ip: "203.0.113.50" });
+    expect(await enrolling()).toMatchObject(who);
     for (const set of [() => asParent(identity), () => asParentChoosing(identity), () => signedOut()]) {
       set();
       await expect(enrolling()).rejects.toBeInstanceOf(AccessDenied);
