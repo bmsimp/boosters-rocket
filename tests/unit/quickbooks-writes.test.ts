@@ -460,6 +460,21 @@ function activeFlagProblems(sources: { file: string; text: string }[]): string[]
   }
   return problems;
 }
+
+/**
+ * What is wrong with the send from a difference's own block (sendToBooks() up to portalValueStamp(), slice M5a):
+ * nothing when it names no client write and not sendWrite(), and reaches QuickBooks through trySavedItem() and
+ * tryDeactivate().
+ */
+function sendBlockProblems(writerText: string): string[] {
+  const writer = code(writerText);
+  const start = writer.indexOf(`export async function ${SEND}(`), end = writer.indexOf("export function portalValueStamp(");
+  if (start < 0 || end <= start) return [`${SEND}'s block isn't found before portalValueStamp()`];
+  const block = writer.slice(start, end);
+  const problems = [...CLIENT_WRITES, ROSTER_SEND].filter((name) => new RegExp(`\\b${name}\\b`).test(block)).map((name) => `${SEND}'s block names ${name}`);
+  for (const via of ["trySavedItem", "tryDeactivate"]) if (!new RegExp(`\\b${via}\\(`).test(block)) problems.push(`${SEND}'s block doesn't send through ${via}()`);
+  return problems;
+}
 describe("what the portal writes to QuickBooks, and who may send each", () => {
   const everything = read("src");
   // src/lib/money reads invoices for parents, and src/lib/parents/contact-edits.ts, which changed a parent's own record
@@ -917,12 +932,21 @@ describe("what the portal writes to QuickBooks, and who may send each", () => {
       const another = [...everything, { file: "src/app/staff/(app)/roster/send-actions.ts", text: `import { ${SEND} } from "@/lib/roster/writes";\nexport const go = () => ${SEND};\n` }];
       expect(naming(another)).not.toEqual([...MAY_SEND].sort());
       // The send itself names no client write: it goes through the module's own tries.
-      const writer = code(everything.find((s) => s.file === ROSTER_WRITER)!.text);
-      const block = writer.slice(writer.indexOf(`export async function ${SEND}(`), writer.indexOf("export function portalValueStamp("));
-      expect(block).not.toBe("");
-      for (const name of [...CLIENT_WRITES, ROSTER_SEND]) expect(block, name).not.toMatch(new RegExp(`\\b${name}\\b`));
-      expect(block).toMatch(/\btrySavedItem\(/);
-      expect(block).toMatch(/\btryDeactivate\(/);
+      const writerSource = everything.find((s) => s.file === ROSTER_WRITER)!.text;
+      expect(sendBlockProblems(writerSource)).toEqual([]);
+      // Each check proved on a copy of the writer it must refuse: sendWrite() or a client write inside the block, a try
+      // taken out of it, or the block's end moved above its start.
+      const intoSendName = (line: string) => writerSource.replace(/(async function sendName\([^\n]*\{\n)/, `$1${line}\n`);
+      const cases = [
+        intoSendName(`  await sendWrite({ op: "rename", role: "family", qboId: "10", syncToken: "0", name: "x", was: "y" }, "", {});`),
+        intoSendName(`  await qboRenameCustomer("10", "0", "x", {} as never);`),
+        writerSource.replace("const t = await tryDeactivate(p.write,", "const t = await (async (..._a: unknown[]) => ({}) as never)(p.write,"),
+        `export function portalValueStamp(): void {}\n${writerSource.replace("export function portalValueStamp(", "function portalValueStampMoved(")}`,
+      ];
+      for (const text of cases) {
+        expect(text, `case ${cases.indexOf(text)} didn't change the writer`).not.toBe(writerSource);
+        expect(sendBlockProblems(text), `case ${cases.indexOf(text)}`).not.toEqual([]);
+      }
     });
 
     it("a second call, true or a value in place of false, an alias, or another module naming it, each refused", () => {
