@@ -348,6 +348,10 @@ describe("the Parent sign-ins settings", () => {
       expect(strict).toContain("<dt>Sign-in level</dt><dd>Strict: a password and a passkey or an authenticator app, every time. An emailed code never signs anyone in.</dd>");
       expect(strict).toContain("Parents sign in to the portal with their email address and a password, which they choose from a link the portal emails them, and then a passkey or an authenticator app, every time. Who can sign in is the portal's own list of each family's guardians: a change made in QuickBooks no longer gives anyone a sign-in or ends one. Only Admins can change this.");
       expect(strict).not.toContain("it emails them a code too");
+      // Step 2's sample of the welcome is Strict's too (sampleWelcome() carries the level).
+      const welcome = decoded(await setup("welcome"));
+      expect(welcome).toContain("Once you've chosen your password, the portal asks you to add a passkey or an authenticator app, which you'll use each time you sign in.");
+      expect(welcome).not.toContain("After that, you sign in with this email address and the password you chose.");
       // "Passwords not chosen yet" at Strict: what choosing a password leads to, not that a session stays.
       await seedParentSettings({ signin: true, welcome: true });
       await db.update(parent).set({ welcomedAt: new Date("2026-01-01T00:00:00Z"), welcomeOwed: false }).where(eq(parent.id, ana.id));
@@ -358,7 +362,11 @@ describe("the Parent sign-ins settings", () => {
       expect(decoded(await view())).toContain("anyone welcomed before gets the email below. A phone or computer they are signed in on now stays signed in. They go out a few each minute.");
       // A stored value that can't be read, naming no level.
       await db.update(setting).set({ value: { signin: true, level: "relaxed" } }).where(eq(setting.key, PARENTS_KEY));
-      expect(decoded(await view())).toContain("<dt>Sign-in level</dt><dd>Not known: the saved sign-in settings can't be read. Choose Standard or Strict under Change, step 3.</dd>");
+      const unknown = decoded(await view());
+      expect(unknown).toContain("<dt>Sign-in level</dt><dd>Not known: the saved sign-in settings can't be read. Choose Standard or Strict under Change, step 3.</dd>");
+      // The press those words name is drawn by that name, though the value read is the closed state (sign-ins off).
+      expect(unknown).toContain(`<a class="btn" href="/staff/settings/parents/setup">Change</a>`);
+      expect(unknown).not.toContain(">Set up</a>");
     });
 
     it("step 3 at Standard shows the counts, and the confirm for 1, for 2 or more and for 0 guardians with neither", async () => {
@@ -422,6 +430,37 @@ describe("the Parent sign-ins settings", () => {
       await setLevelAction("standard", null);
       expect(await setLevelAction("strict", 2)).toEqual({ ok: true, message: "The club is at Strict. Nobody needed signing out." });
       expect((await getParentSettings()).level).toBe("strict");
+    });
+
+    it("binds the press to the count the step shows: the page's own Switch to Strict works, and so does its Switch back", async () => {
+      /** The presses a page draws (SwitchButton's `label` and `act`), found in the element tree it returns, not its markup. */
+      type Press = { label: string; act: () => Promise<unknown> };
+      const presses = (node: unknown): Press[] => {
+        if (Array.isArray(node)) return node.flatMap(presses);
+        if (!node || typeof node !== "object" || !("props" in node)) return [];
+        const p = (node as { props: Record<string, unknown> }).props;
+        const own = typeof p.act === "function" && typeof p.label === "string" ? [{ label: p.label, act: p.act as Press["act"] }] : [];
+        return [...own, ...presses(p.children)];
+      };
+      const drawn = async () => {
+        const page = await ParentSetupPage({ searchParams: Promise.resolve({ step: "level" }) });
+        return { html: decoded(renderToStaticMarkup(page)), presses: presses(page) };
+      };
+      const ana = await ready();
+      const sam = await seedSam();
+      await setSigninsAction(true);
+      await seedParentSession(ana.authUserId); await seedParentSession(sam.authUserId);
+      let page = await drawn();
+      expect(page.html).toContain("<dt>Have neither</dt><dd>2</dd>");
+      expect(page.html).toContain("Switching to Strict signs out the 2 guardians who have neither");
+      const toStrict = page.presses.find((p) => p.label === "Switch to Strict");
+      expect(toStrict).toBeDefined();
+      expect(await toStrict!.act()).toEqual({ ok: true, message: "The club is at Strict. 2 guardians with neither a passkey nor an authenticator app were signed out." });
+      expect((await getParentSettings()).level).toBe("strict");
+      page = await drawn();
+      expect(page.presses.map((p) => p.label)).toEqual(["Switch back to Standard"]);
+      expect(await page.presses[0]!.act()).toEqual({ ok: true, message: "The club is at Standard. Nobody was signed out." });
+      expect((await getParentSettings()).level).toBe("standard");
     });
   });
 });

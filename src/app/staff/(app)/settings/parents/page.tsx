@@ -43,7 +43,8 @@ export default async function ParentSettingsPage() {
         {!s.signin && (missing.length > 0
           ? <Notice tone="warning" live="none">Before sign-ins can be switched on:<ul className="notice-list">{missing.map((m) => <li key={m}>{m}</li>)}</ul></Notice>
           : <Notice tone="info" live="none">Everything sign-ins need is ready: outgoing mail works.</Notice>)}
-        <p><a className="btn" href="/staff/settings/parents/setup">{s.signin ? "Change" : "Set up"}</a></p>
+        {/* "Change" too while the level can't be read (slice SI-10b): the level's words send the Admin there by that name. */}
+        <p><a className="btn" href="/staff/settings/parents/setup">{s.signin || level === null ? "Change" : "Set up"}</a></p>
       </section>
 
       {/* People welcomed before parents signed in with a password have none, and nothing else emails them a link
