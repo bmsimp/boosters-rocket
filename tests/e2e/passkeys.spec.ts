@@ -196,6 +196,7 @@ test("the passkey offer uses a phone's words on an iPhone, and draws nothing whe
     const offer = onPhone.locator('[data-passkey-offer="shown"]');
     await expect(offer.getByRole("heading", { level: 2 })).toHaveText(OFFER.phoneTitle);
     await expect(offer).toContainText(OFFER.phoneBody);
+    await expect(offer).toContainText("This device can keep a passkey for the portal.");
     await expect(offer).not.toContainText(OFFER.computerBody);
 
     // No WebAuthn in this browser: once the box has read it, nothing at all, and Home as usual.

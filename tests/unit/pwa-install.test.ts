@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { installDevice, installHintView, offerDevice, type InstallDevice } from "@/app/components/pwa/install-platform";
+import { PASSKEY_OFFER_COPY } from "@/lib/parents/passkey-offer-copy";
 
 const IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko)";
 const UA = {
@@ -167,6 +168,11 @@ describe("which words the passkey offer uses (slice SI-8)", () => {
     expect(offerDevice({ userAgent: UA.macSafari, platform: "MacIntel", maxTouchPoints: 5 })).toBe("phone");
     expect(offerDevice({ userAgent: UA.macSafari, platform: "MacIntel", maxTouchPoints: 0 })).toBe("computer");
     expect(offerDevice({ userAgent: UA.macSafari, platform: "MacIntel" })).toBe("computer");
+  });
+
+  it("a phone's words say \"this device\", true on an iPad too, never \"your phone\"", () => {
+    expect(PASSKEY_OFFER_COPY.phoneBody).toMatch(/^This device can keep a passkey for the portal\. /);
+    expect(PASSKEY_OFFER_COPY.phoneBody).not.toMatch(/phone/i);
   });
 
   it("Windows, and an Android tablet (no Mobile), are a computer's", () => {

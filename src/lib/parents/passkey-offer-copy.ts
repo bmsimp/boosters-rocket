@@ -4,9 +4,12 @@
 // without a passkey: the offer is a nicety.
 
 export const PASSKEY_OFFER_COPY = {
-  /** On a phone (offerDevice(), src/app/components/pwa/install-platform.ts). */
+  /**
+   * On a phone (offerDevice(), src/app/components/pwa/install-platform.ts), an iPad included, so the body says "this
+   * device", never "your phone" (the owner's approved words, 2026-11-21).
+   */
   phoneTitle: "Sign in with Face ID or your fingerprint next time?",
-  phoneBody: "Your phone can keep a passkey for the portal. Next time, you sign in with a tap, with no password or code to type.",
+  phoneBody: "This device can keep a passkey for the portal. Next time, you sign in with a tap, with no password or code to type.",
   /** On a computer, a tablet that isn't Apple's included. */
   computerTitle: "Sign in with a passkey next time?",
   computerBody: "A passkey lets you sign in with Face ID, your fingerprint, Windows Hello or your password manager, with no password or code to type.",
