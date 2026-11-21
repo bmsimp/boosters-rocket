@@ -53,8 +53,8 @@ themselves.
 - Money: invoices are raised in QuickBooks. Parents pay on QuickBooks' own hosted payment page,
   reached from a "Pay" button on each invoice.
 - Signatures: forms are signed inside the portal through embedded Documenso signing.
-- Parents sign in with a one-time code that the portal emails them; staff sign in with Microsoft
-  or Google.
+- Parents sign in with their email and a password, and on a device the portal doesn't know yet it
+  also emails them a one-time code; staff sign in with Microsoft or Google.
 - The work is seasonal: a heavy burst at the start of each season (forms, new families), then
   occasional balance checks and payments.
 - One volunteer maintains each club's copy, and a successor may not code.

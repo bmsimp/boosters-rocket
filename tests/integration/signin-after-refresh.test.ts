@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vites
 
 /**
  * The whole way in, joined up, beside a roster refresh: a guardian the portal holds (since stage 3 of the app-owned
- * families spec, nothing makes one from QuickBooks) is in the family record the refresh keeps, asks for a code, enters
- * it, gets a session and reaches their family; and what QuickBooks then changes about their parent record changes
+ * families spec, nothing makes one from QuickBooks) is in the family record the refresh keeps, signs in with their
+ * password, enters the code it mails (the sign-in release, slice SI-3b), gets a session and reaches their family; and what QuickBooks then changes about their parent record changes
  * nothing about their sign-in. Only the family record going inactive stops it, at the gate.
  */
 const stubBase = vi.hoisted(() => ({ url: "" }));
@@ -20,15 +20,14 @@ import { cookiesSetBy, fromBrowser } from "../helpers/page-request";
 
 import { db } from "@/lib/db/client";
 import { auditLog, guardian, parent, parentAuthSession, parentAuthUser, signinCode } from "@/lib/db/schema";
-import { getParentAuth } from "@/lib/auth/parent-auth";
 import { getParentState } from "@/lib/auth/identity";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { saveShape } from "@/lib/roster/shape";
-import { env } from "@/env";
 import { resetDb, seedGuardian, seedParent, seedWorkingMail } from "../helpers/db";
 import { startQboStub, seedConnected, fznCompany, FZN_SHAPE, type QboStub } from "../helpers/qbo-stub";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
+import { codeStep, ensurePassword, passwordStep } from "../helpers/parent-door";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -36,19 +35,21 @@ afterAll(() => stub.close());
 
 const IP = "203.0.113.60";
 const worker = { startedBy: "worker", actor: { door: "system" as const, id: null, label: "worker" }, ip: null };
-async function post(path: string, body: unknown) {
-  return (await getParentAuth()).handler(new Request(`${env.APP_URL}/api/auth/parent${path}`, {
-    method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json", origin: env.APP_URL, "cf-connecting-ip": IP },
-  }));
-}
+const HEADERS = { "cf-connecting-ip": IP };
 const cookieFrom = cookiesSetBy;
-/** Asks for a code as the sign-in page does and waits for the email; null when none came. */
-async function codeMailedTo(typed: string): Promise<Msg | null> {
+/**
+ * Signs in with the password as the sign-in page does, typed as given (the person who holds it is given the helper's
+ * password first), and waits for the code's email: the mail and the pending step's cookie, or null when none came.
+ */
+async function codeMailedTo(typed: string): Promise<(Msg & { pending: string }) | null> {
+  await ensurePassword(typed);
   const before = outbox.length;
-  expect(await (await post("/portal-code/send", { email: typed })).json()).toEqual({ ok: true });
+  const { pending } = await passwordStep(typed, { headers: HEADERS });
   try { await vi.waitFor(() => expect(outbox.length).toBeGreaterThan(before), { timeout: 1500 }); } catch { return null; }
-  return outbox.at(-1)!;
+  return { ...outbox.at(-1)!, pending };
 }
+/** The code of that mail, posted with its pending step: the response (its cookies) and the body codeStep() has read from it. */
+const check = (m: Msg & { pending: string }) => codeStep(codeIn(m), m.pending, { headers: HEADERS });
 const codeIn = (m: Msg) => /sign-in code: (\d{6})/.exec(m.subject)![1]!;
 const pageRequest = async (cookie: string) => { fromBrowser(cookie, IP); return getParentState(); };
 const actions = async () => (await db.select().from(auditLog).orderBy(auditLog.id)).map((r) => r.action);
@@ -62,7 +63,7 @@ const seedAna = async () => {
   await seedGuardian({ parentId: ana.id, familyQboId: "10", sourceQboId: "11", status: "invited" });
   return ana;
 };
-/** A minute and more goes by: a second code may be asked for (the portal refuses one inside 60 seconds). */
+/** A minute and more goes by: a second code may be asked for (the portal refuses one inside 60 seconds). The password tries stay counted. */
 const aMinutePasses = () => db.update(signinCode).set({ createdAt: new Date(Date.now() - 120_000) });
 
 describe("a guardian the portal holds signs in beside the roster refresh", () => {
@@ -89,8 +90,8 @@ describe("a guardian the portal holds signs in beside the roster refresh", () =>
     // She types her address her own way and gets a code at the address the portal holds.
     const mail = await codeMailedTo("  ANA@example.COM ");
     expect(mail).toMatchObject({ to: "ana@example.com" });
-    const res = await post("/portal-code/verify", { email: "Ana@Example.com", code: codeIn(mail!) });
-    expect(await res.json()).toEqual({ ok: true, next: "/" });           // one family: straight in
+    const { res, body } = await check(mail!);
+    expect(body).toEqual({ ok: true, next: "/" });                       // one family: straight in
 
     // The next page request is hers, in the Rivera family, and the link is active.
     const state = await pageRequest(cookieFrom(res));
@@ -105,7 +106,7 @@ describe("a guardian the portal holds signs in beside the roster refresh", () =>
     expect(session).not.toHaveProperty("familyQboId");
     expect(account).toMatchObject({ parentId: ana.id, email: "ana@example.com" });
     expect((await actions()).filter((a) => /^(parent\.|signin|guardian\.activate)/.test(a)))
-      .toEqual(["signin.code_sent", "guardian.activate", "signin"]);
+      .toEqual(["signin.second_step_asked", "signin.code_sent", "guardian.activate", "signin", "signin.device_remembered"]);
     const signedIn = (await db.select().from(auditLog)).find((r) => r.action === "signin");
     expect(signedIn).toMatchObject({ door: "parent", actorId: ana.id, targetId: ana.id, after: { familyId: String(familyId) }, ip: IP });
 
@@ -119,7 +120,7 @@ describe("a guardian the portal holds signs in beside the roster refresh", () =>
     await syncAppRecords();
     await seedAna();
     const mail = await codeMailedTo("ana@example.com");
-    const res = await post("/portal-code/verify", { email: "ana@example.com", code: codeIn(mail!) });
+    const { res } = await check(mail!);
     const cookie = cookieFrom(res);
     expect(await pageRequest(cookie)).toMatchObject({ status: "ok" });
 
@@ -143,7 +144,7 @@ describe("a guardian the portal holds signs in beside the roster refresh", () =>
     await syncAppRecords();
     const ana = await seedAna();
     const first = await codeMailedTo("ana@example.com");
-    const res = await post("/portal-code/verify", { email: "ana@example.com", code: codeIn(first!) });
+    const { res } = await check(first!);
     const cookie = cookieFrom(res);
     expect(await pageRequest(cookie)).toMatchObject({ status: "ok" });
 

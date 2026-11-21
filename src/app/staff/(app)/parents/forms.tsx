@@ -29,6 +29,32 @@ export function NoteAction({ label, field, pendingLabel, act }: { label: string;
   );
 }
 
+/**
+ * An Admin's reset of a parent's sign-in (the sign-in release, slice SI-9a): the call-back box, required, the reason
+ * (staff only) and one press. Given only the bound action: no id, address or count. The server refuses an unticked box
+ * or an empty reason in words, so the button is never held back for them. After a reset the box and the reason are
+ * emptied, so a second press needs both again.
+ */
+export function ResetSigninForm({ act }: { act: (reason: string, calledBack: boolean) => Promise<Done> }) {
+  const [calledBack, setCalledBack] = useState(false);
+  const [reason, setReason] = useState("");
+  const [state, run, pending] = useActionState(async () => {
+    const r = await safely(() => act(reason, calledBack), failed);
+    if (r.ok) { setCalledBack(false); setReason(""); }
+    return r;
+  }, null);
+  return (
+    <form onSubmit={noSubmit} className="stack">
+      <fieldset className="checks"><legend>Before you reset</legend>
+        <label><input type="checkbox" required checked={calledBack} onChange={(e) => setCalledBack(e.target.checked)} /> I called them back on a number the club already holds, and they asked for this</label>
+      </fieldset>
+      <label className="field"><span>Why? (staff only)</span><textarea rows={2} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+      <Outcome state={state} />
+      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Resetting…" : "Reset sign-in"}</button>
+    </form>
+  );
+}
+
 /** One button, nothing to type: a plain form action is fine here. */
 export function OneButton({ label, pendingLabel, act }: { label: string; pendingLabel: string; act: () => Promise<Done> }) {
   const [state, run, pending] = useActionState(async () => safely(() => act(), failed), null);

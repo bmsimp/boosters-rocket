@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parentDoorClosed, CLOSED_PARENT_SETTINGS, DEFAULT_PARENT_SETTINGS, parseParentSettings } from "@/lib/parents/settings";
+import { parentDoorClosed, CLOSED_PARENT_SETTINGS, DEFAULT_PARENT_SETTINGS, parseParentSettings, storedLevel } from "@/lib/parents/settings";
 
 describe("the parents setting", () => {
   it("defaults to everything off, at the Standard level", () => {
@@ -58,6 +58,20 @@ describe("the parents setting", () => {
       expect(read).toEqual(CLOSED_PARENT_SETTINGS);
       expect(parentDoorClosed(read)).toBe(true);
     }
+  });
+  it("reads the level a stored value names, whether or not the rest of it parses (storedLevel())", () => {
+    // Slice SI-10b: a save after a value that fails to parse keeps the level it names, or refuses until one is chosen.
+    expect(storedLevel({ signin: true, welcome: false, requireActiveStudents: false, level: "standard" })).toBe("standard");
+    expect(storedLevel({ signin: true, welcome: false, requireActiveStudents: false, level: "strict" })).toBe("strict");
+    expect(storedLevel({ signin: true, welcome: 1, level: "strict" })).toBe("strict");
+    expect(storedLevel({ signin: "yes", level: "standard" })).toBe("standard");
+    // A plain object with no `level` key: every value stored before slice SI-1, readable or not.
+    expect(storedLevel({ signin: true, welcome: false, requireActiveStudents: false })).toBe("standard");
+    expect(storedLevel({ signin: "yes" })).toBe("standard");
+    expect(storedLevel({})).toBe("standard");
+    // Not a plain object, or a level that is neither word.
+    for (const value of [null, undefined, "strict", 3, true, [], ["strict"], [{ level: "strict" }]]) expect(storedLevel(value)).toBeNull();
+    for (const level of ["Standard", "STRICT", "relaxed", "", null, 1, true, {}, ["strict"]]) expect(storedLevel({ signin: true, level })).toBeNull();
   });
   it("closes the parent door unless sign-ins are on, before they were ever switched on as after", () => {
     expect(parentDoorClosed({ ...DEFAULT_PARENT_SETTINGS })).toBe(true); // never switched on: nobody signs in

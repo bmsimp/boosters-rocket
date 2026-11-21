@@ -1,9 +1,11 @@
-import { and, eq, isNull, inArray } from "drizzle-orm";
+import { and, eq, isNull, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { staffUser, staffAuthUser, staffAuthAccount, parentAuthUser, parent, parentAuthSession } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { endParentSessions, enterableGuardianRows, parentActor } from "@/lib/parents/sessions";
 import { getParentSettings, parentDoorClosed } from "@/lib/parents/settings";
+import { hasSecondFactor } from "@/lib/parents/passkeys";
+import { sessionStanding } from "@/lib/parents/enrolment-rule";
 import type { AppFamilyId } from "@/lib/families/ids";
 
 export type StaffIdentity = { door: "staff"; staffUserId: string; name: string; email: string };
@@ -16,9 +18,16 @@ export type ParentFamily = { guardianId: string; familyId: AppFamilyId };
 export type ParentIdentity = {
   door: "parent"; parentId: string; sessionId: string; guardianId: string; familyId: AppFamilyId; name: string; email: string; families: ParentFamily[];
 };
+/**
+ * What the gate makes of a parent session: a family chosen (`ok`), a family still to choose (`choose`), Strict's
+ * enrolment (`enrol`, since the sign-in release's slice SI-10a: a session a password alone made under Strict for a person
+ * with no second factor, which reaches /one-more-step and nothing else; it carries no name and no family, whatever
+ * family the session holds), or nobody (`none`).
+ */
 export type ParentSessionState =
   | { status: "ok"; identity: ParentIdentity }
   | { status: "choose"; parentId: string; sessionId: string; name: string; families: ParentFamily[] }
+  | { status: "enrol"; parentId: string; sessionId: string; email: string }
   | { status: "none" };
 
 /** Hook for the first-admin claim (Task 7). Returns a newly created admin staff user id, or null. */
@@ -75,14 +84,25 @@ function toStaff(s: typeof staffUser.$inferSelect): StaffIdentity {
  * The session stores the app's own family record it chose (`parent_auth_session.family_id`, since stage 3's fifth
  * slice), which is matched here to the person's own rows that count by each row's `family_id`, and the identity carries
  * that row and its family. No QuickBooks id takes part: nothing on the parent side turns one into a family.
+ *
+ * Since the sign-in release's slice SI-10a, after those checks and before the family, the session's standing
+ * (sessionStanding(), src/lib/parents/enrolment-rule.ts): its `enrol_until` (read by its own id, the one column read on
+ * every request) and, under Strict or with `enrol_until` set, whether the person has a second factor in force
+ * (hasSecondFactor(); never read at Standard for a session with none). A session that has ended (an enrolment's window
+ * passed, the club back at Standard or a factor added through another session, `enrol_ended`; or under Strict a session
+ * of a person with no factor that is not enrolling, `strict_no_factor`, however it was made) is ended alone, not every
+ * session of the person (a second enrolling browser must not sign the first out), with `signin.refused` and its reason
+ * in the same transaction; an enrolling one answers `enrol`, whatever family it holds.
  */
-export async function resolveParentSession(s: { id: string; userId: string; familyId: AppFamilyId | null }, ip: string | null = null): Promise<ParentSessionState> {
+export async function resolveParentSession(s: { id: string; userId: string; familyId: AppFamilyId | null }, ip: string | null = null,
+  now = new Date()): Promise<ParentSessionState> {
   const [row] = await db.select({ p: parent }).from(parentAuthUser).innerJoin(parent, eq(parent.id, parentAuthUser.parentId)).where(eq(parentAuthUser.id, s.userId));
   if (!row) return { status: "none" };
   const p = row.p;
   const actor = parentActor(p);
+  const settings = await getParentSettings();
   // A code that passed just before an Admin switched sign-ins off can still have made a session: it ends here.
-  if (parentDoorClosed(await getParentSettings())) {
+  if (parentDoorClosed(settings)) {
     await endParentSessions(p.id);
     await writeAudit({ actor, action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason: "signins_off" }, ip });
     return { status: "none" };
@@ -92,6 +112,20 @@ export async function resolveParentSession(s: { id: string; userId: string; fami
     await endParentSessions(p.id);
     await writeAudit({ actor, action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason: p.blocked ? "blocked" : "no_enabled_guardian" }, ip });
     return { status: "none" };
+  }
+  const [held] = await db.select({ enrolUntil: sql<Date | null>`${parentAuthSession.enrolUntil}`.mapWith(parentAuthSession.enrolUntil) }).from(parentAuthSession)
+    .where(and(eq(parentAuthSession.id, s.id), eq(parentAuthSession.userId, s.userId)));
+  const enrolUntil = held?.enrolUntil ?? null;
+  if (settings.level === "strict" || enrolUntil !== null) {
+    const standing = sessionStanding({ level: settings.level, enrolUntil, hasSecondFactor: await hasSecondFactor(p.id), now });
+    if (standing.standing === "ended") {
+      await db.transaction(async (tx) => {
+        await tx.delete(parentAuthSession).where(eq(parentAuthSession.id, s.id));
+        await writeAudit({ actor, action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason: standing.reason }, ip }, tx);
+      });
+      return { status: "none" };
+    }
+    if (standing.standing === "enrolling") return { status: "enrol", parentId: p.id, sessionId: s.id, email: p.email };
   }
   const families = rows.map((r) => ({ guardianId: r.id, familyId: r.familyId }));
   const chosen = s.familyId ? rows.find((r) => r.familyId === s.familyId) : undefined;

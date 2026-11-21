@@ -4,7 +4,7 @@ import { db } from "@/lib/db/client";
 import { auditLog, guardian, parentAuthSession, parentDevice } from "@/lib/db/schema";
 import { closeMembership } from "@/lib/parents/membership";
 import { resetDb, seedGuardianInFamily, seedParent, seedParentSession } from "../helpers/db";
-import { credentialRows, linkRows, mintLink, seedDevice, seedPassword } from "../helpers/signin-links";
+import { credentialRows, holdLink, linkRows, mintLink, seedDevice, seedPassword } from "../helpers/signin-links";
 
 /**
  * closeMembership() (src/lib/parents/membership.ts) asked without the reconcile's `stillOpenElsewhere`: it asks the
@@ -68,11 +68,13 @@ describe("closeMembership() with no stillOpenElsewhere", () => {
     const f1 = await seedGuardianInFamily({ parentId: ana.id, familyQboId: "F1" }), f2 = await seedGuardianInFamily({ parentId: ana.id, familyQboId: "F2" });
     await seedPassword(ana.authUserId, "a password long enough to keep");
     await mintLink(ana.id, "reset");
+    // And a link held while its mail is on its way (the request page), which goes with the unused one.
+    await holdLink(ana.id, "setup");
     await seedDevice(ana.id);
     const devices = () => db.select().from(parentDevice).where(eq(parentDevice.parentId, ana.id));
 
     await close(f1);
-    expect(await linkRows(ana.id)).toHaveLength(1);
+    expect(await linkRows(ana.id)).toHaveLength(2);
     expect(await devices()).toHaveLength(1);
 
     // The lead's choice 10 of the sign-in release: the last open row closed ends all of the person's sign-in but the password.
@@ -82,6 +84,6 @@ describe("closeMembership() with no stillOpenElsewhere", () => {
     expect(await credentialRows(ana.authUserId)).toHaveLength(1);
     const ended = await db.select().from(auditLog).where(eq(auditLog.action, "parent.access.ended"));
     expect(ended.find((r) => r.targetId === f1.id)!.after).not.toHaveProperty("linksDeleted");
-    expect(ended.find((r) => r.targetId === f2.id)!.after).toMatchObject({ linksDeleted: 1, devicesForgotten: 1 });
+    expect(ended.find((r) => r.targetId === f2.id)!.after).toMatchObject({ linksDeleted: 2, devicesForgotten: 1 });
   });
 });

@@ -9,7 +9,7 @@
 // Roster.Read, shows them blocked), and it never matches a blocked person's address to a customer.
 import { and, eq, inArray, max, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, family, guardian, parent, qboCustomer, type DisabledReason, type GuardianStatus } from "@/lib/db/schema";
+import { auditLog, family, guardian, parent, parentAuthAccount, parentAuthUser, qboCustomer, type DisabledReason, type GuardianStatus } from "@/lib/db/schema";
 import { GUARDIAN_COLS, hasActiveStudent, studentsRuleInForce } from "./sessions";
 import { familyLabel } from "@/app/components/family-label";
 import type { AppFamilyId } from "@/lib/families/ids";
@@ -21,9 +21,10 @@ export type AccessKind = "can" | "cannot" | "blocked";
 /**
  * One guardian row of a family, open or closed, and its person, with whether they can sign in to it, in words. `open`:
  * the row is open, so staff may remove it; `reinstatable`: it is closed, and staff may open it again (stage 3's slice
- * 7b: any closed row but one a change of company closed, which is in no family's list).
+ * 7b: any closed row but one a change of company closed, which is in no family's list). `hasPassword`: the person has
+ * chosen a password (a `credential` row of `parent_auth_account`; the sign-in release, slice SI-4).
  */
-export type FamilySignin = { guardianId: string; parentId: string; name: string; email: string; kind: AccessKind; words: string; open: boolean; reinstatable: boolean };
+export type FamilySignin = { guardianId: string; parentId: string; name: string; email: string; hasPassword: boolean; kind: AccessKind; words: string; open: boolean; reinstatable: boolean };
 /**
  * `previousCompany`: the link was closed when a different QuickBooks company was connected, before stage 4's slice M7a
  * (a change of company closes no row now): a page shows the family
@@ -36,7 +37,8 @@ export type FamilySignin = { guardianId: string; parentId: string; name: string;
  */
 export type PersonFamily = { guardianId: string; familyQboId: string | null; familyId: AppFamilyId | null; familyName: string; previousCompany: boolean; pageStands: boolean;
   kind: AccessKind; words: string; open: boolean; reinstatable: boolean };
-export type PersonRow = { parentId: string; name: string; email: string; blocked: boolean; families: PersonFamily[]; lastSigninAt: string | null; welcomedAt: string | null };
+/** `hasPassword`: the person has chosen a password (a `credential` row of `parent_auth_account`; the sign-in release, slice SI-4). */
+export type PersonRow = { parentId: string; name: string; email: string; blocked: boolean; hasPassword: boolean; families: PersonFamily[]; lastSigninAt: string | null; welcomedAt: string | null };
 export type PersonDetail = PersonRow & { blockedReason: string | null; blockedAt: string | null; welcomeOwed: boolean };
 /**
  * Why a row was closed, in words. Rows the retired reconcile closed for something QuickBooks held keep their reason, and
@@ -64,13 +66,25 @@ const NOT_NOW: Record<Exclude<FamilyStanding, "counts">, string> = {
 
 /**
  * One person's standing in one family, in plain words (spec §4 The roster): the row's own status and closing reason,
- * and for an open row whether its family counts at the gate now (`family`, counting when not given).
+ * and for an open row whether its family counts at the gate now (`family`, counting when not given). A person who may
+ * sign in but hasn't chosen a password yet (`hasPassword` false: since the sign-in release a parent signs in with one,
+ * chosen from the welcome's link or "Set up or reset my password") is still one who can (`can`, so the welcome can be
+ * sent again), in words that say what is missing (slice SI-4).
  */
-export function accessWords(o: { status: GuardianStatus; reason: DisabledReason | null; blocked: boolean; family?: FamilyStanding }): { kind: AccessKind; words: string } {
+export function accessWords(o: { status: GuardianStatus; reason: DisabledReason | null; blocked: boolean; hasPassword: boolean; family?: FamilyStanding }): { kind: AccessKind; words: string } {
   if (o.status === "disabled") return { kind: "cannot", words: o.reason ? `Can't sign in: ${WHY[o.reason]}` : "Can't sign in" };
   if (o.blocked) return { kind: "blocked", words: "Blocked" };
   if (o.family && o.family !== "counts") return { kind: "cannot", words: `Can't sign in now: ${NOT_NOW[o.family]}` };
+  if (!o.hasPassword) return { kind: "can", words: "Hasn't chosen a password yet" };
   return { kind: "can", words: o.status === "invited" ? "Can sign in (hasn't yet)" : "Can sign in" };
+}
+
+/** Which of these people have chosen a password: a `credential` row of `parent_auth_account` for their sign-in account. */
+async function withPassword(parentIds: string[]): Promise<Set<string>> {
+  if (!parentIds.length) return new Set();
+  const rows = await db.select({ id: parentAuthUser.parentId }).from(parentAuthAccount).innerJoin(parentAuthUser, eq(parentAuthUser.id, parentAuthAccount.userId))
+    .where(and(inArray(parentAuthUser.parentId, parentIds), eq(parentAuthAccount.providerId, "credential")));
+  return new Set(rows.flatMap((r) => (r.id === null ? [] : [r.id])));
 }
 
 /**
@@ -125,10 +139,11 @@ async function people(where?: ReturnType<typeof eq>): Promise<PersonDetail[]> {
   const persons = await db.select().from(parent).where(where).orderBy(parent.name, parent.email);
   if (!persons.length) return [];
   const ids = persons.map((p) => p.id);
-  const [links, signins] = await Promise.all([
+  const [links, signins, passwords] = await Promise.all([
     db.select(GUARDIAN_COLS).from(guardian).where(inArray(guardian.parentId, ids)),
     db.select({ id: auditLog.targetId, at: max(auditLog.at) }).from(auditLog)
       .where(and(eq(auditLog.action, "signin"), eq(auditLog.door, "parent"), inArray(auditLog.targetId, ids))).groupBy(auditLog.targetId),
+    withPassword(ids),
   ]);
   // A link from a previous company is in no family record, and is never looked up in the cache. A row in a family
   // record is named from the record, as the chooser names it, and one with none in words.
@@ -147,12 +162,12 @@ async function people(where?: ReturnType<typeof eq>): Promise<PersonDetail[]> {
   const customerOf = (l: (typeof links)[number]) => (oldCompany(l) || l.familyId === null ? null : linked.customerOfFamily.get(l.familyId) ?? null);
   const last = new Map(signins.map((s) => [s.id, s.at]));
   return persons.map((p) => ({
-    parentId: p.id, name: p.name, email: p.email, blocked: p.blocked,
+    parentId: p.id, name: p.name, email: p.email, blocked: p.blocked, hasPassword: passwords.has(p.id),
     families: links.filter((l) => l.parentId === p.id).map((l) => ({ l, customer: customerOf(l) }))
       .sort((a, b) => byCustomerThenRow({ ...a.l, customer: a.customer }, { ...b.l, customer: b.customer })).map(({ l, customer }) => ({
       guardianId: l.id, familyQboId: customer, familyId: oldCompany(l) ? null : l.familyId, familyName: nameOf(l), previousCompany: oldCompany(l),
       pageStands: !oldCompany(l) && pageStands(l.familyId),
-      ...accessWords({ status: l.status, reason: l.disabledReason, blocked: p.blocked, family: standing(l.familyId) }), ...rowActions(l) })),
+      ...accessWords({ status: l.status, reason: l.disabledReason, blocked: p.blocked, hasPassword: passwords.has(p.id), family: standing(l.familyId) }), ...rowActions(l) })),
     lastSigninAt: last.get(p.id)?.toISOString() ?? null, welcomedAt: p.welcomedAt?.toISOString() ?? null,
     blockedReason: p.blockedReason, blockedAt: p.blockedAt?.toISOString() ?? null, welcomeOwed: p.welcomeOwed,
   }));
@@ -162,7 +177,7 @@ async function people(where?: ReturnType<typeof eq>): Promise<PersonDetail[]> {
 export async function listPeople(q?: string): Promise<PersonRow[]> {
   const needle = (q ?? "").trim().toLowerCase().slice(0, 100);
   return (await people()).filter((p) => !needle || p.name.toLowerCase().includes(needle) || p.email.includes(needle))
-    .map((p): PersonRow => ({ parentId: p.parentId, name: p.name, email: p.email, blocked: p.blocked, families: p.families, lastSigninAt: p.lastSigninAt, welcomedAt: p.welcomedAt }));
+    .map((p): PersonRow => ({ parentId: p.parentId, name: p.name, email: p.email, blocked: p.blocked, hasPassword: p.hasPassword, families: p.families, lastSigninAt: p.lastSigninAt, welcomedAt: p.welcomedAt }));
 }
 
 export async function getPerson(parentId: string): Promise<PersonDetail | null> {
@@ -180,9 +195,9 @@ export async function familySignins(familyId: AppFamilyId): Promise<FamilySignin
   // A link from a previous company is in no family's record (its family_id is null): it is not one of this family's sign-ins.
   const links = await db.select({ g: GUARDIAN_COLS, p: parent }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
     .where(and(eq(guardian.familyId, familyId), sql`${guardian.disabledReason} is distinct from 'company_changed'`));
-  const standing = await familyStandings([familyId]);
-  return links.map(({ g, p }): FamilySignin => ({ guardianId: g.id, parentId: p.id, name: p.name, email: p.email,
-    ...accessWords({ status: g.status, reason: g.disabledReason, blocked: p.blocked, family: standing(g.familyId) }), ...rowActions(g) }))
+  const [standing, passwords] = await Promise.all([familyStandings([familyId]), withPassword(links.map(({ p }) => p.id))]);
+  return links.map(({ g, p }): FamilySignin => ({ guardianId: g.id, parentId: p.id, name: p.name, email: p.email, hasPassword: passwords.has(p.id),
+    ...accessWords({ status: g.status, reason: g.disabledReason, blocked: p.blocked, hasPassword: passwords.has(p.id), family: standing(g.familyId) }), ...rowActions(g) }))
     .sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }) || a.email.localeCompare(b.email) || (a.guardianId < b.guardianId ? -1 : 1));
 }
 

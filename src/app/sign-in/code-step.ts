@@ -1,22 +1,31 @@
 import { safeReturnPath } from "@/lib/auth/return-path";
 
 /**
- * The code step, kept on the device while its code can still work. A parent leaves the portal to read the code in
- * their mail; a phone may reload an installed app when they come back, and without this they would be asked for their
- * address again, and a second request inside a minute is refused. Kept: the address they typed, when the code was
- * asked for, and the page they were heading to. Nothing the portal knows about anyone: the page never learns whether
- * the address is on file. It is removed on sign-in and on "Use a different email", and dropped once the code's life
- * is over.
+ * The code step, kept on the device while its code can still work (open question 29). A parent leaves the portal to
+ * read the code in their mail; a phone may reload an installed app when they come back, and without this they would be
+ * asked for their password again. Kept: when the first code was asked for (the right password), and the page they were
+ * heading to. Not the address: since the sign-in release's slice SI-3b the server holds the person and the address in
+ * the pending step (a signed cookie, src/lib/auth/parent-signin-step.ts), which ends CODE_TTL_MS after the right
+ * password and is never extended. A resend doesn't change what is kept here, since a resent code ends with the step
+ * (sendSecondStepCode()), so this lives as long as the step does. It is removed on sign-in and on "Start again", and
+ * dropped once the step's life is over. Since slice SI-6a it keeps which second step it was too (`kind`): the emailed
+ * code (`code`), or the parent's authenticator app (`app`), and since slice SI-7a their passkey (`passkey`, with `app`
+ * when the app is offered beside it, and since slice SI-7b `backup` when a backup code is offered beside a passkey
+ * alone), so a reload draws the same step; a step kept by an older build, with no kind, is the code step.
  *
  * localStorage, not sessionStorage: an installed app that is reloaded starts a new session. No imports from the server
  * side: the sign-in form (a client component) uses this file.
  */
 export const CODE_STEP_KEY = "booster.signin.code-step";
-/** The code's own life (CODE_TTL_MS in src/lib/parents/signin-codes.ts; tests/unit/code-step.test.ts keeps the two equal). */
+/** The pending step's life, and the longest a code lives (CODE_TTL_MS in src/lib/parents/signin-codes.ts; tests/unit/code-step.test.ts keeps the two equal). */
 export const CODE_STEP_LIFE_MS = 10 * 60 * 1000;
-const MAX_EMAIL = 320;
-
-export type CodeStep = { email: string; sentAt: number; next: string | null };
+/** Which second step: the emailed code, the parent's authenticator app (its code, or a backup code), or their passkey. */
+export type CodeStepKind = "code" | "app" | "passkey";
+/**
+ * For the passkey step: `app`, whether the app's code or a backup code is offered beside the passkey, and `backup`
+ * (slice SI-7b), whether a backup code alone is, for a parent with no app who holds unspent backup codes.
+ */
+export type CodeStep = { sentAt: number; next: string | null; kind: CodeStepKind; app?: boolean; backup?: boolean };
 export type CodeStepStore = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 /** The browser's store, or null where it is switched off (some private modes throw on touching it). */
@@ -33,18 +42,23 @@ export function clearCodeStep(store: CodeStepStore | null): void {
 }
 
 /**
- * The step to pick up, or null. What is stored is read as untrusted: anything but an address and a time within the
- * code's life is removed, and the return path is checked again, like every other time it is read.
+ * The step to pick up, or null. What is stored is read as untrusted: anything but a time within the code's life is
+ * removed, and the return path is checked again, like every other time it is read.
  */
 export function loadCodeStep(store: CodeStepStore | null, now: number): CodeStep | null {
   try {
     const raw = store?.getItem(CODE_STEP_KEY);
     if (!raw) return null;
-    const v = JSON.parse(raw) as { email?: unknown; sentAt?: unknown; next?: unknown } | null;
-    const live = typeof v?.email === "string" && v.email.length > 0 && v.email.length <= MAX_EMAIL
-      && typeof v.sentAt === "number" && Number.isFinite(v.sentAt) && v.sentAt <= now && now - v.sentAt < CODE_STEP_LIFE_MS;
+    const v = JSON.parse(raw) as { sentAt?: unknown; next?: unknown; kind?: unknown; app?: unknown; backup?: unknown } | null;
+    const live = typeof v === "object" && v !== null && typeof v.sentAt === "number" && Number.isFinite(v.sentAt) && v.sentAt <= now && now - v.sentAt < CODE_STEP_LIFE_MS;
     if (!live) { clearCodeStep(store); return null; }
-    return { email: v.email as string, sentAt: v.sentAt as number, next: safeReturnPath(v.next) };
+    // Anything but the app's kind or a well-formed passkey's (with its `app` bit) is the code step: a value of an older
+    // build, or one tampered with, draws nothing new.
+    const step = { sentAt: v!.sentAt as number, next: safeReturnPath(v!.next) };
+    if (v!.kind === "app") return { ...step, kind: "app" };
+    // `backup` is read only as `true` (anything else, an older build's step included, is no backup-code field).
+    if (v!.kind === "passkey" && typeof v!.app === "boolean") return { ...step, kind: "passkey", app: v!.app, ...(v!.backup === true ? { backup: true } : {}) };
+    return { ...step, kind: "code" };
   } catch {
     clearCodeStep(store);
     return null;

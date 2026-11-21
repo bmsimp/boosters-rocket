@@ -3,6 +3,12 @@ import { localhostCertificate } from "../helpers/tls";
 import { startMailSink, type MailSink } from "../helpers/mail-sink";
 import { createSmtpSender } from "@/lib/mail/smtp";
 import { MailSendError } from "@/lib/mail/types";
+import { randomBytes } from "node:crypto";
+import { choosePasswordMessage, passwordSetupMessage, welcomeMessage } from "@/lib/mail/messages";
+import { mailPart } from "../helpers/signin-links";
+
+const BRAND = { clubName: "FZN Boosters", color: "#005102" };
+const APP = "https://portal.example.org";
 
 let tls: { key: string; cert: string };
 let sink: MailSink | null = null;
@@ -39,6 +45,25 @@ describe("SMTP sender", () => {
     expect(decoded).toContain("SUMMARY:Car wash, rinse crew");
   });
 
+  // A mail that carries a link (the sign-in release, slice SI-4): in the text, the address alone on its line; in the
+  // HTML, an anchor whose text and href are both the whole address, alone in its paragraph. Each part holds the one token.
+  it.each([
+    ["the welcome", (url: string) => welcomeMessage(BRAND, "ana@example.com", { appUrl: APP, contact: null, link: { url, life: "7 days", strict: false } })],
+    ["the mail to choose a password", (url: string) => choosePasswordMessage(BRAND, "ana@example.com", { appUrl: APP, contact: null, link: { url, life: "7 days", strict: false } })],
+    ["the set-up link's mail", (url: string) => passwordSetupMessage(BRAND, "ana@example.com", { link: url, life: "7 days" })],
+  ] as const)("%s carries its link once in its text and once, as an anchor, in its HTML", async (_name, write) => {
+    sink = await startMailSink({ secure: true, ...tls });
+    const token = randomBytes(32).toString("base64url");
+    const url = `${APP}/sign-in/set-up/${token}`;
+    await sender(sink.port, "tls")(write(url));
+    const raw = sink.messages[0]!.raw;
+    const plain = mailPart(raw, "plain"), html = mailPart(raw, "html");
+    expect(plain.split(/\r?\n/).filter((l) => l.includes(token))).toEqual([url]);
+    expect(plain.split(token)).toHaveLength(2);
+    expect(html.split(`<a href="${url}">${url}</a>`)).toHaveLength(2);
+    expect(html.split(token)).toHaveLength(3); // the anchor's href and its text, and nowhere else
+  });
+
   it("upgrades with STARTTLS", async () => {
     sink = await startMailSink({ secure: false, ...tls });
     await sender(sink.port, "starttls")(msg);
@@ -58,5 +83,31 @@ describe("SMTP sender", () => {
     expect(e).toBeInstanceOf(MailSendError);
     expect((e as Error).message).toBe("The mail server refused the username or password.");
     expect(sink.logins).toEqual([{ user: "sender", ok: false }]);
+    expect((e as MailSendError).recipientRefused).toBe(false); // the mail's own problem, not the address's
+  });
+
+  it("marks a 550 to RCPT TO as the one address refused, not the mail failing", async () => {
+    sink = await startMailSink({ secure: true, ...tls });
+    sink.rejectRecipient = "ana@example.com";
+    const e = await sender(sink.port, "tls")(msg).catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(MailSendError);
+    expect((e as Error).message).toBe("The mail server didn't accept the message (EENVELOPE 550).");
+    expect((e as MailSendError).recipientRefused).toBe(true);
+    expect(sink.messages).toHaveLength(0);
+  });
+
+  // The rule is refusedThisRecipient() (src/lib/mail/refusal.ts), read from what nodemailer reports of the real reply.
+  it("marks a relay refused at RCPT TO with an enhanced code of policy as the mail failing, and a full mailbox as the address's own", async () => {
+    sink = await startMailSink({ secure: true, ...tls });
+    sink.rejectRecipient = "*";
+    sink.rejectReply = { code: 554, text: "5.7.1 Relay access denied" };
+    const relay = await sender(sink.port, "tls")(msg).catch((x: unknown) => x);
+    expect(relay).toBeInstanceOf(MailSendError);
+    expect((relay as Error).message).toBe("The mail server didn't accept the message (EENVELOPE 554).");
+    expect((relay as MailSendError).recipientRefused).toBe(false);
+    sink.rejectReply = { code: 452, text: "4.2.2 Mailbox full" };
+    const full = await sender(sink.port, "tls")(msg).catch((x: unknown) => x);
+    expect((full as MailSendError).recipientRefused).toBe(true);
+    expect(sink.messages).toHaveLength(0);
   });
 });

@@ -2,6 +2,8 @@ import Link from "next/link";
 import { requireStaffPage } from "@/lib/guards";
 import { listPeople, type PersonRow } from "@/lib/parents/directory";
 import { getParentSettings } from "@/lib/parents/settings";
+import { factorCounts, type FactorCounts } from "@/lib/parents/switches";
+import { can } from "@/lib/permissions/effective";
 import { LocalTime } from "@/app/components/local-time";
 import { DataTable } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
@@ -26,16 +28,32 @@ function People({ people, typed }: { people: PersonRow[]; typed: string }) {
   );
 }
 
+const n = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+
+/**
+ * How many of the people who can sign in have a second step of their own (section 9 of the app-owned families spec,
+ * "Sign-in"; the sign-in release's slice SI-10b): counts only, naming nobody, so showing them writes no audit row. An
+ * Admin is told where the level is chosen.
+ */
+function FactorLine({ c, strict, admin, signinOn }: { c: FactorCounts; strict: boolean; admin: boolean; signinOn: boolean }) {
+  const who = signinOn ? "who can sign in" : "who could sign in once sign-ins are on";
+  const counts = `Of the ${n(c.people, "person", "people")} ${who}, ${n(c.passkey, "has", "have")} a passkey and ${c.app} an authenticator app (someone with both is counted twice); ${n(c.neither, "has", "have")} neither.`;
+  const level = strict ? " The club is at Strict: anyone with neither adds one the next time they sign in."
+    : admin ? " You can ask everyone for one under Settings, Parent sign-ins, step 3, once most have one." : "";
+  return <p>{counts}{level}</p>;
+}
+
 export default async function ParentsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  await requireStaffPage("Parents.ReadWrite");
+  const ctx = await requireStaffPage("Parents.ReadWrite");
   const sp = await searchParams;
   const typed = (typeof sp.q === "string" ? sp.q : "").slice(0, 100);
-  const [people, settings] = await Promise.all([listPeople(typed), getParentSettings()]);
+  const [people, settings, factors] = await Promise.all([listPeople(typed), getParentSettings(), factorCounts()]);
   return (
     <main className="wrap single">
       <h1 className="page-title">Parents</h1>
       <p className="lede">Everyone who can sign in to the portal, or once could, and each family they belong to. Who can sign in is kept by the portal itself: a change made in QuickBooks no longer gives anyone a sign-in or ends one.</p>
       {!settings.signin && <Notice tone="warning">Parent sign-ins are off, so nobody can sign in, not even a guardian added here. An Admin switches them on under Parent sign-ins.</Notice>}
+      <FactorLine c={factors} strict={settings.level === "strict"} admin={can(ctx.effective, "Settings.Parents.ReadWrite")} signinOn={settings.signin} />
 
       <section className="box" aria-labelledby="people-h"><h2 id="people-h">People</h2>
         <form method="get" role="search" className="stack">

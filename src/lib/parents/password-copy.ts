@@ -18,6 +18,39 @@ export const PASSWORD_COPY = {
   tooLong: `That password is too long. Please use at most ${PASSWORD_MAX} characters.`,
   breached: "That password has appeared in a known data breach on another site, so it isn't safe to use here. Please choose another: a few unrelated words together, ones you haven't used anywhere else, make a strong one.",
   set: "Your password is set.",
+  /** A set-up that signed the parent in (the club's level is Standard): the form goes on to their page. */
+  signingIn: "Your password is set. Signing you in…",
+  /** The link to where a signed-in parent goes, should the page not move on by itself. */
+  continueIn: "Continue",
+  // The page "Set up or reset my password" (src/app/sign-in/password; slice SI-3a). Its answer is one sentence for
+  // every address and every outcome: it never says whether an address is known, has a password, or was mailed.
+  askTitle: "Set up or reset my password",
+  askLede: "Enter the email address you sign in with. We'll email you a link to set up your password, or to choose a new one if you've forgotten it.",
+  askButton: "Email me a link",
+  askAnswer: "If that address can sign in here, we've emailed it a link. It can take a minute, and the link works once. Check your spam folder too.",
+  /**
+   * Under Strict, to everyone, before and after asking: a guardian with no passkey or app, or who lost theirs, asks the
+   * club (slice SI-10b's words).
+   */
+  askStrict: "If you don't have a passkey or an authenticator app yet, or you've lost yours, please ask the club. They'll help you set up or reset your sign-in.",
+  /**
+   * Under Strict the lede and the answer promise a link only to a holder of a passkey or an app: no set-up link is sent
+   * on request, and a reset only to a holder of a second factor (whichLinkToMail(), password-request-rule.ts). Still one
+   * set of words for every address: the level is the club's, the same for every visitor.
+   */
+  askLedeStrict: "Enter the email address you sign in with. If you have a passkey or an authenticator app, we'll email you a link to choose a new password.",
+  askAnswerStrict: "If that address can reset its password here, we've emailed it a link. It can take a minute, and the link works once. Check your spam folder too. If no email comes, please ask the club.",
   /** What the form says when the action itself couldn't be reached or threw: try again, nothing about why. */
   failed: "That didn't go through. Please try again in a moment.",
 } as const;
+
+/**
+ * What the request form shows at the club's level: its lede, the Strict note (or none), and the answer after an ask
+ * (null: the action's own answer, PASSWORD_COPY.askAnswer). Under Strict a reset link is mailed only to a holder of a
+ * passkey or an app, and the words say so. The same for every address.
+ */
+export function askWords(strict: boolean): { lede: string; note: string | null; answer: string | null } {
+  return strict
+    ? { lede: PASSWORD_COPY.askLedeStrict, note: PASSWORD_COPY.askStrict, answer: PASSWORD_COPY.askAnswerStrict }
+    : { lede: PASSWORD_COPY.askLede, note: null, answer: null };
+}
