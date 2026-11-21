@@ -106,10 +106,10 @@ const noteOfOnlyItem = async () => {
   return { state: f.state, words: f.words };
 };
 
-const RENAME_GIVEN_UP = "Given up. Nothing more will be sent for it. The portal keeps the person's new name, and QuickBooks keeps the name it has on their Parent customer. While that customer is active and theirs alone under the family, and the family's link stands, Accounting links shows the two names as a difference in the family's row, unless their own Parent customer under another family has the new name. Or rename it in QuickBooks.";
-const DEACTIVATE_GIVEN_UP = "Given up. Nothing more will be sent for it. The guardian stays removed in the portal, and their Parent customer stays active in QuickBooks. While it stays under the family's customer with no other guardian linked to it, and the family's link stands, Accounting links shows it as a difference in the family's row. Or make it inactive in QuickBooks once its balance is settled.";
+const RENAME_GIVEN_UP = "Given up. Nothing more will be sent for it. The portal keeps the person's new name, and QuickBooks keeps the name it has on their Parent customer. While the two names differ, they are the family's guardian, that customer is active and theirs alone under the family, and the family is still linked to a customer the books hold as a family, Accounting links shows the two names as a difference in the family's row, unless their own Parent customer under another family has the new name. Or rename it in QuickBooks.";
+const DEACTIVATE_GIVEN_UP = "Given up. Nothing more will be sent for it. The guardian stays removed in the portal, and their Parent customer stays active in QuickBooks. While it is active, under the family's customer with no other guardian linked to it, and the family is still linked to a customer the books hold as a family, Accounting links shows it as a difference in the family's row. Or make it inactive in QuickBooks once its balance is settled.";
 const MAY_HAVE_GONE = " QuickBooks has the change only if a try got through, which the roster's copy of QuickBooks shows after its next read.";
-const NAME_NEXT = "Neither name is taken or sent from this page. Rename their Parent customer in QuickBooks, and this row shows it after the portal's next roster read; or, if the person's name should change, rename them on their page under Parents, which sends the new name to it too, unless the same rename gives that name to their own Parent customer under another family first.";
+const NAME_NEXT = "Neither name is taken or sent from this page. Rename their Parent customer in QuickBooks, and this row shows it after the portal's next roster read; or, if the person's name should change, rename them on their page under Parents once nothing for them or their Parent customers is waiting or stuck on Reconciliation. While QuickBooks is connected and the family's customer is active, that asks QuickBooks to rename it too, unless the same rename gives that name to their own Parent customer under another family first.";
 const REMOVED_NEXT = "Neither is taken or sent from this page. Make their Parent customer inactive in QuickBooks once its balance, owed or a credit, is settled; or, if they are added back under Portal sign-ins, it is theirs again.";
 const INACTIVE_NEXT = "Neither is taken or sent from this page, and the portal never makes a customer active in the books. If they are still this family's guardian, make it active in QuickBooks; if they aren't, remove them under Portal sign-ins. While it is inactive the portal sends it nothing for them: no rename, and no change of their phone, mailing address or sign-in email.";
 
@@ -138,7 +138,7 @@ describe("a rename of a guardian's Parent customer", () => {
     let riveras = rowOf(await view(), "Rivera Family");
     expect(riveras.differences).toEqual([{ kind: "guardian_name", guardianId: row.id, who: "Ana Lopez", portal: "Ana Lopez", books: "Ana Rivera", queue: waiting }]);
     noPressAtGuardians(riveras);
-    expect((await cellsOf("Rivera Family"))[4]).toContain(`Ana Lopez's name on their Parent customer. In the portal: “Ana Lopez”. In the books: “Ana Rivera”. ${waiting.words}${waiting.words.endsWith(".") ? "" : "."} See the change on Reconciliation ${NAME_NEXT}`);
+    expect((await cellsOf("Rivera Family"))[4]).toContain(`Ana Lopez's name on their Parent customer. In the portal: “Ana Lopez”. In the books: “Ana Rivera”. ${waiting.words}${waiting.words.endsWith(".") ? "" : "."} See the change on Reconciliation. ${NAME_NEXT}`);
 
     // Stuck, as later failed tries leave it; then given up.
     await db.update(writeQueue).set({ state: "stuck", nextTryAt: null }).where(eq(writeQueue.id, item!.id));
@@ -171,7 +171,7 @@ describe("a rename of a guardian's Parent customer", () => {
     const riveras = rowOf(await view(), "Rivera Family");
     expect(riveras.differences).toEqual([{ kind: "guardian_name", guardianId: row.id, who: "Mei Chen", portal: "Mei Chen", books: "Ana Rivera", queue: kept }]);
     noPressAtGuardians(riveras);
-    expect((await cellsOf("Rivera Family"))[4]).toContain(`Mei Chen's name on their Parent customer. In the portal: “Mei Chen”. In the books: “Ana Rivera”. ${kept.words}${kept.words.endsWith(".") ? "" : "."} See the change on Reconciliation ${NAME_NEXT}`);
+    expect((await cellsOf("Rivera Family"))[4]).toContain(`Mei Chen's name on their Parent customer. In the portal: “Mei Chen”. In the books: “Ana Rivera”. ${kept.words}${kept.words.endsWith(".") ? "" : "."} See the change on Reconciliation. ${NAME_NEXT}`);
     // Given up, it stays a difference, with no note.
     expect(await giveUp(item!.id, "Leaving it.", asGiver())).toEqual({ ok: true, message: RENAME_GIVEN_UP });
     expect(rowOf(await view(), "Rivera Family").differences).toEqual([expect.objectContaining({ kind: "guardian_name", queue: null })]);
@@ -198,7 +198,7 @@ describe("a removed guardian's Parent customer left active", () => {
     let riveras = rowOf(await view(), "Rivera Family");
     expect(riveras.differences).toEqual([{ kind: "guardian_active", guardianId: row.id, who: "Ana Rivera", portalOpen: false, queue: kept }]);
     noPressAtGuardians(riveras);
-    expect((await cellsOf("Rivera Family"))[4]).toContain(`Whether Ana Rivera is this family's guardian. In the portal: Removed from this family. In the books: Their Parent customer is active. ${kept.words}${kept.words.endsWith(".") ? "" : "."} See the change on Reconciliation ${REMOVED_NEXT}`);
+    expect((await cellsOf("Rivera Family"))[4]).toContain(`Whether Ana Rivera is this family's guardian. In the portal: Removed from this family. In the books: Their Parent customer is active. ${kept.words}${kept.words.endsWith(".") ? "" : "."} See the change on Reconciliation. ${REMOVED_NEXT}`);
 
     expect(await giveUp(item!.id, "Settled by hand.", asGiver())).toEqual({ ok: true, message: DEACTIVATE_GIVEN_UP });
     expect(stub.customers.find((c) => c.Id === "11")).toMatchObject({ Active: true });
@@ -211,6 +211,18 @@ describe("a removed guardian's Parent customer left active", () => {
     expect(cells[4]).toContain(`Whether Ana Rivera is this family's guardian. In the portal: Removed from this family. In the books: Their Parent customer is active. ${REMOVED_NEXT}`);
     // Still listed among the removed guardians, as slice M3c draws them.
     expect(cells[4]).toContain("Removed guardians, with their own Parent customers in the books:Ana Rivera: linked to Ana Rivera, active in the books");
+  });
+
+  it("kept for a balance, then stuck and given up: the given-up words say QuickBooks may have it, and the difference stays", async () => {
+    stub.invoices = [{ Id: "909", SyncToken: "0", CustomerRef: { value: "11" }, TotalAmt: 5, Balance: 5 }];
+    const { row } = await seedAnaRivera({ status: "active" });
+    expect(await removeGuardian(row.id, "Moved away.", op)).toMatchObject({ ok: true });
+    const [item] = await db.select().from(writeQueue);
+    expect(item).toMatchObject({ request: expect.objectContaining({ op: "deactivate", qboId: "11", guardianId: row.id }) });
+    // Stuck, as a later try held back by the balance leaves it (src/lib/roster/queue.ts), then given up.
+    await db.update(writeQueue).set({ state: "stuck", nextTryAt: null }).where(eq(writeQueue.id, item!.id));
+    expect(await giveUp(item!.id, "Settled by hand.", asGiver())).toEqual({ ok: true, message: `${DEACTIVATE_GIVEN_UP}${MAY_HAVE_GONE}` });
+    expect(rowOf(await view(), "Rivera Family").differences).toEqual([{ kind: "guardian_active", guardianId: row.id, who: "Ana Rivera", portalOpen: false, queue: null }]);
   });
 
   it("made inactive in QuickBooks once settled: no difference", async () => {
@@ -275,6 +287,21 @@ describe("not compared", () => {
     expect(guardianDiffs(rowOf(await view(), "Rivera Family"))).toEqual([expect.objectContaining({ kind: "guardian_name", guardianId: row.id, books: "Ana R." })]);
     const [inChen] = await db.insert(guardian).values({ parentId: ana.id, familyId: chen, status: "active" }).returning({ id: guardian.id });
     await linkRowTo(inChen!.id, "25");
+    const v = await view();
+    expect(guardianDiffs(rowOf(v, "Rivera Family"))).toEqual([]);
+    expect(guardianDiffs(rowOf(v, "Chen Family"))).toEqual([]);
+  });
+
+  it("a person in two families renamed: the one record QuickBooks gives the name to, and the other compared with none", async () => {
+    const { ana } = await seedAnaRivera({ status: "active" });
+    await readAgain(qc("25", "Ana Rivera", "2", under("20")));
+    const [inChen] = await db.insert(guardian).values({ parentId: ana.id, familyId: chen, status: "active" }).returning({ id: guardian.id });
+    await linkRowTo(inChen!.id, "25");
+    expect((await view()).rows.flatMap((r) => r.differences).filter(isGuardians)).toEqual([]);
+    // QuickBooks takes the name once: the rename goes to one of her own Parent customers only (name_once).
+    expect(await renamePerson(ana.id, "Ana Lopez", op)).toMatchObject({ ok: true, changed: true });
+    await readAgain();
+    expect(stub.customers.filter((c) => (c.Id === "11" || c.Id === "25") && c.DisplayName === "Ana Lopez")).toHaveLength(1);
     const v = await view();
     expect(guardianDiffs(rowOf(v, "Rivera Family"))).toEqual([]);
     expect(guardianDiffs(rowOf(v, "Chen Family"))).toEqual([]);

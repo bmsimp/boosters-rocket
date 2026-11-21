@@ -156,7 +156,7 @@ function DifferenceLine({ d, take, note, send, sendNote, tag }: { d: Difference;
   return (
     <li>{w.what}. In the portal: {w.portal}. In the books: {w.books}.
       {notes.length > 0 && <> {notes.join(" ")} <Link href={RECONCILIATION_CHANGES}>{notes.length === 1 ? "See the change on Reconciliation" : "See the changes on Reconciliation"}</Link></>}
-      {guardianDifferenceNext(d) !== null && <> {guardianDifferenceNext(d)}</>}
+      {guardianDifferenceNext(d) !== null && <>{notes.length > 0 && "."} {guardianDifferenceNext(d)}</>}
       {note !== undefined && <> {note}</>}
       {sendNote !== undefined && <> {sendNote}</>}
       {take !== undefined && <p>{take.words.join(" ")}</p>}
