@@ -35,7 +35,7 @@ import { volunteerForMovedStudent } from "@/lib/volunteer/moved-student";
 import { buyoutsForMovedStudent } from "@/lib/buyouts/moved";
 import { getShape, missingTypes, ROSTER_LOCK, shapeHolds, shapeTypeIds, type MembershipShape } from "./shape";
 import { buildRoster, type Cust, type Roster } from "./model";
-import { getRosterSource, ROSTER_JOB } from "./source";
+import { getRosterSource, GIVEN_UP_FOR_COMPANY_NOTE, ROSTER_JOB } from "./source";
 import { familyCreatesOnTheQueue, noFamilyPool } from "./no-family";
 import { customerRow } from "./refresh";
 import { checkName, freeName, nameKey } from "./names";
@@ -103,6 +103,7 @@ export const WRITE_COPY = {
   waiting: "Another change to this is still waiting to reach QuickBooks. Once it has gone through, or been given up on the Reconciliation page, try again.",
   doneNotShown: "Done in QuickBooks. The roster here will show it after its next read of QuickBooks, usually within a few minutes.",
   queued: "QuickBooks couldn't take this just now, so it is waiting to reach QuickBooks. The portal tries again in a minute, then less often, and you'll find it on the Reconciliation page.",
+  givenUpForCompany: "QuickBooks didn't answer in time, and the club has connected a different QuickBooks company since, so this won't be tried again.",
   balanceFix: "A balance has to be settled in QuickBooks first: paid or written off, or a credit used or refunded. Then try again.",
   balanceUnread: "QuickBooks couldn't be asked what is owed just now, so nothing was changed. Try again in a few minutes.",
   balanceUnknown: "QuickBooks didn't say what is owed, so nothing was changed. Check the balance in QuickBooks, then try again.",
@@ -115,6 +116,12 @@ export const WRITE_COPY = {
   inactiveHere: "That is inactive in the portal, so nothing was sent to QuickBooks.",
   notOursToAdd: "That family isn't one of the portal's own active families, so nobody can be added to it.",
 } as const;
+
+/**
+ * What a staff change whose answer was lost is told once the roster is another company's (stage 4's slice M7a2): its
+ * item went in given up, and nothing says whether the earlier company made it.
+ */
+const COMPANY_SINCE = "its answer didn't arrive, and the club has connected a different QuickBooks company since, so it won't be tried again.";
 
 /** A family is made inactive only with everyone under it: the refusal names the button as the family's page does. */
 export const familyHereWords = (name: string) =>
@@ -659,10 +666,20 @@ type Filed = { familyId: AppFamilyId | null; studentId: AppStudentId | null };
  * made, marks it done and changes its record (foundDone(), ./queue.ts). `resultQboId` is the customer QuickBooks
  * answered a create with: a create held with one is never sent again, found or not (tryItem()). A new item is audited
  * (roster.write.queued) in the caller's transaction.
+ *
+ * First in the caller's transaction it takes the roster lock (lockRosterAs(), exclusive; the caller may hold it
+ * already), then asks for the roster refresh (askForRosterRefresh()): applyWritten() asks for one holding the roster
+ * lock, so a transaction that held the ask's row while it waited for the roster lock could deadlock with it. When the
+ * roster is another company's now (only a change of company makes it so: stage 4's slice M7a2), no refresh is asked
+ * for, and a new item goes in given up, with the change of company's note, audited so (`state: "given_up"`, `why:
+ * "company_changed"`): it is never sent there, and keeps its row, as every item that may have reached QuickBooks does.
+ * Whether it was held (`held`) or went in given up (`given_up`); a queued try's item a clear gave up stays given up.
  */
 async function holdForTheQueue(tx: Tx, w: RosterWrite, code: string, o: { realmId: string; actor: Actor; ip: string | null; permission?: string; queueId?: string;
-  linkedBy: string | null; filed?: Filed; resultQboId?: string | null }): Promise<void> {
+  linkedBy: string | null; filed?: Filed; resultQboId?: string | null }): Promise<HeldAs> {
   const resultQboId = o.resultQboId ?? null;
+  const ours = await lockRosterAs(tx, rosterTagOf(o.realmId));
+  if (ours) await askForRosterRefresh(tx);
   if (o.queueId) {
     // `request: w`: what this try sent (a rename resent with the version just read, stage 3's slice 9e, holds that one),
     // so the found-done path looks for it as sent, and the queue never sends it with any other version.
@@ -670,14 +687,27 @@ async function holdForTheQueue(tx: Tx, w: RosterWrite, code: string, o: { realmI
       ...(resultQboId ? { resultQboId } : {}), updatedAt: new Date() })
       .where(and(eq(writeQueue.id, o.queueId), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
     if (!still) await keepMadeOnGivenUp(tx, o.queueId, resultQboId);
-    return;
+    return ours ? "held" : "given_up";
   }
   const [item] = await tx.insert(writeQueue).values({
     realmId: o.realmId, request: w, targetQboId: w.op === "create" ? null : w.qboId, familyId: o.filed?.familyId ?? null, studentId: o.filed?.studentId ?? null,
-    sent: true, tries: 1, lastCode: code.slice(0, 40), nextTryAt: new Date(Date.now() + 60_000), askedBy: o.linkedBy, askedByLabel: o.actor.label, resultQboId,
+    sent: true, tries: 1, lastCode: code.slice(0, 40), askedBy: o.linkedBy, askedByLabel: o.actor.label, resultQboId, ...queuedAs(ours),
   }).returning({ id: writeQueue.id });
   await writeAudit({ actor: o.actor, action: "roster.write.queued", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: item!.id,
-    after: { op: w.op, role: w.role, code: code.slice(0, 40), sent: true } }, tx);
+    after: { op: w.op, role: w.role, code: code.slice(0, 40), sent: true, ...(ours ? {} : { state: "given_up", why: "company_changed" }) } }, tx);
+  return ours ? "held" : "given_up";
+}
+
+/** How a staff insert into the queue went in: waiting for the queue (`held`), or given up at once, the roster being another company's now. */
+type HeldAs = "held" | "given_up";
+/**
+ * A new staff item's state: waiting for its next try in a minute while the roster is still its company's (`ours`),
+ * else given up at once with the change of company's note, as the clear gives up the rest (./source.ts).
+ */
+function queuedAs(ours: boolean) {
+  const now = new Date();
+  return ours ? { state: "waiting" as const, nextTryAt: new Date(now.getTime() + 60_000) }
+    : { state: "given_up" as const, note: GIVEN_UP_FOR_COMPANY_NOTE, nextTryAt: null, finishedAt: now };
 }
 
 /**
@@ -746,9 +776,9 @@ export async function applyWritten(w: RosterWrite, answer: Record<string, unknow
       } else if (ours) {
         // The answer wasn't the record asked about: the roster is read again rather than guessed at, and the queue finds
         // the change in it and finishes it, its record with it.
-        await askForRosterRefresh(tx); refreshAsked = true;
+        // holdForTheQueue() asks for the refresh, under the roster lock this holds already.
         await holdForTheQueue(tx, w, "answer_other", { ...o, resultQboId });
-        held = true;
+        refreshAsked = true; held = true;
       }
       await writeAudit({ actor: o.actor, action: AUDIT_ACTION[w.op], permission: o.permission, ip: o.ip, targetType: "qbo_customer", targetId,
         before: auditBefore(w, cached), after: { ...auditAfter(w, answer), ...(o.queueId ? { queueId: o.queueId } : {}), ...(refreshAsked ? { refreshAsked } : {}),
@@ -761,12 +791,13 @@ export async function applyWritten(w: RosterWrite, answer: Record<string, unknow
     // that transaction is kept, so the change is audited here with its code, the worker is asked for a roster refresh,
     // and the write is held for the queue, marked as possibly made, so it is looked for after that refresh (never simply
     // sent again) and its app record changed once it is found there.
+    // holdForTheQueue() takes the roster lock first, then asks for the refresh (not when the roster is another
+    // company's now, when its item goes in given up).
     await db.transaction(async (tx) => {
-      await askForRosterRefresh(tx);
+      const heldAs = await holdForTheQueue(tx, w, "cache_failed", { ...o, resultQboId });
       await writeAudit({ actor: o.actor, action: AUDIT_ACTION[w.op], permission: o.permission, ip: o.ip, targetType: "qbo_customer", targetId,
         before: w.op === "create" ? null : { syncToken: w.syncToken },
-        after: { ...auditAfter(w, answer), ...(o.queueId ? { queueId: o.queueId } : {}), refreshAsked: true, code: "cache_failed" } }, tx);
-      await holdForTheQueue(tx, w, "cache_failed", { ...o, resultQboId });
+        after: { ...auditAfter(w, answer), ...(o.queueId ? { queueId: o.queueId } : {}), refreshAsked: heldAs === "held", code: "cache_failed", ...(heldAs === "held" ? {} : { queue: "given_up" }) } }, tx);
     });
     return { cached: false };
   }
@@ -831,15 +862,22 @@ export async function alignAfterWrite(tx: Tx, w: RosterWrite, realmId: string, t
   return alignLink(tx, kind, w.qboId, realmId, token, w.checked ? undefined : w.syncToken, recordId);
 }
 
-/** Puts a write that may go through later on the queue, audited, in one transaction. */
-async function enqueue(p: { write: RosterWrite; realmId: string; familyId: AppFamilyId | null; studentId: AppStudentId | null }, code: string, sent: boolean, o: WriteOp & { staffUserId: string | null }): Promise<void> {
-  await db.transaction(async (tx) => {
+/**
+ * Puts a write that may go through later on the queue, audited, in one transaction, which takes the roster lock first
+ * (stage 4's slice M7a2: prepare() let go of it before the send). When the roster is another company's now (only a
+ * change of company makes it so), the item goes in given up, with the change of company's note (holdForTheQueue()
+ * says why it is kept), and the answer says so (`given_up`).
+ */
+async function enqueue(p: { write: RosterWrite; realmId: string; familyId: AppFamilyId | null; studentId: AppStudentId | null }, code: string, sent: boolean, o: WriteOp & { staffUserId: string | null }): Promise<HeldAs> {
+  return db.transaction(async (tx) => {
+    const ours = await lockRosterAs(tx, rosterTagOf(p.realmId));
     const [item] = await tx.insert(writeQueue).values({
       realmId: p.realmId, request: p.write, targetQboId: p.write.op === "create" ? null : p.write.qboId, familyId: p.familyId, studentId: p.studentId,
-      sent, lastCode: code.slice(0, 40), nextTryAt: new Date(Date.now() + 60_000), askedBy: o.staffUserId, askedByLabel: o.actor.label,
+      sent, lastCode: code.slice(0, 40), askedBy: o.staffUserId, askedByLabel: o.actor.label, ...queuedAs(ours),
     }).returning({ id: writeQueue.id });
     await writeAudit({ actor: o.actor, action: "roster.write.queued", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: item!.id,
-      after: { op: p.write.op, role: p.write.role, code: code.slice(0, 40), sent } }, tx);
+      after: { op: p.write.op, role: p.write.role, code: code.slice(0, 40), sent, ...(ours ? {} : { state: "given_up", why: "company_changed" }) } }, tx);
+    return ours ? "held" : "given_up";
   });
 }
 
@@ -971,7 +1009,7 @@ export async function askRosterWrite(ask: WriteAsk, rosterTag: string, o: WriteO
     const failure = classify(e.code);
     switch (failure.kind) {
       case "retry":
-        await enqueue(p, e.code, failure.sent, { ...o, staffUserId: o.staffUserId });
+        if ((await enqueue(p, e.code, failure.sent, { ...o, staffUserId: o.staffUserId })) === "given_up") return refuse(WRITE_COPY.givenUpForCompany);
         return { ok: true, queued: true, message: WRITE_COPY.queued };
       case "stale": {
         await audited(e.code, p.write, target);
@@ -1200,7 +1238,7 @@ async function deactivateHolding(kind: "family" | "student", recordId: string, r
     case "failed": {
       const failure = classify(t.code);
       if (failure.kind === "retry") {
-        await enqueue({ write: t.write, realmId: p.realmId, ...p.filed }, t.code, failure.sent, o);
+        if ((await enqueue({ write: t.write, realmId: p.realmId, ...p.filed }, t.code, failure.sent, o)) === "given_up") return refuse(WRITE_COPY.givenUpForCompany);
         return { ok: true, queued: true, message: WRITE_COPY.queued };
       }
       await audited(t.code, t.write);
@@ -1390,10 +1428,9 @@ async function stepStopped(code: string, step: FamilyStep, realmId: string, o: W
         : `${name} changed in QuickBooks twice while this was running, so it wasn't changed. Reload the page to see it as QuickBooks has it now.`, maybe: false, changed: true };
     case "retry":
       if (failure.sent) {
-        await db.transaction(async (tx) => {
-          await askForRosterRefresh(tx);
-          await holdForTheQueue(tx, step.write, e.code, { realmId, actor: o.actor, ip: o.ip, permission: o.permission, linkedBy: o.staffUserId, filed: step.filed });
-        });
+        // holdForTheQueue() takes the roster lock, then asks for the refresh.
+        const heldAs = await db.transaction((tx) => holdForTheQueue(tx, step.write, e.code, { realmId, actor: o.actor, ip: o.ip, permission: o.permission, linkedBy: o.staffUserId, filed: step.filed }));
+        if (heldAs === "given_up") return { words: `The portal can't tell whether QuickBooks made ${name} inactive: ${COMPANY_SINCE}`, maybe: true, changed: true };
         return { words: `The portal can't tell whether QuickBooks made ${name} inactive: its answer didn't arrive. The roster is read again within a few minutes to see, and the portal finishes it then without sending it twice.`, maybe: true, changed: true };
       }
       return { words: `QuickBooks couldn't take that just now, so ${name} wasn't changed. Try again in a few minutes.`, maybe: false, changed: false };
@@ -2033,10 +2070,9 @@ async function sendCreateStep(write: CreateWrite, filed: Filed, said: string, re
       }
       case "retry":
         if (failure.sent) {
-          await db.transaction(async (tx) => {
-            await askForRosterRefresh(tx);
-            await holdForTheQueue(tx, write, e.code, { realmId, actor: o.actor, ip: o.ip, permission: o.permission, linkedBy: o.staffUserId, filed });
-          });
+          // holdForTheQueue() takes the roster lock, then asks for the refresh.
+          const heldAs = await db.transaction((tx) => holdForTheQueue(tx, write, e.code, { realmId, actor: o.actor, ip: o.ip, permission: o.permission, linkedBy: o.staffUserId, filed }));
+          if (heldAs === "given_up") return stop(`The portal can't tell whether QuickBooks made ${said}: ${COMPANY_SINCE}`, true);
           return stop(`The portal can't tell whether QuickBooks made ${said}: its answer didn't arrive. The roster is read again within a few minutes to see, and the portal links ${said} then, without making it twice.`, true);
         }
         return stop(`QuickBooks couldn't take that just now, so ${said} wasn't made there. Try again in a few minutes.`);
