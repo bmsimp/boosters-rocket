@@ -364,7 +364,7 @@ describe("a different QuickBooks company", () => {
       shifts: await db.select().from(volunteerShift).orderBy(asc(volunteerShift.id)),
     });
     const before = await rows();
-    expect([before.credits.length, before.credits.filter((c) => c.removedAt !== null).length, before.reminders.length, before.signups.length]).toEqual([2, 1, 1, 2]);
+    expect([before.credits.length, before.credits.filter((c) => c.removedAt !== null).length, before.reminders.length, before.signups.length]).toEqual([3, 1, 1, 2]);
     await db.transaction((tx) => setRosterSource(tx, "9130000000000001"));
     expect(await clearRosterOfOtherCompany("9130000000000002", { actor: { door: "staff", id: null, label: "admin" }, ip: null })).toBe(true);
     expect(await rows()).toEqual(before);
