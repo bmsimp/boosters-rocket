@@ -32,7 +32,7 @@ import { getRosterSource, ROSTER_JOB } from "@/lib/roster/source";
 import { differencesOf, type Difference, type LinkedStudent, type QueueFact } from "./differences";
 import { suggestCustomers, type Holder, type Suggestion } from "./match";
 import { pairKeys, proposeGuardians, proposeStudents, type Proposals } from "./proposals";
-import { bulkStamp, guardianLinkStamp, guardianUnlinkStamp, linkStamp, reviewStamp, sendStamp, takeStamp, unlinkStamp, type Chosen } from "./stamp";
+import { bulkStamp, guardianLinkStamp, guardianUnlinkStamp, linkStamp, reviewStamp, sendAllStamp, sendStamp, takeStamp, unlinkStamp, type Chosen } from "./stamp";
 import { linkStanding, searchMatches, STATUS_KEYS, type LinksFilter, type NotAFamilyReason, type StatusKey } from "./status";
 
 /**
@@ -233,6 +233,20 @@ const sealOf = (field: SendOffer["field"], recordId: string, customerId: string,
 export const QUEUE_IN_THE_WAY_OF_SEND = "Another change on the Reconciliation page stands in the way (waiting to reach QuickBooks, stuck, or a move kept there), so the portal's value can't be sent to the books until it is done or given up.";
 /** At most this many families are linked by one press of Confirm all exact email matches (the lead's decision 3 for slice M3a2). */
 export const BULK_MAX = 200;
+/** At most this many differences are queued by one press of Send the app's for all (the lead's decision 3 for slice M5b, after M5a's decision 5). */
+export const SEND_ALL_MAX = 100;
+/**
+ * Send the app's for all, for the rows a filter shows (slice M5b; sendAllShown()): the names and students' families a
+ * press queues, once each, in the list's order (`sends`); those it leaves to a later press because a send before them in
+ * the list reads a customer theirs reads too, and so would find it waiting (`later`: a family's name and a student's
+ * move into or out of that family, say); and how many differences the list shows that it passes over, by why: a
+ * make-inactive (`inactive`: each reads a balance first, so it is sent on its own row) or a difference whose customer the
+ * books have inactive (`booksInactive`: the portal sends nothing there and never makes a customer active, open question
+ * 12). The inactive families' list below the families isn't in it.
+ */
+export type SendAllShown = { sends: SendOffer[]; later: SendOffer[]; passedOver: { inactive: number; booksInactive: number } };
+/** Send the app's for all as the page draws it: how many it queues, the stamp sealing them (null for none, or more than SEND_ALL_MAX: no press then), and what it leaves. */
+export type SendAllOffer = { count: number; stamp: string | null; later: number; passedOver: { inactive: number; booksInactive: number } };
 /** A Suggested row the filter shows, as the bulk press links it: the family, its name in words, its suggested customer and the row's own offer. */
 export type SuggestedShown = { familyId: AppFamilyId; familyKey: string; name: string; customerId: string; offer: LinkOffer };
 /**
@@ -316,6 +330,8 @@ export type LinksView = {
   inactive: InactiveRow[];
   /** Whether the books have a parent type (layered books whose shape names one), so a family's Confirm may link guardians with it (slice M3c2). */
   guardianLinks: boolean;
+  /** Send the app's for all for the rows this filter shows (slice M5b, by the press's own rule: sendAllOf()), from this view's reads; null in any state but `listed`. */
+  sendAll: (filter: Pick<LinksFilter, "status" | "q">) => SendAllOffer | null;
 };
 
 /**
@@ -658,7 +674,12 @@ export type LinkBasics = Awaited<ReturnType<typeof readLinkBasics>>;
  * no query of their own: the count is unchanged. Since slice M4b, in the `listed` state, the parents' settings are read
  * beside the queue's items (the one query it adds, counted above), for whether the students rule is in force, which says
  * whether a student's take of active holds the family's sign-ins; the inactive families the books have active
- * (inactiveRowsOf()) come from the reads above, with no query of their own.
+ * (inactiveRowsOf()) come from the reads above, with no query of their own. Since slice M5a so are the presses that send
+ * the portal's value of a difference to the books (sendOffersOf(), and a member's make-inactive on the inactive list),
+ * and since slice M5b a layered family's make-inactive with everyone under it (familySendOf(), whom it covers walked by
+ * coverUnder() over the cache rows read above) and Send the app's for all (sendAll(), sendAllOf() over the rows worked
+ * out here): no query of their own, so the count is unchanged. The bulk's press works the same rows out again in its
+ * own transaction (sendAllShown(), ./link-writes.ts), from the same reads made there.
  * On four hundred families with two thousand customers that is the same number of queries; memory holds the two
  * thousand cached customers (twice, while the queue holds items, as loadOpenWrites() reads its own), the records,
  * guardian rows and links (a few thousand small rows), and the rows rendered are the four hundred families, each
@@ -713,6 +734,12 @@ export async function loadAccountingLinks(): Promise<LinksView> {
     pool: poolShown, step, bulk,
     inactive: listed ? inactiveRowsOf(b, queue) : [],
     guardianLinks: shape !== null && shape.kind === "layered" && shape.parentTypeId !== null,
+    sendAll: (filter) => {
+      if (!listed) return null;
+      const all = sendAllOf(rows, filter);
+      return { count: all.sends.length, later: all.later.length, passedOver: all.passedOver,
+        stamp: all.sends.length === 0 || all.sends.length > SEND_ALL_MAX ? null : sendAllStamp(filter, all.sends.length, sendAllKeys(all.sends)) };
+    },
   };
 }
 
@@ -1408,3 +1435,53 @@ export async function readCustomerAims(tx?: Tx): Promise<Map<string, CustomerAim
   return tx ? run(tx) : db.transaction(run);
 }
 
+/**
+ * Send the app's for all (slice M5b): the sends of the rows a filter shows (filterLinkRows(), the list's own rule),
+ * worked out again from the screen's reads and the queue's open items alone (linkRowsOf()), so the page's button and the
+ * press, which calls this in its own transaction under the roster lock, find the same sends by one rule. Empty in any
+ * state but `listed`.
+ */
+export function sendAllShown(b: LinkBasics, queue: readonly QueueView[], filter: Pick<LinksFilter, "status" | "q">): SendAllShown {
+  if (b.state !== "listed") return { sends: [], later: [], passedOver: { inactive: 0, booksInactive: 0 } };
+  return sendAllOf(linkRowsOf(b, queue, { studentsRule: false, staffNames: new Map() }), filter);
+}
+/**
+ * What Send the app's for all takes from rows (sendAllShown(), and the view's own rows for its button): every `name`
+ * and `place` send offer of the rows the filter shows, once each (a student's family offered on two rows, by their
+ * family's and by the one the books have them under, is one send: the same field, record and stamp), in the list's
+ * order, and nothing else. A send whose checks read a customer an earlier one in the list queues a change for (a name:
+ * its customer; a place: the student's customer, the family's and the one the books have them under; queueSendIn()) is
+ * left for a later press (`later`), as the press would find that change waiting and refuse. Passed over, and counted
+ * once each: every make-inactive the rows show (an `active` difference of an inactive record whose customer the books
+ * have active) and every difference whose customer the books have inactive (an `active` difference of an active record,
+ * or a name or a place said with SEND_INACTIVE_THERE or SEND_FAMILY_CUSTOMER_INACTIVE in place of a press); a difference
+ * a change waiting or stuck on the queue explains is on its way already, and counted in neither.
+ */
+function sendAllOf(rows: readonly LinkRow[], filter: Pick<LinksFilter, "status" | "q">): SendAllShown {
+  const sends: SendOffer[] = [], later: SendOffer[] = [];
+  const seen = new Set<string>(), read = new Set<string>(), inactive = new Set<string>(), booksInactive = new Set<string>();
+  for (const r of filterLinkRows(rows, filter)) {
+    for (const s of r.sends) {
+      if (s.field === "inactive") continue;
+      const key = `${s.field}:${s.recordId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      // The customers the send's own checks find a change waiting for (queueSendIn()): a place's value is the student's
+      // customer, the one the books have them under ("" for none), the family record and its customer.
+      const reads = s.field === "name" ? [s.seal.customerId] : [s.seal.value[0]!, s.seal.value[1]!, s.seal.value[3]!].filter((c) => c !== "");
+      if (reads.some((c) => read.has(c))) { later.push(s); continue; }
+      for (const c of reads) read.add(c);
+      sends.push(s);
+    }
+    r.differences.forEach((d, at) => {
+      if ("queue" in d && d.kind !== "guardians_unlinked" && d.queue !== null && d.queue.state !== "refused") return;
+      const record = d.kind === "active" ? (d.of === "student" ? `student:${String(d.studentId)}` : `family:${String(r.familyId)}`) : null;
+      if (d.kind === "active" && record !== null) (d.portalActive ? booksInactive : inactive).add(`active:${record}`);
+      const note = r.sendNotes.find((n) => n.at === at)?.words;
+      if (note === SEND_INACTIVE_THERE || note === SEND_FAMILY_CUSTOMER_INACTIVE) booksInactive.add(`${String(r.familyId)}:${at}`);
+    });
+  }
+  return { sends, later, passedOver: { inactive: inactive.size, booksInactive: booksInactive.size } };
+}
+/** The sends as Send the app's for all's stamp seals them: each send's own sendStamp() inputs (field, record, customer, value), as a string. */
+export const sendAllKeys = (sends: readonly SendOffer[]): string[] => sends.map((s) => JSON.stringify([s.field, s.recordId.toLowerCase(), s.seal.customerId, s.seal.value]));

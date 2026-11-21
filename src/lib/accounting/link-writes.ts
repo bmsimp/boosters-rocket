@@ -28,13 +28,15 @@ import { recordNameWords } from "@/lib/families/words";
 import { forgetFamilyMoney } from "@/lib/money/family-money";
 import { isQboId } from "@/lib/quickbooks/client";
 import { handful, noFamilyPool, type AimedAt } from "@/lib/roster/no-family";
-import { blocksOthers, familyCreateWaiting, NO_FAMILY_CUSTOMER, recordSendingFree } from "@/lib/roster/writes";
+import { blocksOthers, familyCreateWaiting, NO_FAMILY_CUSTOMER, queueSendIn, readyToSend, recordSendingFree } from "@/lib/roster/writes";
+import { loadOpenWrites } from "@/lib/roster/queue";
+import { nameKey } from "@/lib/roster/names";
 import { isUuid } from "@/lib/seasons/ids";
 import { lockRosterAs, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
-import { BULK_MAX, bulkKeys, readCustomerAims, readLinkBasics, REVIEW_LEFT_WORDS, suggestedRowsShown, type LinkBasics, type LinksState, type ReviewLeftWhy } from "./mapping";
+import { BULK_MAX, bulkKeys, readCustomerAims, readLinkBasics, REVIEW_LEFT_WORDS, SEND_ALL_MAX, sendAllKeys, sendAllShown, suggestedRowsShown, type LinkBasics, type LinksState, type ReviewLeftWhy, type SendOffer } from "./mapping";
 import { pairKeys, type Proposals } from "./proposals";
 import { isStatusKey, linkStanding, SEARCH_MAX, type StatusKey } from "./status";
-import { bulkStampHolds, isChosen, linkStampHolds, reviewStampHolds, unlinkStampHolds, type Chosen } from "./stamp";
+import { bulkStampHolds, isChosen, linkStampHolds, reviewStampHolds, sendAllStampHolds, unlinkStampHolds, type Chosen } from "./stamp";
 
 export type LinkOp = { actor: Actor; ip: string | null; permission: string; staffUserId: string };
 export type LinkDone = { ok: true; message: string } | { ok: false; errors: string[] };
@@ -639,3 +641,94 @@ export async function customerAimedAt(tx: Tx, customerId: string): Promise<Aimed
 }
 
 export type { Chosen };
+
+/* ---- Send the app's for all (stage 4's slice M5b of the app-owned families spec, section 5: "there is a bulk Send the
+   app's for all"; M5a's lead decision 5 and M5b's decision 3) ---- */
+
+/** What staff read when Send the app's for all doesn't go through. Nothing is ever queued or sent in these cases. */
+export const SEND_ALL_COPY = {
+  notFromPage: "That didn't go through, and nothing was sent. Reload the page and try again.",
+  changed: "The list changed since this page was drawn, so nothing was sent. Look at it again.",
+  overCap: `That is more than ${SEND_ALL_MAX} differences for one press, so nothing was sent. Narrow the list with the search or a status, then press again.`,
+  busy: (about: string) => `${about}, one of the differences this list shows, is being changed in the books at this moment, so nothing was sent. Try again in a minute: the list is shown again as it is now.`,
+  sameName: (name: string) => `Two of the names this list would send are both “${name}”, and every name in QuickBooks must be different, so nothing was sent. Rename one of the records on its page, or narrow the list so only one of them is in it, then press again.`,
+} as const;
+
+/** A send of the bulk press refused after it had begun queueing: thrown, so its transaction keeps nothing, with the words it is answered in. */
+class SendAllRefused extends Error {
+  constructor(readonly words: string) { super(words); }
+}
+
+/**
+ * What staff read after Send the app's for all, each sentence true by the code: how many names and students' families
+ * were queued; that the queue's worker sends each within a few minutes, over the books' value the list showed, holding
+ * back and keeping one QuickBooks has changed since; that Reconciliation shows any that waits or is kept; what was left
+ * for a later press and what was passed over, and why; and that the inactive families' list isn't in it.
+ */
+export function sentAllWords(s: { names: number; places: number; later: number; passedOver: { inactive: number; booksInactive: number } }): string {
+  const queued = [s.names ? plural(s.names, "name", "names") : null, s.places ? plural(s.places, "student's family", "students' families") : null].filter((x): x is string => x !== null);
+  const parts = [`Queued for QuickBooks: ${queued.join(" and ")}.`,
+    "The portal sends each within a few minutes, over the books' value this list showed: one QuickBooks has changed since is held back and kept, never sent over. The Reconciliation page shows any that waits or is kept until then."];
+  if (s.later > 0) parts.push(`${s.later === 1 ? "One more difference waits" : `${s.later} more differences wait`} for a change queued now to reach QuickBooks first, as ${s.later === 1 ? "it reads" : "they read"} the same customer: press again once it has.`);
+  if (s.passedOver.inactive > 0) parts.push(`Passed over: ${plural(s.passedOver.inactive, "make-inactive", "make-inactives")}, as each reads a balance first: send ${s.passedOver.inactive === 1 ? "it" : "each"} on its own row.`);
+  if (s.passedOver.booksInactive > 0) parts.push(`Passed over: ${plural(s.passedOver.booksInactive, "difference whose customer QuickBooks has inactive", "differences whose customer QuickBooks has inactive")}: the portal sends nothing there, and never makes a customer active.`);
+  parts.push("The inactive families listed after the families aren't part of this.");
+  return parts.join(" ");
+}
+
+/**
+ * Send the app's for all (stage 4's slice M5b): queues the portal's value of every name and student's family the
+ * page's filter showed (sendAllShown(), the page's own rule), each as a change saved first, and sends nothing at the
+ * press: the queue's worker (runWriteQueue()) takes each once its lease (SAVED_LEASE_MS) is out and sends it as any
+ * saved change, settled by the field against the books' value the row showed. Nothing about the sends is taken from the
+ * browser: the press sends the filter as the page parsed it, how many sends it showed and the stamp sealing them
+ * (sendAllStamp()), and in one transaction, under the roster lock held exclusively with the page's tag and a live
+ * connection to the roster's company (readyToSend()), the sends are worked out again from reads made after the lock is
+ * taken (readLinkBasics(tx), and the queue's open items, loadOpenWrites(), read on its own connection, since its many
+ * reads each open their own; every writer that takes the roster lock is kept out meanwhile, and each send's own checks
+ * read the queue again in this transaction) and must be as many, at most SEND_ALL_MAX, and seal to the same stamp. Then,
+ * in the list's order, each send's in-transaction half (queueSendIn(), the single send's own checks, with the record's
+ * "being sent" lock tried, never waited for). All or nothing: any refusal refuses the whole press, keeping nothing, in
+ * its own words (a record being changed at this moment, two names alike) or as a list that changed. One
+ * `accounting.difference.send` row per difference (with `bulk`, the press's id, and `queueId`) and one
+ * `accounting.difference.send_all` row, in the transaction. It never makes anything inactive, nor active.
+ */
+export async function sendAllDifferences(raw: { status: unknown; q: unknown; count: unknown; stamp: unknown }, rosterTag: string, o: LinkOp): Promise<LinkDone> {
+  const { status: rawStatus, q, count, stamp } = raw;
+  if (!(rawStatus === "" || isStatusKey(rawStatus)) || typeof q !== "string" || q.length > SEARCH_MAX || typeof count !== "number" || !Number.isInteger(count)
+    || count < 1 || typeof stamp !== "string") return no(SEND_ALL_COPY.notFromPage);
+  // More than a press may queue (the page offers no button then).
+  if (count > SEND_ALL_MAX) return no(SEND_ALL_COPY.overCap);
+  const filter = { status: rawStatus === "" ? null : (rawStatus as StatusKey), q };
+  try {
+    return await db.transaction(async (tx): Promise<LinkDone> => {
+      const ready = await readyToSend(tx, rosterTag);
+      if (!ready.ok) return no(ready.error);
+      const b = await readLinkBasics(tx);
+      if (b.state !== "listed") return no(SEND_ALL_COPY.changed);
+      const shown = sendAllShown(b, await loadOpenWrites(), filter);
+      if (shown.sends.length !== count || shown.sends.length > SEND_ALL_MAX || !sendAllStampHolds(filter, count, sendAllKeys(shown.sends), stamp)) return no(SEND_ALL_COPY.changed);
+      const pressId = randomUUID();
+      const names = new Set<string>();
+      for (const s of shown.sends) {
+        const r = await queueSendIn(tx, ready, askOf(s), o, { pressId, lock: "try" });
+        const name = s.field === "name" ? s.seal.value[1]! : null;
+        if (!r.ok) {
+          if (r.busy) throw new SendAllRefused(SEND_ALL_COPY.busy(s.about));
+          throw new SendAllRefused(name !== null && names.has(nameKey(name)) ? SEND_ALL_COPY.sameName(name) : SEND_ALL_COPY.changed);
+        }
+        if (name !== null) names.add(nameKey(name));
+      }
+      const placed = shown.sends.filter((s) => s.field === "place").length;
+      await writeAudit({ actor: o.actor, action: "accounting.difference.send_all", permission: o.permission, ip: o.ip, targetType: "accounting_difference", targetId: pressId,
+        after: { pressId, count: shown.sends.length, names: shown.sends.length - placed, places: placed, passedOver: shown.passedOver, later: shown.later.length,
+          status: filter.status, searched: filter.q !== "", realmId: ready.source } }, tx);
+      return { ok: true, message: sentAllWords({ names: shown.sends.length - placed, places: placed, later: shown.later.length, passedOver: shown.passedOver }) };
+    });
+  } catch (e) {
+    if (e instanceof SendAllRefused) return no(e.words);
+    throw e;
+  }
+}
+/** A send offer as the single press asks it (sendDifferenceAction()): the field, the record and the row's stamp. */
+const askOf = (s: SendOffer) => (s.field === "place" ? { field: "place" as const, studentId: s.recordId, stamp: s.stamp } : { field: "name" as const, kind: s.kind, recordId: s.recordId, stamp: s.stamp });

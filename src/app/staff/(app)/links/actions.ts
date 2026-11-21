@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { requireStaffActionAlso, staffAction, type StaffCtx } from "@/lib/guards";
-import { confirmAllSuggested, leaveUnlinked, LINK_COPY, linkFamilyToCustomer, reviewCarriedOver, undoLeaveUnlinked, unlinkFamily, type LinkDone } from "@/lib/accounting/link-writes";
+import { confirmAllSuggested, leaveUnlinked, LINK_COPY, linkFamilyToCustomer, reviewCarriedOver, sendAllDifferences, undoLeaveUnlinked, unlinkFamily, type LinkDone } from "@/lib/accounting/link-writes";
 import { BULK_MAX } from "@/lib/accounting/mapping";
 import { isStatusKey, SEARCH_MAX } from "@/lib/accounting/status";
 import { isChosen, isGuardianChosen } from "@/lib/accounting/stamp";
@@ -161,3 +161,22 @@ export const sendDifferenceAction = staffAction(P, async (ctx: StaffCtx, field: 
   return r;
 });
 
+/**
+ * Send the app's for all (slice M5b): the filter as the page parsed it (its status key, "" for none, and its search),
+ * how many sends it showed, the roster tag and the stamp sealing them. It needs what a single send needs (the linking
+ * permission, Roster.Read and Roster.Family.ReadWrite: the owner's choice 6, assumed as recommended and awaiting his
+ * word), checked first and refused as the guard refuses. No record, customer or value comes from the browser: the
+ * library works the sends out again under the roster lock, queues them all or none, and sends nothing at the press.
+ */
+export const sendAllAction = staffAction(P, async (ctx: StaffCtx, status: string, q: string, count: number, rosterTag: string, stamp: string): Promise<LinkDone> => {
+  await requireStaffActionAlso(ctx, "Roster.Read");
+  await requireStaffActionAlso(ctx, "Roster.Family.ReadWrite");
+  if (typeof status !== "string" || !(status === "" || isStatusKey(status)) || typeof q !== "string" || q.length > SEARCH_MAX || typeof count !== "number" || !Number.isInteger(count)
+    || count < 1 || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return NOT_FROM_PAGE;
+  // More than SEND_ALL_MAX is refused by the library, in words that say to narrow the list.
+  const r = await sendAllDifferences({ status, q, count, stamp }, rosterTag, op(ctx));
+  // Names and students' families queued change Reconciliation and the family's pages (each item is listed there).
+  if (r.ok) revalidatePath("/", "layout");
+  else again();
+  return r;
+});

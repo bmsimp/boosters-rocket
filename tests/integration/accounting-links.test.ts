@@ -801,11 +801,12 @@ describe("differences, for a link that stands (slice M2)", () => {
     // No button but the filter's own, since slice M3a2 each carried-over row's Confirm this link, and since slice M3b each
     // linked row's Unlink from the books, since slice M3c Ana Rivera's Unlink this guardian, and since slice M4a the kept
     // rename's Take QuickBooks' into the app, and since slice M5a its Send the app's to QuickBooks for an Admin, who may
-    // change families (a waiting move offers none); nothing of money but each unlink's own words of what the guardians
-    // then read.
-    expect(html.split("<button").length - 1).toBe(8);
+    // change families (a waiting move offers none), and since slice M5b Send the app's for all above the list, which
+    // takes that one name; nothing of money but each unlink's own words of what the guardians then read.
+    expect(html.split("<button").length - 1).toBe(9);
     expect(html.split("Take QuickBooks&#x27; into the app<span").length - 1).toBe(1);
     expect(html.split("Send the app&#x27;s to QuickBooks<span").length - 1).toBe(1);
+    expect(html.split("Send the app&#x27;s for all (1)<span").length - 1).toBe(1);
     expect(html.split("Confirm this link<span").length - 1).toBe(2);
     expect(html.split("Unlink from the books<span").length - 1).toBe(2);
     expect(html.split("invoices").length - 1).toBe(2);
