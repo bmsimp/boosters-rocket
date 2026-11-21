@@ -174,12 +174,12 @@ export async function studentsEffect(): Promise<StudentsEffect> {
   return { families: without.size, people: loses.size };
 }
 
-/** Every open row of a person who isn't blocked, in an active family record, with whether that family has an active student. */
+/** Every open row of a person who isn't blocked, in an active family record whose sign-ins aren't held, with whether that family has an active student. */
 async function countingRows(): Promise<{ parentId: string; familyId: string; hasStudent: boolean }[]> {
   const rows = await db.select({ parentId: guardian.parentId, familyId: family.id,
     hasStudent: sql<boolean>`exists (select 1 from ${student} where ${student.familyId} = ${family.id} and ${student.active})` })
     .from(guardian).innerJoin(family, eq(family.id, guardian.familyId)).innerJoin(parent, eq(parent.id, guardian.parentId))
-    .where(and(sql`${guardian.status} <> 'disabled'`, eq(family.active, true), eq(parent.blocked, false)));
+    .where(and(sql`${guardian.status} <> 'disabled'`, eq(family.active, true), isNull(family.signinHeldAt), eq(parent.blocked, false)));
   return rows.map((r) => ({ parentId: r.parentId, familyId: String(r.familyId), hasStudent: r.hasStudent === true }));
 }
 

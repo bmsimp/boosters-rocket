@@ -178,7 +178,10 @@ export async function studentsRuleInForce(tx?: Tx): Promise<boolean> {
  * The one definition of a guardian row that counts (app-owned families spec §6: a guardian signs in while they are an
  * active guardian of an active family in the app): an open row (`status` not `disabled`) whose `family_id` names a
  * family record that is active, and, while the students rule is in force (studentsRuleInForce()), a family with at
- * least one active `student` record. Nothing here reads QuickBooks, and nothing closes a row for any of it: a row of a
+ * least one active `student` record. And the family's sign-ins not held (`family.signin_held_at` null): a take from the
+ * books on the accounting links screen that made the family, or a student who opens it, active again holds them until
+ * someone who may change families lets its guardians in on its page (releaseSigninHold(), guardians.ts; stage 4's
+ * slice M4b). Nothing here reads QuickBooks, and nothing closes a row for any of it: a row of a
  * family that stops counting stays open and counts again when the family does. A row that doesn't count is not a
  * family the person can enter: the chooser doesn't offer it (chooseFamily() refuses it), a session that chose it is
  * sent back to choose, and a person with no row that counts is refused as one with no open row
@@ -196,7 +199,7 @@ export async function studentsRuleInForce(tx?: Tx): Promise<boolean> {
 export async function enterableGuardianRows(parentId: string, tx?: Tx): Promise<EnterableRow[]> {
   const studentsRule = await studentsRuleInForce(tx);
   const rows = await (tx ?? db).select({ g: guardian, familyId: family.id }).from(guardian).innerJoin(family, eq(family.id, guardian.familyId))
-    .where(and(eq(guardian.parentId, parentId), ne(guardian.status, "disabled"), eq(family.active, true),
+    .where(and(eq(guardian.parentId, parentId), ne(guardian.status, "disabled"), eq(family.active, true), isNull(family.signinHeldAt),
       studentsRule ? hasActiveStudent(family.id) : undefined)).orderBy(sql`${guardian.familyQboId} asc nulls last`, guardian.id);
   return rows.map((r) => ({ ...r.g, familyId: r.familyId }));
 }
@@ -217,7 +220,7 @@ export function hasRowThatCounts(studentsRule: boolean): SQL {
  */
 export function guardianRowCounts(studentsRule: boolean): SQL {
   return and(ne(guardian.status, "disabled"), exists(db.select({ id: family.id }).from(family)
-    .where(and(eq(family.id, guardian.familyId), eq(family.active, true), studentsRule ? hasActiveStudent(family.id) : undefined))))!;
+    .where(and(eq(family.id, guardian.familyId), eq(family.active, true), isNull(family.signinHeldAt), studentsRule ? hasActiveStudent(family.id) : undefined))))!;
 }
 
 /**
