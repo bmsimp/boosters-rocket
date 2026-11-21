@@ -152,6 +152,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "roster.write.retry": "A waiting change to QuickBooks was tried again and is still waiting",
   "roster.write.sent_again": "Staff sent the portal's value to QuickBooks again, on purpose, for a change QuickBooks had refused",
   "roster.write.stuck": "A waiting change to QuickBooks is stuck: staff must look at it",
+  "roster.writes.given_up_other_company": "Changes waiting for an earlier QuickBooks company given up after a company change: nothing more is sent for them",
   "season.create": "Season made",
   "season.current.set": "Current season chosen or cleared",
   "season.due_reminders.sent": "Reminders before a payment's or a checklist item's due date emailed",

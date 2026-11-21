@@ -2,7 +2,7 @@
 // take later are tried again here by the worker, carefully: one that QuickBooks may already have made is never simply
 // sent again. Its rules are pure, in ./write-rules.ts; the send and what follows it are ./writes.ts's.
 import "server-only";
-import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { buyout, family, guardian, jobRun, parent, qboCustomer, setting, student, writeQueue, type QueuedWrite, type RosterWrite } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
@@ -10,7 +10,7 @@ import { getConnection } from "@/lib/quickbooks/connection";
 import { WORKER_ACTOR } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster } from "./refresh";
-import { getRosterSource, ROSTER_JOB } from "./source";
+import { getRosterSource, GIVEN_UP_FOR_COMPANY_NOTE, ROSTER_JOB } from "./source";
 import { ROSTER_LOCK } from "./shape";
 import { lockRosterAs, rosterTagOf } from "@/lib/seasons/roster-lock";
 import { alignAfterWrite, applyWritten, balanceUnread, BEING_SENT_NOW, changeOwnRecord, closeEarlierContacts, CONTACT_AWAITS_READ, contactShown, CREDIT_BALANCE, CUSTOMER_HAS_GUARDIAN, EMAIL_TOO_LONG, FAMILY_HELD, guardianCustomerLinked, guardianOf, isSavedFirst, NAME_UNUSABLE, itemLockFree, madeAfterGivingUp, markMoveMoneyStale, moveMoneyNotes, REFRESH_ASK_KEY,
@@ -334,6 +334,34 @@ export const CUSTOMER_HAS_FAMILY = "customer_has_family";
 export const FAMILY_HAS_CUSTOMER = "family_has_customer";
 
 /**
+ * Gives up, in one statement, every open item (waiting, stuck or kept refused) whose company is not the roster's, with
+ * the change of company's note, audited once with the count when there were any (stage 4's slice M7a2). Only a change
+ * of company leaves one: a parent's change of their details takes no roster lock (stage 3's slice 11d), so one saved
+ * after reading the old company, as the clear ran, goes in after the clear has given the rest up; every staff insert
+ * holds the roster lock and goes in given up instead (holdForTheQueue(), enqueue(), ./writes.ts). It holds the roster
+ * lock shared, tried once (a roster read holding it leaves this to the next wake), and reads the roster's company and
+ * the connection under it, so a clear can't come between the read and the statement: nothing is given up while the
+ * roster names no company or QuickBooks is connected to another. It touches no buy-out: the clear ended every unpaid
+ * live buy-out of the old company, and none is queued for another company since (the confirm's writable(), and a
+ * void only for an invoiced one, which only the roster's company's are once the clear has run).
+ */
+async function giveUpOtherCompanys(): Promise<number> {
+  return db.transaction(async (tx) => {
+    const [lock] = (await tx.execute(sql`select pg_try_advisory_xact_lock_shared(${ROSTER_LOCK}) as locked`)) as unknown as { locked: boolean }[];
+    if (!lock?.locked) return 0;
+    const [conn, source] = await Promise.all([getConnection(tx), getRosterSource(tx)]);
+    if (source === null || !conn?.realmId || conn.realmId !== source) return 0;
+    const now = new Date();
+    const given = await tx.update(writeQueue).set({ state: "given_up", note: GIVEN_UP_FOR_COMPANY_NOTE, nextTryAt: null, finishedAt: now, updatedAt: now })
+      .where(and(inArray(writeQueue.state, ["waiting", "stuck", "refused"]), ne(writeQueue.realmId, source))).returning({ id: writeQueue.id });
+    if (given.length === 0) return 0;
+    await writeAudit({ actor: WORKER_ACTOR, action: "roster.writes.given_up_other_company", targetType: "write_queue",
+      after: { reason: "different_company", realmId: source, givenUp: given.length } }, tx);
+    return given.length;
+  });
+}
+
+/**
  * The worker's share of the queue at one wake: a roster refresh first when one was asked for (a family made inactive)
  * or a waiting item needs one before it can be looked for, then up to PER_WAKE items whose time has come. Only items of
  * the company QuickBooks is connected to, which the cache came from, are tried. In the wake's answer only when it did
@@ -342,6 +370,9 @@ export const FAMILY_HAS_CUSTOMER = "family_has_customer";
 export async function runWriteQueue(now: Date = new Date()): Promise<{ ran: boolean; ok: boolean }> {
   const [conn, source] = await Promise.all([getConnection(), getRosterSource()]);
   if (!conn?.realmId || !conn.refreshTokenCiphertext || source !== conn.realmId) return { ran: false, ok: true };
+  // Any open item of another company (a parent's change saved after reading the old company, beside a change of
+  // company's clear: stage 4's slice M7a2) is given up first. It is never tried: only the roster's company's are claimed.
+  const gaveUp = await giveUpOtherCompanys();
   // A parent's change of their details the portal may not send yet (contactSendsMayGo(): the take-in, or a read under the
   // shape saved last, still to come) is not claimed at all: left exactly as it is, with no lease that would hold it past
   // the next wake once it may go, and taking none of the wake's places from a staff change (it blocks nothing). Its try
@@ -352,7 +383,7 @@ export async function runWriteQueue(now: Date = new Date()): Promise<{ ran: bool
     .orderBy(asc(writeQueue.nextTryAt)).limit(PER_WAKE);
   const asked = await refreshAsked();
   let refreshedAt = await lastGoodRefresh();
-  let ran = false, ok = true;
+  let ran = gaveUp > 0, ok = true;
   const needsRead = due.some((i) => i.sent && !isBuyoutWrite(i.request) && (!refreshedAt || refreshedAt <= i.lastTriedAt));
   if ((asked && (!refreshedAt || refreshedAt <= asked)) || needsRead) {
     const r = await refreshRoster({ startedBy: "worker", actor: WORKER_ACTOR, ip: null });

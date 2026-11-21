@@ -10,17 +10,18 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, family, qboConnection, qboCustomerType, student, writeQueue } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, jobRun, qboConnection, qboCustomerType, student, writeQueue } from "@/lib/db/schema";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
 import { addFamily, changeInPortal, createInQuickBooksAndLink, FAMILY_SENDING, FAMILY_WAITING, linkStudentMadeAfterGivingUp, studentsBeingMade, WRITE_COPY } from "@/lib/roster/writes";
-import { ROSTER_LOCK } from "@/lib/roster/shape";
+import { ROSTER_LOCK, saveShape } from "@/lib/roster/shape";
+import { clearRosterOfOtherCompany, ROSTER_JOB } from "@/lib/roster/source";
 import { CUSTOMER_HAS_FAMILY, FAMILY_HAS_CUSTOMER, giveUp, giveUpIn, loadMadeAfterGivingUp, runWriteQueue, tryAgainNow, TRY_AGAIN_NEEDS_LINKING } from "@/lib/roster/queue";
-import { ROSTER_MOVED } from "@/lib/seasons/roster-lock";
+import { currentRosterTag, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
 import { customersWithNoFamily } from "@/lib/roster/no-family";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { addGuardian } from "@/lib/parents/guardians";
 import { resetDb, untilALockIsAwaited } from "../helpers/db";
-import { startQboStub, type QboStub } from "../helpers/qbo-stub";
+import { FZN_SHAPE, startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { asOp, auditsOf, connectRoster, queueItem, REALM, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
 
 /**
@@ -457,6 +458,26 @@ describe("Create in QuickBooks and link", () => {
     expect(await loadMadeAfterGivingUp()).toEqual([]);
     expect((await createInQuickBooksAndLink(String(oak), null, tag, op)).result).toEqual({ ok: false, errors: [expect.stringContaining("for instance to “Oak Family (2)”")] });
     expect(posts()).toEqual([]);
+  });
+
+  // Stage 4's slice M7a2: givenUpMaybeMade() reads only the roster's company's items, as madeAfterGivingUp() does.
+  it("a create a change of company gave up after a send to the old company holds back nothing in the new one, even before a roster read", async () => {
+    const oak = await unlinkedFamily("Oak Family");
+    // Sent to the old company, its answer lost, still waiting when the club changed company.
+    await seedQueued(OAK_CREATE, { familyId: oak, sent: true, state: "waiting", lastTriedAt: new Date() });
+    expect(await clearRosterOfOtherCompany("2222", { actor: { door: "staff", id: null, label: "admin@club.org" }, ip: null })).toBe(true);
+    expect(await db.select().from(writeQueue)).toEqual([expect.objectContaining({ state: "given_up", sent: true, realmId: REALM })]);
+    // The new company connected and its roster read, then, as just after the clear (which drops the roster's run
+    // history), no roster read on record since the old try.
+    await db.update(qboConnection).set({ realmId: "2222" });
+    await saveShape(FZN_SHAPE, { actor: WORKER.actor, ip: null });
+    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    await db.delete(jobRun).where(eq(jobRun.job, ROSTER_JOB));
+    stub.calls.length = 0;
+    const r = await createInQuickBooksAndLink(String(oak), null, await currentRosterTag(), op);
+    expect(r.result).toMatchObject({ ok: true });
+    expect(sent()).toEqual([{ DisplayName: "Oak Family", CustomerTypeRef: { value: "1" } }]);
+    expect(await linkOfFamily(oak)).toMatchObject({ realmId: "2222", customerId: stubNamed("Oak Family")[0]!.Id });
   });
 
   it("a create given up while the worker's send is on its way stays given up: nothing linked, its customer kept and named, and no second one made", async () => {

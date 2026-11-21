@@ -1747,9 +1747,14 @@ async function studentCreateWaiting(tx: Tx, studentId: AppStudentId): Promise<bo
  * (its name is then taken there, and met by namesTaken()).
  */
 async function givenUpMaybeMade(tx: Tx, filed: { familyId: AppFamilyId } | { studentId: AppStudentId }): Promise<boolean> {
+  // Only the roster's company's, as madeAfterGivingUp() reads them: a create a change of company gave up was sent to the
+  // earlier company, and says nothing of this one (stage 4's slice M7a2). None while the cache names no company or
+  // QuickBooks is connected to another (the create is refused then anyway).
+  const source = await getRosterSource(tx);
+  if (source === null || (await connectedToAnotherCompany(tx))) return false;
   const [given] = await tx.select({ lastTriedAt: writeQueue.lastTriedAt }).from(writeQueue)
     .where(and("familyId" in filed ? and(eq(writeQueue.familyId, filed.familyId), isFamilyCreate) : and(eq(writeQueue.studentId, filed.studentId), isStudentCreate),
-      eq(writeQueue.state, "given_up"), eq(writeQueue.sent, true))).orderBy(desc(writeQueue.lastTriedAt)).limit(1);
+      eq(writeQueue.state, "given_up"), eq(writeQueue.sent, true), eq(writeQueue.realmId, source))).orderBy(desc(writeQueue.lastTriedAt)).limit(1);
   if (!given) return false;
   const [read] = await tx.select({ at: jobRun.startedAt }).from(jobRun).where(and(eq(jobRun.job, ROSTER_JOB), eq(jobRun.outcome, "ok"))).orderBy(desc(jobRun.id)).limit(1);
   return !read || read.at <= given.lastTriedAt;
