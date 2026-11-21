@@ -571,38 +571,45 @@ main.wrap.single > .notice { margin-top: var(--cell); max-width: 760px; }
   background-image: linear-gradient(45deg, transparent 50%, var(--ink) 50%), linear-gradient(135deg, var(--ink) 50%, transparent 50%);
   background-position: calc(100% - 22px) 52%, calc(100% - 16px) 52%; background-size: 6px 6px; background-repeat: no-repeat; }
 .field textarea { resize: vertical; }
-.checks input[type="checkbox"], .checks input[type="radio"] { appearance: none; -webkit-appearance: none; width: 22px; height: 22px; margin: 0;
-  display: inline-grid; place-content: center; border: 2px solid var(--ink); border-radius: 0; background: var(--paper); cursor: pointer; }
-.checks input[type="radio"] { border-radius: 50%; }
-.checks input[type="checkbox"]::before { content: ""; width: 6px; height: 11px; border: solid var(--paper); border-width: 0 3px 3px 0;
+/* The mark is a 22px square (a circle for a radio) drawn by ::before at the middle of a 44px control, its tick or dot by
+   ::after: the control itself is the 44 by 44 tap target. Its 11px margins keep the square where a 22px control sat. */
+.checks input[type="checkbox"], .checks input[type="radio"] { appearance: none; -webkit-appearance: none; width: 44px; height: 44px;
+  margin: -11px -11px -11px -11px; display: inline-grid; place-content: center; place-items: center; border: 0; border-radius: 0;
+  background: transparent; cursor: pointer; }
+.checks input[type="checkbox"]::before, .checks input[type="radio"]::before { content: ""; grid-area: 1 / 1; width: 22px; height: 22px;
+  box-sizing: border-box; border: 2px solid var(--ink); background: var(--paper); }
+.checks input[type="radio"]::before { border-radius: 50%; }
+.checks input[type="checkbox"]::after { content: ""; grid-area: 1 / 1; width: 6px; height: 11px; border: solid var(--paper); border-width: 0 3px 3px 0;
   transform: translateY(-1px) rotate(45deg); visibility: hidden; }
-.checks input[type="radio"]::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--club-text); visibility: hidden; }
-.checks input:checked::before { visibility: visible; }
-.checks input[type="checkbox"]:checked { background: var(--club-text); border-color: var(--club-text); }
-.checks input[type="radio"]:checked { border-color: var(--club-text); }
-.checks label:hover input:not(:checked):not(:disabled) { background: var(--club-tint); }
-.checks input:focus-visible { outline: var(--ring) solid var(--club-text); outline-offset: 2px; }
+.checks input[type="radio"]::after { content: ""; grid-area: 1 / 1; width: 10px; height: 10px; border-radius: 50%; background: var(--club-text); visibility: hidden; }
+.checks input:checked::after { visibility: visible; }
+.checks input[type="checkbox"]:checked::before { background: var(--club-text); border-color: var(--club-text); }
+.checks input[type="radio"]:checked::before { border-color: var(--club-text); }
+.checks label:hover input:not(:checked):not(:disabled)::before { background: var(--club-tint); }
+.checks input:focus-visible { outline: var(--ring) solid var(--club-text); outline-offset: -9px; } /* hugs the square, 2px clear of it */
 .checks > p, .checks .hint { margin-top: var(--s1); }
 .stack > .setting { margin-top: 0; } /* a choice group inside a form keeps to the form's own gaps */
 .btn:disabled, .btn:disabled:hover { background: var(--hair); border-color: var(--hair); color: var(--ink-2); cursor: not-allowed; }
 .field input:disabled, .field textarea:disabled, .field select:disabled { background-color: var(--hair); border-color: var(--hair); color: var(--ink-2); cursor: not-allowed; }
-.checks input:disabled { background: var(--hair); border-color: var(--hair); cursor: not-allowed; }
+.checks input:disabled { cursor: not-allowed; }
+.checks input:disabled::before { background: var(--hair); border-color: var(--hair); }
 .checks label:has(input:disabled) { color: var(--ink-2); }
-:root[data-contrast="more"] .btn:disabled, :root[data-contrast="more"] .field :disabled, :root[data-contrast="more"] .checks input:disabled {
+:root[data-contrast="more"] .btn:disabled, :root[data-contrast="more"] .field :disabled, :root[data-contrast="more"] .checks input:disabled::before {
   background-color: var(--paper); border-style: dashed; border-color: var(--ink); color: var(--ink-2); }
 @media (prefers-contrast: more) {
-  :root:not([data-contrast="standard"]) .btn:disabled, :root:not([data-contrast="standard"]) .field :disabled, :root:not([data-contrast="standard"]) .checks input:disabled {
+  :root:not([data-contrast="standard"]) .btn:disabled, :root:not([data-contrast="standard"]) .field :disabled, :root:not([data-contrast="standard"]) .checks input:disabled::before {
     background-color: var(--paper); border-style: dashed; border-color: var(--ink); color: var(--ink-2); }
 }
 @media (forced-colors: active) {
   .notice > svg { forced-color-adjust: none; background: Canvas; color: CanvasText; border: 2px solid CanvasText; padding: 2px; } /* no fill here: the cell keeps its edge, the icon and word carry the tone */
   .field select { appearance: auto; background-image: none; padding-right: var(--s3); }
-  .checks input[type="checkbox"], .checks input[type="radio"] { forced-color-adjust: none; border-color: CanvasText; background: Canvas; }
-  .checks input[type="checkbox"]:checked { background: Highlight; border-color: Highlight; }
-  .checks input[type="checkbox"]::before { border-color: HighlightText; }
-  .checks input[type="radio"]:checked { border-color: Highlight; }
-  .checks input[type="radio"]::before { background: Highlight; }
-  .checks input:disabled { border-color: GrayText; }
+  .checks input[type="checkbox"], .checks input[type="radio"] { forced-color-adjust: none; outline-color: CanvasText; }
+  .checks input[type="checkbox"]::before, .checks input[type="radio"]::before { border-color: CanvasText; background: Canvas; }
+  .checks input[type="checkbox"]:checked::before { background: Highlight; border-color: Highlight; }
+  .checks input[type="checkbox"]::after { border-color: HighlightText; }
+  .checks input[type="radio"]:checked::before { border-color: Highlight; }
+  .checks input[type="radio"]::after { background: Highlight; }
+  .checks input:disabled::before { border-color: GrayText; }
   .btn:disabled, .field :disabled { border-style: dashed; color: GrayText; }
 }
 
