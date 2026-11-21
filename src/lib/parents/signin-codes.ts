@@ -521,7 +521,7 @@ export async function refuseCodeWithoutStep(ip: string | null, now = new Date())
  *   the app and the backup codes, so this is what refuses a sign-in whose code was taken before the press and whose
  *   session is made after it, as `code_gone` does for an emailed code.
  * - a passkey, after a password or alone (from checkPasskeySignin(), since SI-7a): its row is still there and the
- *   person's (`passkey_gone` otherwise: removed since, SI-7b, or by the staff reset, SI-9), and no "Sign out everywhere"
+ *   person's (`passkey_gone` otherwise: removed since, SI-7b, by the staff reset, SI-9a, or as one from an earlier address, SI-9b), and no "Sign out everywhere"
  *   since its check (`signed_out_everywhere`, as for the app: the press keeps passkeys). A passkey alone proved no
  *   password, so no `credential` row is read for it (a reset keeps passkeys); `rawEmail` is then the address the
  *   passkey's check read for its person, which must still be theirs.

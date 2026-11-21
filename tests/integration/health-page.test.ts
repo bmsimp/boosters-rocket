@@ -12,7 +12,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, buyout, family, jobRun, qboConnection, qboCustomerType, role, roleAssignment, roleRule, setting, writeQueue } from "@/lib/db/schema";
+import { auditLog, buyout, family, jobRun, parentAuthPasskey, qboConnection, qboCustomerType, role, roleAssignment, roleRule, setting, writeQueue } from "@/lib/db/schema";
 import HealthPage from "@/app/staff/(app)/health/page";
 import QuickBooksSettingsPage from "@/app/staff/(app)/settings/quickbooks/page";
 import QuickBooksSetupPage from "@/app/staff/(app)/settings/quickbooks/setup/page";
@@ -33,6 +33,9 @@ import { noteApiOk } from "@/lib/forms/settings";
 import { MONEY_JOB } from "@/lib/money/run-keys";
 import { DUE_REMINDERS_KEY } from "@/lib/seasons/due-reminders";
 import { BREACH_MARK, markBreachCheck, readBreachMark } from "@/lib/parents/breach-mark";
+import { removeOldAddressPasskeys } from "@/lib/parents/signin-reset";
+import { seedPasskey } from "../helpers/passkey";
+import { seedAuthenticator } from "../helpers/authenticator";
 import { resetDb, seedGuardianInFamily, seedParent, seedStaff, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
 import { connectForms } from "../helpers/forms";
 import { seedBuyout, seedBuyoutRequirement } from "../helpers/buyouts";
@@ -393,6 +396,13 @@ describe("the health page", () => {
     const waiting = await parents();
     expect(waiting).toMatchObject({ state: "attention", word: "Needs attention", fix: { href: "/staff/settings/mail" } });
     expect(waiting.notes).toEqual(["Welcome emails are waiting because mail is failing: 1 person is owed a welcome or a link to choose a password, and the last one the worker tried to send failed. Until a send works, it tries one person a minute instead of five."]);
+    // A passkey from an earlier address beside it (slice SI-9b): both are said, the mail's first, and the fix stays the
+    // mail's, which nothing else can mend.
+    await seedPasskey(owedOne.id, { origin: "https://old.example.org" });
+    const both = await parents();
+    expect(both).toMatchObject({ state: "attention", fix: { href: "/staff/settings/mail" } });
+    expect(both.notes).toEqual([waiting.notes[0], "1 passkey of 1 person was made at an address other than the portal's address now, so it no longer works. An Admin can remove it under Settings, Parent sign-ins."]);
+    await db.delete(parentAuthPasskey);
     // Mail settings saved but not tested: the worker tries nobody, so the note says nothing (the mail line says why).
     const tested = (await getMailStatus()).verifiedHash;
     await patchMailStatus({ verifiedHash: "saved-since-and-not-tested" });
@@ -412,6 +422,32 @@ describe("the health page", () => {
     await seedParentSettings({ ...SIGNINS_ON, welcome: true });
     await markJob(WELCOME_MARK, { counts: { sent: 1, recipientRefused: 0, linkNotInPlace: 0 }, failed: 0 });
     expect(await parents()).toMatchObject({ state: "ok", notes: [], fix: null });
+  });
+
+  it("says when passkeys were made at an address other than the portal's now, with sign-ins on and off, and links to the press (slice SI-9b)", async () => {
+    const parents = async () => line(await healthReport(NOW), "parents");
+    const ana = await seedParent({ name: "Ana", email: "ana@example.com" });
+    const ben = await seedParent({ name: "Ben", email: "ben@example.com" });
+    await seedPasskey(ana.id);
+    // Off, and on: a current passkey is nothing to say.
+    expect(await parents()).toMatchObject({ state: "off", notes: [], fix: { href: "/staff/settings/parents", label: "Open parent sign-ins" } });
+    await seedParentSettings(SIGNINS_ON);
+    expect(await parents()).toMatchObject({ state: "ok", word: "On", notes: [], fix: null });
+    // One from an earlier address.
+    await seedPasskey(ana.id, { origin: "https://old.example.org" });
+    expect(await parents()).toEqual(expect.objectContaining({ state: "attention", word: "Needs attention", fix: { href: "/staff/settings/parents", label: "Open parent sign-ins" },
+      notes: ["1 passkey of 1 person was made at an address other than the portal's address now, so it no longer works. An Admin can remove it under Settings, Parent sign-ins."] }));
+    // More, of more people, one the portal never recorded.
+    await seedPasskey(ben.id, { origin: null }); await seedAuthenticator(ben.id);
+    const two = ["2 passkeys of 2 people were made at an address other than the portal's address now, so they no longer work. An Admin can remove them under Settings, Parent sign-ins."];
+    expect(await parents()).toMatchObject({ state: "attention", notes: two, fix: { href: "/staff/settings/parents" } });
+    // With sign-ins off the line stays off, and says it all the same.
+    await seedParentSettings({ signin: false });
+    expect(await parents()).toMatchObject({ state: "off", word: "Off", notes: two, fix: { href: "/staff/settings/parents", label: "Open parent sign-ins" } });
+    // Removed: nothing to say.
+    await seedParentSettings(SIGNINS_ON);
+    expect((await removeOldAddressPasskeys(2, { actor: { door: "staff", id: null, label: "admin@club.org" }, ip: null })).ok).toBe(true);
+    expect(await parents()).toMatchObject({ state: "ok", word: "On", notes: [], fix: null });
   });
 
   it("says how the password breach check stands: not used yet, working, and a failure the latest word, with why", async () => {

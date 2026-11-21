@@ -94,8 +94,9 @@ const sent = (v: unknown): v is string => typeof v === "string" && v.length <= M
  * the hash run outside any transaction, so nothing is held while the service is asked. Every refusal from (b) on is
  * audited `parent.password.refused`. A reset keeps the person's authenticator app and backup codes (since the sign-in
  * release's slice SI-6a) and their passkeys (since SI-7a): they are the second step, not the first, so a reset by email
- * alone never takes them away, and the next sign-in on a new device asks for them again. Only the staff reset (SI-9)
- * removes them.
+ * alone never takes them away, and the next sign-in on a new device asks for them again. Only the staff reset (SI-9a)
+ * removes them all; an Admin's removal of passkeys made at an earlier address of the portal (SI-9b) removes those, with
+ * the backup codes they leave standing beside nothing.
  */
 export async function choosePasswordFromLink(raw: { purpose: unknown; token: unknown; password: unknown; again: unknown },
   o: { ip: string | null; now?: Date }): Promise<PasswordSetOutcome> {

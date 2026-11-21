@@ -244,6 +244,14 @@ The emails the worker sends the day before each volunteer shift, and 14 and 3 da
     `recipientRefused`, and the worker tries them again a day later, not every fifteen minutes. If two or more are
     refused in one wake and nobody is sent to, the portal takes it for the mail failing and shows this note. Check the
     address with the family; once it is right, **Resend welcome email** on their page sends at once.
+- **"Needs attention"** (or a note on **"Off"**), with "N passkeys of N people were made at an address other than the
+  portal's address now, so they no longer work. An Admin can remove them under Settings, Parent sign-ins." The
+  portal's address (`APP_URL`) has changed since those passkeys were made, or a passkey was added and never finished
+  recording. The sign-in page still asks those parents for them and never emails them a code. First make sure `APP_URL`
+  is the address families use now (a mistyped one would leave every passkey behind); then open **Settings**, **Parent
+  sign-ins** (the line's link) and use **Passkeys from an earlier address**: one press removes them all, and the box
+  says beforehand what each parent meets next ([after a change of the portal's
+  address](resetting-a-parents-sign-in.md#after-a-change-of-the-portals-address)). The note goes once none is left.
 
 ## Password breach check
 

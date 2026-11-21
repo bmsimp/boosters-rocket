@@ -1,11 +1,15 @@
+import { Fragment } from "react";
 import { requireStaffPage } from "@/lib/guards";
+import { can } from "@/lib/permissions/effective";
+import { RESET_PERMISSION, oldAddressPasskeys } from "@/lib/parents/signin-reset";
+import { OLD_PASSKEYS_COPY as OLD } from "@/lib/parents/old-passkeys-copy";
 import { readStoredSettings, type SigninLevel } from "@/lib/parents/settings";
 import { closedForNoStudents, missingForSignins, NO_STUDENTS_IN_SHAPE, setupMailsToOwe, signinCounts, STUDENTS_RULE_NOT_IN_USE, studentsEffect, studentsRuleUsable } from "@/lib/parents/switches";
 import { Notice } from "@/app/components/notice";
 import { SwitchButton } from "./forms";
 import { StateWords } from "@/app/components/state-words";
 import { BackToSettings } from "../back-to-settings";
-import { oweSetupMailsAction, setRequireStudentsAction } from "./actions";
+import { oweSetupMailsAction, removeOldAddressPasskeysAction, setRequireStudentsAction } from "./actions";
 import { sampleChoosePassword } from "@/lib/parents/welcome";
 
 export const metadata = { title: "Parent sign-ins" };
@@ -20,8 +24,11 @@ const LEVEL_WORDS: Record<SigninLevel | "unknown", string> = {
 
 /** What is set, shown plainly, with no inputs (the pattern the QuickBooks page set). Switching anything opens the steps. */
 export default async function ParentSettingsPage() {
-  await requireStaffPage("Settings.Parents.ReadWrite");
-  const [{ settings: s, level }, counts, students, missing, usable, closedEarlier, noPassword] = await Promise.all([readStoredSettings(), signinCounts(), studentsEffect(), missingForSignins(), studentsRuleUsable(), closedForNoStudents(), setupMailsToOwe()]);
+  const ctx = await requireStaffPage("Settings.Parents.ReadWrite");
+  // Passkeys from an earlier address (slice SI-9b): counted and offered only to a holder of the reset's permission.
+  const mayRemoveOld = can(ctx.effective, RESET_PERMISSION);
+  const [{ settings: s, level }, counts, students, missing, usable, closedEarlier, noPassword, old] = await Promise.all([readStoredSettings(), signinCounts(), studentsEffect(), missingForSignins(), studentsRuleUsable(), closedForNoStudents(), setupMailsToOwe(),
+    mayRemoveOld ? oldAddressPasskeys() : null]);
   // The press's mail, as the worker writes it, for the Admin to read before pressing.
   const sample = s.signin && s.welcome && noPassword > 0 ? await sampleChoosePassword("parent@example.org") : null;
   return (
@@ -46,6 +53,21 @@ export default async function ParentSettingsPage() {
         {/* "Change" too while the level can't be read (slice SI-10b): the level's words send the Admin there by that name. */}
         <p><a className="btn" href="/staff/settings/parents/setup">{s.signin || level === null ? "Change" : "Set up"}</a></p>
       </section>
+
+      {/* Passkeys made at an address other than the portal's now (the sign-in release, slice SI-9b): they no longer
+          work, yet the portal still asks their holders for them. Drawn only while there are any, for a holder of the
+          reset's permission; the press sends the count shown, which the work checks again under its locks. */}
+      {old && old.passkeys > 0 && (
+        <section className="box" aria-labelledby="ps-old-passkeys-h"><h2 id="ps-old-passkeys-h">{OLD.heading}</h2>
+          <p>{OLD.lede(old.origin, old.passkeys, old.people)}</p>
+          <dl className="details">
+            {old.byOrigin.map((g) => <Fragment key={g.origin ?? ""}><dt>{g.origin ?? OLD.unrecorded}</dt><dd>{OLD.count(g.passkeys)}</dd></Fragment>)}
+          </dl>
+          <Notice tone="warning" live="none">{OLD.warning(level === "strict", old.leftWithNoFactor)}</Notice>
+          <p>{OLD.makeSure(old.origin)}</p>
+          <SwitchButton label={OLD.button(old.passkeys)} pendingLabel={OLD.pending} act={removeOldAddressPasskeysAction.bind(null, old.passkeys)} />
+        </section>
+      )}
 
       {/* People welcomed before parents signed in with a password have none, and nothing else emails them a link
           (the sign-in release, slice SI-4). Shown only while an email can go and there is anyone to email. */}
