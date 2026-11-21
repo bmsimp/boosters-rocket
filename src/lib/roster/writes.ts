@@ -1267,19 +1267,27 @@ export function coverUnder<C extends Pick<Cust, "qboId" | "displayName" | "activ
 export const familySendSeal = (familyQboId: string, underIds: readonly string[]): string[] => [familyQboId, ...[...underIds].sort()];
 /**
  * Said, by the screen and by the press, when a family's inactive status isn't sent from its difference because the
- * portal's value of someone it would make inactive in the books isn't inactive (slice M5b): a student record of the
- * family active in the portal (`own`), or a customer under it linked to an active student record of another family
- * (`elsewhere`). Names in the portal's words.
+ * portal's value of someone it covers isn't inactive (slice M5b): a student record of the family active in the portal
+ * (`own`, whether or not QuickBooks has them under the family), or a customer under it linked to an active student
+ * record of another family (`elsewhere`) or of none (`noFamily`). Names in the portal's words. Each says only what can
+ * be done: a student of a family inactive in the portal can't be made inactive on its page (deactivateHolding() and
+ * changeInPortal() refuse while the family is inactive), so the way on is to take the books' value first; a student in
+ * no family has no family row to send their place from.
  */
-export function familySendStudentsWords(own: readonly string[], elsewhere: readonly string[]): string {
+export function familySendStudentsWords(own: readonly string[], elsewhere: readonly string[], noFamily: readonly string[] = []): string {
   const parts: string[] = [];
   if (own.length) {
-    parts.push(`${listed([...own])} ${own.length === 1 ? "is" : "are"} active in the portal, and QuickBooks would make them inactive with the family, so its inactive status isn't sent.`
-      + " Make them inactive on the family's page first, or take the books' value instead.");
+    parts.push(`${listed([...own])} ${own.length === 1 ? "is" : "are"} active in the portal, so the family's inactive status isn't sent: the portal's value of them isn't inactive.`
+      + " While the family is inactive in the portal they can't be made inactive on its page, so take the books' value instead, which makes the family active again here;"
+      + " then, to have it inactive in the books, make them inactive on the family's page, and the family after them.");
   }
   if (elsewhere.length) {
     parts.push(`QuickBooks has ${listed([...elsewhere])} under this family, and the portal has them active in another family, so the family's inactive status isn't sent: QuickBooks would make them inactive with it.`
       + ` Send ${elsewhere.length === 1 ? "their" : "each one's"} family to the books first, from the difference on that family's row.`);
+  }
+  if (noFamily.length) {
+    parts.push(`QuickBooks has ${listed([...noFamily])} under this family, and the portal has them active and in no family, so the family's inactive status isn't sent: QuickBooks would make them inactive with it.`
+      + " It can be sent once the portal has them inactive, or has them in a family whose place for them has reached the books.");
   }
   return parts.join(" ");
 }
@@ -1324,7 +1332,8 @@ type FamilyFrom = "page" | "difference";
 /**
  * How the family action ran, as its one `roster.family.deactivate` row says it, given to a caller that asks (the
  * difference's send, for its own row): the outcome and code, whom QuickBooks took the make-inactive of (`made`), whose
- * answer was lost (`maybe`), who it showed inactive already, everyone it covered, and the family's customer.
+ * answer was lost (`maybe`), who it showed inactive already (at its first reads, or by a stale answer's live read during
+ * the run, whether it then stopped or not), everyone it covered, and the family's customer.
  */
 export type FamilyRan = { outcome: "done" | "stopped" | "refused"; code: string | null; made: string[]; maybe: string[]; alreadyInactive: string[]; covered: string[]; familyQboId: string };
 /**
@@ -1387,10 +1396,11 @@ async function prepareFamily(familyId: AppFamilyId, stamp: string, rosterTag: st
       const ownActive = await tx.select({ name: student.name }).from(student).where(and(eq(student.familyId, familyId), eq(student.active, true)));
       const linked = await tx.select({ name: student.name, familyId: student.familyId }).from(accountingLink).innerJoin(student, eq(student.id, accountingLink.studentId))
         .where(and(eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, source), inArray(accountingLink.customerId, ids), eq(student.active, true)));
-      const elsewhere = linked.filter((s) => s.familyId === null || String(s.familyId) !== String(familyId));
-      if (ownActive.length || elsewhere.length) {
+      const elsewhere = linked.filter((s) => s.familyId !== null && String(s.familyId) !== String(familyId));
+      const noFamily = linked.filter((s) => s.familyId === null);
+      if (ownActive.length || elsewhere.length || noFamily.length) {
         const names = (rows: { name: string | null }[]) => rows.map((s) => recordNameWords(s.name, "student")).sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
-        return no(familySendStudentsWords(names(ownActive), names(elsewhere)));
+        return no(familySendStudentsWords(names(ownActive), names(elsewhere), names(noFamily)));
       }
     }
     const waiting = await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(inArray(writeQueue.targetQboId, ids), inArray(writeQueue.state, ["waiting", "stuck"]), blocksOthers)).limit(1);
@@ -1528,10 +1538,16 @@ async function familyInactiveHolding(familyId: AppFamilyId, stamp: string, roste
   if (!p.ok) return { result: p.result, changed: false };
   const familyQboId = p.familyQboId;
   const again = FAMILY_AGAIN[ask.from];
-  const summary = async (outcome: "done" | "stopped" | "refused", code: string | null, made: string[], notMade: string[], more: { maybe?: string[]; alreadyInactive?: string[] } = {}) => {
+  // `followedLate`: whoever a stale answer's live read showed inactive during the run, told to the difference's send
+  // (so a kept make-inactive of theirs is closed, QuickBooks having them inactive) and not written into the family's row,
+  // which says on a stop what it said before slice M5b.
+  const summary = async (outcome: "done" | "stopped" | "refused", code: string | null, made: string[], notMade: string[],
+    more: { maybe?: string[]; alreadyInactive?: string[]; followedLate?: string[] } = {}) => {
     await writeAudit({ actor: o.actor, action: "roster.family.deactivate", permission: o.permission, ip: o.ip, targetType: "qbo_customer", targetId: familyQboId,
       after: { outcome, ...(code ? { code: code.slice(0, 40) } : {}), made, notMade, ...(more.maybe?.length ? { maybe: more.maybe } : {}), ...(more.alreadyInactive?.length ? { alreadyInactive: more.alreadyInactive } : {}) } });
-    if (ask.from === "difference") ask.report({ outcome, code, made, maybe: more.maybe ?? [], alreadyInactive: more.alreadyInactive ?? [], covered: ids, familyQboId });
+    if (ask.from === "difference") {
+      ask.report({ outcome, code, made, maybe: more.maybe ?? [], alreadyInactive: [...new Set([...(more.alreadyInactive ?? []), ...(more.followedLate ?? [])])], covered: ids, familyQboId });
+    }
   };
   const ids = p.steps.map((s) => s.write.qboId);
   const how: DeactivateHow = { mayWait: false, name: p.familyName, showAmounts: o.showAmounts === true, actor: o.actor, ip: o.ip, permission: o.permission };
@@ -1599,7 +1615,7 @@ async function familyInactiveHolding(familyId: AppFamilyId, stamp: string, roste
     const step = steps[i]!;
     const after = steps.slice(i + 1).filter((s) => s.write.role !== "family").map((s) => s.name);
     await summary("stopped", code, made.map((s) => s.write.qboId), steps.slice(why.maybe ? i + 1 : i).map((s) => s.write.qboId),
-      { maybe: why.maybe ? [step.write.qboId] : [], alreadyInactive });
+      { maybe: why.maybe ? [step.write.qboId] : [], alreadyInactive, followedLate: followedLate.map((s) => s.write.qboId) });
     const errors = [
       made.length ? `Made inactive in QuickBooks: ${listed(made.map((s) => s.name))}.` : "Nobody was made inactive.",
       ...lateWords(),
@@ -4583,12 +4599,14 @@ export type QueueAsk = Exclude<SendAsk, { field: "inactive" }>;
 export type SendReady = Extract<Awaited<ReturnType<typeof readyToSend>>, { ok: true }>;
 /**
  * What queueSendIn() answers: the item queued, with what the at-once try needs (a place: whom it moves, to which family,
- * in words), or the refusal, nothing saved. `busy`: with `lock: "try"`, someone held the record's "being sent" lock.
+ * in words), or the refusal, nothing saved. `busy`, a refusal for something under way at this moment: `record`, with
+ * `lock: "try"`, someone held the record's "being sent" lock; `family`, a place's family, or the one the books have the
+ * student under, has its "being sent" or "being made" lock held (moveRefusals(): FAMILY_BUSY, FAMILY_MAKING_NOW).
  */
 export type QueuedSend =
   | { ok: true; field: "name"; write: RenameWrite; item: QueueRow }
   | { ok: true; field: "place"; write: MoveWrite; item: QueueRow; who: string; to: string; toFamilyId: AppFamilyId }
-  | { ok: false; result: WriteResult; busy?: true };
+  | { ok: false; result: WriteResult; busy?: "record" | "family" };
 type QueueHow = { pressId?: string; lock: "held" | "try" };
 const bulkOf = (how: QueueHow) => (how.pressId === undefined ? {} : { bulk: how.pressId });
 
@@ -4608,7 +4626,7 @@ export async function queueSendIn(tx: Tx, ready: SendReady, ask: QueueAsk, o: Wr
   const kind = ask.field === "place" ? "student" : ask.kind;
   if (how.lock === "try") {
     const [lock] = (await tx.execute(sql`select pg_try_advisory_xact_lock(${sql.raw(String(SENDING_LOCK))}, hashtext(${recordId}::text)) as locked`)) as unknown as { locked: boolean }[];
-    if (!lock?.locked) return { ok: false, result: refuse(kind === "student" ? STUDENT_BEING_CHANGED : FAMILY_BEING_CHANGED), busy: true };
+    if (!lock?.locked) return { ok: false, result: refuse(kind === "student" ? STUDENT_BEING_CHANGED : FAMILY_BEING_CHANGED), busy: "record" };
   }
   return ask.field === "name" ? queueNameIn(tx, ready, kind, recordId, ask.stamp, o, how) : queuePlaceIn(tx, ready, asAppStudentId(recordId), ask.stamp, o, how);
 }
@@ -4674,7 +4692,12 @@ async function queuePlaceIn(tx: Tx, ready: SendReady, studentId: AppStudentId, s
   // never makes this student inactive under the family the move sends them to.
   const families = fromFamilyId === null ? [f.id] : [f.id, fromFamilyId];
   const refusals = await moveRefusals(tx, families, { locks: true });
-  for (const id of families) { const why = refusals.get(String(id)); if (why) return no(why); }
+  for (const id of families) {
+    const why = refusals.get(String(id));
+    // A family's lock held is something under way at this moment, said so by the bulk (`busy`); the words are the move's.
+    if (why === FAMILY_BUSY || why === FAMILY_MAKING_NOW) return { ok: false, result: refuse(why), busy: "family" };
+    if (why) return no(why);
+  }
   if (await studentCreateWaiting(tx, s.id)) return no(STUDENT_WAITING);
   for (const customer of [studentCustomer, familyCustomer, c.parentQboId]) if (customer !== null && (await waitingForCustomer(tx, customer))) return no(WRITE_COPY.waiting);
   if (!sendStampHolds("place", String(s.id), studentCustomer, [studentCustomer, c.parentQboId ?? "", String(f.id), familyCustomer], stamp)) return no(SEND_CHANGED);

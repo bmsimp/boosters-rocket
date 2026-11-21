@@ -11,6 +11,14 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 type Msg = { to: string; subject: string; text: string; html: string };
 const mail = vi.hoisted(() => ({ outbox: [] as Msg[] }));
 vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", buildSender: async () => async (m: Msg) => { mail.outbox.push(m); } }));
+// What the page hands each LinkPress, the client component: every prop is sent to the browser, so each is recorded here
+// and drawn by the real component.
+const pressProps = vi.hoisted(() => ({ seen: [] as Record<string, unknown>[] }));
+vi.mock("@/app/staff/(app)/links/link-press", async (original) => {
+  const m = await original<typeof import("@/app/staff/(app)/links/link-press")>();
+  const { createElement } = await import("react");
+  return { ...m, LinkPress: (p: Parameters<typeof m.LinkPress>[0]) => { pressProps.seen.push({ ...p }); return createElement(m.LinkPress, p); } };
+});
 
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
@@ -83,7 +91,7 @@ const listOf = (whole: string) => { const at = whole.indexOf('id="links-list-h"'
 
 let rivera: AppFamilyId, chen: AppFamilyId, park: AppFamilyId, oak: AppFamilyId, zoe: AppStudentId, sam: AppStudentId, max: AppStudentId;
 beforeEach(async () => {
-  await resetDb(); stub.reset(); mail.outbox = [];
+  await resetDb(); stub.reset(); mail.outbox = []; pressProps.seen.length = 0;
   await seedParentSettings(SIGNINS_ON);
   await seedWorkingMail();
   stub.quirks.balances = true;
@@ -122,7 +130,9 @@ describe("Send the app's for all", () => {
     stub.calls.length = 0;
     const before = Date.now();
     const r = await pressWith(offer);
-    expect(r).toEqual({ ok: true, message: sentAllWords({ names: 2, places: 2, later: 0, passedOver: { inactive: 1, booksInactive: 1 } }) });
+    expect(r).toEqual({ ok: true, message: sentAllWords({ names: 2, places: 2, later: 0, passedOver: { inactive: 1, booksInactive: 1 }, inactiveListed: false }) });
+    // No inactive family is listed, so none is spoken of.
+    expect(r.ok && r.message).not.toContain("inactive families");
     expect(r.ok && r.message).toContain("Queued for QuickBooks: 2 names and 2 students' families.");
     expect(r.ok && r.message).toContain("Passed over: 1 make-inactive");
     // Nothing went to QuickBooks at the press: no write request at all.
@@ -195,6 +205,54 @@ describe("Send the app's for all", () => {
     expect(writes()).toEqual([]);
   });
 
+  it("the stamp seals which sends the list showed and its filter: as many sends, but others, or another filter showing the same ones, are refused", async () => {
+    await fourAndTwo();
+    const offer = await offerFor();
+    // Another filter showing the same four: its own stamp, so the page's doesn't hold for it.
+    const withDifferences = (await loadAccountingLinks()).sendAll({ status: "with_differences", q: "" })!;
+    expect(withDifferences.count).toBe(offer.count);
+    expect(withDifferences.stamp).not.toBe(offer.stamp);
+    expect(await pressWith(offer, { status: "with_differences", q: "" })).toEqual({ ok: false, errors: [SEND_ALL_COPY.changed] });
+    // Oak renamed back in the books and Park renamed there since the page: one send gone and another come, still four.
+    changeInBooks("80", { DisplayName: "Oak Family", SyncToken: "2" });
+    changeInBooks("70", { DisplayName: "Park Household", SyncToken: "1" });
+    await readAgain();
+    expect((await offerFor()).count).toBe(offer.count);
+    expect(await pressWith(offer)).toEqual({ ok: false, errors: [SEND_ALL_COPY.changed] });
+    expect(await items()).toEqual([]);
+    expect(await sends()).toEqual([]);
+    expect(await auditsOf("accounting.difference.send_all")).toEqual([]);
+  });
+
+  it("a family a student's move goes out of being changed at this moment (its lock held): refused, nothing queued, said as busy", async () => {
+    await fourAndTwo();
+    const offer = await offerFor();
+    // Park's "being sent" lock held, as a make-inactive of Park on its page holds it: Sam's move out of Park can't be queued.
+    expect(await holding(SENDING_LOCK, String(park), () => pressWith(offer))).toEqual({ ok: false, errors: [SEND_ALL_COPY.familyBusy("Sam Chen's family")] });
+    // Chen's, the family it goes into, likewise.
+    expect(await holding(SENDING_LOCK, String(chen), () => pressWith(offer))).toEqual({ ok: false, errors: [SEND_ALL_COPY.familyBusy("Sam Chen's family")] });
+    expect(await items()).toEqual([]);
+    expect(await sends()).toEqual([]);
+  });
+
+  it("two students sent into one family go in one press, and the worker sends both", async () => {
+    // Leo and Zoe, both Riveras, put at the top of the tree in the books.
+    changeInBooks("12", { ParentRef: undefined, Job: false, SyncToken: "1" });
+    changeInBooks("13", { ParentRef: undefined, Job: false, SyncToken: "1" });
+    await readAgain();
+    const offer = await offerFor();
+    expect(offer).toMatchObject({ count: 2, later: 0 });
+    const r = await pressWith(offer);
+    expect(r).toMatchObject({ ok: true });
+    expect(r.ok && r.message).toContain("Queued for QuickBooks: 2 students' families.");
+    expect(r.ok && r.message).not.toContain("waits");
+    expect((await items()).map((q) => `${q.request.op} ${q.targetQboId}`).sort()).toEqual(["move 12", "move 13"]);
+    await runWriteQueue(new Date(Date.now() + SAVED_LEASE_MS + 60_000));
+    expect(cust("12")).toMatchObject({ ParentRef: { value: "10" } });
+    expect(cust("13")).toMatchObject({ ParentRef: { value: "10" } });
+    expect((await items()).map((q) => q.state)).toEqual(["done", "done"]);
+  });
+
   it("one record's lock held (a send of it under way): refused, nothing queued, said in words", async () => {
     await fourAndTwo();
     const offer = await offerFor();
@@ -244,6 +302,16 @@ describe("Send the app's for all", () => {
     expect(await pressWith({ count: SEND_ALL_MAX + 1, stamp: "s".repeat(22) })).toEqual({ ok: false, errors: [SEND_ALL_COPY.overCap] });
     expect(await sendAllAction("", "", SEND_ALL_MAX + 1, tag, "s".repeat(22))).toEqual({ ok: false, errors: [SEND_ALL_COPY.overCap] });
     expect(await items()).toEqual([]);
+    // One of them renamed back in the books: exactly SEND_ALL_MAX, the press drawn with its count and taken.
+    changeInBooks(many[0]!.Id, { DisplayName: many[0]!.DisplayName, SyncToken: "2" });
+    await readAgain();
+    const atCap = await offerFor();
+    expect(atCap.count).toBe(SEND_ALL_MAX);
+    expect(atCap.stamp).not.toBeNull();
+    expect(listOf(await renderPage(AccountingLinksPage))).toContain(`Send the app's for all (${SEND_ALL_MAX})`);
+    expect(await pressWith(atCap)).toMatchObject({ ok: true });
+    expect((await items()).filter((q) => q.state === "waiting")).toHaveLength(SEND_ALL_MAX);
+    expect(writes()).toEqual([]);
   });
 });
 
@@ -303,8 +371,17 @@ describe("who may press it, and the page", () => {
     expect(list).toContain(`Send the app's for all (4)<span class="visually-hidden">: Send the app's for all</span>`);
     expect(list).toContain("It passes over 1 make-inactive this list shows, as each reads a balance in QuickBooks first: send it on its own row.");
     expect(list).toContain("It passes over 1 difference whose customer QuickBooks has inactive: the portal sends nothing there, and never makes a customer active.");
-    expect(list).toContain("The inactive families listed after the families aren't part of it.");
+    // No inactive family is listed, so none is spoken of.
+    expect(list).not.toContain("The inactive families listed after the families");
     expect(whole).not.toContain(offer.stamp!);
+    // Every prop each press is handed is words or its bound action: no stamp, offer, seal or id goes to the browser as a prop.
+    expect(pressProps.seen.length).toBeGreaterThan(0);
+    for (const p of pressProps.seen) {
+      expect(Object.keys(p).sort()).toEqual(["about", "act", "busy", "label"]);
+      for (const k of ["about", "busy", "label"] as const) expect(typeof p[k]).toBe("string");
+      expect(typeof p.act).toBe("function");
+    }
+    expect(pressProps.seen.some((p) => p.label === "Send the app's for all (4)")).toBe(true);
     expect(whole).toContain("Only three things here send anything to the books: Send the app&#x27;s to QuickBooks, Send the app&#x27;s for all, and a student&#x27;s move taken from the books");
     // A search narrows it, by the list's own rule.
     expect(listOf(await renderPage(AccountingLinksPage, { searchParams: { q: "oak" } }))).toContain("Send the app's for all (1)");
@@ -312,6 +389,13 @@ describe("who may press it, and the page", () => {
     asStaff(linker);
     const theirs = listOf(await renderPage(AccountingLinksPage));
     expect(theirs).not.toContain("Send the app's for all");
+    // Oak made inactive in the portal, its customer active in the books: listed after the families, and so spoken of.
+    await db.update(student).set({ active: false }).where(eq(student.familyId, oak));
+    await db.update(family).set({ active: false }).where(eq(family.id, oak));
+    asStaff(sender);
+    const now = await offerFor();
+    expect(now.inactiveListed).toBe(true);
+    expect(listOf(await renderPage(AccountingLinksPage))).toContain("The inactive families listed after the families aren't part of it.");
     // Drawing the page queues nothing.
     expect(await items()).toEqual([]);
     expect(writes()).toEqual([]);

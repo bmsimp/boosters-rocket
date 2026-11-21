@@ -651,6 +651,7 @@ export const SEND_ALL_COPY = {
   changed: "The list changed since this page was drawn, so nothing was sent. Look at it again.",
   overCap: `That is more than ${SEND_ALL_MAX} differences for one press, so nothing was sent. Narrow the list with the search or a status, then press again.`,
   busy: (about: string) => `${about}, one of the differences this list shows, is being changed in the books at this moment, so nothing was sent. Try again in a minute: the list is shown again as it is now.`,
+  familyBusy: (about: string) => `${about}, one of the differences this list shows, can't be queued at this moment: a family it moves them into or out of is being changed or made in QuickBooks just now, so nothing was sent. Try again in a minute: the list is shown again as it is now.`,
   sameName: (name: string) => `Two of the names this list would send are both “${name}”, and every name in QuickBooks must be different, so nothing was sent. Rename one of the records on its page, or narrow the list so only one of them is in it, then press again.`,
 } as const;
 
@@ -663,16 +664,17 @@ class SendAllRefused extends Error {
  * What staff read after Send the app's for all, each sentence true by the code: how many names and students' families
  * were queued; that the queue's worker sends each within a few minutes, over the books' value the list showed, holding
  * back and keeping one QuickBooks has changed since; that Reconciliation shows any that waits or is kept; what was left
- * for a later press and what was passed over, and why; and that the inactive families' list isn't in it.
+ * for a later press and what was passed over, and why; and, when the inactive families' list has rows
+ * (`inactiveListed`), that it isn't in it.
  */
-export function sentAllWords(s: { names: number; places: number; later: number; passedOver: { inactive: number; booksInactive: number } }): string {
+export function sentAllWords(s: { names: number; places: number; later: number; passedOver: { inactive: number; booksInactive: number }; inactiveListed: boolean }): string {
   const queued = [s.names ? plural(s.names, "name", "names") : null, s.places ? plural(s.places, "student's family", "students' families") : null].filter((x): x is string => x !== null);
   const parts = [`Queued for QuickBooks: ${queued.join(" and ")}.`,
-    "The portal sends each within a few minutes, over the books' value this list showed: one QuickBooks has changed since is held back and kept, never sent over. The Reconciliation page shows any that waits or is kept until then."];
+    "The portal sends each within a few minutes, over the books' value this list showed: one QuickBooks has changed since is held back and kept, never sent over. The Reconciliation page shows any that waits or is kept."];
   if (s.later > 0) parts.push(`${s.later === 1 ? "One more difference waits" : `${s.later} more differences wait`} for a change queued now to reach QuickBooks first, as ${s.later === 1 ? "it reads" : "they read"} the same customer: press again once it has.`);
   if (s.passedOver.inactive > 0) parts.push(`Passed over: ${plural(s.passedOver.inactive, "make-inactive", "make-inactives")}, as each reads a balance first: send ${s.passedOver.inactive === 1 ? "it" : "each"} on its own row.`);
   if (s.passedOver.booksInactive > 0) parts.push(`Passed over: ${plural(s.passedOver.booksInactive, "difference whose customer QuickBooks has inactive", "differences whose customer QuickBooks has inactive")}: the portal sends nothing there, and never makes a customer active.`);
-  parts.push("The inactive families listed after the families aren't part of this.");
+  if (s.inactiveListed) parts.push("The inactive families listed after the families aren't part of this.");
   return parts.join(" ");
 }
 
@@ -689,7 +691,8 @@ export function sentAllWords(s: { names: number; places: number; later: number; 
  * read the queue again in this transaction) and must be as many, at most SEND_ALL_MAX, and seal to the same stamp. Then,
  * in the list's order, each send's in-transaction half (queueSendIn(), the single send's own checks, with the record's
  * "being sent" lock tried, never waited for). All or nothing: any refusal refuses the whole press, keeping nothing, in
- * its own words (a record being changed at this moment, two names alike) or as a list that changed. One
+ * its own words (a record being changed at this moment, or a family a student's move goes into or out of: `busy`; two
+ * names alike) or as a list that changed. One
  * `accounting.difference.send` row per difference (with `bulk`, the press's id, and `queueId`) and one
  * `accounting.difference.send_all` row, in the transaction. It never makes anything inactive, nor active.
  */
@@ -714,7 +717,8 @@ export async function sendAllDifferences(raw: { status: unknown; q: unknown; cou
         const r = await queueSendIn(tx, ready, askOf(s), o, { pressId, lock: "try" });
         const name = s.field === "name" ? s.seal.value[1]! : null;
         if (!r.ok) {
-          if (r.busy) throw new SendAllRefused(SEND_ALL_COPY.busy(s.about));
+          if (r.busy === "record") throw new SendAllRefused(SEND_ALL_COPY.busy(s.about));
+          if (r.busy === "family") throw new SendAllRefused(SEND_ALL_COPY.familyBusy(s.about));
           throw new SendAllRefused(name !== null && names.has(nameKey(name)) ? SEND_ALL_COPY.sameName(name) : SEND_ALL_COPY.changed);
         }
         if (name !== null) names.add(nameKey(name));
@@ -723,7 +727,7 @@ export async function sendAllDifferences(raw: { status: unknown; q: unknown; cou
       await writeAudit({ actor: o.actor, action: "accounting.difference.send_all", permission: o.permission, ip: o.ip, targetType: "accounting_difference", targetId: pressId,
         after: { pressId, count: shown.sends.length, names: shown.sends.length - placed, places: placed, passedOver: shown.passedOver, later: shown.later.length,
           status: filter.status, searched: filter.q !== "", realmId: ready.source } }, tx);
-      return { ok: true, message: sentAllWords({ names: shown.sends.length - placed, places: placed, later: shown.later.length, passedOver: shown.passedOver }) };
+      return { ok: true, message: sentAllWords({ names: shown.sends.length - placed, places: placed, later: shown.later.length, passedOver: shown.passedOver, inactiveListed: shown.inactiveListed }) };
     });
   } catch (e) {
     if (e instanceof SendAllRefused) return no(e.words);

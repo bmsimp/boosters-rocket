@@ -372,7 +372,7 @@ function SendAllPress({ offer, filter, tag }: { offer: SendAllOffer; filter: Lin
     offer.later > 0 ? `${offer.later === 1 ? "One more difference waits" : `${offer.later} more differences wait`} for a change this press queues to reach QuickBooks first, as ${offer.later === 1 ? "it reads" : "they read"} the same customer: press again once it has.` : null,
   ].filter((x): x is string => x !== null);
   const notes = said.length === 0 ? null : (
-    <Notice tone="info" live="none">Send the app&apos;s for all sends only names and students&apos; families. {said.join(" ")} The inactive families listed after the families aren&apos;t part of it.</Notice>
+    <Notice tone="info" live="none">Send the app&apos;s for all sends only names and students&apos; families. {said.join(" ")}{offer.inactiveListed && " The inactive families listed after the families aren't part of it."}</Notice>
   );
   if (offer.count === 0) return notes;
   if (offer.stamp === null) {
@@ -382,7 +382,7 @@ function SendAllPress({ offer, filter, tag }: { offer: SendAllOffer; filter: Lin
     <div className="stack">
       {notes}
       <p>Send the app&apos;s for all queues the portal&apos;s value of each of the {plural(offer.count, "name and student's family", "names and students' families")} this list shows, over the books&apos; value its row shows, each as its row&apos;s own Send would.
-        Nothing is sent at the press: the portal sends each within a few minutes, and one QuickBooks has changed since this page is held back and kept, never sent over. The Reconciliation page shows any that waits or is kept.
+        Nothing is sent at the press: the portal sends each within a few minutes, and one QuickBooks has changed since this page was drawn is held back and kept, never sent over. The Reconciliation page shows any that waits or is kept.
         Only what this filter shows now is queued: if the list has changed by the time you press, nothing is queued and it is shown again.</p>
       <div className="row-actions">
         <LinkPress label={`Send the app's for all (${offer.count})`} busy="Queueing…" about="Send the app's for all"
@@ -509,7 +509,7 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
           A family with no link can be linked here, to its suggestion or a customer you pick, or left unlinked. Only three things here send anything to the books: Send the app&apos;s to QuickBooks, Send the app&apos;s for all, and a student&apos;s move taken from the books, which voids an unpaid volunteer buy-out invoice of theirs there.
           For a family whose link stands, it also lists where the portal and the books differ. A name, a record the books have inactive or active, or the family the books have a student under can be taken into the portal with Take QuickBooks&apos; into the app, which changes only the portal&apos;s records, except that a student&apos;s move voids an unpaid volunteer buy-out invoice of theirs in the books, as any move does.
           A name, the family a student is in, or a student or member inactive in the portal whose customer the books have active can instead be sent to the books with Send the app&apos;s to QuickBooks, by someone who may also change families: it replaces the books&apos; value with the portal&apos;s, and a make-inactive reads the balance first and sends nothing while there is any. Every other difference is only shown.
-          Send the app&apos;s for all, above the list, queues every name and student&apos;s family the list shows, up to {SEND_ALL_MAX} at once, for the portal to send within a few minutes; it passes over every make-inactive, which is sent on its own row.
+          Send the app&apos;s for all, above the list, queues every name and student&apos;s family the list shows, up to {SEND_ALL_MAX} at once, for the portal to send within a few minutes, but for one that must wait for another change queued by the same press (a family&apos;s name, then a student&apos;s move into or out of it), which it leaves for the next press and says so; it passes over every make-inactive, which is sent on its own row.
           A linked family inactive in the portal whose customer the books have active is listed after the families, and made active again the same way, but its guardians sign in to it only once someone who may change families lets them in, on its page. It can instead be made inactive in the books with everyone under it, on its row, by the balance rule, deepest first and the family last.</p>
         <LinkAnswersShown />
 

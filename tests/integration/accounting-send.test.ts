@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
-import { asStaff, renderPage } from "../helpers/signed-in";
+import { asStaff, renderPage, revalidatedPaths } from "../helpers/signed-in";
 
 // Every request goes to the QuickBooks stub, never Intuit.
 const stubBase = vi.hoisted(() => ({ url: "" }));
@@ -22,7 +22,7 @@ import { LINK_COPY } from "@/lib/accounting/link-writes";
 import { sendStamp } from "@/lib/accounting/stamp";
 import { auditPage, parseAuditFilters } from "@/lib/audit/query";
 import { refreshRoster } from "@/lib/roster/refresh";
-import { FAMILY_BEING_CHANGED, FAMILY_BUSY, familySendStudentsWords, SEND_CHANGED, SEND_FAMILY_NOT_LINKED, SENDING_LOCK, sendNameQueuedWords, sendNameTakenWords, sendToBooks, STALE_TWICE, WRITE_COPY } from "@/lib/roster/writes";
+import { FAMILY_BEING_CHANGED, FAMILY_BUSY, familySendStudentsWords, MOVE_PENDING, SEND_CHANGED, SEND_FAMILY_NOT_LINKED, SENDING_LOCK, sendNameQueuedWords, sendNameTakenWords, sendToBooks, STALE_TWICE, WRITE_COPY } from "@/lib/roster/writes";
 import { sendDifferenceAction } from "@/app/staff/(app)/links/actions";
 import AccountingLinksPage from "@/app/staff/(app)/links/page";
 import { resetDb, seedWorkingMail } from "../helpers/db";
@@ -812,6 +812,27 @@ describe("a layered family inactive in the portal, made inactive in the books wi
     expect(told.ok ? "" : told.errors.join(" ")).toContain("$25.00");
     expect(told).not.toHaveProperty("changed");
     expect(posts()).toEqual([]);
+    // Nothing changed anywhere: only the links page is drawn again, not the layout.
+    expect(revalidatedPaths()).not.toContain("/");
+  });
+
+  it("an answer lost part way, through the press: stopped, the lost step held on the queue, the send row `queued`, and the pages drawn again on `changed`", async () => {
+    const row = await offerNow();
+    // Leo's make-inactive reaches QuickBooks, which makes him inactive, and its answer never comes back.
+    stub.onApiRequest = (c) => { stub.loseUpdateAnswer = c.method === "POST" && /"Id":"12"/.test(c.body); };
+    stub.calls.length = 0;
+    asStaff(sender);
+    const told = await sendDifferenceAction("inactive", "family", row.send!.recordId, tag, row.send!.stamp);
+    stub.onApiRequest = null; stub.loseUpdateAnswer = false;
+    expect(told.ok).toBe(false);
+    expect(told.ok ? [] : told.errors[0]).toBe("Made inactive in QuickBooks: Ana Rivera.");
+    expect(told).not.toHaveProperty("changed");
+    expect(posts().map((b) => b.Id)).toEqual(["11", "12"]);
+    expect(await items()).toEqual([expect.objectContaining({ state: "waiting", sent: true, targetQboId: "12" })]);
+    expect(await familyRuns()).toEqual([expect.objectContaining({ after: expect.objectContaining({ outcome: "stopped", made: ["11"], maybe: ["12"] }) })]);
+    expect(await sends()).toEqual([expect.objectContaining({ after: expect.objectContaining({ outcome: "queued", code: "unreachable" }) })]);
+    // Ana was made inactive in the books: the layout is drawn again (`changed`), though the press didn't go through.
+    expect(revalidatedPaths()).toContain("/");
   });
 
   it("a balance that can't be read stops it, with nothing sent", async () => {
@@ -864,6 +885,15 @@ describe("a layered family inactive in the portal, made inactive in the books wi
     const zoeElsewhere = familySendStudentsWords([], ["Zoe Rivera"]);
     expect(await offerNow()).toMatchObject({ send: null, sendNote: zoeElsewhere });
     expect(await pressWith("inactive", "family", String(rivera), stamp)).toMatchObject({ ok: false, errors: [zoeElsewhere] });
+    // Zoe active and in no family in the portal: no family row to send her place from, so said apart.
+    await db.update(student).set({ familyId: null }).where(eq(student.id, zoe));
+    const zoeNowhere = familySendStudentsWords([], [], ["Zoe Rivera"]);
+    expect(zoeNowhere).not.toContain("that family's row");
+    expect(await offerNow()).toMatchObject({ send: null, sendNote: zoeNowhere });
+    expect(await pressWith("inactive", "family", String(rivera), stamp)).toMatchObject({ ok: false, errors: [zoeNowhere] });
+    // The words for a student of the family never send staff to a press the family's page refuses while it is inactive.
+    expect(leoActive).not.toContain("first, or take");
+    expect(leoActive).toContain("take the books' value instead");
     expect(posts()).toEqual([]);
     expect(await sends()).toEqual([]);
     expect(await familyRuns()).toEqual([]);
@@ -873,9 +903,40 @@ describe("a layered family inactive in the portal, made inactive in the books wi
     const row = await offerNow();
     stub.calls.length = 0;
     expect(await holding(SENDING_LOCK, String(rivera), () => press(row.send!))).toMatchObject({ ok: false, errors: [FAMILY_BEING_CHANGED] });
+    // The record active again: refused by sendInactive()'s own first check, before the family action is reached
+    // (prepareFamily()'s check of the record is for a record made active between the two transactions).
     await db.update(family).set({ active: true }).where(eq(family.id, rivera));
     expect(await press(row.send!)).toMatchObject({ ok: false, errors: [SEND_CHANGED] });
     expect(posts()).toEqual([]);
+    expect(await sends()).toEqual([]);
+  });
+
+  it("the family's customer made inactive in the books since the page, the record still inactive: refused as changed by the family action's own check, nothing read or sent", async () => {
+    const row = await offerNow();
+    changeInBooks("10", { Active: false, SyncToken: "1" });
+    await readAgain();
+    stub.calls.length = 0;
+    // sendInactive() hands a layered family on before it looks at the customer, so this is prepareFamily()'s refusal:
+    // without it the action would read every balance and answer that the family is inactive in QuickBooks already.
+    expect(await press(row.send!)).toMatchObject({ ok: false, errors: [SEND_CHANGED] });
+    expect(posts()).toEqual([]);
+    expect(await familyRuns()).toEqual([]);
+    expect(await sends()).toEqual([]);
+  });
+
+  it("not offered, and refused, while a change waits for the family's customer or a move out of the family is kept", async () => {
+    const row = await offerNow();
+    const waiting = await seedQueued({ op: "rename", role: "family", qboId: "10", syncToken: "0", name: "Rivera Household", was: "Rivera Family" }, { state: "waiting" });
+    expect(await offerNow()).toMatchObject({ send: null, sendNote: QUEUE_IN_THE_WAY_OF_SEND });
+    stub.calls.length = 0;
+    expect(await press(row.send!)).toMatchObject({ ok: false, errors: [WRITE_COPY.waiting] });
+    await db.delete(writeQueue).where(eq(writeQueue.id, waiting.id));
+    await seedQueued({ op: "move", role: "student", qboId: "12", syncToken: "0", fromFamilyQboId: "10", toFamilyQboId: "20", fromFamilyId: rivera, toFamilyId: chen },
+      { state: "refused", code: "fault_6240" });
+    expect(await offerNow()).toMatchObject({ send: null, sendNote: QUEUE_IN_THE_WAY_OF_SEND });
+    expect(await press(row.send!)).toMatchObject({ ok: false, errors: [MOVE_PENDING] });
+    expect(posts()).toEqual([]);
+    expect(await familyRuns()).toEqual([]);
     expect(await sends()).toEqual([]);
   });
 
