@@ -28,10 +28,10 @@ import { sessionProvedRecently } from "@/lib/parents/asking-again";
 import { SIGNIN_SETTINGS_COPY as COPY } from "@/lib/parents/signin-settings-copy";
 import { resetDb, seedParent, seedGuardianInFamily, seedWorkingMail } from "../helpers/db";
 import { SIGNINS_ON, seedParentSettings } from "../helpers/roster-cache";
-import { DOOR_IP, DOOR_PASSWORD, passwordStep, signInThroughDoor } from "../helpers/parent-door";
+import { DOOR_IP, DOOR_PASSWORD, cookieNamed, passwordStep, signInThroughDoor } from "../helpers/parent-door";
 import { seedPassword } from "../helpers/signin-links";
 import { seedAuthenticator, seedBackupCodes } from "../helpers/authenticator";
-import { addPasskey, passkeyAgain, passkeyRows, postAdd, registerOptions, seedPasskey } from "../helpers/passkey";
+import { ORIGIN, addPasskey, passkeyAgain, passkeyRows, postAdd, registerOptions, seedPasskey } from "../helpers/passkey";
 import { makePasskeyKey } from "../helpers/passkey-keys";
 
 /**
@@ -128,6 +128,31 @@ describe("adding a passkey (/portal-passkey/add)", () => {
     expect(await audits("parent.backup_codes.make")).toEqual([{ made: 10, replaced: 0, beside: "passkey" }]);
   });
 
+  it("records the origin each passkey was made for, the portal's own now, read back from the table (slice SI-9b)", async () => {
+    const ana = await seedPerson("Ana");
+    const s = await signedIn(ana);
+    expect((await addPasskey(s.cookie, { name: "Phone" })).body.ok).toBe(true);
+    await proveNow(s.sessionId);
+    expect((await addPasskey(s.cookie)).body.ok).toBe(true);
+    const rows = await db.select({ origin: parentAuthPasskey.origin }).from(parentAuthPasskey)
+      .where(inArray(parentAuthPasskey.userId, db.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, ana.id))));
+    expect(rows.map((r) => r.origin)).toEqual([ORIGIN, ORIGIN]);
+    // The origin is never put in an audit row: it is the portal's own address, not the parent's.
+    expect((await audits("parent.passkey.add")).every((a) => !("origin" in a))).toBe(true);
+  });
+
+  it("Strict's enrolment's add records the origin too (slice SI-9b)", async () => {
+    const ana = await seedPerson("Ana");
+    await seedParentSettings({ level: "strict" });
+    const step = await passwordStep(ana.email);
+    expect(step.body).toEqual({ ok: true, next: "/one-more-step" });
+    const cookie = cookieNamed(step.res, "session_token");
+    const added = await addPasskey(cookie);
+    expect(added.body.ok).toBe(true);
+    expect((await passkeyRows(ana.id)).map((r) => r.origin)).toEqual([ORIGIN]);
+    expect((await audits("parent.passkey.add")).map((a) => a.enrolled)).toEqual([true]);
+  });
+
   it("a first passkey beside an app in force answers no backup codes", async () => {
     const ana = await seedPerson("Ana");
     const s = await signedIn(ana);
@@ -211,6 +236,18 @@ describe("renaming and removing", () => {
     expect((await passkeyRows(ana.id))[0]!.name).toBe("Bitwarden");
     const [row] = await db.select().from(auditLog).where(eq(auditLog.action, "parent.passkey.rename"));
     expect([row!.before, row!.after]).toEqual([{ passkeyId: k.rowId, name: null }, { passkeyId: k.rowId, name: "Bitwarden" }]);
+  });
+
+  it("a rename leaves the origin as it was: an earlier address's stays, a null one stays null (slice SI-9b)", async () => {
+    const ana = await seedPerson("Ana");
+    const s = await signedIn(ana);
+    const old = await seedPasskey(ana.id, { origin: "https://old.example.org" });
+    const unknown = await seedPasskey(ana.id, { origin: null });
+    expect(await renameMyPasskey(s.ctx, old.rowId, "Old phone")).toEqual({ ok: true, message: COPY.passkeyRenamed });
+    expect(await renameMyPasskey(s.ctx, unknown.rowId, "Laptop")).toEqual({ ok: true, message: COPY.passkeyRenamed });
+    const rows = await passkeyRows(ana.id);
+    expect(Object.fromEntries(rows.map((r) => [r.id, [r.name, r.origin]]))).toEqual({
+      [old.rowId]: ["Old phone", "https://old.example.org"], [unknown.rowId]: ["Laptop", null] });
   });
 
   it("removing is refused without a recent proof", async () => {

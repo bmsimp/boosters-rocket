@@ -265,9 +265,11 @@ export function differenceWords(d: Difference): { what: string; portal: string; 
 }
 
 /**
- * What staff can do about a guardian's difference (slice M3c3), in one sentence drawn in place of a press: neither
- * value is taken or sent from the screen. Only what the code makes so: a person's rename is refused while a change of
- * one of their rows' Parent customers is waiting or stuck (renamePerson(), guardianChangeWaiting()), and otherwise asks
+ * What staff can do about a guardian's difference (slice M3c3), in one sentence drawn after it: since slice M3c4 beside
+ * Send the app's to QuickBooks where the row offers it (a name, a removed guardian's Parent customer), never beside a
+ * Take, which isn't offered for either (the lead's decision 2), and so said true whether or not a Send is drawn. Only
+ * what the code makes so: a person's rename is refused while a change of one of their rows' Parent customers is
+ * waiting or stuck (renamePerson(), guardianChangeWaiting()), and otherwise asks
  * QuickBooks to rename their own active Parent customer only while QuickBooks is connected to the roster's company and
  * the family's customer is active (queueForGuardian()'s rename, guardianBooks(), which gives a name to one record of
  * theirs only); a guardian added back has their own Parent customer again (queueForGuardian()'s grant, `has_one`); and nothing
@@ -281,8 +283,8 @@ export function guardianDifferenceNext(d: Difference): string | null {
   return null;
 }
 const GUARDIAN_NEXT = {
-  name: "Neither name is taken or sent from this page. Rename their Parent customer in QuickBooks, and this row shows it after the portal's next roster read; or, if the person's name should change, rename them on their page under Parents once nothing for them or their Parent customers is waiting or stuck on Reconciliation. While QuickBooks is connected and the family's customer is active, that asks QuickBooks to rename it too, unless the same rename gives that name to their own Parent customer under another family first.",
-  removed: "Neither is taken or sent from this page. Make their Parent customer inactive in QuickBooks once its balance, owed or a credit, is settled; or, if they are added back under Portal sign-ins, it is theirs again.",
+  name: "No name is taken from the books here, as their name in the portal is theirs in every family they belong to and on their sign-in. If it should change, rename them on their page under Parents once nothing for them or their Parent customers is waiting or stuck on Reconciliation: while QuickBooks is connected and the family's customer is active, that asks QuickBooks to rename this Parent customer too, unless the same rename gives that name to their own Parent customer under another family first. Or rename it in QuickBooks, and this row shows it after the portal's next roster read.",
+  removed: "The books having their Parent customer active doesn't make them this family's guardian again here, as that would give them a sign-in: they are added back only under Portal sign-ins, and their Parent customer is theirs again if they are. Or make it inactive in QuickBooks once its balance, owed or a credit, is settled.",
   inactive: "Neither is taken or sent from this page, and the portal never makes a customer active in the books. If they are still this family's guardian, make it active in QuickBooks; if they aren't, remove them under Portal sign-ins. While it is inactive the portal sends it nothing for them: no rename, and no change of their phone, mailing address or sign-in email.",
 } as const;
 

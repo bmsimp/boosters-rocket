@@ -78,7 +78,9 @@ export const RATE_LIMITS: Record<RateLimitKind, { max: number; windowMs: number 
   // day is far more than a genuine need (a mail that failed and was tried again, a second call), and the bound keeps
   // one mailbox from being flooded and one person's sign-in from being torn down again and again by a mistaken or
   // stolen Admin session. Per person, never per Admin: an Admin who resets several parents after a change of the
-  // portal's address is the expected case (a later slice, SI-9b, is the better tool for that).
+  // portal's address is the expected case (the press that removes every passkey made at an earlier address at once,
+  // removeOldAddressPasskeys(), slice SI-9b, is the better tool for that, and needs no limit: it is Admin-only and a
+  // second press finds none).
   signin_reset_person: { max: 3, windowMs: 24 * 60 * 60 * 1000 },
   // A parent's own phone and address (contact-edits.ts), counted per person: nobody changes their address more than a
   // few times an hour. Opening the edit page reads the portal alone and takes no count.

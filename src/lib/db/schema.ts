@@ -1465,9 +1465,12 @@ export const parentAuthVerification = parentAuth.verification;
  * assertion, an unsigned 32-bit number as WebAuthn defines it (up to 4294967295), so a bigint, read as a number;
  * `transports` comma-joined. `last_used_at` is the portal's alone (the library neither writes nor returns
  * it, as with the session's `strong_at`), set when a passkey signs someone in (src/lib/parents/passkeys.ts, the only
- * portal module that reads or writes this table). A passkey belongs to APP_URL's host (the relying party id): a club
- * that changes its address leaves them unusable. Kept until the guardian removes one (SI-7b) or a staff reset removes
- * them all (SI-9), and gone with the person's sign-in account; nothing else that ends a person's sign-in removes it.
+ * portal module that writes this table and reads it for one person; switches.ts and signin-reset.ts, staff only, count
+ * it for the whole club). A passkey belongs to APP_URL's host (the relying party id): a club
+ * that changes its address leaves them unusable. `origin`, the portal's alone too (slice SI-9b), is the origin the add
+ * recorded it for, so an Admin can remove every passkey made at an earlier address in one press (signin-reset.ts).
+ * Kept until the guardian removes one (SI-7b), a staff reset removes them all (SI-9a) or that press removes those from
+ * an earlier address, and gone with the person's sign-in account; nothing else that ends a person's sign-in removes it.
  */
 export const parentAuthPasskey = pgTable("parent_auth_passkey", {
   id: text("id").primaryKey(),
@@ -1482,6 +1485,9 @@ export const parentAuthPasskey = pgTable("parent_auth_passkey", {
   createdAt: created(),
   aaguid: text("aaguid"),
   lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  // The portal's own, as last_used_at is (slice SI-9b): the origin the passkey was made for, stamped by the add's
+  // record (recordPasskeyOrigin(), passkeys.ts); null on a row the library inserted that the portal never recorded.
+  origin: text("origin"),
 }, (t) => [
   index("parent_auth_passkey_user_ix").on(t.userId),
   uniqueIndex("parent_auth_passkey_credential_id_uq").on(t.credentialID),

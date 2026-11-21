@@ -3,6 +3,8 @@ import { revalidatePath } from "next/cache";
 import { staffAction, type StaffCtx } from "@/lib/guards";
 import { oweSetupMails, setLevel, setSignins, setWelcome, setRequireStudents } from "@/lib/parents/switches";
 import { getParentSettings } from "@/lib/parents/settings";
+import { RESET_PERMISSION, removeOldAddressPasskeys } from "@/lib/parents/signin-reset";
+import { OLD_PASSKEYS_CHANGED, OLD_PASSKEYS_COPY } from "@/lib/parents/old-passkeys-copy";
 
 const P = "Settings.Parents.ReadWrite" as const;
 type Done = { ok: true; message: string } | { ok: false; errors: string[] };
@@ -56,4 +58,19 @@ export const setLevelAction = staffAction(P, async (ctx, level: unknown, shown: 
     : r.signedOut === 0 ? "The club is at Strict. Nobody needed signing out."
     : r.signedOut === 1 ? "The club is at Strict. 1 guardian with neither a passkey nor an authenticator app was signed out."
     : `The club is at Strict. ${r.signedOut} guardians with neither a passkey nor an authenticator app were signed out.`);
+});
+// Every passkey made at an earlier address of the portal removed in one press (the sign-in release, slice SI-9b), by
+// the reset's permission, Admin-only (it takes away what people sign in with): its own op names that permission in
+// every audit row. The page sends the count of such passkeys it showed, which removeOldAddressPasskeys() checks again
+// under its locks; anything else is NOT_FROM_PAGE.
+const resetOp = (ctx: StaffCtx) => ({ ...op(ctx), permission: RESET_PERMISSION });
+export const removeOldAddressPasskeysAction = staffAction("Parents.SignInReset.ReadWrite", async (ctx, shown: unknown): Promise<Done> => {
+  if (typeof shown !== "number" || !Number.isSafeInteger(shown) || shown < 1 || shown > 1_000_000) return NOT_FROM_PAGE;
+  const r = await removeOldAddressPasskeys(shown, resetOp(ctx));
+  if (!r.ok) {
+    if (r.reason === "invalid") return NOT_FROM_PAGE;
+    revalidatePath("/staff", "layout");
+    return { ok: false, errors: [r.reason === "count_changed" ? OLD_PASSKEYS_CHANGED : OLD_PASSKEYS_COPY.none] };
+  }
+  return done(r, OLD_PASSKEYS_COPY.done(r.passkeys, r.people, r.signedOut));
 });

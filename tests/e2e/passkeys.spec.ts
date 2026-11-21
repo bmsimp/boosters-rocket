@@ -2,7 +2,7 @@ import { test, expect, type Locator } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import postgres from "postgres";
 import { startMailSink, type MailSink } from "../helpers/mail-sink";
-import { e2eMailPort } from "./run-config";
+import { e2eBaseUrl, e2eMailPort } from "./run-config";
 import { codeFor } from "./journey-helpers";
 import { PARENT_SESSION_TOKEN, parentSessionCookie } from "./parent-session";
 import { E2E_SIGNIN } from "./signin-seed";
@@ -93,8 +93,10 @@ test("Zelda adds a passkey, reads her backup codes once, renames it, asks again 
   await page.reload();
   const html = await page.content();
   for (const c of codes) expect(html).not.toContain(c);
-  const [stored] = await sql`SELECT credential_id, public_key, aaguid FROM parent_auth_passkey WHERE user_id = ${ZELDA_USER()}`;
+  const [stored] = await sql`SELECT credential_id, public_key, aaguid, origin FROM parent_auth_passkey WHERE user_id = ${ZELDA_USER()}`;
   for (const v of [stored!.credential_id as string, stored!.public_key as string]) expect(html).not.toContain(v);
+  // The add recorded the origin it was made for: this run's APP_URL, the address the tests open (slice SI-9b).
+  expect(stored!.origin).toBe(new URL(e2eBaseUrl()).origin);
   await box.getByRole("button", { name: /^Rename/ }).click();
   await box.getByLabel(COPY.passkeyRenameLabel).fill("Zelda's renamed passkey");
   await box.getByRole("button", { name: COPY.passkeyRenameSave }).click();

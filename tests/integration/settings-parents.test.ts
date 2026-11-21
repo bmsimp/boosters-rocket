@@ -13,6 +13,19 @@ vi.mock("@/lib/auth/identity", () => ({
   getParentIdentity: async () => null, getParentState: async () => ({ status: "none" }), hasParentSession: async () => false,
 }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ "cf-connecting-ip": "203.0.113.40" }), cookies: async () => ({ get: () => undefined }) }));
+// A staff member who may open Parent sign-ins but doesn't hold the reset's permission (slice SI-9b). No role can be made
+// so (both are Admin-only), so it is made from outside src/: while `withoutReset` is set, the viewer's permissions are
+// every one but Parents.SignInReset.ReadWrite, and not an Admin's.
+const narrow = vi.hoisted(() => ({ withoutReset: false }));
+vi.mock("@/lib/permissions/effective", async (original) => {
+  const m = await original<typeof import("@/lib/permissions/effective")>();
+  const { PERMISSIONS } = await import("@/lib/permissions/registry");
+  return { ...m, effectivePermissions: async (id: string) => {
+    const e = await m.effectivePermissions(id);
+    if (!narrow.withoutReset) return e;
+    return { isAdmin: false, permissions: new Set([...(e.isAdmin ? PERMISSIONS : e.permissions)].filter((x) => x !== "Parents.SignInReset.ReadWrite")) };
+  } };
+});
 const revalidated = vi.hoisted(() => ({ count: 0 }));
 vi.mock("next/cache", () => ({ revalidatePath: () => { revalidated.count += 1; } }));
 vi.mock("next/navigation", () => ({
@@ -33,14 +46,15 @@ import ParentSetupPage from "@/app/staff/(app)/settings/parents/setup/page";
 import QuickBooksSettingsPage from "@/app/staff/(app)/settings/quickbooks/page";
 import StaffLayout from "@/app/staff/(app)/layout";
 import { SETTINGS_SECTIONS } from "@/app/staff/(app)/settings/sections";
-import { oweSetupMailsAction, setLevelAction, setSigninsAction, setWelcomeAction, setRequireStudentsAction } from "@/app/staff/(app)/settings/parents/actions";
+import { oweSetupMailsAction, removeOldAddressPasskeysAction, setLevelAction, setSigninsAction, setWelcomeAction, setRequireStudentsAction } from "@/app/staff/(app)/settings/parents/actions";
+import { OLD_PASSKEYS_CHANGED, OLD_PASSKEYS_COPY as OLD } from "@/lib/parents/old-passkeys-copy";
 import { LEVEL_COUNT_CHANGED, LEVEL_UNREADABLE } from "@/lib/parents/switches";
 import { resetDb, seedGuardian, seedParent, seedParentSession, seedStaff, seedWorkingMail } from "../helpers/db";
 import { seedCache, seedParentSettings, seedShape, storeShape, fam, par, stu } from "../helpers/roster-cache";
 import { startQboStub, seedConnected, type QboStub } from "../helpers/qbo-stub";
 import { syncAppRecords } from "../helpers/app-records";
 import { seedPassword } from "../helpers/signin-links";
-import { seedPasskey } from "../helpers/passkey";
+import { ORIGIN, passkeyRows, seedPasskey } from "../helpers/passkey";
 import { seedAuthenticator } from "../helpers/authenticator";
 
 let stub: QboStub;
@@ -60,6 +74,7 @@ describe("the Parent sign-ins settings", () => {
   let admin: Awaited<ReturnType<typeof seedStaff>>;
   beforeEach(async () => {
     await resetDb(); stub.reset(); revalidated.count = 0;
+    narrow.withoutReset = false;
     admin = await seedStaff({ email: "admin@club.org", name: "Ad Min", admin: true });
     who.staff = { door: "staff", staffUserId: admin.id, name: admin.name, email: admin.email };
   });
@@ -508,6 +523,153 @@ describe("the Parent sign-ins settings", () => {
       expect(page.presses.map((p) => p.label)).toEqual(["Switch back to Standard"]);
       expect(await page.presses[0]!.act()).toEqual({ ok: true, message: "The club is at Standard. Nobody was signed out." });
       expect((await getParentSettings()).level).toBe("standard");
+    });
+  });
+
+  describe("passkeys from an earlier address (slice SI-9b)", () => {
+    const OLD_ORIGIN = "https://old.example.org";
+    const decoded = (html: string) => html.replaceAll("&#x27;", "'");
+    type Press = { label: string; act: () => Promise<unknown> };
+    const presses = (node: unknown): Press[] => {
+      if (Array.isArray(node)) return node.flatMap(presses);
+      if (!node || typeof node !== "object" || !("props" in node)) return [];
+      const p = (node as { props: Record<string, unknown> }).props;
+      const own = typeof p.act === "function" && typeof p.label === "string" ? [{ label: p.label, act: p.act as Press["act"] }] : [];
+      return [...own, ...presses(p.children)];
+    };
+    /** The view as drawn: its markup, decoded, the section's markup alone (from its heading to its end), and its presses. */
+    const drawn = async () => {
+      const page = await ParentSettingsPage();
+      const html = decoded(renderToStaticMarkup(page));
+      const at = html.indexOf(`<h2 id="ps-old-passkeys-h">`);
+      return { html, section: at < 0 ? null : html.slice(at, html.indexOf("</section>", at)), presses: presses(page) };
+    };
+    /** A person with a sign-in account and nothing else. */
+    const person = (name: string) => seedParent({ name, email: `${name.toLowerCase()}@example.com` });
+
+    it("is drawn only while a passkey is from an earlier address, after What is set", async () => {
+      const ana = await ready();
+      await seedPasskey(ana.id);
+      expect((await drawn()).section).toBeNull();
+      await seedPasskey(ana.id, { origin: OLD_ORIGIN });
+      const { html, section } = await drawn();
+      expect(section).not.toBeNull();
+      expect(html.indexOf("ps-status-h")).toBeLessThan(html.indexOf("ps-old-passkeys-h"));
+    });
+
+    it("sits before Passwords not chosen yet when both are drawn", async () => {
+      const ana = await ready();
+      await seedParentSettings({ signin: true, welcome: true });
+      await db.update(parent).set({ welcomedAt: new Date("2026-01-01T00:00:00Z"), welcomeOwed: false }).where(eq(parent.id, ana.id));
+      await seedPasskey(ana.id, { origin: OLD_ORIGIN });
+      const { html } = await drawn();
+      expect(html.indexOf("ps-old-passkeys-h")).toBeGreaterThan(html.indexOf("ps-status-h"));
+      expect(html.indexOf(`<h2 id="ps-setup-h">`)).toBeGreaterThan(html.indexOf("ps-old-passkeys-h"));
+    });
+
+    it("counts a blocked holder left with nothing among nobody, and says only what the press does to them", async () => {
+      await ready();
+      // Cal, blocked, holds one passkey from the old address and nothing else: the press takes it and keeps the rest of
+      // his (his codes; a block already ended his sessions), so nobody is left to warn about.
+      const cal = await person("Cal");
+      await seedPasskey(cal.id, { origin: OLD_ORIGIN });
+      await db.update(parent).set({ blocked: true }).where(eq(parent.id, cal.id));
+      const { section } = await drawn();
+      expect(section).toContain(OLD.lede(ORIGIN, 1, 1));
+      expect(section).toContain("Everyone with one of these passkeys who isn't blocked has an authenticator app or another passkey, so nobody is signed out and no backup codes go.");
+    });
+
+    it("is drawn only for a holder of the reset's permission, and its action refuses anyone else", async () => {
+      const ana = await ready();
+      await seedPasskey(ana.id, { origin: OLD_ORIGIN });
+      narrow.withoutReset = true;
+      const { html, section, presses: drawnPresses } = await drawn();
+      expect(html).toContain(`<h1 class="page-title">Parent sign-ins</h1>`);
+      expect(section).toBeNull();
+      expect(html).not.toContain(OLD.heading);
+      expect(drawnPresses.map((p) => p.label)).not.toContain(OLD.button(1));
+      await expect(removeOldAddressPasskeysAction(1)).rejects.toBeInstanceOf(AccessDenied);
+      expect(await passkeyRows(ana.id)).toHaveLength(1);
+    });
+
+    it("says each word, at both levels, for 0, 1 and 2 people left with no passkey and no app", async () => {
+      await ready();
+      const expectAt = async (passkeys: number, people: number, left: number, list: string) => {
+        for (const strict of [false, true]) {
+          await seedParentSettings({ level: strict ? "strict" : "standard" });
+          const { section } = await drawn();
+          expect(section).toContain(`<h2 id="ps-old-passkeys-h">Passkeys from an earlier address</h2>`);
+          expect(section).toContain(`<p>${OLD.lede(ORIGIN, passkeys, people)}</p>`);
+          expect(section).toContain(`<dl class="details">${list}</dl>`);
+          expect(section).toContain(OLD.warning(strict, left));
+          expect(section).toContain(`<p>Make sure ${ORIGIN} is the address families use now: passkeys made there are kept.</p>`);
+          expect(section).toContain(`>${OLD.button(passkeys)}</button>`);
+        }
+      };
+      // Ben: one passkey from the old address, beside an app: nobody left with neither yet.
+      const ben = await person("Ben");
+      await seedPasskey(ben.id, { origin: OLD_ORIGIN }); await seedAuthenticator(ben.id);
+      await expectAt(1, 1, 0, `<dt>${OLD_ORIGIN}</dt><dd>1 passkey</dd>`);
+      expect(OLD.lede(ORIGIN, 1, 1)).toBe(`A passkey works only at the address it was made at. The portal's address is now ${ORIGIN}. 1 passkey of 1 person was made at another address, so it no longer works, but the portal still asks that person for it.`);
+      expect(OLD.warning(false, 0)).toBe("Everyone with one of these passkeys who isn't blocked has an authenticator app or another passkey, so nobody is signed out and no backup codes go.");
+      expect(OLD.warning(true, 0)).toBe(OLD.warning(false, 0));
+      expect(OLD.button(1)).toBe("Remove 1 passkey made at an earlier address");
+      // Cal: one the portal never recorded, and nothing else.
+      const cal = await person("Cal");
+      await seedPasskey(cal.id, { origin: null });
+      await expectAt(2, 2, 1, `<dt>${OLD_ORIGIN}</dt><dd>1 passkey</dd><dt>An address the portal didn't record</dt><dd>1 passkey</dd>`);
+      expect(OLD.lede(ORIGIN, 2, 2)).toBe(`A passkey works only at the address it was made at. The portal's address is now ${ORIGIN}. 2 passkeys of 2 people were made at another address, so they no longer work, but the portal still asks those people for them.`);
+      expect(OLD.warning(false, 1)).toBe("Removing them signs nobody out. 1 person has no authenticator app and no other passkey: their backup codes go too, and on a phone or computer the portal doesn't know yet they'll get an emailed code until they add a passkey again.");
+      expect(OLD.warning(true, 1)).toBe("1 person has no authenticator app and no other passkey: their backup codes go too, they are signed out, and after their password they add a passkey or an authenticator app before they see their family's page.");
+      // Dee: two from the old address, and nothing else.
+      const dee = await person("Dee");
+      await seedPasskey(dee.id, { origin: OLD_ORIGIN }); await seedPasskey(dee.id, { origin: OLD_ORIGIN });
+      await expectAt(4, 3, 2, `<dt>${OLD_ORIGIN}</dt><dd>3 passkeys</dd><dt>An address the portal didn't record</dt><dd>1 passkey</dd>`);
+      expect(OLD.warning(false, 2)).toBe("Removing them signs nobody out. 2 people have no authenticator app and no other passkey: their backup codes go too, and on a phone or computer the portal doesn't know yet they'll get an emailed code until they add a passkey again.");
+      expect(OLD.warning(true, 2)).toBe("2 people have no authenticator app and no other passkey: their backup codes go too, they are signed out, and after their password they add a passkey or an authenticator app before they see their family's page.");
+      expect(OLD.button(4)).toBe("Remove 4 passkeys made at an earlier address");
+      expect(OLD.pending).toBe("Removing…");
+    });
+
+    it("the page's own press removes them and answers in words; a stale count, none left and anything else are refused", async () => {
+      await ready();
+      const cal = await person("Cal");
+      const dee = await person("Dee");
+      await seedPasskey(cal.id, { origin: null });
+      await seedPasskey(dee.id, { origin: OLD_ORIGIN }); await seedPasskey(dee.id, { origin: OLD_ORIGIN });
+      for (const bad of [0, -1, 1.5, 1_000_001, Number.NaN, "3", null, undefined, [3]]) {
+        expect(await removeOldAddressPasskeysAction(bad as number)).toEqual({ ok: false, errors: [BROWSER] });
+      }
+      expect(await removeOldAddressPasskeysAction(2)).toEqual({ ok: false, errors: [OLD_PASSKEYS_CHANGED] });
+      expect(OLD_PASSKEYS_CHANGED).toBe("The number of passkeys made at an earlier address changed while this page was open. Look at the new number and press again.");
+      expect(await passkeyRows(dee.id)).toHaveLength(2);
+      const press = (await drawn()).presses.find((p) => p.label === OLD.button(3));
+      expect(press).toBeDefined();
+      revalidated.count = 0;
+      expect(await press!.act()).toEqual({ ok: true, message: "Removed 3 passkeys made at an earlier address, from 2 people." });
+      expect(revalidated.count).toBe(1);
+      expect(await passkeyRows(cal.id)).toEqual([]);
+      expect(await passkeyRows(dee.id)).toEqual([]);
+      expect((await audits("parent.passkeys.old_address_removed")).at(-1)).toMatchObject({ actorId: admin.id, permission: "Parents.SignInReset.ReadWrite", ip: "203.0.113.40",
+        targetType: "setting", targetId: PARENTS_KEY });
+      expect((await drawn()).section).toBeNull();
+      expect(await press!.act()).toEqual({ ok: false, errors: ["There are no passkeys from an earlier address now."] });
+    });
+
+    it("at Strict says how many were signed out, one or more", async () => {
+      await ready();
+      await seedParentSettings({ level: "strict" });
+      const cal = await person("Cal");
+      const dee = await person("Dee");
+      await seedPasskey(cal.id, { origin: OLD_ORIGIN }); await seedParentSession(cal.authUserId);
+      expect(await removeOldAddressPasskeysAction(1)).toEqual({ ok: true, message: "Removed 1 passkey made at an earlier address, from 1 person. 1 person was signed out." });
+      await seedPasskey(cal.id, { origin: OLD_ORIGIN }); await seedParentSession(cal.authUserId);
+      await seedPasskey(dee.id, { origin: OLD_ORIGIN }); await seedParentSession(dee.authUserId);
+      await seedPasskey(dee.id, { origin: OLD_ORIGIN });
+      expect(await removeOldAddressPasskeysAction(3)).toEqual({ ok: true, message: "Removed 3 passkeys made at an earlier address, from 2 people. 2 people were signed out." });
+      // Beside an app nobody is signed out, and the answer says nothing of it.
+      await seedPasskey(cal.id, { origin: OLD_ORIGIN }); await seedAuthenticator(cal.id); await seedParentSession(cal.authUserId);
+      expect(await removeOldAddressPasskeysAction(1)).toEqual({ ok: true, message: "Removed 1 passkey made at an earlier address, from 1 person." });
     });
   });
 });

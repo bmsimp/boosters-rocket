@@ -57,13 +57,17 @@ Documenso seals every signed form with a certificate of the club's own. Follow
    - `APP_URL` and `DOCUMENSO_URL`: the two addresses, with `https://` and nothing after the name, not even a `/`
      (this installation's proxy refuses to start with one, and says which line). Choose `APP_URL` for good: parents'
      passkeys belong to that address, so changing it later stops every one of them, while the sign-in page still asks
-     for them and never sends an emailed code in their place. A parent who also has an authenticator app signs in with
-     its code. A parent whose only second step is a passkey can still sign in with a backup code they haven't used
-     (the sign-in page asks for one beside the passkey); with neither, they can't sign in until an Admin resets their
-     sign-in. A new address also signs every parent and staff member out and leaves no phone or computer remembered,
-     since browsers keep those sign-ins for the old address. The portal can't yet remove every parent's passkeys at once, so the way back is that reset, one parent at a time,
-     each with a call back ([resetting a parent's sign-in](resetting-a-parents-sign-in.md)). Don't change the address
-     lightly once parents have passkeys.
+     for them and never sends an emailed code in their place, until an Admin removes them. The portal notes which
+     address each passkey was made at: after a change, the Health page's Parent sign-ins line says how many no longer
+     work, and on Settings, Parent sign-ins, the box "Passkeys from an earlier address" removes them all in one press,
+     keeping any a parent has already added at the new address
+     ([resetting a parent's sign-in](resetting-a-parents-sign-in.md), "After a change of the portal's address"). After
+     it, a parent with an authenticator app signs in with its code, or a backup code. One with no app and no other
+     passkey loses their backup codes with the passkeys; at Standard they sign in with their password and, on a phone
+     or computer the portal doesn't know yet, a code we email, and at Strict they are signed out and their password
+     leads them to add a passkey or an authenticator app before anything else. A new address also signs every parent
+     and staff member out and leaves no phone or computer remembered, since browsers keep those sign-ins for the old
+     address. Don't change the address lightly once parents have passkeys.
    - `CLUB_TIME_ZONE`: for example `America/Chicago`.
    - `CLIENT_IP_HEADER`: `x-forwarded-for` if you will use this installation's own proxy (step 5). With a proxy of your
      own, see [A proxy of your own](#a-proxy-of-your-own) below.

@@ -14,6 +14,8 @@ import { getParentSettings } from "@/lib/parents/settings";
 import { welcomesToSend } from "@/lib/parents/welcome";
 import { takeInWaitingFor, takeInWaitWords } from "@/lib/parents/contact-take-in";
 import { readBreachMark, type BreachMark } from "@/lib/parents/breach-mark";
+import { oldAddressPasskeys } from "@/lib/parents/signin-reset";
+import { OLD_PASSKEYS_COPY } from "@/lib/parents/old-passkeys-copy";
 import { BREACH_TIMEOUT_MS, type BreachNotChecked } from "@/lib/parents/breach-check";
 import { apiFailing as formsApiFailing, formsSummary } from "@/lib/forms/settings";
 import { formsWaiting } from "@/lib/forms/job";
@@ -259,13 +261,18 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
   const welcomesNote = parents.signin && parents.welcome && mail.working && failedLast(welcomeMark) && owed > 0
     ? `Welcome emails are waiting because mail is failing: ${owed === 1 ? "1 person is" : `${owed} people are`} owed a welcome or a link to choose a password, and the last one the worker tried to send failed. Until a send works, it tries one person a minute instead of five.`
     : null;
+  // Passkeys made at an address other than the portal's now (the sign-in release, slice SI-9b): they no longer work,
+  // yet the portal still asks their holders for them, until an Admin removes them on Settings, Parent sign-ins.
+  const old = await oldAddressPasskeys();
+  const oldNote = old.passkeys > 0 ? OLD_PASSKEYS_COPY.health(old.passkeys, old.people) : null;
+  const parentsFix = { href: "/staff/settings/parents", label: "Open parent sign-ins" };
   const headerMissing = addressNote !== null && env.CLIENT_IP_HEADER !== "none";
-  const parentsAttention = headerMissing || welcomesNote !== null;
+  const parentsAttention = headerMissing || welcomesNote !== null || oldNote !== null;
   lines.push(parents.signin
     ? { key: "parents", title: "Parent sign-ins", state: parentsAttention ? "attention" : "ok", word: parentsAttention ? "Needs attention" : "On",
       says: "On. Parents sign in with their email and password, and on a device the portal doesn't know yet, a code sent to their email.", times: [],
-      notes: [addressNote, welcomesNote].filter((x): x is string => x !== null), fix: welcomesNote ? mailFix : null }
-    : { key: "parents", title: "Parent sign-ins", state: "off", word: "Off", times: [], notes: [], fix: { href: "/staff/settings/parents", label: "Open parent sign-ins" },
+      notes: [addressNote, welcomesNote, oldNote].filter((x): x is string => x !== null), fix: welcomesNote ? mailFix : oldNote ? parentsFix : null }
+    : { key: "parents", title: "Parent sign-ins", state: "off", word: "Off", times: [], notes: oldNote ? [oldNote] : [], fix: parentsFix,
       says: "Off. No parent can sign in until an Admin switches them on." });
 
   // The check of a chosen password against those known from data breaches (src/lib/parents/breach-check.ts), from what

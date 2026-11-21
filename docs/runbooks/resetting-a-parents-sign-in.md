@@ -1,8 +1,10 @@
 # Resetting a parent's sign-in
 
 A parent who has lost everything they sign in with can't get back in on their own. That is a parent who has lost their
-phone with its passkey or authenticator app and their backup codes too, or one whose passkeys stopped working because
-the portal's address changed. An Admin can reset their sign-in, in the portal, on the parent's own page. Only Admins can
+phone with its passkey or authenticator app and their backup codes too, or, after the portal's address changed, one at
+Strict whose only passkeys were made at the old address and who has forgotten their password (most parents a change of
+address leaves stuck need only the one press of [After a change of the portal's address](#after-a-change-of-the-portals-address)).
+An Admin can reset their sign-in, in the portal, on the parent's own page. Only Admins can
 do this.
 
 Most parents who are stuck don't need this:
@@ -80,16 +82,39 @@ it).
 
 ## After a change of the portal's address
 
-A passkey belongs to the portal's address. If the address ever changes, every parent's passkeys stop working, though
-the sign-in page still asks for them. Not every parent with a passkey is locked out:
+A passkey belongs to the portal's address. If the address ever changes, every passkey made at the old address stops
+working, though the sign-in page still asks for it and never emails a code in its place. The Health page says how
+many there are, on its **Parent sign-ins** line. Remove them first, for every parent at once:
 
-- A parent who also has an authenticator app enters its code instead.
-- A parent with a backup code they haven't used enters it in the **Backup code** field beside **Use your passkey**
-  (a first passkey came with ten of them, unless they had the app already).
+1. Make sure the portal's address (`APP_URL` in the server's env file) is the one families use now: passkeys made
+   there are kept.
+2. Open **Settings**, **Parent sign-ins**. The box **Passkeys from an earlier address** says how many there are, of
+   how many parents, made at which addresses, and what happens to the parents who have nothing else to sign in with.
+3. Press **Remove ... made at an earlier address**. If the number changed while the page was open, it says so: look at
+   the new number and press again.
+
+What each parent meets next:
+
+- **With an authenticator app**: its code, or a backup code, as before. Their backup codes are kept.
+- **With a passkey they already added at the new address**: that passkey, as before, and their backup codes.
+- **With neither, club at Standard**: their backup codes go with the old passkeys, since they would stand beside
+  nothing. Nobody is signed out. They sign in with their password and, on a phone or computer the portal doesn't know
+  yet, a code we email, until they add a passkey again under **Sign-in settings**. A forgotten password is **Set up or
+  reset my password**, as for anyone.
+- **With neither, club at Strict**: their backup codes go too, and they are signed out. After their password, the
+  portal asks them to add a passkey or an authenticator app before they see their family's page.
 
 A new address also signs everyone out and leaves no phone or computer remembered, since browsers keep those sign-ins
 for the old address, so a remembered phone doesn't help.
 
-Right after signing in with the app or a backup code, they can remove the passkeys that stopped working and add new
-ones under **Sign-in settings**. A parent with neither is locked out until their sign-in is reset. The portal can't
-yet remove every parent's passkeys at once, so each such parent is reset one by one, as above, each with a call back.
+The portal emails nobody about the change. Tell your families in your own words; for example:
+
+> Our parent portal has a new address: <the new address>. Passkeys made at the old address no longer work, so once
+> you're signed in, please add yours again under Sign-in settings. Until then, sign in with your password and then
+> [at Standard] the code we email you, or your authenticator app if you use one.
+> [at Strict] your authenticator app if you use one; if you don't, the portal will ask you to add a passkey or an
+> authenticator app first.
+
+A parent the press doesn't bring back needs their sign-in reset, as above, each with a call back: at Strict, one with
+neither who has forgotten their password, since the sign-in page emails no link to a parent with no passkey or app
+there.

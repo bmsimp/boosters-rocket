@@ -1,23 +1,26 @@
 // Staff only (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts): an Admin's reset of one parent's sign-in
 // (the sign-in release, slice SI-9a; open questions 22, 24, 26 and 33 of the app-owned families spec), what a person's
-// page shows of what they sign in with, and the staff home's line for every other Admin. It reads and removes any
-// person's sign-in, and reads every recent reset. Staff never see or set a password: nothing here shows, takes or
-// stores one, and the reason, which is for staff only, is kept in its audit row alone.
+// page shows of what they sign in with, the staff home's line for every other Admin, and, since slice SI-9b, an
+// Admin's removal in one press of every parent's passkeys made at an earlier address of the portal, with its count. It
+// reads and removes any person's sign-in, reads every recent reset, and reads every passkey of the club. Staff never
+// see or set a password: nothing here shows, takes or stores one, and the reason, which is for staff only, is kept in
+// its audit row alone.
 import "server-only";
-import { and, count, desc, eq, gt, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, exists, gt, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { auditLog, parent, parentAuthAccount, parentAuthSession, parentAuthUser, parentDevice, parentEmailChange } from "@/lib/db/schema";
+import { auditLog, parent, parentAuthAccount, parentAuthenticator, parentAuthPasskey, parentAuthSession, parentAuthUser, parentDevice, parentEmailChange } from "@/lib/db/schema";
+import { passkeyOrigin } from "@/lib/auth/passkey-origin";
 import { writeAudit } from "@/lib/audit/log";
 import { currentBrand, sendMail } from "@/lib/mail/send";
 import { signinResetMessage } from "@/lib/mail/messages";
 import { getClubSettings } from "@/lib/settings/club";
-import { hasAuthenticator, removeAuthenticator, unspentBackupCodes } from "./authenticator";
+import { hasAuthenticator, removeAuthenticator, removeBackupCodes, unspentBackupCodes } from "./authenticator";
 import { lifeWords, passwordLink } from "./link-delivery";
-import { passkeyCount, removeAllPasskeys } from "./passkeys";
+import { madeElsewhere, passkeyCount, removeAllPasskeys, removeOldAddressPasskeysOf } from "./passkeys";
 import type { StaffOp } from "./people";
 import { takeRateLimit } from "./rate-limit";
 import { deleteUnusedSigninCodes, deleteUnusedSigninLinks, endParentSessions, enterableGuardianRows, forgetDevices } from "./sessions";
-import { PARENTS_KEY, getParentSettings, parentDoorClosed } from "./settings";
+import { PARENTS_KEY, getParentSettings, parentDoorClosed, readStoredSettings } from "./settings";
 import { CODE_TTL_MS } from "./signin-codes";
 import { LINK_LIFE_MS, mintSigninLink } from "./signin-links";
 
@@ -194,4 +197,142 @@ export async function recentSigninResets(viewerStaffId: string, now = new Date()
     .orderBy(desc(auditLog.at), desc(auditLog.id)).limit(RESETS_SHOWN + 1);
   const resets = rows.slice(0, RESETS_SHOWN).flatMap((r) => (r.parentId ? [{ auditId: r.auditId, by: r.by, parentId: r.parentId, name: r.name, at: r.at }] : []));
   return { resets, more: rows.length > RESETS_SHOWN };
+}
+
+/*
+ * Passkeys from an earlier address (the sign-in release, slice SI-9b; section 6 of the app-owned families spec,
+ * "Passkeys anywhere": "A passkey belongs to the portal's address: if a club changes it, parents fall back to password
+ * and second step and add their passkeys again"). A passkey works only at the origin it was made for (the relying
+ * party, parentPasskeys(), src/lib/auth/parent-auth.ts), yet the portal counts every row as a second factor. After a
+ * change of APP_URL an Admin removes, in one press, every passkey whose recorded origin is not the portal's now
+ * (madeElsewhere(), passkeys.ts: a null origin, a row the portal never recorded, counts as one, once it is older than
+ * an add under way could be, ADD_UNDER_WAY_MINUTES). Until they press,
+ * nothing at the door, the gate, asking again or the offer reads the origin.
+ */
+
+type Reader = Pick<typeof db, "select">;
+
+/** A count of passkeys from an earlier address, by the origin they were made at (null: one the portal didn't record). */
+export type OldOrigin = { origin: string | null; passkeys: number };
+/**
+ * The passkeys from an earlier address now, counts only: the portal's origin now; how many passkeys were made
+ * elsewhere and how many people they belong to; those counts by the origin they were made at (each the portal's own
+ * address once, which the Health page shows staff already; never a credential id or a passkey's name); and, of those
+ * people, how many the press would leave with no passkey and no authenticator app in force (hasAuthenticator()'s
+ * rule), not counting a blocked person, whose backup codes it keeps.
+ */
+export type OldAddressPasskeys = { origin: string; passkeys: number; people: number; leftWithNoFactor: number; byOrigin: OldOrigin[] };
+
+/** Origins in a fixed order: by their text, code unit by code unit, and the unrecorded last. */
+const byOriginText = (a: OldOrigin, b: OldOrigin) => (a.origin === b.origin ? 0 : a.origin === null ? 1 : b.origin === null ? -1 : a.origin < b.origin ? -1 : 1);
+
+/** The people who hold a passkey from an earlier address, as a query of their ids. */
+const holdersElsewhere = (q: Reader, origin: string) => q.select({ id: parentAuthUser.parentId }).from(parentAuthPasskey)
+  .innerJoin(parentAuthUser, eq(parentAuthUser.id, parentAuthPasskey.userId)).where(madeElsewhere(origin));
+/**
+ * On a query of `parent`: the person holds no passkey the press would keep (none but those madeElsewhere(), so a
+ * current one or an add under way at this address keeps them counted as holding one, as the press's passkeyCount()
+ * after its delete does) and no authenticator app in force.
+ */
+const leftWithNothing = (origin: string) => sql`not ${exists(db.select({ id: parentAuthPasskey.id }).from(parentAuthPasskey)
+  .innerJoin(parentAuthUser, eq(parentAuthUser.id, parentAuthPasskey.userId))
+  .where(and(eq(parentAuthUser.parentId, parent.id), sql`not ${madeElsewhere(origin)}`)))}
+  and not ${exists(db.select({ id: parentAuthenticator.id }).from(parentAuthenticator)
+    .where(and(eq(parentAuthenticator.parentId, parent.id), isNotNull(parentAuthenticator.confirmedAt))))}`;
+
+/**
+ * OldAddressPasskeys now, read in `q` when given (the press reads it under its locks): one read of the passkeys by
+ * origin and, when there are any, one of the people who hold them, and nothing else of the club's.
+ */
+export async function oldAddressPasskeys(q: Reader = db): Promise<OldAddressPasskeys> {
+  const origin = passkeyOrigin();
+  const groups = await q.select({ origin: parentAuthPasskey.origin, passkeys: count() }).from(parentAuthPasskey)
+    .where(madeElsewhere(origin)).groupBy(parentAuthPasskey.origin);
+  const byOrigin = groups.map((g) => ({ origin: g.origin, passkeys: Number(g.passkeys) })).sort(byOriginText);
+  const passkeys = byOrigin.reduce((sum, g) => sum + g.passkeys, 0);
+  if (passkeys === 0) return { origin, passkeys: 0, people: 0, leftWithNoFactor: 0, byOrigin: [] };
+  const [row] = await q.select({ people: count(),
+    left: sql<number>`count(*) filter (where ${parent.blocked} = false and ${leftWithNothing(origin)})`.mapWith(Number) })
+    .from(parent).where(inArray(parent.id, holdersElsewhere(q, origin)));
+  return { origin, passkeys, people: Number(row?.people ?? 0), leftWithNoFactor: row?.left ?? 0, byOrigin };
+}
+
+/** Why the press was refused: `shown` isn't a count the page draws, the count changed since, or there are none now. */
+export type OldPasskeysRefusal = "invalid" | "count_changed" | "none";
+/**
+ * The press done: how many passkeys went, from how many people, how many of those were left with no passkey and no
+ * app (their backup codes gone too), and, at Strict, how many of those had a session ended.
+ */
+export type OldPasskeysResult = { ok: true; passkeys: number; people: number; leftWithNoFactor: number; signedOut: number } | { ok: false; reason: OldPasskeysRefusal };
+
+/**
+ * An Admin's removal of every passkey made at an earlier address (slice SI-9b), by the reset's permission
+ * (RESET_PERMISSION, Admin-only: it takes away what people sign in with). In this order:
+ * (a) `shown`, the count of such passkeys the page drew, a safe whole number of 1 or more, else `invalid`, nothing read
+ *     or written;
+ * (b) one transaction in the order above lockedPerson() (sessions.ts): the parents' settings lock shared (the level is
+ *     read under it, and the switches, which take it whole, wait or are waited for); then, in one statement ordered by
+ *     id, the row FOR UPDATE of every person who holds such a passkey (the order of lockPeople(), switches.ts, and of
+ *     the clean-up, the only other writers that lock more than one person: two presses, a press and a switch, or a
+ *     press and any one person's own write never wait on each other in a circle); then, read under them, the count:
+ *     none refuses as `none`, writing nothing; one that isn't `shown` refuses as `count_changed`, changing nothing,
+ *     audited `parent.passkeys.old_address_refused`;
+ * (c) otherwise, person by person in id order: their passkeys from an earlier address deleted
+ *     (removeOldAddressPasskeysOf()); if they are not blocked and hold no passkey after it and no app in force, every
+ *     backup code, which would stand beside nothing (as removeMyPasskey() takes them with a last passkey beside no app:
+ *     open question 25), and at Strict (the level stored, as the page reads it, readStoredSettings()) every session
+ *     ended (open question 21, as the switch to Strict does: the gate would end it at their next request,
+ *     `strict_no_factor`, so the counts are true at the press); at Standard nobody is signed out. One
+ *     `parent.passkey.remove` row each, `reason: "old_address"`. Their devices, password, app, other passkeys, codes
+ *     beside an app or a remaining passkey, the offer's count and everything else stay. A blocked person's old passkeys
+ *     go too (they work nowhere), with nothing else of theirs. Sign-ins off doesn't stop the press;
+ * (d) one `parent.passkeys.old_address_removed` row of counts, with the portal's origin, the level and the origins.
+ * No mail goes (the screens each parent reaches next say what to do) and no rate limit applies: the press is an
+ * Admin's, and a second finds none. The library inserts a new passkey's row (origin null) just before the add records
+ * its origin (passkey-settings.ts), without the person's row: madeElsewhere() leaves such a row out while it is younger
+ * than ADD_UNDER_WAY_MINUTES, so a press in that moment neither counts nor removes a passkey being added at this
+ * address, and the people it locks are all whose rows it can delete (no row from an earlier address is made after the
+ * lock: every new one is such a row, and the add only ever records the portal's origin now). The summary's `byOrigin`
+ * is summed from the rows deleted.
+ */
+export async function removeOldAddressPasskeys(shown: unknown, o: StaffOp): Promise<OldPasskeysResult> {
+  if (typeof shown !== "number" || !Number.isSafeInteger(shown) || shown < 1) return { ok: false, reason: "invalid" };
+  const permission = o.permission ?? RESET_PERMISSION;
+  return db.transaction(async (tx): Promise<OldPasskeysResult> => {
+    await holdParentSettings(tx);
+    const origin = passkeyOrigin();
+    const people = await tx.select({ id: parent.id, blocked: parent.blocked }).from(parent)
+      .where(inArray(parent.id, holdersElsewhere(tx, origin))).orderBy(parent.id).for("update");
+    const found = await oldAddressPasskeys(tx);
+    if (found.passkeys === 0) return { ok: false, reason: "none" };
+    if (found.passkeys !== shown) {
+      await writeAudit({ actor: o.actor, action: "parent.passkeys.old_address_refused", permission, targetType: "setting", targetId: PARENTS_KEY,
+        after: { reason: "count_changed", shown, found: found.passkeys }, ip: o.ip }, tx);
+      return { ok: false, reason: "count_changed" };
+    }
+    const level = (await readStoredSettings(tx)).level === "strict" ? "strict" as const : "standard" as const;
+    let passkeys = 0, touched = 0, backupCodesDeleted = 0, leftWithNoFactor = 0, sessionsEnded = 0, signedOut = 0;
+    // The summary's origins are those of the rows this press deleted, so its counts agree with each other whatever the
+    // count read above saw.
+    const removedByOrigin = new Map<string | null, number>();
+    for (const p of people) {
+      const origins = await removeOldAddressPasskeysOf(tx, p.id, origin);
+      const removed = origins.length;
+      if (removed === 0) continue;
+      for (const at of origins) removedByOrigin.set(at, (removedByOrigin.get(at) ?? 0) + 1);
+      const left = await passkeyCount(p.id, tx);
+      const nothing = !p.blocked && left === 0 && !(await hasAuthenticator(p.id, tx));
+      const codes = nothing ? await removeBackupCodes(tx, p.id) : 0;
+      const ended = nothing && level === "strict" ? await endParentSessions(p.id, tx) : 0;
+      passkeys += removed; touched++; backupCodesDeleted += codes; sessionsEnded += ended;
+      if (nothing) leftWithNoFactor++;
+      if (ended > 0) signedOut++;
+      await writeAudit({ actor: o.actor, action: "parent.passkey.remove", permission, targetType: "parent", targetId: p.id,
+        after: { reason: "old_address", removed, passkeys: left, backupCodesDeleted: codes, sessionsEnded: ended }, ip: o.ip }, tx);
+    }
+    await writeAudit({ actor: o.actor, action: "parent.passkeys.old_address_removed", permission, targetType: "setting", targetId: PARENTS_KEY,
+      after: { origin, level, passkeys, people: touched, backupCodesDeleted, leftWithNoFactor, sessionsEnded,
+        byOrigin: [...removedByOrigin].map(([at, n]) => ({ origin: at, passkeys: n })).sort(byOriginText) }, ip: o.ip }, tx);
+    return { ok: true, passkeys, people: touched, leftWithNoFactor, signedOut };
+  });
 }

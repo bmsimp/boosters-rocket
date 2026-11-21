@@ -1,5 +1,9 @@
 // A guardian's passkeys (the sign-in release, slice SI-7a; section 6 of the app-owned families spec, "Passkeys
-// anywhere", and open questions 24, 30 and 35): the only portal module that reads or writes `parent_auth_passkey`. The
+// anywhere", and open questions 24, 30 and 35): the only portal module that writes `parent_auth_passkey`, and the only
+// one that reads it for one person. Two staff-only modules read it for the whole club, each in one query: the counts of
+// factors and Strict's switch (holdsPasskey(), switches.ts) and the count of passkeys from an earlier address
+// (oldAddressPasskeys(), signin-reset.ts, through madeElsewhere() below); a change to what counts as a person's
+// passkey here is a change to them too. The
 // WebAuthn ceremony is the passkey library's (@better-auth/passkey, on the parent instance, src/lib/auth/parent-auth.ts):
 // it makes the challenge, verifies an assertion against the stored public key and writes the signature counter itself.
 // What the portal reads here is whether a person has a passkey (who is asked which step at the door), when their newest
@@ -57,7 +61,7 @@ export async function passkeyNamed(credentialId: string, q: Reader = db): Promis
 /**
  * A passkey sign-in's own write, in the caller's transaction (which holds the person's row, lockedPerson(), and writes
  * the `signin.second_step` row): the passkey that verified is still the person's, and its `last_used_at` is set, by one
- * update returning the row. False when it is gone or no longer theirs (removed since, SI-7b, or by a staff reset, SI-9).
+ * update returning the row. False when it is gone or no longer theirs (removed since, SI-7b, by a staff reset, SI-9a, or as one from an earlier address, SI-9b).
  */
 export async function usePasskey(tx: Tx, parentId: string, passkeyId: string, now: Date): Promise<boolean> {
   const rows = await tx.update(parentAuthPasskey).set({ lastUsedAt: now })
@@ -170,6 +174,35 @@ export async function namePasskey(tx: Tx, parentId: string, passkeyId: string, n
 }
 
 /**
+ * The origin a passkey of the person's was made for (slice SI-9b), set by the add's own record in the caller's
+ * transaction, beside its name (addMyPasskey(), passkey-settings.ts): the origin the library verified the registration
+ * against, passkeyOrigin() (src/lib/auth/passkey-origin.ts). Never by a rename, which may happen at a new address and
+ * must never mark an old passkey current. False when it isn't theirs.
+ */
+export async function recordPasskeyOrigin(tx: Tx, parentId: string, passkeyId: string, origin: string): Promise<boolean> {
+  const rows = await tx.update(parentAuthPasskey).set({ origin })
+    .where(and(eq(parentAuthPasskey.id, passkeyId), inArray(parentAuthPasskey.userId, usersOf(tx, parentId))))
+    .returning({ id: parentAuthPasskey.id });
+  return rows.length > 0;
+}
+
+/**
+ * How long a row with no origin may be an add still under way rather than one the portal never recorded: the library
+ * inserts a new passkey's row (origin null) just before the add's own transaction records its origin, in the same
+ * request (addMyPasskey(), passkey-settings.ts), so a press of the removal in that moment must neither count it nor
+ * remove it. Minutes, many times a request's length; a row the add never recorded is taken by a press after it.
+ */
+export const ADD_UNDER_WAY_MINUTES = 10;
+
+/**
+ * A passkey made at an address other than `origin` (the portal's now): its recorded origin is distinct from it, so a
+ * row the portal never recorded (null) counts as one too (slice SI-9b), once it is older than ADD_UNDER_WAY_MINUTES
+ * (one younger may be an add under way at this address). A condition on a query of the table.
+ */
+export const madeElsewhere = (origin: string) => sql`(${parentAuthPasskey.origin} IS DISTINCT FROM ${origin}
+  and not (${parentAuthPasskey.origin} is null and ${parentAuthPasskey.createdAt} > now() - ${sql.raw(`interval '${ADD_UNDER_WAY_MINUTES} minutes'`)}))`;
+
+/**
  * A passkey of the person's removed, in the caller's transaction; false when it isn't theirs. A sign-in that verified
  * it just before and whose session is made after is refused at its last check (signinStands(): `passkey_gone`).
  */
@@ -183,11 +216,25 @@ export async function removePasskey(tx: Tx, parentId: string, passkeyId: string)
 /**
  * Every passkey of the person removed, in the caller's transaction, which holds the person's row and writes the audit
  * row: an Admin's reset of their sign-in (resetSignin(), signin-reset.ts; the sign-in release, slice SI-9a), which takes
- * away what they sign in with, the passkeys that no longer work after a change of the portal's address included.
- * Answers how many went. A sign-in that verified one just before and whose session is made after is refused at its last
+ * away what they sign in with, the passkeys that no longer work after a change of the portal's address included (for
+ * every parent at once, removeOldAddressPasskeysOf() below). Answers how many went. A sign-in that verified one just before and whose session is made after is refused at its last
  * check (signinStands(): `passkey_gone`).
  */
 export async function removeAllPasskeys(tx: Tx, parentId: string): Promise<number> {
   const rows = await tx.delete(parentAuthPasskey).where(inArray(parentAuthPasskey.userId, usersOf(tx, parentId))).returning({ id: parentAuthPasskey.id });
   return rows.length;
+}
+
+/**
+ * The person's passkeys made at an address other than `origin` (madeElsewhere()) removed, in the caller's transaction,
+ * which holds the person's row and writes the audit row: an Admin's removal of every passkey made at an earlier address
+ * (removeOldAddressPasskeys(), signin-reset.ts; slice SI-9b). Their passkeys made at `origin` stay. Answers the origin
+ * each one that went was made at (null for one the portal never recorded), so the press counts what it removed, never
+ * a credential id. A sign-in that verified one just before and whose session is made after is refused at its last check
+ * (signinStands(): `passkey_gone`).
+ */
+export async function removeOldAddressPasskeysOf(tx: Tx, parentId: string, origin: string): Promise<(string | null)[]> {
+  const rows = await tx.delete(parentAuthPasskey).where(and(inArray(parentAuthPasskey.userId, usersOf(tx, parentId)), madeElsewhere(origin)))
+    .returning({ origin: parentAuthPasskey.origin });
+  return rows.map((r) => r.origin);
 }

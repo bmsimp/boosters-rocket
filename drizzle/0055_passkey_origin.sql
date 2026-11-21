@@ -1,0 +1,1 @@
+ALTER TABLE "parent_auth_passkey" ADD COLUMN "origin" text;
