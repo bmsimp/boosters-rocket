@@ -63,6 +63,15 @@ const LINK_EFFECT = "Once linked, this family's guardians see this customer's op
  * family goes with the confirm; the unlink ends the family's link to its customer (as the books' copy names it), Leo's
  * link and Ana Rivera's own link; then both presses.
  */
+/**
+ * What Ana Rivera's line in the Riveras' opening says after her own link since slice M3c: it is her own Parent customer,
+ * with the warning of Unlink this guardian and its press, as the text of the page reads it.
+ */
+const ANA_OWN = ", their own Parent customer under this family"
+  + "Needs attention Unlinking ends only Ana Rivera's own link: nothing is sent to the books, the customer stays there as it is, and their access in the portal is as it was."
+  + " A change of their details still waiting to reach it is given up unsent at its next try. Nothing is sent for them to a Parent customer then, and no Parent customer is made for them by this, or later by itself."
+  + " They can be linked again here. It isn't unlinked while a change of theirs or of that customer waits on Reconciliation."
+  + "Unlink Ana Rivera from this Parent customer: Rivera Family";
 const riveraPresses = (customer = "Rivera Family") => "Confirm this link records it as checked by you, so it no longer reads as carried over. Nothing is sent to the books."
   + "Confirmed with it, each carried over to a student customer directly under this customer:Leo Rivera"
   + `Unlink from the booksUnlinking ends this family's link to “${customer}”, with the link of its student Leo Rivera, and a guardian's own link to a Parent customer. Nothing is sent to the books, and the customer stays there as it is.`
@@ -436,7 +445,7 @@ describe("the page", () => {
     const rivera = rowNamed(html, "Rivera Family")!;
     expect(rivera.slice(0, 3)).toEqual(["Rivera Family", "ana@example.com", "Rivera FamilyNo email address"]);
     expect(rivera[3]).toMatch(/^Carried overCarried over from the roster by the portal, on .+\. Nobody has confirmed it since\.$/);
-    expect(rivera[4]).toBe("Students and guardians: Rivera FamilyStudents:Leo Rivera: linked to Leo RiveraGuardians:Ana Rivera (ana@example.com): linked to Ana Rivera" + riveraPresses());
+    expect(rivera[4]).toBe("Students and guardians: Rivera FamilyStudents:Leo Rivera: linked to Leo RiveraGuardians:Ana Rivera (ana@example.com): linked to Ana Rivera" + ANA_OWN + riveraPresses());
     const patel = rowNamed(html, "The Patels")!;
     expect(patel.slice(1)).toEqual(["asha@example.com", "Patel Familyasha@example.com",
       "SuggestedA guardian's sign-in address matches: asha@example.com, on this customer.",
@@ -878,12 +887,132 @@ describe("differences, for a link that stands (slice M2)", () => {
     expect(html).not.toContain("<b>Bold</b>");
     expect(html).toContain("In the books: “&lt;b&gt;Bold&lt;/b&gt; Rivera”.");
     expect(html).toContain("<details class=\"more\"><summary>Students, guardians and differences<span class=\"visually-hidden\">: Rivera Family</span></summary>");
-    expect(rowNamed(html, "Rivera Family")![4]).toBe("Students, guardians and differences: Rivera FamilyStudents:Leo Rivera: linked to Leo RiveraGuardians:Ana Rivera (ana@example.com): linked to Ana Rivera"
+    expect(rowNamed(html, "Rivera Family")![4]).toBe("Students, guardians and differences: Rivera FamilyStudents:Leo Rivera: linked to Leo RiveraGuardians:Ana Rivera (ana@example.com): linked to Ana Rivera" + ANA_OWN
       + "Where the portal and the books differ:The family's name. In the portal: “Rivera Family”. In the books: “<b>Bold</b> Rivera”." + riveraPresses("<b>Bold</b> Rivera"));
     // The books' values are the portal's copy from its last read, said with its time; the page settles nothing.
     expect(whole).toContain("against its copy of the books, from its last read of them on ");
     expect(whole).toContain("and settles none of it.");
     expect((await db.select().from(auditLog)).length).toBe(audits);
     expect(await db.select().from(writeQueue)).toEqual(queue);
+  });
+});
+
+describe("guardians' own links in a row's opening (slice M3c)", () => {
+  const list = (html: string) => { const at = html.indexOf('id="links-list-h"'); return html.slice(at, html.indexOf("</section>", at)); };
+  const linkRowTo = (guardianId: string, customerId: string) =>
+    db.insert(accountingLink).values({ system: "quickbooks", realmId: REALM, customerId, guardianId, origin: "carried_over" });
+  const guardianOf = (view: LinksView, familyName: string, person: string) => {
+    const g = rowOf(view, familyName).guardians.find((x) => x.name === person);
+    if (!g) throw new Error(`no guardian ${person} in ${familyName}`);
+    return g;
+  };
+  let rivera: AppFamilyId, chen: AppFamilyId;
+  let kai: string, gus: string, eli: string, bea: string;
+  /**
+   * Two more Parent customers read in (May Chen 22 under the Chens, Bea Rivera 14 under the Riveras), and guardians: in the Riveras, Ana Rivera (seedAnaRivera(): her own, 11), Luz Rivera
+   * (no link, and no Parent customer free for her) and Bea Rivera, removed, linked to Bea Rivera 14; in the Chens, Mei
+   * C. (no link: May Chen 22 holds her sign-in address, Mei Chen 21 doesn't have her name), Kai Chen (linked to 11 too,
+   * Ana's), Gus Chen (linked to 999, which the books' copy doesn't hold) and Eli Chen (linked to Leo Rivera 12, a
+   * student customer under the Riveras); and a row of the Chens' a change of company closed, linked to 21.
+   */
+  async function seedGuardians() {
+    tag = await connectRoster(stub);
+    await seedAnaRivera();
+    await readAgain(qc("22", "May Chen", "2", { ...under("20"), ...mail("mei@example.com") }), qc("14", "Bea Rivera", "2", under("10")));
+    rivera = await recordOfCustomer("10", "family"); chen = await recordOfCustomer("20", "family");
+    await guardianIn(chen, "Mei C.", "mei@example.com");
+    kai = await guardianIn(chen, "Kai Chen", "kai@example.com"); await linkRowTo(kai, "11");
+    gus = await guardianIn(chen, "Gus Chen", "gus@example.com"); await linkRowTo(gus, "999");
+    eli = await guardianIn(chen, "Eli Chen", "eli@example.com"); await linkRowTo(eli, "12");
+    await guardianIn(rivera, "Luz Rivera", "luz@example.com");
+    bea = await guardianIn(rivera, "Bea Rivera", "bea@example.com", "disabled"); await linkRowTo(bea, "14");
+    const moved = await guardianIn(chen, "Old Company", "old@example.com", "disabled");
+    await db.update(guardian).set({ disabledReason: "company_changed" }).where(eq(guardian.id, moved));
+    await linkRowTo(moved, "21");
+  }
+
+  it("gives each open guardian their link's standing with Unlink, or the Parent customers they may be linked to with the one filled in, and lists the removed", async () => {
+    await seedGuardians();
+    const view = await loadAccountingLinks();
+    const ana = guardianOf(view, "Rivera Family", "Ana Rivera");
+    const anaLink = (await db.select().from(accountingLink).where(eq(accountingLink.guardianId, ana.id)))[0]!;
+    expect(ana).toMatchObject({ standing: "shared", sharedWith: ["Chen Family"], unlink: { linkId: anaLink.id, stamp: expect.any(String) }, offer: null, noOffer: null });
+    expect(guardianOf(view, "Chen Family", "Kai Chen")).toMatchObject({ standing: "shared", sharedWith: ["Rivera Family"], offer: null });
+    expect(guardianOf(view, "Chen Family", "Gus Chen")).toMatchObject({ standing: "gone", link: { state: "gone" }, unlink: { linkId: expect.any(String) } });
+    expect(guardianOf(view, "Chen Family", "Eli Chen")).toMatchObject({ standing: "elsewhere", link: { state: "linked", customer: "Leo Rivera" } });
+    // Mei C.: the one Parent customer of the Chens' no guardian row is linked to, filled in by the address it holds (Mei
+    // Chen 21 is linked to the row a change of company closed: still a guardian row's link, so not offered).
+    const offered = guardianOf(view, "Chen Family", "Mei C.");
+    expect(offered).toMatchObject({ standing: null, unlink: null, noOffer: null });
+    expect(offered.offer).toEqual({ familyLinkId: expect.any(String), candidates: [{ qboId: "22", name: "May Chen", email: "mei@example.com" }], suggested: "22", stamps: { "22": expect.any(String) } });
+    // Luz: Ana's 11 is linked, and Bea's 14 is a removed guardian's, theirs again if added back: nothing is free.
+    expect(guardianOf(view, "Rivera Family", "Luz Rivera")).toMatchObject({ offer: null, noOffer: { why: "none" } });
+    expect(rowOf(view, "Rivera Family").removed).toEqual([{ id: bea, name: "Bea Rivera", customer: "Bea Rivera", active: true }]);
+    // The closed row a change of company closed isn't a removed guardian.
+    expect(rowOf(view, "Chen Family").removed).toEqual([]);
+    expect(rowOf(view, "Rivera Family").guardians.map((g) => g.name)).toEqual(["Ana Rivera", "Luz Rivera"]);
+  });
+
+  it("offers none in a state but listed, and no link for a family whose own link doesn't stand", async () => {
+    await seedGuardians();
+    changeInBooks("20", { CustomerTypeRef: { value: "4" } });
+    await readAgain();
+    let view = await loadAccountingLinks();
+    expect(rowOf(view, "Chen Family").status.key).toBe("not_a_family");
+    expect(guardianOf(view, "Chen Family", "Mei C.")).toMatchObject({ offer: null, noOffer: null });
+    // A link is ended alone whatever the family's own link stands as.
+    expect(guardianOf(view, "Chen Family", "Kai Chen")).toMatchObject({ standing: "shared", unlink: { linkId: expect.any(String) } });
+    await db.delete(setting).where(eq(setting.key, SHAPE_KEY));
+    view = await loadAccountingLinks();
+    expect(view.state).toBe("no_shape");
+    for (const r of view.rows) for (const g of r.guardians) expect(g).toMatchObject({ standing: null, unlink: null, offer: null, noOffer: null });
+  });
+
+  it("draws the guardians' presses, the choice filled in, the removed guardians, and the words, as text", async () => {
+    await seedGuardians();
+    asStaff(await seedStaff({ email: "admin@club.org", name: "Ada Admin", admin: true }));
+    const audits = (await db.select().from(auditLog)).length;
+    const html = list(await renderPage(AccountingLinksPage));
+    const chenOpening = rowNamed(html, "Chen Family")![4]!;
+    expect(chenOpening).toContain("Mei C. (mei@example.com): no link of its own"
+      + "A Parent customer under this family in the books that no guardian is linked to is named like Mei C. or holds their sign-in address, and is filled in. Any of them can be chosen instead."
+      + "Which Parent customer is Mei C.'sMay Chenmei@example.comLink Mei C. to this Parent customer: Chen Family"
+      + "Linking sends nothing to the books and changes nothing of their access in the portal. From then on, a rename of them, their removal from this family and a change of their phone, mailing address or sign-in email go to that Parent customer, by the portal's own rules, while it is theirs alone under this family. The details the portal holds for them now aren't sent by it.");
+    expect(html).toMatch(/<input type="radio" name="guardian-[0-9a-f-]{36}" value="22" checked=""/);
+    expect(chenOpening).toContain("Kai Chen (kai@example.com): linked to Ana Rivera, which a guardian of Rivera Family is linked to as well, so it is nobody's own and nothing is sent for them: unlink all but one guardian from it to make it that guardian's own"
+      + "Needs attention Unlinking ends only Kai Chen's own link:");
+    expect(chenOpening).toContain("Unlink Kai Chen from this Parent customer: Chen Family");
+    expect(chenOpening).toContain("Gus Chen (gus@example.com): linked to a customer that isn't in the books' copy any more, so nothing is sent for them");
+    expect(chenOpening).toContain("Eli Chen (eli@example.com): linked to Leo Rivera, which isn't a Parent customer directly under this family's customer in the books, so nothing is sent for them");
+    const riveraOpening = rowNamed(html, "Rivera Family")![4]!;
+    expect(riveraOpening).toContain("Luz Rivera (luz@example.com): no link of its own"
+      + "There is no active Parent customer under this family in the books that no guardian is linked to, so none can be linked to them here.");
+    expect(riveraOpening).toContain("Removed guardians, with their own Parent customers in the books:Bea Rivera: linked to Bea Rivera, active in the books"
+      + "A removed guardian's Parent customer is theirs again if they are added back under Portal sign-ins, so it isn't offered to another guardian here, and their link isn't ended on its own: Unlink from the books ends it with the family's.");
+    expect(riveraOpening).not.toContain("Unlink Bea Rivera");
+    expect(riveraOpening).not.toContain("Link Luz Rivera");
+    expect((await db.select().from(auditLog)).length).toBe(audits);
+  });
+
+  it("reads as many times with every guardian, link and offer as with one: no query of its own", async () => {
+    tag = await connectRoster(stub);
+    await seedAnaRivera();
+    const spy = vi.spyOn(db, "select");
+    try {
+      await loadAccountingLinks();
+      const one = spy.mock.calls.length;
+      spy.mockClear();
+      await readAgain(qc("22", "May Chen", "2", { ...under("20"), ...mail("mei@example.com") }), qc("14", "Bea Rivera", "2", under("10")));
+      chen = await recordOfCustomer("20", "family"); rivera = await recordOfCustomer("10", "family");
+      for (const n of ["One", "Two", "Three"]) await guardianIn(chen, `${n} Chen`, `${n.toLowerCase()}@example.com`);
+      await linkRowTo(await guardianIn(chen, "Kai Chen", "kai@example.com"), "11");
+      await linkRowTo(await guardianIn(rivera, "Bea Rivera", "bea@example.com", "disabled"), "14");
+      spy.mockClear();
+      const view = await loadAccountingLinks();
+      expect(guardianOf(view, "Chen Family", "One Chen").offer).not.toBeNull();
+      expect(spy.mock.calls.length).toBe(one);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

@@ -518,7 +518,9 @@ export type LinkBasics = Awaited<ReturnType<typeof readLinkBasics>>;
  * nothing more but what a family's create given up after a try left (madeAfterGivingUp(): 4 to 8, the page's own).
  * Since slice M3a2 the rows' Confirm this link (reviewOf()) and Confirm all exact email matches (bulk(), by
  * suggestedRowsShown()) are worked out from the same reads, with no query of their own, and since slice M3b so is each
- * linked row's Unlink from the books (unlinkOf()).
+ * linked row's Unlink from the books (unlinkOf()). Since slice M3c so are each open guardian's link standing, Unlink
+ * this guardian and Link this guardian's candidates (guardianLinkOf(), guardianOfferOf()) and the removed guardians
+ * (removedOf()): the guardian query reads closed rows too, one query still, so the count is as it was.
  * On four hundred families with two thousand customers that is the same number of queries; memory holds the two
  * thousand cached customers (twice, while the queue holds items, as loadOpenWrites() reads its own), the records,
  * guardian rows and links (a few thousand small rows), and the rows rendered are the four hundred families, each
