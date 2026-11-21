@@ -26,14 +26,19 @@ const files = (dir: string): string[] => readdirSync(path.resolve(dir), { recurs
 const NOT_AUDITED: Record<string, string> = {
   // Caches for the Health page: what an outside service last answered, or what a job last did.
   "src/lib/forms/settings.ts#patchStatus": "a cache: when Documenso last answered, failed or sent a webhook, for the Health page",
-  "src/lib/jobs/marks.ts#markJob": "a cache: when the volunteer reminders and the buy-out check last ran, and their counts, for the Health page; what they send or change is audited",
+  "src/lib/jobs/marks.ts#markJob": "a cache: when the volunteer reminders, the buy-out check, the welcome emails and the sweep of expired passkey challenges last ran, and their counts, for the Health page; what they send or change is audited",
+  // The library's own rows past their life.
+  "src/lib/jobs/cleanup.ts#sweepExpiredChallenges": "Better Auth's parent verification rows past their expiry (the passkey library's challenges, slice SI-7a), swept at every wake so a flood of challenges can't outlive five minutes; the library's rows, not the club's, counted in the worker's mark, and the daily clean-up's delete of the same rows is audited (cleanup.run)",
   "src/lib/parents/breach-mark.ts#markBreachCheck": "a cache: when the password breach service last answered or failed, with a short code, for the Health page; each password chosen is audited (parent.password.set, with whether it was checked)",
   // Rows a page load makes so that something has an id: nothing is sent or signed.
   "src/lib/forms/my-forms.ts#loadMyForms": "a placeholder: the family's signature requests are made, not opened and with nothing sent, the first time its Forms page is read, so each has an id; the open that makes a document is audited (form.document.create)",
   // A session's own upkeep.
-  "src/lib/parents/sessions.ts#renewParentSession": "a session's expiry pushed forward while the parent keeps using it; signing in, signing out and ending sessions are audited",
+  "src/lib/parents/sessions.ts#renewParentSession": "a session's expiry pushed forward while the parent keeps using it, and (since SI-5b) the expiry and last use of the remembered device it names with it; signing in, signing out, ending sessions and remembering and forgetting devices are audited",
+  // A parent's own answer to an offer.
+  "src/lib/parents/passkey-offer.ts#declinePasskeyOffer": "a parent's own answer to the passkey offer on Home, kept so it comes back at most once a month on a device and not after the third: it grants and removes nothing, like the install hint's dismissal, and adding a passkey from the offer is audited by the add (parent.passkey.add)",
   // Rate-limit counts.
-  "src/lib/parents/rate-limit.ts#takeRateLimit": "rate-limit counts: one row per try, cleaned up when they expire (CLEANED_TABLES); a refusal is audited by its caller",
+  "src/lib/parents/rate-limit.ts#takeRateLimitPlace": "rate-limit counts: one row per try, cleaned up when they expire (CLEANED_TABLES); a refusal is audited by its caller",
+  "src/lib/parents/rate-limit.ts#giveBackRateLimit": "rate-limit counts: a right password's try gives its own row back (password-signin.ts), so only wrong tries stay counted; the sign-in it goes on to is audited",
   // Claims: a row held so that two requests or two runs never do one thing twice.
   "src/lib/forms/requests.ts#claim": "a claim: holds a request while an open makes its document (preparing_at); the open is audited",
   "src/lib/forms/requests.ts#release": "a claim: lets go of the hold above",
@@ -43,6 +48,7 @@ const NOT_AUDITED: Record<string, string> = {
   // Setup's and the connection's own progress, before the thing they lead to is done (and audited).
   "src/lib/setup/state.ts#updateSetupState": "which step of the first-run setup is showing; what the steps save (the first Admin, the keys) is audited",
   "src/lib/quickbooks/connection.ts#beginConnect": "the single-use state of a connection being started, before Intuit answers; the connection made (quickbooks.connect) is audited",
+  "src/lib/roster/source.ts#dropSwitchAsk": "the single-use ask to switch companies, dropped when a plain start or a change of keys replaces it or a connect spends it; making the ask is audited (quickbooks.switch.asked), and so are the switch it leads to (quickbooks.connect, with switchedFrom) and its clear",
   // The import of the app's records from the roster cache (src/lib/families/roster-import.ts#importInto) left this list
   // in stage 3's slice 10: its one caller under src/, "Create a family from this" (src/lib/roster/no-family.ts), writes
   // its audit row (accounting.family.from_customer) in the same transaction, so the scan covers it.

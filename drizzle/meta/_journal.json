@@ -358,6 +358,34 @@
       "when": 1795252417552,
       "tag": "0050_family_signin_hold",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1795255231936,
+      "tag": "0051_authenticator_app",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1795255234209,
+      "tag": "0052_passkeys",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1795255236266,
+      "tag": "0053_passkey_offer",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1795255238725,
+      "tag": "0054_enrolling_session",
+      "breakpoints": true
     }
   ]
 }

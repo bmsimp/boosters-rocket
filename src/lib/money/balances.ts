@@ -57,7 +57,7 @@ export type Balances = {
   worthALook: WorthALook[];
   /**
    * How many active family records of the portal have no family link in the records' company (0 while that company is
-   * unknown), so they have no row here (stage 4's slice M3b; the owner's choice 9, recommended and awaiting his word):
+   * unknown), so they have no row here (stage 4's slice M3b; the owner's choice 9, which the owner confirmed on 2026-11-21):
    * the page says so in one line, pointing at Accounting links.
    */
   unlinked: number;

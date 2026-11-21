@@ -15,14 +15,18 @@ in the page's order, and a page the keyboard can't Tab out of; and after each ac
 
 | Journey | What the test holds |
 |---|---|
-| 1. Signing in with an emailed code | The first stop is the email field. Enter sends the code and the code field takes the focus; a wrong code is an alert with the focus left in the field; Enter signs in; the chooser's family button by Tab and Enter. |
+| 1. Signing in with a password and an emailed code | The first stop is the email field, then the password, then Sign in. Enter checks the password and, on a browser the portal doesn't remember, the code field takes the focus; a wrong code is an alert with the focus left in the field; Enter signs in; the chooser's family button by Tab and Enter. |
 | 2. Home to Payments | "Skip to the page" is the first stop, drawn while focused (44px), and the next Tab lands past the club bar and the Switch family line. The bar's order (Skip, Home, Forms, Payments); after Enter on Payments the focus stays on its link; the Pay link is reached and named with its amount and invoice (not followed: it is Intuit's page). |
 | 3. Opening a form | The family's signed form opened by keyboard; its page title is the form's name; the download and Back to Forms are reached. Agreeing and Documenso's frame are not: forms are not set up in the seed (below). |
 | 4. Signing up for a shift and cancelling | The choice group is one stop, then Sign me up; the thank-you takes the focus. Cancel my sign-up puts the focus on Keep it, inside the group "Cancel my sign-up?"; Keep it gives it back; Shift+Tab reaches Yes, cancel it; the cancelled message takes the focus. |
 | 5. Checking in | Check me in by Enter; the box's status line takes the focus; Tab then leaves the page. |
 | 6. The details form | Family, Update my details, the form's first field and its Save, and Back to Family by keyboard. Since stage 3's slice 11a the details are the portal's own, so the browser run shows the form (below). |
-| 7. The email change | An address with no "@" keeps the focus in the field; the good one is announced with the focus left on Send me a link; on the emailed link's page, the refused Yes keeps the focus with its alert. |
+| 7. The email change | The seeded session is stamped as proved just now and put back after (asking again, the sign-in release's slice SI-5a, is journey 10). An address with no "@" keeps the focus in the field; the good one is announced with the focus left on Send me a link; on the emailed link's page, the refused Yes keeps the focus with its alert. |
 | 8. The Display page | Each choice group is one stop and the arrow keys choose (Dark sets `data-theme="dark"`, Match my device takes it off); Contrast, Text size and Motion follow, then Sign out, which signs out. |
+| 10. Sign-in settings: asking again | From Family, "Sign-in settings" by Tab and Enter; the password field, then Continue; Enter puts the focus in the code field; a wrong code is an alert with the focus left in the field; the emailed code by Enter, and the thank-you takes the focus; then New password, New password again, Change my password (never pressed) and Sign out everywhere (never pressed); Tab then leaves the page. The seeded session's `strong_at` is put back after, and the codes the journey made are deleted (the seed has none). |
+| 11. The authenticator app | In the Authenticator app box: its own asking again (the password, Continue, the emailed code), the thank-you taking the focus; Set up an authenticator app by Enter puts the focus on the words above the QR code; Copy the key by Tab and Enter copies the key alone; the code field, Finish setting up, and the backup codes' words take the focus; Copy the backup codes copies the ten alone. Drawn again with no recent proof: the password, then the app's own code, the thank-you; Make new backup codes (not pressed), Turn off the authenticator app by Enter, and what happened takes the focus; Tab then leaves the page. The app, its codes and the counts are removed after, and the seeded session's `strong_at` put back (added with the sign-in release's slice SI-6b). |
+| 13. The passkey offer on Home | A session made and proved just now on a device of its own (as a sign-in by the password and the emailed code leaves one): on Home, Tab from the top reaches **Turn on**, then **Not now**; Enter on Not now replaces the box with its answer ("No problem. We'll leave it for now."), which takes the focus; Tab then goes on through Home and leaves it. The session, its device and Zelda's count are removed and put back after (added with the sign-in release's slice SI-8). |
+| 14. Strict's enrolment (`/one-more-step`) | Strict stored for the journey alone and Standard put back after, with a guardian of its own (a password, no second factor, never Zelda): the email, the password and Enter land on `/one-more-step`; Tab past **Add a passkey** reaches **Set up an authenticator app**, and Enter puts the focus on the words above the QR code; the app's code typed in its field and Enter finish it, and the done words above the ten backup codes take the focus; Tab reaches the box to tick, then **Continue**, whose Enter while unticked asks for the tick and goes nowhere; Shift+Tab, Space ticks it, Tab and Enter go home (added with the sign-in release's slice SI-10a). |
 
 Still walked only by hand, or not at all, because the browser run can't reach the service: agreeing to sign and the
 signing frame (journey 3's second half, against the local Documenso as in step 6), saving the phone and address form
@@ -50,18 +54,29 @@ on staff pages too (both were "For later" in the section below).
   database's Forms settings pointed at it and its test template attached to the seeded Medical release. The browser
   test run never does this: its seed leaves forms unset, so it can't reach a Documenso.
 
-### 1. Signing in with an emailed code (`/sign-in`, `/choose-family`)
+### 1. Signing in with a password and an emailed code (`/sign-in`, `/choose-family`)
 
-- Tab order: Email, Send code, "Board and staff sign in here". On the code step: the code field, Sign in,
-  Resend code (waiting, so skipped), Use a different email, then the staff link. The chooser: each family, then
-  Sign out. Every stop has a ring in every mode (3px club text, 4px in high contrast, Highlight in forced colors).
-- Enter in the Email field sends the code; the code step's status ("If this email belongs to a family in the club,
-  we've sent a 6-digit code…") is announced and the focus is in the code field. A wrong code is announced as an
-  alert and the focus stays in the field. The right one goes to the chooser, then Home.
+Since the sign-in release's slice SI-3b. `tests/e2e/keyboard-journeys.spec.ts` walks it by keyboard on every run;
+the hand walk below was made on the code door before it and has not been made again on the password form.
+
+- Tab order: Email, Password, Sign in, Sign in with a passkey (since slice SI-7a; its sentence of what a passkey is is
+  its description), "Set up or reset my password", "Board and staff sign in here". The journey stops at Sign in, and
+  Zelda has no passkey, so it still meets the emailed code; the passkey's own step (Use your passkey, which takes the
+  focus, the app's code field beside it for a guardian with an app too, Start again) is checked in the browser by
+  `tests/e2e/parent-a11y.spec.ts` (`/sign-in (passkey step)`) and walked by `tests/e2e/passkey-signin.spec.ts`. On the code
+  step (a device the portal doesn't remember): the code field, Sign in, Resend code (waiting, so skipped), Start
+  again, then the same two links. The chooser: each family, then Sign out. Every stop has a ring in every mode (3px
+  club text, 4px in high contrast, Highlight in forced colors).
+- Enter on Sign in checks the password. A refusal is announced as an alert ("That email and password didn't work…"
+  with a link to "Set up or reset my password") and the focus stays where it was. A right password on a new device
+  moves to the code step: its status ("To finish signing in on this device, enter the 6-digit code we've emailed
+  you…") is announced and the focus is in the code field. A wrong code is announced as an alert and the focus stays
+  in the field. The right one goes to the chooser, then Home. On a device the portal remembers, the password alone
+  goes to the chooser.
 - **Found and fixed:** "Board and staff sign in here" was a 207 by 21px target standing alone on its line (now 44px
   tall, `.link-line`). Send code and Sign in were disabled while busy, which drops the focus when pressed from the
   button: they are now `aria-disabled` while busy, and each step focuses its own field when the form moves to it
-  (also after "Use a different email" and after Resend).
+  (also after "Use a different email", now "Start again", and after Resend).
 - Left as it is: a page load (the chooser, Home) starts the focus at the top of the page, as every full page load does.
 
 ### 2. Home to Payments and a Pay link (`/`, `/payments`)
@@ -164,6 +179,127 @@ can't reach QuickBooks, so no buy-out is made there).
   - A confirm or a switch-back that works redraws the page into another section, so its message ("Done. An invoice
     from the club for $25.00…", "Done. The invoice is cancelled…") vanished unheard. It now goes to a status line
     outside both sections (`Announcer`), which is announced and takes the focus.
+
+### 10. Sign-in settings: asking again before a change (`/family/sign-in`, and `/family/email` the same way)
+
+Added with the sign-in release's slice SI-5a, and the remembered devices with SI-5b. Journey 10 of
+`tests/e2e/keyboard-journeys.spec.ts` walks what is marked "walked"; the rest is how the page is built, walked neither by
+the spec nor by hand yet.
+
+- Walked: the order: the club bar, then the password box (Your password, Continue), Sign out everywhere, the
+  remembered devices, the Authenticator app box (since SI-6b, journey 11), Back to Family. The address a password manager files the password under is a hidden `username`
+  field, never a stop.
+- Walked: Continue moves to the code step, whose field takes the focus (and is described by the words that a code was
+  emailed); a wrong code is an alert, with the focus left in the field (the busy button is `aria-disabled`).
+- Walked: once proved, "Thank you, that's you. You can make the change now." takes the focus and the change form
+  follows it: New password, New password again, Change my password (never pressed), then Sign out everywhere (never
+  pressed).
+- Walked: the proof covers forgetting a device too, so after Sign out everywhere come the remembered devices, newest
+  use first, each with its button: "Forget this device" on the row marked "This device" (the seeded session was made
+  on it), and on every other row "Forget", whose name says which device by the row's two times ("Forget the device
+  first remembered …, last used …", and the row's place in the list when another row's times read the same), so no two
+  buttons share a name; then "Forget every other device". Forgetting one (the spec's own device, found by its button's
+  name, never the seeded one) puts "That device is forgotten…" in a status line that takes the focus, and its row goes.
+- Walked, in a session of the spec's own made on a device of its own: "Forget this device" by Tab and Enter puts the
+  same status line in the focus, the row goes, and the page drawn again (its session now naming no device) still offers
+  "Forget every other device", never saying it can't tell which device is in use.
+- Checked by the accessibility spec, not walked: without a recent proof the devices are listed, the seeded one marked
+  "This device", with no buttons, and the devices box asks again itself.
+- Not walked yet: the devices box's own asking (the password, then the code); once proved there, its own "Thank you,
+  that's you." is drawn above the list and takes the focus, and the buttons follow it, so Tab reaches them next; the
+  password box above, its password step not yet answered, draws the change form in its place. A parent with no
+  password, or a club at Strict, reads why nothing can be forgotten here instead.
+- Not walked yet: a session that names none of the listed devices (one from before SI-5b, or one whose device ran out
+  or was forgotten before the page was opened) says above the list that the portal can't tell which is the device in use, marks none, and
+  offers "Forget every device" instead of "Forget every other device".
+- Not walked yet: Start again goes back to the password field; a wrong password is an alert with the focus left in the
+  field.
+- Not walked yet: a change that is made, and "Sign out everywhere", replace every form of the page with what happened,
+  which takes the focus, and the way to sign in again (Sign in; with no password yet, Choose a password): the parent is
+  signed out everywhere. The spec never presses either, so the seeded session lives on.
+- Not walked yet: on `/family/email` the same asking comes before the new address field, and a person with no password
+  is offered "Email me a link to choose a password" instead.
+
+### 11. The authenticator app: setting it up, its backup codes, asking again with it, turning it off (`/family/sign-in`)
+
+Added with the sign-in release's slice SI-6b. Journey 11 of `tests/e2e/keyboard-journeys.spec.ts` walks what is marked
+"walked"; `tests/e2e/parent-a11y.spec.ts` draws the box's four states only presses reach (the set-up shown, the backup
+codes shown, the app on, and asking again for the app's code) in every mode at 360 and 1440 wide.
+
+- Walked: the box asks again on its own (the password, Continue, then the code emailed to a parent with no app yet);
+  once proved, its "Thank you, that's you." takes the focus and **Set up an authenticator app** is the next stop.
+- Walked: the set-up press puts the focus on "Scan this QR code with your authenticator app…", above the QR code (an
+  image named "QR code to scan with your authenticator app", never a stop) and the key in groups of four, selectable
+  text; **Copy the key** is the next stop, copies the key alone, and says "Copied." in a status line; then the code
+  field (the number keypad on a phone, `one-time-code`), then **Finish setting up**.
+- Walked: finishing puts the focus on "Your authenticator app is set up.", above the ten backup codes (a list named
+  "Your backup codes") and the words to keep them off the phone; **Copy the backup codes** copies the ten alone, one
+  per line.
+- Not walked yet: below the backup codes the box asks for the password again at once (a proof from before the app came
+  into force no longer counts), and the other boxes' changes drawn for that proof go back to their password field too.
+- Walked: drawn again with no recent proof, the box asks for the password and then the app's code (one field that takes
+  a backup code too); proved, **Make new backup codes**, then the words that the backup codes go with it and new
+  devices get an emailed code again, then **Turn off the authenticator app**, whose answer takes the focus, and the box
+  is off again.
+- Not walked yet: a wrong code at the set-up is an alert with the focus left in the field; a set-up past its half hour
+  says to start again; **Make new backup codes** shows the new ten the same way, saying the old ones no longer work;
+  under Strict the box says the app can't be turned off here, and offers no set-up to a parent without one.
+- Not walked yet: the sign-in page's app step when the app was turned off meanwhile goes back to the password step,
+  with the refusal's words and that they start again, and asking again goes back to its password field the same way.
+
+### 12. Passkeys: adding, naming, asking again with one, removing (`/family/sign-in`)
+
+Added with the sign-in release's slice SI-7b. Journey 12 of `tests/e2e/keyboard-journeys.spec.ts` walks it by keyboard
+alone with Playwright's own authenticator (`tests/e2e/passkeys.spec.ts` walks it by pointer, and signs in with the
+passkey on a fresh browser); what a real phone's or computer's prompt does is on the owner's list
+(`docs/runbooks/before-the-first-family.md`).
+
+- Walked: the "Passkeys" box asks again on its own for a parent with no passkey (the password, Continue, the emailed
+  code); once proved, the box's own "Thank you, that's you." takes the focus (drawn by the box, since the asking gives
+  way to the change at once), then the name field ("A name for it (optional)", described by its help line) and **Add a
+  passkey**.
+- Walked: after the add, the words "Your passkey is added, and here are your backup codes." take the focus; the ten codes
+  are selectable text, and **Copy the backup codes** copies the ten alone, one per line, and says "Copied.".
+- Walked: **Rename** on a passkey (its name spoken after the word) draws its field, which takes the focus, then **Save
+  the name** and **Cancel**; Cancel gives the focus back to that passkey's **Rename**; a saved name's answer takes the
+  focus.
+- Walked: for a holder, asking again offers **Use your passkey** first, then the password field beside it; a proof's
+  thanks takes the focus, and **Remove** (its passkey's name spoken after it), with the words for the last one, is
+  reached with Shift+Tab; its answer takes the focus, and Tab leaves the page.
+- Not walked yet: after the password, a holder with no app is asked for the passkey alone, and the words of that step
+  take the focus (there is no field), or, holding unspent backup codes, the backup code's field does; a refused or
+  cancelled passkey is an alert with the focus left on its button; a browser or password manager that already holds a
+  passkey for the parent is answered in words that say so.
+- A busy button keeps the focus (`aria-disabled`), and every answer takes the focus.
+
+### 13. The passkey offer on Home (`/`)
+
+Added with the sign-in release's slice SI-8. Journey 13 of `tests/e2e/keyboard-journeys.spec.ts` walks Not now by
+keyboard alone; `tests/e2e/parent-a11y.spec.ts` checks the box at 360 and 1440 in every mode (its target "/ (the passkey
+offer)"); `tests/e2e/passkeys.spec.ts` presses **Turn on** once with Playwright's own authenticator. What a real phone's
+or computer's prompt does is on the owner's list (`docs/runbooks/before-the-first-family.md`).
+
+- Walked: the box comes after the greeting and before the family's boxes, headed with its question; **Turn on** then
+  **Not now** are the next Tab stops; Not now's answer replaces the box and takes the focus; Tab goes on through Home.
+- Not walked by keyboard: **Turn on** (the passkey prompt is the browser's own); after it, the words "Done. Next time you
+  sign in here, use your passkey." take the focus, or, for a first passkey with no app, the words above the ten backup
+  codes; a refused or cancelled add is an alert under the buttons, which takes the focus, with the offer still there;
+  the third Not now's answer, with its **Sign-in settings** link after it.
+
+### 14. Strict's enrolment (`/one-more-step`)
+
+Added with the sign-in release's slice SI-10a. Journey 14 of `tests/e2e/keyboard-journeys.spec.ts` walks the app's way
+by keyboard alone; `tests/e2e/parent-a11y.spec.ts` checks the page at 360 and 1440 in every mode (its targets
+"/one-more-step" and "/one-more-step (the backup codes and the box to tick)"); `tests/e2e/strict-enrolment.spec.ts`
+adds a passkey there once with Playwright's own authenticator. What a real phone's passkey prompt does there, and the page in
+the installed app, stay unproved in a browser: nothing can store Strict until SI-10b's switch, which adds them to the
+owner's list (`docs/runbooks/before-the-first-family.md`).
+
+- Walked: the two boxes in order, the passkey's press then the app's; the set-up's words take the focus; the done words
+  above the backup codes take the focus; Continue is `aria-disabled` until the box is ticked, and pressed unticked says
+  why in its status line, the focus staying on it.
+- Not walked by keyboard: **Add a passkey** (the prompt is the browser's own); a press once the half hour since signing
+  in has passed, whose alert takes the focus with a **Sign in** link after it.
 
 ### On a phone: the tab bar and the focus
 

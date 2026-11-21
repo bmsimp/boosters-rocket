@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { installDevice, installHintView, type InstallDevice } from "@/app/components/pwa/install-platform";
+import { installDevice, installHintView, offerDevice, type InstallDevice } from "@/app/components/pwa/install-platform";
+import { PASSKEY_OFFER_COPY } from "@/lib/parents/passkey-offer-copy";
 
 const IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko)";
 const UA = {
@@ -151,5 +152,37 @@ describe("Chromium's install offer is caught once and kept", () => {
     target.dispatchEvent(new Event("appinstalled"));
     expect(offer.installedThisVisit()).toBe(true);
     expect(offer.installOffer()).toBeNull();
+  });
+});
+
+describe("which words the passkey offer uses (slice SI-8)", () => {
+  const ANDROID_TABLET = "Mozilla/5.0 (Linux; Android 15; SM-X910) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
+  it.each([
+    ["Safari on an iPhone", UA.iphoneSafari], ["Chrome on an iPhone", UA.iphoneChrome], ["an iPhone app's own browser", UA.iphoneWebView],
+    ["Safari on an iPad", UA.ipadSafari], ["Chrome on an Android phone", UA.androidChrome], ["Firefox on an Android phone", UA.androidFirefox],
+  ])("%s: a phone's", (_what, userAgent) => {
+    expect(offerDevice({ userAgent, maxTouchPoints: 5 })).toBe("phone");
+  });
+
+  it("an iPad that says it is a Mac is a phone's; a Mac is a computer's", () => {
+    expect(offerDevice({ userAgent: UA.macSafari, platform: "MacIntel", maxTouchPoints: 5 })).toBe("phone");
+    expect(offerDevice({ userAgent: UA.macSafari, platform: "MacIntel", maxTouchPoints: 0 })).toBe("computer");
+    expect(offerDevice({ userAgent: UA.macSafari, platform: "MacIntel" })).toBe("computer");
+  });
+
+  it("a phone's words say \"this device\", true on an iPad too, never \"your phone\"", () => {
+    expect(PASSKEY_OFFER_COPY.phoneBody).toMatch(/^This device can keep a passkey for the portal\. /);
+    expect(PASSKEY_OFFER_COPY.phoneBody).not.toMatch(/phone/i);
+  });
+
+  it("Windows, and an Android tablet (no Mobile), are a computer's", () => {
+    expect(offerDevice({ userAgent: UA.windowsEdge, platform: "Win32", maxTouchPoints: 0 })).toBe("computer");
+    expect(offerDevice({ userAgent: ANDROID_TABLET, platform: "Linux armv81", maxTouchPoints: 5 })).toBe("computer");
+  });
+
+  it("installed or not, the same words", () => {
+    expect(offerDevice({ userAgent: UA.iphoneSafari, iosStandalone: true })).toBe("phone");
+    expect(offerDevice({ userAgent: UA.androidChrome, displayStandalone: true })).toBe("phone");
+    expect(offerDevice({ userAgent: UA.windowsEdge, displayStandalone: true })).toBe("computer");
   });
 });

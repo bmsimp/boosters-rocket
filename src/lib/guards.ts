@@ -15,7 +15,7 @@ export class AccessDenied extends Error {
 export type StaffCtx = StaffIdentity & { effective: Effective; ip: string | null };
 export type ParentCtx = ParentIdentity & { ip: string | null };
 
-export type GuardInfo = { door: "staff" | "parent" | "setup" | "setup-unlock" | "before-sign-in"; permission?: Permission; self?: true };
+export type GuardInfo = { door: "staff" | "parent" | "setup" | "setup-unlock" | "before-sign-in" | "enrolment"; permission?: Permission; self?: true };
 const registry = new WeakMap<object, GuardInfo>();
 export function registerGuard(fn: object, info: GuardInfo): void { registry.set(fn, info); }
 export function guardOf(fn: unknown): GuardInfo | undefined {
@@ -76,10 +76,14 @@ export function parentAction<A extends unknown[], R>(fn: (ctx: ParentCtx, ...arg
 export type BeforeSignInCtx = { ip: string | null };
 
 /**
- * An action a visitor takes before they have signed in: choosing a password from a set-up or reset link. There is no
- * session to check, so, as setupUnlockAction()'s (src/lib/setup/guard.ts), its guard is the check its function performs:
- * the link it is given, looked up and checked in full (src/lib/parents/signin-links.ts), limited per address and per
- * link, with one answer for every refusal. The function is given only the visitor's address. Registered as the door
+ * An action a visitor takes before they have signed in: choosing a password from a set-up or reset link, and asking
+ * for such a link by email ("Set up or reset my password"). There is no session to check, so, as setupUnlockAction()'s
+ * (src/lib/setup/guard.ts), its guard is the check its function performs: the link it is given, looked up and checked
+ * in full (src/lib/parents/signin-links.ts), limited per address and per link, with one answer for every refusal; or,
+ * for the ask, which carries no token, its limits (per address, under a keyed hash, and per IP address) and its one
+ * answer for every address (src/lib/parents/password-request.ts). A sign-in it leads to is finished only by the one
+ * finish every sign-in goes through (src/lib/auth/parent-signin-finish.ts). The function is given only the visitor's
+ * address. Registered as the door
  * "before-sign-in", which tests/integration/invariants.test.ts allows in one file only, src/app/sign-in/password-actions.ts:
  * a new use of it is a decision, with its own checklist in AGENTS.md ("Page or action before sign-in").
  */
@@ -120,11 +124,14 @@ export async function requireStaffActionAlso(ctx: StaffCtx, permission: Permissi
 
 export type ParentSessionCtx ={ parentId: string; sessionId: string; ip: string | null };
 
-/** For the family chooser: a signed-in parent, whether or not a family is chosen yet. */
+/**
+ * For the family chooser: a signed-in parent, whether or not a family is chosen yet. An enrolling session (Strict's
+ * enrolment, since the sign-in release's slice SI-10a) is refused, as no session is: it may choose no family.
+ */
 export function parentSessionAction<A extends unknown[], R>(fn: (ctx: ParentSessionCtx, ...args: A) => Promise<R>) {
   const wrapped = async (...args: A): Promise<R> => {
     const s = await getParentState();
-    if (s.status === "none") throw new AccessDenied();
+    if (s.status === "none" || s.status === "enrol") throw new AccessDenied();
     const parentId = s.status === "ok" ? s.identity.parentId : s.parentId;
     const sessionId = s.status === "ok" ? s.identity.sessionId : s.sessionId;
     return fn({ parentId, sessionId, ip: await requestIp() }, ...args);
@@ -144,6 +151,9 @@ export async function requireParentPage(returnTo?: string): Promise<ParentCtx> {
   const s = await getParentState();
   if (s.status === "ok") return { ...s.identity, ip: await requestIp() };
   if (s.status === "choose") redirect(withReturnPath("/choose-family", returnTo));
+  // Strict's enrolment (slice SI-10a): a session a password alone made reaches no family page, only the step that adds
+  // a passkey or an authenticator app, which carries the page asked for on.
+  if (s.status === "enrol") redirect(withReturnPath("/one-more-step", returnTo));
   redirect((await hasParentSession()) ? "/refused" : withReturnPath("/sign-in", returnTo));
 }
 
@@ -156,4 +166,41 @@ export async function requireParentPage(returnTo?: string): Promise<ParentCtx> {
  */
 export async function parentLayoutCtx(): Promise<ParentCtx | null> {
   return parentCtx();
+}
+
+/**
+ * Strict's enrolment (the sign-in release, slice SI-10a): a session made under Strict by a password alone, for a person
+ * with no second factor, which may do exactly two things, add a passkey or set up an authenticator app, and reach
+ * nothing else (the gate's `enrol`, src/lib/auth/resolve.ts). Its ctx is the person and the session, and the address
+ * the session's person holds, as the factor's presses take them (passkey-settings.ts, authenticator-settings.ts): no
+ * name, no family.
+ */
+export type EnrolmentCtx = { parentId: string; sessionId: string; email: string; ip: string | null };
+
+/**
+ * The guard of /one-more-step (src/app/one-more-step/page.tsx), the page an enrolling session reaches: its ctx for an
+ * enrolling session; a session that is whole (a family chosen or to choose) is sent home, where the gate takes it on;
+ * none (or one the gate has just ended, its window passed) to sign in.
+ */
+export async function requireEnrolmentPage(): Promise<EnrolmentCtx> {
+  const s = await getParentState();
+  if (s.status === "enrol") return { parentId: s.parentId, sessionId: s.sessionId, email: s.email, ip: await requestIp() };
+  if (s.status === "ok" || s.status === "choose") redirect("/");
+  redirect("/sign-in");
+}
+
+/**
+ * An action an enrolling session takes on /one-more-step: admitted only for the gate's `enrol`, never for a whole
+ * session or none. Registered as the door "enrolment", which tests/integration/invariants.test.ts allows in one file
+ * only, src/app/one-more-step/actions.ts: a new use of it is a decision. The function is given the person and session
+ * from the gate, never from the browser.
+ */
+export function enrolmentAction<A extends unknown[], R>(fn: (ctx: EnrolmentCtx, ...args: A) => Promise<R>) {
+  const wrapped = async (...args: A): Promise<R> => {
+    const s = await getParentState();
+    if (s.status !== "enrol") throw new AccessDenied();
+    return fn({ parentId: s.parentId, sessionId: s.sessionId, email: s.email, ip: await requestIp() }, ...args);
+  };
+  registry.set(wrapped, { door: "enrolment" });
+  return wrapped;
 }

@@ -52,7 +52,8 @@ export type CloseMembership = {
  * Closes one membership: the row becomes `disabled` with its reason and the status it had (`statusBeforeDisable`), the
  * person's unused email change requests asked in the row's family record go (every unused request, every unused
  * sign-in code and every unused set-up and reset link, and every remembered device is forgotten, when no open row is
- * left: the lead's choice 10 of the sign-in release; the password stays), so a link or code sent before the close can't
+ * left: the lead's choice 10 of the sign-in release; the password stays, and so, since slice SI-6a, do the person's
+ * authenticator app, backup codes and, since slice SI-7a, passkeys, as the password does), so a link or code sent before the close can't
  * work after a reinstate or a new add within its life; the person's sessions that chose the row's family record end (none for a row that names no family record: no session can
  * have chosen one, since the gate lets a session into a family only through its person's row naming it), and all their
  * sessions when no open row is left; when the row was open, the family's unfinished forms still waiting on them start

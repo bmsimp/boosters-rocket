@@ -12,28 +12,28 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, buyout, jobRun, qboConnection, qboCustomerType, role, roleAssignment, roleRule, setting, writeQueue } from "@/lib/db/schema";
+import { auditLog, buyout, family, jobRun, qboConnection, qboCustomerType, role, roleAssignment, roleRule, setting, writeQueue } from "@/lib/db/schema";
 import HealthPage from "@/app/staff/(app)/health/page";
 import QuickBooksSettingsPage from "@/app/staff/(app)/settings/quickbooks/page";
 import QuickBooksSetupPage from "@/app/staff/(app)/settings/quickbooks/setup/page";
 import { writeAudit } from "@/lib/audit/log";
 import { QUICKBOOKS_USE, QUICKBOOKS_WRITE_ACTION } from "@/lib/quickbooks/what-it-does";
 import { GET as liveness } from "@/app/api/health/route";
-import { healthReport, BACKUP_OLD_MS, MONEY_OLD_MS, SIGNIN_ADDRESS_LOOKBACK_MS, WORKER_LATE_MS, type HealthLine } from "@/lib/health/report";
+import { healthReport, BACKUP_OLD_MS, MONEY_OLD_MS, SIGNIN_ADDRESS_LOOKBACK_MS, SWEEP_FAILED, WORKER_LATE_MS, type HealthLine } from "@/lib/health/report";
 import { env } from "@/env";
 import { BACKUP_KEY } from "@/lib/health/backup";
 import { BUILD_VERSION } from "@/lib/health/version";
 import { runDueJobs, WAKE_KEY } from "@/lib/jobs/runner";
 import { CLEANUP_JOB } from "@/lib/jobs/cleanup";
-import { BUYOUT_CHECK_MARK, markJob, readMark, REMINDERS_MARK } from "@/lib/jobs/marks";
+import { BUYOUT_CHECK_MARK, CHALLENGE_SWEEP_MARK, markJob, readMark, REMINDERS_MARK, WELCOME_MARK } from "@/lib/jobs/marks";
 import { BUYOUT_CHECK_LATE_MS } from "@/lib/health/job-lines";
-import { patchMailStatus } from "@/lib/mail/settings";
+import { getMailStatus, patchMailStatus } from "@/lib/mail/settings";
 import { ADMIN_ONLY } from "@/lib/permissions/registry";
 import { noteApiOk } from "@/lib/forms/settings";
 import { MONEY_JOB } from "@/lib/money/run-keys";
 import { DUE_REMINDERS_KEY } from "@/lib/seasons/due-reminders";
 import { BREACH_MARK, markBreachCheck, readBreachMark } from "@/lib/parents/breach-mark";
-import { resetDb, seedStaff, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
+import { resetDb, seedGuardianInFamily, seedParent, seedStaff, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
 import { connectForms } from "../helpers/forms";
 import { seedBuyout, seedBuyoutRequirement } from "../helpers/buyouts";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
@@ -314,6 +314,21 @@ describe("the health page", () => {
     expect(line(await healthReport(), "cleanup")).toMatchObject({ state: "attention", times: [{ label: "Last tried" }] });
   });
 
+  it("says on the clean-up line when the sweep of expired passkey challenges at every wake last failed, until one works (slice SI-7a)", async () => {
+    await markJob(CHALLENGE_SWEEP_MARK, "threw");
+    const failedAt = (await readMark(CHALLENGE_SWEEP_MARK))!.failedAt;
+    expect(line(await healthReport(), "cleanup")).toMatchObject({ state: "attention", word: "Needs attention", says: SWEEP_FAILED,
+      times: [{ label: "Last ran", at: null }, { label: "Challenge sweep last failed", at: failedAt }] });
+    // The daily clean-up failing too: its own words, and the sweep's beside them.
+    await db.insert(jobRun).values({ job: CLEANUP_JOB, startedBy: "worker", finishedAt: new Date(), outcome: "failed", detail: "The clean-up couldn't finish. Nothing was removed. (unexpected)" });
+    expect(line(await healthReport(), "cleanup")).toMatchObject({ state: "attention", says: "The last clean-up couldn't finish. The worker tries again in 15 minutes.",
+      notes: ["The clean-up couldn't finish. Nothing was removed. (unexpected)", SWEEP_FAILED] });
+    await db.delete(jobRun);
+    // A sweep that works, even one that removed nothing, clears it.
+    await markJob(CHALLENGE_SWEEP_MARK, { counts: { challenges: 0 }, failed: 0 });
+    expect(line(await healthReport(), "cleanup")).toMatchObject({ state: "off", word: "Not yet run", notes: [], times: [{ label: "Last ran", at: null }] });
+  });
+
   it("says when the reminders before a due date last looked, what they sent, and when the last one failed", async () => {
     const due = async () => line(await healthReport(NOW), "due_reminders");
     await seedParentSettings(SIGNINS_ON);
@@ -362,6 +377,41 @@ describe("the health page", () => {
       expect(chosen).toMatchObject({ state: "ok", word: "On" });
       expect(chosen.notes.join(" ")).toMatch(/addresses aren't recorded, because CLIENT_IP_HEADER is none/);
     } finally { env.CLIENT_IP_HEADER = setting; }
+  });
+
+  it("says when welcome emails are waiting because mail is failing, and stops once a welcome goes", async () => {
+    await seedParentSettings({ ...SIGNINS_ON, welcome: true });
+    await seedWorkingMail(); // tested: the worker would really try
+    const owedOne = await seedParent({ name: "Owed One", welcomeOwed: true });
+    const row = await seedGuardianInFamily({ parentId: owedOne.id, familyQboId: "10", status: "invited" });
+    // Owed but with no guardian row, so no wake tries them: not counted.
+    await seedParent({ name: "Owed No Row", welcomeOwed: true });
+    const parents = async () => line(await healthReport(NOW), "parents");
+    expect(await parents()).toMatchObject({ state: "ok", notes: [] });
+    // The worker's last welcome failed: while it is so, it tries one person a wake (sendOwedWelcomes()).
+    await markJob(WELCOME_MARK, { counts: { sent: 0, recipientRefused: 0, linkNotInPlace: 0 }, failed: 1 });
+    const waiting = await parents();
+    expect(waiting).toMatchObject({ state: "attention", word: "Needs attention", fix: { href: "/staff/settings/mail" } });
+    expect(waiting.notes).toEqual(["Welcome emails are waiting because mail is failing: 1 person is owed a welcome or a link to choose a password, and the last one the worker tried to send failed. Until a send works, it tries one person a minute instead of five."]);
+    // Mail settings saved but not tested: the worker tries nobody, so the note says nothing (the mail line says why).
+    const tested = (await getMailStatus()).verifiedHash;
+    await patchMailStatus({ verifiedHash: "saved-since-and-not-tested" });
+    expect(await parents()).toMatchObject({ state: "ok", notes: [], fix: null });
+    expect(line(await healthReport(NOW), "mail")).toMatchObject({ word: "Not tested" });
+    await patchMailStatus({ verifiedHash: tested });
+    expect((await parents()).notes).toHaveLength(1);
+    // Their family made inactive: they stay owed but can't sign in, so no wake tries anyone and the mark stays failed,
+    // yet nobody is waiting to be sent to, and the note goes.
+    await db.update(family).set({ active: false }).where(eq(family.id, row.familyId!));
+    expect(await parents()).toMatchObject({ state: "ok", notes: [], fix: null });
+    await db.update(family).set({ active: true }).where(eq(family.id, row.familyId!));
+    expect((await parents()).notes).toHaveLength(1);
+    // Nobody owed, or welcome emails off: nothing is waiting.
+    await seedParentSettings({ ...SIGNINS_ON, welcome: false });
+    expect(await parents()).toMatchObject({ state: "ok", notes: [] });
+    await seedParentSettings({ ...SIGNINS_ON, welcome: true });
+    await markJob(WELCOME_MARK, { counts: { sent: 1, recipientRefused: 0, linkNotInPlace: 0 }, failed: 0 });
+    expect(await parents()).toMatchObject({ state: "ok", notes: [], fix: null });
   });
 
   it("says how the password breach check stands: not used yet, working, and a failure the latest word, with why", async () => {

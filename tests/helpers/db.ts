@@ -263,12 +263,18 @@ export async function familyOfSession(authUserId: string, familyQboId: string): 
  * A live parent session row, as Better Auth would store it. Its family is the app's own record (`familyId`), or the one
  * a family's QuickBooks id comes to (familyOfSession()); neither, a session still choosing.
  */
-export async function seedParentSession(authUserId: string, o: { familyQboId?: string | null; familyId?: AppFamilyId | null; expiresAt?: Date } = {}) {
+export async function seedParentSession(authUserId: string, o: { familyQboId?: string | null; familyId?: AppFamilyId | null; expiresAt?: Date; strongAt?: Date | null;
+  deviceId?: string | null; enrolUntil?: Date | null } = {}) {
   const id = crypto.randomUUID();
   const token = crypto.randomUUID();
   const familyId = o.familyId ?? (o.familyQboId ? await familyOfSession(authUserId, o.familyQboId) : null);
+  // `strongAt`: when the session last proved the password and the second step (a sign-in, or asking again: slice
+  // SI-5a). Null, as for a session made before the password release, unless given. `deviceId`: the remembered device
+  // (`parent_device`, seedDevice()) the session was made on (slice SI-5b), which its renewal renews and the sign-in
+  // settings mark as "This device"; null, as for a session made before SI-5b, unless given. `enrolUntil`: the end of
+  // Strict's enrolment for a session a password alone made (slice SI-10a); null, a session that is not enrolling, unless given.
   await db.insert(parentAuthSession).values({ id, token, userId: authUserId, familyId,
-    expiresAt: o.expiresAt ?? new Date(Date.now() + 7 * 86_400_000) });
+    expiresAt: o.expiresAt ?? new Date(Date.now() + 7 * 86_400_000), strongAt: o.strongAt ?? null, deviceId: o.deviceId ?? null, enrolUntil: o.enrolUntil ?? null });
   return { id, token };
 }
 

@@ -141,7 +141,7 @@ export const takeDifferenceAction = staffAction(P, async (ctx: StaffCtx, field: 
  * Send the app's to QuickBooks (slice M5a): what the row's difference sends (`name`, `inactive` or `place`), the kind
  * of record (`family` or `student`; a place is always a student's), the record's app id, the roster tag and the stamp
  * sealing the value the row showed. It sends the portal's value over the books', so it needs Roster.Family.ReadWrite
- * too, the permission that changes families (the owner's choice 6, assumed as recommended and awaiting his word, as
+ * too, the permission that changes families (the owner's choice 6, which he confirmed on 2026-11-21, as
  * "Create in QuickBooks and link" needs both), checked here first with the page's Roster.Read and refused as the guard
  * refuses. A balance that stops a make-inactive is said with its amount only for a holder of Finance.Balance.Read, as on
  * a family's page. The library works the value out again under the roster lock, and sends through today's writes alone.
@@ -164,8 +164,8 @@ export const sendDifferenceAction = staffAction(P, async (ctx: StaffCtx, field: 
 /**
  * Send the app's for all (slice M5b): the filter as the page parsed it (its status key, "" for none, and its search),
  * how many sends it showed, the roster tag and the stamp sealing them. It needs what a single send needs (the linking
- * permission, Roster.Read and Roster.Family.ReadWrite: the owner's choice 6, assumed as recommended and awaiting his
- * word), checked first and refused as the guard refuses. No record, customer or value comes from the browser: the
+ * permission, Roster.Read and Roster.Family.ReadWrite: the owner's choice 6, which he confirmed on 2026-11-21),
+ * checked first and refused as the guard refuses. No record, customer or value comes from the browser: the
  * library works the sends out again under the roster lock, queues them all or none, and sends nothing at the press.
  */
 export const sendAllAction = staffAction(P, async (ctx: StaffCtx, status: string, q: string, count: number, rosterTag: string, stamp: string): Promise<LinkDone> => {

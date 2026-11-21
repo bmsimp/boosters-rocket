@@ -31,8 +31,10 @@ is the list of what a person must check first, in order.
 
 What it does:
 
-- Staff sign in with Microsoft or Google; parents sign in with a code the portal emails them, and
-  stay signed in for 90 days on their own phone.
+- Staff sign in with Microsoft or Google; parents sign in with their email and a password, and on a
+  device the portal doesn't know yet a code it emails them, or their own passkey or authenticator app
+  (a passkey also signs in alone), and stay signed in for 90 days on their own phone. A club at Strict
+  asks every guardian for a passkey or an authenticator app, and never signs anyone in by email alone.
 - Parent pages for Home, Forms, Payments, Volunteer and Family, installable as an app on iOS and
   Android, checked for WCAG 2.2 AA in every display mode.
 - Money: each family's open invoices and total with Pay buttons that open QuickBooks' own payment
@@ -91,6 +93,8 @@ The runbooks, written for a club volunteer:
 - [Restore](docs/runbooks/restore.md): onto the same machine or a new one
 - [Reconnecting QuickBooks](docs/runbooks/quickbooks-reconnect.md): the same company, or a different one
 - [When the Health page warns](docs/runbooks/health-warnings.md): one entry for each of its lines
+- [Resetting a parent's sign-in](docs/runbooks/resetting-a-parents-sign-in.md): the call back, the reset, and what
+  the parent does next
 - [Before the first family](docs/runbooks/before-the-first-family.md): every check only a person can
   make (real phones, a real QuickBooks company, Documenso, Intuit's assessment), then a pilot with a
   few families and the welcome emails

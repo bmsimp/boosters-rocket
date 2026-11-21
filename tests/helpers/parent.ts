@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { familyMoney, parent, parentAuthSession, setting, type StoredInvoice } from "@/lib/db/schema";
+import { familyMoney, parent, parentAuthAccount, parentAuthSession, parentAuthUser, setting, type StoredInvoice } from "@/lib/db/schema";
 import { resolveParentSession, type ParentIdentity } from "@/lib/auth/resolve";
 import { chooseFamily } from "@/lib/parents/family-choice";
 import { formatMoney } from "@/lib/money/cents";
@@ -13,6 +13,10 @@ import { seedTwoFamilyForms, type FamilyForms } from "./forms";
 import { seedTwoFamilyEmailChanges, type FamilyEmailChange } from "./email-change";
 import { seedTwoFamilyBuyouts, type FamilyBuyout } from "./buyouts";
 import { recordOfCustomer, syncAppRecords } from "./app-records";
+import { seedDevice, seedPassword } from "./signin-links";
+
+/** The password proveRecently() gives a person who has none: the door helper's (DOOR_PASSWORD, tests/helpers/parent-door.ts). */
+export const PROVEN_PASSWORD = "the parents' long test password";
 
 /**
  * Signed-in parents for tests: the family as QuickBooks lists it (in the roster cache), the portal person, their link
@@ -196,7 +200,8 @@ async function appIdsOf(spec: ParentFamilySpec): Promise<string[]> {
  * told about them. The club has a current season (seedTwoFamilySeason): each family has its own ticks and a waiver, and
  * a requirement asked of it alone, whose title, id and waiver reason are among its markers. Each also has forms to sign
  * (seedTwoFamilyForms): a request in every state, and one form asked of it alone. And one volunteer shift that both
- * families have signed up for (seedTwoFamilyVolunteering), whose sign-up ids are among their markers. Last, the app's
+ * families have signed up for (seedTwoFamilyVolunteering), whose sign-up ids are among their markers. Each parent has
+ * a remembered device their session was made on, whose id is among their markers. Last, the app's
  * own records and links for both families (stage 1 of the app-owned families spec), as a roster read makes them.
  */
 export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededParent }> {
@@ -221,6 +226,13 @@ export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededPar
   const forms = await seedTwoFamilyForms({ spec: FAMILY_A, parentId: a.identity.parentId }, { spec: FAMILY_B, parentId: b.identity.parentId }, seasons.season);
   a.forms = forms.a; a.markers.push(...forms.a.markers);
   b.forms = forms.b; b.markers.push(...forms.b.markers);
+  // Each parent has a remembered device, the one their session was made on (slice SI-5b): its id, which their sign-in
+  // settings list, and its token, which no page ever holds, are their markers.
+  for (const p of [a, b]) {
+    const device = await seedDevice(p.identity.parentId);
+    await db.update(parentAuthSession).set({ deviceId: device.id }).where(eq(parentAuthSession.id, p.identity.sessionId));
+    p.markers.push(device.id, device.token);
+  }
   // Each parent has asked to change their sign-in address: the new address and the link's token are their markers.
   const emails = await seedTwoFamilyEmailChanges(a, b);
   a.emailChange = emails.a; a.markers.push(...emails.a.markers);
@@ -266,6 +278,24 @@ export async function identityNow(sessionId: string): Promise<ParentIdentity> {
   const state = await resolveParentSession({ id: s.id, userId: s.userId, familyId: s.familyId });
   if (state.status !== "ok") throw new Error(`identityNow: the portal would not sign this session in (session state "${state.status}")`);
   return state.identity;
+}
+
+/**
+ * Gives the seeded parent a password, unless they have one, and stamps their session as having proved the password and
+ * the second step just now (`strong_at`, as a sign-in or asking again stamps it: slice SI-5a), so a change of how they
+ * sign in (their password, their sign-in email) goes ahead without asking again for the next 10 minutes.
+ */
+export async function proveRecently(identity: ParentIdentity, password = PROVEN_PASSWORD, at = new Date()): Promise<void> {
+  const [user] = await db.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, identity.parentId));
+  if (!user) throw new Error(`proveRecently: ${identity.email} has no sign-in account`);
+  const credential = and(eq(parentAuthAccount.userId, user.id), eq(parentAuthAccount.providerId, "credential"));
+  const has = await db.select({ id: parentAuthAccount.id }).from(parentAuthAccount).where(credential);
+  // The password was chosen a moment before the proof, by the test's own clock (a change refuses a password replaced
+  // since the proof, and the database's clock may run a little ahead of the test's).
+  const chosen = new Date(at.getTime() - 1000);
+  if (has.length === 0) await seedPassword(user.id, password, chosen);
+  else await db.update(parentAuthAccount).set({ updatedAt: chosen }).where(credential);
+  await db.update(parentAuthSession).set({ strongAt: at }).where(eq(parentAuthSession.id, identity.sessionId));
 }
 
 /**

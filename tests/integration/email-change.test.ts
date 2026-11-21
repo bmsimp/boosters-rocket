@@ -37,13 +37,16 @@ vi.mock("@/lib/parents/sessions", async (original) => {
 
 import { asc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, guardian, parent, parentAuthAccount, parentAuthSession, parentAuthUser, parentDevice, parentEmailChange, qboCustomer, rateLimitEvent, signinCode, writeQueue } from "@/lib/db/schema";
+import { accountingLink, auditLog, guardian, parent, parentAuthAccount, parentAuthenticator, parentAuthSession, parentAuthUser, parentDevice, parentEmailChange, qboCustomer, rateLimitEvent, signinCode, writeQueue } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import { EMAIL_COPY, confirmMyEmailChange, findMyEmailChange } from "@/lib/parents/email-change";
 import { addGuardian, removeGuardian } from "@/lib/parents/guardians";
 import { blockPerson } from "@/lib/parents/people";
 import { enterableGuardianRows } from "@/lib/parents/sessions";
-import { requestSigninCode, verifySigninCode } from "@/lib/parents/signin-codes";
+import { sendSecondStepCode, verifySigninCode } from "@/lib/parents/signin-codes";
+import { factorCounts, setLevel } from "@/lib/parents/switches";
+import { askAgainCode, askAgainPassword } from "@/lib/parents/asking-again";
+import { confirmMyAuthenticator, startMyAuthenticator } from "@/lib/parents/authenticator-settings";
 import { confirmEmailChangeAction, requestEmailChangeAction } from "@/app/(parent)/family/email/actions";
 import HomePage from "@/app/(parent)/page";
 import FamilyPage from "@/app/(parent)/family/page";
@@ -54,11 +57,12 @@ import { seedContactFamilies } from "../helpers/contact";
 import { resetDb, seedGuardian, seedParent, seedParentSession, seedWorkingMail } from "../helpers/db";
 import { emailChangeToken, seedEmailChange } from "../helpers/email-change";
 import { CHENOWETH, RIVERA } from "../helpers/money";
-import { identityNow, seedParentIn } from "../helpers/parent";
+import { PROVEN_PASSWORD, identityNow, proveRecently, seedParentIn } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { addToCache, seedParentSettings, seedShape, stu } from "../helpers/roster-cache";
 import { NO_CHANGES, appRecordsByCustomer, recordOfCustomer, syncAppRecords, whatAFreshRunWouldChange } from "../helpers/app-records";
-import { linkRows, mintLink, seedDevice, seedPassword } from "../helpers/signin-links";
+import { credentialRows, holdLink, linkRows, mintLink, seedDevice, seedPassword } from "../helpers/signin-links";
+import { appCode, seedAuthenticator } from "../helpers/authenticator";
 import { ROSTER_LOCK } from "@/lib/roster/shape";
 
 let stub: QboStub;
@@ -83,6 +87,8 @@ const authUserOf = async (parentId: string) => (await db.select({ id: parentAuth
 const sessionsOf = async (parentId: string) => db.select({ id: parentAuthSession.id }).from(parentAuthSession)
   .innerJoin(parentAuthUser, eq(parentAuthUser.id, parentAuthSession.userId)).where(eq(parentAuthUser.parentId, parentId));
 const codesOf = async (parentId: string) => db.select().from(signinCode).where(eq(signinCode.parentId, parentId));
+/** An Admin's press on the parents' settings, for the switch to Strict. */
+const ADMIN_OP = { actor: { door: "staff" as const, id: "00000000-0000-4000-8000-000000000001", label: "admin@club.org" }, ip: "203.0.113.9", permission: "Settings.Parents.ReadWrite" };
 const requests = () => db.select().from(parentEmailChange).orderBy(asc(parentEmailChange.createdAt));
 const ctxOf = (identity: ParentIdentity) => ({ ...identity, ip: null });
 const asking = (email: unknown) => { const f = new FormData(); if (typeof email === "string") f.set("email", email); return requestEmailChangeAction(f); };
@@ -106,6 +112,7 @@ describe("asking for the change", () => {
   it("stores the request, mails a link to the new address and a notice to the old, and changes nothing else", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
+    await proveRecently(r.identity);
     expect(await asking(`  ${NEW.toUpperCase()} `)).toEqual({ ok: true, message: EMAIL_COPY.sent(NEW) });
 
     expect(outbox.map((m) => m.to).sort()).toEqual([NEW, RIVERA.parent.email].sort());
@@ -140,9 +147,96 @@ describe("asking for the change", () => {
     expect(await sessionsOf(r.identity.parentId)).toHaveLength(1);
   });
 
+  it("asks again: refused, storing and mailing nothing, unless this session proved itself in the last 10 minutes (open question 28)", async () => {
+    const { r } = await seedContactFamilies(stub);
+    asParent(r.identity);
+    // A session from before the password release (no proof), one that proved itself 11 minutes ago, and one whose proof
+    // is stamped ahead of the clock: each refused in words that point to sign-in settings.
+    expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.proveFirst] });
+    await proveRecently(r.identity, PROVEN_PASSWORD, new Date(Date.now() - 11 * 60_000));
+    expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.proveFirst] });
+    await proveRecently(r.identity, PROVEN_PASSWORD, new Date(Date.now() + 60_000));
+    expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.proveFirst] });
+    expect(EMAIL_COPY.proveFirst).toContain("Sign-in settings");
+    expect(outbox).toEqual([]);
+    expect(await requests()).toEqual([]);
+    expect((await audits()).map((a) => [a.action, a.targetId, a.after])).toEqual(Array.from({ length: 3 }, () => ["parent.email.request.failed", r.identity.parentId, { code: "not_proved" }]));
+    // Proved just now: asked, as before.
+    await proveRecently(r.identity);
+    expect(await asking(NEW)).toEqual({ ok: true, message: EMAIL_COPY.sent(NEW) });
+    expect((await requests()).map((x) => x.newEmail)).toEqual([NEW]);
+  });
+
+  it("at Strict asks the change for a session proved under Strict, and asks again of one whose proof predates the switch (slice SI-10b)", async () => {
+    // Changed on purpose from SI-5a's Strict refusal ("can't be changed here yet"): the switch to Strict clears every
+    // proof made before it (setLevel()), so a proof here is Strict's own.
+    const { r } = await seedContactFamilies(stub);
+    asParent(r.identity);
+    await seedAuthenticator(r.identity.parentId);
+    await proveRecently(r.identity);
+    expect(await setLevel("strict", (await factorCounts()).neither, ADMIN_OP)).toMatchObject({ ok: true });
+    expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.proveFirstWithApp] });
+    expect(await requests()).toEqual([]);
+    expect(outbox).toEqual([]);
+    expect((await audits()).filter((a) => a.action === "parent.email.request.failed").map((a) => a.after)).toEqual([{ code: "not_proved" }]);
+    // The page at Strict: the asking again with the app's code, and no Strict branch in place of the form.
+    const asksAgain = await renderPage(FamilyEmailPage);
+    expect(asksAgain).toContain("Before you change your sign-in email, please show it&#x27;s you: enter your password, then the code from your authenticator app.");
+    expect(asksAgain).not.toContain("Send me a link");
+    // Proved under Strict: the form, and the change asked, as at Standard.
+    await proveRecently(r.identity);
+    expect(await renderPage(FamilyEmailPage)).toContain("Send me a link");
+    expect(await asking(NEW)).toEqual({ ok: true, message: EMAIL_COPY.sent(NEW) });
+    expect((await requests()).map((x) => x.newEmail)).toEqual([NEW]);
+    expect(outbox.map((m) => m.to).sort()).toEqual([NEW, RIVERA.parent.email].sort());
+  });
+
+  it("tells a guardian with no app to show it's them with the emailed code, and one with an app in force with the app's code (slice SI-6b)", async () => {
+    const { r } = await seedContactFamilies(stub);
+    asParent(r.identity);
+    expect(EMAIL_COPY.proveFirst).toContain("a code we email you");
+    expect(EMAIL_COPY.proveFirstWithApp).toContain("the code from your authenticator app");
+    expect(EMAIL_COPY.proveFirstWithApp).not.toMatch(/email you|emailed/);
+    expect(EMAIL_COPY.proveFirstWithApp).toContain("Sign-in settings");
+    expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.proveFirst] });
+    // An unfinished set-up is no app: still the emailed code's words.
+    const unfinished = await seedAuthenticator(r.identity.parentId, { confirmed: false });
+    expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.proveFirst] });
+    await db.delete(parentAuthenticator).where(eq(parentAuthenticator.id, unfinished.id));
+    await seedAuthenticator(r.identity.parentId);
+    expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.proveFirstWithApp] });
+    expect(outbox).toEqual([]);
+    expect(await requests()).toEqual([]);
+    expect((await audits()).map((a) => a.after)).toEqual(Array.from({ length: 3 }, () => ({ code: "not_proved" })));
+  });
+
+  it("refuses a proof made before the person's app came into force in another session, until they show it's them with the app's code (slice SI-6b's second read)", async () => {
+    const { r } = await seedContactFamilies(stub);
+    asParent(r.identity);
+    // This session proved itself a few seconds ago (as with the emailed code); another of theirs then sets an app up.
+    await proveRecently(r.identity, PROVEN_PASSWORD, new Date(Date.now() - 5_000));
+    const other = await seedParentSession(await authUserOf(r.identity.parentId), { familyId: r.identity.familyId, strongAt: new Date(Date.now() - 4_000) });
+    const elsewhere = { ...ctxOf(r.identity), sessionId: other.id };
+    const start = await startMyAuthenticator(elsewhere);
+    if (!start.ok) throw new Error(`the set-up should begin: ${start.errors.join(" ")}`);
+    const secret = start.key.replace(/ /g, "");
+    expect(await confirmMyAuthenticator(elsewhere, appCode(secret), start.stamp)).toMatchObject({ ok: true });
+    // Within this session's 10 minutes: refused, nothing stored or mailed.
+    expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.proveFirstWithApp] });
+    expect(outbox).toEqual([]);
+    expect(await requests()).toEqual([]);
+    // Asked again with the app's code: asked, as before.
+    const first = await askAgainPassword(ctxOf(r.identity), PROVEN_PASSWORD);
+    if (!first.ok || first.step !== "app") throw new Error("the app's step should be asked for");
+    expect(await askAgainCode(ctxOf(r.identity), first.stamp, appCode(secret, Date.now(), 1))).toMatchObject({ ok: true });
+    expect(await asking(NEW)).toEqual({ ok: true, message: EMAIL_COPY.sent(NEW) });
+    expect((await requests()).map((x) => x.newEmail)).toEqual([NEW]);
+  });
+
   it("answers the same whatever the new address is, known to the portal and to QuickBooks or not", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
+    await proveRecently(r.identity);
     for (const email of [CHENOWETH.parent.email, "nobody.anywhere@example.org"]) {
       outbox.length = 0;
       expect(await asking(email)).toEqual({ ok: true, message: EMAIL_COPY.sent(email) });
@@ -153,6 +247,7 @@ describe("asking for the change", () => {
   it("replaces an earlier request that wasn't used: only the newest link works", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
+    await proveRecently(r.identity);
     await asking("first.try@family-r-new.example");
     const first = linkTo("first.try@family-r-new.example");
     await asking(NEW);
@@ -165,6 +260,7 @@ describe("asking for the change", () => {
   it("refuses an address that isn't one, and the address they sign in with now, and sends nothing", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
+    await proveRecently(r.identity);
     for (const bad of ["not an address", "", "a@", `${"x".repeat(320)}@example.com`]) expect(await asking(bad), bad).toEqual({ ok: false, errors: [EMAIL_COPY.invalid] });
     await db.delete(rateLimitEvent); // each ask is counted, a refused one too: these are more than an hour allows
     expect(await asking(undefined)).toEqual({ ok: false, errors: [EMAIL_COPY.invalid] });
@@ -179,12 +275,14 @@ describe("asking for the change", () => {
     // A sign-in made by hand: no record of their own in QuickBooks.
     const hand = await seedParentIn({ familyQboId: R_FAMILY, name: "Hand Made", email: "hand.made@family-r.example" });
     asParent(hand.identity);
+    await proveRecently(hand.identity);
     expect(await asking("hand.moved@family-r-new.example")).toEqual({ ok: true, message: EMAIL_COPY.sent("hand.moved@family-r-new.example") });
     // Rivera's parent, whose record the club re-addressed, and who is a parent of the Chenoweth family too.
     await db.update(qboCustomer).set({ email: "someone.else@family-r.example" }).where(eq(qboCustomer.qboId, R_PARENT));
     await seedGuardian({ parentId: r.identity.parentId, familyQboId: C_FAMILY, status: "active", sourceQboId: C_PARENT });
     await syncAppRecords();
     asParent(r.identity);
+    await proveRecently(r.identity);
     expect(await asking(NEW)).toEqual({ ok: true, message: EMAIL_COPY.sent(NEW) });
     expect((await requests()).map((q) => [q.parentId, q.newEmail]).sort()).toEqual([
       [hand.identity.parentId, "hand.moved@family-r-new.example"], [r.identity.parentId, NEW]].sort());
@@ -195,9 +293,11 @@ describe("asking for the change", () => {
     const { r, c } = await seedContactFamilies(stub);
     await db.update(guardian).set({ status: "disabled", disabledReason: "removed" }).where(eq(guardian.id, c.identity.guardianId));
     asParent(c.identity);
+    await proveRecently(c.identity);
     expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.askTheClub] });
     await seedParentSettings({ signin: false });
     asParent(r.identity);
+    await proveRecently(r.identity);
     expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.askTheClub] });
 
     expect(outbox).toEqual([]);
@@ -219,6 +319,7 @@ describe("asking for the change", () => {
   it("is rate-limited per person, and audits the first refusal only", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
+    await proveRecently(r.identity);
     for (let i = 0; i < 5; i++) expect(await asking(`try.${i}@family-r-new.example`)).toMatchObject({ ok: true });
     expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.tooManyAsks] });
     expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.tooManyAsks] });
@@ -231,6 +332,7 @@ describe("the link's page, and who is offered the change", () => {
   it("asks, and opening it changes nothing", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
+    await proveRecently(r.identity);
     await asking(NEW);
     const token = linkTo(NEW);
     const page = await renderPage(ConfirmEmailPage, { params: { token } });
@@ -262,11 +364,24 @@ describe("the link's page, and who is offered the change", () => {
     await syncAppRecords();
     for (const who of [hand.identity, r.identity]) {
       asParent(who);
+      await proveRecently(who);
       expect(await renderPage(FamilyPage), who.name).toContain(OFFER);
       expect(await renderPage(FamilyDetailsPage), who.name).toContain(OFFER);
       expect(await renderPage(HomePage), who.name).toContain("and your sign-in email on your Family page");
       expect(await renderPage(FamilyEmailPage), who.name).toContain("Send me a link");
     }
+  });
+
+  it("the email page offers a link to choose a password first, then asks again, then the new address (slice SI-5a)", async () => {
+    const { r } = await seedContactFamilies(stub);
+    asParent(r.identity);
+    expect(await renderPage(FamilyEmailPage)).toContain("Email me a link to choose a password");
+    await proveRecently(r.identity, PROVEN_PASSWORD, new Date(Date.now() - 11 * 60_000));
+    const asksAgain = await renderPage(FamilyEmailPage);
+    expect(asksAgain).toContain("Before you change your sign-in email, please show it&#x27;s you");
+    expect(asksAgain).not.toContain("Send me a link");
+    await proveRecently(r.identity);
+    expect(await renderPage(FamilyEmailPage)).toContain("Send me a link");
   });
 
   it("offers it in books with no parent type", async () => {
@@ -283,12 +398,14 @@ describe("the link's page, and who is offered the change", () => {
     const { r, c } = await seedContactFamilies(stub);
     await db.update(guardian).set({ status: "disabled", disabledReason: "removed" }).where(eq(guardian.id, c.identity.guardianId));
     asParent(c.identity);
+    await proveRecently(c.identity);
     for (const page of [FamilyPage, FamilyDetailsPage]) expect(await renderPage(page)).not.toContain("Change my sign-in email");
     const told = await renderPage(FamilyEmailPage);
     expect(told).toContain("Your sign-in email can&#x27;t be changed here. Please ask the club and they&#x27;ll change it for you.");
     expect(told).not.toContain("Send me a link");
     await seedParentSettings({ signin: false });
     asParent(r.identity);
+    await proveRecently(r.identity);
     expect(await renderPage(FamilyPage)).not.toContain("Change my sign-in email");
     expect(await renderPage(FamilyEmailPage)).not.toContain("Send me a link");
   });
@@ -296,6 +413,7 @@ describe("the link's page, and who is offered the change", () => {
   it("a link of one who may no longer change it here asks them to ask the club", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
+    await proveRecently(r.identity);
     await asking(NEW);
     const token = linkTo(NEW);
     await seedParentSettings({ signin: false });
@@ -310,12 +428,15 @@ describe("confirming: the portal alone", () => {
   it("the person's own address changes, what the old address held ends, and QuickBooks is asked nothing", async () => {
     const { r, c } = await seedContactFamilies(stub);
     await aCode(r.identity.parentId);
-    // A set-up and a reset link mailed to the old address, a device remembered for it, and a password.
+    // A set-up and a reset link mailed to the old address, a second set-up link held while its mail is on its way
+    // there (the request page), a device remembered for it, and a password.
     await mintLink(r.identity.parentId, "setup");
     await mintLink(r.identity.parentId, "reset");
+    await holdLink(r.identity.parentId, "setup");
     await seedDevice(r.identity.parentId);
     await seedPassword(await authUserOf(r.identity.parentId), "a long and lovely password");
     asParent(r.identity);
+    await proveRecently(r.identity);
     await asking(NEW);
     const token = linkTo(NEW);
     expect(await renderPage(ConfirmEmailPage, { params: { token } })).toContain("Yes, use this address");
@@ -353,7 +474,7 @@ describe("confirming: the portal alone", () => {
       request: { op: "email", role: "parent", qboId: R_PARENT, syncToken: expect.any(String), from: RIVERA.parent.email, to: NEW, guardianId: r.identity.guardianId } }]);
     const [itemId] = (await db.select({ id: writeQueue.id }).from(writeQueue)).map((i) => i.id);
     expect(await auditsOf("parent.email.save")).toEqual([{ action: "parent.email.save", targetType: "parent", targetId: r.identity.parentId, before: { email: RIVERA.parent.email },
-      after: { email: NEW, familyId: String(r.identity.familyId), sessionsEnded: 1, linksDeleted: 2, devicesForgotten: 1, queueIds: [itemId] } }]);
+      after: { email: NEW, familyId: String(r.identity.familyId), sessionsEnded: 1, linksDeleted: 3, devicesForgotten: 1, queueIds: [itemId] } }]);
     // Nothing decided access: no sign-in was opened, moved or closed.
     for (const action of ["parent.email.changed", "parent.access.granted", "parent.access.moved", "parent.access.ended", "parent.hold.opened"]) {
       expect((await audits()).map((a) => a.action)).not.toContain(action);
@@ -368,22 +489,28 @@ describe("confirming: the portal alone", () => {
   it("the person signs in again with the new address at once, and never with the old", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
+    await proveRecently(r.identity);
     await asking(NEW);
     expect(await confirmEmailChangeAction(linkTo(NEW))).toEqual(DONE(NEW));
     outbox.length = 0;
-    await (await requestSigninCode(RIVERA.parent.email, IP)).delivery;
+    // The second step's code (since the sign-in release's slice SI-3b, sent for a right password to the person a
+    // pending step names): her password, which the change kept, with each address.
+    const [cred] = await credentialRows(await authUserOf(r.identity.parentId));
+    const step = (email: string) => ({ parentId: r.identity.parentId, email, password: { credentialId: cred!.id, credentialUpdatedAt: cred!.updatedAt } });
+    await (await sendSecondStepCode(step(RIVERA.parent.email), IP)).delivery;
     expect(outbox).toEqual([]);
-    await (await requestSigninCode(NEW, IP)).delivery;
+    await (await sendSecondStepCode(step(NEW), IP)).delivery;
     expect(outbox.map((m) => m.to)).toEqual([NEW]);
     const code = /sign-in code: (\d{6})/.exec(outbox[0]!.subject)![1]!;
-    expect(await verifySigninCode(RIVERA.parent.email, code, IP)).toMatchObject({ ok: false });
-    expect(await verifySigninCode(NEW, code, IP)).toEqual({ ok: true, parentId: r.identity.parentId, codeId: expect.any(String) });
+    expect(await verifySigninCode(step(RIVERA.parent.email), code, IP)).toMatchObject({ ok: false });
+    expect(await verifySigninCode(step(NEW), code, IP)).toEqual({ ok: true, codeId: expect.any(String) });
   });
 
   it("a person with no QuickBooks record, one whose record lost their address, and one in two families each change it", async () => {
     const { r } = await seedContactFamilies(stub);
     const hand = await seedParentIn({ familyQboId: R_FAMILY, name: "Hand Made", email: "hand.made@family-r.example" });
     asParent(hand.identity);
+    await proveRecently(hand.identity);
     await asking("hand.moved@family-r-new.example");
     expect(await confirmEmailChangeAction(linkTo("hand.moved@family-r-new.example"))).toEqual(DONE("hand.moved@family-r-new.example"));
     expect((await person(hand.identity.parentId)).email).toBe("hand.moved@family-r-new.example");
@@ -392,6 +519,7 @@ describe("confirming: the portal alone", () => {
     await seedGuardian({ parentId: r.identity.parentId, familyQboId: C_FAMILY, status: "active", sourceQboId: C_PARENT });
     await syncAppRecords();
     asParent(r.identity);
+    await proveRecently(r.identity);
     await asking(NEW);
     expect(await confirmEmailChangeAction(linkTo(NEW))).toEqual(DONE(NEW));
     expect((await person(r.identity.parentId)).email).toBe(NEW);
@@ -413,6 +541,7 @@ describe("confirming: the portal alone", () => {
     const home = await seedParentIn({ familyQboId: "7310", name: "Noparent Family", email: "home@noparent.example", sourceQboId: "7310" });
     const work = await seedParentIn({ familyQboId: "7310", name: "Noparent Family", email: "work@noparent.example", sourceQboId: "7310" });
     asParent(home.identity);
+    await proveRecently(home.identity);
     await asking("home.new@noparent.example");
     expect(await confirmEmailChangeAction(linkTo("home.new@noparent.example"))).toEqual(DONE("home.new@noparent.example"));
     expect(await cachedEmail("7310")).toBe("home@noparent.example; work@noparent.example");
@@ -431,6 +560,7 @@ describe("confirming: the portal alone", () => {
     await addToCache([{ qboId: "7410", displayName: "Marisol Thackeray", typeQboId: "M", email: "marisol@flat.example" }]);
     const m = await seedParentIn({ familyQboId: "7410", name: "Marisol Thackeray", email: "marisol@flat.example", sourceQboId: "7410" });
     asParent(m.identity);
+    await proveRecently(m.identity);
     expect(await renderPage(FamilyPage)).toContain(OFFER);
     await asking("marisol.new@flat.example");
     expect(await confirmEmailChangeAction(linkTo("marisol.new@flat.example"))).toEqual(DONE("marisol.new@flat.example"));
@@ -444,6 +574,7 @@ describe("confirming: the portal alone", () => {
   it("takes no roster lock: a confirm made while a roster read holds it finishes", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
+    await proveRecently(r.identity);
     await asking(NEW);
     const token = linkTo(NEW);
     let held!: () => void, release!: () => void;
@@ -466,6 +597,7 @@ describe("confirming: the portal alone", () => {
   it("two presses of the button at once make one change, audited once", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
+    await proveRecently(r.identity);
     await asking(NEW);
     const token = linkTo(NEW);
     const results = await Promise.all([confirmEmailChangeAction(token), confirmEmailChangeAction(token)]);
@@ -480,6 +612,7 @@ describe("confirming: the portal alone", () => {
     const { r } = await seedContactFamilies(stub);
     await seedParentSettings({ requireActiveStudents: true });
     asParent(r.identity);
+    await proveRecently(r.identity);
     await asking(NEW);
     const token = linkTo(NEW);
     // The family has no active student any more: the gate would refuse the new address there.
@@ -501,6 +634,7 @@ describe("confirming: one address is one person", () => {
     if (who === "no family") await seedParent({ name: "Somebody Else", email: NEW });
     await aCode(r.identity.parentId);
     asParent(r.identity);
+    await proveRecently(r.identity);
     await asking(taken);
     const token = linkTo(taken);
     expect(await confirmEmailChangeAction(token)).toEqual({ ok: false, errors: [EMAIL_COPY.cantHere] });
@@ -521,6 +655,7 @@ describe("confirming: one address is one person", () => {
   it("an address staff give another person between the ask and the confirm is refused, and nothing changes", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
+    await proveRecently(r.identity);
     await asking(NEW);
     const token = linkTo(NEW);
     expect(await addGuardian(await recordOfCustomer(C_FAMILY, "family"), { name: "Somebody Else", email: NEW }, staffOp)).toMatchObject({ ok: true });
@@ -534,6 +669,7 @@ describe("confirming: one address is one person", () => {
     const { r } = await seedContactFamilies(stub);
     await aCode(r.identity.parentId);
     asParent(r.identity);
+    await proveRecently(r.identity);
     await asking(NEW);
     const token = linkTo(NEW);
     let other: string | null = null;
@@ -554,10 +690,12 @@ describe("confirming: one address is one person", () => {
   it("two people's links to one address confirmed at once: one has it, the other keeps theirs", async () => {
     const { r, c } = await seedContactFamilies(stub);
     asParent(r.identity);
+    await proveRecently(r.identity);
     await asking(NEW);
     const rToken = linkTo(NEW);
     outbox.length = 0;
     asParent(c.identity);
+    await proveRecently(c.identity);
     await asking(NEW);
     const cToken = linkTo(NEW);
     const results = await Promise.all([confirmMyEmailChange(ctxOf(r.identity), rToken), confirmMyEmailChange(ctxOf(c.identity), cToken)]);
@@ -576,6 +714,7 @@ describe("confirming: stopped meanwhile, nothing changes", () => {
     const seeded = await seedContactFamilies(stub);
     await aCode(seeded.r.identity.parentId);
     asParent(seeded.r.identity);
+    await proveRecently(seeded.r.identity);
     await asking(NEW);
     return { ...seeded, token: linkTo(NEW) };
   };
@@ -722,6 +861,7 @@ describe("confirming with a token that isn't the session's own: one refusal, not
     const { r } = await seedContactFamilies(stub);
     // Rivera's parent asks in the Rivera family, then is made a parent of the Chenoweth family too and signs in to it.
     asParent(r.identity);
+    await proveRecently(r.identity);
     expect(await asking(NEW)).toMatchObject({ ok: true });
     const token = linkTo(NEW);
     await seedGuardian({ parentId: r.identity.parentId, familyQboId: C_FAMILY, status: "active", sourceQboId: C_PARENT });

@@ -1,87 +1,435 @@
-import { and, asc, eq, isNull, lt, or, type SQL } from "drizzle-orm";
-import { db } from "@/lib/db/client";
-import { parent } from "@/lib/db/schema";
+import { and, asc, count, desc, eq, exists, gt, inArray, isNull, lt, or, type SQL } from "drizzle-orm";
+import { db, type Tx } from "@/lib/db/client";
+import { parent, parentAuthUser, parentSigninToken } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
-import { env } from "@/env";
-import { sendMail, currentBrand } from "@/lib/mail/send";
+import { sendMail, currentBrand, type SendOutcome } from "@/lib/mail/send";
 import { getStoredMailConfig, mailWorking } from "@/lib/mail/settings";
-import { welcomeMessage } from "@/lib/mail/messages";
+import { choosePasswordMessage, welcomeMessage, type EarlierLinkWords, type SetupLinkWords } from "@/lib/mail/messages";
+import type { MailMessage } from "@/lib/mail/types";
+import { failedLast, markJob, readMark, WELCOME_MARK } from "@/lib/jobs/marks";
 import type { StaffOp } from "./people";
 import { getParentSettings, parentDoorClosed } from "./settings";
 import { enterableGuardianRows, hasRowThatCounts, studentsRuleInForce } from "./sessions";
+import { RESEND_AFTER_MS } from "./signin-codes";
+import { heldLink } from "./link-state";
+import { holdSigninLink, linkSentWithin, LINK_LIFE_MS } from "./signin-links";
+import { deliverHeldLink, lifeWords, passwordLink, personBy, portalAddress, type HeldLink, type LinkPerson } from "./link-delivery";
 
 export const WELCOME_BATCH = 5;
 export const WELCOME_RETRY_MS = 15 * 60_000;
+/** How long a person whose address the mail server refused waits before the worker tries them again (holdOffRefused()). */
+export const REFUSED_RETRY_MS = 24 * 60 * 60_000;
+/**
+ * How much life a set-up link the person already holds must have left for the worker's welcome to say it still works
+ * and carry none, or for the press's mail to be skipped for it: with less, it might run out before they read the mail,
+ * so the mail carries a new link, which takes its place once the mail has gone. The check after the send holds the
+ * earlier-link welcome to the same.
+ */
+export const EARLIER_LINK_MIN_LIFE_MS = 24 * 60 * 60_000;
 const WELCOME_ACTOR: Actor = { door: "system", id: null, label: "welcome" };
 
-/** The welcome email as it would go to `to`. Step 3 of the settings shows it as a sample. */
-export async function welcomeEmailFor(to: string) {
+/** The club's own sending address, which a reply reaches (spec §3). Both settings hold a bare address. */
+async function contactAddress(): Promise<string | null> {
   const stored = await getStoredMailConfig();
-  // The club's own sending address is the one a reply reaches (spec §3). Both settings hold a bare address.
-  const contact = stored ? (stored.method === "graph" ? stored.mailbox : stored.from) : null;
-  return welcomeMessage(await currentBrand(), to, { appUrl: env.APP_URL.replace(/\/+$/, ""), contact });
+  return stored ? (stored.method === "graph" ? stored.mailbox : stored.from) : null;
 }
+
 /**
- * Takes one person for sending, in a single statement: it succeeds for one run only, and only while the person is still
- * owed, not blocked, not tried in the last 15 minutes, and has a guardian row that counts (`counts`, hasRowThatCounts():
- * the rule the gate lets them in by). The claim time is the back-off after a failure.
+ * Which mail a person is sent: the welcome, or, for a person the club welcomed before who is owed a mail again (the
+ * Admin's press on the parents' settings page, oweSetupMails(), ./switches.ts, is the one thing that owes a mail to
+ * someone welcomed already), the mail with a link to choose their password (choosePasswordMessage()). Each is also its
+ * MailPurpose, and the `mail` of its audit rows.
  */
-async function claim(id: string, now: Date, counts: SQL): Promise<boolean> {
+type Mail = "welcome" | "choose_password";
+
+/**
+ * The mail as the worker and a resend write it, and as the settings show it as a sample: one function, so a sample is
+ * the mail that goes. `link`: a new set-up link, the one emailed earlier (EarlierLinkWords, the welcome only), or none.
+ */
+async function writeMail(mail: Mail, to: string, link: SetupLinkWords | EarlierLinkWords | null): Promise<MailMessage> {
+  const appUrl = portalAddress();
+  const [brand, contact] = await Promise.all([currentBrand(), contactAddress()]);
+  return mail === "choose_password" && link && "url" in link ? choosePasswordMessage(brand, to, { appUrl, contact, link }) : welcomeMessage(brand, to, { appUrl, contact, link });
+}
+
+/** A sample's link: plainly a sample, never a token's shape. Nothing is made, held or read for it. */
+async function sampleLink(): Promise<SetupLinkWords> {
+  const settings = await getParentSettings();
+  return { url: `${portalAddress()}/sign-in/set-up/(a link made for each person)`, life: lifeWords(LINK_LIFE_MS.setup), strict: settings.level === "strict" };
+}
+
+/** The welcome email as it would go to `to`, with no password yet: step 2 of the settings shows it as a sample. */
+export async function sampleWelcome(to: string): Promise<MailMessage> {
+  return writeMail("welcome", to, await sampleLink());
+}
+
+/** The mail the Admin's press sends someone welcomed before, as it would go to `to`: the parents' settings show it beside the press. */
+export async function sampleChoosePassword(to: string): Promise<MailMessage> {
+  return writeMail("choose_password", to, await sampleLink());
+}
+
+/**
+ * The people the worker sends a welcome or a press mail to, as a condition on `parent`, whatever their back-off: owed,
+ * not blocked, with a sign-in account, and a guardian row that counts (hasRowThatCounts(): the rule the gate lets them
+ * in by). Someone owed who can't sign in stays owed and is not tried until they can.
+ */
+async function canBeSent(): Promise<SQL> {
+  return and(eq(parent.welcomeOwed, true), eq(parent.blocked, false),
+    exists(db.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, parent.id))),
+    hasRowThatCounts(await studentsRuleInForce()))!;
+}
+const pastBackOff = (now: Date) => or(isNull(parent.welcomeTriedAt), lt(parent.welcomeTriedAt, new Date(now.getTime() - WELCOME_RETRY_MS)));
+
+/**
+ * How many people the worker has yet to send a welcome or a press mail to (canBeSent(), in their back-off or not): the
+ * Health page's count of those waiting while mail is failing. Nobody who can't sign in is counted, so the count, and
+ * the note with it, goes to nothing once none of them can be sent to, though no wake has tried anyone since.
+ */
+export async function welcomesToSend(): Promise<number> {
+  const [row] = await db.select({ n: count() }).from(parent).where(await canBeSent());
+  return row?.n ?? 0;
+}
+
+/**
+ * Takes one person for sending, in a single statement: it succeeds for one run only, and only while the person can
+ * still be sent to (`due`, canBeSent()) and was not tried in the last 15 minutes. The claim time is the back-off after
+ * a failure.
+ */
+async function claim(id: string, now: Date, due: SQL): Promise<boolean> {
   const rows = await db.update(parent).set({ welcomeTriedAt: now })
-    .where(and(eq(parent.id, id), eq(parent.welcomeOwed, true), eq(parent.blocked, false), counts,
-      or(isNull(parent.welcomeTriedAt), lt(parent.welcomeTriedAt, new Date(now.getTime() - WELCOME_RETRY_MS)))))
+    .where(and(eq(parent.id, id), due, pastBackOff(now)))
     .returning({ id: parent.id });
   return rows.length > 0;
 }
+
+/**
+ * Holds off the worker's next try for people whose address the server refused on its own account, so a bad mailbox is
+ * not tried every fifteen minutes. There is no column of its own for this: it stamps `welcome_tried_at`, the claim's
+ * time, a day on less the claim's own back-off, so pastBackOff() lets them be claimed again a day after this wake's
+ * claim and no sooner. Nothing shown to staff reads that column as a time something happened: only the claim reads it,
+ * and a welcome sent sets it back to null. Only rows this wake claimed at `claimedAt` and still owed are stamped, so a
+ * person welcomed meanwhile is left alone. A Resend reads no back-off and still sends at once (the staff member's way to
+ * try a corrected address sooner).
+ */
+async function holdOffRefused(ids: string[], claimedAt: Date): Promise<void> {
+  if (ids.length === 0) return;
+  await db.update(parent).set({ welcomeTriedAt: new Date(claimedAt.getTime() + REFUSED_RETRY_MS - WELCOME_RETRY_MS) })
+    .where(and(inArray(parent.id, ids), eq(parent.welcomeOwed, true), eq(parent.welcomeTriedAt, claimedAt)));
+}
 const welcomesOn = async () => { const s = await getParentSettings(); return s.welcome && s.signin; };
+
+/** Who sends and is recorded: the worker (no permission), or the staff member who pressed Resend. */
+type Sender = { actor: Actor; permission?: string; ip: string | null };
+/** The worker's welcome (it reads the switches and the owed mark again) or a staff resend (it reads only the door, as before). */
+type Kind = { worker: true } | { worker: false };
+
+/**
+ * What the read under the person's lock found. `go`: the mail to send, to the address read under the lock, with a set-up
+ * link held for it (holdSigninLink()) when the person has no password, or none; `earlier` for the worker's welcome to a
+ * person who holds a set-up link that still works, which goes with no new link and says that one still works. Otherwise
+ * why not: for a resend, the refusals as before; for the worker, nothing to send now (`quiet`: switched off, no longer
+ * owed, blocked, no row that counts or no sign-in account since the claim; it stays as it is), a press mail skipped for
+ * a password chosen since or a set-up link that still works for a day (`skipped`, its row written), or a mail to someone whose
+ * set-up link from another sender is on its way, or a press mail to someone sent a set-up link a moment ago (`wait`,
+ * still owed). A resend is refused (`on_its_way`) while another set-up link is on its way to the person (the worker's
+ * welcome, an ask on "Set up or reset my password"), and for RESEND_AFTER_MS after the portal last mailed them one
+ * (setupMailedJustNow()): its link would replace the one in that mail, which may not even have been opened yet.
+ */
+type Prepared =
+  | { go: true; to: string; mail: Mail; held: HeldLink | null; earlier: boolean; strict: boolean }
+  | { go: false; why: "not_found" | "blocked" | "no_access" | "on_its_way" | "quiet" | "skipped" | "wait" };
+
+/**
+ * The person's set-up links as a welcome reads them under the person's lock: one held on its way, made less than
+ * RESEND_AFTER_MS ago (another sender's mail is going; a link held longer ago belongs to a send the portal never came
+ * back to), one that still works (unused and not expired, however old), and whether one that works has at least
+ * EARLIER_LINK_MIN_LIFE_MS left (`lastsADay`: the worker's welcome may say it still works, and the press's mail be
+ * skipped for it, only then).
+ */
+async function setupLinks(tx: Tx, parentId: string, now: Date): Promise<{ onItsWay: boolean; works: boolean; lastsADay: boolean }> {
+  const rows = await tx.select({ usedAt: parentSigninToken.usedAt, expiresAt: parentSigninToken.expiresAt }).from(parentSigninToken)
+    .where(and(eq(parentSigninToken.parentId, parentId), eq(parentSigninToken.purpose, "setup"),
+      or(and(isNull(parentSigninToken.usedAt), gt(parentSigninToken.expiresAt, now)),
+        and(heldLink, gt(parentSigninToken.createdAt, new Date(now.getTime() - RESEND_AFTER_MS))))));
+  const working = rows.filter((r) => r.usedAt === null);
+  return { onItsWay: rows.some((r) => r.usedAt !== null), works: working.length > 0,
+    lastsADay: working.some((r) => r.expiresAt.getTime() > now.getTime() + EARLIER_LINK_MIN_LIFE_MS) };
+}
+
+/**
+ * For a resend: whether the portal mailed this person a set-up link less than RESEND_AFTER_MS ago that may be in their
+ * mailbox unopened, which a new link would stop working (a double press, or two staff members pressing at once): one
+ * made in that time and live or on its way (linkSentWithin(), the request page's resend wait), or a link that still
+ * works while their last welcome or press mail went in that time (`welcomed_at` is written once its link was put in
+ * place, so this counts from then, not from when the link was made).
+ */
+async function setupMailedJustNow(tx: Tx, parentId: string, o: { welcomedAt: Date | null; linkWorks: boolean; now: Date }): Promise<boolean> {
+  if (o.linkWorks && o.welcomedAt !== null && o.welcomedAt.getTime() > o.now.getTime() - RESEND_AFTER_MS) return true;
+  return linkSentWithin(tx, { parentId, purpose: "setup", now: o.now, withinMs: RESEND_AFTER_MS });
+}
+
+async function prepare(parentId: string, kind: Kind, by: Sender): Promise<Prepared> {
+  return db.transaction(async (tx): Promise<Prepared> => {
+    // The person's row first, in the order above lockedPerson() (./sessions.ts); then everything is read again under it.
+    const [row] = await tx.select({ welcomedAt: parent.welcomedAt, welcomeOwed: parent.welcomeOwed }).from(parent).where(eq(parent.id, parentId)).for("update");
+    // The moment's time, read once the lock is held, never the wake's: a batch's earlier sends can take a minute or
+    // more, and every read below of whether a link is on its way or still works, and the life of a link held here, go
+    // by when this person's turn came. Other senders judge "on its way" by their own clock, so a link held with the
+    // wake's start time would already look too old to them.
+    const now = new Date();
+    const live = row ? await personBy({ id: parentId }, tx) : null;
+    if (!row || !live) return { go: false, why: kind.worker ? "quiet" : "not_found" };
+    const settings = await getParentSettings(tx);
+    const counts = (await enterableGuardianRows(live.id, tx)).length > 0;
+    if (kind.worker) {
+      if (!settings.signin || !settings.welcome || parentDoorClosed(settings) || !row.welcomeOwed || live.blocked || !counts || live.authUserId === null) return { go: false, why: "quiet" };
+    } else {
+      if (live.blocked) return { go: false, why: "blocked" };
+      // Only to someone the gate would let in: the door open, a row that counts, and a sign-in account (nothing signs in without one).
+      if (parentDoorClosed(settings) || !counts || live.authUserId === null) return { go: false, why: "no_access" };
+    }
+    const mail: Mail = kind.worker && row.welcomedAt !== null ? "choose_password" : "welcome";
+    if (mail === "choose_password" && live.hasPassword) {
+      // A press mail for someone who has chosen a password since the press: nothing to choose, so it isn't sent.
+      await tx.update(parent).set({ welcomeOwed: false, welcomeTriedAt: null, updatedAt: new Date() }).where(eq(parent.id, live.id));
+      await writeAudit({ actor: by.actor, action: "parent.welcome.skipped", targetType: "parent", targetId: live.id, after: { to: live.email, mail, reason: "has_password" }, ip: by.ip }, tx);
+      return { go: false, why: "skipped" };
+    }
+    const strict = settings.level === "strict";
+    if (live.hasPassword) return { go: true, to: live.email, mail, held: null, earlier: false, strict };
+    // Another sender's set-up link on its way (a resend and the worker at once, or an ask on the request page): this
+    // mail's link would replace it once both were handed over, so the first mail's link wouldn't work. The worker
+    // waits, owed, for a later wake; a resend is refused in words.
+    const links = await setupLinks(tx, live.id, now);
+    if (links.onItsWay) return { go: false, why: kind.worker ? "wait" : "on_its_way" };
+    // No mail the portal sends by itself destroys a link that still works: only a deliberate act does (a parent's own
+    // ask on the request page, or a staff member's Resend, whose purpose is a fresh link).
+    if (mail === "choose_password") {
+      // The resend wait of the request page: a set-up link sent a moment ago may be in the mailbox unused, and the
+      // press's mail would replace it. It waits, owed, for a later wake.
+      if (await linkSentWithin(tx, { parentId: live.id, purpose: "setup", now, withinMs: RESEND_AFTER_MS })) return { go: false, why: "wait" };
+      // A set-up link that still works for a day or more (EARLIER_LINK_MIN_LIFE_MS, the earlier-link welcome's bar),
+      // made longer ago (asked for since the press): they have one to choose a password with, and the press's mail would
+      // only replace it. It isn't sent. One with less life left might run out before they use it: the press's mail then
+      // holds a new link below, which takes its place only once the mail has gone.
+      if (links.lastsADay) {
+        await tx.update(parent).set({ welcomeOwed: false, welcomeTriedAt: null, updatedAt: new Date() }).where(eq(parent.id, live.id));
+        await writeAudit({ actor: by.actor, action: "parent.welcome.skipped", targetType: "parent", targetId: live.id, after: { to: live.email, mail, reason: "has_live_link" }, ip: by.ip }, tx);
+        return { go: false, why: "skipped" };
+      }
+    } else if (kind.worker && links.lastsADay) {
+      // The worker's welcome (a first one, or one tried again) to a person who holds a set-up link that still works for
+      // a day or more, whoever sent it (they asked on the request page, or an earlier try's mail went and its link was
+      // put in place): it goes now, once, with no new link, saying the one emailed earlier still works. A link with
+      // less life left might run out before the mail is read: the welcome then holds a new one below, which takes its
+      // place only once the mail has gone, as any welcome's link does.
+      return { go: true, to: live.email, mail, held: null, earlier: true, strict };
+    } else if (!kind.worker && (await setupMailedJustNow(tx, live.id, { welcomedAt: row.welcomedAt, linkWorks: links.works, now }))) {
+      // A resend within a minute of the last set-up link the portal mailed them would stop that link working.
+      return { go: false, why: "on_its_way" };
+    }
+    const { linkId, token } = await holdSigninLink(tx, { parentId: live.id, purpose: "setup", now });
+    return { go: true, to: live.email, mail, strict, earlier: false, held: { linkId, purpose: "setup", token, to: live.email, who: { id: live.id, email: live.email } } };
+  });
+}
+
+/**
+ * The check again under the person's lock before a welcome's link is put in place: the address still the one mailed,
+ * the door open, a sign-in account, not blocked, a row that counts, and still no password. The Strict rule of the
+ * request page (whichLinkToMail()) is not asked: under Strict the club resends the welcome (open question 34).
+ */
+async function stillToWelcome(tx: Tx, live: LinkPerson | null, to: string): Promise<string | null> {
+  if (!live || live.email !== to) return "unknown_email";
+  if (parentDoorClosed(await getParentSettings(tx))) return "signins_off";
+  if (live.authUserId === null) return "no_sign_in_account";
+  if (live.blocked) return "blocked";
+  if ((await enterableGuardianRows(live.id, tx)).length === 0) return "no_enabled_guardian";
+  return live.hasPassword ? "has_password" : null;
+}
+
+const message = (p: Extract<Prepared, { go: true }>): Promise<MailMessage> => writeMail(p.mail, p.to,
+  p.held ? { url: passwordLink("setup", p.held.token), life: lifeWords(LINK_LIFE_MS.setup), strict: p.strict } : p.earlier ? { earlier: true, strict: p.strict } : null);
+
+/**
+ * What a sent welcome carried, for its row and the resend's answer: a set-up link put in place (`setup`), no link (a
+ * person with a password), no new link because the one emailed earlier still works (`earlier`: the worker's welcome
+ * only), or a link that was not put in place because a password was chosen while it was on its way (`not_in_place`),
+ * which leaves nothing to choose.
+ */
+export type WelcomeLink = "setup" | "none" | "earlier" | "not_in_place";
+/** `recipientRefused`: the mail wasn't handed over because the server refused this person's address (SendOutcome). */
+type Sent = { ok: true; link: WelcomeLink } | { ok: false; why: "mail_failed" | "link_not_in_place"; recipientRefused?: true };
+
+/**
+ * Sends the prepared mail, and records the outcome in its own transaction. With a held link, through the shared delivery
+ * (deliverHeldLink(), ./link-delivery.ts): the link is put in place only once the mail has been handed over, and a link
+ * the person held before is never taken from them by a mail that didn't reach them. Handed over, and the link in place
+ * or none to put: the person is welcomed (`welcomed_at` now, owed no more) and `parent.welcome.sent` says which mail went
+ * and whether a link did (never which). Not handed over: `parent.welcome.failed`, and they stay owed with the claim's
+ * back-off (`recipientRefused` when the server refused their address). Handed over and the link not put in place: they
+ * stay owed and `parent.welcome.failed` says so (`link_not_put_in_place`), unless a password was chosen meanwhile, when
+ * they are welcomed (`not_in_place`). Handed over saying the link emailed earlier still works, and none works for a day
+ * more by the time it is recorded: they stay owed and `parent.welcome.failed` says so (`earlier_link_gone`), unless a password was
+ * chosen meanwhile.
+ */
+async function send(parentId: string, p: Extract<Prepared, { go: true }>, by: Sender, resend: boolean): Promise<Sent> {
+  const base = { to: p.to, mail: p.mail, ...(resend ? { resend: true } : {}) };
+  const purpose = p.mail; // each mail is its own MailPurpose
+  const carries: WelcomeLink = p.held ? "setup" : p.earlier ? "earlier" : "none";
+  let outcome: { handedOver: false; error: string; recipientRefused?: true } | { handedOver: true; link: WelcomeLink } | { handedOver: true; notInPlace: string };
+  if (p.held) {
+    const d = await deliverHeldLink(p.held, { message: () => message(p), purpose, actor: by.actor, permission: by.permission, ip: by.ip,
+      check: (tx, live) => stillToWelcome(tx, live, p.to) });
+    outcome = !d.handedOver ? d : d.inPlace ? { handedOver: true, link: "setup" } : d.reason === "has_password" ? { handedOver: true, link: "not_in_place" } : { handedOver: true, notInPlace: d.reason };
+  } else {
+    const r = await (async () => sendMail(await message(p), { purpose, actor: by.actor, ip: by.ip }))().catch((): SendOutcome => ({ ok: false, error: "The email couldn't be written." }));
+    outcome = r.ok ? { handedOver: true, link: carries } : { handedOver: false, error: r.error, ...(r.recipientRefused ? { recipientRefused: true as const } : {}) };
+  }
+  return db.transaction(async (tx): Promise<Sent> => {
+    const row = { actor: by.actor, permission: by.permission, targetType: "parent", targetId: parentId, ip: by.ip } as const;
+    if (!outcome.handedOver) {
+      // welcomeTriedAt stays as claimed: that is the 15-minute back-off.
+      const refused = outcome.recipientRefused ? { recipientRefused: true as const } : {};
+      await writeAudit({ ...row, action: "parent.welcome.failed", after: { ...base, link: carries, error: outcome.error, ...refused } }, tx);
+      return { ok: false, why: "mail_failed", ...refused };
+    }
+    if ("notInPlace" in outcome) {
+      await writeAudit({ ...row, action: "parent.welcome.failed", after: { ...base, link: "setup", error: "link_not_put_in_place", reason: outcome.notInPlace } }, tx);
+      return { ok: false, why: "link_not_in_place" };
+    }
+    let link = outcome.link;
+    if (link === "setup" && p.held) {
+      // The link was put in place in the delivery's own transaction. Under the person's row again it must still be there
+      // (unused, or spent by their choosing a password with it): an end of their sign-in in between (a block and an
+      // unblock, say) deleted it, and recording them as welcomed would leave them a dead link and nothing owed. Then
+      // they stay owed with the claim's back-off, unless they have a password by now, which leaves nothing to choose.
+      await tx.select({ id: parent.id }).from(parent).where(eq(parent.id, parentId)).for("update");
+      const [still] = await tx.select({ id: parentSigninToken.id }).from(parentSigninToken).where(eq(parentSigninToken.id, p.held.linkId));
+      if (!still) {
+        if (!(await personBy({ id: parentId }, tx))?.hasPassword) {
+          await writeAudit({ ...row, action: "parent.welcome.failed", after: { ...base, link: "setup", error: "link_not_put_in_place", reason: "changed_while_mailing" } }, tx);
+          return { ok: false, why: "link_not_in_place" };
+        }
+        link = "not_in_place";
+      }
+    }
+    if (link === "earlier") {
+      // The mail said the set-up link emailed earlier still works, and it went with no lock held. Under the person's row
+      // again one must still work for EARLIER_LINK_MIN_LIFE_MS (unused, by the clock now), the bar prepare() chose the
+      // mail by: an end of their sign-in in between (a block and an unblock, say) deleted it, or it is about to run out,
+      // and recording them as welcomed would leave them no working link and nothing owed. Then they stay owed with the
+      // claim's back-off, and the next try holds a new link for them, unless they have a password by now, which leaves
+      // nothing to choose.
+      await tx.select({ id: parent.id }).from(parent).where(eq(parent.id, parentId)).for("update");
+      const at = new Date();
+      const [latest] = await tx.select({ expiresAt: parentSigninToken.expiresAt }).from(parentSigninToken)
+        .where(and(eq(parentSigninToken.parentId, parentId), eq(parentSigninToken.purpose, "setup"), isNull(parentSigninToken.usedAt),
+          gt(parentSigninToken.expiresAt, at))).orderBy(desc(parentSigninToken.expiresAt)).limit(1);
+      const lasts = latest !== undefined && latest.expiresAt.getTime() > at.getTime() + EARLIER_LINK_MIN_LIFE_MS;
+      if (!lasts && !(await personBy({ id: parentId }, tx))?.hasPassword) {
+        await writeAudit({ ...row, action: "parent.welcome.failed", after: { ...base, link: "earlier", error: "earlier_link_gone",
+          reason: latest ? "runs_out_within_a_day" : "changed_while_mailing" } }, tx);
+        return { ok: false, why: "link_not_in_place" };
+      }
+    }
+    await tx.update(parent).set({ welcomedAt: new Date(), welcomeOwed: false, welcomeTriedAt: null, updatedAt: new Date() }).where(eq(parent.id, parentId));
+    await writeAudit({ ...row, action: "parent.welcome.sent", after: { ...base, link } }, tx);
+    return { ok: true, link };
+  });
+}
 
 /**
  * Sends welcomes the switches, an unblock, or a staff add or reinstate of a guardian (./guardians.ts, which owes one
- * whether or not the row counts yet) marked as owed (spec §2 Welcome emails). Called on every wake of the
- * worker: at most five a wake, so a whole roster goes out over some minutes, not in one burst from the club's mailbox.
- * Each person is claimed before their email goes, so two overlapping runs never welcome the same person twice. A
- * person owed a welcome with no guardian row that counts (the gate's rule, enterableGuardianRows()) is skipped and
- * stays owed: the welcome goes once they can sign in.
+ * whether or not the row counts yet) marked as owed (spec §2 Welcome emails), and the mails the Admin's press owed to
+ * people welcomed before (oweSetupMails(), ./switches.ts). Called on every wake of the worker: at most five a wake, so
+ * a whole roster goes out over some minutes, not in one burst from the club's mailbox. Each person is claimed before
+ * their email goes, so two overlapping runs never welcome the same person twice. A person owed a welcome with no
+ * guardian row that counts (the gate's rule, enterableGuardianRows()) is skipped and stays owed: the welcome goes once
+ * they can sign in. After the claim, one transaction takes the person's row and reads everything again under it
+ * (prepare()), holding a set-up link for a person with no password; then the mail goes (send()). `now` decides only who
+ * is due and is the claim's time; everything about links is read at each person's turn (prepare()).
+ *
+ * A mail outage is not hammered: a send that fails for the mail's own reasons (not handed over, and not because the
+ * server refused that one address on its own account, refusedThisRecipient() in ../mail/refusal.ts, which leaves the
+ * rest of the batch to go) ends the wake's batch, and while the last welcome the worker tried to send failed (its
+ * counts-only mark, WELCOME_MARK, ../jobs/marks.ts), a wake tries one person, not five; the first that goes brings back
+ * the batch of five at the next wake. The Health page's parents line says when welcome emails are waiting for that
+ * reason. A person whose address was refused is tried again a day later, not every fifteen minutes (holdOffRefused()),
+ * except in a wake that began throttled, which can't tell a refusal from the mail failing (finishWake()).
  */
 export async function sendOwedWelcomes(now: Date = new Date()): Promise<{ sent: number; failed: number }> {
   if (!(await welcomesOn()) || !(await mailWorking())) return { sent: 0, failed: 0 };
-  const counts = hasRowThatCounts(await studentsRuleInForce());
-  const due = await db.select().from(parent)
-    .where(and(eq(parent.welcomeOwed, true), eq(parent.blocked, false), counts,
-      or(isNull(parent.welcomeTriedAt), lt(parent.welcomeTriedAt, new Date(now.getTime() - WELCOME_RETRY_MS)))))
-    .orderBy(asc(parent.createdAt), asc(parent.id)).limit(WELCOME_BATCH);
-  let sent = 0, failed = 0;
-  for (const p of due) {
-    if (!(await welcomesOn())) break; // switched off while this run was going
-    if (!(await claim(p.id, now, counts))) continue;
-    const r = await sendMail(await welcomeEmailFor(p.email), { purpose: "welcome", actor: WELCOME_ACTOR });
-    if (r.ok) {
-      await db.update(parent).set({ welcomedAt: new Date(), welcomeOwed: false, welcomeTriedAt: null, updatedAt: new Date() }).where(eq(parent.id, p.id));
-      await writeAudit({ actor: WELCOME_ACTOR, action: "parent.welcome.sent", targetType: "parent", targetId: p.id, after: { to: p.email } });
-      sent++;
-    } else {
-      // welcomeTriedAt stays as claimed: that is the 15-minute back-off.
-      await writeAudit({ actor: WELCOME_ACTOR, action: "parent.welcome.failed", targetType: "parent", targetId: p.id, after: { to: p.email, error: r.error } });
+  const canBe = await canBeSent();
+  const throttled = failedLast(await readMark(WELCOME_MARK));
+  const batch = throttled ? 1 : WELCOME_BATCH;
+  const due = await db.select().from(parent).where(and(canBe, pastBackOff(now)))
+    .orderBy(asc(parent.createdAt), asc(parent.id)).limit(batch);
+  let sent = 0, failed = 0, mailFailed = 0;
+  const refused: string[] = [];
+  try {
+    for (const p of due) {
+      if (!(await welcomesOn())) break; // switched off while this run was going
+      if (!(await claim(p.id, now, canBe))) continue;
+      const by = { actor: WELCOME_ACTOR, ip: null };
+      const ready = await prepare(p.id, { worker: true }, by);
+      if (!ready.go) continue;
+      const r = await send(p.id, ready, by, false);
+      if (r.ok) { sent++; continue; }
       failed++;
+      // The server refusing this one address is the address's problem: the others still go. Any other send that wasn't
+      // handed over is the mail itself failing, and the rest wait for a later wake.
+      if (r.why === "mail_failed" && r.recipientRefused) refused.push(p.id);
+      else if (r.why === "mail_failed") { mailFailed++; break; }
     }
+  } finally {
+    // Also when a later person's turn threw: what this wake did is marked, so a send that went lifts the throttle.
+    await finishWake(now, { throttled, sent, refused, mailFailed, linkNotInPlace: failed - mailFailed - refused.length });
   }
   return { sent, failed };
 }
 
-/** **Resend welcome email** on a person's page. It goes at once and does not depend on the welcome switch. */
-export async function resendWelcome(parentId: string, o: StaffOp): Promise<{ ok: true } | { ok: false; reason: "not_found" | "no_access" | "blocked" | "mail_failed" }> {
-  const [p] = await db.select().from(parent).where(eq(parent.id, parentId));
-  if (!p) return { ok: false, reason: "not_found" };
-  if (p.blocked) return { ok: false, reason: "blocked" };
-  if (parentDoorClosed(await getParentSettings())) return { ok: false, reason: "no_access" }; // they could not sign in
-  // Only to someone the gate would let in: a row that counts, as the code request asks (./sessions.ts).
-  if ((await enterableGuardianRows(p.id)).length === 0) return { ok: false, reason: "no_access" };
-  const r = await sendMail(await welcomeEmailFor(p.email), { purpose: "welcome", actor: o.actor, ip: o.ip });
-  if (!r.ok) {
-    await writeAudit({ actor: o.actor, action: "parent.welcome.failed", permission: o.permission, targetType: "parent", targetId: p.id, after: { to: p.email, error: r.error, resend: true }, ip: o.ip });
-    return { ok: false, reason: "mail_failed" };
-  }
-  await db.update(parent).set({ welcomedAt: new Date(), welcomeOwed: false, welcomeTriedAt: null, updatedAt: new Date() }).where(eq(parent.id, p.id));
-  await writeAudit({ actor: o.actor, action: "parent.welcome.sent", permission: o.permission, targetType: "parent", targetId: p.id, after: { to: p.email, resend: true }, ip: o.ip });
-  return { ok: true };
+/**
+ * The end of a wake: its mark, and the refused people's back-off. Only a wake that tried someone is marked: one that
+ * tried nobody says nothing about whether mail works. A refusal says nothing either way, so it never clears the mark:
+ * a wake whose only tries were one refused address leaves it as it was (a throttled wake stays throttled), and only a
+ * send that went (handed over, `sent` or `linkNotInPlace`) clears it. A server may refuse relaying to every address
+ * with no enhanced code that says so, which refusedThisRecipient() can't tell from a bad address: a wake that sent to
+ * nobody and had two or more refused is taken for the mail failing (marked failed, so the throttle starts and the
+ * Health note shows), and its refused people keep the claim's fifteen-minute back-off like any mail failure. A wake that
+ * began throttled (the mark said the last send failed) tries one person, so that check can't fire in it: its refused
+ * person keeps the fifteen-minute back-off too, since the mail may be what refused them, and holding each one tried off
+ * a day would leave everyone waiting a day once the mail is mended while the Health note said one a minute was tried.
+ * Otherwise each refused person is held off a day. Never throws: it runs after the wake's own error, if any.
+ */
+async function finishWake(claimedAt: Date, w: { throttled: boolean; sent: number; refused: string[]; mailFailed: number; linkNotInPlace: number }): Promise<void> {
+  const handedOver = w.sent + w.linkNotInPlace;
+  const refusalsAreTheMail = handedOver === 0 && w.refused.length >= 2;
+  // Not held off: tried again after the claim's back-off.
+  if (!refusalsAreTheMail && !w.throttled) await holdOffRefused(w.refused, claimedAt).catch(() => undefined);
+  if (handedOver + w.mailFailed + w.refused.length === 0) return;
+  if (handedOver === 0 && w.mailFailed === 0 && !refusalsAreTheMail) return; // one refused address, and nothing else
+  await markJob(WELCOME_MARK, { counts: { sent: w.sent, recipientRefused: w.refused.length, linkNotInPlace: w.linkNotInPlace },
+    failed: w.mailFailed + (refusalsAreTheMail ? w.refused.length : 0) });
+}
+
+export type ResendRefusal = "not_found" | "no_access" | "blocked" | "on_its_way" | "mail_failed" | "link_not_in_place";
+/**
+ * **Resend welcome email** on a person's page. It goes at once and does not depend on the welcome switch. It is the
+ * welcome of the worker, sent now: with a set-up link for a person with no password, which takes the place of their
+ * unused one only once its mail has gone, and with none for a person with a password. The staff member is the actor of
+ * every row. Refused for a person not there, blocked, or who can't sign in (`no_access`: the door closed, no row that
+ * counts, no sign-in account), and while another set-up link is on its way to them or the portal mailed them one less
+ * than RESEND_AFTER_MS ago (`on_its_way`: the worker's welcome, a resend just pressed, or an ask on "Set up or reset my
+ * password", whose link this one would replace, so a double press can't stop the link in the mail just sent working);
+ * `mail_failed` when the mail wasn't handed over (an earlier link keeps working), and `link_not_in_place` when it was
+ * but something changed for the person while it went, so its link won't work.
+ */
+export async function resendWelcome(parentId: string, o: StaffOp): Promise<{ ok: true; link: Exclude<WelcomeLink, "earlier"> } | { ok: false; reason: ResendRefusal }> {
+  const by = { actor: o.actor, permission: o.permission, ip: o.ip };
+  const ready = await prepare(parentId, { worker: false }, by);
+  if (!ready.go) return { ok: false, reason: ready.why === "blocked" || ready.why === "not_found" || ready.why === "on_its_way" ? ready.why : "no_access" };
+  const r = await send(parentId, ready, by, true);
+  if (!r.ok) return { ok: false, reason: r.why };
+  // prepare() answers `earlier` for the worker alone: a resend carries a link of its own, or none to a person with a password.
+  return { ok: true, link: r.link === "earlier" ? "none" : r.link };
 }

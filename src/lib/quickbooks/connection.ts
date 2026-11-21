@@ -273,9 +273,9 @@ export async function completeConnect(
     await clearRosterOfOtherCompany(p.realmId!, { actor: o.actor, ip: o.ip });
   } catch (e) {
     if (!switched) throw e;
-    // Logged and audited, so the audit log says a switch's clear is still to run, not only the roster's failed runs.
+    // Audited, not logged (nothing here writes to the log), so the audit log says a switch's clear is still to run,
+    // not only the roster's failed runs; the stored switch stays for the next refresh to spend.
     const error = e instanceof Error ? e.name.slice(0, 40) : "unknown";
-    console.error(`[quickbooks] The switch from company ${claim.switchFrom} to ${p.realmId} is stored, but its clear failed (${error}); the next roster refresh runs it.`);
     try {
       await writeAudit({ actor: o.actor, action: "quickbooks.switch.clear_failed", permission: o.permission, ...TARGET,
         after: { fromRealmId: claim.switchFrom, toRealmId: p.realmId, error }, ip: o.ip });

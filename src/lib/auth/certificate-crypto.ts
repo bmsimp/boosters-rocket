@@ -1,5 +1,8 @@
 import "reflect-metadata"; // tsyringe (under @peculiar/x509) needs a Reflect polyfill loaded first
 import { createHash, randomBytes, webcrypto } from "node:crypto";
+// The same version @simplewebauthn/server (under @better-auth/passkey) uses, so one copy is installed. Every copy
+// registers its algorithms in tsyringe's one global container, so beside a second copy the generator here is handed
+// the other's ASN.1 objects and fails ("Cannot get schema for ... target"), bundled or not. Keep the two in step.
 import * as x509 from "@peculiar/x509";
 
 x509.cryptoProvider.set(webcrypto as unknown as Crypto);

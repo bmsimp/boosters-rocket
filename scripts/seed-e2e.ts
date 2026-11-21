@@ -8,6 +8,8 @@ import { E2E_VOLUNTEER } from "../tests/e2e/volunteer-seed";
 import { E2E_BUYOUT } from "../tests/e2e/buyout-seed";
 import { E2E_SIGNED_PDF } from "../tests/e2e/signed-forms-seed";
 import { E2E_EMAIL, emailTokenHash } from "../tests/e2e/email-seed";
+import { E2E_SIGNIN, deviceTokenHash } from "../tests/e2e/signin-seed";
+import { hashPassword } from "better-auth/crypto";
 import { E2E_DETAILS } from "../tests/e2e/details-seed";
 import { appRecordsFillStatements } from "../tests/helpers/app-records-fill";
 
@@ -55,6 +57,19 @@ async function main() {
   // Every session she has is deleted first, as the staff one is.
   const [zelda] = await sql`SELECT id FROM parent_auth_user WHERE parent_id = ${p!.id}`;
   await sql`DELETE FROM parent_auth_session WHERE user_id = ${zelda!.id}`;
+  // Zelda and Ana sign in with a password (the sign-in release, slice SI-3b), kept as Better Auth's sign-up keeps one,
+  // and Zelda has one remembered device, so a password alone signs her in on it (tests/e2e/signin-seed.ts: a fixed
+  // token). The specs that need her with no password (set-up links, "Set up or reset my password") remove her row and
+  // put one for this password back after (tests/e2e/signin-links.ts).
+  const [anaUser] = await sql`SELECT id FROM parent_auth_user WHERE parent_id = ${ana!.id}`;
+  for (const user of [zelda!.id, anaUser!.id]) {
+    await sql`INSERT INTO parent_auth_account (id, account_id, provider_id, user_id, password)
+            VALUES (${crypto.randomUUID()}, ${user}, 'credential', ${user}, ${await hashPassword(E2E_SIGNIN.password)})`;
+  }
+  // Her seeded session (below) names it as the device it was made on, so her sign-in settings list it as "This device"
+  // (slice SI-5b) and the browser checks meet the list with that row.
+  const [zeldaDevice] = await sql`INSERT INTO parent_device (parent_id, token_hash, expires_at)
+          VALUES (${p!.id}, ${deviceTokenHash(E2E_SIGNIN.zeldaDevice)}, now() + interval '90 days') RETURNING id`;
   // SMTP to the e2e mail sink (tests/e2e/parent-sign-in.spec.ts), counted as tested.
   const sealed = createSecretBox({ current: process.env.SETTINGS_ENCRYPTION_KEY! }).seal("sink-password", "mail:smtp-password");
   const mail = { method: "smtp", host: "127.0.0.1", port: mailPort, security: "tls", username: "sender", from: "boosters@e2e.example.org",
@@ -352,9 +367,11 @@ async function main() {
     return { id: row.id as string, familyId };
   };
   // A live session for Zelda with the first family chosen, so the e2e run can open parent pages without the emailed
-  // code (tests/e2e/parent-session.ts makes the cookie).
-  await sql`INSERT INTO parent_auth_session (id, token, user_id, family_id, expires_at)
-          VALUES ('e2e-parent-session', 'e2e-parent-session-token', ${zelda!.id}, ${(await zeldaIn("E2E-FAMILY")).familyId}, now() + interval '7 days')`;
+  // code (tests/e2e/parent-session.ts makes the cookie). It was made on her remembered device (`device_id`, slice SI-5b),
+  // a day before the run, so it is never a session at its sign-in: Home's passkey offer (slice SI-8) is drawn only in a
+  // session made in the last 10 minutes, and the specs that stamp this one as proved just now open Home too.
+  await sql`INSERT INTO parent_auth_session (id, token, user_id, family_id, device_id, expires_at, created_at)
+          VALUES ('e2e-parent-session', 'e2e-parent-session-token', ${zelda!.id}, ${(await zeldaIn("E2E-FAMILY")).familyId}, ${zeldaDevice!.id}, now() + interval '7 days', now() - interval '1 day')`;
   // A change of sign-in address Zelda asked for and hasn't confirmed, under her link to the Quetzalcoatl family, and a
   // used one under her link to the second family (tests/e2e/email-seed.ts: fixed tokens, so the specs can open them).
   for (const [key, family, used] of [["own", "E2E-FAMILY", false], ["other", "E2E-FAMILY-2", true]] as const) {

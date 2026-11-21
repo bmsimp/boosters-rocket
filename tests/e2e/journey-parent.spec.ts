@@ -5,7 +5,9 @@ import { startMailSink, type MailSink } from "../helpers/mail-sink";
 import { e2eMailPort } from "./run-config";
 import { E2E_BUYOUT } from "./buyout-seed";
 import { E2E_VOLUNTEER } from "./volunteer-seed";
-import { codeFor, noSidewaysScroll, shot } from "./journey-helpers";
+import { codeFor, noSidewaysScroll, passOffer, shot } from "./journey-helpers";
+import { E2E_SIGNIN } from "./signin-seed";
+import { removeZeldaDevicesMadeHere, resetPasskeyOffer } from "./signin-links";
 
 // One parent's whole visit, walked by what they would tap (docs/walkthrough.md): Zelda signs in with the code the
 // portal mails her, chooses a family, reads Home, opens her signed form, looks at Payments, signs up for two shifts and
@@ -27,9 +29,10 @@ test.beforeAll(async () => {
   expect((seeded?.value as { port?: number } | undefined)?.port, "the mail port in the seeded settings; seed again with this run's E2E_MAIL_PORT").toBe(e2eMailPort());
   sink = await startMailSink({ secure: true, port: e2eMailPort(), key: readFileSync(".e2e/sink-key.pem", "utf8"), cert: readFileSync(".e2e/sink-cert.pem", "utf8") });
 });
-test.afterAll(async () => { await sink.close(); await sql.end(); });
+// The sign-in remembers this browser's device for Zelda (slice SI-3b): it goes after, keeping the seed's.
+test.afterAll(async () => { await removeZeldaDevicesMadeHere(sql); await resetPasskeyOffer(sql); await sink.close(); await sql.end(); });
 
-test("a parent's visit: sign in by emailed code, read and do what the family needs, and sign out", async ({ page, baseURL }) => {
+test("a parent's visit: sign in by password and emailed code, read and do what the family needs, and sign out", async ({ page, baseURL }) => {
   test.setTimeout(120_000);
   await sql`DELETE FROM signin_code`;
   await sql`DELETE FROM rate_limit_event`;
@@ -38,15 +41,17 @@ test("a parent's visit: sign in by emailed code, read and do what the family nee
   /** A parent tab: the tab bar at the foot of a phone, the club bar's links on a laptop. */
   const tab = (name: string) => (phone ? page.locator("nav.tabs") : page.locator("header.bar")).getByRole("link", { name, exact: true });
 
-  await test.step("signs in with the code from the email and chooses a family", async () => {
+  await test.step("signs in with her password and the code from the email, and chooses a family", async () => {
     await page.goto("/");
     await expect(page).toHaveURL(/\/sign-in$/);
     await shot(page, "p01-sign-in");
     await page.getByLabel("Email").fill("zelda@example.com");
-    await page.getByRole("button", { name: "Send code" }).click();
-    await expect(page.getByRole("status")).toContainText("we've sent a 6-digit code");
+    await page.getByLabel("Password").fill(E2E_SIGNIN.password);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    // A browser the portal doesn't know for her: the second step, the code it emails.
+    await expect(page.getByRole("status")).toContainText("enter the 6-digit code we've emailed you");
     await page.getByLabel("6-digit code").fill(await codeFor(sql, sink, "zelda@example.com"));
-    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page).toHaveURL(/\/choose-family$/);
     await noSidewaysScroll(page);
     await shot(page, "p02-choose-family");
@@ -56,6 +61,8 @@ test("a parent's visit: sign in by emailed code, read and do what the family nee
 
   await test.step("reads Home: what is owed, the season and each student", async () => {
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+    // The sign-in proved a second step on a new browser: Home offers a passkey first (slice SI-8). Not now.
+    await passOffer(page);
     await expect(page.getByText("Viewing Quetzalcoatl Family.")).toBeVisible();
     await expect(page.getByRole("region", { name: "Quetzalcoatl Family" }).locator(".total, .owed, .big").first()).toContainText("$185.00");
     await expect(page.getByRole("heading", { name: "Your students" })).toBeVisible();
