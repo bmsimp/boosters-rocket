@@ -518,8 +518,8 @@ describe("the pages", () => {
     // The families' own list doesn't count it, and draws no press for it.
     expect(sectionOf(whole, "links-list-h")).not.toContain("Rivera Family's active status");
     expect(whole).toContain("A linked family inactive in the portal whose customer the books have active is listed after the families, and made active again the same way");
-    // Since slice M5a the lede names the two presses that send anything to the books, Send among them.
-    expect(whole).toContain("Only two things here send anything to the books: Send the app&#x27;s to QuickBooks, and a student&#x27;s move taken from the books, which voids an unpaid volunteer buy-out invoice of theirs there.");
+    // Since slice M5a the lede names the presses that send anything to the books, Send among them, and since slice M5b Send the app's for all.
+    expect(whole).toContain("Only three things here send anything to the books: Send the app&#x27;s to QuickBooks, Send the app&#x27;s for all, and a student&#x27;s move taken from the books, which voids an unpaid volunteer buy-out invoice of theirs there.");
     // Taken: Rivera is a row again, and Leo's press is on it.
     expect(await press((await inactiveOf("Rivera Family")).take!)).toMatchObject({ ok: true });
     const again = await renderPage(AccountingLinksPage);

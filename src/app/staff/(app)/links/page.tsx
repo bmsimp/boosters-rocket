@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireStaffAlso, requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
-import { BULK_MAX, filterLinkRows, filtersOf, givenUpCustomersOf, loadAccountingLinks, REVIEW_LEFT_WORDS, statusCounts, type BulkOffer, type ConfirmStep, type GuardianShown, type InactiveRow, type LinkMade, type LinkOffer, type LinkRow, type LinkStatus, type LinksState, type LinksView, type OwnLink, type ReviewOffer, type SendOffer, type TakeOffer, type UnlinkOffer } from "@/lib/accounting/mapping";
+import { BULK_MAX, filterLinkRows, filtersOf, givenUpCustomersOf, loadAccountingLinks, REVIEW_LEFT_WORDS, SEND_ALL_MAX, statusCounts, type BulkOffer, type ConfirmStep, type GuardianShown, type InactiveRow, type LinkMade, type LinkOffer, type LinkRow, type LinkStatus, type LinksState, type LinksView, type OwnLink, type ReviewOffer, type SendAllOffer, type SendOffer, type TakeOffer, type UnlinkOffer } from "@/lib/accounting/mapping";
 import { differenceKinds, differenceWords, noteSentence, type Difference } from "@/lib/accounting/differences";
 import { NOT_A_FAMILY_WORDS, parseLinksFilter, searchMatches, SEARCH_MAX, STATUS_KEYS, STATUS_WORDS, type LinksFilter, type StatusKey } from "@/lib/accounting/status";
 import type { Holder } from "@/lib/accounting/match";
@@ -13,7 +13,7 @@ import { LocalTime } from "@/app/components/local-time";
 import { Notice } from "@/app/components/notice";
 import { StateWords } from "@/app/components/state-words";
 import { familyPage } from "@/app/staff/(app)/family-pages";
-import { confirmAllAction, confirmLinkAction, leaveUnlinkedAction, linkGuardianAction, reviewLinkAction, sendDifferenceAction, takeDifferenceAction, undoLeaveUnlinkedAction, unlinkAction, unlinkGuardianAction } from "./actions";
+import { confirmAllAction, confirmLinkAction, leaveUnlinkedAction, linkGuardianAction, reviewLinkAction, sendAllAction, sendDifferenceAction, takeDifferenceAction, undoLeaveUnlinkedAction, unlinkAction, unlinkGuardianAction } from "./actions";
 import { GuardianLinkPress, LinkAnswers, LinkAnswersShown, LinkPress } from "./link-press";
 
 export const metadata = { title: "Accounting links" };
@@ -198,7 +198,8 @@ function InactivePart({ rows, tag, familyPages, maySend }: { rows: InactiveRow[]
   return (
     <section className="box" aria-labelledby="links-inactive-h"><h2 id="links-inactive-h">Inactive in the portal, active in the books</h2>
       <p>Each of these families is inactive in the portal and linked to a customer the books have active. Taking the books&apos; value makes the family active again in the portal, alone, and sends nothing to the books.
-        Its guardians can&apos;t sign in to it until someone who may change families lets them in, on its page.</p>
+        Its guardians can&apos;t sign in to it until someone who may change families lets them in, on its page.
+        {maySend && " Sending the app's value instead makes it inactive in the books, with everyone active under it there, as its row says, and changes nothing in the portal."}</p>
       <DataTable caption={plural(rows.length, "inactive family the books have active", "inactive families the books have active")} captionHidden columns={columns} rows={rows} rowKey={(r) => String(r.familyId)} />
     </section>
   );
@@ -356,6 +357,41 @@ function BulkPress({ bulk, filter, tag }: { bulk: BulkOffer; filter: LinksFilter
   );
 }
 
+/**
+ * Send the app's for all (slice M5b): for the names and students' families the filter shows now, in the `listed` state,
+ * for a reader who may change families, a press bound to the filter as parsed, the count, the roster tag and the stamp
+ * sealing those sends, and nothing else; with more than SEND_ALL_MAX, no press but a notice to narrow the list. What it
+ * passes over (each make-inactive, each difference whose customer the books have inactive) and what it leaves for a
+ * later press are said in a notice, with why.
+ */
+function SendAllPress({ offer, filter, tag }: { offer: SendAllOffer; filter: LinksFilter; tag: string }) {
+  const { inactive, booksInactive } = offer.passedOver;
+  const said = [
+    inactive > 0 ? `It passes over ${plural(inactive, "make-inactive", "make-inactives")} this list shows, as each reads a balance in QuickBooks first: send ${inactive === 1 ? "it" : "each"} on its own row.` : null,
+    booksInactive > 0 ? `It passes over ${plural(booksInactive, "difference whose customer QuickBooks has inactive", "differences whose customer QuickBooks has inactive")}: the portal sends nothing there, and never makes a customer active.` : null,
+    offer.later > 0 ? `${offer.later === 1 ? "One more difference waits" : `${offer.later} more differences wait`} for a change this press queues to reach QuickBooks first, as ${offer.later === 1 ? "it reads" : "they read"} the same customer: press again once it has.` : null,
+  ].filter((x): x is string => x !== null);
+  const notes = said.length === 0 ? null : (
+    <Notice tone="info" live="none">Send the app&apos;s for all sends only names and students&apos; families. {said.join(" ")}{offer.inactiveListed && " The inactive families listed after the families aren't part of it."}</Notice>
+  );
+  if (offer.count === 0) return notes;
+  if (offer.stamp === null) {
+    return <>{notes}<Notice tone="info" live="none">This list shows {offer.count} names and students&apos; families to send. Up to {SEND_ALL_MAX} can be sent at once, so narrow the list with the search or a status first.</Notice></>;
+  }
+  return (
+    <div className="stack">
+      {notes}
+      <p>Send the app&apos;s for all queues the portal&apos;s value of each of the {plural(offer.count, "name and student's family", "names and students' families")} this list shows, over the books&apos; value its row shows, each as its row&apos;s own Send would.
+        Nothing is sent at the press: the portal sends each within a few minutes, and one QuickBooks has changed since this page was drawn is held back and kept, never sent over. The Reconciliation page shows any that waits or is kept.
+        Only what this filter shows now is queued: if the list has changed by the time you press, nothing is queued and it is shown again.</p>
+      <div className="row-actions">
+        <LinkPress label={`Send the app's for all (${offer.count})`} busy="Queueing…" about="Send the app's for all"
+          act={sendAllAction.bind(null, filter.status ?? "", filter.q, offer.count, tag, offer.stamp)} />
+      </div>
+    </div>
+  );
+}
+
 function ConfirmPress({ familyId, about, offer, tag }: { familyId: string; about: string; offer: LinkOffer; tag: string }) {
   return <LinkPress label="Confirm" busy="Linking…" about={about} act={confirmLinkAction.bind(null, familyId, offer.customerId, offer.chosen, tag, offer.stamp)} />;
 }
@@ -448,6 +484,8 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
   const rows = filterLinkRows(view.rows, filter);
   // Confirm all exact email matches, over the Suggested rows this filter shows, by the press's own rule (suggestedRowsShown()).
   const bulk = view.bulk(filter);
+  // Send the app's for all (slice M5b), over the sends this filter shows, by the press's own rule (sendAllShown()), for a reader who may change families.
+  const sendAll = maySend ? view.sendAll(filter) : null;
   const filtered = filter.status !== null || filter.q !== "";
   const pick = typeof sp.pick === "string" && sp.pick.length <= 64 ? sp.pick : null;
   const customer = typeof sp.customer === "string" && sp.customer.length <= 64 ? sp.customer : null;
@@ -468,10 +506,11 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
       <LinkAnswers>
         <h1 className="page-title">Accounting links</h1>
         <p className="lede">Every family in the portal, beside the customer in the books it is linked to, or the one that looks like its own.
-          A family with no link can be linked here, to its suggestion or a customer you pick, or left unlinked. Only two things here send anything to the books: Send the app&apos;s to QuickBooks, and a student&apos;s move taken from the books, which voids an unpaid volunteer buy-out invoice of theirs there.
+          A family with no link can be linked here, to its suggestion or a customer you pick, or left unlinked. Only three things here send anything to the books: Send the app&apos;s to QuickBooks, Send the app&apos;s for all, and a student&apos;s move taken from the books, which voids an unpaid volunteer buy-out invoice of theirs there.
           For a family whose link stands, it also lists where the portal and the books differ. A name, a record the books have inactive or active, or the family the books have a student under can be taken into the portal with Take QuickBooks&apos; into the app, which changes only the portal&apos;s records, except that a student&apos;s move voids an unpaid volunteer buy-out invoice of theirs in the books, as any move does.
           A name, the family a student is in, or a student or member inactive in the portal whose customer the books have active can instead be sent to the books with Send the app&apos;s to QuickBooks, by someone who may also change families: it replaces the books&apos; value with the portal&apos;s, and a make-inactive reads the balance first and sends nothing while there is any. Every other difference is only shown.
-          A linked family inactive in the portal whose customer the books have active is listed after the families, and made active again the same way, but its guardians sign in to it only once someone who may change families lets them in, on its page.</p>
+          Send the app&apos;s for all, above the list, queues every name and student&apos;s family the list shows, up to {SEND_ALL_MAX} at once, for the portal to send within a few minutes, but for one that must wait for another change queued by the same press (a family&apos;s name, then a student&apos;s move into or out of it), which it leaves for the next press and says so; it passes over every make-inactive, which is sent on its own row.
+          A linked family inactive in the portal whose customer the books have active is listed after the families, and made active again the same way, but its guardians sign in to it only once someone who may change families lets them in, on its page. It can instead be made inactive in the books with everyone under it, on its row, by the balance rule, deepest first and the family last.</p>
         <LinkAnswersShown />
 
         <section className="box" aria-labelledby="links-how-h"><h2 id="links-how-h">How links are made</h2>
@@ -519,6 +558,7 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
           {overlap > 0 && <p>{overlap === 1 ? "1 family whose link was carried over has differences, so it is counted under both Carried over and Linked, with differences."
             : `${overlap} families whose links were carried over have differences, so each is counted under both Carried over and Linked, with differences.`}</p>}
           {bulk !== null && <BulkPress bulk={bulk} filter={filter} tag={tag} />}
+          {sendAll !== null && <SendAllPress offer={sendAll} filter={filter} tag={tag} />}
           {filter.tooLong && <Notice tone="warning" live="none">That search was too long, so nothing was searched for. Try a shorter part of a name or an address, up to {SEARCH_MAX} characters.</Notice>}
           {view.rows.length === 0 ? <Notice tone="info" live="none">The portal has no active families yet.</Notice>
             : rows.length === 0 ? <Notice tone="info">No family matches that.</Notice>

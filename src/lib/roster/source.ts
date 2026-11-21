@@ -1,4 +1,4 @@
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql, type SQL } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { familyMoney, jobRun, qboCustomer, qboCustomerType, setting, writeQueue } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
@@ -17,6 +17,18 @@ export async function getRosterSource(tx?: Tx): Promise<string | null> {
   const realmId = (row?.value as { realmId?: unknown } | undefined)?.realmId;
   return typeof realmId === "string" ? realmId : null;
 }
+
+/**
+ * True of a queue item filed under the roster cache's company (`write_queue.realm_id` against `roster.source`, read in
+ * the same statement, so it costs no extra read and matches nothing while the cache names no company): the one rule
+ * every reader of open items holds (stage 4's slice M7a3), so an item a change of company left open (a parent's save
+ * that read the old company before the clear committed, until the worker's next wake gives it up: runWriteQueue(),
+ * ./queue.ts) never holds a record back, takes a name, lists, counts or is closed as replaced by the new company's
+ * change. The roster's company, not the connection's: while QuickBooks is connected to another company, the roster's
+ * own items are still its records' pending changes, and still hold them back and show (givenUpMaybeMade(), ./writes.ts,
+ * reads none then: what it finds would be sent to the connected company).
+ */
+export const ofRosterCompany: SQL = sql`${writeQueue.realmId} = (select ${setting.value}->>'realmId' from ${setting} where ${setting.key} = ${SOURCE_KEY})`;
 
 export async function setRosterSource(tx: Tx, realmId: string): Promise<void> {
   const value = { realmId };
@@ -65,8 +77,8 @@ export const GIVEN_UP_FOR_COMPANY_NOTE = "Given up: the club connected a differe
  * guards, so the endings here stand (an invoice made at that moment is recorded on the ended buy-out). A staff insert
  * into the queue after it goes in given up (holdForTheQueue(), enqueue(), ./writes.ts: each takes the roster lock and
  * finds the roster another company's), and the worker gives up any parent's item inserted after it, which takes no
- * roster lock (runWriteQueue(), ./queue.ts). Readers of open items that don't filter by company are stage 4's slice
- * M7a3's.
+ * roster lock (runWriteQueue(), ./queue.ts). Until it does, every reader of open items reads only the roster's
+ * company's (ofRosterCompany above, stage 4's slice M7a3), so such an item holds nothing back, lists or counts nowhere.
  *
  * Nothing the portal runs reaches it until stage 4's slice M8 turns a change of company back on: a different company
  * is refused wherever one is connected or read (completeConnect() in src/lib/quickbooks/connection.ts, refreshRoster()

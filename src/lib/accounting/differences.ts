@@ -16,8 +16,9 @@ import type { MembershipShape } from "@/lib/roster/shape";
 export type QueueNote = { state: "waiting" | "stuck" | "refused"; words: string };
 /**
  * A queue item as this module needs it: what it changes, by the ids it names, and its words. Every item the queue
- * gives is of the roster's company: a change of company's clear gives up every item still to go, and a different company
- * is refused (one queued outside the roster lock at that moment could outlive the clear: stage 4's slice M7a2).
+ * gives is of the roster's company: a change of company's clear gives up every item still to go, a different company
+ * is refused, and loadOpenWrites() reads only the roster's company's (ofRosterCompany, src/lib/roster/source.ts: stage
+ * 4's slice M7a3), so a parent's change saved as the clear ran, open until the worker's next wake, is never among them.
  */
 export type QueueFact = QueueNote & { op: string; role: string | null; qboId: string | null; studentId: string | null; guardianId: string | null };
 

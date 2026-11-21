@@ -464,8 +464,13 @@ function activeFlagProblems(sources: { file: string; text: string }[]): string[]
 /**
  * What is wrong with the send from a difference's own block (sendToBooks() up to portalValueStamp(), slice M5a):
  * nothing when it names no client write and not sendWrite(), and reaches QuickBooks through trySavedItem() and
- * tryDeactivate().
+ * tryDeactivate(), and, since slice M5b, a layered family made inactive with everyone under it only through the family
+ * action's own body (familyInactiveHolding()): never its press's entry (askFamilyInactive(), which takes the family's
+ * "being sent" lock the send already holds), its checks (prepareFamily()) or its steps (sendDeactivate(), stepStopped())
+ * by themselves.
  */
+const SEND_FAMILY = "familyInactiveHolding";
+const FAMILY_ACTION_PARTS = ["askFamilyInactive", "prepareFamily", "sendDeactivate", "stepStopped"];
 function sendBlockProblems(writerText: string): string[] {
   const writer = code(writerText);
   const start = writer.indexOf(`export async function ${SEND}(`), end = writer.indexOf("export function portalValueStamp(");
@@ -473,7 +478,16 @@ function sendBlockProblems(writerText: string): string[] {
   const block = writer.slice(start, end);
   const problems = [...CLIENT_WRITES, ROSTER_SEND].filter((name) => new RegExp(`\\b${name}\\b`).test(block)).map((name) => `${SEND}'s block names ${name}`);
   for (const via of ["trySavedItem", "tryDeactivate"]) if (!new RegExp(`\\b${via}\\(`).test(block)) problems.push(`${SEND}'s block doesn't send through ${via}()`);
+  if (!new RegExp(`\\b${SEND_FAMILY}\\(`).test(block)) problems.push(`${SEND}'s block doesn't make a layered family inactive through ${SEND_FAMILY}(), the family action's own body`);
+  for (const name of FAMILY_ACTION_PARTS) {
+    if (new RegExp(`\\b${name}\\b`).test(block)) problems.push(`${SEND}'s block reaches the family action otherwise than through ${SEND_FAMILY}(): it names ${name}`);
+  }
   return problems;
+}
+/** A copy of the writer with sendToBooks()'s block (to portalValueStamp()) changed by `change`, for the cases a check must refuse. */
+function inSendBlock(writerText: string, change: (block: string) => string): string {
+  const start = writerText.indexOf(`export async function ${SEND}(`), end = writerText.indexOf("export function portalValueStamp(");
+  return writerText.slice(0, start) + change(writerText.slice(start, end)) + writerText.slice(end);
 }
 describe("what the portal writes to QuickBooks, and who may send each", () => {
   const everything = read("src");
@@ -942,6 +956,11 @@ describe("what the portal writes to QuickBooks, and who may send each", () => {
         intoSendName(`  await qboRenameCustomer("10", "0", "x", {} as never);`),
         writerSource.replaceAll("tryDeactivate(", "tryDeactivateElsewhere("),
         `export function portalValueStamp(): void {}\n${writerSource.replace("export function portalValueStamp(", "function portalValueStampMoved(")}`,
+        // Slice M5b: the family reached through its press's entry, its checks or its sender, or not through its body at all.
+        inSendBlock(writerSource, (b) => b.replaceAll(`${SEND_FAMILY}(`, "askFamilyInactive(")),
+        inSendBlock(writerSource, (b) => b.replaceAll(`${SEND_FAMILY}(`, "familyInactiveElsewhere(")),
+        intoSendName(`  void prepareFamily;`),
+        intoSendName(`  void sendDeactivate;`),
       ];
       for (const text of cases) {
         expect(text, `case ${cases.indexOf(text)} didn't change the writer`).not.toBe(writerSource);
@@ -965,5 +984,80 @@ describe("what the portal writes to QuickBooks, and who may send each", () => {
         expect(activeFlagProblems(sources), `case ${cases.indexOf(sources)}`).not.toEqual([]);
       }
     });
+  });
+});
+
+/**
+ * Send the app's for all (stage 4's slice M5b): every name and student's family the accounting links screen's list
+ * shows, queued as changes saved first in one transaction and sent by the queue's worker, never at the press. Its
+ * per-difference work is the in-transaction half of a single send, moved out of sendName() and sendPlace() into
+ * queueSendIn() (which those two call too), named only by the roster's write module and the bulk's home; the bulk
+ * itself (sendAllDifferences(), src/lib/accounting/link-writes.ts) is named only there and by the screen's action. Neither
+ * body names a try, the family action, sendWrite() or a client write: the bulk queues and never sends, and never
+ * makes anything inactive. MAY_SAVED_TRY, MAY_ROSTER_DEACTIVATE and the active flag's rule are unchanged.
+ */
+const SEND_QUEUE = "queueSendIn";
+const MAY_SEND_QUEUE = [ROSTER_WRITER, "src/lib/accounting/link-writes.ts"];
+const SEND_ALL = "sendAllDifferences";
+const MAY_SEND_ALL = ["src/lib/accounting/link-writes.ts", "src/app/staff/(app)/links/actions.ts"];
+const LINK_WRITES = "src/lib/accounting/link-writes.ts";
+/** What a queue-only body must never name: a try, the family action, the one send, or a client write. */
+const NOT_IN_A_QUEUE_ONLY_BODY = [...CLIENT_WRITES, ROSTER_SEND, SAVED_TRY, "tryDeactivate", SEND_FAMILY];
+
+/**
+ * What is wrong with the two queue-only bodies: queueSendIn() with the helpers after it, up to sendName() in the
+ * roster's write module, and sendAllDifferences() in its own module; nothing when each is found and names none of
+ * NOT_IN_A_QUEUE_ONLY_BODY.
+ */
+function queueOnlyProblems(writerText: string, linkWritesText: string): string[] {
+  const writer = code(writerText);
+  const start = writer.indexOf(`export async function ${SEND_QUEUE}(`), end = writer.indexOf("async function sendName(", start);
+  const problems: string[] = [];
+  if (start < 0 || end <= start) problems.push(`${SEND_QUEUE}'s body isn't found before sendName()`);
+  const bulk = exportedFunction(linkWritesText, SEND_ALL);
+  if (bulk === "") problems.push(`${LINK_WRITES} has no exported function ${SEND_ALL}`);
+  const bodies: [string, string][] = [[SEND_QUEUE, start < 0 || end <= start ? "" : writer.slice(start, end)], [SEND_ALL, bulk]];
+  for (const [name, body] of bodies) {
+    for (const forbidden of NOT_IN_A_QUEUE_ONLY_BODY) if (new RegExp(`\\b${forbidden}\\b`).test(body)) problems.push(`${name}'s body names ${forbidden}: it queues, and never sends`);
+  }
+  return problems;
+}
+
+describe("and Send the app's for all, which queues and never sends at the press (stage 4's slice M5b)", () => {
+  const everything = read("src");
+  const naming = (sources: { file: string; text: string }[], name: string) => sources.filter((s) => new RegExp(`\\b${name}\\b`).test(code(s.text))).map((s) => s.file).sort();
+  const writerSource = everything.find((s) => s.file === ROSTER_WRITER)?.text ?? "";
+  const linkWritesSource = everything.find((s) => s.file === LINK_WRITES)?.text ?? "";
+
+  it("is reached only from the screen's press, and its per-difference work only from the module and the bulk, and a new caller is found", () => {
+    expect(naming(everything, SEND_QUEUE), `${SEND_QUEUE} queues a difference's send in the caller's transaction. A new caller is a decision for a slice brief.`).toEqual([...MAY_SEND_QUEUE].sort());
+    expect(naming(everything, SEND_ALL), `${SEND_ALL} queues every name and student's family the list shows. A new caller is a decision for a slice brief.`).toEqual([...MAY_SEND_ALL].sort());
+    const another = (name: string) => [...everything, { file: "src/app/staff/(app)/roster/send-all-actions.ts", text: `import { ${name} } from "@/lib/accounting/link-writes";\nexport const go = () => ${name};\n` }];
+    expect(naming(another(SEND_QUEUE), SEND_QUEUE)).not.toEqual([...MAY_SEND_QUEUE].sort());
+    expect(naming(another(SEND_ALL), SEND_ALL)).not.toEqual([...MAY_SEND_ALL].sort());
+  });
+
+  it("names no try, no family action, no send and no client write in either body", () => {
+    expect(queueOnlyProblems(writerSource, linkWritesSource)).toEqual([]);
+    // Each proved on a copy it must refuse: a try, the family action, sendWrite() or a client write put into either body,
+    // or the queue's body's end gone.
+    const intoQueue = (line: string) => writerSource.replace(new RegExp(`(export async function ${SEND_QUEUE}\\([^\\n]*\\{\\n)`), `$1${line}\n`);
+    const intoBulk = (line: string) => linkWritesSource.replace(new RegExp(`(export async function ${SEND_ALL}\\([^\\n]*\\{\\n)`), `$1${line}\n`);
+    const cases: [string, string][] = [
+      [intoQueue(`  await trySavedItem({} as never, {} as never, {} as never);`), linkWritesSource],
+      [intoQueue(`  await tryDeactivate({} as never, "", {} as never);`), linkWritesSource],
+      [intoQueue(`  await familyInactiveHolding({} as never, "", "", {} as never, {} as never);`), linkWritesSource],
+      [intoQueue(`  await sendWrite({} as never, "", {});`), linkWritesSource],
+      [intoQueue(`  await qboRenameCustomer("10", "0", "x", {} as never);`), linkWritesSource],
+      [writerSource, intoBulk(`  await trySavedItem({} as never, {} as never, {} as never);`)],
+      [writerSource, intoBulk(`  await tryDeactivate({} as never, "", {} as never);`)],
+      [writerSource, intoBulk(`  await qboSetCustomerActive("10", "0", false, {} as never);`)],
+      [writerSource.replace("async function sendName(", "async function sendNameMoved("), linkWritesSource],
+      [writerSource, linkWritesSource.replace(`export async function ${SEND_ALL}(`, `async function ${SEND_ALL}(`)],
+    ];
+    for (const [i, [writer, bulk]] of cases.entries()) {
+      expect(writer === writerSource && bulk === linkWritesSource, `case ${i} didn't change either source`).toBe(false);
+      expect(queueOnlyProblems(writer, bulk), `case ${i}`).not.toEqual([]);
+    }
   });
 });
