@@ -30,6 +30,7 @@ import { isQboId } from "@/lib/quickbooks/client";
 import { handful, noFamilyPool, type AimedAt } from "@/lib/roster/no-family";
 import { blocksOthers, familyCreateWaiting, NO_FAMILY_CUSTOMER, queueSendIn, readyToSend, recordSendingFree } from "@/lib/roster/writes";
 import { loadOpenWrites } from "@/lib/roster/queue";
+import { ofRosterCompany } from "@/lib/roster/source";
 import { nameKey } from "@/lib/roster/names";
 import { isUuid } from "@/lib/seasons/ids";
 import { lockRosterAs, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
@@ -168,7 +169,7 @@ async function linkIn(tx: Tx, b: LinkBasics, familyId: AppFamilyId, customerId: 
  */
 async function keptMovesInto(tx: Tx, b: LinkBasics, familyKeys: readonly string[]): Promise<number> {
   if (familyKeys.length === 0) return 0;
-  const kept = await tx.select({ studentQboId: sql<string | null>`${writeQueue.request}->>'qboId'` }).from(writeQueue).where(and(eq(writeQueue.state, "refused"),
+  const kept = await tx.select({ studentQboId: sql<string | null>`${writeQueue.request}->>'qboId'` }).from(writeQueue).where(and(eq(writeQueue.state, "refused"), ofRosterCompany,
     eq(writeQueue.lastCode, NO_FAMILY_CUSTOMER), sql`${writeQueue.request}->>'op' = 'move'`, inArray(sql<string>`${writeQueue.request}->>'toFamilyId'`, [...familyKeys])));
   return kept.filter((m) => m.studentQboId !== null && b.customerById.get(m.studentQboId)?.active === true).length;
 }
@@ -476,7 +477,7 @@ export function reviewedWords(s: { family: string; customer: string; confirmed: 
 
 /** A buy-out that isn't settled (the owner's choice 3 for slice M3b, recommended and awaiting his word): an unlink is refused while one stands. */
 const UNSETTLED_BUYOUT = ["being_invoiced", "invoiced", "being_voided", "stuck"] as const;
-/** A queue item that holds an unlink back: waiting, stuck, or kept (`refused`). */
+/** A queue item that holds an unlink back: waiting, stuck, or kept (`refused`), of the roster's company (ofRosterCompany, src/lib/roster/source.ts). */
 const OPEN_ITEM = ["waiting", "stuck", "refused"] as const;
 
 /**
@@ -544,7 +545,7 @@ export async function unlinkFamily(raw: { familyId: unknown; linkId: unknown; st
 
     // The queue: a move into or out of the family, then any other change that blocks others and names it.
     const customers = [...new Set([link.customerId, ...studentLinks.map((l) => l.customerId), ...guardianLinks.map((l) => l.customerId)])];
-    const open = inArray(writeQueue.state, [...OPEN_ITEM]);
+    const open = and(inArray(writeQueue.state, [...OPEN_ITEM]), ofRosterCompany);
     const moves = await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(open, sql`${writeQueue.request}->>'op' = 'move'`, or(eq(writeQueue.familyId, familyId),
       sql`${writeQueue.request}->>'toFamilyId' = ${familyKey}`, sql`${writeQueue.request}->>'fromFamilyQboId' = ${link.customerId}`, sql`${writeQueue.request}->>'toFamilyQboId' = ${link.customerId}`)));
     if (moves.length > 0) return no(LINK_COPY.unlinkMoving(moves.length));

@@ -22,6 +22,7 @@ import { LINK_COPY } from "@/lib/accounting/link-writes";
 import { sendStamp } from "@/lib/accounting/stamp";
 import { auditPage, parseAuditFilters } from "@/lib/audit/query";
 import { refreshRoster } from "@/lib/roster/refresh";
+import { clearRosterOfOtherCompany } from "@/lib/roster/source";
 import { FAMILY_BEING_CHANGED, FAMILY_BUSY, familySendStudentsWords, MOVE_PENDING, SEND_CHANGED, SEND_FAMILY_NOT_LINKED, SENDING_LOCK, sendNameQueuedWords, sendNameTakenWords, sendToBooks, STALE_TWICE, WRITE_COPY } from "@/lib/roster/writes";
 import { sendDifferenceAction } from "@/app/staff/(app)/links/actions";
 import AccountingLinksPage from "@/app/staff/(app)/links/page";
@@ -569,6 +570,22 @@ describe("a student or member inactive in the portal, made inactive in the books
     expect(await items()).toEqual([expect.objectContaining({ state: "waiting", sent: true, targetQboId: "12", studentId: leo, request: expect.objectContaining({ op: "deactivate", qboId: "12" }) })]);
     expect((await sends()).map((a) => (a.after as { outcome: string }).outcome).sort()).toEqual(["queued", "refused", "stale_again"]);
     expect(await studentRow(leo)).toMatchObject({ active: false });
+  });
+
+  it("a lost answer as the club changes company goes on the queue given up, its send row `refused`, and the staff member is told it won't be tried again", async () => {
+    await leoInactiveHere();
+    const offer = await sendOf("Rivera Family", "inactive");
+    // The change of company's clear runs as the make-inactive reaches QuickBooks (stage 4's slice M7a2), and its answer never comes back.
+    stub.onApiRequest = async (c) => {
+      if (c.method !== "POST") return;
+      stub.onApiRequest = null;
+      expect(await clearRosterOfOtherCompany("2222", { actor: { door: "staff", id: null, label: "admin@club.org" }, ip: null })).toBe(true);
+      stub.loseUpdateAnswer = true;
+    };
+    expect(await press(offer)).toEqual({ ok: false, errors: [WRITE_COPY.givenUpForCompany] });
+    stub.loseUpdateAnswer = false;
+    expect(await items()).toEqual([expect.objectContaining({ state: "given_up", sent: true, targetQboId: "12", nextTryAt: null })]);
+    expect((await sends()).map((a) => a.after)).toEqual([expect.objectContaining({ outcome: "refused", queue: "given_up" })]);
   });
 
   it("a balance is said with its amount only to a reader who may see balances, through the press", async () => {

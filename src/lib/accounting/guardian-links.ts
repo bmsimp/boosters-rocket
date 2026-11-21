@@ -24,6 +24,7 @@ import { writeAudit } from "@/lib/audit/log";
 import { asAppFamilyId, QUICKBOOKS, type AppFamilyId } from "@/lib/families/ids";
 import { isQboId } from "@/lib/quickbooks/client";
 import { blocksOthers, familySendingFree, guardianCustomerLinked, recordSendingFree } from "@/lib/roster/writes";
+import { ofRosterCompany } from "@/lib/roster/source";
 import { isUuid } from "@/lib/seasons/ids";
 import { lockRosterAs, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
 import { LINK_COPY, type LinkDone, type LinkOp } from "./link-writes";
@@ -33,7 +34,7 @@ import { guardianLinkStampHolds, guardianUnlinkStampHolds, isGuardianChosen } fr
 /** A press's answer, and on success the guardian's family (for the action to show its page again; never sent to the browser). */
 export type GuardianLinkDone = LinkDone | { ok: true; message: string; familyId: AppFamilyId };
 const no = (...errors: string[]): LinkDone => ({ ok: false, errors });
-/** A queue item that holds a guardian press back: waiting, stuck, or kept (`refused`). */
+/** A queue item that holds a guardian press back: waiting, stuck, or kept (`refused`), of the roster's company (ofRosterCompany, src/lib/roster/source.ts). */
 const OPEN_ITEM = ["waiting", "stuck", "refused"] as const;
 
 /** The last words of every refusal made once the arguments and the roster tag have been checked, as LINK_COPY's: the action shows the screen again. */
@@ -108,7 +109,7 @@ export async function linkGuardian(raw: { guardianId: unknown; customerId: unkno
       const realmId = b.realm!;
       if (await guardianCustomerLinked(tx, realmId, customerId, row.id)) return no(GUARDIAN_LINK_COPY.notOffered);
 
-      const open = inArray(writeQueue.state, [...OPEN_ITEM]);
+      const open = and(inArray(writeQueue.state, [...OPEN_ITEM]), ofRosterCompany);
       const ofRow = await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(open, sql`${writeQueue.request}->>'guardianId' = ${row.id}`));
       if (ofRow.length > 0) return no(GUARDIAN_LINK_COPY.rowWaiting(ofRow.length));
       const ofCustomer = await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(open, blocksOthers, eq(writeQueue.targetQboId, customerId)));
@@ -173,7 +174,7 @@ export async function unlinkGuardian(raw: { guardianId: unknown; linkId: unknown
     if (!link) return no(GUARDIAN_LINK_COPY.notLinkedNow);
     if (link.id !== linkKey || !guardianUnlinkStampHolds(row.id, link.id, link.customerId, stamp)) return no(GUARDIAN_LINK_COPY.unlinkChanged);
 
-    const open = inArray(writeQueue.state, [...OPEN_ITEM]);
+    const open = and(inArray(writeQueue.state, [...OPEN_ITEM]), ofRosterCompany);
     const blocking = await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(open, blocksOthers,
       sql`(${writeQueue.request}->>'guardianId' = ${row.id} or ${writeQueue.targetQboId} = ${link.customerId})`));
     if (blocking.length > 0) return no(GUARDIAN_LINK_COPY.unlinkWaiting(blocking.length));

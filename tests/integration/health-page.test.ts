@@ -135,6 +135,8 @@ describe("the health page", () => {
   it("says, as needing attention, how many changes the portal keeps that QuickBooks didn't take (stage 3's slice 9e), pointing at Reconciliation", async () => {
     await admin();
     await seedConnected(stub);
+    // Read from that company: Health counts the roster's company's items only (stage 4's slice M7a3).
+    await put("roster.source", { realmId: "9130000000000001" });
     const refused = { realmId: "9130000000000001", state: "refused" as const, sent: false, lastCode: "fault_5010", nextTryAt: null, askedByLabel: "registrar@club.org" };
     await db.insert(writeQueue).values([
       { ...refused, request: { op: "rename", role: "family", qboId: "10", syncToken: "0", name: "Rivera Household", was: "Rivera Family" }, targetQboId: "10" },

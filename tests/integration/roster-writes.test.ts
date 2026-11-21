@@ -18,14 +18,16 @@ import { runWriteQueue } from "@/lib/roster/queue";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { NOT_HERE } from "@/lib/roster/operations";
 import { ROSTER_MOVED } from "@/lib/seasons/roster-lock";
-import { setRosterSource } from "@/lib/roster/source";
+import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
+import { saveShape } from "@/lib/roster/shape";
+import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { formWithdrawal, signedFormEvidence, signedFormFile, volunteerSignup } from "@/lib/db/schema";
 import { resetDb, seedParent, untilALockIsAwaited } from "../helpers/db";
 import { formSetting, requestByCustomer, seedEvidence, seedFormRequirement, seedRequest } from "../helpers/forms";
 import { appRecordRows, NO_CHANGES, recordOfCustomer, whatAFreshRunWouldChange } from "../helpers/app-records";
 import { seedSeason } from "../helpers/season";
 import { seedEvent, seedSignup } from "../helpers/volunteer";
-import { fznCompany, startQboStub, type QboStub } from "../helpers/qbo-stub";
+import { fznCompany, FZN_SHAPE, startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
 import { asOp, auditsOf, connectRoster, queueItem, REALM, seedAnaRivera, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
 import { enterableGuardianRows } from "@/lib/parents/sessions";
@@ -1175,5 +1177,91 @@ describe("nothing of a refusal is kept but its code", () => {
     await offStudent("12");
     expect(JSON.stringify(await audits())).not.toMatch(/must never store/);
     expect(fznCompany().customers.length).toBeGreaterThan(0);
+  });
+});
+
+// Stage 4's slice M7a2: every staff insert into the queue holds the roster lock and is held to the roster's company. A
+// change of company is refused wherever one is connected or read until slice M8, so these call its clear directly, as
+// the request reaches QuickBooks.
+describe("a change of company while a staff write is on its way", () => {
+  const admin = { actor: { door: "staff" as const, id: null, label: "admin@club.org" }, ip: null };
+  const NOTE = "Given up: the club connected a different QuickBooks company, so nothing more was sent for this.";
+  /** Runs the change of company's clear as the first POST reaches QuickBooks, then `then` on the stub. */
+  const clearAsItArrives = (then: (body: string) => void, only: (body: string) => boolean = () => true) => {
+    stub.onApiRequest = async (c) => {
+      if (c.method !== "POST" || !only(c.body)) return;
+      stub.onApiRequest = null;
+      expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
+      then(c.body);
+    };
+  };
+
+  it("a write QuickBooks couldn't take goes on the queue given up, with the note, and the staff member is told it won't be tried again", async () => {
+    tag = await connectRoster(stub);
+    clearAsItArrives(() => { stub.failNext = 1; });
+    expect(await askRosterWrite({ op: "rename", qboId: "12", syncToken: "0", name: "Leon Rivera" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.givenUpForCompany] });
+    const [item] = await queue();
+    expect(item).toMatchObject({ state: "given_up", note: NOTE, sent: true, lastCode: "http_500", nextTryAt: null, realmId: REALM, targetQboId: "12" });
+    expect(item!.finishedAt).not.toBeNull();
+    expect((await auditsOf("roster.write.queued"))[0]).toMatchObject({ targetId: item!.id, after: { op: "rename", sent: true, state: "given_up", why: "company_changed" } });
+    // Nothing more is sent for it once QuickBooks is connected to the new company and the worker runs: it went in given
+    // up, so the worker's give-up of the earlier company's open items finds nothing to give up.
+    await db.update(qboConnection).set({ realmId: "2222" });
+    stub.calls.length = 0;
+    await runWriteQueue(new Date(Date.now() + 3_600_000));
+    expect(posts()).toEqual([]);
+    expect((await queue())[0]).toMatchObject({ state: "given_up", note: NOTE });
+    expect(await auditsOf("roster.writes.given_up_other_company")).toEqual([]);
+  });
+
+  it("a make-inactive QuickBooks couldn't take goes on the queue given up, and the staff member is told it won't be tried again", async () => {
+    tag = await connectRoster(stub);
+    clearAsItArrives(() => { stub.failNext = 1; });
+    expect(await offStudent("12")).toEqual({ ok: false, errors: [WRITE_COPY.givenUpForCompany] });
+    expect(await queue()).toEqual([expect.objectContaining({ state: "given_up", note: NOTE, sent: true, lastCode: "http_500", targetQboId: "12", nextTryAt: null })]);
+    expect((await auditsOf("roster.write.queued"))[0]!.after).toMatchObject({ op: "deactivate", role: "student", state: "given_up", why: "company_changed" });
+  });
+
+  it("a write QuickBooks takes as the club changes company is said to be done there, not that the roster here will show it", async () => {
+    tag = await connectRoster(stub);
+    clearAsItArrives(() => {});
+    expect(await askRosterWrite({ op: "rename", qboId: "12", syncToken: "0", name: "Leon Rivera" }, tag, op)).toEqual({ ok: true, message: WRITE_COPY.doneCompanySince });
+    expect(inStub("12").DisplayName).toBe("Leon Rivera");
+    expect(await queue()).toEqual([]);
+    expect((await auditsOf("roster.customer.rename"))[0]!.after).toMatchObject({ code: "company_changed" });
+  });
+
+  it("a family action's step whose answer is lost goes on the queue given up, no refresh is asked for, and the words say it won't be tried again", async () => {
+    tag = await connectRoster(stub);
+    const shown = await stampFor("10");
+    // Ana's step goes through; as Leo's reaches QuickBooks, the club changes company, and his answer never comes back.
+    clearAsItArrives(() => { stub.loseUpdateAnswer = true; }, (body) => /"Id":"12"/.test(body));
+    const first = await inactivate("10", shown, op);
+    expect(first.result.ok).toBe(false);
+    expect(first.result.ok ? [] : first.result.errors).toContain("The portal can't tell whether QuickBooks made Leo Rivera inactive: its answer didn't arrive, and the club has connected a different QuickBooks company since, so it won't be tried again.");
+    expect(await queue()).toEqual([expect.objectContaining({ state: "given_up", note: NOTE, sent: true, lastCode: "unreachable", targetQboId: "12", nextTryAt: null })]);
+    expect((await auditsOf("roster.write.queued"))[0]!.after).toMatchObject({ op: "deactivate", role: "student", sent: true, state: "given_up", why: "company_changed" });
+    expect(await db.select().from(setting).where(eq(setting.key, REFRESH_ASK_KEY))).toEqual([]);
+  });
+
+  it("an old company's item given up for a customer holds back no write to the new company's customer of the same id", async () => {
+    tag = await connectRoster(stub);
+    const [rivera, leo] = [await recordOfCustomer("10", "family"), await recordOfCustomer("12", "student")];
+    // A rename of Leo still waiting in the old company when the clear runs.
+    await seedQueued({ op: "rename", role: "student", qboId: "12", syncToken: "0", name: "Leo R.", was: "Leo Rivera" }, { sent: true });
+    expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
+    // The new company: QuickBooks connected to it, the roster read from it (the stub answers its customers by the same
+    // ids), and the kept family and student linked to its customers 10 and 12.
+    await db.update(qboConnection).set({ realmId: "2222" });
+    await saveShape(FZN_SHAPE, { actor: WORKER.actor, ip: null });
+    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    await db.insert(accountingLink).values([{ system: "quickbooks", realmId: "2222", customerId: "10", familyId: rivera, origin: "carried_over" },
+      { system: "quickbooks", realmId: "2222", customerId: "12", studentId: leo, origin: "carried_over" }]);
+    tag = await currentRosterTag();
+    expect((await queue()).map((i) => i.state)).toEqual(["given_up"]);
+    const r = await askRosterWrite({ op: "rename", qboId: "12", syncToken: "0", name: "Leon Rivera" }, tag, op);
+    expect(r).not.toEqual({ ok: false, errors: [WRITE_COPY.waiting] });
+    expect(r).toMatchObject({ ok: true });
+    expect(inStub("12").DisplayName).toBe("Leon Rivera");
   });
 });

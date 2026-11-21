@@ -12,7 +12,7 @@ import { importRecordsFromRoster } from "@/lib/families/roster-import";
 import { isQboId } from "@/lib/quickbooks/client";
 import { buildRoster, type Cust, type Roster } from "./model";
 import { getShape, ROSTER_LOCK, shapeHolds } from "./shape";
-import { getRosterSource } from "./source";
+import { getRosterSource, ofRosterCompany } from "./source";
 import { beforeResend } from "./write-rules";
 
 /**
@@ -69,7 +69,7 @@ export async function familyCreatesOnTheQueue(tx?: Tx): Promise<RosterWrite[]> {
  */
 export async function familyCreatesFiled(tx?: Tx): Promise<{ write: RosterWrite; familyId: string | null }[]> {
   return (await (tx ?? db).select({ request: writeQueue.request, familyId: writeQueue.familyId }).from(writeQueue)
-    .where(and(inArray(writeQueue.state, ["waiting", "stuck"]), sql`${writeQueue.request}->>'op' = 'create'`, sql`${writeQueue.request}->>'role' in ('family', 'member')`)))
+    .where(and(inArray(writeQueue.state, ["waiting", "stuck"]), ofRosterCompany, sql`${writeQueue.request}->>'op' = 'create'`, sql`${writeQueue.request}->>'role' in ('family', 'member')`)))
     .map((r) => ({ write: r.request as RosterWrite, familyId: r.familyId === null ? null : String(r.familyId) }));
 }
 
