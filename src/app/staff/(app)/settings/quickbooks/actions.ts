@@ -4,10 +4,11 @@ import { redirect } from "next/navigation";
 import { db } from "@/lib/db/client";
 import { qboCustomerType } from "@/lib/db/schema";
 import { staffAction, type StaffCtx } from "@/lib/guards";
-import { getConnection, parseQboAppForm, saveQboApp, beginConnect, disconnect } from "@/lib/quickbooks/connection";
+import { getConnection, parseQboAppForm, saveQboApp, beginConnect, beginSwitchConnect, disconnect } from "@/lib/quickbooks/connection";
 import { parseShapeForm, saveShape, type TypeRow } from "@/lib/roster/shape";
 import { previewShape, type ShapePreview } from "@/lib/roster/queries";
 import { refreshRoster } from "@/lib/roster/refresh";
+import { SWITCH_PAGE } from "./switch-words";
 
 const P = "Settings.QuickBooks.ReadWrite" as const;
 const SETUP = "/staff/settings/quickbooks/setup";
@@ -29,6 +30,18 @@ export const saveQboAppAction = staffAction(P, async (ctx, form: FormData): Prom
 /** A plain form action: it always ends in a redirect, to Intuit or back to step 1. */
 export const beginConnectAction = staffAction(P, async (ctx): Promise<void> => {
   const r = await beginConnect(ctx.staffUserId);
+  redirect(r.ok ? r.url : `${SETUP}?step=app&error=keys`);
+});
+
+/**
+ * The switch page's press (stage 4's slice M8): a plain form action that always ends in a redirect. It reads nothing
+ * from the form but its one checkbox, which must say "yes"; anything else goes back to the switch page to be checked.
+ * Then a connect starts with an ask recorded (beginSwitchConnect()), so the company chosen at Intuit may be another.
+ */
+export const switchConnectAction = staffAction(P, async (ctx, form: unknown): Promise<void> => {
+  const confirmed = form instanceof FormData && form.getAll("confirm").length === 1 && form.get("confirm") === "yes";
+  if (!confirmed) redirect(`${SWITCH_PAGE}?error=confirm`);
+  const r = await beginSwitchConnect(ctx.staffUserId, { actor: actor(ctx), ip: ctx.ip, permission: P });
   redirect(r.ok ? r.url : `${SETUP}?step=app&error=keys`);
 });
 

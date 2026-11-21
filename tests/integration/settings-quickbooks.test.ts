@@ -23,10 +23,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import { ShapeForm, shapeFormData, disconnectedNote } from "@/app/staff/(app)/settings/quickbooks/forms";
 import { db } from "@/lib/db/client";
-import { auditLog, qboConnection, qboCustomer, role, roleRule, roleAssignment } from "@/lib/db/schema";
-import { saveQboAppAction, beginConnectAction, disconnectAction, previewShapeAction, saveShapeAction } from "@/app/staff/(app)/settings/quickbooks/actions";
+import { eq } from "drizzle-orm";
+import { accountingLink, auditLog, family, qboConnection, qboCustomer, role, roleRule, roleAssignment, setting } from "@/lib/db/schema";
+import { saveQboAppAction, beginConnectAction, switchConnectAction, disconnectAction, previewShapeAction, saveShapeAction } from "@/app/staff/(app)/settings/quickbooks/actions";
 import QuickBooksSettingsPage from "@/app/staff/(app)/settings/quickbooks/page";
 import QuickBooksSetupPage from "@/app/staff/(app)/settings/quickbooks/setup/page";
+import SwitchCompanyPage from "@/app/staff/(app)/settings/quickbooks/switch/page";
 import { GET as callback } from "@/app/api/quickbooks/callback/route";
 import { AccessDenied } from "@/lib/guards";
 import { getShape } from "@/lib/roster/shape";
@@ -65,12 +67,13 @@ describe("QuickBooks settings", () => {
 
   it("refuses staff whose custom role includes everything, on every action, and audits it", async () => {
     await asEverythingRole();
-    for (const call of [() => saveQboAppAction(form(keys)), () => beginConnectAction(), () => disconnectAction(), () => previewShapeAction(form({ kind: "flat", members: "3" })), () => saveShapeAction(form({ kind: "flat", members: "3" }))]) {
+    for (const call of [() => saveQboAppAction(form(keys)), () => beginConnectAction(), () => switchConnectAction(form({ confirm: "yes" })), () => disconnectAction(), () => previewShapeAction(form({ kind: "flat", members: "3" })), () => saveShapeAction(form({ kind: "flat", members: "3" }))]) {
       await expect(call()).rejects.toBeInstanceOf(AccessDenied);
     }
-    expect((await audits("access.refused")).map((a) => a.permission)).toEqual(Array(5).fill("Settings.QuickBooks.ReadWrite"));
+    expect((await audits("access.refused")).map((a) => a.permission)).toEqual(Array(6).fill("Settings.QuickBooks.ReadWrite"));
     expect(await redirectOf(QuickBooksSettingsPage())).toBe("/refused");
     expect(await redirectOf(QuickBooksSetupPage({ searchParams: Promise.resolve({}) }))).toBe("/refused");
+    expect(await redirectOf(SwitchCompanyPage({ searchParams: Promise.resolve({}) }))).toBe("/refused");
   });
 
   it("step 1 saves the keys; a bad form comes back with its errors", async () => {
@@ -193,6 +196,103 @@ describe("QuickBooks settings", () => {
       expect(html).not.toContain(bad);
       expect(html).not.toContain('class="errors"');
     }
+  });
+
+  it("step 2 says a different company was refused, and how to move the portal to it", async () => {
+    await saveQboAppAction(form(keys));
+    const html = await setupHtml("connect", "roster_company");
+    expect(html).toContain("That is a different QuickBooks company from the one the portal&#x27;s families were read from, so nothing was connected and nothing was changed.");
+    expect(html).toContain("To move the portal to this other company, choose Connect a different company first: it lists what a switch ends and keeps.");
+  });
+
+  it("step 2 offers Connect a different company only while the roster names a company", async () => {
+    await saveQboAppAction(form(keys));
+    expect(await setupHtml("connect")).not.toContain('href="/staff/settings/quickbooks/switch"');
+    await db.delete(qboConnection);
+    await seedConnected(stub);
+    await refreshRoster(worker);
+    expect(await setupHtml("connect")).toContain('href="/staff/settings/quickbooks/switch">Connect a different company</a>');
+    expect(renderToStaticMarkup(await QuickBooksSettingsPage())).toContain('href="/staff/settings/quickbooks/switch">Connect a different company</a>');
+  });
+
+  // Stage 4's slice M8: the page an Admin says on, first, that they mean to connect a different company.
+  const switchHtml = async (error?: string) => renderToStaticMarkup(await SwitchCompanyPage({ searchParams: Promise.resolve(error ? { error } : {}) }));
+  const switchRow = async () => (await db.select().from(setting).where(eq(setting.key, "quickbooks.switch")))[0]?.value ?? null;
+  /** One active family linked to a customer of the roster's company. */
+  const linkedFamily = async () => {
+    const [f] = await db.insert(family).values({ name: "Linked Family", active: true }).returning();
+    await db.insert(accountingLink).values({ system: "quickbooks", realmId: "9130000000000001", customerId: "10", familyId: f!.id, origin: "carried_over" });
+  };
+
+  it("the switch page sends the visitor to step 2 while the roster names no company", async () => {
+    await saveQboAppAction(form(keys));
+    expect(await redirectOf(SwitchCompanyPage({ searchParams: Promise.resolve({}) }))).toBe("/staff/settings/quickbooks/setup?step=connect");
+  });
+
+  it("the switch page lists what a switch ends and keeps, and while connected says to disconnect first, with no press", async () => {
+    await seedConnected(stub);
+    await refreshRoster(worker);
+    await linkedFamily();
+    const html = await switchHtml();
+    expect(html).toContain("<h1 class=\"page-title\">Connect a different QuickBooks company</h1>");
+    const ends = html.slice(html.indexOf("What a switch ends"), html.indexOf("What is kept"));
+    expect(ends).toContain("1 family link, 0 student links and 0 guardian links. You link them again on Accounting links.");
+    expect(ends).toContain("0 requests still waiting to be sent to the earlier company.");
+    expect(ends).toContain("0 unpaid volunteer buy-out invoices.");
+    expect(ends).toContain("The membership shape. You choose it again for the new company in step 3.");
+    const kept = html.slice(html.indexOf("What is kept"), html.indexOf("Before you start"));
+    expect(kept).toContain("Every family, student and guardian: 1 family, 0 students and 0 guardian rows.");
+    expect(kept).toContain("Every signed form, still downloadable by its family and by staff.");
+    expect(kept).toContain("0 paid volunteer buy-outs, which keep counting.");
+    expect(html).toContain("docker compose run --rm backup --now");
+    expect(html).toContain("QuickBooks is connected now. Disconnect it first, from QuickBooks settings, then come back here.");
+    expect(html).not.toContain("<button");
+    expect(html).not.toContain('name="confirm"');
+    for (const hidden of ["9130000000000001", "Linked Family", "at-seed", "rt-seed"]) expect(html).not.toContain(hidden);
+  });
+
+  it("once disconnected, the switch page asks for its checkbox and offers the press", async () => {
+    await seedConnected(stub);
+    await refreshRoster(worker);
+    await disconnectAction();
+    const html = await switchHtml();
+    expect(html).toContain('<input type="checkbox" required="" name="confirm" value="yes"/> I understand that every family&#x27;s link to the books ends');
+    expect(html).toContain(">Switch companies: sign in to Intuit</button>");
+    expect(html).not.toContain("Check the box to say you understand");
+    expect(await switchHtml("confirm")).toContain("Check the box to say you understand what a switch ends, then try again.");
+  });
+
+  it("the switch press refuses an unchecked or malformed form, and otherwise asks and goes to Intuit", async () => {
+    await seedConnected(stub);
+    await refreshRoster(worker);
+    await disconnectAction();
+    const back = "/staff/settings/quickbooks/switch?error=confirm";
+    for (const bad of [form({}), form({ confirm: "no" }), form({ confirm: ["yes", "yes"] }), "yes", null, { confirm: "yes" }]) {
+      expect(await redirectOf(switchConnectAction(bad as FormData))).toBe(back);
+    }
+    expect(await switchRow()).toBeNull();
+    expect(await audits("quickbooks.switch.asked")).toEqual([]);
+    expect(await redirectOf(switchConnectAction(form({ confirm: "yes", realmId: "9130000000000002" })))).toContain(`${stub.base}/authorize?client_id=`);
+    expect(await switchRow()).toMatchObject({ asked: { staffUserId: admin.id, fromRealmId: "9130000000000001" } });
+    expect((await audits("quickbooks.switch.asked")).map((a) => [a.actorId, a.permission, a.ip])).toEqual([[admin.id, "Settings.QuickBooks.ReadWrite", "203.0.113.40"]]);
+  });
+
+  it("a switch through the callback lands on step 3, which sends staff to Accounting links", async () => {
+    await seedConnected(stub);
+    await refreshRoster(worker);
+    await linkedFamily();
+    await disconnectAction();
+    const state = new URL((await redirectOf(switchConnectAction(form({ confirm: "yes" }))))!).searchParams.get("state")!;
+    stub.codes.add("code-1");
+    const res = await callback(callbackUrl({ code: "code-1", state, realmId: "9130000000000002" }));
+    expect(new URL(res.headers.get("location")!).search).toBe("?step=shape");
+    expect((await db.select().from(qboConnection))[0]).toMatchObject({ realmId: "9130000000000002" });
+    expect(await getShape()).toBeNull();
+    expect(await db.select().from(accountingLink)).toEqual([]);
+    expect(await switchRow()).toBeNull();
+    const html = await setupHtml("shape");
+    expect(html).toContain("1 family has no link to this QuickBooks company&#x27;s customers yet. Link it on Accounting links, so its balance can be shown.");
+    expect(html).toContain('href="/staff/links">Accounting links</a>');
   });
 
   it("step 3 lists the customer types found, and says so when there are none", async () => {

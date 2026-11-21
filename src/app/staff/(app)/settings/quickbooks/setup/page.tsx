@@ -9,6 +9,10 @@ import { loadRosterPage } from "@/lib/roster/queries";
 import { CopyField } from "@/app/components/sign-in-settings/copy-field";
 import { AppKeysForm, ShapeForm } from "../forms";
 import { saveQboAppAction, beginConnectAction, previewShapeAction, saveShapeAction } from "../actions";
+import { getRosterSource } from "@/lib/roster/source";
+import { familiesToLinkAgain } from "@/lib/quickbooks/switch";
+import { can } from "@/lib/permissions/effective";
+import { LINKS_PAGE, relinkLine, ROSTER_COMPANY_REFUSED, SWITCH_PAGE, SWITCH_WORDS } from "../switch-words";
 
 export const metadata = { title: "Set up QuickBooks" };
 export const dynamic = "force-dynamic";
@@ -24,18 +28,17 @@ const REFUSED: Record<string, string> = {
   state: "That return from Intuit didn't match a sign-in started here, or it was more than 10 minutes old. Start again.",
   denied: "Intuit didn't give the portal access. Start again and choose Connect when Intuit asks.",
   other_company: "That is a different QuickBooks company from the one already connected. Disconnect first if you mean to switch companies.",
-  // Until the mapping screen ships (stage 4 of the app-owned families spec): the seasons are kept for the families read from the first company.
-  roster_company: "That is a different QuickBooks company from the one the portal's families were read from, so it wasn't connected and nothing was changed. "
-    + "For now the portal can only connect that same company again: each family's ticks, waivers and chosen lists are kept for the families read from it. "
-    + "Start again, and in Intuit choose the company the club used before. Moving to another company will be possible in a later update.",
+  // A different company with no ask from the switch page (stage 4's slice M8).
+  roster_company: ROSTER_COMPANY_REFUSED,
   intuit: "Intuit refused the request. Check the Client ID, the Client secret and the choice of sandbox or production in step 1, and that the redirect address is on the Intuit app.",
 };
 
 export default async function QuickBooksSetupPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  await requireStaffPage("Settings.QuickBooks.ReadWrite");
+  const ctx = await requireStaffPage("Settings.QuickBooks.ReadWrite");
   const sp = await searchParams;
   const one = (k: string) => { const v = sp[k]; return typeof v === "string" ? v : Array.isArray(v) ? v[0] : undefined; };
-  const [conn, page] = await Promise.all([connectionView(), loadRosterPage()]);
+  const mayLink = can(ctx.effective, "Accounting.Link.ReadWrite");
+  const [conn, page, source, toLink] = await Promise.all([connectionView(), loadRosterPage(), getRosterSource(), mayLink ? familiesToLinkAgain() : 0]);
   // A step opens only when the one before it is done (spec §3). With no step asked for: the first one not done yet.
   const reachable: Step = !conn.configured ? "app" : !conn.connected ? "connect" : "shape";
   const order: Step[] = ["app", "connect", "shape"];
@@ -70,6 +73,8 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
           <p>This sends you to Intuit to choose the club&apos;s QuickBooks company and approve access, then brings you back here. Sign in as someone who is an admin of that company. {QUICKBOOKS_USE.reads} {QUICKBOOKS_USE.writes}</p>
           {conn.connected && <p className="hint">QuickBooks is connected to <b>{conn.companyName ?? "a company"}</b>. Signing in again renews the connection to the same company.</p>}
           <form action={beginConnectAction}><button className="btn">Sign in to Intuit</button></form>
+          {/* A first connect needs no switch: offered only while the roster names a company. */}
+          {source !== null && <p>{SWITCH_WORDS.setupHint} <a className="link-line" href={SWITCH_PAGE}>{SWITCH_WORDS.setupLink}</a></p>}
           <p className="box-foot"><a href={`${SETUP}?step=app`}>Back to step 1</a>{conn.connected && <> · <a href={`${SETUP}?step=shape`}>Skip to step 3</a></>}</p>
         </section>
       )}
@@ -78,6 +83,7 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
         <section className="box" aria-labelledby="qbo-shape-h"><h2 id="qbo-shape-h">Step 3: The shape of your membership</h2>
           {/* The company's name is free text from QuickBooks: a text child, never markup. */}
           <p>{`Connected to ${conn.companyName ?? "a QuickBooks company"}.`} If that isn&apos;t the club&apos;s company, go back to QuickBooks settings and disconnect.</p>
+          {toLink > 0 && conn.connected && <Notice tone="info">{relinkLine(toLink)} <a href={LINKS_PAGE}>Accounting links</a></Notice>}
           <p>Tell the portal which QuickBooks customer types are the club&apos;s members. Customers of any other type, such as schools or vendors, stay out of the portal. When you save, the portal reads the roster again with the new shape. You can change this later.</p>
           {page.types.length === 0
             ? <Notice tone="info">{page.lastRun && !page.lastRun.ok
