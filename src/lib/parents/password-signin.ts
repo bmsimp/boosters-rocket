@@ -108,7 +108,7 @@ async function turnedAwayBusy(ip: string | null, now: Date) {
 
 /** Why a password signs nobody in, for the audit row only. */
 export type PasswordRefusal = "rate_limited" | "not_an_address" | "signins_off" | "unknown_email" | "no_sign_in_account" | "no_password"
-  | "wrong_password" | "blocked" | "no_enabled_guardian" | "strict_no_factor";
+  | "wrong_password" | "blocked" | "no_enabled_guardian";
 
 /**
  * A right password: the person, the address it was proved with (as the portal holds it), the `credential` row it was
@@ -122,10 +122,12 @@ export type PasswordRefusal = "rate_limited" | "not_an_address" | "signins_off" 
  * `{ ok: false }`, with `limited` when it was over a limit or turned away from a full wait, which the page may say in
  * words of its own: each is decided before the person or their password is read, by what the visitor sent alone (the
  * address typed, and a device cookie only its own device's row answers to), so it is the same for an address on file
- * and one that isn't.
+ * and one that isn't. Since slice SI-10a, under Strict, a right password of a person with no second factor in force is
+ * `step: "enrol"`, with no device: Strict's enrolment, which the caller finishes at once as a session that reaches only
+ * /one-more-step (the one finish, src/lib/auth/parent-signin-finish.ts), where they add a passkey or an authenticator app.
  */
 export type PasswordCheck = { ok: true; person: { id: string; email: string }; password: PasswordProof; device: { deviceId: string } | null;
-  step: "emailed_code" | "second_factor"; factors: { passkey: boolean; app: boolean; backup: boolean }; at: Date }
+  step: "emailed_code" | "second_factor" | "enrol"; factors: { passkey: boolean; app: boolean; backup: boolean }; at: Date }
   | { ok: false; limited: boolean };
 const REFUSED: PasswordCheck = { ok: false, limited: false };
 
@@ -193,18 +195,21 @@ async function audit(reason: PasswordRefusal, who: { id: string; email: string }
  *     was given up while it waited, gives its place back (its password was never checked) and is answered as in (b)
  *     or (a);
  * (g) the verdict, in this order of reasons: over a limit, not an address, sign-ins off, nobody's address, no sign-in
- *     account, no password, a wrong password (`signin.password_wrong`), blocked, no row that counts, and the second step
- *     the club's level asks for (secondStepFor(), told whether the person has an app: under Strict, nothing with no
- *     second factor, `strict_no_factor`, on a remembered device too, which proved only the mailbox; refused only when
- *     it answers no step). Each is audited once, in its own write
+ *     account, no password, a wrong password (`signin.password_wrong`), blocked, and no row that counts. Each is audited once, in its own write
  *     (`signin.password_refused` with its reason, and for over a limit, `limit` (`ip`, `email`, `device` or `reask`), once per
  *     full window, naming nobody). A refused try keeps its place;
  * (h) for a right password that goes on, its place given back (so only wrong and refused tries are counted, and a
  *     parent's own right password never uses one up), and the remembered device the cookie names for this person,
  *     unexpired (under Standard: under Strict a device stands in for no second step, since it proved only the mailbox,
- *     so an app holder is asked for the app on it too; slice SI-10 decides whether a device the app proved is taken);
+ *     so an app holder is asked for the app on it too, and none the app proved is taken either);
  *     with none, the second step is asked (`signin.second_step_asked`, with `step`), and the caller sets the pending
  *     step and, for the emailed code, sends it, timed from `at`, when the check finished; for the app it sends nothing.
+ *     The second step is the one the club's level asks for (secondStepFor(), told whether the person has a second
+ *     factor): where it answers none (under Strict, for a person with no second factor in force), since slice SI-10a the
+ *     answer is Strict's enrolment (`step: "enrol"`, `signin.second_step_asked` with it), with no device read, on a
+ *     remembered device too (which proved only the mailbox), and the caller finishes it at once: the password alone
+ *     leads only to adding a passkey or an authenticator app (open question 21). Until they add one, a stolen password
+ *     is enough for that; the emailed code takes no part.
  * Over a limit, or turned away by a full wait, the answer is `limited`; every other refusal is the one refusal.
  * A password, a hash, the device token and the typed address (for an address that is nobody's) appear in no row.
  */
@@ -259,9 +264,8 @@ export async function checkPasswordSignin(rawEmail: unknown, password: unknown, 
     : !right ? "wrong_password"
     : person.blocked ? "blocked"
     : !counts ? "no_enabled_guardian"
-    : secondStep === null ? "strict_no_factor"
     : null;
-  if (reason || secondStep === null || !person || !person.credentialId || !person.updatedAt) {
+  if (reason || !person || !person.credentialId || !person.updatedAt) {
     await audit(reason ?? "no_password", reason === "not_an_address" || reason === "unknown_email" ? null : who, ip);
     return REFUSED;
   }
@@ -270,11 +274,12 @@ export async function checkPasswordSignin(rawEmail: unknown, password: unknown, 
   await giveBackRateLimit(place.placeId);
   const proof: PasswordProof = { credentialId: person.credentialId, credentialUpdatedAt: person.updatedAt };
   // Under Strict a remembered device is no second step (it proved only the mailbox): whoever gets this far there has an
-  // app or, at the door, a passkey, and is asked for it on every device.
+  // app or, at the door, a passkey, and is asked for it on every device, or has neither, and is led to add one (`enrol`).
+  const step = secondStep ?? "enrol";
   const remembered = settings.level === "strict" ? null : await rememberedDevice(person.id, typeof device === "string" ? device : null, at);
   if (!remembered) {
     await writeAudit({ actor: parentActor(person), action: "signin.second_step_asked", targetType: "parent", targetId: person.id,
-      after: { step: secondStep }, ip });
+      after: { step }, ip });
   }
-  return { ok: true, person: { id: person.id, email: person.email }, password: proof, device: remembered, step: secondStep, factors, at };
+  return { ok: true, person: { id: person.id, email: person.email }, password: proof, device: remembered, step, factors, at };
 }

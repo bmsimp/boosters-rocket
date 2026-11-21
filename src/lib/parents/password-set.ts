@@ -21,6 +21,7 @@ import { checkPasswordRule } from "./password-rule";
 import { takeRateLimit, type RateLimitTake } from "./rate-limit";
 import { CODE_TTL_MS, type LinkSigninProof } from "./signin-codes";
 import { getParentSettings } from "./settings";
+import { hasSecondFactor } from "./passkeys";
 import { deleteUnusedSigninCodes, endParentSessions, forgetDevices, parentActor } from "./sessions";
 import { unspentLink } from "./link-state";
 import { hashLinkToken, isLinkPurpose, isLinkToken, linkVerdict, type LinkPurpose, type LinkRefusal } from "./signin-links";
@@ -34,11 +35,12 @@ export type PasswordSetResult = { ok: true; message: string; next?: string } | {
 /**
  * A set-up link's sign-in, to be finished: the person, the address the set read under their lock, and the proof of what
  * the set spent (signinStands(), signin-codes.ts, reads it again). Server only: the action passes it to
- * signInFromLink() and never to the browser.
+ * signInFromLink() and never to the browser. `enrol` (since slice SI-10a): under Strict, for a person with no second
+ * factor, the sign-in is Strict's enrolment, which reaches only /one-more-step (open question 22).
  */
-export type LinkSignin = { parentId: string; email: string; proof: LinkSigninProof };
+export type LinkSignin = { parentId: string; email: string; proof: LinkSigninProof; enrol?: true };
 
-/** What choosePasswordFromLink() gives its action: the answer, and for a set-up at Standard the sign-in to finish. */
+/** What choosePasswordFromLink() gives its action: the answer, and for a set-up the sign-in to finish (under Strict, as an enrolment). */
 export type PasswordSetOutcome = { ok: true; message: string; signIn: LinkSignin | null } | { ok: false; errors: string[] };
 
 /**
@@ -82,8 +84,11 @@ const sent = (v: unknown): v is string => typeof v === "string" && v.length <= M
  * (e) the breach check: found is refused in words, not checked is taken and said so in the audit row;
  * (f) the hash;
  * (g) one transaction that checks the link again under the person's lock and sets the password (storePassword()), and,
- *     for a set-up while the club's level is Standard, hands back the sign-in to finish (`signIn`), which the action
- *     finishes after this transaction has committed; null for a reset and under Strict.
+ *     for a set-up, hands back the sign-in to finish (`signIn`), which the action finishes after this transaction has
+ *     committed: at Standard as any sign-in, and since slice SI-10a under Strict, for a person with no second factor in
+ *     force, as Strict's enrolment (`enrol`), which leads to adding a passkey or an authenticator app before anything
+ *     else (open question 22); null for a reset, and under Strict for a person who has a second factor (an edge: the
+ *     page points them to sign in, where they are asked for it).
  * Every refusal of (b), (c) and (g) is the same one sentence, and runs no rule, breach check or hash. A refusal of (d)
  * or (e) says why and what to do, and leaves the link unspent; the limit per link counts each try. The breach check and
  * the hash run outside any transaction, so nothing is held while the service is asked. Every refusal from (b) on is
@@ -169,9 +174,11 @@ async function writePassword(o: { purpose: LinkPurpose; token: string; hash: str
     if (!verdict.ok) return { ok: false as const, reason: verdict.reason, who: verdict.who };
     const link = verdict.link;
     const reset = o.purpose === "reset";
-    // The club's level, read under the person's lock with the rest of the link's check: a set-up signs in at Standard
-    // only (under Strict a later slice leads to a passkey or an authenticator app first), and a reset never does.
+    // The club's level, read under the person's lock with the rest of the link's check: a set-up signs in at Standard,
+    // and under Strict leads to adding a passkey or an authenticator app first (Strict's enrolment, slice SI-10a) for a
+    // person with no second factor in force, read under the lock too; a reset never signs anyone in.
     const { level } = await getParentSettings(tx);
+    const enrol = o.purpose === "setup" && level === "strict" && !(await hasSecondFactor(link.parentId, tx));
 
     // A code spent within a code's life goes too: a sign-in that spent it just before this reset, and makes its session
     // just after, finds it gone at its last check (signinStands()) and is refused.
@@ -200,8 +207,9 @@ async function writePassword(o: { purpose: LinkPurpose; token: string; hash: str
         ...(reset ? { codesDeleted, linksDeleted, devicesForgotten, sessionsEnded } : {}) }, ip: o.ip }, tx);
     // The proof of what this set spent: its link, now spent, and the password row as written here. The sign-in's last
     // check reads both again under the person's lock, so a reset or a block that commits in between refuses it.
-    const signIn: LinkSignin | null = o.purpose === "setup" && level === "standard"
-      ? { parentId: link.parentId, email: link.email, proof: { linkId: link.tokenId, credentialId, credentialUpdatedAt: now } } : null;
+    const proof = { linkId: link.tokenId, credentialId, credentialUpdatedAt: now };
+    const signIn: LinkSignin | null = o.purpose === "setup" && level === "standard" ? { parentId: link.parentId, email: link.email, proof }
+      : enrol ? { parentId: link.parentId, email: link.email, proof, enrol: true } : null;
     return { ok: true as const, signIn };
   });
 }

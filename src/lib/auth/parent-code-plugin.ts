@@ -117,9 +117,12 @@ export const parentCodePlugin = () => ({
       if (!r.ok) return ctx.json(r.limited ? LIMITED : REJECTED);
       // What follows is timed from when the check finished (r.at), so a wait for its turn never shortens the step.
       const now = r.at;
-      if (r.device) {
+      if (r.device || r.step === "enrol") {
         // A device the portal remembers for this person: the password and the device are the proof, and no code is asked.
-        const done = await finishParentSignin(ctx, { parentId: r.person.id, email: r.person.email, proof: { password: r.password, deviceId: r.device.deviceId }, ip, next: ctx.body.next });
+        // Or, since slice SI-10a, Strict's enrolment for a person with no second factor: the password alone, finished at
+        // once as a session that reaches only /one-more-step, where they add a passkey or an authenticator app.
+        const proof = r.device ? { password: r.password, deviceId: r.device.deviceId } : { password: r.password, enrol: true as const };
+        const done = await finishParentSignin(ctx, { parentId: r.person.id, email: r.person.email, proof, ip, next: ctx.body.next });
         return ctx.json(done.ok ? { ok: true, next: done.next } : REJECTED);
       }
       // Any other device: the second step. The step and its first code end together (pendingStepEnd()).
@@ -274,12 +277,15 @@ export const parentCodePlugin = () => ({
     // so the router serves it to nobody (tests/integration/parent-door.test.ts lists every reachable path), and nothing a
     // browser sends reaches its body. The parent lands on their page or the chooser, and since slice SI-3b the device it
     // was used on is remembered, since the link proved the mailbox and its form set the password.
+    // Since slice SI-10a a set-up link under Strict, for a person with no second factor, is Strict's enrolment (`enrol`,
+    // as the set decided under the person's lock): the session reaches only /one-more-step.
     finishLinkSignin: createAuthEndpoint.serverOnly({
       method: "POST",
-      body: z.object({ parentId: z.string(), email: z.string(), linkId: z.string(), credentialId: z.string(), credentialUpdatedAt: z.number() }),
+      body: z.object({ parentId: z.string(), email: z.string(), linkId: z.string(), credentialId: z.string(), credentialUpdatedAt: z.number(), enrol: z.boolean().optional() }),
     }, async (ctx) => {
       const b = ctx.body;
-      const proof = { link: { linkId: b.linkId, credentialId: b.credentialId, credentialUpdatedAt: new Date(b.credentialUpdatedAt) } };
+      const link = { linkId: b.linkId, credentialId: b.credentialId, credentialUpdatedAt: new Date(b.credentialUpdatedAt) };
+      const proof = b.enrol === true ? { link, enrol: true as const } : { link };
       return ctx.json(await finishParentSignin(ctx, { parentId: b.parentId, email: b.email, proof, ip: ipOf(ctx) }));
     }),
   },
