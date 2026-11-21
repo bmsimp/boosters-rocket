@@ -127,7 +127,7 @@ export default async function SignedFormsPage({ searchParams }: { searchParams: 
 
       <section className="box" aria-labelledby="archive-h">
         <h2 id="archive-h">Earlier company</h2>
-        <p>Signed forms kept from a QuickBooks company that is no longer connected. They are the club&apos;s record, so they are never deleted; families don&apos;t see them.</p>
+        <p>Signed forms set aside when the club connected a different QuickBooks company, before the portal kept families across such a change. They are the club&apos;s record, so they are never deleted; families don&apos;t see them. A form a family the portal still has signed under an earlier company stays with that family, above.</p>
         {archive.length === 0 ? <p>There are none.</p> : <KeptTable entries={archive} caption="Each form kept from a company no longer connected" />}
       </section>
     </main>

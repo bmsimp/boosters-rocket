@@ -278,14 +278,16 @@ describe("the reminders before a due date", () => {
     expect(mail.outbox.filter((m) => m.subject.startsWith("Due "))).toHaveLength(3);
   });
 
-  // Connecting a different company is refused until stage 4 of the app-owned families spec ships (company-change-step5),
-  // so only this clear, which nothing the portal runs reaches, removes the claims, with the records they name.
-  it("forgets every claim in the clear a change of company would run, before the families they name", async () => {
+  // Connecting a different company is refused until stage 4's slice M8 (company-change-step5). Since slice M7a the clear
+  // a change of company would run keeps the seasons' records (open question 16): it was "forgets every claim" while the
+  // clear removed the families they name.
+  it("keeps every claim in the clear a change of company would run, as the families they name are kept", async () => {
     await season();
     expect(await sendDueReminders(at(WAKE))).toEqual({ sent: 3, failed: 0 });
-    expect(await db.select().from(requirementReminder)).toHaveLength(3);
+    const claims = await db.select().from(requirementReminder).orderBy(requirementReminder.id);
+    expect(claims).toHaveLength(3);
     expect(await clearRosterOfOtherCompany("2222", { actor: { door: "system", id: null, label: "test" }, ip: null })).toBe(true);
-    expect(await db.select().from(requirementReminder)).toEqual([]);
-    expect(await audits("season.records.cleared")).toMatchObject([{ after: { reason: "different_company", dueReminderClaims: 3 } }]);
+    expect(await db.select().from(requirementReminder).orderBy(requirementReminder.id)).toEqual(claims);
+    expect(await audits("season.records.cleared")).toEqual([]);
   });
 });

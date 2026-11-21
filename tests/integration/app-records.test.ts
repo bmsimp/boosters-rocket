@@ -8,9 +8,9 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 
-import { eq, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, family, guardian, parent, qboConnection, student } from "@/lib/db/schema";
+import { accountingLink, accountingLinkEnded, auditLog, family, guardian, parent, qboConnection, student } from "@/lib/db/schema";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { askRosterWrite, deactivateLinked, moveStudent, WRITE_COPY } from "@/lib/roster/writes";
 import { saveShape, ROSTER_LOCK } from "@/lib/roster/shape";
@@ -246,15 +246,31 @@ describe("another company", () => {
   });
 
 
-  it("connecting a different company leaves the new tables empty and every sign-in in no family", async () => {
+  // Stage 4's slice M7a (open question 16): the clear keeps the app's own records and ends only their links, into the
+  // link history. It was "leaves the new tables empty" while a change of company removed the records too.
+  it("connecting a different company keeps every family, student and membership, and moves every link into the history", async () => {
     await seedParentSettings(SIGNINS_ON);
     await connectRoster(stub);
     await seedAnaRivera();
+    const before = await appRecordRows();
+    expect(before.links.length).toBeGreaterThan(0);
     expect(await clearRosterOfOtherCompany("9130000000000002", { actor: WORKER.actor, ip: null })).toBe(true);
-    expect(await db.select().from(family)).toEqual([]);
-    expect(await db.select().from(student)).toEqual([]);
-    expect(await db.select().from(accountingLink)).toEqual([]);
-    expect((await db.select().from(guardian)).map((g) => g.familyId)).toEqual([null]);
+    const after = await appRecordRows();
+    expect(after.families).toEqual(before.families);
+    expect(after.students).toEqual(before.students);
+    expect(after.memberships).toEqual(before.memberships);
+    expect(after.memberships.every((m) => m.familyId !== null)).toBe(true);
+    expect(after.links).toEqual([]);
+    // Each link as it was, under its own id, ended by the change of company (the worker is nobody: no staff member).
+    const ended = await db.select().from(accountingLinkEnded).orderBy(asc(accountingLinkEnded.id));
+    expect(ended.map((l) => ({ id: l.id, system: l.system, realmId: l.realmId, customerId: l.customerId, familyId: l.familyId, studentId: l.studentId, guardianId: l.guardianId,
+      origin: l.origin, linkedAt: l.linkedAt, linkedBy: l.linkedBy }))).toEqual(before.links.map((l) => ({ id: l.id, system: l.system, realmId: l.realmId, customerId: l.customerId,
+      familyId: l.familyId, studentId: l.studentId, guardianId: l.guardianId, origin: l.origin, linkedAt: l.linkedAt, linkedBy: l.linkedBy })));
+    expect(ended.every((l) => l.endedHow === "company_changed" && l.endedBy === null && l.endedAt instanceof Date)).toBe(true);
+    const [row] = await audits("accounting.links.cleared");
+    expect(row!.after).toMatchObject({ reason: "different_company", realmId: "9130000000000002", links: before.links.length, endedAs: "company_changed",
+      familyLinks: before.links.filter((l) => l.familyId !== null).length, studentLinks: before.links.filter((l) => l.studentId !== null).length,
+      guardianLinks: before.links.filter((l) => l.guardianId !== null).length, leftUnlinkedCleared: 0, familiesKept: true, studentsKept: true, membershipsKept: true });
   });
 
   it("a lookup asks for one kind, answers while QuickBooks is disconnected, and never while another company is connected", async () => {

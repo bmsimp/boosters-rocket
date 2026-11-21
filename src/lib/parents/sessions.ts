@@ -120,9 +120,6 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * - the daily clean-up (cleanUp(), src/lib/jobs/cleanup.ts) takes FOR UPDATE, in id order, the row of every person
  *   with an expired request, a spent or expired code, a used or expired link, an expired device or an expired session,
  *   then deletes those requests, then the codes, then the links and devices, then the sessions;
- * - clearParentAccess() (company-change.ts), on a change of company, takes FOR UPDATE, in id order, every person's
- *   row, then the open guardian rows, then deletes every request, then the unused codes, then the unused links, then
- *   the devices, then the sessions;
  * - a code request calls this before it touches a code, and the code door's last check (signinStands(),
  *   signin-codes.ts) calls it and then reads the code it spent.
  */
