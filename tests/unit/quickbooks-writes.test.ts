@@ -148,6 +148,14 @@ const MAY_CONTACT_SEND = [ROSTER_WRITER, "src/app/staff/(app)/parents/actions.ts
 /** One try of a change saved first, whoever makes it (at once, the press, the queue's worker), settling its own queue item. */
 const SAVED_TRY = "trySavedItem";
 const MAY_SAVED_TRY = [ROSTER_WRITER, "src/lib/roster/queue.ts"];
+/**
+ * Send the app's to QuickBooks (stage 4's slice M5a): a name, a student's family or a student or member made inactive,
+ * sent from a difference on the accounting links screen over the books' value. It reaches QuickBooks only through the
+ * try of a change saved first (trySavedItem()) and the make-inactive's try (tryDeactivate()), today's writes and bodies,
+ * so MAY_SAVED_TRY and MAY_ROSTER_DEACTIVATE are unchanged. Started only by the module itself and the screen's press.
+ */
+const SEND = "sendToBooks";
+const MAY_SEND = [ROSTER_WRITER, "src/app/staff/(app)/links/actions.ts"];
 /** Which body each roster write sends. */
 const ROSTER_BODY = { qboCreateCustomer: "create", qboRenameCustomer: "rename", qboMoveCustomer: "reparent", qboSetCustomerActive: "active" } as const;
 /** The fields the roster writes' bodies can carry, in the order CUSTOMER_WRITES writes them. */
@@ -900,6 +908,21 @@ describe("what the portal writes to QuickBooks, and who may send each", () => {
   describe("and never a customer made active again (open question 12)", () => {
     it("the roster's write module calls the active flag write once, with false, and nothing else in src but the client and the check names it", () => {
       expect(activeFlagProblems(everything)).toEqual([]);
+    });
+
+    it("a send from a difference is started only by the accounting links screen's press, and a new caller is found", () => {
+      const naming = (sources: { file: string; text: string }[]) => sources.filter((s) => new RegExp(`\\b${SEND}\\b`).test(code(s.text))).map((s) => s.file).sort();
+      const why = `${SEND} sends a difference's portal value to QuickBooks, only through the saved-first try and the make-inactive's try. A new caller is a decision for a slice brief.`;
+      expect(naming(everything), why).toEqual([...MAY_SEND].sort());
+      const another = [...everything, { file: "src/app/staff/(app)/roster/send-actions.ts", text: `import { ${SEND} } from "@/lib/roster/writes";\nexport const go = () => ${SEND};\n` }];
+      expect(naming(another)).not.toEqual([...MAY_SEND].sort());
+      // The send itself names no client write: it goes through the module's own tries.
+      const writer = code(everything.find((s) => s.file === ROSTER_WRITER)!.text);
+      const block = writer.slice(writer.indexOf(`export async function ${SEND}(`), writer.indexOf("export function portalValueStamp("));
+      expect(block).not.toBe("");
+      for (const name of [...CLIENT_WRITES, ROSTER_SEND]) expect(block, name).not.toMatch(new RegExp(`\\b${name}\\b`));
+      expect(block).toMatch(/\btrySavedItem\(/);
+      expect(block).toMatch(/\btryDeactivate\(/);
     });
 
     it("a second call, true or a value in place of false, an alias, or another module naming it, each refused", () => {

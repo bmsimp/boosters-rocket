@@ -5,7 +5,8 @@ import { confirmAllSuggested, leaveUnlinked, LINK_COPY, linkFamilyToCustomer, re
 import { BULK_MAX } from "@/lib/accounting/mapping";
 import { isStatusKey, SEARCH_MAX } from "@/lib/accounting/status";
 import { isChosen } from "@/lib/accounting/stamp";
-import { takeFromBooks } from "@/lib/roster/writes";
+import { can } from "@/lib/permissions/effective";
+import { sendToBooks, takeFromBooks } from "@/lib/roster/writes";
 
 // The accounting links screen's presses (stage 4's slice M3a; src/lib/accounting/link-writes.ts): Confirm (a Suggested
 // row's customer, a Several possible row's candidate, or one picked from the customers no family is linked to), Leave
@@ -100,6 +101,28 @@ export const takeDifferenceAction = staffAction(P, async (ctx: StaffCtx, field: 
     || !str(recordId, ID_MAX) || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return NOT_FROM_PAGE;
   const r = await takeFromBooks(field === "place" ? { field, studentId: recordId, stamp } : { field, kind, recordId, stamp }, rosterTag, op(ctx));
   // A name, a record made inactive or active again, or a student moved changes the Families pages, Balances and the family's pages.
+  if (r.ok) revalidatePath("/", "layout");
+  else again();
+  return r;
+});
+
+/**
+ * Send the app's to QuickBooks (slice M5a): what the row's difference sends (`name`, `inactive` or `place`), the kind
+ * of record (`family` or `student`; a place is always a student's), the record's app id, the roster tag and the stamp
+ * sealing the value the row showed. It sends the portal's value over the books', so it needs Roster.Family.ReadWrite
+ * too, the permission that changes families (the owner's choice 6, assumed as recommended and awaiting his word, as
+ * "Create in QuickBooks and link" needs both), checked here first with the page's Roster.Read and refused as the guard
+ * refuses. A balance that stops a make-inactive is said with its amount only for a holder of Finance.Balance.Read, as on
+ * a family's page. The library works the value out again under the roster lock, and sends through today's writes alone.
+ */
+export const sendDifferenceAction = staffAction(P, async (ctx: StaffCtx, field: string, kind: string, recordId: string, rosterTag: string, stamp: string): Promise<LinkDone> => {
+  await requireStaffActionAlso(ctx, "Roster.Read");
+  await requireStaffActionAlso(ctx, "Roster.Family.ReadWrite");
+  if (!(field === "name" || field === "inactive" || field === "place") || !(kind === "family" || kind === "student") || (field === "place" && kind !== "student")
+    || !str(recordId, ID_MAX) || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return NOT_FROM_PAGE;
+  const r = await sendToBooks(field === "place" ? { field, studentId: recordId, stamp } : { field, kind, recordId, stamp }, rosterTag,
+    { ...op(ctx), showAmounts: can(ctx.effective, "Finance.Balance.Read") });
+  // A name, a student's family or an inactive record sent changes the Families pages, Reconciliation and the family's pages.
   if (r.ok) revalidatePath("/", "layout");
   else again();
   return r;

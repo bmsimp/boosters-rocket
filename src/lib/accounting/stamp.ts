@@ -74,3 +74,17 @@ export function takeStamp(field: string, recordId: string, customerId: string, v
 }
 export const takeStampHolds = (field: string, recordId: string, customerId: string, value: readonly unknown[], stamp: string): boolean =>
   same(takeStamp(field, recordId, customerId, value), stamp);
+
+/**
+ * Send the app's to QuickBooks (slice M5a): what a difference's press sends (`field`: `name`, `inactive` or `place`), the
+ * record it is of (the family's or the student's app id), its customer, and what the row showed, sealed in a domain of
+ * its own, so no take's or link press's stamp is ever a send's: for a name the books' name and the portal's; for a place
+ * the student's customer, the customer the cache has them under (`""` for the top of the tree), the family record they
+ * are in and that family's customer; for a make-inactive the record's customer. The press works each value out again
+ * under the roster lock and must seal to it, so what it sends over is only what the row showed.
+ */
+export function sendStamp(field: string, recordId: string, customerId: string, value: readonly unknown[]): string {
+  return sealed("accounting-send", [field, recordId.toLowerCase(), customerId, [...value]]);
+}
+export const sendStampHolds = (field: string, recordId: string, customerId: string, value: readonly unknown[], stamp: string): boolean =>
+  same(sendStamp(field, recordId, customerId, value), stamp);
