@@ -24,8 +24,8 @@ describe("the signed-in parent helpers", () => {
     expect(JSON.stringify(ana.identity)).not.toContain(FAMILY_A.family.qboId);
     expect(ana.identity.families).toEqual([{ guardianId: ana.identity.guardianId, familyId }]);
     const [link] = await db.select().from(guardian).where(eq(guardian.id, ana.identity.guardianId));
-    // The row stands on its family record and its own link (stage 3's slice 12b1): neither old copy is written.
-    expect(link).toMatchObject({ status: "active", isPrimary: true, parentId: ana.identity.parentId, familyId, familyQboId: null, sourceQboId: null });
+    // The row stands on its family record and its own link (stage 3's slice 12b1).
+    expect(link).toMatchObject({ status: "active", isPrimary: true, parentId: ana.identity.parentId, familyId });
     const [own] = await db.select().from(accountingLink).where(eq(accountingLink.guardianId, ana.identity.guardianId));
     expect(own).toMatchObject({ customerId: FAMILY_A.parent.qboId, origin: "carried_over", linkedBy: null });
     expect(own!.syncedToken).not.toBeNull(); // the cache's version of the parent's record, as the import aligned one
@@ -80,7 +80,7 @@ describe("the signed-in parent helpers", () => {
     const rivera = await recordOfCustomer("10", "family");
     const linksBefore = (await db.select().from(accountingLink)).length;
     const row = await seedGuardian({ parentId: ana.id, familyQboId: "10", sourceQboId: "11", status: "invited" });
-    expect(row).toMatchObject({ familyId: rivera, familyQboId: null, sourceQboId: null });
+    expect(row).toMatchObject({ familyId: rivera });
     const [own] = await db.select().from(accountingLink).where(eq(accountingLink.guardianId, row.id));
     expect(own).toMatchObject({ realmId: "4620000000000009", customerId: "11", origin: "carried_over" });
     expect((await db.select().from(accountingLink)).length).toBe(linksBefore + 1);

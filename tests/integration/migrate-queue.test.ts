@@ -103,7 +103,7 @@ describe("migrations 0034 and 0035: the write queue names the app's own records 
       await item("rename-family", { request: { op: "rename", role: "family", qboId: "F2", syncToken: "0", name: "Birch Household", was: "Birch Family" }, target: "F2", family: "F2" });
       await item("deactivate-member", { request: { op: "deactivate", role: "member", qboId: "M1", syncToken: "0" }, target: "M1" });
       // A family's own change that named no family (as a test seed or an older writer may have left it): found by its
-      // target, as refsQuery and 0023 read it.
+      // target, as 0023 read it.
       await item("rename-family-unfiled", { request: { op: "rename", role: "family", qboId: "F1", syncToken: "0", name: "Ash Household", was: "Ash Family" }, target: "F1" });
       // A roster family changed as a student (its type changed in QuickBooks): 0023 made it a student record beside its
       // family record, and the item names that student record.

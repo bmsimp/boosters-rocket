@@ -93,7 +93,7 @@ const people = new Map<string, string>();
 async function guardianIn(familyId: AppFamilyId, name: string, email: string, status: "invited" | "active" | "disabled" = "invited", o: { blocked?: boolean } = {}) {
   const parentId = people.get(email) ?? (await seedParent({ name, email, blocked: o.blocked ?? false })).id;
   people.set(email, parentId);
-  const [row] = await db.insert(guardian).values({ parentId, familyId, familyQboId: null, status, disabledReason: status === "disabled" ? "removed" : null }).returning({ id: guardian.id });
+  const [row] = await db.insert(guardian).values({ parentId, familyId, status, disabledReason: status === "disabled" ? "removed" : null }).returning({ id: guardian.id });
   return row!.id;
 }
 beforeEach(() => people.clear());

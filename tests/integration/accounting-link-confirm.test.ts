@@ -78,7 +78,7 @@ async function unlinkedFamily(name: string, students: string[] = []): Promise<Ap
 /** An open guardian row of a new person in this family record. */
 async function guardianIn(familyId: AppFamilyId, name: string, email: string) {
   const p = await seedParent({ name, email });
-  await db.insert(guardian).values({ parentId: p.id, familyId, familyQboId: null, status: "invited" });
+  await db.insert(guardian).values({ parentId: p.id, familyId, status: "invited" });
 }
 const studentNamed = async (familyId: AppFamilyId, name: string): Promise<AppStudentId> =>
   (await db.select({ id: student.id }).from(student).where(and(eq(student.familyId, familyId), eq(student.name, name))))[0]!.id;

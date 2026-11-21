@@ -91,7 +91,8 @@ describe("migration 0047: the history of ended links", { timeout: 60_000 }, () =
     expect(await tableThere()).toBe(0);
     const before = await everything();
     expect(before.links).toHaveLength(3);
-    await migrateWith(path.resolve("drizzle"));
+    // To 0047 itself: a later migration (0049) drops guardian columns this compares row by row.
+    await migrateWith(migrationsUpTo(indexOf("_link_history")));
     expect(await tableThere()).toBe(1);
     expect(await q(async (pg) => (await pg`SELECT count(*)::int AS n FROM accounting_link_ended`)[0]!.n)).toBe(0);
     expect(await everything()).toEqual(before);

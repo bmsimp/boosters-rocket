@@ -49,7 +49,8 @@ export const RE_KEYED_SINCE_0023: { line: string; by: string }[] = [
 /**
  * 0023's guardian statements, which the import no longer follows (stage 3's slice 12b1): a guardian row is given its
  * family record and its own link by whoever makes it (src/lib/parents/guardians.ts; in tests, seedGuardian()), never
- * from its `family_qbo_id` or `source_qbo_id`, which nothing reads now. So when the fill is run on today's tables the
+ * from its old copies of its customers (`family_qbo_id`, `source_qbo_id`), which migration 0049 dropped: today's
+ * tables have neither column. So when the fill is run on today's tables the
  * guardian rows' line of its refs is replaced by one that reads nothing (the refs query stays valid SQL, with no rows),
  * and the two statements that put rows in their families and linked them are left out. Each is found once, as written,
  * or the fill throws, as for RE_KEYED_SINCE_0023.

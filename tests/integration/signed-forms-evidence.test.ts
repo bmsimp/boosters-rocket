@@ -403,7 +403,7 @@ describe("the guardians' copies", () => {
 
   it("goes only to the guardians recorded as signers: nobody else, nobody blocked, nobody whose link is closed", async () => {
     // B's guardian is linked to A's family too, but didn't sign: nothing goes to them.
-    await db.insert(guardian).values({ parentId: b.identity.parentId, familyQboId: FAMILY_A.family.qboId, status: "active" });
+    await db.insert(guardian).values({ parentId: b.identity.parentId, familyId: a.identity.familyId, status: "active" });
     await signedForA();
     await db.update(parent).set({ blocked: true }).where(eq(parent.id, a.identity.parentId));
     await runEvidenceJob();

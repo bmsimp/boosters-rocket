@@ -182,7 +182,8 @@ async function customerOfRecord(familyId: AppFamilyId, realmId: string): Promise
 
 /**
  * A guardian row standing on its own family record and its own link, as the portal holds one (stage 3's slice 12b1): it
- * writes `family_id` itself, never `family_qbo_id` or `source_qbo_id`, and runs no import.
+ * writes `family_id` itself and runs no import. `familyQboId` and `sourceQboId` are the customers it is seeded by, read
+ * through the links: the row holds no copy of either (migration 0049 dropped them).
  * - Its family: `familyId` when given; else, for `familyQboId` while the roster names
  *   a company, the family record that customer's link names (recordOfCustomer(), which makes an inactive one with its
  *   link for a customer the import hasn't made yet: an import run once the cache holds the customer makes it active);

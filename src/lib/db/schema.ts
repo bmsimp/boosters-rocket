@@ -165,37 +165,29 @@ export const student = pgTable("student", {
 /**
  * "This person is a guardian in this family." Name, email and phone live on the person (`parent`). A row stands on its
  * family record (`family_id`) and its own link (`accounting_link.guardian_id`), and is found by them alone; a person is
- * in a family record at most once (`guardian_family_id_parent_uq`). `family_qbo_id` and `source_qbo_id` are old copies
- * nothing reads since stage 3's slice 12b1: a row is read through GUARDIAN_COLS (src/lib/parents/sessions.ts), which
- * leaves them out, and made by SQL that doesn't name them, so the build still reads and makes rows once they are gone;
- * only an unlink's clear of `family_qbo_id` (below) still names them (a change of company's clear keeps every row as it
- * is since stage 4's slice M7a). Migration
- * 0048 made a link of each `source_qbo_id` the import had left unlinked, for a row whose family's link names its
- * `family_qbo_id` and that had no link ended; its header says why each row it skips loses nothing. No row made since
- * writes them, only an unlink still clears `family_qbo_id` (stage 4's slice M3b), and slice 12b2 drops them with the
- * two indexes on `family_qbo_id`.
+ * in a family record at most once (`guardian_family_id_parent_uq`, partial: a previous company's row has no family).
+ * Every row has its family but one a change of company closed before stage 4's slice M7a (`company_changed`), which
+ * nothing makes now: a change of company keeps every row with its family and ends only the links
+ * (`guardian_family_unless_company_changed`). The row's old copies of its customers (`family_qbo_id`, `source_qbo_id`)
+ * went in stage 3's slice 12b2 (migration 0049), after 0048 had made a link of each source the import left unlinked.
  */
 export const guardian = pgTable("guardian", {
   id: uuid("id").primaryKey().defaultRandom(),
-  familyQboId: text("family_qbo_id"),
-  // The same family as the app's own record: written by whoever makes or reinstates the row (src/lib/parents/guardians.ts),
-  // never by a roster read (stage 3's slice 9c). Null for a row a change of company closed before stage 4's slice M7a
-  // (its QuickBooks ids are another company's; a change of company touches no guardian row now), and for a row made before its family had a record that nothing has given one since.
+  // The family, the app's own record: written by whoever makes the row (src/lib/parents/guardians.ts), never by a roster
+  // read (stage 3's slice 9c). Null only for a row a change of company closed before stage 4's slice M7a, which nothing makes now.
   familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
   parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "restrict" }),
   isPrimary: boolean("is_primary").notNull().default(false),
   status: text("status", { enum: ["invited", "active", "disabled"] }).notNull().default("invited"),
-  sourceQboId: text("source_qbo_id"),                  // read by nothing since slice 12b1 (its record is the row's own link; GUARDIAN_COLS leaves it out); dropped in 12b2
   disabledReason: text("disabled_reason", { enum: DISABLED_REASONS }),
   statusBeforeDisable: text("status_before_disable", { enum: ["invited", "active"] }),
   createdAt: created(),
   updatedAt: updated(),
 }, (t) => [
-  uniqueIndex("guardian_family_parent_uq").on(t.familyQboId, t.parentId),
   uniqueIndex("guardian_family_id_parent_uq").on(t.familyId, t.parentId).where(sql`family_id is not null`),
-  index("guardian_family_ix").on(t.familyQboId),
   index("guardian_family_id_ix").on(t.familyId),
   index("guardian_parent_ix").on(t.parentId),
+  check("guardian_family_unless_company_changed", sql`${t.familyId} is not null or ${t.disabledReason} is not distinct from 'company_changed'`),
 ]);
 
 /**

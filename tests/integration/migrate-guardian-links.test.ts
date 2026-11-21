@@ -53,6 +53,8 @@ async function at0047() {
   await makeScratchDatabase("migrate_member"); // marked as this run's: a database of that name the run didn't make is refused
   await migrateWith(migrationsUpTo(indexOf("_guardian_links_additive") - 1));
 }
+/** Up to 0048 itself: the next of the guardian rows' migrations (0049) drops the columns these rows are compared by. */
+const through0048 = () => migrationsUpTo(indexOf("_guardian_links_additive"));
 const filled = () => q((pg) => pg`SELECT door, actor_label, actor_id, target_type, target_id, ip, before, after FROM audit_log WHERE action = 'parents.guardian_links.filled'`);
 const links = () => q((pg) => pg`SELECT * FROM accounting_link ORDER BY id`);
 const guardians = () => q((pg) => pg`SELECT * FROM guardian ORDER BY id`);
@@ -110,7 +112,7 @@ describe("migration 0048: each guardian row's own link, from the record its sign
         VALUES (gen_random_uuid(), 'quickbooks', ${REALM}, '41', ${ids.ivy!}, 'carried_over', now(), now(), 'unlinked')`;
     });
     const before = { links: await links(), guardians: await guardians() };
-    await migrateWith(path.resolve("drizzle"));
+    await migrateWith(through0048());
 
     // Every row as it was: no column changed.
     expect(await guardians()).toEqual(before.guardians);
@@ -137,7 +139,7 @@ describe("migration 0048: each guardian row's own link, from the record its sign
 
   it("on an empty database: nothing made, and its audit row says so", async () => {
     await at0047();
-    await migrateWith(path.resolve("drizzle"));
+    await migrateWith(through0048());
     expect(await links()).toEqual([]);
     expect((await filled()).map((r) => r.after)).toEqual([{ cause: "migration 0048_guardian_links_additive", linksMade: 0, rowsAlreadyLinked: 0, linksDisagreeing: 0,
       rowsOfFamiliesUnlinked: 0, rowsWithASourceAndNoCompany: 0 }]);
@@ -152,7 +154,7 @@ describe("migration 0048: each guardian row's own link, from the record its sign
       await pg`INSERT INTO guardian (family_qbo_id, family_id, parent_id, status, source_qbo_id) VALUES ('10', ${f!.id as string}, ${p!.id as string}, 'active', '11')`;
     });
     const before = await links();
-    await migrateWith(path.resolve("drizzle"));
+    await migrateWith(through0048());
     expect(await links()).toEqual(before);
     expect((await filled()).map((r) => r.after)).toEqual([{ cause: "migration 0048_guardian_links_additive", linksMade: 0, rowsAlreadyLinked: 0, linksDisagreeing: 0,
       rowsOfFamiliesUnlinked: 0, rowsWithASourceAndNoCompany: 1 }]);

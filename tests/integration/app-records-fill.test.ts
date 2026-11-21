@@ -22,8 +22,8 @@ import { NO_CHANGES, appRecordsByCustomer, syncAppRecords, whatAFreshRunWouldCha
  */
 const REALM = "4620000000000001";
 
+/** No test here seeds a guardian row in a family record (the one row seeded is a previous company's, in none), so the records go as they are. */
 async function emptyAppRecords() {
-  await db.update(guardian).set({ familyId: null });
   await db.delete(accountingLink); await db.delete(student); await db.delete(family);
 }
 async function runFill() {
@@ -102,13 +102,13 @@ describe("migration 0023's fill makes what the import makes", () => {
     expect(byFunction.links.find((l) => l.customer === "F1")!.syncedToken).not.toBeNull();
   });
 
-  it("neither puts a guardian row in a family nor links it, whatever its old copies name", async () => {
+  it("neither puts a guardian row in a family nor links it", async () => {
     await company();
     await seedShape();
     await seedCache([fam("F1", "Ash Family"), par("P1", "Ash Parent", "F1", "ash@fill.example"), stu("S1", "Ash Kid", "F1")]);
     const ash = await person("Ash Parent");
-    // A row holding only the old copies, as 0023's fill read them, and no family record.
-    const [row] = await db.insert(guardian).values({ parentId: ash.id, familyQboId: "F1", sourceQboId: "P1", status: "active" }).returning();
+    // A row a change of company closed before stage 4's slice M7a, the one kind in no family record.
+    const [row] = await db.insert(guardian).values({ parentId: ash.id, status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "active" }).returning();
     const { byFunction, byFill } = await bothWays();
     expect(byFill).toEqual(byFunction);
     expect(byFunction.families).toEqual([{ customer: "F1", name: "Ash Family", active: true }]);
