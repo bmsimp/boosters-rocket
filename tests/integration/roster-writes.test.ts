@@ -1180,9 +1180,9 @@ describe("nothing of a refusal is kept but its code", () => {
   });
 });
 
-// Stage 4's slice M7a2: every staff insert into the queue holds the roster lock and is held to the roster's company. A
-// change of company is refused wherever one is connected or read until slice M8, so these call its clear directly, as
-// the request reaches QuickBooks.
+// Stage 4's slice M7a2: every staff insert into the queue holds the roster lock and is held to the roster's company.
+// These call a change of company's clear directly, as the request reaches QuickBooks (since slice M8 a switch an Admin
+// asks for reaches it through the connect).
 describe("a change of company while a staff write is on its way", () => {
   const admin = { actor: { door: "staff" as const, id: null, label: "admin@club.org" }, ip: null };
   const NOTE = "Given up: the club connected a different QuickBooks company, so nothing more was sent for this.";

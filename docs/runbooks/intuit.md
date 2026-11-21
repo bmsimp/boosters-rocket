@@ -35,10 +35,10 @@ https://developer.intuit.com.
 
 ## 2. Try it on a sandbox company first
 
-Do this on the proof-of-concept host, or another installation of its own, never on the installation families will
-use: until families can be linked to another company's customers (the mapping screen, still to come), an installation
-that has read a sandbox's customers refuses the club's real books
-([reconnecting QuickBooks](quickbooks-reconnect.md#connecting-a-different-company)).
+Do this on the proof-of-concept host, or another installation of its own, if you can: it is still the better place.
+A trial on the installation families will use can now be followed by the club's real books, as a switch of company,
+but the switch ends every link made to the sandbox's customers, and the trial's ended buy-outs and audit rows stay
+behind ([reconnecting QuickBooks](quickbooks-reconnect.md#connecting-a-different-company)).
 
 1. On the developer site, open **Sandbox** and create a sandbox company if there is none.
 2. In the sandbox, set the company up like the club's books: the customer types the club uses (for example Family,
@@ -82,11 +82,12 @@ that has read a sandbox's customers refuses the club's real books
 
 ## 4. Connect the club's real books
 
-On the installation families will use, the real books are the first company it connects. One that has already read a
-sandbox company's customers refuses them, and keeps refusing until the mapping screen ships: it says the company isn't
-the one the portal's families were read from, and changes nothing
-([reconnecting QuickBooks](quickbooks-reconnect.md#connecting-a-different-company)). Keep the sandbox trial on the
-proof-of-concept host, and install the club's own from [first install](first-install.md).
+On the installation families will use, the real books are best the first company it connects. One that has already
+read a sandbox company's customers takes them only as a switch: an Admin selects **Connect a different company** first,
+and every family is then linked to the real books' customers again on Accounting links
+([reconnecting QuickBooks](quickbooks-reconnect.md#connecting-a-different-company)). Without that, it says the company
+isn't the one the portal's families were read from, and changes nothing. Keep the sandbox trial on the
+proof-of-concept host where you can, and install the club's own from [first install](first-install.md).
 
 1. In the portal: **Settings**, **QuickBooks**. With no keys saved yet the button is Set up; with Development keys saved
    from a try, and nothing ever connected, it is **Change**, and its steps open at step 1, where the keys go.

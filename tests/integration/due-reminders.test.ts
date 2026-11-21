@@ -278,8 +278,8 @@ describe("the reminders before a due date", () => {
     expect(mail.outbox.filter((m) => m.subject.startsWith("Due "))).toHaveLength(3);
   });
 
-  // Connecting a different company is refused until stage 4's slice M8 (company-change-step5). Since slice M7a the clear
-  // a change of company would run keeps the seasons' records (open question 16): it was "forgets every claim" while the
+  // Since stage 4's slice M8 a switch an Admin asks for reaches this clear (company-change-step5). Since slice M7a the clear
+  // a change of company runs keeps the seasons' records (open question 16): it was "forgets every claim" while the
   // clear removed the families they name.
   it("keeps every claim in the clear a change of company would run, as the families they name are kept", async () => {
     await season();

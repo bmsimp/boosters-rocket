@@ -312,7 +312,7 @@ describe("a family's buy-outs page (Roster.Read)", () => {
 });
 
 // Stage 4's slice M7b: what a change of company left in the earlier company's books, on Reconciliation and the family's
-// buy-outs page. The clear is unreachable until slice M8 (open question 18): the tests run it directly.
+// buy-outs page. Since slice M8 a switch an Admin asks for reaches the clear; the tests run it directly.
 describe("an earlier QuickBooks company's buy-outs, for the treasurer", () => {
   const admin = { actor: { door: "staff" as const, id: null, label: "admin@club.org" }, ip: null };
   /** Text as React writes it into HTML. */

@@ -19,9 +19,8 @@ import { isUuid } from "@/lib/seasons/ids";
  * books, so it is cleared too: the new company's are asked afresh on the screen.
  *
  * Nothing else of the app's records changes: every family, student and guardian row stays as it was, with its family.
- * Staff link them to the new company's customers on the accounting links screen. Nothing the portal runs reaches this
- * until stage 4's slice M8 turns a change of company back on (a different company is refused: open question 18).
- * Audited with counts when there was anything to end or clear.
+ * Staff link them to the new company's customers on the accounting links screen. Reached since stage 4's slice M8 by a
+ * switch an Admin asked for on the switch page (src/lib/roster/source.ts says how). Audited with counts when there was anything to end or clear.
  */
 export async function endLinksOfEarlierCompany(tx: Tx, o: { fromRealmId: string; toRealmId: string; actor: Actor; ip: string | null }): Promise<void> {
   const endedBy = o.actor.door === "staff" && isUuid(o.actor.id) ? o.actor.id : null;

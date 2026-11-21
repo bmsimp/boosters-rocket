@@ -885,8 +885,8 @@ describe("how the requirement reads, on the parent's pages", () => {
   });
 });
 
-// Stage 4's slice M7b: a parent's reads after a change of company's clear (open question 16), which is unreachable
-// until slice M8 (open question 18): the tests run it directly.
+// Stage 4's slice M7b: a parent's reads after a change of company's clear (open question 16), which since slice M8 a
+// switch an Admin asks for reaches: the tests run it directly.
 describe("after the club connects a different QuickBooks company", () => {
   const admin = { actor: { door: "staff" as const, id: null, label: "admin@club.org" }, ip: null };
   const ENDED_LINE = "The club moved its books to a new QuickBooks company, so your earlier buy-out for this was ended. If anything is still owed on it, the club will be in touch.";

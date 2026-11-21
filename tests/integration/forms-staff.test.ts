@@ -360,7 +360,7 @@ describe("the Health page's line for forms", () => {
 describe("a different QuickBooks company", () => {
   // Since stage 4's slice M7a the clear a change of company would run keeps every form (open question 16), as the
   // families and students the requests name are kept: it was "deletes every signature request and consent" while the
-  // clear removed those records too. A change of company is still refused until slice M8.
+  // clear removed those records too. Since slice M8 a switch an Admin asks for reaches it; this calls it directly.
   it("keeps every signature request and consent, and the requirements' templates", async () => {
     const fall = await seedSeason({ name: "Fall", steps: [{ name: "Forms" }] });
     const form = formSetting({ id: "envelope_seedtemplate" });
