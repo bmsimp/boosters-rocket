@@ -1,9 +1,17 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { asParent, asParentChoosing, asRefusedParent, pageOutcome, type Page, type PageOutcome } from "../helpers/signed-in";
+import { asParent, asParentChoosing, asParentEnrolling, asRefusedParent, pageOutcome, type Page, type PageOutcome } from "../helpers/signed-in";
 import { readdirSync } from "node:fs";
 import path from "node:path";
 import { createElement } from "react";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/lib/db/client";
+import { auditLog, parentAuthAccount, parentAuthenticator, parentAuthSession, parentAuthUser } from "@/lib/db/schema";
+import { ENROL_WINDOW_MS } from "@/lib/parents/enrolment-rule";
+import OneMoreStep from "@/app/one-more-step/page";
+import { confirmEnrolmentAppAction, startEnrolmentAppAction } from "@/app/one-more-step/actions";
 import { resetDb } from "../helpers/db";
+import { seedParentSettings } from "../helpers/roster-cache";
+import { seedPassword } from "../helpers/signin-links";
 import { moneyMarkers, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { familyRecord, studentRecord } from "../helpers/volunteer";
 
@@ -14,7 +22,9 @@ import { familyRecord, studentRecord } from "../helpers/volunteer";
  * family B's. The output must hold none of the other family's markers (names, QuickBooks ids, email addresses, phone
  * numbers, the portal's own ids: see tests/helpers/parent.ts) and must show something of the family it was rendered
  * for, so a page that renders an empty state can't pass by showing nothing. Each page is also asked for with no
- * session and with no family chosen, and must send the visitor away itself, with its own address to come back to.
+ * session, with no family chosen and (since the sign-in release's slice SI-10a) by a session still enrolling under
+ * Strict, and must send the visitor away itself, with its own address to come back to. And Strict's enrolment page,
+ * /one-more-step, shows an enrolling parent nothing of any family, and its actions change nothing of another's.
  *
  * A new page needs nothing here unless:
  *  - it has a dynamic segment: give its params in PARAMS (the test says so when one is missing);
@@ -112,7 +122,7 @@ const addressOf = (route: string, params: Record<string, string | string[]> = {}
  * parent is brought back to it afterward (requireParentPage(returnTo) in src/lib/guards.ts). Never another page's.
  * The home page carries none: everyone lands there anyway.
  */
-const awayTo = (to: "/sign-in" | "/choose-family", address: string) => (address === "/" ? to : `${to}?next=${encodeURIComponent(address)}`);
+const awayTo = (to: "/sign-in" | "/choose-family" | "/one-more-step", address: string) => (address === "/" ? to : `${to}?next=${encodeURIComponent(address)}`);
 const markersIn = (html: string, markers: string[]) => { const text = html.toLowerCase(); return markers.filter((m) => text.includes(m.toLowerCase())); };
 const describeOutcome = (o: PageOutcome) => ("html" in o ? "rendered" : "redirect" in o ? `redirected to ${o.redirect}` : "answered 404");
 
@@ -173,7 +183,7 @@ describe("one family never sees another's data on a parent page", () => {
       }
     });
 
-    it("sends a visitor with no session to /sign-in, and one with no family chosen to /choose-family", async () => {
+    it("sends a visitor with no session to /sign-in, one with no family chosen to /choose-family, and one enrolling to /one-more-step", async () => {
       const page = await load(file);
       const props = { params: paramsFor(route, a) };
       // Every test starts signed out (tests/helpers/signed-in.ts).
@@ -183,6 +193,10 @@ describe("one family never sees another's data on a parent page", () => {
       asParentChoosing(a.identity);
       const choosing = await pageOutcome(page, props);
       expect(choosing, `${file} ${describeOutcome(choosing)} for a parent who has not chosen a family; it must call requireParentPage() itself, before anything else, with its own address (${address}).`).toEqual({ redirect: awayTo("/choose-family", address) });
+      // Strict's enrolment (slice SI-10a): a session a password alone made reaches no family page, its own family's included.
+      asParentEnrolling(a.identity);
+      const enrolling = await pageOutcome(page, props);
+      expect(enrolling, `${file} ${describeOutcome(enrolling)} for a session still enrolling under Strict; it must call requireParentPage() itself, before anything else, with its own address (${address}).`).toEqual({ redirect: awayTo("/one-more-step", address) });
       asRefusedParent();
       const refused = await pageOutcome(page, props);
       expect(refused, `${file} ${describeOutcome(refused)} for a session the portal refuses; it must call requireParentPage() itself, before anything else.`).toEqual({ redirect: "/refused" });
@@ -208,6 +222,40 @@ describe("one family never sees another's data on a parent page", () => {
         const outcome = await pageOutcome(page, { params: { id } });
         if ("html" in outcome) expect(markersIn(outcome.html, other.markers), `/forms/${id} for ${viewer.spec.family.name}`).toEqual([]);
       }
+    }
+  });
+
+  // Strict's enrolment (slice SI-10a): family A's parent, enrolling, sees on /one-more-step nothing of any family, A's
+  // own included (no name, no student, no marker of A's or B's), and the page's actions, which take no id, change
+  // nothing of B's whatever they are sent. Strict is stored for the test alone, and Standard put back after it.
+  it("shows an enrolling parent nothing of any family on /one-more-step, and its actions touch nothing of another family's", async () => {
+    await seedParentSettings({ level: "strict" });
+    // A password for A for this test alone (the set-up asks for one): the seeded parents have none, which /family/email shows.
+    const [user] = await db.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, a.identity.parentId));
+    await seedPassword(user!.id, "the enrolling parent's long password");
+    try {
+      await db.update(parentAuthSession).set({ enrolUntil: new Date(Date.now() + ENROL_WINDOW_MS) }).where(eq(parentAuthSession.id, a.identity.sessionId));
+      asParentEnrolling(a.identity);
+      const outcome = await pageOutcome(OneMoreStep, { searchParams: { next: "/payments" } });
+      if (!("html" in outcome)) expect.fail(`/one-more-step ${describeOutcome(outcome)} for an enrolling parent; it must render.`);
+      expect(markersIn(outcome.html, [...a.markers, ...b.markers]), "/one-more-step shows an enrolling parent family data").toEqual([]);
+      for (const words of [...a.season!.staffOnly, ...b.season!.staffOnly]) expect(outcome.html).not.toContain(words);
+      // Its actions, as A, with B's ids in every field: they take none, so B's sign-in is untouched.
+      const before = { app: await db.select().from(parentAuthenticator).where(eq(parentAuthenticator.parentId, b.identity.parentId)),
+        session: await db.select().from(parentAuthSession).where(eq(parentAuthSession.id, b.identity.sessionId)) };
+      const call = startEnrolmentAppAction as unknown as (...args: unknown[]) => Promise<unknown>;
+      await call(b.identity.parentId, b.identity.sessionId, b.identity.familyId);
+      await confirmEnrolmentAppAction(b.identity.parentId, b.identity.sessionId);
+      expect({ app: await db.select().from(parentAuthenticator).where(eq(parentAuthenticator.parentId, b.identity.parentId)),
+        session: await db.select().from(parentAuthSession).where(eq(parentAuthSession.id, b.identity.sessionId)) }).toEqual(before);
+      // What A's own start began is A's, and no audit row names B.
+      const rows = await db.select().from(auditLog).where(eq(auditLog.action, "parent.authenticator.setup_started"));
+      expect(rows.map((r) => r.targetId)).toEqual([a.identity.parentId]);
+    } finally {
+      await db.delete(parentAuthenticator).where(eq(parentAuthenticator.parentId, a.identity.parentId));
+      await db.delete(parentAuthAccount).where(and(eq(parentAuthAccount.userId, user!.id), eq(parentAuthAccount.providerId, "credential")));
+      await db.update(parentAuthSession).set({ enrolUntil: null }).where(eq(parentAuthSession.id, a.identity.sessionId));
+      await seedParentSettings({ level: "standard" });
     }
   });
 
