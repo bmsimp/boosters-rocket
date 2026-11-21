@@ -13,7 +13,7 @@
 // finish), so holding it exclusively keeps every one of them out while the press reads the guardians, the students and
 // the cache and writes the links. Reading the guardians to work the suggestion out again takes no row lock either.
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { accountingLink, accountingLinkEnded, buyout, family, guardian, requirement, student, writeQueue } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
@@ -405,10 +405,7 @@ const OPEN_ITEM = ["waiting", "stuck", "refused"] as const;
  * Unlink from the books (stage 4's slice M3b; section 4, "Every link, unlink, import and alignment is audited"; open
  * question 13, "an admin picks again"): ends a linked family's link to its customer in the books, with every link of its
  * student records (active or inactive, whatever customer each names, so a later link pairs its students afresh) and of
- * its guardian rows (open or closed), and clears each of its guardian rows' `family_qbo_id`: nothing under src/ reads that
- * copy since stage 3's slice 12b1, and this is its one writer left, kept until slice 12b2 drops the column, because
- * migration 0048's fill reads it and the copy cleared with the guardian links ended keeps that fill from giving a
- * relinked family's rows back a link this unlink ended. Its stored figures are forgotten at once (forgetFamilyMoney()). Sends nothing to the books; the
+ * its guardian rows (open or closed). Its stored figures are forgotten at once (forgetFamilyMoney()). Sends nothing to the books; the
  * customer stays there as it is. A relink is this, then a link as Confirm or Pick a different customer makes it: nothing
  * is restored.
  *
@@ -424,10 +421,10 @@ const OPEN_ITEM = ["waiting", "stuck", "refused"] as const;
  * shared, held to the transaction's end). A parent's change of their details or sign-in email refuses nothing: a waiting
  * one's own next try gives it up unsent, as its family is no longer linked; a stuck or kept one stays on Reconciliation. Then each link is moved to
  * `accounting_link_ended` as it was (its id, origin, `linked_at`, `linked_by`) with the press's time, the staff member
- * and `unlinked`, and deleted; the guardian rows' `family_qbo_id` set null; the money row deleted under the family's
+ * and `unlinked`, and deleted; the money row deleted under the family's
  * money lock, after the roster lock (the one order: nothing that holds the money lock takes the roster lock); and one
  * `accounting.link.remove` row. Nothing else: no record made, renamed, moved or made inactive, no guardian row opened,
- * closed or moved, `source_qbo_id` left, no session, sign-in, season, volunteering or forms record, the roster cache,
+ * closed, moved or otherwise changed, no session, sign-in, season, volunteering or forms record, the roster cache,
  * the queue or a paid buy-out touched.
  */
 export async function unlinkFamily(raw: { familyId: unknown; linkId: unknown; stamp: unknown }, rosterTag: string, o: LinkOp): Promise<LinkDone> {
@@ -488,7 +485,7 @@ export async function unlinkFamily(raw: { familyId: unknown; linkId: unknown; st
       sql`${writeQueue.request}->>'op' in ('contact', 'email')`));
     const details = { waiting: detailItems.filter((d) => d.state === "waiting").length, held: detailItems.filter((d) => d.state !== "waiting").length };
 
-    // The links move to the history as they were, then go; then the rows' customer, the money, and the audit row. The
+    // The links move to the history as they were, then go; then the money, and the audit row. The
     // time they ended is the database's, as the insert starts (statement_timestamp(), one for every row), past every lock
     // above: the clock audit_log.at and linked_at are written by, so the audit filter's windows compare like with like.
     const ended = [link, ...studentLinks, ...guardianLinks];
@@ -496,8 +493,6 @@ export async function unlinkFamily(raw: { familyId: unknown; linkId: unknown; st
       studentId: l.studentId, guardianId: l.guardianId, origin: l.origin, linkedAt: l.linkedAt, linkedBy: l.linkedBy, endedAt: sql`statement_timestamp()`, endedBy: o.staffUserId,
       endedHow: "unlinked" as const }))).returning({ endedAt: accountingLinkEnded.endedAt }) as [{ endedAt: Date }, ...{ endedAt: Date }[]];
     await tx.delete(accountingLink).where(inArray(accountingLink.id, ended.map((l) => l.id)));
-    const cleared = (await tx.update(guardian).set({ familyQboId: null, updatedAt: endedAt })
-      .where(and(eq(guardian.familyId, familyId), isNotNull(guardian.familyQboId))).returning({ id: guardian.id })).length;
     const moneyForgotten = await forgetFamilyMoney(tx, familyId);
     await writeAudit({ actor: o.actor, action: "accounting.link.remove", permission: o.permission, ip: o.ip, targetType: "family", targetId: familyKey,
       before: { link: { id: link.id, customerQboId: link.customerId, realmId: link.realmId, origin: link.origin, linkedAt: link.linkedAt.toISOString(), linkedBy: link.linkedBy },
@@ -505,7 +500,7 @@ export async function unlinkFamily(raw: { familyId: unknown; linkId: unknown; st
         guardianLinks: guardianLinks.map((l) => ({ id: l.id, guardianId: l.guardianId, customerQboId: l.customerId })) },
       after: { familyId: familyKey, customerQboId: link.customerId, realmId: link.realmId, endedAt: endedAt.toISOString(),
         studentLinksEnded: studentLinks.map((l) => ({ studentId: String(l.studentId), customerQboId: l.customerId })),
-        guardianLinksEnded: guardianLinks.length, guardianRowsCleared: cleared, moneyForgotten, paidBuyoutsKept: paidKept } }, tx);
+        guardianLinksEnded: guardianLinks.length, moneyForgotten, paidBuyoutsKept: paidKept } }, tx);
 
     // Whether Reconciliation lists the customer among those with no family now: the pool worked out again without the links ended.
     const familyLinked = new Set([...b.familyOfCustomer.keys()].filter((c) => c !== link.customerId));
