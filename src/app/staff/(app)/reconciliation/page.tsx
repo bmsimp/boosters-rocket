@@ -7,7 +7,7 @@ import { isUuid } from "@/lib/seasons/ids";
 import { loadBalances } from "@/lib/money/balances";
 import { linksOfCustomers } from "@/lib/families/links";
 import { readCustomerAims, type CustomerAim } from "@/lib/accounting/mapping";
-import { handful } from "@/lib/roster/no-family";
+import { customersWithNoFamily, handful } from "@/lib/roster/no-family";
 import { LocalTime } from "@/app/components/local-time";
 import { DataTable, type Column } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
@@ -18,8 +18,8 @@ import { CONTACT_AWAITS_READ, CONTACT_NOT_OFFERED, EMAIL_NOT_OFFERED, EMAIL_TOO_
   TAKEN_NAME_KEPT } from "@/lib/roster/writes";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { BuyoutsToLook, EarlierCompanyBuyouts } from "./buyouts";
-import { CustomersWithNoFamily } from "./no-family";
 import { familyPage } from "@/app/staff/(app)/family-pages";
+import { NO_FAMILY_WORDS } from "../links/no-family";
 
 export const metadata = { title: "Reconciliation" };
 export const dynamic = "force-dynamic";
@@ -181,7 +181,8 @@ function Refused({ items, canChange, compared, mayCompare }: { items: QueueView[
  * picked for that family on Accounting links (stage 4's slice M3a2: "Create a family from this" refuses it, `aims`),
  * with a link to its confirm step where it can be reached, or, where that family's row is Suggested for another
  * customer and offers no Pick, once it is left unlinked there; one the screen suggests for, or lists for, another
- * family is linked there; otherwise it is brought in from Customers with no family. Every reader is told the same, and
+ * family is linked there; otherwise it is brought in from Customers with no family, on Accounting links since stage 4's
+ * slice M6. Every reader is told the same, and
  * only a holder of the linking permission is given the link to Accounting links, which only they can open. A
  * student's sits under its family, so it is linked to the student here ("Link the student to it", for staff who may
  * change families and link them to accounting). Names are QuickBooks text, shown as text only.
@@ -192,8 +193,8 @@ function MadeAfterGivingUp({ items, linking, canChange, rosterTag, aims }: { ite
     const stop = "if it isn't wanted, make it inactive in QuickBooks.";
     // Aimed at nobody: the family saved first is inactive or linked already (or nothing can be suggested now), so it is brought in.
     if (aim === undefined) {
-      return `A ${m.role} customer that no ${m.role} in the portal is linked to. ${linking ? "Bring it in with “Create a family from this” under Customers with no family below"
-        : "Someone who may link families to accounting can bring it in from Customers with no family on this page"}, then make the ${m.role} the portal saved first inactive on its page; ${stop}`;
+      return `A ${m.role} customer that no ${m.role} in the portal is linked to. ${linking ? "Bring it in with “Create a family from this” under Customers with no family on Accounting links"
+        : "Someone who may link families to accounting can bring it in from Customers with no family on Accounting links"}, then make the ${m.role} the portal saved first inactive on its page; ${stop}`;
     }
     const ours = aim.why === "given_up" && m.familyId !== null && String(aim.families[0].id) === String(m.familyId);
     const pick = ours && aim.why === "given_up" && aim.pickable;
@@ -230,7 +231,8 @@ function MadeAfterGivingUp({ items, linking, canChange, rosterTag, aims }: { ite
 /**
  * What doesn't line up between the portal and QuickBooks, in one place (v1 spec §6.3, §8.3): staff changes still
  * waiting to reach QuickBooks or stuck, the roster's Needs attention list, for staff who may link families to
- * accounting the customers no family is linked to (stage 3's slice 10), and, for staff who may see money, the
+ * accounting how many customers no family is linked to, which are listed on Accounting links (stage 3's slice 10 listed
+ * them here; stage 4's slice M6 moved them), and, for staff who may see money, the
  * families whose QuickBooks balance isn't what their invoices add up to. It lists many families, so opening it is not
  * audited as a read of one; each family's own page is, and so is the compare view of one kept change of a parent's phone
  * and address (`?compare=<id>`, stage 3's slice 11b), before anything of it is shown. Names are QuickBooks text, shown
@@ -255,12 +257,13 @@ export default async function ReconciliationPage({ searchParams }: { searchParam
   const staff = { actor: { door: "staff" as const, id: ctx.staffUserId, label: ctx.email }, ip: ctx.ip };
   const compared = !toCompare ? null : isEmail(toCompare) ? await compareEmail(toCompare.id, { ...staff, mayReadFamilyField: mayCompare }) : await compareContact(toCompare.id, staff);
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite");
-  // Customers no family is linked to, with "Create a family from this": only for staff who may link families to accounting.
+  // How many customers no family is linked to, said with a link to Accounting links, where they are listed with
+  // "Create a family from this" (stage 4's slice M6): only for staff who may link families to accounting.
   const linking = can(ctx.effective, "Accounting.Link.ReadWrite");
-  // Which customers no family is linked to are meant for a family the portal has (stage 4's slice M3a2), read once for
-  // both sections that say so: for staff who may link families, who are shown Customers with no family, and for anyone
+  const noFamily = linking ? await customersWithNoFamily() : null;
+  // Which customers no family is linked to are meant for a family the portal has (stage 4's slice M3a2), read for anyone
   // shown a family's or member's create made after it was given up, whose words go by it.
-  const aims = linking || madeAnyway.some((m) => m.role !== "student") ? await readCustomerAims() : null;
+  const aims = madeAnyway.some((m) => m.role !== "student") ? await readCustomerAims() : null;
   const stuck = writes.filter((w) => w.state === "stuck"), waiting = writes.filter((w) => w.state === "waiting"), refused = writes.filter((w) => w.state === "refused");
   // The customers with a family page (the roster's families, or members in flat books), each by its family record, found
   // through the family kind of link in one lookup for the list: a customer with none links nowhere.
@@ -294,7 +297,9 @@ export default async function ReconciliationPage({ searchParams }: { searchParam
 
       <EarlierCompanyBuyouts showAmounts={money} canChange={canChange} />
 
-      {linking && aims !== null && <CustomersWithNoFamily mayChangeFamilies={canChange} aims={aims} />}
+      {noFamily !== null && noFamily.state === "listed" && noFamily.customers.length > 0 && (
+        <Notice tone="info" live="none">{NO_FAMILY_WORDS.elsewhere(noFamily.customers.length)} <Link href="/staff/links#no-family-h">Customers with no family, on Accounting links</Link></Notice>
+      )}
 
       <section className="box" aria-labelledby="attention-h"><h2 id="attention-h">Needs attention in the roster{roster.attention.length ? ` (${roster.attention.length})` : ""}</h2>
         {!roster.roster ? <Notice tone="warning" live="none">The roster can&apos;t be shown right now. <Link href="/staff/roster">Open the roster</Link> to see why.</Notice>

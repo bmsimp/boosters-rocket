@@ -169,7 +169,7 @@ describe("an unlink", () => {
     expect(message).toContain("2 guardians' own links to Parent customers ended with it too.");
     expect(message).toContain("Its stored figures were forgotten");
     expect(message).toContain("Nothing was sent to the books, and the customer stays there as it is.");
-    expect(message).toContain("Reconciliation now lists the customer under Customers with no family");
+    expect(message).toContain("This page now lists the customer under Customers with no family");
     expect(stub.apiCalls()).toEqual([]);
 
     expect(await linksOfFamily(rivera)).toEqual([]);

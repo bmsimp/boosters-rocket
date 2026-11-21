@@ -457,22 +457,27 @@ describe("the page", () => {
     expect(withoutIds(html)).toContain('href="/staff/roster/<id>"');
     expect(html).toContain("<details class=\"more\"><summary>Students and guardians<span class=\"visually-hidden\">: The Patels</span></summary>");
     expect((await db.select().from(auditLog)).length).toBe(audits);
-    // The customers with no family stay on Reconciliation, linked from here, counted by the pool's own rule, and the
-    // page says a family the portal has is linked here, that Reconciliation refuses "Create a family from this" for a
-    // customer it aims at a family (slice M3a2), and that "Create in QuickBooks and link" would make a second customer
-    // for a family never linked to its customer, and isn't offered for one unlinked while its customer is in the books (slice M3b2).
+    // The customers with no family have their own part of this page since slice M6 (on Reconciliation before), counted
+    // by the pool's own rule, and the page says a family the portal has is linked here, that "Create a family from this"
+    // is refused for a customer it aims at a family (slice M3a2), and that "Create in QuickBooks and link" would make a
+    // second customer for a family never linked to its customer, and isn't offered for one unlinked while its customer
+    // is in the books (slice M3b2).
     const whole = await renderPage(AccountingLinksPage);
-    expect(whole).toContain('href="/staff/reconciliation#no-family-h"');
-    expect(whole).toContain("1 active customer the books list as a family at the top level, under no other customer, has no family in the portal.");
+    expect(whole).not.toContain('href="/staff/reconciliation#no-family-h"');
+    const noFamily = whole.slice(whole.indexOf('id="no-family-h"'), whole.indexOf("</section>", whole.indexOf('id="no-family-h"')));
+    expect(noFamily).toContain("1 active customer the books list as a family at the top level, under no other customer, has no family in the portal.");
     expect(whole).toContain("A family the portal has is linked here: Confirm its suggestion, or one of its possible customers, or pick a different customer from those no family is linked to.");
     expect(whole).not.toContain("would still make a second family");
-    expect(whole).toContain("Reconciliation refuses “Create a family from this” for a customer this page suggests or lists for a family the portal has, or that a given-up change of a family the portal saved first made.");
+    expect(whole).not.toContain("Reconciliation refuses");
+    expect(whole).toContain("“Create a family from this” is refused for a customer this page suggests or lists for a family the portal has, or that a given-up change of a family the portal saved first made.");
+    expect(whole).toContain("“Create a family from this”, under Customers with no family on this page, makes a new family in the portal from a customer no family is linked to.");
     expect(whole).toContain("would make a second customer in the books for a family whose customer is already there but was never linked to it; it isn&#x27;t offered for one unlinked while its customer is still in the books.");
     expect(whole).toContain("makes a new customer in the books for a family that has none, but not for one unlinked while its customer is still in the books, nor for a student of it whose customer is; and adding a family under Families makes one too, when someone who may link families adds it while the books are connected.");
-    // And Reconciliation's section links back here.
+    // And Reconciliation lists them no more, but says how many and links here.
     const recon = await renderPage(ReconciliationPage);
-    const at = recon.indexOf('id="no-family-h"');
-    expect(recon.slice(at, recon.indexOf("</section>", at))).toContain('href="/staff/links"');
+    expect(recon).not.toContain('id="no-family-h"');
+    expect(recon).toContain("1 customer the books list as a family has no family in the portal: see it on Accounting links.");
+    expect(recon).toContain('href="/staff/links#no-family-h"');
     expect(whole).toContain("A guardian who can&#x27;t sign in, because they are blocked, is listed under the family, but their address is never matched.");
   });
 

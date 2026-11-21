@@ -20,7 +20,7 @@ import { recordNameWords } from "@/lib/families/words";
 import { parseEmailField } from "@/lib/parents/emails";
 import { buildRoster, type Cust } from "@/lib/roster/model";
 import { checkName, nameKey } from "@/lib/roster/names";
-import { familyCreatesFiled, noFamilyPool } from "@/lib/roster/no-family";
+import { familyCreatesFiled, noFamilyPool, type NoFamilyCustomer } from "@/lib/roster/no-family";
 import { loadOpenWrites, waitingWords, type QueueView } from "@/lib/roster/queue";
 import { blocksOthers, coverUnder, familySendSeal, familySendStudentsWords, guardianOf, heldWords, KEPT_OFF_STAYS, keptWordsFor, madeAfterGivingUp, type MadeAfterGivingUp } from "@/lib/roster/writes";
 import { deactivateOf, offers, renameOf } from "@/lib/roster/operations";
@@ -39,7 +39,7 @@ import { linkStanding, searchMatches, STATUS_KEYS, type LinksFilter, type NotAFa
  * Whether suggestions can be worked out, or why not: the roster cache names no company (`no_company`), the books are
  * connected to a company other than the roster's (`other_company`: no link is read at all), or the membership shape
  * is missing or names a customer type the books no longer have (`no_shape`). The same states, in the same order, as
- * Reconciliation's customers with no family (customersWithNoFamily()).
+ * the customers with no family (customersWithNoFamily()).
  */
 export type LinksState = "listed" | "no_company" | "other_company" | "no_shape";
 /** A customer as the row shows it: its name and its whole email field, the books' text, shown as text only. */
@@ -315,8 +315,20 @@ export type ConfirmStep =
 export type LinksView = {
   state: LinksState;
   rows: LinkRow[];
-  /** How many customers no family is linked to (Reconciliation's list); null when none can be listed. */
+  /** How many customers no family is linked to (the screen's own part for them, since slice M6); null when none can be listed. */
   noFamily: number | null;
+  /**
+   * The customers no family is linked to, as the screen's part for them lists them (slice M6, conformance L.15): the pool
+   * (noFamilyPool()'s rule, customersWithNoFamily()'s), in the roster's order, with their students counted; null when none
+   * can be listed.
+   */
+  noFamilyList: NoFamilyCustomer[] | null;
+  /**
+   * Which customers no family is linked to are meant for a family the portal has (customerAims(), "Create a family from
+   * this"'s refusal), worked out once from this view's reads and the creates given up after a try (madeAfterGivingUp()):
+   * empty in any state but `listed`.
+   */
+  aims: ReadonlyMap<string, CustomerAim>;
   /** Whether the families' own pages stand (loadRosterPage() has a roster: rosterShown()), so the rows may link to them. */
   familyPages: boolean;
   /** When the last successful roster read finished: the books' values are the portal's copy as of then. Null when none has. */
@@ -681,6 +693,10 @@ export type LinkBasics = Awaited<ReturnType<typeof readLinkBasics>>;
  * coverUnder() over the cache rows read above) and Send the app's for all (sendAll(), sendAllOf() over the rows worked
  * out here): no query of their own, so the count is unchanged. The bulk's press works the same rows out again in its
  * own transaction (sendAllShown(), ./link-writes.ts), from the same reads made there.
+ * Since slice M6, in the `listed` state, the creates given up after a try are read beside the queue's items, in a
+ * transaction of their own (madeAfterGivingUp(): 4 to 8, as readCustomerAims() counts them), for the aims of the
+ * customers no family is linked to (customerAims(), from the reads above): so a listed view is 19 to 62. The import's
+ * review adds one query more, and only when it is asked for (importReview(): the persons who hold its addresses).
  * On four hundred families with two thousand customers that is the same number of queries; memory holds the two
  * thousand cached customers (twice, while the queue holds items, as loadOpenWrites() reads its own), the records,
  * guardian rows and links (a few thousand small rows), and the rows rendered are the four hundred families, each
@@ -692,7 +708,10 @@ export async function loadAccountingLinks(): Promise<LinksView> {
   // The queue's open items only where differences are worked out: only the roster's company's (ofRosterCompany,
   // src/lib/roster/source.ts, stage 4's slice M7a3), so a parent's change saved as a change of company's clear ran,
   // open until the worker's next wake gives it up, holds nothing back here.
-  const [queue, parentSettings] = state === "listed" ? await Promise.all([loadOpenWrites(), getParentSettings()]) : [[], null];
+  // Since slice M6, beside them, the creates given up after a try (madeAfterGivingUp()), for the aims of the customers no
+  // family is linked to (customerAims()), which the screen's part for them shows: read once, never a second readLinkBasics().
+  const [queue, parentSettings, givenUp] = state === "listed"
+    ? await Promise.all([loadOpenWrites(), getParentSettings(), db.transaction((tx) => madeAfterGivingUp(tx))]) : [[], null, []];
   // Whether a family's guardians sign in by its active students (enterableGuardianRows()): a student's take of active may open it.
   const studentsRule = parentSettings !== null && studentsRuleApplies(parentSettings.requireActiveStudents, shape);
   const staffIds = [...new Set([...links.flatMap((l) => (l.linkedBy === null ? [] : [l.linkedBy])), ...[...leftOf.values()].flatMap((m) => (m.by === null ? [] : [m.by]))])];
@@ -729,7 +748,8 @@ export async function loadAccountingLinks(): Promise<LinksView> {
   };
 
   return {
-    state, noFamily: pool === null ? null : pool.length,
+    state, noFamily: pool === null ? null : pool.length, noFamilyList: pool,
+    aims: listed ? customerAims(b, givenUp) : new Map<string, CustomerAim>(),
     rows,
     familyPages: rosterShown({ connected: Boolean(b.connection?.realmId && b.connection.refreshTokenCiphertext), connectedRealmId: b.connection?.realmId ?? null, source: b.source,
       hasCache: b.typeRows.length > 0 || b.customerRows.length > 0, shape, readOnce: b.okRuns.length > 0, typeRows: b.typeRows }),
@@ -1427,7 +1447,8 @@ export function customerAims(b: LinkBasics, made: readonly MadeAfterGivingUp[]):
 /**
  * The aims of every customer, read in the caller's transaction or one of its own: readLinkBasics()'s reads (12 or 13)
  * and, in the `listed` state, madeAfterGivingUp()'s (4 to 8), a fixed number whatever the number of customers.
- * Reconciliation shows them, and "Create a family from this" refuses by them under its own roster lock
+ * Reconciliation shows them for its creates made after they were given up (the screen's own part reads them from its view,
+ * loadAccountingLinks()'s `aims`, since slice M6), and "Create a family from this" refuses by them under its own roster lock
  * (customerAimedAt(), ./link-writes.ts).
  */
 export async function readCustomerAims(tx?: Tx): Promise<Map<string, CustomerAim>> {

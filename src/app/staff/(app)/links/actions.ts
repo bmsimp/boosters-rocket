@@ -1,7 +1,8 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { requireStaffActionAlso, staffAction, type StaffCtx } from "@/lib/guards";
-import { confirmAllSuggested, leaveUnlinked, LINK_COPY, linkFamilyToCustomer, reviewCarriedOver, sendAllDifferences, undoLeaveUnlinked, unlinkFamily, type LinkDone } from "@/lib/accounting/link-writes";
+import { confirmAllSuggested, customerAimedAt, leaveUnlinked, LINK_COPY, linkFamilyToCustomer, reviewCarriedOver, sendAllDifferences, undoLeaveUnlinked, unlinkFamily, type LinkDone } from "@/lib/accounting/link-writes";
+import { familyFromCustomer, NO_FAMILY_COPY } from "@/lib/roster/no-family";
 import { BULK_MAX } from "@/lib/accounting/mapping";
 import { isStatusKey, SEARCH_MAX } from "@/lib/accounting/status";
 import { isChosen, isGuardianChosen } from "@/lib/accounting/stamp";
@@ -23,6 +24,7 @@ import { sendToBooks, takeFromBooks } from "@/lib/roster/writes";
 // roster lock. Every answer shows the screen again as it is now.
 const P = "Accounting.Link.ReadWrite" as const;
 const NOT_FROM_PAGE: LinkDone = { ok: false, errors: [LINK_COPY.notFromPage] };
+const NO_FAMILY_NOT_FROM_PAGE: LinkDone = { ok: false, errors: [NO_FAMILY_COPY.notFromPage] };
 const str = (v: unknown, max: number): v is string => typeof v === "string" && v.length > 0 && v.length <= max;
 const ID_MAX = 64, TAG_MAX = 64, STAMP_MAX = 64;
 const op = (ctx: StaffCtx) => ({ actor: { door: "staff" as const, id: ctx.staffUserId, label: ctx.email }, ip: ctx.ip, permission: P, staffUserId: ctx.staffUserId });
@@ -157,6 +159,24 @@ export const sendDifferenceAction = staffAction(P, async (ctx: StaffCtx, field: 
   // pages; since slice M5b a layered family's make-inactive stopped part way may have changed them too (`changed`, as
   // the family page's own action revalidates on it), and `changed` itself stays on the server.
   if (r.ok || changed === true) revalidatePath("/", "layout");
+  else again();
+  return r;
+});
+
+/**
+ * "Create a family from this", in the screen's part for the customers no family is linked to (since slice M6; stage 3's
+ * slice 10 put it on Reconciliation): src/lib/roster/no-family.ts. It needs the linking permission and also Roster.Read,
+ * the page's own, and takes one value, the customer's QuickBooks id, checked here for its type and size and in the
+ * library for its digits; everything about the customer is checked again there, under the roster lock. It refuses a
+ * customer this screen aims at a family the portal has (customerAimedAt(), passed in: no-family.ts may not import this
+ * screen's modules).
+ */
+export const familyFromCustomerAction = staffAction(P, async (ctx: StaffCtx, customerQboId: string): Promise<LinkDone> => {
+  if (!can(ctx.effective, "Roster.Read") || typeof customerQboId !== "string" || customerQboId.length === 0 || customerQboId.length > ID_MAX) return NO_FAMILY_NOT_FROM_PAGE;
+  const r = await familyFromCustomer(customerQboId, { ...op(ctx), mayChangeFamilies: can(ctx.effective, "Roster.Family.ReadWrite") }, customerAimedAt);
+  // The new family shows on the Families pages and every staff page that lists families; a refusal shows the screen again
+  // as it is now, the row of a customer meant for a family the portal has with its words and link.
+  if (r.ok) revalidatePath("/", "layout");
   else again();
   return r;
 });

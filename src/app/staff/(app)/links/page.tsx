@@ -15,6 +15,7 @@ import { StateWords } from "@/app/components/state-words";
 import { familyPage } from "@/app/staff/(app)/family-pages";
 import { confirmAllAction, confirmLinkAction, leaveUnlinkedAction, linkGuardianAction, reviewLinkAction, sendAllAction, sendDifferenceAction, takeDifferenceAction, undoLeaveUnlinkedAction, unlinkAction, unlinkGuardianAction } from "./actions";
 import { GuardianLinkPress, LinkAnswers, LinkAnswersShown, LinkPress } from "./link-press";
+import { CustomersWithNoFamily } from "./no-family";
 
 export const metadata = { title: "Accounting links" };
 export const dynamic = "force-dynamic";
@@ -521,7 +522,7 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
             Nothing is sent to the books: the press ties the family to its customer in the portal, with each of its students whose name is on exactly one student on each side,
             and, where the books have Parent customers, each of its guardians whose sign-in address is in the email field of exactly one Parent customer under it that no one is linked to (nor kept for another guardian whose link to it an unlink ended) and that holds no other of its guardians&apos; addresses, unless a change for them or that customer is waiting, stuck or kept on Reconciliation.
             Students left that way aren&apos;t linked, and show with the family&apos;s row among its differences, but for a student customer inactive in the books, which is only counted there. Leave unlinked keeps a family out of the suggestions until someone undoes it.</p>
-          <p>A link also comes with something new. &ldquo;Create a family from this&rdquo;, on Reconciliation, makes a new family in the portal from a customer no family is linked to.
+          <p>A link also comes with something new. &ldquo;Create a family from this&rdquo;, under Customers with no family on this page, makes a new family in the portal from a customer no family is linked to.
             &ldquo;Create in QuickBooks and link&rdquo;, on a family&apos;s page, makes a new customer in the books for a family that has none, but not for one unlinked while its customer is still in the books, nor for a student of it whose customer is; and adding a family under Families makes one too, when someone who may link families adds it while the books are connected.</p>
           <p>For each family whose link stands, the portal compares the names, whether each is active, the family each student is under, and the students and Parent customers only one side has,
             against its copy of the books{view.readAt ? <>, from its last read of them on <LocalTime iso={view.readAt} /></> : ", though it hasn't read the books yet"}.
@@ -532,18 +533,15 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
           <p>Where the books have Parent customers, a guardian of a linked family is linked in its row&apos;s opening to a Parent customer under it that no guardian is linked to, and one guardian&apos;s link is ended there alone: a Parent customer several guardians share is nobody&apos;s own, so the portal sends nothing for it until all but one are unlinked from it.
             Neither sends anything to the books. A removed guardian&apos;s Parent customer is shown with the family, and offered to nobody else.</p>
           <Notice tone="warning" live="none">For a family this page suggests a customer for, or lists possible customers of, link it here with Confirm.
-            Reconciliation refuses &ldquo;Create a family from this&rdquo; for a customer this page suggests or lists for a family the portal has, or that a given-up change of a family the portal saved first made.
+            &ldquo;Create a family from this&rdquo; is refused for a customer this page suggests or lists for a family the portal has, or that a given-up change of a family the portal saved first made.
             And &ldquo;Create in QuickBooks and link&rdquo; on the family&apos;s page would make a second customer in the books for a family whose customer is already there but was never linked to it; it isn&apos;t offered for one unlinked while its customer is still in the books.</Notice>
-          {view.noFamily !== null && (
-            <p>{view.noFamily === 0 ? "Every active customer the books list as a family at the top level, under no other customer, is linked to a family in the portal, or is about to be by a change on Reconciliation."
-              : `${plural(view.noFamily, "active customer the books list as a family at the top level, under no other customer, has", "active customers the books list as a family at the top level, under no other customer, have")} no family in the portal.`}
-              {" "}<Link href="/staff/reconciliation#no-family-h">See the customers with no family on Reconciliation</Link></p>
-          )}
         </section>
 
         {view.state !== "listed" && <Notice tone="warning" live="none">{WHY_NOT_CHECKED[view.state]}</Notice>}
 
         {pick !== null && <PickPart view={view} familyId={pick} customerId={customer} cq={cq} tag={tag} made={made} />}
+
+        <CustomersWithNoFamily view={view} mayChangeFamilies={maySend} />
 
         <section className="box" aria-labelledby="links-list-h"><h2 id="links-list-h">Families</h2>
           <form method="get" action="/staff/links" role="search" className="matrix-filter">

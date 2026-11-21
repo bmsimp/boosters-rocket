@@ -16,7 +16,8 @@ import { getRosterSource, ofRosterCompany } from "./source";
 import { beforeResend } from "./write-rules";
 
 /**
- * One customer no family is linked to, as Reconciliation lists it: its name (QuickBooks text, shown as text only) and
+ * One customer no family is linked to, as the accounting links screen lists it (Reconciliation did until stage 4's slice
+ * M6): its name (QuickBooks text, shown as text only) and
  * the student customers QuickBooks holds directly under it (layered books with a student type; none otherwise): how
  * many, how many of those are inactive in QuickBooks, and how many already have a student record of the portal (another
  * family's, or inactive), which "Create a family from this" leaves as they are.
@@ -88,8 +89,8 @@ export function noFamilyCandidates(roster: Roster, customers: readonly Cust[], c
 /**
  * The customers no family is linked to, from what the list is read from: the roster (buildRoster() of the shape and the
  * cache), the cache's customers, the family creates on the queue and which customers have a family link and a student
- * link in the roster's company. Pure: the one rule, for Reconciliation's list (customersWithNoFamily()) and the
- * accounting links screen's suggestions (src/lib/accounting/mapping.ts) alike.
+ * link in the roster's company. Pure: the one rule, for the list (customersWithNoFamily(), Reconciliation's count) and
+ * the accounting links screen's own part, chooser and suggestions (src/lib/accounting/mapping.ts) alike.
  */
 export function noFamilyPool(roster: Roster, customers: readonly Cust[], creates: readonly RosterWrite[],
   links: { familyLinked: ReadonlySet<string>; studentLinked: ReadonlySet<string> }): NoFamilyCustomer[] {
