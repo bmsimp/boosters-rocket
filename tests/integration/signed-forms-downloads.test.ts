@@ -73,13 +73,21 @@ describe("a parent downloads their own family's signed form", () => {
     expect((await askParent(a.forms!.ids.complete)).status).toBe(404);
   });
 
-  it("finds evidence only by the family's own request and the company connected now", async () => {
+  // Stage 4's slice M7a (decision 5): evidence is current unless archived, whatever company copy it holds. The
+  // "another company's" case flipped on purpose from refused to given, as in archived-evidence.test.ts.
+  it("finds evidence only by the family's own request, whatever company copy it holds, and never once archived", async () => {
     asParent(a.identity);
     const ctx = { ...a.identity, ip: null };
     expect(await findMySignedPdf(ctx, b.forms!.ids.complete)).toBeNull();
     expect([...(await mySignedDownloads(ctx, [a.forms!.ids.complete, b.forms!.ids.complete, NOBODY, "x"])).entries()]).toEqual([[a.forms!.ids.complete, 1]]);
-    // The same row under another company is not this family's, whatever its QuickBooks id says.
+    // The same row with another company's copy (a family kept across a change of company) is still this family's,
+    // found by its request and app family, never by a QuickBooks id; B's stays B's.
     await db.update(signedFormEvidence).set({ realmId: "another-company" }).where(eq(signedFormEvidence.id, a.forms!.evidence.id));
+    expect(Buffer.compare((await findMySignedPdf(ctx, a.forms!.ids.complete))!, a.forms!.evidence.sealed)).toBe(0);
+    expect((await askParent(a.forms!.ids.complete)).status).toBe(200);
+    expect(await findMySignedPdf(ctx, b.forms!.ids.complete)).toBeNull();
+    // Archived as an earlier company's (before slice M7a): cut from its request and family, and refused.
+    await db.update(signedFormEvidence).set({ earlierCompanyAt: new Date(), requestId: null, familyId: null, studentId: null }).where(eq(signedFormEvidence.id, a.forms!.evidence.id));
     expect(await findMySignedPdf(ctx, a.forms!.ids.complete)).toBeNull();
     expect((await askParent(a.forms!.ids.complete)).status).toBe(404);
   });
