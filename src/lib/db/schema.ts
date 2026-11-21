@@ -83,7 +83,7 @@ const DISABLED_REASONS = ["no_active_students", "removed", "inactive", "family_i
  * Filled once from the person's own QuickBooks records by the take-in (src/lib/parents/contact-take-in.ts); nothing
  * QuickBooks holds changes them after that. `contact_version` is raised by every change of either: 0 means nobody
  * has ever set them, which is what the take-in fills.
- * `passkey_offer_declines` (the sign-in release, slice SI-8, migration 0048): how many times the person has pressed
+ * `passkey_offer_declines` (the sign-in release, slice SI-8, migration 0053): how many times the person has pressed
  * "Not now" on the passkey offer on Home, on any device (declinePasskeyOffer(), src/lib/parents/passkey-offer.ts);
  * from the third, Home offers a passkey no more and Sign-in settings is the place to add one (open question 31). Kept
  * by everything that ends or resets a person's sign-in, a staff reset included; never shown, sent to the browser or
@@ -341,7 +341,7 @@ export const parentSigninToken = pgTable("parent_signin_token", {
  * used, and forgotten by the person on their sign-in settings; since slice SI-2 blocking, sign-ins switched off, a
  * password reset, a confirmed change of sign-in email and closing a person's last open
  * membership delete them (src/lib/parents/sessions.ts).
- * `passkey_offered_at` (the sign-in release, slice SI-8, migration 0048): when "Not now" was last pressed on the
+ * `passkey_offered_at` (the sign-in release, slice SI-8, migration 0053): when "Not now" was last pressed on the
  * passkey offer on Home in a session made on this device, null until it is; the offer comes back on this device only
  * 30 days after it (open question 31; src/lib/parents/passkey-offer-rule.ts). It goes with the row: a device the
  * portal forgets, by whatever path, is a new device to the offer.
@@ -1435,7 +1435,7 @@ export const staffAuthVerification = staffAuth.verification;
 // field. `ON DELETE SET NULL`: forgetting a device, a block, a reset, a password change and the clean-up delete
 // device rows, and the sessions they named go on with none. Null for a session made
 // before SI-5b (nothing tells which device made it), and for one whose device is gone.
-// `enrol_until` (the sign-in release, slice SI-10a, migration 0049): set on a session that is enrolling, one made under
+// `enrol_until` (the sign-in release, slice SI-10a, migration 0054): set on a session that is enrolling, one made under
 // Strict by a password alone for a person with no second factor (a password at the door, or a set-up link's), to the
 // sign-in's time plus ENROL_WINDOW_MS (src/lib/parents/enrolment-rule.ts), by the one finish before any cookie
 // (src/lib/auth/parent-signin-finish.ts); cleared, with `strong_at` set, in the transaction that puts the person's first

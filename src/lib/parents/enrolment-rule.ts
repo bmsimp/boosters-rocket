@@ -1,6 +1,6 @@
 // Strict's enrolment, as a rule (the sign-in release, slice SI-10a; section 6 of the app-owned families spec, "Signing
 // in", and open questions 21, 22 and 34): what a parent session may reach, given the club's level, the session's
-// `enrol_until` (parent_auth_session, migration 0049) and whether its person has a second factor in force. Pure: no
+// `enrol_until` (parent_auth_session, migration 0054) and whether its person has a second factor in force. Pure: no
 // imports, so a unit test reads every answer (tests/unit/enrolment-rule.test.ts).
 
 /**
