@@ -19,8 +19,8 @@ const n = (count: number, one: string, many: string) => `${count} ${count === 1 
 
 /**
  * What switching to Strict does, for the count of guardians with neither a passkey nor an authenticator app (slice SI-10b).
- * With parent sign-ins off nobody is signed in (`setSignins(false)` ended every session), so the switch signs nobody out and
- * the count is of who could sign in once they are on.
+ * With parent sign-ins off nobody can be signed in (the gate ends any session while the door is closed), so the switch
+ * signs out nobody who could reach anything, and the count is of who could sign in once they are on.
  */
 function strictConfirm(neither: number, signinOn: boolean): string {
   if (!signinOn) {

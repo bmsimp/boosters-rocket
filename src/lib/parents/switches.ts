@@ -228,8 +228,10 @@ export async function factorCounts(tx?: Tx): Promise<FactorCounts> {
 
 /**
  * setLevel()'s answer: for Strict, how many people with neither were signed out; and `signinOn`, the stored `signin`
- * as change() read it under its lock (the press's own moment, not a read after it). With sign-ins off nobody is signed
- * in (setSignins(false) ended every session), so there is nobody to sign out and `signedOut` is 0.
+ * as change() read it under its lock (the press's own moment, not a read after it). With sign-ins off nobody can be
+ * signed in: the gate ends any session at its next request while the door is closed (resolveParentSession(),
+ * parentDoorClosed()). A session left from a value never stored or one that can't be read (whose `signin` reads as
+ * off without setSignins(false) having run) is still deleted and counted in `signedOut`, though it could reach nothing.
  */
 export type LevelResult = { ok: true; signedOut: number; signinOn: boolean } | { ok: false; errors: string[] };
 
@@ -237,8 +239,9 @@ export type LevelResult = { ok: true; signedOut: number; signinOn: boolean } | {
  * The Admin's choice of the club's sign-in level (the sign-in release, slice SI-10b; section 6 of the app-owned
  * families spec, "Signing in", and open question 21 (a)), through change(): the parents' settings lock, the setting and
  * one `settings.parents.save` row with its before and after, all in one transaction. Strict may be chosen with sign-ins
- * on or off: the level is the club's, not the door's. With sign-ins off nobody is signed in to sign out (setSignins(false)
- * ended every session), and FactorCounts are of who could sign in once they are on; the answer's `signinOn` says which.
+ * on or off: the level is the club's, not the door's. With sign-ins off nobody can be signed in (the gate ends any
+ * session while the door is closed; LevelResult says what `signedOut` still counts then), and FactorCounts are of who
+ * could sign in once they are on; the answer's `signinOn` says which.
  *
  * To Strict from Standard (or from a level that can't be read), refused, changing nothing and recording nothing, when
  * the count of people with neither read under the lock differs from the count the Admin was shown (`shownNeither`,
