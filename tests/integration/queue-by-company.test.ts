@@ -21,7 +21,7 @@ import { askFamilyInactive, askRosterWrite, closeEarlierContacts, coverStamp, cr
   FAMILY_WAITING, GUARDIAN_PENDING, guardianChangeWaiting, guardianMaySend, guardianStandings, KEPT_OFF_STAYS, keptContactsOf, MOVE_PENDING, moveTargets, NO_FAMILY_CUSTOMER, replaceRefusedCreates,
   sendToBooks, studentsBeingMade, takeFromBooks, WRITE_COPY, addFamily, changeInPortal } from "@/lib/roster/writes";
 import { familyCreatesFiled } from "@/lib/roster/no-family";
-import { loadAccountingLinks, type GuardianShown, type LinkRow, type LinksView } from "@/lib/accounting/mapping";
+import { loadAccountingLinks, QUEUE_IN_THE_WAY, QUEUE_IN_THE_WAY_OF_SEND, type GuardianShown, type LinkRow, type LinksView } from "@/lib/accounting/mapping";
 import { GUARDIAN_LINK_COPY, guardianUnlinkedWords, linkGuardian, unlinkGuardian } from "@/lib/accounting/guardian-links";
 import { LINK_COPY, linkFamilyToCustomer, unlinkFamily } from "@/lib/accounting/link-writes";
 import { guardianLinkStamp, sendStamp, takeStamp } from "@/lib/accounting/stamp";
@@ -145,12 +145,18 @@ describe("a staff write is never held back by an earlier company's item", () => 
 
   it("a name an earlier company's create or rename asked for is not taken (namesTaken())", async () => {
     await oldInEvery(FAMILY_CREATE("Oak Family"));
+    // Were the earlier company's names read, the name offered would be "Oak Family (3)".
+    await oldInEvery(FAMILY_CREATE("Oak Family (2)"));
     await oldInEvery(RENAME_CHEN);
     const current = await seedQueued(FAMILY_CREATE("Oak Family"));
-    expect(await askRosterWrite({ op: "rename", qboId: "12", syncToken: "0", name: "Oak Family" }, tag, op)).toMatchObject({ ok: false });
+    expect(await askRosterWrite({ op: "rename", qboId: "12", syncToken: "0", name: "Oak Family" }, tag, op)).toEqual({ ok: false, offer: "Oak Family (2)",
+      errors: ["“Oak Family” is already a name in QuickBooks, and every name there must be different. You could use “Oak Family (2)” instead."] });
+    expect(posts()).toEqual([]);
     await dropItem(current.id);
     expect(await askRosterWrite({ op: "rename", qboId: "12", syncToken: "0", name: "Oak Family" }, tag, op)).toMatchObject({ ok: true });
     expect(await askRosterWrite({ op: "rename", qboId: "21", syncToken: "0", name: "Chen Household" }, tag, op)).toMatchObject({ ok: true });
+    expect(posts().map((c) => JSON.parse(c.body) as Record<string, unknown>)).toEqual([{ Id: "12", SyncToken: "0", sparse: true, DisplayName: "Oak Family" },
+      { Id: "21", SyncToken: "0", sparse: true, DisplayName: "Chen Household" }]);
   });
 
   it("a student made inactive: an earlier company's change of their customer, their family's create, their own create, or their move (waitingForCustomer(), familyCreateWaiting(), studentCreateWaiting(), movesOf())", async () => {
@@ -436,6 +442,26 @@ describe("the accounting links screen and its presses", () => {
     await seedQueued(MEI_CREATE());
     expect(guardianIn(await loadAccountingLinks(), "Chen Family", "Mei Chen")).toMatchObject({ offer: null, linkHeld: { row: 1, customers: 0 } });
     expect(withoutIds(await renderPage(AccountingLinksPage))).not.toEqual(page);
+  });
+
+  it("a take and a send on a real difference are held back by the roster's company's items only (takeOffersOf(), sendFactsOf(), sendOffersOf())", async () => {
+    // The books have Leo under the Chens (a read: the portal's records stay as they were), so the Rivera row offers to
+    // take QuickBooks' place into the app and to send the portal's to the books.
+    stub.customers = stub.customers.map((c) => (c.Id === "12" ? { ...c, ParentRef: { value: "20" }, Job: true, SyncToken: "1" } : c));
+    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    const RENAME_RIVERA: RosterWrite = { op: "rename", role: "family", qboId: "10", syncToken: "0", name: "Riveras", was: "Rivera Family" };
+    await oldInEvery(RENAME_RIVERA);
+    await oldInEvery(MOVE_LEO(rivera, chen));
+    const placeOffers = async () => {
+      const r = rowOf(await loadAccountingLinks(), "Rivera Family");
+      const at = r.differences.findIndex((d) => d.kind === "place");
+      expect(at).toBeGreaterThanOrEqual(0);
+      return { take: r.takes.some((t) => t.field === "place"), send: r.sends.some((s) => s.field === "place"),
+        notes: [...r.takeNotes, ...r.sendNotes].filter((n) => n.at === at).map((n) => n.words) };
+    };
+    expect(await placeOffers()).toEqual({ take: true, send: true, notes: [] });
+    await seedQueued(RENAME_RIVERA);
+    expect(await placeOffers()).toEqual({ take: false, send: false, notes: [QUEUE_IN_THE_WAY, QUEUE_IN_THE_WAY_OF_SEND] });
   });
 
   it("Link this guardian (linkGuardian()'s two queries)", async () => {
