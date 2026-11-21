@@ -23,7 +23,9 @@ const UNPAID_LIVE: BuyoutState[] = ["being_invoiced", "invoiced", "being_voided"
  * which moves an invoiced one to being voided holding no roster lock) either committed first, and its buy-out ends here
  * and its void is given up with the rest of the queue, or waits for this, and then finds the buy-out no longer
  * invoiced and queues nothing. Which state each was in, the paid ones kept and the ids ended are audited; nothing is
- * written when there was nothing.
+ * written when there was nothing. A buy-out write the worker is sending at that moment is not closed here: its finish
+ * could set an ended buy-out stuck again, and the paths that lock its queue item first could deadlock with the clear
+ * (the clear's doc comment, src/lib/roster/source.ts; stage 4's slice M7a2).
  */
 export async function endBuyoutsOfEarlierCompany(tx: Tx, o: { fromRealmId: string; toRealmId: string; actor: Actor; ip: string | null }): Promise<void> {
   // The state each was in is the row as this update found it, once its lock was had (RETURNING old: Postgres 18, as

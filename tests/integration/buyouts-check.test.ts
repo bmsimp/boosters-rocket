@@ -316,7 +316,7 @@ describe("a void on the queue", () => {
 
 describe("connecting a different company", () => {
   const admin = { actor: { door: "staff" as const, id: null, label: "admin@club.org" }, ip: null };
-  const NOTE = "Given up: the club connected a different QuickBooks company, so this was never sent there.";
+  const NOTE = "Given up: the club connected a different QuickBooks company, so nothing more was sent for this.";
   /** The same choice made again, straight into the table, by the app's own records (a family may choose again once one ended). */
   const chooseAgain = (b: typeof buyout.$inferSelect) => db.insert(buyout).values({ requirementId: b.requirementId, familyId: b.familyId, studentId: b.studentId,
     customerQboId: b.customerQboId, itemQboId: b.itemQboId, unitCents: b.unitCents, units: b.units, amountCents: b.amountCents, state: "being_invoiced", realmId: "2222",

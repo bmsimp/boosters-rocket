@@ -23,8 +23,11 @@ export async function setRosterSource(tx: Tx, realmId: string): Promise<void> {
   await tx.insert(setting).values({ key: SOURCE_KEY, value }).onConflictDoUpdate({ target: setting.key, set: { value, updatedAt: new Date() } });
 }
 
-/** The note on every queue item a change of company gave up: staff read it on Reconciliation. */
-export const GIVEN_UP_FOR_COMPANY_NOTE = "Given up: the club connected a different QuickBooks company, so this was never sent there.";
+/**
+ * The note on every queue item a change of company gave up, kept on the row for the clean-up and later readers (no page
+ * shows a given-up item's note yet). True of an item tried before as well: nothing more is sent for it.
+ */
+export const GIVEN_UP_FOR_COMPANY_NOTE = "Given up: the club connected a different QuickBooks company, so nothing more was sent for this.";
 
 /**
  * When the cache came from a company other than `realmId`, what open question 16 of the app-owned families spec says a
@@ -51,8 +54,18 @@ export const GIVEN_UP_FOR_COMPANY_NOTE = "Given up: the club connected a differe
  * end before the queue is given up. Their update takes each row's lock, so a void queued at that moment for an
  * invoiced one (queueVoid(), which holds no roster lock) either committed first, and its buy-out ends here and its
  * void is given up next, or waits, then finds the buy-out ended and queues nothing; given up first, a void queued
- * after it would be left waiting. The queue is given up in one statement, after which nothing of the old company is
- * still to be sent; the links end next, then QuickBooks' copies, and the roster's company last, with the audit row.
+ * after it would be left waiting. The queue is given up in one statement; the links end next, then QuickBooks' copies,
+ * and the roster's company last, with the audit row.
+ *
+ * Still open, stage 4's slice M7a2's (writes and queue code this slice leaves alone), both before slice M8 turns this
+ * on. A roster write the worker is trying at that moment stays given up (every finish in ./queue.ts and ./writes.ts
+ * is guarded by its state), but a buy-out write's finish (src/lib/buyouts/writes.ts) is not: itemDone() would mark the
+ * given-up item done, and tryFailed() set it waiting or stuck again and its ended buy-out stuck. And the lock order:
+ * this takes the buy-outs' row locks before the queue's, while giveUpIn() (staff "Give up") and the buy-out write's
+ * tryFailed(), createRefused() and voidKept() take an item's before its buy-out's, holding no roster lock, so one of
+ * them at that moment can deadlock with this (40P01, which rolls the change of company back). No order here suits
+ * both: created() and voided() lock the buy-out first. Those paths are to hold the roster lock shared, as
+ * closeBuyout() (src/lib/buyouts/close.ts) does.
  *
  * Nothing the portal runs reaches it until stage 4's slice M8 turns a change of company back on: a different company
  * is refused wherever one is connected or read (completeConnect() in src/lib/quickbooks/connection.ts, refreshRoster()
