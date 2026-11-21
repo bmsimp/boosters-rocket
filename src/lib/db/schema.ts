@@ -138,10 +138,15 @@ export const family = pgTable("family", {
   contactVersion: integer("contact_version").notNull().default(0),
   accountingLeftUnlinkedAt: timestamp("accounting_left_unlinked_at", { withTimezone: true }),
   accountingLeftUnlinkedBy: uuid("accounting_left_unlinked_by"), // staff_user.id of who left it unlinked
+  // Stage 4's slice M4b: a family made active again from the books, or opened by a student's take, keeps its guardians
+  // out (the gate reads it, enterableGuardianRows()) until someone who may change families lets them in on its page.
+  signinHeldAt: timestamp("signin_held_at", { withTimezone: true }),
+  signinHeldBy: uuid("signin_held_by"), // staff_user.id of whose take set the hold
   createdAt: created(),
   updatedAt: updated(),
 }, (t) => [
   check("family_left_unlinked_by_with_at", sql`${t.accountingLeftUnlinkedBy} is null or ${t.accountingLeftUnlinkedAt} is not null`),
+  check("family_signin_held_by_with_at", sql`${t.signinHeldBy} is null or ${t.signinHeldAt} is not null`),
 ]);
 
 /**
