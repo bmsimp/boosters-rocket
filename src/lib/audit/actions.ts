@@ -96,6 +96,8 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "parent.passkey.add_refused": "A passkey couldn't be added in sign-in settings",
   "parent.passkey.rename": "A parent renamed one of their passkeys",
   "parent.passkey.remove": "A parent's passkey was removed",
+  "parent.passkeys.old_address_removed": "An Admin removed every passkey made at an earlier address",
+  "parent.passkeys.old_address_refused": "An Admin's removal of passkeys from an earlier address was refused",
   "parent.device.forgotten": "A parent forgot one of their remembered devices in sign-in settings",
   "parent.devices.forgotten": "A parent forgot every remembered device but the one they were using, in sign-in settings",
   "parent.hold.opened": "Address held for staff to review",

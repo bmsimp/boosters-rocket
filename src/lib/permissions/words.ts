@@ -21,7 +21,7 @@ export const PERMISSION_WORDS: Record<Permission, string> = {
   "Roster.Family.ReadWrite": "Add, rename, move and make inactive families, students and parents in QuickBooks, and give or end a guardian's sign-in for a family: add, remove and reinstate its guardians, and let them sign in again after the family, or one of its students, was made active again from the books; and change a family's phone and mailing address, where the books keep them on the family",
   "Settings.Parents.ReadWrite": "Switch parent sign-ins and welcome emails on or off, and email set-up links to parents with no password",
   "Parents.ReadWrite": "See every parent, change a parent's name, block or unblock a parent, and resend a welcome email; and see and change a parent's phone and mailing address (and see a family's, where the books keep them on the family)",
-  "Parents.SignInReset.ReadWrite": "Reset a parent's sign-in: sign them out everywhere, remove their password, passkeys and authenticator app, and email them a link to choose a new password",
+  "Parents.SignInReset.ReadWrite": "Reset a parent's sign-in: sign them out everywhere, remove their password, passkeys and authenticator app, and email them a link to choose a new password; or remove every passkey made at an earlier address",
   "Season.Steps.Read": "See the seasons, their steps and requirements",
   "Season.Steps.ReadWrite": "Set seasons up: steps, requirements and the current season",
   "Season.Progress.Read": "See which families have met each requirement",
