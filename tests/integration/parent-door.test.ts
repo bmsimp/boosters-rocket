@@ -167,7 +167,9 @@ describe("the parent door", () => {
     const { body, cookie } = await signIn("ana@example.com");
     expect(body).toEqual({ ok: true, next: "/choose-family" });
     const first = await stateOf(cookie);
-    expect(first).toMatchObject({ status: "choose", families: [{ guardianId: f1.id, familyId: f1.familyId }, { guardianId: f2.id, familyId: f2.familyId }] });
+    // Neither family has a link, so the chooser lists them by row (enterableGuardianRows(), stage 3's slice 12b1).
+    const byRow = [f1, f2].sort((x, y) => (x.id < y.id ? -1 : 1));
+    expect(first).toMatchObject({ status: "choose", families: byRow.map((f) => ({ guardianId: f.id, familyId: f.familyId })) });
     const sessionId = first.status === "choose" ? first.sessionId : "";
     // A family is chosen by the person's own guardian row; the session is given that row's family.
     expect(await chooseFamily({ sessionId, parentId: a.id, guardianId: f2.id, ip: IP })).toBe(true);
@@ -636,7 +638,8 @@ describe("the gate: while the club asks for an active student, a family with non
     await giveStudent(g1.familyId); await giveStudent(g2.familyId);   // F3 has none
     const { cookie } = await signIn("ana@example.com");
     const s = await stateOf(cookie);
-    expect(s).toMatchObject({ status: "choose", families: [{ guardianId: g1.id }, { guardianId: g2.id }] });
+    // Neither family has a link, so the chooser lists them by row (enterableGuardianRows(), stage 3's slice 12b1).
+    expect(s).toMatchObject({ status: "choose", families: [g1.id, g2.id].sort().map((guardianId) => ({ guardianId })) });
     const sessionId = s.status === "choose" ? s.sessionId : "";
     // The family with no active student can't be chosen, the same way as a row that isn't the person's.
     expect(await chooseFamily({ sessionId, parentId: a.id, guardianId: g3.id, ip: IP })).toBe(false);
