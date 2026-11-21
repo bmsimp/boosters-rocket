@@ -25,8 +25,8 @@ QuickBooks, **Check the portal's requests** (`/staff/settings/quickbooks/check`,
 | Section | Built | Partly built | Missing | Changed or dropped | Owner check |
 |---|---|---|---|---|---|
 | §2 In v1 | 9 | 0 | 0 | 1 | 0 |
-| §6 Roster management | 15 | 0 | 0 | 6 | 0 |
-| §8 Money | 24 | 0 | 0 | 0 | 0 |
+| §6 Roster management | 11 | 0 | 0 | 10 | 0 |
+| §8 Money | 25 | 0 | 0 | 0 | 0 |
 | §9 Forms | 23 | 0 | 0 | 2 | 0 |
 | §10 Seasons | 17 | 1 | 0 | 0 | 0 |
 | §11 Volunteering | 26 | 0 | 0 | 0 | 0 |
@@ -36,7 +36,7 @@ QuickBooks, **Check the portal's requests** (`/staff/settings/quickbooks/check`,
 | Owner's decisions of 2026-11-14 | 5 | 0 | 0 | 0 | 0 |
 | App-owned families: the mapping screen | 18 | 0 | 3 | 0 | 0 |
 | App-owned families: signing in | 37 | 2 | 1 | 0 | 4 |
-| **All** | **202** | **7** | **4** | **11** | **4** |
+| **All** | **199** | **7** | **4** | **15** | **4** |
 
 Nothing the v1 spec asks for is missing outright. The four missing rows are the app-owned families spec's: three of
 its mapping screen, which stage 4 is building one slice at a time (each row names the slice that builds it), and one of

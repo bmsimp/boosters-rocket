@@ -4,7 +4,7 @@
  * the family can choose again or volunteer. So it is offered only when the portal can tell that no unpaid invoice of the
  * buy-out stands: QuickBooks refused the invoice; the create was never sent (every try of it surely sent nothing); the
  * invoice is gone from QuickBooks; or it is paid in full and a void was asked for (a guardian switched back, or the
- * student moved). Where an unpaid invoice may stand, the words say what to do in QuickBooks first, and the daily check
+ * student moved) and not made. Where an unpaid invoice may stand, the words say what to do in QuickBooks first, and the daily check
  * or "Try again now" then sees what was done there. Beside it, what a buy-out of an earlier QuickBooks company leaves to
  * settle in that company's books by hand (earlierCompanyLook(), stage 4's slice M7b), for the treasurer's list on
  * Reconciliation and the family's buy-outs page. Nothing here reads the database or the clock.
@@ -42,6 +42,17 @@ export function movedAwayByTheCheck(f: { state: BuyoutState; flag: Flag | null; 
   return f.state === "invoiced" && f.flag === "student_moved" && f.lastCode === null && !f.items.some((i) => i.op === "invoice_void");
 }
 
+/**
+ * A paid buy-out's flag that says a void was asked for and not made: the portal wouldn't send it, the invoice being paid
+ * (`paid_before_void`, or a move's `student_moved`), or QuickBooks refused it (`void_refused`, which voidKept() leaves on
+ * an invoiced one the daily check may then mark paid). The family paid an invoice that was to be cancelled, so a refund
+ * may be owed. A `given_up` flag isn't one: on a paid buy-out it is a create given up that QuickBooks made all the same,
+ * and the family paid it instead, as chosen (a void given up leaves the buy-out stuck, never paid).
+ */
+export function paidWhileToBeVoided(flag: Flag | null): boolean {
+  return flag === "paid_before_void" || flag === "student_moved" || flag === "void_refused";
+}
+
 const keep = (why: KeepWhy, words: string): CloseVerdict => ({ may: false, why, words });
 const close = (why: CloseWhy): CloseVerdict => ({ may: true, why, words: CLOSE_WORDS[why] });
 
@@ -61,9 +72,9 @@ export function closeVerdict(f: CloseFacts): CloseVerdict {
       ? "QuickBooks may have made this invoice. Use Try again now, above: the portal looks for the invoice first, by the buy-out's note, and takes it up if it is there."
       : "QuickBooks may have made this invoice before the change was given up, so the portal can't tell whether one is owed. Look in QuickBooks for an invoice whose note starts “Booster Rocket buy-out”, and sort it out there.");
   }
-  // Paid: its invoice stands, paid. Closing is for a void the portal wouldn't send, whatever any other flag says.
+  // Paid: its invoice stands, paid. Closing is for a void the portal wouldn't send, or QuickBooks wouldn't make, whatever any other flag says.
   if (f.state === "paid") {
-    if (f.flag === "paid_before_void" || f.flag === "student_moved") return close("paid_in_full");
+    if (paidWhileToBeVoided(f.flag)) return close("paid_in_full");
     return keep("nothing_to_do", "Paid instead: nothing to look at.");
   }
   // A void's own live read found it gone; a flag from stored figures alone is read again live by the close.
@@ -214,7 +225,7 @@ const looker = (here: boolean) => (kind: EarlierKind, invoiceQboId: string | nul
 /**
  * What an earlier company's buy-out leaves to settle there (the caller has told it is one: its `realm_id` is not the
  * roster's). A refused one billed nothing; a paid one keeps counting, and only one paid although its void was asked for
- * (`paid_before_void`, `student_moved`) may be owed a refund, which the close (closeVerdict()'s `paid_in_full`) then ends
+ * (paidWhileToBeVoided(): `paid_before_void`, `student_moved`, `void_refused`) may be owed a refund, which the close (closeVerdict()'s `paid_in_full`) then ends
  * here; one that ended any other way than by the change of company (voided, closed by staff) is history. One the change
  * of company ended (or, which the clear leaves none of, one still live in that company) is read from its invoice, its
  * queue items and what the portal last read of it:
@@ -234,7 +245,7 @@ const looker = (here: boolean) => (kind: EarlierKind, invoiceQboId: string | nul
 export function earlierCompanyLook(f: EarlierFacts): EarlierLook {
   const here = f.here ?? false, look = looker(here);
   if (f.state === "refused") return look("nothing_to_settle", null);
-  if (f.state === "paid") return f.flag === "paid_before_void" || f.flag === "student_moved" ? look("refund_owed", f.invoiceQboId) : look("nothing_to_settle", f.invoiceQboId);
+  if (f.state === "paid") return paidWhileToBeVoided(f.flag) ? look("refund_owed", f.invoiceQboId) : look("nothing_to_settle", f.invoiceQboId);
   if (f.state === "voided" && f.endReason !== "earlier_company") return look("nothing_to_settle", f.invoiceQboId);
   const creates = f.items.filter((i) => i.op === "invoice_create");
   const invoice = f.invoiceQboId ?? creates.find((i) => i.resultQboId !== null)?.resultQboId ?? null;
