@@ -939,7 +939,10 @@ function givenUpNext(item: Item): string {
 
 /**
  * What a refused change given up leaves (stage 3's slice 9e): the portal keeps its own value and QuickBooks its own,
- * and the difference waits for the mapping screen; a student saved first stays in the portal, unlinked.
+ * and the difference waits for the mapping screen (Accounting links), which since stage 4's slice M3c3 shows a
+ * guardian's rename or make-inactive given up in the family's row, while that Parent customer is the guardian's own and
+ * the family's link stands (a guardian's phone, address and email still wait for a later slice); a student saved first
+ * stays in the portal, unlinked.
  */
 function refusedGivenUpWords(item: Item): string {
   const w = item.request;
@@ -966,13 +969,14 @@ const guardianOp = (w: QueuedWrite): keyof typeof GUARDIAN_GIVEN_UP =>
   w.op === "create" ? "create" : w.op === "deactivate" ? "deactivate" : w.op === "contact" ? "contact" : w.op === "email" ? "email" : "rename";
 /**
  * What giving up a guardian's Parent customer change leaves (stage 3's slice 9h): the guardian's access in the portal is
- * as the portal has it; a Parent customer left active waits for the mapping screen to show the difference, and one QuickBooks
- * made from a create given up can be linked to the guardian on Accounting links (stage 4's slice M3c).
+ * as the portal has it; a Parent customer left active, or left with its name, is shown as a difference in the family's
+ * row on Accounting links (stage 4's slice M3c3) while it is the guardian's own and the family's link stands, and one
+ * QuickBooks made from a create given up can be linked to the guardian on Accounting links (stage 4's slice M3c).
  */
 const GUARDIAN_GIVEN_UP = {
   create: "Given up. Nothing more will be sent for it. The guardian keeps their access in the portal, with no Parent customer of their own in QuickBooks: if QuickBooks made one anyway, nothing in the portal is linked to it, and once the portal has read it from QuickBooks it can be linked to them on Accounting links, in the opening of the family's row.",
-  deactivate: "Given up. Nothing more will be sent for it. The guardian stays removed in the portal, and their Parent customer stays active in QuickBooks, for the mapping screen to show as a difference. Or make it inactive in QuickBooks once its balance is settled.",
-  rename: "Given up. Nothing more will be sent for it. The portal keeps the person's new name, and QuickBooks keeps the name it has on their Parent customer, for the mapping screen to show as a difference. Or rename it in QuickBooks.",
+  deactivate: "Given up. Nothing more will be sent for it. The guardian stays removed in the portal, and their Parent customer stays active in QuickBooks. While it stays under the family's customer with no other guardian linked to it, and the family's link stands, Accounting links shows it as a difference in the family's row. Or make it inactive in QuickBooks once its balance is settled.",
+  rename: "Given up. Nothing more will be sent for it. The portal keeps the person's new name, and QuickBooks keeps the name it has on their Parent customer. While that customer is active and theirs alone under the family, and the family's link stands, Accounting links shows the two names as a difference in the family's row, unless their own Parent customer under another family has the new name. Or rename it in QuickBooks.",
   contact: CONTACT_GIVEN_UP,
   email: EMAIL_GIVEN_UP,
 } as const;
