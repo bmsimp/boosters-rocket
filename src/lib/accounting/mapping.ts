@@ -398,22 +398,23 @@ export type LinkBasics = Awaited<ReturnType<typeof readLinkBasics>>;
  *
  * Queries per view, whatever the number of families (statements, not counting a transaction's begin and end): ten at
  * once, then the links (one query, while the roster names a company the books aren't connected away from), then the
- * queue's open items, then the staff names when a link or a mark names one. With no company named, or the books
+ * queue's open items and, beside them, the parents' settings (since slice M4b), then the staff names when a link or a mark
+ * names one. With no company named, or the books
  * connected to another company, no link and no queue item is read: 10, or 11 with a mark's staff name. With the shape
- * missing or broken, the links but not the queue: 11 or 12. Listed with an empty queue: 12 or 13. loadOpenWrites()
+ * missing or broken, the links but not the queue: 11 or 12. Listed with an empty queue: 13 or 14. loadOpenWrites()
  * makes one query for its items and, when there are any, up to 38 more of its own, re-reads of tables the screen has
  * read already, each made only when an item needs it: the cache's customers; a move's families through their links
  * (3: each lookup through a link reads the roster's company and the connection first), their names (1), the items'
  * family records and links (4), refused students' and guardians' names (2), a parent's contact details' read state,
  * people, families and cache rows (4), the move money note (6), the families joined's links (3), and a kept contact
- * change's checks (14). So at most 39 for the queue and 51 a view: 10 to 51. The confirm step and the chooser read
+ * change's checks (14). So at most 39 for the queue and 52 a view: 10 to 52. The confirm step and the chooser read
  * nothing more but what a family's create given up after a try left (madeAfterGivingUp(): 4 to 8, the page's own).
  * Since slice M3a2 the rows' Confirm this link (reviewOf()) and Confirm all exact email matches (bulk(), by
  * suggestedRowsShown()) are worked out from the same reads, with no query of their own, and since slice M3b so is each
  * linked row's Unlink from the books (unlinkOf()). Since slice M4a so are the presses that take the books' value of a
  * difference into the portal (takeOffersOf()), with no query of their own: the count is unchanged. Since slice M4b, in
- * the `listed` state, the parents' settings are read beside the queue's items (one more query, at once with them: 13
- * or 14 listed with an empty queue, at most 52 a view), for whether the students rule is in force, which says whether a
+ * the `listed` state, the parents' settings are read beside the queue's items (the one query it adds, counted above),
+ * for whether the students rule is in force, which says whether a
  * student's take of active holds the family's sign-ins; the inactive families the books have active (inactiveRowsOf())
  * come from the reads above, with no query of their own.
  * On four hundred families with two thousand customers that is the same number of queries; memory holds the two
