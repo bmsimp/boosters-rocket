@@ -148,6 +148,14 @@ const MAY_CONTACT_SEND = [ROSTER_WRITER, "src/app/staff/(app)/parents/actions.ts
 /** One try of a change saved first, whoever makes it (at once, the press, the queue's worker), settling its own queue item. */
 const SAVED_TRY = "trySavedItem";
 const MAY_SAVED_TRY = [ROSTER_WRITER, "src/lib/roster/queue.ts"];
+/**
+ * Send the app's to QuickBooks (stage 4's slice M5a): a name, a student's family or a student or member made inactive,
+ * sent from a difference on the accounting links screen over the books' value. It reaches QuickBooks only through the
+ * try of a change saved first (trySavedItem()) and the make-inactive's try (tryDeactivate()), today's writes and bodies,
+ * so MAY_SAVED_TRY and MAY_ROSTER_DEACTIVATE are unchanged. Started only by the module itself and the screen's press.
+ */
+const SEND = "sendToBooks";
+const MAY_SEND = [ROSTER_WRITER, "src/app/staff/(app)/links/actions.ts"];
 /** Which body each roster write sends. */
 const ROSTER_BODY = { qboCreateCustomer: "create", qboRenameCustomer: "rename", qboMoveCustomer: "reparent", qboSetCustomerActive: "active" } as const;
 /** The fields the roster writes' bodies can carry, in the order CUSTOMER_WRITES writes them. */
@@ -422,6 +430,49 @@ function checkWriterProblems(source: string): string[] {
     else if (!/\n {2}await allowed\(run, /.test(before)) problems.push(`${name} is called before the guard`);
     else if (before.slice(before.indexOf("await allowed(run, ")).includes("\n}\n")) problems.push(`${name} is called outside the function that awaited the guard`);
   }
+  return problems;
+}
+
+/**
+ * Open question 12 of the app-owned families spec: the portal never makes a customer active again (stage 4's critic,
+ * risk 1). It holds only because the roster's write module calls the client's active flag write once, in sendWrite(),
+ * with the literal `false`, and nothing else in `src/` but the client and the check of the portal's requests (an Intuit
+ * sandbox only, its own records) names it. A send from a difference on the accounting links screen (slice M5a) reaches
+ * QuickBooks through that one call and no other.
+ */
+const ACTIVE_FLAG = "qboSetCustomerActive";
+const ACTIVE_FLAG_CALL = "qboSetCustomerActive(w.qboId, w.syncToken, false, opts)";
+const MAY_NAME_ACTIVE_FLAG = [CLIENT, CHECK_WRITER, ROSTER_WRITER];
+/** What is wrong with how the active flag write is reached; nothing when only the client, the check and the roster's write module name it, and the module imports it once and calls it once, with `false`. */
+function activeFlagProblems(sources: { file: string; text: string }[]): string[] {
+  const problems: string[] = [];
+  const naming = sources.filter((s) => new RegExp(`\\b${ACTIVE_FLAG}\\b`).test(code(s.text))).map((s) => s.file);
+  const others = naming.filter((f) => !MAY_NAME_ACTIVE_FLAG.includes(f));
+  if (others.length) problems.push(`${ACTIVE_FLAG} is named by ${others.sort().join(", ")}`);
+  const writer = code(sources.find((s) => s.file === ROSTER_WRITER)?.text ?? "");
+  const names = [...writer.matchAll(new RegExp(`\\b${ACTIVE_FLAG}\\b`, "g"))];
+  if (names.length !== 2) problems.push(`${ROSTER_WRITER} names ${ACTIVE_FLAG} ${names.length} times: once to import it and once to call it is all`);
+  const calls = [...writer.matchAll(new RegExp(`\\b${ACTIVE_FLAG}\\s*\\(`, "g"))];
+  if (calls.length !== 1) problems.push(`${ROSTER_WRITER} calls ${ACTIVE_FLAG} ${calls.length} times, not once`);
+  for (const call of calls) {
+    const rest = writer.slice(call.index);
+    if (!rest.startsWith(ACTIVE_FLAG_CALL) || !/^\s*;/.test(rest.slice(ACTIVE_FLAG_CALL.length))) problems.push(`${ACTIVE_FLAG} is called otherwise than ${ACTIVE_FLAG_CALL}: ${rest.slice(0, 70)}`);
+  }
+  return problems;
+}
+
+/**
+ * What is wrong with the send from a difference's own block (sendToBooks() up to portalValueStamp(), slice M5a):
+ * nothing when it names no client write and not sendWrite(), and reaches QuickBooks through trySavedItem() and
+ * tryDeactivate().
+ */
+function sendBlockProblems(writerText: string): string[] {
+  const writer = code(writerText);
+  const start = writer.indexOf(`export async function ${SEND}(`), end = writer.indexOf("export function portalValueStamp(");
+  if (start < 0 || end <= start) return [`${SEND}'s block isn't found before portalValueStamp()`];
+  const block = writer.slice(start, end);
+  const problems = [...CLIENT_WRITES, ROSTER_SEND].filter((name) => new RegExp(`\\b${name}\\b`).test(block)).map((name) => `${SEND}'s block names ${name}`);
+  for (const via of ["trySavedItem", "tryDeactivate"]) if (!new RegExp(`\\b${via}\\(`).test(block)) problems.push(`${SEND}'s block doesn't send through ${via}()`);
   return problems;
 }
 describe("what the portal writes to QuickBooks, and who may send each", () => {
@@ -865,6 +916,53 @@ describe("what the portal writes to QuickBooks, and who may send each", () => {
       for (const source of refused) {
         expect(source, "the case didn't change the constant").not.toBe(constant);
         expect(bodyProblems(source), source).not.toEqual([]);
+      }
+    });
+  });
+
+  describe("and never a customer made active again (open question 12)", () => {
+    it("the roster's write module calls the active flag write once, with false, and nothing else in src but the client and the check names it", () => {
+      expect(activeFlagProblems(everything)).toEqual([]);
+    });
+
+    it("a send from a difference is started only by the accounting links screen's press, and a new caller is found", () => {
+      const naming = (sources: { file: string; text: string }[]) => sources.filter((s) => new RegExp(`\\b${SEND}\\b`).test(code(s.text))).map((s) => s.file).sort();
+      const why = `${SEND} sends a difference's portal value to QuickBooks, only through the saved-first try and the make-inactive's try. A new caller is a decision for a slice brief.`;
+      expect(naming(everything), why).toEqual([...MAY_SEND].sort());
+      const another = [...everything, { file: "src/app/staff/(app)/roster/send-actions.ts", text: `import { ${SEND} } from "@/lib/roster/writes";\nexport const go = () => ${SEND};\n` }];
+      expect(naming(another)).not.toEqual([...MAY_SEND].sort());
+      // The send itself names no client write: it goes through the module's own tries.
+      const writerSource = everything.find((s) => s.file === ROSTER_WRITER)!.text;
+      expect(sendBlockProblems(writerSource)).toEqual([]);
+      // Each check proved on a copy of the writer it must refuse: sendWrite() or a client write inside the block, a try
+      // taken out of it, or the block's end moved above its start.
+      const intoSendName = (line: string) => writerSource.replace(/(async function sendName\([^\n]*\{\n)/, `$1${line}\n`);
+      const cases = [
+        intoSendName(`  await sendWrite({ op: "rename", role: "family", qboId: "10", syncToken: "0", name: "x", was: "y" }, "", {});`),
+        intoSendName(`  await qboRenameCustomer("10", "0", "x", {} as never);`),
+        writerSource.replaceAll("tryDeactivate(", "tryDeactivateElsewhere("),
+        `export function portalValueStamp(): void {}\n${writerSource.replace("export function portalValueStamp(", "function portalValueStampMoved(")}`,
+      ];
+      for (const text of cases) {
+        expect(text, `case ${cases.indexOf(text)} didn't change the writer`).not.toBe(writerSource);
+        expect(sendBlockProblems(text), `case ${cases.indexOf(text)}`).not.toEqual([]);
+      }
+    });
+
+    it("a second call, true or a value in place of false, an alias, or another module naming it, each refused", () => {
+      const writerSource = everything.find((s) => s.file === ROSTER_WRITER)!.text;
+      const withWriter = (text: string) => everything.map((s) => (s.file === ROSTER_WRITER ? { file: s.file, text } : s));
+      const cases = [
+        withWriter(writerSource.replace(ACTIVE_FLAG_CALL, "qboSetCustomerActive(w.qboId, w.syncToken, true, opts)")),
+        withWriter(writerSource.replace(ACTIVE_FLAG_CALL, "qboSetCustomerActive(w.qboId, w.syncToken, w.op === \"deactivate\" ? false : true, opts)")),
+        withWriter(writerSource.replace(ACTIVE_FLAG_CALL, "qboSetCustomerActive(w.qboId, w.syncToken, false, opts).then((a) => a)")),
+        withWriter(`${writerSource}\nasync function wake(qboId: string) { return qboSetCustomerActive(qboId, "0", true, {} as never); }\n`),
+        withWriter(writerSource.replace(`${ACTIVE_FLAG},`, `${ACTIVE_FLAG} as setActive, ${ACTIVE_FLAG},`)),
+        [...everything, { file: "src/lib/accounting/send.ts", text: `import { ${ACTIVE_FLAG} } from "@/lib/quickbooks/client";\nexport const wake = (id: string) => ${ACTIVE_FLAG}(id, "0", true, {} as never);\n` }],
+      ];
+      for (const sources of cases) {
+        expect(sources, "the case didn't change the sources").not.toEqual(everything);
+        expect(activeFlagProblems(sources), `case ${cases.indexOf(sources)}`).not.toEqual([]);
       }
     });
   });

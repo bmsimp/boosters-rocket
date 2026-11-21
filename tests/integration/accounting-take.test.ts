@@ -474,7 +474,9 @@ describe("the page", () => {
     expect(list).toContain("Ash Oak is still active in the books, so the family can't be taken as inactive until they are made inactive there or moved.");
     // Nothing for Chen's waiting rename, Max at the top, Kim with no record, Mei Chen's Parent customer.
     expect(list).not.toMatch(/Chen Family's name<\/span>|Max Rivera's family<\/span>|Kim Rivera<\/span>/);
-    expect(whole).toContain("with Take QuickBooks&#x27; into the app, which changes only the portal&#x27;s records, except that a student&#x27;s move voids an unpaid volunteer buy-out invoice of theirs in the books, as any move does; every other difference is only shown.");
+    expect(whole).toContain("with Take QuickBooks&#x27; into the app, which changes only the portal&#x27;s records, except that a student&#x27;s move voids an unpaid volunteer buy-out invoice of theirs in the books, as any move does.");
+    // Since slice M5a, Send the app's to QuickBooks beside it, and only then is the rest only shown.
+    expect(whole).toContain("can instead be sent to the books with Send the app&#x27;s to QuickBooks, by someone who may also change families: it replaces the books&#x27; value with the portal&#x27;s, and a make-inactive reads the balance first and sends nothing while there is any. Every other difference is only shown.");
   });
 
   it("draws a move's press and a record's inactive press with their words when nothing on the queue stands in the way", async () => {
