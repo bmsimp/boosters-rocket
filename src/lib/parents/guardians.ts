@@ -388,7 +388,7 @@ export async function reinstateGuardian(guardianId: string, o: StaffOp, w: Waits
   return r ?? { ok: false, reason: "being_changed" };
 }
 
-export type ReleaseSigninHoldResult = { ok: true; name: string; counting: number } | { ok: false; reason: "not_found" | "not_held" | "busy" };
+export type ReleaseSigninHoldResult = { ok: true; name: string; counting: number; signingIn: number } | { ok: false; reason: "not_found" | "not_held" | "busy" };
 
 /**
  * Lets a family's guardians sign in again after a take from the books held its sign-ins (stage 4's slice M4b, the
@@ -397,7 +397,9 @@ export type ReleaseSigninHoldResult = { ok: true; name: string; counting: number
  * roster lock shared as the guardian writes here take it (holdRoster(): at most ROSTER_WAIT_MS, `busy` otherwise), the
  * family row FOR UPDATE, and the hold cleared only while it is set (`not_held` otherwise, changing nothing). Audited
  * `roster.family.signin_released`: the hold's time and staff member before, and how many of the family's open guardian
- * rows count now by the gate's rule (guardianRowCounts()) after. No guardian row is opened, closed or changed: each
+ * rows count now by the gate's rule (guardianRowCounts()) after. `signingIn`, for the answer's words, is how many of
+ * those rows are of a person who isn't blocked (the door refuses a blocked person, and the family's page leaves them
+ * out of the release's words likewise): the rows that let someone in now. No guardian row is opened, closed or changed: each
  * open one counts again at once, by the gate's own rule (an active family, and, while the students rule is in force,
  * an active student), and every door follows. Nothing is sent to QuickBooks.
  */
@@ -409,12 +411,23 @@ export async function releaseSigninHold(familyId: AppFamilyId, o: StaffOp, w: Wa
     if (!f) return { ok: false, reason: "not_found" };
     if (f.at === null) return { ok: false, reason: "not_held" };
     await tx.update(family).set({ signinHeldAt: null, signinHeldBy: null, updatedAt: new Date() }).where(eq(family.id, familyId));
-    const counting = (await tx.select({ id: guardian.id }).from(guardian)
-      .where(and(eq(guardian.familyId, familyId), guardianRowCounts(await studentsRuleInForce(tx))))).length;
+    const rows = await tx.select({ blocked: parent.blocked }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
+      .where(and(eq(guardian.familyId, familyId), guardianRowCounts(await studentsRuleInForce(tx))));
+    const counting = rows.length;
+    const signingIn = rows.filter((r) => !r.blocked).length;
     await writeAudit({ actor: o.actor, action: "roster.family.signin_released", permission: o.permission, targetType: "family", targetId: String(familyId), ip: o.ip,
       before: { heldAt: f.at.toISOString(), heldBy: f.by }, after: { counting } }, tx);
-    return { ok: true, name: recordNameWords(f.name, "family"), counting };
+    return { ok: true, name: recordNameWords(f.name, "family"), counting, signingIn };
   });
+}
+
+/**
+ * Whether the family of a guardian row has its sign-ins held (stage 4's slice M4b), for the words after a reinstate on
+ * the family's page: the row's own family record, read after the write. One query.
+ */
+export async function signinHeldOfGuardian(guardianId: string): Promise<boolean> {
+  const [r] = await db.select({ at: family.signinHeldAt }).from(guardian).innerJoin(family, eq(family.id, guardian.familyId)).where(eq(guardian.id, guardianId));
+  return !!r?.at;
 }
 
 /**

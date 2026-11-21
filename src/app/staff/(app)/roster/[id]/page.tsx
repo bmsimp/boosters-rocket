@@ -120,8 +120,11 @@ function SignIns({ familyId, signins, links, changes, addable, inQuickBooks }: {
  */
 function SigninHold({ name, hold, notNow, guardians, release }: { name: string; hold: { at: string; by: string | null }; notNow: string | null; guardians: string[];
   release: (() => Promise<{ ok: true; message: string } | { ok: false; errors: string[] }>) | null }) {
+  const them = `${guardians.length === 1 ? "1 guardian" : `${guardians.length} guardians`}, ${guardians.join(", ")}`;
+  // "At once" only while nothing else keeps them out (`notNow` null); otherwise once what the Notice says no longer stands.
   const who = guardians.length === 0 ? "It has no open guardian who isn't blocked now."
-    : `Every open guardian of it can then sign in to it at once: ${guardians.length === 1 ? "1 guardian" : `${guardians.length} guardians`}, ${guardians.join(", ")}.`;
+    : notNow === null ? `Every open guardian of it can then sign in to it at once, while parent sign-ins are on: ${them}.`
+    : `Every open guardian of it can then sign in to it once what keeps them out above no longer stands: ${them}.`;
   return (
     <section className="box" aria-labelledby="entry-hold-h"><h2 id="entry-hold-h">Sign-ins held</h2>
       <Notice tone="warning" live="none">

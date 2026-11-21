@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { staffAction, type StaffCtx } from "@/lib/guards";
 import { blockPerson, renamePerson, unblockPerson } from "@/lib/parents/people";
-import { addGuardian, reinstateGuardian, releaseSigninHold, removeGuardian } from "@/lib/parents/guardians";
+import { addGuardian, reinstateGuardian, releaseSigninHold, removeGuardian, signinHeldOfGuardian, signinHoldOf } from "@/lib/parents/guardians";
 import { familyRecordAt } from "@/lib/families/address";
 import { resendWelcome } from "@/lib/parents/welcome";
 import { can } from "@/lib/permissions/effective";
@@ -117,9 +117,10 @@ export const addGuardianAction = staffAction(R, async (ctx, familyId: string, na
   refresh();
   // Said of a person who held the address already, between their name and what follows it.
   const known = r.person === "existing" ? ", who already had a sign-in with this address (their name is unchanged)" : "";
+  const held = (await signinHoldOf(family)) !== null ? ` ${HELD_STILL}` : "";
   return { ok: true, message: withQuickBooks(r.outcome === "reinstated"
-    ? `${r.name}${known}${known ? "," : ""} was a guardian of this family before: their sign-in for it is back. They sign in with this address and a code while parent sign-ins are on.`
-    : `Added ${r.name}${known}. They sign in with this address and a code while parent sign-ins are on, and are sent a welcome email if they have never had one and welcome emails are on.`, r.quickbooks) };
+    ? `${r.name}${known}${known ? "," : ""} was a guardian of this family before: their sign-in for it is back. They sign in with this address and a code while parent sign-ins are on.${held}`
+    : `Added ${r.name}${known}. They sign in with this address and a code while parent sign-ins are on, and are sent a welcome email if they have never had one and welcome emails are on.${held}`, r.quickbooks) };
 });
 
 export const removeGuardianAction = staffAction(R, async (ctx, guardianId: string, note: string): Promise<Done> => {
@@ -150,6 +151,10 @@ const REINSTATE_REFUSED = {
   being_changed: BEING_CHANGED_WORDS,
 } as const;
 
+// Said after an add or a reinstate in a family whose sign-ins a take from the books held (stage 4's slice M4b): the
+// guardian's row is open, and the gate still keeps them out until the hold is ended on the family's page.
+const HELD_STILL = "This family's sign-ins are held all the same, so they can't sign in to it until someone who may change families lets its guardians in, under Sign-ins held on this page.";
+
 export const reinstateGuardianAction = staffAction(R, async (ctx, guardianId: string): Promise<Done> => {
   if (!personId(guardianId)) return NOT_FROM_PAGE;
   const r = await reinstateGuardian(guardianId, op(ctx, R));
@@ -159,7 +164,8 @@ export const reinstateGuardianAction = staffAction(R, async (ctx, guardianId: st
     return { ok: false, errors: [REINSTATE_REFUSED[r.reason]] };
   }
   refresh();
-  return { ok: true, message: withQuickBooks("Reinstated. Their sign-in for this family is back.", r.quickbooks) };
+  const held = (await signinHeldOfGuardian(guardianId)) ? ` ${HELD_STILL}` : "";
+  return { ok: true, message: withQuickBooks(`Reinstated. Their sign-in for this family is back.${held}`, r.quickbooks) };
 });
 
 /**
@@ -180,9 +186,10 @@ export const releaseSigninHoldAction = staffAction(R, async (ctx, familyId: stri
     return NOT_FROM_PAGE;
   }
   refresh();
-  return { ok: true, message: r.counting === 0
-    ? `Done. Nobody can sign in to ${r.name} yet all the same: it has no open guardian, or none the portal lets in now (the family may be inactive, or have no active student while the club asks for one).`
-    : `Done. ${r.counting === 1 ? "Its 1 open guardian" : `Its ${r.counting} open guardians`} can sign in to ${r.name} now.` };
+  // By the people who can sign in now: an open row that counts, of a person who isn't blocked (`signingIn`).
+  return { ok: true, message: r.signingIn === 0
+    ? `Done. Nobody can sign in to ${r.name} yet all the same: it has no open guardian who isn't blocked, or none the portal lets in now (the family may be inactive, or have no active student while the club asks for one).`
+    : `Done. ${r.signingIn === 1 ? "Its 1 open guardian" : `Its ${r.signingIn} open guardians`} can sign in to ${r.name} now, while parent sign-ins are on.` };
 });
 
 /**

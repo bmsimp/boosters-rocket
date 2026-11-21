@@ -15,7 +15,7 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { family, guardian, student, writeQueue } from "@/lib/db/schema";
+import { accountingLink, family, guardian, parent, student, writeQueue } from "@/lib/db/schema";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
 import { AccessDenied } from "@/lib/guards";
 import { loadAccountingLinks, QUEUE_IN_THE_WAY, type InactiveRow, type LinkRow, type LinksView, type TakeOffer } from "@/lib/accounting/mapping";
@@ -24,11 +24,12 @@ import { auditPage, parseAuditFilters } from "@/lib/audit/query";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { FAMILY_BEING_CHANGED, heldWords, KEPT_OFF_STAYS, MOVE_PENDING, SENDING_LOCK, STUDENT_BEING_CHANGED, TAKE_CHANGED, takeFromBooks, WRITE_COPY } from "@/lib/roster/writes";
 import { enterableGuardianRows } from "@/lib/parents/sessions";
-import { releaseSigninHold } from "@/lib/parents/guardians";
-import { releaseSigninHoldAction } from "@/app/staff/(app)/parents/actions";
+import { releaseSigninHold, signinHeldOfGuardian } from "@/lib/parents/guardians";
+import { addGuardianAction, releaseSigninHoldAction } from "@/app/staff/(app)/parents/actions";
+import { takeDifferenceAction } from "@/app/staff/(app)/links/actions";
 import AccountingLinksPage from "@/app/staff/(app)/links/page";
 import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
-import { resetDb, seedGuardian, seedParent, seedWorkingMail } from "../helpers/db";
+import { resetDb, seedGuardian, seedGuardianInFamily, seedParent, seedWorkingMail } from "../helpers/db";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
 import { auditsOf, connectRoster, seedAnaRivera, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
@@ -62,6 +63,7 @@ async function readAgain(...customers: ReturnType<typeof qc>[]) {
   const r = await refreshRoster(WORKER);
   if (!r.ok) throw new Error(`the roster couldn't be read from the stub: ${JSON.stringify(r)}`);
 }
+const under = (id: string) => ({ ParentRef: { value: id }, Job: true });
 const changeInBooks = (id: string, change: Record<string, unknown>) => { stub.customers = stub.customers.map((c) => (c.Id === id ? { ...c, ...change } : c)); };
 /** Holds one of the advisory locks a send holds, for as long as `run` takes, on another connection. */
 const holding = <T>(key: number, id: string, run: () => Promise<T>) => db.transaction(async (tx) => {
@@ -183,7 +185,7 @@ describe("a student made active again", () => {
     expect((await activeTakes())[0]!.after).toMatchObject({ field: "active", kind: "student", studentId: String(leo), held: true });
     // The release, by someone who may change families: counted at once.
     const holder = await staffWith("holder@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]);
-    expect(await releaseSigninHold(rivera, holderOp(holder))).toEqual({ ok: true, name: "Rivera Family", counting: 1 });
+    expect(await releaseSigninHold(rivera, holderOp(holder))).toEqual({ ok: true, name: "Rivera Family", counting: 1, signingIn: 1 });
     expect((await enterableGuardianRows(ana.id)).map((g) => g.familyId)).toEqual([rivera]);
     expect(await familyRow(rivera)).toMatchObject({ signinHeldAt: null, signinHeldBy: null });
     const [released, ...again] = await auditsOf("roster.family.signin_released");
@@ -191,6 +193,33 @@ describe("a student made active again", () => {
     expect(released).toMatchObject({ targetType: "family", targetId: String(rivera), permission: "Roster.Family.ReadWrite",
       before: { heldAt: held.signinHeldAt!.toISOString(), heldBy: linker.id }, after: { counting: 1 } });
     expect((await auditPage(parseAuditFilters({ record: `family:${rivera}` }), {}, 500)).rows.map((r) => r.id)).toContain(released!.id);
+  });
+
+  it("through the press itself (takeDifferenceAction()), with field active: taken, and the pages shown again", async () => {
+    await leoInactiveHere();
+    const offer = await offerOf("Rivera Family", "active");
+    asStaff(linker);
+    expect(await takeDifferenceAction("active", "student", offer.recordId, tag, offer.stamp))
+      .toEqual({ ok: true, message: "Made Leo Rivera active in the portal, as the books have them. Nothing was sent to the books." });
+    expect(revalidatedPaths()).toContain("/");
+    expect(await studentRow(leo)).toMatchObject({ active: true });
+    expect(await activeTakes()).toHaveLength(1);
+  });
+
+  it("with the students rule in force and another active student in the family: no hold, and its words don't say one", async () => {
+    // Mia Rivera (13), imported before anything is changed in the portal.
+    await readAgain(qc("13", "Mia Rivera", "3", under("10")));
+    await syncAppRecords();
+    await seedParentSettings({ requireActiveStudents: true });
+    await leoInactiveHere();
+    // Mia is active: Ana signs in to Rivera already, so bringing Leo back opens nothing.
+    expect((await enterableGuardianRows(ana.id)).map((g) => g.familyId)).toEqual([rivera]);
+    const offer = await offerOf("Rivera Family", "active");
+    expect(offer.words).toEqual(["Makes Leo Rivera active in the portal, as the books have them. Nothing is sent to the books."]);
+    expect(await press(offer)).toEqual({ ok: true, message: "Made Leo Rivera active in the portal, as the books have them. Nothing was sent to the books." });
+    expect(await familyRow(rivera)).toMatchObject({ signinHeldAt: null, signinHeldBy: null });
+    expect((await activeTakes())[0]!.after).toMatchObject({ kind: "student", held: false });
+    expect((await enterableGuardianRows(ana.id)).map((g) => g.familyId)).toEqual([rivera]);
   });
 
   it("with a make-inactive of the customer kept on Reconciliation: taken, and the kept change stays as it is, said", async () => {
@@ -245,7 +274,7 @@ describe("a family made active again", () => {
     expect((await activeTakes())[0]!.after).toMatchObject({ kind: "student", held: false });
     expect(await enterableGuardianRows(ana.id)).toEqual([]);
     const holder = await staffWith("holder@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]);
-    expect(await releaseSigninHold(rivera, holderOp(holder))).toEqual({ ok: true, name: "Rivera Family", counting: 1 });
+    expect(await releaseSigninHold(rivera, holderOp(holder))).toEqual({ ok: true, name: "Rivera Family", counting: 1, signingIn: 1 });
     expect((await enterableGuardianRows(ana.id)).map((g) => g.familyId)).toEqual([rivera]);
     expect(await guardianRows()).toEqual(guardiansBefore);
     expect(sentSince()).toEqual([]);
@@ -275,7 +304,7 @@ describe("a member made active again, in flat books", () => {
     expect(await familyRow(rivera)).toMatchObject({ active: true, signinHeldBy: linker.id });
     expect(await enterableGuardianRows(pat.id)).toEqual([]);
     const holder = await staffWith("holder@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]);
-    expect(await releaseSigninHold(rivera, holderOp(holder))).toEqual({ ok: true, name: "Rivera Family", counting: 1 });
+    expect(await releaseSigninHold(rivera, holderOp(holder))).toEqual({ ok: true, name: "Rivera Family", counting: 1, signingIn: 1 });
     expect((await enterableGuardianRows(pat.id)).map((r) => r.id)).toEqual([g.id]);
   });
 });
@@ -317,6 +346,14 @@ describe("refused, changing nothing", () => {
     expect(await studentRow(leo)).toMatchObject({ active: false });
     expect(await activeTakes()).toEqual([]);
     expect(await familyRow(rivera)).toMatchObject({ signinHeldAt: null });
+  });
+
+  it("an inactive family with no link isn't listed, and offers nothing", async () => {
+    await riveraInactiveHere();
+    expect((await loadAccountingLinks()).inactive.map((r) => r.name)).toEqual(["Rivera Family"]);
+    // Its link ended (the test's own write: nothing reads it before the screen).
+    await db.delete(accountingLink).where(eq(accountingLink.familyId, rivera));
+    expect((await loadAccountingLinks()).inactive).toEqual([]);
   });
 
   it("a student of an inactive family isn't offered, and a press called anyway is refused: the family comes first", async () => {
@@ -389,13 +426,57 @@ describe("the release", () => {
       expect(await (releaseSigninHoldAction as unknown as (...a: unknown[]) => Promise<unknown>)(bad)).toEqual({ ok: false, errors: ["That didn't go through. Reload the page and try again."] });
     }
     expect(await auditsOf("roster.family.signin_released")).toEqual([]);
-    expect(await releaseSigninHoldAction(String(rivera))).toEqual({ ok: true, message: "Done. Its 1 open guardian can sign in to Rivera Family now." });
+    expect(await releaseSigninHoldAction(String(rivera))).toEqual({ ok: true, message: "Done. Its 1 open guardian can sign in to Rivera Family now, while parent sign-ins are on." });
     expect(revalidatedPaths()).toContain("/staff");
     expect(await auditsOf("roster.family.signin_released")).toHaveLength(1);
     // A family with no hold: refused, nothing changed, no row.
     expect(await releaseSigninHoldAction(String(rivera))).toEqual({ ok: false, errors: ["This family's guardians aren't held back from signing in, so nothing was changed. Reload the page."] });
     expect(await releaseSigninHoldAction(String(chen))).toEqual({ ok: false, errors: ["This family's guardians aren't held back from signing in, so nothing was changed. Reload the page."] });
     expect(await auditsOf("roster.family.signin_released")).toHaveLength(1);
+  });
+});
+
+describe("the release's words and a held family's guardians", () => {
+  beforeEach(layered);
+
+  it("count only the guardians who can sign in: a blocked person's open row counts by the gate's rule in the audit row, not in the words", async () => {
+    await riveraInactiveHere();
+    expect(await press((await inactiveOf("Rivera Family")).take!)).toMatchObject({ ok: true });
+    // Ben Rivera, a second open guardian of the family, and Ana blocked (the test's own writes, after every take).
+    const ben = await seedParent({ name: "Ben Rivera", email: "ben@example.com" });
+    await seedGuardianInFamily({ parentId: ben.id, familyQboId: "10" });
+    await db.update(parent).set({ blocked: true }).where(eq(parent.id, ana.id));
+    const holder = await staffWith("holder@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]);
+    asStaff(holder);
+    const page = (await renderPage(RosterEntryPage, { params: { id: String(rivera) } })).replaceAll("&#x27;", "'");
+    expect(page).toContain("at once, while parent sign-ins are on: 1 guardian, Ben Rivera.");
+    expect(await releaseSigninHoldAction(String(rivera))).toEqual({ ok: true, message: "Done. Its 1 open guardian can sign in to Rivera Family now, while parent sign-ins are on." });
+    const [released] = await auditsOf("roster.family.signin_released");
+    expect(released).toMatchObject({ targetId: String(rivera), after: { counting: 2 } });
+  });
+
+  it("say nobody can sign in when the only open guardian is blocked", async () => {
+    await riveraInactiveHere();
+    expect(await press((await inactiveOf("Rivera Family")).take!)).toMatchObject({ ok: true });
+    await db.update(parent).set({ blocked: true }).where(eq(parent.id, ana.id));
+    const holder = await staffWith("holder@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]);
+    asStaff(holder);
+    expect(await releaseSigninHoldAction(String(rivera))).toEqual({ ok: true, message: "Done. Nobody can sign in to Rivera Family yet all the same: it has no open guardian who isn't blocked, or none the portal lets in now (the family may be inactive, or have no active student while the club asks for one)." });
+    expect((await auditsOf("roster.family.signin_released"))[0]).toMatchObject({ after: { counting: 1 } });
+  });
+
+  it("an add to a held family says its sign-ins are held all the same, and a guardian row's hold is read by its family", async () => {
+    await riveraInactiveHere();
+    expect(await press((await inactiveOf("Rivera Family")).take!)).toMatchObject({ ok: true });
+    const anas = (await guardianRows()).find((g) => g.parentId === ana.id)!;
+    expect(await signinHeldOfGuardian(anas.id)).toBe(true);
+    const holder = await staffWith("holder@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]);
+    asStaff(holder);
+    const added = await addGuardianAction(String(rivera), "Ben Rivera", "ben@example.com");
+    expect(added).toMatchObject({ ok: true });
+    expect((added as { message: string }).message).toContain("This family's sign-ins are held all the same, so they can't sign in to it until someone who may change families lets its guardians in, under Sign-ins held on this page.");
+    expect(await releaseSigninHoldAction(String(rivera))).toMatchObject({ ok: true });
+    expect(await signinHeldOfGuardian(anas.id)).toBe(false);
   });
 });
 
@@ -457,7 +538,7 @@ describe("the pages", () => {
     expect(forHolder).toContain("Sign-ins held");
     expect(forHolder).toContain("Rivera Family's guardians can't sign in to it now. It was made active again from the books on the accounting links screen (the family, or one of its students), by linker, on ");
     expect(forHolder).toContain("Once let in, they count at once: the family is active and nothing else keeps them out.");
-    expect(forHolder).toContain("Let its guardians sign in ends the hold. Every open guardian of it can then sign in to it at once: 1 guardian, Ana Rivera.");
+    expect(forHolder).toContain("Let its guardians sign in ends the hold. Every open guardian of it can then sign in to it at once, while parent sign-ins are on: 1 guardian, Ana Rivera.");
     expect(forHolder).toContain(">Let its guardians sign in</button>");
     // The staff member's id is never drawn: their name is.
     expect(forHolder).not.toContain(linker.id);
@@ -471,5 +552,21 @@ describe("the pages", () => {
     // Released: no Notice.
     expect(await releaseSigninHold(rivera, holderOp(holder))).toMatchObject({ ok: true });
     expect(sectionOf(await renderPage(RosterEntryPage, { params: { id: String(rivera) } }), "entry-hold-h")).toBe("");
+  });
+
+  it("the family's page: while something else keeps them out, the button's words don't say at once", async () => {
+    await seedParentSettings({ requireActiveStudents: true });
+    await leoInactiveHere();
+    expect(await press(await offerOf("Rivera Family", "active"))).toMatchObject({ ok: true });
+    // Leo inactive in the books again, and taken so: the family is held and has no active student.
+    changeInBooks("12", { Active: false });
+    await readAgain();
+    expect(await press(await offerOf("Rivera Family", "inactive"))).toMatchObject({ ok: true });
+    const holder = await staffWith("holder@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]);
+    asStaff(holder);
+    const part = sectionOf(await renderPage(RosterEntryPage, { params: { id: String(rivera) } }), "entry-hold-h");
+    expect(part).toContain("Even once let in, they can't sign in yet: the family has no active student, and the club asks for one.");
+    expect(part).toContain("Every open guardian of it can then sign in to it once what keeps them out above no longer stands: 1 guardian, Ana Rivera.");
+    expect(part).not.toContain("at once");
   });
 });
