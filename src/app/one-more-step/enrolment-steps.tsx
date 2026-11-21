@@ -9,8 +9,11 @@ import { AppSetupForm, type AppSetupShown } from "@/app/(parent)/family/sign-in/
 import type { EnrolmentAppConfirm, EnrolmentAppStart } from "./actions";
 
 const Errors = ({ errors }: { errors: string[] }) => <ul role="alert" className="errors">{errors.map((e) => <li key={e}>{e}</li>)}</ul>;
-/** A press that threw (the gate refused it: the session ended, its window passed) is answered as the window passed. */
-const SIGN_IN_AGAIN = { ok: false as const, errors: [WORDS.windowPassed], signInAgain: true as const };
+/**
+ * A press that threw: a lost connection, the server, or the gate's refusal of a session no longer enrolling (whole from
+ * another tab, or ended). One answer true of each, in the box, which stays: a reload shows where things stand.
+ */
+const THREW = { ok: false as const, errors: [WORDS.failed] };
 type Busy = "passkey" | "start" | "confirm" | null;
 type Done = { kind: "passkey" | "app"; codes: string[] | null };
 type Setup = AppSetupShown & { stamp: string };
@@ -37,7 +40,8 @@ export function EnrolmentSteps({ portalOrigin, next, startApp, confirmApp }: { p
   const [busy, setBusy] = useState<Busy>(null);
   const [passkeyErrors, setPasskeyErrors] = useState<string[] | null>(null);
   const [appErrors, setAppErrors] = useState<string[] | null>(null);
-  const [signInAgain, setSignInAgain] = useState(false);
+  // The words of a refusal that means signing in again (the actions' own, true of why), and only those are drawn then.
+  const [signInAgain, setSignInAgain] = useState<string[] | null>(null);
   const [setup, setSetup] = useState<Setup | null>(null);
   const [code, setCode] = useState("");
   const [done, setDone] = useState<Done | null>(null);
@@ -47,8 +51,12 @@ export function EnrolmentSteps({ portalOrigin, next, startApp, confirmApp }: { p
   const landing = useRef<HTMLParagraphElement>(null);
   const said = useRef<HTMLParagraphElement>(null);
   const refusal = useRef<HTMLDivElement>(null);
+  const appAnswer = useRef<HTMLDivElement>(null);
   const [landed, setLanded] = useState(0);
+  // A set-up found over takes its form and focused button away: the focus goes to the answer that says so.
+  const [setupEnded, setSetupEnded] = useState(0);
   useEffect(() => { if (landed) landing.current?.focus(); }, [landed]);
+  useEffect(() => { if (setupEnded) appAnswer.current?.focus(); }, [setupEnded]);
   useEffect(() => { if (done) said.current?.focus(); }, [done]);
   useEffect(() => { if (signInAgain) refusal.current?.focus(); }, [signInAgain]);
 
@@ -58,28 +66,29 @@ export function EnrolmentSteps({ portalOrigin, next, startApp, confirmApp }: { p
     const added = await addPasskeyHere("");
     setBusy(null);
     if (added.ok) { setDone({ kind: "passkey", codes: added.codes ?? null }); return; }
-    // The options or the add refused for want of a proof: here that means the enrolment's window has passed.
-    if (added.proveAgain) { setSignInAgain(true); return; }
+    // The options or the add refused for want of a proof: the session may no longer add one (its window passed, a
+    // factor came through another session, or the level changed). The browser can't tell which: words true of each.
+    if (added.proveAgain) { setSignInAgain([WORDS.signInAgain]); return; }
     setPasskeyErrors([added.error]);
   };
   const start = async () => {
     if (busy) return;
     setBusy("start"); setAppErrors(null);
-    const r = await safely(() => startApp(), SIGN_IN_AGAIN);
+    const r = await safely<EnrolmentAppStart>(() => startApp(), THREW);
     setBusy(null);
-    if (!r.ok) { if ("signInAgain" in r) setSignInAgain(true); else setAppErrors(r.errors); return; }
+    if (!r.ok) { if ("signInAgain" in r) setSignInAgain(r.errors); else setAppErrors(r.errors); return; }
     setCode(""); setSetup({ key: r.key, qr: r.qr, stamp: r.stamp }); setLanded((n) => n + 1);
   };
   const confirm = async () => {
     if (busy || !setup) return;
     setBusy("confirm"); setAppErrors(null);
-    const r = await safely(() => confirmApp(code, setup.stamp), SIGN_IN_AGAIN);
+    const r = await safely<EnrolmentAppConfirm>(() => confirmApp(code, setup.stamp), THREW);
     setBusy(null);
     if (!r.ok) {
-      if ("signInAgain" in r) { setSetup(null); setSignInAgain(true); return; }
-      // Nothing left to finish (run out, replaced, or finished in another window): the dead QR code and key go.
-      if ("setupOver" in r && r.setupOver) { setSetup(null); setCode(""); }
+      if ("signInAgain" in r) { setSetup(null); setSignInAgain(r.errors); return; }
       setAppErrors(r.errors);
+      // Nothing left to finish (run out, replaced, or finished in another window): the dead QR code and key go.
+      if ("setupOver" in r && r.setupOver) { setSetup(null); setCode(""); setSetupEnded((n) => n + 1); }
       return;
     }
     setSetup(null); setCode(""); setDone({ kind: "app", codes: r.codes });
@@ -92,7 +101,7 @@ export function EnrolmentSteps({ portalOrigin, next, startApp, confirmApp }: { p
   if (signInAgain) {
     return (
       <div ref={refusal} tabIndex={-1} className="stack">
-        <Errors errors={[WORDS.windowPassed]} />
+        <Errors errors={signInAgain} />
         <p><Link className="link-line" href="/sign-in">{WORDS.signIn}</Link></p>
       </div>
     );
@@ -103,7 +112,7 @@ export function EnrolmentSteps({ portalOrigin, next, startApp, confirmApp }: { p
     return (
       <div className="stack enrolment-done">
         {done.codes ? (
-          <BackupCodesShown message={words} list={done.codes} app={done.kind === "app"} lineRef={said}
+          <BackupCodesShown message={words} list={done.codes} app={done.kind === "app"} lineRef={said} heading={2}
             keep={done.kind === "passkey" ? WORDS.backupCodesKeepPasskey : undefined} />
         ) : <p ref={said} role="status" tabIndex={-1} className="paid-up"><Tick />{words}</p>}
         <form className="stack" onSubmit={(e) => { e.preventDefault(); goOn(); }}>
@@ -146,7 +155,7 @@ export function EnrolmentSteps({ portalOrigin, next, startApp, confirmApp }: { p
         ) : (
           <>
             <p>{WORDS.appWhat}</p>
-            {appErrors && <Errors errors={appErrors} />}
+            {appErrors && <div ref={appAnswer} tabIndex={-1}><Errors errors={appErrors} /></div>}
             <div className="box-foot">
               <button type="button" className="btn" aria-disabled={busy !== null || undefined} onClick={() => void start()}>
                 {busy === "start" ? WORDS.appSetUpBusy : WORDS.appSetUp}
@@ -155,6 +164,8 @@ export function EnrolmentSteps({ portalOrigin, next, startApp, confirmApp }: { p
           </>
         )}
       </section>
+      {/* Only while the step is still to do: once a factor is in force, signing out no longer brings it back. */}
+      <p className="help">{WORDS.foot}</p>
     </div>
   );
 }

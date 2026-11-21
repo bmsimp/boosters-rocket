@@ -30,8 +30,8 @@ export default async function OneMoreStep({ searchParams }: { searchParams?: Pro
     <main className="wrap signin">
       <h1 className="page-title">{WORDS.title}</h1>
       <p className="lede">{WORDS.lede}</p>
+      {/* The steps draw the foot's words too, while there is a step to do. */}
       <EnrolmentSteps portalOrigin={portalOrigin} next={next} startApp={startEnrolmentAppAction} confirmApp={confirmEnrolmentAppAction} />
-      <p className="help">{WORDS.foot}</p>
       <SignOutButton door="parent" />
     </main>
   );
