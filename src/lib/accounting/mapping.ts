@@ -29,7 +29,7 @@ import { studentsRuleApplies } from "@/lib/parents/sessions";
 import { byRosterOrder, rosterShown } from "@/lib/roster/queries";
 import { getShape, missingTypes } from "@/lib/roster/shape";
 import { getRosterSource, ofRosterCompany, ROSTER_JOB } from "@/lib/roster/source";
-import { differencesOf, type Difference, type LinkedStudent, type QueueFact } from "./differences";
+import { differencesOf, type Difference, type GuardianToCompare, type LinkedStudent, type QueueFact } from "./differences";
 import { suggestCustomers, type Holder, type Suggestion } from "./match";
 import { pairKeys, proposeGuardians, proposeStudents, type Proposals } from "./proposals";
 import { bulkStamp, guardianLinkStamp, guardianUnlinkStamp, linkStamp, reviewStamp, sendAllStamp, sendStamp, takeStamp, unlinkStamp, type Chosen } from "./stamp";
@@ -633,11 +633,39 @@ export async function readLinkBasics(tx?: Tx) {
     .filter((g) => g.status === "disabled" && g.disabledReason !== "company_changed" && g.familyId !== null && String(g.familyId) === familyKey && linkOfGuardian.has(g.id))
     .map((g) => { const c = customerById.get(linkOfGuardian.get(g.id)!.customerId); return { id: g.id, name: g.name, customer: c?.displayName ?? null, active: c?.active ?? false }; })
     .sort(byName);
+  // Slice M3c3: each family's guardian rows with a link of the records' company, and each person's open rows, grouped once.
+  const linkedRowsOf = group(everyGuardian.filter((g) => g.familyId !== null && linkOfGuardian.has(g.id)), (g) => String(g.familyId));
+  const openRowsOfPerson = group(everyGuardian.filter((g) => g.status !== "disabled"), (g) => g.parentId);
+  /**
+   * A family's guardian rows with a link of the records' company, as its differences compare them with their own Parent
+   * customers (slice M3c3, GuardianToCompare): its open rows, then its closed rows not closed by a change of company
+   * (removedOf()'s), each by name then id; whether no other open row is linked to the row's customer (openRowsOn); and,
+   * for an open row, ownNamedElsewhere()'s rule as guardianOfferOf() holds it: another open row of the person's linked to
+   * an active customer of the parent type with their name by nameKey(). No query of its own.
+   */
+  const ownParentsOf = (familyKey: string): GuardianToCompare[] => {
+    const rows = linkedRowsOf.get(familyKey) ?? [];
+    const open = rows.filter((g) => g.status !== "disabled").sort(byName).map((g): GuardianToCompare => {
+      const customerId = linkOfGuardian.get(g.id)!.customerId;
+      const key = nameKey(g.name);
+      const namedElsewhere = (openRowsOfPerson.get(g.parentId) ?? []).some((o) => {
+        const l = o.id === g.id ? undefined : linkOfGuardian.get(o.id);
+        const c = l === undefined ? undefined : customerById.get(l.customerId);
+        return c !== undefined && c.active && parentTypeId !== null && c.typeQboId === parentTypeId && nameKey(c.displayName) === key;
+      });
+      return { guardianId: g.id, who: g.name, open: true, customerId, alone: (openRowsOn.get(customerId) ?? []).every((x) => x.row.id === g.id), namedElsewhere };
+    });
+    const closed = rows.filter((g) => g.status === "disabled" && g.disabledReason !== "company_changed").sort(byName).map((g): GuardianToCompare => {
+      const customerId = linkOfGuardian.get(g.id)!.customerId;
+      return { guardianId: g.id, who: g.name, open: false, customerId, alone: (openRowsOn.get(customerId) ?? []).length === 0, namedElsewhere: false };
+    });
+    return [...open, ...closed];
+  };
 
   return { source, connection, shape, typeRows, okRuns, customerRows, customers, customerById, tokenOf, roster, realm, state, everyFamily, families, everyStudent, students,
     guardians, links, linkOfFamily, familyOfCustomer, customerOfStudent, customerOfGuardian, studentLinked, pool, poolIds, studentsOf, guardiansOf, addressesOf, leftOf,
     unlinked, suggestions, listedAsFamily, proposalsFor, offerFor, chosenFor, reviewOf, unlinkOf, createQueuedFor, familyLinkedAnywhere, creates,
-    everyGuardian, guardianById, linkOfGuardian, guardianBooksOf, guardianOfferOf, guardianLinkOf, removedOf };
+    everyGuardian, guardianById, linkOfGuardian, guardianBooksOf, guardianOfferOf, guardianLinkOf, removedOf, ownParentsOf };
 }
 export type LinkBasics = Awaited<ReturnType<typeof readLinkBasics>>;
 
@@ -680,7 +708,8 @@ export type LinkBasics = Awaited<ReturnType<typeof readLinkBasics>>;
  * and since slice M5b a layered family's make-inactive with everyone under it (familySendOf(), whom it covers walked by
  * coverUnder() over the cache rows read above) and Send the app's for all (sendAll(), sendAllOf() over the rows worked
  * out here): no query of their own, so the count is unchanged. The bulk's press works the same rows out again in its
- * own transaction (sendAllShown(), ./link-writes.ts), from the same reads made there.
+ * own transaction (sendAllShown(), ./link-writes.ts), from the same reads made there. Since slice M3c3 a guardian
+ * compared with their own Parent customer (ownParentsOf()) comes from the same reads, so the count is unchanged.
  * On four hundred families with two thousand customers that is the same number of queries; memory holds the two
  * thousand cached customers (twice, while the queue holds items, as loadOpenWrites() reads its own), the records,
  * guardian rows and links (a few thousand small rows), and the rows rendered are the four hundred families, each
@@ -854,6 +883,7 @@ function linkRowsOf(b: LinkBasics, queue: readonly QueueView[], o: { studentsRul
         kind: roster?.kind === "flat" ? "member" : "family", name: f.name, customerId: link.customerId,
         students: (studentsOf.get(key) ?? []).map((s) => ({ id: s.id, name: s.name, active: s.active, customerId: customerOfStudent.get(String(s.id)) ?? null })),
         guardians: (guardiansOf.get(key) ?? []).map((g) => ({ id: g.id, customerId: customerOfGuardian.get(g.id) ?? null })),
+        ownParents: b.ownParentsOf(key),
       });
       const status: LinkStatus = found !== null && found.differences.length > 0 ? { key: "with_differences", made } : made;
       const takes = found === null ? { takes: [], takeNotes: [] } : takeOffersOf(b, f, link.customerId, found.differences, queue, studentsRule);
