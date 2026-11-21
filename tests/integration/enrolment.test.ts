@@ -9,6 +9,7 @@ vi.mock("@/lib/parents/breach-check", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/parents/breach-check")>()), checkBreach: async () => ({ outcome: "not_found" as const }),
 }));
 
+import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, parentAuthSession } from "@/lib/db/schema";
@@ -20,10 +21,11 @@ import { ENROL_WINDOW_MS } from "@/lib/parents/enrolment-rule";
 import { ENROLMENT_COPY } from "@/lib/parents/enrolment-copy";
 import { SIGNIN_SETTINGS_COPY as COPY } from "@/lib/parents/signin-settings-copy";
 import { confirmMyAuthenticator, remakeMyBackupCodes, startMyAuthenticator, turnOffMyAuthenticator } from "@/lib/parents/authenticator-settings";
-import { removeMyPasskey } from "@/lib/parents/passkey-settings";
+import { addMyPasskey, removeMyPasskey } from "@/lib/parents/passkey-settings";
 import { changeMyPassword, forgetMyDevice } from "@/lib/parents/signin-settings";
 import { choosePasswordFromLink } from "@/lib/parents/password-set";
 import { askAgainPassword } from "@/lib/parents/asking-again";
+import { signinStands } from "@/lib/parents/signin-codes";
 import OneMoreStep from "@/app/one-more-step/page";
 import ChooseFamily from "@/app/choose-family/page";
 import { confirmEnrolmentAppAction, startEnrolmentAppAction } from "@/app/one-more-step/actions";
@@ -33,7 +35,7 @@ import { changePasswordAction, forgetDeviceAction, newBackupCodesAction, removeP
 import { resetDb, seedGuardianInFamily, seedParent, seedParentSession, seedWorkingMail } from "../helpers/db";
 import { SIGNINS_ON, seedParentSettings } from "../helpers/roster-cache";
 import { DOOR_IP, DOOR_PASSWORD, cookieNamed, passwordStep, signInThroughDoor } from "../helpers/parent-door";
-import { deviceRows, mintLink, seedDevice, seedPassword } from "../helpers/signin-links";
+import { credentialRows, deviceRows, mintLink, seedDevice, seedPassword } from "../helpers/signin-links";
 import { appCode, authenticatorRows, backupCodeRows } from "../helpers/authenticator";
 import { addPasskey, passkeyRows, registerOptions, seedPasskey } from "../helpers/passkey";
 
@@ -72,13 +74,15 @@ async function seedGuardianWithPassword(name: string, familyQboId: string) {
 }
 /** A session the door's password made under Strict for `p` (who has no second factor): its cookie and its row's id. */
 async function enrolledAtTheDoor(p: { id: string; email: string; authUserId: string }, next?: string) {
+  const had = new Set((await sessionsOf(p.authUserId)).map((r) => r.id));
   const step = await passwordStep(p.email, next ? { next } : {});
   expect(step.body).toEqual({ ok: true, next: next ? `/one-more-step?next=${encodeURIComponent(next)}` : "/one-more-step" });
   const cookie = cookieNamed(step.res, "session_token");
   expect(cookie).not.toBe("");
-  const rows = await sessionsOf(p.authUserId);
-  const made = rows.at(-1)!;
-  return { cookie, sessionId: made.id, ctx: { parentId: p.id, sessionId: made.id, email: p.email, ip: DOOR_IP }, res: step.res };
+  // The session this sign-in made: the one row that wasn't there before it (the rows come back in no set order).
+  const made = (await sessionsOf(p.authUserId)).filter((r) => !had.has(r.id));
+  expect(made).toHaveLength(1);
+  return { cookie, sessionId: made[0]!.id, ctx: { parentId: p.id, sessionId: made[0]!.id, email: p.email, ip: DOOR_IP }, res: step.res };
 }
 const inWindow = () => new Date(Date.now() + ENROL_WINDOW_MS);
 
@@ -118,7 +122,7 @@ describe("the gate under Strict", () => {
     expect((await stateOf(after.id)).status).toBe("ok");
   });
 
-  it("ends an enrolling session whose window passed, or once the club is back at Standard, or once a factor came through another session, and leaves the other alone", async () => {
+  it("ends an enrolling session whose window passed, or once the club is back at Standard, and leaves the other alone", async () => {
     const ana = await seedGuardianWithPassword("Ana", "F1");
     await seedParentSettings({ level: "strict" });
     // The window: a second before its end it is enrolling; a second past it, ended.
@@ -127,19 +131,34 @@ describe("the gate under Strict", () => {
     expect(await stateOf(passed.id)).toEqual({ status: "none" });
     expect(await sessionRow(passed.id)).toBeNull();
     expect((await stateOf(live.id)).status).toBe("enrol");
-    // A factor added through a second enrolling session: that one became whole (its window cleared, proved now), this one ends.
-    const second = await seedParentSession(ana.authUserId, { familyQboId: "F1", enrolUntil: inWindow() });
-    await seedPasskey(ana.id, { createdAt: new Date(Date.now() - 1000) });
-    await db.update(parentAuthSession).set({ enrolUntil: null, strongAt: new Date() }).where(eq(parentAuthSession.id, second.id));
+    // Back at Standard, an enrolling session ends at its next request too; a whole one carries on.
+    await seedParentSettings({ level: "standard" });
+    const whole = await seedParentSession(ana.authUserId, { familyQboId: "F1", strongAt: new Date() });
     expect(await stateOf(live.id)).toEqual({ status: "none" });
     expect(await sessionRow(live.id)).toBeNull();
-    expect((await stateOf(second.id)).status).toBe("ok");
-    // Back at Standard, an enrolling session ends at its next request too; a whole one carries on.
-    const third = await seedParentSession(ana.authUserId, { familyQboId: "F1", enrolUntil: inWindow() });
-    await seedParentSettings({ level: "standard" });
-    expect(await stateOf(third.id)).toEqual({ status: "none" });
-    expect((await stateOf(second.id)).status).toBe("ok");
-    expect(await refusedFor(ana.id)).toEqual([{ reason: "enrol_ended" }, { reason: "enrol_ended" }, { reason: "enrol_ended" }]);
+    expect((await stateOf(whole.id)).status).toBe("ok");
+    expect(await refusedFor(ana.id)).toEqual([{ reason: "enrol_ended" }, { reason: "enrol_ended" }]);
+  });
+
+  it("makes whole only the session that added the factor: another enrolling session of the person keeps its window, is told only to sign in again, and is ended at the gate", async () => {
+    const ana = await seedGuardianWithPassword("Ana", "F1");
+    await seedParentSettings({ level: "strict" });
+    const first = await enrolledAtTheDoor(ana);
+    const second = await enrolledAtTheDoor(ana);
+    expect(second.sessionId).not.toBe(first.sessionId);
+    // The real add, from the second browser: its completion touches its own session's row alone.
+    const added = await addPasskey(second.cookie);
+    expect(added.body.ok).toBe(true);
+    expect(await sessionRow(second.sessionId)).toMatchObject({ enrolUntil: null });
+    expect((await sessionRow(first.sessionId))!.enrolUntil).not.toBeNull();
+    expect((await audits("parent.passkey.add")).map((r) => (r.after as { enrolled?: boolean }).enrolled)).toEqual([true]);
+    // A press from the first, before the gate reads it: refused in words true of why (no 30 minutes have passed).
+    asParentEnrolling(first.ctx);
+    expect(await startEnrolmentAppAction()).toEqual({ ok: false, errors: [ENROLMENT_COPY.signInAgain], signInAgain: true });
+    expect(await stateOf(first.sessionId)).toEqual({ status: "none" });
+    expect(await sessionRow(first.sessionId)).toBeNull();
+    expect((await stateOf(second.sessionId)).status).toBe("ok");
+    expect(await refusedFor(ana.id)).toEqual([{ reason: "enrol_ended" }]);
   });
 });
 
@@ -235,6 +254,23 @@ describe("the door under Strict", () => {
     expect((await audits("signin.second_step_asked")).map((r) => r.after)).not.toContainEqual({ step: "enrol" });
   });
 
+  it("has the finish refuse an enrolment's proof, by a password or a link, once the club has left Strict or the person holds a factor", async () => {
+    const ana = await seedGuardianWithPassword("Ana", "F1");
+    await seedParentSettings({ level: "strict" });
+    const [cred] = await credentialRows(ana.authUserId);
+    const password = { credentialId: cred!.id, credentialUpdatedAt: cred!.updatedAt };
+    // The link's proof is refused for the enrolment before its link is read, so any id serves here.
+    const proofs = [{ password, enrol: true as const }, { link: { linkId: randomUUID(), ...password }, enrol: true as const }];
+    expect(await signinStands(ana.id, ana.email, DOOR_IP, proofs[0]!)).toBe(true);
+    await seedParentSettings({ level: "standard" });
+    for (const proof of proofs) expect(await signinStands(ana.id, ana.email, DOOR_IP, proof)).toBe(false);
+    await seedParentSettings({ level: "strict" });
+    await seedPasskey(ana.id);
+    for (const proof of proofs) expect(await signinStands(ana.id, ana.email, DOOR_IP, proof)).toBe(false);
+    expect(await refusedFor(ana.id)).toEqual([{ reason: "enrol_not_strict" }, { reason: "enrol_not_strict" },
+      { reason: "second_factor_in_force" }, { reason: "second_factor_in_force" }]);
+  });
+
   it("leads a set-up link's password at Strict to the same enrolment; a reset link signs nobody in", async () => {
     const ana = await seedParent({ name: "Ana", email: "ana@example.com" });
     await seedGuardianInFamily({ parentId: ana.id, familyQboId: "F1", status: "invited" });
@@ -291,6 +327,42 @@ describe("what an enrolling session may press", () => {
     expect((await stateOf(s.sessionId)).status).toBe("ok");
   });
 
+  it("answers a set-up found over in the enrolment's own words, never Sign-in settings' offer to turn the app off there", async () => {
+    const ana = await seedGuardianWithPassword("Ana", "F1");
+    await seedParentSettings({ level: "strict" });
+    const s = await enrolledAtTheDoor(ana);
+    asParentEnrolling(s.ctx);
+    const older = await startEnrolmentAppAction();
+    const newer = await startEnrolmentAppAction();
+    if (!older.ok || !newer.ok) expect.fail("both set-ups should begin");
+    const replaced = await confirmEnrolmentAppAction(appCode(older.key.replace(/ /g, "")), older.stamp);
+    expect(replaced).toEqual({ ok: false, errors: [ENROLMENT_COPY.appSetupReplaced], setupOver: true });
+    expect(ENROLMENT_COPY.appSetupReplaced).not.toContain("turn the app off here");
+    expect((await sessionRow(s.sessionId))!.enrolUntil).not.toBeNull();
+  });
+
+  it("completes no enrolment for a passkey whose ceremony outlasted the window: the passkey is recorded, the session left for the gate to end", async () => {
+    const ana = await seedGuardianWithPassword("Ana", "F1");
+    await seedParentSettings({ level: "strict" });
+    const s = await enrolledAtTheDoor(ana);
+    // The library's verification, in which the window passes: it inserts the row, as the library does, and answers it.
+    const verify = async () => {
+      await db.update(parentAuthSession).set({ enrolUntil: new Date(Date.now() - 1000) }).where(eq(parentAuthSession.id, s.sessionId));
+      const made = await seedPasskey(ana.id, { createdAt: new Date() });
+      return { ok: true as const, passkeyId: made.rowId };
+    };
+    // The shape the browser's ceremony sends; its contents are this verify's to judge, not the add's.
+    const REGISTRATION = { id: "cred", rawId: "cred", type: "public-key", response: { clientDataJSON: "e30", attestationObject: "e30" } };
+    const added = await addMyPasskey({ parentId: ana.id, sessionId: s.sessionId, email: ana.email }, { response: REGISTRATION }, verify, DOOR_IP);
+    expect(added.ok).toBe(true);
+    expect(await passkeyRows(ana.id)).toHaveLength(1);
+    const row = await sessionRow(s.sessionId);
+    expect(row!.enrolUntil).not.toBeNull();
+    expect(row!.strongAt).toBeNull();
+    expect((await audits("parent.passkey.add")).map((r) => (r.after as { enrolled?: boolean }).enrolled)).toEqual([undefined]);
+    expect(await stateOf(s.sessionId)).toEqual({ status: "none" });
+  });
+
   it("is refused every other press: new codes, turning the app off, removing a passkey, the password change, forgetting a device", async () => {
     const ana = await seedGuardianWithPassword("Ana", "F1");
     const device = await seedDevice(ana.id);
@@ -310,10 +382,16 @@ describe("what an enrolling session may press", () => {
     const ana = await seedGuardianWithPassword("Ana", "F1");
     await seedParentSettings({ level: "strict" });
     const s = await enrolledAtTheDoor(ana);
+    asParentEnrolling(s.ctx);
+    // A set-up started in the window, its QR code scanned, and the window passing before its confirm.
+    const started = await startEnrolmentAppAction();
+    if (!started.ok) expect.fail(`the set-up should begin: ${started.errors.join(" ")}`);
     await db.update(parentAuthSession).set({ enrolUntil: new Date(Date.now() - 1000) }).where(eq(parentAuthSession.id, s.sessionId));
     expect(await startMyAuthenticator(s.ctx)).toEqual({ ok: false, errors: [COPY.proveAgain] });
-    asParentEnrolling(s.ctx);
     expect(await startEnrolmentAppAction()).toEqual({ ok: false, errors: [ENROLMENT_COPY.windowPassed], signInAgain: true });
+    // The confirm says too that the entry the app saved is dead.
+    expect(await confirmEnrolmentAppAction(appCode(started.key.replace(/ /g, "")), started.stamp))
+      .toEqual({ ok: false, errors: [ENROLMENT_COPY.windowPassed, ENROLMENT_COPY.appEntryDead], signInAgain: true });
     expect(await confirmEnrolmentAppAction("123456", "not a stamp")).toMatchObject({ ok: false });
     expect(await authenticatorRows(ana.id)).toEqual([]);
     // The library's options are refused too, making no challenge: the session may add nothing now.
