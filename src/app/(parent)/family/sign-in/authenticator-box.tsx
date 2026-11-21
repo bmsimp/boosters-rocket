@@ -5,25 +5,15 @@ import { LocalTime } from "@/app/components/local-time";
 import { SIGNIN_SETTINGS_COPY as COPY, howYouSignIn } from "@/lib/parents/signin-settings-copy";
 import { confirmAuthenticatorAction, newBackupCodesAction, startAuthenticatorAction, turnOffAuthenticatorAction } from "./actions";
 import { AskAgain } from "./signin-forms";
+import { AppSetupForm, CopyButton } from "./app-setup";
 
 type Result = { ok: true; message: string } | { ok: false; errors: string[] };
 const FAILED = { ok: false as const, errors: [COPY.failed] };
 const Errors = ({ errors }: { errors: string[] }) => <ul role="alert" className="errors">{errors.map((e) => <li key={e}>{e}</li>)}</ul>;
 const Tick = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M4 12.5l5 5 11-11" /></svg>;
 
-/** A press that copies `text`, and only it, saying in words whether it did. */
-export function CopyButton({ text, label }: { text: string; label: string }) {
-  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
-  const copy = async () => {
-    try { await navigator.clipboard.writeText(text); setState("copied"); } catch { setState("failed"); }
-  };
-  return (
-    <div className="stack">
-      <button type="button" className="btn btn-line" onClick={() => void copy()}>{label}</button>
-      <p role="status" className="help">{state === "copied" ? COPY.copied : state === "failed" ? COPY.copyFailed : ""}</p>
-    </div>
-  );
-}
+// The copy press and the set-up's form live in app-setup.tsx since slice SI-10a, shared with Strict's enrolment.
+export { CopyButton } from "./app-setup";
 
 /** The parent's app as the page shows it (MyApp, src/lib/parents/signin-settings.ts): when it was set up, and the backup codes left. */
 export type ShownApp = { since: string; backupCodesLeft: number };
@@ -131,31 +121,8 @@ export function AuthenticatorBox({ email, app, proved, hasPassword, strict, pass
 
   // Being set up: the QR code and the key, once, from the press's answer, then the code that finishes it.
   if (setup) {
-    return (
-      <div className="stack">
-        <p ref={landing} tabIndex={-1}>{COPY.appScan}</p>
-        <svg className="app-qr" viewBox={`0 0 ${setup.qr.size} ${setup.qr.size}`} role="img" aria-label={COPY.appQrLabel} shapeRendering="crispEdges" xmlns="http://www.w3.org/2000/svg">
-          <rect width={setup.qr.size} height={setup.qr.size} fill="white" />
-          <path d={setup.qr.path} fill="black" />
-        </svg>
-        <div>
-          <p>{COPY.appKey}</p>
-          <code className="app-key">{setup.key}</code>
-        </div>
-        <CopyButton text={setup.key.replace(/ /g, "")} label={COPY.copyKey} />
-        <form className="stack" onSubmit={(e) => { e.preventDefault(); void confirm(); }}>
-          <p id="app-confirm-lede">{COPY.appConfirmLede}</p>
-          <label className="field"><span>{COPY.appConfirmCode}</span>
-            <input name="code" aria-describedby="app-confirm-lede" inputMode="numeric" autoComplete="one-time-code" maxLength={20} required
-              value={code} onChange={(e) => setCode(e.target.value)} />
-          </label>
-          {answered}
-          {/* Busy is aria-disabled, not disabled: a disabled button drops the focus, and the keyboard's place with it. */}
-          <button className="btn" aria-disabled={busy !== null || undefined}>{busy === "confirm" ? COPY.checking : COPY.appConfirm}</button>
-        </form>
-        <p className="help">{COPY.appSetupLost}</p>
-      </div>
-    );
+    return <AppSetupForm setup={setup} code={code} onCode={setCode} onConfirm={() => void confirm()} busy={busy !== null} answered={answered}
+      landing={landing} lost={COPY.appSetupLost} />;
   }
 
   return (
