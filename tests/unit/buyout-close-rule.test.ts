@@ -101,43 +101,80 @@ describe("closing a buy-out (v1 spec §11.5)", () => {
 });
 
 // What a buy-out of an earlier QuickBooks company leaves to settle there by hand (stage 4's slice M7b): every state, end
-// reason, flag and set of queue items such a buy-out can have falls in one kind.
+// reason, flag, last code and set of queue items such a buy-out can have falls in one kind.
 describe("an earlier company's buy-out, for the treasurer (stage 4's slice M7b)", () => {
   const ID = "00000000-0000-4000-8000-0000000000b7";
-  const item = (op: LookItem["op"], state: LookItem["state"], sent: boolean, resultQboId: string | null = null): LookItem => ({ op, state, sent, resultQboId });
+  /**
+   * A queue item as the portal leaves one. `answered`: done, or closed by the portal on QuickBooks' answer (itemClosed(),
+   * no note); false for one given up by staff or by the clear (a note), or still waiting or stuck.
+   */
+  const item = (op: LookItem["op"], state: LookItem["state"], sent: boolean, o: { resultQboId?: string | null; answered?: boolean } = {}): LookItem =>
+    ({ op, state, sent, resultQboId: o.resultQboId ?? null, answered: o.answered ?? state === "done" });
+  const created = (id = "5001") => item("invoice_create", "done", true, { resultQboId: id });
+  /** A void closed by voidKept() on QuickBooks' answer: given up, no note, `sent` as an earlier try left it. */
+  const voidKept = (sent: boolean) => item("invoice_void", "given_up", sent, { answered: true });
+  /** A void the clear (or staff) gave up before any answer came back. */
+  const voidGivenUp = (sent: boolean) => item("invoice_void", "given_up", sent);
   const earlier = (f: Partial<EarlierFacts>): EarlierFacts => ({ id: ID, state: "voided", endReason: "earlier_company", flag: null, lastCode: null, invoiceQboId: "5001",
-    items: [item("invoice_create", "done", true, "5001")], ...f });
+    items: [created()], ...f });
   const kind = (f: Partial<EarlierFacts>) => earlierCompanyLook(earlier(f)).kind;
 
-  it("an ended one whose invoice is known and no void of it was sent: the invoice stands there", () => {
-    // Ended from invoiced (its create done), from stuck with a void never sent, or from being voided with the void not yet sent.
+  it("an ended one whose invoice is known, with no void left unanswered and nothing read that says it is gone or part paid: the invoice stands", () => {
+    // Ended from invoiced (its create done), or flagged by the daily check alone, or with a void QuickBooks refused.
     expect(earlierCompanyLook(earlier({}))).toEqual({ kind: "invoice_stands", invoiceQboId: "5001", madeAfter: false, note: null, words: EARLIER_WORDS.invoice_stands });
-    expect(kind({ items: [item("invoice_void", "given_up", false), item("invoice_create", "done", true, "5001")] })).toBe("invoice_stands");
-    expect(kind({ flag: "missing", items: [item("invoice_void", "given_up", false), item("invoice_create", "done", true, "5001")] })).toBe("invoice_stands");
-    // A void QuickBooks answered (done) found it paid and kept it: the invoice stands, something paid on it.
-    expect(kind({ flag: "paid_before_void", lastCode: "paid", items: [item("invoice_void", "done", true), item("invoice_create", "done", true, "5001")] })).toBe("invoice_stands");
+    expect(kind({ flag: "other_customer" })).toBe("invoice_stands");
+    expect(kind({ flag: "student_moved" })).toBe("invoice_stands");
+    expect(kind({ flag: "void_refused", lastCode: "fault_6240", items: [voidKept(false), created()] })).toBe("invoice_stands");
+    expect(kind({ flag: "void_refused", lastCode: "fault_6240", items: [voidKept(true), created()] })).toBe("invoice_stands");
     expect(EARLIER_WORDS.invoice_stands).toContain("waive the requirement");
     expect(EARLIER_WORDS.invoice_stands).toContain("void it there");
+    // It says nothing of whether it was paid: the stored figures may have shown it paid before the clear (slice M7b2's).
+    expect(EARLIER_WORDS.invoice_stands).not.toContain("unpaid");
   });
 
-  it("an ended one whose invoice came only from its given-up create's item, or was recorded on it after the item was given up: the invoice stands, made after", () => {
-    const fromItem = earlierCompanyLook(earlier({ invoiceQboId: null, items: [item("invoice_create", "given_up", true, "6101")] }));
+  it("an ended one whose invoice came from a given-up create's item, or was recorded on it after the item was given up: the invoice stands, made for a request given up", () => {
+    const fromItem = earlierCompanyLook(earlier({ invoiceQboId: null, items: [item("invoice_create", "given_up", true, { resultQboId: "6101" })] }));
     expect(fromItem).toEqual({ kind: "invoice_stands", invoiceQboId: "6101", madeAfter: true, note: null, words: `${EARLIER_WORDS.invoice_stands} ${MADE_AFTER_WORDS}` });
     // invoiceFoundAfterEnding() recorded it on the buy-out: the item, still given up, names the same invoice.
-    expect(earlierCompanyLook(earlier({ invoiceQboId: "6102", items: [item("invoice_create", "given_up", true, "6102")] }))).toMatchObject({ kind: "invoice_stands", invoiceQboId: "6102", madeAfter: true });
+    expect(earlierCompanyLook(earlier({ invoiceQboId: "6102", items: [item("invoice_create", "given_up", true, { resultQboId: "6102" })] })))
+      .toMatchObject({ kind: "invoice_stands", invoiceQboId: "6102", madeAfter: true });
     // The newest create that names one is read.
-    expect(earlierCompanyLook(earlier({ invoiceQboId: null, items: [item("invoice_create", "given_up", true, null), item("invoice_create", "given_up", true, "6103")] })))
+    expect(earlierCompanyLook(earlier({ invoiceQboId: null, items: [item("invoice_create", "given_up", true), item("invoice_create", "given_up", true, { resultQboId: "6103" })] })))
       .toMatchObject({ kind: "invoice_stands", invoiceQboId: "6103", madeAfter: true });
+    // The words claim no order of events: in M7a2's held finish QuickBooks made it before the clear gave the item up.
+    expect(MADE_AFTER_WORDS).not.toContain("after");
   });
 
-  it("an ended one whose void was sent and never answered: it may be voided already", () => {
-    const v = earlierCompanyLook(earlier({ items: [item("invoice_void", "given_up", true), item("invoice_create", "done", true, "5001")] }));
+  it("an ended one whose newest void QuickBooks never answered may be voided already, whether or not the item was marked sent", () => {
+    const v = earlierCompanyLook(earlier({ items: [voidGivenUp(true), created()] }));
     expect(v).toEqual({ kind: "void_may_have_gone", invoiceQboId: "5001", madeAfter: false, note: null, words: EARLIER_WORDS.void_may_have_gone });
+    // A void is not marked sent before it goes: one the clear gave up mid-send, or a restart cut off, is unsent.
+    expect(kind({ items: [voidGivenUp(false), created()] })).toBe("void_may_have_gone");
+    expect(kind({ items: [item("invoice_void", "waiting", false), created()] })).toBe("void_may_have_gone");
     expect(kind({ items: [item("invoice_void", "stuck", true)] })).toBe("void_may_have_gone");
-    expect(kind({ invoiceQboId: null, items: [item("invoice_void", "given_up", true), item("invoice_create", "given_up", true, "6104")] })).toBe("void_may_have_gone");
+    // Whatever an older void's answer left on the buy-out: the newest void is the one on its way.
+    expect(kind({ flag: "missing", lastCode: "invoice_gone", items: [voidGivenUp(false), voidKept(false), created()] })).toBe("void_may_have_gone");
+    expect(kind({ invoiceQboId: null, items: [voidGivenUp(true), item("invoice_create", "given_up", true, { resultQboId: "6104" })] })).toBe("void_may_have_gone");
   });
 
-  it("an ended one with no invoice known whose create was sent: it may be made, and the note to search for is its own", () => {
+  it("an ended one whose void's read found something paid and the rest owed: part paid, not to be voided as it is", () => {
+    for (const flag of ["paid_before_void", "student_moved"] as const) {
+      for (const sent of [false, true]) {
+        expect(earlierCompanyLook(earlier({ flag, lastCode: "paid", items: [voidKept(sent), created()] })), `${flag} ${sent}`)
+          .toEqual({ kind: "part_paid", invoiceQboId: "5001", madeAfter: false, note: null, words: EARLIER_WORDS.part_paid });
+      }
+    }
+    expect(EARLIER_WORDS.part_paid).toContain("refund what they paid");
+  });
+
+  it("an ended one the portal last saw gone from the family's invoices: by a void's live read, or by the daily check's flag", () => {
+    for (const sent of [false, true]) expect(kind({ flag: "missing", lastCode: "invoice_gone", items: [voidKept(sent), created()] })).toBe("last_seen_gone");
+    expect(kind({ flag: "student_moved", lastCode: "invoice_gone", items: [voidKept(false), created()] })).toBe("last_seen_gone");
+    expect(kind({ flag: "missing" })).toBe("last_seen_gone");
+    expect(EARLIER_WORDS.last_seen_gone).not.toContain("void it");
+  });
+
+  it("an ended one with no invoice known whose create was sent and never answered: it may be made, and the note to search for is its own", () => {
     const v = earlierCompanyLook(earlier({ invoiceQboId: null, items: [item("invoice_create", "given_up", true)] }));
     expect(v).toEqual({ kind: "may_be_made", invoiceQboId: null, madeAfter: false, note: `Booster Rocket buy-out ${ID}`, words: EARLIER_WORDS.may_be_made });
     expect(BUYOUT_NOTE_PREFIX).toBe("Booster Rocket buy-out ");
@@ -152,44 +189,53 @@ describe("an earlier company's buy-out, for the treasurer (stage 4's slice M7b)"
     for (const flag of [null, "missing", "other_customer", "void_refused", "given_up"] as const) expect(kind({ state: "paid", endReason: null, flag }), String(flag)).toBe("nothing_to_settle");
   });
 
-  it("nothing to settle: an ended one with no invoice and no create ever sent, a refused one, and one that ended any other way", () => {
+  it("nothing to settle: an ended one with no invoice and no create left unanswered, a refused one, one whose void was done, and one that ended any other way", () => {
     expect(kind({ invoiceQboId: null, items: [] })).toBe("nothing_to_settle");
     expect(kind({ invoiceQboId: null, items: [item("invoice_create", "given_up", false)] })).toBe("nothing_to_settle");
+    // A create QuickBooks refused, closed on that answer.
+    expect(kind({ invoiceQboId: null, items: [item("invoice_create", "given_up", true, { answered: true })] })).toBe("nothing_to_settle");
     expect(kind({ state: "refused", endReason: null, invoiceQboId: null, lastCode: "fault_6000", items: [item("invoice_create", "given_up", true)] })).toBe("nothing_to_settle");
+    expect(kind({ items: [item("invoice_void", "done", true), created()] })).toBe("nothing_to_settle");
     for (const endReason of ["switched_back", "student_moved", "voided_in_quickbooks", "closed_by_staff"] as const) {
-      expect(kind({ endReason, items: [item("invoice_void", "given_up", true), item("invoice_create", "done", true, "5001")] }), endReason).toBe("nothing_to_settle");
+      expect(kind({ endReason, items: [voidGivenUp(true), created()] }), endReason).toBe("nothing_to_settle");
     }
     expect(EARLIER_WORDS.nothing_to_settle).toContain("earlier QuickBooks company");
   });
 
-  it("puts every state, end reason, flag and set of items in exactly one kind", () => {
+  it("puts every state, end reason, flag, last code and set of items in exactly one kind", () => {
     const states: BuyoutState[] = ["being_invoiced", "invoiced", "paid", "being_voided", "voided", "refused", "stuck"];
     const reasons: EarlierFacts["endReason"][] = [null, "switched_back", "student_moved", "voided_in_quickbooks", "closed_by_staff", "earlier_company"];
     const flags: EarlierFacts["flag"][] = [null, "missing", "other_customer", "student_moved", "paid_before_void", "void_refused", "given_up"];
-    const itemSets: LookItem[][] = [[], [item("invoice_create", "given_up", false)], [item("invoice_create", "given_up", true)], [item("invoice_create", "given_up", true, "7001")],
-      [item("invoice_create", "done", true, "5001")], [item("invoice_void", "given_up", false), item("invoice_create", "done", true, "5001")],
-      [item("invoice_void", "given_up", true), item("invoice_create", "done", true, "5001")], [item("invoice_void", "done", true), item("invoice_create", "done", true, "5001")],
-      [item("invoice_void", "stuck", true)], [item("invoice_create", "stuck", true)]];
+    const codes: (string | null)[] = [null, "paid", "invoice_gone", "fault_6240", "timeout"];
+    const itemSets: LookItem[][] = [[], [item("invoice_create", "given_up", false)], [item("invoice_create", "given_up", true)], [item("invoice_create", "given_up", true, { answered: true })],
+      [item("invoice_create", "given_up", true, { resultQboId: "7001" })], [created()],
+      [voidGivenUp(false), created()], [voidGivenUp(true), created()], [voidKept(false), created()], [voidKept(true), created()],
+      [item("invoice_void", "done", true), created()], [item("invoice_void", "waiting", false), created()], [item("invoice_void", "stuck", true)], [item("invoice_create", "stuck", true)],
+      [voidGivenUp(false), voidKept(true), created()], [voidKept(false), voidGivenUp(true), created()]];
     const kinds = new Set<EarlierKind>();
     let n = 0;
-    for (const state of states) for (const endReason of reasons) for (const flag of flags) for (const items of itemSets) for (const invoiceQboId of [null, "5001"]) {
-      const v = earlierCompanyLook(earlier({ state, endReason, flag, items, invoiceQboId }));
-      const at = JSON.stringify({ state, endReason, flag, items, invoiceQboId });
-      // The table, as the slice's brief states it.
+    for (const state of states) for (const endReason of reasons) for (const flag of flags) for (const lastCode of codes) for (const items of itemSets) for (const invoiceQboId of [null, "5001"]) {
+      const v = earlierCompanyLook(earlier({ state, endReason, flag, lastCode, items, invoiceQboId }));
+      const at = JSON.stringify({ state, endReason, flag, lastCode, items, invoiceQboId });
+      // The table, written out.
       const known = invoiceQboId ?? items.find((i) => i.op === "invoice_create" && i.resultQboId !== null)?.resultQboId ?? null;
+      const lastVoid = items.find((i) => i.op === "invoice_void");
       const expected: EarlierKind = state === "refused" ? "nothing_to_settle"
         : state === "paid" ? (flag === "paid_before_void" || flag === "student_moved" ? "refund_owed" : "nothing_to_settle")
           : state === "voided" && endReason !== "earlier_company" ? "nothing_to_settle"
-            : known === null ? (items.some((i) => i.op === "invoice_create" && i.sent) ? "may_be_made" : "nothing_to_settle")
-              : items.some((i) => i.op === "invoice_void" && i.sent && i.state !== "done") ? "void_may_have_gone" : "invoice_stands";
+            : known === null ? (items.some((i) => i.op === "invoice_create" && i.sent && !i.answered) ? "may_be_made" : "nothing_to_settle")
+              : lastVoid && !lastVoid.answered ? "void_may_have_gone"
+                : lastVoid?.state === "done" ? "nothing_to_settle"
+                  : lastCode === "paid" && (flag === "paid_before_void" || flag === "student_moved") ? "part_paid"
+                    : lastCode === "invoice_gone" || flag === "missing" ? "last_seen_gone" : "invoice_stands";
       expect(v.kind, at).toBe(expected);
       expect(v.words.startsWith(EARLIER_WORDS[v.kind]), at).toBe(true);
       expect(v.madeAfter && v.kind !== "invoice_stands", at).toBe(false);
       expect(v.note !== null, at).toBe(v.kind === "may_be_made");
       kinds.add(v.kind); n++;
     }
-    expect(n).toBe(states.length * reasons.length * flags.length * itemSets.length * 2);
-    expect([...kinds].sort()).toEqual(["invoice_stands", "may_be_made", "nothing_to_settle", "refund_owed", "void_may_have_gone"]);
+    expect(n).toBe(states.length * reasons.length * flags.length * codes.length * itemSets.length * 2);
+    expect([...kinds].sort()).toEqual(["invoice_stands", "last_seen_gone", "may_be_made", "nothing_to_settle", "part_paid", "refund_owed", "void_may_have_gone"]);
     // Each kind's words name "the earlier QuickBooks company", never a company of its own.
     for (const words of Object.values(EARLIER_WORDS)) expect(words).toContain("earlier QuickBooks company");
   });

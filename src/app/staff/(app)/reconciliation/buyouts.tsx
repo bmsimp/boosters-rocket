@@ -47,7 +47,8 @@ export async function BuyoutsToLook({ showAmounts, canChange = false }: { showAm
  * (stage 4's slice M7b, open question 16): every buy-out of another company than the roster's that leaves something to
  * settle (src/lib/buyouts/staff.ts, loadEarlierCompanyBuyouts()), named by the app's own records, with the requirement,
  * for staff who may see money the amount, the earlier company and the invoice or the note to search for, and what to
- * do. Where the family may have paid there, a link to its season page, where a waiver is given; a refund owed offers
+ * do. The family's roster page is linked only while it opens (none after a clear until the new company's shape is set;
+ * its buy-outs page always opens). Where the family may have paid there, a link to its season page, where a waiver is given; a refund owed offers
  * the close, as Volunteer buy-outs does, for staff who may change the roster. Drawn only when it has a row. Nothing is
  * sent to the browser but what it shows.
  */
@@ -61,7 +62,7 @@ export async function EarlierCompanyBuyouts({ showAmounts, canChange = false }: 
         Each may still have something to settle in that company&apos;s books, by hand: look it up there by its invoice, or by its note.</p>
       <DataTable caption="Volunteer buy-outs from the earlier QuickBooks company" captionHidden rowKey={(b) => b.id} rows={items}
         columns={[
-          { key: "family", header: "Family", rowHeader: true, cell: (b) => <><Link href={familyPage(b.familyId)}>{b.familyName}</Link>
+          { key: "family", header: "Family", rowHeader: true, cell: (b) => <>{b.familyPageStands ? <Link href={familyPage(b.familyId)}>{b.familyName}</Link> : b.familyName}
             <span className="when"><Link href={familyBuyoutsPage(b.familyId)}>Its buy-outs</Link></span></> },
           { key: "requirement", header: "Requirement", cell: (b) => <>{b.requirement}{b.subjectName ? `, for ${b.subjectName}` : ""}</> },
           ...(showAmounts ? [{ key: "amount", header: "Amount", numeric: true, cell: (b: (typeof items)[number]) => formatMoney(b.amountCents) }] : []),

@@ -350,7 +350,8 @@ describe("an earlier QuickBooks company's buy-outs, for the treasurer", () => {
     expect(section).toContain("Invoice 5001");
     expect(section).toContain("Invoice 5002");
     expect(section).toContain(`Company ${MONEY_REALM}`);
-    expect(section).toContain(`href="/staff/roster/${familyId}"`);
+    // The family's roster page doesn't open until the new company's shape is set: its name is text, its buy-outs page linked.
+    expect(section).not.toContain(`href="/staff/roster/${familyId}"`);
     expect(section).toContain(`href="/staff/roster/${familyId}/buyouts"`);
     // The invoice that stands links to the family's season page, where a waiver is given; the refund owed offers the close instead.
     expect(section.match(/href="\/staff\/seasons\/progress\/family\/[^"?]+\?season=[^"]+"/g)).toHaveLength(1);
@@ -377,7 +378,9 @@ describe("an earlier QuickBooks company's buy-outs, for the treasurer", () => {
     expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
     asStaff(await writer());
     const html = await renderPage(FamilyBuyoutsPage, { params: { id } });
-    expect(html).toContain("A family no longer on the roster");
+    // Named by its own record, though the clear left it no link and the cache none of the old customers.
+    expect(html).not.toContain("A family no longer on the roster");
+    expect(html).toContain(`${esc(RIVERA.family.name)}: each time it chose`);
     expect(html).toContain("Ended when the club connected a different QuickBooks company: nothing more was sent to the earlier one");
     expect(html).toContain(esc("In the earlier QuickBooks company's books: invoice 5001"));
     expect(html).toContain(esc("In the earlier QuickBooks company's books: invoice 5002"));

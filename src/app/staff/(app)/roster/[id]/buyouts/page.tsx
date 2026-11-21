@@ -22,20 +22,21 @@ function InvoiceWords({ b, money }: { b: FamilyBuyout; money: boolean }) {
   const i = b.invoice;
   const owed = money && i.owedCents !== null ? `: ${formatMoney(i.owedCents)} ${i.kind === "part_paid" ? "still owed" : "owed"}` : "";
   const words = { none: b.state === "refused" ? "None: nothing was billed" : "None made yet", not_read: "Not in the family's figures as last read", open: `Open${owed}`,
-    part_paid: `Part paid${owed}`, paid: "Paid", voided: "Voided", earlier_company: `In the earlier QuickBooks company's books: invoice ${i.qboId ?? ""}` }[i.kind];
+    part_paid: `Part paid${owed}`, paid: "Paid", voided: "Voided", earlier_company: i.qboId ? `In the earlier QuickBooks company's books: invoice ${i.qboId}` : "None the portal knows of: it may have been made in the earlier QuickBooks company" }[i.kind];
   return <>{words}{i.readAt ? <span className="when">Read from QuickBooks <LocalTime iso={i.readAt} /></span> : null}</>;
 }
 
 /**
  * What staff can do about one buy-out: close it where closeVerdict() allows (for staff who may change the roster), or
  * what to do first. A buy-out of an earlier QuickBooks company says what it leaves to settle in that company's books
- * (earlierCompanyLook()), but for a refund owed, whose close is offered as today, and one with nothing left to settle,
- * which says what closeVerdict() says.
+ * (earlierCompanyLook()), but for a refund owed, whose close is offered as today with the rule's words (the refund is
+ * the earlier company's), and one with nothing left to settle, which says what closeVerdict() says.
  */
 function WhatToDo({ b, canChange, rosterTag }: { b: FamilyBuyout; canChange: boolean; rosterTag: string }) {
   if (b.earlier && b.earlier.kind !== "refund_owed" && b.earlier.kind !== "nothing_to_settle") return <>{b.earlier.words}{b.earlier.note ? <span className="when">Note: {b.earlier.note}</span> : null}</>;
-  if (b.close.may && canChange) return <CloseBuyout what={b.close.words} act={closeBuyoutAction.bind(null, b.id, b.tag, rosterTag)} />;
-  return b.close.may ? <>{b.close.words} Staff who may change the roster can close it.</> : <>{b.close.words}</>;
+  const words = b.earlier?.kind === "refund_owed" ? b.earlier.words : b.close.words;
+  if (b.close.may && canChange) return <CloseBuyout what={words} act={closeBuyoutAction.bind(null, b.id, b.tag, rosterTag)} />;
+  return b.close.may ? <>{words} Staff who may change the roster can close it.</> : <>{words}</>;
 }
 
 /**
@@ -53,7 +54,7 @@ export default async function FamilyBuyoutsPage({ params }: { params: Promise<{ 
   if (!familyId) notFound();
   // The tag first: the buy-outs shown are that company's or a later one's, never an earlier one's.
   const rosterTag = await currentRosterTag();
-  const { familyName, buyouts } = await loadFamilyBuyouts(familyId);
+  const { familyName, recordName, buyouts } = await loadFamilyBuyouts(familyId);
   if (familyName === null && buyouts.length === 0) notFound();
   // Naming the app's family. Older rows name the customer, and the audit page's record filter finds both.
   await writeAudit({ actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, action: "volunteer.buyout.family.read", permission: "Roster.Read",
@@ -71,7 +72,7 @@ export default async function FamilyBuyoutsPage({ params }: { params: Promise<{ 
   return (
     <main className="wrap single">
       <h1 className="page-title">Volunteer buy-outs</h1>
-      <p className="lede">{familyName ?? "A family no longer on the roster"}: each time it chose to pay instead of volunteering, and where that stands.{" "}
+      <p className="lede">{familyName ?? recordName}: each time it chose to pay instead of volunteering, and where that stands.{" "}
         {familyName !== null && <Link href={familyPage(familyId)}>Back to the family</Link>}</p>
       <section className="box" aria-labelledby="family-buyouts-h"><h2 id="family-buyouts-h">Buy-outs{buyouts.length ? ` (${buyouts.length})` : ""}</h2>
         {buyouts.length === 0 ? <Notice tone="done" live="none">This family hasn&apos;t chosen to pay instead of volunteering.</Notice>
