@@ -607,6 +607,7 @@ function inactiveRowsOf(b: LinkBasics, queue: readonly QueueView[]): InactiveRow
     const send: Pick<InactiveRow, "send" | "sendNote"> = noun === "family" ? { send: null, sendNote: SEND_FAMILY_INACTIVE }
       : inTheWay ? { send: null, sendNote: QUEUE_IN_THE_WAY_OF_SEND }
       : b.shape === null || !offers(b.shape, deactivateOf("member")) ? { send: null, sendNote: null }
+      : !sendConnected(b) ? { send: null, sendNote: SEND_NOT_CONNECTED }
       : { sendNote: null, send: { at: 0, field: "inactive", kind: "family", recordId: key, about: `${words}'s active status`,
         words: [inactiveSendWords(words, "it"), ...(kept ? [KEPT_OFF_SENT] : [])], stamp: sendStamp("inactive", key, c.qboId, [c.qboId]) } };
     if (inTheWay) return [{ ...base, take: null, note: QUEUE_IN_THE_WAY, ...send }];
@@ -777,6 +778,9 @@ function takeOffersOf(b: LinkBasics, f: { id: AppFamilyId; name: string | null }
 /** A make-inactive sent from the screen, in words: what QuickBooks will hold, and that the balance is read first and any balance stops it. */
 const inactiveSendWords = (who: string, pronoun: "it" | "them") =>
   `Makes ${who} inactive in the books, as the portal has ${pronoun}, in place of active there. QuickBooks is asked what is owed first, and any balance, owed or a credit, stops it with nothing sent.`;
+/** Said beside a name in place of Send when only a create or rename waiting or stuck on the queue holds the portal's name: on its way to QuickBooks, not there yet. */
+export const sendNameQueuedNote = (name: string) =>
+  `A change on its way to QuickBooks, on the Reconciliation page, gives another customer the name “${name}”, and every name there must be different, so the portal's name can't be sent: rename the record on its page instead, or give that change up.`;
 /** Said with a send whose make-inactive of the customer is kept on Reconciliation: the send takes its place once QuickBooks has the customer inactive. */
 const KEPT_OFF_SENT = "The make-inactive kept on the Reconciliation page is closed once QuickBooks has the customer inactive, as this takes its place.";
 
@@ -786,14 +790,22 @@ const KEPT_OFF_SENT = "The make-inactive kept on the Reconciliation page is clos
  * family (a rename and a make-inactive of a student need one), each cached customer's name by nameKey(), and the names
  * of the creates and renames waiting or stuck on the queue (namesTaken()'s rule, src/lib/roster/writes.ts).
  */
-type SendFacts = { studentListed: Set<string>; holders: Map<string, string[]>; queuedNames: Set<string> };
+type SendFacts = { studentListed: Set<string>; holders: Map<string, string[]>; queuedNames: Set<string>; connected: boolean };
+/**
+ * Whether a send could go through now, by the connection the view read: QuickBooks connected, with a live refresh token,
+ * to the roster's company (readyToSend()'s rule, src/lib/roster/writes.ts). Not so, no press is drawn, and one sentence
+ * stands in its place (SEND_NOT_CONNECTED).
+ */
+const sendConnected = (b: LinkBasics) => Boolean(b.connection?.realmId && b.connection.refreshTokenCiphertext) && b.source !== null && b.source === b.connection?.realmId;
+/** Said beside a difference in place of Send the app's to QuickBooks while QuickBooks isn't connected to the roster's company. */
+export const SEND_NOT_CONNECTED = "QuickBooks isn't connected to the roster's company just now, so the portal's value can be sent once an Admin connects it under QuickBooks.";
 function sendFactsOf(b: LinkBasics, queue: readonly QueueView[]): SendFacts {
   const studentListed = new Set(b.roster === null || b.roster.kind === "flat" ? [] : b.roster.families.flatMap((f) => f.students.map((c) => c.qboId)));
   const holders = new Map<string, string[]>();
   for (const c of b.customers) { const k = nameKey(c.displayName); const had = holders.get(k); if (had) had.push(c.qboId); else holders.set(k, [c.qboId]); }
   const queuedNames = new Set(queue.flatMap((i) => ((i.state === "waiting" || i.state === "stuck") && (i.write.op === "create" || i.write.op === "rename") && "name" in i.write
     && typeof i.write.name === "string" ? [nameKey(i.write.name)] : [])));
-  return { studentListed, holders, queuedNames };
+  return { studentListed, holders, queuedNames, connected: sendConnected(b) };
 }
 
 /**
@@ -805,7 +817,8 @@ function sendFactsOf(b: LinkBasics, queue: readonly QueueView[]): SendFacts {
  * takes the place of (said beside it). Offered:
  * - a name, of the family, the member or an active student, whose customer the cache has active (a student's listed
  *   directly under a family), where the portal's name is one checkName() takes as it is and no other customer of the
- *   cache, nor a create or rename waiting, holds (otherwise one sentence: QuickBooks has another customer of that name);
+ *   cache, nor a create or rename waiting, holds (otherwise one sentence: QuickBooks has another customer of that name,
+ *   or a change on its way there gives one that name);
  * - where an active student is, as the books have them under another family, at the top of the tree or under another
  *   customer (`place` at `other_family`, `top`, `under_other`), and this family's `student_elsewhere` of an active record
  *   in another family whose own link stands: the same send from either row, one stamp, the student's customer and the
@@ -829,7 +842,11 @@ function sendOffersOf(b: LinkBasics, s: SendFacts, f: { id: AppFamilyId; name: s
   const familyCreating = (id: AppFamilyId) => queue.some((i) => open(i) && i.write.op === "create" && (i.write.role === "family" || i.write.role === "member") && String(i.familyId) === String(id));
   const studentCreating = (id: AppStudentId) => queue.some((i) => open(i) && i.write.op === "create" && i.write.role === "student" && String(i.studentId) === String(id));
   const studentMoving = (id: AppStudentId) => queue.some((i) => i.write.op === "move" && String(i.studentId) === String(id));
-  const offer = (o: SendOffer, blocked: boolean) => { if (blocked) sendNotes.push({ at: o.at, words: QUEUE_IN_THE_WAY_OF_SEND }); else sends.push(o); };
+  const offer = (o: SendOffer, blocked: boolean) => {
+    if (!s.connected) sendNotes.push({ at: o.at, words: SEND_NOT_CONNECTED });
+    else if (blocked) sendNotes.push({ at: o.at, words: QUEUE_IN_THE_WAY_OF_SEND });
+    else sends.push(o);
+  };
   const key = String(f.id);
   const familyWords = recordNameWords(f.name, "family");
   const studentOf = (id: AppStudentId) => b.everyStudent.find((x) => String(x.id) === String(id));
@@ -851,8 +868,10 @@ function sendOffersOf(b: LinkBasics, s: SendFacts, f: { id: AppFamilyId; name: s
     const who = recordNameWords(st.name, "student"), toWords = recordNameWords(to.name, "family");
     const parent = c.parentQboId === null ? undefined : b.customerById.get(c.parentQboId);
     const held = parent === undefined ? "at the top of its list, under no customer" : `under “${parent.displayName}”`;
+    // Whose invoices a family sees follows QuickBooks' tree (open question 14): said, as a move's money note says it.
+    const invoices = `Once QuickBooks has them there, ${toWords} sees their invoices in the portal${parent === undefined ? "" : `, and no family sees them through “${parent.displayName}” any more`}.`;
     offer({ at, field: "place", kind: "student", recordId: String(studentId), about: `${who}'s family`,
-      words: [`Sends ${who}'s family to the books: QuickBooks will have them under ${toWords}'s customer, where it has them ${held} now. The books' place is replaced. Nothing of theirs in the portal moves: their forms, volunteer places and buy-outs stay as they are.`,
+      words: [`Sends ${who}'s family to the books: QuickBooks will have them under ${toWords}'s customer, where it has them ${held} now. The books' place is replaced. ${invoices} Nothing else of theirs in the portal moves: their forms, volunteer places and buy-outs stay as they are.`,
         ...(kept ? ["The move kept on the Reconciliation page is closed, as this takes its place."] : [])],
       stamp: sendStamp("place", String(studentId), studentCustomer, [studentCustomer, c.parentQboId ?? "", String(to.id), toCustomer]) },
     waitingFor(studentCustomer) || studentCreating(studentId) || familyCreating(to.id) || waitingFor(toCustomer) || waitingFor(c.parentQboId));
@@ -868,10 +887,12 @@ function sendOffersOf(b: LinkBasics, s: SendFacts, f: { id: AppFamilyId; name: s
       if (!c.active) { sendNotes.push({ at, words: inactiveThere }); return; }
       const name = checkName(d.portal ?? "");
       if (!name.ok || name.name !== d.portal) return;
-      if ((s.holders.get(nameKey(name.name)) ?? []).some((id) => id !== c.qboId) || s.queuedNames.has(nameKey(name.name))) {
+      if ((s.holders.get(nameKey(name.name)) ?? []).some((id) => id !== c.qboId)) {
         sendNotes.push({ at, words: `QuickBooks has another customer named “${name.name}”, and every name there must be different, so the portal's name can't be sent: rename the record on its page instead.` });
         return;
       }
+      // A name only a change on its way to QuickBooks holds: QuickBooks doesn't have it yet, so it isn't said that it does.
+      if (s.queuedNames.has(nameKey(name.name))) { sendNotes.push({ at, words: sendNameQueuedNote(name.name) }); return; }
       const recordId = d.of === "student" ? String(d.studentId) : key;
       const whose = d.of === "student" ? `${recordNameWords(student?.name ?? null, "student")}'s` : `this ${d.of}'s`;
       offer({ at, field: "name", kind: d.of === "student" ? "student" : "family", recordId, about: `${d.of === "student" ? recordNameWords(student?.name ?? null, "student") : familyWords}'s name`,

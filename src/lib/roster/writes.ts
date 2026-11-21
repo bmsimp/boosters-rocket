@@ -4455,11 +4455,14 @@ export type SendAsk =
 /** What a send answers when the value it would send over isn't the one its row showed: nothing is sent. */
 export const SEND_CHANGED = "The books or the portal changed since this page was drawn, so nothing was sent. Look at the row again.";
 const SEND_NOT_LINKED = "That isn't linked to the books, so there is nothing to send it to. Look at the row again.";
-const SEND_FAMILY_NOT_LINKED = "The student's family in the portal isn't linked to an active family customer in the books, so there is nowhere to send them to. Look at the row again.";
+export const SEND_FAMILY_NOT_LINKED = "The student's family in the portal isn't linked to an active family customer in the books, so there is nowhere to send them to. Look at the row again.";
 /** A name another customer in the books holds: the portal's name is the one sent, so no other is offered. */
 export const sendNameTakenWords = (name: string) =>
   `QuickBooks has another customer named “${name}”, and every name there must be different, so nothing was sent. Rename the record on its page instead, to a name QuickBooks doesn't hold.`;
-const SEND_NAME_UNUSABLE = (error: string) => `The portal's name for this record can't be sent to QuickBooks as it is: ${error} Rename the record on its page instead.`;
+/** A name only a create or rename waiting or stuck on the queue holds: on its way to QuickBooks, which doesn't have it yet. */
+export const sendNameQueuedWords = (name: string) =>
+  `A change on its way to QuickBooks, on the Reconciliation page, gives another customer the name “${name}”, and every name there must be different, so nothing was sent. Rename the record on its page instead, or give that change up.`;
+const SEND_NAME_UNUSABLE =(error: string) => `The portal's name for this record can't be sent to QuickBooks as it is: ${error} Rename the record on its page instead.`;
 /** A family of layered books is made inactive only together with everyone under it: never sent from a difference. */
 export const SEND_FAMILY_INACTIVE = "The books make a family inactive only together with everyone under it, so this family's inactive status isn't sent from here.";
 const SEND_STUDENT_FAMILY_INACTIVE = "This student's family is inactive in the portal, so nothing was sent for the student.";
@@ -4495,7 +4498,8 @@ async function linkVersionOf(tx: Tx, source: string, customer: string, kind: "fa
  * company, the shape holding): the record active (a student's family too) and linked in its kind, its customer in the
  * cache, active, on the roster in the role a rename needs, the shape offering it, nothing waiting or stuck for it; the
  * portal's name one checkName() takes as it is and no other customer of the cache, nor a create or rename waiting,
- * holds (nameKey(): refused in words, nothing saved, no other name offered: the portal's is the one sent); the stamp
+ * holds (nameKey(): refused in words, nothing saved, no other name offered: the portal's is the one sent; said as
+ * another customer's, or as a change's on its way there, whichever holds it); the stamp
  * sealing the books' name and the portal's. Then a kept rename of the customer is closed as replaced, the rename queued
  * as a change saved first with the link's own version and `was` the books' name the row showed, and the send audited
  * (`accounting.difference.send`), in that transaction; then tried at once (trySavedItem()). QuickBooks having renamed it
@@ -4523,7 +4527,10 @@ async function sendName(kind: "family" | "student", recordId: string, stamp: str
     const name = checkName(r.name ?? "");
     if (!name.ok) return no(SEND_NAME_UNUSABLE(name.error));
     if (name.name !== r.name) return no(SEND_NAME_UNUSABLE("it isn't written as the portal writes names."));
-    if (nameIn(name.name, await namesTaken(tx, cache, c.qboId))) return no(sendNameTakenWords(name.name));
+    // Held by another customer in the books, or only by a create or rename on its way there: said as which it is.
+    if (nameIn(name.name, await namesTaken(tx, cache, c.qboId))) {
+      return no(nameIn(name.name, cache.filter((x) => x.qboId !== c.qboId).map((x) => x.displayName)) ? sendNameTakenWords(name.name) : sendNameQueuedWords(name.name));
+    }
     if (!sendStampHolds("name", recordId, c.qboId, [c.displayName, r.name], stamp)) return no(SEND_CHANGED);
     // The send takes the place of a rename of the customer kept on Reconciliation, the portal's earlier change.
     const replaced = await replaceRefused(tx, renamesOf(c.qboId), { op: "send", field: "name", recordId }, o);
@@ -4594,13 +4601,17 @@ async function sendPlace(studentId: AppStudentId, stamp: string, rosterTag: stri
     if (!c) return no(WRITE_COPY.gone);
     if (!c.active) return no(INACTIVE_THERE);
     if (c.parentQboId === familyCustomer) return no(SEND_CHANGED);
-    const why = (await moveRefusals(tx, [f.id], { locks: true })).get(String(f.id));
-    if (why) return no(why);
+    // The family record the books have the student under now, when its customer is one a family record is linked to.
+    const fromFamilyId = c.parentQboId === null ? null : await familyLinkedTo(c.parentQboId, tx);
+    // Both families, by the rule a move goes by: the student's, and the one the books have them under, whose "being
+    // sent" lock askFamilyInactive() holds for its whole run, so a family being made inactive with everyone under it
+    // never makes this student inactive under the family the move sends them to.
+    const families = fromFamilyId === null ? [f.id] : [f.id, fromFamilyId];
+    const refusals = await moveRefusals(tx, families, { locks: true });
+    for (const id of families) { const why = refusals.get(String(id)); if (why) return no(why); }
     if (await studentCreateWaiting(tx, s.id)) return no(STUDENT_WAITING);
     for (const customer of [studentCustomer, familyCustomer, c.parentQboId]) if (customer !== null && (await waitingForCustomer(tx, customer))) return no(WRITE_COPY.waiting);
     if (!sendStampHolds("place", String(s.id), studentCustomer, [studentCustomer, c.parentQboId ?? "", String(f.id), familyCustomer], stamp)) return no(SEND_CHANGED);
-    // The family record the books have the student under now, when its customer is one a family record is linked to.
-    const fromFamilyId = c.parentQboId === null ? null : await familyLinkedTo(c.parentQboId, tx);
     // The send takes the place of a move of the student kept on Reconciliation, the portal's earlier change.
     const replaced = await replaceRefused(tx, movesOf(s.id), { op: "send", field: "place", studentId: String(s.id) }, o);
     // Overwritten on purpose, but only over what the row showed: the move's before-value is the customer the cache has
@@ -4622,7 +4633,10 @@ async function sendPlace(studentId: AppStudentId, stamp: string, rosterTag: stri
   const stays = "Nothing of theirs in the portal moved: their forms, volunteer places and buy-outs stay as they are.";
   const t = await trySavedItem(item, write, { by: "at_once", linkedBy: o.staffUserId, actor: o.actor, ip: o.ip, permission: o.permission });
   switch (t.is) {
-    case "done": return { ok: true, message: `Sent ${who}'s family to QuickBooks: QuickBooks has them under ${to} now, as the portal has them. ${stays}${t.cached ? "" : " The roster here shows it after its next read of QuickBooks, usually within a few minutes."}` };
+    // Whose invoices a family sees follows QuickBooks' tree as the roster cache holds it (open question 14).
+    case "done": return { ok: true, message: `Sent ${who}'s family to QuickBooks: QuickBooks has them under ${to} now, as the portal has them. ${stays} ${t.cached
+      ? `${to} sees their invoices in the portal now.`
+      : `${to} sees their invoices in the portal once the roster here reads QuickBooks again, usually within a few minutes.`}` };
     case "found": return { ok: true, message: `QuickBooks has ${who} under ${to} already, so nothing more was sent. ${stays}` };
     case "waiting": return { ok: true, status: "waiting", message: (t.sent
       ? `The portal can't tell yet whether QuickBooks took ${who}'s move to ${to}: its answer didn't arrive. The roster is read again within a few minutes to see, and the portal finishes it then without sending it twice; you'll find it on the Reconciliation page until then.`
