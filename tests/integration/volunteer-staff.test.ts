@@ -260,7 +260,7 @@ describe("shifts", () => {
 
   it("tells nobody the club has cut off from the family: a guardian whose link is closed, or who is blocked", async () => {
     const { a, b, shift, eventId } = await shared();
-    await db.update(guardian).set({ status: "disabled" }).where(and(eq(guardian.parentId, a.identity.parentId), eq(guardian.familyQboId, FAMILY_A.family.qboId)));
+    await db.update(guardian).set({ status: "disabled" }).where(and(eq(guardian.parentId, a.identity.parentId), eq(guardian.familyId, a.identity.familyId)));
     await db.update(parent).set({ blocked: true }).where(eq(parent.id, b.identity.parentId));
     const as = { startsAt: "10:00", endsAt: "12:00", places: 4, role: "Rinse crew", requirementIds: [] };
     expect(await updateShiftAction(shift.id, as)).toEqual({ ok: true, message: "Saved." });

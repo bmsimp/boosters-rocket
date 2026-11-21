@@ -1,12 +1,25 @@
 import { and, eq, exists, gt, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { family, guardian, parent, parentAuthSession, parentDevice, parentSigninToken, signinCode, student } from "@/lib/db/schema";
+import { accountingLink, family, guardian, parent, parentAuthSession, parentDevice, parentSigninToken, signinCode, student } from "@/lib/db/schema";
 import type { Actor } from "@/lib/audit/log";
-import type { AppFamilyId } from "@/lib/families/ids";
+import { QUICKBOOKS, type AppFamilyId } from "@/lib/families/ids";
+import { recordsCompany } from "@/lib/families/links";
 import { getShape, shapeNamesStudents, type MembershipShape } from "@/lib/roster/shape";
 import { getParentSettings } from "./settings";
 
-export type GuardianRow = typeof guardian.$inferSelect;
+/**
+ * A guardian row as the code reads it: every column but the two old copies (`family_qbo_id`, `source_qbo_id`), which
+ * nothing reads since stage 3's slice 12b1 and slice 12b2 drops. Drizzle names every column it declares in a whole-row
+ * select (`select()`, or the table as one field of a select) and in an insert, so a guardian row is read through
+ * GUARDIAN_COLS only and made by its own SQL (saveGuardian(), ./guardians.ts; tests/unit/guardian-columns.test.ts): the
+ * gate, the chooser, staff's add, remove and reinstate and the Parents pages then keep working beside a database those
+ * columns have left. An unlink's clear of the copy still names it, until slice 12b2.
+ */
+export type GuardianRow = Omit<typeof guardian.$inferSelect, "familyQboId" | "sourceQboId">;
+export const GUARDIAN_COLS = {
+  id: guardian.id, familyId: guardian.familyId, parentId: guardian.parentId, isPrimary: guardian.isPrimary, status: guardian.status,
+  disabledReason: guardian.disabledReason, statusBeforeDisable: guardian.statusBeforeDisable, createdAt: guardian.createdAt, updatedAt: guardian.updatedAt,
+} satisfies Record<keyof GuardianRow, unknown>;
 
 export const parentActor = (p: { id: string; email: string }): Actor => ({ door: "parent", id: p.id, label: p.email });
 
@@ -185,19 +198,26 @@ export async function studentsRuleInForce(tx?: Tx): Promise<boolean> {
  * (src/lib/auth/resolve.ts): sent no code and refused at the code check (signin-codes.ts, `no_enabled_guardian`) and
  * at the sign-in's end (completeParentSignin()), and sent no welcome (welcome.ts, through hasRowThatCounts(), the same
  * rule as SQL). A session already open when the rule comes into force, or when a family loses its last active student
- * or goes inactive, is caught on its next request. In the chooser's order, by `family_qbo_id`, then the rows that name
- * no customer (made while their family had no link, stage 3's slice 9d, or of a family unlinked since: stage 4's slice
- * M3b clears the rows' copy, and a relink never fills it again), then by row id. So a family's place in the chooser (and
- * its "(1)", "(2)" in myFamilyNames()) moves only when an unlink sends its rows to the end, and the families after it up
- * one; nothing else moves it. Closing a membership
+ * or goes inactive, is caught on its next request. In the chooser's order, by the customer the family's own link names
+ * (in the records' company, as linksOf() reads it), then the rows of families with no link, then by row id (stage 3's
+ * slice 12b1). That is the order the rows' own copy of the customer (`family_qbo_id`) gave for every row whose copy
+ * matched its family's link. Two kinds of row had a copy that didn't, and now sort among the linked families by their
+ * family's customer instead of staying at the end: one made while its family had no link, of a family linked since,
+ * and one of a family unlinked (an unlink clears the copy, stage 4's slice M3b) and linked again since. While
+ * QuickBooks is connected to another company than the records' (recordsCompany() answers null) no link is read, and
+ * the rows come in row id order. A family's place in the chooser (and its "(1)", "(2)" in myFamilyNames()) moves when
+ * the family is linked, unlinked or relinked, and in that one state. Closing a membership
  * ends the sessions that chose the row's family record (endFamilySessions()), and every session once no open row is
  * left (membership.ts).
  */
 export async function enterableGuardianRows(parentId: string, tx?: Tx): Promise<EnterableRow[]> {
-  const studentsRule = await studentsRuleInForce(tx);
-  const rows = await (tx ?? db).select({ g: guardian, familyId: family.id }).from(guardian).innerJoin(family, eq(family.id, guardian.familyId))
+  const [studentsRule, realmId] = await Promise.all([studentsRuleInForce(tx), recordsCompany(tx)]);
+  // A family has at most one family link in a company (accounting_link_family_uq), so the join adds no row.
+  const ownLink = and(eq(accountingLink.familyId, family.id), eq(accountingLink.system, QUICKBOOKS), realmId === null ? sql`false` : eq(accountingLink.realmId, realmId));
+  const rows = await (tx ?? db).select({ g: GUARDIAN_COLS, familyId: family.id }).from(guardian).innerJoin(family, eq(family.id, guardian.familyId))
+    .leftJoin(accountingLink, ownLink)
     .where(and(eq(guardian.parentId, parentId), ne(guardian.status, "disabled"), eq(family.active, true),
-      studentsRule ? hasActiveStudent(family.id) : undefined)).orderBy(sql`${guardian.familyQboId} asc nulls last`, guardian.id);
+      studentsRule ? hasActiveStudent(family.id) : undefined)).orderBy(sql`${accountingLink.customerId} asc nulls last`, guardian.id);
   return rows.map((r) => ({ ...r.g, familyId: r.familyId }));
 }
 

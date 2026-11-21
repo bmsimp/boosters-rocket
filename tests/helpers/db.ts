@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { role, staffUser, roleAssignment, family, guardian, parent, parentAuthUser, parentAuthSession, authProvider, providerCertificate, setting, type GuardianStatus, type DisabledReason } from "@/lib/db/schema";
+import { role, staffUser, roleAssignment, family, guardian, parent, parentAuthUser, parentAuthSession, authProvider, providerCertificate, setting, accountingLink, qboCustomer, type GuardianStatus, type DisabledReason } from "@/lib/db/schema";
 import { generateCertificate } from "@/lib/auth/certificate-crypto";
 import { isCertificateProvider, type CertificateProviderKey } from "@/lib/auth/certificates";
 import { secretBox } from "@/lib/crypto/secret-box";
@@ -8,7 +8,7 @@ import { invalidateProviders, type ProviderKey } from "@/lib/auth/providers";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { mailConfigHash } from "@/lib/mail/config-hash";
 import type { StoredMailConfig } from "@/lib/mail/types";
-import type { AppFamilyId } from "@/lib/families/ids";
+import { QUICKBOOKS, type AppFamilyId } from "@/lib/families/ids";
 import { getRosterSource } from "@/lib/roster/source";
 import { recordOfCustomer } from "./app-records";
 
@@ -152,45 +152,99 @@ export async function seedParent(o: { name: string; email?: string; phone?: stri
   return { ...p!, authUserId: u!.id };
 }
 
+/**
+ * The unlinked family record a `familyQboId` stands for while the roster names no company: one per id for the life of
+ * this test database (made again once resetDb() has removed the one remembered), so rows seeded under one id share it.
+ */
+const unlinkedFamilyOf = new Map<string, AppFamilyId>();
+async function rememberedFamily(familyQboId: string, make: boolean): Promise<AppFamilyId | null> {
+  const had = unlinkedFamilyOf.get(familyQboId);
+  if (had !== undefined && (await db.select({ id: family.id }).from(family).where(eq(family.id, had))).length) return had;
+  if (!make) return null;
+  const [f] = await db.insert(family).values({ name: null, active: true }).returning({ id: family.id });
+  unlinkedFamilyOf.set(familyQboId, f!.id);
+  return f!.id;
+}
+
+/** The family record a customer's family link names in the company, or null when it has none. */
+async function linkedFamily(customerId: string, realmId: string): Promise<AppFamilyId | null> {
+  const [l] = await db.select({ familyId: accountingLink.familyId }).from(accountingLink).where(and(eq(accountingLink.system, QUICKBOOKS),
+    eq(accountingLink.realmId, realmId), eq(accountingLink.customerId, customerId), isNotNull(accountingLink.familyId)));
+  return l?.familyId ?? null;
+}
+
+/** The customer a family record's link names in the company, or null for a record with no link. */
+async function customerOfRecord(familyId: AppFamilyId, realmId: string): Promise<string | null> {
+  const [l] = await db.select({ customerId: accountingLink.customerId }).from(accountingLink)
+    .where(and(eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId), eq(accountingLink.familyId, familyId)));
+  return l?.customerId ?? null;
+}
+
+/**
+ * A guardian row standing on its own family record and its own link, as the portal holds one (stage 3's slice 12b1): it
+ * writes `family_id` itself, never `family_qbo_id` or `source_qbo_id`, and runs no import.
+ * - Its family: `familyId` when given (null: a row in no family record); else, for `familyQboId` while the roster names
+ *   a company, the family record that customer's link names (recordOfCustomer(), which makes an inactive one with its
+ *   link for a customer the import hasn't made yet: an import run once the cache holds the customer makes it active);
+ *   while the roster names none, one active unlinked family record per `familyQboId` (rows of one id share it, and the
+ *   gate lets their people in). That record does not survive an import run while the roster names no company
+ *   (syncAppRecords(), and the cache helpers that run it): it has no link, so the import makes it inactive, the gate
+ *   refuses its people and whatAFreshRunWouldChange() is not NO_CHANGES; seed such rows after the last import, or seed
+ *   a roster company first. A row a change of company closed (`company_changed`) is in no family, as the clear
+ *   leaves one.
+ * - Its own link: with a roster company, a `sourceQboId` that isn't its family's customer is the record its sign-in came
+ *   from, and the row gets the `carried_over` membership link to it the import made, with the cache's version of that
+ *   customer when the cache holds it. None for a row of a family with no link, as the import made none.
+ */
 export async function seedGuardian(o: {
-  parentId: string; familyQboId: string; status?: GuardianStatus; isPrimary?: boolean;
+  parentId: string; familyQboId?: string; familyId?: AppFamilyId | null; status?: GuardianStatus; isPrimary?: boolean;
   disabledReason?: DisabledReason | null; statusBeforeDisable?: "invited" | "active" | null; sourceQboId?: string | null;
 }): Promise<GuardianRow> {
+  if (o.familyQboId === undefined && o.familyId === undefined) throw new Error("seedGuardian: give the row's familyQboId, or its familyId (null for none).");
+  const realmId = await getRosterSource();
+  const familyId: AppFamilyId | null = o.disabledReason === "company_changed" ? null
+    : o.familyId !== undefined ? o.familyId
+    : realmId !== null ? await recordOfCustomer(o.familyQboId!, "family")
+    : await rememberedFamily(o.familyQboId!, true);
   const [g] = await db.insert(guardian).values({
-    parentId: o.parentId, familyQboId: o.familyQboId, status: o.status ?? "active", isPrimary: o.isPrimary ?? false,
-    disabledReason: o.disabledReason ?? null, statusBeforeDisable: o.statusBeforeDisable ?? null, sourceQboId: o.sourceQboId ?? null,
+    parentId: o.parentId, familyId, status: o.status ?? "active", isPrimary: o.isPrimary ?? false,
+    disabledReason: o.disabledReason ?? null, statusBeforeDisable: o.statusBeforeDisable ?? null,
   }).returning();
+  const familyCustomer = realmId === null || familyId === null ? null : await customerOfRecord(familyId, realmId);
+  if (realmId !== null && familyCustomer !== null && o.sourceQboId && o.sourceQboId !== familyCustomer) {
+    const [c] = await db.select({ syncToken: qboCustomer.syncToken }).from(qboCustomer).where(eq(qboCustomer.qboId, o.sourceQboId));
+    await db.insert(accountingLink).values({ system: QUICKBOOKS, realmId, customerId: o.sourceQboId, guardianId: g!.id, origin: "carried_over",
+      ...(c ? { syncedToken: c.syncToken, syncedAt: new Date() } : {}) });
+  }
   return g!;
 }
 
 /**
- * A guardian row (seedGuardian()) in an active family record of the app's own, with no link to QuickBooks: a family the
- * gate lets its person into (an open row naming an active family record, src/lib/auth/resolve.ts), for the tests of the
- * door that seed people by hand with no roster company. Rows of one `familyQboId` share one record, as the session's
- * stored family id is matched to a row by it. A test with a roster company imports the records instead
- * (syncAppRecords()), which would point these rows elsewhere.
+ * seedGuardian(), kept by its name for the tests of the door that seed people by hand with no roster company: rows of
+ * one `familyQboId` share one active family record of the app's own, which the gate lets their people into.
  */
-export async function seedGuardianInFamily(o: Parameters<typeof seedGuardian>[0]): Promise<GuardianRow> {
-  const [same] = await db.select({ familyId: guardian.familyId }).from(guardian)
-    .where(and(eq(guardian.familyQboId, o.familyQboId), isNotNull(guardian.familyId))).limit(1);
-  const familyId = same?.familyId ?? (await db.insert(family).values({ name: null, active: true }).returning({ id: family.id }))[0]!.id;
-  const g = await seedGuardian(o);
-  const [row] = await db.update(guardian).set({ familyId }).where(eq(guardian.id, g.id)).returning();
-  return row!;
-}
+export const seedGuardianInFamily = (o: Parameters<typeof seedGuardian>[0]): Promise<GuardianRow> => seedGuardian(o);
 
 /**
- * The app's own family a session in `familyQboId` stores, as migration 0037 carried one over: the family record of the
- * person's own guardian row in that family, when it names one; else, while the roster names a company, that
- * customer's family record (recordOfCustomer(), which a later step points the row at too). Throws when there is none,
- * rather than store a session that names no family: a test of the door seeds its rows with seedGuardianInFamily().
+ * The app's own family a session in `familyQboId` stores, as migration 0037 carried one over: the family record that id
+ * stands for (its link's while the roster names a company, or the one seedGuardian() made for it while the roster named
+ * none), the first of the two the person has a row in; else, while the roster names a company, that customer's family
+ * record (recordOfCustomer()), or the remembered one. Throws when there is none, rather than store a session that names
+ * no family.
  */
 export async function familyOfSession(authUserId: string, familyQboId: string): Promise<AppFamilyId> {
-  const [row] = await db.select({ familyId: guardian.familyId }).from(guardian).innerJoin(parentAuthUser, eq(parentAuthUser.parentId, guardian.parentId))
-    .where(and(eq(parentAuthUser.id, authUserId), eq(guardian.familyQboId, familyQboId), isNotNull(guardian.familyId)));
-  if (row?.familyId) return row.familyId;
-  if ((await getRosterSource()) !== null) return recordOfCustomer(familyQboId, "family");
-  throw new Error(`seedParentSession: no family record for ${familyQboId}: the person has no row in it naming one and the roster names no company. Seed the row with seedGuardianInFamily(), or a roster company first.`);
+  const realmId = await getRosterSource();
+  const linked = realmId === null ? null : await linkedFamily(familyQboId, realmId);
+  const remembered = await rememberedFamily(familyQboId, false);
+  for (const candidate of [linked, remembered]) {
+    if (candidate === null) continue;
+    const [row] = await db.select({ id: guardian.id }).from(guardian).innerJoin(parentAuthUser, eq(parentAuthUser.parentId, guardian.parentId))
+      .where(and(eq(parentAuthUser.id, authUserId), eq(guardian.familyId, candidate)));
+    if (row) return candidate;
+  }
+  if (realmId !== null) return recordOfCustomer(familyQboId, "family");
+  if (remembered !== null) return remembered;
+  throw new Error(`seedParentSession: no family record for ${familyQboId}: the roster names no company and no row was seeded under it. Seed the row with seedGuardian(), or a roster company first.`);
 }
 
 /**

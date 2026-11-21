@@ -12,6 +12,7 @@ import type { Tx } from "@/lib/db/client";
 import { guardian, parentEmailChange, type DisabledReason } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import type { AppFamilyId } from "@/lib/families/ids";
+import { customerOfFamily } from "@/lib/families/links";
 import { formsForGoneSigner } from "@/lib/forms/signer-gone";
 import { deleteUnusedSigninCodes, deleteUnusedSigninLinks, endFamilySessions, endParentSessions, forgetDevices } from "./sessions";
 
@@ -28,7 +29,7 @@ async function deleteUnusedRequests(tx: Tx, parentId: string, familyId: AppFamil
 
 /** The parts of a guardian row a close reads. The caller's own object is changed in place to match the row. */
 export type MembershipRow = Pick<typeof guardian.$inferSelect,
-  "id" | "parentId" | "familyQboId" | "familyId" | "status" | "statusBeforeDisable" | "disabledReason" | "sourceQboId">;
+  "id" | "parentId" | "familyId" | "status" | "statusBeforeDisable" | "disabledReason">;
 
 export type CloseMembership = {
   reason: DisabledReason;
@@ -55,7 +56,8 @@ export type CloseMembership = {
  * work after a reinstate or a new add within its life; the person's sessions that chose the row's family record end (none for a row that names no family record: no session can
  * have chosen one, since the gate lets a session into a family only through its person's row naming it), and all their
  * sessions when no open row is left; when the row was open, the family's unfinished forms still waiting on them start
- * again (formsForGoneSigner(), by the row's own `family_id`); and `parent.access.ended` is written. In that order, in the caller's transaction, which must hold the row locked. Returns
+ * again (formsForGoneSigner(), by the row's own `family_id`); and `parent.access.ended` is written, naming the customer
+ * the family's own link names now (`familyQboId`, null for a family with no link or a row in none). In that order, in the caller's transaction, which must hold the row locked. Returns
  * whether it was open and how many sessions ended.
  */
 export async function closeMembership(tx: Tx, row: MembershipRow, o: CloseMembership): Promise<{ wasOpen: boolean; sessionsEnded: number }> {
@@ -78,10 +80,11 @@ export async function closeMembership(tx: Tx, row: MembershipRow, o: CloseMember
   let sessionsEnded = row.familyId === null ? 0 : await endFamilySessions(row.parentId, row.familyId, tx);
   if (!openElsewhere) sessionsEnded += await endParentSessions(row.parentId, tx);
   // A document already made for them keeps a working signing link: their unfinished forms for this family start again.
+  const familyQboId = row.familyId === null ? null : await customerOfFamily(row.familyId, tx);
   const formsReset = wasOpen ? await formsForGoneSigner(tx, { parentId: row.parentId, family: row.familyId, reason: "access_ended", actor: o.actor, ip: o.ip ?? null }) : 0;
   await writeAudit({ actor: o.actor, action: "parent.access.ended", permission: o.permission, targetType: "guardian", targetId: row.id, ip: o.ip ?? null,
     before: { status: was },
-    after: { parentId: row.parentId, familyId: row.familyId === null ? null : String(row.familyId), familyQboId: row.familyQboId, reason: o.reason, sessionsEnded,
+    after: { parentId: row.parentId, familyId: row.familyId === null ? null : String(row.familyId), familyQboId, reason: o.reason, sessionsEnded,
       ...(requestsDeleted ? { requestsDeleted } : {}), ...(linksDeleted ? { linksDeleted } : {}), ...(devicesForgotten ? { devicesForgotten } : {}), ...(formsReset ? { formsReset } : {}), ...(o.cause === undefined ? {} : { cause: o.cause }), ...(o.note === undefined ? {} : { note: o.note }) } }, tx);
   return { wasOpen, sessionsEnded };
 }

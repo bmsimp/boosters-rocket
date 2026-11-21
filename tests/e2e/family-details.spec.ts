@@ -20,7 +20,10 @@ const putBack = () => sql`UPDATE parent SET phone = ${E2E_DETAILS.phone}, addres
 test.afterAll(async () => { await putBack(); await sql.end(); });
 
 test("the seeded parent's QuickBooks record has an id that is never sent to Intuit", async () => {
-  const links = await sql`SELECT g.source_qbo_id FROM guardian g JOIN parent p ON p.id = g.parent_id WHERE p.email = 'zelda@example.com' AND g.family_qbo_id = ${PARENT_SESSION_FAMILY}`;
+  // Her row's own link (stage 3's slice 12b1: the record her sign-in came from), in the family whose customer the session names.
+  const links = await sql`SELECT l.customer_id AS source_qbo_id FROM guardian g JOIN parent p ON p.id = g.parent_id
+    JOIN accounting_link fl ON fl.family_id = g.family_id JOIN accounting_link l ON l.guardian_id = g.id
+    WHERE p.email = 'zelda@example.com' AND fl.customer_id = ${PARENT_SESSION_FAMILY}`;
   expect(links).toHaveLength(1);
   // If this fails, don't change it: a numeric id here could send this run's requests to Intuit's real servers.
   expect(links[0]!.source_qbo_id).toBe("E2E-P1");

@@ -40,7 +40,7 @@ async function spentCode(): Promise<string> {
 async function ana(o: { blocked?: boolean; status?: "invited" | "active" | "disabled"; family?: "active" | "inactive" | "none" } = {}) {
   const p = await seedParent({ name: "Ana", email: "ana@example.com", blocked: o.blocked });
   const row = { parentId: p.id, familyQboId: "F1", status: o.status ?? "active", disabledReason: o.status === "disabled" ? "removed" as const : null };
-  if (o.family === "none") { await seedGuardian(row); return p; }
+  if (o.family === "none") { await seedGuardian({ ...row, familyQboId: undefined, familyId: null }); return p; }
   const g = await seedGuardianInFamily(row);
   if (o.family === "inactive") await db.update(family).set({ active: false }).where(eq(family.id, g.familyId!));
   return p;

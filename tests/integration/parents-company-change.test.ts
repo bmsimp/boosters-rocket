@@ -78,7 +78,8 @@ describe("connecting a different QuickBooks company", () => {
     const { link } = await seedClosedLeo();
     await clearRosterOfOtherCompany("2222", admin);
     const [row] = await db.select().from(guardian).where(eq(guardian.id, link.id));
-    expect(row).toMatchObject({ status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "active", familyQboId: "30", sourceQboId: "31" });
+    // In no family now (the clear takes every row's family away), what it was before it closed kept.
+    expect(row).toMatchObject({ status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "active", familyId: null });
     expect((await audits("parent.access.cleared"))[0]!.after).toMatchObject({ links: 3, closedLinksMarked: 1 });
   });
 
