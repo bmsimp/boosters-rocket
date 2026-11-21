@@ -14,7 +14,7 @@ import { accountingLink, auditLog, family, qboConnection, qboCustomerType, stude
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
 import { addFamily, changeInPortal, createInQuickBooksAndLink, FAMILY_SENDING, FAMILY_WAITING, linkStudentMadeAfterGivingUp, studentsBeingMade, WRITE_COPY } from "@/lib/roster/writes";
 import { ROSTER_LOCK } from "@/lib/roster/shape";
-import { CUSTOMER_HAS_FAMILY, FAMILY_HAS_CUSTOMER, giveUp, loadMadeAfterGivingUp, runWriteQueue, tryAgainNow, TRY_AGAIN_NEEDS_LINKING } from "@/lib/roster/queue";
+import { CUSTOMER_HAS_FAMILY, FAMILY_HAS_CUSTOMER, giveUp, giveUpIn, loadMadeAfterGivingUp, runWriteQueue, tryAgainNow, TRY_AGAIN_NEEDS_LINKING } from "@/lib/roster/queue";
 import { ROSTER_MOVED } from "@/lib/seasons/roster-lock";
 import { customersWithNoFamily } from "@/lib/roster/no-family";
 import { refreshRoster } from "@/lib/roster/refresh";
@@ -495,21 +495,26 @@ describe("Create in QuickBooks and link", () => {
     stub.customers.push({ Id: "77", SyncToken: "0", DisplayName: "Oak Family", Active: true, CustomerTypeRef: { value: "1" } });
     const item = await seedQueued(OAK_CREATE, { familyId: oak, sent: true, lastTriedAt: ago(60_000), nextTryAt: ago(1000) });
     expect((await refreshRoster(WORKER)).ok).toBe(true);
-    // The roster lock held elsewhere: the worker's look finds the customer, then waits for the lock, and staff give the item up meanwhile.
+    // The roster lock held elsewhere: the worker's look finds the customer, then waits for the lock, and staff give the
+    // item up meanwhile. Since stage 4's slice M7a2 "Give up" holds the roster lock itself (giveUp() takes it shared),
+    // so it can't run beside a finish waiting for it: the give-up is made holding the lock the worker waits for, as
+    // giveUp() would hold it had it taken it first, and commits before the worker's finish goes on.
     let release = () => {};
     let held: Promise<void> = Promise.resolve();
+    let gaveUp: unknown = null;
     await new Promise<void>((ready) => {
       held = db.transaction(async (tx) => {
         await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
         ready();
         await new Promise<void>((r) => { release = () => r(); });
+        gaveUp = await giveUpIn(tx, item.id, "Making it in QuickBooks by hand.", op);
       });
     });
     const wake = runWriteQueue();
     await untilALockIsAwaited();
-    expect(await giveUp(item.id, "Making it in QuickBooks by hand.", op)).toMatchObject({ ok: true });
     release();
     await held;
+    expect(gaveUp).toMatchObject({ ok: true });
     expect(await wake).toMatchObject({ ok: true });
     expect(await queueItem(item.id)).toMatchObject({ state: "given_up", resultQboId: "77" });
     expect(await linkOfFamily(oak)).toBeUndefined();
