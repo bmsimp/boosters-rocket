@@ -21,7 +21,8 @@ const portalOrigin = () => new URL(env.APP_URL).origin;
  * sign-in release's slice SI-5a the change is asked for only by a session that proved itself in the last 10 minutes
  * (open question 28): the page asks again first (src/lib/parents/asking-again.ts), and a person with no password is
  * offered a link to choose one; since SI-6b a guardian with an authenticator app is asked for its code, and since SI-7b
- * a guardian with a passkey for it (howYouSignIn()). Under Strict the change isn't made here yet, so the club is asked.
+ * a guardian with a passkey for it (howYouSignIn()). Under Strict (since SI-10b) the change is asked here as at Standard,
+ * by a session proved under Strict: the switch to Strict cleared every proof made before it.
  * The portal's own origin (APP_URL's, no secret) is passed to the asking, where a passkey works.
  */
 export default async function FamilyEmailPage() {
@@ -35,14 +36,13 @@ export default async function FamilyEmailPage() {
           <p className="lede">You sign in with {ctx.email}. A new address becomes the one you sign in with, and the club&apos;s records are brought up to date with it.</p>
           <section className="box" aria-labelledby="new-h">
             <h2 id="new-h">Your new email</h2>
-            {me.strict ? <p>{SIGNIN_SETTINGS_COPY.strict}</p>
-              : !me.hasPassword ? (
+            {!me.hasPassword ? (
                 <>
                   <p>{SIGNIN_SETTINGS_COPY.choosePasswordForEmail} {SIGNIN_SETTINGS_COPY.noPassword}</p>
                   <SetupLinkForm />
                 </>
               ) : (
-                <AskAgain email={me.email} proved={me.provedRecently} lede={howYouSignIn({ app: me.app !== null, passkey: me.hasPasskey }).askAgainForEmail}
+                <AskAgain email={me.email} proved={me.provedRecently} lede={howYouSignIn({ app: me.app !== null, passkey: me.hasPasskey, strict: me.strict }).askAgainForEmail}
                   passkey={me.hasPasskey} portalOrigin={portalOrigin()}>
                   <p>We&apos;ll email a link to the new address. Nothing changes until you open it and say yes.</p>
                   <NewEmailForm />

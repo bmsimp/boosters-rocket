@@ -4,6 +4,7 @@ import { canChangeMyEmail } from "@/lib/parents/email-change";
 import { hasAuthenticator } from "@/lib/parents/authenticator";
 import { hasPasskey } from "@/lib/parents/passkeys";
 import { howYouSignIn } from "@/lib/parents/signin-settings-copy";
+import { getParentSettings } from "@/lib/parents/settings";
 import { loadMyFamily } from "@/lib/parents/my-family";
 import { getClubSettings } from "@/lib/settings/club";
 import { DetailsBox, NotSetUpBox, StudentsBox } from "../family-boxes";
@@ -12,7 +13,8 @@ export const metadata = { title: "Family" };
 
 export default async function FamilyPage() {
   const ctx = await requireParentPage("/family");
-  const [family, club, ownEmail, app, passkey] = await Promise.all([loadMyFamily(ctx), getClubSettings(), canChangeMyEmail(ctx), hasAuthenticator(ctx.parentId), hasPasskey(ctx.parentId)]);
+  const [family, club, ownEmail, app, passkey, settings] = await Promise.all([loadMyFamily(ctx), getClubSettings(), canChangeMyEmail(ctx), hasAuthenticator(ctx.parentId),
+    hasPasskey(ctx.parentId), getParentSettings()]);
   return (
     <main className="wrap single family-page">
       <h1 className="page-title">{family ? family.name : "Your family"}</h1>
@@ -37,8 +39,8 @@ export default async function FamilyPage() {
           <dt>Name</dt><dd>{ctx.name}</dd>
           <dt>Email</dt><dd>{ctx.email}</dd>
         </dl>
-        {/* How they sign in: their passkey (since SI-7b), on a new device the code from their authenticator app (since SI-6b), or the code we email. */}
-        <p className="help">{howYouSignIn({ app, passkey }).how}</p>
+        {/* How they sign in: their passkey (since SI-7b), on a new device the code from their authenticator app (since SI-6b), or the code we email; at Strict, every time (SI-10b). */}
+        <p className="help">{howYouSignIn({ app, passkey, strict: settings.level === "strict" }).how}</p>
         {/* No id in either link: each page takes whose sign-in it is from the session. */}
         <div className="box-foot stack">
           <Link className="btn btn-line" href="/family/sign-in">Sign-in settings</Link>

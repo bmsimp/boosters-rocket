@@ -24,7 +24,6 @@ import { getParentSettings } from "./settings";
 import { sessionProvedRecently } from "./asking-again";
 import { hasAuthenticator } from "./authenticator";
 import { hasPasskey } from "./passkeys";
-import { SIGNIN_SETTINGS_COPY } from "./signin-settings-copy";
 
 /** How long the link mailed to the new address works. */
 export const EMAIL_CHANGE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -108,10 +107,10 @@ export async function requestMyEmailChange(ctx: ParentCtx, input: unknown): Prom
     // The person's row first, as every change of a person's sign-in does: two asks at once end with one live request.
     await tx.select({ id: parent.id }).from(parent).where(eq(parent.id, ctx.parentId)).for("update");
     // Asking again (open question 28; the sign-in release, slice SI-5a): only a session that proved the password and
-    // the second step within the last 10 minutes asks, read here, before anything is stored or mailed.
+    // the second step within the last 10 minutes asks, read here, before anything is stored or mailed. At Strict too
+    // (since slice SI-10b): the switch to Strict cleared every proof made before it (setLevel(), switches.ts), so a
+    // proof here is Strict's own.
     if (!(await sessionProvedRecently(tx, ctx))) return "not_proved" as const;
-    // Under Strict nothing can be asked again yet (the page says so), and a proof made at Standard is no way past it.
-    if ((await getParentSettings(tx)).level === "strict") return "strict" as const;
     await tx.delete(parentEmailChange).where(and(eq(parentEmailChange.parentId, ctx.parentId), isNull(parentEmailChange.usedAt)));
     // The request is asked in the session's own family (the app's family record the gate gave it). It names no
     // QuickBooks record (`record_qbo_id` stays null, read by nothing): the address is the person's.
@@ -125,7 +124,6 @@ export async function requestMyEmailChange(ctx: ParentCtx, input: unknown): Prom
     return refused("not_proved", [(await hasPasskey(ctx.parentId)) ? EMAIL_COPY.proveFirstWithPasskey
       : (await hasAuthenticator(ctx.parentId)) ? EMAIL_COPY.proveFirstWithApp : EMAIL_COPY.proveFirst]);
   }
-  if (asked === "strict") return refused("strict", [SIGNIN_SETTINGS_COPY.strict]);
   const brand = await currentBrand();
   const sent = await sendMail(emailChangeConfirmMessage(brand, email, { link: emailChangeLink(token) }), { purpose: "email_change_confirm", actor, ip: ctx.ip });
   if (!sent.ok) return { ok: false, errors: [EMAIL_COPY.notSent] };

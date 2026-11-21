@@ -80,6 +80,8 @@ export function PasskeyOffer({ portalOrigin }: { portalOrigin: string }) {
       <h2 id="passkey-offer-h">{phone ? WORDS.phoneTitle : WORDS.computerTitle}</h2>
       {on ? (
         on.codes ? (
+          // Codes come only with a first passkey of a person with no app. At Strict a whole session of a person with no
+          // passkey holds an app, so the offer never shows codes there, and needs no Strict confirm (slice SI-10b).
           <>
             <BackupCodesShown message={COPY.passkeyCodesMade} list={on.codes} app={false} lineRef={said} keep={WORDS.backupCodesKeep} />
             <p>{WORDS.turnedOn}</p>

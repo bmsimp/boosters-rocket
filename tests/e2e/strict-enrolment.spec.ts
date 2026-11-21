@@ -1,6 +1,7 @@
 import { test, expect, type Browser, type Page } from "@playwright/test";
 import postgres from "postgres";
 import { ENROLMENT_COPY as WORDS } from "../../src/lib/parents/enrolment-copy";
+import { SIGNIN_SETTINGS_COPY as SETTINGS } from "../../src/lib/parents/signin-settings-copy";
 import { appCodeAt } from "./authenticator-steps";
 import { STRICT_PARENT, makeStrictParent, removeStrictParent, storeLevel } from "./strict-seed";
 
@@ -10,8 +11,12 @@ import { STRICT_PARENT, makeStrictParent, removeStrictParent, storeLevel } from 
  * asked for sends her back there; she sets an app up there (its code worked out from the key the page shows, as
  * tests/e2e/authenticator.spec.ts does), reads her ten backup codes, is asked to tick that she saved them, ticks it,
  * presses Continue and is home; and, as another guardian afresh, adds a passkey with Playwright's own authenticator (as
- * tests/e2e/passkeys.spec.ts installs it) and goes on the same way. Strict is stored at the start and Standard put back
+ * tests/e2e/passkeys.spec.ts installs it) and goes on the same way. Since slice SI-10b, on Sign-in settings at Strict,
+ * the new backup codes she makes stay until she ticks that she saved them and presses Done. Strict is stored at the start and Standard put back
  * after; the guardian is the spec's own, never Zelda (tests/e2e/strict-seed.ts), and goes with everything she made.
+ * What Playwright's own authenticator can't show (a real phone's passkey at /one-more-step, the installed app) is the
+ * owner's check 44 (docs/runbooks/before-the-first-family.md). The Admin's switch to Strict is pressed by no browser
+ * spec: it would sign out the seeded parents later specs use (tests/integration/parents-switches.test.ts proves it).
  */
 const sql = postgres(process.env.DATABASE_URL!);
 
@@ -92,6 +97,27 @@ test("she sets an authenticator app up there, ticks that she saved her backup co
     // Whole now: Home is hers, and asks nothing more.
     await page.goto("/");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(`Hi, ${STRICT_PARENT.first}`);
+    // Sign-in settings at Strict (slice SI-10b), within the 10 minutes her enrolment proved: new backup codes, shown
+    // once, stay until she ticks that she saved them and presses Done; then they're gone, and the box says so.
+    await page.goto("/family/sign-in");
+    const settings = page.getByRole("region", { name: SETTINGS.appTitle, exact: true });
+    await settings.getByRole("button", { name: SETTINGS.newCodes }).click();
+    const codes = settings.getByRole("list", { name: SETTINGS.backupCodesTitle });
+    await expect(codes.getByRole("listitem")).toHaveCount(10);
+    const done = settings.getByRole("button", { name: SETTINGS.codesDone, exact: true });
+    await expect(done).toHaveAttribute("aria-disabled", "true");
+    // Pressed while it says it isn't ready (Playwright's click won't press an aria-disabled button): the box says why.
+    await done.focus();
+    await page.keyboard.press("Enter");
+    await expect(settings.getByText(WORDS.tickFirst)).toBeVisible();
+    await expect(done).toBeFocused();
+    await expect(codes.getByRole("listitem")).toHaveCount(10);
+    await settings.getByLabel(WORDS.saved).check();
+    await expect(done).not.toHaveAttribute("aria-disabled", "true");
+    await done.click();
+    await expect(codes).toHaveCount(0);
+    await expect(settings.getByText(SETTINGS.codesPutAway)).toBeVisible();
+    await expect(page.locator(":focus")).toContainText(SETTINGS.codesPutAway);
   } finally { await close(); }
 });
 

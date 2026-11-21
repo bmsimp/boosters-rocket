@@ -1,9 +1,10 @@
 "use client";
-import type { Ref } from "react";
+import { useState, type Ref } from "react";
 import { parentAuthClient } from "@/lib/auth/client";
 import { readCeremony, type CeremonyOutcome } from "@/app/sign-in/passkey-ceremony";
 import { SIGNIN_SETTINGS_COPY as COPY } from "@/lib/parents/signin-settings-copy";
-import { CopyButton } from "./authenticator-box";
+import { ENROLMENT_COPY } from "@/lib/parents/enrolment-copy";
+import { CopyButton } from "./app-setup";
 import { toPortalAdd } from "./passkey-adding";
 
 /**
@@ -83,5 +84,30 @@ export function BackupCodesShown({ message, list, app, lineRef, keep, heading = 
       </ul>
       <CopyButton text={list.join("\n")} label={COPY.copyCodes} />
     </div>
+  );
+}
+
+/**
+ * Under Strict, below backup codes Sign-in settings shows once (open question 25; the sign-in release's slice SI-10b,
+ * as Strict's enrolment confirms them on /one-more-step): "I've saved my backup codes somewhere safe" and Done,
+ * `aria-disabled` until it is ticked. Pressed unticked, its status line asks for the tick and the focus stays on the
+ * button; ticked, `onDone` puts the codes away (the box draws its answer). Kept nowhere: no column, no audit row, no
+ * action. Given only `onDone`.
+ */
+export function CodesSaved({ onDone }: { onDone: () => void }) {
+  const [ticked, setTicked] = useState(false);
+  const [nudge, setNudge] = useState("");
+  return (
+    <form className="stack" onSubmit={(e) => { e.preventDefault(); if (!ticked) { setNudge(ENROLMENT_COPY.tickFirst); return; } onDone(); }}>
+      <div className="checks">
+        <label>
+          <input type="checkbox" name="saved" checked={ticked} onChange={(e) => { setTicked(e.target.checked); if (e.target.checked) setNudge(""); }} />
+          <span>{ENROLMENT_COPY.saved}</span>
+        </label>
+      </div>
+      {/* aria-disabled, never disabled: a press while unticked says why, and the focus stays on the button. */}
+      <button className="btn" aria-disabled={!ticked || undefined}>{COPY.codesDone}</button>
+      <p role="status" className="help">{nudge}</p>
+    </form>
   );
 }

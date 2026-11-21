@@ -14,7 +14,8 @@ export const dynamic = "force-dynamic";
  * guard is its limits and its one answer (askPasswordLinkAction, ../password-actions.ts). It is ready when /sign-in is
  * (mail working, parent sign-ins on); otherwise it says sign-in isn't available, with no form. Opening it writes
  * nothing. It shows nothing about a person or a family; the form is given plain words and whether the club is at
- * Strict, where nothing is mailed on request yet and the page tells everyone to ask the club.
+ * Strict, where a reset link is mailed only to a holder of a passkey or an authenticator app, and the page tells
+ * everyone else to ask the club.
  */
 export default async function PasswordRequestPage() {
   const [club, mail, settings] = await Promise.all([getClubSettings(), mailWorking(), getParentSettings()]);

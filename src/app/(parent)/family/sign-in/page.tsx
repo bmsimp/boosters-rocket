@@ -20,14 +20,16 @@ export const metadata = { title: "Sign-in settings" };
  * off (AuthenticatorBox); the words that say how the parent signs in on a new device follow whether they have one
  * (howYouSignIn(), by the loader's `app`). Since SI-7b the "Passkeys" box adds (asked again first), names, lists and
  * removes passkeys (PasskeyBox), a passkey holder is asked again with the passkey, and the words follow whether they
- * have one too (`hasPasskey`). APP_URL's origin, where passkeys work, is passed to the forms (no secret).
+ * have one too (`hasPasskey`). Since SI-10b everything here works at Strict as at Standard (the switch to Strict
+ * cleared every older proof), with Strict's words of how they sign in (`strict`) and, under new backup codes, a confirm
+ * that they were saved. APP_URL's origin, where passkeys work, is passed to the forms (no secret).
  * Once a press signs the parent out everywhere, the frame (SignInSettingsFrame) draws its answer in place of every form.
  */
 export default async function SignInSettingsPage() {
   const ctx = await requireParentPage("/family/sign-in");
   const me = await loadMySignin(ctx);
   // The sentences of how the parent signs in on a new device: the code from their authenticator app, or the code we email.
-  const factors = { app: me.app !== null, passkey: me.hasPasskey };
+  const factors = { app: me.app !== null, passkey: me.hasPasskey, strict: me.strict };
   const words = howYouSignIn(factors);
   const portalOrigin = new URL(env.APP_URL).origin;
   // How a parent signs in again after signing out everywhere: with their password; with none yet, after choosing one
@@ -47,16 +49,15 @@ export default async function SignInSettingsPage() {
             <dt>{COPY.password}</dt><dd>{me.hasPassword ? COPY.passwordChosen : COPY.passwordNotChosen}</dd>
           </dl>
           <p className="help">{me.hasPassword ? words.how : COPY.howNoPassword}</p>
-          {/* No id in the link: the page takes whose address it is from the session. Under Strict it can't be changed here. */}
-          {me.canChangeEmail && !me.strict && <div className="box-foot"><Link className="btn btn-line" href="/family/email">{COPY.changeEmail}</Link></div>}
+          {/* No id in the link: the page takes whose address it is from the session. */}
+          {me.canChangeEmail && <div className="box-foot"><Link className="btn btn-line" href="/family/email">{COPY.changeEmail}</Link></div>}
         </section>
         <section className="box" aria-labelledby="password-h">
           <h2 id="password-h">{COPY.passwordTitle}</h2>
-          {me.strict ? <p>{COPY.strict}</p>
-            : !me.hasPassword ? <><p>{COPY.noPassword}</p><SetupLinkForm /></>
+          {!me.hasPassword ? <><p>{COPY.noPassword}</p><SetupLinkForm /></>
             : (
               <AskAgain email={me.email} proved={me.provedRecently} lede={words.askAgainForPassword} passkey={me.hasPasskey} portalOrigin={portalOrigin}>
-                <ChangePasswordForm email={me.email} app={me.app !== null} passkey={me.hasPasskey} />
+                <ChangePasswordForm email={me.email} app={me.app !== null} passkey={me.hasPasskey} strict={me.strict} />
               </AskAgain>
             )}
         </section>
@@ -67,8 +68,8 @@ export default async function SignInSettingsPage() {
         <section className="box" aria-labelledby="devices-h">
           <h2 id="devices-h">{COPY.devicesTitle}</h2>
           {/* Each device is given only its row's id, whether it is this session's, and its two times. */}
-          <RememberedDevices devices={me.devices} proved={me.provedRecently} email={me.email} app={me.app !== null} passkey={me.hasPasskey} portalOrigin={portalOrigin}
-            canAsk={me.hasPassword && !me.strict} cantAsk={me.strict ? COPY.devicesStrict : COPY.choosePasswordForDevices} />
+          <RememberedDevices devices={me.devices} proved={me.provedRecently} email={me.email} app={me.app !== null} passkey={me.hasPasskey} strict={me.strict}
+            portalOrigin={portalOrigin} canAsk={me.hasPassword} cantAsk={COPY.choosePasswordForDevices} />
         </section>
         <section className="box" aria-labelledby="app-h">
           <h2 id="app-h">{COPY.appTitle}</h2>

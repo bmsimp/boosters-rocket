@@ -53,6 +53,10 @@ import { seedEmailChange } from "../helpers/email-change";
 import { linkRows, mintLink, seedCode, seedDevice, seedPassword } from "../helpers/signin-links";
 import { appCode, authenticatorRows, backupCodeRows, seedAuthenticator, seedBackupCodes, wrongAppCode } from "../helpers/authenticator";
 import { seedPasskey } from "../helpers/passkey";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { CodesSaved } from "@/app/(parent)/family/sign-in/passkey-add";
+import { ENROLMENT_COPY } from "@/lib/parents/enrolment-copy";
 
 /**
  * A parent's sign-in settings (/family/sign-in; the sign-in release, slice SI-5a): the page, asking again (the door's
@@ -177,18 +181,23 @@ describe("the page", () => {
     expect(page).not.toContain(html(COPY.everywhereThen));
   });
 
-  it("under Strict: nothing to change here yet, in words; signing out everywhere still offered", async () => {
+  it("under Strict, proved under Strict: the password box and the email link as at Standard, with Strict's words", async () => {
+    // Changed on purpose by slice SI-10b: Strict's placeholder ("can't be changed here") is gone, since the switch to
+    // Strict clears every older proof, so a proof here is Strict's own.
     const a = await seedSignedInParent(FAMILY_A);
+    await seedAuthenticator(a.identity.parentId);
     await proveRecently(a.identity);
     await seedParentSettings({ level: "strict" });
     asParent(a.identity);
     const page = await renderPage(SignInSettingsPage);
-    expect(page).toContain(html(COPY.strict));
-    expect(page).not.toContain(`type="password"`);
+    expect(page).toContain(`type="password"`);
+    expect(page).toContain(COPY.changeButton);
     expect(page).toContain(COPY.everywhereButton);
-    // The words say the email can't be changed here, so no link offers it.
-    expect(page).not.toContain(`href="/family/email"`);
-    expect(page).not.toContain(COPY.changeEmail);
+    expect(page).toContain(`href="/family/email"`);
+    expect(page).toContain(COPY.changeEmail);
+    expect(page).not.toContain("can&#x27;t be changed here");
+    expect(page).toContain(html("You sign in with this address and your password, and then the code from your authenticator app or one of your backup codes, every time, on every phone or computer."));
+    expect(page).not.toContain(html(WITH_APP.how));
   });
 });
 
@@ -480,16 +489,19 @@ describe("changing the password", () => {
     expect(await audits("parent.password.changed")).toEqual([]);
   });
 
-  it("under Strict is refused even with a recent proof, in the Strict words, changing nothing", async () => {
+  it("under Strict changes the password for a session proved under Strict, as at Standard", async () => {
+    // Changed on purpose by slice SI-10b: Strict's refusal is gone (the switch to Strict cleared every older proof).
     const a = await seedSignedInParent(FAMILY_A);
+    await seedAuthenticator(a.identity.parentId);
     await proveRecently(a.identity);
     await seedParentSettings({ level: "strict" });
     asParent(a.identity);
-    const before = await credentialOf(a.identity.parentId);
-    expect(await changePasswordAction(NEW_PASSWORD, NEW_PASSWORD)).toEqual({ ok: false, errors: [COPY.strict] });
-    expect(await credentialOf(a.identity.parentId)).toEqual(before);
-    expect(await sessionsOf(a.identity.parentId)).toHaveLength(1);
-    expect(await audits("parent.password.changed")).toEqual([]);
+    expect(await changePasswordAction(NEW_PASSWORD, NEW_PASSWORD)).toEqual({ ok: true, message: COPY.changed });
+    expect(await verifyPassword({ hash: (await credentialOf(a.identity.parentId))!.password!, password: NEW_PASSWORD })).toBe(true);
+    expect(await sessionsOf(a.identity.parentId)).toEqual([]);
+    expect(await audits("parent.password.changed")).toHaveLength(1);
+    // The app stays: it is the second step, not the first.
+    expect(await authenticatorRows(a.identity.parentId)).toHaveLength(1);
   });
 
   it("is refused for a breached password, one too short and two that differ, in words, changing nothing", async () => {
@@ -1211,7 +1223,7 @@ describe("the Passkeys box, drawn (slice SI-7b)", () => {
     expect(box).toContain(COPY.passkeyAdd);
     expect(box).not.toContain(html(COPY.passkeyRemoveLastWords));
     for (const v of secretsOf(keys)) expect(whole).not.toContain(v);
-    expect(whole).toContain(html(howYouSignIn({ app: false, passkey: true }).how));
+    expect(whole).toContain(html(howYouSignIn({ app: false, passkey: true, strict: false }).how));
   });
 
   it("not proved: listed with Rename, no Remove, no add, and asking again offers the passkey first", async () => {
@@ -1224,7 +1236,7 @@ describe("the Passkeys box, drawn (slice SI-7b)", () => {
     expect(box.match(/>Rename</g)).toHaveLength(2);
     expect(box).not.toContain(">Remove<");
     expect(box).not.toContain(COPY.passkeyAdd);
-    expect(box).toContain(html(howYouSignIn({ app: false, passkey: true }).askAgainForPasskeys));
+    expect(box).toContain(html(howYouSignIn({ app: false, passkey: true, strict: false }).askAgainForPasskeys));
     expect(box).toContain(COPY.usePasskey);
     for (const v of secretsOf(keys)) expect(whole).not.toContain(v);
   });
@@ -1265,5 +1277,96 @@ describe("the Passkeys box, drawn (slice SI-7b)", () => {
     expect(box).toContain(html(COPY.passkeysNone));
     expect(box).toContain(COPY.passkeyAdd);
     expect(box).not.toContain(COPY.newCodes);
+  });
+});
+
+// Sign-in settings at Strict (the sign-in release, slice SI-10b): as at Standard for a session proved under Strict,
+// with Strict's words of how the parent signs in and of what a remembered device spares (nothing, there), and, under
+// new backup codes, a confirm that they were saved.
+describe("Sign-in settings at Strict (slice SI-10b)", () => {
+  const devicesBox = (page: string) => page.slice(page.indexOf(`id="devices-h"`), page.indexOf(`id="app-h"`));
+  const appBox = (page: string) => page.slice(page.indexOf(`id="app-h"`), page.indexOf(`id="passkeys-h"`));
+
+  it("says how an app holder, a passkey holder and one with both sign in at Strict, and what a device spares, word for word", () => {
+    const app = howYouSignIn({ app: true, passkey: false, strict: true });
+    expect(app.how).toBe("You sign in with this address and your password, and then the code from your authenticator app or one of your backup codes, every time, on every phone or computer.");
+    expect(app.devicesLede).toBe("These are the phones and computers we remember for you. The club asks everyone for a passkey or an authenticator app each time they sign in, so on these too, after your password we ask for the code from your authenticator app.");
+    expect(app.devicesNone).toBe("We don't remember any device for you right now. Wherever you sign in with your password, we ask for the code from your authenticator app too.");
+    const passkey = howYouSignIn({ app: false, passkey: true, strict: true });
+    expect(passkey.how).toBe("You can sign in with your passkey alone. With this address and your password instead, we also ask for your passkey, every time, on every phone or computer.");
+    expect(passkey.devicesLede).toBe("These are the phones and computers we remember for you. The club asks everyone for a passkey or an authenticator app each time they sign in, so on these too, after your password we ask for your passkey.");
+    expect(passkey.devicesNone).toBe("We don't remember any device for you right now. Wherever you sign in with your password, we ask for your passkey too.");
+    const both = howYouSignIn({ app: true, passkey: true, strict: true });
+    expect(both.how).toBe("You can sign in with your passkey alone. With this address and your password instead, we also ask for your passkey or the code from your authenticator app, every time, on every phone or computer.");
+    expect(both.devicesNone).toBe("We don't remember any device for you right now. Wherever you sign in with your password, we ask for your passkey or the code from your authenticator app too.");
+    for (const w of [app, passkey, both]) {
+      expect(w.forgetHere).toBe("Forgetting the device you're using now doesn't sign you out here, and doesn't change how you sign in on it.");
+      expect(w.deviceForgotten).toBe("That device is forgotten. You sign in on it the same way as before.");
+      expect(w.otherDevicesForgotten).toBe("Every other device is forgotten. You sign in on them the same way as before.");
+      expect(w.everyDeviceForgotten).toBe("Every device is forgotten, this one included. You sign in on each of them the same way as before.");
+    }
+    // Every other key is the factor's own, the same at either level.
+    for (const f of [{ app: true, passkey: false }, { app: false, passkey: true }, { app: true, passkey: true }]) {
+      const strict = howYouSignIn({ ...f, strict: true }), standard = howYouSignIn({ ...f, strict: false });
+      for (const key of ["askAgainForPassword", "askAgainForEmail", "askAgainForDevices", "signsOutEverywhere", "changedNext", "everywhereThen", "everywhereNext",
+        "askAgainForApp", "askAgainForAppChange", "askAgainForPasskeys"] as const) expect(strict[key]).toBe(standard[key]);
+    }
+    // At Strict with no factor (the gate makes it unreachable), Standard's words.
+    expect(howYouSignIn({ app: false, passkey: false, strict: true })).toEqual(howYouSignIn({ app: false, passkey: false, strict: false }));
+    // And Standard's words are as they were.
+    expect(howYouSignIn({ app: true, passkey: false, strict: false })).toEqual(WITH_APP);
+  });
+
+  it("says Strict's words of the last factor and of what an app is, word for word", () => {
+    expect(COPY.turnOffStrict).toBe("Your authenticator app is your only second step, and the club asks everyone for one, so it can't be turned off while it's your only one. Add a passkey first, then you can turn the app off.");
+    expect(COPY.passkeyRemoveStrict).toBe("This passkey is your only second step, and the club asks everyone for one, so it can't be removed while it's your only one. Add another passkey or set up an authenticator app first, then you can remove this one.");
+    expect(COPY.appWhatStrict).toBe("An authenticator app on your phone, like Google Authenticator or Microsoft Authenticator, shows a new 6-digit code every 30 seconds. Once you set one up, you can enter its code after your password in place of your passkey.");
+    expect(COPY.codesDone).toBe("Done");
+    expect(COPY.codesPutAway).toBe("Your backup codes aren't shown here any more. We won't show them again.");
+  });
+
+  it("lists a passkey holder's devices with their buttons at Strict, in Strict's words, and forgets one and then the rest", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await seedPasskey(a.identity.parentId);
+    await proveRecently(a.identity);
+    const first = await seedDevice(a.identity.parentId, { createdAt: new Date(Date.now() - 20 * DAY), lastUsedAt: new Date(Date.now() - DAY) });
+    await seedDevice(a.identity.parentId, { createdAt: new Date(Date.now() - 10 * DAY), lastUsedAt: new Date(Date.now() - 2 * DAY) });
+    await seedParentSettings({ level: "strict" });
+    asParent(a.identity);
+    const words = howYouSignIn({ app: false, passkey: true, strict: true });
+    const page = await renderPage(SignInSettingsPage);
+    const box = devicesBox(page);
+    expect(box).toContain(html(words.devicesLede));
+    expect(box).not.toContain(html(howYouSignIn({ app: false, passkey: true, strict: false }).devicesLede));
+    expect(box).toContain(COPY.forgetAll);
+    expect(box).not.toContain("one at a time");
+    // The app box says what an app is at Strict: in place of the passkey, not of an emailed code.
+    expect(appBox(page)).toContain(html(COPY.appWhatStrict));
+    expect(appBox(page)).not.toContain(html(COPY.appWhat));
+    expect(await forgetDeviceAction(first.id)).toEqual({ ok: true, message: "That device is forgotten. You sign in on it the same way as before." });
+    expect(await devicesOf(a.identity.parentId)).toHaveLength(1);
+    expect(await forgetOtherDevicesAction()).toEqual({ ok: true, message: "Every device is forgotten, this one included. You sign in on each of them the same way as before." });
+    expect(await devicesOf(a.identity.parentId)).toEqual([]);
+    expect(await audits("parent.device.forgotten")).toHaveLength(1);
+    expect(await audits("parent.devices.forgotten")).toHaveLength(1);
+  });
+
+  it("the Family page says how they sign in at Strict", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await seedAuthenticator(a.identity.parentId);
+    await seedParentSettings({ level: "strict" });
+    asParent(a.identity);
+    const page = await renderPage(FamilyPage);
+    expect(page).toContain(html(howYouSignIn({ app: true, passkey: false, strict: true }).how));
+    expect(page).not.toContain(html(WITH_APP.how));
+  });
+
+  it("draws the confirm of new backup codes: the box to tick, labelled, and Done, aria-disabled until it is ticked", () => {
+    const drawn = renderToStaticMarkup(createElement(CodesSaved, { onDone: () => undefined })).replaceAll("&#x27;", "'");
+    expect(drawn).toContain('<div class="checks"><label><input type="checkbox" name="saved"');
+    expect(drawn).toContain(`<span>${ENROLMENT_COPY.saved}</span></label></div>`);
+    expect(drawn).toMatch(/<button class="btn" aria-disabled="true">Done<\/button>/);
+    expect(drawn).not.toMatch(/\sdisabled=""/);
+    expect(drawn).toContain('<p role="status" class="help"></p>');
   });
 });

@@ -5,7 +5,7 @@ import { safely } from "@/app/components/action-error";
 import { LocalTime } from "@/app/components/local-time";
 import { SIGNIN_SETTINGS_COPY as COPY, howYouSignIn, passkeysAddedOnlyAt } from "@/lib/parents/signin-settings-copy";
 import { newBackupCodesAction, removePasskeyAction, renamePasskeyAction } from "./actions";
-import { BackupCodesShown, Tick, addPasskeyHere } from "./passkey-add";
+import { BackupCodesShown, CodesSaved, Tick, addPasskeyHere } from "./passkey-add";
 import { passkeysAddIn } from "./passkey-adding";
 import { AskAgain, Said } from "./signin-forms";
 
@@ -34,12 +34,13 @@ function WhenDrawn({ then }: { then: () => void }) {
  * component's state (BackupCodesShown). Beside a passkey and no app, "Make new backup codes" too. Given only what it shows: the address for
  * AskAgain's username field, the listed passkeys, whether a password is chosen, whether the session proved itself,
  * whether the club is at Strict, whether they have an app, how many backup codes are left, and APP_URL's origin (where
- * a passkey can be added; reached at any other address, the box says so in place of the add press).
+ * a passkey can be added; reached at any other address, the box says so in place of the add press). Since slice SI-10b,
+ * under Strict, backup codes shown here stay until the parent ticks that they saved them and presses Done (CodesSaved).
  */
 export function PasskeyBox({ email, passkeys, proved, hasPassword, strict, app, backupCodesLeft, portalOrigin }: { email: string; passkeys: ShownPasskey[]; proved: boolean;
   hasPassword: boolean; strict: boolean; app: boolean; backupCodesLeft: number; portalOrigin: string }) {
   const router = useRouter();
-  const words = howYouSignIn({ app, passkey: passkeys.length > 0 });
+  const words = howYouSignIn({ app, passkey: passkeys.length > 0, strict });
   const [provedHere, setProvedHere] = useState(false);
   const [where, setWhere] = useState<"here" | "unsupported" | "elsewhere">("here");
   useEffect(() => {
@@ -117,6 +118,8 @@ export function PasskeyBox({ email, passkeys, proved, hasPassword, strict, app, 
     <div className="stack">
       <p>{COPY.passkeysWhat}</p>
       {codes && <BackupCodesShown message={codes.message} list={codes.list} app={app} lineRef={codesLine} />}
+      {/* Under Strict (open question 25; slice SI-10b): put away once the parent says they saved them, and the box says so. */}
+      {codes && strict && <CodesSaved onDone={() => { setCodes(null); setAnswer({ ok: true, message: COPY.codesPutAway }); }} />}
       {answer && (
         <div ref={said} tabIndex={-1}>
           {answer.ok ? <p role="status" className="paid-up"><Tick />{answer.message}</p> : <Errors errors={answer.errors} />}

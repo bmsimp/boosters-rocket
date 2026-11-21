@@ -47,10 +47,10 @@ export type MyDevice = { id: string; thisOne: boolean; createdAt: string; lastUs
 /**
  * What the page shows, and nothing else: the address the parent signs in with, whether the change of it is offered
  * (canChangeMyEmail()), whether they have a password, whether this session proved itself within the window
- * (provedRecently(), the page's choice between asking again and the change), whether the club is at Strict, where
- * nothing can be changed here yet (the door's password step refuses every password without a second factor, so nobody
- * can be asked again until SI-6 and SI-7), and (since SI-5b) the person's remembered devices that are still unexpired,
- * newest use first, the one this session names marked. A session from before SI-5b names none, and none is marked.
+ * (provedRecently(), the page's choice between asking again and the change), whether the club is at Strict (since
+ * slice SI-10b everything here works there as at Standard, for a session proved under Strict, since the switch cleared
+ * every older proof: Strict picks the words of how they sign in and a confirm under new backup codes), and (since
+ * SI-5b) the person's remembered devices that are still unexpired, newest use first, the one this session names marked. A session from before SI-5b names none, and none is marked.
  */
 export type MySignin = { email: string; canChangeEmail: boolean; hasPassword: boolean; provedRecently: boolean; strict: boolean; devices: MyDevice[]; app: MyApp | null;
   hasPasskey: boolean; passkeys: MyPasskey[]; backupCodesLeft: number };
@@ -95,7 +95,7 @@ async function deleteUnusedEmailChanges(parentId: string, tx: Tx): Promise<numbe
 }
 
 /** Why a change found under the person's lock can't go on: the window run out, blocked, no password, or another one. */
-type NotChanged = "not_proved" | "strict" | "blocked" | "no_password" | "password_changed" | "gone";
+type NotChanged = "not_proved" | "blocked" | "no_password" | "password_changed" | "gone";
 
 /**
  * Changing the password, signed in and proved within the window (open questions 26 and 28). In this order:
@@ -108,8 +108,9 @@ type NotChanged = "not_proved" | "strict" | "blocked" | "no_password" | "passwor
  *     code in the audit row;
  * (f) hashPassword(), outside any transaction;
  * (g) one transaction in the order above lockedPerson() (sessions.ts): the person's row FOR UPDATE, then, read under it,
- *     the window again on this session, the club not at Strict (refused in the Strict words), the person not blocked, and their `credential` row still there and not
- *     replaced since this session proved itself (its `updated_at` no later than `strong_at`: every writer of a password
+ *     the window again on this session, the person not blocked, and their `credential` row still there and not
+ *     replaced since this session proved itself (at either level: a proof made at Standard before the switch to Strict
+ *     was cleared by it, setLevel(), switches.ts, so the window is Strict's own) (its `updated_at` no later than `strong_at`: every writer of a password
  *     holds the person's row); then their unused email change requests (as a block does, so a change of sign-in email
  *     asked in a session this ends can't outlive it), and, as a reset does (writePassword(), password-set.ts), their
  *     unused sign-in codes and those spent within a code's life, their unspent links (a held one included), the
@@ -141,9 +142,6 @@ export async function changeMyPassword(ctx: Me, raw: { password: unknown; again:
       const now = new Date(); // read once the person's row is held
       const strongAt = await sessionStrongAt(tx, ctx);
       if (!provedRecently(strongAt, now)) return "not_proved" as const;
-      // Under Strict nothing is changed here yet (the page says so): a proof made at Standard before the club moved on
-      // is no way past it.
-      if ((await getParentSettings(tx)).level === "strict") return "strict" as const;
       if (me.blocked) return "blocked" as const;
       const had = await currentPassword(tx, ctx.parentId);
       if (!had) return "no_password" as const;
@@ -165,7 +163,6 @@ export async function changeMyPassword(ctx: Me, raw: { password: unknown; again:
     // The hash is a parameter of the write, and a failed query's error carries its parameters: never let it reach a log.
     throw new Error("password_change_failed");
   }
-  if (changed === "strict") return { ok: false, errors: [COPY.strict] };
   if (typeof changed === "string") return PROVE_AGAIN;
 
   const to = changed.to;
@@ -247,14 +244,16 @@ export async function forgetMyDevice(ctx: Me, deviceId: unknown): Promise<Settin
       .where(and(eq(parentDevice.id, deviceId), eq(parentDevice.parentId, ctx.parentId), gt(parentDevice.expiresAt, me.now)))
       .returning({ id: parentDevice.id });
     if (gone.length === 0) return "not_theirs" as const;
-    const factors = { app: await hasAuthenticator(ctx.parentId, tx), passkey: await hasPasskey(ctx.parentId, tx) };
+    const factors = { app: await hasAuthenticator(ctx.parentId, tx), passkey: await hasPasskey(ctx.parentId, tx),
+      strict: (await getParentSettings(tx)).level === "strict" };
     await writeAudit({ actor: parentActor({ id: ctx.parentId, email: me.email }), action: "parent.device.forgotten", targetType: "parent", targetId: ctx.parentId,
       after: { deviceId: gone[0]!.id, thisDevice: thisOne }, ip: ctx.ip }, tx);
     return factors;
   });
   if (done === "not_proved") return PROVE_AGAIN;
   if (done === "not_theirs") return NOT_FROM_PAGE;
-  // What the next sign-in on it asks for: their passkey (slice SI-7b), the code from their authenticator app (SI-6b), or the code we email.
+  // What the next sign-in on it asks for: their passkey (slice SI-7b), the code from their authenticator app (SI-6b), or
+  // the code we email; at Strict (slice SI-10b), that nothing changes, since no device stands in for the second step there.
   return { ok: true, message: howYouSignIn(done).deviceForgotten };
 }
 
@@ -282,7 +281,8 @@ export async function forgetMyOtherDevices(ctx: Me): Promise<SettingsResult> {
       .where(and(eq(parentDevice.id, kept), eq(parentDevice.parentId, ctx.parentId), gt(parentDevice.expiresAt, me.now))) : [];
     await writeAudit({ actor: parentActor({ id: ctx.parentId, email: me.email }), action: "parent.devices.forgotten", targetType: "parent", targetId: ctx.parentId,
       after: { devicesForgotten: gone.length, thisDeviceKept: stillTheirs !== undefined }, ip: ctx.ip }, tx);
-    return { kept: stillTheirs !== undefined, app: await hasAuthenticator(ctx.parentId, tx), passkey: await hasPasskey(ctx.parentId, tx) };
+    return { kept: stillTheirs !== undefined, app: await hasAuthenticator(ctx.parentId, tx), passkey: await hasPasskey(ctx.parentId, tx),
+      strict: (await getParentSettings(tx)).level === "strict" };
   });
   if (!done) return PROVE_AGAIN;
   // With none kept the page couldn't say which device was in use ("Forget every device"): the answer says every one is

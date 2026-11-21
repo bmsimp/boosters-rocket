@@ -23,8 +23,6 @@ export const SIGNIN_SETTINGS_COPY = {
   howNoPassword: "You're signed in here, but you haven't chosen a password yet. To sign in again on any device, you'll need one.",
   changeEmail: "Change my sign-in email",
   passwordTitle: "Your password",
-  /** Under Strict (SI-10 stores it): nothing can be changed here until a second factor of the guardian's own exists. */
-  strict: "For now, your password and your sign-in email can't be changed here. Please ask the club if you need either changed.",
   noPassword: "You haven't chosen a password yet. We can email a link to choose one to the address you sign in with.",
   setupButton: "Email me a link to choose a password",
   setupBusy: "Sending…",
@@ -78,7 +76,6 @@ export const SIGNIN_SETTINGS_COPY = {
   forgetHere: "Forgetting the device you're using now doesn't sign you out here. The next time you sign in on it, we'll email you a code again.",
   askAgainForDevices: "Before you forget a device, please show it's you: enter your password, then the code we email you.",
   choosePasswordForDevices: "To forget a device here, please choose a password first. Signing out everywhere forgets every device too.",
-  devicesStrict: "For now, devices can't be forgotten one at a time here. Signing out everywhere forgets every device.",
   deviceForgotten: "That device is forgotten. The next time you sign in on it, we'll email you a code.",
   otherDevicesForgotten: "Every other device is forgotten. The next time you sign in on one of them, we'll email you a code.",
   /** The same press when the session kept no device of the person's: every one is gone, the one in use too, if it was one. */
@@ -88,6 +85,8 @@ export const SIGNIN_SETTINGS_COPY = {
   // The authenticator app (slice SI-6b, in place of SI-5a's words that more ways to sign in would come here): setting it up, its backup codes, making new ones, and turning it off.
   appTitle: "Authenticator app",
   appWhat: "An authenticator app on your phone, like Google Authenticator or Microsoft Authenticator, shows a new 6-digit code every 30 seconds. Once you set one up, when you sign in on a device we don't know yet we ask for its code instead of emailing you one.",
+  /** The same at Strict (slice SI-10b), where the app is asked for every time: in place of a passkey, not of an emailed code. */
+  appWhatStrict: "An authenticator app on your phone, like Google Authenticator or Microsoft Authenticator, shows a new 6-digit code every 30 seconds. Once you set one up, you can enter its code after your password in place of your passkey.",
   /** Setting one up keeps the remembered devices (open question 26 lists what forgets them): said beside the device list. */
   appKeepsDevices: "Setting up an app doesn't forget the devices we remember for you.",
   appNeedsPassword: "To set up an authenticator app, please choose a password first.",
@@ -135,8 +134,8 @@ export const SIGNIN_SETTINGS_COPY = {
   turnOff: "Turn off the authenticator app",
   turnOffBusy: "Turning off…",
   turnedOff: "Your authenticator app is turned off, and your backup codes no longer work. When you sign in on a device we don't know yet, we'll email you a code again.",
-  /** Under Strict the app is the guardian's only second step until passkeys come (SI-7): it stays. */
-  turnOffStrict: "For now, your authenticator app can't be turned off here, since the club asks everyone for a second step and the app is your only one. Add a passkey first, or ask the club if you need it changed.",
+  /** Under Strict the app stays while it is the guardian's only second step (open question 33): add a passkey first. */
+  turnOffStrict: "Your authenticator app is your only second step, and the club asks everyone for one, so it can't be turned off while it's your only one. Add a passkey first, then you can turn the app off.",
   /** Turning the app off beside a passkey (slice SI-7b): the backup codes stay, and the passkey is the second step. */
   turnOffWordsBesidePasskey: "If you turn off your authenticator app, your passkey stays your second step. Your backup codes stay too, and work in place of your passkey when you sign in and when this page asks you to show it's you.",
   turnedOffBesidePasskey: "Your authenticator app is turned off. Your passkey is still your second step, and your backup codes still work in place of it when you sign in and when this page asks you to show it's you.",
@@ -176,8 +175,8 @@ export const SIGNIN_SETTINGS_COPY = {
   passkeyRemoveLastAppWords: "This is your only passkey. If you remove it, when you sign in on a device we don't know yet, we'll ask for the code from your authenticator app.",
   passkeyRemovedLast: "That passkey is removed, and your backup codes no longer work. When you sign in on a device we don't know yet, we'll email you a code again.",
   passkeyRemovedLastApp: "That passkey is removed. When you sign in on a device we don't know yet, we'll ask for the code from your authenticator app.",
-  /** Under Strict (SI-10 stores it), the last second factor stays (open question 33): add another first. */
-  passkeyRemoveStrict: "This passkey is your only second step, and the club asks everyone for one, so it can't be removed yet. Add another passkey first, then you can remove this one.",
+  /** Under Strict the last second factor stays (open question 33): add another first. */
+  passkeyRemoveStrict: "This passkey is your only second step, and the club asks everyone for one, so it can't be removed while it's your only one. Add another passkey or set up an authenticator app first, then you can remove this one.",
   passkeyNotFound: "That passkey isn't one of yours now. Please reload this page.",
   /** The backup codes made with a first passkey of a guardian with no app (open question 25). */
   passkeyCodesMade: "Your passkey is added, and here are your backup codes.",
@@ -186,6 +185,12 @@ export const SIGNIN_SETTINGS_COPY = {
    * sign-in page's passkey step (its backup-code field, offered while the person holds unspent ones) and when this page
    * asks again, so they are the way in when the passkey's device is lost.
    */
+  /**
+   * Under Strict, wherever this page shows new backup codes (open question 25; slice SI-10b): a press under the box's
+   * "I've saved my backup codes somewhere safe" (ENROLMENT_COPY.saved) that puts them away, and what the box says then.
+   */
+  codesDone: "Done",
+  codesPutAway: "Your backup codes aren't shown here any more. We won't show them again.",
   backupCodesKeepPasskey: "Each backup code works once, in place of your passkey, when you sign in and when this page asks you to show it's you. If you lose the phone or computer that holds your passkey, they're how you get in, so keep them somewhere safe that isn't on that device, like on paper or in a password manager on another device. We won't show them again.",
   // Asking again with a passkey (slice SI-7b): the passkey alone, or the password and then the second step.
   usePasskey: "Use your passkey",
@@ -287,17 +292,43 @@ function withPasskey(app: boolean): HowWords {
   };
 }
 
-// Under Strict (stored by nothing until SI-10) a remembered device asks for the second step too (password-signin.ts),
-// so `how`, `devicesLede` and their kin, here and in SIGNIN_SETTINGS_COPY, promise what Strict doesn't keep: SI-10 adds
-// Strict's versions and picks them by the level as well.
+// Under Strict a remembered device asks for the second step too (password-signin.ts: no device stands in for a step
+// there), so since slice SI-10b `how`, `devicesLede` and their kin are Strict's own for a person with a factor
+// (strictWords()), picked by the level beside the factors; every other key is the factor's own, true at either level.
 export type HowWords = { [K in keyof typeof WITH_APP]: string };
-/** What the person has of their own, for the words: an authenticator app in force, and (since slice SI-7b) a passkey. */
-export type Factors = { app: boolean; passkey: boolean };
+/**
+ * What the person has of their own, for the words: an authenticator app in force, and (since slice SI-7b) a passkey;
+ * and (since slice SI-10b) whether the club is at Strict.
+ */
+export type Factors = { app: boolean; passkey: boolean; strict: boolean };
+
+/**
+ * The keys that say what a remembered device spares, at Strict, where it spares nothing (slice SI-10b). `second` names
+ * what follows the password, as withPasskey() names it, or, with the app alone, the app's code.
+ */
+function strictWords(f: Factors, words: HowWords): HowWords {
+  const second = f.passkey ? (f.app ? "your passkey or the code from your authenticator app" : "your passkey") : "the code from your authenticator app";
+  return {
+    ...words,
+    how: f.passkey ? `You can sign in with your passkey alone. With this address and your password instead, we also ask for ${second}, every time, on every phone or computer.`
+      : "You sign in with this address and your password, and then the code from your authenticator app or one of your backup codes, every time, on every phone or computer.",
+    devicesLede: `These are the phones and computers we remember for you. The club asks everyone for a passkey or an authenticator app each time they sign in, so on these too, after your password we ask for ${second}.`,
+    devicesNone: `We don't remember any device for you right now. Wherever you sign in with your password, we ask for ${second} too.`,
+    forgetHere: "Forgetting the device you're using now doesn't sign you out here, and doesn't change how you sign in on it.",
+    deviceForgotten: "That device is forgotten. You sign in on it the same way as before.",
+    otherDevicesForgotten: "Every other device is forgotten. You sign in on them the same way as before.",
+    everyDeviceForgotten: "Every device is forgotten, this one included. You sign in on each of them the same way as before.",
+  };
+}
+
 /**
  * The sentences of how the parent signs in on a new device and is asked again: a passkey holder's (with the app beside
- * it when they have one, slice SI-7b), the app's for a guardian with one in force, the emailed code's otherwise.
+ * it when they have one, slice SI-7b), the app's for a guardian with one in force, the emailed code's otherwise; at
+ * Strict, for a person with a factor, with Strict's words of what a device spares (strictWords()). At Strict with no
+ * factor (which the gate makes unreachable: such a session is signed out or enrolling) Standard's words.
  */
 export function howYouSignIn(f: Factors): HowWords {
+  if (f.strict && (f.passkey || f.app)) return strictWords(f, howYouSignIn({ ...f, strict: false }));
   if (f.passkey) return withPasskey(f.app);
   if (f.app) return WITH_APP;
   const c = SIGNIN_SETTINGS_COPY;
