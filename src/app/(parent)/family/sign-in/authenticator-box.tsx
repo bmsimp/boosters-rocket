@@ -6,6 +6,7 @@ import { SIGNIN_SETTINGS_COPY as COPY, howYouSignIn } from "@/lib/parents/signin
 import { confirmAuthenticatorAction, newBackupCodesAction, startAuthenticatorAction, turnOffAuthenticatorAction } from "./actions";
 import { AskAgain } from "./signin-forms";
 import { AppSetupForm, CopyButton } from "./app-setup";
+import { CodesSaved } from "./passkey-add";
 
 type Result = { ok: true; message: string } | { ok: false; errors: string[] };
 const FAILED = { ok: false as const, errors: [COPY.failed] };
@@ -39,10 +40,12 @@ type Busy = "start" | "confirm" | "codes" | "off" | null;
  * whether a password is chosen, whether the session proved itself, whether the club is at Strict, and the app's two
  * facts. Since slice SI-7b also whether they have a passkey (`passkey`), and APP_URL's origin for asking again with it:
  * beside a passkey, turning the app off keeps the backup codes and is allowed under Strict, and the words say so.
+ * Since slice SI-10b, under Strict, the backup codes stay until the parent ticks that they saved them and presses Done
+ * (CodesSaved), and the words of what an app is and how they sign in are Strict's.
  */
 export function AuthenticatorBox({ email, app, proved, hasPassword, strict, passkey = false, portalOrigin = "" }: { email: string; app: ShownApp | null; proved: boolean;
   hasPassword: boolean; strict: boolean; passkey?: boolean; portalOrigin?: string }) {
-  const words = howYouSignIn({ app: app !== null, passkey });
+  const words = howYouSignIn({ app: app !== null, passkey, strict });
   const [setup, setSetup] = useState<Setup | null>(null);
   const [codes, setCodes] = useState<{ message: string; list: string[] } | null>(null);
   const [answer, setAnswer] = useState<Result | null>(null);
@@ -112,6 +115,9 @@ export function AuthenticatorBox({ email, app, proved, hasPassword, strict, pass
           {codes.list.map((c) => <li key={c}><code>{c}</code></li>)}
         </ul>
         <CopyButton text={codes.list.join("\n")} label={COPY.copyCodes} />
+        {/* Under Strict (open question 25): put away once the parent says they saved them, the box drawn as after a press. */}
+        {/* Keyed by the list: new codes pressed again while these are shown start unticked. */}
+        {strict && <CodesSaved key={codes.list.join(" ")} onDone={() => { setCodes(null); setAnswer({ ok: true, message: COPY.codesPutAway }); }} />}
         {answered}
         {on}
       </div>
@@ -128,7 +134,7 @@ export function AuthenticatorBox({ email, app, proved, hasPassword, strict, pass
   return (
     <div className="stack">
       {answered}
-      <p>{COPY.appWhat}</p>
+      <p>{strict ? COPY.appWhatStrict : COPY.appWhat}</p>
       <p className="help">{COPY.appKeepsDevices}</p>
       {!hasPassword ? <p>{COPY.appNeedsPassword}</p>
         : (

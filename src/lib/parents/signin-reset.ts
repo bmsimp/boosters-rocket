@@ -46,7 +46,7 @@ const holdParentSettings = (tx: Tx) => tx.execute(sql`select pg_advisory_xact_lo
 /** Why a mail couldn't be handed over when the message itself couldn't be written (the club's name not read, say): a fixed sentence, as a send failure's is. */
 const NOT_WRITTEN = "The email couldn't be written.";
 
-type Done = { to: string; token: string };
+type Done = { to: string; token: string; strict: boolean };
 
 /**
  * An Admin's reset of one person's sign-in (open question 22). In this order:
@@ -69,7 +69,8 @@ type Done = { to: string; token: string };
  *     a passkey alone included); their passkeys (removeAllPasskeys()); their remembered devices; their sessions; and one
  *     `parent.signin.reset` row with what they had and what went, counts only, and the reason;
  * (d) after the commit, never inside it, the mail with the link (signinResetMessage()) to the address read under the
- *     lock. One that couldn't be handed over leaves the reset standing (what was asked is done: every session ended and
+ *     lock, in the words of the level read under it (at Strict, that the password leads first to adding a passkey or
+ *     an authenticator app: slice SI-10b). One that couldn't be handed over leaves the reset standing (what was asked is done: every session ended and
  *     every credential gone) and the link as it is (its token is in no mail, and gone with this call: it expires and
  *     the next link replaces it), and writes `parent.signin.reset_unmailed` with the send's fixed sentence.
  * Everything else of the person stays: their name, their guardian rows and every family's records, their forms, their
@@ -100,7 +101,8 @@ export async function resetSignin(sentId: string, raw: { reason: string; calledB
     if (p.blocked) { await refused("blocked", p.id, tx); return "blocked"; }
     const [user] = await tx.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, p.id));
     if (!user || (await enterableGuardianRows(p.id, tx)).length === 0) { await refused("no_access", p.id, tx); return "no_access"; }
-    if (parentDoorClosed(await getParentSettings(tx))) { await refused("signins_off", p.id, tx); return "signins_off"; }
+    const settings = await getParentSettings(tx);
+    if (parentDoorClosed(settings)) { await refused("signins_off", p.id, tx); return "signins_off"; }
     const now = new Date(); // read once the person's row is held
 
     // What they had, read under the person's row (every writer of these holds it), before anything goes.
@@ -130,14 +132,14 @@ export async function resetSignin(sentId: string, raw: { reason: string; calledB
       before: { password: passwordRemoved, passkeys, app, backupCodes, devices: Number(devices?.n ?? 0), sessions: Number(sessions?.n ?? 0) },
       after: { reason, calledBack: true, passwordRemoved, passkeysRemoved, appsRemoved: removed.apps, backupCodesRemoved: removed.backupCodes,
         devicesForgotten, sessionsEnded, codesDeleted, linksDeleted, requestsDeleted }, ip: o.ip }, tx);
-    return { to: p.email, token };
+    return { to: p.email, token, strict: settings.level === "strict" };
   });
   if (typeof done === "string") return { ok: false, reason: done };
 
   // The mail, after the commit: at once, never queued (Appendix A: "without waiting").
   const sent = await (async () => {
     const [brand, club] = await Promise.all([currentBrand(), getClubSettings()]);
-    const message = signinResetMessage(brand, done.to, { link: passwordLink("setup", done.token), life: lifeWords(LINK_LIFE_MS.setup), contact: club.treasurerEmail });
+    const message = signinResetMessage(brand, done.to, { link: passwordLink("setup", done.token), life: lifeWords(LINK_LIFE_MS.setup), contact: club.treasurerEmail, strict: done.strict });
     return sendMail(message, { purpose: "signin_reset", actor: o.actor, ip: o.ip });
   })().catch(() => ({ ok: false as const, error: NOT_WRITTEN }));
   if (!sent.ok) {

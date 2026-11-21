@@ -36,6 +36,8 @@ import { resetDb, seedGuardian, seedParent, seedStaff } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par } from "../helpers/roster-cache";
 import { rowNamed, tableRows } from "../helpers/table";
 import { seedPassword } from "../helpers/signin-links";
+import { seedPasskey } from "../helpers/passkey";
+import { seedAuthenticator } from "../helpers/authenticator";
 import * as sendModule from "@/lib/mail/send";
 
 const audits = async (action: string) => (await db.select().from(auditLog)).filter((r) => r.action === action);
@@ -119,6 +121,31 @@ describe("the staff pages for parents", () => {
     expect(dated).toContain('<time dateTime="2026-11-05T12:00:00.000Z" title="2026-11-05T12:00:00.000Z">');
     expect(dated).toContain('Sent <time dateTime="2026-11-01T12:00:00.000Z" title="2026-11-01T12:00:00.000Z">');
     expect(rowNamed(dated, "Ana Rivera")!.slice(2, 4)).toEqual([expect.stringMatching(/^2026-11-05/), expect.stringMatching(/^Sent 2026-11-01/)]);
+  });
+
+  it("says how many who can sign in have a passkey, an app or neither, naming nobody, and where an Admin asks for one", async () => {
+    // Section 9 of the app-owned families spec ("Sign-in"): staff see the counts; the sign-in release's slice SI-10b.
+    const counts = (html: string) => { const at = html.indexOf("<p>Of the "); return at < 0 ? "" : html.slice(at, html.indexOf("</p>", at)).replaceAll("&#x27;", "'"); };
+    const readsBefore = (await db.select().from(auditLog)).length;
+    // Ana can sign in, with neither; Sam's rows are closed, so Sam isn't counted. The registrar holds no Settings.Parents.ReadWrite.
+    expect(counts(await parentsPage())).toBe("<p>Of the 1 person who can sign in, 0 have a passkey and 0 an authenticator app (someone with both is counted twice); 1 has neither.");
+    const ana = await anaRow();
+    await seedPasskey(ana.id); await seedAuthenticator(ana.id);
+    const sam = (await db.select().from(parent).where(eq(parent.email, "sam@example.com")))[0]!;
+    await db.update(guardian).set({ status: "invited", disabledReason: null, statusBeforeDisable: null }).where(eq(guardian.parentId, sam.id));
+    expect(counts(await parentsPage())).toBe("<p>Of the 2 people who can sign in, 1 has a passkey and 1 an authenticator app (someone with both is counted twice); 1 has neither.");
+    // An Admin is told where the level is chosen; at Strict, everyone is told what happens to those with neither.
+    as(await seedStaff({ email: "ada@club.org", name: "Ada Admin", admin: true }));
+    expect(counts(await parentsPage())).toBe("<p>Of the 2 people who can sign in, 1 has a passkey and 1 an authenticator app (someone with both is counted twice); 1 has neither. You can ask everyone for one under Settings, Parent sign-ins, step 3, once most have one.");
+    await seedParentSettings({ level: "strict" });
+    const strict = " The club is at Strict: anyone with neither adds one the next time they sign in.";
+    expect(counts(await parentsPage())).toBe(`<p>Of the 2 people who can sign in, 1 has a passkey and 1 an authenticator app (someone with both is counted twice); 1 has neither.${strict}`);
+    as(registrar);
+    expect(counts(await parentsPage())).toBe(`<p>Of the 2 people who can sign in, 1 has a passkey and 1 an authenticator app (someone with both is counted twice); 1 has neither.${strict}`);
+    await seedParentSettings({ level: "standard" });
+    expect(counts(await parentsPage())).not.toContain("step 3");
+    // Counts only: reading them writes no audit row.
+    expect((await db.select().from(auditLog)).length).toBe(readsBefore);
   });
 
   it("refuses arguments no page sends, without touching the database", async () => {
@@ -329,6 +356,17 @@ describe("the staff pages for parents", () => {
       expect(html.replaceAll("&#x27;", "'")).not.toContain("Ana's secret laptop");
       expect(section).not.toContain("ana@example.com");
       expect(section).not.toContain("cred-ana-1");
+    });
+
+    it("says at Strict what the link leads to, and Standard's words at Standard", async () => {
+      await asAdmin();
+      const ana = await anaRow();
+      const standard = resetSection(await personPage(ana.id));
+      expect(standard).toContain("which works once, for 7 days. Choosing it signs them in on that phone or computer; on another one they sign in with that password and a code emailed to them. They can then add a passkey or an authenticator app again. Their families, forms and everything else stay as they are.");
+      await seedParentSettings({ level: "strict" });
+      const strict = resetSection(await personPage(ana.id));
+      expect(strict).toContain("which works once, for 7 days. The club is at Strict: once they've chosen a password, the portal asks them to add a passkey or an authenticator app before they see anything else. Their families, forms and everything else stay as they are.");
+      expect(strict).not.toContain("Choosing it signs them in");
     });
 
     it("says why there is nothing to reset for a blocked person, one who can't sign in, and while sign-ins are off", async () => {

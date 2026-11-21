@@ -35,7 +35,7 @@ const VISITS: Record<string, Visit[]> = {
   "/staff/forms/evidence/[id]": [{ from: "/staff/forms", links: ['a[href^="/staff/forms/evidence/"]'] }],
   "/staff/forms/requests/[id]": [{ from: "/staff/forms", links: ['a[href^="/staff/forms/requests/"]'] }],
   // A set-up page shows one step at a time: each step is a page of its own.
-  "/staff/settings/parents/setup": ["signins", "welcome"].map((step) => ({ path: `/staff/settings/parents/setup?step=${step}` })),
+  "/staff/settings/parents/setup": ["signins", "welcome", "level"].map((step) => ({ path: `/staff/settings/parents/setup?step=${step}` })),
 };
 
 const staffRoutes = () => parentRoutes(STAFF_DIR).map((r) => (r === "/" ? "/staff" : `/staff${r}`));

@@ -44,7 +44,7 @@ import { addGuardian, removeGuardian } from "@/lib/parents/guardians";
 import { blockPerson } from "@/lib/parents/people";
 import { enterableGuardianRows } from "@/lib/parents/sessions";
 import { sendSecondStepCode, verifySigninCode } from "@/lib/parents/signin-codes";
-import { SIGNIN_SETTINGS_COPY } from "@/lib/parents/signin-settings-copy";
+import { factorCounts, setLevel } from "@/lib/parents/switches";
 import { askAgainCode, askAgainPassword } from "@/lib/parents/asking-again";
 import { confirmMyAuthenticator, startMyAuthenticator } from "@/lib/parents/authenticator-settings";
 import { confirmEmailChangeAction, requestEmailChangeAction } from "@/app/(parent)/family/email/actions";
@@ -87,6 +87,8 @@ const authUserOf = async (parentId: string) => (await db.select({ id: parentAuth
 const sessionsOf = async (parentId: string) => db.select({ id: parentAuthSession.id }).from(parentAuthSession)
   .innerJoin(parentAuthUser, eq(parentAuthUser.id, parentAuthSession.userId)).where(eq(parentAuthUser.parentId, parentId));
 const codesOf = async (parentId: string) => db.select().from(signinCode).where(eq(signinCode.parentId, parentId));
+/** An Admin's press on the parents' settings, for the switch to Strict. */
+const ADMIN_OP = { actor: { door: "staff" as const, id: "00000000-0000-4000-8000-000000000001", label: "admin@club.org" }, ip: "203.0.113.9", permission: "Settings.Parents.ReadWrite" };
 const requests = () => db.select().from(parentEmailChange).orderBy(asc(parentEmailChange.createdAt));
 const ctxOf = (identity: ParentIdentity) => ({ ...identity, ip: null });
 const asking = (email: unknown) => { const f = new FormData(); if (typeof email === "string") f.set("email", email); return requestEmailChangeAction(f); };
@@ -157,15 +159,30 @@ describe("asking for the change", () => {
     await proveRecently(r.identity);
     expect(await asking(NEW)).toEqual({ ok: true, message: EMAIL_COPY.sent(NEW) });
     expect((await requests()).map((x) => x.newEmail)).toEqual([NEW]);
-    // Under Strict a proof made at Standard is no way past the words that say it can't be changed here yet: refused,
-    // the live request left as it was, nothing mailed.
-    await seedParentSettings({ level: "strict" });
+  });
+
+  it("at Strict asks the change for a session proved under Strict, and asks again of one whose proof predates the switch (slice SI-10b)", async () => {
+    // Changed on purpose from SI-5a's Strict refusal ("can't be changed here yet"): the switch to Strict clears every
+    // proof made before it (setLevel()), so a proof here is Strict's own.
+    const { r } = await seedContactFamilies(stub);
+    asParent(r.identity);
+    await seedAuthenticator(r.identity.parentId);
     await proveRecently(r.identity);
-    const mailed = outbox.length;
-    expect(await asking("another.new@example.org")).toEqual({ ok: false, errors: [SIGNIN_SETTINGS_COPY.strict] });
+    expect(await setLevel("strict", (await factorCounts()).neither, ADMIN_OP)).toMatchObject({ ok: true });
+    expect(await asking(NEW)).toEqual({ ok: false, errors: [EMAIL_COPY.proveFirstWithApp] });
+    expect(await requests()).toEqual([]);
+    expect(outbox).toEqual([]);
+    expect((await audits()).filter((a) => a.action === "parent.email.request.failed").map((a) => a.after)).toEqual([{ code: "not_proved" }]);
+    // The page at Strict: the asking again with the app's code, and no Strict branch in place of the form.
+    const asksAgain = await renderPage(FamilyEmailPage);
+    expect(asksAgain).toContain("Before you change your sign-in email, please show it&#x27;s you: enter your password, then the code from your authenticator app.");
+    expect(asksAgain).not.toContain("Send me a link");
+    // Proved under Strict: the form, and the change asked, as at Standard.
+    await proveRecently(r.identity);
+    expect(await renderPage(FamilyEmailPage)).toContain("Send me a link");
+    expect(await asking(NEW)).toEqual({ ok: true, message: EMAIL_COPY.sent(NEW) });
     expect((await requests()).map((x) => x.newEmail)).toEqual([NEW]);
-    expect(outbox.length).toBe(mailed);
-    expect((await audits()).filter((a) => a.action === "parent.email.request.failed").map((a) => a.after).at(-1)).toEqual({ code: "strict" });
+    expect(outbox.map((m) => m.to).sort()).toEqual([NEW, RIVERA.parent.email].sort());
   });
 
   it("tells a guardian with no app to show it's them with the emailed code, and one with an app in force with the app's code (slice SI-6b)", async () => {

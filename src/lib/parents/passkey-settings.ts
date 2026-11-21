@@ -282,15 +282,18 @@ export async function removeMyPasskey(ctx: Me, id: unknown, now?: Date): Promise
     if (!(await passkeyOfPerson(tx, ctx.parentId, id))) return "gone" as const;
     const app = await hasAuthenticator(ctx.parentId, tx);
     const last = (await passkeyCount(ctx.parentId, tx)) === 1;
-    if (last && !app && (await getParentSettings(tx)).level === "strict") return "strict" as const;
+    const strict = last && (await getParentSettings(tx)).level === "strict";
+    if (last && !app && strict) return "strict" as const;
     await removePasskey(tx, ctx.parentId, id);
     const backupCodesDeleted = last && !app ? await removeBackupCodes(tx, ctx.parentId) : 0;
     await writeAudit({ actor: parentActor({ id: ctx.parentId, email: live.email }), action: "parent.passkey.remove", targetType: "parent", targetId: ctx.parentId,
       after: { passkeyId: id, passkeys: await passkeyCount(ctx.parentId, tx), backupCodesDeleted }, ip: ctx.ip }, tx);
-    return last ? (app ? "last_beside_app" as const : "last" as const) : "one_of_several" as const;
+    return last ? (app ? (strict ? "last_beside_app_strict" as const : "last_beside_app" as const) : "last" as const) : "one_of_several" as const;
   });
   if (done === "not_proved") return PROVE_AGAIN;
   if (done === "gone") return NOT_FOUND;
   if (done === "strict") return { ok: false, errors: [COPY.passkeyRemoveStrict] };
-  return { ok: true, message: done === "last" ? COPY.passkeyRemovedLast : done === "last_beside_app" ? COPY.passkeyRemovedLastApp : COPY.passkeyRemoved };
+  // Beside an app at Strict (slice SI-10b), the app's code is asked at every sign-in: no remembered device spares it.
+  return { ok: true, message: done === "last" ? COPY.passkeyRemovedLast : done === "last_beside_app" ? COPY.passkeyRemovedLastApp
+    : done === "last_beside_app_strict" ? COPY.passkeyRemovedLastAppStrict : COPY.passkeyRemoved };
 }

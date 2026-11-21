@@ -114,16 +114,28 @@ describe("mail messages", () => {
     it("a welcome with a link has it on a line of its own, its life in words, and where to ask for a new one, in full", () => {
       const m = messages[0][1];
       expect(m.text.split("\n")).toContain(url);
-      expect(m.text).toContain("The link works once, for 7 days.");
+      expect(m.text).toContain("The link works once, for 7 days. After that, you sign in with this email address and the password you chose.");
       expect(m.text).toContain("If the link runs out before you use it, you can ask for a new one at https://portal.example.org/sign-in/password");
       expect(m.text).not.toContain("ask the club");
+      expect(m.text).not.toContain("passkey");
     });
-    it("at Strict it says to ask the club to send it again, since the request page mails no set-up link there", () => {
+    it("at Strict it says what the password leads to, and to ask the club for a new link, since the request page mails no set-up link there", () => {
+      // Slice SI-10b: the third and fourth lines at Strict, word for word; changed on purpose from SI-4's "send this email again".
       for (const [, m] of [messages[1], messages[4]]) {
         expect(m.text.split("\n")).toContain(url);
-        expect(m.text).toContain("If the link runs out before you use it, please ask the club to send this email again.");
+        const lines = textLines(m.text);
+        const at = lines.indexOf(url);
+        expect(lines.slice(at + 1, at + 3)).toEqual([
+          "The link works once, for 7 days. Once you've chosen your password, the portal asks you to add a passkey or an authenticator app, which you'll use each time you sign in.",
+          "If the link runs out before you use it, please ask the club to send you a new one.",
+        ]);
+        expect(m.text).not.toContain("send this email again");
         expect(m.text).not.toContain("/sign-in/password");
+        expect(m.text).not.toContain("After that, you sign in with this email address and the password you chose.");
       }
+      // The mail to choose a password says nothing at Strict of a device staying signed in: the switch signs out a guardian with neither.
+      expect(messages[4][1].text).not.toContain("stays signed in");
+      expect(messages[1][1].text).toContain("First, choose your password with this link:");
     });
     it("a welcome with no link says to sign in with the password, at the sign-in page in full, and carries no link to choose one", () => {
       const m = messages[2][1];
@@ -252,7 +264,7 @@ describe("mail messages", () => {
   // An Admin's reset of a parent's sign-in (slice SI-9a; src/lib/parents/signin-reset.ts).
   describe("the mail of a reset of a parent's sign-in", () => {
     const link = "https://portal.example.org/sign-in/set-up/AbC-123_xyz";
-    const m = signinResetMessage(b, "ana@example.com", { link, life: "7 days", contact: "treasurer@boosters.example.org" });
+    const m = signinResetMessage(b, "ana@example.com", { link, life: "7 days", contact: "treasurer@boosters.example.org", strict: false });
     /** The words of the mail's HTML body, with its markup taken out and its escaping undone. */
     const htmlWords = m.html.replace(/<div style="background[^>]*>[^<]*<\/div>/, "").replace(/<[^>]+>/g, "\n").split("\n").map((l) => l.trim()).filter(Boolean)
       .map((l) => l.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&"));
@@ -272,9 +284,19 @@ describe("mail messages", () => {
     });
     it("says where to write to the club when it has an address, and leaves the line out when it has none", () => {
       expect(m.text).toContain("You can write to the club at treasurer@boosters.example.org.");
-      const none = signinResetMessage(b, "ana@example.com", { link, life: "7 days", contact: null });
+      const none = signinResetMessage(b, "ana@example.com", { link, life: "7 days", contact: null, strict: false });
       expect(`${none.text}${none.html}`).not.toContain("You can write to the club");
       expect(none.text.trim().split("\n\n")).toHaveLength(m.text.trim().split("\n\n").length - 1);
+    });
+    it("at Strict says the password leads first to adding a passkey or an authenticator app, in place of Standard's line (slice SI-10b)", () => {
+      const strict = signinResetMessage(b, "ana@example.com", { link, life: "7 days", contact: "treasurer@boosters.example.org", strict: true });
+      const lines = strict.text.trim().split("\n\n");
+      expect(lines[3]).toBe("The link works once, for 7 days. Once you've chosen your password, the portal asks you to add a passkey or an authenticator app before anything else.");
+      expect(m.text.trim().split("\n\n")[3]).toBe("The link works once, for 7 days. Once you've chosen your password, you can add a passkey or an authenticator app again under Sign-in settings.");
+      expect(strict.text).not.toContain("again under Sign-in settings");
+      // Every other line as Standard's.
+      expect(lines.filter((_l, i) => i !== 3)).toEqual(m.text.trim().split("\n\n").filter((_l, i) => i !== 3));
+      expect(`${strict.text}${strict.html.replace(/font-family:/g, "")}`).not.toMatch(/family|student|guardian|admin|staff/i);
     });
     it("says the same in its text and its HTML, names no family, student, guardian or Admin, and escapes the club's name", () => {
       expect(htmlWords).toEqual(m.text.trim().split("\n\n"));

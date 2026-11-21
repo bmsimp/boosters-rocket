@@ -78,6 +78,9 @@ test("Zelda adds a passkey, reads her backup codes once, renames it, asks again 
   await expect(box.getByText(COPY.passkeyCodesMade)).toBeVisible();
   const codes = (await box.getByRole("list", { name: COPY.backupCodesTitle }).getByRole("listitem").allTextContents()).map((c) => c.trim());
   expect(new Set(codes).size).toBe(10);
+  // At Standard no confirm is drawn under them (Strict's, slice SI-10b, is tests/e2e/strict-enrolment.spec.ts's).
+  await expect(box.getByRole("checkbox")).toHaveCount(0);
+  await expect(box.getByRole("button", { name: COPY.codesDone, exact: true })).toHaveCount(0);
   expect(paths).toContain("/api/auth/parent/passkey/generate-register-options");
   expect(paths).toContain("/api/auth/parent/portal-passkey/add");
   expect(paths).not.toContain("/api/auth/parent/passkey/verify-registration");

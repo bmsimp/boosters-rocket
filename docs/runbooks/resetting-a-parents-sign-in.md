@@ -42,7 +42,8 @@ are.
 They are emailed a link to choose a new password. It works once, for 7 days. The email says that if they didn't ask the
 club for this, they should contact the club straight away. Choosing the password with the link signs them in on that
 phone or computer; on another one they sign in with the password and a code emailed to them. They can then add a passkey or an
-authenticator app again under **Sign-in settings**.
+authenticator app again under **Sign-in settings**. When the club is at Strict instead, once they've chosen a password, the
+portal asks them to add a passkey or an authenticator app before they see anything else.
 
 ## When the email couldn't be sent
 

@@ -212,8 +212,8 @@ export function AskAgain({ email, proved, lede, children, passkey = false, porta
  * change that was made signs the parent out everywhere, this device too, so the answer brings the way to sign in again.
  * `app`: whether the parent has an authenticator app (slice SI-6b), for the words of how they sign in again.
  */
-export function ChangePasswordForm({ email, app, passkey = false }: { email: string; app: boolean; passkey?: boolean }) {
-  const words = howYouSignIn({ app, passkey });
+export function ChangePasswordForm({ email, app, passkey = false, strict }: { email: string; app: boolean; passkey?: boolean; strict: boolean }) {
+  const words = howYouSignIn({ app, passkey, strict });
   const [password, setPassword] = useState("");
   const [again, setAgain] = useState("");
   const [busy, setBusy] = useState(false);
@@ -309,7 +309,8 @@ const sameMinutes = (a: ListedDevice, b: ListedDevice) => a.createdAt.slice(0, 1
  * The remembered devices (slice SI-5b), newest use first, the one this session was made on marked "This device". Each
  * can be forgotten, and every other one at once, but only by a session that showed it's the parent in the last 10
  * minutes: otherwise the list is drawn without its buttons and asking again below it (AskAgain; `canAsk` false, for a
- * parent with no password or under Strict, draws `cantAsk`'s words instead). Given only the listed devices, whether
+ * parent with no password, draws `cantAsk`'s words instead; at Strict as at Standard since slice SI-10b, with
+ * Strict's words, `strict`). Given only the listed devices, whether
  * this session proved itself, the address for AskAgain's username field and those words.
  *
  * Each button says which device it forgets: "Forget this device" on the session's own row, and on every other "Forget"
@@ -319,10 +320,11 @@ const sameMinutes = (a: ListedDevice, b: ListedDevice) => a.createdAt.slice(0, 1
  * device". A session whose own device was just forgotten in this box knows the rest are the others, and keeps "Forget
  * every other device" without that sentence.
  */
-export function RememberedDevices({ devices, proved, canAsk, cantAsk, email, app, passkey = false, portalOrigin = "" }: { devices: ListedDevice[]; proved: boolean;
-  canAsk: boolean; cantAsk: string; email: string; app: boolean; passkey?: boolean; portalOrigin?: string }) {
-  // What the next sign-in on a forgotten device asks for: their passkey (slice SI-7b), the code from their authenticator app (slice SI-6b), or ours.
-  const words = howYouSignIn({ app, passkey });
+export function RememberedDevices({ devices, proved, canAsk, cantAsk, email, app, passkey = false, strict, portalOrigin = "" }: { devices: ListedDevice[]; proved: boolean;
+  canAsk: boolean; cantAsk: string; email: string; app: boolean; passkey?: boolean; strict: boolean; portalOrigin?: string }) {
+  // What the next sign-in on a forgotten device asks for: their passkey (slice SI-7b), the code from their authenticator app (slice SI-6b), or ours;
+  // at Strict (slice SI-10b), the same as before, since no device stands in for the second step there.
+  const words = howYouSignIn({ app, passkey, strict });
   // Proved here, by the asking below: it gives way to its thanks, drawn above the list, and the buttons come after it.
   // Proved in another box of the page, the page is drawn again with `proved` (the proof revalidates it), and the
   // asking here simply goes.

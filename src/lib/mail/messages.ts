@@ -61,13 +61,18 @@ export function changeCodeMessage(b: Brand, to: string, code: string, o: { setti
 /**
  * A set-up link as the welcome and the press's mail carry it (the sign-in release, slice SI-4): its address, how long it
  * works in words (lifeWords() of LINK_LIFE_MS.setup), and whether the club is at Strict, where "Set up or reset my
- * password" mails no set-up link (whichLinkToMail(), `strict_no_setup`), so the mail says to ask the club instead.
+ * password" mails no set-up link (whichLinkToMail(), `strict_no_setup`), so the mail says to ask the club instead, and
+ * where the password chosen leads first to adding a passkey or an authenticator app (Strict's enrolment, slice SI-10a),
+ * which the mail says too (slice SI-10b).
  */
 export type SetupLinkWords = { url: string; life: string; strict: boolean };
 
-/** What to do once a set-up link has run out: ask for a new one on the request page (Standard), or ask the club (Strict). */
+/**
+ * What to do once a set-up link has run out: ask for a new one on the request page (Standard), or ask the club for a new
+ * one (Strict: not "this email again", since what staff send is the welcome, from the person's page on Parents).
+ */
 const afterItRunsOut = (appUrl: string, link: SetupLinkWords) => (link.strict
-  ? "If the link runs out before you use it, please ask the club to send this email again."
+  ? "If the link runs out before you use it, please ask the club to send you a new one."
   : `If the link runs out before you use it, you can ask for a new one at ${appUrl}/sign-in/password`);
 
 /**
@@ -76,6 +81,10 @@ const afterItRunsOut = (appUrl: string, link: SetupLinkWords) => (link.strict
  * request page at Standard, the club at Strict).
  */
 export type EarlierLinkWords = { earlier: true; strict: boolean };
+
+/** A set-up link's life at Strict, and what choosing a password leads to there (slice SI-10b). */
+const strictLinkLife = (life: string) =>
+  `The link works once, for ${life}. Once you've chosen your password, the portal asks you to add a passkey or an authenticator app, which you'll use each time you sign in.`;
 
 /**
  * The welcome (parents spec §3; since the sign-in release's slice SI-4 it carries a set-up link). It holds no family
@@ -93,7 +102,8 @@ export function welcomeMessage(b: Brand, to: string, o: { appUrl: string; contac
       ] : [
         `You can now sign in to ${b.clubName} at ${o.appUrl} with this email address. First, choose your password with this link:`,
         { link: o.link.url },
-        `The link works once, for ${o.link.life}. After that, you sign in with this email address and the password you chose.`,
+        o.link.strict ? strictLinkLife(o.link.life)
+          : `The link works once, for ${o.link.life}. After that, you sign in with this email address and the password you chose.`,
         afterItRunsOut(o.appUrl, o.link),
       ]),
     NEVER_ASKS(b),
@@ -106,16 +116,18 @@ export function welcomeMessage(b: Brand, to: string, o: { appUrl: string; contac
  * The set-up link an Admin's press on the parents' settings page mails to a person the club welcomed before, who has
  * no password (the sign-in release, slice SI-4): someone welcomed before the portal signed parents in with a password,
  * or someone whose welcome's link ran out unused. True for both, it says how they sign in, that the link chooses their
- * password, how long it works and what to do after, and that a device they are signed in on now stays signed in. Like
- * the welcome, it names no family, student or other person.
+ * password, how long it works and what to do after, and at Standard that a device they are signed in on now stays
+ * signed in; at Strict, what the password leads to first, and nothing of a device signed in now, which the switch to
+ * Strict signs out for a guardian with neither a passkey nor an app (slice SI-10b). Like the welcome, it names no
+ * family, student or other person.
  */
 export function choosePasswordMessage(b: Brand, to: string, o: { appUrl: string; contact: string | null; link: SetupLinkWords }): MailMessage {
   const lines: Line[] = [
     `You sign in to the ${b.clubName} portal at ${o.appUrl} with this email address and a password. To choose your password, open this link:`,
     { link: o.link.url },
-    `The link works once, for ${o.link.life}.`,
+    o.link.strict ? strictLinkLife(o.link.life) : `The link works once, for ${o.link.life}.`,
     afterItRunsOut(o.appUrl, o.link),
-    "If you're signed in to the portal on a phone or computer now, it stays signed in, and you'll need your password the next time you sign in.",
+    ...(o.link.strict ? [] : ["If you're signed in to the portal on a phone or computer now, it stays signed in, and you'll need your password the next time you sign in."]),
     NEVER_ASKS(b),
     ...(o.contact ? [`Questions? Write to ${o.contact}.`] : []),
   ];
@@ -185,15 +197,17 @@ export function passwordResetMessage(b: Brand, to: string, o: { link: string; li
  * set-up link on a line of its own with its life in words, what to do next, and, since this mailbox may be the very
  * one a caller holds, to contact the club straight away if they didn't ask (with the club's address, `contact`, when it
  * has one: the reader is signed out everywhere and can't look it up in the portal). It names no family, student or
- * other person, and no Admin: the reader is told to contact the club, not whom. Standard's words; under Strict a later
- * slice (SI-10) says what the link leads to first.
+ * other person, and no Admin: the reader is told to contact the club, not whom. At Standard it says they can add a
+ * passkey or an authenticator app again under Sign-in settings; at Strict (`strict`, the level read under the lock),
+ * that the portal asks them to add one before anything else (Strict's enrolment; slice SI-10b).
  */
-export function signinResetMessage(b: Brand, to: string, o: { link: string; life: string; contact: string | null }): MailMessage {
+export function signinResetMessage(b: Brand, to: string, o: { link: string; life: string; contact: string | null; strict: boolean }): MailMessage {
   const lines: Line[] = [
     `Someone at ${b.clubName} reset how you sign in to the portal with this email address. Your password, passkeys, authenticator app and backup codes no longer work, and every phone and computer that was signed in has been signed out.`,
     "To choose a new password, open this link:",
     { link: o.link },
-    `The link works once, for ${o.life}. Once you've chosen your password, you can add a passkey or an authenticator app again under Sign-in settings.`,
+    o.strict ? `The link works once, for ${o.life}. Once you've chosen your password, the portal asks you to add a passkey or an authenticator app before anything else.`
+      : `The link works once, for ${o.life}. Once you've chosen your password, you can add a passkey or an authenticator app again under Sign-in settings.`,
     "If you asked the club for this, that's all there is to do.",
     "If you didn't ask the club for this, please contact the club straight away: someone may be trying to get into your account.",
     ...(o.contact ? [`You can write to the club at ${o.contact}.`] : []),

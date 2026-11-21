@@ -26,19 +26,22 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, guardian, jobRun, parent, parentSigninToken, qboConnection, role, roleAssignment, roleRule, setting, student } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
-import { getParentSettings } from "@/lib/parents/settings";
+import { getParentSettings, PARENTS_KEY } from "@/lib/parents/settings";
 import { ROSTER_JOB, setRosterSource } from "@/lib/roster/source";
 import ParentSettingsPage from "@/app/staff/(app)/settings/parents/page";
 import ParentSetupPage from "@/app/staff/(app)/settings/parents/setup/page";
 import QuickBooksSettingsPage from "@/app/staff/(app)/settings/quickbooks/page";
 import StaffLayout from "@/app/staff/(app)/layout";
 import { SETTINGS_SECTIONS } from "@/app/staff/(app)/settings/sections";
-import { oweSetupMailsAction, setSigninsAction, setWelcomeAction, setRequireStudentsAction } from "@/app/staff/(app)/settings/parents/actions";
-import { resetDb, seedGuardian, seedParent, seedStaff, seedWorkingMail } from "../helpers/db";
-import { seedCache, seedShape, storeShape, fam, par, stu } from "../helpers/roster-cache";
+import { oweSetupMailsAction, setLevelAction, setSigninsAction, setWelcomeAction, setRequireStudentsAction } from "@/app/staff/(app)/settings/parents/actions";
+import { LEVEL_COUNT_CHANGED, LEVEL_UNREADABLE } from "@/lib/parents/switches";
+import { resetDb, seedGuardian, seedParent, seedParentSession, seedStaff, seedWorkingMail } from "../helpers/db";
+import { seedCache, seedParentSettings, seedShape, storeShape, fam, par, stu } from "../helpers/roster-cache";
 import { startQboStub, seedConnected, type QboStub } from "../helpers/qbo-stub";
 import { syncAppRecords } from "../helpers/app-records";
 import { seedPassword } from "../helpers/signin-links";
+import { seedPasskey } from "../helpers/passkey";
+import { seedAuthenticator } from "../helpers/authenticator";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -82,7 +85,8 @@ describe("the Parent sign-ins settings", () => {
     who.staff = { door: "staff", staffUserId: other.id, name: other.name, email: other.email };
     expect((await thrown(ParentSettingsPage())).url).toBe("/refused");
     expect((await thrown(ParentSetupPage({ searchParams: Promise.resolve({}) }))).url).toBe("/refused");
-    for (const call of [() => setSigninsAction(true), () => setWelcomeAction(true), () => setRequireStudentsAction(true), () => oweSetupMailsAction()]) {
+    for (const call of [() => setSigninsAction(true), () => setWelcomeAction(true), () => setRequireStudentsAction(true), () => oweSetupMailsAction(),
+      () => setLevelAction("strict", 0), () => setLevelAction("standard", null)]) {
       await expect(call()).rejects.toBeInstanceOf(AccessDenied);
     }
     expect(renderToStaticMarkup(await StaffLayout({ children: null }))).not.toContain('href="/staff/settings/parents"');
@@ -119,11 +123,16 @@ describe("the Parent sign-ins settings", () => {
     expect(await setSigninsAction(true)).toEqual({ ok: true, message: "Parent sign-ins are on." });
   });
 
-  it("has two steps, sign-ins and welcome emails: the clean-up preview is gone", async () => {
+  it("has three steps, sign-ins, welcome emails and the sign-in level: the clean-up preview is gone", async () => {
     await ready();
     const html = await setup();
     expect(html).toContain("1. Parent sign-ins");
     expect(html).toContain("2. Welcome emails");
+    expect(html).toContain("3. Sign-in level");
+    expect(html).toContain('href="/staff/settings/parents/setup?step=level"');
+    expect(await setup("level")).toContain("Step 3: Sign-in level");
+    // Step 2 names step 3 first in its foot, as step 1 names step 2.
+    expect(await setup("welcome")).toContain('<p class="box-foot"><a class="link-line" href="/staff/settings/parents/setup?step=level">Next: sign-in level</a>');
     expect(html).not.toContain("Clean-up preview");
     // An old link to the preview lands on the first step.
     expect(await setup("preview")).toContain("Step 1: Parent sign-ins");
@@ -204,7 +213,13 @@ describe("the Parent sign-ins settings", () => {
     for (const act of [setSigninsAction, setWelcomeAction, setRequireStudentsAction]) {
       for (const bad of ["true", 1, null, undefined, { valueOf: () => true }, [true]]) expect(await loose(act)(bad)).toEqual(refused);
     }
-    expect(await getParentSettings()).toMatchObject({ signin: false, welcome: false, requireActiveStudents: false });
+    // The level: exactly "standard" with null, or "strict" with a count the page could have shown.
+    for (const [level, shown] of [["Strict", 1], ["STANDARD", null], ["relaxed", 0], [null, null], [undefined, undefined], [["strict"], 1], [{ valueOf: () => "strict" }, 1],
+      ["strict", null], ["strict", undefined], ["strict", "1"], ["strict", 1.5], ["strict", -1], ["strict", 1_000_001], ["strict", Number.NaN], ["strict", Infinity],
+      ["strict", { valueOf: () => 1 }], ["standard", 0], ["standard", undefined], ["standard", "null"], ["standard", false]] as [unknown, unknown][]) {
+      expect(await loose(setLevelAction)(level, shown)).toEqual(refused);
+    }
+    expect(await getParentSettings()).toMatchObject({ signin: false, welcome: false, requireActiveStudents: false, level: "standard" });
     expect(await audits("settings.parents.save")).toEqual([]);
     expect(revalidated.count).toBe(0);
   });
@@ -304,5 +319,148 @@ describe("the Parent sign-ins settings", () => {
     // Refused in words while a switch is off.
     await setWelcomeAction(false);
     expect(await oweSetupMailsAction()).toEqual({ ok: false, errors: ["Switch parent sign-ins and welcome emails on first."] });
+  });
+
+  describe("the sign-in level (slice SI-10b)", () => {
+    const decoded = (html: string) => html.replaceAll("&#x27;", "'");
+    /** Step 3's box, from its heading to the end of its section. */
+    const stepThree = async () => {
+      const html = decoded(await setup("level"));
+      const at = html.indexOf('id="pl-h"');
+      expect(at).toBeGreaterThan(-1);
+      return html.slice(at, html.indexOf("</section>", at));
+    };
+    /** Sam, a second guardian who can sign in, in the Chen family. */
+    const seedSam = async () => {
+      const sam = await seedParent({ name: "Shared Sam", email: "sam@example.com" });
+      await seedGuardian({ parentId: sam.id, familyQboId: "20", sourceQboId: "21", status: "invited" });
+      await syncAppRecords();
+      return sam;
+    };
+
+    it("says the level under What is set, in words, with Strict's lede and Strict's words beside the press", async () => {
+      const ana = await ready();
+      const standard = decoded(await view());
+      expect(standard).toContain("<dt>Sign-in level</dt><dd>Standard: a password, and on a phone or computer the portal doesn't know yet, a code we email, or the guardian's own passkey or authenticator app</dd>");
+      expect(standard).toContain("on a phone or computer the portal doesn't know yet, it emails them a code too.");
+      await seedParentSettings({ level: "strict" });
+      const strict = decoded(await view());
+      expect(strict).toContain("<dt>Sign-in level</dt><dd>Strict: a password and a passkey or an authenticator app, every time. An emailed code never signs anyone in.</dd>");
+      expect(strict).toContain("Parents sign in to the portal with their email address and a password, which they choose from a link the portal emails them, and then a passkey or an authenticator app, every time. Who can sign in is the portal's own list of each family's guardians: a change made in QuickBooks no longer gives anyone a sign-in or ends one. Only Admins can change this.");
+      expect(strict).not.toContain("it emails them a code too");
+      // Step 2's sample of the welcome is Strict's too (sampleWelcome() carries the level).
+      const welcome = decoded(await setup("welcome"));
+      expect(welcome).toContain("Once you've chosen your password, the portal asks you to add a passkey or an authenticator app, which you'll use each time you sign in.");
+      expect(welcome).not.toContain("After that, you sign in with this email address and the password you chose.");
+      // "Passwords not chosen yet" at Strict: what choosing a password leads to, not that a session stays.
+      await seedParentSettings({ signin: true, welcome: true });
+      await db.update(parent).set({ welcomedAt: new Date("2026-01-01T00:00:00Z"), welcomeOwed: false }).where(eq(parent.id, ana.id));
+      const owed = decoded(await view());
+      expect(owed).toContain("anyone welcomed before gets the email below. Once they've chosen a password, the portal asks them to add a passkey or an authenticator app before they see anything else. They go out a few each minute.");
+      expect(owed).not.toContain("A phone or computer they are signed in on now stays signed in.");
+      await seedParentSettings({ level: "standard" });
+      expect(decoded(await view())).toContain("anyone welcomed before gets the email below. A phone or computer they are signed in on now stays signed in. They go out a few each minute.");
+      // A stored value that can't be read, naming no level.
+      await db.update(setting).set({ value: { signin: true, level: "relaxed" } }).where(eq(setting.key, PARENTS_KEY));
+      const unknown = decoded(await view());
+      expect(unknown).toContain("<dt>Sign-in level</dt><dd>Not known: the saved sign-in settings can't be read. Choose Standard or Strict under Change, step 3.</dd>");
+      // The press those words name is drawn by that name, though the value read is the closed state (sign-ins off).
+      expect(unknown).toContain(`<a class="btn" href="/staff/settings/parents/setup">Change</a>`);
+      expect(unknown).not.toContain(">Set up</a>");
+    });
+
+    it("step 3 at Standard shows the counts, and the confirm for 1, for 2 or more and for 0 guardians with neither", async () => {
+      const ana = await ready();
+      let html = await stepThree();
+      expect(html).toContain("The club is at Standard: a password, and on a phone or computer the portal doesn't know yet, a code we email, or the guardian's own passkey or authenticator app.");
+      expect(html).toContain("<dt>Can sign in</dt><dd>1 person</dd><dt>Have a passkey</dt><dd>0</dd><dt>Have an authenticator app</dt><dd>0</dd><dt>Have neither</dt><dd>1</dd>");
+      expect(html).toContain("Strict asks every guardian for a passkey or an authenticator app each time they sign in, and an emailed code never signs anyone in. Switch once most guardians have one.");
+      expect(html).toContain("<summary>Switch to Strict</summary>");
+      expect(html).toContain("Switching to Strict signs out the 1 guardian who has neither a passkey nor an authenticator app. The next time they sign in, their password takes them to add one before they see their family's page. If they've forgotten their password, they'll need you to reset their sign-in from their page on Parents.");
+      expect(html).toContain(">Switch to Strict</button>");
+      expect(html).not.toContain("Switch back to Standard");
+      const sam = await seedSam();
+      html = await stepThree();
+      expect(html).toContain("<dt>Can sign in</dt><dd>2 people</dd>");
+      expect(html).toContain("Switching to Strict signs out the 2 guardians who have neither a passkey nor an authenticator app. The next time they sign in, their password takes them to add one before they see their family's page. Anyone who has forgotten their password will need you to reset their sign-in from their page on Parents.");
+      await seedPasskey(ana.id); await seedAuthenticator(ana.id); await seedAuthenticator(sam.id);
+      html = await stepThree();
+      expect(html).toContain("<dt>Can sign in</dt><dd>2 people</dd><dt>Have a passkey</dt><dd>1</dd><dt>Have an authenticator app</dt><dd>2</dd><dt>Have neither</dt><dd>0</dd>");
+      expect(html).toContain("Switching to Strict signs nobody out: every guardian who can sign in has a passkey or an authenticator app.");
+      expect(html).toContain('<a class="link-line" href="/staff/settings/parents">Back to Parent sign-ins</a>');
+    });
+
+    it("step 3 at Strict offers only switching back, and with the level unknown says so and offers both", async () => {
+      await ready();
+      await seedParentSettings({ level: "strict" });
+      let html = await stepThree();
+      expect(html).toContain("The club is at Strict: a password and a passkey or an authenticator app, every time. An emailed code never signs anyone in.");
+      expect(html).toContain("<dt>Have neither</dt><dd>1</dd>");
+      expect(html).toContain("<summary>Switch back to Standard</summary>");
+      expect(html).toContain("Switching back to Standard lets guardians with no passkey or app sign in with their password and a code we email again. Nobody is signed out, and every passkey and app stays.");
+      expect(html).toContain(">Switch back to Standard</button>");
+      expect(html).not.toContain("Switch to Strict");
+      expect(html).not.toContain("Switch once most guardians have one.");
+      await db.update(setting).set({ value: { signin: true, level: "relaxed" } }).where(eq(setting.key, PARENTS_KEY));
+      html = await stepThree();
+      expect(html).toContain(decoded(LEVEL_UNREADABLE));
+      expect(html).toContain("<dt>Have neither</dt><dd>1</dd>");
+      expect(html).toContain("<summary>Switch to Strict</summary>");
+      expect(html).toContain("<summary>Switch back to Standard</summary>");
+      expect(html).not.toContain("The club is at");
+    });
+
+    it("switches through the action with each of its answers, and refuses a count that is stale", async () => {
+      const ana = await ready();
+      const sam = await seedSam();
+      await setSigninsAction(true);
+      revalidated.count = 0;
+      expect(await setLevelAction("strict", 1)).toEqual({ ok: false, errors: [LEVEL_COUNT_CHANGED] });
+      expect(revalidated.count).toBe(0);
+      expect((await getParentSettings()).level).toBe("standard");
+      // Ana and Sam each have a session, and neither a passkey nor an app: both are signed out.
+      await seedParentSession(ana.authUserId); await seedParentSession(sam.authUserId);
+      expect(await setLevelAction("strict", 2)).toEqual({ ok: true, message: "The club is at Strict. 2 guardians with neither a passkey nor an authenticator app were signed out." });
+      expect(revalidated.count).toBe(1);
+      expect((await audits("settings.parents.save")).at(-1)).toMatchObject({ actorId: admin.id, permission: "Settings.Parents.ReadWrite", ip: "203.0.113.40",
+        after: { level: "strict", signedOut: 2, sessionsEnded: 2, counts: { people: 2, passkey: 0, app: 0, neither: 2 } } });
+      expect(await setLevelAction("standard", null)).toEqual({ ok: true, message: "The club is at Standard. Nobody was signed out." });
+      await seedParentSession(ana.authUserId);
+      expect(await setLevelAction("strict", 2)).toEqual({ ok: true, message: "The club is at Strict. 1 guardian with neither a passkey nor an authenticator app was signed out." });
+      await setLevelAction("standard", null);
+      expect(await setLevelAction("strict", 2)).toEqual({ ok: true, message: "The club is at Strict. Nobody needed signing out." });
+      expect((await getParentSettings()).level).toBe("strict");
+    });
+
+    it("binds the press to the count the step shows: the page's own Switch to Strict works, and so does its Switch back", async () => {
+      /** The presses a page draws (SwitchButton's `label` and `act`), found in the element tree it returns, not its markup. */
+      type Press = { label: string; act: () => Promise<unknown> };
+      const presses = (node: unknown): Press[] => {
+        if (Array.isArray(node)) return node.flatMap(presses);
+        if (!node || typeof node !== "object" || !("props" in node)) return [];
+        const p = (node as { props: Record<string, unknown> }).props;
+        const own = typeof p.act === "function" && typeof p.label === "string" ? [{ label: p.label, act: p.act as Press["act"] }] : [];
+        return [...own, ...presses(p.children)];
+      };
+      const drawn = async () => {
+        const page = await ParentSetupPage({ searchParams: Promise.resolve({ step: "level" }) });
+        return { html: decoded(renderToStaticMarkup(page)), presses: presses(page) };
+      };
+      const ana = await ready();
+      const sam = await seedSam();
+      await setSigninsAction(true);
+      await seedParentSession(ana.authUserId); await seedParentSession(sam.authUserId);
+      let page = await drawn();
+      expect(page.html).toContain("<dt>Have neither</dt><dd>2</dd>");
+      expect(page.html).toContain("Switching to Strict signs out the 2 guardians who have neither");
+      const toStrict = page.presses.find((p) => p.label === "Switch to Strict");
+      expect(toStrict).toBeDefined();
+      expect(await toStrict!.act()).toEqual({ ok: true, message: "The club is at Strict. 2 guardians with neither a passkey nor an authenticator app were signed out." });
+      expect((await getParentSettings()).level).toBe("strict");
+      page = await drawn();
+      expect(page.presses.map((p) => p.label)).toEqual(["Switch back to Standard"]);
+      expect(await page.presses[0]!.act()).toEqual({ ok: true, message: "The club is at Standard. Nobody was signed out." });
+      expect((await getParentSettings()).level).toBe("standard");
+    });
   });
 });

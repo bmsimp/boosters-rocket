@@ -158,12 +158,15 @@ async function offerSession(): Promise<() => Promise<void>> {
  * Standard and gives nobody a session that enrols, so for each opening Strict is stored, a guardian of the spec's own is
  * made with a password and no second factor (never Zelda, whose seeded session the gate would sign out at Strict), and
  * an enrolling session of hers is given to the browser (tests/e2e/strict-seed.ts); she goes, and Standard comes back,
- * as the page is closed. Chromium here holds WebAuthn at the portal's address, so the passkey's press is drawn.
+ * as the page is closed. Chromium here holds WebAuthn at the portal's address, so the passkey's press is drawn. Since
+ * slice SI-10b also Sign-in settings at Strict with new backup codes and the box to tick under them: the same guardian
+ * enrols with an app, goes on, and presses "Make new backup codes" there, within the 10 minutes the enrolment proved.
  */
-type EnrolState = "page" | "codes";
+type EnrolState = "page" | "codes" | "settings-codes";
 const ENROL_TARGETS: Target[] = [
   { label: "/one-more-step", address: "/one-more-step", signedIn: false, enrol: "page" },
   { label: "/one-more-step (the backup codes and the box to tick)", address: "/one-more-step", signedIn: false, enrol: "codes" },
+  { label: "/family/sign-in at Strict (new backup codes and the box to tick)", address: "/one-more-step", signedIn: false, enrol: "settings-codes" },
 ];
 const ENROL_SESSION_TOKEN = "e2e-a11y-enrolling-session-token";
 
@@ -229,6 +232,17 @@ async function prepareEnrolment(page: Page, state: EnrolState) {
   await box.getByRole("button", { name: "Finish setting up" }).click();
   await expect(page.getByRole("list", { name: "Your backup codes" }).getByRole("listitem")).toHaveCount(10);
   await expect(page.getByLabel("I've saved my backup codes somewhere safe")).toBeVisible();
+  if (state === "codes") return;
+  // Whole now: on, and to Sign-in settings at Strict, where new codes are shown with the box to tick under them.
+  await page.getByLabel("I've saved my backup codes somewhere safe").check();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await page.goto("/family/sign-in");
+  const settings = page.getByRole("region", { name: "Authenticator app", exact: true });
+  await settings.getByRole("button", { name: "Make new backup codes" }).click();
+  await expect(settings.getByRole("list", { name: "Your backup codes" }).getByRole("listitem")).toHaveCount(10);
+  await expect(settings.getByLabel("I've saved my backup codes somewhere safe")).toBeVisible();
+  await expect(settings.getByRole("button", { name: "Done", exact: true })).toHaveAttribute("aria-disabled", "true");
 }
 
 /** Opens a target in a context of its own, as the seeded parent or nobody, and waits for its fonts. */
