@@ -30,6 +30,8 @@ const setupModules = modules.filter((f) => f.startsWith("src/app/setup/"));
 const otherModules = modules.filter((f) => !staffModules.includes(f) && !parentModules.includes(f) && !setupModules.includes(f));
 /** The one file whose actions are taken before sign-in, with no session: the form of a set-up or reset link. */
 const BEFORE_SIGN_IN_FILE = "src/app/sign-in/password-actions.ts";
+/** The one file whose actions an enrolling session takes (Strict's /one-more-step, the sign-in release's slice SI-10a). */
+const ENROLMENT_FILE = "src/app/one-more-step/actions.ts";
 
 const exportedFunctions = async (file: string) => {
   const mod = await import(path.join(root, file));
@@ -82,6 +84,20 @@ describe("every server action is guarded (spec §7, §12)", () => {
       // An action with no session at all (beforeSignInAction, src/lib/guards.ts) is allowed in this one file: its guard
       // is the link it is given. A new one is a decision, with the checklist in AGENTS.md ("Page or action before sign-in").
       if (g?.door === "before-sign-in") expect(file, `${file} → ${name} uses beforeSignInAction outside ${BEFORE_SIGN_IN_FILE}`).toBe(BEFORE_SIGN_IN_FILE);
+      // An enrolling session's action (enrolmentAction, src/lib/guards.ts) is allowed in this one file: it reaches only
+      // the setting up of a first second factor. A new one is a decision.
+      if (g?.door === "enrolment") expect(file, `${file} → ${name} uses enrolmentAction outside ${ENROLMENT_FILE}`).toBe(ENROLMENT_FILE);
+    }
+  });
+
+  it("finds the enrolment's actions, guarded as such, and the enrolment door nowhere else", async () => {
+    expect(otherModules).toContain(ENROLMENT_FILE);
+    const exported = await exportedFunctions(ENROLMENT_FILE);
+    // Setting up an authenticator app, in two presses; a passkey is added through the door's own /portal-passkey/add.
+    expect(exported.map(([name]) => name).sort()).toEqual(["confirmEnrolmentAppAction", "startEnrolmentAppAction"]);
+    for (const [, value] of exported) expect(guardOf(value)?.door).toBe("enrolment");
+    for (const file of modules.filter((f) => f !== ENROLMENT_FILE)) {
+      for (const [name, value] of await exportedFunctions(file)) expect(guardOf(value)?.door, `${file} → ${name}`).not.toBe("enrolment");
     }
   });
 

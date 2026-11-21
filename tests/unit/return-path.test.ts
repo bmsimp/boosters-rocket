@@ -84,6 +84,8 @@ describe("the return path: where a parent lands after signing in", () => {
     ["the sign-in page itself", "/sign-in"],
     ["the sign-in page with a path of its own", "/sign-in?next=%2Fdisplay"],
     ["the family chooser", "/choose-family"],
+    ["Strict's enrolment", "/one-more-step"],
+    ["Strict's enrolment carrying a path of its own", "/one-more-step?next=%2Fpayments"],
     ["the refusal page", "/refused"],
     ["a framework path", "/_next/static/chunks/main.js"],
     ["a framework data path", "/_next/data/x"],
@@ -103,6 +105,7 @@ describe("the return path: where a parent lands after signing in", () => {
     expect(landingPath(value)).toBe("/");
     expect(withReturnPath("/sign-in", value)).toBe("/sign-in");
     expect(withReturnPath("/choose-family", value)).toBe("/choose-family");
+    expect(withReturnPath("/one-more-step", value)).toBe("/one-more-step");
   });
 
   it("takes a value of exactly the longest length", () => {
@@ -119,6 +122,8 @@ describe("the return path: where a parent lands after signing in", () => {
   it("carries a path to the sign-in page and the chooser, encoded, and leaves the home page out", () => {
     expect(withReturnPath("/sign-in", "/display")).toBe("/sign-in?next=%2Fdisplay");
     expect(withReturnPath("/choose-family", "/payments?year=2026&open=1")).toBe("/choose-family?next=%2Fpayments%3Fyear%3D2026%26open%3D1");
+    expect(withReturnPath("/one-more-step", "/payments")).toBe("/one-more-step?next=%2Fpayments");
+    expect(withReturnPath("/one-more-step", "/")).toBe("/one-more-step");
     expect(withReturnPath("/sign-in", "/")).toBe("/sign-in");
     expect(withReturnPath("/sign-in", undefined)).toBe("/sign-in");
     // What it writes is read back as the same path.
@@ -143,7 +148,7 @@ describe("the return path: where a parent lands after signing in", () => {
     const app = path.resolve(__dirname, "../../src/app");
     const serves = (dir: string): boolean => readdirSync(dir, { recursive: true }).some((f) => /(^|[\\/])(page|route)\.(tsx|ts|jsx|js)$/.test(String(f)));
     const areas = readdirSync(app).filter((name) => statSync(path.join(app, name)).isDirectory() && !/^\(.*\)$/.test(name) && serves(path.join(app, name)));
-    expect(areas).toEqual(expect.arrayContaining(["api", "staff", "setup", "sign-in", "choose-family", "refused"]));
+    expect(areas).toEqual(expect.arrayContaining(["api", "staff", "setup", "sign-in", "choose-family", "one-more-step", "refused"]));
     const open = areas.filter((name) => safeReturnPath(`/${name}`) !== null || safeReturnPath(`/${name}/x`) !== null);
     expect(open, `These folders of src/app serve pages or route handlers that are not parent pages, and a parent could be sent to them after signing in: ${open.join(", ")}. `
       + `Add each to NOT_PARENT_SECTIONS in src/lib/auth/return-path.ts, or move its pages under src/app/(parent)/ if they are parent pages.`).toEqual([]);
