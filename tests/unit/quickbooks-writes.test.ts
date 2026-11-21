@@ -424,6 +424,34 @@ function checkWriterProblems(source: string): string[] {
   }
   return problems;
 }
+
+/**
+ * Open question 12 of the app-owned families spec: the portal never makes a customer active again (stage 4's critic,
+ * risk 1). It holds only because the roster's write module calls the client's active flag write once, in sendWrite(),
+ * with the literal `false`, and nothing else in `src/` but the client and the check of the portal's requests (an Intuit
+ * sandbox only, its own records) names it. A send from a difference on the accounting links screen (slice M5a) reaches
+ * QuickBooks through that one call and no other.
+ */
+const ACTIVE_FLAG = "qboSetCustomerActive";
+const ACTIVE_FLAG_CALL = "qboSetCustomerActive(w.qboId, w.syncToken, false, opts)";
+const MAY_NAME_ACTIVE_FLAG = [CLIENT, CHECK_WRITER, ROSTER_WRITER];
+/** What is wrong with how the active flag write is reached; nothing when only the client, the check and the roster's write module name it, and the module imports it once and calls it once, with `false`. */
+function activeFlagProblems(sources: { file: string; text: string }[]): string[] {
+  const problems: string[] = [];
+  const naming = sources.filter((s) => new RegExp(`\\b${ACTIVE_FLAG}\\b`).test(code(s.text))).map((s) => s.file);
+  const others = naming.filter((f) => !MAY_NAME_ACTIVE_FLAG.includes(f));
+  if (others.length) problems.push(`${ACTIVE_FLAG} is named by ${others.sort().join(", ")}`);
+  const writer = code(sources.find((s) => s.file === ROSTER_WRITER)?.text ?? "");
+  const names = [...writer.matchAll(new RegExp(`\\b${ACTIVE_FLAG}\\b`, "g"))];
+  if (names.length !== 2) problems.push(`${ROSTER_WRITER} names ${ACTIVE_FLAG} ${names.length} times: once to import it and once to call it is all`);
+  const calls = [...writer.matchAll(new RegExp(`\\b${ACTIVE_FLAG}\\s*\\(`, "g"))];
+  if (calls.length !== 1) problems.push(`${ROSTER_WRITER} calls ${ACTIVE_FLAG} ${calls.length} times, not once`);
+  for (const call of calls) {
+    const rest = writer.slice(call.index);
+    if (!rest.startsWith(ACTIVE_FLAG_CALL) || !/^\s*;/.test(rest.slice(ACTIVE_FLAG_CALL.length))) problems.push(`${ACTIVE_FLAG} is called otherwise than ${ACTIVE_FLAG_CALL}: ${rest.slice(0, 70)}`);
+  }
+  return problems;
+}
 describe("what the portal writes to QuickBooks, and who may send each", () => {
   const everything = read("src");
   // src/lib/money reads invoices for parents, and src/lib/parents/contact-edits.ts, which changed a parent's own record
@@ -865,6 +893,29 @@ describe("what the portal writes to QuickBooks, and who may send each", () => {
       for (const source of refused) {
         expect(source, "the case didn't change the constant").not.toBe(constant);
         expect(bodyProblems(source), source).not.toEqual([]);
+      }
+    });
+  });
+
+  describe("and never a customer made active again (open question 12)", () => {
+    it("the roster's write module calls the active flag write once, with false, and nothing else in src but the client and the check names it", () => {
+      expect(activeFlagProblems(everything)).toEqual([]);
+    });
+
+    it("a second call, true or a value in place of false, an alias, or another module naming it, each refused", () => {
+      const writerSource = everything.find((s) => s.file === ROSTER_WRITER)!.text;
+      const withWriter = (text: string) => everything.map((s) => (s.file === ROSTER_WRITER ? { file: s.file, text } : s));
+      const cases = [
+        withWriter(writerSource.replace(ACTIVE_FLAG_CALL, "qboSetCustomerActive(w.qboId, w.syncToken, true, opts)")),
+        withWriter(writerSource.replace(ACTIVE_FLAG_CALL, "qboSetCustomerActive(w.qboId, w.syncToken, w.op === \"deactivate\" ? false : true, opts)")),
+        withWriter(writerSource.replace(ACTIVE_FLAG_CALL, "qboSetCustomerActive(w.qboId, w.syncToken, false, opts).then((a) => a)")),
+        withWriter(`${writerSource}\nasync function wake(qboId: string) { return qboSetCustomerActive(qboId, "0", true, {} as never); }\n`),
+        withWriter(writerSource.replace(`${ACTIVE_FLAG},`, `${ACTIVE_FLAG} as setActive, ${ACTIVE_FLAG},`)),
+        [...everything, { file: "src/lib/accounting/send.ts", text: `import { ${ACTIVE_FLAG} } from "@/lib/quickbooks/client";\nexport const wake = (id: string) => ${ACTIVE_FLAG}(id, "0", true, {} as never);\n` }],
+      ];
+      for (const sources of cases) {
+        expect(sources, "the case didn't change the sources").not.toEqual(everything);
+        expect(activeFlagProblems(sources), `case ${cases.indexOf(sources)}`).not.toEqual([]);
       }
     });
   });
