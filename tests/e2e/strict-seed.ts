@@ -34,8 +34,10 @@ export async function makeStrictParent(sql: postgres.Sql): Promise<{ parentId: s
   await sql`INSERT INTO parent_auth_user (id, name, email, email_verified, parent_id) VALUES (${authUserId}, ${STRICT_PARENT.name}, ${STRICT_PARENT.email}, true, ${parentId})`;
   await sql`INSERT INTO parent_auth_account (id, account_id, provider_id, user_id, password)
             VALUES (${randomUUID()}, ${authUserId}, 'credential', ${authUserId}, ${await hashPassword(STRICT_PARENT.password)})`;
-  await sql`INSERT INTO guardian (family_qbo_id, family_id, parent_id, is_primary, status)
-            SELECT 'E2E-FAMILY', family_id, ${parentId}, false, 'active' FROM guardian WHERE family_qbo_id = 'E2E-FAMILY' AND family_id IS NOT NULL LIMIT 1`;
+  // E2E-FAMILY's record, through its own link: a guardian row holds no copy of a customer since migration 0049.
+  await sql`INSERT INTO guardian (family_id, parent_id, is_primary, status)
+            SELECT (SELECT family_id FROM accounting_link WHERE system = 'quickbooks' AND customer_id = 'E2E-FAMILY' AND family_id IS NOT NULL
+              AND realm_id = (SELECT value->>'realmId' FROM setting WHERE key = 'roster.source')), ${parentId}, false, 'active'`;
   return { parentId, authUserId };
 }
 
@@ -49,5 +51,6 @@ export async function enrollingSession(sql: postgres.Sql, authUserId: string, to
   await sql`INSERT INTO parent_auth_session (id, token, user_id, expires_at, enrol_until, family_id)
             SELECT ${`e2e-enrolling-${randomUUID()}`}, ${token}, ${authUserId}, now() + interval '1 day', now() + interval '30 minutes', g.family_id
             FROM guardian g JOIN parent_auth_user u ON u.parent_id = g.parent_id
-            WHERE u.id = ${authUserId} AND g.family_qbo_id = 'E2E-FAMILY' AND g.family_id IS NOT NULL`;
+            WHERE u.id = ${authUserId} AND g.family_id = (SELECT family_id FROM accounting_link WHERE system = 'quickbooks' AND customer_id = 'E2E-FAMILY' AND family_id IS NOT NULL
+              AND realm_id = (SELECT value->>'realmId' FROM setting WHERE key = 'roster.source'))`;
 }
