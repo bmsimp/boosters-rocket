@@ -11,6 +11,7 @@ import { WORKER_ACTOR } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster } from "./refresh";
 import { getRosterSource, ROSTER_JOB } from "./source";
+import { ROSTER_LOCK } from "./shape";
 import { lockRosterAs, rosterTagOf } from "@/lib/seasons/roster-lock";
 import { alignAfterWrite, applyWritten, balanceUnread, BEING_SENT_NOW, changeOwnRecord, closeEarlierContacts, CONTACT_AWAITS_READ, contactShown, CREDIT_BALANCE, CUSTOMER_HAS_GUARDIAN, EMAIL_TOO_LONG, FAMILY_HELD, guardianCustomerLinked, guardianOf, isSavedFirst, NAME_UNUSABLE, itemLockFree, madeAfterGivingUp, markMoveMoneyStale, moveMoneyNotes, REFRESH_ASK_KEY,
   replaceRefusedCreates, sendWrite, tryDeactivate, trySavedItem, whileItemHeld, whoStopped, contactStopsNow, emailShown, emailStopsNow, type ContactNotOffered, type EmailNotOffered, type JoinedNow, type MadeAfterGivingUp,
@@ -60,7 +61,7 @@ const short = (code: string) => code.slice(0, 40);
 
 /**
  * One state change of an item, with its audit row, in one transaction, only while it is still waiting: one staff gave
- * up while its try was under way stays given up, whatever the try came to. A row a company change deleted is left gone.
+ * up while its try was under way stays given up, whatever the try came to, and so does one a change of company gave up.
  * `triedAt` is when this try sent the write (or looked for it): a refresh that started before it may not show it.
  * `resultQboId`: the customer a create was found made as, kept so that it is never sent again (tryItem()).
  */
@@ -818,12 +819,36 @@ export async function tryAgainNow(id: string, o: QueueOp & { mayLink?: boolean }
   });
 }
 
-/** "Give up": the item is never tried again. The note says why, for staff, and is kept in the audit log. */
+/** What staff are told when "Give up" waited for the roster lock past its wait (a roster read holding it): nothing was changed. */
+export const GIVE_UP_BUSY = "The roster is being brought up to date from QuickBooks just now, so nothing was given up. Try again in a moment.";
+
+/**
+ * "Give up": the item is never tried again. The note says why, for staff, and is kept in the audit log. It holds the
+ * roster lock shared first, waiting at most 10 seconds for it (stage 4's slice M7a2), then the item, then a buy-out's
+ * row (giveUpIn()), the order a buy-out write's finish (src/lib/buyouts/writes.ts) and a staff close take them; a change
+ * of company holds the roster lock alone, so none of them runs beside its clear, which ends the buy-outs before it
+ * gives up the queue. Past the wait nothing is changed, and staff are told to try again.
+ */
 export async function giveUp(id: string, rawNote: string, o: QueueOp): Promise<Done> {
   const note = rawNote.trim();
   if (!note) return { ok: false, errors: ["Say why, in a few words. The note is kept in the audit log."] };
   if (note.length > NOTE_MAX) return { ok: false, errors: [`The note is too long (${NOTE_MAX} characters at most).`] };
-  return db.transaction((tx) => giveUpIn(tx, id, note, o));
+  try {
+    return await db.transaction(async (tx) => {
+      await tx.execute(sql`set local lock_timeout = '10s'`);
+      await tx.execute(sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`);
+      await tx.execute(sql`set local lock_timeout to default`);
+      return giveUpIn(tx, id, note, o);
+    });
+  } catch (e) {
+    if (lockTimedOut(e)) return { ok: false, errors: [GIVE_UP_BUSY] };
+    throw e;
+  }
+}
+/** Postgres could not take a lock within its wait (lock_not_available). Drizzle wraps the driver's error, so its cause is read too. */
+function lockTimedOut(e: unknown): boolean {
+  const code = (v: unknown) => (typeof v === "object" && v !== null ? (v as { code?: unknown }).code : undefined);
+  return (code(e) ?? code((e as { cause?: unknown } | null)?.cause)) === "55P03";
 }
 
 /**

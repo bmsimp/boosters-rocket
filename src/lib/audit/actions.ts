@@ -232,6 +232,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "volunteer.signups.cleared": "Volunteer sign-ups cleared after a company change",
   "volunteer.buyout.chosen": "A parent chose to pay instead of volunteering",
   "volunteer.buyout.invoiced": "A buy-out's invoice made in QuickBooks",
+  "volunteer.buyout.invoice_found_after_ending": "An invoice QuickBooks made for a buy-out a company change had ended, recorded on it: it is in the earlier company's books",
   "volunteer.buyout.refused": "QuickBooks refused a buy-out's invoice: nothing was billed",
   "volunteer.buyout.stuck": "A buy-out's change to QuickBooks is stuck: staff must look at it",
   "volunteer.buyout.switch_back": "A parent switched back from paying to volunteering",
