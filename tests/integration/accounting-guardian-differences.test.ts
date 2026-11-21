@@ -32,7 +32,9 @@ import { recordOfCustomer } from "../helpers/app-records";
  * families spec, section 5, "Differences": "This covers an edit made in QuickBooks and a change QuickBooks refused";
  * src/lib/accounting/differences.ts): a linked family's row says where a guardian's own Parent customer has another
  * name than the person, is active while they are removed, or is inactive while they are the family's guardian, with
- * both values, the queue's change that explains it, and in place of a press what staff can do instead. The company is
+ * both values, the queue's change that explains it, and what staff can do about it: since slice M3c4 beside Send the
+ * app's to QuickBooks for a guardian's name or a removed guardian's Parent customer (sendOffersOf()), never a Take, and
+ * for an open guardian whose Parent customer the books have inactive in place of a press. The company is
  * fznCompany()'s (tests/helpers/qbo-stub.ts): the Rivera Family 10 with Ana Rivera 11 (Parent) and Leo Rivera 12
  * (Student), the Chen Family 20 with Mei Chen 21 (Parent). Ana's row is linked to 11 (seedAnaRivera()). Everything is
  * seeded before a view, and no helper that runs the whole import (syncAppRecords()) is called after a press.
@@ -121,7 +123,7 @@ const DEACTIVATE_GIVEN_UP = "Given up. Nothing more will be sent for it. The gua
 const MAY_HAVE_GONE = " QuickBooks has the change only if a try got through, which the roster's copy of QuickBooks shows after its next read.";
 // Changed on purpose in slice M3c4: beside a Send, never "neither is sent from this page".
 const NAME_NEXT = "No name is taken from the books here, as their name in the portal is theirs in every family they belong to and on their sign-in. If it should change, rename them on their page under Parents once nothing for them or their Parent customers is waiting or stuck on Reconciliation: while QuickBooks is connected and the family's customer is active, that asks QuickBooks to rename this Parent customer too, unless the same rename gives that name to their own Parent customer under another family first. Or rename it in QuickBooks, and this row shows it after the portal's next roster read.";
-const REMOVED_NEXT = "Their removal isn't taken back from the books here: they are added back only under Portal sign-ins, and their Parent customer is theirs again if they are. Or make it inactive in QuickBooks once its balance, owed or a credit, is settled.";
+const REMOVED_NEXT = "The books having their Parent customer active doesn't make them this family's guardian again here, as that would give them a sign-in: they are added back only under Portal sign-ins, and their Parent customer is theirs again if they are. Or make it inactive in QuickBooks once its balance, owed or a credit, is settled.";
 const INACTIVE_NEXT = "Neither is taken or sent from this page, and the portal never makes a customer active in the books. If they are still this family's guardian, make it active in QuickBooks; if they aren't, remove them under Portal sign-ins. While it is inactive the portal sends it nothing for them: no rename, and no change of their phone, mailing address or sign-in email.";
 
 let op: ReturnType<typeof asOp>;
@@ -136,7 +138,7 @@ beforeEach(async () => {
 });
 
 describe("a rename of a guardian's Parent customer", () => {
-  it("waiting, stuck, then given up: both names, the queue's words while it is on the queue, never a press, and the sentence in its place", async () => {
+  it("waiting, stuck, then given up: both names, the queue's words while it is on the queue, no press while it is there, and once given up a Send beside the sentence", async () => {
     const { ana, row } = await seedAnaRivera({ status: "active" });
     // QuickBooks fails every request of the at-once try: the person is renamed in the portal, and the rename of 11 waits.
     stub.failNext = 50;
