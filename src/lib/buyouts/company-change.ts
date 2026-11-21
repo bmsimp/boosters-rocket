@@ -1,10 +1,13 @@
-import { eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import type { Tx } from "@/lib/db/client";
-import { buyout, type BuyoutState } from "@/lib/db/schema";
+import { buyout, familyMoney, writeQueue, type BuyoutState } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
+import { checksOwnFlag } from "./closing";
+import { paidIn } from "./rules";
 
-// This module is called from src/lib/roster/source.ts, so it must import nothing from src/lib/roster/, and nothing
-// staff-only: source.ts is reached from parent code.
+// This module is called from src/lib/roster/source.ts, so it must import nothing from src/lib/roster/ (nor
+// src/lib/money/stored.ts, which does), and nothing staff-only: source.ts is reached from parent code. ./closing.ts and
+// ./rules.ts are pure.
 
 /** A buy-out that stands with nothing paid on it as far as the portal knows: being invoiced, invoiced, being cancelled, or stuck. */
 const UNPAID_LIVE: BuyoutState[] = ["being_invoiced", "invoiced", "being_voided", "stuck"];
@@ -15,8 +18,9 @@ const UNPAID_LIVE: BuyoutState[] = ["being_invoiced", "invoiced", "being_voided"
  * old company's, and nothing can be sent there now. Every unpaid live buy-out ends, `voided` with `end_reason`
  * `earlier_company`, in the portal alone, as one staff close does: nothing is sent to QuickBooks, and its invoice stays
  * in the old company's books for the treasurer. Its customer, item, invoice, company, flag and when it was flagged are
- * kept as they were, for the treasurer's list (stage 4's slice M7b). A paid one keeps counting, as it is; a voided or
- * refused one is history already. The family may choose again for that requirement, as far as the database goes: the
+ * kept as they were, for the treasurer's list (stage 4's slice M7b). A paid one keeps counting, as it is, and so does
+ * an invoiced one its family's stored figures show paid, which is marked paid first (markPaidAsStored(), slice M7b2); a
+ * voided or refused one is history already. The family may choose again for that requirement, as far as the database goes: the
  * live indexes no longer hold it.
  *
  * One statement, which takes each row's lock: a void being queued at that moment (queueVoid(), src/lib/buyouts/writes.ts,
@@ -29,6 +33,7 @@ const UNPAID_LIVE: BuyoutState[] = ["being_invoiced", "invoiced", "being_voided"
  * slice M7a2).
  */
 export async function endBuyoutsOfEarlierCompany(tx: Tx, o: { fromRealmId: string; toRealmId: string; actor: Actor; ip: string | null }): Promise<void> {
+  await markPaidAsStored(tx, o);
   // The state each was in is the row as this update found it, once its lock was had (RETURNING old: Postgres 18, as
   // every database of the portal is): a row another transaction changed meanwhile is read again after it commits.
   const ended = Array.from(await tx.execute<{ id: string; state_before: BuyoutState }>(sql`
@@ -42,4 +47,52 @@ export async function endBuyoutsOfEarlierCompany(tx: Tx, o: { fromRealmId: strin
     before: { realmId: o.fromRealmId, ...byState },
     after: { reason: "different_company", realmId: o.toRealmId, state: "voided", endReason: "earlier_company", ended: ended.length,
       endedIds: ended.map((e) => e.id).sort(), paidKept: paid.length, sentToQuickBooks: false } }, tx);
+}
+
+/**
+ * Before the ending (stage 4's slice M7b2, the owner's reading of open question 16, 2026-11-21): every invoiced buy-out
+ * of the earlier company whose own family's stored figures (`family_money`, kept by the family that chose it, per-student
+ * ones too, whether or not the student is still in it), read from that same company, show its invoice paid (paidIn(),
+ * ./rules.ts) is marked `paid`, so it keeps counting, as a paid one does: until this moment the family read "Paid
+ * instead" for it (buyoutFacts(), ./standing.ts), and QuickBooks can no longer be asked for the old company's invoice.
+ * The figures count as stored, whatever their age, a mark that they are behind or a failed last read, as buyoutFacts()
+ * counts them; the audit row says so, with their dates. A family with no figures, or none of that company, has nothing
+ * to mark by. Only `invoiced`: one being invoiced, being cancelled or stuck ends with the rest.
+ *
+ * As the daily check marks one paid (checkBuyoutInvoices(), ./daily-check.ts): its flag comes off only when it is the
+ * check's own (checksOwnFlag(), ./closing.ts, read with whether a void was ever queued for it), and a void's or a move's
+ * stays, so a buy-out paid though its void was asked for still reads as a refund owed; its customer, item, invoice,
+ * company, units and amount are kept; audited `volunteer.buyout.paid` with the clear's actor. Nothing is sent or queued.
+ *
+ * The candidates are read FOR UPDATE, under the roster lock the caller holds: a void queued at that moment (queueVoid(),
+ * src/lib/buyouts/writes.ts, holding no roster lock) either committed first, and its buy-out, being voided now, is no
+ * candidate and ends as today, or waits for this transaction, and then finds the buy-out paid and queues nothing. One
+ * the daily check marked paid first is no candidate either, and is not audited twice.
+ */
+async function markPaidAsStored(tx: Tx, o: { fromRealmId: string; actor: Actor; ip: string | null }): Promise<void> {
+  const candidates = await tx.select().from(buyout)
+    .where(and(eq(buyout.state, "invoiced"), isNotNull(buyout.invoiceQboId), eq(buyout.realmId, o.fromRealmId))).orderBy(asc(buyout.id)).for("update");
+  if (candidates.length === 0) return;
+  const figures = await tx.select({ familyId: familyMoney.familyId, realmId: familyMoney.realmId, readAt: familyMoney.readAt, staleAt: familyMoney.staleAt,
+    invoices: familyMoney.invoices }).from(familyMoney).where(inArray(familyMoney.familyId, [...new Set(candidates.map((b) => b.familyId))]));
+  const of = new Map(figures.map((f) => [f.familyId, f]));
+  const paid = candidates.filter((b) => {
+    const f = of.get(b.familyId);
+    return f !== undefined && f.realmId === b.realmId && f.realmId === o.fromRealmId && paidIn(f.invoices, b.invoiceQboId);
+  });
+  if (paid.length === 0) return;
+  // The buy-outs a void was ever queued for: a `student_moved` flag beside one is a move's or a void's, never the check's own.
+  const voidsFor = new Set((await tx.select({ id: sql<string>`${writeQueue.request}->>'buyoutId'` }).from(writeQueue)
+    .where(and(sql`${writeQueue.request}->>'op' = 'invoice_void'`, inArray(sql<string>`${writeQueue.request}->>'buyoutId'`, paid.map((b) => b.id))))).map((r) => r.id));
+  for (const b of paid) {
+    const f = of.get(b.familyId)!;
+    const own = checksOwnFlag({ state: b.state, flag: b.flag, lastCode: b.lastCode, items: voidsFor.has(b.id) ? [{ op: "invoice_void" }] : [] });
+    const [done] = await tx.update(buyout).set({ state: "paid", ...(own ? { flag: null, flaggedAt: null } : {}), updatedAt: new Date() })
+      .where(and(eq(buyout.id, b.id), eq(buyout.state, "invoiced"))).returning({ id: buyout.id });
+    if (!done) continue;
+    await writeAudit({ actor: o.actor, action: "volunteer.buyout.paid", targetType: "buyout", targetId: b.id, ip: o.ip,
+      before: { state: "invoiced", ...(own ? { flag: b.flag } : {}) },
+      after: { state: "paid", ...(own ? { flag: null } : {}), invoiceQboId: b.invoiceQboId, amountCents: b.amountCents, why: "different_company", realmId: o.fromRealmId,
+        figures: "as_stored", figuresReadAt: f.readAt?.toISOString() ?? null, figuresStaleAt: f.staleAt?.toISOString() ?? null } }, tx);
+  }
 }

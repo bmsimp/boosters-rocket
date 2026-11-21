@@ -47,7 +47,8 @@ export const GIVEN_UP_FOR_COMPANY_NOTE = "Given up: the club connected a differe
  * keeps it all and answers false. The caller owns the transaction and holds ROSTER_LOCK.
  *
  * Ended: every unpaid live buy-out, `earlier_company`, nothing sent to QuickBooks, its invoice left in the old company's
- * books for the treasurer (endBuyoutsOfEarlierCompany(), src/lib/buyouts/company-change.ts); a paid one keeps counting.
+ * books for the treasurer (endBuyoutsOfEarlierCompany(), src/lib/buyouts/company-change.ts); a paid one keeps counting,
+ * and so does an invoiced one its family's stored figures show paid, which is marked paid first (slice M7b2).
  * Cleared, each naming the old company's customers, products or invoices: every link, moved into the link history as
  * `company_changed` with every "Left unlinked" mark (endLinksOfEarlierCompany(), src/lib/families/company-change.ts);
  * what each family was last seen to owe (`family_money`: another company's invoices are never shown, and a row read
