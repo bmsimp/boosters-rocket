@@ -7,7 +7,7 @@ import { secretBox, SecretBoxError } from "@/lib/crypto/secret-box";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { errorNeedsAdmin, qboEndpoints, QboError, QBO_SCOPE } from "./endpoints";
 import { QBO_AAD, qboGet, sealTokens, tokenRequest, type TokenSet } from "./client";
-import { clearRosterOfOtherCompany, getRosterSource, getSwitchRecord, setSwitchRecord, SWITCH_KEY, type SwitchRecord } from "@/lib/roster/source";
+import { clearRosterOfOtherCompany, dropSwitchAsk, getRosterSource, getSwitchRecord, setSwitchRecord, storedSwitchOf, SWITCH_KEY, type SwitchRecord } from "@/lib/roster/source";
 
 export type QboOp = { actor: Actor; ip: string | null; permission?: string };
 export type QboAppDraft = { clientId: string; clientSecret: string | null; environment: QboEnvironment };
@@ -82,7 +82,7 @@ export async function saveQboApp(d: QboAppDraft, o: QboOp): Promise<{ ok: true }
     const keysChanged = c !== undefined && (c.clientId !== d.clientId || c.environment !== d.environment);
     const dropState = keysChanged ? { stateHash: null, stateStaffUserId: null, stateExpiresAt: null } : {};
     // An ask to switch companies goes with the state it was made for.
-    if (keysChanged) await tx.delete(setting).where(eq(setting.key, SWITCH_KEY));
+    if (keysChanged) await dropSwitchAsk(tx);
     if (c) await tx.update(qboConnection).set({ clientId: d.clientId, environment: d.environment, ...secret, ...dropState, updatedAt: new Date() });
     else await tx.insert(qboConnection).values({ clientId: d.clientId, environment: d.environment, clientSecretCiphertext: sealed!.ciphertext, clientSecretKeyId: sealed!.keyId });
     await writeAudit({ actor: o.actor, action: "settings.quickbooks.save", permission: o.permission, ...TARGET, ip: o.ip,
@@ -119,13 +119,14 @@ const intuitUrl = (clientId: string, state: string) =>
 /**
  * Starts a connect: a new single-use state for this Admin (replacing any earlier one) and the Intuit address to send
  * them to. Any ask to switch companies is dropped with the state it was made for, so this connect is a plain one: the
- * same company again, or a first one.
+ * same company again, or a first one. A stored switch whose clear hasn't run yet is kept for the clear: signing in
+ * again then renews the company it switched to (completeConnect()), and the next roster refresh still finishes it.
  */
 export async function beginConnect(staffUserId: string): Promise<Begun> {
   const { state, set } = newState(staffUserId);
   const c = await db.transaction(async (tx) => {
     const [row] = await tx.update(qboConnection).set(set).returning();
-    await tx.delete(setting).where(eq(setting.key, SWITCH_KEY));
+    await dropSwitchAsk(tx);
     return row;
   });
   return c ? { ok: true, url: intuitUrl(c.clientId, state) } : { ok: false, reason: "not_configured" };
@@ -144,7 +145,7 @@ export async function beginSwitchConnect(staffUserId: string, o: QboOp): Promise
     const [row] = await tx.update(qboConnection).set(set).returning();
     if (!row) return undefined;
     const fromRealmId = await getRosterSource(tx);
-    if (fromRealmId === null) { await tx.delete(setting).where(eq(setting.key, SWITCH_KEY)); return row; }
+    if (fromRealmId === null) { await dropSwitchAsk(tx); return row; }
     await setSwitchRecord(tx, { asked: { stateHash: set.stateHash, staffUserId, expiresAt: set.stateExpiresAt.toISOString(), fromRealmId } });
     await writeAudit({ actor: o.actor, action: "quickbooks.switch.asked", permission: o.permission, ...TARGET, after: { fromRealmId }, ip: o.ip }, tx);
     return row;
@@ -194,14 +195,17 @@ export async function completeConnect(
     // The ask to switch companies, if any, is spent with the state it was made for (a stored switch is the clear's).
     const ask = await getSwitchRecord(tx);
     await tx.update(qboConnection).set({ stateHash: null, stateStaffUserId: null, stateExpiresAt: null, updatedAt: new Date() });
-    if (ask && "asked" in ask) await tx.delete(setting).where(eq(setting.key, SWITCH_KEY));
+    if (ask && "asked" in ask) await dropSwitchAsk(tx);
     if (p.error || !p.code || !p.realmId || !/^\d{1,32}$/.test(p.realmId)) return { ok: false, reason: "denied" };
     if (c.realmId && c.realmId !== p.realmId) return { ok: false, reason: "other_company" };
     // The company the roster was read from, or another only against the ask: nothing is exchanged or stored otherwise.
+    // One exception: signing in again to the company a stored switch moved to, while it is still connected and that
+    // switch's clear hasn't run (step 3b threw, and no refresh has finished it), renews it, and the clear then runs.
     let switchFrom: string | null = null;
     if (!(await sameRosterCompany(p.realmId!, tx))) {
       const rosterRealmId = await getRosterSource(tx);
-      if (!askHolds(ask, { stateHash: c.stateHash, staffUserId: o.staffUserId, rosterRealmId })) return { ok: false, reason: "roster_company" };
+      const renewing = c.realmId === p.realmId && storedSwitchOf(ask, rosterRealmId, p.realmId);
+      if (!renewing && !askHolds(ask, { stateHash: c.stateHash, staffUserId: o.staffUserId, rosterRealmId })) return { ok: false, reason: "roster_company" };
       switchFrom = rosterRealmId;
     }
     try {
@@ -269,6 +273,13 @@ export async function completeConnect(
     await clearRosterOfOtherCompany(p.realmId!, { actor: o.actor, ip: o.ip });
   } catch (e) {
     if (!switched) throw e;
+    // Logged and audited, so the audit log says a switch's clear is still to run, not only the roster's failed runs.
+    const error = e instanceof Error ? e.name.slice(0, 40) : "unknown";
+    console.error(`[quickbooks] The switch from company ${claim.switchFrom} to ${p.realmId} is stored, but its clear failed (${error}); the next roster refresh runs it.`);
+    try {
+      await writeAudit({ actor: o.actor, action: "quickbooks.switch.clear_failed", permission: o.permission, ...TARGET,
+        after: { fromRealmId: claim.switchFrom, toRealmId: p.realmId, error }, ip: o.ip });
+    } catch { /* the connection stands whatever the audit write does */ }
   }
   // 4. The company's name, for people. The connection stands even if this read fails.
   let companyName: string | null = null;

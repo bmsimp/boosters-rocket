@@ -40,6 +40,18 @@ export async function getSwitchRecord(tx?: Tx): Promise<SwitchRecord | null> {
   return null;
 }
 
+/** Whether the switch row is a stored switch from `fromRealmId` to `toRealmId`: the licence to clear for that pair alone. */
+export const storedSwitchOf = (r: SwitchRecord | null, fromRealmId: string | null, toRealmId: string | null): boolean =>
+  r !== null && "stored" in r && fromRealmId !== null && toRealmId !== null && r.stored.fromRealmId === fromRealmId && r.stored.toRealmId === toRealmId;
+
+/**
+ * Drops an ask to switch companies, and only an ask: a stored switch is the clear's to spend, so a new sign-in to
+ * Intuit, or a connect that spends its state, never takes from the refresh the switch it is to finish.
+ */
+export async function dropSwitchAsk(tx: Tx): Promise<void> {
+  await tx.delete(setting).where(and(eq(setting.key, SWITCH_KEY), sql`(${setting.value} -> 'asked') is not null`));
+}
+
 export async function setSwitchRecord(tx: Tx, value: SwitchRecord): Promise<void> {
   await tx.insert(setting).values({ key: SWITCH_KEY, value }).onConflictDoUpdate({ target: setting.key, set: { value, updatedAt: new Date() } });
 }

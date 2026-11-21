@@ -8,7 +8,7 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { billingAddressOf } from "@/lib/parents/contact-fields";
 import { noteAddressesKept } from "@/lib/parents/contact-take-in";
 import { getShape, shapeTypeIds, ROSTER_LOCK, NO_ADDRESS_COLUMNS } from "./shape";
-import { clearRosterOfOtherCompanyLocked, getRosterSource, getSwitchRecord, ROSTER_JOB, setRosterSource } from "./source";
+import { clearRosterOfOtherCompanyLocked, getRosterSource, getSwitchRecord, storedSwitchOf, ROSTER_JOB, setRosterSource } from "./source";
 
 export { ROSTER_LOCK, ROSTER_JOB };
 
@@ -107,7 +107,7 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
     const from = await getRosterSource(tx);
     if (from !== null && from !== realmId) {
       const s = await getSwitchRecord(tx);
-      if (!s || !("stored" in s) || s.stored.fromRealmId !== from || s.stored.toRealmId !== realmId) return fail(NOT_SWITCHED_WORDS, "roster_company");
+      if (!storedSwitchOf(s, from, realmId)) return fail(NOT_SWITCHED_WORDS, "roster_company");
     }
     let types: Raw[], customers: Raw[];
     try {

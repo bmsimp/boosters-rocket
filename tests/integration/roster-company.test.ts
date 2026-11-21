@@ -7,6 +7,17 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 
+// Step 3b's clear made to throw, a set number of times, as a failed transaction or a stopped process would leave it: the
+// rest of the module is the real one (the refresh's backstop calls clearRosterOfOtherCompanyLocked() itself).
+const failClear = vi.hoisted(() => ({ next: 0 }));
+vi.mock("@/lib/roster/source", async (original) => {
+  const m = await original<typeof import("@/lib/roster/source")>();
+  return { ...m, clearRosterOfOtherCompany: async (...a: Parameters<typeof m.clearRosterOfOtherCompany>) => {
+    if (failClear.next > 0) { failClear.next--; throw new Error("the clear's transaction failed"); }
+    return m.clearRosterOfOtherCompany(...a);
+  } };
+});
+
 import { eq, desc } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, jobRun, qboConnection, qboCustomer, setting } from "@/lib/db/schema";
@@ -36,7 +47,7 @@ describe("the roster belongs to the connected company", () => {
   let admin: Awaited<ReturnType<typeof seedStaff>>;
   let op: { actor: { door: "staff"; id: string; label: string }; ip: string; permission: string };
   beforeEach(async () => {
-    await resetDb(); stub.reset(); Object.assign(stub, fznCompany());
+    await resetDb(); stub.reset(); Object.assign(stub, fznCompany()); failClear.next = 0;
     admin = await seedStaff({ email: "admin@example.org", admin: true });
     op = { actor: { door: "staff", id: admin.id, label: admin.email }, ip: "203.0.113.9", permission: "Settings.QuickBooks.ReadWrite" };
     await seedConnected(stub, { realmId: A });
@@ -209,6 +220,60 @@ describe("the roster belongs to the connected company", () => {
     expect((await audits("roster.cleared")).map((r) => [r.before, r.after])).toEqual([[{ realmId: A }, { reason: "different_company", realmId: B, writesGivenUp: 0 }]]);
     // The run that cleared is the only roster run kept, and it is the one that read B.
     expect((await rosterRuns()).map((r) => r.outcome)).toEqual(["ok"]);
+  });
+
+  it("a switch whose clear throws after the store still connects, with the switch recorded and audited; the next refresh clears it", { timeout: 30_000 }, async () => {
+    await disconnect(op);
+    failClear.next = 1;
+    expect(await connect(B, { switching: true })).toEqual({ ok: true });
+    expect((await db.select().from(qboConnection))[0]).toMatchObject({ realmId: B });
+    // The row as the store wrote it, in its transaction: this pair, this Admin.
+    expect(await switchRow()).toMatchObject({ stored: { fromRealmId: A, toRealmId: B, staffUserId: admin.id } });
+    expect(await source()).toEqual({ realmId: A });
+    expect(await audits("roster.cleared")).toEqual([]);
+    expect((await audits("quickbooks.switch.clear_failed")).map((r) => r.after)).toEqual([{ fromRealmId: A, toRealmId: B, error: "Error" }]);
+    expect((await audits("quickbooks.connect")).map((r) => r.after)).toEqual([expect.objectContaining({ realmId: B, switchedFrom: A })]);
+    // The callback's own refresh (or the worker's) runs the clear for that switch, and reads the new company.
+    expect(await refreshRoster(worker)).toMatchObject({ ok: true, customers: 9 });
+    expect(await source()).toEqual({ realmId: B });
+    expect(await switchRow()).toBeNull();
+    expect(await getShape()).toBeNull();
+    expect(await audits("roster.cleared")).toHaveLength(1);
+  });
+
+  it("a plain sign-in to Intuit keeps a stored switch whose clear hasn't run, and renewing the company switched to runs it", { timeout: 30_000 }, async () => {
+    await disconnect(op);
+    failClear.next = 1;
+    expect(await connect(B, { switching: true })).toEqual({ ok: true });
+    expect(await beginConnect(admin.id)).toMatchObject({ ok: true });
+    expect(await switchRow()).toMatchObject({ stored: { fromRealmId: A, toRealmId: B } });
+    // Signing in again to B, still connected, as step 2 offers: renewed, and the clear runs now.
+    expect(await connect(B)).toEqual({ ok: true });
+    expect((await db.select().from(qboConnection))[0]).toMatchObject({ realmId: B });
+    expect(await source()).toEqual({ realmId: B });
+    expect(await switchRow()).toBeNull();
+    expect(await audits("roster.cleared")).toHaveLength(1);
+    expect(await audits("quickbooks.connect_refused")).toEqual([]);
+  });
+
+  it("a connect of the roster's company spends a stored switch left behind, and clears nothing", { timeout: 30_000 }, async () => {
+    // A switch to B stored and its clear never run, then a disconnect: B is not connected any more.
+    await setSwitchRow({ stored: { fromRealmId: A, toRealmId: B, staffUserId: admin.id, at: new Date().toISOString() } });
+    await disconnect(op);
+    expect(await connect(A)).toEqual({ ok: true });
+    expect(await switchRow()).toBeNull();
+    expect(await source()).toEqual({ realmId: A });
+    expect(await getShape()).toEqual(FZN_SHAPE);
+    expect(await audits("roster.cleared")).toEqual([]);
+  });
+
+  it("a stored switch lets no company but the one it switched to be connected with no ask", { timeout: 30_000 }, async () => {
+    await setSwitchRow({ stored: { fromRealmId: A, toRealmId: B, staffUserId: admin.id, at: new Date().toISOString() } });
+    await disconnect(op);
+    // Not connected to B: a stored switch renews a connection to B that stands, and is no ask for a new one.
+    expect(await connect(B)).toEqual({ ok: false, reason: "roster_company" });
+    expect(await connect(C)).toEqual({ ok: false, reason: "roster_company" });
+    await expectNothingCleared();
   });
 
   it.each([

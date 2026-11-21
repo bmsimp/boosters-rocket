@@ -115,6 +115,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "quickbooks.connect_refused": "QuickBooks connection refused",
   "quickbooks.disconnect": "QuickBooks disconnected",
   "quickbooks.switch.asked": "An Admin said they mean to connect a different QuickBooks company, and was sent to Intuit",
+  "quickbooks.switch.clear_failed": "A different QuickBooks company was connected, but the change of company's clear failed just after; the next roster refresh runs it",
   "quickbooks.token_refresh.failed": "QuickBooks connection couldn't be renewed",
   "role.assign": "Role given to a staff member",
   "role.assign.refused": "Giving a role refused",
