@@ -161,10 +161,9 @@ of the backup from part 1:
 
 **Going back to a version from before password sign-in.** The restore puts back the databases as they were before
 the update, so every password, passkey, authenticator app, backup code and remembered phone or computer made since is
-gone, and parents sign in with a code the portal emails them again, as they did. That version knows no sign-in level
-either: it signs parents in with an emailed code whatever the level was, and the first time its **Parent sign-ins**
-settings are saved, the level is lost. Coming forward again is this update once more: parents need a password again,
-so press **Email a set-up link to everyone who can sign in and hasn't chosen a password** as in
+gone, and parents sign in with a code the portal emails them again, as they did. The restored databases know no
+sign-in level either, so the club comes forward at Standard. Coming forward again is this update once more: parents
+need a password again, so press **Email a set-up link to everyone who can sign in and hasn't chosen a password** as in
 [the update that brings password sign-in](#the-update-that-brings-password-sign-in), and if the club was at Strict,
 open **Settings**, **Parent sign-ins**, **Change**, step 3, **Sign-in level**, and switch to Strict again.
 

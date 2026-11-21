@@ -86,9 +86,10 @@ the sign-in page still asks for them. Not every parent with a passkey is locked 
 - A parent who also has an authenticator app enters its code instead.
 - A parent with a backup code they haven't used enters it in the **Backup code** field beside **Use your passkey**
   (a first passkey came with ten of them, unless they had the app already).
-- At Standard, on a phone or computer the portal still remembers, their password alone still signs them in.
+
+A new address also signs everyone out and leaves no phone or computer remembered, since browsers keep those sign-ins
+for the old address, so a remembered phone doesn't help.
 
 Right after signing in with the app or a backup code, they can remove the passkeys that stopped working and add new
-ones under **Sign-in settings**. A parent with none of these is locked out until their sign-in is reset, and so is one
-who is signed in but can't show it's them again (their passkey was all they had). The portal can't yet remove every
-parent's passkeys at once, so each such parent is reset one by one, as above, each with a call back.
+ones under **Sign-in settings**. A parent with neither is locked out until their sign-in is reset. The portal can't
+yet remove every parent's passkeys at once, so each such parent is reset one by one, as above, each with a call back.

@@ -59,9 +59,9 @@ Documenso seals every signed form with a certificate of the club's own. Follow
      passkeys belong to that address, so changing it later stops every one of them, while the sign-in page still asks
      for them and never sends an emailed code in their place. A parent who also has an authenticator app signs in with
      its code. A parent whose only second step is a passkey can still sign in with a backup code they haven't used
-     (the sign-in page asks for one beside the passkey), and at Standard their password alone still signs them in on a
-     phone or computer the portal remembers; with neither, they can't sign in until an Admin resets their sign-in. The
-     portal can't yet remove every parent's passkeys at once, so the way back is that reset, one parent at a time,
+     (the sign-in page asks for one beside the passkey); with neither, they can't sign in until an Admin resets their
+     sign-in. A new address also signs every parent and staff member out and leaves no phone or computer remembered,
+     since browsers keep those sign-ins for the old address. The portal can't yet remove every parent's passkeys at once, so the way back is that reset, one parent at a time,
      each with a call back ([resetting a parent's sign-in](resetting-a-parents-sign-in.md)). Don't change the address
      lightly once parents have passkeys.
    - `CLUB_TIME_ZONE`: for example `America/Chicago`.

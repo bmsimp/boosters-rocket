@@ -319,6 +319,7 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
 22. **The staff home for someone with one permission.** Give a test staff member a role with one of the staff home's
     four permissions only, and sign in as them.
     **Pass:** the Today box shows only that permission's line. **If not:** note what else showed.
+
 Checks 23 to 45 are the sign-in's, in this order: passkeys (23 to 34), the authenticator apps (35 to 41), the Strict
 level (42 and 43), an Admin's reset of a parent's sign-in (44) and the passkey offer on Home (45). Make them with the
 club at Standard, where every club starts (Settings, Parent sign-ins, step 3, **Sign-in level**), until check 42 moves
