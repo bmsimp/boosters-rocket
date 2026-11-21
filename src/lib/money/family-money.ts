@@ -238,6 +238,20 @@ async function readAndKeep(tx: Tx, familyId: AppFamilyId, familyQboId: string, b
 /** The two keys of the family's advisory lock: by the app family's own id, so a page load and the run exclude each other. */
 const familyLock = (familyId: AppFamilyId) => sql`${sql.raw(String(MONEY_LOCK))}, hashtext(${String(familyId)}::text)`;
 
+/** The run's code for a family whose link changed between the run's listing and its lock: passed over, never a failure. */
+export const RELINKED = "relinked";
+
+/**
+ * Forgets one family's stored figures (stage 4's slice M3b, Unlink from the books), in the caller's transaction, which
+ * holds the roster lock: the family's money lock is taken first, waiting for a page load's or the run's read of it to
+ * finish (they take no roster lock while they hold it, so the order is always the roster lock, then this one), then
+ * its row is deleted. Whether there was one.
+ */
+export async function forgetFamilyMoney(tx: Tx, familyId: AppFamilyId): Promise<boolean> {
+  await tx.execute(sql`select pg_advisory_xact_lock(${familyLock(familyId)})`);
+  return (await tx.delete(familyMoney).where(eq(familyMoney.familyId, familyId)).returning({ familyId: familyMoney.familyId })).length > 0;
+}
+
 /** The stored row of one app family. */
 const storedRow = async (familyId: AppFamilyId, tx?: Tx): Promise<MoneyRow | undefined> =>
   (await (tx ?? db).select().from(familyMoney).where(eq(familyMoney.familyId, familyId)))[0];
@@ -259,6 +273,11 @@ async function liveRead(familyId: AppFamilyId, timeoutMs: number): Promise<boole
       if (familyQboId === null) return false;
       const [lock] = (await tx.execute(sql`select pg_try_advisory_xact_lock(${familyLock(familyId)}) as locked`)) as unknown as { locked: boolean }[];
       if (!lock?.locked) return false;
+      // Found again under the lock (stage 4's slice M3b): an unlink or a relink that committed between the first look and
+      // the lock leaves nothing to read for the customer found before, so another customer's invoices are never kept for
+      // the family. The lock order is the roster lock, then this one: an unlink takes this lock after the roster lock
+      // (forgetFamilyMoney()), and nothing that holds this lock takes the roster lock.
+      if ((await customerOfFamily(familyId, tx)) !== familyQboId) return false;
       const before = await storedRow(familyId, tx);
       const family = await familyCustomers(familyQboId, tx);
       // Whoever held the lock a moment ago may have just read it, or just failed to.
@@ -281,6 +300,9 @@ async function liveRead(familyId: AppFamilyId, timeoutMs: number): Promise<boole
 export async function readFamilyForRun(familyId: AppFamilyId, familyQboId: string, o: { pace: () => Promise<void>; timeoutMs?: number }): Promise<ReadOutcome> {
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(${familyLock(familyId)})`);
+    // The family's link, read again under the lock (stage 4's slice M3b): a family unlinked, or linked to another
+    // customer, since the run listed it is passed over, with nothing read or stamped (RELINKED, counted as not read).
+    if ((await customerOfFamily(familyId, tx)) !== familyQboId) return { ok: false, code: RELINKED };
     const before = await storedRow(familyId, tx);
     return readAndKeep(tx, familyId, familyQboId, before, await familyCustomers(familyQboId, tx), { kind: "run", timeoutMs: o.timeoutMs ?? RUN_CALL_TIMEOUT_MS, pace: o.pace });
   });

@@ -25,7 +25,7 @@ describe("every permission has words", () => {
     // Stage 3's slice 11c: staff see and change a guardian's phone and mailing address, so the words say who may.
     // Stage 3's slice 7b, the lead's choice: adding, removing and reinstating a guardian gives or ends an address's view
     // of a family, so it goes with the permission that changes a family, and its words say so plainly.
-    expect(PERMISSION_WORDS["Roster.Family.ReadWrite"]).toBe("Add, rename, move and make inactive families, students and parents in QuickBooks, and give or end a guardian's sign-in for a family: add, remove and reinstate its guardians; and change a family's phone and mailing address, where the books keep them on the family");
+    expect(PERMISSION_WORDS["Roster.Family.ReadWrite"]).toBe("Add, rename, move and make inactive families, students and parents in QuickBooks, and give or end a guardian's sign-in for a family: add, remove and reinstate its guardians, and let them sign in again after the family, or one of its students, was made active again from the books; and change a family's phone and mailing address, where the books keep them on the family");
     expect(PERMISSION_WORDS["Parents.ReadWrite"]).toBe("See every parent, change a parent's name, block or unblock a parent, and resend a welcome email; and see and change a parent's phone and mailing address (and see a family's, where the books keep them on the family)");
   });
 

@@ -32,7 +32,7 @@ import StaffHome from "@/app/staff/(app)/page";
 import ChooseFamily from "@/app/choose-family/page";
 import { blockAction, unblockAction, resendWelcomeAction, resetSigninAction } from "@/app/staff/(app)/parents/actions";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
-import { resetDb, seedGuardian, seedParent, seedStaff } from "../helpers/db";
+import { resetDb, seedGuardian, seedInactiveFamily, seedParent, seedStaff } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par } from "../helpers/roster-cache";
 import { rowNamed, tableRows } from "../helpers/table";
 import { seedPassword } from "../helpers/signin-links";
@@ -320,8 +320,8 @@ describe("the staff pages for parents", () => {
   it("the family chooser names each family from its app record, says so for one it doesn't know, and sends no QuickBooks id", async () => {
     const ana = (await db.select().from(parent)).find((p) => p.email === "ana@example.com")!;
     const [rivera] = await db.select().from(guardian).where(eq(guardian.parentId, ana.id));
-    // A row with no family record behind it: the portal knows no name for it.
-    const unknown = await seedGuardian({ parentId: ana.id, familyQboId: "NOPE" });
+    // A row whose family record has no name: the portal knows none for it.
+    const unknown = await seedGuardian({ parentId: ana.id, familyId: await seedInactiveFamily() });
     who.parentState = { status: "choose", parentId: ana.id, sessionId: "s1", name: ana.name,
       families: [{ guardianId: rivera!.id, familyQboId: "10" }, { guardianId: unknown.id, familyQboId: "NOPE" }] };
     const html = renderToStaticMarkup(await ChooseFamily());

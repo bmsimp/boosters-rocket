@@ -1,14 +1,11 @@
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { familyMoney, jobRun, qboCustomer, qboCustomerType, setting, writeQueue } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
-import { clearParentAccess } from "@/lib/parents/company-change";
-import { clearSeasonRecords } from "@/lib/seasons/company-change";
 import { clearMoneyRecords } from "@/lib/money/company-change";
-import { clearVolunteerRecords } from "@/lib/volunteer/company-change";
-import { clearFormRecords } from "@/lib/forms/company-change";
+import { endBuyoutsOfEarlierCompany } from "@/lib/buyouts/company-change";
 import { clearCheckRecords } from "@/lib/quickbooks/sandbox-check/view";
-import { clearAppRecords } from "@/lib/families/company-change";
+import { endLinksOfEarlierCompany } from "@/lib/families/company-change";
 import { ROSTER_LOCK, SHAPE_KEY } from "./shape";
 
 export const ROSTER_JOB = "roster.refresh";
@@ -27,58 +24,78 @@ export async function setRosterSource(tx: Tx, realmId: string): Promise<void> {
 }
 
 /**
- * When the cache came from a company other than `realmId`, everything that belonged to that company goes: the cache,
- * the membership shape (its type IDs mean nothing in another company), the roster's run history (so the worker reads
- * the new company at once; `keepRunId` spares the run doing this), all parent access (`clearParentAccess`), what
- * each family was last seen to owe (`family_money`: another company's invoices are never shown), what the seasons
- * record against customers (`clearSeasonRecords`: ticks, waivers and chosen lists), the products and services a
- * payment requirement is met by, with the worker's place in its read of every family (`clearMoneyRecords`), every
- * volunteer sign-up (`clearVolunteerRecords`), and every form made for a family to sign (`clearFormRecords`: the
- * requests and the consents with them), and every staff roster write in the queue, waiting or finished, whose ids are
- * that company's (`write_queue`, counted in the audit row), the records the check of the portal's requests made there
- * (`clearCheckRecords`), and the app's own families, students and links made from its customers (`clearAppRecords`).
- * The same company, or a cache that says no company, keeps it all. The caller owns the transaction and holds
- * ROSTER_LOCK.
+ * The note on every queue item a change of company gave up, kept on the row for the clean-up and later readers (no page
+ * shows a given-up item's note yet). True of an item tried before as well: nothing more is sent for it.
+ */
+export const GIVEN_UP_FOR_COMPANY_NOTE = "Given up: the club connected a different QuickBooks company, so nothing more was sent for this.";
+
+/**
+ * When the cache came from a company other than `realmId`, what open question 16 of the app-owned families spec says a
+ * change of company clears (stage 4's slice M7a), and nothing else. The same company, or a cache that says no company,
+ * keeps it all and answers false. The caller owns the transaction and holds ROSTER_LOCK.
  *
- * From stage 2 of the app-owned families spec until stage 4 ships, a different company is refused wherever one is
- * connected or read (completeConnect() in src/lib/quickbooks/connection.ts, refreshRoster() in ./refresh.ts; open
- * question 18), so nothing the portal runs reaches the clear below: the seasons' and volunteering's records point at
- * the app's own families and students, which a change of company would have to take away. It is kept whole for the
- * areas that have not moved yet (their part of tests/integration/company-change-step5.test.ts calls it directly), and
- * so the season, volunteer and form records go first: the database refuses to delete a family or student one still
- * names. The money cache (`family_money`) and the write queue are kept by the app's family too, and go before them as well.
+ * Ended: every unpaid live buy-out, `earlier_company`, nothing sent to QuickBooks, its invoice left in the old company's
+ * books for the treasurer (endBuyoutsOfEarlierCompany(), src/lib/buyouts/company-change.ts); a paid one keeps counting.
+ * Cleared, each naming the old company's customers, products or invoices: every link, moved into the link history as
+ * `company_changed` with every "Left unlinked" mark (endLinksOfEarlierCompany(), src/lib/families/company-change.ts);
+ * what each family was last seen to owe (`family_money`: another company's invoices are never shown, and a row read
+ * from the old company at this moment is never shown either, its `realm_id` not the roster's); QuickBooks' own copies:
+ * the customer list and its types, the products and each payment requirement's product, with the money run's place
+ * and any run under way (clearMoneyRecords()), the records the check of the portal's requests made there
+ * (clearCheckRecords()), the membership shape (its type ids mean nothing in another company), the roster's run history
+ * (so the worker reads the new company at once; `keepRunId` spares the run doing this) and the roster's company. Given
+ * up, not deleted: every queue item still to go (waiting, stuck or kept refused), of any kind, with one note and one
+ * count (`writesGivenUp`); one done or given up is kept as it was. Kept, untouched: the families, students and guardian
+ * rows, every sign-in, session, device, code, link, welcome and switch, every email change, the seasons' ticks,
+ * waivers, chosen lists and reminders, every volunteer sign-up, credit and reminder, every form request, consent and
+ * reminder record, and all kept evidence, which stays its family's (src/lib/forms/evidence-company.ts).
+ *
+ * The order: no foreign key orders it any more, as nothing the app's records are named by is deleted, but the buy-outs
+ * end before the queue is given up. Their update takes each row's lock, so a void queued at that moment for an
+ * invoiced one (queueVoid(), which holds no roster lock) either committed first, and its buy-out ends here and its
+ * void is given up next, or waits, then finds the buy-out ended and queues nothing; given up first, a void queued
+ * after it would be left waiting. The queue is given up in one statement; the links end next, then QuickBooks' copies,
+ * and the roster's company last, with the audit row.
+ *
+ * Still open, stage 4's slice M7a2's (writes and queue code this slice leaves alone), both before slice M8 turns this
+ * on. A roster write the worker is trying at that moment stays given up (every finish in ./queue.ts and ./writes.ts
+ * is guarded by its state), but a buy-out write's finish (src/lib/buyouts/writes.ts) is not: itemDone() would mark the
+ * given-up item done, and tryFailed() set it waiting or stuck again and its ended buy-out stuck. And the lock order:
+ * this takes the buy-outs' row locks before the queue's, while giveUpIn() (staff "Give up") and the buy-out write's
+ * tryFailed(), createRefused() and voidKept() take an item's before its buy-out's, holding no roster lock, so one of
+ * them at that moment can deadlock with this (40P01, which rolls the change of company back). No order here suits
+ * both: created() and voided() lock the buy-out first. Those paths are to hold the roster lock shared, as
+ * closeBuyout() (src/lib/buyouts/close.ts) does.
+ *
+ * Nothing the portal runs reaches it until stage 4's slice M8 turns a change of company back on: a different company
+ * is refused wherever one is connected or read (completeConnect() in src/lib/quickbooks/connection.ts, refreshRoster()
+ * in ./refresh.ts; open question 18). Its tests call it directly (tests/integration/company-change-step5.test.ts).
  */
 export async function clearRosterOfOtherCompanyLocked(tx: Tx, realmId: string, o: { actor: Actor; ip: string | null; keepRunId?: number }): Promise<boolean> {
   const from = await getRosterSource(tx);
   if (from === null || from === realmId) return false;
-  // Parent access first. It deletes every parent session and every email change request, which name the app's own
-  // family they chose or were asked in, so they are gone before clearAppRecords() removes the families below (their
-  // restrict keys would stop it).
-  await clearParentAccess(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
-  // The season's ticks, waivers, chosen lists and reminder claims, every volunteer sign-up, credit and reminder claim,
-  // and every form request, name the app's own records, so they go before them.
-  await clearSeasonRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
-  await clearVolunteerRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
-  // Every signature request, and the current company's evidence, names them too: the requests go, and the evidence is
-  // kept, marked as the earlier company's and cut from its request and records (src/lib/forms/company-change.ts).
-  await clearFormRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
-  // What each family was last seen to owe is kept by the app's own family, so it goes before the records too.
+  const at = { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip };
+  // Every unpaid live buy-out ends as the earlier company's, under each row's lock, before its queued writes are given up.
+  await endBuyoutsOfEarlierCompany(tx, at);
+  // Every queue item still to go, whatever its kind, is given up: its ids are the old company's, and it is never sent
+  // there now. One done or given up already is kept as it was.
+  const now = new Date();
+  const writesGivenUp = (await tx.update(writeQueue).set({ state: "given_up", note: GIVEN_UP_FOR_COMPANY_NOTE, nextTryAt: null, finishedAt: now, updatedAt: now })
+    .where(inArray(writeQueue.state, ["waiting", "stuck", "refused"])).returning({ id: writeQueue.id })).length;
+  // What each family was last seen to owe: the old company's invoices.
   await tx.delete(familyMoney);
-  // Every staff roster write and buy-out invoice write in the queue, waiting or finished: its ids are that company's,
-  // and it is filed under the app's own family and student, so it goes before them as well.
-  const writesDeleted = (await tx.delete(writeQueue).returning({ id: writeQueue.id })).length;
-  // The app's own families, students and links, made from that company's customers (src/lib/families/).
-  await clearAppRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
+  // The links, into their history, and the "Left unlinked" marks (src/lib/families/).
+  await endLinksOfEarlierCompany(tx, at);
   await tx.delete(qboCustomer);
   await tx.delete(qboCustomerType);
-  await clearMoneyRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
+  await clearMoneyRecords(tx, at);
   // The records the check of the portal's requests made in that company (src/lib/quickbooks/sandbox-check/).
   await clearCheckRecords(tx, { actor: o.actor, ip: o.ip });
   await tx.delete(setting).where(eq(setting.key, SHAPE_KEY));
   await tx.delete(jobRun).where(o.keepRunId === undefined ? eq(jobRun.job, ROSTER_JOB) : and(eq(jobRun.job, ROSTER_JOB), ne(jobRun.id, o.keepRunId)));
   await setRosterSource(tx, realmId);
   await writeAudit({ actor: o.actor, action: "roster.cleared", targetType: "setting", targetId: SOURCE_KEY, ip: o.ip,
-    before: { realmId: from }, after: { reason: "different_company", realmId, writesDeleted } }, tx);
+    before: { realmId: from }, after: { reason: "different_company", realmId, writesGivenUp } }, tx);
   return true;
 }
 

@@ -1,12 +1,21 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { requireStaffActionAlso, staffAction, type StaffCtx } from "@/lib/guards";
-import { leaveUnlinked, LINK_COPY, linkFamilyToCustomer, undoLeaveUnlinked, type LinkDone } from "@/lib/accounting/link-writes";
-import { isChosen } from "@/lib/accounting/stamp";
+import { confirmAllSuggested, leaveUnlinked, LINK_COPY, linkFamilyToCustomer, reviewCarriedOver, undoLeaveUnlinked, unlinkFamily, type LinkDone } from "@/lib/accounting/link-writes";
+import { BULK_MAX } from "@/lib/accounting/mapping";
+import { isStatusKey, SEARCH_MAX } from "@/lib/accounting/status";
+import { isChosen, isGuardianChosen } from "@/lib/accounting/stamp";
+import { linkGuardian, unlinkGuardian, type GuardianLinkDone } from "@/lib/accounting/guardian-links";
+import { isUuid } from "@/lib/seasons/ids";
+import { familyPage } from "@/app/staff/(app)/family-pages";
+import { takeFromBooks } from "@/lib/roster/writes";
 
 // The accounting links screen's presses (stage 4's slice M3a; src/lib/accounting/link-writes.ts): Confirm (a Suggested
 // row's customer, a Several possible row's candidate, or one picked from the customers no family is linked to), Leave
-// unlinked and Undo. Each needs the linking permission, Accounting.Link.ReadWrite (not Admin-only), and also
+// unlinked and Undo; since slice M3a2, Confirm all exact email matches and Confirm this link (a carried-over link
+// confirmed as reviewed); since slice M3b, Unlink from the books; since slice M3c, Link this guardian and Unlink this
+// guardian (src/lib/accounting/guardian-links.ts); since slice M4a, Take QuickBooks' into the app. Each needs the
+// linking permission, Accounting.Link.ReadWrite (not Admin-only), and also
 // Roster.Read, the page's own, checked here first and refused as the guard refuses (requireStaffActionAlso()). A server
 // action can be called with any values, not only the ones its page sends: each argument is checked here for its type
 // and size, and everything about the family, the customer and the students is checked again in the library, under the
@@ -41,5 +50,88 @@ export const undoLeaveUnlinkedAction = staffAction(P, async (ctx: StaffCtx, fami
   if (!str(familyId, ID_MAX) || !str(rosterTag, TAG_MAX)) return NOT_FROM_PAGE;
   const r = await undoLeaveUnlinked(familyId, rosterTag, op(ctx));
   again();
+  return r;
+});
+
+/**
+ * Confirm all exact email matches (slice M3a2): the filter as the page parsed it (its status key, "" for none, and its
+ * search), how many Suggested rows it showed, the roster tag and the stamp sealing those rows. No family, customer or
+ * student comes from the browser: the library works the rows out again under the roster lock.
+ */
+export const confirmAllAction = staffAction(P, async (ctx: StaffCtx, status: string, q: string, count: number, rosterTag: string, stamp: string): Promise<LinkDone> => {
+  await requireStaffActionAlso(ctx, "Roster.Read");
+  if (typeof status !== "string" || !(status === "" || isStatusKey(status)) || typeof q !== "string" || q.length > SEARCH_MAX || typeof count !== "number" || !Number.isInteger(count)
+    || count < 1 || count > BULK_MAX || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return NOT_FROM_PAGE;
+  const r = await confirmAllSuggested({ status, q, count, stamp }, rosterTag, op(ctx));
+  if (r.ok) revalidatePath("/", "layout");
+  else again();
+  return r;
+});
+
+/** Confirm this link (slice M3a2): the family's app id, its carried-over family link's id, the roster tag and the stamp. */
+export const reviewLinkAction = staffAction(P, async (ctx: StaffCtx, familyId: string, linkId: string, rosterTag: string, stamp: string): Promise<LinkDone> => {
+  await requireStaffActionAlso(ctx, "Roster.Read");
+  if (!str(familyId, ID_MAX) || !str(linkId, ID_MAX) || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return NOT_FROM_PAGE;
+  const r = await reviewCarriedOver({ familyId, linkId, stamp }, rosterTag, op(ctx));
+  again();
+  return r;
+});
+
+/**
+ * Unlink from the books (slice M3b): the family's app id, its family link's id, the roster tag and the stamp. No
+ * customer or student comes from the browser: the library reads the links again under the roster lock.
+ */
+export const unlinkAction = staffAction(P, async (ctx: StaffCtx, familyId: string, linkId: string, rosterTag: string, stamp: string): Promise<LinkDone> => {
+  await requireStaffActionAlso(ctx, "Roster.Read");
+  if (!str(familyId, ID_MAX) || !str(linkId, ID_MAX) || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return NOT_FROM_PAGE;
+  const r = await unlinkFamily({ familyId, linkId, stamp }, rosterTag, op(ctx));
+  // An unlink changes the family's page, the Families pages, Balances and every staff page that lists families.
+  if (r.ok) revalidatePath("/", "layout");
+  else again();
+  return r;
+});
+
+/** A guardian press's answer, its family's page shown again on success: the family's id stays on the server. */
+const shownAgain = (r: GuardianLinkDone): LinkDone => {
+  again();
+  if (!r.ok) return r;
+  if ("familyId" in r) revalidatePath(familyPage(r.familyId));
+  return { ok: true, message: r.message };
+};
+
+/**
+ * Link this guardian (slice M3c): the guardian row's id, the Parent customer chosen from its row's candidates, how it was
+ * chosen (`suggested` or `picked`), the roster tag and the stamp. The library works the row's candidates out again
+ * under the roster lock.
+ */
+export const linkGuardianAction = staffAction(P, async (ctx: StaffCtx, guardianId: string, customerId: string, chosen: string, rosterTag: string, stamp: string): Promise<LinkDone> => {
+  await requireStaffActionAlso(ctx, "Roster.Read");
+  if (!isUuid(guardianId) || !str(customerId, ID_MAX) || !/^\d{1,19}$/.test(customerId) || !isGuardianChosen(chosen) || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return NOT_FROM_PAGE;
+  return shownAgain(await linkGuardian({ guardianId, customerId, chosen, stamp }, rosterTag, op(ctx)));
+});
+
+/** Unlink this guardian (slice M3c): the guardian row's id, its link's id, the roster tag and the stamp. */
+export const unlinkGuardianAction = staffAction(P, async (ctx: StaffCtx, guardianId: string, linkId: string, rosterTag: string, stamp: string): Promise<LinkDone> => {
+  await requireStaffActionAlso(ctx, "Roster.Read");
+  if (!isUuid(guardianId) || !isUuid(linkId) || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return NOT_FROM_PAGE;
+  return shownAgain(await unlinkGuardian({ guardianId, linkId, stamp }, rosterTag, op(ctx)));
+});
+
+/**
+ * Take QuickBooks' into the app (slice M4a): what the row's difference takes (`name`, `inactive` or `place`, and since
+ * slice M4b `active`), the kind of record (`family` or `student`; a place is always a student's), the record's app id,
+ * the roster tag and the stamp sealing the value the row showed. The linking permission and the page's Roster.Read
+ * settle it (the owner's choice 6, as recommended): nothing is sent to the books but the buy-out void a student's move
+ * brings, as any move's, and the library works the value out again under the roster lock. A record made active again
+ * holds its family's sign-ins, which only Roster.Family.ReadWrite releases (releaseSigninHoldAction(), ../parents/actions.ts).
+ */
+export const takeDifferenceAction = staffAction(P, async (ctx: StaffCtx, field: string, kind: string, recordId: string, rosterTag: string, stamp: string): Promise<LinkDone> => {
+  await requireStaffActionAlso(ctx, "Roster.Read");
+  if (!(field === "name" || field === "inactive" || field === "active" || field === "place") || !(kind === "family" || kind === "student") || (field === "place" && kind !== "student")
+    || !str(recordId, ID_MAX) || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return NOT_FROM_PAGE;
+  const r = await takeFromBooks(field === "place" ? { field, studentId: recordId, stamp } : { field, kind, recordId, stamp }, rosterTag, op(ctx));
+  // A name, a record made inactive or active again, or a student moved changes the Families pages, Balances and the family's pages.
+  if (r.ok) revalidatePath("/", "layout");
+  else again();
   return r;
 });

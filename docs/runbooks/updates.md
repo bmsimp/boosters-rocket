@@ -146,6 +146,25 @@ MIGRATE_WITHOUT_RECENT_BACKUP=yes docker compose up -d
 Use it only for that one start, on the command line. Never put `MIGRATE_WITHOUT_RECENT_BACKUP` in `.env`: it would
 switch the check off for every update after this one.
 
+## A parent's new sign-in email while the update starts
+
+The update that drops what the retired reviews kept (migration 0046) removes a column the version before it still
+names when a parent asks for a new sign-in email, or opens or confirms its link. In the seconds between `migrate`
+finishing and the new `app` taking over, such a parent sees an error page. Nothing is lost: once **Health** names the
+new version, they ask again or open the link again, and it works.
+
+## Unlinking a family, or a parent's sign-in, while the update starts
+
+The update that drops each guardian row's old copies of its QuickBooks customers (migration 0049) removes two
+columns the version before it still names in one place: Unlink from the books, on **Accounting links**. In the seconds
+between `migrate` finishing and the new `app` taking over, that press shows an error and changes nothing; once
+**Health** names the new version, press it again. A version from before stage 3's slice 12b1 names the columns on
+every read of a guardian row, so updating from one, every sign-in and every guardian page fails in those seconds the
+same way, and works again once the new version is up. Nothing is lost.
+
+If `migrate` itself stops with "Migration 0049 stopped" (`docker compose logs migrate`), nothing was changed: send
+those words to the portal's maintainers, and run the version you had until they answer (Going back, below).
+
 ## Going back
 
 After a `migrate` that failed, nothing was changed, so no restore is needed: put back the previous version's files and

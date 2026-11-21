@@ -89,7 +89,7 @@ async function seedAnaWithEverything() {
   await seedParentSession(ana.authUserId); await seedParentSession(ana.authUserId);
   await seedCode(ana.id);
   await mintLink(ana.id, "reset");
-  await seedEmailChange({ parentId: ana.id, guardianId: ana.row.id, familyId: ana.row.familyId, recordQboId: null, newEmail: "ana.new@example.com" });
+  await seedEmailChange({ parentId: ana.id, guardianId: ana.row.id, familyId: ana.row.familyId, newEmail: "ana.new@example.com" });
   return ana;
 }
 

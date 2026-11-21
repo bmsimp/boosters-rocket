@@ -67,11 +67,14 @@ const CLIENT_WRITES = ["qboUpdateCustomerContact", "qboUpdateCustomerEmail", "qb
 const EMAIL_CHANGE = "src/lib/parents/email-change.ts";
 const EMAIL_WRITE = "qboUpdateCustomerEmail";
 /**
- * The only modules that may name the email write: where it is written, and the check of the portal's requests. Since
- * stage 3's slice 11d a parent's confirmed change of sign-in email is the portal's alone, so the email change names none
- * of the client's writes (emailChangeProblems()); slice S11e adds the roster's write module, which sends it on.
+ * The only modules that may name the email write: where it is written, the check of the portal's requests, and, since
+ * stage 3's slice S11e, the roster's write module, whose one send (sendWrite()) sends a person's sign-in email the
+ * portal changed first, reached only through the one try of a change saved first (trySavedItem()). Since stage 3's
+ * slice 11d a parent's confirmed change of sign-in email is the portal's alone, so the email change names none of the
+ * client's writes (emailChangeProblems()), and nor does the parent-facing module that queues it in the confirm's
+ * transaction (contact-queue.ts).
  */
-const MAY_SEND_THE_EMAIL_WRITE = [CLIENT, CHECK_WRITER];
+const MAY_SEND_THE_EMAIL_WRITE = [CLIENT, CHECK_WRITER, ROSTER_WRITER_OF_CONTACT];
 /** What reaches the email change's confirmation from a browser: the parent's own server action, and nothing else. */
 const CONFIRM = "confirmMyEmailChange";
 const MAY_CONFIRM = [EMAIL_CHANGE, "src/app/(parent)/family/email/actions.ts"];
@@ -121,6 +124,13 @@ const MAY_RENAME_TRY = [ROSTER_WRITER];
  */
 const ROSTER_DEACTIVATE = "deactivateLinked";
 const MAY_ROSTER_DEACTIVATE = [ROSTER_WRITER, "src/app/staff/(app)/roster/write-actions.ts"];
+/**
+ * Take QuickBooks' into the app (stage 4's slice M4a): a name, an inactive customer or a student's family taken from
+ * the books into the portal's own record, sending nothing to QuickBooks. Started only by the module itself and the
+ * accounting links screen's press.
+ */
+const TAKE = "takeFromBooks";
+const MAY_TAKE = [ROSTER_WRITER, "src/app/staff/(app)/links/actions.ts"];
 /**
  * A guardian's own Parent customer (stage 3's slice 9h): queued in the guardian's own transaction (an add, a reinstate,
  * a removal, a person's rename) and tried at once after it commits, through the module's own try of a change saved
@@ -520,9 +530,17 @@ describe("what the portal writes to QuickBooks, and who may send each", () => {
     expect(emailBodyProblems(emailUpdateConstant(clientSource))).toEqual([]);
   });
 
-  it("lets only the check of the portal's requests send the email write, and only the parent's own action confirm a change of sign-in email", () => {
+  it("lets only the check of the portal's requests and the roster's write module send the email write, and only the parent's own action confirm a change of sign-in email", () => {
     const naming = (name: string) => everything.filter((s) => new RegExp(`\\b${name}\\b`).test(code(s.text))).map((s) => s.file).sort();
     expect(naming(EMAIL_WRITE), `${EMAIL_WRITE} is the portal's second write to QuickBooks. A new caller is a decision for a slice brief, not a fix made in passing.`).toEqual([...MAY_SEND_THE_EMAIL_WRITE].sort());
+    // In the roster's write module (stage 3's slice S11e): imported once, called once, inside its one send.
+    const writer = code(everything.find((s) => s.file === ROSTER_WRITER_OF_CONTACT)?.text ?? "");
+    expect([...writer.matchAll(new RegExp(`\\b${EMAIL_WRITE}\\b`, "g"))]).toHaveLength(2);
+    expect(writer.slice(writer.indexOf("export async function sendWrite("), writer.indexOf("\nconst AUDIT_ACTION"))).toMatch(new RegExp(`\\b${EMAIL_WRITE}\\(`));
+    // The module that queues it in the confirm's transaction is no way to QuickBooks: no client, no write, no send.
+    const queueText = code(contactQueue);
+    expect(queueText).not.toMatch(/quickbooks\/client|roster\/(writes|queue)["']/);
+    for (const name of [...CLIENT_WRITES, ROSTER_SEND, SAVED_TRY]) expect(queueText, name).not.toMatch(new RegExp(`\\b${name}\\b`));
     expect(naming(CONFIRM)).toEqual([...MAY_CONFIRM].sort());
     // Since stage 3's slice 11d the email change sends nothing to QuickBooks, and the module is no way to it.
     expect(emailChangeProblems(emailChange)).toEqual([]);
@@ -567,6 +585,7 @@ describe("what the portal writes to QuickBooks, and who may send each", () => {
       for (const name of SAVED_FIRST) expect(naming(name), `${name} sends a change saved in the portal first. A new caller is a decision for a slice brief.`).toEqual([...MAY_SAVED_FIRST].sort());
       expect(naming(RENAME_TRY), `${RENAME_TRY} sends a rename, and resends it once after a live read. A new caller is a decision for a slice brief.`).toEqual([...MAY_RENAME_TRY].sort());
       expect(naming(ROSTER_DEACTIVATE), `${ROSTER_DEACTIVATE} makes a linked record inactive in QuickBooks. A new caller is a decision for a slice brief.`).toEqual([...MAY_ROSTER_DEACTIVATE].sort());
+      expect(naming(TAKE), `${TAKE} takes the books' value into the portal and sends nothing to QuickBooks. A new caller is a decision for a slice brief.`).toEqual([...MAY_TAKE].sort());
       expect(naming(SAVED_TRY), `${SAVED_TRY} sends a change saved first and settles its queue item. A new caller is a decision for a slice brief.`).toEqual([...MAY_SAVED_TRY].sort());
       for (const name of GUARDIAN_SENDS) expect(naming(name), `${name} queues or sends a guardian's Parent customer change. A new caller is a decision for a slice brief.`).toEqual([...MAY_GUARDIAN_SEND].sort());
       expect(naming(CONTACT_SEND), `${CONTACT_SEND} sends a staff member's change of a guardian's details at once. A new caller is a decision for a slice brief.`).toEqual([...MAY_CONTACT_SEND].sort());

@@ -14,6 +14,8 @@ import { seedParentSettings } from "../helpers/roster-cache";
 import { seedPassword } from "../helpers/signin-links";
 import { moneyMarkers, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { familyRecord, studentRecord } from "../helpers/volunteer";
+import { relinkFamily, unlinkThroughThePress } from "../helpers/links";
+import { staffWith } from "../helpers/roster-writes";
 
 /**
  * The gate every parent page passes through: one family never sees another's data.
@@ -270,5 +272,80 @@ describe("one family never sees another's data on a parent page", () => {
       const leaked = markersIn(outcome.html, other.markers);
       expect(leaked, `${file}, rendered for ${viewer.spec.family.name}, contains data of ${other.spec.family.name}: ${leaked.join(", ")}.`).toEqual([]);
     });
+  });
+});
+
+// Stage 4's slice M3b: a family unlinked from its customer and linked to another (relinkFamily(), tests/helpers/links.ts)
+// sees nothing of the other family on any parent page, nor any invoice of its own stored before; and the other family
+// sees nothing of it. Family B is the one relinked: its buy-out is paid, so its unlink goes through (A's is invoiced, which
+// refuses one). Nothing after the relink runs the import, which would make a second family for B's old customer.
+describe("a relinked family never sees another family's data, nor its own figures from before", () => {
+  let a: SeededParent, b: SeededParent;
+  beforeAll(async () => {
+    await resetDb();
+    ({ a, b } = await seedTwoFamilies());
+    await relinkFamily(b.identity.familyId, { qboId: "QBO-THIRD-9901", name: "Third Family", typeQboId: "F" });
+  }, 60_000);
+
+  it.each(pages.map((p) => [p.route, p.file] as const))("%s", async (route, file) => {
+    const page = await load(file);
+    const bOldInvoices = (b.spec.invoices ?? []).map((i) => i.number);
+    for (const [viewer, other] of [[a, b], [b, a]] as const) {
+      asParent(viewer.identity);
+      const outcome = await pageOutcome(page, { params: paramsFor(route, viewer) });
+      if (!("html" in outcome)) {
+        if (!isDynamic(route)) expect.fail(`${file} ${describeOutcome(outcome)} for ${viewer.spec.family.name}'s parent after B's relink; it must render.`);
+        continue;
+      }
+      expect(markersIn(outcome.html, other.markers), `${file} for ${viewer.spec.family.name} after B's relink`).toEqual([]);
+      if (viewer === b) expect(markersIn(outcome.html, bOldInvoices), `${file} shows B an invoice stored before its relink`).toEqual([]);
+    }
+  });
+});
+
+// Stage 4's slice M3b, the lead's decision 8: what a family's parent sees after an unlink is what a family with no link
+// sees, by the code that was there before it. Family B is the one unlinked (its buy-out is paid, so the unlink goes
+// through); nothing after it runs the import, which would make a second family for B's old customer.
+describe("an unlinked family's pages read as a family whose payments aren't connected", () => {
+  let b: SeededParent;
+  const render = async (route: string) => {
+    const page = pages.find((p) => p.route === route);
+    if (!page) expect.fail(`no parent page ${route}`);
+    asParent(b.identity);
+    const outcome = await pageOutcome(await load(page.file), { params: undefined });
+    if (!("html" in outcome)) expect.fail(`${page.file} ${describeOutcome(outcome)} for the unlinked family's parent; it must render.`);
+    return outcome.html;
+  };
+  beforeAll(async () => {
+    await resetDb();
+    ({ b } = await seedTwoFamilies());
+    const staff = await staffWith("unlinker@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
+    await unlinkThroughThePress(b.identity.familyId, staff);
+  }, 60_000);
+
+  it("Home and Payments say so, with no invoice, amount owed, Pay or way to Payments", async () => {
+    const invoices = (b.spec.invoices ?? []).flatMap((i) => [i.number, ...(i.payLink ? [i.payLink] : [])]);
+    expect(invoices.length).toBeGreaterThan(0);
+    for (const route of ["/", "/payments"]) {
+      const html = await render(route);
+      expect(html, route).toContain("The club hasn&#x27;t connected your payments to the portal yet. Until then, the treasurer can tell you what you owe.");
+      expect(markersIn(html, invoices), route).toEqual([]);
+      expect(html, route).not.toContain("See your payments");
+    }
+  });
+
+  it("Season reads its payment as No invoice yet; Volunteer still reads the paid buy-out as Paid instead, with no way to pay instead; the rest as before", async () => {
+    const season = await render("/season");
+    expect(season).toContain("No invoice yet");
+    expect(season).not.toContain("Not paid yet");
+    expect(markersIn(season, [b.spec.family.name, ...b.spec.students.map((s) => s.name)])).toHaveLength(1 + b.spec.students.length);
+    const volunteer = await render("/volunteer");
+    expect(markersIn(volunteer, b.buyout!.page)).toEqual(b.buyout!.page);
+    expect(volunteer).not.toMatch(/\/volunteer\/pay-instead\//);
+    for (const route of ["/family", "/forms"]) {
+      const html = await render(route);
+      const shown = MUST_SHOW[route]!(b);
+      expect(markersIn(html, shown), route).toEqual(shown);
+    }
   });
 });

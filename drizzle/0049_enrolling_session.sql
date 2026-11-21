@@ -1,1 +1,0 @@
-ALTER TABLE "parent_auth_session" ADD COLUMN "enrol_until" timestamp with time zone;

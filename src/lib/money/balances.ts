@@ -3,9 +3,11 @@
 // tests/integration/page-guards.test.ts). It reads only what is stored: nothing here asks QuickBooks. What may be shown
 // is the parent pages' own rule (mayShow in ./stored.ts), so staff never see figures a parent of the family couldn't.
 import "server-only";
-import type { CustomerCheck, StoredInvoice } from "@/lib/db/schema";
-import type { AppFamilyId } from "@/lib/families/ids";
-import { customerOfFamily, linksOfCustomers } from "@/lib/families/links";
+import { and, count, eq, sql } from "drizzle-orm";
+import { db } from "@/lib/db/client";
+import { family as familyTable, type CustomerCheck, type StoredInvoice } from "@/lib/db/schema";
+import { QUICKBOOKS, type AppFamilyId } from "@/lib/families/ids";
+import { customerOfFamily, linksOfCustomers, recordsCompany } from "@/lib/families/links";
 import { getRosterSource } from "@/lib/roster/source";
 import { openInvoices, paidInvoices } from "./invoices";
 import { safePayLink } from "./pay-link";
@@ -53,7 +55,22 @@ export type Balances = {
   /** How many families there are before the filter and the search. */
   families: number;
   worthALook: WorthALook[];
+  /**
+   * How many active family records of the portal have no family link in the records' company (0 while that company is
+   * unknown), so they have no row here (stage 4's slice M3b; the owner's choice 9, recommended and awaiting his word):
+   * the page says so in one line, pointing at Accounting links.
+   */
+  unlinked: number;
 };
+
+/** Active family records with no family link in the records' company (recordsCompany()): none counted while it is unknown. One query, besides the company's. */
+async function familiesWithNoLink(): Promise<number> {
+  const realmId = await recordsCompany();
+  if (realmId === null) return 0;
+  const [r] = await db.select({ n: count() }).from(familyTable).where(and(eq(familyTable.active, true),
+    sql`not exists (select 1 from accounting_link l where l.family_id = ${familyTable.id} and l.system = ${QUICKBOOKS} and l.realm_id = ${realmId})`));
+  return r?.n ?? 0;
+}
 
 const iso = (d: Date | null) => d?.toISOString() ?? null;
 const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, "en", { sensitivity: "base" });
@@ -78,8 +95,8 @@ function differences(row: MoneyRow | undefined, source: string | null, family: F
  * that owe something; `search` keeps families whose name, or the name of a student or parent in them, holds it.
  */
 export async function loadBalances(o: { owing?: boolean; search?: string } = {}): Promise<Balances> {
-  const [families, rows, source] = await Promise.all([familiesCustomers(null), moneyRows(null), getRosterSource()]);
-  if (source === null) return { roster: false, rows: [], families: 0, worthALook: [] };
+  const [families, rows, source, unlinked] = await Promise.all([familiesCustomers(null), moneyRows(null), getRosterSource(), familiesWithNoLink()]);
+  if (source === null) return { roster: false, rows: [], families: 0, worthALook: [], unlinked };
   // Each roster family's row is its app family's, found through the family customer's own family link (the family kind
   // only: a customer may have a student record too), for every family in one query.
   const links = await linksOfCustomers({ families: [...families.keys()], students: [] });
@@ -96,7 +113,7 @@ export async function loadBalances(o: { owing?: boolean; search?: string } = {})
   const names = (id: string) => [families.get(id)!.familyName, ...[...families.get(id)!.customers.values()].filter((n): n is string => n !== null)];
   const shown = all.filter((r) => (!o.owing || (r.figures !== null && r.figures.totalCents > 0))
     && (needle === "" || names(r.familyQboId).some((n) => n.toLocaleLowerCase("en").includes(needle))));
-  return { roster: families.size > 0, rows: shown.sort(byName), families: all.length, worthALook: worthALook.sort(byName) };
+  return { roster: families.size > 0, rows: shown.sort(byName), families: all.length, worthALook: worthALook.sort(byName), unlinked };
 }
 
 export type FamilyBalance = {

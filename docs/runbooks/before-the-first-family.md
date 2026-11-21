@@ -180,7 +180,9 @@ What the page can't do is walk the portal's own screens. Do these in the sandbox
    10 minutes, it asks for your password and the code it emails you first), a new address you can read. Open
    the emailed link on the phone while signed out.
    **Pass:** you sign in with the old address and land back on the question; confirming signs you out, and you sign in
-   with the new address. **If not:** note where it went instead.
+   with the new address; after the worker's next wake (a few minutes), the parent's own record in QuickBooks shows the
+   new address in its email field in place of the old, and any other address in it as it was. **If not:** note where it
+   went instead, and what Reconciliation says of the change.
 8. **A staff change that waits.** The portal puts a roster change on its queue when QuickBooks is busy or can't be
    reached, which can't be made to happen from the portal. The first time Health's QuickBooks line counts a change
    waiting, open Reconciliation.
@@ -648,22 +650,32 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    **Pass:** the club's items are listed and a requirement can name its own. **If not:** note what the page said.
 6. **Read Accounting links against the real books** (`/staff/links`, Accounting links under Families; it takes the
    permission to link families to accounting). It sends nothing to the books: a family the portal has is linked there
-   to its customer, or left unlinked, and nothing else on it changes anything.
+   to its customer, left unlinked, or unlinked again, and nothing else on it changes anything.
    **Pass:** every family you brought in reads **Linked**, confirmed by you, on the day you pressed; a family you added
    on Families while QuickBooks was connected reads **Linked**, made in the books from the portal, by you; a family
    added with no customer (by someone who may not link families, or while QuickBooks was disconnected) reads
    **Suggested** only where one of its guardians signs in with an address that really is on a customer no family is
    linked to (or on a parent record under it), and otherwise **Several possible** or **No match**. For such a family,
    open its row: a Suggested one lists the students **Confirm** would link with it (a name on exactly one student on
-   each side) and those it would leave; press **Confirm** where the customer really is that family's, and it reads
-   **Linked**, confirmed by you, or **Linked, with differences** while anything is left over: a student left is shown
-   among its differences (an inactive student customer left is only counted on the row), and, in books with a parent
-   type, so is each guardian whose own Parent customer isn't linked yet (Confirm never links a guardian's), which is
-   every confirmed Suggested family there. Its money is read at its next page load. A Several possible or No match family takes **Pick a different customer**, from the customers no family
+   each side) and those it would leave, and, in books with a parent type, the guardians it would link to the Parent
+   customer under it whose email field holds their sign-in address; press **Confirm** where the customer really is
+   that family's, and it reads **Linked**, confirmed by you, or **Linked, with differences** while anything is left
+   over: a student left is shown among its differences (an inactive student customer left is only counted on the
+   row), and, in books with a parent type, so is each guardian Confirm didn't link to a Parent customer of their own,
+   whom you can link in the row's opening with **Link this guardian** where a Parent customer under it is free for them
+   and no change for them or that customer is waiting, stuck or kept on Reconciliation. Its money is read at its next page load. A Several possible or No match family takes **Pick a different customer**, from the customers no family
    is linked to, with the same confirm step; **Leave unlinked** keeps a family with no customer in the books yet out
-   of the suggestions until you undo it. Don't press **Create a family from this** for a customer Accounting links
-   suggests or lists for a family the portal has (it would make a second family), nor **Create in QuickBooks and
-   link** for a family whose customer is already in the books (it would make a second customer); and the
+   of the suggestions until you undo it. With several Suggested rows, **Confirm all exact email matches** above the list
+   links every Suggested row the filter shows, its count on the button, each as its own **Confirm** would; narrow the
+   list with the status or the search first to link fewer. A link carried over from the roster (on an installation
+   that had families before) offers **Confirm this link** in its row, which records it as checked by you. A linked family's row
+   offers **Unlink from the books**: unlink a test family you linked, and its row reads Suggested or No match again,
+   its guardians' Home and Payments say the club hasn't connected their payments yet, and Balances counts it in one
+   line; link it again with **Confirm** (a Suggested row), or, for another customer, **Leave unlinked** and then **Pick a
+   different customer**, and its money is read afresh. Reconciliation
+   refuses **Create a family from this** for a customer Accounting links suggests or lists for a family the portal has,
+   and its row names that family and links to Accounting links; don't press **Create in QuickBooks and link** for a
+   family whose customer is already in the books (it would make a second customer); and the
    count of customers with no family matches Reconciliation's list. A linked family whose records differ from the
    books' copy reads **Linked, with differences** instead, still saying how its link was made, and its row's opening
    lists each difference with the portal's value and the books': a family you brought in has the Parent customers

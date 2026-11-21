@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
 import type { MembershipShape } from "@/lib/roster/shape";
 import type { Cust, Family } from "@/lib/roster/model";
 import { NOT_HERE, shapeOperations, type RosterOperation } from "@/lib/roster/operations";
@@ -37,8 +38,8 @@ export function WhatChanges({ shape, canChange, unlinked = false }: { shape: Mem
     <section className="box" aria-labelledby="changes-h"><h2 id="changes-h">Changing the roster</h2>
       <p>{canChange ? <>From the portal you can {list}. For a family linked to QuickBooks, a rename, a new student or a move of a student is saved in the portal first and then sent to QuickBooks; if QuickBooks refuses it, the portal keeps it and the Reconciliation page lists it. What follows a move happens at once: a completed form goes with the student and an unfinished one starts again in the new family, their places on shifts still to come are given up and none of their places counts for the family they joined, the credit they earned stays with the family it was earned for, and an unpaid volunteer buy-out invoice of theirs is queued to be voided while a paid one is flagged for the club. Their invoices follow once QuickBooks has the move. Making someone inactive is sent to QuickBooks first, and the roster shows it once QuickBooks has it. A guardian added under Portal sign-ins gets their own Parent customer under the family, with their name and sign-in address, unless QuickBooks already has a customer of that name there; it is renamed with them, and made inactive when they are removed, only when it has no balance the portal can read, owed or a credit.</>
         : <>Staff who may change the roster can {list} from the portal. For a family linked to QuickBooks, a rename, a new student or a move of a student is saved in the portal first; making someone inactive is sent to QuickBooks first.</>}</p>
-      <p>{unlinked ? "This family has no customer in QuickBooks: a change to it is saved in the portal only."
-        : "A new family is saved in the portal first, and made in QuickBooks too when the staff member who adds it may link families to accounting. A family with no customer in QuickBooks is changed in the portal only."}</p>
+      <p>{unlinked ? "This family isn't linked to a customer in QuickBooks: a change to it is saved in the portal only."
+        : "A new family is saved in the portal first, and made in QuickBooks too when the staff member who adds it may link families to accounting. A family that isn't linked to a customer in QuickBooks is changed in the portal only."}</p>
       {notOffered.map((n) => <p key={n.why}>{n.why}</p>)}
       <p>{NOT_HERE.contact}</p>
     </section>
@@ -59,7 +60,7 @@ export function Waiting({ items, compare = new Set<string>() }: { items: QueueVi
     <>
       {open.length > 0 && (
         <section className="box" aria-labelledby="waiting-h"><h2 id="waiting-h">Waiting to reach QuickBooks</h2>
-          <p>These changes were asked for and haven&apos;t been finished yet: most are waiting for QuickBooks to take them. Nothing else can be changed on the same record until they go through or are given up on the <a href="/staff/reconciliation">Reconciliation page</a>, but for a guardian&apos;s phone and mailing address, which hold nothing back.</p>
+          <p>These changes were asked for and haven&apos;t been finished yet: most are waiting for QuickBooks to take them. Nothing else can be changed on the same record until they go through or are given up on the <a href="/staff/reconciliation">Reconciliation page</a>, but for a guardian&apos;s phone, mailing address and sign-in email, which hold nothing back.</p>
           <DataTable caption="Each change, and where it stands" captionHidden rows={open} rowKey={(i) => i.id} columns={[
             { key: "change", header: "Change", rowHeader: true, cell: (i) => <>{i.words}{i.moneyNote ? <span className="when">{i.moneyNote}</span> : null}</> },
             { key: "state", header: "Where it stands", cell: (i) => waitingWords(i) },
@@ -114,7 +115,7 @@ export function CreateBox({ shape, rosterTag, memberTypes, goes }: { shape: Memb
   );
 }
 
-/** A student of the family's record with no customer in QuickBooks, for the portal's own changes. */
+/** A student of the family's record with no link to a customer in QuickBooks, for the portal's own changes. */
 export type HereStudent = { id: string; name: string };
 
 /**
@@ -130,13 +131,13 @@ export function PortalChanges({ familyId, name, noun, unlinked, addStudents, stu
   if (!unlinked && students.length === 0) return null;
   return (
     <section className="box" aria-labelledby="portal-changes-h"><h2 id="portal-changes-h">Change in the portal</h2>
-      <p>{unlinked ? `This ${noun} has no customer in QuickBooks, so a change made here is saved in the portal only: nothing is sent to QuickBooks.`
-        : "These students have no customer in QuickBooks, so a change to them is saved in the portal only: nothing is sent to QuickBooks."}</p>
+      <p>{unlinked ? `This ${noun} isn't linked to a customer in QuickBooks, so a change made here is saved in the portal only: nothing is sent to QuickBooks.`
+        : "These students aren't linked to a customer in QuickBooks, so a change to them is saved in the portal only: nothing is sent to QuickBooks."}</p>
       {unlinked && (
         <details className="more"><summary>Change the {noun} {name}</summary>
           <NameForm field="New name" label="Rename" pendingLabel="Renaming…" initial={name} act={renameHereAction.bind(null, rosterTag, "family", familyId)} />
           <DeactivateForm label={`Make ${name} inactive`}
-            warning={`This makes ${name} inactive in the portal${noun === "family" ? ", with its students" : ""}: its guardians can no longer sign in to it. It can't be made active again in the portal, and with no customer in QuickBooks its page here goes away; what it holds (its season, forms and volunteering) is kept. Nothing is sent to QuickBooks, and there is no balance to check: it has no customer there.`}
+            warning={`This makes ${name} inactive in the portal${noun === "family" ? ", with its students" : ""}: its guardians can no longer sign in to it. It can't be made active again in the portal, and with no link to QuickBooks its page here goes away; what it holds (its season, forms and volunteering) is kept. Nothing is sent to QuickBooks, and there is no balance to check: it isn't linked to a customer there.`}
             act={deactivateHereAction.bind(null, rosterTag, "family", familyId)} />
         </details>
       )}
@@ -148,7 +149,7 @@ export function PortalChanges({ familyId, name, noun, unlinked, addStudents, stu
       {students.map((s) => (
         <details key={s.id} className="more"><summary>Change the student {s.name}</summary>
           <NameForm field="New name" label="Rename" pendingLabel="Renaming…" initial={s.name} act={renameHereAction.bind(null, rosterTag, "student", s.id)} />
-          <DeactivateForm label={`Make ${s.name} inactive`} warning={`${s.name} is no longer counted in the family's season. Nothing is sent to QuickBooks: they have no customer there.`}
+          <DeactivateForm label={`Make ${s.name} inactive`} warning={`${s.name} is no longer counted in the family's season. Nothing is sent to QuickBooks: they aren't linked to a customer there.`}
             act={deactivateHereAction.bind(null, rosterTag, "student", s.id)} />
         </details>
       ))}
@@ -160,9 +161,11 @@ export function PortalChanges({ familyId, name, noun, unlinked, addStudents, stu
  * "Create in QuickBooks and link" (stage 3's slice 9d), for an active family with no link or with students with none:
  * what pressing it makes, and the button for staff who may change families and link them to accounting (`may`), while
  * QuickBooks is connected to the roster's company (`ready`). Anyone else who may change families is told who can.
+ * `notOffered`: the active students with no link it leaves out (stage 4's slice M3b2), each with the customer they were
+ * linked to until the family they were in was unlinked, which the books still hold (QuickBooks text, as text).
  */
-export function CreateInQuickBooks({ familyId, name, noun, unlinked, students, types, rosterTag, may, ready }: {
-  familyId: string; name: string; noun: "family" | "member"; unlinked: boolean; students: string[]; types: { qboId: string; name: string }[];
+export function CreateInQuickBooks({ familyId, name, noun, unlinked, students, notOffered = [], types, rosterTag, may, ready }: {
+  familyId: string; name: string; noun: "family" | "member"; unlinked: boolean; students: string[]; notOffered?: { name: string; customer: string }[]; types: { qboId: string; name: string }[];
   rosterTag: string; may: boolean; ready: boolean;
 }) {
   const listed = (names: string[]) => (names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
@@ -172,6 +175,7 @@ export function CreateInQuickBooks({ familyId, name, noun, unlinked, students, t
   return (
     <section className="box" aria-labelledby="create-link-h"><h2 id="create-link-h">Create in QuickBooks and link</h2>
       <p>{what} If one of them can&apos;t be made, it stops there and says why; pressing again carries on with whatever is still unlinked.</p>
+      {notOffered.map((s) => <Notice key={`${s.name}:${s.customer}`} tone="info" live="none">{s.name} isn&apos;t offered: they were linked to &ldquo;{s.customer}&rdquo; in QuickBooks until the family they were in was unlinked, and &ldquo;{s.customer}&rdquo; is still there, so a second customer isn&apos;t made for them.</Notice>)}
       {!ready ? <Notice tone="info" live="none">QuickBooks isn&apos;t connected to the company this roster was read from, so nothing can be made there just now.</Notice>
         : !may ? <Notice tone="info" live="none">Someone who may link families to accounting can make it in QuickBooks and link it.</Notice>
         : <CreateAndLinkForm types={unlinked && noun === "member" ? types : []} act={createAndLinkAction.bind(null, rosterTag, familyId)} />}
@@ -275,9 +279,11 @@ export function MoveStudents({ students, families, refusedHere, rosterTag, act }
  * (`inactiveRecords`, by customer) is offered nothing that would send. A move is MoveStudents' (slice 9f), for every
  * student of the family's record, wherever QuickBooks has them (the page says where).
  */
-export function FamilyChanges({ shape, family, edit, cover, inactiveRecords }: {
+export function FamilyChanges({ shape, family, edit, cover, inactiveRecords, linker = false }: {
   shape: Extract<MembershipShape, { kind: "layered" }>; family: Family; edit: Edit; cover: { family: Covered; under: Covered[] } | null;
   inactiveRecords: Set<string>;
+  /** Whether the reader may link families to accounting (Accounting.Link.ReadWrite): Accounting links is then a link. */
+  linker?: boolean;
 }) {
   const { offered } = shapeOperations(shape);
   const f = family.customer;
@@ -300,12 +306,12 @@ export function FamilyChanges({ shape, family, edit, cover, inactiveRecords }: {
       {family.parents.map((p) => (edit.guardianCustomers?.get(p.qboId) === "own"
         ? <Notice key={p.qboId} tone="info" live="none">{p.displayName} is a portal guardian&apos;s own Parent customer, so it is changed through them: rename the person on their page, or remove them under Portal sign-ins below.</Notice>
         : edit.guardianCustomers?.get(p.qboId) === "other"
-          ? <Notice key={p.qboId} tone="info" live="none">{p.displayName} is linked to a portal guardian, but isn&apos;t one guardian&apos;s own Parent customer under this family (several guardians share it, or the guardian is in another family), so the portal sends nothing for it: change it in QuickBooks, and the mapping screen will sort it out.</Notice>
+          ? <Notice key={p.qboId} tone="info" live="none">{p.displayName} is linked to a portal guardian, but isn&apos;t one guardian&apos;s own Parent customer under this family (several guardians share it, or the guardian is in another family), so the portal sends nothing for it: change it in QuickBooks, or on {linker ? <Link href="/staff/links">Accounting links</Link> : "Accounting links, by someone who may link families to accounting,"} unlink from it each guardian whose it isn&apos;t. Once one guardian of this family alone is linked to it, it is theirs; if none of this family&apos;s is left on it, one who isn&apos;t linked to a customer can be linked to it there.</Notice>
         : edit.guardianCustomers?.get(p.qboId) === "removed"
           ? <RecordChanges key={p.qboId} who="the parent" c={p} rename={offered.has("rename_parent")} deactivate={offered.has("deactivate_parent")} edit={edit}
             warning="This is the own Parent customer of a guardian removed from this family, left active in QuickBooks because a removal makes it inactive only when its balance allows. Adding them back under Portal sign-ins uses it again, under whatever name it has then. A change here is made in QuickBooks only and changes nothing in the portal. A parent with any balance in QuickBooks, owed or a credit, isn't made inactive until it is settled there, nor while the portal can't read it." />
         : <RecordChanges key={p.qboId} who="the parent" c={p} rename={offered.has("rename_parent")} deactivate={offered.has("deactivate_parent")} edit={edit}
-          warning="This Parent customer isn't a portal guardian: who can sign in is the portal's own list of the family's guardians, adding the person under Portal sign-ins doesn't use it, and the mapping screen will offer to link it. Making it inactive changes nothing in the portal. A parent with any balance in QuickBooks, owed or a credit, isn't made inactive until it is settled there, nor while the portal can't read it." />))}
+          warning="This Parent customer isn't a portal guardian: who can sign in is the portal's own list of the family's guardians, adding the person under Portal sign-ins doesn't use it, and while it is active a guardian of this family who isn't linked to a customer can be linked to it on Accounting links, by someone who may link families to accounting. Making it inactive changes nothing in the portal. A parent with any balance in QuickBooks, owed or a credit, isn't made inactive until it is settled there, nor while the portal can't read it." />))}
     </section>
   );
 }

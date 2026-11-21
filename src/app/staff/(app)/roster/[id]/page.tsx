@@ -1,4 +1,5 @@
 // Link, not <a>, for /staff/roster below: the no-html-link-for-pages lint rule treats it as the dynamic /staff/roster/[id] route.
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
@@ -6,16 +7,19 @@ import { can } from "@/lib/permissions/effective";
 import { writeAudit } from "@/lib/audit/log";
 import { loadRosterPage, familyEntry, type RecordStudent } from "@/lib/roster/queries";
 import { familyRecordAt } from "@/lib/families/address";
-import type { AppFamilyId } from "@/lib/families/ids";
-import { familyCover, guardianCustomers, guardianStandings, moveTargets, studentsBeingMade, versionsOf } from "@/lib/roster/writes";
+import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
+import { familyCover, guardianCustomers, guardianStandings, heldCustomerOffered, isDetailsSend, moveTargets, studentsBeingMade, versionsOf } from "@/lib/roster/writes";
+import { endedLinksHeld, type EndedHeld } from "@/lib/accounting/ended-links";
 import { comparableContacts, loadOpenWrites } from "@/lib/roster/queue";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { familyContact, familySignins, type FamilySignin } from "@/lib/parents/directory";
 import { whoseDetails } from "@/lib/parents/my-family";
 import type { ContactForm } from "@/lib/parents/contact-fields";
-import { AddGuardianForm, DetailsForm } from "@/app/staff/(app)/parents/forms";
+import { AddGuardianForm, DetailsForm, ReleaseHoldControl } from "@/app/staff/(app)/parents/forms";
 import { GuardianChange } from "@/app/staff/(app)/parents/guardian-change";
-import { addGuardianAction } from "@/app/staff/(app)/parents/actions";
+import { addGuardianAction, releaseSigninHoldAction } from "@/app/staff/(app)/parents/actions";
+import { signinHoldOf } from "@/lib/parents/guardians";
+import { studentsRuleInForce } from "@/lib/parents/sessions";
 import { DisconnectedNotice, Freshness } from "../freshness";
 import { CreateInQuickBooks, FamilyChanges, MemberChanges, MoveStudents, PortalChanges, Waiting, WhatChanges, type MovableStudent } from "../changes";
 import { moveAction, saveFamilyDetailsAction } from "../write-actions";
@@ -24,6 +28,7 @@ import { placeWords } from "@/lib/roster/place";
 import type { Cust, Family } from "@/lib/roster/model";
 import { DataTable, type Column } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
+import { LocalTime } from "@/app/components/local-time";
 import { familyBalancePage, familyBuyoutsPage, familyCreditPage, familyProgressPage } from "@/app/staff/(app)/family-pages";
 
 export const metadata = { title: "Roster" };
@@ -35,13 +40,14 @@ const standing = (c: Cust | null) => (c === null ? "No customer" : c.active ? "A
  * A student record's standing in QuickBooks: its customer's under this family; or, for a record whose linked customer
  * QuickBooks has elsewhere (since stage 3's slice 9c the two can disagree), where that is, in the words the accounting
  * links screen says it in too (placeWords(), src/lib/roster/place.ts): under another family, under no customer, under
- * one that is no family here, no longer a student customer, or gone. QuickBooks text, as text.
+ * one that is no family here, no longer a student customer, or gone. QuickBooks text, as text. A record with no link
+ * whose customer from before an unlink is still in the books (`held`, endedLinksHeld(): stage 4's slice M3b2) says so.
  */
-const studentStanding = (s: RecordStudent) => (s.customer ? standing(s.customer) : s.place ? placeWords(s.place)
-  : s.linked ? "Not under a family in QuickBooks" : "No customer");
+const studentStanding = (s: RecordStudent, held: ReadonlyMap<AppStudentId, EndedHeld>) => (s.customer ? standing(s.customer) : s.place ? placeWords(s.place)
+  : s.linked ? "Not under a family in QuickBooks" : held.has(s.id) ? "Not linked: their customer from before an unlink is still in the books" : "No customer");
 
 /** One row of a people table: a record's name (a student's) or a customer's (a parent's, a member's), with what QuickBooks holds for them. */
-type Person = { key: string; name: string; customer: Cust | null; standing?: string };
+type Person = { key: string; name: string; customer: Cust | null; standing?: ReactNode };
 const ofCustomer = (c: Cust): Person => ({ key: c.qboId, name: c.displayName, customer: c });
 
 /**
@@ -108,6 +114,31 @@ function SignIns({ familyId, signins, links, changes, addable, inQuickBooks }: {
 }
 
 /**
+ * A family whose sign-ins a take from the books held (stage 4's slice M4b): who held it and when, why, whether its
+ * guardians would count at the gate once let in (`wouldCount`, or why not), and, for staff who may change families
+ * (`release`), the one press that lets every open guardian of it sign in at once, with their names and count. Nobody
+ * else gets the press; a parent is shown nothing of the hold. Names are people's, shown as text.
+ */
+function SigninHold({ name, hold, notNow, guardians, release }: { name: string; hold: { at: string; by: string | null }; notNow: string | null; guardians: string[];
+  release: (() => Promise<{ ok: true; message: string } | { ok: false; errors: string[] }>) | null }) {
+  const them = `${guardians.length === 1 ? "1 guardian" : `${guardians.length} guardians`}, ${guardians.join(", ")}`;
+  // "At once" only while nothing else keeps them out (`notNow` null); otherwise once what the Notice says no longer stands.
+  const who = guardians.length === 0 ? "It has no open guardian who isn't blocked now."
+    : notNow === null ? `Every open guardian of it can then sign in to it at once, while parent sign-ins are on: ${them}.`
+    : `Every open guardian of it can then sign in to it once what keeps them out above no longer stands: ${them}.`;
+  return (
+    <section className="box" aria-labelledby="entry-hold-h"><h2 id="entry-hold-h">Sign-ins held</h2>
+      <Notice tone="warning" live="none">
+        {name}&apos;s guardians can&apos;t sign in to it now. It was made active again from the books on the accounting links screen (the family, or one of its students),
+        {hold.by ? ` by ${hold.by},` : ""} on <LocalTime iso={hold.at} />, and its sign-ins were held then, until someone who may change families lets its guardians in.
+        {" "}{notNow === null ? "Once let in, they count at once: the family is active and nothing else keeps them out." : `Even once let in, they can't sign in yet: ${notNow}.`}
+      </Notice>
+      {release !== null && <><p>Let its guardians sign in ends the hold. {who}</p><ReleaseHoldControl release={release} /></>}
+    </section>
+  );
+}
+
+/**
  * The family's phone and mailing address as the portal holds them (stage 3's slice 11c), in books where they are each
  * family's (no parent type, flat books included), shared by its guardians: shown only to a reader who may change
  * families or see parents' details, and the form only to one who may change families, for an active family record.
@@ -163,6 +194,10 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   const links = can(ctx.effective, "Parents.ReadWrite");
   const changesGuardians = can(ctx.effective, "Roster.Family.ReadWrite");
   const signins = await familySignins(familyId);
+  // A hold on its sign-ins after a take from the books (stage 4's slice M4b): one query, and the students rule only when held.
+  const hold = await signinHoldOf(familyId);
+  const holdNotNow = hold === null ? null : !fam.active ? "the family is inactive in the portal"
+    : (await studentsRuleInForce()) && !fam.students.some((s) => s.active) ? "the family has no active student, and the club asks for one" : null;
   const signinStandings = await guardianStandings(signins.map((s) => ({ guardianId: s.guardianId, familyId, name: s.name, open: s.open })));
   // The Parent customers a portal guardian is linked to (stage 3's slice 9h): shown as theirs, with no forms here.
   const ofGuardians = await guardianCustomers(fam.parents.map((p) => p.qboId), familyId);
@@ -191,10 +226,22 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   const beingMade = await studentsBeingMade(fam.students.filter((s) => s.active).map((s) => s.id));
   const hereStudents = fam.students.filter((s) => s.active && !s.linked && !beingMade.has(String(s.id)));
   const studentType = page.shape?.kind === "layered" && page.shape.studentTypeId !== null;
+  // What an unlink left (stage 4's slice M3b2): the family's, and each active student's with no link, ended link whose
+  // customer the books still hold, read once (endedLinksHeld(): two queries, none when both lists are empty), and for the
+  // family's, whether Accounting links can offer that customer (heldCustomerOffered(): three more, only for such a
+  // family). Guardians' are said by their standings (guardianStandings(), which reads every row's at once: two more).
+  const held = await endedLinksHeld({ families: fam.linked ? [] : [familyId], students: fam.students.filter((s) => s.active && !s.linked).map((s) => s.id) });
+  const heldFamily = held.families.get(familyId) ?? null;
+  const heldOffered = heldFamily !== null && (await heldCustomerOffered(heldFamily.customerId));
+  const linker = can(ctx.effective, "Accounting.Link.ReadWrite");
   // "Create in QuickBooks and link": for an active family with no link, or with active students with none (where the
   // books have a student type) under a customer QuickBooks holds as an active family, to staff who may change families
-  // and link them to accounting (createInQuickBooksAndLink() refuses one under an inactive customer).
-  const toMake = !fam.linked || (studentType && hereStudents.length > 0 && customer !== null && customer.active);
+  // and link them to accounting (createInQuickBooksAndLink() refuses one under an inactive customer). Never for a family
+  // or a student whose customer from before an unlink is still in the books: they are linked again on Accounting links
+  // (the action refuses the family and leaves such a student out all the same).
+  const toCreate = hereStudents.filter((s) => !held.students.has(s.id));
+  const notOffered = hereStudents.flatMap((s) => { const was = held.students.get(s.id); return was ? [{ name: s.name, customer: was.customerName }] : []; });
+  const toMake = (!fam.linked && heldFamily === null) || (studentType && toCreate.length > 0 && customer !== null && customer.active);
   const inQuickBooks: Family | null = customer === null ? null
     : { customer, students: fam.students.flatMap((s) => (s.customer ? [s.customer] : [])), parents: fam.parents };
   // Students whose record is inactive are offered nothing that would send. One QuickBooks has under another family is
@@ -208,7 +255,8 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   ] : []);
   const edit = canChange && inQuickBooks ? { rosterTag, versions: await versionsOf(records.map((r) => r.qboId)), familyId: String(familyId), records: linkedRecords,
     guardianCustomers: ofGuardians,
-    blocked: new Set(open.map((w) => (w.write.op === "create" || !("qboId" in w.write) ? null : w.write.qboId)).filter((x): x is string => x !== null)),
+    // A guardian's phone, mailing address or sign-in email sent on blocks nothing (isDetailsSend(), as blocksOthers on the server).
+    blocked: new Set(open.map((w) => (w.write.op === "create" || isDetailsSend(w.write) || !("qboId" in w.write) ? null : w.write.qboId)).filter((x): x is string => x !== null)),
     // A student with a move QuickBooks refused that the portal kept (slice 9f) isn't made inactive until it is sent or
     // given up (deactivateLinked() refuses it): their make-inactive is not offered, and the page says why.
     keptMoves: new Set(fam.students.flatMap((s) => (s.customer !== null && waiting.some((w) => w.state === "refused" && w.write.op === "move" && w.studentId !== null
@@ -232,16 +280,27 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
       <h1 className="page-title">{fam.name}</h1>
       <p className="lede">{entry.kind === "family" ? "A family" : "A member"} the portal keeps{customer ? <>, linked to its customer in QuickBooks{customer.active ? "" : ", which is inactive there"}</>
         : fam.linked ? `, linked to a customer QuickBooks doesn't list as a ${entry.kind} now`
-        : making ? ", not linked to QuickBooks yet: its customer is being made there" : ", not linked to QuickBooks: it is in the portal only, and a change to it is saved here only"}. <Link href="/staff/roster">Back to the roster</Link></p>
+        : making ? ", not linked to QuickBooks yet: its customer is being made there"
+        : heldFamily ? <>, not linked to QuickBooks: it was linked to &ldquo;{heldFamily.customerName}&rdquo; there until it was unlinked, &ldquo;{heldFamily.customerName}&rdquo; is still in the books, and a change to it is saved here only</>
+        : ", not linked to QuickBooks: it is in the portal only, and a change to it is saved here only"}.{heldFamily === null ? null
+          // Where Accounting links can't offer the customer (inactive in the books, under another customer or of another
+          // type: the pool's rule, as the refusal says it, ENDED_HELD()), it is sorted out in QuickBooks first.
+          : !heldOffered ? <> Accounting links can&apos;t offer &ldquo;{heldFamily.customerName}&rdquo; for it until it is sorted out in QuickBooks, where it may be inactive, under another customer or of another type; once it is, {linker
+            ? <><Link href="/staff/links">link it again on Accounting links</Link>.</> : "someone who may link families to accounting links it again there."}</>
+          : linker ? <> <Link href="/staff/links">Link it again on Accounting links</Link>.</>
+          : " Someone who may link families to accounting links it again on Accounting links."} <Link href="/staff/roster">Back to the roster</Link></p>
       <DisconnectedNotice page={page} admin={admin} />
       {entry.kind === "family" ? (
         <>
-          <People id="entry-students-h" title="Students" noun="Student" people={fam.students.map((s) => ({ key: String(s.id), name: s.name, customer: s.customer, standing: studentStanding(s) }))} contact={false} empty="The portal holds no students for this family." />
+          <People id="entry-students-h" title="Students" noun="Student" people={fam.students.map((s) => ({ key: String(s.id), name: s.name, customer: s.customer, standing: studentStanding(s, held.students) }))} contact={false} empty="The portal holds no students for this family." />
           <People id="entry-parents-h" title="Parents in QuickBooks" noun="Parent" contact empty="QuickBooks lists no parents under this family."
-            people={fam.parents.map((c) => ({ ...ofCustomer(c), standing: `${standing(c)}: ${ofGuardians.get(c.qboId) === "own" ? "a portal guardian's own, changed through them under Portal sign-ins and on their page"
-              : ofGuardians.get(c.qboId) === "other" ? "linked to a portal guardian, but not one guardian's own under this family (several share it, or theirs is another family), so the portal sends nothing for it: change it in QuickBooks, and the mapping screen will sort it out"
+            people={fam.parents.map((c) => ({ ...ofCustomer(c), standing: <>{standing(c)}: {ofGuardians.get(c.qboId) === "own" ? "a portal guardian's own, changed through them under Portal sign-ins and on their page"
+              // Stage 4's slice M3c: a shared customer, or one only another family's guardian is linked to, is sorted out on
+              // Accounting links by unlinking each guardian whose it isn't (and linking one of this family's where none is
+              // left on it), and one no guardian is linked to is linked to one there; a link only for a reader who may link.
+              : ofGuardians.get(c.qboId) === "other" ? <>linked to a portal guardian, but not one guardian&apos;s own under this family (several share it, or theirs is another family), so the portal sends nothing for it: change it in QuickBooks, or on {linker ? <Link href="/staff/links">Accounting links</Link> : "Accounting links, by someone who may link families to accounting,"} unlink from it each guardian whose it isn&apos;t; once one guardian of this family alone is linked to it, it is theirs, and if none of this family&apos;s is left on it, one who isn&apos;t linked to a customer can be linked to it there</>
               : ofGuardians.get(c.qboId) === "removed" ? "the own Parent customer of a guardian removed from this family, left active in QuickBooks (a removal makes it inactive only when its balance allows): adding them back under Portal sign-ins uses it again"
-              : "not a portal guardian; adding the person under Portal sign-ins doesn't use it, and the mapping screen will offer to link it"}` }))} />
+              : <>not a portal guardian; adding the person under Portal sign-ins doesn&apos;t use it, and while it is active a guardian of this family who isn&apos;t linked to a customer can be linked to it on {linker ? <Link href="/staff/links">Accounting links</Link> : "Accounting links, by someone who may link families to accounting"}</>}</> }))} />
         </>
       ) : (
         <People id="entry-member-h" title="In QuickBooks" noun="Member" people={customer ? [ofCustomer(customer)] : []} contact empty="QuickBooks lists no customer for this member." />
@@ -256,16 +315,18 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
         credit={entry.kind === "family" && fam.active && can(ctx.effective, "Volunteer.Credit.ReadWrite")} />
       {familyDetails && <FamilyDetails familyId={familyId} details={familyDetails} editable={can(ctx.effective, "Roster.Family.ReadWrite") && fam.active} />}
       <Waiting items={waiting} compare={compareIds} />
-      {edit && inQuickBooks && entry.kind === "family" && page.shape?.kind === "layered" && <FamilyChanges shape={page.shape} family={inQuickBooks} edit={edit} cover={cover} inactiveRecords={inactiveRecords} />}
+      {edit && inQuickBooks && entry.kind === "family" && page.shape?.kind === "layered" && <FamilyChanges shape={page.shape} family={inQuickBooks} edit={edit} cover={cover} inactiveRecords={inactiveRecords} linker={linker} />}
       {moves && <MoveStudents students={movable} families={moveTo.families} refusedHere={moveTo.refusedHere} rosterTag={rosterTag} act={moveAction} />}
       {edit && inQuickBooks && entry.kind === "member" && <MemberChanges member={inQuickBooks.customer} edit={edit} />}
       {changesHere && page.shape && <PortalChanges familyId={String(familyId)} name={fam.name} noun={entry.kind} unlinked={!fam.linked}
         addStudents={offers(page.shape, "add_student")} students={hereStudents.map((s) => ({ id: String(s.id), name: s.name }))} rosterTag={rosterTag} />}
       {changesHere && toMake && <CreateInQuickBooks familyId={String(familyId)} name={fam.name} noun={entry.kind} unlinked={!fam.linked}
-        students={studentType ? hereStudents.map((s) => s.name) : []} rosterTag={rosterTag} ready={page.connected && page.roster !== null}
+        students={studentType ? toCreate.map((s) => s.name) : []} notOffered={studentType ? notOffered : []} rosterTag={rosterTag} ready={page.connected && page.roster !== null}
         may={can(ctx.effective, "Accounting.Link.ReadWrite")}
         types={page.shape?.kind === "flat" ? page.shape.memberTypeIds.map((t) => ({ qboId: t, name: page.types.find((x) => x.qboId === t)?.name ?? "A member type" })) : []} />}
       {page.shape && <WhatChanges shape={page.shape} canChange={canChange} unlinked={!fam.linked} />}
+      {hold !== null && <SigninHold name={fam.name} hold={hold} notNow={holdNotNow} guardians={signins.filter((s) => s.open && s.kind !== "blocked").map((s) => s.name)}
+        release={changesGuardians ? releaseSigninHoldAction.bind(null, String(familyId)) : null} />}
       <SignIns familyId={familyId} signins={signins} links={links} changes={changesGuardians} inQuickBooks={signinStandings}
         addable={!fam.active ? "This family is inactive in the portal, so nobody can be added to it."
           : making ? "Making this family in QuickBooks is still waiting on the queue, so nobody can be added to it for now." : null} />

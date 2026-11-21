@@ -24,7 +24,7 @@ import { env } from "@/env";
 import { asAppFamilyId, type AppFamilyId } from "@/lib/families/ids";
 // Each person is seeded in a family of the app's own (seedGuardianInFamily()): the gate lets a parent in only through an
 // open row naming an active family record.
-import { resetDb, seedParent, seedGuardian, seedGuardianInFamily, seedParentSession, seedWorkingMail } from "../helpers/db";
+import { resetDb, seedParent, seedGuardian, seedGuardianInFamily, seedInactiveFamily, seedParentSession, seedWorkingMail } from "../helpers/db";
 // Every sign-in goes through the door as a browser's does: the password, then the code it mails (the sign-in release, slice SI-3b).
 import { DOOR_IP, DOOR_PASSWORD, appStep, codeMailed, codeStep, cookieNamed, passwordStep, postDoor, signInThroughDoor } from "../helpers/parent-door";
 import { appCode, seedAuthenticator, seedBackupCodes } from "../helpers/authenticator";
@@ -229,7 +229,9 @@ describe("the parent door", () => {
     const { body, cookie } = await signIn("ana@example.com");
     expect(body).toEqual({ ok: true, next: "/choose-family" });
     const first = await stateOf(cookie);
-    expect(first).toMatchObject({ status: "choose", families: [{ guardianId: f1.id, familyId: f1.familyId }, { guardianId: f2.id, familyId: f2.familyId }] });
+    // Neither family has a link, so the chooser lists them by row (enterableGuardianRows(), stage 3's slice 12b1).
+    const byRow = [f1, f2].sort((x, y) => (x.id < y.id ? -1 : 1));
+    expect(first).toMatchObject({ status: "choose", families: byRow.map((f) => ({ guardianId: f.id, familyId: f.familyId })) });
     const sessionId = first.status === "choose" ? first.sessionId : "";
     // A family is chosen by the person's own guardian row; the session is given that row's family.
     expect(await chooseFamily({ sessionId, parentId: a.id, guardianId: f2.id, ip: IP })).toBe(true);
@@ -621,10 +623,10 @@ describe("the gate: a parent enters only an active family of the app's own (app-
     expect(await stateOf(cookie)).toMatchObject({ status: "ok", identity: { familyId: g2.familyId } });
   });
 
-  it("offers no row that names no family record, and refuses a person with no row that counts as one with no open row", async () => {
+  it("offers no row of a family record that was never active, and refuses a person with no row that counts as one with no open row", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
-    // A row the records were never brought into step for: it names no family record.
-    const bare = await seedGuardian({ parentId: a.id, familyQboId: "F1" });
+    // An open row in a family record that is inactive and linked to nothing: it doesn't count.
+    const bare = await seedGuardian({ parentId: a.id, familyId: await seedInactiveFamily() });
     const g2 = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F2" });
     // The password is taken and the code sent and checked because one row counts, and that one family is entered at once.
     const { body, cookie } = await signIn("ana@example.com");
@@ -643,10 +645,10 @@ describe("the gate: a parent enters only an active family of the app's own (app-
 
   it.each([
     ["names an inactive family record", "inactive"],
-    ["names no family record", "none"],
+    ["names a family record that was never active", "none"],
   ] as const)("a person whose only open row %s is refused at the password, sent no code and never signed in, as one with no open row", async (_, kind) => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
-    const g = kind === "none" ? await seedGuardian({ parentId: a.id, familyQboId: "F1", status: "invited" })
+    const g = kind === "none" ? await seedGuardian({ parentId: a.id, familyId: await seedInactiveFamily(), status: "invited" })
       : await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1", status: "invited" });
     if (kind === "inactive") await makeInactive(g.familyId);
     await seedPassword(a.authUserId, DOOR_PASSWORD);
@@ -795,7 +797,8 @@ describe("the gate: while the club asks for an active student, a family with non
     await giveStudent(g1.familyId); await giveStudent(g2.familyId);   // F3 has none
     const { cookie } = await signIn("ana@example.com");
     const s = await stateOf(cookie);
-    expect(s).toMatchObject({ status: "choose", families: [{ guardianId: g1.id }, { guardianId: g2.id }] });
+    // Neither family has a link, so the chooser lists them by row (enterableGuardianRows(), stage 3's slice 12b1).
+    expect(s).toMatchObject({ status: "choose", families: [g1.id, g2.id].sort().map((guardianId) => ({ guardianId })) });
     const sessionId = s.status === "choose" ? s.sessionId : "";
     // The family with no active student can't be chosen, the same way as a row that isn't the person's.
     expect(await chooseFamily({ sessionId, parentId: a.id, guardianId: g3.id, ip: IP })).toBe(false);
@@ -806,5 +809,85 @@ describe("the gate: while the club asks for an active student, a family with non
     await db.update(student).set({ active: false }).where(eq(student.familyId, g1.familyId!));
     expect(await stateOf(cookie)).toMatchObject({ status: "choose", families: [{ guardianId: g2.id, familyId: g2.familyId }] });
     expect(await statuses()).toEqual(["active", "active", "active"]);
+  });
+});
+
+describe("the gate: a family whose sign-ins are held after a take from the books is not one to enter (stage 4's slice M4b)", () => {
+  // The hold is set by a take on Accounting links (accounting-take-active.test.ts) and cleared by staff who may change
+  // families (releaseSigninHold()); here it is the test's own write, as the blocks above make a family inactive.
+  beforeEach(async () => { await resetDb(); outbox.length = 0; await seedWorkingMail(); await seedParentSettings(SIGNINS_ON); });
+  const STAFF_ID = "00000000-0000-4000-8000-0000000000aa";
+  const hold = (familyId: AppFamilyId | null) => db.update(family).set({ signinHeldAt: new Date(), signinHeldBy: STAFF_ID }).where(eq(family.id, familyId!));
+  const release = (familyId: AppFamilyId | null) => db.update(family).set({ signinHeldAt: null, signinHeldBy: null }).where(eq(family.id, familyId!));
+  const refusedFor = async (action: string, reason: string) =>
+    (await db.select().from(auditLog)).filter((x) => x.action === action && (x.after as { reason?: string } | null)?.reason === reason);
+  const ageCodes = async () => { await db.update(signinCode).set({ createdAt: new Date(Date.now() - 5 * 60_000) }); await db.delete(rateLimitEvent); };
+
+  it("the code request: a person whose only family is held is sent no code, with the same answer as anyone's, and closes no row", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    const g = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1", status: "invited" });
+    await hold(g.familyId);
+    const res = await post("/portal-code/send", { email: "ana@example.com" });
+    expect([res.status, await res.text()]).toEqual([200, JSON.stringify({ ok: true })]);
+    expect(await refusedFor("signin.code_refused", "no_enabled_guardian")).toHaveLength(1);
+    expect(outbox).toEqual([]);
+    expect((await db.select().from(guardian))[0]).toMatchObject({ id: g.id, status: "invited" });
+    // Released: the same row lets her in.
+    await release(g.familyId);
+    await ageCodes();
+    expect((await signIn("ana@example.com")).body).toEqual({ ok: true, next: "/" });
+  });
+
+  it("the code check: a code sent before the hold is refused once it is set, and no session is made", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    const g = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
+    await post("/portal-code/send", { email: "ana@example.com" });
+    await vi.waitFor(() => expect(outbox.length).toBe(1));
+    const code = /sign-in code: (\d{6})/.exec(outbox[0]!.subject)![1]!;
+    await hold(g.familyId);
+    const checked = await post("/portal-code/verify", { email: "ana@example.com", code });
+    expect(checked.headers.getSetCookie().some((c) => c.startsWith("br_parent.session_token"))).toBe(false);
+    expect(await refusedFor("signin.refused", "no_enabled_guardian")).toHaveLength(1);
+    expect(await db.select().from(parentAuthSession)).toEqual([]);
+    expect((await db.select().from(guardian)).map((r) => r.status)).toEqual(["active"]);
+  });
+
+  it("the chooser offers only the family that isn't held, refuses the held one, and a session that chose it is sent back on its next request", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    const g1 = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" }), g2 = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F2" });
+    const { cookie } = await signIn("ana@example.com");
+    const s = await stateOf(cookie);
+    const sessionId = s.status === "choose" ? s.sessionId : "";
+    expect(await chooseFamily({ sessionId, parentId: a.id, guardianId: g1.id, ip: IP })).toBe(true);
+    expect(await stateOf(cookie)).toMatchObject({ status: "ok", identity: { guardianId: g1.id, familyId: g1.familyId } });
+    // Held: the session that chose it goes back to choose on its next request, offered the other family alone.
+    await hold(g1.familyId);
+    expect(await stateOf(cookie)).toEqual({ status: "choose", parentId: a.id, sessionId, name: "Ana", families: [{ guardianId: g2.id, familyId: g2.familyId }] });
+    expect((await sessionRow()).familyId).toBeNull();
+    expect((await refusedFor("signin.refused", "family_not_enabled")).map((x) => x.after)).toEqual([{ reason: "family_not_enabled", familyId: String(g1.familyId) }]);
+    expect(await chooseFamily({ sessionId, parentId: a.id, guardianId: g1.id, ip: IP })).toBe(false);
+    // Both families held: nothing counts, so the person is signed out as one with no open row; no row is closed.
+    await hold(g2.familyId);
+    expect(await stateOf(cookie)).toEqual({ status: "none" });
+    expect(await db.select().from(parentAuthSession)).toEqual([]);
+    expect((await db.select().from(guardian)).map((r) => r.status)).toEqual(["active", "active"]);
+    // Released: both count again, by the gate and by the SQL rule the welcome and the reminders read.
+    await release(g1.familyId); await release(g2.familyId);
+    expect((await enterableGuardianRows(a.id)).map((r) => r.id).sort()).toEqual([g1.id, g2.id].sort());
+    const rule = await studentsRuleInForce();
+    expect(await db.select({ id: guardian.id }).from(guardian).where(guardianRowCounts(rule))).toHaveLength(2);
+  });
+
+  it("the SQL rule: a held family's row doesn't count, and its person counts only by another family's row", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" }), b = await seedParent({ name: "Ben", email: "ben@example.com" });
+    const ga = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
+    await seedGuardianInFamily({ parentId: b.id, familyQboId: "F1" });
+    const gb2 = await seedGuardianInFamily({ parentId: b.id, familyQboId: "F2" });
+    await hold(ga.familyId);
+    const rule = await studentsRuleInForce();
+    expect((await db.select({ id: guardian.id }).from(guardian).where(guardianRowCounts(rule))).map((r) => r.id)).toEqual([gb2.id]);
+    expect((await db.select({ id: parent.id }).from(parent).where(hasRowThatCounts(rule))).map((p) => p.id)).toEqual([b.id]);
+    expect(await enterableGuardianRows(a.id)).toEqual([]);
+    expect((await enterableGuardianRows(b.id)).map((r) => r.id)).toEqual([gb2.id]);
   });
 });

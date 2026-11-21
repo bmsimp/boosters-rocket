@@ -8,6 +8,8 @@ sign-in (`2026-11-09-certificate-credentials-design.md`).
 
 **Changed since** (2026-11-19, stage 3 slice 7a of `2026-11-18-app-owned-families-design.md`): the person and their guardian rows are no longer made, moved or closed from QuickBooks; a code goes to a person with a guardian row that counts (open, in an active family record, and with an active student while the club asks for one), and a confirmed change of sign-in email changes the person's own address after QuickBooks takes it. The code, the session, the chooser and the welcome are as this spec says.
 
+**Changed since** (2026-11-20, stage 3 slices 5 to 12b2 of `2026-11-18-app-owned-families-design.md`): the session stores the app's own family record it chose, never a QuickBooks id (5, migrations 0037 and 0038); the chooser and the frame name a family from its record, and the chooser binds the guardian row; a confirmed change of sign-in email is the portal's alone and is then sent on to the person's records in QuickBooks (11d, 11e); a guardian row names no QuickBooks customer (12b1, 12b2).
+
 ## Why
 
 The v1 design signed parents in through a Microsoft Entra External ID tenant, using email one-time

@@ -1,13 +1,23 @@
 import { and, eq, exists, gt, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { family, guardian, parent, parentAuthSession, parentAuthUser, parentDevice, parentSigninToken, signinCode, student } from "@/lib/db/schema";
+import { accountingLink, family, guardian, parent, parentAuthSession, parentAuthUser, parentDevice, parentSigninToken, signinCode, student } from "@/lib/db/schema";
 import type { Actor } from "@/lib/audit/log";
-import type { AppFamilyId } from "@/lib/families/ids";
+import { QUICKBOOKS, type AppFamilyId } from "@/lib/families/ids";
+import { recordsCompany } from "@/lib/families/links";
 import { getShape, shapeNamesStudents, type MembershipShape } from "@/lib/roster/shape";
 import { getParentSettings } from "./settings";
 import { unspentLink } from "./link-state";
 
+/**
+ * A guardian row as the code reads it, every column of it: what the gate, the chooser, staff's add, remove and
+ * reinstate and the Parents pages select (GUARDIAN_COLS). Kept by name since stage 3's slice 12b1, when it left out the
+ * row's two old copies of its customers, which slice 12b2 dropped (migration 0049).
+ */
 export type GuardianRow = typeof guardian.$inferSelect;
+export const GUARDIAN_COLS = {
+  id: guardian.id, familyId: guardian.familyId, parentId: guardian.parentId, isPrimary: guardian.isPrimary, status: guardian.status,
+  disabledReason: guardian.disabledReason, statusBeforeDisable: guardian.statusBeforeDisable, createdAt: guardian.createdAt, updatedAt: guardian.updatedAt,
+} satisfies Record<keyof GuardianRow, unknown>;
 
 export const parentActor = (p: { id: string; email: string }): Actor => ({ door: "parent", id: p.id, label: p.email });
 
@@ -77,7 +87,7 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * release's slice SI-2 (mintSigninLink(), signin-links.ts); devices since SI-3b (recordStrongSignin(), devices.ts), and
  * each session names the device it was made on since SI-5b (`parent_auth_session.device_id`). Everything that ends all of a
  * person's sign-in deletes their unused links, a held one on its way included (unspentLink, ./link-state.ts) and forgets their devices, in that
- * place, and keeps their password: blocking, sign-ins switched off, the change-of-company clear, a confirmed change of
+ * place, and keeps their password: blocking, sign-ins switched off, a confirmed change of
  * sign-in email, and closing a person's last open membership (closeMembership(), membership.ts; the lead's choice 10 of
  * the sign-in release). A password reset ends their sign-in too, in the same place, but sets the new password: it spends
  * its own link and deletes their other unspent reset links, a held one included. So:
@@ -92,8 +102,15 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * - confirmMyEmailChange() (email-change.ts) takes both address locks and the row FOR UPDATE, spends its request,
  *   reads (since slice SI-5a) under the row that the person isn't blocked and its own session still exists (stopping
  *   with the address unchanged otherwise), and changes the address, then deletes the person's other requests, then
- *   their unused codes, then their unused links, then their devices, then their sessions; it takes no roster lock and
- *   touches no app records or roster cache (since stage 3's slice 11d);
+ *   their unused codes, then their unused links, then their devices, then their sessions; then, since stage 3's slice
+ *   S11e, it queues the new address for each record of theirs in QuickBooks (queueEmailChange(), contact-queue.ts): the
+ *   record's open email items FOR UPDATE SKIP LOCKED (never waited for), then it closes those it may and inserts its own
+ *   items (a key share on each membership's family row, by the foreign key); it takes no roster lock and no "being
+ *   sent" lock and waits for neither, and touches no app records or roster cache (since stage 3's slice 11d). That key
+ *   share can wait, briefly, for a staff write holding the family's row FOR UPDATE (after the roster lock: a rename, an
+ *   add, the family action, changeOwnRecord() and the like), so the confirm may wait behind such a write: safe while no
+ *   writer takes a person's row, their sessions, codes or links, or their email items, after taking a family's row FOR
+ *   UPDATE. A new writer that would must take the person's row first;
  * - requestMyEmailChange() takes the row FOR UPDATE, then (since slice SI-5a) reads the asking session's `strong_at`
  *   unlocked, refusing unless it proved itself within the window, then replaces the person's unused request;
  * - blockPerson() (people.ts) takes the row FOR UPDATE, then deletes the unused requests, then the codes, then the
@@ -105,8 +122,8 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   waited for a person another of them holds, as that one asked for the roster, would be a deadlock, which Postgres
  *   ends by aborting one of them. (The email confirm took the roster after the person too until stage 3's slice 11d;
  *   it takes no roster lock now.) No roster read waits for a person's row, so waiting for the roster while holding one
- *   is safe against it; the change-of-company clear, which holds the roster as it takes everyone's rows, could meet
- *   these writes, though nothing the portal runs reaches it until stage 4. So addGuardian() takes the address lock, then the row FOR UPDATE, then the
+ *   is safe against it, and a change of company, which holds the roster, takes no person's or guardian row (stage 4's
+ *   slice M7a). So addGuardian() takes the address lock, then the row FOR UPDATE, then the
  *   roster lock, then makes the person if there is none, then takes their guardian row in the family FOR UPDATE;
  *   removeGuardian() and reinstateGuardian() take the row FOR UPDATE (no address lock: the address isn't changed or
  *   claimed), then the roster lock, then the guardian row FOR UPDATE, and removeGuardian() then deletes the person's
@@ -129,9 +146,6 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * - the daily clean-up (cleanUp(), src/lib/jobs/cleanup.ts) takes FOR UPDATE, in id order, the row of every person
  *   with an expired request, a spent or expired code, a used or expired link, an expired device or an expired session,
  *   then deletes those requests, then the codes, then the links and devices, then the sessions;
- * - clearParentAccess() (company-change.ts), on a change of company, takes FOR UPDATE, in id order, every person's
- *   row, then the open guardian rows, then deletes every request, then the unused codes, then the unused links, then
- *   the devices, then the sessions;
  * - a code request calls this before it touches a code, and a sign-in's last check (signinStands(), signin-codes.ts,
  *   run by the one finish of every sign-in, src/lib/auth/parent-signin-finish.ts) calls it and then reads, unlocked,
  *   what the sign-in spent: the code, or a set-up link's row and the `credential` row the set wrote;
@@ -275,9 +289,13 @@ export const hasActiveStudent = (familyId: typeof family.id): SQL =>
 
 /**
  * Whether "Families with no active student" is in force: stored on, and the stored membership shape names a student
- * type (shapeNamesStudents()). With no student type the app holds no active student, so the rule would keep every
- * parent out: it is in force only while the shape names students, as it was before stage 3's slice 7a, and a value
- * stored on beside a shape without students is not used until a shape with students is saved. This is the one place
+ * type (shapeNamesStudents()). The portal adds a student, moves one and changes a linked one only while the shape
+ * names a student type (shapeOperations()'s `noStudents`), and "Create a family from this" makes student records only
+ * then, so the shape says whether the club keeps students in the portal; the records a shape saved without one leaves
+ * (an unlinked one can still be renamed or made inactive, changeInPortal(), but none added) must not decide who signs
+ * in: the rule is in force only while the shape names students, as it was
+ * before stage 3's slice 7a, and a value stored on beside a shape without students is not used until a shape with
+ * students is saved. This is the one place
  * that decides it: the gate, the code request and check, the chooser, the welcome, the switches' counts, the staff
  * words and the reminders all go through it, through studentsRuleInForce(), which reads both as stored.
  */
@@ -294,24 +312,36 @@ export async function studentsRuleInForce(tx?: Tx): Promise<boolean> {
  * The one definition of a guardian row that counts (app-owned families spec §6: a guardian signs in while they are an
  * active guardian of an active family in the app): an open row (`status` not `disabled`) whose `family_id` names a
  * family record that is active, and, while the students rule is in force (studentsRuleInForce()), a family with at
- * least one active `student` record. Nothing here reads QuickBooks, and nothing closes a row for any of it: a row of a
+ * least one active `student` record. And the family's sign-ins not held (`family.signin_held_at` null): a take from the
+ * books on the accounting links screen that made the family, or a student who opens it, active again holds them until
+ * someone who may change families lets its guardians in on its page (releaseSigninHold(), guardians.ts; stage 4's
+ * slice M4b). Nothing here reads QuickBooks, and nothing closes a row for any of it: a row of a
  * family that stops counting stays open and counts again when the family does. A row that doesn't count is not a
  * family the person can enter: the chooser doesn't offer it (chooseFamily() refuses it), a session that chose it is
  * sent back to choose, and a person with no row that counts is refused as one with no open row
  * (src/lib/auth/resolve.ts): sent no code and refused at the code check (signin-codes.ts, `no_enabled_guardian`) and
  * at the sign-in's end (completeParentSignin()), and sent no welcome (welcome.ts, through hasRowThatCounts(), the same
  * rule as SQL). A session already open when the rule comes into force, or when a family loses its last active student
- * or goes inactive, is caught on its next request. In the chooser's order, by `family_qbo_id`, then the rows that name
- * no customer (made while their family had no link, stage 3's slice 9d), then by row id, so no linked family's place in
- * the chooser (and its "(1)", "(2)" in myFamilyNames()) moves. Closing a membership
+ * or goes inactive, is caught on its next request. In the chooser's order, by the customer the family's own link names
+ * (in the records' company, as linksOf() reads it), then the rows of families with no link, then by row id (stage 3's
+ * slice 12b1). That is the order the rows' own copy of the customer (`family_qbo_id`) gave for every row whose copy
+ * matched its family's link. Two kinds of row had a copy that didn't, and now sort among the linked families by their
+ * family's customer instead of staying at the end: one made while its family had no link, of a family linked since,
+ * and one of a family unlinked (an unlink cleared the copy, stage 4's slice M3b, until stage 3's slice 12b2 dropped it) and linked again since. While
+ * QuickBooks is connected to another company than the records' (recordsCompany() answers null) no link is read, and
+ * the rows come in row id order. A family's place in the chooser (and its "(1)", "(2)" in myFamilyNames()) moves when
+ * the family is linked, unlinked or relinked, and in that one state. Closing a membership
  * ends the sessions that chose the row's family record (endFamilySessions()), and every session once no open row is
  * left (membership.ts).
  */
 export async function enterableGuardianRows(parentId: string, tx?: Tx): Promise<EnterableRow[]> {
-  const studentsRule = await studentsRuleInForce(tx);
-  const rows = await (tx ?? db).select({ g: guardian, familyId: family.id }).from(guardian).innerJoin(family, eq(family.id, guardian.familyId))
-    .where(and(eq(guardian.parentId, parentId), ne(guardian.status, "disabled"), eq(family.active, true),
-      studentsRule ? hasActiveStudent(family.id) : undefined)).orderBy(sql`${guardian.familyQboId} asc nulls last`, guardian.id);
+  const [studentsRule, realmId] = await Promise.all([studentsRuleInForce(tx), recordsCompany(tx)]);
+  // A family has at most one family link in a company (accounting_link_family_uq), so the join adds no row.
+  const ownLink = and(eq(accountingLink.familyId, family.id), eq(accountingLink.system, QUICKBOOKS), realmId === null ? sql`false` : eq(accountingLink.realmId, realmId));
+  const rows = await (tx ?? db).select({ g: GUARDIAN_COLS, familyId: family.id }).from(guardian).innerJoin(family, eq(family.id, guardian.familyId))
+    .leftJoin(accountingLink, ownLink)
+    .where(and(eq(guardian.parentId, parentId), ne(guardian.status, "disabled"), eq(family.active, true), isNull(family.signinHeldAt),
+      studentsRule ? hasActiveStudent(family.id) : undefined)).orderBy(sql`${accountingLink.customerId} asc nulls last`, guardian.id);
   return rows.map((r) => ({ ...r.g, familyId: r.familyId }));
 }
 
@@ -331,7 +361,7 @@ export function hasRowThatCounts(studentsRule: boolean): SQL {
  */
 export function guardianRowCounts(studentsRule: boolean): SQL {
   return and(ne(guardian.status, "disabled"), exists(db.select({ id: family.id }).from(family)
-    .where(and(eq(family.id, guardian.familyId), eq(family.active, true), studentsRule ? hasActiveStudent(family.id) : undefined))))!;
+    .where(and(eq(family.id, guardian.familyId), eq(family.active, true), isNull(family.signinHeldAt), studentsRule ? hasActiveStudent(family.id) : undefined))))!;
 }
 
 /**

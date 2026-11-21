@@ -26,7 +26,7 @@ import { saveShape } from "@/lib/roster/shape";
 import { resetDb, seedGuardian, seedParent, seedWorkingMail } from "../helpers/db";
 import { startQboStub, seedConnected, fznCompany, FZN_SHAPE, type QboStub } from "../helpers/qbo-stub";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
-import { syncAppRecords } from "../helpers/app-records";
+import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 import { codeStep, ensurePassword, passwordStep } from "../helpers/parent-door";
 
 let stub: QboStub;
@@ -53,7 +53,11 @@ const check = (m: Msg & { pending: string }) => codeStep(codeIn(m), m.pending, {
 const codeIn = (m: Msg) => /sign-in code: (\d{6})/.exec(m.subject)![1]!;
 const pageRequest = async (cookie: string) => { fromBrowser(cookie, IP); return getParentState(); };
 const actions = async () => (await db.select().from(auditLog).orderBy(auditLog.id)).map((r) => r.action);
-/** Ana Rivera as the portal holds her: the person, her sign-in account and an invited row in the Rivera family (customer 10) from her record (11). */
+/**
+ * Ana Rivera as the portal holds her: the person, her sign-in account and an invited row in the Rivera family's record
+ * (customer 10), linked to her record (11). Seeded after the first read and the records it stands for, as staff add a
+ * guardian to a family the portal has: a row is given its family record by whoever makes it (stage 3's slice 12b1).
+ */
 const seedAna = async () => {
   const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
   await seedGuardian({ parentId: ana.id, familyQboId: "10", sourceQboId: "11", status: "invited" });
@@ -71,16 +75,16 @@ describe("a guardian the portal holds signs in beside the roster refresh", () =>
   });
 
   it("from the portal's own row to their family: refresh, code, session, and the family record migration 0023 made", async () => {
-    const ana = await seedAna();
     expect(await refreshRoster(worker)).toMatchObject({ ok: true });
     await syncAppRecords(); // the records, as 0023 made them from this roster: a read makes none (stage 3's slice 9c)
-    // The refresh made nobody: Ana is the one person, as seeded, and QuickBooks' other records gave no one a sign-in.
-    expect(await db.select().from(parent)).toHaveLength(1);
+    // The refresh made nobody: QuickBooks' records gave no one a sign-in.
+    expect(await db.select().from(parent)).toEqual([]);
+    const ana = await seedAna();
     const [link] = await db.select().from(guardian);
-    expect(link).toMatchObject({ parentId: ana.id, familyQboId: "10", sourceQboId: "11", status: "invited" });
+    expect(link).toMatchObject({ parentId: ana.id, status: "invited" });
     // Her row names the family record of customer 10, which the gate enters.
     const familyId = link!.familyId;
-    expect(familyId).not.toBeNull();
+    expect(String(familyId)).toBe(String(await recordOfCustomer("10", "family")));
     expect(await db.select().from(parentAuthSession)).toEqual([]);
 
     // She types her address her own way and gets a code at the address the portal holds.
@@ -112,9 +116,9 @@ describe("a guardian the portal holds signs in beside the roster refresh", () =>
   }, 30_000);
 
   it("stays in when the refresh no longer finds her parent record, or her family: the app's records stand alone", async () => {
-    await seedAna();
     await refreshRoster(worker);
     await syncAppRecords();
+    await seedAna();
     const mail = await codeMailedTo("ana@example.com");
     const { res } = await check(mail!);
     const cookie = cookieFrom(res);
@@ -136,9 +140,9 @@ describe("a guardian the portal holds signs in beside the roster refresh", () =>
   }, 30_000);
 
   it("keeps signing in with the portal's address when QuickBooks changes the one on her record", async () => {
-    const ana = await seedAna();
     await refreshRoster(worker);
     await syncAppRecords();
+    const ana = await seedAna();
     const first = await codeMailedTo("ana@example.com");
     const { res } = await check(first!);
     const cookie = cookieFrom(res);

@@ -2,7 +2,7 @@ import { and, asc, eq, gt, lte, sql, count } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { rateLimitEvent } from "@/lib/db/schema";
 
-export type RateLimitKind = "code_send_email" | "code_send_ip" | "code_check_ip" | "contact_save_parent" | "contact_open_parent" | "form_open_parent"
+export type RateLimitKind = "code_send_email" | "code_send_ip" | "code_check_ip" | "contact_save_parent" | "form_open_parent"
   | "volunteer_checkin_parent" | "volunteer_signup_parent" | "email_request_parent" | "email_confirm_parent" | "buyout_parent"
   | "password_link_ip" | "password_link_token" | "password_ask_email" | "password_ask_ip" | "password_try_email" | "password_try_device"
   | "password_try_ip" | "password_reask_parent" | "password_change_parent" | "signin_settings_parent" | "second_step_parent"
@@ -81,10 +81,8 @@ export const RATE_LIMITS: Record<RateLimitKind, { max: number; windowMs: number 
   // portal's address is the expected case (a later slice, SI-9b, is the better tool for that).
   signin_reset_person: { max: 3, windowMs: 24 * 60 * 60 * 1000 },
   // A parent's own phone and address (contact-edits.ts), counted per person: nobody changes their address more than a
-  // few times an hour. Since stage 3's slice 11a opening the edit page reads the portal alone and takes no count, so
-  // contact_open_parent is unused (S12 removes it).
+  // few times an hour. Opening the edit page reads the portal alone and takes no count.
   contact_save_parent: { max: 6, windowMs: 60 * 60 * 1000 },
-  contact_open_parent: { max: 30, windowMs: WINDOW_MS },
   // Opening a form to sign, and checking how one stands (src/lib/forms/signing.ts), counted per person: each asks the
   // club's Documenso once, and Documenso counts every call the portal makes against one limit of its own. A family
   // signing a dozen forms in a sitting opens and checks each a few times, so this sits well above that.

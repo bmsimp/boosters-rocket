@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useRef, useState, useTransition } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { DataTable } from "@/app/components/data-table";
@@ -10,9 +11,11 @@ const failed: Done = { ok: false, errors: [ACTION_FAILED] };
 /**
  * One row as the server words it: its key (the customer's id, which the bound press carries to the browser anyway, so
  * a row keeps its own pending press when the list shrinks), the customer's name (QuickBooks text, shown as text), its
- * students, what pressing makes, and the press bound to it.
+ * students, what pressing makes, and the press bound to it; or, for a customer meant for a family the portal has
+ * (stage 4's slice M3a2), no press but `aim`: words naming that family and the address on Accounting links where the
+ * two are linked (an app uuid and the customer's digits, no books text), with the link's words.
  */
-export type NoFamilyRow = { key: string; name: string; students: string; makes: string; act: () => Promise<Done> };
+export type NoFamilyRow = { key: string; name: string; students: string; makes: string; act: (() => Promise<Done>) | null; aim: { words: string; href: string; label: string } | null };
 
 /** A refusal said with the customer it is about (a family made names itself), so answers to several presses are told apart. */
 const about = (name: string, r: Done): Done => (r.ok ? r : { ok: false, errors: r.errors.map((e) => `${name}: ${e}`) });
@@ -35,7 +38,9 @@ export function NoFamilyRows({ rows }: { rows: NoFamilyRow[] }) {
             { key: "name", header: "Customer", rowHeader: true, cell: (r) => r.name },
             { key: "students", header: "Students under it", cell: (r) => r.students },
             { key: "makes", header: "What it makes", cell: (r) => r.makes },
-            { key: "do", header: "What you can do", quiet: true, cell: (r) => <MakeFamily name={r.name} act={r.act} onDone={(d) => onDone(r.name, d)} /> },
+            { key: "do", header: "What you can do", quiet: true, cell: (r) => (r.aim !== null || r.act === null
+              ? <>{r.aim?.words}{r.aim && <> <Link href={r.aim.href}>{r.aim.label}<span className="visually-hidden">: {r.name}</span></Link></>}</>
+              : <MakeFamily name={r.name} act={r.act} onDone={(d) => onDone(r.name, d)} />) },
           ]} />
       )}
     </>

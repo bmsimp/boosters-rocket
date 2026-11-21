@@ -1,6 +1,5 @@
 // Which of a person's set-up and reset links (`parent_signin_token`, signin-links.ts) are not yet spent. It imports
-// nothing but the schema, so the change-of-company clear (company-change.ts, called from src/lib/roster/source.ts) can
-// use it without importing anything from src/lib/roster/.
+// nothing but the schema, so any writer that ends a person's sign-in can use it without importing anything else.
 import { isNull, or, sql } from "drizzle-orm";
 import { parentSigninToken } from "@/lib/db/schema";
 

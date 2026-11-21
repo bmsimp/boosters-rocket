@@ -12,7 +12,7 @@ import { getShape } from "@/lib/roster/shape";
 import { getRosterSource } from "@/lib/roster/source";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { linksOfCustomers } from "@/lib/families/links";
-import { readFamilyForRun } from "./family-money";
+import { readFamilyForRun, RELINKED } from "./family-money";
 import { familiesCustomers } from "./stored";
 
 import { MONEY_JOB, RUN_KEY } from "./run-keys";
@@ -37,9 +37,10 @@ const RUN_LOCK = 7461003;
  * carry on next time. `no_record`: a family of the roster with no family record of the app's own in the roster's
  * company, so there is no row to keep its figures in (since stage 3's slice 9c a family customer added in the books
  * has no record until staff make one from it, "Create a family from this", so this can last); QuickBooks is asked
- * nothing, and nothing is stamped.
+ * nothing, and nothing is stamped. `relinked` (stage 4's slice M3b): the family was unlinked, or linked to another customer,
+ * since the run listed it (readFamilyForRun()), so nothing is read or stamped for it either.
  */
-const PASS_OVER = new Set(["bad_answer", "fault", "bad_id", "not_a_family", "http_400", "no_record"]);
+const PASS_OVER = new Set(["bad_answer", "fault", "bad_id", "not_a_family", "http_400", "no_record", RELINKED]);
 /**
  * Runs in a row that may stop at the same family before the next one passes it over: a family whose read always fails
  * (always too slow, say) would otherwise stop every run there, and the families after it would never be read again.

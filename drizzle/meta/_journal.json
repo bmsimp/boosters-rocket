@@ -327,29 +327,36 @@
     {
       "idx": 46,
       "version": "7",
-      "when": 1795195740839,
-      "tag": "0046_authenticator_app",
+      "when": 1795202270305,
+      "tag": "0046_retired_records_dropped",
       "breakpoints": true
     },
     {
       "idx": 47,
       "version": "7",
-      "when": 1795195746674,
-      "tag": "0047_passkeys",
+      "when": 1795209125298,
+      "tag": "0047_link_history",
       "breakpoints": true
     },
     {
       "idx": 48,
       "version": "7",
-      "when": 1795211899508,
-      "tag": "0048_passkey_offer",
+      "when": 1795220787353,
+      "tag": "0048_guardian_links_additive",
       "breakpoints": true
     },
     {
       "idx": 49,
       "version": "7",
-      "when": 1795218771815,
-      "tag": "0049_enrolling_session",
+      "when": 1795237269748,
+      "tag": "0049_guardian_columns_dropped",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1795252417552,
+      "tag": "0050_family_signin_hold",
       "breakpoints": true
     }
   ]

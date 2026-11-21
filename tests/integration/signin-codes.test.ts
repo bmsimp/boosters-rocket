@@ -19,7 +19,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, family, guardian, parent, parentAuthAccount, setting, signinCode } from "@/lib/db/schema";
 import { sendSecondStepCode, verifySigninCode, signinStands, hashSigninCode, CODE_TTL_MS, type StepPerson } from "@/lib/parents/signin-codes";
-import { resetDb, seedParent, seedGuardian, seedGuardianInFamily, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
+import { resetDb, seedParent, seedGuardian, seedGuardianInFamily, seedInactiveFamily, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
 import { stepPersonFor } from "../helpers/parent-door";
 import { seedDevice, seedPassword } from "../helpers/signin-links";
@@ -59,7 +59,7 @@ async function spentCode(): Promise<{ password: StepPerson["password"]; codeId: 
 async function ana(o: { blocked?: boolean; status?: "invited" | "active" | "disabled"; family?: "active" | "inactive" | "none" } = {}) {
   const p = await seedParent({ name: "Ana", email: "ana@example.com", blocked: o.blocked });
   const row = { parentId: p.id, familyQboId: "F1", status: o.status ?? "active", disabledReason: o.status === "disabled" ? "removed" as const : null };
-  if (o.family === "none") { await seedGuardian(row); return p; }
+  if (o.family === "none") { await seedGuardian({ ...row, familyQboId: undefined, familyId: await seedInactiveFamily() }); return p; }
   const g = await seedGuardianInFamily(row);
   if (o.family === "inactive") await db.update(family).set({ active: false }).where(eq(family.id, g.familyId!));
   return p;
@@ -142,7 +142,7 @@ describe("sending the second step's code", () => {
     ["a person whose rows are all disabled", () => ana({ status: "disabled" }), "no_enabled_guardian"],
     // An open row is not enough: its family must be an active family record (app-owned families spec section 6).
     ["a person whose only open row names an inactive family", () => ana({ family: "inactive" }), "no_enabled_guardian"],
-    ["a person whose only open row names no family record", () => ana({ family: "none" }), "no_enabled_guardian"],
+    ["a person whose only open row is in a family record that was never active", () => ana({ family: "none" }), "no_enabled_guardian"],
     ["an invited person whose only row names an inactive family", () => ana({ status: "invited", family: "inactive" }), "no_enabled_guardian"],
   ] as const)("sends nothing to %s and audits why", async (_, setup, reason) => {
     await setup();

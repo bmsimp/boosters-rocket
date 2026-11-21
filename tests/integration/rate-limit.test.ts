@@ -62,7 +62,7 @@ describe("database rate limits", () => {
     // 3 codes to one address; 60 requests and 180 checks from one IP address, which a school's shared Wi-Fi needs on a
     // registration night (spec §1 Rate limits). All in 15 minutes.
     const window = { windowMs: 15 * 60 * 1000 };
-    const { contact_save_parent, contact_open_parent, form_open_parent, volunteer_checkin_parent, volunteer_signup_parent, email_request_parent, email_confirm_parent, buyout_parent,
+    const { contact_save_parent, form_open_parent, volunteer_checkin_parent, volunteer_signup_parent, email_request_parent, email_confirm_parent, buyout_parent,
       password_reask_parent, password_change_parent, signin_settings_parent, signin_reset_person, ...signIn } = RATE_LIMITS;
     expect(signIn).toEqual({ code_send_email: { max: 3, ...window }, code_send_ip: { max: 60, ...window }, code_check_ip: { max: 180, ...window },
       // Choosing a password from a set-up or reset link (src/lib/parents/password-set.ts): a flood per IP address, as
@@ -81,9 +81,8 @@ describe("database rate limits", () => {
       // code's 5 tries (a right code gives its place back); the per-IP flood stop is the code check's.
       second_step_parent: { max: 5, ...window } });
     // A parent's own phone and address (src/lib/parents/contact-edits.ts), counted per person: a handful of saves an
-    // hour, each a write to the club's QuickBooks, and the reads the edit page makes as it opens.
+    // hour. Opening the edit page takes no count.
     expect(contact_save_parent).toEqual({ max: 6, windowMs: 60 * 60 * 1000 });
-    expect(contact_open_parent).toEqual({ max: 30, ...window });
     // Opening a form to sign and checking how it stands (src/lib/forms/signing.ts), counted per person: each asks the
     // club's Documenso once. A family signing a dozen forms in a sitting stays well under it.
     expect(form_open_parent).toEqual({ max: 120, ...window });

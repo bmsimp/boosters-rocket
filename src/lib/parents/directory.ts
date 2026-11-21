@@ -10,7 +10,7 @@
 import { and, eq, inArray, max, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, family, guardian, parent, parentAuthAccount, parentAuthUser, qboCustomer, type DisabledReason, type GuardianStatus } from "@/lib/db/schema";
-import { hasActiveStudent, studentsRuleInForce } from "./sessions";
+import { GUARDIAN_COLS, hasActiveStudent, studentsRuleInForce } from "./sessions";
 import { familyLabel } from "@/app/components/family-label";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { linksOf } from "@/lib/families/links";
@@ -26,13 +26,14 @@ export type AccessKind = "can" | "cannot" | "blocked";
  */
 export type FamilySignin = { guardianId: string; parentId: string; name: string; email: string; hasPassword: boolean; kind: AccessKind; words: string; open: boolean; reinstatable: boolean };
 /**
- * `previousCompany`: the link was closed when a different QuickBooks company was connected. Its `familyQboId` is the
- * old company's, so a page shows the family name as text and never links it to, or looks it up in, the roster.
- * `familyId`: the membership's own app family (`guardian.family_id`), which the family's page is addressed by; null for
- * a previous company's link, which has none. `familyQboId` is null for a membership made while its family had no link
- * (stage 3's slice 9d): the family is named from its record. `pageStands`: the family's staff page stands for it (an
- * active record, or one with a link), so it may be linked to; an inactive family with no link (made inactive in the
- * portal) has no page.
+ * `previousCompany`: the link was closed when a different QuickBooks company was connected, before stage 4's slice M7a
+ * (a change of company closes no row now): a page shows the family
+ * name as text and never links it to, or looks it up in, the roster. `familyId`: the membership's own app family
+ * (`guardian.family_id`), which the family's page is addressed by; null for a previous company's link, which has none.
+ * `familyQboId`: the customer the family record's own link names (stage 3's slice 12b1), null for a family with no link
+ * and for a previous company's row; the family is named from its record. `pageStands`: the family's staff page stands
+ * for it (an active record, or one with a link), so it may be linked to; an inactive family with no link (made inactive
+ * in the portal) has no page.
  */
 export type PersonFamily = { guardianId: string; familyQboId: string | null; familyId: AppFamilyId | null; familyName: string; previousCompany: boolean; pageStands: boolean;
   kind: AccessKind; words: string; open: boolean; reinstatable: boolean };
@@ -52,12 +53,15 @@ const WHY: Record<DisabledReason, string> = {
 
 /**
  * Why an open row's family is not one its person can enter now, by the gate's rule (enterableGuardianRows(),
- * ./sessions.ts): no family record, an inactive one, or none with an active student while the Admin asks for one.
+ * ./sessions.ts): no family record, an inactive one, one whose sign-ins are held after a take from the books (stage 4's
+ * slice M4b), or none with an active student while the Admin asks for one.
  * `counts` when it is one to enter. Nothing closes the row for any of these: the gate keeps its person out.
  */
-export type FamilyStanding = "counts" | "no_record" | "inactive" | "no_students";
+export type FamilyStanding = "counts" | "no_record" | "inactive" | "held" | "no_students";
 const NOT_NOW: Record<Exclude<FamilyStanding, "counts">, string> = {
-  no_record: "the family isn't set up in the portal", inactive: "the family is inactive", no_students: "the family has no active students",
+  no_record: "the family isn't set up in the portal", inactive: "the family is inactive",
+  held: "the family was made active again from the books, and its guardians wait for someone who may change families to let them in on its page",
+  no_students: "the family has no active students",
 };
 
 /**
@@ -91,7 +95,7 @@ async function withPassword(parentIds: string[]): Promise<Set<string>> {
 async function familyStandings(ids: (AppFamilyId | null)[]): Promise<(id: AppFamilyId | null) => FamilyStanding> {
   const unique = [...new Set(ids.filter((id): id is AppFamilyId => id !== null))];
   const [studentsRule, rows, withStudents] = await Promise.all([studentsRuleInForce(),
-    unique.length ? db.select({ id: family.id, active: family.active }).from(family).where(inArray(family.id, unique)) : Promise.resolve([]),
+    unique.length ? db.select({ id: family.id, active: family.active, held: family.signinHeldAt }).from(family).where(inArray(family.id, unique)) : Promise.resolve([]),
     unique.length ? db.select({ id: family.id }).from(family).where(and(inArray(family.id, unique), hasActiveStudent(family.id))) : Promise.resolve([])]);
   const found = new Map(rows.map((r) => [String(r.id), r]));
   const hasStudent = new Set(withStudents.map((r) => String(r.id)));
@@ -99,6 +103,7 @@ async function familyStandings(ids: (AppFamilyId | null)[]): Promise<(id: AppFam
     const f = id === null ? undefined : found.get(String(id));
     if (!f) return "no_record";
     if (!f.active) return "inactive";
+    if (f.held !== null) return "held";
     return studentsRule && !hasStudent.has(String(f.id)) ? "no_students" : "counts";
   };
 }
@@ -113,12 +118,16 @@ export async function familyNames(ids: string[]): Promise<Map<string, string>> {
 
 const numeric = (a: string, b: string) => a.localeCompare(b, "en", { numeric: true });
 /**
- * A person's rows in the order the Parents pages list them: a previous company's last; then by the customer each names,
- * as numbers; then the rows that name none (made while their family had no link), by row id.
+ * A person's rows in the order the Parents pages list them: a previous company's last; then by the customer each
+ * family's own link names, as numbers; then the rows of families with no link, by row id. As the chooser's order
+ * (enterableGuardianRows()), a row of a family linked since it was made, or relinked after an unlink, sorts by its
+ * family's customer now; while QuickBooks is connected to another company than the records' no link is read, and the
+ * rows of the current company come by row id.
  */
-const byCustomerThenRow = (a: typeof guardian.$inferSelect, b: typeof guardian.$inferSelect) =>
-  Number(oldCompany(a)) - Number(oldCompany(b)) || Number(a.familyQboId === null) - Number(b.familyQboId === null)
-  || (a.familyQboId !== null && b.familyQboId !== null ? numeric(a.familyQboId, b.familyQboId) : 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+type Placed = { id: string; disabledReason: DisabledReason | null; customer: string | null };
+const byCustomerThenRow = (a: Placed, b: Placed) =>
+  Number(oldCompany(a)) - Number(oldCompany(b)) || Number(a.customer === null) - Number(b.customer === null)
+  || (a.customer !== null && b.customer !== null ? numeric(a.customer, b.customer) : 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 /** The label for a link closed by a company change, in place of a family name. */
 export const PREVIOUS_COMPANY_FAMILY = "A family in the previous QuickBooks company";
 const oldCompany = (l: { disabledReason: DisabledReason | null }) => l.disabledReason === "company_changed";
@@ -131,18 +140,16 @@ async function people(where?: ReturnType<typeof eq>): Promise<PersonDetail[]> {
   if (!persons.length) return [];
   const ids = persons.map((p) => p.id);
   const [links, signins, passwords] = await Promise.all([
-    db.select().from(guardian).where(inArray(guardian.parentId, ids)),
+    db.select(GUARDIAN_COLS).from(guardian).where(inArray(guardian.parentId, ids)),
     db.select({ id: auditLog.targetId, at: max(auditLog.at) }).from(auditLog)
       .where(and(eq(auditLog.action, "signin"), eq(auditLog.door, "parent"), inArray(auditLog.targetId, ids))).groupBy(auditLog.targetId),
     withPassword(ids),
   ]);
-  // A link from a previous company holds that company's family ID, which names some other family (or none) in the
-  // connected one: it is never looked up in the cache. A row in a family record is named from the record, as the
-  // chooser names it; one with no record by the cache's name for its number, and one with neither in words.
+  // A link from a previous company is in no family record, and is never looked up in the cache. A row in a family
+  // record is named from the record, as the chooser names it, and one with none in words.
   const current = links.filter((l) => !oldCompany(l));
   const recordIds = [...new Set(current.flatMap((l) => (l.familyId === null ? [] : [l.familyId])))];
-  const [names, records, standing, linked] = await Promise.all([
-    familyNames(current.flatMap((l) => (l.familyId === null && l.familyQboId !== null ? [l.familyQboId] : []))),
+  const [records, standing, linked] = await Promise.all([
     recordIds.length ? db.select({ id: family.id, name: family.name }).from(family).where(inArray(family.id, recordIds)) : Promise.resolve([]),
     familyStandings(links.map((l) => l.familyId)), linksOf({ families: recordIds, students: [] })]);
   // The family's page stands for an active record, linked or not, and for an inactive one through its link (as the
@@ -150,12 +157,15 @@ async function people(where?: ReturnType<typeof eq>): Promise<PersonDetail[]> {
   const pageStands = (id: AppFamilyId | null) => id !== null && (!["inactive", "no_record"].includes(standing(id)) || linked.customerOfFamily.has(id));
   const recordName = new Map(records.map((r) => [String(r.id), recordNameWords(r.name, "family")]));
   const nameOf = (l: (typeof links)[number]) => (oldCompany(l) ? PREVIOUS_COMPANY_FAMILY
-    : (l.familyId !== null ? recordName.get(String(l.familyId)) : undefined) ?? (l.familyQboId !== null ? names.get(l.familyQboId) : undefined) ?? recordNameWords(null, "family"));
+    : (l.familyId !== null ? recordName.get(String(l.familyId)) : undefined) ?? recordNameWords(null, "family"));
+  // The customer of the row's family record, through the family's own link: none for a previous company's row.
+  const customerOf = (l: (typeof links)[number]) => (oldCompany(l) || l.familyId === null ? null : linked.customerOfFamily.get(l.familyId) ?? null);
   const last = new Map(signins.map((s) => [s.id, s.at]));
   return persons.map((p) => ({
     parentId: p.id, name: p.name, email: p.email, blocked: p.blocked, hasPassword: passwords.has(p.id),
-    families: links.filter((l) => l.parentId === p.id).sort(byCustomerThenRow).map((l) => ({
-      guardianId: l.id, familyQboId: l.familyQboId, familyId: oldCompany(l) ? null : l.familyId, familyName: nameOf(l), previousCompany: oldCompany(l),
+    families: links.filter((l) => l.parentId === p.id).map((l) => ({ l, customer: customerOf(l) }))
+      .sort((a, b) => byCustomerThenRow({ ...a.l, customer: a.customer }, { ...b.l, customer: b.customer })).map(({ l, customer }) => ({
+      guardianId: l.id, familyQboId: customer, familyId: oldCompany(l) ? null : l.familyId, familyName: nameOf(l), previousCompany: oldCompany(l),
       pageStands: !oldCompany(l) && pageStands(l.familyId),
       ...accessWords({ status: l.status, reason: l.disabledReason, blocked: p.blocked, hasPassword: passwords.has(p.id), family: standing(l.familyId) }), ...rowActions(l) })),
     lastSigninAt: last.get(p.id)?.toISOString() ?? null, welcomedAt: p.welcomedAt?.toISOString() ?? null,
@@ -183,7 +193,7 @@ export async function getPerson(parentId: string): Promise<PersonDetail | null> 
  */
 export async function familySignins(familyId: AppFamilyId): Promise<FamilySignin[]> {
   // A link from a previous company is in no family's record (its family_id is null): it is not one of this family's sign-ins.
-  const links = await db.select({ g: guardian, p: parent }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
+  const links = await db.select({ g: GUARDIAN_COLS, p: parent }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
     .where(and(eq(guardian.familyId, familyId), sql`${guardian.disabledReason} is distinct from 'company_changed'`));
   const [standing, passwords] = await Promise.all([familyStandings([familyId]), withPassword(links.map(({ p }) => p.id))]);
   return links.map(({ g, p }): FamilySignin => ({ guardianId: g.id, parentId: p.id, name: p.name, email: p.email, hasPassword: passwords.has(p.id),

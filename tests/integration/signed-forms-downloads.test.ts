@@ -3,7 +3,7 @@ import { asParent, asParentChoosing, asRefusedParent, asStaff, redirectOf, rende
 
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, family, guardian, parentAuthSession, role, roleAssignment, roleRule, signatureRequest, signedFormEvidence } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, parentAuthSession, role, roleAssignment, roleRule, signatureRequest, signedFormEvidence } from "@/lib/db/schema";
 import { GET as parentDownload } from "@/app/(parent)/forms/[id]/signed/route";
 import { GET as staffDownload } from "@/app/staff/(app)/forms/evidence/[id]/[file]/route";
 import FormsPage from "@/app/(parent)/forms/page";
@@ -73,13 +73,21 @@ describe("a parent downloads their own family's signed form", () => {
     expect((await askParent(a.forms!.ids.complete)).status).toBe(404);
   });
 
-  it("finds evidence only by the family's own request and the company connected now", async () => {
+  // Stage 4's slice M7a (decision 5): evidence is current unless archived, whatever company copy it holds. The
+  // "another company's" case flipped on purpose from refused to given, as in archived-evidence.test.ts.
+  it("finds evidence only by the family's own request, whatever company copy it holds, and never once archived", async () => {
     asParent(a.identity);
     const ctx = { ...a.identity, ip: null };
     expect(await findMySignedPdf(ctx, b.forms!.ids.complete)).toBeNull();
     expect([...(await mySignedDownloads(ctx, [a.forms!.ids.complete, b.forms!.ids.complete, NOBODY, "x"])).entries()]).toEqual([[a.forms!.ids.complete, 1]]);
-    // The same row under another company is not this family's, whatever its QuickBooks id says.
+    // The same row with another company's copy (a family kept across a change of company) is still this family's,
+    // found by its request and app family, never by a QuickBooks id; B's stays B's.
     await db.update(signedFormEvidence).set({ realmId: "another-company" }).where(eq(signedFormEvidence.id, a.forms!.evidence.id));
+    expect(Buffer.compare((await findMySignedPdf(ctx, a.forms!.ids.complete))!, a.forms!.evidence.sealed)).toBe(0);
+    expect((await askParent(a.forms!.ids.complete)).status).toBe(200);
+    expect(await findMySignedPdf(ctx, b.forms!.ids.complete)).toBeNull();
+    // Archived as an earlier company's (before slice M7a): cut from its request and family, and refused.
+    await db.update(signedFormEvidence).set({ earlierCompanyAt: new Date(), requestId: null, familyId: null, studentId: null }).where(eq(signedFormEvidence.id, a.forms!.evidence.id));
     expect(await findMySignedPdf(ctx, a.forms!.ids.complete)).toBeNull();
     expect((await askParent(a.forms!.ids.complete)).status).toBe(404);
   });
@@ -160,12 +168,10 @@ describe("a signed form kept while the family had no QuickBooks link", () => {
     await db.delete(accountingLink).where(eq(accountingLink.familyId, familyA));
     expect(await db.select().from(accountingLink).where(eq(accountingLink.familyId, familyA))).toEqual([]);
     expect((await db.select({ active: family.active }).from(family).where(eq(family.id, familyA)))[0]).toEqual({ active: true });
-    // The session names the family record, never a QuickBooks id (the session slice, migrations 0037 and 0038). The
-    // guardian row's QuickBooks family is changed too, as a later slice drops that column: a gate that still matched a
-    // session to a row by a QuickBooks family would find no row, so this half proves the session slice with the other two.
+    // The session names the family record, never a QuickBooks id (the session slice, migrations 0037 and 0038), and the
+    // guardian row holds no QuickBooks family (slice 12b2 dropped its copy): this half proves the session slice with the other two.
     expect((await db.select({ familyId: parentAuthSession.familyId }).from(parentAuthSession).where(eq(parentAuthSession.id, a.session.id)))[0])
       .toEqual({ familyId: familyA });
-    await db.update(guardian).set({ familyQboId: "NO-CUSTOMER-A" }).where(eq(guardian.id, a.identity.guardianId));
     // The gate signs the parent in to it from the session, which names the family record: no link is asked for.
     const signedIn = await identityNow(a.session.id);
     expect(signedIn).toMatchObject({ familyId: familyA, guardianId: a.identity.guardianId });
@@ -207,7 +213,7 @@ describe("staff download a signed form's evidence", () => {
       expect([r.status, r.headers.get("content-disposition"), r.headers.get("content-type")]).toEqual([200, `attachment; filename="${name}"`, type]);
     }
     const record = JSON.parse(await (await askStaff(a.forms!.evidence.id, "evidence-record-json")).text());
-    expect(record).toMatchObject({ evidenceId: a.forms!.evidence.id, requestId: a.forms!.ids.complete, fromAnEarlierCompany: false, form: "Uniform agreement" });
+    expect(record).toMatchObject({ evidenceId: a.forms!.evidence.id, requestId: a.forms!.ids.complete, archivedAsEarlierCompany: false, form: "Uniform agreement" });
     expect(record.files.find((f: { kind: string }) => f.kind === "sealed_pdf").sha256).toBe(a.forms!.evidence.sealedSha256);
     expect(await audits("forms.evidence.download")).toHaveLength(6);
   });

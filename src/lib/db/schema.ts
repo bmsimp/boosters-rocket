@@ -115,8 +115,8 @@ export const parent = pgTable("parent", {
  * with it; since then they stand alone: a staff roster write changes its own record (changeOwnRecord(),
  * src/lib/roster/writes.ts), and nothing QuickBooks holds changes one (the import that made them,
  * src/lib/families/roster-import.ts, has no caller in the portal). Every link belongs to the company the cache came
- * from. Nothing deletes a record or a link but a change of company, which empties all three tables
- * (src/lib/families/company-change.ts).
+ * from. Nothing deletes a record. A link is removed only by an unlink or a change of company, each of which moves it
+ * into `accounting_link_ended` (src/lib/accounting/link-writes.ts, src/lib/families/company-change.ts).
  */
 
 /**
@@ -144,10 +144,15 @@ export const family = pgTable("family", {
   contactVersion: integer("contact_version").notNull().default(0),
   accountingLeftUnlinkedAt: timestamp("accounting_left_unlinked_at", { withTimezone: true }),
   accountingLeftUnlinkedBy: uuid("accounting_left_unlinked_by"), // staff_user.id of who left it unlinked
+  // Stage 4's slice M4b: a family made active again from the books, or opened by a student's take, keeps its guardians
+  // out (the gate reads it, enterableGuardianRows()) until someone who may change families lets them in on its page.
+  signinHeldAt: timestamp("signin_held_at", { withTimezone: true }),
+  signinHeldBy: uuid("signin_held_by"), // staff_user.id of whose take set the hold
   createdAt: created(),
   updatedAt: updated(),
 }, (t) => [
   check("family_left_unlinked_by_with_at", sql`${t.accountingLeftUnlinkedBy} is null or ${t.accountingLeftUnlinkedAt} is not null`),
+  check("family_signin_held_by_with_at", sql`${t.signinHeldBy} is null or ${t.signinHeldAt} is not null`),
 ]);
 
 /**
@@ -169,33 +174,31 @@ export const student = pgTable("student", {
 ]);
 
 /**
- * "This person is a guardian in this family." Name, email and phone live on the person (`parent`). `family_qbo_id` is
- * the customer the family's link named when the row was made: null for a membership made while its family had no link
- * (stage 3's slice 9d, migration 0040), which is never filled in later, even once the family is linked, and by which
- * nothing finds a family. A person is in a family record at most once (`guardian_family_id_parent_uq`); the old unique
- * index by customer stays, for the rows that name one.
+ * "This person is a guardian in this family." Name, email and phone live on the person (`parent`). A row stands on its
+ * family record (`family_id`) and its own link (`accounting_link.guardian_id`), and is found by them alone; a person is
+ * in a family record at most once (`guardian_family_id_parent_uq`, partial: a previous company's row has no family).
+ * Every row has its family but one a change of company closed before stage 4's slice M7a (`company_changed`), which
+ * nothing makes now: a change of company keeps every row with its family and ends only the links
+ * (`guardian_family_unless_company_changed`). The row's old copies of its customers (`family_qbo_id`, `source_qbo_id`)
+ * went in stage 3's slice 12b2 (migration 0049), after 0048 had made a link of each source the import left unlinked.
  */
 export const guardian = pgTable("guardian", {
   id: uuid("id").primaryKey().defaultRandom(),
-  familyQboId: text("family_qbo_id"),
-  // The same family as the app's own record: written by whoever makes or reinstates the row (src/lib/parents/guardians.ts),
-  // never by a roster read (stage 3's slice 9c). Null for a row a change of company closed (its QuickBooks ids are
-  // another company's), and for a row made before its family had a record that nothing has given one since.
+  // The family, the app's own record: written by whoever makes the row (src/lib/parents/guardians.ts), never by a roster
+  // read (stage 3's slice 9c). Null only for a row a change of company closed before stage 4's slice M7a, which nothing makes now.
   familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
   parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "restrict" }),
   isPrimary: boolean("is_primary").notNull().default(false),
   status: text("status", { enum: ["invited", "active", "disabled"] }).notNull().default("invited"),
-  sourceQboId: text("source_qbo_id"),                  // the QuickBooks customer this link came from; null for one made by hand
   disabledReason: text("disabled_reason", { enum: DISABLED_REASONS }),
   statusBeforeDisable: text("status_before_disable", { enum: ["invited", "active"] }),
   createdAt: created(),
   updatedAt: updated(),
 }, (t) => [
-  uniqueIndex("guardian_family_parent_uq").on(t.familyQboId, t.parentId),
   uniqueIndex("guardian_family_id_parent_uq").on(t.familyId, t.parentId).where(sql`family_id is not null`),
-  index("guardian_family_ix").on(t.familyQboId),
   index("guardian_family_id_ix").on(t.familyId),
   index("guardian_parent_ix").on(t.parentId),
+  check("guardian_family_unless_company_changed", sql`${t.familyId} is not null or ${t.disabledReason} is not distinct from 'company_changed'`),
 ]);
 
 /**
@@ -210,8 +213,11 @@ export const guardian = pgTable("guardian", {
  * member's new family, member or student, stage 3's slice 9c) is `created`, with `linked_by` the staff member who asked;
  * one "Create a family from this" makes (stage 3's slice 10, src/lib/roster/no-family.ts), for a customer no family
  * was linked to and the students under it, is `confirmed`, with `linked_by` the staff member with the linking
- * permission (Accounting.Link.ReadWrite, not Admin-only) who pressed it. Nothing deletes one but a change of company, which
- * deletes every row. A lookup always asks for one kind (src/lib/families/links.ts).
+ * permission (Accounting.Link.ReadWrite, not Admin-only) who pressed it, and since stage 4's slice M3c so is a guardian
+ * row's link made by Link this guardian on the accounting links screen (src/lib/accounting/guardian-links.ts). Since
+ * stage 4's slice M3b Unlink from the books moves a family's link, with its student records' and guardian rows' links,
+ * to `accounting_link_ended`, and since slice M3c Unlink this guardian moves one open guardian row's link there alone;
+ * nothing else removes one but a change of company, which moves every row there too (stage 4's slice M7a). A lookup always asks for one kind (src/lib/families/links.ts).
  * `synced_token` is the customer's QuickBooks version (its SyncToken) the portal last aligned with, and `synced_at` when
  * (stage 3's slice 9e): set from the answer of a send the portal made that carried the link's own version (or the one
  * resend made after a live read found the field as the portal held it), from a create's answer, from the roster cache
@@ -245,6 +251,49 @@ export const accountingLink = pgTable("accounting_link", {
   check("accounting_link_carried_over_by_nobody", sql`${t.origin} <> 'carried_over' or ${t.linkedBy} is null`),
 ]);
 
+/**
+ * A link that was ended, kept for the audit page's record filter (stage 4's slice M3b): the row an `accounting_link` was,
+ * with its own id, origin, `linked_at` and `linked_by`, and when it ended, by whom (staff_user.id, with no foreign key,
+ * as `linked_by` has none) and how (`unlinked`: Unlink from the books on the accounting links screen, which ends a
+ * family's link with every link of its student records and guardian rows, unlinkFamily() in
+ * src/lib/accounting/link-writes.ts; or, since stage 4's slice M3c, Unlink this guardian, which ends one open guardian
+ * row's link alone, unlinkGuardian() in src/lib/accounting/guardian-links.ts; `company_changed`: a change of company,
+ * which ends every link, guardian rows' included, by the staff member who connected the new company or nobody,
+ * src/lib/families/company-change.ts, stage 4's slice M7a). No unique
+ * index: a customer may have been several records' in turn, and a record several customers'. Nothing but those unlinks and
+ * a change of company writes it, nothing deletes a row, and it is read only by the audit filter (customersOfRecord(),
+ * src/lib/audit/query.ts) and, since stage 4's slice M3b2, endedLinksHeld() (src/lib/accounting/ended-links.ts): a
+ * record's latest ended link whose customer the books still hold, so that no press makes a second customer for a
+ * family or student wherever the books hold the first ("Create in QuickBooks and link", the family create prepare()
+ * sends), nor a second Parent customer for a guardian row whose old one is directly under the family's customer now
+ * (a family relinked to another customer gets one under it: one Parent customer per family), and a family's page and
+ * the Families list say so. A link that exists is in `accounting_link`, and every reader of the links that are reads
+ * that table alone.
+ */
+export const accountingLinkEnded = pgTable("accounting_link_ended", {
+  id: uuid("id").primaryKey(),                         // the ended link's own id, so audit rows naming a link id still name a row
+  system: text("system", { enum: ["quickbooks"] }).notNull(),
+  realmId: text("realm_id").notNull(),
+  customerId: text("customer_id").notNull(),
+  familyId: uuid("family_id").references(() => family.id, { onDelete: "cascade" }).$type<AppFamilyId>(),
+  studentId: uuid("student_id").references(() => student.id, { onDelete: "cascade" }).$type<AppStudentId>(),
+  guardianId: uuid("guardian_id").references(() => guardian.id, { onDelete: "cascade" }),
+  origin: text("origin", { enum: ["carried_over", "created", "confirmed"] }).notNull(),
+  linkedAt: timestamp("linked_at", { withTimezone: true }).notNull(),
+  linkedBy: uuid("linked_by"),
+  endedAt: timestamp("ended_at", { withTimezone: true }).notNull(),
+  endedBy: uuid("ended_by"),
+  endedHow: text("ended_how", { enum: ["unlinked", "company_changed"] }).notNull(), // no CHECK (migration 0047): a value is added here alone
+  createdAt: created(),
+}, (t) => [
+  index("accounting_link_ended_family_ix").on(t.familyId),
+  index("accounting_link_ended_student_ix").on(t.studentId),
+  index("accounting_link_ended_guardian_ix").on(t.guardianId),
+  index("accounting_link_ended_customer_ix").on(t.system, t.realmId, t.customerId),
+  check("accounting_link_ended_one_record", sql`num_nonnulls(${t.familyId}, ${t.studentId}, ${t.guardianId}) = 1`),
+  check("accounting_link_ended_carried_over_by_nobody", sql`${t.origin} <> 'carried_over' or ${t.linkedBy} is null`),
+]);
+
 /** Sign-in codes (spec §1). Only the hash is stored; only the latest unused code per person exists. */
 export const signinCode = pgTable("signin_code", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -268,7 +317,7 @@ export const signinCode = pgTable("signin_code", {
  * `used_at` set to its own `created_at`, so it works for nobody and holds no place, until the mail has been handed over
  * and it is put in place (holdSigninLink(), putHeldLinkInPlace()).
  * Made by mintSigninLink() and spent by choosePasswordFromLink() since slice SI-2 (src/lib/parents/signin-links.ts,
- * password-set.ts); blocking, sign-ins switched off, the change-of-company clear, a confirmed change of sign-in email
+ * password-set.ts); blocking, sign-ins switched off, a confirmed change of sign-in email
  * and closing a person's last open membership delete the unused ones.
  */
 export const parentSigninToken = pgTable("parent_signin_token", {
@@ -289,8 +338,8 @@ export const parentSigninToken = pgTable("parent_signin_token", {
  * hash of the token its cookie holds, never the token; renewed by use (`last_used_at`, `expires_at`). It goes with the
  * person. The daily clean-up deletes one past its expiry. Made since slice SI-3b (recordStrongSignin(),
  * src/lib/parents/devices.ts), renewed since SI-5b while a session that names it (`parent_auth_session.device_id`) is
- * used, and forgotten by the person on their sign-in settings; since slice SI-2 blocking, sign-ins switched off, the
- * change-of-company clear, a password reset, a confirmed change of sign-in email and closing a person's last open
+ * used, and forgotten by the person on their sign-in settings; since slice SI-2 blocking, sign-ins switched off, a
+ * password reset, a confirmed change of sign-in email and closing a person's last open
  * membership delete them (src/lib/parents/sessions.ts).
  * `passkey_offered_at` (the sign-in release, slice SI-8, migration 0048): when "Not now" was last pressed on the
  * passkey offer on Home in a session made on this device, null until it is; the offer comes back on this device only
@@ -363,17 +412,15 @@ export const rateLimitEvent = pgTable("rate_limit_event", {
  * The token is stored hashed. A request belongs to the person, the link (`guardian_id`) and the family it was asked
  * under; it is confirmed only by that person, signed in to that family through that link. The family is the app's own
  * record (`family_id`, the session's family when it was asked; migration 0037 carried each request's QuickBooks family
- * over to it and 0038 dropped `family_qbo_id`). `record_qbo_id`, the QuickBooks record a change was written to until
- * stage 3's slice 11d, is written null since and read by nothing (stage 3's last slice drops it). The link and family
- * were added after the table (0016, 0037): a row without them is never confirmed. A change of company deletes every
- * row, before the app's records it names.
+ * over to it and 0038 dropped `family_qbo_id`). It names no QuickBooks record: the address is the person's. The link
+ * and family were added after the table (0016, 0037): a row without them is never confirmed. A change of company
+ * deletes every row, before the app's records it names.
  */
 export const parentEmailChange = pgTable("parent_email_change", {
   id: uuid("id").primaryKey().defaultRandom(),
   parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "cascade" }),
   guardianId: uuid("guardian_id").references(() => guardian.id, { onDelete: "cascade" }),
   familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
-  recordQboId: text("record_qbo_id"),
   newEmail: text("new_email").notNull(),
   tokenHash: text("token_hash").notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
@@ -384,34 +431,6 @@ export const parentEmailChange = pgTable("parent_email_change", {
   uniqueIndex("parent_email_change_one_live").on(t.parentId).where(sql`used_at IS NULL`),
   index("parent_email_change_family_ix").on(t.familyId),
 ]);
-
-/**
- * One row per email address that is, or was, under more than one family (spec §1 Held addresses). The three sets hold
- * family QuickBooks IDs: approved by staff as the same person, rejected as not the same person, and already announced
- * to staff by email. The IDs belong to the connected company; a company change deletes every row.
- */
-export const heldAddress = pgTable("held_address", {
-  email: text("email").primaryKey(),                   // trimmed + lower-cased
-  approvedFamilyQboIds: jsonb("approved_family_qbo_ids").$type<string[]>().notNull().default([]),
-  rejectedFamilyQboIds: jsonb("rejected_family_qbo_ids").$type<string[]>().notNull().default([]),
-  announcedFamilyQboIds: jsonb("announced_family_qbo_ids").$type<string[]>().notNull().default([]),
-  note: text("note"),
-  decidedBy: uuid("decided_by"),                       // staff_user.id
-  decidedAt: timestamp("decided_at", { withTimezone: true }),
-  createdAt: created(),
-  updatedAt: updated(),
-});
-
-/** "This family in the previous QuickBooks company is this family in the connected one" (spec §6). Kept for good. */
-export const familyMatch = pgTable("family_match", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  oldRealmId: text("old_realm_id").notNull(),
-  oldFamilyQboId: text("old_family_qbo_id").notNull(),
-  newRealmId: text("new_realm_id").notNull(),
-  newFamilyQboId: text("new_family_qbo_id").notNull(),
-  decidedBy: uuid("decided_by"),
-  decidedAt: timestamp("decided_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [uniqueIndex("family_match_old_uq").on(t.oldRealmId, t.oldFamilyQboId)]);
 
 export type QboEnvironment = "sandbox" | "production";
 
@@ -512,8 +531,8 @@ export type CustomerCheck = {
  * failed. Never a source of truth. Keyed by the app's own family (`family_id`, a `restrict` foreign key; migrations
  * 0032 and 0033 of stage 2 of the app-owned families spec): a row is only ever written for a family that has a record.
  * What is inside stays QuickBooks': the invoices and the check each name the customer they are of, and those ids
- * belong to the company in `realm_id`. A company change deletes every row (before the app's records it names), and so
- * does a change of membership shape, which changes whose invoices are a family's.
+ * belong to the company in `realm_id`. A company change deletes every row (another company's invoices are never shown),
+ * and so does a change of membership shape, which changes whose invoices are a family's.
  */
 export const familyMoney = pgTable("family_money", {
   familyId: uuid("family_id").primaryKey().references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
@@ -617,7 +636,22 @@ export type RosterWrite =
    * Only `Id`, `SyncToken` and the fields of `change` are sent.
    */
   | { op: "contact"; role: "parent" | "family" | "member"; qboId: string; syncToken: string; change: ContactDetails; was: ContactDetails; orWas?: ContactDetails[];
-      checked?: true; guardianId?: string };
+      checked?: true; guardianId?: string }
+  /**
+   * A guardian's sign-in email, changed in the portal first by the parent's confirmed change (stage 3's slice S11e,
+   * queued in the confirm's own transaction by src/lib/parents/contact-queue.ts) and sent on by the queue's worker with
+   * today's body (EMAIL_UPDATE, the whole field): `role` `parent` for the own Parent customer of the membership
+   * `guardianId` names; `family` or `member` for the family's own linked customer, in books with no parent type, where
+   * `guardianId` still names the membership whose person's address it is (so two guardians' changes of one family's
+   * field are never taken for one). `from` is the person's sign-in address before the change, `to` after it (both
+   * trimmed and lower-cased); `orFrom`, the `to` of each earlier change of the same record and membership that may have
+   * been sent (and what each of those accepted so), any of which QuickBooks may hold instead of `from`. The field sent
+   * is made at each try from the field as read live, never stored: `from` (or an `orFrom` address) replaced by `to`,
+   * every other address left exactly as it was. `syncToken` is the link's own version (empty when it has none);
+   * `checked`, that it was sent with a version read live after the field read as `from` or `orFrom`. Only `Id`,
+   * `SyncToken` and the field are sent.
+   */
+  | { op: "email"; role: "parent" | "family" | "member"; qboId: string; syncToken: string; from: string; to: string; orFrom?: string[]; checked?: true; guardianId?: string };
 /** A phone and a mailing address as a contact item carries them (RosterWrite `contact`): each part a field of the portal's form. */
 export type ContactDetails = { phone?: string; address?: { line1: string; line2: string; city: string; region: string; postalCode: string; country: string } };
 /**
@@ -651,7 +685,8 @@ export type QueuedWrite = RosterWrite | BuyoutWrite;
  * family a student moves from, the family that chose a buy-out), and `student_id`, the student a rename, move or
  * make-inactive is for. Each is null where there is no such record: a new family or member (made after QuickBooks
  * answers), a parent's own customer, an invoice's student. A done or given-up item is kept 30 days (the daily
- * clean-up); every item goes when a different company is connected, before the app's records.
+ * clean-up); when a different company is connected every item still to go (waiting, stuck or refused) is given up, with
+ * one note, and one done or given up is kept as it was (stage 4's slice M7a).
  * `refused` (stage 3's slice 9e): a change the portal saved first (a rename of a linked family, member or student, or a
  * student's create filed under the student record; since slice 11b a parent's phone and mailing address too) that
  * QuickBooks refused, or the portal held back: the portal keeps its value, and the item
@@ -1016,8 +1051,8 @@ export const volunteerReminder = pgTable("volunteer_reminder", {
  * credit earned later does not lower it. One live buy-out at most per requirement and family where it is the family's
  * (`buyout_family_live_uq`), and per requirement and student whichever family chose it (`buyout_student_live_uq`), so a
  * guardian can never make two invoices for one requirement. `flag` is set for the treasurer (the daily check, a move, a
- * paid invoice the portal would not void) and shown on the Reconciliation page. Never expires; a company change deletes
- * every row. The row keeps the requirement, the family and the student from being deleted.
+ * paid invoice the portal would not void) and shown on the Reconciliation page. Never expires; a company change ends
+ * every unpaid live one (`earlier_company`, below) and keeps every other as it is (stage 4's slice M7a). The row keeps the requirement, the family and the student from being deleted.
  */
 export const buyout = pgTable("buyout", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -1032,8 +1067,10 @@ export const buyout = pgTable("buyout", {
   // Where it stands (src/lib/buyouts/rules.ts). All but voided and refused are live: one at most per requirement and subject.
   state: text("state", { enum: ["being_invoiced", "invoiced", "paid", "being_voided", "voided", "refused", "stuck"] }).notNull(),
   // Why a voided one ended: its invoice voided (switched back, student moved, or in QuickBooks), or closed by staff from
-  // Reconciliation once no unpaid invoice of it stood, with nothing sent to QuickBooks (src/lib/buyouts/close.ts).
-  endReason: text("end_reason", { enum: ["switched_back", "student_moved", "voided_in_quickbooks", "closed_by_staff"] }),
+  // Reconciliation once no unpaid invoice of it stood, with nothing sent to QuickBooks (src/lib/buyouts/close.ts), or
+  // ended by a change of company while unpaid, with nothing sent either, its invoice left in the old company's books
+  // (`earlier_company`: src/lib/buyouts/company-change.ts). No CHECK (migration 0020): a value is added here alone.
+  endReason: text("end_reason", { enum: ["switched_back", "student_moved", "voided_in_quickbooks", "closed_by_staff", "earlier_company"] }),
   invoiceQboId: text("invoice_qbo_id"),
   invoiceSyncToken: text("invoice_sync_token"),
   realmId: text("realm_id").notNull(),                 // the QuickBooks company the invoice is in
@@ -1122,7 +1159,7 @@ export const signatureRequest = pgTable("signature_request", {
  * A guardian's agreement to sign one form electronically (v1 spec §9.2): who, when, from which address, and which
  * version of the consent text they were shown (src/lib/forms/consent.ts). Without a row for the signed-in guardian no
  * document is made and no signing token is handed out. Kept with the request as part of its evidence (§9.4). The
- * request is the family's (signature_request.family_id), and a company change, were it to run, deletes these with it.
+ * request is the family's (signature_request.family_id), and a company change keeps it and these (stage 4's slice M7a).
  */
 export const signatureConsent = pgTable("signature_consent", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -1154,9 +1191,10 @@ export type EvidenceOriginal = { itemId: string; sha256: string; size: number };
  * from: it has no foreign key to the request, the requirement or the consents, and nothing in the portal deletes it.
  * The names, signers and consents are copies as they were. `realm_id` is the QuickBooks company the family belonged to
  * (the roster cache's company then), or null when the family had no link there, or the roster named no company: a
- * family the club keeps by hand signs forms like any other. When a different company is connected the row is kept,
- * `request_id` is cut (`earlier_company_at` is set), and from then on it is shown only in the staff archive: its
- * QuickBooks ids may name another family in the new company. `mismatch_at` is set when a later fetch gave a stored file
+ * family the club keeps by hand signs forms like any other. Since stage 4's slice M7a a change of company leaves the row
+ * as it is: the family it names is kept, and it is still that family's, whatever company copy it holds. Before that
+ * slice a change of company cut `request_id` and set `earlier_company_at`, and such a row is shown only in the staff
+ * archive: its QuickBooks ids may name another family in the new company. `mismatch_at` is set when a later fetch gave a stored file
  * a different hash.
  *
  * `family_qbo_id`, `subject_qbo_id` and `subject_kind` are the record's own copies of whose form it was, in QuickBooks'
@@ -1165,20 +1203,20 @@ export type EvidenceOriginal = { itemId: string; sha256: string; size: number };
  * removed once stored (a link made later fills nothing in), and never used to find a family. The current company's evidence also
  * names the app's own family whose form it is now (`family_id`, which moves with a student, as the request does) and,
  * for a per-student form, the app's own student (`student_id`): that is how the portal finds a family's evidence
- * (stage 2 of the app-owned families spec; migration 0028 filled them). An earlier company's evidence names neither,
- * and never gains them (signed_form_evidence_app_records): it is matched to nobody.
+ * (stage 2 of the app-owned families spec; migration 0028 filled them). Evidence archived as an earlier company's names
+ * neither, and never gains them (signed_form_evidence_app_records): it is matched to nobody.
  */
 export const signedFormEvidence = pgTable("signed_form_evidence", {
   id: uuid("id").primaryKey().defaultRandom(),
-  requestId: uuid("request_id"),                           // signature_request.id, with no foreign key; null once its company is an earlier one
+  requestId: uuid("request_id"),                           // signature_request.id, with no foreign key; null once archived as an earlier company's
   realmId: text("realm_id"),                               // the QuickBooks company the request's family belonged to; null with no link
   earlierCompanyAt: timestamp("earlier_company_at", { withTimezone: true }),
   requirementId: uuid("requirement_id"),                   // requirement.id, with no foreign key
   familyQboId: text("family_qbo_id"),                      // the record's copy, null with no link: never changed, never matched to a family
   subjectQboId: text("subject_qbo_id"),                    // the record's copy, null with no link: never changed, never matched to a family
   subjectKind: text("subject_kind", { enum: ["family", "student"] }).notNull(),
-  familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),   // the current company's only
-  studentId: uuid("student_id").references(() => student.id, { onDelete: "restrict" }).$type<AppStudentId>(), // a per-student form's, the current company's only
+  familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),   // every row but an archived one
+  studentId: uuid("student_id").references(() => student.id, { onDelete: "restrict" }).$type<AppStudentId>(), // a per-student form's, every row but an archived one
   formTitle: text("form_title").notNull(),                 // the names as they were
   familyName: text("family_name"),
   subjectName: text("subject_name"),
@@ -1382,7 +1420,7 @@ export const staffAuthVerification = staffAuth.verification;
 // family record the session chose, null until it chooses one. The gate matches it to the person's own open guardian
 // rows by their `family_id` on every request (src/lib/auth/resolve.ts); it is never a QuickBooks id. Migration 0037
 // carried each session's QuickBooks family over to it (clearing one it couldn't), and 0038 dropped `family_qbo_id`. A
-// change of company deletes every session before the app's records go (clearParentAccess()).
+// change of company leaves every session as it is (stage 4's slice M7a): the family it chose is kept.
 // `strong_at` (the sign-in release, slice SI-1): when this session last proved the password and the second step, null
 // until a later slice stamps it. It is the portal's alone: it is not a Better Auth additional field, so the library
 // never names it. Its drizzle adapter inserts and updates only the fields its own schema knows, leaving this column at
@@ -1394,8 +1432,8 @@ export const staffAuthVerification = staffAuth.verification;
 // carries the device's cookie (its path is the door's), so the session's renewal (renewParentSession(),
 // src/lib/parents/sessions.ts), which runs while a page renders, renews the device it names through this; and the
 // sign-in settings mark "This device" by it. Like `strong_at` it is the portal's alone and not a Better Auth additional
-// field. `ON DELETE SET NULL`: forgetting a device, a block, a reset, a password change, the clean-up and the
-// change-of-company clear delete device rows, and the sessions they named go on with none. Null for a session made
+// field. `ON DELETE SET NULL`: forgetting a device, a block, a reset, a password change and the clean-up delete
+// device rows, and the sessions they named go on with none. Null for a session made
 // before SI-5b (nothing tells which device made it), and for one whose device is gone.
 // `enrol_until` (the sign-in release, slice SI-10a, migration 0049): set on a session that is enrolling, one made under
 // Strict by a password alone for a person with no second factor (a password at the door, or a set-up link's), to the

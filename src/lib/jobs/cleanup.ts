@@ -15,12 +15,13 @@ export const REMINDER_CLAIM_DAYS = 365;
 export const FINISHED_WRITES_DAYS = 30;
 const CLEANUP_ACTOR: Actor = { door: "system", id: null, label: "worker" };
 /**
- * Settings whose feature is gone (stage 3 of the app-owned families spec, slice 7a), so nothing reads, writes or
- * expires them any more: the previous company's people as they were (`parents.previous_company`, names and addresses
- * of a company the club left, promised gone after 90 days) and the review notice's last send (`parents.review_notice`).
- * Their life ended with the feature: the clean-up removes any still stored.
+ * Settings whose feature is gone, so nothing reads, writes or expires them any more: their life ended with the feature,
+ * and the clean-up removes any still stored. None is listed now: the two the retired reviews left (the previous
+ * company's snapshot, `parents.previous_company`, and the review notice's mark, `parents.review_notice`) were deleted
+ * by migration 0046, with the reviews' tables. A feature retired later lists its setting's key here, and adds back a
+ * test that a listed key is deleted and counted (`retiredSettings`): while the list is empty that delete runs nowhere.
  */
-export const RETIRED_SETTINGS = ["parents.previous_company", "parents.review_notice"] as const;
+export const RETIRED_SETTINGS: readonly string[] = [];
 
 export type CleanupCounts = {
   staffSessions: number; parentSessions: number; signinCodes: number; signinLinks: number; unfinishedAuthenticators: number; spentBackupCodes: number; rememberedDevices: number; rateLimitEvents: number;
@@ -57,26 +58,25 @@ export const KEPT_TABLES: Record<string, string> = {
   auth_provider: "the staff sign-in set-up", provider_certificate: "the staff sign-in set-up, rotated by an Admin",
   staff_user: "staff accounts, removed by an Admin", role: "roles", role_rule: "roles", role_assignment: "roles",
   parent: "the people who sign in to the portal: the app's own records", guardian: "each person's membership of a family, open or closed: the app's own records",
-  held_address: "retired with the held-address review (stage 3 of the app-owned families spec): neither read nor written, kept until a later slice drops it",
-  family_match: "retired with the match review (stage 3 of the app-owned families spec): neither read nor written, kept until a later slice drops it",
   qbo_connection: "the one QuickBooks connection", qbo_customer_type: "the roster cache, replaced by each refresh", qbo_customer: "the roster cache, replaced by each refresh",
   qbo_item: "QuickBooks' products and services, replaced each time staff read the list; emptied on a change of company",
   season: "seasons are history", season_step: "seasons are history", requirement: "seasons are history", requirement_cover: "seasons are history",
   requirement_progress: "ticks and waivers: a season's record",
   volunteer_event: "volunteer history: what happened stays readable", volunteer_shift: "volunteer history", volunteer_shift_requirement: "volunteer history",
-  volunteer_signup: "who volunteered: emptied on a change of company, otherwise kept",
-  volunteer_credit: "volunteering done, the record a requirement is met by: emptied on a change of company, otherwise kept",
-  volunteer_reminder: "one row per reminder email, so none goes twice: emptied on a change of company, otherwise kept",
-  buyout: "a family's choice to pay instead of volunteering, and its invoice: the record a requirement is met by, never expires; emptied on a change of company",
+  volunteer_signup: "who volunteered: kept, a change of company included",
+  volunteer_credit: "volunteering done, the record a requirement is met by: kept, a change of company included",
+  volunteer_reminder: "one row per reminder email, so none goes twice: kept, a change of company included",
+  buyout: "a family's choice to pay instead of volunteering, and its invoice: the record a requirement is met by, never expires; a change of company ends an unpaid one and keeps it",
   signature_request: "a form's record of signing: evidence, never expires", signature_consent: "a guardian's consent to sign electronically: evidence, never expires",
   signed_form_evidence: "a signed form's evidence: the club's record, never deleted, kept even after a change of company",
   signed_form_file: "the files of a signed form's evidence: never deleted", signed_form_copy: "the copies of a signed form sent to guardians: part of its record",
   form_withdrawal: "documents waiting to be withdrawn in Documenso: the worker removes each once it is done",
   qbo_check_run: "the runs of the check of the portal's QuickBooks requests: a few a year, the record of what QuickBooks was seen to answer",
   qbo_check_record: "the records the check made in a sandbox company, kept so the next run makes inactive any a cut-off run left; emptied on a change of company",
-  family: "the portal's own families; emptied on a change of company",
-  student: "the portal's own students; emptied on a change of company",
-  accounting_link: "each family, student and sign-in's link to its QuickBooks customer; emptied on a change of company",
+  family: "the portal's own families; kept, a change of company included",
+  student: "the portal's own students; kept, a change of company included",
+  accounting_link: "each family, student and sign-in's link to its QuickBooks customer; a change of company moves every one to accounting_link_ended",
+  accounting_link_ended: "the links an unlink or a change of company ended, kept for good for the audit page's record filter",
   audit_log: "append-only",
 };
 
@@ -197,7 +197,8 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
   const verifications = n(await tx.delete(staffAuthVerification).where(lt(staffAuthVerification.expiresAt, now)).returning({ id: staffAuthVerification.id }))
     + n(await tx.delete(parentAuthVerification).where(lt(parentAuthVerification.expiresAt, now)).returning({ id: parentAuthVerification.id }));
 
-  const retiredSettings = n(await tx.delete(setting).where(inArray(setting.key, [...RETIRED_SETTINGS])).returning({ key: setting.key }));
+  const retiredSettings = RETIRED_SETTINGS.length === 0 ? 0
+    : n(await tx.delete(setting).where(inArray(setting.key, [...RETIRED_SETTINGS])).returning({ key: setting.key }));
 
   return { staffSessions, parentSessions, signinCodes, signinLinks, unfinishedAuthenticators, spentBackupCodes, rememberedDevices, rateLimitEvents, emailChanges, familyMoney: money, jobRuns, reminderClaims, writeQueue: writes, verifications, retiredSettings };
 }

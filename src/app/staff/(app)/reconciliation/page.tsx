@@ -2,17 +2,20 @@ import Link from "next/link";
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { loadRosterPage } from "@/lib/roster/queries";
-import { compareContact, isFamilyCreateItem, loadMadeAfterGivingUp, loadOpenWrites, TRY_AGAIN_NEEDS_LINKING, waitingWords, type ContactCompare, type GivenUpMadeView, type QueueView } from "@/lib/roster/queue";
+import { compareContact, compareEmail, isFamilyCreateItem, loadMadeAfterGivingUp, loadOpenWrites, TRY_AGAIN_NEEDS_LINKING, waitingWords, type ContactCompare, type GivenUpMadeView, type QueueView } from "@/lib/roster/queue";
 import { isUuid } from "@/lib/seasons/ids";
 import { loadBalances } from "@/lib/money/balances";
 import { linksOfCustomers } from "@/lib/families/links";
+import { readCustomerAims, type CustomerAim } from "@/lib/accounting/mapping";
+import { handful } from "@/lib/roster/no-family";
 import { LocalTime } from "@/app/components/local-time";
 import { DataTable, type Column } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
 import { WorthALook } from "../balances/worth-a-look";
 import { OneButton, TextAction } from "../seasons/forms";
 import { giveUpAction, linkMadeStudentAction, sendPortalValueAction, tryAgainAction } from "../roster/write-actions";
-import { CONTACT_AWAITS_READ, CONTACT_NOT_OFFERED, EMAIL_TOO_LONG, GUARDIAN_RENAME_TAKEN, GUARDIAN_TAKEN_NAME, guardianOf, keptRefusalWords, NAME_UNUSABLE, keptWordsFor, portalValueStamp, TAKEN_NAME_KEPT } from "@/lib/roster/writes";
+import { CONTACT_AWAITS_READ, CONTACT_NOT_OFFERED, EMAIL_NOT_OFFERED, EMAIL_TOO_LONG, GUARDIAN_RENAME_TAKEN, GUARDIAN_TAKEN_NAME, guardianOf, keptRefusalWords, NAME_UNUSABLE, keptWordsFor, portalValueStamp,
+  TAKEN_NAME_KEPT } from "@/lib/roster/writes";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { BuyoutsToLook } from "./buyouts";
 import { CustomersWithNoFamily } from "./no-family";
@@ -45,6 +48,9 @@ const CODE_WORDS: Record<string, string> = {
   customer_has_guardian: "QuickBooks has a Parent customer of that name, but another guardian in the portal (one of this family's now, or one removed, who takes it back if reinstated) is linked to it already, so this guardian was left unlinked and nothing will be sent again: check it in QuickBooks, then give this up",
   email_too_long: "the person's sign-in address is longer than QuickBooks takes, so no Parent customer was made for them",
   name_unusable: "the person's name can't be used in QuickBooks, so no Parent customer was made for them: rename them on their page",
+  // A person's sign-in email sent on (stage 3's slice S11e), held back by the portal.
+  email_differs: "QuickBooks' email field doesn't hold the sign-in address the portal last knew where the portal reads it, or that address is another person's sign-in now, so the new one wasn't sent over it",
+  email_already_there: "QuickBooks' email field holds the new address already, beside the old one, so nothing was sent",
 };
 const codeWords = (code: string | null) => (code === null ? null
   : CODE_WORDS[code] ?? (/^http_5\d\d/.test(code) ? "QuickBooks had a problem of its own" : /^token_/.test(code) ? "the portal couldn't get a key to QuickBooks" : "QuickBooks refused it"));
@@ -85,6 +91,8 @@ const NOT_OFFERED: Record<NonNullable<QueueView["notOffered"]>, string> = {
   name_unusable: `${keptRefusalWords(NAME_UNUSABLE, null)} Or give it up here: the guardian keeps their access in the portal.`,
   // A kept change of a parent's phone and address whose record is no longer the one it is for (stage 3's slice 11b).
   ...CONTACT_NOT_OFFERED,
+  // And of a person's sign-in email, or one whose address the person has changed again since (stage 3's slice S11e).
+  ...EMAIL_NOT_OFFERED,
 };
 /**
  * A kept change of a parent's phone and address (stage 3's slice 11b): the list says in words which details differ and
@@ -94,17 +102,32 @@ const NOT_OFFERED: Record<NonNullable<QueueView["notOffered"]>, string> = {
  * removed, the family made inactive) neither is shown, and no link is offered.
  */
 const isContact = (i: QueueView) => i.write.op === "contact";
+/**
+ * A kept change of a person's sign-in email (stage 3's slice S11e) is compared the same way, offered to every reader of
+ * this page for a Parent customer's own record or a flat member's (the lead's decision 5: that reader sees the
+ * guardian's sign-in address and those records' email fields on the family's page already); the list says in words
+ * why it didn't go through, never an address. A family customer's own field, in layered books with no parent type, is
+ * shown on no page a reader of this one sees, so its compare view is offered only to staff who may see a person's
+ * details (Parents.ReadWrite), as a kept phone and address is: emailMayCompare().
+ */
+const isEmail = (i: QueueView) => i.write.op === "email";
+const emailMayCompare = (i: QueueView, mayCompare: boolean) => i.write.op === "email" && (i.write.role !== "family" || mayCompare);
+/** Whether a kept item is compared before "Send the portal's value" is offered: a phone and address, or a sign-in email. */
+const isCompared = (i: QueueView) => isContact(i) || isEmail(i);
 function ContactCell({ i, compared, mayCompare }: { i: QueueView; compared: ContactCompare | null; mayCompare: boolean }) {
   if (compared?.id === i.id) return <>
     <span className="when">{`QuickBooks has: ${compared.quickbooks}.`}</span>
     <span className="when">{`The portal has: ${compared.portal}.`}</span>
   </>;
-  if (!mayCompare || i.notOffered === "record_gone") return null;
+  if (!mayCompare || i.notOffered === "record_gone" || i.notOffered === "email_record_gone") return null;
   return <Link className="link-line" href={`/staff/reconciliation?compare=${i.id}#writes-h`}>Compare the two</Link>;
 }
 /** Where "Send the portal's value" isn't beside a kept contact change: it is offered only in its compare view. */
 const COMPARE_FIRST = "Compare the two first: the portal's details are sent from there, beside what QuickBooks holds.";
 const COMPARE_NEEDS = "Someone who may see parents' details can compare the two here and send the portal's details from there.";
+/** Where "Send the portal's value" isn't beside a kept change of sign-in email: it too is offered only in its compare view. */
+const COMPARE_EMAIL_FIRST = "Compare the two first: the person's sign-in email is sent from there, beside the email field QuickBooks holds.";
+const COMPARE_EMAIL_NEEDS = "Someone who may see parents' details can compare the two here and send the person's sign-in email from there.";
 
 /** Why "Send the portal's value" isn't offered for a refused item, by what it was: a guardian's taken name is the person's to rename (stage 3's slice 9h). */
 const notOfferedWords = (i: QueueView): string | null => {
@@ -124,7 +147,8 @@ const notOfferedWords = (i: QueueView): string | null => {
 function Refused({ items, canChange, compared, mayCompare }: { items: QueueView[]; canChange: boolean; compared: ContactCompare | null; mayCompare: boolean }) {
   const columns: Column<QueueView>[] = [
     { key: "what", header: "Change", rowHeader: true, cell: (i) => <>{i.words}<span className="when">{waitingWords(i)}</span>{i.moneyNote ? <span className="when">{i.moneyNote}</span> : null}</> },
-    { key: "why", header: "Why it didn't go through", cell: (i) => <>{keptWordsFor(i.write, i.lastCode, i.holds, i.differs, i.joined)}{isContact(i) ? <ContactCell i={i} compared={compared} mayCompare={mayCompare} /> : null}</> },
+    { key: "why", header: "Why it didn't go through", cell: (i) => <>{keptWordsFor(i.write, i.lastCode, i.holds, i.differs, i.joined)}{isCompared(i)
+      ? <ContactCell i={i} compared={compared} mayCompare={isEmail(i) ? emailMayCompare(i, mayCompare) : mayCompare} /> : null}</> },
     { key: "asked", header: "Asked", cell: (i) => <><LocalTime iso={i.askedAt} />{i.askedBy ? <span className="when">by {i.askedBy}</span> : null}</> },
     { key: "family", header: "Family", cell: (i) => (i.familyId ? <Link href={familyPage(i.familyId)}>Open the family</Link> : "None") },
     ...(canChange ? [{ key: "do", header: "What you can do", quiet: true, cell: (i: QueueView) => {
@@ -132,9 +156,9 @@ function Refused({ items, canChange, compared, mayCompare }: { items: QueueView[
       // (which takes its place, and is sent), a customer QuickBooks has inactive is never made active again by the
       // portal, one the roster doesn't hold isn't sent to, and a move into a family with no customer in QuickBooks waits
       // for that family to be made there. The press is bound to what the row shows (QueueView.shown).
-      const instead = notOfferedWords(i) ?? (!isContact(i) || compared?.id === i.id ? null : mayCompare ? COMPARE_FIRST : COMPARE_NEEDS);
-      // A kept contact change is bound to the digest of what its compare view showed (ContactCompare.shown).
-      const shown = isContact(i) ? compared?.shown ?? "" : i.shown;
+      const instead = notOfferedWords(i) ?? (!isCompared(i) || compared?.id === i.id ? null : isEmail(i) ? (emailMayCompare(i, mayCompare) ? COMPARE_EMAIL_FIRST : COMPARE_EMAIL_NEEDS) : mayCompare ? COMPARE_FIRST : COMPARE_NEEDS);
+      // A kept contact change, or change of sign-in email, is bound to the digest of what its compare view showed (ContactCompare.shown).
+      const shown = isCompared(i) ? compared?.shown ?? "" : i.shown;
       return (
         <div className="row-actions">
           {instead === null
@@ -153,13 +177,36 @@ function Refused({ items, canChange, compared, mayCompare }: { items: QueueView[
 /**
  * The creates staff gave up here that QuickBooks made all the same (stage 3's slice 9d, the lead's decision): a given-up
  * change stays given up, so nothing in the portal is linked to the customer QuickBooks made, and no second one is made
- * for the record. A family's or member's is brought in from Customers with no family; a student's sits under its
- * family, so it is linked to the student here ("Link the student to it", for staff who may change families and link
- * them to accounting). Names are QuickBooks text, shown as text only.
+ * for the record. A family's or member's, while the family the portal saved first is active with no family link, is
+ * picked for that family on Accounting links (stage 4's slice M3a2: "Create a family from this" refuses it, `aims`),
+ * with a link to its confirm step where it can be reached, or, where that family's row is Suggested for another
+ * customer and offers no Pick, once it is left unlinked there; one the screen suggests for, or lists for, another
+ * family is linked there; otherwise it is brought in from Customers with no family. Every reader is told the same, and
+ * only a holder of the linking permission is given the link to Accounting links, which only they can open. A
+ * student's sits under its family, so it is linked to the student here ("Link the student to it", for staff who may
+ * change families and link them to accounting). Names are QuickBooks text, shown as text only.
  */
-function MadeAfterGivingUp({ items, linking, canChange, rosterTag }: { items: GivenUpMadeView[]; linking: boolean; canChange: boolean; rosterTag: string }) {
-  const bringIn = linking ? "Bring it in with “Create a family from this” under Customers with no family below"
-    : "Someone who may link families to accounting can bring it in from Customers with no family on this page";
+function MadeAfterGivingUp({ items, linking, canChange, rosterTag, aims }: { items: GivenUpMadeView[]; linking: boolean; canChange: boolean; rosterTag: string; aims: ReadonlyMap<string, CustomerAim> | null }) {
+  const family = (m: GivenUpMadeView) => {
+    const aim = aims?.get(m.customerQboId);
+    const stop = "if it isn't wanted, make it inactive in QuickBooks.";
+    // Aimed at nobody: the family saved first is inactive or linked already (or nothing can be suggested now), so it is brought in.
+    if (aim === undefined) {
+      return `A ${m.role} customer that no ${m.role} in the portal is linked to. ${linking ? "Bring it in with “Create a family from this” under Customers with no family below"
+        : "Someone who may link families to accounting can bring it in from Customers with no family on this page"}, then make the ${m.role} the portal saved first inactive on its page; ${stop}`;
+    }
+    const ours = aim.why === "given_up" && m.familyId !== null && String(aim.families[0].id) === String(m.familyId);
+    const pick = ours && aim.why === "given_up" && aim.pickable;
+    const what = !ours ? `Accounting links suggests it for, or lists it as a possible customer of, ${handful(aim.families.map((f) => f.name))}, ${aim.families.length === 1 ? "a family" : "families"} the portal has: link it there to the family it is; ${stop}`
+      : pick ? `if it is the ${m.role} the portal saved first, pick it for that ${m.role} on Accounting links; ${stop}`
+      : `Accounting links suggests another customer for the ${m.role} the portal saved first. If that one is the ${m.role}'s, confirm it there; if this one is, leave the ${m.role} unlinked there first, then pick this one for it; ${stop}`;
+    const at = !ours ? `/staff/links?status=${aim.why === "several" ? "several" : "suggested"}`
+      : pick && /^\d{1,20}$/.test(m.customerQboId) ? `/staff/links?pick=${encodeURIComponent(String(m.familyId))}&customer=${m.customerQboId}#links-pick-h`
+      : "/staff/links?status=suggested";
+    return <>A {m.role} customer that no {m.role} in the portal is linked to. It isn&apos;t offered to bring in under Customers with no family: {what}
+      {" "}{linking ? <Link href={at}>{pick ? "Pick it on Accounting links" : "See it on Accounting links"}<span className="visually-hidden">: {m.name}</span></Link>
+        : "Someone who may link families to accounting does this on Accounting links."}</>;
+  };
   const student = (m: GivenUpMadeView) => {
     const say = "A student customer that no student in the portal is linked to. If it is the student the portal saved first, link the two; if it isn't wanted, make it inactive in QuickBooks.";
     if (m.studentId === null) return say;
@@ -173,7 +220,7 @@ function MadeAfterGivingUp({ items, linking, canChange, rosterTag }: { items: Gi
         { key: "name", header: "In QuickBooks", rowHeader: true, cell: (m) => m.name },
         { key: "what", header: "What to do", cell: (m) => (m.role === "student"
           ? student(m)
-          : `A ${m.role} customer that no ${m.role} in the portal is linked to. ${bringIn}, then make the ${m.role} the portal saved first inactive on its page; if it isn't wanted, make it inactive in QuickBooks.`) },
+          : family(m)) },
         { key: "family", header: "Saved first", cell: (m) => (m.familyPage ? <Link href={familyPage(m.familyPage)}>Open the family</Link> : "None") },
       ]} />
     </section>
@@ -199,14 +246,21 @@ export default async function ReconciliationPage({ searchParams }: { searchParam
   const mayCompare = can(ctx.effective, "Parents.ReadWrite");
   const [writes, roster, balances, madeAnyway] = await Promise.all([loadOpenWrites({ showAmounts: money }), loadRosterPage(), money ? loadBalances() : Promise.resolve(null),
     loadMadeAfterGivingUp()]);
-  // The one item asked to be compared: a uuid naming a kept contact change of the list, for a holder of Parents.ReadWrite;
-  // anything else shows the list as if none were asked. Audited (compareContact()) before the page shows anything of it.
+  // The one item asked to be compared: a uuid naming a kept contact change of the list, for a holder of Parents.ReadWrite,
+  // or a kept change of sign-in email, for any reader of this page but a family customer's own field, only for a holder
+  // of Parents.ReadWrite (stage 3's slice S11e, emailMayCompare()); anything else shows the list
+  // as if none were asked. Audited (compareContact(), compareEmail()) before the page shows anything of it.
   const asked = typeof sp.compare === "string" && isUuid(sp.compare) ? sp.compare.toLowerCase() : null;
-  const toCompare = mayCompare && asked ? writes.find((w) => w.id === asked && w.state === "refused" && isContact(w)) : undefined;
-  const compared = toCompare ? await compareContact(toCompare.id, { actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, ip: ctx.ip }) : null;
+  const toCompare = asked ? writes.find((w) => w.id === asked && w.state === "refused" && ((mayCompare && isContact(w)) || emailMayCompare(w, mayCompare))) : undefined;
+  const staff = { actor: { door: "staff" as const, id: ctx.staffUserId, label: ctx.email }, ip: ctx.ip };
+  const compared = !toCompare ? null : isEmail(toCompare) ? await compareEmail(toCompare.id, { ...staff, mayReadFamilyField: mayCompare }) : await compareContact(toCompare.id, staff);
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite");
   // Customers no family is linked to, with "Create a family from this": only for staff who may link families to accounting.
   const linking = can(ctx.effective, "Accounting.Link.ReadWrite");
+  // Which customers no family is linked to are meant for a family the portal has (stage 4's slice M3a2), read once for
+  // both sections that say so: for staff who may link families, who are shown Customers with no family, and for anyone
+  // shown a family's or member's create made after it was given up, whose words go by it.
+  const aims = linking || madeAnyway.some((m) => m.role !== "student") ? await readCustomerAims() : null;
   const stuck = writes.filter((w) => w.state === "stuck"), waiting = writes.filter((w) => w.state === "waiting"), refused = writes.filter((w) => w.state === "refused");
   // The customers with a family page (the roster's families, or members in flat books), each by its family record, found
   // through the family kind of link in one lookup for the list: a customer with none links nowhere.
@@ -225,7 +279,8 @@ export default async function ReconciliationPage({ searchParams }: { searchParam
               One QuickBooks took that the portal couldn&apos;t take in at the time waits here too, until the portal finishes it on its side.
               A stuck change waits for you: try it again, or give it up and make it in QuickBooks.
               A change saved in the portal first that didn&apos;t go through (QuickBooks refused it, the portal held it back as QuickBooks has something else, or it couldn&apos;t be sent) is kept in the portal: send the portal&apos;s value again on purpose, or give it up and leave QuickBooks as it is.
-              A guardian&apos;s phone and mailing address are among them: saved in the portal first, then sent on, and never sent over details QuickBooks holds that the portal didn&apos;t know of.</p>
+              A guardian&apos;s phone and mailing address are among them: saved in the portal first, then sent on, and never sent over details QuickBooks holds that the portal didn&apos;t know of.
+              So is a parent&apos;s new sign-in email, sent on to each record of theirs at the worker&apos;s next wake after they change it, and never over an address QuickBooks holds that the portal didn&apos;t know there.</p>
             {refused.length > 0 && <><h3 className="table-head">Not in QuickBooks, kept in the portal ({refused.length})</h3><Refused items={refused} canChange={canChange} compared={compared} mayCompare={mayCompare} /></>}
             {stuck.length > 0 && <><h3 className="table-head">Stuck ({stuck.length})</h3><Writes items={stuck} caption="Stuck changes" canChange={canChange} mayLink={linking} /></>}
             {waiting.length > 0 && <><h3 className="table-head">Waiting ({waiting.length})</h3><Writes items={waiting} caption="Changes waiting" canChange={canChange} mayLink={linking} /></>}
@@ -233,11 +288,11 @@ export default async function ReconciliationPage({ searchParams }: { searchParam
         )}
       </section>
 
-      {madeAnyway.length > 0 && <MadeAfterGivingUp items={madeAnyway} linking={linking} canChange={canChange} rosterTag={rosterTag} />}
+      {madeAnyway.length > 0 && <MadeAfterGivingUp items={madeAnyway} linking={linking} canChange={canChange} rosterTag={rosterTag} aims={aims} />}
 
       <BuyoutsToLook showAmounts={money} canChange={canChange} />
 
-      {linking && <CustomersWithNoFamily mayChangeFamilies={canChange} />}
+      {linking && aims !== null && <CustomersWithNoFamily mayChangeFamilies={canChange} aims={aims} />}
 
       <section className="box" aria-labelledby="attention-h"><h2 id="attention-h">Needs attention in the roster{roster.attention.length ? ` (${roster.attention.length})` : ""}</h2>
         {!roster.roster ? <Notice tone="warning" live="none">The roster can&apos;t be shown right now. <Link href="/staff/roster">Open the roster</Link> to see why.</Notice>

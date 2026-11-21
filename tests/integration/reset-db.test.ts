@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { getTableName, isTable, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import * as schema from "@/lib/db/schema";
-import { auditLog, heldAddress, jobRun, qboCustomer, role, roleRule, setting } from "@/lib/db/schema";
+import { auditLog, jobRun, qboCustomer, qboCustomerType, role, roleRule, setting } from "@/lib/db/schema";
 import { childrenFirst, resetDb, seedGuardian, seedParent, seedParentSession, seedStaff } from "../helpers/db";
 
 /** Row counts for every table in the public schema, read from the database rather than from a list someone keeps. */
@@ -27,12 +27,12 @@ describe("resetDb", () => {
     await db.insert(roleRule).values({ roleId: custom!.id, kind: "include", pattern: "Roster.*" });
     await db.insert(setting).values({ key: "reset.test", value: { any: "thing" } });
     await db.insert(qboCustomer).values({ qboId: "10", displayName: "Rivera Family", active: true, syncToken: "0" });
-    await db.insert(heldAddress).values({ email: "sam@example.com" });
+    await db.insert(qboCustomerType).values({ qboId: "T1", name: "Family", active: true });
     await db.insert(jobRun).values({ job: "reset.test", startedBy: "test" });
     await db.insert(auditLog).values({ door: "staff", actorId: staff.id, actorLabel: staff.email, action: "reset.test" });
 
     const before = await rowCounts();
-    for (const t of ["staff_user", "role_assignment", "parent", "parent_auth_user", "guardian", "parent_auth_session", "role_rule", "setting", "qbo_customer", "held_address", "job_run", "audit_log"]) {
+    for (const t of ["staff_user", "role_assignment", "parent", "parent_auth_user", "guardian", "parent_auth_session", "role_rule", "setting", "qbo_customer", "qbo_customer_type", "job_run", "audit_log"]) {
       expect(before[t], `${t} should hold a row before the reset`).toBeGreaterThan(0);
     }
     expect(before.role).toBe(2);

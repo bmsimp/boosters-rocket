@@ -529,8 +529,8 @@ describe("changing the password", () => {
     await seedDevice(b.identity.parentId);
     await seedCode(b.identity.parentId);
     // A change of sign-in email asked for in a session this ends can't outlive it; B's is B's.
-    await seedEmailChange({ parentId: a.identity.parentId, guardianId: a.identity.guardianId, familyId: a.identity.familyId, recordQboId: null, newEmail: "taken.over@elsewhere.example" });
-    await seedEmailChange({ parentId: b.identity.parentId, guardianId: b.identity.guardianId, familyId: b.identity.familyId, recordQboId: null, newEmail: "b.moving@elsewhere.example" });
+    await seedEmailChange({ parentId: a.identity.parentId, guardianId: a.identity.guardianId, familyId: a.identity.familyId, newEmail: "taken.over@elsewhere.example" });
+    await seedEmailChange({ parentId: b.identity.parentId, guardianId: b.identity.guardianId, familyId: b.identity.familyId, newEmail: "b.moving@elsewhere.example" });
     const theirsBefore = { credential: await credentialOf(b.identity.parentId), sessions: await sessionsOf(b.identity.parentId), devices: await devicesOf(b.identity.parentId), codes: await codesOf(b.identity.parentId),
       emailChanges: await emailChangesOf(b.identity.parentId) };
     const before = await credentialOf(a.identity.parentId);
@@ -586,9 +586,9 @@ describe("signing out everywhere", () => {
     await seedCode(a.identity.parentId);
     await seedCode(a.identity.parentId, { usedAt: new Date(Date.now() - 60_000) });
     const old = await seedCode(a.identity.parentId, { usedAt: new Date(Date.now() - CODE_TTL_MS - 60_000) });
-    await seedEmailChange({ parentId: a.identity.parentId, guardianId: a.identity.guardianId, familyId: a.identity.familyId, recordQboId: null, newEmail: "taken.over@elsewhere.example" });
+    await seedEmailChange({ parentId: a.identity.parentId, guardianId: a.identity.guardianId, familyId: a.identity.familyId, newEmail: "taken.over@elsewhere.example" });
     await seedCode(b.identity.parentId);
-    await seedEmailChange({ parentId: b.identity.parentId, guardianId: b.identity.guardianId, familyId: b.identity.familyId, recordQboId: null, newEmail: "b.moving@elsewhere.example" });
+    await seedEmailChange({ parentId: b.identity.parentId, guardianId: b.identity.guardianId, familyId: b.identity.familyId, newEmail: "b.moving@elsewhere.example" });
     asParent(a.identity);
     expect(await signOutEverywhereAction()).toEqual({ ok: true, message: COPY.everywhereDone });
     expect(await sessionsOf(a.identity.parentId)).toEqual([]);

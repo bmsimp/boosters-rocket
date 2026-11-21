@@ -24,6 +24,7 @@ import { getParentSettings } from "./settings";
 import { sessionProvedRecently } from "./asking-again";
 import { hasAuthenticator } from "./authenticator";
 import { hasPasskey } from "./passkeys";
+import { queueEmailChange } from "./contact-queue";
 
 /** How long the link mailed to the new address works. */
 export const EMAIL_CHANGE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -112,9 +113,8 @@ export async function requestMyEmailChange(ctx: ParentCtx, input: unknown): Prom
     // proof here is Strict's own.
     if (!(await sessionProvedRecently(tx, ctx))) return "not_proved" as const;
     await tx.delete(parentEmailChange).where(and(eq(parentEmailChange.parentId, ctx.parentId), isNull(parentEmailChange.usedAt)));
-    // The request is asked in the session's own family (the app's family record the gate gave it). It names no
-    // QuickBooks record (`record_qbo_id` stays null, read by nothing): the address is the person's.
-    await tx.insert(parentEmailChange).values({ parentId: ctx.parentId, guardianId: ctx.guardianId, familyId: ctx.familyId, recordQboId: null,
+    // The request is asked in the session's own family (the app's family record the gate gave it).
+    await tx.insert(parentEmailChange).values({ parentId: ctx.parentId, guardianId: ctx.guardianId, familyId: ctx.familyId,
       newEmail: email, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + EMAIL_CHANGE_TTL_MS) });
     await writeAudit({ actor, action: "parent.email.request", targetType: "parent", targetId: ctx.parentId, before: { email: ctx.email },
       after: { email, familyId: String(ctx.familyId) }, ip: ctx.ip }, tx);
@@ -185,7 +185,7 @@ class NotFinished extends Error { constructor(readonly why: "session_ended" | "b
  * Then the portal, in one transaction, in the order ./sessions.ts gives (lockedPerson()): both address locks, then the
  * person's row, then the request is spent (one already spent, by another press of the same link, ends it there: nothing
  * more is done or audited, and this press is told as that one was; one deleted since it was read, by a block, a
- * removal, a new ask or the change-of-company clear, is told as signed out when the person was blocked or the session
+ * removal or a new ask, is told as signed out when the person was blocked or the session
  * ended, and otherwise as a link that no longer works, `bad_link`); then, read again under that row, the person still
  * there and not blocked and the session that confirms still existing (ended meanwhile by any end of it, the change
  * stops: thrown, so the spend goes back with the rest, recorded with its own code, `session_ended`, `blocked` or
@@ -236,7 +236,7 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown): Prom
   const finish = () => db.transaction(async (tx): Promise<"changed" | "taken" | "gone" | null> => {
     // The person first, in the order ./sessions.ts gives (lockedPerson()): both addresses, then the person's row, then
     // what hangs on the person, their email change requests, sign-in codes, set-up and reset links, remembered devices
-    // and sessions, in that order. An ask, a block, the switches, the daily clean-up and the change-of-company clear
+    // and sessions, in that order. An ask, a block, the switches and the daily clean-up
     // take the same rows in the same order, so none of them can wait on this one while it waits on them.
     for (const address of [oldEmail, newEmail].sort()) await lockEmail(tx, address);
     const [me] = await tx.select({ blocked: parent.blocked }).from(parent).where(eq(parent.id, ctx.parentId)).for("update");
@@ -253,7 +253,7 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown): Prom
       // Nothing more is done or audited for it.
       const [still] = await tx.select({ id: parentEmailChange.id }).from(parentEmailChange).where(eq(parentEmailChange.id, row.id));
       if (still) return null;
-      // Gone since it was read: a block, a removal, the change-of-company clear or a new ask deleted it. A block or
+      // Gone since it was read: a block, a removal or a new ask deleted it. A block or
       // an end of the session is told as one; otherwise the link no longer works, as any other.
       await stopIfSignedOut();
       return "gone";
@@ -276,8 +276,10 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown): Prom
     const devicesForgotten = await forgetDevices(ctx.parentId, tx);
     // Every session was proved with the old address: the person signs in again, with the new one.
     const sessionsEnded = await endParentSessions(ctx.parentId, tx);
+    // Stage 3's slice S11e: the new address is sent on to each record of the person's in QuickBooks, by the worker.
+    const queueIds = await queueEmailChange(tx, ctx.parentId, { from: oldEmail, to: newEmail }, { actor, ip: ctx.ip });
     await writeAudit({ actor, action: "parent.email.save", targetType: "parent", targetId: ctx.parentId, before: { email: oldEmail },
-      after: { email: newEmail, familyId: String(ctx.familyId), sessionsEnded, linksDeleted, devicesForgotten }, ip: ctx.ip }, tx);
+      after: { email: newEmail, familyId: String(ctx.familyId), sessionsEnded, linksDeleted, devicesForgotten, queueIds }, ip: ctx.ip }, tx);
     return "changed";
   });
 

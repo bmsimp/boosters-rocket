@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { staffAction, type StaffCtx } from "@/lib/guards";
 import { blockPerson, renamePerson, unblockPerson } from "@/lib/parents/people";
-import { addGuardian, reinstateGuardian, removeGuardian } from "@/lib/parents/guardians";
+import { addGuardian, reinstateGuardian, releaseSigninHold, removeGuardian, signinHeldOfGuardian, signinHoldOf } from "@/lib/parents/guardians";
 import { familyRecordAt } from "@/lib/families/address";
 import { resendWelcome } from "@/lib/parents/welcome";
 import { resetSignin } from "@/lib/parents/signin-reset";
@@ -156,9 +156,10 @@ export const addGuardianAction = staffAction(R, async (ctx, familyId: string, na
   refresh();
   // Said of a person who held the address already, between their name and what follows it.
   const known = r.person === "existing" ? ", who already had a sign-in with this address (their name is unchanged)" : "";
+  const held = (await signinHoldOf(family)) !== null ? ` ${HELD_STILL}` : "";
   return { ok: true, message: withQuickBooks(r.outcome === "reinstated"
-    ? `${r.name}${known}${known ? "," : ""} was a guardian of this family before: their sign-in for it is back. They sign in with this address and their password while parent sign-ins are on; if they haven't chosen one, Resend welcome email on their page sends them a link to choose it.`
-    : `Added ${r.name}${known}. They sign in with this address and a password while parent sign-ins are on. If they have never had a welcome email and welcome emails are on, they are sent one, with a link to choose a password if they have none.`, r.quickbooks) };
+    ? `${r.name}${known}${known ? "," : ""} was a guardian of this family before: their sign-in for it is back. They sign in with this address and their password while parent sign-ins are on; if they haven't chosen one, Resend welcome email on their page sends them a link to choose it.${held}`
+    : `Added ${r.name}${known}. They sign in with this address and a password while parent sign-ins are on. If they have never had a welcome email and welcome emails are on, they are sent one, with a link to choose a password if they have none.${held}`, r.quickbooks) };
 });
 
 export const removeGuardianAction = staffAction(R, async (ctx, guardianId: string, note: string): Promise<Done> => {
@@ -183,11 +184,14 @@ const REINSTATE_REFUSED = {
   making: MAKING_WORDS.replace("nobody can be added to it", "this sign-in can't be brought back just now"),
   changing: CHANGING_WORDS.replace("nobody can be added to it", "this sign-in can't be brought back just now"),
   other_company: OTHER_COMPANY_WORDS.replace("and nobody was added", "and this sign-in wasn't brought back"),
-  other_customer: "This sign-in was made for a different customer in QuickBooks than this family's own, so it can't be brought back here.",
   busy: BUSY_WORDS,
   qbo_pending: QBO_PENDING_WORDS,
   being_changed: BEING_CHANGED_WORDS,
 } as const;
+
+// Said after an add or a reinstate in a family whose sign-ins a take from the books held (stage 4's slice M4b): the
+// guardian's row is open, and the gate still keeps them out until the hold is ended on the family's page.
+const HELD_STILL = "This family's sign-ins are held all the same, so they can't sign in to it until someone who may change families lets its guardians in, under Sign-ins held on this page.";
 
 export const reinstateGuardianAction = staffAction(R, async (ctx, guardianId: string): Promise<Done> => {
   if (!personId(guardianId)) return NOT_FROM_PAGE;
@@ -198,7 +202,32 @@ export const reinstateGuardianAction = staffAction(R, async (ctx, guardianId: st
     return { ok: false, errors: [REINSTATE_REFUSED[r.reason]] };
   }
   refresh();
-  return { ok: true, message: withQuickBooks("Reinstated. Their sign-in for this family is back.", r.quickbooks) };
+  const held = (await signinHeldOfGuardian(guardianId)) ? ` ${HELD_STILL}` : "";
+  return { ok: true, message: withQuickBooks(`Reinstated. Their sign-in for this family is back.${held}`, r.quickbooks) };
+});
+
+/**
+ * "Let its guardians sign in", on a family's page (stage 4's slice M4b): a family whose sign-ins a take from the books
+ * held (made active again, or opened by a student's take, on Accounting links) lets its guardians sign in again. Under
+ * the permission that gives and ends sign-ins, as reinstating does (the lead's decision 2 on the owner's choice 5): the
+ * linking permission alone brings a record back and lets nobody in. `familyId`, bound by the page, is the app's family
+ * record's id, checked here and found again (familyRecordAt()); the library clears the hold only while it is set.
+ */
+export const releaseSigninHoldAction = staffAction(R, async (ctx, familyId: string): Promise<Done> => {
+  if (!personId(familyId)) return NOT_FROM_PAGE;
+  const found = await familyRecordAt(familyId);
+  if (!found) return NOT_FROM_PAGE;
+  const r = await releaseSigninHold(found, op(ctx, R));
+  if (!r.ok) {
+    if (r.reason === "busy") return { ok: false, errors: [BUSY_WORDS] };
+    if (r.reason === "not_held") return { ok: false, errors: ["This family's guardians aren't held back from signing in, so nothing was changed. Reload the page."] };
+    return NOT_FROM_PAGE;
+  }
+  refresh();
+  // By the people who can sign in now: an open row that counts, of a person who isn't blocked (`signingIn`).
+  return { ok: true, message: r.signingIn === 0
+    ? `Done. Nobody can sign in to ${r.name} yet all the same: it has no open guardian who isn't blocked, or none the portal lets in now (the family may be inactive, or have no active student while the club asks for one).`
+    : `Done. ${r.signingIn === 1 ? "Its 1 open guardian" : `Its ${r.signingIn} open guardians`} can sign in to ${r.name} now, while parent sign-ins are on.` };
 });
 
 /**

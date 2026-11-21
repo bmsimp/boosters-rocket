@@ -1,6 +1,6 @@
 {
-  "id": "2982ad0d-96c5-4d95-a673-48d5ecb9d942",
-  "prevId": "a5176760-0fe9-4c83-8773-370ee28b350a",
+  "id": "4bab11de-681a-4efd-ab5c-4b8733f3ac0d",
+  "prevId": "677d9717-d802-42e9-bc9d-4845455d87d5",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -288,6 +288,226 @@
         "accounting_link_carried_over_by_nobody": {
           "name": "accounting_link_carried_over_by_nobody",
           "value": "\"accounting_link\".\"origin\" <> 'carried_over' or \"accounting_link\".\"linked_by\" is null"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.accounting_link_ended": {
+      "name": "accounting_link_ended",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "system": {
+          "name": "system",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "realm_id": {
+          "name": "realm_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "family_id": {
+          "name": "family_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "student_id": {
+          "name": "student_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "guardian_id": {
+          "name": "guardian_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "origin": {
+          "name": "origin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "linked_at": {
+          "name": "linked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "linked_by": {
+          "name": "linked_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ended_by": {
+          "name": "ended_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ended_how": {
+          "name": "ended_how",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "accounting_link_ended_family_ix": {
+          "name": "accounting_link_ended_family_ix",
+          "columns": [
+            {
+              "expression": "family_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "accounting_link_ended_student_ix": {
+          "name": "accounting_link_ended_student_ix",
+          "columns": [
+            {
+              "expression": "student_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "accounting_link_ended_guardian_ix": {
+          "name": "accounting_link_ended_guardian_ix",
+          "columns": [
+            {
+              "expression": "guardian_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "accounting_link_ended_customer_ix": {
+          "name": "accounting_link_ended_customer_ix",
+          "columns": [
+            {
+              "expression": "system",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "realm_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "customer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "accounting_link_ended_family_id_family_id_fk": {
+          "name": "accounting_link_ended_family_id_family_id_fk",
+          "tableFrom": "accounting_link_ended",
+          "tableTo": "family",
+          "columnsFrom": [
+            "family_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "accounting_link_ended_student_id_student_id_fk": {
+          "name": "accounting_link_ended_student_id_student_id_fk",
+          "tableFrom": "accounting_link_ended",
+          "tableTo": "student",
+          "columnsFrom": [
+            "student_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "accounting_link_ended_guardian_id_guardian_id_fk": {
+          "name": "accounting_link_ended_guardian_id_guardian_id_fk",
+          "tableFrom": "accounting_link_ended",
+          "tableTo": "guardian",
+          "columnsFrom": [
+            "guardian_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "accounting_link_ended_one_record": {
+          "name": "accounting_link_ended_one_record",
+          "value": "num_nonnulls(\"accounting_link_ended\".\"family_id\", \"accounting_link_ended\".\"student_id\", \"accounting_link_ended\".\"guardian_id\") = 1"
+        },
+        "accounting_link_ended_carried_over_by_nobody": {
+          "name": "accounting_link_ended_carried_over_by_nobody",
+          "value": "\"accounting_link_ended\".\"origin\" <> 'carried_over' or \"accounting_link_ended\".\"linked_by\" is null"
         }
       },
       "isRLSEnabled": false
@@ -915,85 +1135,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.family_match": {
-      "name": "family_match",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "old_realm_id": {
-          "name": "old_realm_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "old_family_qbo_id": {
-          "name": "old_family_qbo_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "new_realm_id": {
-          "name": "new_realm_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "new_family_qbo_id": {
-          "name": "new_family_qbo_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "decided_by": {
-          "name": "decided_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "decided_at": {
-          "name": "decided_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "family_match_old_uq": {
-          "name": "family_match_old_uq",
-          "columns": [
-            {
-              "expression": "old_realm_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "old_family_qbo_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.family_money": {
       "name": "family_money",
       "schema": "",
@@ -1320,12 +1461,6 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "family_qbo_id": {
-          "name": "family_qbo_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "family_id": {
           "name": "family_id",
           "type": "uuid",
@@ -1351,12 +1486,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'invited'"
-        },
-        "source_qbo_id": {
-          "name": "source_qbo_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "disabled_reason": {
           "name": "disabled_reason",
@@ -1386,27 +1515,6 @@
         }
       },
       "indexes": {
-        "guardian_family_parent_uq": {
-          "name": "guardian_family_parent_uq",
-          "columns": [
-            {
-              "expression": "family_qbo_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "parent_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "guardian_family_id_parent_uq": {
           "name": "guardian_family_id_parent_uq",
           "columns": [
@@ -1425,21 +1533,6 @@
           ],
           "isUnique": true,
           "where": "family_id is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "guardian_family_ix": {
-          "name": "guardian_family_ix",
-          "columns": [
-            {
-              "expression": "family_qbo_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -1506,79 +1599,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.held_address": {
-      "name": "held_address",
-      "schema": "",
-      "columns": {
-        "email": {
-          "name": "email",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "approved_family_qbo_ids": {
-          "name": "approved_family_qbo_ids",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "rejected_family_qbo_ids": {
-          "name": "rejected_family_qbo_ids",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "announced_family_qbo_ids": {
-          "name": "announced_family_qbo_ids",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "note": {
-          "name": "note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "decided_by": {
-          "name": "decided_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "decided_at": {
-          "name": "decided_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
+      "checkConstraints": {
+        "guardian_family_unless_company_changed": {
+          "name": "guardian_family_unless_company_changed",
+          "value": "\"guardian\".\"family_id\" is not null or \"guardian\".\"disabled_reason\" is not distinct from 'company_changed'"
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.job_run": {
@@ -1775,13 +1801,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "passkey_offer_declines": {
-          "name": "passkey_offer_declines",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1928,137 +1947,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.parent_auth_passkey": {
-      "name": "parent_auth_passkey",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "public_key": {
-          "name": "public_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "credential_id": {
-          "name": "credential_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "counter": {
-          "name": "counter",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "device_type": {
-          "name": "device_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "backed_up": {
-          "name": "backed_up",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "transports": {
-          "name": "transports",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "aaguid": {
-          "name": "aaguid",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_used_at": {
-          "name": "last_used_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "parent_auth_passkey_user_ix": {
-          "name": "parent_auth_passkey_user_ix",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "parent_auth_passkey_credential_id_uq": {
-          "name": "parent_auth_passkey_credential_id_uq",
-          "columns": [
-            {
-              "expression": "credential_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "parent_auth_passkey_user_id_parent_auth_user_id_fk": {
-          "name": "parent_auth_passkey_user_id_parent_auth_user_id_fk",
-          "tableFrom": "parent_auth_passkey",
-          "tableTo": "parent_auth_user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.parent_auth_session": {
       "name": "parent_auth_session",
       "schema": "",
@@ -2122,12 +2010,6 @@
         "device_id": {
           "name": "device_id",
           "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "enrol_until": {
-          "name": "enrol_until",
-          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
@@ -2362,168 +2244,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.parent_authenticator": {
-      "name": "parent_authenticator",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "parent_id": {
-          "name": "parent_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "secret_ciphertext": {
-          "name": "secret_ciphertext",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "secret_key_id": {
-          "name": "secret_key_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "confirmed_at": {
-          "name": "confirmed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_used_step": {
-          "name": "last_used_step",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "parent_authenticator_parent_uq": {
-          "name": "parent_authenticator_parent_uq",
-          "columns": [
-            {
-              "expression": "parent_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "parent_authenticator_parent_id_parent_id_fk": {
-          "name": "parent_authenticator_parent_id_parent_id_fk",
-          "tableFrom": "parent_authenticator",
-          "tableTo": "parent",
-          "columnsFrom": [
-            "parent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.parent_backup_code": {
-      "name": "parent_backup_code",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "parent_id": {
-          "name": "parent_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "code_hash": {
-          "name": "code_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "used_at": {
-          "name": "used_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "parent_backup_code_parent_ix": {
-          "name": "parent_backup_code_parent_ix",
-          "columns": [
-            {
-              "expression": "parent_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "parent_backup_code_parent_id_parent_id_fk": {
-          "name": "parent_backup_code_parent_id_parent_id_fk",
-          "tableFrom": "parent_backup_code",
-          "tableTo": "parent",
-          "columnsFrom": [
-            "parent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.parent_device": {
       "name": "parent_device",
       "schema": "",
@@ -2566,12 +2286,6 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true
-        },
-        "passkey_offered_at": {
-          "name": "passkey_offered_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -2653,12 +2367,6 @@
         "family_id": {
           "name": "family_id",
           "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "record_qbo_id": {
-          "name": "record_qbo_id",
-          "type": "text",
           "primaryKey": false,
           "notNull": false
         },

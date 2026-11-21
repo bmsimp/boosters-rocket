@@ -1,7 +1,8 @@
 // The names of a signed-in parent's own families, for the chooser and the frame's "Viewing <name>" line. Each comes from
 // the app's own family record (`family.name`), found through the person's guardian row's `family_id`, never from a
 // QuickBooks id, so no customer id reaches the page as a label (app-owned families spec §2). A family whose name the
-// portal doesn't know, or a row with no family record yet, is said so in words (recordNameWords()). Parent code: it
+// portal doesn't know is said so in words (recordNameWords()); a previous company's row, the one kind in no family
+// record, is never offered here. Parent code: it
 // reads only the rows of the person it is given, and imports no staff-only module (tests/integration/page-guards.test.ts).
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";

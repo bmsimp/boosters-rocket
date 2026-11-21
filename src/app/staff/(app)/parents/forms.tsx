@@ -183,3 +183,23 @@ export function DetailsForm({ initial, act }: { initial: ContactForm; act: (sent
     </form>
   );
 }
+
+/**
+ * "Let its guardians sign in", on a family's page, for staff with `Roster.Family.ReadWrite` (stage 4's slice M4b): one
+ * press, given only the bound action (releaseSigninHoldAction(), which carries the family's id), and its answer.
+ */
+export function ReleaseHoldControl({ release }: { release: () => Promise<Done> }) {
+  const [state, run, pending] = useActionState(async () => safely(() => release(), failed), null);
+  const said = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (state?.ok) said.current?.focus(); }, [state]);
+  return (
+    <div className="stack">
+      {state ? <div ref={said} tabIndex={-1}><ActionOutcome state={state} /></div> : null}
+      {state?.ok ? null : (
+        <form action={run} className="row-actions">
+          <button className="btn" disabled={pending}>{pending ? "Letting them in…" : "Let its guardians sign in"}</button>
+        </form>
+      )}
+    </div>
+  );
+}

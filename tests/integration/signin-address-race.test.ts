@@ -81,7 +81,7 @@ const check = (email: string, code: string, now: Date) => verifySigninCode({ par
 /** The parent's own confirmed change, from OLD to NEW, made in the portal alone, from the session the parent confirms in. */
 async function confirmTheChange() {
   const { token } = await seedEmailChange({ parentId: r.identity.parentId, guardianId: r.identity.guardianId, familyId: r.identity.familyId,
-    recordQboId: RIVERA.parent.qboId, newEmail: NEW });
+    newEmail: NEW });
   return confirmMyEmailChange({ ...r.identity, ip: null }, token);
 }
 

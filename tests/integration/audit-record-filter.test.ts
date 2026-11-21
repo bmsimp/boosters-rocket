@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { db } from "@/lib/db/client";
-import { auditLog } from "@/lib/db/schema";
+import { desc, eq, inArray, or } from "drizzle-orm";
+import { accountingLink, accountingLinkEnded, auditLog, guardian, student } from "@/lib/db/schema";
+import { asAppFamilyId } from "@/lib/families/ids";
 import { writeAudit } from "@/lib/audit/log";
 import { auditExportScope, auditPage, parseAuditFilters } from "@/lib/audit/query";
 import { setRosterSource } from "@/lib/roster/source";
-import { resetDb } from "../helpers/db";
+import { resetDb, seedParent } from "../helpers/db";
 import { fam, seedCache, seedShape, stu } from "../helpers/roster-cache";
 import { recordOfCustomer } from "../helpers/app-records";
 import { seedSeason } from "../helpers/season";
@@ -176,6 +178,23 @@ describe("the audit page's filter for one family or student", () => {
     expect(await tagged(`student:${kai}`)).toEqual(["kai-left-chen"]);
   });
 
+  it("finds a move taken from the books on the accounting links screen under the student and under both families, and a take of another field by its target alone", async () => {
+    // Stage 4's slice M4a: a take's move names both families in its body, as the portal's own move's row does.
+    const take = (t: string, targetType: string, targetId: string, before: Record<string, unknown>, after: Record<string, unknown>) =>
+      bodied("accounting.difference.take", targetType, targetId, { before, after: { ...after, tag: t } });
+    await take("moved", "student", leo, { familyId: rivera }, { field: "place", kind: "student", studentId: leo, familyId: chen, fromFamilyId: rivera, customerQboId: "12", familyQboId: "20", replaced: [] });
+    await bodied("roster.student.move.followed", "student", leo, { after: { studentId: leo, fromFamilyId: rivera, toFamilyId: chen, cause: `accounting.difference.take#${leo}`, tag: "followed" } });
+    // Kai made inactive from the books: his row names the Chen family in its body, and is his alone.
+    await take("kai-inactive", "student", kai, { active: true }, { field: "inactive", kind: "student", studentId: kai, familyId: chen, customerQboId: "22", replaced: [], active: false });
+    await take("rivera-named", "family", rivera, { name: "Riveras" }, { field: "name", kind: "family", familyId: rivera, customerQboId: "10", name: "Rivera Family", replaced: [] });
+    const tagged = async (record: string) => (await auditPage(parseAuditFilters({ record }))).rows
+      .map((r) => (r.after as { tag?: string } | null)?.tag).filter((t): t is string => t !== undefined).sort();
+    expect(await tagged(`family:${rivera}`)).toEqual(["followed", "moved", "rivera-named"]);
+    expect(await tagged(`family:${chen}`)).toEqual(["followed", "moved"]);
+    expect(await tagged(`student:${leo}`)).toEqual(["followed", "moved"]);
+    expect(await tagged(`student:${kai}`)).toEqual(["kai-inactive"]);
+  });
+
   it("finds a confirm on the accounting links screen under its family and under each student it linked, and never under another student", async () => {
     // Stage 4's slice M3a: the row targets the family and names the students it linked only in its body.
     const confirm = (t: string, familyId: string, studentId: string, customerQboId: string) => bodied("accounting.link.confirm", "family", familyId,
@@ -301,5 +320,77 @@ describe("the audit page's filter for a family's or student's buy-out rows", () 
     // Kai's customer, chosen for as a family: its family record's row, never Kai's.
     expect(await targets(`family:${kaiAsFamily}`)).toEqual([`buyout:${BOTH_FAMILY_OLD}`]);
     expect(await targets(`student:${kai}`)).not.toContain(`buyout:${BOTH_FAMILY_OLD}`);
+  });
+});
+
+/**
+ * Stage 4's slice M3b: an unlink moves a family's links to accounting_link_ended, and the filter bounds each customer by
+ * when it was the record's: a row naming the customer written while the family was linked to it is the family's; one
+ * written after the family's unlink, once another family is linked to the customer, is that other family's alone; and
+ * one written before that other family's link is never the other family's.
+ */
+describe("the audit page's filter for a customer a family was linked to and another is linked to now", () => {
+  const REALM = "4620000000000001";
+  const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+  let rivera = "", chen = "", leo = "";
+  /** A row, written as of `at`. */
+  const rowAt = async (at: Date, action: string, targetType: string, targetId: string, body: { before?: Record<string, unknown>; after?: Record<string, unknown> } = {}) => {
+    await writeAudit({ actor, action, targetType, targetId, ...body });
+    const [last] = await db.select({ id: auditLog.id }).from(auditLog).orderBy(desc(auditLog.id)).limit(1);
+    await db.update(auditLog).set({ at }).where(eq(auditLog.id, last!.id));
+  };
+  /** A family's links (and its students'), ended as of `at`, as an unlink ends them. */
+  const endLinksOf = async (familyId: string, at: Date) => {
+    const studentIds = (await db.select({ id: student.id }).from(student).where(eq(student.familyId, asAppFamilyId(familyId)))).map((s) => s.id);
+    const links = await db.select().from(accountingLink).where(or(eq(accountingLink.familyId, asAppFamilyId(familyId)), studentIds.length ? inArray(accountingLink.studentId, studentIds) : undefined));
+    await db.insert(accountingLinkEnded).values(links.map((l) => ({ id: l.id, system: l.system, realmId: l.realmId, customerId: l.customerId, familyId: l.familyId, studentId: l.studentId,
+      guardianId: l.guardianId, origin: l.origin, linkedAt: l.linkedAt, linkedBy: l.linkedBy, endedAt: at, endedBy: null, endedHow: "unlinked" as const })));
+    await db.delete(accountingLink).where(inArray(accountingLink.id, links.map((l) => l.id)));
+  };
+  const tagged = async (record: string) => (await auditPage(parseAuditFilters({ record }))).rows
+    .map((r) => (r.after as { tag?: string } | null)?.tag).filter((t): t is string => t !== undefined).sort();
+
+  beforeEach(async () => {
+    await resetDb();
+    await db.transaction((tx) => setRosterSource(tx, REALM));
+    await seedShape();
+    await seedCache([fam("10", "Rivera Family"), stu("12", "Leo Rivera", "10"), fam("20", "Chen Family")]);
+    [rivera, chen, leo] = [String(await recordOfCustomer("10", "family")), String(await recordOfCustomer("20", "family")), String(await recordOfCustomer("12", "student"))];
+    // Rivera's links were made long ago (carried over by the import): set them back so every row below falls after them.
+    await db.update(accountingLink).set({ linkedAt: ago(600) });
+    await rowAt(ago(180), "season.progress.family.read", "qbo_customer", "10", { after: { tag: "x-while-rivera" } });
+    await rowAt(ago(170), "money.balance_mismatch", "family", "10", { after: { tag: "x-old-money-while-rivera" } });
+    // Rivera unlinked from 10 (with Leo's link), and Chen from 20, two hours ago.
+    await endLinksOf(rivera, ago(120));
+    await rowAt(ago(120), "accounting.link.remove", "family", rivera, { after: { familyId: rivera, customerQboId: "10", studentLinksEnded: [{ studentId: leo, customerQboId: "12" }], tag: "rivera-unlinked" } });
+    await endLinksOf(chen, ago(115));
+    await rowAt(ago(100), "season.progress.family.read", "qbo_customer", "10", { after: { tag: "x-between" } });
+    // Chen linked to 10 an hour ago.
+    await db.insert(accountingLink).values({ system: "quickbooks", realmId: REALM, customerId: "10", familyId: asAppFamilyId(chen), origin: "confirmed", linkedBy: "00000000-0000-4000-8000-0000000000aa", linkedAt: ago(60) });
+    await rowAt(ago(30), "season.progress.family.read", "qbo_customer", "10", { after: { tag: "x-while-chen" } });
+  });
+
+  it("finds a row naming the customer under the family it was linked to when the row was written, and never the other", async () => {
+    expect(await tagged(`family:${rivera}`)).toEqual(["rivera-unlinked", "x-old-money-while-rivera", "x-while-rivera"]);
+    // Chen's window for 10 opens at Rivera's unlink (the latest of another family's, before Chen's link was made): no row
+    // of Rivera's time is Chen's; one written since, before or after Chen's link, is.
+    expect(await tagged(`family:${chen}`)).toEqual(["x-between", "x-while-chen"]);
+    expect(await tagged(rivera)).toEqual(["rivera-unlinked", "x-old-money-while-rivera", "x-while-rivera"]);
+  });
+
+  it("finds an unlink under the family and under each student whose link it ended", async () => {
+    expect(await tagged(`student:${leo}`)).toEqual(["rivera-unlinked"]);
+    expect(await tagged(leo)).toEqual(["rivera-unlinked"]);
+  });
+
+  it("never bounds a student's window by a guardian row's ended link to the same customer", async () => {
+    // A guardian row of the Chens whose own link to 12 ended before Leo's did: a guardian row is neither kind, so Leo's
+    // window for 12 still has no lower bound, and a row naming 12 from before it is still Leo's.
+    const kit = await seedParent({ name: "Kit Chen", email: "kit@example.com" });
+    const [row] = await db.insert(guardian).values({ parentId: kit.id, familyId: asAppFamilyId(chen), status: "invited" }).returning();
+    await db.insert(accountingLinkEnded).values({ id: "00000000-0000-4000-8000-0000000000c1", system: "quickbooks", realmId: REALM, customerId: "12", guardianId: row!.id,
+      origin: "carried_over", linkedAt: ago(500), linkedBy: null, endedAt: ago(150), endedBy: "00000000-0000-4000-8000-0000000000aa", endedHow: "unlinked" });
+    await rowAt(ago(200), "season.progress.family.read", "qbo_customer", "12", { after: { tag: "leo-old" } });
+    expect(await tagged(`student:${leo}`)).toEqual(["leo-old", "rivera-unlinked"]);
   });
 });

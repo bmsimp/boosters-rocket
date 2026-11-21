@@ -12,6 +12,7 @@ import type { Tx } from "@/lib/db/client";
 import { guardian, parentEmailChange, type DisabledReason } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import type { AppFamilyId } from "@/lib/families/ids";
+import { customerOfFamily } from "@/lib/families/links";
 import { formsForGoneSigner } from "@/lib/forms/signer-gone";
 import { deleteUnusedSigninCodes, deleteUnusedSigninLinks, endFamilySessions, endParentSessions, forgetDevices } from "./sessions";
 
@@ -28,13 +29,11 @@ async function deleteUnusedRequests(tx: Tx, parentId: string, familyId: AppFamil
 
 /** The parts of a guardian row a close reads. The caller's own object is changed in place to match the row. */
 export type MembershipRow = Pick<typeof guardian.$inferSelect,
-  "id" | "parentId" | "familyQboId" | "familyId" | "status" | "statusBeforeDisable" | "disabledReason" | "sourceQboId">;
+  "id" | "parentId" | "familyId" | "status" | "statusBeforeDisable" | "disabledReason">;
 
 export type CloseMembership = {
   reason: DisabledReason;
   actor: Actor;
-  /** Drops the row's `source_qbo_id` too, so another row can carry it; the audit row keeps what it was. */
-  dropSource?: boolean;
   /** Added to the audit row's `after`: what led to the close. */
   cause?: string;
   /** Added to the audit row's `after`: staff's own note on why, kept for staff only (a parent never reads it). */
@@ -58,14 +57,14 @@ export type CloseMembership = {
  * work after a reinstate or a new add within its life; the person's sessions that chose the row's family record end (none for a row that names no family record: no session can
  * have chosen one, since the gate lets a session into a family only through its person's row naming it), and all their
  * sessions when no open row is left; when the row was open, the family's unfinished forms still waiting on them start
- * again (formsForGoneSigner(), by the row's own `family_id`); and `parent.access.ended` is written. In that order, in the caller's transaction, which must hold the row locked. Returns
+ * again (formsForGoneSigner(), by the row's own `family_id`); and `parent.access.ended` is written, naming the customer
+ * the family's own link names now (`familyQboId`, null for a family with no link or a row in none). In that order, in the caller's transaction, which must hold the row locked. Returns
  * whether it was open and how many sessions ended.
  */
 export async function closeMembership(tx: Tx, row: MembershipRow, o: CloseMembership): Promise<{ wasOpen: boolean; sessionsEnded: number }> {
   const wasOpen = row.status !== "disabled";
   const was = row.status === "disabled" ? row.statusBeforeDisable : row.status;
-  const droppedSource = row.sourceQboId;
-  const set = { status: "disabled" as const, disabledReason: o.reason, statusBeforeDisable: was, ...(o.dropSource ? { sourceQboId: null } : {}) };
+  const set = { status: "disabled" as const, disabledReason: o.reason, statusBeforeDisable: was };
   await tx.update(guardian).set({ ...set, updatedAt: new Date() }).where(eq(guardian.id, row.id));
   // The caller's object is the row as it is now, so what it decides next (another close, the person's last open row) reads it.
   Object.assign(row, set);
@@ -82,11 +81,11 @@ export async function closeMembership(tx: Tx, row: MembershipRow, o: CloseMember
   let sessionsEnded = row.familyId === null ? 0 : await endFamilySessions(row.parentId, row.familyId, tx);
   if (!openElsewhere) sessionsEnded += await endParentSessions(row.parentId, tx);
   // A document already made for them keeps a working signing link: their unfinished forms for this family start again.
+  const familyQboId = row.familyId === null ? null : await customerOfFamily(row.familyId, tx);
   const formsReset = wasOpen ? await formsForGoneSigner(tx, { parentId: row.parentId, family: row.familyId, reason: "access_ended", actor: o.actor, ip: o.ip ?? null }) : 0;
-  // A dropped source is gone from the row: the audit row keeps what it was.
   await writeAudit({ actor: o.actor, action: "parent.access.ended", permission: o.permission, targetType: "guardian", targetId: row.id, ip: o.ip ?? null,
-    before: o.dropSource ? { status: was, sourceQboId: droppedSource } : { status: was },
-    after: { parentId: row.parentId, familyId: row.familyId === null ? null : String(row.familyId), familyQboId: row.familyQboId, reason: o.reason, sessionsEnded,
+    before: { status: was },
+    after: { parentId: row.parentId, familyId: row.familyId === null ? null : String(row.familyId), familyQboId, reason: o.reason, sessionsEnded,
       ...(requestsDeleted ? { requestsDeleted } : {}), ...(linksDeleted ? { linksDeleted } : {}), ...(devicesForgotten ? { devicesForgotten } : {}), ...(formsReset ? { formsReset } : {}), ...(o.cause === undefined ? {} : { cause: o.cause }), ...(o.note === undefined ? {} : { note: o.note }) } }, tx);
   return { wasOpen, sessionsEnded };
 }

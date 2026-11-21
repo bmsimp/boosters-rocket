@@ -16,6 +16,7 @@ import { AccessDenied } from "@/lib/guards";
 import { loadFamilyMoney } from "@/lib/money/family-money";
 import { addGuardian } from "@/lib/parents/guardians";
 import { customersWithNoFamily, familyFromCustomer, isSecondFamilyLink, NO_FAMILY_COPY } from "@/lib/roster/no-family";
+import { customerAimedAt, leaveUnlinked } from "@/lib/accounting/link-writes";
 import { rosterEntry } from "@/lib/roster/queries";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { askRosterWrite } from "@/lib/roster/writes";
@@ -24,10 +25,10 @@ import { ROSTER_LOCK, SHAPE_KEY } from "@/lib/roster/shape";
 import { SOURCE_KEY } from "@/lib/roster/source";
 import { familyFromCustomerAction } from "@/app/staff/(app)/reconciliation/family-actions";
 import ReconciliationPage from "@/app/staff/(app)/reconciliation/page";
-import { resetDb, untilALockIsAwaited } from "../helpers/db";
+import { resetDb, seedParent, untilALockIsAwaited } from "../helpers/db";
 import { seedSignedInParent } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
-import { asOp, connectRoster, REALM, staffWith, WORKER } from "../helpers/roster-writes";
+import { asOp, connectRoster, REALM, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
 import { appRecordRows, NO_CHANGES, recordOfCustomer, whatAFreshRunWouldChange } from "../helpers/app-records";
 import { rowNamed, tableRows } from "../helpers/table";
 import { stubInvoice } from "../helpers/money";
@@ -46,6 +47,7 @@ let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
 afterAll(() => stub.close());
 beforeEach(async () => { await resetDb(); stub.reset(); });
+let tag: string;
 
 /** A customer as QuickBooks answers it, as fznCompany() writes them. */
 const qc = (Id: string, DisplayName: string, typeId: string | null, extra: Record<string, unknown> = {}) => ({
@@ -129,7 +131,7 @@ describe("Create a family from this", () => {
     await connectRoster(stub);
     await addInQuickBooks(...PATELS);
     const treasurer = await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
-    const r = await familyFromCustomer("70", asLinker(treasurer));
+    const r = await familyFromCustomer("70", asLinker(treasurer), customerAimedAt);
     expect(r).toEqual({ ok: true, message: "Patel Family is a family in the portal now, linked to its QuickBooks customer, with 2 students. Nobody can sign in for it yet: add its guardians on its page, under Families." });
 
     const [link] = await familyLinksOf("70");
@@ -173,7 +175,7 @@ describe("Create a family from this", () => {
     const leoBefore = await db.select().from(student).where(eq(student.id, leo));
     const linkBefore = await studentLinkOf("12");
     const staff = await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
-    const r = await familyFromCustomer("70", asLinker(staff));
+    const r = await familyFromCustomer("70", asLinker(staff), customerAimedAt);
     expect(r).toEqual({ ok: true, message: "Patel Family is a family in the portal now, linked to its QuickBooks customer, with 2 students. 1 student under it in QuickBooks already had a record in the portal and was left as it was. Nobody can sign in for it yet: add its guardians on its page, under Families." });
     expect(await db.select().from(student).where(eq(student.id, leo))).toEqual(leoBefore);
     expect(leoBefore[0]!.familyId).toEqual(rivera);
@@ -193,7 +195,7 @@ describe("Create a family from this", () => {
     const linkBefore = await studentLinkOf("74");
     expect(await listed()).toEqual([{ qboId: "70", name: "Patel Family", students: 3, inactiveStudents: 1, studentsWithRecord: 1 }]);
     const staff = await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
-    expect(await familyFromCustomer("70", asLinker(staff))).toEqual({ ok: true, message: "Patel Family is a family in the portal now, linked to its QuickBooks customer, with 2 students. 1 student under it in QuickBooks already had a record in the portal and was left as it was. Nobody can sign in for it yet: add its guardians on its page, under Families." });
+    expect(await familyFromCustomer("70", asLinker(staff), customerAimedAt)).toEqual({ ok: true, message: "Patel Family is a family in the portal now, linked to its QuickBooks customer, with 2 students. 1 student under it in QuickBooks already had a record in the portal and was left as it was. Nobody can sign in for it yet: add its guardians on its page, under Families." });
     expect(await db.select().from(student).where(eq(student.id, sam))).toEqual(samBefore);
     expect(await studentLinkOf("74")).toEqual(linkBefore);
     const kids = await db.select({ name: student.name }).from(student).where(eq(student.familyId, await madeFamilyOf("70")));
@@ -206,7 +208,7 @@ describe("Create a family from this", () => {
     await connectRoster(stub);
     await addInQuickBooks(...PATELS);
     const staff = await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
-    expect(await familyFromCustomer("70", asLinker(staff, false))).toEqual({ ok: true, message: "Patel Family is a family in the portal now, linked to its QuickBooks customer, with 2 students. Nobody can sign in for it yet: someone who may change families adds its guardians on its page, under Families." });
+    expect(await familyFromCustomer("70", asLinker(staff, false), customerAimedAt)).toEqual({ ok: true, message: "Patel Family is a family in the portal now, linked to its QuickBooks customer, with 2 students. Nobody can sign in for it yet: someone who may change families adds its guardians on its page, under Families." });
   });
 
   it("leaves a family like any other: staff add a guardian and a student to it, and a page load reads its money", async () => {
@@ -214,7 +216,7 @@ describe("Create a family from this", () => {
     await addInQuickBooks(...PATELS);
     stub.invoices.push(stubInvoice("9001", "70", { TotalAmt: 20, Balance: 20 }));
     const staff = await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Accounting.Link.ReadWrite"]);
-    expect(await familyFromCustomer("70", asLinker(staff))).toMatchObject({ ok: true });
+    expect(await familyFromCustomer("70", asLinker(staff), customerAimedAt)).toMatchObject({ ok: true });
     const patels = await madeFamilyOf("70");
 
     expect(await addGuardian(patels, { name: "Nita Patel", email: "nita@example.com" }, asOp(staff))).toMatchObject({ ok: true, outcome: "added" });
@@ -244,7 +246,7 @@ describe("Create a family from this", () => {
         await new Promise<void>((r) => { commit = () => r(); });
       });
     });
-    const press = familyFromCustomer("70", asLinker(staff));
+    const press = familyFromCustomer("70", asLinker(staff), customerAimedAt);
     await untilALockIsAwaited(15_000, 1);
     commit();
     await other;
@@ -273,7 +275,7 @@ describe("Create a family from this", () => {
     await connectRoster(stub, { shape: { kind: "flat", memberTypeIds: ["1"] } });
     await addInQuickBooks(qc("70", "Patel Family", "1"), qc("71", "Asha Patel", "3", under("70")));
     const staff = await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
-    expect(await familyFromCustomer("70", asLinker(staff))).toMatchObject({ ok: true });
+    expect(await familyFromCustomer("70", asLinker(staff), customerAimedAt)).toMatchObject({ ok: true });
     const [link] = await familyLinksOf("70");
     expect(await db.select().from(student).where(eq(student.familyId, link!.familyId!))).toEqual([]);
     expect(await studentLinkOf("71")).toBeUndefined();
@@ -293,7 +295,7 @@ describe("Create a family from this", () => {
         await new Promise<void>((r) => { release = () => r(); });
       });
     });
-    const presses = [familyFromCustomer("70", asLinker(staff)), familyFromCustomer("70", asLinker(staff))];
+    const presses = [familyFromCustomer("70", asLinker(staff), customerAimedAt), familyFromCustomer("70", asLinker(staff), customerAimedAt)];
     await untilALockIsAwaited(15_000, 2);
     release();
     await held;
@@ -301,7 +303,7 @@ describe("Create a family from this", () => {
     expect(answers.filter((a) => a.ok)).toHaveLength(1);
     expect(answers.filter((a) => !a.ok)).toEqual([{ ok: false, errors: [NO_FAMILY_COPY.already] }]);
     // And a press after them.
-    expect(await familyFromCustomer("70", asLinker(staff))).toEqual({ ok: false, errors: [NO_FAMILY_COPY.already] });
+    expect(await familyFromCustomer("70", asLinker(staff), customerAimedAt)).toEqual({ ok: false, errors: [NO_FAMILY_COPY.already] });
     expect(await familyLinksOf("70")).toHaveLength(1);
     expect(await db.select().from(student).where(eq(student.familyId, (await familyLinksOf("70"))[0]!.familyId!))).toHaveLength(2);
     expect(await audits("accounting.family.from_customer")).toHaveLength(1);
@@ -313,19 +315,19 @@ describe("Create a family from this", () => {
     const staff = await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
     const before = await appRecordRows();
     const refused = (errors: string) => ({ ok: false, errors: [errors] });
-    for (const odd of ["", "7O", "70 ", "-70", "1".repeat(20), "x".repeat(100)]) expect(await familyFromCustomer(odd, asLinker(staff)), odd).toEqual(refused(NO_FAMILY_COPY.notFromPage));
-    for (const id of ["80", "85", "86", "71", "73", "99999"]) expect(await familyFromCustomer(id, asLinker(staff)), id).toEqual(refused(NO_FAMILY_COPY.notOffered));
-    expect(await familyFromCustomer("10", asLinker(staff))).toEqual(refused(NO_FAMILY_COPY.already));
+    for (const odd of ["", "7O", "70 ", "-70", "1".repeat(20), "x".repeat(100)]) expect(await familyFromCustomer(odd, asLinker(staff), customerAimedAt), odd).toEqual(refused(NO_FAMILY_COPY.notFromPage));
+    for (const id of ["80", "85", "86", "71", "73", "99999"]) expect(await familyFromCustomer(id, asLinker(staff), customerAimedAt), id).toEqual(refused(NO_FAMILY_COPY.notOffered));
+    expect(await familyFromCustomer("10", asLinker(staff), customerAimedAt)).toEqual(refused(NO_FAMILY_COPY.already));
 
     await db.update(qboConnection).set({ realmId: "9130000000000999" });
-    expect(await familyFromCustomer("70", asLinker(staff))).toEqual(refused(NO_FAMILY_COPY.other_company));
+    expect(await familyFromCustomer("70", asLinker(staff), customerAimedAt)).toEqual(refused(NO_FAMILY_COPY.other_company));
     await db.update(qboConnection).set({ realmId: REALM });
     const shape = (await db.select().from(setting).where(eq(setting.key, SHAPE_KEY)))[0]!;
     await db.delete(setting).where(eq(setting.key, SHAPE_KEY));
-    expect(await familyFromCustomer("70", asLinker(staff))).toEqual(refused(NO_FAMILY_COPY.no_shape));
+    expect(await familyFromCustomer("70", asLinker(staff), customerAimedAt)).toEqual(refused(NO_FAMILY_COPY.no_shape));
     await db.insert(setting).values({ key: SHAPE_KEY, value: shape.value });
     await db.delete(setting).where(eq(setting.key, SOURCE_KEY));
-    expect(await familyFromCustomer("70", asLinker(staff))).toEqual(refused(NO_FAMILY_COPY.no_company));
+    expect(await familyFromCustomer("70", asLinker(staff), customerAimedAt)).toEqual(refused(NO_FAMILY_COPY.no_company));
 
     expect(await appRecordRows()).toEqual(before);
     expect(await audits("accounting.family.from_customer")).toEqual([]);
@@ -400,5 +402,199 @@ describe("the action and the Reconciliation section", () => {
     await db.delete(setting).where(eq(setting.key, SHAPE_KEY));
     html = section(await renderPage(ReconciliationPage))!;
     expect(html).toContain("the portal can&#x27;t tell which customers are families");
+  });
+});
+
+describe("a customer meant for a family the portal has (stage 4's slice M3a2)", () => {
+  const mail = (address: string) => ({ PrimaryEmailAddr: { Address: address } });
+  const section = (html: string, id: string) => { const at = html.indexOf(`id="${id}"`); return at < 0 ? "" : html.slice(at, html.indexOf("</section>", at)); };
+  /** A family the portal has with no link: a record of its own, active. */
+  const unlinked = async (name: string) => (await db.insert(family).values({ name, active: true }).returning({ id: family.id }))[0]!.id;
+  /** An open guardian row of a new person in this family record. */
+  const guardianIn = async (familyId: Awaited<ReturnType<typeof unlinked>>, name: string, email: string) => {
+    const p = await seedParent({ name, email });
+    await db.insert(guardian).values({ parentId: p.id, familyId, status: "invited" });
+  };
+  /** Everything "Create a family from this" would make, read before and after a refusal. */
+  const made = async () => ({ records: await appRecordRows(), audits: await audits("accounting.family.from_customer") });
+
+  it("refuses a Suggested row's customer, a Several possible candidate and a given-up create's customer of an unlinked family, making nothing", async () => {
+    await connectRoster(stub);
+    await addInQuickBooks(qc("70", "Patel Family", "1", mail("asha@example.com")), qc("75", "Okafor Family", "1", mail("ike@example.com")),
+      qc("76", "Okafor Household", "1", mail("ada@example.com")), qc("90", "Quiet Family", "1"));
+    const patels = await unlinked("The Patels");
+    await guardianIn(patels, "Asha Patel", "asha@example.com");
+    const okafors = await unlinked("The Okafors");
+    await guardianIn(okafors, "Ike Okafor", "ike@example.com");
+    await guardianIn(okafors, "Ada Okafor", "ada@example.com");
+    // The Quiets' own create, given up after a try QuickBooks took: it made Quiet Family (90), linked to nobody.
+    const quiets = await unlinked("The Quiets");
+    await seedQueued({ op: "create", role: "family", name: "Quiet Family", typeQboId: "1", familyQboId: null, email: null }, { familyId: quiets, sent: true, state: "given_up", lastTriedAt: new Date() });
+    const staff = await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
+    // Each is still a customer with no family: the list is unchanged, only the press refuses.
+    expect((await listed() as { qboId: string }[]).map((c) => c.qboId).sort()).toEqual(["70", "75", "76", "90"]);
+    const before = await made();
+    expect(await familyFromCustomer("70", asLinker(staff), customerAimedAt)).toEqual({ ok: false, errors: [NO_FAMILY_COPY.suggestedFor(["The Patels"])] });
+    for (const id of ["75", "76"]) expect(await familyFromCustomer(id, asLinker(staff), customerAimedAt), id).toEqual({ ok: false, errors: [NO_FAMILY_COPY.suggestedFor(["The Okafors"])] });
+    expect(await familyFromCustomer("90", asLinker(staff), customerAimedAt)).toEqual({ ok: false, errors: [NO_FAMILY_COPY.givenUpFor("The Quiets", true)] });
+    expect(await made()).toEqual(before);
+    expect(NO_FAMILY_COPY.suggestedFor(["The Patels"])).toBe("Accounting links suggests this customer for, or lists it as a possible customer of, The Patels, a family the portal has already, so no second family was made. Link the two on Accounting links.");
+    expect(NO_FAMILY_COPY.givenUpFor("The Quiets", true)).toBe("The portal saved The Quiets first, and QuickBooks made this customer for it before making it was given up, so no second family was made. If it is that family's, pick it for that family on Accounting links.");
+  });
+
+  it("names two families or more that a customer is listed for, up to a handful", async () => {
+    await connectRoster(stub);
+    await addInQuickBooks(qc("70", "Shared Family", "1", mail("one@example.com, two@example.com")));
+    await guardianIn(await unlinked("The Ones"), "One", "one@example.com");
+    await guardianIn(await unlinked("The Twos"), "Two", "two@example.com");
+    const staff = await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
+    expect(await familyFromCustomer("70", asLinker(staff), customerAimedAt)).toEqual({ ok: false, errors: [
+      "Accounting links suggests this customer for, or lists it as a possible customer of, The Ones and The Twos, families the portal has already, so no second family was made. Link it to the right one on Accounting links."] });
+  });
+
+  it("makes the family for a customer only a Left unlinked family's guardians match, ", async () => {
+    tag = await connectRoster(stub);
+    await addInQuickBooks(qc("70", "Patel Family", "1", mail("asha@example.com")));
+    const patels = await unlinked("The Patels");
+    await guardianIn(patels, "Asha Patel", "asha@example.com");
+    const linker = await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
+    expect(await familyFromCustomer("70", asLinker(linker), customerAimedAt)).toMatchObject({ ok: false });
+    expect(await leaveUnlinked(String(patels), tag, asLinker(linker))).toMatchObject({ ok: true });
+    expect(await familyFromCustomer("70", asLinker(linker), customerAimedAt)).toMatchObject({ ok: true });
+    expect(await familyLinksOf("70")).toHaveLength(1);
+  });
+
+  it("refuses, under its own lock, a customer a guardian added between the page and the press makes suggested", async () => {
+    await connectRoster(stub);
+    await addInQuickBooks(qc("70", "Patel Family", "1", mail("asha@example.com")));
+    const patels = await unlinked("The Patels");
+    const staff = await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
+    // The page: Patel Family offered, no row aiming at it.
+    asStaff(staff);
+    expect(rowNamed(section(await renderPage(ReconciliationPage), "no-family-h"), "Patel Family")![3]).toBe("Create a family from this: Patel Family");
+    // The press waits for the roster lock; meanwhile Asha's address joins the Patels (a write that takes no roster lock).
+    let release = () => {};
+    let held: Promise<void> = Promise.resolve();
+    await new Promise<void>((took) => {
+      held = db.transaction(async (tx) => {
+        await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
+        took();
+        await new Promise<void>((r) => { release = () => r(); });
+      });
+    });
+    const press = familyFromCustomer("70", asLinker(staff), customerAimedAt);
+    await untilALockIsAwaited(15_000, 1);
+    await guardianIn(patels, "Asha Patel", "asha@example.com");
+    release();
+    await held;
+    expect(await press).toEqual({ ok: false, errors: [NO_FAMILY_COPY.suggestedFor(["The Patels"])] });
+    expect(await familyLinksOf("70")).toEqual([]);
+    expect(await audits("accounting.family.from_customer")).toEqual([]);
+  });
+
+  it("shows the aimed customer's row with words naming the family and a link to Accounting links instead of the button, the books' text as text, and the action reads the page again on a refusal", async () => {
+    await connectRoster(stub);
+    await addInQuickBooks(qc("70", "<b>Patel</b> Family", "1", mail("asha@example.com")), qc("75", "Okafor Family", "1", mail("ike@example.com")),
+      qc("76", "Okafor Household", "1", mail("ada@example.com")), qc("90", "Quiet Family", "1"), qc("95", "Plain Family", "1"));
+    const patels = await unlinked("The Patels");
+    await guardianIn(patels, "Asha Patel", "asha@example.com");
+    const okafors = await unlinked("The Okafors");
+    await guardianIn(okafors, "Ike Okafor", "ike@example.com");
+    await guardianIn(okafors, "Ada Okafor", "ada@example.com");
+    const quiets = await unlinked("The Quiets");
+    await seedQueued({ op: "create", role: "family", name: "Quiet Family", typeQboId: "1", familyQboId: null, email: null }, { familyId: quiets, sent: true, state: "given_up", lastTriedAt: new Date() });
+    asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]));
+    const html = await renderPage(ReconciliationPage);
+    const list = section(html, "no-family-h");
+    expect(rowNamed(list, "<b>Patel</b> Family")![3]).toBe("Accounting links suggests it for The Patels, a family the portal has already, so it isn't made a family here. Link it on Accounting links: <b>Patel</b> Family");
+    // Its "What it makes" cell says it makes nothing here, never what the press it isn't offered would make.
+    expect(rowNamed(list, "<b>Patel</b> Family")![2]).toBe("Nothing here: it is linked to a family on Accounting links.");
+    expect(rowNamed(list, "Plain Family")![2]).toBe("A family, linked to this customer.");
+    expect(list).toContain('href="/staff/links?status=suggested"');
+    expect(list).toContain("&lt;b&gt;Patel&lt;/b&gt; Family");
+    expect(list).not.toContain("<b>Patel</b>");
+    expect(rowNamed(list, "Okafor Household")![3]).toBe("Accounting links lists it as a possible customer of The Okafors, a family the portal has already, so it isn't made a family here. Look at it for that family on Accounting links: Okafor Household");
+    expect(list).toContain(`href="/staff/links?pick=${String(okafors)}&amp;customer=76#links-pick-h"`);
+    expect(rowNamed(list, "Quiet Family")![3]).toBe("The portal saved The Quiets first, and QuickBooks made this customer for it before making it was given up, so it isn't made a family here. Pick it for that family on Accounting links: Quiet Family");
+    expect(list).toContain(`href="/staff/links?pick=${String(quiets)}&amp;customer=90#links-pick-h"`);
+    expect(rowNamed(list, "Plain Family")![3]).toBe("Create a family from this: Plain Family");
+    expect(list).not.toContain("nothing can link the two yet");
+    expect(list).toContain("isn&#x27;t made a family here: its row names that family and links to Accounting links, where the two are linked.");
+    // The given-up create's own section points at picking it for the family saved first, with a link to that step.
+    const madeAnyway = section(html, "made-anyway-h").replaceAll("<!-- -->", "");
+    expect(madeAnyway).toContain("It isn&#x27;t offered to bring in under Customers with no family: if it is the family the portal saved first, pick it for that family on Accounting links");
+    expect(madeAnyway).toContain(`href="/staff/links?pick=${String(quiets)}&amp;customer=90#links-pick-h"`);
+    // The action refuses as the library does, and asks Reconciliation to be read again.
+    expect(await familyFromCustomerAction("70")).toEqual({ ok: false, errors: [NO_FAMILY_COPY.suggestedFor(["The Patels"])] });
+    expect(revalidatedPaths()).toContain("/staff/reconciliation");
+    expect(await familyLinksOf("70")).toEqual([]);
+  });
+
+  it("for a given-up create's customer whose family saved first is Suggested for another customer, says to confirm that one or leave the family unlinked first, and the refusal says so", async () => {
+    tag = await connectRoster(stub);
+    await addInQuickBooks(qc("70", "Patel Family", "1", mail("asha@example.com")), qc("90", "Quiet Family", "1"));
+    // The Quiets' guardian signs in with the address on Patel Family, so their row is Suggested for 70; their own
+    // create, given up after a try QuickBooks took, made Quiet Family (90). Their row offers no Pick a different customer.
+    const quiets = await unlinked("The Quiets");
+    await guardianIn(quiets, "Asha Quiet", "asha@example.com");
+    await seedQueued({ op: "create", role: "family", name: "Quiet Family", typeQboId: "1", familyQboId: null, email: null }, { familyId: quiets, sent: true, state: "given_up", lastTriedAt: new Date() });
+    const linker = await staffWith("treasurer@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Accounting.Link.ReadWrite"]);
+    expect(await familyFromCustomer("90", asLinker(linker), customerAimedAt)).toEqual({ ok: false, errors: [NO_FAMILY_COPY.givenUpFor("The Quiets", false)] });
+    expect(NO_FAMILY_COPY.givenUpFor("The Quiets", false)).toBe("The portal saved The Quiets first, and QuickBooks made this customer for it before making it was given up, so no second family was made."
+      + " Accounting links suggests another customer for that family: confirm that one there if it is the family's, or, if this one is, leave the family unlinked there first, then pick this one for it.");
+    asStaff(linker);
+    const html = await renderPage(ReconciliationPage);
+    const list = section(html, "no-family-h");
+    expect(rowNamed(list, "Quiet Family")![3]).toBe("The portal saved The Quiets first, and QuickBooks made this customer for it before making it was given up, so it isn't made a family here."
+      + " Accounting links suggests another customer for that family: confirm that one there if it is the family's, or, if this one is, leave the family unlinked there first, then pick this one for it."
+      + " See that family's row on Accounting links: Quiet Family");
+    expect(list).not.toContain(`pick=${String(quiets)}`);
+    const madeAnyway = section(html, "made-anyway-h").replaceAll("<!-- -->", "").replaceAll("&#x27;", "'");
+    expect(madeAnyway).toContain("It isn't offered to bring in under Customers with no family: Accounting links suggests another customer for the family the portal saved first."
+      + " If that one is the family's, confirm it there; if this one is, leave the family unlinked there first, then pick this one for it; if it isn't wanted, make it inactive in QuickBooks.");
+    expect(madeAnyway).toContain('href="/staff/links?status=suggested"');
+    expect(madeAnyway).not.toContain(`pick=${String(quiets)}`);
+    // Left unlinked, the family's row offers Pick: the words and the link point at its confirm step, and the refusal says to pick it.
+    expect(await leaveUnlinked(String(quiets), tag, asLinker(linker))).toMatchObject({ ok: true });
+    expect(await familyFromCustomer("90", asLinker(linker), customerAimedAt)).toEqual({ ok: false, errors: [NO_FAMILY_COPY.givenUpFor("The Quiets", true)] });
+    const after = await renderPage(ReconciliationPage);
+    expect(rowNamed(section(after, "no-family-h"), "Quiet Family")![3]).toBe("The portal saved The Quiets first, and QuickBooks made this customer for it before making it was given up, so it isn't made a family here. Pick it for that family on Accounting links: Quiet Family");
+    expect(section(after, "made-anyway-h")).toContain(`href="/staff/links?pick=${String(quiets)}&amp;customer=90#links-pick-h"`);
+    expect(await familyLinksOf("90")).toEqual([]);
+  });
+
+  it("makes the family for a given-up create's customer once the family saved first is inactive, or linked to another customer", async () => {
+    await connectRoster(stub);
+    await addInQuickBooks(qc("90", "Quiet Family", "1"), qc("91", "Oak Family", "1"), qc("95", "Oak Household", "1"));
+    const quiets = await unlinked("The Quiets");
+    await seedQueued({ op: "create", role: "family", name: "Quiet Family", typeQboId: "1", familyQboId: null, email: null }, { familyId: quiets, sent: true, state: "given_up", lastTriedAt: new Date() });
+    const oaks = await unlinked("The Oaks");
+    await seedQueued({ op: "create", role: "family", name: "Oak Family", typeQboId: "1", familyQboId: null, email: null }, { familyId: oaks, sent: true, state: "given_up", lastTriedAt: new Date() });
+    const linker = await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
+    expect(await familyFromCustomer("90", asLinker(linker), customerAimedAt)).toEqual({ ok: false, errors: [NO_FAMILY_COPY.givenUpFor("The Quiets", true)] });
+    expect(await familyFromCustomer("91", asLinker(linker), customerAimedAt)).toEqual({ ok: false, errors: [NO_FAMILY_COPY.givenUpFor("The Oaks", true)] });
+    // The Quiets made inactive in the portal; the Oaks linked to Oak Household: neither is a family the customer is meant for now.
+    await db.update(family).set({ active: false }).where(eq(family.id, quiets));
+    await db.insert(accountingLink).values({ system: "quickbooks", realmId: REALM, customerId: "95", familyId: oaks, origin: "confirmed", linkedBy: linker.id });
+    expect(await familyFromCustomer("90", asLinker(linker), customerAimedAt)).toMatchObject({ ok: true });
+    expect(await familyFromCustomer("91", asLinker(linker), customerAimedAt)).toMatchObject({ ok: true });
+    for (const id of ["90", "91"]) expect(await familyLinksOf(id), id).toHaveLength(1);
+    expect((await familyLinksOf("90"))[0]!.familyId).not.toBe(quiets);
+    expect((await familyLinksOf("91"))[0]!.familyId).not.toBe(oaks);
+  });
+
+  it("tells staff who may not link families the same thing about a given-up create's customer, with no link to Accounting links and nothing about making the family inactive", async () => {
+    await connectRoster(stub);
+    await addInQuickBooks(qc("90", "Quiet Family", "1"));
+    const quiets = await unlinked("The Quiets");
+    await seedQueued({ op: "create", role: "family", name: "Quiet Family", typeQboId: "1", familyQboId: null, email: null }, { familyId: quiets, sent: true, state: "given_up", lastTriedAt: new Date() });
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    const html = await renderPage(ReconciliationPage);
+    expect(section(html, "no-family-h")).toBe("");
+    const madeAnyway = section(html, "made-anyway-h").replaceAll("<!-- -->", "").replaceAll("&#x27;", "'");
+    expect(madeAnyway).toContain("It isn't offered to bring in under Customers with no family: if it is the family the portal saved first, pick it for that family on Accounting links;"
+      + " if it isn't wanted, make it inactive in QuickBooks. Someone who may link families to accounting does this on Accounting links.");
+    expect(madeAnyway).not.toContain("saved first inactive");
+    expect(madeAnyway).not.toContain('href="/staff/links');
   });
 });

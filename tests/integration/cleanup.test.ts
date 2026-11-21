@@ -189,8 +189,9 @@ describe("the daily clean-up deletes only what is past use", () => {
       // A parent's own contact edits are counted in the same table, a save over an hour: each kind goes by its own window.
       { kind: "contact_save_parent", subject: "p-1", at: at(-w - SEC) },           // past the sign-in window, inside its own: stays
       { kind: "contact_save_parent", subject: "p-1", at: at(-RATE_LIMITS.contact_save_parent.windowMs - SEC) }, // gone
-      { kind: "contact_open_parent", subject: "p-1", at: at(-RATE_LIMITS.contact_open_parent.windowMs + SEC) }, // stays
-      { kind: "contact_open_parent", subject: "p-1", at: at(-RATE_LIMITS.contact_open_parent.windowMs - SEC) }, // gone
+      // A kind RATE_LIMITS names no more (contact_open_parent, retired) goes as an unknown one does, after the longest window.
+      { kind: "contact_open_parent", subject: "p-1", at: at(-longest + SEC) },     // stays
+      { kind: "contact_open_parent", subject: "p-1", at: at(-longest - SEC) },     // gone
     ]).returning({ id: rateLimitEvent.id });
     expect(RATE_LIMITS.contact_save_parent.windowMs).toBeGreaterThan(w);
     expect(await clean()).toEqual({ ...NOTHING, rateLimitEvents: 5 });
@@ -317,18 +318,19 @@ describe("the daily clean-up deletes only what is past use", () => {
 describe("the settings of retired features", () => {
   beforeEach(async () => { await resetDb(); });
 
-  // The previous company's snapshot held its people's names and addresses for 90 days; nothing expires it now that
-  // its feature is gone, so the clean-up removes it, and the review notice's mark, and no other setting.
-  it("are deleted, and every other setting is kept", async () => {
+  // The two the retired reviews left (the previous company's snapshot, the review notice's mark) were deleted by
+  // migration 0046 (tests/integration/migrate-retired-records.test.ts). None is listed now, so the clean-up deletes no
+  // setting, whatever is stored; the mechanism waits for a feature retired later. While the list is empty its delete
+  // of a listed key runs in no test: the slice that lists one adds back a case that stores it and expects it deleted
+  // and counted (`retiredSettings: 1`).
+  it("are none now, and every setting is kept", async () => {
     await db.insert(setting).values([
       { key: "parents.previous_company", value: { realmId: "1", people: [{ name: "Old Name", email: "old@example.com" }] } },
-      { key: "parents.review_notice", value: { sentAt: "2026-11-01T00:00:00Z" } },
       { key: "parents.settings", value: { signin: true, everEnabled: true, welcome: false, requireActiveStudents: false } },
     ]);
-    expect(RETIRED_SETTINGS).toEqual(["parents.previous_company", "parents.review_notice"]);
-    expect(await clean()).toEqual({ ...NOTHING, retiredSettings: 2 });
-    expect((await db.select({ key: setting.key }).from(setting)).map((r) => r.key)).toEqual(["parents.settings"]);
+    expect(RETIRED_SETTINGS).toEqual([]);
     expect(await clean()).toEqual(NOTHING);
+    expect((await db.select({ key: setting.key }).from(setting)).map((r) => r.key).sort()).toEqual(["parents.previous_company", "parents.settings"]);
     expect(describeCleanup({ ...NOTHING, retiredSettings: 2 })).toBe("Removed 2 settings of retired features.");
   });
 });

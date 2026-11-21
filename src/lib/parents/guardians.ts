@@ -8,6 +8,8 @@
 // only: called from src/app/staff/(app)/parents/actions.ts behind `Roster.Family.ReadWrite` (the lead's choice: giving
 // an address a family's sign-in goes with the permission that changes a family); never from parent code, which may not
 // import it (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts): it gives any address access to any family.
+// Since stage 4's slice M4b it also lets a family's guardians sign in again after a take from the books held them out
+// (releaseSigninHold(), at the end), under the same permission.
 //
 // Every write here holds what keeps a family record and its link still under it: the roster lock, shared, taken before
 // the family is looked at and before any guardian row is, so no staff roster write (which may change a family's
@@ -22,24 +24,24 @@
 // person (their requests, codes and sessions) last. The roster lock is waited for at most three seconds (a roster read holds it through its whole QuickBooks read, and the person's row held meanwhile would hold up
 // that person's code request and the daily clean-up): when it is busy, nothing has been written and the answer is
 // `busy`. A guardian row names the family itself in `family_id` (a person is in a family record once, the unique index
-// of migration 0040): nothing else gives a row its family since stage 3's slice 9c (no roster read brings the records
-// into step). Since stage 3's slice 9d a family with no link takes guardians too: a row made while its family has a
-// link keeps naming that customer in `family_qbo_id`, as the old unique index by customer still needs, and one made
-// while it has none names no customer, and is never given one later.
+// of migration 0040), and is found by it alone: nothing else gives a row its family, and every row has one but a
+// previous company's (the check of migration 0049, which dropped the row's old copies of its customers). A
+// family with no link takes guardians too (stage 3's slice 9d). The audit rows name the family's linked customer as it
+// stands at the write (`familyQboId`, the key the audit page's record filter reads), null for a family with no link.
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { family, guardian, parent, parentAuthUser } from "@/lib/db/schema";
+import { family, guardian, parent, parentAuthUser, staffUser } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { normalizeEmail } from "@/lib/email";
-import { customerOfFamily, familyLinkState } from "@/lib/families/links";
+import { familyLinkState } from "@/lib/families/links";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { recordNameWords } from "@/lib/families/words";
 import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { familyCreateWaiting, familySendingFree, guardianChangeWaiting, guardianSentWords, queueForGuardian, sendGuardianSaved, whileGuardiansHeld, type GuardianQueued } from "@/lib/roster/writes";
 import { closeMembership } from "./membership";
 import type { StaffOp } from "./people";
-import { lockEmail } from "./sessions";
+import { GUARDIAN_COLS, guardianRowCounts, lockEmail, studentsRuleInForce, type GuardianRow } from "./sessions";
 import { getParentSettings, PARENTS_KEY } from "./settings";
 
 /** The longest name staff may give a person, and the longest address the portal reads. */
@@ -90,7 +92,7 @@ export async function holdRoster(tx: Tx, w: Waits): Promise<boolean> {
 }
 
 type Person = typeof parent.$inferSelect;
-type Row = typeof guardian.$inferSelect;
+type Row = GuardianRow;
 
 /**
  * Marks the person as owed a welcome when welcomes are on and they were never welcomed, aren't owed one already and
@@ -139,18 +141,17 @@ async function openFamiliesOf(tx: Tx, parentId: string): Promise<string[]> {
 
 /**
  * Opens a closed row again as it was before it closed (`status_before_disable`, else invited), in the family it names,
- * and records it (`parent.access.granted`, `reinstated`, with `more`: what an add adds), naming the customer the row
- * itself names (`family_qbo_id`; none for a row made while its family had no link, even once the family is linked).
- * The caller holds the person's
- * row and this row FOR UPDATE.
+ * and records it (`parent.access.granted`, `reinstated`, with `more`: what an add adds), naming the customer the
+ * family's own link names now (`customer`, familyRefusal()'s; null for a family with no link). The caller holds the
+ * person's row and this row FOR UPDATE.
  */
-async function reopen(tx: Tx, row: Row, p: Person, familyId: AppFamilyId, o: StaffOp, more: Record<string, unknown> = {}): Promise<void> {
+async function reopen(tx: Tx, row: Row, p: Person, familyId: AppFamilyId, customer: string | null, o: StaffOp, more: Record<string, unknown> = {}): Promise<void> {
   const status = row.statusBeforeDisable ?? "invited";
   const before = { status: row.status, disabledReason: row.disabledReason };
   await tx.update(guardian).set({ status, disabledReason: null, statusBeforeDisable: null, updatedAt: new Date() }).where(eq(guardian.id, row.id));
   const owed = await oweWelcome(tx, p);
   await writeAudit({ actor: o.actor, action: "parent.access.granted", permission: o.permission, targetType: "guardian", targetId: row.id, ip: o.ip,
-    before, after: { parentId: p.id, familyId: String(familyId), familyQboId: row.familyQboId, status, reinstated: true, ...more, ...owed } }, tx);
+    before, after: { parentId: p.id, familyId: String(familyId), familyQboId: customer, status, reinstated: true, ...more, ...owed } }, tx);
 }
 
 export type AddGuardianResult =
@@ -168,17 +169,14 @@ export type AddGuardianResult =
 
 /**
  * The row an add would open for this address in this family, read before the add's transaction, unlocked: the person's
- * row in the family record, or, for a linked family, their row under its customer. Its "being sent" lock is taken
- * before the save (whileGuardiansHeld()), and the add checks under its locks that it is still the row it opens.
+ * row in the family record (`guardian_family_id_parent_uq`). Its "being sent" lock is taken before the save
+ * (whileGuardiansHeld()), and the add checks under its locks that it is still the row it opens.
  */
 async function rowToOpen(familyId: AppFamilyId, email: string): Promise<string | null> {
   const [p] = await db.select({ id: parent.id }).from(parent).where(eq(parent.email, email));
   if (!p) return null;
   const [inFamily] = await db.select({ id: guardian.id }).from(guardian).where(and(eq(guardian.parentId, p.id), eq(guardian.familyId, familyId)));
-  if (inFamily) return inFamily.id;
-  const customer = await customerOfFamily(familyId);
-  const [under] = customer === null ? [] : await db.select({ id: guardian.id }).from(guardian).where(and(eq(guardian.parentId, p.id), eq(guardian.familyQboId, customer)));
-  return under?.id ?? null;
+  return inFamily?.id ?? null;
 }
 
 /**
@@ -189,13 +187,11 @@ async function rowToOpen(familyId: AppFamilyId, email: string): Promise<string |
  * mistyped address that lands on a real person never gives them the family unseen. Only a press that carries that
  * person's id as shown (`samePerson`), checked again under the locks, reuses them, their name unchanged; one that names
  * anyone but who holds the address now is asked again. The membership is a new `invited` guardian row in the family's
- * record, naming the family's own linked customer as `family_qbo_id` (none, for a family with no link: stage 3's slice
- * 9d) and no `source_qbo_id`, audited `parent.access.granted` with whether the person was reused and the name staff
- * typed; or, where the person's row in that family record is closed, that row reinstated (reinstateGuardian()'s rule),
- * and the answer says so; or, for a linked family, where the person's row under its customer was closed by a change of
- * company (its ids are another company's), that row taken for the new membership, as the old unique (customer, person)
- * index needs. The person's row is found by its family record (`guardian_family_id_parent_uq`), and for a linked family
- * by its customer too. A welcome is owed by oweWelcome()'s rule. Refused, changing nothing: a name or address the
+ * record, audited `parent.access.granted` with the family's linked customer (null for a family with no link: stage 3's
+ * slice 9d), whether the person was reused and the name staff typed; or, where the person's row in that family record
+ * is closed, that row reinstated (reinstateGuardian()'s rule), and the answer says so. The person's row is found by its
+ * family record alone (`guardian_family_id_parent_uq`): a row of theirs a change of company closed (before stage 4's
+ * slice M7a, which keeps every row in its family) is in no family and stays as it is, beside the new one. A welcome is owed by oweWelcome()'s rule. Refused, changing nothing: a name or address the
  * portal can't take, a family record that isn't there or is inactive, one whose own create is waiting on the queue or
  * being sent (`making`), one whose link the portal can't tell (`other_company`: familyRefusal()), a blocked person, one with an open row in the family already, and a roster read holding its lock past the wait
  * (`busy`). Emails nobody: the welcome job sends the welcome.
@@ -239,12 +235,8 @@ async function saveGuardian(familyId: AppFamilyId, name: string, email: string, 
     const fam = await familyRefusal(tx, familyId);
     if ("refusal" in fam) return { ok: false, reason: fam.refusal };
     if (p?.blocked) return { ok: false, reason: "blocked" };
-    // The person's row in this family record; for a linked family, else their row under its customer (a change of
-    // company closed it, or it was made before the family had a record): the old unique index holds that place.
-    const [inFamily] = p ? await tx.select().from(guardian).where(and(eq(guardian.parentId, p.id), eq(guardian.familyId, familyId))).for("update") : [];
-    const [underCustomer] = p && !inFamily && fam.customer !== null
-      ? await tx.select().from(guardian).where(and(eq(guardian.parentId, p.id), eq(guardian.familyQboId, fam.customer))).for("update") : [];
-    const held = inFamily ?? underCustomer;
+    // The person's row in this family record, by the record alone.
+    const [held] = p ? await tx.select(GUARDIAN_COLS).from(guardian).where(and(eq(guardian.parentId, p.id), eq(guardian.familyId, familyId))).for("update") : [];
     if (held && held.status !== "disabled") return { ok: false, reason: "already" };
     // The row whose "being sent" lock is held must be the one opened: another by now (an add raced this one) is `raced`.
     if (held ? held.id !== rowId : known) return { ok: false, reason: "raced" };
@@ -259,28 +251,21 @@ async function saveGuardian(familyId: AppFamilyId, name: string, email: string, 
         after: { name, email, familyId: String(familyId) } }, tx);
     }
     const who = p!;
-    const row = held;
     const grant = (guardianId: string) => queueForGuardian(tx, { op: "grant", guardianId, familyId, name: who.name, email: who.email }, o);
-    if (row && row.disabledReason !== "company_changed") {
-      if (await guardianChangeWaiting(tx, [row.id])) return { ok: false, reason: "qbo_pending" };
-      await reopen(tx, row, who, familyId, o, { addedBy: "staff", ...said });
-      return { ok: true, result: { ok: true, outcome: "reinstated", person, name: who.name, guardianId: row.id, parentId: who.id }, queued: await grant(row.id) };
+    if (held) {
+      if (await guardianChangeWaiting(tx, [held.id])) return { ok: false, reason: "qbo_pending" };
+      await reopen(tx, held, who, familyId, fam.customer, o, { addedBy: "staff", ...said });
+      return { ok: true, result: { ok: true, outcome: "reinstated", person, name: who.name, guardianId: held.id, parentId: who.id }, queued: await grant(held.id) };
     }
-    let guardianId: string;
-    const before = row ? { status: row.status, disabledReason: row.disabledReason, sourceQboId: row.sourceQboId } : null;
-    if (row) {
-      // Another company's row for this person under the same number: the unique index makes it the new membership.
-      await tx.update(guardian).set({ familyId, status: "invited", disabledReason: null, statusBeforeDisable: null, sourceQboId: null, isPrimary: false, updatedAt: new Date() })
-        .where(eq(guardian.id, row.id));
-      guardianId = row.id;
-    } else {
-      const [made] = await tx.insert(guardian).values({ id: rowId, familyQboId: fam.customer, familyId, parentId: who.id, status: "invited", sourceQboId: null }).returning({ id: guardian.id });
-      guardianId = made!.id;
-    }
+    // Its own SQL, naming only the columns it writes (since stage 3's slice 12b1, when the schema still declared the row's
+    // old copies, which drizzle's insert would have named); the rest take their defaults.
+    const [made] = Array.from(await tx.execute<{ id: string }>(sql`insert into ${guardian} (${sql.identifier(guardian.id.name)},
+      ${sql.identifier(guardian.familyId.name)}, ${sql.identifier(guardian.parentId.name)}, ${sql.identifier(guardian.status.name)})
+      values (${rowId}, ${String(familyId)}, ${who.id}, 'invited') returning ${sql.identifier(guardian.id.name)}`));
+    const guardianId = made!.id;
     const owed = await oweWelcome(tx, who);
     await writeAudit({ actor: o.actor, action: "parent.access.granted", permission: o.permission, targetType: "guardian", targetId: guardianId, ip: o.ip,
-      before, after: { parentId: who.id, familyId: String(familyId), familyQboId: fam.customer, status: "invited", addedBy: "staff", ...said,
-        ...(row ? { reopenedFrom: "company_changed" } : {}), ...owed } }, tx);
+      after: { parentId: who.id, familyId: String(familyId), familyQboId: fam.customer, status: "invited", addedBy: "staff", ...said, ...owed } }, tx);
     return { ok: true, result: { ok: true, outcome: "added", person, name: who.name, guardianId, parentId: who.id }, queued: await grant(guardianId) };
   });
 }
@@ -296,7 +281,7 @@ async function lockedRow(tx: Tx, guardianId: string, w: Waits): Promise<{ row: R
   if (!seen) return null;
   const [p] = await tx.select().from(parent).where(eq(parent.id, seen.parentId)).for("update");
   if (!(await holdRoster(tx, w))) return "busy";
-  const [row] = await tx.select().from(guardian).where(eq(guardian.id, guardianId)).for("update");
+  const [row] = await tx.select(GUARDIAN_COLS).from(guardian).where(eq(guardian.id, guardianId)).for("update");
   return p && row ? { row, p } : null;
 }
 
@@ -343,15 +328,15 @@ export async function removeGuardian(guardianId: string, rawNote: string, o: Sta
 }
 
 export type ReinstateGuardianResult = { ok: true; quickbooks: string[] }
-  | { ok: false; reason: "not_found" | "already_open" | "previous_company" | "blocked" | "no_family" | "inactive" | "waiting" | "making" | "changing" | "other_company" | "other_customer" | "busy" | "qbo_pending"
+  | { ok: false; reason: "not_found" | "already_open" | "previous_company" | "blocked" | "no_family" | "inactive" | "waiting" | "making" | "changing" | "other_company" | "busy" | "qbo_pending"
     | "being_changed" };
 
 /**
  * Opens a closed membership again: the same row, as it was before it closed (`status_before_disable`, else invited),
- * whatever closed it (staff, or a reason the retired reconcile recorded) but a change of company, whose row names no
- * family and is offered nothing. Audited `parent.access.granted`, `reinstated`; a welcome is owed by oweWelcome()'s
- * rule. A family with no link takes it back too (stage 3's slice 9d): the row names no customer, or the family's own,
- * and one that names another customer (`other_customer`) is not this family's to reopen. Refused for a blocked person,
+ * whatever closed it (staff, or a reason the retired reconcile recorded) but a change of company before stage 4's slice
+ * M7a, whose row names no family and is offered nothing. Audited `parent.access.granted`, `reinstated`; a welcome is owed by oweWelcome()'s
+ * rule. A family with no link takes it back too (stage 3's slice 9d): a row is in its family by its record alone, so it
+ * is reopened there whatever customer the family is linked to now. Refused for a blocked person,
  * a family record that is gone or inactive, one whose own create is waiting on the queue or being sent, one whose link
  * the portal can't tell (familyRefusal()), and a roster read holding its lock past the wait.
  *
@@ -373,15 +358,63 @@ export async function reinstateGuardian(guardianId: string, o: StaffOp, w: Waits
       if (p.blocked) return { ok: false, reason: "blocked" };
       const fam = await familyRefusal(tx, row.familyId);
       if ("refusal" in fam) return { ok: false, reason: fam.refusal };
-      // The row names no customer (made while the family had no link), or the family's own; one that names another is not
-      // this family's to reopen.
-      if (row.familyQboId !== null && row.familyQboId !== fam.customer) return { ok: false, reason: "other_customer" };
       if (await guardianChangeWaiting(tx, [row.id])) return { ok: false, reason: "qbo_pending" };
-      await reopen(tx, row, p, row.familyId!, o);
+      await reopen(tx, row, p, row.familyId!, fam.customer, o);
       return { ok: true, queued: await queueForGuardian(tx, { op: "grant", guardianId: row.id, familyId: row.familyId!, name: p.name, email: p.email }, o), name: p.name };
     });
     if (!saved.ok) return saved;
     return { ok: true, quickbooks: guardianSentWords(await sendGuardianSaved(saved.queued, o, { hold, rosterWaitMs: w.rosterWaitMs }), "grant", saved.name) };
   });
   return r ?? { ok: false, reason: "being_changed" };
+}
+
+export type ReleaseSigninHoldResult = { ok: true; name: string; counting: number; signingIn: number } | { ok: false; reason: "not_found" | "not_held" | "busy" };
+
+/**
+ * Lets a family's guardians sign in again after a take from the books held its sign-ins (stage 4's slice M4b, the
+ * lead's decision 2 on the owner's choice 5: the take settles the record, and this decides who signs in, under the
+ * permission that gives and ends sign-ins). In one transaction, with the parents' settings lock shared and then the
+ * roster lock shared as the guardian writes here take it (holdRoster(): at most ROSTER_WAIT_MS, `busy` otherwise), the
+ * family row FOR UPDATE, and the hold cleared only while it is set (`not_held` otherwise, changing nothing). Audited
+ * `roster.family.signin_released`: the hold's time and staff member before, and how many of the family's open guardian
+ * rows count now by the gate's rule (guardianRowCounts()) after. `signingIn`, for the answer's words, is how many of
+ * those rows are of a person who isn't blocked (the door refuses a blocked person, and the family's page leaves them
+ * out of the release's words likewise): the rows that let someone in now. No guardian row is opened, closed or changed: each
+ * open one counts again at once, by the gate's own rule (an active family, and, while the students rule is in force,
+ * an active student), and every door follows. Nothing is sent to QuickBooks.
+ */
+export async function releaseSigninHold(familyId: AppFamilyId, o: StaffOp, w: Waits = {}): Promise<ReleaseSigninHoldResult> {
+  return db.transaction(async (tx): Promise<ReleaseSigninHoldResult> => {
+    await holdSettings(tx);
+    if (!(await holdRoster(tx, w))) return { ok: false, reason: "busy" };
+    const [f] = await tx.select({ name: family.name, at: family.signinHeldAt, by: family.signinHeldBy }).from(family).where(eq(family.id, familyId)).for("update");
+    if (!f) return { ok: false, reason: "not_found" };
+    if (f.at === null) return { ok: false, reason: "not_held" };
+    await tx.update(family).set({ signinHeldAt: null, signinHeldBy: null, updatedAt: new Date() }).where(eq(family.id, familyId));
+    const rows = await tx.select({ blocked: parent.blocked }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
+      .where(and(eq(guardian.familyId, familyId), guardianRowCounts(await studentsRuleInForce(tx))));
+    const counting = rows.length;
+    const signingIn = rows.filter((r) => !r.blocked).length;
+    await writeAudit({ actor: o.actor, action: "roster.family.signin_released", permission: o.permission, targetType: "family", targetId: String(familyId), ip: o.ip,
+      before: { heldAt: f.at.toISOString(), heldBy: f.by }, after: { counting } }, tx);
+    return { ok: true, name: recordNameWords(f.name, "family"), counting, signingIn };
+  });
+}
+
+/**
+ * Whether the family of a guardian row has its sign-ins held (stage 4's slice M4b), for the words after a reinstate on
+ * the family's page: the row's own family record, read after the write. One query.
+ */
+export async function signinHeldOfGuardian(guardianId: string): Promise<boolean> {
+  const [r] = await db.select({ at: family.signinHeldAt }).from(guardian).innerJoin(family, eq(family.id, guardian.familyId)).where(eq(guardian.id, guardianId));
+  return !!r?.at;
+}
+
+/**
+ * A family's sign-in hold as its page shows it (stage 4's slice M4b): when it was set and by whom (the staff member's
+ * name, null when none is found), or null when its sign-ins aren't held. One query.
+ */
+export async function signinHoldOf(familyId: AppFamilyId): Promise<{ at: string; by: string | null } | null> {
+  const [r] = await db.select({ at: family.signinHeldAt, by: staffUser.name }).from(family).leftJoin(staffUser, eq(staffUser.id, family.signinHeldBy)).where(eq(family.id, familyId));
+  return r?.at ? { at: r.at.toISOString(), by: r.by ?? null } : null;
 }

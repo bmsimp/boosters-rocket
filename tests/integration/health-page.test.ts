@@ -245,9 +245,9 @@ describe("the health page", () => {
     }
     expect(QUICKBOOKS_USE.reads).toMatch(/families and members.*what each family owes/);
     expect(QUICKBOOKS_USE.writes).toMatch(/new families, students, parents and members.*inactive.*never deletes/);
-    // A parent's change of sign-in email is the portal's alone since stage 3's slice 11d (slice S11e says it again, as a
-    // change sent on after the portal saves it).
-    expect(QUICKBOOKS_USE.writes).not.toMatch(/email address a parent signs in with|own record's email field/);
+    // A parent's change of sign-in email is the portal's own since stage 3's slice 11d, and since slice S11e it is sent
+    // on to their records after the portal changes it, never over an address the portal didn't know there.
+    expect(QUICKBOOKS_USE.writes).toMatch(/the address a parent signs in with, in the email field of each record of theirs .*after the portal changes it, replacing only the address the portal knew there and never over an address it didn't know of/);
     // A guardian's phone and mailing address are the portal's own (stage 3's slice 11a), and sent on after the portal
     // saves a parent's change (slice 11b), never over details the portal didn't know of.
     expect(QUICKBOOKS_USE.writes).toMatch(/phone and mailing address, on their own record.*after the portal saves a change a parent or staff make to them, and never over details QuickBooks holds that the portal didn't know of/);

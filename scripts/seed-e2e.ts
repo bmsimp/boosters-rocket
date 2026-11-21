@@ -44,23 +44,15 @@ async function main() {
           ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name RETURNING id`;
   await sql`INSERT INTO parent_auth_user (id, name, email, email_verified, parent_id)
           VALUES (${crypto.randomUUID()}, 'Zelda Quetzalcoatl', 'zelda@example.com', true, ${p!.id}) ON CONFLICT (parent_id) DO NOTHING`;
-  // Each link names the QuickBooks record it came from (E2E-P1, E2E-P2 below). Those ids are not numbers on purpose: an
-  // id that isn't digits is never sent to QuickBooks, so with the made-up tokens below nothing of this run can reach
-  // Intuit's real servers (tests/e2e/family-details.spec.ts checks the id).
-  await sql`INSERT INTO guardian (family_qbo_id, parent_id, is_primary, status, source_qbo_id) VALUES ('E2E-FAMILY', ${p!.id}, true, 'active', 'E2E-P1')
-          ON CONFLICT (family_qbo_id, parent_id) DO NOTHING`;
-  await sql`INSERT INTO guardian (family_qbo_id, parent_id, is_primary, status, source_qbo_id) VALUES ('E2E-FAMILY-2', ${p!.id}, false, 'active', 'E2E-P2')
-          ON CONFLICT (family_qbo_id, parent_id) DO NOTHING`;
-  // Ana Rivera, invited to the Rivera family from her parent record (E2E-11). Who can sign in is the portal's own list
-  // of guardians (stage 3 of the app-owned families spec): switching sign-ins on (tests/e2e/parents.spec.ts) gives
-  // nobody else one, so the club holds 2 people in 3 families. Sam Okafor has parent records under two families in
-  // QuickBooks and no sign-in.
+  // Zelda's and Ana's guardian rows are made once the app's family records exist (after the fill below). Ana Rivera is
+  // invited to the Rivera family from her parent record (E2E-11). Who can sign in is the portal's own list of guardians
+  // (stage 3 of the app-owned families spec): switching sign-ins on (tests/e2e/parents.spec.ts) gives nobody else one,
+  // so the club holds 2 people in 3 families. Sam Okafor has parent records under two families in QuickBooks and no
+  // sign-in.
   const [ana] = await sql`INSERT INTO parent (name, email) VALUES ('Ana Rivera', 'ana@example.com')
           ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name RETURNING id`;
   await sql`INSERT INTO parent_auth_user (id, name, email, email_verified, parent_id)
           VALUES (${crypto.randomUUID()}, 'Ana Rivera', 'ana@example.com', true, ${ana!.id}) ON CONFLICT (parent_id) DO NOTHING`;
-  await sql`INSERT INTO guardian (family_qbo_id, parent_id, is_primary, status, source_qbo_id) VALUES ('E2E-10', ${ana!.id}, true, 'invited', 'E2E-11')
-          ON CONFLICT (family_qbo_id, parent_id) DO NOTHING`;
   // Zelda's live session is made once the app's records exist (below): it names the family it chose by its record.
   // Every session she has is deleted first, as the staff one is.
   const [zelda] = await sql`SELECT id FROM parent_auth_user WHERE parent_id = ${p!.id}`;
@@ -345,12 +337,34 @@ async function main() {
   // connection: its scratch tables are the session's.
   const fill = appRecordsFillStatements();
   await sql.begin(async (tx) => { for (const statement of fill) await tx.unsafe(statement); });
-  // Zelda's guardian row in a family, with the app's family record the fill gave it: a session and a change of sign-in
-  // address name the family by that record, as the sign-in stores it and migration 0037 carried them over.
+  // The family record the fill made of a family customer: each guardian row stands on its family's record and its own
+  // link, as staff make one (src/lib/parents/guardians.ts), never on a QuickBooks id of its own.
+  const familyRecordOf = async (customer: string): Promise<string> => {
+    const [link] = await sql`SELECT family_id FROM accounting_link WHERE system = 'quickbooks' AND realm_id = '9130000000000001' AND customer_id = ${customer} AND family_id IS NOT NULL`;
+    if (!link) throw new Error(`seed-e2e: no family record of ${customer} for a guardian row`);
+    return link.family_id as string;
+  };
+  // Zelda in both of her families (the family chooser test: one guardian simply belongs to both) and Ana in the Rivera
+  // family, each row linked to the parent record its sign-in came from (E2E-P1, E2E-P2, E2E-11), `carried_over` with the
+  // cache's version of it, as the import linked one. Those ids are not numbers on purpose: an id that isn't digits is
+  // never sent to QuickBooks, so with the made-up tokens below nothing of this run can reach Intuit's real servers
+  // (tests/e2e/family-details.spec.ts checks the id).
+  for (const [person, family, primary, status, own] of [[p!.id, "E2E-FAMILY", true, "active", "E2E-P1"], [p!.id, "E2E-FAMILY-2", false, "active", "E2E-P2"],
+    [ana!.id, "E2E-10", true, "invited", "E2E-11"]] as const) {
+    const [row] = await sql`INSERT INTO guardian (family_id, parent_id, is_primary, status) VALUES (${await familyRecordOf(family)}, ${person}, ${primary}, ${status})
+            ON CONFLICT (family_id, parent_id) WHERE family_id IS NOT NULL DO NOTHING RETURNING id`;
+    if (row) {
+      await sql`INSERT INTO accounting_link (system, realm_id, customer_id, guardian_id, origin, synced_token, synced_at)
+              SELECT 'quickbooks', '9130000000000001', ${own}, ${row.id}, 'carried_over', c.sync_token, now() FROM qbo_customer c WHERE c.qbo_id = ${own}`;
+    }
+  }
+  // Zelda's guardian row in a family, by her family's record: a session and a change of sign-in address name the family
+  // by that record, as the sign-in stores it and migration 0037 carried them over.
   const zeldaIn = async (family: string): Promise<{ id: string; familyId: string }> => {
-    const [row] = await sql`SELECT id, family_id FROM guardian WHERE parent_id = ${p!.id} AND family_qbo_id = ${family}`;
-    if (!row?.family_id) throw new Error(`seed-e2e: Zelda's row in ${family} names no family record`);
-    return { id: row.id as string, familyId: row.family_id as string };
+    const familyId = await familyRecordOf(family);
+    const [row] = await sql`SELECT id FROM guardian WHERE parent_id = ${p!.id} AND family_id = ${familyId}`;
+    if (!row) throw new Error(`seed-e2e: Zelda has no row in ${family}'s family record`);
+    return { id: row.id as string, familyId };
   };
   // A live session for Zelda with the first family chosen, so the e2e run can open parent pages without the emailed
   // code (tests/e2e/parent-session.ts makes the cookie). It was made on her remembered device (`device_id`, slice SI-5b),
@@ -360,11 +374,10 @@ async function main() {
           VALUES ('e2e-parent-session', 'e2e-parent-session-token', ${zelda!.id}, ${(await zeldaIn("E2E-FAMILY")).familyId}, ${zeldaDevice!.id}, now() + interval '7 days', now() - interval '1 day')`;
   // A change of sign-in address Zelda asked for and hasn't confirmed, under her link to the Quetzalcoatl family, and a
   // used one under her link to the second family (tests/e2e/email-seed.ts: fixed tokens, so the specs can open them).
-  // Their records' ids are not numbers: confirming is refused before anything is sent (tests/e2e/family-email.spec.ts).
-  for (const [key, family, record, used] of [["own", "E2E-FAMILY", "E2E-P1", false], ["other", "E2E-FAMILY-2", "E2E-P2", true]] as const) {
+  for (const [key, family, used] of [["own", "E2E-FAMILY", false], ["other", "E2E-FAMILY-2", true]] as const) {
     const link = await zeldaIn(family);
-    await sql`INSERT INTO parent_email_change (parent_id, guardian_id, family_id, record_qbo_id, new_email, token_hash, expires_at, used_at)
-            VALUES (${p!.id}, ${link.id}, ${link.familyId}, ${record}, ${E2E_EMAIL[key].newEmail}, ${emailTokenHash(E2E_EMAIL[key].token)}, now() + interval '7 days', ${used ? new Date() : null})`;
+    await sql`INSERT INTO parent_email_change (parent_id, guardian_id, family_id, new_email, token_hash, expires_at, used_at)
+            VALUES (${p!.id}, ${link.id}, ${link.familyId}, ${E2E_EMAIL[key].newEmail}, ${emailTokenHash(E2E_EMAIL[key].token)}, now() + interval '7 days', ${used ? new Date() : null})`;
   }
   // The season's chosen lists, ticks and waivers, the volunteer sign-ups, the form requests and evidence, the buy-outs and
   // each family's stored figures, by the app's own record of each customer, of the kind each names it as, in the roster's

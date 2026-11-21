@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { asStaff, pageOutcome, renderPage, revalidatedPaths } from "../helpers/signed-in";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, familyMoney, qboCustomer, role, roleAssignment, roleRule } from "@/lib/db/schema";
+import { accountingLink, auditLog, familyMoney, qboCustomer, role, roleAssignment, roleRule } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
 import { formatMoney } from "@/lib/money/cents";
 import { ADMIN_ONLY, GRANTABLE } from "@/lib/permissions/registry";
@@ -81,10 +81,11 @@ describe("the Balances page", () => {
   });
 
   it("lists a roster family with no family record yet, linking it nowhere: it has no page to open", async () => {
-    // Written to the cache by hand, with no reconcile after it: the records have not caught up with it.
+    // Written to the cache by hand, with no reconcile after it: the records have not caught up with it. Since stage 4's
+    // slice M3b it reads "No family in the portal" (it was "Not read from QuickBooks yet").
     await db.insert(qboCustomer).values({ qboId: "QBO-NEW-9004", displayName: "New Family", active: true, parentQboId: null, typeQboId: "F", syncToken: "0" });
     const html = await renderPage(BalancesPage);
-    expect(rowNamed(html, "New Family")).toEqual(["New Family", "Not read from QuickBooks yet", "Never", ""]);
+    expect(rowNamed(html, "New Family")).toEqual(["New Family", "No family in the portal", "Never", ""]);
     expect([...html.matchAll(/href="\/staff\/balances\/([^"?]+)"/g)].map((m) => m[1]).sort())
       .toEqual([await idOf(FAMILY_A.family.qboId), await idOf(FAMILY_B.family.qboId), await idOf("QBO-CHEN-9001")].sort());
   });
@@ -132,6 +133,32 @@ describe("the Balances page", () => {
       expect(textOf(await renderPage(BalancesPage))).toContain("A read of every family is asked for. The worker starts it within a minute.");
       expect(stub.apiCalls()).toEqual([]); // the page never waits on QuickBooks
     } finally { await stub.close(); }
+  });
+
+  it("counts the families in the portal with no link in one line, pointing at Accounting links for whoever may link them (stage 4's slice M3b)", async () => {
+    const unlinkedLine = "families in the portal aren't linked to a customer in the books";
+    expect(textOf(await renderPage(BalancesPage))).not.toContain("linked to a customer in the books");
+    // Family A's link ends (as an unlink ends it): its record stands with no link, and its customer has no family now.
+    const a = await recordOfCustomer(FAMILY_A.family.qboId, "family");
+    await db.delete(accountingLink).where(eq(accountingLink.familyId, a));
+    let html = await renderPage(BalancesPage);
+    expect(textOf(html)).toContain("1 family in the portal isn't linked to a customer in the books, so it has no figures here. Someone who may link families to accounting links it on Accounting links.");
+    expect(html).not.toContain('href="/staff/links"');
+    expect(textOf(html)).not.toContain(unlinkedLine);
+    // Its old customer is listed as a roster family with no family in the portal, linking nowhere.
+    expect(rowNamed(html, FAMILY_A.family.name)).toEqual([FAMILY_A.family.name, "No family in the portal", "Never", ""]);
+    expect(html).not.toContain(`href="/staff/balances/${String(a)}"`);
+    // A reader who may link families is pointed at the page.
+    asStaff(await withRole("linker@club.org", ["Finance.Balance.Read", "Accounting.Link.ReadWrite", "Roster.Read"]));
+    html = await renderPage(BalancesPage);
+    expect(html).toContain('href="/staff/links"');
+    expect(textOf(html)).toContain("1 family in the portal isn't linked to a customer in the books, so it has no figures here. Link it on Accounting links");
+    // Either permission alone isn't enough to be offered the link.
+    asStaff(await withRole("half@club.org", ["Finance.Balance.Read", "Accounting.Link.ReadWrite"]));
+    expect(await renderPage(BalancesPage)).not.toContain('href="/staff/links"');
+    // The family's own Balances page is Not found while it has no link.
+    asStaff(treasurer);
+    expect(await pageOutcome(FamilyBalancePage, { params: { familyId: String(a) } })).toEqual({ notFound: true });
   });
 });
 

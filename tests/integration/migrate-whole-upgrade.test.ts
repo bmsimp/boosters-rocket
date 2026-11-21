@@ -59,7 +59,8 @@ type Seeded = Record<string, string>;
  * sessions and a pending email change; a season with a chosen list, ticks, a waiver and a due-date reminder claim;
  * volunteer sign-ups, credit and reminder claims; form requests with the current company's evidence and an earlier
  * company's; buy-outs per family and per student; the money cache, with a row that has only ever failed and one whose
- * customer a later roster read removed from the cache; and a queued write.
+ * customer a later roster read removed from the cache; a queued write; and the retired reviews' records, a held address
+ * and a match, which 0046 drops.
  */
 async function seedTheRelease(pg: postgres.Sql): Promise<Seeded> {
   const ids: Seeded = {};
@@ -180,6 +181,12 @@ async function seedTheRelease(pg: postgres.Sql): Promise<Seeded> {
   const [queued] = await pg`INSERT INTO write_queue (realm_id, request, family_qbo_id, sent, tries, next_try_at)
     VALUES (${REALM}, ${pg.json({ op: "invoice_void", buyoutId: ids.buyoutFamily!, invoiceQboId: "9001", familyQboId: "F1" })}, 'F1', false, 0, now()) RETURNING id`;
   ids.queued = queued!.id as string;
+
+  // The held-address review's and the match review's records, as the release keeps them: 0046 drops both tables.
+  await pg`INSERT INTO held_address (email, approved_family_qbo_ids, note, decided_by, decided_at)
+    VALUES ('ash@upgrade.example', ${pg.json(["F1", "F2"])}, 'Both hers', ${STAFF}, now())`;
+  await pg`INSERT INTO family_match (old_realm_id, old_family_qbo_id, new_realm_id, new_family_qbo_id, decided_by)
+    VALUES (${OTHER_REALM}, 'F9', ${REALM}, 'F1', ${STAFF})`;
   return ids;
 }
 
@@ -213,18 +220,49 @@ describe("the whole upgrade from the release at 0022, in one run of the migrator
     });
 
     it("gives each guardian row its family, and carries each session and the pending email change over to it (0037, 0038)", async () => {
-      const guardians = await q((pg) => pg.unsafe(`SELECT t.family_qbo_id, ${customerOf("t.family_id", "family")} AS family FROM guardian t ORDER BY t.family_qbo_id COLLATE "C"`));
-      expect(guardians.map((g) => [g.family_qbo_id, g.family])).toEqual([["F1", "F1"], ["F2", "F2"]]);
+      // Each row's family through `family_id` and that record's link, and the record its sign-in came from through its own
+      // membership link: the row holds no copy of either since 0049.
+      const guardians = await q((pg) => pg.unsafe(`SELECT t.id, ${customerOf("t.family_id", "family")} AS family,
+        (SELECT l.customer_id FROM accounting_link l WHERE l.guardian_id = t.id AND l.system = 'quickbooks' AND l.realm_id = '${REALM}') AS own FROM guardian t`));
+      expect(guardians).toHaveLength(2);
+      expect(guardians.find((g) => g.id === ids["guardian-F1"])).toMatchObject({ family: "F1", own: "P1" });
+      expect(guardians.find((g) => g.id === ids["guardian-F2"])).toMatchObject({ family: "F2", own: "P2" });
       // Each session names the app's record of the family it chose, the one its person's row there names.
       const sessions = await q((pg) => pg.unsafe(`SELECT t.id, ${customerOf("t.family_id", "family")} AS family FROM parent_auth_session t ORDER BY t.id COLLATE "C"`));
       expect(sessions.map((s) => [s.id, s.family])).toEqual([[`session-${ASH}`, "F1"], [`session-${BIRCH}`, "F2"]].sort((a, b) => (a[0]! < b[0]! ? -1 : 1)));
-      const [change] = await q((pg) => pg`SELECT family_id, guardian_id, record_qbo_id FROM parent_email_change WHERE id = ${ids.emailChange!}`);
-      expect(change).toMatchObject({ family_id: await recordOf("F1", "family"), guardian_id: ids["guardian-F1"], record_qbo_id: "P1" });
+      const [change] = await q((pg) => pg`SELECT family_id, guardian_id, used_at FROM parent_email_change WHERE id = ${ids.emailChange!}`);
+      expect(change).toMatchObject({ family_id: await recordOf("F1", "family"), guardian_id: ids["guardian-F1"], used_at: null });
       // Neither keeps a QuickBooks family column.
       const columns = await q((pg) => pg`SELECT table_name FROM information_schema.columns WHERE column_name = 'family_qbo_id' AND table_name IN ('parent_auth_session', 'parent_email_change')`);
       expect(columns).toEqual([]);
       const [carried] = await q((pg) => pg`SELECT after FROM audit_log WHERE action = 'parent.session.carried_over'`);
       expect(carried!.after).toMatchObject({ sessionsCarried: 2, sessionsCleared: 0, emailChangesCarried: 1, emailChangesDeleted: 0, realmId: REALM });
+    });
+
+    it("drops the retired reviews' tables and the request's record column, counting what went (0046)", async () => {
+      const [tables] = await q((pg) => pg`SELECT to_regclass('public.held_address')::text AS held, to_regclass('public.family_match')::text AS matched`);
+      expect(tables).toEqual({ held: null, matched: null });
+      expect(await q((pg) => pg`SELECT column_name FROM information_schema.columns WHERE table_name = 'parent_email_change' AND column_name = 'record_qbo_id'`)).toHaveLength(0);
+      const rows = await q((pg) => pg`SELECT after FROM audit_log WHERE action = 'parents.retired_records.dropped'`);
+      expect(rows.map((r) => r.after)).toEqual([{ cause: "migration 0046_retired_records_dropped", heldAddresses: 1, familyMatches: 1, emailChangesNamingARecord: 1, retiredSettings: 0 }]);
+    });
+
+    it("finds each guardian row linked already to the record its sign-in came from, as 0023 linked it, and makes no link (0048)", async () => {
+      const rows = await q((pg) => pg`SELECT after FROM audit_log WHERE action = 'parents.guardian_links.filled'`);
+      expect(rows.map((r) => r.after)).toEqual([{ cause: "migration 0048_guardian_links_additive", linksMade: 0, rowsAlreadyLinked: 2, linksDisagreeing: 0,
+        rowsOfFamiliesUnlinked: 0, rowsWithASourceAndNoCompany: 0 }]);
+      const links = await q((pg) => pg`SELECT customer_id FROM accounting_link WHERE guardian_id IS NOT NULL ORDER BY customer_id COLLATE "C"`);
+      expect(links.map((l) => l.customer_id)).toEqual(["P1", "P2"]);
+    });
+
+    it("drops the guardian rows' old copies and their two indexes, counting what went, every row kept with its family (0049)", async () => {
+      const rows = await q((pg) => pg`SELECT after FROM audit_log WHERE action = 'parents.guardian_columns.dropped'`);
+      expect(rows.map((r) => r.after)).toEqual([{ cause: "migration 0049_guardian_columns_dropped", rowsWithAFamilyCopy: 2, rowsWithASource: 2, previousCompanyRowsWithNoFamily: 0 }]);
+      expect(await q((pg) => pg`SELECT column_name FROM information_schema.columns WHERE table_name = 'guardian' AND column_name IN ('family_qbo_id', 'source_qbo_id')`)).toHaveLength(0);
+      const indexes = (await q((pg) => pg`SELECT indexname FROM pg_indexes WHERE tablename = 'guardian'`)).map((r) => r.indexname as string);
+      expect(indexes).not.toContain("guardian_family_parent_uq");
+      expect(indexes).not.toContain("guardian_family_ix");
+      expect(await q((pg) => pg`SELECT count(*)::int AS n FROM guardian WHERE family_id IS NULL`)).toEqual([{ n: 0 }]);
     });
 
     it("re-keys the season: the chosen list, the ticks, the waiver with its reason, and the reminder claim", async () => {
@@ -323,6 +361,16 @@ describe("the whole upgrade from the release at 0022, in one run of the migrator
       const tables = await q((pg) => pg`SELECT to_regclass('public.family')::text AS family, to_regclass('public.student')::text AS student,
         to_regclass('public.accounting_link')::text AS link`);
       expect(tables[0]).toEqual({ family: null, student: null, link: null });
+      // 0046 never ran either: the retired reviews' tables and the request's record column are as the release left them.
+      const [kept] = await q((pg) => pg`SELECT (SELECT count(*)::int FROM held_address) AS held, (SELECT count(*)::int FROM family_match) AS matched,
+        (SELECT count(*)::int FROM parent_email_change WHERE record_qbo_id = 'P1') AS changes`);
+      expect(kept).toEqual({ held: 1, matched: 1, changes: 1 });
+      // Nor did 0048: no audit row of its fill.
+      expect(await q((pg) => pg`SELECT id FROM audit_log WHERE action = 'parents.guardian_links.filled'`)).toEqual([]);
+      // Nor 0049: no audit row of its drop, and each guardian row holds its copies as the release wrote them.
+      expect(await q((pg) => pg`SELECT id FROM audit_log WHERE action = 'parents.guardian_columns.dropped'`)).toEqual([]);
+      expect((await q((pg) => pg`SELECT family_qbo_id, source_qbo_id FROM guardian ORDER BY family_qbo_id COLLATE "C"`)).map((g) => [g.family_qbo_id, g.source_qbo_id]))
+        .toEqual([["F1", "P1"], ["F2", "P2"]]);
       const columns = await q((pg) => pg`SELECT table_name, column_name FROM information_schema.columns
         WHERE table_schema = 'public' AND (column_name::text IN ('family_id', 'student_id') OR (table_name::text, column_name::text) IN
           (('requirement_progress', 'subject_qbo_id'), ('volunteer_signup', 'family_qbo_id'), ('signature_request', 'family_qbo_id'), ('buyout', 'family_qbo_id'), ('family_money', 'family_qbo_id')))`);

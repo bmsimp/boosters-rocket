@@ -60,9 +60,17 @@ export async function customersWithNoFamily(tx?: Tx): Promise<NoFamilyList> {
 
 /** The family's and member's creates waiting or stuck on the write queue, whose customers the list leaves out (beforeResend()). */
 export async function familyCreatesOnTheQueue(tx?: Tx): Promise<RosterWrite[]> {
-  return (await (tx ?? db).select({ request: writeQueue.request }).from(writeQueue)
+  return (await familyCreatesFiled(tx)).map((c) => c.write);
+}
+/**
+ * The same creates, each with the family record it is filed under (`write_queue.family_id`; null for one queued before
+ * stage 3's slice 9d, which names none), in one query: the accounting links screen leaves such a family out of Confirm
+ * all exact email matches, as a press refuses it (familyCreateWaiting(), src/lib/roster/writes.ts).
+ */
+export async function familyCreatesFiled(tx?: Tx): Promise<{ write: RosterWrite; familyId: string | null }[]> {
+  return (await (tx ?? db).select({ request: writeQueue.request, familyId: writeQueue.familyId }).from(writeQueue)
     .where(and(inArray(writeQueue.state, ["waiting", "stuck"]), sql`${writeQueue.request}->>'op' = 'create'`, sql`${writeQueue.request}->>'role' in ('family', 'member')`)))
-    .map((r) => r.request as RosterWrite);
+    .map((r) => ({ write: r.request as RosterWrite, familyId: r.familyId === null ? null : String(r.familyId) }));
 }
 
 /**
@@ -96,6 +104,27 @@ type Done = { ok: true; message: string } | { ok: false; errors: string[] };
 const no = (...errors: string[]): Done => ({ ok: false, errors });
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
+/** Names up to a handful (five), then how many more: "A, B and C", "A, B, C, D, E and 2 more". Names are shown as text. */
+export function handful(names: readonly string[], most = 5): string {
+  if (names.length > most) return `${names.slice(0, most).join(", ")} and ${names.length - most} more`;
+  return names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+/**
+ * Why a customer no family is linked to is meant for a family the portal has already (stage 4's slice M3a2), so
+ * "Create a family from this" would make a second family beside it: the accounting links screen suggests it for these
+ * families (`suggested`) or lists it as a possible customer of them (`several`), or a create of this family, saved in the
+ * portal first and given up after a try, made it (`given_up`). The families by name, as text.
+ */
+export type AimedAt = { why: "suggested" | "several"; families: string[] } | { why: "given_up"; families: [string]; pickable: boolean };
+/**
+ * How familyFromCustomer() asks whether a customer is meant for a family the portal has: given the press's own
+ * transaction, after its exclusive roster lock. Its one implementation is the accounting links screen's rule
+ * (customerAimedAt(), src/lib/accounting/link-writes.ts), passed in by the press's action, since that screen's modules
+ * import this one and this one may not import them back.
+ */
+export type AimedAtFinder = (tx: Tx, customerId: string) => Promise<AimedAt | null>;
+
 /** What staff read when a family isn't made, in words. Nothing is ever made in these cases. */
 export const NO_FAMILY_COPY = {
   notFromPage: "That didn't go through. Reload the page and try again.",
@@ -104,6 +133,12 @@ export const NO_FAMILY_COPY = {
   no_company: "The portal hasn't read the club's QuickBooks yet, so there are no customers to make a family from. Nothing was made.",
   other_company: "QuickBooks is connected to a different company than the one the roster was read from, so nothing was made. An Admin can see why under Settings, QuickBooks.",
   no_shape: "The membership shape isn't chosen, or names a customer type QuickBooks no longer has, so the portal can't tell which customers are families. Nothing was made. An Admin can choose it under Settings, QuickBooks.",
+  /** A customer the accounting links screen suggests for, or lists as a possible customer of, families the portal has. */
+  suggestedFor: (families: readonly string[]) => `Accounting links suggests this customer for, or lists it as a possible customer of, ${handful(families)}, ${families.length === 1 ? "a family the portal has already" : "families the portal has already"}, so no second family was made. ${families.length === 1 ? "Link the two on Accounting links." : "Link it to the right one on Accounting links."}`,
+  /** A customer a given-up create of a family the portal saved first made. */
+  givenUpFor: (family: string, pickable: boolean) => `The portal saved ${family} first, and QuickBooks made this customer for it before making it was given up, so no second family was made. ${pickable
+    ? "If it is that family's, pick it for that family on Accounting links."
+    : "Accounting links suggests another customer for that family: confirm that one there if it is the family's, or, if this one is, leave the family unlinked there first, then pick this one for it."}`,
 } as const;
 
 /**
@@ -146,8 +181,14 @@ export const isSecondFamilyLink = (e: unknown): boolean => {
  * second finds the link the first made. The unique index on a customer's family link is the last line, answered in
  * words. One audit row (`accounting.family.from_customer`) in the same transaction, naming the app's new family.
  * `mayChangeFamilies` says whether the staff member may add the guardians themself, so the answer says who does.
+ *
+ * Since stage 4's slice M3a2 it also refuses, in words and making nothing, a customer meant for a family the portal has
+ * already (`aimedAt`, required so no caller can leave it out: the accounting links screen's suggestion or candidate for
+ * a family, or the customer a given-up create of an active family with no family link made). A customer only a Left
+ * unlinked family's guardians match is aimed at by nobody (that family is given to no matcher), so it is made.
  */
-export async function familyFromCustomer(customerId: string, o: { actor: Actor; ip: string | null; permission: string; staffUserId: string; mayChangeFamilies: boolean }): Promise<Done> {
+export async function familyFromCustomer(customerId: string, o: { actor: Actor; ip: string | null; permission: string; staffUserId: string; mayChangeFamilies: boolean },
+  aimedAt: AimedAtFinder): Promise<Done> {
   if (typeof customerId !== "string" || !isQboId(customerId)) return no(NO_FAMILY_COPY.notFromPage);
   try {
     return await db.transaction(async (tx): Promise<Done> => {
@@ -156,6 +197,10 @@ export async function familyFromCustomer(customerId: string, o: { actor: Actor; 
       if (list.state !== "listed") return no(NO_FAMILY_COPY[list.state]);
       const offered = list.customers.find((c) => c.qboId === customerId);
       if (!offered) return no((await familyLinkedTo(customerId, tx)) !== null ? NO_FAMILY_COPY.already : NO_FAMILY_COPY.notOffered);
+      // A customer the accounting links screen aims at a family the portal has (stage 4's slice M3a2) is linked there,
+      // never made a second family of: worked out now, under this transaction's lock, by that screen's own rule.
+      const aim = await aimedAt(tx, customerId);
+      if (aim !== null) return no(aim.why === "given_up" ? NO_FAMILY_COPY.givenUpFor(aim.families[0], aim.pickable) : NO_FAMILY_COPY.suggestedFor(aim.families));
       const realmId = (await getRosterSource(tx))!;
       const made = await importRecordsFromRoster(tx, { familyCustomerId: customerId, linkedBy: o.staffUserId });
       // The list offered it, so the import's plan holds its family record and it had none. Had it found one after all,

@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { requireStaffAlso, requireStaffPage } from "@/lib/guards";
-import { filterLinkRows, filtersOf, givenUpCustomersOf, loadAccountingLinks, statusCounts, type ConfirmStep, type LinkMade, type LinkOffer, type LinkRow, type LinkStatus, type LinksState, type LinksView, type OwnLink } from "@/lib/accounting/mapping";
+import { BULK_MAX, filterLinkRows, filtersOf, givenUpCustomersOf, loadAccountingLinks, REVIEW_LEFT_WORDS, statusCounts, type BulkOffer, type ConfirmStep, type GuardianShown, type InactiveRow, type LinkMade, type LinkOffer, type LinkRow, type LinkStatus, type LinksState, type LinksView, type OwnLink, type ReviewOffer, type TakeOffer, type UnlinkOffer } from "@/lib/accounting/mapping";
 import { differenceKinds, differenceWords, noteSentence, type Difference } from "@/lib/accounting/differences";
-import { NOT_A_FAMILY_WORDS, parseLinksFilter, searchMatches, SEARCH_MAX, STATUS_KEYS, STATUS_WORDS, type StatusKey } from "@/lib/accounting/status";
+import { NOT_A_FAMILY_WORDS, parseLinksFilter, searchMatches, SEARCH_MAX, STATUS_KEYS, STATUS_WORDS, type LinksFilter, type StatusKey } from "@/lib/accounting/status";
 import type { Holder } from "@/lib/accounting/match";
 import type { Proposals } from "@/lib/accounting/proposals";
 import { recordNameWords } from "@/lib/families/words";
@@ -12,8 +12,8 @@ import { LocalTime } from "@/app/components/local-time";
 import { Notice } from "@/app/components/notice";
 import { StateWords } from "@/app/components/state-words";
 import { familyPage } from "@/app/staff/(app)/family-pages";
-import { confirmLinkAction, leaveUnlinkedAction, undoLeaveUnlinkedAction } from "./actions";
-import { LinkAnswers, LinkAnswersShown, LinkPress } from "./link-press";
+import { confirmAllAction, confirmLinkAction, leaveUnlinkedAction, linkGuardianAction, reviewLinkAction, takeDifferenceAction, undoLeaveUnlinkedAction, unlinkAction, unlinkGuardianAction } from "./actions";
+import { GuardianLinkPress, LinkAnswers, LinkAnswersShown, LinkPress } from "./link-press";
 
 export const metadata = { title: "Accounting links" };
 export const dynamic = "force-dynamic";
@@ -42,7 +42,7 @@ const holderWords = (h: Holder) => (h.on.kind === "family" ? `${h.address}, on t
 /** How a link was made, in words: carried over from the roster, or by whose press. */
 function MadeDetail({ made }: { made: LinkMade }) {
   return made.key === "carried_over" ? <>Carried over from the roster by the portal, on <LocalTime iso={made.at} />. Nobody has confirmed it since.</>
-    : made.origin === "confirmed" ? <>Confirmed{made.by ? ` by ${made.by}` : ""}, with Confirm on this page or &ldquo;Create a family from this&rdquo;, on <LocalTime iso={made.at} />.</>
+    : made.origin === "confirmed" ? <>Confirmed{made.by ? ` by ${made.by}` : ""}, on this page or with &ldquo;Create a family from this&rdquo;, on <LocalTime iso={made.at} />.</>
     : <>Made in the books from the portal{made.by ? ` by ${made.by}` : ""}, on <LocalTime iso={made.at} />.</>;
 }
 
@@ -71,28 +71,143 @@ function StatusDetail({ status, row }: { status: LinkStatus; row: LinkRow }) {
 const ownLinkWords = (l: OwnLink) => (l.state === "linked" ? `linked to ${l.customer}` : l.state === "gone" ? "linked to a customer that isn't in the books' copy any more"
   : l.state === "none" ? "no link of its own" : "its link can't be checked now");
 
+const listed = (names: readonly string[]) => (names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
+
+/**
+ * How an open guardian row's own link stands (slice M3c), in words, after ownLinkWords(): their own Parent customer
+ * (what the portal sends to), one shared with another guardian, one elsewhere in the books, or one the books' copy
+ * doesn't hold. Nothing is sent for any but their own (ownParentCustomer(), src/lib/roster/writes.ts).
+ */
+function standingWords(g: GuardianShown): string {
+  switch (g.standing) {
+    case null: return "";
+    case "own": return ", their own Parent customer under this family";
+    // Only a Parent customer directly under this family's customer is `shared` (guardianLinkOf()): one guardian of this family left on it alone is theirs.
+    case "shared": return g.sharedWith.length === 0 ? ", which another guardian of this family is linked to as well, so it is nobody's own and nothing is sent for them: unlink every guardian from it but one of this family's to make it that guardian's own"
+      : `, which a guardian of ${listed(g.sharedWith)} is linked to as well, so it is nobody's own and nothing is sent for them: unlink every guardian from it but one of this family's to make it that guardian's own`;
+    case "elsewhere": return ", which isn't a Parent customer directly under this family's customer in the books, so nothing is sent for them";
+    case "gone": return ", so nothing is sent for them";
+  }
+}
+
+/** What Link this guardian does, said beside every one (linkGuardian(), src/lib/accounting/guardian-links.ts). */
+const GUARDIAN_LINK_EFFECT = "Linking sends nothing to the books and changes nothing of their access in the portal. From then on, a rename of them, their removal from this family and a change of their phone, mailing address or sign-in email go to that Parent customer, by the portal's own rules, while it is theirs alone under this family. The details the portal holds for them now aren't sent by it.";
+/**
+ * What Unlink this guardian does, as a warning beside every one (unlinkGuardian()): a change of their details refuses
+ * it nothing (a waiting one is given up at its next try, a stuck or kept one stays on Reconciliation), and linking them
+ * again is offered here only where the family may have a guardian linked (`relink`). The press is drawn only while
+ * nothing on the queue holds it back (`unlinkHeld`), so the warning needn't say what does.
+ */
+const GUARDIAN_UNLINK_EFFECT = (who: string, relink: boolean) => `Unlinking ends only ${who}'s own link: nothing is sent to the books, the customer stays there as it is, and their access in the portal is as it was. A change of their details waiting to reach it is given up unsent at its next try, and one that is stuck or kept stays on the Reconciliation page, where it can be given up. Nothing is sent for them to a Parent customer then, and no Parent customer is made for them by this, or later by itself. ${relink ? "They can be linked again here." : "Linking them again isn't offered here until this family is linked to a family customer that stands in the books and the membership shape has a parent type."}`;
+
 /** Reconciliation's list of changes, where a change the queue holds is shown with what can be done about it. */
 const RECONCILIATION_CHANGES = "/staff/reconciliation#writes-h";
+const isAre = (n: number) => (n === 1 ? "is" : "are");
+/** What on the write queue holds Link this guardian back (GuardianShown.linkHeld), in words; null for nothing. */
+function linkHeldWords(g: GuardianShown): string | null {
+  const h = g.linkHeld;
+  if (h === null) return null;
+  if (h.row > 0) return `${h.row === 1 ? "A change" : `${h.row} changes`} for ${g.name} ${isAre(h.row)} waiting, stuck or kept on the Reconciliation page, so linking them isn't offered until ${h.row === 1 ? "it has" : "they have"} gone through or been given up there.`;
+  return `${h.customers === 1 ? "A Parent customer" : `${h.customers} Parent customers`} under this family that no guardian is linked to ${h.customers === 1 ? "has" : "have"} a change waiting, stuck or kept on the Reconciliation page, so ${h.customers === 1 ? "it isn't" : "they aren't"} offered until it has gone through or been given up there.`;
+}
+/** What on the write queue holds Unlink this guardian back (GuardianShown.unlinkHeld), in words. */
+const unlinkHeldWords = (g: GuardianShown) => `${g.unlinkHeld === 1 ? "A change" : `${g.unlinkHeld} changes`} of ${g.name}'s Parent customer, or of the customer they are linked to, ${isAre(g.unlinkHeld)} waiting, stuck or kept on the Reconciliation page, so unlinking them isn't offered until ${g.unlinkHeld === 1 ? "it has" : "they have"} gone through or been given up there.`;
+
+/** One open guardian of the row's opening (since slice M3c with its link's standing, Link this guardian or Unlink this guardian). */
+function GuardianLine({ g, row, tag }: { g: GuardianShown; row: LinkRow; tag: string }) {
+  return (
+    <li>{g.name} ({g.email}){g.blocked ? ", can't sign in, so this address isn't matched" : ""}: {ownLinkWords(g.link)}{standingWords(g)}
+      {g.offer !== null && (
+        <>
+          <p>{g.offer.suggested !== null ? `A Parent customer under this family in the books that no guardian is linked to is named like ${g.name} or holds their sign-in address, and is filled in. Any of them can be chosen instead.`
+            : `These are the Parent customers under this family in the books that no guardian is linked to. None is filled in: choose the one that is ${g.name}'s.`}</p>
+          <GuardianLinkPress name={`guardian-${g.id}`} who={g.name} about={row.name} suggested={g.offer.suggested}
+            options={g.offer.candidates.map((c) => ({ value: c.qboId, label: c.name, hint: c.email ?? "No email address",
+              act: linkGuardianAction.bind(null, g.id, c.qboId, c.qboId === g.offer!.suggested ? "suggested" : "picked", tag, g.offer!.stamps[c.qboId]!) }))} />
+          <p>{GUARDIAN_LINK_EFFECT}</p>
+        </>
+      )}
+      {linkHeldWords(g) !== null && <p>{linkHeldWords(g)} <Link href={RECONCILIATION_CHANGES}>See the changes on Reconciliation<span className="visually-hidden">: {g.name}</span></Link></p>}
+      {g.unlinkHeld > 0 && <p>{unlinkHeldWords(g)} <Link href={RECONCILIATION_CHANGES}>See the changes on Reconciliation<span className="visually-hidden">: {g.name}</span></Link></p>}
+      {g.noOffer !== null && <p>{g.noOffer.why === "elsewhere" ? `Their own record in the books is under ${g.noOffer.family}, and the portal links it there, so none is offered here.`
+        : "There is no active Parent customer under this family in the books that no guardian is linked to, so none can be linked to them here."}</p>}
+      {g.unlink !== null && (
+        <>
+          <Notice tone="warning" live="none">{GUARDIAN_UNLINK_EFFECT(g.name, g.relink)}</Notice>
+          <div className="row-actions"><LinkPress label={`Unlink ${g.name} from this Parent customer`} busy="Unlinking…" about={row.name} act={unlinkGuardianAction.bind(null, g.id, g.unlink.linkId, tag, g.unlink.stamp)} /></div>
+        </>
+      )}
+    </li>
+  );
+}
 
 /**
  * One difference, with both values as text, and the change on the write queue that explains it, in the queue's own
- * words with a link to Reconciliation's list (never its buttons). Nothing here settles it.
+ * words with a link to Reconciliation's list (never its buttons). Since slice M4a, where a press takes the books' value
+ * into the portal (`take`), what it does is said after it, then the press; or, where none is offered now, why, in one
+ * sentence (`note`).
  */
-function DifferenceLine({ d }: { d: Difference }) {
+function DifferenceLine({ d, take, note, tag }: { d: Difference; take: TakeOffer | undefined; note: string | undefined; tag: string }) {
   const w = differenceWords(d);
   const notes = d.kind === "guardians_unlinked" ? d.queue.map((q) => `For ${q.count} of them: ${noteSentence(q.note)}`)
     : d.kind === "student_customer" || d.kind === "parent_customers" || d.queue === null ? [] : [noteSentence(d.queue)];
   return (
     <li>{w.what}. In the portal: {w.portal}. In the books: {w.books}.
-      {notes.length > 0 && <> {notes.join(" ")} <Link href={RECONCILIATION_CHANGES}>{notes.length === 1 ? "See the change on Reconciliation" : "See the changes on Reconciliation"}</Link></>}</li>
+      {notes.length > 0 && <> {notes.join(" ")} <Link href={RECONCILIATION_CHANGES}>{notes.length === 1 ? "See the change on Reconciliation" : "See the changes on Reconciliation"}</Link></>}
+      {note !== undefined && <> {note}</>}
+      {take !== undefined && <><p>{take.words.join(" ")}</p>
+        <div className="row-actions"><LinkPress label="Take QuickBooks' into the app" busy="Taking it…" about={take.about} act={takeDifferenceAction.bind(null, take.field, take.kind, take.recordId, tag, take.stamp)} /></div></>}</li>
+  );
+}
+
+/**
+ * The inactive families the books have active (slice M4b), after the list: each family by name (a link to its page while
+ * those stand), its customer in the books (the books' text, as text), its inactive students by name, and Take
+ * QuickBooks' into the app with what it does said beside it, or the one sentence that stands in its place. Drawn only
+ * when there is one. The press is a bound action, given only its words.
+ */
+function InactivePart({ rows, tag, familyPages }: { rows: InactiveRow[]; tag: string; familyPages: boolean }) {
+  const columns: Column<InactiveRow>[] = [
+    { key: "family", header: "Family", rowHeader: true, cell: (r) => (familyPages ? <Link href={familyPage(r.familyId)}>{r.name}</Link> : r.name) },
+    { key: "customer", header: "Customer in the books", cell: (r) => r.customer },
+    { key: "students", header: "Its students, inactive in the portal", cell: (r) => (r.students.length === 0 ? "None" : r.students.join(", ")) },
+    { key: "do", header: "What you can do", quiet: true, cell: (r) => (r.take === null ? r.note : <><p>{r.take.words.join(" ")}</p>
+      <div className="row-actions"><LinkPress label="Take QuickBooks' into the app" busy="Taking it…" about={r.take.about}
+        act={takeDifferenceAction.bind(null, r.take.field, r.take.kind, r.take.recordId, tag, r.take.stamp)} /></div></>) },
+  ];
+  return (
+    <section className="box" aria-labelledby="links-inactive-h"><h2 id="links-inactive-h">Inactive in the portal, active in the books</h2>
+      <p>Each of these families is inactive in the portal and linked to a customer the books have active. Taking the books&apos; value makes the family active again in the portal, alone, and sends nothing to the books.
+        Its guardians can&apos;t sign in to it until someone who may change families lets them in, on its page.</p>
+      <DataTable caption={plural(rows.length, "inactive family the books have active", "inactive families the books have active")} captionHidden columns={columns} rows={rows} rowKey={(r) => String(r.familyId)} />
+    </section>
   );
 }
 
 /**
  * What a link press would link with the family, and what it would leave on each side, in words: every pair as "<the
  * record's name> with <the customer's name>", the records and customers left, and that those left aren't linked by it.
+ * Since slice M3c2 the guardians it would link, each "<the person's name> with <the Parent customer's name>", and those
+ * the write queue holds back, each with what holds it and how it is linked once that has cleared (proposalsFor()). The
+ * Parent customers no guardian is paired with aren't listed: once the family is linked they show among its differences.
  */
 function ProposalsShown({ proposals }: { proposals: Proposals }) {
+  const { guardians, guardiansHeld } = proposals;
+  return (
+    <>
+      <StudentProposalsShown proposals={proposals} />
+      {guardians.length > 0 && <><p>Guardians linked with it, by the sign-in address their Parent customer&apos;s email field holds:</p>
+        <ul>{guardians.map((g) => <li key={g.guardianId}>{g.who} with {g.customerName}</li>)}</ul></>}
+      {guardiansHeld.length > 0 && <><p>Not linked with it, though their Parent customer&apos;s email field holds their sign-in address:</p>
+        <ul>{guardiansHeld.map((g) => <li key={g.guardianId}>{g.who} with {g.customerName}: a change for them or for their Parent customer is waiting, stuck or kept on the Reconciliation page, so they aren&apos;t linked with it.
+          Once it has gone through or been given up there, they can be linked in the opening of the family&apos;s row on this page, with Link this guardian, if the family is linked by then and that Parent customer is still free for them.
+          {" "}<Link href={RECONCILIATION_CHANGES}>See the changes on Reconciliation<span className="visually-hidden">: {g.who}</span></Link></li>)}</ul></>}
+    </>
+  );
+}
+
+/** The students a link press would link with the family, and those it would leave (slice M3a). */
+function StudentProposalsShown({ proposals }: { proposals: Proposals }) {
   const { pairs, recordsLeft, customersLeft } = proposals;
   if (pairs.length === 0 && recordsLeft.length === 0 && customersLeft.length === 0) return <p>No student would be linked with it.</p>;
   return (
@@ -108,35 +223,115 @@ function ProposalsShown({ proposals }: { proposals: Proposals }) {
   );
 }
 
-/** What a link does on the parents' side, and that it can't be taken back here yet: said beside every Confirm. */
-const LINK_EFFECT = "Once linked, this family's guardians see this customer's open invoices and Pay links, and those of the students and parents the books hold directly under it, the next time they open Home or Payments, and a pay-instead choice for the family bills it. The link can't be removed in the portal yet, so check it is the right household.";
+/** What a link does on the parents' side, and how it is taken back: said beside every Confirm. */
+const LINK_EFFECT = "Once linked, this family's guardians see this customer's open invoices and Pay links, and those of the students and parents the books hold directly under it, the next time they open Home or Payments, and a pay-instead choice for the family bills it. A link can be removed again on this page, with Unlink from the books in the family's row, but its guardians may have seen those invoices by then, so check it is the right household.";
+/**
+ * What a guardian linked with a family's Confirm has from then on (slice M3c2), said beside every Confirm only where the
+ * books have a parent type (LinksView.guardianLinks): the same as Link this guardian's (GUARDIAN_LINK_EFFECT), so the two
+ * are kept true together.
+ */
+const LINK_GUARDIANS_EFFECT = "A guardian linked with it has, from then on, a rename of them, their removal from this family and a change of their phone, mailing address or sign-in email sent to that Parent customer, by the portal's own rules, while it is theirs alone under this family. Linking sends nothing to the books, and the details the portal holds for them now aren't sent by it.";
 
 /** The address of the chooser for a family, or of its confirm step for a customer. */
 const pickHref = (familyId: string, customerId?: string) => `/staff/links?pick=${encodeURIComponent(familyId)}${customerId ? `&customer=${encodeURIComponent(customerId)}` : ""}#${PICK}`;
 
 /** The row's opening: the family's active students and its open guardians, each with their own link, then its differences, then what can be done. */
-function Opening({ row, tag }: { row: LinkRow; tag: string }) {
+function Opening({ row, tag, guardianLinks }: { row: LinkRow; tag: string; guardianLinks: boolean }) {
   const id = String(row.familyId);
   return (
     <details className="more"><summary>{row.differences.length > 0 ? "Students, guardians and differences" : "Students and guardians"}<span className="visually-hidden">: {row.name}</span></summary>
       <p>{row.students.length === 0 ? "No active students." : "Students:"}</p>
       {row.students.length > 0 && <ul>{row.students.map((s) => <li key={String(s.id)}>{s.name}: {ownLinkWords(s.link)}</li>)}</ul>}
       <p>{row.guardians.length === 0 ? "No guardians." : "Guardians:"}</p>
-      {row.guardians.length > 0 && <ul>{row.guardians.map((g) => <li key={g.id}>{g.name} ({g.email}){g.blocked ? ", can't sign in, so this address isn't matched" : ""}: {ownLinkWords(g.link)}</li>)}</ul>}
+      {row.guardians.length > 0 && <ul>{row.guardians.map((g) => <GuardianLine key={g.id} g={g} row={row} tag={tag} />)}</ul>}
+      {row.removed.length > 0 && <><p>Removed guardians, with their own Parent customers in the books:</p>
+        <ul>{row.removed.map((r) => <li key={r.id}>{r.name}: {r.customer === null ? "linked to a customer that isn't in the books' copy any more" : `linked to ${r.customer}, ${r.active ? "active" : "inactive"} in the books`}</li>)}</ul>
+        <p>A removed guardian&apos;s Parent customer is theirs again if they are added back under Portal sign-ins, so it isn&apos;t offered to another guardian here, and their link isn&apos;t ended on its own: Unlink from the books ends it with the family&apos;s.</p></>}
       {row.status.key === "several" && <><p>Possible customers:</p><ul>{row.status.candidates.map((c) => <li key={c.qboId}>{c.name}{c.email ? ` (${c.email})` : ""} <Link href={pickHref(id, c.qboId)}>Look at it before linking<span className="visually-hidden">: {c.name}</span></Link></li>)}</ul></>}
       {row.status.key === "several" && row.status.alsoMatches.length > 0 && <p>Also matched by: {row.status.alsoMatches.join(", ")}.</p>}
-      {row.differences.length > 0 && <><p>Where the portal and the books differ:</p><ul>{row.differences.map((d, i) => <DifferenceLine key={i} d={d} />)}</ul></>}
+      {row.differences.length > 0 && <><p>Where the portal and the books differ:</p><ul>{row.differences.map((d, i) => <DifferenceLine key={i} d={d} tag={tag} take={row.takes.find((t) => t.at === i)} note={row.takeNotes.find((n) => n.at === i)?.words} />)}</ul></>}
       {row.inactiveUnrecorded > 0 && <p>The books also have {plural(row.inactiveUnrecorded, "inactive student customer", "inactive student customers")} under this family with no student record in the portal.</p>}
-      {row.confirm !== null && row.customer !== null && <><p>Confirming links it to &ldquo;{row.customer.name}&rdquo;. Nothing is sent to the books.</p><ProposalsShown proposals={row.confirm.proposals} /><p>{LINK_EFFECT}</p></>}
+      {row.confirm !== null && row.customer !== null && <><p>Confirming links it to &ldquo;{row.customer.name}&rdquo;. Nothing is sent to the books.</p><ProposalsShown proposals={row.confirm.proposals} /><p>{LINK_EFFECT}</p>{guardianLinks && <p>{LINK_GUARDIANS_EFFECT}</p>}</>}
+      {row.review !== null && <ReviewShown review={row.review} />}
+      {row.unlink !== null && <UnlinkShown unlink={row.unlink} />}
       {row.offers.pick && <p className="link-line"><Link href={pickHref(id)}>Pick a different customer<span className="visually-hidden">: {row.name}</span></Link></p>}
-      {(row.confirm !== null || row.offers.leave || row.offers.undo) && (
+      {(row.confirm !== null || row.review !== null || row.unlink !== null || row.offers.leave || row.offers.undo) && (
         <div className="row-actions">
           {row.confirm !== null && <ConfirmPress familyId={id} about={row.name} offer={row.confirm} tag={tag} />}
+          {row.review !== null && <LinkPress label="Confirm this link" busy="Confirming…" about={row.name} act={reviewLinkAction.bind(null, id, row.review.linkId, tag, row.review.stamp)} />}
+          {row.unlink !== null && <LinkPress label="Unlink from the books" busy="Unlinking…" about={row.name} act={unlinkAction.bind(null, id, row.unlink.linkId, tag, row.unlink.stamp)} />}
           {row.offers.leave && <LinkPress label="Leave unlinked" busy="Leaving it unlinked…" about={row.name} act={leaveUnlinkedAction.bind(null, id, tag)} />}
           {row.offers.undo && <LinkPress label="Undo Left unlinked" busy="Undoing…" about={row.name} act={undoLeaveUnlinkedAction.bind(null, id, tag)} />}
         </div>
       )}
     </details>
+  );
+}
+
+/**
+ * What Confirm this link records, for a carried-over link (slice M3a2): that a staff member checked it, that nothing is
+ * sent, and which of the family's carried-over student links it confirms with it and which it leaves, by name.
+ */
+function ReviewShown({ review }: { review: ReviewOffer }) {
+  return (
+    <>
+      <p>Confirm this link records it as checked by you, so it no longer reads as carried over. Nothing is sent to the books.</p>
+      <p>{review.confirms.length === 0 ? "No student's link is confirmed with it." : "Confirmed with it, each carried over to a student customer directly under this customer:"}</p>
+      {review.confirms.length > 0 && <ul>{review.confirms.map((c) => <li key={c.linkId}>{c.name}</li>)}</ul>}
+      {review.leaves.length > 0 && <><p>Left carried over, as the portal and the books don&apos;t agree on them:</p>
+        <ul>{review.leaves.map((l) => <li key={l.linkId}>{l.name} ({REVIEW_LEFT_WORDS[l.why]})</li>)}</ul></>}
+    </>
+  );
+}
+
+/**
+ * What Unlink from the books does (slice M3b), each sentence true by the code (unlinkFamily(), src/lib/accounting/link-writes.ts):
+ * the links it ends, that nothing is sent, what the guardians then read and that the figures are forgotten, what stays,
+ * what holds it back, and how the family is linked again.
+ */
+function UnlinkShown({ unlink }: { unlink: UnlinkOffer }) {
+  const guardians = unlink.guardianLinks === 0 ? "" : unlink.guardianLinks === 1 ? ", and a guardian's own link to a Parent customer" : `, and ${unlink.guardianLinks} guardians' own links to Parent customers`;
+  return (
+    <>
+      <h3>Unlink from the books</h3>
+      <p>Unlinking ends this family&apos;s link to {unlink.customer === null ? "its customer, which the books' copy doesn't hold now" : <>&ldquo;{unlink.customer}&rdquo;</>}
+        {unlink.students.length === 0 ? ", with no student's link" : `, with the ${unlink.students.length === 1 ? "link of its student" : "links of its students"} ${unlink.students.map((s) => s.name).join(", ")}`}{guardians}.
+        {" "}{unlink.customer === null ? "Nothing is sent to the books." : "Nothing is sent to the books, and the customer stays there as it is."}</p>
+      <p>Its guardians then read that the club hasn&apos;t connected their payments to the portal yet, with no invoices, Pay or buy-out offer, until it is linked again, and its stored figures are forgotten at once.
+        The family, its students, guardians, sign-ins, season, volunteering and forms stay as they are.
+        It isn&apos;t unlinked while a buy-out of the family or its students isn&apos;t settled, or while a change of it waits on Reconciliation.</p>
+      <p>To link it again, use this page, with Confirm or Pick a different customer once its row shows them. While its customer is still in the books, &ldquo;Create in QuickBooks and link&rdquo; isn&apos;t offered on its page, nor for its students whose customers are, so that no second customer is made for them.</p>
+    </>
+  );
+}
+
+/**
+ * Confirm all exact email matches (slice M3a2): for the Suggested rows the filter shows now, in the `listed` state, a
+ * press bound to the filter as parsed, the count, the roster tag and the stamp sealing those rows, and nothing else;
+ * with more than BULK_MAX, no press but a notice to narrow the list. A Suggested row a press would refuse whatever
+ * happened meanwhile (the family's own create waiting or stuck on the queue) isn't counted, and a notice says so.
+ */
+function BulkPress({ bulk, filter, tag }: { bulk: BulkOffer; filter: LinksFilter; tag: string }) {
+  const held = bulk.waiting === 0 ? null : (
+    <Notice tone="info" live="none">{bulk.waiting === 1 ? "1 Suggested row this list shows isn't" : `${bulk.waiting} Suggested rows this list shows aren't`} counted
+      in Confirm all exact email matches, as a press can&apos;t link {bulk.waiting === 1 ? "it" : "them"} now: making the family in the books is still waiting on the queue, until that has gone through
+      or been given up on Reconciliation, or the family is linked to a customer of another company. Each row&apos;s own Confirm says which.</Notice>
+  );
+  if (bulk.count === 0) return held;
+  if (bulk.stamp === null) {
+    return <>{held}<Notice tone="info" live="none">This list shows {bulk.count} Suggested rows. Up to {BULK_MAX} can be confirmed at once, so narrow the list with the search first.</Notice></>;
+  }
+  return (
+    <div className="stack">
+      {held}
+      <p>Confirm all exact email matches links each of the {plural(bulk.count, "family", "families")} this list shows as Suggested to the customer filled in on its row, with the students and guardians its row&apos;s opening lists.
+        Only the rows this filter shows now are linked: if the list has changed by the time you press, nothing is linked and it is shown again. Nothing is sent to the books.</p>
+      <p>Once linked, each family&apos;s guardians see its customer&apos;s open invoices and Pay links, and those of the students and parents the books hold directly under it, the next time they open Home or Payments. A link can be removed again in its row, with Unlink from the books, but by then its guardians may have seen those invoices, so look the rows over first.</p>
+      <div className="row-actions">
+        <LinkPress label={`Confirm all exact email matches (${bulk.count})`} busy="Linking…" about="Confirm all exact email matches"
+          act={confirmAllAction.bind(null, filter.status ?? "", filter.q, bulk.count, tag, bulk.stamp)} />
+      </div>
+    </div>
   );
 }
 
@@ -178,8 +373,9 @@ function PickPart({ view, familyId, customerId, cq, tag, made }: { view: LinksVi
           {step.parents !== null && (step.parents.length === 0 ? <p>The books hold no Parent customers directly under it.</p>
             : <><p>Parent customers the books hold directly under it:</p><ul>{step.parents.map((c) => <li key={c.qboId}>{c.name}{c.active ? "" : " (inactive in the books)"}</li>)}</ul></>)}
           <ProposalsShown proposals={step.offer.proposals} />
-          <p>Nothing is sent to the books. The family&apos;s guardians&apos; own records in the books aren&apos;t linked by this.</p>
+          <p>Nothing is sent to the books.</p>
           <p>{LINK_EFFECT}</p>
+          {view.guardianLinks && <p>{LINK_GUARDIANS_EFFECT}</p>}
           <div className="row-actions"><ConfirmPress familyId={id} about={row.name} offer={step.offer} tag={tag} /></div>
         </div>
       )}
@@ -201,7 +397,13 @@ function PickPart({ view, familyId, customerId, cq, tag, made }: { view: LinksVi
  * active family, its link to its customer in the books and how that link stands, or the customer that looks like its
  * own, with a status on each row, a filter by status and a search. Since slice M3a a family with no link is linked here
  * (Confirm its suggestion or a candidate, or Pick a different customer), or left unlinked, and nothing is sent to the
- * books; each press is audited, in its own transaction (src/lib/accounting/link-writes.ts). For holders of the linking
+ * books; each press is audited, in its own transaction (src/lib/accounting/link-writes.ts). Since slice M3a2 the
+ * Suggested rows the filter shows are confirmed in one press (Confirm all exact email matches), and a carried-over link
+ * is confirmed as reviewed in its row (Confirm this link). Since slice M3b a linked family is unlinked in its row (Unlink
+ * from the books), and linked again with the presses above. Since slice M3c a guardian of a linked family is linked to
+ * a Parent customer under it in the row's opening (Link this guardian), and one guardian's link ended alone (Unlink
+ * this guardian, which splits a shared one), src/lib/accounting/guardian-links.ts; the removed guardians' Parent
+ * customers are shown, never pressed. For holders of the linking
  * permission (Accounting.Link.ReadWrite, not Admin-only), who also need Roster.Read, checked here and refused as the
  * guard refuses (requireStaffAlso()): a role written with patterns can hold the first without the second. The page
  * lists many families, so neither the page, a row's opening, the chooser nor the confirm step is audited as a read of
@@ -220,6 +422,8 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
   // A carried-over family with differences is found under two filters (filtersOf()), so the counts overlap by this many.
   const overlap = view.rows.filter((r) => filtersOf(r).length > 1).length;
   const rows = filterLinkRows(view.rows, filter);
+  // Confirm all exact email matches, over the Suggested rows this filter shows, by the press's own rule (suggestedRowsShown()).
+  const bulk = view.bulk(filter);
   const filtered = filter.status !== null || filter.q !== "";
   const pick = typeof sp.pick === "string" && sp.pick.length <= 64 ? sp.pick : null;
   const customer = typeof sp.customer === "string" && sp.customer.length <= 64 ? sp.customer : null;
@@ -233,7 +437,7 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
     { key: "customer", header: "Customer in the books", cell: (r) => (r.customer === null ? (r.status.key === "not_checked" ? "Not checked now" : "None")
       : <>{r.customer.name}<span className="when">{r.customer.email ?? "No email address"}</span></>) },
     { key: "status", header: "Status", cell: (r) => <><StateWords state={ICON[r.status.key]} words={STATUS_WORDS[r.status.key]} /><span className="when"><StatusDetail status={r.status} row={r} /></span></> },
-    { key: "more", header: "Students and guardians", cell: (r) => <Opening row={r} tag={tag} /> },
+    { key: "more", header: "Students and guardians", cell: (r) => <Opening row={r} tag={tag} guardianLinks={view.guardianLinks} /> },
   ];
   return (
     <main className="wrap single">
@@ -241,7 +445,8 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
         <h1 className="page-title">Accounting links</h1>
         <p className="lede">Every family in the portal, beside the customer in the books it is linked to, or the one that looks like its own.
           A family with no link can be linked here, to its suggestion or a customer you pick, or left unlinked. Nothing here is sent to the books.
-          For a family whose link stands, it also lists where the portal and the books differ, and settles none of it.</p>
+          For a family whose link stands, it also lists where the portal and the books differ. A name, a record the books have inactive or active, or the family the books have a student under can be taken into the portal with Take QuickBooks&apos; into the app, which changes only the portal&apos;s records, except that a student&apos;s move voids an unpaid volunteer buy-out invoice of theirs in the books, as any move does; every other difference is only shown.
+          A linked family inactive in the portal whose customer the books have active is listed after the families, and made active again the same way, but its guardians sign in to it only once someone who may change families lets them in, on its page.</p>
         <LinkAnswersShown />
 
         <section className="box" aria-labelledby="links-how-h"><h2 id="links-how-h">How links are made</h2>
@@ -249,16 +454,22 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
             in its own email field, or on a parent record under it. A name never suggests a customer, and a customer another family is linked to is never suggested.
             A guardian who can&apos;t sign in, because they are blocked, is listed under the family, but their address is never matched.</p>
           <p>A family the portal has is linked here: Confirm its suggestion, or one of its possible customers, or pick a different customer from those no family is linked to.
-            Nothing is sent to the books: the press ties the family to its customer in the portal, with each of its students whose name is on exactly one student on each side.
+            Nothing is sent to the books: the press ties the family to its customer in the portal, with each of its students whose name is on exactly one student on each side,
+            and, where the books have Parent customers, each of its guardians whose sign-in address is in the email field of exactly one Parent customer under it that no one is linked to (nor kept for another guardian whose link to it an unlink ended) and that holds no other of its guardians&apos; addresses, unless a change for them or that customer is waiting, stuck or kept on Reconciliation.
             Students left that way aren&apos;t linked, and show with the family&apos;s row among its differences, but for a student customer inactive in the books, which is only counted there. Leave unlinked keeps a family out of the suggestions until someone undoes it.</p>
           <p>A link also comes with something new. &ldquo;Create a family from this&rdquo;, on Reconciliation, makes a new family in the portal from a customer no family is linked to.
-            &ldquo;Create in QuickBooks and link&rdquo;, on a family&apos;s page, makes a new customer in the books for a family that has none, and so does adding a family under Families, when someone who may link families adds it while the books are connected.</p>
+            &ldquo;Create in QuickBooks and link&rdquo;, on a family&apos;s page, makes a new customer in the books for a family that has none, but not for one unlinked while its customer is still in the books, nor for a student of it whose customer is; and adding a family under Families makes one too, when someone who may link families adds it while the books are connected.</p>
           <p>For each family whose link stands, the portal compares the names, whether each is active, the family each student is under, and the students and Parent customers only one side has,
             against its copy of the books{view.readAt ? <>, from its last read of them on <LocalTime iso={view.readAt} /></> : ", though it hasn't read the books yet"}.
             A family whose link was carried over and that has differences is found under both Carried over and Linked, with differences, and counted under both.</p>
+          <p>Confirm all exact email matches, above the list, links every Suggested row the list shows, up to {BULK_MAX} at once, each as its own Confirm would.
+            A link carried over from the roster is confirmed in its row&apos;s opening with Confirm this link, which records it as checked by you.
+            A linked family is unlinked in its row&apos;s opening with Unlink from the books, which ends its link with its students&apos; and guardians&apos; links and sends nothing to the books: to link it to a different customer, unlink it, then link it again here.</p>
+          <p>Where the books have Parent customers, a guardian of a linked family is linked in its row&apos;s opening to a Parent customer under it that no guardian is linked to, and one guardian&apos;s link is ended there alone: a Parent customer several guardians share is nobody&apos;s own, so the portal sends nothing for it until all but one are unlinked from it.
+            Neither sends anything to the books. A removed guardian&apos;s Parent customer is shown with the family, and offered to nobody else.</p>
           <Notice tone="warning" live="none">For a family this page suggests a customer for, or lists possible customers of, link it here with Confirm.
-            &ldquo;Create a family from this&rdquo; on Reconciliation, for that customer, would still make a second family beside the one the portal has, so don&apos;t use it for one.
-            And &ldquo;Create in QuickBooks and link&rdquo; on the family&apos;s page would make a second customer in the books for a family whose customer is already there.</Notice>
+            Reconciliation refuses &ldquo;Create a family from this&rdquo; for a customer this page suggests or lists for a family the portal has, or that a given-up change of a family the portal saved first made.
+            And &ldquo;Create in QuickBooks and link&rdquo; on the family&apos;s page would make a second customer in the books for a family whose customer is already there but was never linked to it; it isn&apos;t offered for one unlinked while its customer is still in the books.</Notice>
           {view.noFamily !== null && (
             <p>{view.noFamily === 0 ? "Every active customer the books list as a family at the top level, under no other customer, is linked to a family in the portal, or is about to be by a change on Reconciliation."
               : `${plural(view.noFamily, "active customer the books list as a family at the top level, under no other customer, has", "active customers the books list as a family at the top level, under no other customer, have")} no family in the portal.`}
@@ -282,12 +493,15 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
           </form>
           {overlap > 0 && <p>{overlap === 1 ? "1 family whose link was carried over has differences, so it is counted under both Carried over and Linked, with differences."
             : `${overlap} families whose links were carried over have differences, so each is counted under both Carried over and Linked, with differences.`}</p>}
+          {bulk !== null && <BulkPress bulk={bulk} filter={filter} tag={tag} />}
           {filter.tooLong && <Notice tone="warning" live="none">That search was too long, so nothing was searched for. Try a shorter part of a name or an address, up to {SEARCH_MAX} characters.</Notice>}
           {view.rows.length === 0 ? <Notice tone="info" live="none">The portal has no active families yet.</Notice>
             : rows.length === 0 ? <Notice tone="info">No family matches that.</Notice>
             : <DataTable caption={filtered ? `${plural(rows.length, "family", "families")} of ${view.rows.length} shown` : `Every family, by name: ${plural(rows.length, "family", "families")}`}
                 columns={columns} rows={rows} rowKey={(r) => String(r.familyId)} />}
         </section>
+
+        {view.inactive.length > 0 && <InactivePart rows={view.inactive} tag={tag} familyPages={view.familyPages} />}
       </LinkAnswers>
     </main>
   );
