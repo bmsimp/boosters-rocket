@@ -85,9 +85,9 @@ async function main() {
     if (await select.count()) await select.selectOption(account.templates.main.envelopeId);
     else fail("the requirement page listed no templates from Documenso: check the connection.");
     await page.getByRole("button", { name: /^Check and attach/ }).click();
-    await page.locator("main .notice-done, main .notice-problem").first().waitFor({ timeout: 30_000 });
+    await page.locator("main .notice-done, main .notice-late").first().waitFor({ timeout: 30_000 });
     await shot("2-template-attached");
-    if (await page.locator("main .notice-problem").count()) fail(`attaching the template was refused: ${await page.locator("main .notice-problem").first().innerText()}`);
+    if (await page.locator("main .notice-late").count()) fail(`attaching the template was refused: ${await page.locator("main .notice-late").first().innerText()}`);
 
     // 3. The parent signs.
     await page.goto(`${base}/forms`);

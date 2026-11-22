@@ -15,7 +15,7 @@ test("the seeded parent session opens the parent home, not the sign-in page", as
   const res = await page.goto("/");
   expect(res?.status()).toBe(200);
   await expect(page).toHaveURL(`${baseURL}/`);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
   await expect(page.getByText("Viewing Quetzalcoatl Family.")).toBeVisible();
   await page.goto("/display");
   await expect(page).toHaveURL(/\/display$/);

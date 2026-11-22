@@ -20,7 +20,7 @@ function StepDates({ startsOn, endsOn }: { startsOn: string | null; endsOn: stri
 }
 
 /**
- * The whole season for the signed-in family: every step (a "set", to a parent) in order, what each asks of the family and of each student,
+ * The whole season for the signed-in family: every step in order, what each asks of the family and of each student,
  * and how each stands, in words. Reached from the ruler on Home; it has no tab.
  */
 export default async function SeasonPage() {
@@ -35,8 +35,8 @@ export default async function SeasonPage() {
         : !season ? <p className="lede">The club hasn&apos;t set up a season here yet. There&apos;s nothing you need to do.</p>
         : (
           <>
-            <p className="lede">Every set of the season for {family.name}, and what&apos;s done so far. <Link href="/">Back to Home</Link></p>
-            {season.steps.length === 0 && <p className="lede">The club hasn&apos;t added any sets yet.</p>}
+            <p className="lede">Every step of the season for {family.name}, and what&apos;s done so far. <Link href="/">Back to Home</Link></p>
+            {season.steps.length === 0 && <p className="lede">The club hasn&apos;t added any steps yet.</p>}
             {season.steps.map((step, i) => {
               const students = step.students.filter((s) => s.lines.length > 0);
               const left = linesLeft(step.family) + step.students.reduce((sum, s) => sum + linesLeft(s.lines), 0);
@@ -45,8 +45,8 @@ export default async function SeasonPage() {
               return (
                 <section className="box" key={step.id} aria-labelledby={`step-${i + 1}`}>
                   <h2 id={`step-${i + 1}`}>{i + 1}. {step.name}</h2>
-                  {(current || dated) && <p>{current ? "The current set" : null}{current && dated ? " · " : null}<StepDates startsOn={step.startsOn} endsOn={step.endsOn} /></p>}
-                  {!asked ? <p className="step-none">Nothing is asked of your family in this set.</p>
+                  {(current || dated) && <p>{current ? "The current step" : null}{current && dated ? " · " : null}<StepDates startsOn={step.startsOn} endsOn={step.endsOn} /></p>}
+                  {!asked ? <p className="step-none">Nothing is asked of your family in this step.</p>
                     : <StateWords state={left === 0 ? "done" : "todo"} words={left === 0 ? "Done" : `${left} ${left === 1 ? "thing" : "things"} left to do`} />}
                   {step.family.length > 0 && (
                     <div className="family-reqs"><h3>Your family</h3><RequirementLines lines={step.family} today={season.today} /></div>

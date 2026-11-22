@@ -216,7 +216,7 @@ describe("a family's guardian, the moment after a change of company", () => {
     asParent(identity);
     // Home: the money box says the family isn't connected to the club's books (its link ended), with no figures and no Pay.
     const home = textOf(await renderPage(ParentHome));
-    expect(home).toContain("Hi, Ansgar");
+    expect(home).toContain("Alderquist Family");
     expect(home).toContain("The club hasn't connected your payments to the portal yet. Until then, the treasurer can tell you what you owe.");
     for (const invoice of a.spec.invoices!) expect(home).not.toContain(invoice.number);
     // Forms: once the new company's membership shape is saved (the clear cleared the old one, as QuickBooks' own), the

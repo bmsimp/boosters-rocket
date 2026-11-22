@@ -18,7 +18,7 @@ export function DisplaySettings() {
         { value: "device", label: "Match my device", hint: "Follows your phone or computer" },
         { value: "light", label: "Light", hint: "Dark text on white" },
         { value: "dark", label: "Dark", hint: "Light text on near-black" }]} />
-      <ChoiceGroup name="contrast" legend="Contrast" hint="High contrast makes text and lines as strong as possible and removes the background grid." value={prefs.contrast} onChange={set("contrast")} options={[
+      <ChoiceGroup name="contrast" legend="Contrast" hint="High contrast gives stronger text and borders, and a thicker focus ring." value={prefs.contrast} onChange={set("contrast")} options={[
         { value: "device", label: "Match my device", hint: "Uses your contrast setting" },
         { value: "standard", label: "Standard" }, { value: "more", label: "High contrast" }]} />
       <ChoiceGroup name="text" legend="Text size" hint="Your browser's own zoom works too." value={prefs.text} onChange={set("text")} options={[

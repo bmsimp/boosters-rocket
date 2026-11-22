@@ -43,7 +43,7 @@ test("the manifest answers as a manifest, built from the club's settings, with n
   const manifest = await res.json();
   expect(manifest).toMatchObject({
     name: CLUB.name, short_name: CLUB.name, id: "/", start_url: "/", scope: "/", display: "standalone",
-    theme_color: CLUB.color, background_color: CLUB.color,
+    theme_color: "#ffffff", background_color: "#f7f7f8", // the look's surface and ground, not the club's color
   });
   expect(manifest.icons.map((i: { sizes: string; purpose: string }) => `${i.sizes} ${i.purpose}`))
     .toEqual(["192x192 any", "512x512 any", "192x192 maskable", "512x512 maskable"]);
@@ -78,7 +78,10 @@ test("the head of the sign-in page carries what a phone needs to install the por
   await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute("href", /^\/icons\/apple-touch-icon\.png\?v=[0-9a-f]{12}$/);
   await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute("sizes", "180x180");
   await expect(page.locator('link[rel="icon"]').first()).toHaveAttribute("href", /^\/icons\/favicon\.png\?v=[0-9a-f]{12}$/);
-  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", CLUB.color);
+  // The browser's bar matches the portal's white top bar in light and its dark surface in dark (src/lib/theme/palette.ts);
+  // the club's color stays the manifest's, for the installed app's splash.
+  await expect(page.locator('meta[name="theme-color"][media="(prefers-color-scheme: light)"]')).toHaveAttribute("content", "#ffffff");
+  await expect(page.locator('meta[name="theme-color"][media="(prefers-color-scheme: dark)"]')).toHaveAttribute("content", "#16181c");
   await expect(page.locator('meta[name="color-scheme"]')).toHaveAttribute("content", "light dark");
   const viewport = await page.locator('meta[name="viewport"]').getAttribute("content");
   expect(viewport).toContain("width=device-width");
@@ -156,7 +159,7 @@ test("the worker takes charge, and pages still load and redirect through it", as
   const home = await page.goto("/");
   expect(home?.status()).toBe(200);
   expect(home?.fromServiceWorker()).toBe(true);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
 });
 
 test("offline, a page load shows the offline page, and Try again brings the page back", async ({ page, context }) => {
@@ -197,12 +200,12 @@ test("after a signed-in parent has browsed, the caches hold the offline page and
   await workerInCharge(page);
   // Browse as a parent does, with the worker in charge: full page loads, and moving between pages inside the app.
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
   await expect(page.getByText("Viewing Quetzalcoatl Family.")).toBeVisible();
   await page.getByRole("link", { name: /Your account and display settings/ }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Display");
   await page.goBack();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
   await page.goto("/display");
   await page.reload();
   // What the family owes, by its tab and asked for directly.
@@ -450,7 +453,7 @@ test("an app brought back to the front after a minute away reads its page again,
     await putAwayFor(61_000);
     await bringBack();
     await expect(owed).toHaveText("$100.00");
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
   } finally {
     await sql`UPDATE family_money SET total_cents = 18500 WHERE family_id = (SELECT family_id FROM accounting_link WHERE customer_id = 'E2E-FAMILY' AND family_id IS NOT NULL)`;
   }
@@ -481,6 +484,6 @@ test("with a notch and a home indicator, the bar, the gutters, the tabs and the 
   await cdp.send("Emulation.setSafeAreaInsetsOverride" as never, { insets: { top: 0, bottom: 0, left: 0, right: 0 } } as never);
   await page.reload();
   expect(await px("header.bar", "padding-top")).toBe("0px");
-  expect(await px("main.wrap", "padding-left")).toBe("24px");
+  expect(await px("main.wrap", "padding-left")).toBe(testInfo.project.name === "phone" ? "16px" : "24px"); // the gutter, --cell
   expect(await px("body", "padding-bottom")).toBe(testInfo.project.name === "phone" ? "88px" : "0px");
 });

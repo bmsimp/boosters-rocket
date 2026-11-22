@@ -229,7 +229,7 @@ test("a page to return to that is not a parent page of this site is dropped", as
     await expect(page).toHaveURL(`${baseURL}/choose-family`);
     await page.getByRole("button", { name: "Quetzalcoatl Family", exact: true }).click();
     await expect(page).toHaveURL(`${baseURL}/`);
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
     await passOffer(page);
     await page.goto("/display");
     await page.getByRole("button", { name: "Sign out" }).click();

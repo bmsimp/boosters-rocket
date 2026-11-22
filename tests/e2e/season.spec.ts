@@ -40,8 +40,8 @@ test("Home shows the season ruler for the current season, and each student's pro
   // The ruler: a band under the club bar, above the greeting. Not a control: one link, to the Season page.
   const ruler = page.getByRole("region", { name: /^Fall 2026/ });
   await expect(ruler).toBeVisible();
-  await expect(ruler.locator(".season-title")).toHaveText("Fall 2026 · Set 2 of 4: Uniforms");
-  // On a phone the current set's name is in the heading, so a label that doesn't fit its cell loses nothing; on a wide
+  await expect(ruler.locator(".season-title")).toHaveText("Fall 2026 · Step 2 of 4: Uniforms");
+  // On a phone the current step's name is in the heading, so a label that doesn't fit its cell loses nothing; on a wide
   // screen every cell shows its own label and the heading drops the name.
   if (isPhone(page)) await expect(ruler.locator(".current-name")).toBeVisible();
   else await expect(ruler.locator(".current-name")).toBeHidden();
@@ -51,12 +51,12 @@ test("Home shows the season ruler for the current season, and each student's pro
   await expect(cells.nth(0)).toHaveClass("done");
   await expect(cells.nth(0)).toContainText("Join, done");
   await expect(cells.nth(1)).toHaveAttribute("aria-current", "step");
-  await expect(cells.nth(1)).toContainText("Uniforms, current set");
+  await expect(cells.nth(1)).toContainText("Uniforms, current step");
   await expect(ruler.locator("[aria-current]")).toHaveCount(1);
-  // Season asks nothing of the family, but it is still ahead: only a set behind the current one is ticked.
+  // Season asks nothing of the family, but it is still ahead: only a step behind the current one is ticked.
   await expect(ruler.locator("ol.sets > li.done")).toHaveCount(1);
-  // The current step is filled with the club's color; the others are paper.
-  const fill = (i: number) => cells.nth(i).evaluate((el) => getComputedStyle(el).backgroundColor);
+  // The current step's segment of the track is the club's color; the others are not.
+  const fill = (i: number) => cells.nth(i).locator(".track").evaluate((el) => getComputedStyle(el).backgroundColor);
   expect(await fill(1)).toBe("rgb(91, 42, 134)");
   expect(await fill(2)).not.toBe("rgb(91, 42, 134)");
   // A dot for each student on the current step: Xochitl finished, Yaretzi still on it. Decoration, hidden from a screen reader.
@@ -69,18 +69,23 @@ test("Home shows the season ruler for the current season, and each student's pro
   expect(rulerBox.y + rulerBox.height).toBeLessThanOrEqual(heading.y);
 
   // The same facts in words, under each student: the state, then each requirement of the current step.
+  // The page's one quiet line under the family's name names the season and its step.
+  await expect(page.locator(".home-head .lede")).toContainText("Fall 2026 · Uniforms");
   const students = page.getByRole("region", { name: "Your students" });
-  await expect(students).toContainText("Fall 2026 · Uniforms");
-  const xochitl = students.locator("ul.students > li").filter({ hasText: "Xochitl Quetzalcoatl" });
-  await expect(xochitl.locator(".count")).toHaveText("1 of 1 done");
-  await expect(xochitl.locator("> .state")).toHaveText("Done with Uniforms");
-  await expect(xochitl.locator(".reqs li")).toHaveText([`${FITTING}Done`, "Marching shoes sized (optional)Not done yet"]);
-  const yaretzi = students.locator("ul.students > li").filter({ hasText: "Yaretzi Quetzalcoatl" });
-  await expect(yaretzi.locator(".count")).toHaveText("0 of 1 done");
-  await expect(yaretzi.locator("> .state")).toHaveText("1 thing left to do in Uniforms");
-  await expect(yaretzi.locator(".reqs li").first()).toHaveText(`${FITTING}Not done yet`);
+  const xochitl = students.locator("ul.list > li").filter({ hasText: "Xochitl Quetzalcoatl" });
+  await expect(xochitl.locator("> .list-trail .list-amount")).toHaveText("1 of 1 done");
+  await expect(xochitl.locator("> .list-main .list-status")).toHaveText("Done with Uniforms");
+  // Each requirement is a row indented under the student, on the list's own surface: no panel inside the list.
+  await expect(xochitl.locator(".list-sub > li")).toHaveText([`${FITTING}Done`, "Marching shoes sized (optional)Not done yet"]);
+  const yaretzi = students.locator("ul.list > li").filter({ hasText: "Yaretzi Quetzalcoatl" });
+  await expect(yaretzi.locator("> .list-trail .list-amount")).toHaveText("0 of 1 done");
+  await expect(yaretzi.locator("> .list-main .list-status")).toHaveText("1 thing left to do in Uniforms");
+  await expect(yaretzi.locator(".list-sub > li").first()).toHaveText(`${FITTING}Not done yet`);
   // Every state is words with an icon, never a color alone.
-  await expect(yaretzi.locator(".reqs .state svg").first()).toBeVisible();
+  await expect(yaretzi.locator("> .status-icon")).toBeVisible();
+  await expect(yaretzi.locator(".list-sub .state svg").first()).toBeVisible();
+  // What is still to do is in To do too.
+  await expect(page.getByRole("region", { name: "To do" })).toContainText(`${FITTING}Not done yet`);
   // Nothing of a step that is behind them or ahead, and nothing asked of another family alone.
   await expect(page.locator("body")).not.toContainText(/Handbook read|Banquet RSVP|Tuba locker|Percussion truck|Cast on his arm/);
   await noSidewaysScroll(page);
@@ -94,8 +99,8 @@ test("Home shows the season ruler for the current season, and each student's pro
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Fall 2026");
   await expect(page.getByRole("heading", { level: 2 })).toHaveText(["1. Join", "2. Uniforms", "3. Season", "4. Wrap-up"]);
   await expect(page.getByRole("region", { name: "1. Join" })).toContainText("DoneYour familyHandbook readDone");
-  await expect(page.getByRole("region", { name: "2. Uniforms" })).toContainText("The current set");
-  await expect(page.getByRole("region", { name: "3. Season" })).toContainText("Nothing is asked of your family in this set.");
+  await expect(page.getByRole("region", { name: "2. Uniforms" })).toContainText("The current step");
+  await expect(page.getByRole("region", { name: "3. Season" })).toContainText("Nothing is asked of your family in this step.");
   const wrap = page.getByRole("region", { name: "4. Wrap-up" });
   await expect(wrap).toContainText("Banquet RSVP");
   await expect(wrap.locator(".when")).toContainText("Due ");
@@ -118,10 +123,10 @@ test("staff tick a student off, and the parent then sees it; unticked, the famil
   // The parent: both students have finished Uniforms, Season asks nothing, so the family is on Wrap-up.
   await page.goto("/");
   const ruler = page.getByRole("region", { name: /^Fall 2026/ });
-  await expect(ruler.locator(".season-title")).toContainText("Set 4 of 4");
+  await expect(ruler.locator(".season-title")).toContainText("Step 4 of 4");
   await expect(ruler.locator("ol.sets > li.done")).toHaveCount(3);
   await expect(ruler.locator("ol.sets > li").nth(3)).toHaveAttribute("aria-current", "step");
-  await expect(page.getByRole("region", { name: "Your students" })).toContainText("Your family1 thing left to do in Wrap-upBanquet RSVPNot done yet");
+  await expect(page.getByRole("region", { name: "Your students" })).toContainText(/Your family1 thing left to do in Wrap-up(\d of \d done)?Banquet RSVPNot done yet/);
   await page.goto("/season");
   const uniforms = page.getByRole("region", { name: "2. Uniforms" });
   await expect(uniforms.locator("> .state")).toHaveText("Done");
@@ -135,7 +140,7 @@ test("staff tick a student off, and the parent then sees it; unticked, the famil
   await expect(again.getByRole("button", { name: "Tick", exact: true })).toBeVisible();
   await expect(again.locator(".state")).toHaveText("Not done yet");
   await page.goto("/");
-  await expect(page.getByRole("region", { name: /^Fall 2026/ }).locator(".season-title")).toContainText("Set 2 of 4");
+  await expect(page.getByRole("region", { name: /^Fall 2026/ }).locator(".season-title")).toContainText("Step 2 of 4");
 });
 
 test("staff open one family's season from a requirement's list, and the visit is in the audit log", async ({ page }) => {

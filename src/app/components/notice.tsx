@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { Tone as StatusTone } from "./ui/tone";
 
 /**
  * The notice primitive (DESIGN.md, Notices): a status that stands apart from the text around it. Four tones, each with
@@ -7,6 +8,12 @@ import type { ReactNode } from "react";
  * word is then read out but not drawn, as the heading says it. No hooks: server pages and client forms both use it.
  */
 export type Tone = "info" | "warning" | "done" | "problem";
+
+/**
+ * A notice speaks the product's one status vocabulary (src/app/components/ui/tone.ts): info is neutral, warning is
+ * due, done is done and problem is late. The prop keeps its own names; the class and the colors follow the status tone.
+ */
+export const NOTICE_STATUS_TONE: Record<Tone, StatusTone> = { info: "neutral", warning: "due", done: "done", problem: "late" };
 
 export const TONE_WORDS: Record<Tone, string> = { info: "Note", warning: "Needs attention", done: "Done", problem: "Problem" };
 
@@ -30,7 +37,7 @@ export function Notice({ tone, title, titleId, level = 2, live, className, child
 }) {
   const announced = live ?? (tone === "problem" ? "alert" : "status");
   const role = announced === "none" ? undefined : announced;
-  const cls = ["notice", `notice-${tone}`, className].filter(Boolean).join(" ");
+  const cls = ["notice", `notice-${NOTICE_STATUS_TONE[tone]}`, className].filter(Boolean).join(" ");
   const Heading = level === 3 ? "h3" : "h2";
   if (title) {
     return (

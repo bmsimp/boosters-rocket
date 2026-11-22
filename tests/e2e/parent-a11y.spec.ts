@@ -327,7 +327,7 @@ async function findProblems(page: Page, where: string, mode: Mode): Promise<stri
   if (mode.forcedColors) return found; // the system draws the colors
 
   // Contrast. axe can't tell what is behind words drawn straight on the chart paper, because the paper's grid is a
-  // background image, nor behind the set ruler's cells, whose yard-line ticks are a pseudo-element. Both are 1-2px
+  // background image, nor behind the season ruler's cells, whose yard-line ticks are a pseudo-element. Both are 1-2px
   // decoration that no word sits on (DESIGN.md: the grid is "decoration only", and gone in high contrast), so they are
   // taken away while contrast is measured, and every word is measured against the paper or fill it is really on.
   // Anything axe still can't measure is a finding: a new kind of background has to be measured, not skipped.

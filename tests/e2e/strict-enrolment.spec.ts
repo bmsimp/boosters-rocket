@@ -96,7 +96,7 @@ test("she sets an authenticator app up there, ticks that she saved her backup co
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     // Whole now: Home is hers, and asks nothing more.
     await page.goto("/");
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText(`Hi, ${STRICT_PARENT.first}`);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
     // Sign-in settings at Strict (slice SI-10b), within the 10 minutes her enrolment proved: new backup codes, shown
     // once, stay until she ticks that she saved them and presses Done; then they're gone, and the box says so.
     await page.goto("/family/sign-in");
@@ -141,7 +141,7 @@ test("she adds a passkey there instead, and goes home the same way", async ({ br
     expect(paths).toContain("/api/auth/parent/portal-passkey/add");
     expect(paths).not.toContain("/api/auth/parent/passkey/verify-registration");
     await confirmSavedAndGoOn(page, `${baseURL}/`);
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText(`Hi, ${STRICT_PARENT.first}`);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
     // The Passkeys box at Strict (slice SI-10b): her new backup codes beside the passkey stay until she ticks and presses Done.
     await page.goto("/family/sign-in");
     const settings = page.getByRole("region", { name: SETTINGS.passkeysTitle, exact: true });

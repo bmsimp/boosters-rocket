@@ -129,6 +129,7 @@ describe("the safe-area rules sit in one block at the end of the stylesheet", ()
     ["the club bar clears the top", ".bar { padding-top: env(safe-area-inset-top); }"],
     ["the tab bar clears the home indicator and both sides", ".tabs { padding-bottom: env(safe-area-inset-bottom); padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }"],
     ["on a wide screen the body still clears the home indicator", "@media (min-width: 760px) { body { padding-bottom: env(safe-area-inset-bottom); } }"],
+    ["a page with no tab bar keeps no room for one, and still clears the home indicator", "body:not(:has(> nav.tabs)) { padding-bottom: env(safe-area-inset-bottom); }"],
   ])("%s", (_what, rule) => {
     expect(block).toContain(rule);
   });

@@ -86,6 +86,8 @@ themselves.
   and accessible whatever logo and colors a club supplies.
 - Voice: a warm, plain-spoken neighbor. Short sentences and everyday words. Never scolding or
   alarming about money ("You have 2 forms left for Maya", not "Action required: overdue").
+- Look: on 2026-11-21 the owner chose the familiar category standard (calm and organized, in the
+  manner of Linear) over a distinctive themed world. Keep the product familiar and calm.
 
 ## Evidence on Hand
 

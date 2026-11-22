@@ -82,9 +82,10 @@ test("the page fits the screen at this width, and the amounts line up", async ({
   expect(Math.abs(amount.x + amount.width - (total.x + total.width))).toBeLessThanOrEqual(1);
   const pay = (await page.locator("a.pay").boundingBox())!, row = (await soon.boundingBox())!;
   if (width < 760) {
-    // Phone: Pay goes full width under its invoice row.
+    // Phone: a compact Pay under its invoice's amount, at the row's right edge, the invoice's words keeping the rest.
     expect(pay.y).toBeGreaterThan(amount.y + amount.height - 1);
-    expect(pay.width).toBeGreaterThan(row.width - 2);
+    expect(Math.abs(pay.x + pay.width - (amount.x + amount.width))).toBeLessThanOrEqual(1);
+    expect(pay.width).toBeLessThan(row.width / 2);
   } else {
     // Desktop: text | Pay | amount, on one line.
     expect(pay.x + pay.width).toBeLessThanOrEqual(amount.x + 1);

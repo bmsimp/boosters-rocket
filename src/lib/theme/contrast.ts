@@ -1,10 +1,14 @@
+import { CLUB_TEXT_GROUND, CLUB_TINT_SURFACE } from "./palette";
+
 export class InvalidColorError extends Error {}
 
 const INK = "#14161a";
 const WHITE = "#ffffff";
-const PAPER_L = "#ffffff";
-const PAPER_D = "#16181c";
-const PAPER_DHC = "#000000";
+/** The club's color as text is checked against the hardest ground of each mode it is drawn on (./palette.ts). */
+const GROUND_L = CLUB_TEXT_GROUND.light;
+const GROUND_D = CLUB_TEXT_GROUND.dark;
+const GROUND_LHC = CLUB_TEXT_GROUND.lightHc;
+const GROUND_DHC = CLUB_TEXT_GROUND.darkHc;
 
 export function normalizeHex(input: string): string | null {
   const s = input.trim().replace(/^#/, "").toLowerCase();
@@ -79,12 +83,12 @@ export function deriveClubTokens(input: string): ClubTokens {
   const club = normalizeHex(input);
   if (!club) throw new InvalidColorError(`“${input}” isn't a color. Use a hex value like #5b2a86.`);
   const clubOn = contrastRatio(WHITE, club) >= contrastRatio(INK, club) ? WHITE : INK;
-  const textL = adjustUntil(club, PAPER_L, 4.5, "darker");
-  const textD = adjustUntil(club, PAPER_D, 4.5, "lighter");
-  const textLhc = adjustUntil(club, PAPER_L, 7, "darker");
-  const textDhc = adjustUntil(club, PAPER_DHC, 7, "lighter");
-  const tintL = mix(club, PAPER_L, 0.08);
-  const tintD = mix(club, PAPER_D, 0.14);
+  const textL = adjustUntil(club, GROUND_L, 4.5, "darker");
+  const textD = adjustUntil(club, GROUND_D, 4.5, "lighter");
+  const textLhc = adjustUntil(club, GROUND_LHC, 7, "darker");
+  const textDhc = adjustUntil(club, GROUND_DHC, 7, "lighter");
+  const tintL = mix(club, CLUB_TINT_SURFACE.light, 0.08);
+  const tintD = mix(club, CLUB_TINT_SURFACE.dark, 0.14);
   return {
     club, clubOn,
     textL: adjustUntil(textL, tintL, 4.5, "darker"),

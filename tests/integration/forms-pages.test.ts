@@ -42,13 +42,13 @@ describe("the Forms page, from what the portal has stored (forms not set up)", (
     const text = textOf(html);
     expect(text).toContain("Autumn Field Season: the forms for Alderquist Family");
     expect(text).toContain("The forms still to sign aren't ready yet. There's nothing you need to do right now");
-    // The family's own forms, then each student's, with the set each belongs to.
-    expect(text).toMatch(/Your family Signed once for Alderquist Family Travel consent \(optional\) Sign-up Not signed yet/);
-    expect(text).toMatch(/Bus waiver QA74 \(optional\) Sign-up Not ready yet/);
-    expect(text).toMatch(/Aurelio Alderquist Uniform agreement \(optional\) Uniforms Signed, being finished/);
-    expect(text).toMatch(/Photo release \(optional\) Uniforms Declined/);
-    expect(text).toMatch(/Azalea Alderquist Uniform agreement \(optional\) Uniforms Signed Open/);
-    expect(text).toMatch(/Photo release \(optional\) Uniforms Waiting for the other guardian/);
+    // The family's own forms, then each student's, with the step each belongs to.
+    expect(text).toMatch(/Your family Signed once for Alderquist Family Travel consent \(optional\) Not signed yet · Sign-up/);
+    expect(text).toMatch(/Bus waiver QA74 \(optional\) Not ready yet · Sign-up/);
+    expect(text).toMatch(/Aurelio Alderquist Uniform agreement \(optional\) Signed, being finished · Uniforms/);
+    expect(text).toMatch(/Photo release \(optional\) Declined · Uniforms/);
+    expect(text).toMatch(/Azalea Alderquist Uniform agreement \(optional\) Signed · Uniforms Open/);
+    expect(text).toMatch(/Photo release \(optional\) Waiting for the other guardian · Uniforms/);
     // A way to each form that has something behind it, by the family's own request ids; none for the one that isn't ready.
     const ids = a.forms!.ids;
     // and the download of the signed one, whose evidence is kept (src/lib/forms/my-evidence.ts).
@@ -159,7 +159,7 @@ describe("signing a form on its page", () => {
   it("shows the consent first, with no frame and nothing asked of Documenso; then the frame with the guardian's own token", async () => {
     const id = await myFormId();
     const listed = textOf(await renderPage(FormsPage));
-    expect(listed).toMatch(/Aurelio Alderquist Medical release Forms Not signed yet Sign for Aurelio/);
+    expect(listed).toMatch(/Aurelio Alderquist Medical release Not signed yet · Forms Sign for Aurelio/);
     expect(listed).not.toContain("aren't ready");
 
     const consent = await renderPage(FormPage, { params: { id } });
@@ -222,7 +222,7 @@ describe("signing a form on its page", () => {
     const id = await myFormId();
     const everywhere = async () => { asParent(a.identity); return [textOf(await renderPage(ParentHome)), textOf(await renderPage(SeasonPage)), textOf(await renderPage(FormsPage))]; };
     for (const text of await everywhere()) expect(text).toMatch(/Medical release (Forms )?Not signed yet/);
-    expect((await everywhere())[0]).toContain("Aurelio Alderquist 0 of 1 done 1 thing left to do in Forms Medical release Not signed yet");
+    expect((await everywhere())[0]).toContain("Aurelio Alderquist 1 thing left to do in Forms 0 of 1 done Medical release Not signed yet");
 
     await agreeToSignAction(id);
     await renderPage(FormPage, { params: { id } });
@@ -231,17 +231,17 @@ describe("signing a form on its page", () => {
     stub.sign(document.id, FAMILY_A.parent.email);
     expect(await checkFormAction(id)).toEqual({ ok: true, message: "Signed, being finished", settled: false });
     for (const text of await everywhere()) expect(text).toMatch(/Medical release (Forms )?Signed, being finished/);
-    expect((await everywhere())[0]).toContain("Aurelio Alderquist 0 of 1 done 1 thing left to do in Forms Medical release Signed, being finished"); // signed by everyone is not yet done
+    expect((await everywhere())[0]).toContain("Aurelio Alderquist 1 thing left to do in Forms 0 of 1 done Medical release Signed, being finished"); // signed by everyone is not yet done
     const sealing = textOf(await renderPage(FormPage, { params: { id } }));
     expect(sealing).toContain("Everyone has signed. The signed copy is being finished");
 
     stub.seal(document.id);
     expect(await checkFormAction(id)).toEqual({ ok: true, message: "Signed", settled: true });
     const [home, season, forms] = await everywhere();
-    expect(home).toContain("Aurelio Alderquist 1 of 1 done Done with Forms Medical release Signed");
-    expect(home).toContain("Azalea Alderquist 0 of 1 done 1 thing left to do in Forms Medical release Not signed yet"); // her own form is another request
+    expect(home).toContain("Aurelio Alderquist Done with Forms 1 of 1 done Medical release Signed");
+    expect(home).toContain("Azalea Alderquist 1 thing left to do in Forms 0 of 1 done Medical release Not signed yet"); // her own form is another request
     expect(season).toMatch(/Medical release Signed/);
-    expect(forms).toMatch(/Medical release Forms Signed Open/);
+    expect(forms).toMatch(/Medical release Signed · Forms Open/);
     expect(textOf(await renderPage(FormPage, { params: { id } }))).toContain("Signed Thank you! There's nothing more to do for this form.");
   });
 
@@ -260,7 +260,7 @@ describe("signing a form on its page", () => {
     const declined = await renderPage(FormPage, { params: { id } });
     expect(textOf(declined)).toContain("This form was declined, so it isn't signed. If that wasn't meant, you can start it again and sign it.");
     expect(declined).toContain("Start this form again");
-    expect(textOf(await renderPage(FormsPage))).toMatch(/Medical release Forms Declined Open/);
+    expect(textOf(await renderPage(FormsPage))).toMatch(/Medical release Declined · Forms Open/);
   });
 
   it("shows a family with no forms that there is nothing to sign, and a family that isn't set up nothing at all", async () => {
@@ -291,7 +291,7 @@ describe("the note that forms can't be signed yet (forms not set up)", () => {
     await db.update(signatureRequest).set({ state: "complete", envelopeId: "envelope_seeddone", envelopeStatus: "COMPLETED", completedAt: new Date(), allSignedAt: new Date() })
       .where(eq(signatureRequest.requirementId, requirementId));
     const text = textOf(await renderPage(FormsPage));
-    expect(text).toMatch(/Travel consent \(optional\) Forms Signed/);
+    expect(text).toMatch(/Travel consent \(optional\) Signed · Forms/);
     expect(text).not.toContain("aren't ready");
   });
 });

@@ -214,7 +214,7 @@ For a linked family, making someone inactive (and a parent's changes) go to Quic
 | 10.2.4 | Checklist met by a staff tick, one at a time or in bulk | | Built | `seasons-staff.test.ts` "ticks an item off for one student, then for everyone shown, and unticks it" |
 | 10.2.5 | Any requirement can be waived with a reason in the audit log | The reason is staff-only; the family reads "Waived" | Built | `seasons-staff.test.ts` "waives a requirement for a family or student with a reason"; `tests/integration/parent-isolation.test.ts` (the staff-only markers) |
 | 10.3.1 | A step is done when every required item is met or waived | | Built | `season-progress.test.ts` "when a step is done (spec 10.3)" |
-| 10.3.2 | The current set: the step by date or, with no dates, the first not done by everyone | Parents read "set", staff "step" | Built | `season-progress.test.ts` "the current step (spec 10.3)"; `seasons-parent.test.ts` "follows the club's dates, on the club's own day" |
+| 10.3.2 | The current step: the step by date or, with no dates, the first not done by everyone | Parents and staff both read "step" | Built | `season-progress.test.ts` "the current step (spec 10.3)"; `seasons-parent.test.ts` "follows the club's dates, on the club's own day" |
 | 10.3.3 | Each student's marker; progress in words, never color alone | | Built | `seasons-parent.test.ts` "draws the ruler for the family's own step, with a dot for each student"; `tests/e2e/parent-a11y.spec.ts` |
 
 ## §11 Volunteering

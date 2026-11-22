@@ -50,7 +50,7 @@ On 2026-11-16 it ended `SIGNED` at both 390 and 1440.
 | Where | Width | What a person met | What became of it |
 |---|---|---|---|
 | Sign-in, the code, the family chooser | Both | Worked: the code arrived in the mail sink, the chooser named both families, Home opened on the one chosen. | Nothing to fix |
-| Home | Both | Worked: what is owed, the ruler on set 2 of 4, each student's line, the parent's details. | Nothing to fix |
+| Home | Both | Worked: what is owed, the ruler on step 2 of 4, each student's line, the parent's details. | Nothing to fix |
 | Forms | Both | Above the family's **signed** travel consent the page said "The club's forms aren't ready to sign yet", as if that one weren't signed either. | **Fixed** (`5ede4fb`): the note speaks of the forms still to sign, and is left out when there are none |
 | One signed form | Both | "Signed" said three times over: the box's heading, its state and "This form is signed. Thank you!". | **Fixed** (`a56929c`, `slice/finish`): the heading is "This form", the state says "Signed" with its tick, and the thanks says there is nothing more to do |
 | Payments | Both | Worked: each open invoice, the Pay link to QuickBooks' page, the total, what was paid. The buy-out's invoice reads "Invoice QZ-1042" like any other, with nothing saying it is the volunteering buy-out. | **Fixed** (`7dd19e7`, `slice/finish`): the line reads "Paying instead of volunteering: Concession help", found by the family's own buy-outs |

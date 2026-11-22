@@ -1,545 +1,516 @@
 ---
 name: Booster Rocket
-description: A white-label parent portal drawn like a marching-band dot book, so a family always knows its next set.
+description: A white-label parent portal for booster clubs, drawn as the calm category standard so a family reads what is left to do, pay and sign in seconds.
 colors:
   club: "#5b2a86"
   club-on: "#ffffff"
-  club-text: "#5b2a86"
-  club-tint: "#f1ebf6"
   club-text-l: "#5b2a86"
   club-text-d: "#c9a7ea"
   club-text-lhc: "#45206a"
   club-text-dhc: "#e5d3f7"
   club-tint-l: "#f1ebf6"
   club-tint-d: "#2a2133"
-  paper: "#ffffff"
-  grid: "#e8eae6"
-  ink: "#14161a"
-  ink-2: "#4c5159"
-  hair: "#d9dcd6"
-  done: "#2f6b3a"
-  due: "#9a4f08"
-  late: "#a3261b"
-  paper-dark: "#16181c"
-  grid-dark: "#22252b"
-  ink-dark: "#eceee9"
-  ink-2-dark: "#a9aeb6"
-  hair-dark: "#3a3e45"
-  done-dark: "#6fcf86"
-  due-dark: "#f0a24b"
-  late-dark: "#ff8b7e"
-  paper-hc: "#ffffff"
-  ink-hc: "#000000"
-  ink-2-hc: "#1f2328"
-  done-hc: "#1c4d25"
-  due-hc: "#6b3500"
-  late-hc: "#7d1a12"
-  paper-dark-hc: "#000000"
-  ink-dark-hc: "#ffffff"
-  ink-2-dark-hc: "#e6e6e6"
-  done-dark-hc: "#8ff0a4"
-  due-dark-hc: "#ffc06e"
-  late-dark-hc: "#ffaaa0"
+  ground: "#f7f7f8"
+  surface: "#ffffff"
+  surface-raised: "#ffffff"
+  surface-muted: "#f2f2f4"
+  border: "#e3e4e8"
+  border-control: "#cfd2d8"
+  border-strong: "#8a8e98"
+  ink: "#18191d"
+  ink-2: "#5c606a"
+  ink-3: "#8a8e98"
+  done: "#1d7344"
+  due: "#955400"
+  late: "#b3261e"
+  done-soft: "#e7f4ec"
+  due-soft: "#fcf1df"
+  late-soft: "#fceceb"
+  neutral-soft: "#f0f1f3"
+  ground-dark: "#0f1012"
+  surface-dark: "#16181c"
+  surface-raised-dark: "#1e2025"
+  surface-muted-dark: "#1e2025"
+  border-dark: "#2a2d33"
+  border-control-dark: "#3b3f46"
+  border-strong-dark: "#6f737d"
+  ink-dark: "#ececee"
+  ink-2-dark: "#a2a6ae"
+  ink-3-dark: "#6f737d"
+  done-dark: "#5fc68b"
+  due-dark: "#e9a647"
+  late-dark: "#ff8b7d"
+  done-soft-dark: "#15291e"
+  due-soft-dark: "#2e2312"
+  late-soft-dark: "#33191a"
+  neutral-soft-dark: "#22252a"
 typography:
-  display:
-    fontFamily: "Atkinson Hyperlegible, system-ui, sans-serif"
-    fontSize: "2.5rem"
-    fontWeight: 700
-    lineHeight: 1
-    letterSpacing: "-0.02em"
-    fontFeature: "\"tnum\", \"lnum\""
-  headline:
-    fontFamily: "Barlow Condensed, Arial Narrow, sans-serif"
+  page-title:
+    fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif"
     fontSize: "1.5rem"
-    fontWeight: 700
-    lineHeight: 1.1
-    letterSpacing: "0.005em"
-  club-name:
-    fontFamily: "Barlow Condensed, Arial Narrow, sans-serif"
-    fontSize: "1.3125rem"
-    fontWeight: 700
-    lineHeight: 1
-    letterSpacing: "0.01em"
-  set-number:
-    fontFamily: "Barlow Condensed, Arial Narrow, sans-serif"
-    fontSize: "1.25rem"
-    fontWeight: 700
-    lineHeight: 1
-  setting-legend:
-    fontFamily: "Barlow Condensed, Arial Narrow, sans-serif"
-    fontSize: "1.25rem"
-    fontWeight: 700
-    lineHeight: 1.2
-  title:
-    fontFamily: "Atkinson Hyperlegible, system-ui, sans-serif"
-    fontSize: "1.1875rem"
-    fontWeight: 700
-    lineHeight: 1.45
-  body:
-    fontFamily: "Atkinson Hyperlegible, system-ui, sans-serif"
-    fontSize: "1.0625rem"
-    fontWeight: 400
-    lineHeight: 1.45
-  body-row:
-    fontFamily: "Atkinson Hyperlegible, system-ui, sans-serif"
-    fontSize: "1rem"
-    fontWeight: 400
-    lineHeight: 1.45
-  set-label:
-    fontFamily: "Atkinson Hyperlegible, system-ui, sans-serif"
-    fontSize: "0.8125rem"
-    fontWeight: 400
-    lineHeight: 1.2
-  body-sm:
-    fontFamily: "Atkinson Hyperlegible, system-ui, sans-serif"
-    fontSize: "0.9375rem"
-    fontWeight: 400
-    lineHeight: 1.45
-  meta:
-    fontFamily: "Atkinson Hyperlegible, system-ui, sans-serif"
-    fontSize: "0.875rem"
-    fontWeight: 400
-    lineHeight: 1.45
-  label:
-    fontFamily: "Barlow Condensed, Arial Narrow, sans-serif"
-    fontSize: "0.9375rem"
     fontWeight: 600
-    letterSpacing: "0.08em"
-  nav:
-    fontFamily: "Barlow Condensed, Arial Narrow, sans-serif"
+    lineHeight: 1.25
+    letterSpacing: "-0.018em"
+  amount:
+    fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "2rem"
+    fontWeight: 600
+    lineHeight: 1.15
+    letterSpacing: "-0.025em"
+    fontFeature: "\"tnum\", \"lnum\""
+  stat:
+    fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "1.5rem"
+    fontWeight: 600
+    lineHeight: 1.2
+    letterSpacing: "-0.018em"
+    fontFeature: "\"tnum\", \"lnum\""
+  card-title:
+    fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
     fontSize: "1.125rem"
     fontWeight: 600
-  tab:
-    fontFamily: "Barlow Condensed, Arial Narrow, sans-serif"
+    lineHeight: 1.35
+    letterSpacing: "-0.011em"
+  body:
+    fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "1rem"
+    fontWeight: 400
+    lineHeight: 1.5
+  row-title:
+    fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "1rem"
+    fontWeight: 500
+    lineHeight: 1.5
+  control:
+    fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
     fontSize: "0.9375rem"
-    fontWeight: 600
-    letterSpacing: "0.03em"
+    fontWeight: 500
+    lineHeight: 1.2
+  meta:
+    fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "0.875rem"
+    fontWeight: 400
+    lineHeight: 1.5
+  label:
+    fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "0.875rem"
+    fontWeight: 500
+    lineHeight: 1.5
+    letterSpacing: "0em"
+  caption:
+    fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "0.8125rem"
+    fontWeight: 500
+    lineHeight: 1.3
 rounded:
-  none: "0px"
-  person: "50%"
+  badge: "4px"
+  control: "6px"
+  surface: "8px"
+  round: "999px"
 spacing:
   s1: "4px"
   s2: "8px"
   s3: "12px"
   s4: "16px"
   s5: "24px"
-  s6: "48px"
-  cell: "24px"
+  s6: "32px"
+  s7: "48px"
+  cell: "16px"
+  cell-wide: "24px"
 components:
   club-bar:
-    backgroundColor: "{colors.club}"
-    textColor: "{colors.club-on}"
-    height: "56px"
-  box:
-    backgroundColor: "{colors.paper}"
+    backgroundColor: "{colors.surface}"
     textColor: "{colors.ink}"
-    rounded: "{rounded.none}"
-    padding: "{spacing.s4}"
-  set-cell:
-    backgroundColor: "{colors.paper}"
-    textColor: "{colors.ink-2}"
-    typography: "{typography.set-number}"
-    padding: "6px 6px 14px 8px"
-  set-cell-current:
+    height: "56px"
+  logo-tile:
     backgroundColor: "{colors.club}"
     textColor: "{colors.club-on}"
-  student-dot:
-    backgroundColor: "{colors.paper}"
-    textColor: "{colors.due}"
-    rounded: "{rounded.person}"
-    size: "20px"
-  student-dot-done:
-    backgroundColor: "{colors.done}"
-    textColor: "{colors.paper}"
-    rounded: "{rounded.person}"
-    size: "20px"
+    rounded: "{rounded.surface}"
+    size: "32px"
   button-primary:
-    backgroundColor: "{colors.ink}"
-    textColor: "{colors.paper}"
-    rounded: "{rounded.none}"
-    padding: "0 20px"
-    height: "48px"
-  button-primary-hover:
-    backgroundColor: "{colors.paper}"
-    textColor: "{colors.ink}"
-  button-line:
-    backgroundColor: "{colors.paper}"
-    textColor: "{colors.ink}"
-    rounded: "{rounded.none}"
-    padding: "0 20px"
+    backgroundColor: "{colors.club}"
+    textColor: "{colors.club-on}"
+    typography: "{typography.control}"
+    rounded: "{rounded.control}"
+    padding: "0 16px"
     height: "44px"
-  button-line-hover:
-    backgroundColor: "{colors.ink}"
-    textColor: "{colors.paper}"
+  button-secondary:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    typography: "{typography.control}"
+    rounded: "{rounded.control}"
+    padding: "0 16px"
+    height: "44px"
+  button-secondary-hover:
+    backgroundColor: "{colors.surface-muted}"
+  button-quiet:
+    textColor: "{colors.club-text-l}"
+    typography: "{typography.control}"
+    rounded: "{rounded.control}"
+    padding: "0 12px"
+    height: "44px"
+  button-quiet-hover:
+    backgroundColor: "{colors.club-tint-l}"
   button-club:
-    backgroundColor: "{colors.paper}"
-    textColor: "{colors.club-text}"
-    rounded: "{rounded.none}"
-    padding: "0 20px"
+    backgroundColor: "{colors.club-tint-l}"
+    textColor: "{colors.club-text-l}"
+    rounded: "{rounded.control}"
+    padding: "0 16px"
     height: "44px"
-  button-club-hover:
-    backgroundColor: "{colors.club-tint}"
-    textColor: "{colors.club-text}"
+  button-danger:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.late}"
+    rounded: "{rounded.control}"
+    padding: "0 16px"
+    height: "44px"
+  button-danger-hover:
+    backgroundColor: "{colors.late-soft}"
   button-disabled:
-    backgroundColor: "{colors.hair}"
+    backgroundColor: "{colors.surface-muted}"
     textColor: "{colors.ink-2}"
-  button-disabled-hc:
-    backgroundColor: "{colors.paper-hc}"
-    textColor: "{colors.ink-2-hc}"
-  choice:
-    backgroundColor: "{colors.paper}"
+  button-sm:
+    typography: "{typography.meta}"
+    padding: "0 12px"
+    height: "44px"
+  card:
+    backgroundColor: "{colors.surface}"
     textColor: "{colors.ink}"
-    rounded: "{rounded.none}"
-    padding: "8px 16px"
+    rounded: "{rounded.surface}"
+    padding: "16px"
+  card-wide:
+    padding: "20px"
+  list:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.surface}"
+  list-row:
+    typography: "{typography.row-title}"
+    padding: "10px 16px"
     height: "56px"
-  choice-hover:
-    backgroundColor: "{colors.club-tint}"
-  choice-checked:
-    backgroundColor: "{colors.paper}"
-    textColor: "{colors.club-text}"
-  tab:
-    backgroundColor: "{colors.paper}"
+  status-icon:
+    textColor: "{colors.ink-3}"
+    size: "16px"
+  badge:
+    backgroundColor: "{colors.neutral-soft}"
     textColor: "{colors.ink-2}"
-    typography: "{typography.tab}"
-    height: "64px"
-  tab-active:
-    textColor: "{colors.club-text}"
-  tab-badge:
-    backgroundColor: "{colors.due}"
-    textColor: "{colors.paper}"
-    rounded: "{rounded.none}"
-    padding: "0 6px"
-  table-header:
-    textColor: "{colors.ink-2}"
-    typography: "{typography.label}"
+    typography: "{typography.caption}"
+    rounded: "{rounded.badge}"
+    padding: "1px 8px"
+  badge-done:
+    backgroundColor: "{colors.done-soft}"
+    textColor: "{colors.done}"
+  badge-due:
+    backgroundColor: "{colors.due-soft}"
+    textColor: "{colors.due}"
+  badge-late:
+    backgroundColor: "{colors.late-soft}"
+    textColor: "{colors.late}"
   notice:
-    backgroundColor: "{colors.paper}"
+    backgroundColor: "{colors.neutral-soft}"
     textColor: "{colors.ink}"
-    rounded: "{rounded.none}"
+    rounded: "{rounded.surface}"
     padding: "12px 16px"
+  notice-due:
+    backgroundColor: "{colors.due-soft}"
+  notice-done:
+    backgroundColor: "{colors.done-soft}"
+  notice-late:
+    backgroundColor: "{colors.late-soft}"
   field:
-    backgroundColor: "{colors.paper}"
+    backgroundColor: "{colors.surface}"
     textColor: "{colors.ink}"
-    rounded: "{rounded.none}"
+    typography: "{typography.body}"
+    rounded: "{rounded.control}"
     padding: "8px 12px"
     height: "44px"
   field-disabled:
-    backgroundColor: "{colors.hair}"
+    backgroundColor: "{colors.surface-muted}"
     textColor: "{colors.ink-2}"
-  check:
-    backgroundColor: "{colors.paper}"
-    rounded: "{rounded.none}"
-    size: "22px"
-  check-checked:
-    backgroundColor: "{colors.club-text}"
-    textColor: "{colors.paper}"
+  choice:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.surface}"
+    padding: "8px 16px"
+    height: "56px"
+  choice-checked:
+    backgroundColor: "{colors.club-tint-l}"
+  table-header:
+    textColor: "{colors.ink-2}"
+    typography: "{typography.caption}"
+  top-nav-link:
+    textColor: "{colors.ink-2}"
+    typography: "{typography.control}"
+    rounded: "{rounded.control}"
+    padding: "0 12px"
+    height: "44px"
+  top-nav-link-current:
+    backgroundColor: "{colors.club-tint-l}"
+    textColor: "{colors.club-text-l}"
+  tab:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink-2}"
+    typography: "{typography.caption}"
+    height: "64px"
+  tab-current:
+    textColor: "{colors.club-text-l}"
+  avatar:
+    backgroundColor: "{colors.surface-muted}"
+    textColor: "{colors.ink}"
+    typography: "{typography.caption}"
+    rounded: "{rounded.round}"
+    size: "2.25rem"
 ---
 
 # Design System: Booster Rocket
 
+The stylesheet (`src/app/booster.css`) is what the browser reads and is the source of every value here; `src/lib/theme/palette.ts` mirrors its fixed colors and `tests/unit/design-tokens.test.ts` holds the two together and measures every pair. The components are the primitives in `src/app/components/ui/` (import from `@/app/components/ui`), indexed in `docs/agents/ui.md` and drawn in every state in the living gallery (`/staff/design-system`, and its static twin `design/system/gallery.html`). Parent Home (`src/app/(parent)/page.tsx`) is the reference surface.
+
 ## Overview
 
-**Creative North Star: "The Dot Book"**
+**Creative North Star: "The Calm Standard"**
 
-The season is a drill, and a family always knows its next set. Every screen is a page from the dot book students carry: white chart paper ruled with a faint 24px coordinate grid, near-black 2px ink rules, square corners, and the club's own color used the way a drill writer uses a highlighter, to mark where you are now. Nothing floats; everything is drawn onto the paper.
+Booster Rocket reads like a quiet, well-organized product of its category: structure comes from spacing, grouping and a strict type scale, not from heavy rules, boxes inside boxes or drop shadows. A near-white ground carries white surfaces with a 1px hairline and an 8px corner; Inter is the one face; near-black ink and one gray carry every word. The club's own color is an accent and nothing more: the primary button, the current place in the menu, the focus ring and the small logo tile in a white top bar.
 
-The system is white-label. Each club supplies one color at runtime, and the app derives everything else from it (see Colors). The club leads; Booster Rocket is credited in the footer, never featured. The grid reads as plain graph paper, so a theater or sports club fits as well as a marching band.
+The system is white-label. Each club supplies one color at runtime and the app derives every club role from it, checked against every ground of every display mode. The club leads; Booster Rocket is credited in the footer ("Runs on Booster Rocket"), never featured. The same layout is drawn in four display modes (light, dark, and high contrast for each), at three text sizes, with reduced motion and under Windows contrast themes; only token values change between them.
 
-Density is calm and phone-first: one column of ruled boxes on phones, a two-column box grid at 760px and up. Money is set like a ledger, with tabular figures in one right-aligned column that visibly sums to its total. The reference build is `design/reference/parent-home.html` (with `display-settings.html` for the Display page); every later surface, staff screens included, inherits from it.
-
-The same page is drawn in four ink sets: light, dark ("chart paper at night", where the world's ink becomes the paper), and a high-contrast version of each. Layout, rules and shapes never change between modes; only the token values do. Windows contrast themes are honored on top of all four.
+Parents are every age, often on older phones, so the category's density is translated humanely: body text is 1rem, nothing is set under 0.8125rem, every control is at least 44px tall, and WCAG 2.2 AA holds throughout. Staff at laptops get the same world denser, in DataTables, never smaller than that floor. Status is always words plus a small drawn icon, in four tones only.
 
 **Key Characteristics:**
-- Chart paper ground: white with a 24px grid in `grid`, gutters and gaps on that grid.
-- 2px `ink` rules for structure, 1px `hair` rules for list rows, no shadows, no rounded containers.
-- One runtime club color, derived into per-mode roles, used for the bar, the current set, and club actions.
-- Two faces: Atkinson Hyperlegible for anything read, Barlow Condensed for marks, labels and numbers on the chart.
-- Status is always a word plus an icon, never color alone.
-- Four display modes chosen per device, each defaulting to "match my device".
+- Near-white ground, white surfaces, 1px hairlines, corners of 8px (surfaces), 6px (controls) and 4px (badges).
+- One face, Inter, self-hosted; tabular figures only where a figure is read as a figure.
+- The club's color derived at runtime into fill, ink-on-fill, text and tint roles, used as an accent only.
+- Lists over tables for what a person acts on: a section label over one bordered list of rows, each a status ring, a title, a meta line, then an amount or a compact action.
+- Four status tones (done, due, late, neutral), always words plus an icon.
+- No shadow anywhere except under menus and popovers.
 
 ## Colors
 
-A white-and-ink chart palette with one runtime club color and three field-status colors, drawn in four modes.
+A neutral near-white and near-black palette with one runtime club accent and three field-status colors, defined for four display modes.
 
 ### Display modes
-Modes are attributes on `<html>`, set before paint by `display.js` from the person's choices on the Display page. Choices are stored per device (`localStorage`, key `br-display`); every mode's default is "match my device", which removes the attribute and lets the media query decide.
+Modes are attributes on `<html>`, set before paint by `src/app/display-script.ts` from the person's choices on the Display page, stored on the device (`localStorage`, key `br-display`). Every mode's default is "Match my device", which removes the attribute so the media query decides.
 - **Theme** `data-theme` `light | dark`; default follows `prefers-color-scheme`.
-- **Contrast** `data-contrast` `standard | more`; default follows `prefers-contrast: more`.
-- **Text** `data-text` `large | larger` sets the root to 112.5% / 125%. All type is in rem, so every size grows and the layout reflows rather than clipping.
-- **Motion** `data-motion` `reduce` removes every transition; default follows `prefers-reduced-motion`.
+- **Contrast** `data-contrast` `standard | more`; default follows `prefers-contrast: more`. High contrast swaps in the `--hc-*` values: every line (`border`, `border-control`, `border-strong`) becomes full ink, text reaches 7:1, `ink-3` takes `ink-2`'s value, and the focus ring grows from 2px to 3px.
+- **Text** `data-text` `large | larger` sets the root to 112.5% / 125%. All type is in rem, so every size grows and layouts reflow instead of clipping.
+- **Motion** `data-motion` `reduce` removes every transition and animation (a busy spinner holds still); default follows `prefers-reduced-motion`.
+- Any element may carry `data-theme` / `data-contrast` with `.theme-sample` to show a mode in place (the gallery does).
+
+The light and dark values are in the frontmatter (dark keys end `-dark`). The high-contrast values live in the stylesheet's `@tokens light-hc` / `dark-hc` blocks and `PALETTE.lightHc` / `PALETTE.darkHc` in `palette.ts`: light HC is a white ground with `#000000` ink, `#2b2e34` secondary ink, `#18191d` lines and status `#0f5530` / `#6b3a00` / `#8a1a14`; dark HC is a black ground with `#ffffff` ink, `#e2e4e8` secondary ink, `#ececee` lines and status `#8eeab1` / `#ffc978` / `#ffb0a6`.
 
 ### Primary (runtime, per club)
-The frontmatter values are FZN's purple default. The gold demo (`#gold`) hand-sets a light club color: club `#f2c200`, club-on `#14161a`, club-text `#7a5c00` / `#f2c200` / `#5c4500` / `#ffd84d` (light / dark / light HC / dark HC), club-tint `#fdf6d6` / `#2e2a17` (light / dark). **The app must derive these, not ask clubs for them:**
-- **Club Fill** (`club`): the color the club picked, unchanged in every mode. Fills the club bar, the current set cell and text selection.
-- **On Club** (`club-on`): ink on the club fill, unchanged in every mode. White if white reaches 4.5:1 against the fill, otherwise `ink` `#14161a`.
-- **Club Text** (`club-text`): the club color as text, link, outline button, checked option and focus ring on paper. It resolves per mode:
-  - `club-text-l`: 4.5:1 on light paper. The club color itself if it passes, otherwise darkened (lower lightness, same hue). Gold becomes `#7a5c00` (6.25:1).
-  - `club-text-d`: 4.5:1 on dark paper. Lightened as needed; purple becomes `#c9a7ea` (8.63:1), gold stays `#f2c200` (10.57:1).
-  - `club-text-lhc` / `club-text-dhc`: 7:1 on high-contrast paper (purple `#45206a` 12.59:1 / `#e5d3f7` 14.99:1; gold `#5c4500` 9.11:1 / `#ffd84d` 15.18:1).
-- **Club Wash** (`club-tint-l` / `club-tint-d`): a pale (or, in dark, deep) wash of the club color for hover on club actions and choice options only. The mode's `club-text` must still reach 4.5:1 on it (7:1 in high contrast).
+The frontmatter values are the default club's purple (`DEFAULT_COLOR`). **The app derives these; a club is never asked for them** (`deriveClubTokens()`, `src/lib/theme/contrast.ts`, written onto `<html>` as custom properties by `src/app/layout.tsx`; an invalid stored color falls back to the default with a server warning):
+- **Club Fill** (`club`): the color the club picked, the same in every mode. Fills the primary button, the logo tile, the current step's track in the step indicator, and the club preview on the Club settings page.
+- **On Club** (`club-on`): ink on the club fill, the same in every mode: white or `#14161a`, whichever has the higher contrast against the fill.
+- **Club Text** (`club-text`, resolved per mode from `club-text-l` / `-d` / `-lhc` / `-dhc`): the club color as text, link, quiet button, checked control, current nav item and focus ring. Darkened (light) or lightened (dark), same hue and saturation, until it reaches 4.5:1 against the hardest ground of its mode (`surface-muted`, `CLUB_TEXT_GROUND`), or 7:1 in high contrast; the light and dark tones are then checked again on the club tint.
+- **Club Wash** (`club-tint-l` / `-d`): the club color mixed 8% into the light surface, 14% into the dark one. The current nav item, the current tab's icon pill, a checked choice tile, the club button and quiet-button hover, text selection, the account control while Display is open.
 
 ### Tertiary (status, per mode)
-| Role | Light | Dark | Light HC | Dark HC |
-|---|---|---|---|---|
-| **Field Green** (`done`): done, paid, signed, finished sets | `done` 6.39:1 | `done-dark` 9.26:1 | `done-hc` 9.82:1 | `done-dark-hc` 15.17:1 |
-| **Due Amber** (`due`): to do, due soon, student still on the set, count badge, offline note | `due` 6.01:1 | `due-dark` 8.44:1 | `due-hc` 9.84:1 | `due-dark-hc` 13.02:1 |
-| **Past-Due Red** (`late`): the date line of a past-due invoice, and the word and the icon cell of a problem notice (something that didn't go through) | `late` 7.37:1 | `late-dark` 7.83:1 | `late-hc` 10.35:1 | `late-dark-hc` 11.51:1 |
+- **Field Green** (`done`): done, paid, signed, finished steps.
+- **Due Amber** (`due`): still to do, due soon, a student with more to do, the note for figures that are not current, needs attention.
+- **Past-Due Red** (`late`): past due, a problem (something that didn't go through), a field's error, the danger button's words.
+- Each has a soft tint (`done-soft`, `due-soft`, `late-soft`) for badges and notices; `neutral-soft` is the fourth tint, for neutral badges and information notices. The tone's ink and plain `ink` both pass on its tint.
 
 ### Neutral
-- **Chart Paper** (`paper`): the ground of the page, boxes, the season band, tab bar and options. Dark: `paper-dark`, near-black. High contrast: pure white / pure black.
-- **Grid Line** (`grid`): the 24px coordinate grid behind the page. Decoration only. Dark: `grid-dark`. High contrast: removed (`transparent`).
-- **Drill Ink** (`ink`): body text, 2px structural rules, the filled Pay button. 18.1:1 light, 15.21:1 dark; pure black / white in high contrast.
-- **Pencil** (`ink-2`): secondary text: meta lines, helper text, labels, inactive tabs, future set numbers. 7.99:1 light, 7.97:1 dark.
-- **Hairline** (`hair`): 1px row dividers inside boxes; disabled button fill. Dark: `hair-dark`. High contrast: `hair` becomes `ink`, so every rule is full ink.
+- **Near-White Ground** (`ground`): the page behind everything.
+- **Surface** (`surface`): cards, lists, the club bar, the tab bar, fields, buttons that are not filled. `surface-raised` is the menus' surface (lighter than `surface` in dark).
+- **Muted Surface** (`surface-muted`): hover fills, a total row, a table's group rows, the disabled fill, code samples.
+- **Hairline** (`border`): every 1px divider and surface edge. **Control Edge** (`border-control`): secondary buttons, option tiles, the Menu button. **Strong Edge** (`border-strong`): a text field's or tick box's edge, at 3:1 so the control can be seen.
+- **Ink** (`ink`): text and headings. **Secondary Ink** (`ink-2`): meta lines, hints, labels, table headers, inactive nav and tabs; 4.5:1 on every ground. **Mark Gray** (`ink-3`): drawn marks only (a neutral status ring, an empty state's icon), at 3:1; never text.
+- `--overlay` (black 8% in light, white 10% in dark) is the hover wash laid over a filled button. `--focus` is the focus ring's color: the element's own `club-text` (`:root, [data-theme], [data-contrast]` set it from `--club-text`, so a sample wrapper in another mode draws its own). Every focus ring is `var(--ring) solid var(--focus)`.
 
 ### Named Rules
-**The Derived Club Rule.** A club picks one color; the app computes `club-on`, the four `club-text-*` tones and the two `club-tint-*` washes from it. No club setting may produce a pairing below 4.5:1 (7:1 in high contrast), whatever color is supplied.
+**The Accent-Only Rule.** The club fill is for the primary button, the logo tile and the current step's track. Everywhere else the club appears as `club-text` or `club-tint`. The top bar and the tab bar are white surfaces, never the club's color.
 
-**The Highlighter Rule.** The club fill appears only on the club bar and the current set. Club color elsewhere is `club-text`: links, the club outline button, the active tab, the checked option, focus.
+**The Derived Club Rule.** A club picks one color; the app computes `club-on`, the four `club-text-*` tones and both `club-tint-*` washes. No club color can produce text under 4.5:1 (7:1 in high contrast) on any ground of its mode; `club` and `club-on` never change between modes.
 
-**The Fixed Fill Rule.** `club` and `club-on` do not change between modes. The bar and the current set look the same by day and night; only club-text and club-tint adapt to the paper.
+**The Four Tones Rule.** A status has one of four tones: done, due, late, neutral (`Tone`, `src/app/components/ui/tone.ts`). Information is ink on the neutral tint, never a blue. No fifth status color.
 
-**The Night Chart Rule.** Dark mode is the same chart with ink and paper swapped: same rules, same layout, same grid (in `grid-dark`). Never introduce surfaces, grays or elevation that the light chart lacks.
-
-**The Full-Ink Contrast Rule.** High contrast removes the grid, draws every hairline in full ink, sets text at 7:1 or better, and thickens the focus ring to 4px. Nothing else moves.
-
-**The Word-First Status Rule.** Every status color travels with a word and usually an icon ("Due Nov 15, in 8 days", a tick plus "All forms signed"). Color confirms; it never carries meaning alone.
+**The Measured Pair Rule.** A fixed color added to the stylesheet is added to `palette.ts` in the same commit and its text pairs meet 4.5:1 (7:1 high contrast), its marks 3:1, or the token test fails.
 
 ## Typography
 
-**Reading Font:** Atkinson Hyperlegible (with system-ui, sans-serif)
-**Mark Font:** Barlow Condensed (with Arial Narrow, sans-serif)
+**Face:** Inter (self-hosted through `next/font/google` in `src/app/layout.tsx`, fetched at build time and served from the portal; a variable font), falling back to `ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`.
 
-**Character:** Atkinson is the plain, legible voice for everything a parent reads, chosen for older eyes and older phones. Barlow Condensed is the drill chart's lettering: set numbers, box headings, the club name, labels and navigation.
-
-Both faces are **self-hosted by the Next.js app**: `next/font/google` in `src/app/layout.tsx` downloads them when the portal is built and serves them from the portal itself, so no page asks Google for a font. The weights in use: Atkinson 400 and 700; Barlow Condensed 500, 600, 700. The reference page loads Google Fonts only as a prototype.
+**Character:** One plain, neutral face for everything, with weight (400, 500, 600; 700 only for the club logo tile) and a short scale doing the work that a second face did before. Headings are 600 with a slight negative tracking; labels are sentence case, never uppercase.
 
 ### Hierarchy
-Sizes are rem against a 16px root (18px Large, 20px Larger).
-- **Display** (Atkinson 700, 2.5rem, line-height 1, -0.02em, tabular): the family's amount owed. One per screen.
-- **Headline** (Barlow Condensed 700, 1.5rem, 1.1): box headings ("Ramirez family", "Your students").
-- **Club name** (Barlow Condensed 700, 1.3125rem): the club's name in the bar.
-- **Set number** (Barlow Condensed 700, 1.25rem): numbers in the season ruler.
-- **Setting legend** (Barlow Condensed 700, 1.25rem, 1.2): the name of a choice group ("Appearance", "Text size").
-- **Title** (Atkinson 700, 1.1875rem): a person's name in a list.
-- **Body** (Atkinson 400, 1.0625rem, 1.45): default text, buttons (700), amounts, option names (700).
-- **Body row** (1rem): invoice and history rows, detail values, secondary buttons. **Body small** (0.9375rem) and **Meta** (0.875rem): box subtitles, setting hints and option descriptions; dates, "as of", part and grade. Set labels are 0.8125rem on phones (0.9375rem at 760px+); nothing smaller.
-- **Label** (Barlow Condensed 600, 0.9375rem, 0.06–0.08em, uppercase): the season heading and definition terms (Email, Phone, Address). Labels name real content beside them.
-- **Nav / Tab** (Barlow Condensed 600, 1.125rem desktop nav, 0.9375rem phone tabs at 0.03em).
+The scale is six steps (`--text-xs` 0.8125rem to `--text-2xl` 2rem) plus `--text-control` (0.9375rem), the control size; rem against a 16px root (18px Large, 20px Larger).
+- **Amount** (600, 2rem, 1.15, tabular): the one large figure (the amount owed on Payments, a buy-out's amount). Home's Total owed sets it at 1.5rem beside its title.
+- **Page title** (600, 1.5rem, 1.75rem from 760px, 1.25): the page's `h1` in `PageHeader`.
+- **Stat** (600, 1.5rem, tabular): one figure on a staff page.
+- **Card title** (600, 1.125rem, 1.35): a `Card`'s heading; `h3` inside a card is 1rem 600.
+- **Body** (400, 1rem, 1.5): default text; prose held to about 70ch.
+- **Row title** (500, 1rem): a `ListRow`'s title, a table's row header.
+- **Control** (500, `--text-control` 0.9375rem): buttons, top-nav links, the Menu button; also the size of a card's quiet line, a notice's body, table cells and hints that sit as a paragraph (`.help`).
+- **Meta** (400, 0.875rem): a row's meta line, field hints, as-of lines, the step indicator's heading.
+- **Label** (500, 0.875rem, `ink-2` for `SectionLabel`, `ink` for a field's label): the small heading over a list, a field's label.
+- **Caption** (500, 0.8125rem): table column headers, tab labels, badges, avatar initials, the step indicator's numbers. The floor: nothing smaller.
 
 ### Named Rules
-**The Two-Hands Rule.** Atkinson for reading, Barlow for marking. A sentence is never set in Barlow; a set number is never set in Atkinson.
+**The One Face Rule.** Inter for every word and figure. The only other faces are the system fallback on the offline page and in the static gallery (Inter comes through `next/font`), and the icon renderer's bundled Geist on the app icon.
 
-**The Ledger Figures Rule.** Every amount, count, phone number and date-with-digits uses tabular lining figures (`font-variant-numeric: tabular-nums lining-nums`).
+**The Rem Floor Rule.** Every font size is in rem, from the scale, never under 0.8125rem; body text is 1rem.
 
-**The Rem-Only Rule.** Every font size is in rem so the Text size setting and browser zoom scale all of it. Never set type in px.
+**The Figures-as-Figures Rule.** Tabular lining figures only where a figure lines up or is read as an amount: `.num`, a DataTable's `numeric` cells and times, a list's amount, money, stats, step numbers. The body keeps Inter's proportional figures (its tabular hyphen is set wide).
 
 ## Layout
 
-The page sits on a 24px chart grid (`cell`) drawn on the body background. The content column is max 1032px with 24px side padding; at 1032px+ the grid tile is offset so its lines meet the content's left edge. Box gaps are one cell (24px). On desktop the header stack is sized so boxes start on a grid row (bar 56 + season band 142 + 2px rule = 200; main padding 40 puts box tops at 240). Spacing inside boxes uses the 4/8/12/16/24/48 scale.
+One centered column, `max-width: 1120px`, with a page gutter (`--cell`) of 16px on a phone and 24px from 760px (never less than the safe-area inset). Space is on a 4px base: 4, 8, 12, 16, 24, 32, 48. A page's `main` is a grid with a 16px gap (24px from 760px).
 
-- **Phone (<760px):** single column of boxes; bottom tab bar fixed (64px tabs plus safe-area inset), body padded 88px so content clears it; Pay buttons go full width under their invoice row; choice options stack one per row.
-- **760px and up:** tabs hide, top nav appears in the club bar; boxes form a two-column grid (money and students on top, paid history and details below); invoice rows become text | Pay (min 112px) | amount (min 96px); choice options sit in a row of `--cols` equal columns (3, or 2 for Motion).
-- **Single-box pages** (Display): one box, max 760px wide, under a page head (back link, page title, one-line intro).
-- **Larger text:** the layout reflows; nothing clips. Grid alignment of the desktop header is exact at the standard size only.
+- **Phone (below 760px):** one column; a white 56px club bar at the top and, on parent pages, a fixed bottom tab bar (64px tabs plus the bottom inset), the body padded 88px so content clears it and the keyboard's focus is scrolled clear of it. Staff open a Menu panel from a Menu button. A DataTable's rows stack, label beside value. A list row's amount and action stack at its end below 480px.
+- **760px and up:** the tab bar hides and the links move into the club bar's top nav, the account avatar at its right edge. Parent Home is two columns, 3fr and 2fr: the lists (To do, Students) on the left; the total owed and the details on the right. A parent page's single cards keep to a 760px column; staff pages use the whole width for tables, with prose at about 70ch. Choice tiles sit in `--cols` columns (3 by default).
+- **The staff bar wraps** onto further rows when its links need more than one (`.bar-rows`); the parent bar never wraps and is always 56px.
+- **Inside a card**, lists, tables and money lines run to the card's edges (`--box-pad`, 16px, 20px from 760px), so a row's hairline meets the card's edge.
 
-**The On-Grid Rule.** Page gutters, box gaps and the header stack resolve to multiples of 24px so boxes sit on the paper's lines.
+**The 44 Rule.** Every control and lone link is at least 44px tall: buttons (compact `size="sm"` is narrower, not shorter), fields, tabs (64px), menu links (48px in the phone panel), disclosure summaries, a link alone on its line (`.link-line`), a table's links.
 
 ## Elevation & Depth
 
-Flat by conviction, in every mode. There is no elevation: depth comes from ink weight (2px structural rules versus 1px hairlines) and from the club fill. `box-shadow` appears only as an **inset rule**, a drawn line inside an element: the 3px underline on the current top-nav link, the 3px top rule on the active tab, the 2px ring on an unfinished student dot, the 1px inner rule that doubles a checked option's border. Dark mode adds no surfaces or layers.
+Flat. Depth comes from tone (a white surface on a near-white ground, a muted fill for hover and totals) and from 1px hairlines. The one shadow is under things that float over the page: the top nav's group panel and the phone's Menu panel. Inset box-shadows that appear elsewhere are drawn lines, not elevation: the account control's ring on hover, a checked choice tile's doubled edge, a student marker's ring, and high contrast's 1px inner edge on notices and badges.
 
-**The Drawn-Not-Lifted Rule.** No drop shadows, blur, glow or offset shadows. If something needs emphasis, rule it heavier or fill it.
+### Shadow Vocabulary
+- **Menu** (`--shadow-menu`: `0 8px 24px -6px rgb(16 17 20 / 0.14), 0 1px 3px rgb(16 17 20 / 0.08)` in light; `0 8px 24px -6px rgb(0 0 0 / 0.6), 0 1px 3px rgb(0 0 0 / 0.5)` in dark): menus and popovers only.
+
+### Named Rules
+**The Menu-Only Shadow Rule.** Cards, lists, buttons, notices and bars never cast a shadow. If something needs emphasis, it gets a tone, a weight or a position.
 
 ## Shapes
 
-Square corners everywhere (0px): boxes, buttons, badges, set cells, choice options, the tab bar. The only round shapes are **people**, plus the radio mark: student dots on the ruler, the club monogram, the account initials, and the 20px radio circle inside a choice option (the platform's own convention for a single choice).
+Gently rounded and consistent: 8px for surfaces (cards, lists, notices, menus, choice tiles, the logo tile, the offline page's card), 6px for controls (buttons, fields, the current nav item, the skip link, the Menu button), 4px for badges and tick boxes, and a full round only for people and status marks: avatars and the account control, status rings, the step indicator's student markers, radio marks, and the current tab's tinted icon pill. Edges are 1px hairlines; a field's and tick box's edges use the stronger edge color. The step indicator's track segments are 4px tall with a 2px corner.
 
-**The Dots-Are-People Rule.** A circle means a person. Containers, buttons, chips and badges are never round or pill-shaped. The radio mark is the one sanctioned exception, and it lives inside a square option.
+**The Three Corners Rule.** A new element takes 8px if it is a surface, 6px if it is a control, 4px if it is a label. Nothing else is a pill.
 
 ## Components
 
-### Club bar
-The club's own header. 56px, `club` fill, `club-on` text: monogram (34px circle, inverted colors, Barlow 700 0.875rem, the club's short name), club name, and on desktop the top nav and the account control; desktop nav links are 44px tall. A club's logo is meant to replace the monogram; a club can't supply one yet (Not yet designed, below).
-- **Account control:** a link (not a button) to Account / Display: 44px circle, 2px `club-on` outline, initials in Barlow 700. Its accessible name says where it goes ("AR: Your account and display settings, Ana Ramirez": it starts with the initials it shows, WCAG 2.5.3; the staff bar's reads "AR: Staff home, signed in as Ana Ramirez"); `aria-current="page"` on the Display page.
-- **Focus on the club fill:** inside the bar the focus ring switches to `club-on`, because `club-text` can vanish against the fill.
+Every component below is a primitive; import it from `@/app/components/ui` unless another path is named. `docs/agents/ui.md` holds the same index with what not to do; the gallery draws each one in every state.
 
-### Season set ruler (signature)
-The club's season steps drawn as yard-line cells. Not a control.
-- **Heading:** Label style, "Fall season · **Set 2 of 5**", current part in `ink`. On phones (<760px) the current set's name is always appended in the heading ("Set 2 of 5: Forms"), so a hidden cell label loses nothing; at 760px+ it is dropped from the heading. On Home it is a labelled line (`p.season-title`), not a second page heading: Home's `h1` is the greeting. Beside it sits the way to the Season page ("See the whole season", `club-text` bold, 44px tall); it wraps under the heading when there is no room. When every set is done the heading says so ("All 5 sets done"). When the season asks nothing of the family in any set, nothing is done, because nothing was to do: the heading says "Nothing to do yet" and no set is ticked.
-- **Cells:** equal columns (`--count` = number of sets), 2px `ink` left rules with a closing right rule, min 60px tall; hash ticks along the foot (2px ink at 25% intervals, 45% opacity, 6px tall; full opacity in high contrast).
-- **States:** done sets show a tick and number in `done` plus hidden ", done"; the current set (`aria-current="step"`) fills with `club`, its number, label and ticks in `club-on`, plus hidden ", current set"; future sets in `ink-2`. The ruler reads left to right: only a set behind the current one is ticked, and one the family left unfinished there has no tick and hidden ", not finished". A set ahead is drawn as still to come, even when it asks nothing of the family.
-- **Labels that don't fit:** each cell is a size container; under 76px wide (narrow phone, larger text, zoom) its label hides and the number stays. Labels clamp to two lines otherwise.
-- **Students on set:** one 20px dot per student under the current set, initial in Barlow 700 0.75rem. Finished: `done` fill, paper initial. Still to do: paper fill, `due` 2px inset ring and initial. On the club-filled current set every dot gets a 2px `club-on` outline and the dots spread to an 8px gap, so each keeps an edge whatever the club color. Dots are decoration; the same facts are stated in words in the students box.
-- **Many sets:** with more than 6 sets on a phone (<760px) every label hides and cells show numbers only. At 760px+ labels return.
-- **Reuse:** the forms matrix is meant to take the same ruler as its column header, one column per set. Not built yet: the matrix has one column per form, under no set (`docs/ui-backlog.md`).
+### Club bar (`ClubBar`, `src/app/components/club-bar.tsx`; `ParentFrame`, `ParentTabs`)
+A white 56px bar with a hairline foot: the club's logo tile (the short name in `club-on` on the `club` fill, 32px tall, 8px corner, decorative), the club's name (1rem 600, ellipsized), the menu, and the account avatar.
+- **Account:** a link to the parent's Display page (staff: the staff home), a 44px target with a 36px `surface-muted` disc of initials; its accessible name starts with the initials it shows. On its own page it takes the club tint and club text.
+- **Skip to the page:** the first Tab stop of every bar with links, drawn only while focused as a secondary button at the top of the bar in the page's flow; it lands on `PageStart`, past the bar and the "Viewing <family>. Switch family" line.
 
-### Boxes
-The ruled container for every section: `paper`, 2px `ink` border, 0 radius, 16px padding, no shadow. Headline, then an optional `ink-2` body-small subtitle. Rows inside are divided by 1px `hair` rules.
+### Navigation (`src/app/components/top-nav.tsx`, `parent-tabs.tsx`; `staffMenu()`, `src/app/staff/(app)/staff-menu.ts`)
+- **Phone, parent:** a fixed white tab bar with a hairline top, one equal column per `PARENT_NAV` tab (Home, Forms, Payments, Volunteer, Family): a line icon over a 0.8125rem label in `ink-2`. The current tab's label is `club-text` at 600 and its icon sits on a `club-tint` pill: never the color alone.
+- **760px and up:** links in the bar, 0.9375rem 500 `ink-2`, 44px, 6px corner; hover `surface-muted`; the current one `club-text` on `club-tint` at 600.
+- **Staff menu (grouped):** Home, the groups (Families, Season, Money), Settings as one entry, then Admin; an entry shows only to someone who may open its page, a group only when it holds one. A group is a button drawn like a link with a 12px caret that turns over when open. It opens on click or keyboard only, never hover, as a disclosure; its links drop into a `surface-raised` panel with a hairline, an 8px corner and the menu shadow, right-aligned to the button. One group open at a time; it closes on Escape (focus back to the button), on tabbing out, on choosing a link and on a press outside. The group holding the current page is marked like a current link. Below 760px the Menu button opens one full-width panel: Home, each group's links under its name (0.8125rem `ink-2`, a hairline above), Settings, links 48px tall; it scrolls within the screen.
 
-### Money lines and total
-- One row per open invoice: what ("Fall uniform fee, Maya"), a meta date line, and the amount right-aligned in tabular figures.
-- **Urgency ramp, on the date line only:** due later `ink-2` ("Due Nov 22"); due soon `due` bold with the distance ("Due Nov 15, in 8 days"); past due `late` bold ("Was due Oct 30"). Amounts never change color. Paid rows show "Paid Aug 28" and a `done` "Paid" under the amount. "Soon" and "past" are counted from the club's own date, in the club's time zone, for an invoice and for a season requirement alike, so every parent of a club reads the same words on the same day.
-- **Total:** one amount column that sums to a 2px `ink` rule and a bold "Total". The big Display figure above equals the Total.
-- **One Pay per invoice:** QuickBooks pays one invoice at a time. The soonest-due invoice gets the filled black Pay with an arrow; others get outlined Pay. Each Pay's accessible name states the amount and invoice.
-- **As of:** the owed figure always carries its source and time ("Owed now. From QuickBooks, as of 2:14 pm.").
-- **Paid up:** `done` tick plus "You're all paid up. Thank you!"
-- **Figures that are not current:** when QuickBooks can't be read just now, the last known figures stay on screen with a note under the as-of line in `due`, bold Meta size, `role="status"` ("We couldn't get the latest figures from QuickBooks just now. These are the last ones we have. Paying here is paused until we can. Need to pay sooner? Ask the treasurer."). Every Pay becomes disabled, keeps its place and says why in its accessible name ("Pay $85.00, paused until the figures are up to date"). The note is the same whatever the cause, and the causes are not all an outage: QuickBooks may need connecting again by an Admin, or another read may be under way. So it never says QuickBooks is down, and never promises when paying will be back.
-- **Payments not connected:** a family the portal can tell has no link to the club's books (from stage 3 of the app-owned families spec: a family staff added that waits to be linked, or a club with no accounting system) gets the money box with its heading ("What you owe") and one `help` line, `role="status"`: "The club hasn't connected your payments to the portal yet. Until then, the treasurer can tell you what you owe." No figure, no as-of line, no invoice, no Pay, no paid list, no not-current note and no "See your payments" button; it names no system and gives no reason. Everything else on the page is as usual. It shows only when the portal can tell (`notConnected` from `loadFamilyMoney()`); whenever it can't, or the family is linked but has nothing to show, the box keeps "We can't show what you owe right now. Please check back in a little while.", so a linked family never reads it in place of what it owes.
+### Page header (`PageHeader`)
+The way back when there is one (a 44px `ink-2` link with a chevron), the page title, one quiet `ink-2` line (`lede`, Home's at 0.875rem: the season and step, and "Payments as of <time>"), and the page's actions to the right, wrapping under on a phone. Settings pages start with `<BackToSettings />` instead.
 
-### Passkey offer (Home)
-Right after a sign-in that proved a second step, Home shows one box after the greeting and before the family's boxes, across both columns at 760px and wider (no wider than 760px): headed with its question, a phone's ("Sign in with Face ID or your fingerprint next time?") or a computer's ("Sign in with a passkey next time?"), one sentence of what it does, a `help` line that it can be removed under Sign-in settings, then a primary **Turn on** beside a line **Not now** (wrapping under each other where there is no room; busy is "Turning on…", `aria-disabled`). Turned on, the box keeps its heading and says so in a `done` tick line that takes the focus, with the ten backup codes once for a first passkey with no app, drawn as on Sign-in settings. Not now replaces the box with its answer, a `done` tick line, `role="status"`, which takes the focus; the third answer is followed by a **Sign-in settings** link alone on its line. A refused or cancelled add is an alert under the buttons, and the box stays; refused because the ten minutes after signing in have passed (Home has no asking again), the alert says so and is followed by a **Sign-in settings** link alone on its line. The backup codes' keeping words name Sign-in settings, not "this page". Nothing is drawn until the page has read the browser, and nothing at all where the browser can't make a passkey or the page is at another address.
+### Cards (`Card`)
+A white surface, 1px hairline, 8px corner, 16px padding (20px from 760px), no shadow. A title (`title` + `titleId` name the region), an optional quiet line (`description`, `ink-2` 0.9375rem), `headActions` beside the title, `actions` at the foot. Never a card inside a card.
 
-### One more step (Strict's enrolment)
-`/one-more-step`, the one page a guardian reaches when the club is at Strict and they have neither a passkey nor an authenticator app (the sign-in release, slice SI-10a). It is drawn like the sign-in pages and the family chooser: the narrow sign-in column, no club bar and no tabs, the page title "One more step" and a lede, then two boxes, "Use a passkey" and "Use an authenticator app", each with one sentence of what it is and a primary button ("Add a passkey", busy "Adding…"; "Set up an authenticator app", busy "Starting…", `aria-disabled`). The passkey box's button is drawn only once the page has read the browser, and only where it can make a passkey at the portal's own address; otherwise a sentence says this browser can't and the app is the way. The app box then shows the Sign-in settings set-up (the QR code, the key in fours with its copy press, the code field and "Finish setting up"), with the enrolment's own line of how long it lasts. Done, both boxes give way to a `done` tick line that takes the focus, the ten backup codes once, drawn as on Sign-in settings with the copy press, a ruled checkbox "I've saved my backup codes somewhere safe" (44px) and a primary **Continue**, `aria-disabled` until it is ticked; pressed unticked, a status line under it asks them to tick it. A press refused because the half hour since signing in has passed replaces everything with an alert saying so and a **Sign in** link alone on its line. Under it all, a `help` line on what to do if now isn't a good time, and the sign-out press. It names no family, person or address.
+### Lists (`List`, `ListRow`, `ListSubRow`, `SectionLabel`, `StatusIcon`)
+The core of the look. A `SectionLabel` (a real heading, 0.875rem 500 `ink-2`, sentence case) over one bordered list; a hairline between rows; each row at least 56px with 10px 16px padding: a 16px status ring, a title (500) over a meta line (0.875rem `ink-2`, its parts joined by a dot), then a right-aligned tabular amount and a compact action (`size="sm"`). A status with words puts them first on the meta line in the tone's color; a status without words draws only its ring, for a row whose meta line already says the state. A row's parts are `ListSubRow`s, indented under its title with a hairline above each, never a card inside a row. Inside a `Card`, a list runs to the card's edges.
+- **Status ring** (`StatusIcon`, decorative): shape tells the tone as well as color does: done a filled disc with a tick, due a ring with a quarter filled, late a filled disc with a bar, neutral a dashed ring in `ink-3`.
 
-### Buttons
-- **Shape:** square (0px), 2px border, Atkinson 700.
-- **Primary** (`ink` fill, paper text, 48px tall, body size): the one main action, chiefly the soonest Pay. Hover inverts to paper with ink text.
-- **Line** (paper, ink border and text, 44px, body-row size): other Pay buttons and ordinary actions ("Update my details"). Hover fills ink.
-- **Club** (paper, `club-text` border and text, 44px, body-row size): actions that belong to the club's season ("Sign Maya's forms"). Hover `club-tint`.
-- **Busy on a parent page** is `aria-disabled`, never `disabled`: a button that becomes disabled while it has the focus drops the focus to the page. The form refuses a second submit while its action runs.
-- **Disabled** (`aria-disabled`, or the native `disabled` a form's button carries while its action runs): `hair` fill and border, `ink-2` text, not-allowed cursor, and no hover. In high contrast (where `hair` is full ink) it becomes paper fill with a dashed `ink` border and `ink-2` text, so disabled never reads as a filled primary. Under forced colors the border is dashed and the text `GrayText`.
-- **Motion:** color only, 150ms ease-out; none under reduced motion.
+### Buttons (`Button`, `LinkButton`, `buttonClass()`)
+`Button` does something; `LinkButton` goes somewhere (`plain` for a full load or an outside address). 44px tall, 6px corner, 0.9375rem 500, color transitions at 120ms ease-out.
+- **Primary:** the club fill with `club-on` ink; hover lays the overlay wash over it. One per area.
+- **Secondary:** white with the control edge and ink; hover `surface-muted`.
+- **Quiet:** words in `club-text`, no edge; hover `club-tint`.
+- **Club:** `club-text` on `club-tint`; hover adds a `club-text` edge.
+- **Danger:** white, control edge, words in `late`; hover `late-soft` with a `late` edge.
+- **Small** (`size="sm"`): 12px side padding and 0.875rem; still 44px tall.
+- **Busy and disabled** share one look: `surface-muted` fill, hairline edge, `ink-2` words, not-allowed cursor, no hover. `busy` adds a spinner and is `aria-disabled`, never `disabled` (a disabled button drops the focus); the caller ignores presses. In high contrast it is white with a dashed ink edge; under forced colors dashed with `GrayText`.
 
-### Choice group (ruled options)
-A set of radio buttons drawn as ruled options; the Display page is built from them. Inherit it for any single-choice setting.
-- **Group:** a `fieldset` with a Setting legend and an optional `ink-2` body-small hint; options in a grid with an 8px gap, stacked on phones, `--cols` columns at 760px+.
-- **Option:** a label wrapping a visually hidden native radio and a square ruled tile: 2px `ink` border, `paper`, min 56px tall, 8px 16px padding; a 20px ring (2px `ink`) as the radio mark, the option name in Body 700, an optional Meta description in `ink-2`. Hover: `club-tint` wash.
-- **Checked:** border and ring turn `club-text`, the border is doubled by a 1px inset rule, and a 10px `club-text` dot fills the ring.
-- **Focus:** the mode's ring (`club-text`, 3px or 4px in high contrast) with a 2px offset around the tile.
+### Badges (`Badge`, `StatusBadge`)
+A short label on a tint: 0.8125rem 500, 1px 8px padding, 4px corner. `Badge` takes a tone or `club` (a role, a count; `club` is a label style, not a status tone); `StatusBadge` is a tone's icon and words (the tone's own word when none is given). In high contrast a 1px inner edge in the tone; under forced colors a `CanvasText` border.
 
-### Tables
-For content that is a table: rows of the same things with the same facts, such as the roster, Parents, Balances, the audit log, the forms matrix, a shift's sign-ups, a requirement's progress and the Reconciliation lists. One primitive (`DataTable`, `src/app/components/data-table.tsx`) serves them all. A list of a few things each with its own shape stays a list (`.lines`); money owed stays a ledger (Money lines and total).
-- **Laptop (760px and up):** a real table inside its box. A caption says what it lists, drawn as an `ink-2` Body small line, or read out only (`captionHidden`) when the box's heading already says it. Header cells (`scope="col"`) are Label style in `ink-2` over a 2px `ink` rule; rows are divided by 1px `hair` rules; no zebra stripes, no fills. The cell that names a row is a header cell (`scope="row"`), bold. Numbers and amounts (`numeric`) are right-aligned in tabular figures. A column of buttons (`quiet`) has its header read out only and its buttons at the row's end.
-- **Phone (below 760px):** the header row is hidden and each row stacks: a hairline above it, the row's name first and bold, then each cell as its column's label (Label style at 0.8125rem, `ink-2`) beside its value, two fifths and three fifths. Buttons sit under the row, at its start. The page never scrolls sideways.
-- **Semantics kept:** CSS that changes how a table displays can take its table semantics away, so every part carries its role (`table`, `rowgroup`, `row`, `columnheader`, `rowheader`, `cell`). The label shown in a stacked cell is hidden from assistive technology, which reads the header already.
-- **Groups:** rows can be grouped under a heading row (the forms matrix's families): a `rowgroup` whose first row is a `rowheader` across every column, Atkinson 700 over a 2px `ink` rule.
-- **Wide tables:** a table with a column per item (the forms matrix) scrolls inside its own focusable region at laptop widths, its names column held in place, and stacks like any other on a phone.
-- **Order:** rows come in the page's own order; no sort controls. The column the rows follow says so with `aria-sort` (the audit log, newest first).
-- **A filtered list** (the forms matrix, Accounting links): a plain GET form above the table (`.matrix-filter`: three columns at 760px+, stacked below), with a `select` of fixed keys and a search field built from the Form controls, a Show button (`btn-line`) and, once anything is chosen, a 44px link back to the whole list. Accounting links' status choice says each status's count over the whole list ("Suggested (3)"; a carried-over family with differences counts under both Carried over and Linked, with differences, and a line under the form says so); the caption then says how many rows the filter shows of how many, and a Note says when none match. What the address carries is checked on the server: an unknown key or a list shows everything, and a search over its 100 characters is not run and says so in a needs-attention notice.
-- **A row that opens:** a row whose facts don't fit its cells keeps them in its last column as a `details.more` (its summary at least 44px, named for the row: "Students and guardians: <family>", the name read out only), holding short lists. No script, nothing drawn but the primitives. A status cell is a State line (icon and words) with its reason under it as a `when` line.
-- **Dark and high contrast:** tokens only; in high contrast every hairline is full ink. Under forced colors the rules are `CanvasText`.
+### State words (`StateWords`, `src/app/components/state-words.tsx`)
+A state inside a row or cell: a 16px icon and 0.875rem 500 words. Done is a tick in `done`; to do is the status icon's due mark in `due` (the product's one to-do mark); waived is a struck circle in `ink-2`, for a requirement the club let a family or student off (the reason is never shown to the family).
 
-### Notices
-A status that is not part of a box's ordinary text: the QuickBooks and roster notices, a refresh's answer, the staff home's warnings, what a form's action answered, and any line that is really a state. One primitive (`Notice`, `src/app/components/notice.tsx`), four tones, each with its own word and icon, so color only repeats them:
-| Tone | Word | Icon | Ink |
-|---|---|---|---|
-| information | Note | circled i | `ink` |
-| needs attention | Needs attention | triangle with a bang | `due` |
-| done | Done | tick | `done` |
-| problem | Problem | circled cross | `late` |
-- **Drawn:** a ruled panel like every box: `paper`, a 2px `ink` rule evenly all round, 12px 16px padding, square corners. No edge is heavier or colored: the tone is carried by what the notice says. First a 28px square icon cell filled with the tone's ink, its 20px icon drawn in `paper`; then the word in Label style in the tone's ink; then the text in Body row. The fill and the icon are the same pair of tokens as the tone's text on paper, so the icon reads at the tone's own contrast in every mode.
-- **With a title:** a notice can be a section of its own (the staff home's QuickBooks, mail and sign-in warnings): a Headline-size heading names it, the word is read before the heading but not drawn, and its link or button sits under the text.
-- **Announced:** a problem is an alert, every other tone a status; a notice that is simply part of a page as it loads is announced as neither.
-- **Dark and high contrast:** tokens only. Under forced colors the fill is gone: the rules and the icon cell's 2px edge are `CanvasText`, and the word and icon carry the tone.
-- **Inside a form:** a warning about what saving will do (a role written with patterns) is a needs-attention notice that is part of the page, announced as neither, held to 60ch.
-- **Copy:** the same voice as every page: say what happened, what still works and who can help. A refusal says the same thing whatever the reason.
+### Notices (`Notice`, `ActionOutcome`, `src/app/components/notice.tsx`)
+A status that stands apart from the text around it, or what an action answered. On its tone's soft tint with a hairline edge and an 8px corner, 12px 16px padding: a 20px icon and the tone's word in the tone's ink, the body in `ink` at 0.9375rem.
+- One status vocabulary: a notice's tones are the four status tones, its props keeping their own names. `info` is neutral "Note" (circled i, `ink` on `neutral-soft`); `warning` is due "Needs attention" (triangle, `due`); `done` is done "Done" (tick, `done`); `problem` is late "Problem" (circled cross, `late`). The classes are `notice-neutral`, `notice-due`, `notice-done`, `notice-late`.
+- **With a title** a notice is a section of its own (the staff home's warnings): a 1rem 600 heading, the word read out before it but not drawn, its link or button under the text.
+- **Announced:** a problem is an alert, every other tone a status; one that is simply part of the page as it loads is announced as neither (`live="none"`).
+- `ActionOutcome` turns a server action's `{ ok, message }` or `{ ok: false, errors }` into a done or problem notice (information for `waiting`, needs attention for `attention`).
 
-### Form controls
-Every staff form is built from these, and parent forms take them up as they are next designed.
-- **Text fields and text areas:** Label-style label above, a 2px `ink` box, `paper`, min 44px tall, 8px 12px padding. They fill their column and never run past their box, whatever is typed or however long an option is. A text area grows downward only.
-- **Password fields:** a text field (`type="password"`), with the rule said in words above it in `help` and named by the field's `aria-describedby`, in "characters" and never as a promise about a person's count. Choosing a password asks for it twice ("Type it again"), each with `autocomplete="new-password"`, and offers no username. The answer is in words: what is wrong and what to do, or the set line with a tick (`paid-up`) followed by a `.link-line` onward.
-- **Selects:** drawn like a text field, with the arrow drawn in `ink` at the right; the platform's own arrow under forced colors.
-- **Single choice:** the Choice group (below). Native radio lists are not used on new forms.
-- **Check boxes:** a 22px ruled square (2px `ink`, `paper`); checked fills with `club-text` and a `paper` tick. Hover on an unchecked one: `club-tint`. Each sits in a 44px-tall label row.
-- **Radio marks outside a choice group** (`.checks` lists kept for long option lists): a 22px ruled circle; checked turns the ring `club-text` with a 10px `club-text` dot.
-- **Fieldsets:** a group of check boxes is a `fieldset` with a Label-style `legend`; a choice group's legend is the Setting legend.
-- **Focus:** the mode's ring, as everywhere.
-- **Disabled:** `hair` fill and border, `ink-2` text, not-allowed cursor; dashed `ink` border on `paper` in high contrast; dashed with `GrayText` under forced colors. Never color alone: a disabled control is also not focusable or says why beside it.
-- **Forced colors:** check boxes and radio marks draw themselves (`forced-color-adjust: none`) on `Canvas` with a `CanvasText` edge; checked fills with `Highlight` and a `HighlightText` tick.
+### Fields (`TextInput`, `TextArea`, `Select`, `Checkbox`, `Field`; `ChoiceGroup`, `src/app/components/choice-group.tsx`)
+- **Text fields, text areas, selects:** a 0.875rem 500 label above, a 44px white control with a 1px strong edge and a 6px corner, 8px 12px padding; hover darkens the edge to `ink-2`; focus wears the ring and a `club-text` edge. A hint (`ink-2` 0.875rem) and an error (`late`, 500, with an icon) are tied by `aria-describedby`; an invalid control's edge is `late`. Fields fill their column and never run past it; a text area grows downward only; a select draws its own `ink-2` chevron (the platform's under forced colors). Disabled: `surface-muted`, hairline edge, `ink-2`.
+- **Check boxes and radio marks** (`.checks`): an 18px mark drawn inside a 44 by 44 control, 1.5px strong edge, 4px corner (a circle for radio); checked fills with `club-text` and a white tick (radio: a `club-text` dot); the focus ring hugs the mark.
+- **Choice group:** radio buttons drawn as tiles: the whole 56px tile is the control, a control edge and an 8px corner, an 18px radio mark, the option's name (1rem 500) and an optional `ink-2` description. Hover `surface-muted`; checked a `club-text` edge doubled by a 1px inset, `club-tint` fill and a filled mark. The legend is 1rem 600 with an optional hint. Stacked on a phone, `--cols` columns from 760px.
+- **Password fields:** a text field with its rule said in words above it, in "characters"; choosing one asks for it twice ("Type it again"), each `autocomplete="new-password"`, with no username.
 
-### Settings view
-A settings page shows what is set as a box per part: a Headline, a state line (done or to do, in words), a details list, and one button to that part's own step page (Set up, Change, or Open the steps). The view has no inputs, and every settings page starts with "Back to Settings" (club-text, bold, 44px). The Settings page lays these boxes in two columns at 760px+. The step pages use the staff pages' form controls, and every answer is a notice (`ActionOutcome`).
+### Tables (`DataTable`, `src/app/components/data-table.tsx`)
+For many records with the same columns (roster, Parents, Balances, audit, the forms matrix, progress). Inside its card at 760px and up: a caption in `ink-2` 0.875rem (or read out only), sentence-case 0.8125rem 500 `ink-2` headers over a hairline, a hairline between rows, cells at 0.9375rem with 10px 12px padding, the row's name a row header (500), numeric columns right-aligned in tabular figures, a quiet column of buttons at the row's end; hover `surface-muted` where hover exists; group rows on `surface-muted` at 600. Below 760px each row stacks: a hairline above it, the name first, then each cell as its 0.8125rem label beside its value; the page never scrolls sideways. Every part keeps its table role. Rows come in the page's own order with no sort controls; the column they follow says so (`sorted`, `aria-sort`). A wide table with a column per item (the forms matrix) scrolls inside its own focusable region at laptop widths, its names column held in place. A row whose facts don't fit keeps them in a `details.more` in its last column.
 
-### Club bar preview
-On the club step of setup and the Club change page, a 56px sample of the club bar in the chosen color, with the derived club-on text, so the derived-contrast rule can be seen before saving.
+### Money rows and total (Home's To do and Total owed; Payments' money box: `src/app/(parent)/money-box.tsx`, `due-line.tsx`)
+- **One row per open invoice:** what it is ("Invoice QZ-1041, Xochitl"), its due line in words, the amount right-aligned in tabular figures, its Pay. On Home a ring before it in the tone of its due date (neutral later, due soon, late past). A buy-out's invoice adds "Paying instead of volunteering: <title>".
+- **Urgency on the date line only:** later `ink-2` ("Due Nov 22"); soon `due` 500 with the distance ("Due Nov 15, in 8 days"); past `late` 500 ("Was due Oct 30"). Amounts never change color. "Soon" and "past" are counted from the club's own date in its time zone (`clubToday()`), for an invoice and a season requirement alike, so every parent of a club reads the same words on the same day.
+- **One Pay per invoice:** QuickBooks pays one invoice at a time. The soonest-due payable invoice gets the primary Pay with an arrow; every other one a secondary Pay. Each Pay's accessible name states the amount and the invoice. Pay is a plain link in the same tab to QuickBooks' payment page (`noopener noreferrer`, no referrer). An invoice with no pay link has no Pay, and the help line says the treasurer can tell them how to pay it.
+- **As of:** the figures always carry their source and time ("Owed now. From QuickBooks, as of 2:14 pm."; "Nothing owed." when nothing is), and Home's page line repeats "Payments as of <time>".
+- **Total:** Home's Total owed card shows the amount once beside its title, the as-of line, the help line ("Each invoice opens on QuickBooks' secure payment page. … Need more time? Ask the treasurer. They're happy to work something out.") and "See your payments". Payments sums its rows to a Total row on `surface-muted`. Invoices in more than one currency get no single total, and a line says so.
+- **Paid up:** a `done` tick and "You're all paid up. Thank you!". A credit: "The boosters may be holding a credit for you…". Payments lists paid invoices of the last 12 months, each with a `done` "Paid" under its amount.
+- **Figures that are not current:** the last known figures stay, and a note in `due` on `due-soft` (0.875rem 500, `role="status"`) stands over Home's To do list and under the as-of line on Payments: "We couldn't get the latest figures from QuickBooks just now. These are the last ones we have. Paying here is paused until we can. Need to pay sooner? Ask the treasurer." Every Pay stays in its place, `aria-disabled`, and says why in its accessible name ("Pay $85.00, paused until the figures are up to date"). The causes are not all an outage, so it never says QuickBooks is down and never promises when paying will be back.
+- **Payments not connected:** a family the portal can tell has no link to the club's books (`notConnected` from `loadFamilyMoney()`) gets the money card with its heading ("What you owe") and one `role="status"` line: "The club hasn't connected your payments to the portal yet. Until then, the treasurer can tell you what you owe." No figure, as-of line, invoice, Pay, paid list, not-current note or "See your payments"; it names no system and gives no reason. Whenever the portal can't tell, the card says "We can't show what you owe right now. Please check back in a little while.", so a linked family never reads the not-connected words.
 
-### Quiet button
-`.btn-quiet`: no border or fill, club-text and underlined, 44px tall, for an action less important than the Save beside it (Turn off sign-in, Change name).
+### Step indicator (`StepIndicator`; Home's season ruler, `src/app/(parent)/season-parts.tsx`)
+The club's season steps as a thin segmented track, each step's number and name under its segment. Not a control.
+- **Heading:** a 0.875rem `ink-2` line, "Fall 2026 · **Step 2 of 4**", the current part in `ink` 600; on a phone the current step's name is always in it, so a hidden label loses nothing. Beside it, "See the whole season" (`club-text`, 44px), wrapping under when there is no room. "All N steps done" when every step is; "Nothing to do yet" when the season asks nothing of the family, and then nothing is ticked.
+- **Steps:** done steps have a `done` track and a ticked number, with a hidden ", done"; the current step (`aria-current="step"`) has a `club` track and its number and name in `club-text` 600, with a hidden ", current step"; future steps a hairline track and `ink-2`. Only a step behind the current one is ticked; one left unfinished there has no tick and a hidden ", not finished".
+- **Labels that don't fit:** each step is a size container; under 76px wide its label hides and the number stays; labels clamp to two lines. With more than six steps on a phone every label hides.
+- **Students on the current step:** one 22px marker each with the student's initial: done is a `done` disc with a white initial; still to do a white disc with a `due` ring and initial. Decoration: the Students list says the same in words.
 
-### Staff home
-What needs doing today, for the staff member signed in. A "Today" box first: one line for each kind of thing waiting (changes waiting or stuck on their way to QuickBooks, forms due within a week or signed and not yet finished, shifts in the next week with places to fill), each a to-do state line with a count in words, one line of what it means in `ink-2`, and the link to the page that deals with it. Each line is read only for staff who hold that page's permission. With nothing waiting the box says so in one calm line, a done state ("Nothing needs doing today."). The warnings about the portal's own connections (QuickBooks, outgoing mail, sign-in certificates) follow as titled notices. To Admins alone, after them, "Sign-in resets this week": a titled information notice, one line for each parent's sign-in another Admin reset in the last 7 days ("<who> reset <name>'s sign-in <when>.", the name linking to the person's page, then a link to that reset in the audit log), never the reason, at most 50 of them, with a sentence linking every reset in the audit log when there were more, and one closing sentence saying to ask whoever did it about one you didn't expect; with none, it isn't drawn. Then the signed-in box with Sign out.
+### Smaller primitives
+- **EmptyState:** a centered 28px `ink-3` icon, a 1rem 600 title, a kind `ink-2` line of what will be here, and the one action.
+- **Stat** (several in `.stats`): a 0.875rem `ink-2` label over a 1.5rem 600 tabular figure. Staff pages only.
+- **KeyValue** (`dl.details`): `ink-2` 0.875rem labels beside values; long values wrap where they stand.
+- **Toolbar:** filters in a wrapping row over what they scope, actions at its end.
+- **Avatar:** initials on a `surface-muted` disc (2.25rem; 1.75rem small; `club` variant on the tint).
+- **LocalTime, CalendarDate, `formatMoney()`** (`@/lib/money/cents`): an instant in the viewer's zone, a calendar date the same for everyone, an amount. Never formatted by hand.
+- **Hint** (`.hint`, `.help`): an `ink-2` line explaining what is above it; never a state. **Link line** (`.link-line`): a lone link, 44px. **Box foot / row actions / one button:** the buttons that close a card, two or more side by side, a button with its answer under it.
+- **Visually hidden** (`.visually-hidden`): words a screen reader reads that the page doesn't draw (which invoice a Pay pays).
 
-### Display page
-Account / Display, reached from the account control. One box of four choice groups, in order: **Appearance** (Match my device, Light, Dark), **Contrast** (Match my device, Standard, High contrast), **Text size** (Standard, Large, Larger, each option name previewed at its own size), **Motion** (Match my device, Reduce motion). "Match my device" is always first and is the default. Changes apply at once; a closing `ink-2` note says the choice is saved on this device only.
+### Settings view (`SETTINGS_SECTIONS`, `src/app/staff/(app)/settings/`)
+A card per part: its title, a state in words with an icon, a KeyValue of what is set, and one button to that part's own page. No inputs on the view; step pages use the fields above and answer every action with `ActionOutcome`. Two columns from 760px. The club step of setup and the Club page show the chosen color in a 56px preview strip (`club` fill, `club-on` name, 8px corner) before saving.
 
-### State line
-One vocabulary across the product: **to do, waiting, done, closed**. Each is an icon plus words in Atkinson 700 0.9375rem. Built so far: to do = `due` alert-circle plus "2 forms to sign"; done = `done` tick plus "All forms signed"; and a third, waived = `ink-2` struck circle plus "Waived", for a requirement the club has let a family or student off (the reason is never shown to the family). Waiting and closed must follow the same icon-plus-words pattern; their icon and color are not yet drawn. Counts beside a person ("1 of 3 signed") are Barlow 600 1rem, `ink-2`, right-aligned.
-
-### Details list
-Two-column definition list (`.details`): Label-style terms in `ink-2`, values in Body row.
-
-### Small primitives
-The pieces every page is put together from, beside the components above. Each lives in `src/app/booster.css` or `src/app/components/`; use them rather than a new rule.
-- **Page head:** the page's `h1` (`.page-title`, Barlow 700 2rem) and an optional one-line intro under it (`.lede`, `ink-2`, at most 60ch).
-- **Hint** (`.hint`): an `ink-2` Body small line that explains the control or text above it. Never a state: a state is a Notice or a State line.
-- **Link line** (`.link-line`): a link alone on its line, 44px tall, so it is a tap target like a button.
-- **Box foot** (`.box-foot`): the buttons or links that close a box, below its content. **Row actions** (`.row-actions`): two or more buttons side by side, wrapping on a phone.
-- **One button** (`.one-button`): a button that runs an action, with its answer under it; while it runs it is `aria-disabled` on a parent page.
-- **Steps:** a numbered list of things to do outside the portal (`.steps-list`, at most 68ch), and the step names of a set-up page in a row with the current one marked (`.setup-progress`, `aria-current="step"`).
-- **Table heading** (`h3.table-head`): the heading over one of several tables in one box.
-- **Copy field** (`CopyField`, `.copy-row`): a read-only value with its Copy button, for what staff paste elsewhere (a command, an address).
-- **Times and dates:** an instant through `LocalTime` (in the viewer's zone, with UTC on hover) and a calendar date through `CalendarDate`; an amount through `formatMoney()`. Never formatted by hand.
-- **Visually hidden** (`.visually-hidden`): words a screen reader reads that the page doesn't draw, such as which invoice a Pay button pays.
-
-### Navigation
-- **Phone:** fixed bottom tab bar, 2px `ink` top rule, one 64px tab of equal width for each parent page that exists (icon 24px over Barlow label). Active tab: `club-text` with a 3px inset top rule. Count badge: square, `due` fill, paper figure, labeled ("2 to sign").
-- **Desktop (760px+):** tabs hide; links move into the club bar in Barlow 600 1.125rem, `club-on`, active marked by a 3px inset underline.
-- **Staff menu (grouped).** A staff member's menu is Home, then groups (Families: Roster, Parents, Accounting links; Season; Money), Settings as one entry, then Admin last; an entry shows only to those who may open its page, and a group only when it has one (`staffMenu()`, `src/app/staff/(app)/staff-menu.ts`). At 760px+ a group is a button drawn like a top-nav link (Barlow 600 1.125rem, club-on, a 12px caret that turns over when open). It opens on click or keyboard only, never on hover, as a disclosure (aria-expanded, aria-controls). Its links drop into a panel under the button, right-aligned to it, on the club fill with a 2px club-on border, links 48px tall, the current one marked by a 4px inset left rule. One group is open at a time. It closes on Escape (focus back to its button), on tabbing out, on choosing a link and on a press outside the menu. The group holding the current page carries the 3px inset underline and the accessible name "<Group>, current section". Below 760px the Menu button opens one panel listing Home, each group's links under its name (Barlow 600 0.9375rem uppercase, a 1px club-on rule above), and Settings; the panel scrolls within the screen. With six entries the staff bar is normally one 56px row; `.bar-rows` still lets it wrap. The parent bar is unchanged and never wraps: it is always 56px, which the season ruler's grid counts on.
+### Display page (`src/app/(parent)/display/`)
+Reached from the account avatar. One card of four choice groups in order: **Appearance** (Match my device, Light, Dark), **Contrast** (Match my device, Standard, High contrast), **Text size** (Standard, Large, Larger), **Motion** (Match my device, Reduce motion; two columns). "Match my device" is first and the default. Changes apply at once; a closing `ink-2` note: "Saved on this device. Sign in somewhere else and you can choose again there." The install hint is permanent here.
 
 ### Focus
-`:focus-visible` everywhere: `club-text` outline, 3px (4px in high contrast), 2px offset; `club-on` inside the club bar. High contrast also thickens link underlines to 2px.
-- **Skip to the page:** the first Tab stop of every club bar that has links in it (parent and staff). Read out but not drawn until it has the focus; then a ruled `paper` button, `ink` text and 2px border, 44px tall, at the top of the bar in the page's flow (it covers nothing), with the bar's `club-on` ring. It lands past the bar and the Switch family line, where the next Tab goes on into the page.
+`:focus-visible` everywhere: a `--focus` (`club-text`) outline, 2px (3px in high contrast), 2px offset (1px on fields, hugging the mark on tick boxes). High contrast also thickens link underlines to 2px. The skip link's landing point takes the focus with no ring.
 
 ### Windows contrast themes (forced colors)
-Under `forced-colors: active` the system palette wins; the build only keeps every state readable without its own colors:
-- The page grid is dropped; the club bar gets a 2px `CanvasText` bottom rule; the monogram gets a 2px `CanvasText` ring.
-- The current set fills with `Highlight`, its number, label and ticks in `HighlightText` (`forced-color-adjust: none`). Hash ticks on other sets are kept in `CanvasText` at full opacity.
-- Student dots are drawn on `Canvas` with `CanvasText` initial and ring; finished dots invert (`CanvasText` fill, `Canvas` initial). On the current set their outline is `HighlightText`.
-- The current top-nav link and active tab are underlined (3px) instead of relying on inset rules; the count badge gets a 1px `CanvasText` border.
-- Choice options: ring on `Canvas` with a `CanvasText` border; checked = 3px `Highlight` border and a `Highlight` dot; focus = 3px dashed `CanvasText` outline, 4px offset. All other focus rings use `Highlight`.
+Under `forced-colors: active` the system palette wins; the build keeps every state readable without its own colors: the bars and the logo tile, account and avatars get `CanvasText` edges; the current nav link and tab are underlined 3px; menus get `CanvasText` borders; the step track is `GrayText`, done steps `CanvasText`, the current one `Highlight` and 6px tall with its words underlined; student markers draw on `Canvas` with a `CanvasText` ring (done inverted); money rings and paid marks in `CanvasText`; badges and notices get a `CanvasText` border and the notice icon `CanvasText`; choice tiles and tick boxes draw themselves (checked in `Highlight`, focus a 3px dashed `CanvasText` outline on tiles); selects use the platform's arrow; disabled is dashed with `GrayText`; focus rings use `Highlight`. QR codes and the club preview keep their own colors (`forced-color-adjust: none`).
 
-### Not yet designed
-The entrance motion moment, the waiting and closed states, a club's own logo (there is no way to supply one yet: every club shows its monogram), and the monogram fallback for a club without a logo (the build's monogram is a prototype).
+### Installed app (`src/app/manifest.ts`, `src/lib/pwa/`, `public/offline.html`, `public/sw.js`)
+One app for the whole portal, built from the club's settings on each request.
+- **Icon:** a square of `club` with the club's short name in `club-on`, in the renderer's bundled Geist Regular, held to the middle 60% (84% on the 48px favicon, which nothing crops). Sizes 192 and 512 (each for any use and as maskable), 180 for iOS, 48 for the tab. A short name the font can't draw gets the plain mark: a ring with a dot in `club-on`.
+- **Label:** the club's name when 12 characters or fewer, otherwise its short name.
+- **Theme color:** the top bar's surface, white in light and `#16181c` in dark (`THEME_COLOR`); the manifest's theme color is the light surface and its splash background the light ground, not the club's color, which is on the icon. iOS status bar style `default`.
+- **Safe areas:** the viewport covers the screen; the bar adds the top inset, gutters are the larger of the gutter and the side inset, the tab bar adds the bottom and side insets, the body's bottom padding is 88px plus the bottom inset (the inset alone from 760px and on pages with no tab bar). Zoom is never disabled. This block is last in the stylesheet.
+- **Offline page:** a single white card (max 420px, 8px corner, hairline) on the ground: a no-connection icon, "You're offline", "The portal needs a connection to load. Check your Wi-Fi or mobile data, then try again.", and a full-width ink-filled **Try again** that asks for the same address again. System font, inline styles, all four modes by media query, `CanvasText` edges under forced colors; no club color or name, no family data, no script, the same for everyone, because it is the one thing the service worker stores.
+- **Install hint:** a card "Add the portal to your home screen": an Install button once the browser offers its prompt, or on iPhone and iPad the steps (Share, Add to Home Screen, Add), preceded by opening the page in Safari inside another app's browser. Permanent on the Display page; under the sign-in form an offer with **Not now**, dismissed on that device and left out when there is nothing to offer. Never inside the installed app.
 
 ### Copy patterns
-The voice is PRODUCT.md's warm, plain neighbor, kind about money. On screen that means: state facts plainly ("Was due Oct 30", never "OVERDUE"); count what is left ("2 forms to sign"); name the person on the button ("Sign Maya's forms"); offer help with a person, not a penalty ("Need more time on the uniform fee? Ask the treasurer. They're happy to work something out."); thank people ("You're all paid up. Thank you!"); when a service is down, say what still works and who can help, and say when it will come back only if the portal knows.
-
-## Installed app
-
-The portal can be put on a phone's home screen and then opens without browser chrome. It is one app for the whole portal: parents and staff install the same thing. Everything below is built from the club's settings on each request, so a club that changes its color or short name gets a new icon without a rebuild.
-
-- **Icon:** a square of `club` with the club's short name in `club-on`, centered. The letters are set in the one font that ships with the renderer (Geist Regular, not a portal face: the icon is the only place it appears), sized to fill the middle 60% of the icon and no more, so Android's round and squircle crops never touch them. Sizes: 192 and 512 (each listed for any use and as maskable), 180 for iOS, 48 for the browser tab, where the letters run wider because nothing crops it. A short name the font can't draw (an emoji, a script outside Western European) gets the **plain mark** instead: the checked radio mark, a ring with a dot, in `club-on`. A club logo will replace the monogram at the same addresses.
-- **Label under the icon:** the club's name when it is 12 characters or fewer, otherwise the club's short name. A home screen cuts a longer label off with an ellipsis.
-- **Status bar and theme color:** the browser's theme color is `club`, so Android's status bar and the task switcher match the club bar. On iOS the status bar style is `default`: the system draws its own bar above the page in the device's light or dark, so the clock is readable over any club color.
-- **Safe areas:** the viewport covers the whole screen (`viewport-fit=cover`), and the page keeps clear of notches and the home indicator with `env(safe-area-inset-*)`: the club bar adds the top inset above its 56px, the gutters are the larger of 24px and the side inset, the bottom tab bar adds the bottom and side insets, and the body's bottom padding is 88px plus the bottom inset (the inset alone at 760px and up). Insets are 0 in an ordinary browser tab, where nothing changes. Zoom is never disabled.
-- **Offline page:** when a page can't be loaded, a single box on the chart grid: a no-connection icon, "You're offline", one sentence on what to do, and a full-width primary **Try again** that asks for the same address again. It is the same for every club and every person: system font, `paper` and `ink` only, light and dark by the device setting, no club color or name and no family data, because it is the one thing the device stores.
-- **Install hint:** a box headed "Add the portal to your home screen" with a one-line reason. On Chromium it holds a line **Install** button once the browser has offered its prompt; on iPhone and iPad it lists the steps (Share, Add to Home Screen, Add), preceded by "open this page in Safari" inside another app's browser. On the Display page the box is permanent. Under the sign-in form it is an offer: it carries a line **Not now** button, stays dismissed on that device, and is left out when the browser has neither a prompt nor steps to give. It never appears inside the installed app.
+The voice is PRODUCT.md's warm, plain neighbor, kind about money. State facts plainly ("Was due Oct 30", never "OVERDUE"); count what is left ("1 thing left to do in Uniforms", "1 of 2 done"); name the person or thing on the button ("Sign", "Pay" with the invoice in its accessible name); offer help with a person, not a penalty ("Need more time? Ask the treasurer. They're happy to work something out."); thank people ("You're all paid up. Thank you!"); when something can't be read, say what still works and who can help, and say when it will be back only if the portal knows. A refusal says the same thing whatever the reason. US English, sentence case.
 
 ## Do's and Don'ts
 
 ### Do:
-- **Do** derive `club-on`, the four `club-text-*` tones and both `club-tint-*` washes from the club's one color; check every pairing reaches 4.5:1, and 7:1 in high contrast.
-- **Do** keep page gutters, box gaps and header heights on the 24px grid.
-- **Do** draw structure with 2px `ink` rules and rows with 1px `hair` rules.
-- **Do** set every amount in tabular figures, right-aligned in one column that sums to a 2px Total rule, with an "as of" time beside the owed figure.
-- **Do** give each invoice its own Pay; fill only the soonest-due one.
-- **Do** pair every status color with a word, and an icon where there is room.
-- **Do** keep tap targets at 44px or more (48px for the primary button, 56px for choice options, 64px for tabs) and the focus ring `club-text` 3px (4px in high contrast) with a 2px offset on paper (`club-on` inside the club bar).
-- **Do** reuse the season set ruler as the header of the staff forms matrix (still to build: `docs/ui-backlog.md`).
-- **Do** build a list of like things as a `DataTable`, a status as a `Notice`, and a form from the Form controls; never a bare paragraph for a state.
-- **Do** build every new color from the mode tokens so all four modes and forced colors work without extra rules; check a new surface in light, dark, both high-contrast sets and a Windows contrast theme.
-- **Do** set type in rem and let layouts reflow at 125% text.
-- **Do** make "Match my device" the first and default choice of every display setting, and store display choices on the device.
+- **Do** derive `club-on`, the four `club-text-*` tones and both `club-tint-*` washes from the club's one color, and check every pair reaches 4.5:1 (7:1 in high contrast) on the hardest ground of its mode.
+- **Do** build pages from the primitives in `@/app/components/ui`; add a sample to the gallery and regenerate `design/system/gallery.html` when a primitive or state is added.
+- **Do** use tokens only in components: no hex, rgb or named color, and add any new fixed color to `palette.ts` in the same commit.
+- **Do** put a short list a person acts on in a `List` under a `SectionLabel`, and many like records in a `DataTable`.
+- **Do** say every status in words with an icon, in one of the four tones: done, due, late, neutral.
+- **Do** keep every control and lone link at least 44px tall, and a parent page's busy button `aria-disabled`.
+- **Do** set type in rem from the scale, never under 0.8125rem, and let layouts reflow at 125% text.
+- **Do** give each invoice its own Pay, the soonest-due payable one primary, and an as-of line beside the figures.
+- **Do** check a new surface in light, dark, both high-contrast sets and a Windows contrast theme.
+- **Do** make "Match my device" the first and default choice of every display setting, stored on the device.
 
 ### Don't:
-- **Don't** use drop shadows, blur or offset shadows; inset rules only.
-- **Don't** round containers, buttons, badges or chips; circles are for people (and the radio mark) only.
-- **Don't** use the club fill beyond the club bar and the current set, or change it between modes.
-- **Don't** color an amount red; past-due red goes on the date line only.
-- **Don't** set sentences in Barlow Condensed or numbers on the chart in Atkinson.
-- **Don't** put a small uppercase label above a heading as decoration; labels name content beside them.
-- **Don't** load fonts from Google in the app; self-host them.
-- **Don't** hide a Pay button when the figures are not current; disable it in place and say why.
-- **Don't** promise when a service will be back unless the portal knows; say what still works and who can help.
+- **Don't** fill the club bar, the tab bar or any surface with the club's color; it is an accent for the primary button, the logo tile, the current step's track, the current nav item and focus.
+- **Don't** cast a shadow from anything but a menu or popover (`--shadow-menu`).
+- **Don't** nest a card in a card, or put a panel inside a list row.
+- **Don't** set a label in uppercase or put an eyebrow over a page title; a section label names the list under it.
+- **Don't** add a fifth status color or a blue information tone; information is ink on the neutral tint.
+- **Don't** use `ink-3` for text, or color alone for any meaning.
+- **Don't** make a pill: full rounds are for avatars, status marks, radio marks and the current tab's icon pill.
+- **Don't** color an amount; urgency goes on the date line only.
+- **Don't** hide a Pay when the figures are not current; pause it in place and say why.
+- **Don't** promise when a service will be back unless the portal knows.
+- **Don't** load fonts from Google in the app or set type in px.
+- **Don't** use an emoji or a Unicode glyph as an icon; icons are drawn SVG.

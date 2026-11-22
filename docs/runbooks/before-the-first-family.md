@@ -277,7 +277,7 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
     **Pass:** the club bar shows on both; under the parent form the install box offers itself, and **Not now** keeps it
     away on that phone. **If not:** a screenshot.
 13. **Home on a phone.** **Pass:** it reads in order (greeting, the money box under the family's name, students,
-    details), the season ruler's step names fit or hide cleanly, the current set shows the club color, each student's
+    details), the season ruler's step names fit or hide cleanly, the current step shows the club color, each student's
     dot is readable, and the tabs are easy to tap (and, for a parent in two families, **Switch family** on Family).
     **If not:** a screenshot.
 14. **Display modes.** On Display, try dark, high contrast and the largest text size, then open Home, Volunteer, a
@@ -326,7 +326,7 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
     Enter, and Escape returns to it. With high contrast on (Display, or the device's own), a staff form's busy button
     shows a dashed border, not a filled one. In a Windows contrast theme (Settings, Accessibility, Contrast themes), the
     staff tick boxes and radio marks still show which is checked, notices keep their border all round, their icon cell's edge, their word and their icon, and on
-    Home and Display the current set, the checked option and the focus ring are visible. In that theme too, the first
+    Home and Display the current step, the checked option and the focus ring are visible. In that theme too, the first
     Tab on a parent page and on a staff page shows **Skip to the page** with its ring, and Enter moves on past the bar.
     **If not:** note the page and what was missing.
 22. **The staff home for someone with one permission.** Give a test staff member a role with one of the staff home's
@@ -770,7 +770,7 @@ work another. Any time before the pilot.
 
 1. Whether a requirement can cover a student by grade or section, and if so where a student's grade comes from:
    QuickBooks holds none. Today coverage is everyone, or a hand-picked list of families or students.
-2. A waiver's reason stays hidden from the family (they read "Waived"); parents read "set" where staff read "step";
+2. A waiver's reason stays hidden from the family (they read "Waived"); parents and staff both read "step";
    all four season permissions are ordinary ones a custom role can hold.
 3. A QuickBooks company other than the one the portal's families were read from is connected only after an Admin
    says, on the switch page, that they mean to: it ends every family's link to the books, and keeps everything a season
