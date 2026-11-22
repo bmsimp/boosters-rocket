@@ -59,7 +59,7 @@ test.describe("staff", () => {
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
     const owed = page.getByRole("region", { name: "Owed now" });
     await expect(owed.locator(".amt")).toHaveText("$185.00");
-    await expect(owed.locator(".lines li")).toHaveCount(2);
+    await expect(owed.locator(".list-row")).toHaveCount(2);
     await expect(owed).toContainText("Invoice QZ-1041, Xochitl Quetzalcoatl");
     await expect(page.getByRole("region", { name: "Paid in the last 12 months" })).toContainText("Invoice QZ-1017");
     await noSidewaysScroll(page);
