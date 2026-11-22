@@ -153,3 +153,28 @@ test("on a phone the same entries are behind the Menu button, each group under i
   await expect(page).toHaveURL(/\/staff\/settings$/);
   await context.close();
 });
+
+test("the initials at the end of the bar open the staff member's own account page: name, display and sign out", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await context.addCookies([staffSessionCookie()]);
+  const page = await context.newPage();
+  await page.goto("/staff");
+  // The staff home no longer holds the name or Sign out: they are on the account page.
+  await expect(page.locator("main").getByRole("button", { name: "Sign out" })).toHaveCount(0);
+  await expect(page.locator("main").getByRole("button", { name: "Change my name" })).toHaveCount(0);
+  const account = page.locator("header.bar a.account");
+  await expect(account).toHaveAccessibleName(/^[A-Z]{1,2}: Your account and display settings, signed in as /);
+  await account.click();
+  await expect(page).toHaveURL(/\/staff\/account$/);
+  await expect(page.locator("header.bar a.account")).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Your account");
+  await expect(page.getByRole("button", { name: "Change my name" })).toBeVisible();
+  for (const legend of ["Appearance", "Contrast", "Text size", "Motion"]) await expect(page.getByRole("group", { name: new RegExp(`^${legend}`) })).toBeVisible();
+  // The same device choice as the parent's Display page: Dark sets the attribute, Match my device takes it off.
+  await page.getByRole("radio", { name: /^Dark/ }).check();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.getByRole("radio", { name: /^Match my device/ }).first().check();
+  await expect(page.locator("html")).not.toHaveAttribute("data-theme", /.+/);
+  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await context.close();
+});
