@@ -70,7 +70,7 @@ describe("the stylesheet keeps to the type floor and to rem", () => {
       if (rem) expect(Number(rem[1]), size).toBeGreaterThanOrEqual(0.8125);
     }
   });
-  it("the scale's own steps are the six it names", () => {
-    expect(css).toContain("--text-xs: 0.8125rem; --text-sm: 0.875rem; --text-md: 1rem; --text-lg: 1.125rem; --text-xl: 1.5rem; --text-2xl: 2rem;");
+  it("the scale's own steps are the six it names, plus the control size between sm and md", () => {
+    expect(css).toContain("--text-xs: 0.8125rem; --text-sm: 0.875rem; --text-control: 0.9375rem; --text-md: 1rem; --text-lg: 1.125rem; --text-xl: 1.5rem; --text-2xl: 2rem;");
   });
 });
