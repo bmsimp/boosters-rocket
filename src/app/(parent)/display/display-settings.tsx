@@ -5,7 +5,11 @@ import { ChoiceGroup } from "../../components/choice-group";
 type Prefs = { theme: string; contrast: string; text: string; motion: string };
 declare global { interface Window { BoosterDisplay?: { get(): Prefs; set(k: keyof Prefs, v: string): void } } }
 
-export function DisplaySettings() {
+/**
+ * The four display choices, saved on the device (`br-display`, src/app/display-script.ts). The parent's Display page
+ * draws them under its own title; the staff account page gives them a card title of their own (`title`).
+ */
+export function DisplaySettings({ title }: { title?: { text: string; id: string } } = {}) {
   const [prefs, setPrefs] = useState<Prefs | null>(null);
   // Device-only choices are unknowable on the server, so read them after mount.
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -13,7 +17,8 @@ export function DisplaySettings() {
   if (!prefs) return null;
   const set = (k: keyof Prefs) => (v: string) => { window.BoosterDisplay?.set(k, v); setPrefs({ ...prefs, [k]: v }); };
   return (
-    <form className="box" aria-label="Display settings" onSubmit={(e) => e.preventDefault()}>
+    <form className="box" aria-label={title ? undefined : "Display settings"} aria-labelledby={title?.id} onSubmit={(e) => e.preventDefault()}>
+      {title && <h2 id={title.id}>{title.text}</h2>}
       <ChoiceGroup name="theme" legend="Appearance" hint="Light or dark background." value={prefs.theme} onChange={set("theme")} options={[
         { value: "device", label: "Match my device", hint: "Follows your phone or computer" },
         { value: "light", label: "Light", hint: "Dark text on white" },

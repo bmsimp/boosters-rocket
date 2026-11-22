@@ -29,6 +29,7 @@ Import from the index: `import { Card, List, ListRow, LinkButton } from "@/app/c
 | Filters over a list or table | `Toolbar` | filters scattered above several cards |
 | Where something stands in a few steps | `StepIndicator` (the season ruler) | a progress bar with no words |
 | A person's initials | `Avatar` | an initial in a square |
+| The display choices (Appearance, Contrast, Text size, Motion), saved on the device | `DisplaySettings` (`src/app/(parent)/display/display-settings.tsx`; the staff account page passes `title`) | a copy of its choices or its storage on another page |
 | An instant, a calendar date, an amount | `LocalTime`, `CalendarDate`, `formatMoney()` (`@/lib/money/cents`) | formatting them yourself |
 
 Rules:
@@ -57,6 +58,10 @@ Section 1 of `booster.css`; the fixed colors are mirrored in `src/lib/theme/pale
 ## The gallery
 
 `/staff/design-system` (`src/app/staff/(app)/design-system/`, permission `Settings.Club.Read`, an Admin menu entry) draws `Gallery` (`gallery.tsx`): sample content only, no reads, not audited. A new primitive or state gets a sample there in the same commit, then `pnpm tsx scripts/design-gallery.tsx` writes the static twin `design/system/gallery.html` (the same components and stylesheet, inlined, fetching nothing; it shows the fallback face, as Inter comes through `next/font`).
+
+## The account control
+
+The initials at the end of the club bar lead to the person's own page: a parent's Display page, a staff member's account page (`/staff/account`: their name, the same `DisplaySettings`, Sign out). The page is about the signed-in person alone, takes no id and asks for no permission (the staff home and it are `STAFF_OWN_PAGES` in `tests/integration/page-guards.test.ts`). The link's name starts with the initials it shows, and it is `aria-current="page"` on that page.
 
 ## Installed app
 

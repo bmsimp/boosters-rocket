@@ -21,6 +21,11 @@ const isRoute = (f: string) => /\/route\.(tsx|ts|jsx|js)$/.test(f);
 const PARENT_PAGES = "src/app/(parent)/";
 const STAFF_PAGES = "src/app/staff/(app)/";
 const STAFF_HOME = "src/app/staff/(app)/page.tsx";
+/**
+ * The pages every signed-in staff member may open, which ask for no permission: the staff home, and the staff member's
+ * own account page (their name, display and sign out: it takes no id and shows nobody else's data).
+ */
+const STAFF_OWN_PAGES = new Set([STAFF_HOME, "src/app/staff/(app)/account/page.tsx"]);
 
 const read = (file: string) => readFileSync(path.join(root, file), "utf8");
 /** The code without comments, so a guard that is only mentioned, or commented out, doesn't count. */
@@ -72,8 +77,8 @@ function staffPageProblem(file: string, source = read(file)): string | null {
   }
   const argument = call[1]!;
   if (argument === "") {
-    return file === STAFF_HOME ? null
-      : `${file}: requireStaffPage() is called with no permission, which only the staff home may do. Pass the permission this page needs, as a string from src/lib/permissions/registry.ts: \`await requireStaffPage("Area.Object.Level")\`.`;
+    return STAFF_OWN_PAGES.has(file) ? null
+      : `${file}: requireStaffPage() is called with no permission, which only the staff home and the staff account page may do. Pass the permission this page needs, as a string from src/lib/permissions/registry.ts: \`await requireStaffPage("Area.Object.Level")\`.`;
   }
   const literal = /^(["'])([^"']+)\1$/.exec(argument)?.[2];
   if (!literal || !isPermission(literal)) {
@@ -243,15 +248,16 @@ describe("every page guards itself", () => {
     expect(parentPageProblem(NEW, source)).toContain(`${NEW}: a parent page must call requireParentPage() itself`);
   });
 
-  it("accepts a staff page with a permission, and the staff home with none", () => {
+  it("accepts a staff page with a permission, and the staff home and the staff account page with none", () => {
     expect(staffPageProblem(NEW_STAFF, `${STAFF_IMPORT}export default async function P() {\n  const ctx = await requireStaffPage("Roster.Read");\n  return null;\n}`)).toBeNull();
     expect(staffPageProblem(NEW_STAFF, `${STAFF_IMPORT}export default async function P() {\n  const [ctx] = await Promise.all([requireStaffPage('Roster.Read'), load()]);\n  return null;\n}`)).toBeNull();
     expect(staffPageProblem(STAFF_HOME, `${STAFF_IMPORT}export default async function P() { const ctx = await requireStaffPage(); return null; }`)).toBeNull();
+    expect(staffPageProblem("src/app/staff/(app)/account/page.tsx", `${STAFF_IMPORT}export default async function P() { const ctx = await requireStaffPage(); return null; }`)).toBeNull();
   });
 
   it.each([
     ["has no guard", `export default function P() { return null; }`, "a staff page must call requireStaffPage(...) itself"],
-    ["passes no permission and isn't the staff home", `${STAFF_IMPORT}export default async function P() { await requireStaffPage(); return null; }`, "called with no permission, which only the staff home may do"],
+    ["passes no permission and isn't the staff home", `${STAFF_IMPORT}export default async function P() { await requireStaffPage(); return null; }`, "called with no permission, which only the staff home and the staff account page may do"],
     ["passes a permission that doesn't exist", `${STAFF_IMPORT}export default async function P() { await requireStaffPage("Roster.Everything"); return null; }`, "must be given a permission written out as a string"],
     ["passes a permission the scan can't read", `${STAFF_IMPORT}const NEEDS = "Roster.Read";\nexport default async function P() { await requireStaffPage(NEEDS); return null; }`, "must be given a permission written out as a string"],
   ])("catches a staff page that %s", (_what, source, problem) => {

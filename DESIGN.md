@@ -386,7 +386,7 @@ Every component below is a primitive; import it from `@/app/components/ui` unles
 
 ### Club bar (`ClubBar`, `src/app/components/club-bar.tsx`; `ParentFrame`, `ParentTabs`)
 A white 56px bar with a hairline foot: the club's logo tile (the short name in `club-on` on the `club` fill, 32px tall, 8px corner, decorative), the club's name (1rem 600, ellipsized), the menu, and the account avatar.
-- **Account:** a link to the parent's Display page (staff: the staff home), a 44px target with a 36px `surface-muted` disc of initials; its accessible name starts with the initials it shows. On its own page it takes the club tint and club text.
+- **Account:** a link to the parent's Display page (staff: their account page, `/staff/account`: their name with Change my name, the same Display choices saved on the device, and Sign out; its name "AR: Your account and display settings, signed in as Ana Ramirez"), a 44px target with a 36px `surface-muted` disc of initials; its accessible name starts with the initials it shows. On its own page it takes the club tint and club text.
 - **Skip to the page:** the first Tab stop of every bar with links, drawn only while focused as a secondary button at the top of the bar in the page's flow; it lands on `PageStart`, past the bar and the "Viewing <family>. Switch family" line.
 
 ### Navigation (`src/app/components/top-nav.tsx`, `parent-tabs.tsx`; `staffMenu()`, `src/app/staff/(app)/staff-menu.ts`)
@@ -471,7 +471,7 @@ The club's season steps as a thin segmented track, each step's number and name u
 A card per part: its title, a state in words with an icon, a KeyValue of what is set, and one button to that part's own page. No inputs on the view; step pages use the fields above and answer every action with `ActionOutcome`. Two columns from 760px. The club step of setup and the Club page show the chosen color in a 56px preview strip (`club` fill, `club-on` name, 8px corner) before saving.
 
 ### Display page (`src/app/(parent)/display/`)
-Reached from the account avatar. One card of four choice groups in order: **Appearance** (Match my device, Light, Dark), **Contrast** (Match my device, Standard, High contrast), **Text size** (Standard, Large, Larger), **Motion** (Match my device, Reduce motion; two columns). "Match my device" is first and the default. Changes apply at once; a closing `ink-2` note: "Saved on this device. Sign in somewhere else and you can choose again there." The install hint is permanent here.
+Reached from the account avatar. The staff account page (`src/app/staff/(app)/account/`) draws the same choices (`DisplaySettings`, given a card title there) under "Your name" and before "Signed in as" with Sign out. One card of four choice groups in order: **Appearance** (Match my device, Light, Dark), **Contrast** (Match my device, Standard, High contrast), **Text size** (Standard, Large, Larger), **Motion** (Match my device, Reduce motion; two columns). "Match my device" is first and the default. Changes apply at once; a closing `ink-2` note: "Saved on this device. Sign in somewhere else and you can choose again there." The install hint is permanent here.
 
 ### Focus
 `:focus-visible` everywhere: a `--focus` (`club-text`) outline, 2px (3px in high contrast), 2px offset (1px on fields, hugging the mark on tick boxes). High contrast also thickens link underlines to 2px. The skip link's landing point takes the focus with no ring.
