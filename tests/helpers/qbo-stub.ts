@@ -43,6 +43,7 @@ export type QboStub = {
   refreshTokens: Set<string>;   // refresh tokens the token endpoint accepts, once each (Intuit rotates them)
   failToken: string | null;     // answer token requests with this OAuth error
   failQueryFrom: number | null; // answer query number N and later with HTTP 500 (1 is the first query)
+  tid: string | null;           // send this as the intuit_tid header on every answer, as Intuit does (null: send none)
   nullQueryBody: boolean;       // answer every query with the JSON body null
   failRevoke: boolean;          // answer revoke requests with HTTP 500 and revoke nothing
   /**
@@ -173,7 +174,7 @@ export async function startQboStub(): Promise<QboStub> {
     invoices: [], items: [], oddItemAnswer: null, refuseInQuery: false, oddInvoiceAnswer: null, oddRosterAnswer: null, rateLimitNext: 0, failNext: 0, apiDelayMs: 0, peakApi: 0,
     otherNames: [], inactiveTakesChildren: false, updateFault: null, beforeUpdate: null, loseUpdateAnswer: false, updateServerFault: null, dropApi: false, dropToken: false, onApiRequest: null,
     invoiceFault: null, loseInvoiceAnswer: false, beforeVoid: null, quirks: defaultQuirks(),
-    failToken: null, failQueryFrom: null, nullQueryBody: false, failRevoke: false, revokeDelayMs: 0, tokenDelayMs: 0, queryDelayMs: 0, companyInfoDelayMs: 0, refreshExpiresIn: 8_640_000 } as unknown as QboStub;
+    failToken: null, failQueryFrom: null, tid: null, nullQueryBody: false, failRevoke: false, revokeDelayMs: 0, tokenDelayMs: 0, queryDelayMs: 0, companyInfoDelayMs: 0, refreshExpiresIn: 8_640_000 } as unknown as QboStub;
   const server: Server = createServer((req, res) => {
     const born = generation;
     // True, with the connection closed unanswered, when the stub was reset since this request arrived.
@@ -185,7 +186,7 @@ export async function startQboStub(): Promise<QboStub> {
       const url = new URL(req.url!, "http://stub");
       const call: StubCall = { method: req.method!, path: url.pathname, query: url.searchParams, auth: req.headers.authorization ?? "", body };
       stub.calls.push(call);
-      const json = (status: number, value: unknown) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(value)); };
+      const json = (status: number, value: unknown) => { res.writeHead(status, { "content-type": "application/json", ...(stub.tid ? { intuit_tid: stub.tid } : {}) }); res.end(JSON.stringify(value)); };
       // A refused write, as QuickBooks sends one: always HTTP 400, told apart by the code. The words are never the portal's to keep.
       const fault = (code: string) => ({ Fault: { Error: [{ Message: "a message the portal must never store", Detail: "a detail the portal must never store", code, element: "" }], type: "ValidationFault" }, time: new Date().toISOString() });
       // Intuit's token and revoke endpoints take the app's keys as HTTP Basic: a Client ID and a secret, both present.
@@ -410,7 +411,7 @@ export async function startQboStub(): Promise<QboStub> {
     stub.invoiceFault = null; stub.loseInvoiceAnswer = false; stub.beforeVoid = null; stub.quirks = defaultQuirks();
     issued = 0; queries = 0; stub.calls.length = 0; stub.customers = []; stub.types = []; stub.companyName = "Stub Boosters";
     stub.invoices = []; stub.items = []; stub.oddItemAnswer = null; stub.refuseInQuery = false; stub.oddInvoiceAnswer = null; stub.oddRosterAnswer = null; stub.rateLimitNext = 0; stub.failNext = 0; stub.apiDelayMs = 0; stub.peakApi = 0;
-    stub.codes.clear(); stub.accessTokens.clear(); stub.refreshTokens.clear(); stub.failToken = null; stub.failQueryFrom = null; stub.nullQueryBody = false; stub.failRevoke = false; stub.revokeDelayMs = 0; stub.tokenDelayMs = 0; stub.queryDelayMs = 0; stub.companyInfoDelayMs = 0; stub.refreshExpiresIn = 8_640_000;
+    stub.codes.clear(); stub.accessTokens.clear(); stub.refreshTokens.clear(); stub.failToken = null; stub.failQueryFrom = null; stub.tid = null; stub.nullQueryBody = false; stub.failRevoke = false; stub.revokeDelayMs = 0; stub.tokenDelayMs = 0; stub.queryDelayMs = 0; stub.companyInfoDelayMs = 0; stub.refreshExpiresIn = 8_640_000;
   };
   stub.close = () => new Promise<void>((r) => server.close(() => r()));
   return stub;

@@ -17,6 +17,7 @@ import { getRosterSource } from "@/lib/roster/source";
 import { lastCheck, lastCheckWords } from "@/lib/quickbooks/sandbox-check/view";
 import { IntegrationHead, IntegrationHealth } from "../integration-head";
 import { healthLines, quickbooksRow } from "../statuses";
+import { SupportLine } from "../../support-line";
 
 export const metadata = { title: "QuickBooks settings" };
 export const dynamic = "force-dynamic";
@@ -36,7 +37,7 @@ export default async function QuickBooksSettingsPage() {
     <main className="wrap single">
       <IntegrationHead of="quickbooks" title="QuickBooks" status={row.status}
         lede={<>{row.does} Only Admins can change these settings, because they reach the club&apos;s books.</>} />
-      {problems.length > 0 && <Notice tone="warning" title="Needs attention" titleId="qbo-problems-h"><ul className="notice-list">{problems.map((p) => <li key={p.kind}>{p.text}</li>)}</ul></Notice>}
+      {problems.length > 0 && <Notice tone="warning" title="Needs attention" titleId="qbo-problems-h"><ul className="notice-list">{problems.map((p) => <li key={p.kind}>{p.text}{p.fix && <> <a href={p.fix.href}>{p.fix.label}</a></>}</li>)}</ul></Notice>}
       <IntegrationHealth here="/staff/settings/quickbooks" line={lines.find((l) => l.key === "quickbooks")} />
 
       {conn.configured && (
@@ -73,6 +74,7 @@ export default async function QuickBooksSettingsPage() {
         {/* Disconnect, last, as it is today: it stays in place after it is pressed, to say what it did. */}
         <Disconnect connected={conn.connected} disconnect={disconnectAction} warning={warning} />
       </Card>
+      <SupportLine />
     </main>
   );
 }

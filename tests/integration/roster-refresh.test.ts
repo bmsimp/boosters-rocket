@@ -244,8 +244,10 @@ describe("the roster refresh", () => {
     await refreshRoster(worker);
     stub.oddRosterAnswer = { customers: FAULT };
     await expectFailedRun(await refreshRoster(worker), "QuickBooks refused the request. (fault)", "fault");
+    // A Fault for the customer type query alone, the customers read, is a plan without customer types (no_customer_types,
+    // tests/integration/roster-customer-types.test.ts): its own words, and still none of QuickBooks' text.
     stub.oddRosterAnswer = { types: FAULT };
-    expect(await refreshRoster(worker)).toEqual({ ok: false, reason: "failed", error: "QuickBooks refused the request. (fault)" });
+    expect(await refreshRoster(worker)).toMatchObject({ ok: false, reason: "failed", error: expect.stringContaining("(no_customer_types)") });
     expect(JSON.stringify([await db.select().from(auditLog), await db.select().from(jobRun)])).not.toContain("a message the portal must never store");
   });
 

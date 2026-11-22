@@ -58,7 +58,7 @@
   --done-soft: #e3f2e8; --due-soft: #fdeedc; --late-soft: #fbe4e2; --info-soft: #e6e8fa; --neutral-soft: #f0f1f3;
   --badge-ink: #6b6b6b; /* the footer's one-color "Powered by Boosters Rocket" badge */
   /* the product's own colors (brand/BRAND.md), for the sign-in page's full-color badge only: never portal UI */
-  --br-ink: #1e1b4b; --br-flame-ink: #b82d28; --br-disc: #1e1b4b; --br-flame: #e8433a; --br-ember: #f49a92; --br-smoke: #ffffff;
+  --br-ink: #1e1b4b; --br-flame-ink: #b82d28; --br-disc: #1e1b4b; --br-flame: #e8433a; --br-ember: #f49a92; --br-glow: #fbd8d4; --br-smoke: #ffffff;
   --overlay: rgb(0 0 0 / 0.08); --overlay-mix: black 8%; /* the same wash as a color-mix() term (a filled button's hover) */
   --shadow-menu: 0 8px 24px -6px rgb(16 17 20 / 0.14), 0 1px 3px rgb(16 17 20 / 0.08);
   --club: var(--club-l); --club-on: var(--club-on-l);
@@ -80,7 +80,7 @@
   --done: #6cc38a; --due: #f2b36b; --late: #ff8a80; --info: #a5adff;
   --done-soft: #12301f; --due-soft: #3a2510; --late-soft: #3d1512; --info-soft: #1e2250; --neutral-soft: #22252a;
   --badge-ink: #9a9aa2;
-  --br-ink: #ffffff; --br-flame-ink: #f06a5f; --br-disc: #332f72; --br-flame: #e8433a; --br-ember: #f49a92; --br-smoke: #ffffff;
+  --br-ink: #ffffff; --br-flame-ink: #f06a5f; --br-disc: #332f72; --br-flame: #e8433a; --br-ember: #f49a92; --br-glow: #fbd8d4; --br-smoke: #ffffff;
   --overlay: rgb(255 255 255 / 0.1); --overlay-mix: white 10%;
   --shadow-menu: 0 8px 24px -6px rgb(0 0 0 / 0.6), 0 1px 3px rgb(0 0 0 / 0.5);
   --club: var(--club-d); --club-on: var(--club-on-d);
@@ -101,7 +101,7 @@
     --done: #6cc38a; --due: #f2b36b; --late: #ff8a80; --info: #a5adff;
     --done-soft: #12301f; --due-soft: #3a2510; --late-soft: #3d1512; --info-soft: #1e2250; --neutral-soft: #22252a;
     --badge-ink: #9a9aa2;
-    --br-ink: #ffffff; --br-flame-ink: #f06a5f; --br-disc: #332f72; --br-flame: #e8433a; --br-ember: #f49a92; --br-smoke: #ffffff;
+    --br-ink: #ffffff; --br-flame-ink: #f06a5f; --br-disc: #332f72; --br-flame: #e8433a; --br-ember: #f49a92; --br-glow: #fbd8d4; --br-smoke: #ffffff;
     --overlay: rgb(255 255 255 / 0.1); --overlay-mix: white 10%;
     --shadow-menu: 0 8px 24px -6px rgb(0 0 0 / 0.6), 0 1px 3px rgb(0 0 0 / 0.5);
     --club: var(--club-d); --club-on: var(--club-on-d);
@@ -576,14 +576,16 @@ html:not(:has(nav.tabs:not(.staff-tabs))) main.wrap.single > .page-head .page-ba
 @media (min-width: 760px) { .page-title { font-size: 1.75rem; } }
 
 /* --- Powered by (src/app/components/powered-by.tsx): the product's credit, the club leading everywhere else. One ink
-   in every footer; the sign-in page's is in the product's colors. Live text beside the mark; never removed by a setting. --- */
-.powered-by { display: flex; width: fit-content; align-items: center; gap: 6px; min-height: 44px; color: var(--badge-ink);
-  font-size: var(--text-xs); font-weight: 500; text-decoration: none; }
-.powered-by:hover .pb-name { text-decoration: underline; }
-.pb-mark { width: 1.5rem; height: 1.5rem; flex: none; fill: currentColor; } /* 24px: over the kit's 20px floor for the small badge */
-.pb-name { font-weight: 600; }
-.powered-by-color .pb-boosters { color: var(--br-ink); } .powered-by-color .pb-rocket { color: var(--br-flame-ink); }
-.powered-by-color .pb-disc { fill: var(--br-disc); } .powered-by-color .pb-smoke { fill: var(--br-smoke); }
+   in every footer; the sign-in page's is in the product's colors. The kit's outlined badge, inline, its inks these
+   tokens; the link's name is visually hidden text. Never removed by a setting. --- */
+.powered-by { display: flex; width: fit-content; align-items: center; min-height: 44px; color: var(--badge-ink);
+  text-decoration: none; }
+/* 24px tall (the kit's 235 x 24 box), so "Powered by" stands about 13px, over the kit's 12px floor */
+.pb-badge { display: block; width: 14.6875rem; max-width: 100%; height: 1.5rem; flex: none; fill: currentColor; }
+.powered-by:hover .pb-badge { box-shadow: 0 1px 0 currentColor; }
+.pb-stroked { stroke: currentColor; stroke-width: 0.8; stroke-linejoin: round; }
+.powered-by-color .pb-boosters { fill: var(--br-ink); } .powered-by-color .pb-rocket { fill: var(--br-flame-ink); }
+.powered-by-color .pb-disc { fill: var(--br-disc); } .powered-by-color .pb-smoke { fill: var(--br-smoke); stroke: var(--br-smoke); }
 .powered-by-color .pb-ember { fill: var(--br-ember); } .powered-by-color .pb-flame { fill: var(--br-flame); }
 footer.wrap .powered-by { color: var(--badge-ink); } /* not the footer's club-colored links */
 .signin-foot { max-width: 440px; margin: var(--s5) auto 0; padding: 0 var(--cell); display: flex; justify-content: center; }
@@ -890,7 +892,8 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 .setup-title { display: flex; align-items: center; gap: var(--s3); }
 .product-mark { width: 2.5rem; height: 2.5rem; flex: none; forced-color-adjust: none; } /* the product's icon, before there is a club (setup) */
 .product-mark .pm-tile { fill: var(--br-disc); } .product-mark .pm-smoke { fill: var(--br-smoke); }
-.product-mark .pm-ember { fill: var(--br-ember); } .product-mark .pm-flame { fill: var(--br-flame); }
+.product-mark .pm-glow { fill: var(--br-glow); } .product-mark .pm-ember { fill: var(--br-ember); } .product-mark .pm-flame { fill: var(--br-flame); }
+.product-mark .pm-rocket { fill: var(--br-smoke); stroke: var(--br-smoke); stroke-width: 0.8; stroke-linejoin: round; }
 .setup-progress { display: flex; gap: var(--s1) var(--s4); flex-wrap: wrap; margin-top: var(--s3); list-style: none; padding: 0; font-size: var(--text-sm); color: var(--ink-2); }
 .setup-progress [aria-current="step"] { color: var(--ink); font-weight: 600; text-decoration: underline; text-decoration-color: var(--club-text); text-decoration-thickness: 2px; text-underline-offset: 0.35em; }
 .setup-progress a { display: inline-flex; align-items: center; min-height: 44px; color: var(--club-text); }
@@ -1141,6 +1144,7 @@ main.wrap.single > .page-head + p { margin-top: var(--s4); }
 @media (forced-colors: active) {
   .bar, .tabs { border-color: CanvasText; }
   .powered-by-color .pb-mark { forced-color-adjust: none; } /* the product's mark keeps its own colors, its disc its own ground */
+  .powered-by .pb-words, .powered-by .pb-boosters, .powered-by .pb-rocket { fill: currentColor; } /* the badge's words in the link's system color */
   .monogram, .account, .avatar { border: 1px solid CanvasText; }
   .top-nav a[aria-current="page"], .nav-group-button.here, .top-nav .nav-panel a[aria-current="page"],
   .tabs a[aria-current="page"] { text-decoration: underline; text-decoration-thickness: 3px; text-underline-offset: 6px; }

@@ -33,7 +33,8 @@ const ASH_PARENT = "7c0a9a1e-0000-4000-8000-000000000011", BIRCH_PARENT = "7c0a9
 const NOBODY = "5b0e7f0a-3c1d-4a52-9f0e-3a1b2c3d4e6f";
 const STATES = ["being_invoiced", "invoiced", "paid", "being_voided", "voided", "refused", "stuck"] as const;
 /** The columns the re-key changes or drops: every other column of a buy-out is kept exactly. */
-const RE_KEYED = new Set(["family_id", "student_id", "family_qbo_id", "subject_qbo_id"]);
+// last_intuit_tid: a later migration (0056) adds it to the queue, empty.
+const RE_KEYED = new Set(["family_id", "student_id", "family_qbo_id", "subject_qbo_id", "last_intuit_tid"]);
 
 /** The migrations folder as it was up to `last` (by index), for the database as it was before this slice. */
 function migrationsUpTo(last: number): string {

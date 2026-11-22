@@ -65,11 +65,11 @@ const short = (code: string) => code.slice(0, 40);
  * `triedAt` is when this try sent the write (or looked for it): a refresh that started before it may not show it.
  * `resultQboId`: the customer a create was found made as, kept so that it is never sent again (tryItem()).
  */
-async function settle(item: Item, to: { state: "stuck" | "waiting"; code: string; sent: boolean; nextTryAt?: Date; resultQboId?: string; request?: RosterWrite }, triedAt: Date): Promise<Step> {
+async function settle(item: Item, to: { state: "stuck" | "waiting"; code: string; sent: boolean; nextTryAt?: Date; resultQboId?: string; request?: RosterWrite; tid?: string | null }, triedAt: Date): Promise<Step> {
   await db.transaction(async (tx) => {
     // `request`: what this try sent, when it may have been made with another version than the item's (a rename resent
     // after a live read, stage 3's slice 9e), so a later look finds it as sent.
-    const [still] = await tx.update(writeQueue).set({ state: to.state, lastCode: short(to.code), sent: to.sent, tries: item.tries + 1, lastTriedAt: triedAt,
+    const [still] = await tx.update(writeQueue).set({ state: to.state, lastCode: short(to.code), lastIntuitTid: to.tid ?? null, sent: to.sent, tries: item.tries + 1, lastTriedAt: triedAt,
       nextTryAt: to.state === "waiting" ? to.nextTryAt! : null, ...(to.resultQboId ? { resultQboId: to.resultQboId } : {}), ...(to.request ? { request: to.request } : {}), updatedAt: new Date() })
       .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
     if (!still) return;
@@ -83,7 +83,7 @@ async function settle(item: Item, to: { state: "stuck" | "waiting"; code: string
 async function markDone(item: Item, how: "sent" | "found", resultQboId: string | null, tries: number, tx?: Parameters<Parameters<typeof db.transaction>[0]>[0],
   appRecord: OwnRecordChange | null = null): Promise<void> {
   const run = async (t: NonNullable<typeof tx>) => {
-    const [still] = await t.update(writeQueue).set({ state: "done", resultQboId, tries, lastTriedAt: new Date(), nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
+    const [still] = await t.update(writeQueue).set({ state: "done", lastIntuitTid: null, resultQboId, tries, lastTriedAt: new Date(), nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
       .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
     if (!still) return;
     await writeAudit({ actor: WORKER_ACTOR, action: "roster.write.done", targetType: "write_queue", targetId: item.id,
@@ -197,9 +197,9 @@ async function tryRosterItem(item: Item, w: RosterWrite, now: Date, refreshedAt:
       case "stale_again": return settle(item, { ...afterFailedTry(item.tries + 1, item.createdAt, now), code: "fault_5010", sent: item.sent }, new Date());
       case "failed": {
         const failure = classify(t.code);
-        if (failure.kind !== "retry") return settle(item, { state: "stuck", code: t.code, sent: item.sent }, new Date());
+        if (failure.kind !== "retry") return settle(item, { state: "stuck", code: t.code, sent: item.sent, tid: t.tid }, new Date());
         // Sent with another version than the item held (a resend after a live read): kept, so a later look finds it as sent.
-        return settle(item, { ...afterFailedTry(item.tries + 1, item.createdAt, now), code: t.code, sent: item.sent || t.sent, ...(t.sent ? { request: t.write } : {}) }, new Date());
+        return settle(item, { ...afterFailedTry(item.tries + 1, item.createdAt, now), code: t.code, sent: item.sent || t.sent, tid: t.tid, ...(t.sent ? { request: t.write } : {}) }, new Date());
       }
       case "answer": {
         const { cached } = await applyWritten(t.write, t.answer, { realmId: item.realmId, actor: WORKER_ACTOR, ip: null, queueId: item.id, linkedBy: item.askedBy,
@@ -230,9 +230,9 @@ async function tryRosterItem(item: Item, w: RosterWrite, now: Date, refreshedAt:
     const failure = classify(e.code);
     // Once a try may have reached QuickBooks, the item stays `sent`: a later try that sent nothing (a 429, a token that
     // couldn't be had) or was refused says nothing about the earlier one, which may still have been made.
-    if (failure.kind !== "retry") return settle(item, { state: "stuck", code: e.code, sent: item.sent }, triedAt);
+    if (failure.kind !== "retry") return settle(item, { state: "stuck", code: e.code, sent: item.sent, tid: e.tid }, triedAt);
     const next = afterFailedTry(item.tries + 1, item.createdAt, now);
-    return settle(item, { ...next, code: e.code, sent: item.sent || failure.sent }, triedAt);
+    return settle(item, { ...next, code: e.code, sent: item.sent || failure.sent, tid: e.tid }, triedAt);
   }
   const { cached } = await applyWritten(w, answer, { realmId: item.realmId, actor: WORKER_ACTOR, ip: null, queueId: item.id, linkedBy: item.askedBy,
     filed: { familyId: item.familyId, studentId: item.studentId },
@@ -414,6 +414,8 @@ export async function runWriteQueue(now: Date = new Date()): Promise<{ ran: bool
 export type QueueView = {
   id: string; state: "waiting" | "stuck" | "refused"; write: QueuedWrite; words: string; askedBy: string | null; askedAt: string;
   lastTriedAt: string; nextTryAt: string | null; tries: number; lastCode: string | null;
+  /** Intuit's reference for the last failed try (`intuit_tid`), for staff to quote to Intuit support; null when it gave none. */
+  intuitTid?: string | null;
   /** The family record it is filed under, for the link to that family's page: null when it has none, or that record has no page (inactive, with no link). */
   familyId: AppFamilyId | null;
   /** The student record it is for (a rename, a move, a make-inactive, a student's create), or null. */
@@ -684,7 +686,7 @@ export async function loadOpenWrites(o: { familyId?: AppFamilyId; showAmounts?: 
       id: r.id, state: r.state as QueueView["state"], write: request, words: describeWrite(request, names, { showAmounts: o.showAmounts, familyNames,
         ...(request.op === "contact" ? contactWords(r) : request.op === "email" ? emailWords(r) : {}) }),
       askedBy: r.askedByLabel, askedAt: r.createdAt.toISOString(),
-      lastTriedAt: r.lastTriedAt.toISOString(), nextTryAt: r.nextTryAt?.toISOString() ?? null, tries: r.tries, lastCode: r.lastCode,
+      lastTriedAt: r.lastTriedAt.toISOString(), nextTryAt: r.nextTryAt?.toISOString() ?? null, tries: r.tries, lastCode: r.lastCode, intuitTid: r.lastIntuitTid ?? null,
       familyId: r.familyId !== null && withPage.has(String(r.familyId)) ? r.familyId : null,
       studentId: r.studentId, moneyNote: noteOf.get(r.id) ?? null,
       finishing: finishingOf(r),

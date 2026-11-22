@@ -4,7 +4,7 @@ import { jobRun, qboCustomer, qboCustomerType } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getConnection } from "@/lib/quickbooks/connection";
 import { qboQueryAll, qboCustomerTypes } from "@/lib/quickbooks/client";
-import { QboError } from "@/lib/quickbooks/endpoints";
+import { failureWords, QboError } from "@/lib/quickbooks/endpoints";
 import { billingAddressOf } from "@/lib/parents/contact-fields";
 import { noteAddressesKept } from "@/lib/parents/contact-take-in";
 import { getShape, shapeTypeIds, ROSTER_LOCK, NO_ADDRESS_COLUMNS } from "./shape";
@@ -22,6 +22,20 @@ const CHUNK = 500;
  */
 export const NOT_SWITCHED_WORDS = "The roster was read from another QuickBooks company than the one connected now, and nobody chose to switch to it, so it wasn't read. "
   + "Disconnect QuickBooks, then connect the company the roster was read from, or choose Connect a different company first. (roster_company)";
+
+/**
+ * Why a read found no customer types to go by (`no_customer_types`): QuickBooks refused the customer type query while it
+ * answered the customer query (a plan without customer types, after a downgrade, say), or answered that the company has
+ * no customer types at all while the shape names some. Both shapes go by customer types, so the roster can't be sorted
+ * into families; the cache and every family's records stay as they were. The words a failed run keeps (with the code),
+ * and the Health page, Settings, QuickBooks and the staff home show (src/lib/quickbooks/health.ts).
+ */
+export const NO_CUSTOMER_TYPES_WORDS = "QuickBooks no longer offers customer types on this company's plan, so the membership shape can't be read. "
+  + "Turn customer types back on in QuickBooks, or move the company to a plan that has them, then check the membership shape. "
+  + "Until then the roster and every family's figures stay as they were last read.";
+export const NO_CUSTOMER_TYPES = "no_customer_types";
+/** The refusals of the customer type query that mean the plan doesn't offer them, when the customer query works. */
+const TYPES_REFUSED = /^(http_400|http_403|fault)$/;
 
 export type RefreshResult =
   | { ok: true; customers: number; types: number }
@@ -109,13 +123,22 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
       const s = await getSwitchRecord(tx);
       if (!storedSwitchOf(s, from, realmId)) return fail(NOT_SWITCHED_WORDS, "roster_company");
     }
-    let types: Raw[], customers: Raw[];
+    let types: Raw[] = [], customers: Raw[], typesRefused = false;
     try {
-      types = await qboCustomerTypes();
+      try {
+        types = await qboCustomerTypes();
+      } catch (e) {
+        if (!(e instanceof QboError && TYPES_REFUSED.test(e.code))) throw e;
+        typesRefused = true; // told apart from a refusal of everything by the customer query below
+      }
       customers = await qboQueryAll("Customer", "Active in (true, false)");
     } catch (e) {
       // Only a QboError's own fixed sentence and code are kept; anything else gets a fixed sentence.
-      return e instanceof QboError ? fail(`${e.message} (${e.code})`, e.code) : fail("The roster couldn't be read. (unexpected)", "unexpected");
+      return e instanceof QboError ? fail(failureWords(e), e.code) : fail("The roster couldn't be read. (unexpected)", "unexpected");
+    }
+    // No types while the shape names some is believed only of the company the shape was chosen for, not one switched to.
+    if (typesRefused || (from === realmId && types.filter(isRow).length === 0 && shapeTypeIds(await getShape(tx)).length > 0)) {
+      return fail(`${NO_CUSTOMER_TYPES_WORDS} (${NO_CUSTOMER_TYPES})`, NO_CUSTOMER_TYPES);
     }
     // From here to the save, anything that throws ends in a recorded failed run, not a rolled-back one the worker would
     // retry every minute. A savepoint, so even a database error here leaves the transaction able to record it.

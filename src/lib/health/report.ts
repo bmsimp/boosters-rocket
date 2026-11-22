@@ -170,7 +170,7 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
     lines.push({
       key: "quickbooks", title: "QuickBooks", state: attention ? "attention" : "ok", word: attention ? "Needs attention" : "Connected",
       times: [...rosterTimes, { label: "Requests last checked", at: checked?.at ?? null }],
-      notes: [...problems.map((p) => p.text), ...queueNote, ...takeInNote, lastCheckWords(checked), use], fix: problems.length ? qboFix : writes.stuck || writes.refused ? queueFix : checkFix,
+      notes: [...problems.map((p) => p.text), ...queueNote, ...takeInNote, lastCheckWords(checked), use], fix: problems.length ? (problems.find((p) => p.fix)?.fix ?? qboFix) : writes.stuck || writes.refused ? queueFix : checkFix,
       says: `Connected to ${conn.companyName ?? "a QuickBooks company"}${conn.environment === "sandbox" ? " (an Intuit sandbox, not the club's real books)" : ""}.`,
     });
   }

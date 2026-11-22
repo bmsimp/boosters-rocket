@@ -3,7 +3,7 @@ import { db } from "@/lib/db/client";
 import { jobRun, setting } from "@/lib/db/schema";
 import { accessToken, WORKER_ACTOR } from "@/lib/quickbooks/client";
 import { connectionView } from "@/lib/quickbooks/connection";
-import { QboError } from "@/lib/quickbooks/endpoints";
+import { failureWords, QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster, ROSTER_JOB } from "@/lib/roster/refresh";
 import { sendOwedWelcomes } from "@/lib/parents/welcome";
 import { rosterRefreshAsked } from "@/lib/parents/refresh-ask";
@@ -119,7 +119,7 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
       ran.push({ job: TOKEN_JOB, ok: true });
     } catch (e) {
       // A QboError's message is a fixed sentence and its code a short code; anything else is recorded without its text.
-      const detail = e instanceof QboError ? `${e.message} (${e.code})` : "The connection couldn't be refreshed. (unexpected)";
+      const detail = e instanceof QboError ? failureWords(e) : "The connection couldn't be refreshed. (unexpected)";
       await db.update(jobRun).set({ finishedAt: new Date(), outcome: "failed", detail }).where(eq(jobRun.id, run!.id));
       ran.push({ job: TOKEN_JOB, ok: false });
     }

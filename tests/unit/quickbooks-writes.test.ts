@@ -560,7 +560,12 @@ describe("what the portal writes to QuickBooks, and who may send each", () => {
   });
 
   it("writes nothing to the log, so no token, request or response body can end up there", () => {
-    for (const s of sources) expect(s.text, s.file).not.toMatch(/console\.\w+\(/);
+    // The one line: the discovery document's fallback, with the environment and a fixed reason word only.
+    const DISCOVERY = "src/lib/quickbooks/discovery.ts";
+    for (const s of sources) if (s.file !== DISCOVERY) expect(s.text, s.file).not.toMatch(/console\.\w+\(/);
+    const discovery = sources.find((s) => s.file === DISCOVERY)!.text;
+    expect(discovery.match(/console\.\w+\([^\n]*/g)).toEqual(['console.warn(JSON.stringify({ event: "quickbooks.discovery_fallback", environment, reason: read }));']);
+    expect(discovery).toMatch(/async function readDocument\(address: string\): Promise<OAuthEndpoints \| string>/);
   });
 
   it("sends nothing but GET, except to Intuit's token and revoke endpoints and the one customer update", () => {
@@ -570,7 +575,7 @@ describe("what the portal writes to QuickBooks, and who may send each", () => {
     expect(posts.sort()).toEqual([CLIENT, CLIENT, CLIENT, CLIENT, CLIENT, "src/lib/quickbooks/connection.ts"]);
     const methods = (text: string) => methodsIn(text).map((m) => m.is);
     expect(methods(bodyOf("tokenRequest"))).toEqual(["POST"]);
-    expect(bodyOf("tokenRequest")).toContain("qboEndpoints().token");
+    expect(bodyOf("tokenRequest")).toContain("(await oauthEndpoints(environment)).token"); // Intuit's discovery document, or its checked fallback
     expect(methods(bodyOf(WRITE))).toEqual(["POST"]);
     // Everything else in the client that reaches the API is a GET: qboGet, and what is built on it.
     expect(methods(bodyOf("qboGet"))).toEqual(["GET"]);

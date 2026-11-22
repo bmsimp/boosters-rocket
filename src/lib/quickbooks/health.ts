@@ -1,7 +1,11 @@
 import { connectionView } from "./connection";
 import { loadRosterPage } from "@/lib/roster/queries";
+import { NO_CUSTOMER_TYPES, NO_CUSTOMER_TYPES_WORDS } from "@/lib/roster/refresh";
 
-export type QboProblem = { kind: "token_failed" | "expiring" | "roster_failed" | "roster_old" | "shape_broken"; text: string };
+/** `fix`: where the problem is put right, when that is one page (each place that shows the problem links it). */
+export type QboProblem = { kind: "token_failed" | "expiring" | "roster_failed" | "no_customer_types" | "roster_old" | "shape_broken"; text: string; fix?: { href: string; label: string } };
+/** Step 3 of the QuickBooks steps, the membership shape. */
+export const SHAPE_STEP = { href: "/staff/settings/quickbooks/setup?step=shape", label: "Open the membership shape step" };
 const EXPIRING_MS = 30 * 86_400_000;
 const OLD_MS = 48 * 3_600_000;
 
@@ -16,10 +20,12 @@ export async function quickbooksProblems(now: Date = new Date()): Promise<QboPro
     out.push({ kind: "expiring", text: "The QuickBooks connection expires within 30 days. Connect QuickBooks again to renew it." });
   }
   const since = page.lastOkAt ?? conn.connectedAt;
-  if (page.lastRun && !page.lastRun.ok) out.push({ kind: "roster_failed", text: `The last roster refresh failed: ${page.lastRun.detail ?? "no reason was recorded"}` });
+  if (page.lastRun && !page.lastRun.ok && page.lastRun.detail?.endsWith(`(${NO_CUSTOMER_TYPES})`)) {
+    out.push({ kind: "no_customer_types", text: NO_CUSTOMER_TYPES_WORDS, fix: SHAPE_STEP });
+  } else if (page.lastRun && !page.lastRun.ok) out.push({ kind: "roster_failed", text: `The last roster refresh failed: ${page.lastRun.detail ?? "no reason was recorded"}` });
   else if (since && now.getTime() - Date.parse(since) > OLD_MS) {
     out.push({ kind: "roster_old", text: "The roster hasn't been refreshed from QuickBooks in more than 2 days. Check that the worker is running." });
   }
-  if (page.brokenTypes.length) out.push({ kind: "shape_broken", text: "The membership shape names a customer type QuickBooks no longer has. Choose the shape again." });
+  if (page.brokenTypes.length) out.push({ kind: "shape_broken", text: "The membership shape names a customer type QuickBooks no longer has. Choose the shape again.", fix: SHAPE_STEP });
   return out;
 }

@@ -37,6 +37,7 @@ const SITES: Record<string, string> = {
   "ghcr.io": "the GitHub Container Registry the published image lives in",
   "docker.com": "Docker's own documentation and Docker Hub",
   "developer.intuit.com": "registering the Intuit app (intuit.md)",
+  "developer.api.intuit.com": "Intuit's OAuth discovery document the portal reads, named in the assessment's true answers (intuit.md, part 3)",
   "docs.documenso.com": "Documenso's own documentation",
   "caddyserver.com": "the proxy's own documentation (deploy/Caddyfile)",
   "smtp.office365.com": "Microsoft 365's SMTP server, for Documenso's account mail (mail.md)",

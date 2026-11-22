@@ -1,0 +1,1 @@
+ALTER TABLE "write_queue" ADD COLUMN "last_intuit_tid" text;

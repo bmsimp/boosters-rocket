@@ -1,28 +1,46 @@
 # Boosters Rocket brand kit
 
-The brand kit, as the owner gave it: the guide, the tokens and the logo files. It lives at `brand/` in the repo.
+The brand kit, as the owner gave it (the second kit, of 2026-11-22, from Claude Design): the guide, the tokens, the
+logo files and their exports. It lives at `brand/` in the repo.
+
+- `BRAND.md` — the brand guide: co-branding rules, logo use, color, type, voice.
+- `tokens.css` / `tokens.json` — the brand's design tokens (see "In this repo" for how the app uses them).
+- `logos/` — outlined SVGs for code: every word is converted to paths, so no font is needed; the `-mono` files use
+  `currentColor`.
+- `exports/` — ready-to-use files: outlined SVG, transparent PNG, vector PDF and EPS, a website icon set (`icons/`) and
+  social images and README banners (`social/`). `exports/README.md` says which file is for what. The kit's `print/`
+  folder (1.8 MB of 4096 px marks and 3600 px-wide lockup PNGs) is not kept here: its README says to prefer the PDF or
+  EPS for a printer, and those are kept. Ask the owner for the kit if a print PNG is ever needed.
+- `social-preview.png` — the repository's social preview (the kit's `exports/social/github-social-preview-1280x640.png`),
+  set by hand in the repository's Settings, General, Social preview.
+- `logos/qb-app-icon.png` — not part of the kit: the owner's 100 x 100 icon for the Boosters Rocket app's listing with
+  Intuit (the QuickBooks app's icon in Intuit's developer portal). Kept here so it is versioned with the rest.
 
 ## In this repo
 
 - **Fonts.** `tokens.css` starts with a Google Fonts `@import` (Bricolage Grotesque and Inter). That import is for
-  brand surfaces outside the app only (the README's images, the website, the social preview). The app never loads it
-  and never loads a font from Google: it self-hosts Inter through `next/font` (`src/app/layout.tsx`), and does not use
-  Bricolage Grotesque at all.
+  brand surfaces outside the app only (the website, the social images). The app never loads it and never loads a font
+  from Google: it self-hosts Inter through `next/font` (`src/app/layout.tsx`), and does not use Bricolage Grotesque at
+  all. The kit's lockups and "Powered by" badges draw the wordmark as outlines, so showing one loads no font.
 - **Tokens.** `tokens.css` and `tokens.json` are the brand's source values, not the app's stylesheet. The app's tokens
   live in `src/app/booster.css` (mirrored in `src/lib/theme/palette.ts` and measured by
   `tests/unit/design-tokens.test.ts`), with sizes in rem: the kit's px scale is not imported. The status colors and the
   badge ink there are the kit's, checked against the app's own grounds (`DESIGN.md`, Colors).
-- **The rules for agents** are in `AGENTS.md` ("Brand & UI"), adapted from the snippet below: the club leads, the
-  product is a "Powered by Boosters Rocket" badge, tokens in `src/app/booster.css`.
+- **The badge.** The footer's "Powered by Boosters Rocket" (`src/app/components/powered-by.tsx`) is the kit's outlined
+  `powered-by-mono.svg` and `powered-by-color-light.svg`, inlined so its inks come from the app's tokens (one ink,
+  `--badge-ink`; in color, the `--br-*` tokens, which follow the display mode). Its coordinates are rounded to two
+  places; the files here are the originals.
+- **The setup pages' icon** (`src/app/setup/product-mark.tsx`) is the kit's `logos/app-icon-small.svg`, inline.
+- **The club's own app icons** are the club's monogram, not the product's (`src/app/icons/[name]/route.ts`): nothing
+  here replaces them.
+- **The rules for agents** are in `AGENTS.md` ("Brand & UI"), adapted from the kit's snippet below: the club leads, the
+  product is a "Powered by Boosters Rocket" badge, tokens in `src/app/booster.css`. Where the snippet and `AGENTS.md`
+  differ (the snippet's `brand/tokens.css` and its Bricolage headings), `AGENTS.md` applies.
 - **Use of the name and logos:** `TRADEMARKS.md` at the repo's root.
 
-- `BRAND.md` — the brand guide: co-branding rules, logo use, color, type, voice.
-- `tokens.css` / `tokens.json` — design tokens.
-- `logos/` — SVG logo, icon, and "Powered by" files. Mono files use `currentColor`.
+## For Claude Code (the kit's snippet)
 
-## For Claude Code
-
-Add this to the repo's `CLAUDE.md`:
+The kit suggests this for the repo's `CLAUDE.md`; this repo's version is in `AGENTS.md`:
 
 ```md
 ## Brand & UI
@@ -34,7 +52,7 @@ Add this to the repo's `CLAUDE.md`:
 - Fonts: Inter for UI; Bricolage Grotesque only for display headings.
 ```
 
-Lockup and "Powered by" SVGs use live text (Bricolage Grotesque / Inter). In the app, render them as HTML text + the mark SVG instead, or convert the text to outlines for print.
+All SVGs have text converted to outlines, so they render identically everywhere without the fonts installed.
 
 ## Other companies' marks
 

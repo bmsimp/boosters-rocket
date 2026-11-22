@@ -1,7 +1,7 @@
 <h1>
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="brand/logos/lockup-horizontal-color-dark-bg.svg">
-    <img alt="Boosters Rocket" src="brand/logos/lockup-horizontal-color.svg" width="360" height="64">
+    <source media="(prefers-color-scheme: dark)" srcset="brand/exports/social/readme-banner-dark-1280x320.svg">
+    <img alt="Boosters Rocket" src="brand/exports/social/readme-banner-light-1280x320.svg" width="1280" height="320">
   </picture>
 </h1>
 
@@ -116,7 +116,8 @@ the interface problems still open.
 ## The brand
 
 [The brand guide](brand/BRAND.md) has the logos, the colors and how the portal is co-branded: inside a club's
-portal the club's name, logo and color lead, and Boosters Rocket is a "Powered by" badge in the footer.
+portal the club's name, logo and color lead, and Boosters Rocket is a "Powered by" badge in the footer. Every logo,
+icon and banner, outlined and exported for each use, is in [`brand/exports/`](brand/exports/README.md).
 
 Licensed under [AGPL-3.0](LICENSE). The code is open; the name "Boosters Rocket" and its logos are reserved:
 a fork that changes the software uses its own name and logo, and a club running it unmodified may show
