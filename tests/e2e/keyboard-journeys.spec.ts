@@ -471,7 +471,7 @@ test.describe("10. sign-in settings, by keyboard: asking again, then the change 
     await page.keyboard.press("Tab");
     await expect(passwordBox.getByRole("button", { name: "Continue" })).toBeFocused();
     await page.keyboard.press("Enter");
-    await expect(passwordBox.getByRole("status")).toContainText("We've emailed you a 6-digit code.");
+    await expect(passwordBox.getByRole("status")).toContainText("Enter the 6-digit code we've emailed you to go on.");
     const code = passwordBox.getByLabel("6-digit code");
     await expect(code).toBeFocused();
     // A wrong code is an alert, and the focus stays in the field.

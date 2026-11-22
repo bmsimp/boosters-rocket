@@ -22,7 +22,7 @@ for (const [path, heading] of [["/sign-in", "Sign in"], ["/staff/sign-in", "Staf
   });
 }
 
-test("the parent door promises what a parent finds today: their students, what's owed, forms and volunteer shifts", async ({ page }) => {
+test("the parent door asks for the email and password, and says a new device asks one thing more", async ({ page }) => {
   await page.goto("/sign-in");
   // Since the sign-in release's slice SI-3b: the email and password, and one more thing only on a device the portal
   // doesn't know (since SI-7a it never says which: a code, the app or a passkey).

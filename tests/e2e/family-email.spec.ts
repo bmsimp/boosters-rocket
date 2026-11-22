@@ -81,7 +81,7 @@ test.describe("a parent changes their sign-in email", () => {
 
     await expect(page).toHaveURL(/\/family\/email$/);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Change your sign-in email");
-    await expect(page.locator("main .lede")).toContainText("You sign in with zelda@example.com.");
+    await expect(page.locator("main .lede")).toContainText("You sign in with zelda@example.com now.");
     await page.getByRole("textbox", { name: "New email" }).fill(` ${NEW.toUpperCase()} `);
     await noSidewaysScroll(page);
     const send = page.getByRole("button", { name: "Send me a link" });

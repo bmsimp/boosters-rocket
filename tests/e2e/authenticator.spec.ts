@@ -59,7 +59,7 @@ async function newDevice(browser: Browser, baseURL: string): Promise<{ page: Pag
   await page.getByLabel("Password").fill(E2E_SIGNIN.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   // Asked for the app, never for an emailed code.
-  await expect(page.getByRole("status")).toContainText("enter the 6-digit code from your authenticator app");
+  await expect(page.getByRole("status")).toContainText("Enter the 6-digit code from your authenticator app");
   return { page, close: () => context.close() };
 }
 /** The second step's one field and Confirm, then the family chooser to Home. */
@@ -81,12 +81,12 @@ test("a parent sets an authenticator app up, signs in on new browsers with its c
   await context.addCookies([parentSessionCookie()]);
   await page.goto("/family/sign-in");
   const box = page.getByRole("region", { name: "Authenticator app" });
-  await expect(box).toContainText("An authenticator app on your phone");
+  await expect(box).toContainText("An app like Google or Microsoft Authenticator");
 
   // Shown it's her first: her password, then the code emailed to her (she has no app yet).
   await box.getByLabel("Your password").fill(E2E_SIGNIN.password);
   await box.getByRole("button", { name: "Continue" }).click();
-  await expect(box.getByRole("status")).toContainText("We've emailed you a 6-digit code.");
+  await expect(box.getByRole("status")).toContainText("Enter the 6-digit code we've emailed you to go on.");
   await box.getByLabel("6-digit code").fill(await codeFor(sql, sink, ZELDA_EMAIL));
   await box.getByRole("button", { name: "Confirm" }).click();
   await expect(box.getByText("Thank you, that's you.")).toBeVisible();
