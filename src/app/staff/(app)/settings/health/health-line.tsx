@@ -27,13 +27,3 @@ export function HealthLineWords({ line: l }: { line: HealthLine }) {
     </>
   );
 }
-
-/** One Health line on its own, as an integration's page shows it: its state, then its words. */
-export function HealthLineBody({ line }: { line: HealthLine }) {
-  return (
-    <ul className="lines">
-      <li data-health={line.key} data-state={line.state}><div><span className="what"><b>{line.title}</b></span><HealthLineWords line={line} /></div>
-        <StateWord state={line.state} word={line.word} /></li>
-    </ul>
-  );
-}

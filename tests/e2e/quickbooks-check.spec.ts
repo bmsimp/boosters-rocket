@@ -10,7 +10,8 @@ test("an Admin opens the check from QuickBooks settings, and is told it can't ru
   const toIntuit: string[] = [];
   page.on("request", (r) => { if (/intuit\.com/i.test(r.url())) toIntuit.push(r.url()); });
   await page.goto("/staff/settings/quickbooks");
-  const section = page.getByRole("region", { name: "The portal's requests" });
+  // The portal's requests are a line of the Connection card's roster section.
+  const section = page.getByRole("region", { name: "Roster" });
   await expect(section).toContainText("haven't been checked against a company yet");
   await section.getByRole("link", { name: "Check the portal's requests" }).click();
   await expect(page).toHaveURL(/\/staff\/settings\/quickbooks\/check$/);

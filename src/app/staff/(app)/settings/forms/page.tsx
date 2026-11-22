@@ -25,8 +25,9 @@ export default async function FormsSettingsPage() {
       <IntegrationHead of="documenso" title="Documenso" status={row.status}
         lede={<>Parents sign the club&apos;s forms inside the portal, in a Documenso the club runs itself. This page connects the two. Only Admins can change it, because the API token can read every signed form.</>} />
 
+      {summary.origin !== null && (
       <Card title="Connection" titleId="forms-conn-h">
-        {summary.origin === null ? <p>Forms aren&apos;t set up yet. Until they are, parents read that forms aren&apos;t ready, and nothing else changes for them.</p> : (
+        {(
           <KeyValue items={[
             { key: "origin", label: "Documenso", value: <code>{summary.origin}</code> },
             { key: "token", label: "API token", value: summary.tokenReadable ? "Saved" : "Saved, but it can't be opened with this server's encryption key. Enter it again." },
@@ -36,11 +37,12 @@ export default async function FormsSettingsPage() {
           ]} />
         )}
       </Card>
+      )}
 
-      <IntegrationHealth id="forms" here="/staff/settings/forms" line={lines.find((l) => l.key === "forms")} />
+      <IntegrationHealth here="/staff/settings/forms" line={lines.find((l) => l.key === "forms")} />
 
       <Card title={summary.origin === null ? "Set up" : "Change"} titleId="forms-change-h">
-        <p>{summary.origin === null ? "Four steps: Documenso's address and an API token, a check, the webhook, and a template for each form." : "Open the steps to change the address or the API token, check the connection again, or make a new webhook secret."}</p>
+        <p>{summary.origin === null ? "Until forms are set up, parents read that forms aren't ready, and nothing else changes for them. Four steps: Documenso's address and an API token, a check, the webhook, and a template for each form." : "Open the steps to change the address or the API token, check the connection again, or make a new webhook secret."}</p>
         <p className="settings-open"><LinkButton href="/staff/settings/forms/setup" variant="primary">{summary.origin === null ? "Set up" : "Change"}</LinkButton></p>
       </Card>
     </main>

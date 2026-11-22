@@ -22,9 +22,9 @@ export const metadata = { title: "QuickBooks settings" };
 export const dynamic = "force-dynamic";
 
 /**
- * QuickBooks, an integration's page (the Settings spec, "Integration pages"): its head with the status, what is set,
- * its Health line, its own cards (the membership shape, the roster, the portal's requests), then the change, ending with
- * Disconnect. What is set is shown plainly, with no inputs; changing anything opens the steps.
+ * QuickBooks, an integration's page (the Settings spec, "Integration pages"): its head with the status, its Health
+ * line only when it needs attention, then two surfaces: Connection (what is set, and the roster's section: the
+ * membership shape, the last read, the worker and the portal's requests) and the change, ending with Disconnect. What is set is shown plainly, with no inputs; changing anything opens the steps.
  */
 export default async function QuickBooksSettingsPage() {
   const ctx = await requireStaffPage("Settings.QuickBooks.ReadWrite");
@@ -37,41 +37,33 @@ export default async function QuickBooksSettingsPage() {
       <IntegrationHead of="quickbooks" title="QuickBooks" status={row.status}
         lede={<>{row.does} Only Admins can change these settings, because they reach the club&apos;s books.</>} />
       {problems.length > 0 && <Notice tone="warning" title="Needs attention" titleId="qbo-problems-h"><ul className="notice-list">{problems.map((p) => <li key={p.kind}>{p.text}</li>)}</ul></Notice>}
+      <IntegrationHealth here="/staff/settings/quickbooks" line={lines.find((l) => l.key === "quickbooks")} />
 
-      <Card title="Connection" titleId="qbo-conn-h">
-        <HowThisWorks summary="What the portal does with QuickBooks"><p>{QUICKBOOKS_USE.reads} {QUICKBOOKS_USE.writes} Each change is in the audit log.</p></HowThisWorks>
-        {!conn.configured ? <p>QuickBooks isn&apos;t set up yet.</p> : (
-          // The company's name is QuickBooks text: a text child, never markup.
+      {conn.configured && (
+        <Card title="Connection" titleId="qbo-conn-h">
+          <HowThisWorks summary="What the portal does with QuickBooks"><p>{QUICKBOOKS_USE.reads} {QUICKBOOKS_USE.writes} Each change is in the audit log.</p></HowThisWorks>
+          {/* The company's name is QuickBooks text: a text child, never markup. */}
           <KeyValue items={[
-            { key: "status", label: "Status", value: conn.connected ? <>Connected to <b>{conn.companyName ?? "a QuickBooks company"}</b></> : "Not connected. The Intuit app's keys are saved." },
+            { key: "company", label: "Company", value: conn.connected ? <b>{conn.companyName ?? "A QuickBooks company"}</b> : "None. The Intuit app's keys are saved." },
             { key: "env", label: "Which QuickBooks", value: conn.environment === "production" ? "Production (the club's real books)" : "Sandbox (an Intuit test company)" },
             { key: "client", label: "Client ID", value: <code>{conn.clientId}</code> },
             conn.connected && { key: "at", label: "Connected", value: when(conn.connectedAt) },
             conn.connected && { key: "renewed", label: "Last renewed", value: when(conn.lastTokenRefreshAt) },
             conn.connected && { key: "expires", label: "Expires", value: <>{when(conn.refreshExpiresAt)} unless it is renewed first. The worker renews it every day.</> },
           ]} />
-        )}
-      </Card>
-
-      <IntegrationHealth id="qbo" here="/staff/settings/quickbooks" line={lines.find((l) => l.key === "quickbooks")} />
-
-      <Card title="Membership shape" titleId="qbo-shape-h">
-        <p>{page.shapeWords ?? "Not chosen yet."}</p>
-        {page.brokenTypes.length > 0 && <Notice tone="warning">This shape names a customer type QuickBooks no longer has. Choose the shape again.</Notice>}
-      </Card>
-
-      <Card title="Roster" titleId="qbo-roster-h">
-        <KeyValue items={[
-          { key: "read", label: "Last read from QuickBooks", value: <>{page.lastOkAt ? <LocalTime iso={page.lastOkAt} /> : "Not yet"}{page.lastRun && !page.lastRun.ok ? <> (the latest try failed: {page.lastRun.detail})</> : null}{!conn.connected && page.lastOkAt ? ". QuickBooks is disconnected, so the roster is no longer current." : null}</> },
-          { key: "found", label: "What it found", value: rosterCounts(page.roster) || "Nothing to show until a shape is chosen." },
-          { key: "worker", label: "Worker", value: wake ? <>Last checked in <LocalTime iso={wake} /></> : "Hasn't checked in yet." },
-        ]} />
-      </Card>
-
-      <Card title={"The portal's requests"} titleId="qbo-check-h">
-        <p>{lastCheckWords(checked)}{checked ? <> (<LocalTime iso={checked.at} />)</> : null}</p>
-        <p><a className="link-line" href="/staff/settings/quickbooks/check">Check the portal&apos;s requests</a></p>
-      </Card>
+          <section className="box-section" aria-labelledby="qbo-roster-h">
+            <h3 id="qbo-roster-h">Roster</h3>
+            <KeyValue items={[
+              { key: "shape", label: "Membership shape", value: page.shapeWords ?? "Not chosen yet." },
+              { key: "read", label: "Last read from QuickBooks", value: <>{page.lastOkAt ? <LocalTime iso={page.lastOkAt} /> : "Not yet"}{page.lastRun && !page.lastRun.ok ? <> (the latest try failed: {page.lastRun.detail})</> : null}{!conn.connected && page.lastOkAt ? ". QuickBooks is disconnected, so the roster is no longer current." : null}</> },
+              { key: "found", label: "What it found", value: rosterCounts(page.roster) || "Nothing to show until a shape is chosen." },
+              { key: "worker", label: "Worker", value: wake ? <>Last checked in <LocalTime iso={wake} /></> : "Hasn't checked in yet." },
+              { key: "requests", label: "The portal's requests", value: <>{lastCheckWords(checked)}{checked ? <> (<LocalTime iso={checked.at} />)</> : null} <a href="/staff/settings/quickbooks/check">Check the portal&apos;s requests</a></> },
+            ]} />
+            {page.brokenTypes.length > 0 && <Notice tone="warning">This shape names a customer type QuickBooks no longer has. Choose the shape again.</Notice>}
+          </section>
+        </Card>
+      )}
 
       <Card title={conn.configured ? "Change" : "Set up"} titleId="qbo-change-h">
         <p>{conn.configured ? "Open the steps to change the Intuit app's keys, renew the connection or choose the shape again." : "Three steps: the Intuit app's keys, signing in to Intuit, and the shape of your membership."}</p>
