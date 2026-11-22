@@ -419,7 +419,7 @@ describe("the family's pages after an unlink", () => {
     expect(html).not.toContain('id="create-link-h"');
     expect(html).not.toMatch(/<button[^>]*>Create in QuickBooks and link<\/button>/);
     expect(textOf(sectionOf(html, "portal-changes-h"))).toContain("This family isn't linked to QuickBooks, so changes are saved here only");
-    expect(textOf(sectionOf(html, "changes-h"))).toContain("This family isn't linked to a customer in QuickBooks: a change to it is saved in the portal only.");
+    expect(html).not.toContain('id="changes-h"');
     // A reader who may not link families is told who can, with no link.
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     const theirs = ledeOf(await renderPage(RosterEntryPage, { params: { id: String(rivera) } }));

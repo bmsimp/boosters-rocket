@@ -26,10 +26,10 @@ import { addStudentAction, addStudentHereAction, createAction, createAndLinkActi
 
 /**
  * What can be changed here for this club, and why the rest can't, in words (src/lib/roster/operations.ts): one line,
- * and the rest under How this works. On a family's page (`onFamily`) a move's and a new guardian's consequences are left
- * out, as Move a student and Add a guardian say them there.
+ * and the rest under How this works. The roster page's alone: a family's page says what it needs in its own folds
+ * (ChangesInQuickBooks below, Move a student, Add a guardian).
  */
-export function WhatChanges({ shape, canChange, unlinked = false, onFamily = false }: { shape: MembershipShape; canChange: boolean; unlinked?: boolean; onFamily?: boolean }) {
+export function WhatChanges({ shape, canChange, unlinked = false }: { shape: MembershipShape; canChange: boolean; unlinked?: boolean }) {
   const { offered, notOffered } = shapeOperations(shape);
   const words: [RosterOperation, string][] = shape.kind === "flat"
     ? [["create_member", "make a member"], ["rename_member", "rename one"], ["deactivate_member", "make one inactive"]]
@@ -49,8 +49,8 @@ export function WhatChanges({ shape, canChange, unlinked = false, onFamily = fal
             : <><li>A new family is saved here, and made in QuickBooks too if you can link families.</li><li>A family with no link is changed here only.</li></>}
         </ul>
         {notOffered.map((n) => <p key={n.why}>{n.why}</p>)}
-        {canChange && !onFamily && <p>A move: the student takes their completed forms, and unfinished ones start again. They give up places on shifts still to come. Earned credit stays with the old family. An unpaid buy-out invoice is voided, and a paid one is flagged for the club. Invoices follow once QuickBooks has the move.</p>}
-        {canChange && !onFamily && <p>A new guardian gets their own Parent customer under the family, with their name and sign-in address, unless one of that name is there already. It is renamed with them. When they&apos;re removed it is made inactive, but only if it has no balance the portal can read, owed or a credit.</p>}
+        {canChange && <p>A move: the student takes their completed forms, and unfinished ones start again. They give up places on shifts still to come. Earned credit stays with the old family. An unpaid buy-out invoice is voided, and a paid one is flagged for the club. Invoices follow once QuickBooks has the move.</p>}
+        {canChange && <p>A new guardian gets their own Parent customer under the family, with their name and sign-in address, unless one of that name is there already. It is renamed with them. When they&apos;re removed it is made inactive, but only if it has no balance the portal can read, owed or a credit.</p>}
         <p>{NOT_HERE.contact}</p>
       </HowThisWorks>
     </Card>
@@ -310,6 +310,7 @@ export function FamilyChanges({ shape, family, edit, cover, inactiveRecords, lin
   const f = family.customer;
   return (
     <Card title="Change in QuickBooks" titleId="family-changes-h">
+      <ChangesInQuickBooks />
       <RecordChanges who="the family" c={f} rename={offered.has("rename_family")} deactivate={false} edit={edit} warning=""
         extra={offered.has("deactivate_family") && cover ? <FamilyInactive family={f} cover={cover} edit={edit} /> : null} />
       {f.active && offered.has("add_student") && (
@@ -337,10 +338,24 @@ export function FamilyChanges({ shape, family, edit, cover, inactiveRecords, lin
   );
 }
 
+/** What a family's or member's changes in QuickBooks do, folded under the card's title: the roster page says it in Changing the roster. */
+function ChangesInQuickBooks() {
+  return (
+    <HowThisWorks>
+      <ul>
+        <li>A rename, new student or move of a linked family is saved here first, then sent. If QuickBooks refuses, it stays here and Reconciliation lists it.</li>
+        <li>Making someone inactive goes to QuickBooks first. The roster shows it once QuickBooks has it.</li>
+      </ul>
+      <p>{NOT_HERE.contact}</p>
+    </HowThisWorks>
+  );
+}
+
 /** A flat club's member: rename and make inactive. */
 export function MemberChanges({ member, edit }: { member: Cust; edit: Edit }) {
   return (
     <Card title="Change in QuickBooks" titleId="member-changes-h">
+      <ChangesInQuickBooks />
       <RecordChanges who="the member" c={member} rename deactivate edit={edit} follow warning="They can no longer sign in. If QuickBooks shows a balance, owed or a credit, or the portal can't read it, nothing is made inactive until it's settled there." />
     </Card>
   );

@@ -304,12 +304,13 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
   it("a family's page, with both permissions: rename, add a student, move and make inactive; no \"Add a parent\" (stage 3's slice 9h)", async () => {
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
-    for (const words of ["Change in QuickBooks", "Add a student", "Change the student Leo Rivera", "Change the parent Ana Rivera", "Move to", "Make Rivera Family inactive",
-      "From the portal you can make a family, add a student, give each new guardian their own Parent customer, rename a family, student or parent, move a student to another family and make a family, student or parent inactive."]) {
+    for (const words of ["Change in QuickBooks", "Add a student", "Change the student Leo Rivera", "Change the parent Ana Rivera", "Move to", "Make Rivera Family inactive"]) {
       expect(html, words).toContain(words.replaceAll("'", "&#x27;"));
     }
     // A guardian is added under Portal sign-ins, which makes their Parent customer: the QuickBooks-only form is gone.
     expect(html).not.toContain("Add a parent");
+    // What the roster can change is the roster page's card alone: a family's page says it in its own folds.
+    expect(html).not.toContain('id="changes-h"');
     // A guardian's phone and address are the portal's own (stage 3's slice 11a), sent on after each save (slice 11b):
     // nothing says staff change them in QuickBooks.
     expect(html).toContain(NOT_HERE.contact.replaceAll("'", "&#x27;"));
@@ -376,12 +377,12 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
     expect(posts()).toEqual([]);
   });
 
-  it("with Roster.Read alone: what can be changed, and by whom, but no form", async () => {
+  it("with Roster.Read alone: the roster page says what can be changed, and by whom, and neither page has a form", async () => {
     asStaff(await staffWith("reader@club.org", ["Roster.Read"]));
     const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
-    expect(html).toContain("Staff who may change the roster can make a family");
-    for (const words of ["Change in QuickBooks", "Add a student", "Make Rivera Family inactive"]) expect(html).not.toContain(words);
+    for (const words of ["Change in QuickBooks", "Add a student", "Make Rivera Family inactive", "Changing the roster"]) expect(html).not.toContain(words);
     const list = await renderPage(RosterPage);
+    expect(list).toContain("Staff who may change the roster can make a family");
     expect(list).not.toContain("Make a family</h2>");
   });
 
