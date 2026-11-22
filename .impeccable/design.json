@@ -1,25 +1,25 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-07T14:29:48+00:00",
+  "generatedAt": "2026-11-22T00:30:37.458Z",
   "title": "Design System: Booster Rocket",
   "extensions": {
     "colorMeta": {
       "club": {
         "role": "primary",
-        "displayName": "Club Fill (runtime; FZN purple default)",
+        "displayName": "Club Fill (runtime; default purple)",
         "canonical": "#5b2a86",
         "oklch": "oklch(40.0% 0.148 305.0)",
         "tonalRamp": [
-          "#0f0619",
-          "#29183b",
-          "#462b61",
-          "#6f4797",
-          "#9369c0",
-          "#b394d8",
-          "#d8c3f2",
-          "#f5e8ff"
+          "#130025",
+          "#340255",
+          "#53217d",
+          "#72429f",
+          "#9566c6",
+          "#b98ceb",
+          "#d7bdf7",
+          "#f3eaff"
         ],
-        "derivation": "Runtime: the one color the club picks. Unchanged in every mode."
+        "derivation": "The color the club picked; the same in every mode. Primary button, logo tile, current step's track."
       },
       "club-on": {
         "role": "primary",
@@ -28,179 +28,15 @@
         "oklch": "oklch(100.0% 0.000 89.9)",
         "tonalRamp": [
           "#0b0b0b",
-          "#222222",
-          "#3a3a3a",
+          "#242424",
+          "#404040",
           "#5d5d5d",
           "#808080",
           "#a4a4a4",
-          "#cecece",
+          "#cacaca",
           "#eeeeee"
         ],
-        "derivation": "White if white on club >= 4.5:1, else ink #14161a. Unchanged in every mode."
-      },
-      "club-text": {
-        "role": "primary",
-        "displayName": "Club Text (derived)",
-        "canonical": "#5b2a86",
-        "oklch": "oklch(40.0% 0.148 305.0)",
-        "tonalRamp": [
-          "#0f0619",
-          "#29183b",
-          "#462b61",
-          "#6f4797",
-          "#9369c0",
-          "#b394d8",
-          "#d8c3f2",
-          "#f5e8ff"
-        ],
-        "derivation": "Resolves per mode to club-text-l / -d / -lhc / -dhc."
-      },
-      "club-tint": {
-        "role": "primary",
-        "displayName": "Club Wash (derived)",
-        "canonical": "#f1ebf6",
-        "oklch": "oklch(94.8% 0.016 310.1)",
-        "tonalRamp": [
-          "#0c0b0d",
-          "#232124",
-          "#3c393f",
-          "#605c64",
-          "#837e87",
-          "#a7a3aa",
-          "#cfccd1",
-          "#efeef1"
-        ],
-        "derivation": "Resolves per theme to club-tint-l / -d."
-      },
-      "paper": {
-        "role": "neutral",
-        "displayName": "Chart Paper",
-        "canonical": "#ffffff",
-        "oklch": "oklch(100.0% 0.000 89.9)",
-        "tonalRamp": [
-          "#0b0b0b",
-          "#222222",
-          "#3a3a3a",
-          "#5d5d5d",
-          "#808080",
-          "#a4a4a4",
-          "#cecece",
-          "#eeeeee"
-        ]
-      },
-      "grid": {
-        "role": "neutral",
-        "displayName": "Grid Line",
-        "canonical": "#e8eae6",
-        "oklch": "oklch(93.4% 0.006 128.5)",
-        "tonalRamp": [
-          "#0b0b0b",
-          "#212221",
-          "#3a3b39",
-          "#5d5e5b",
-          "#7f817d",
-          "#a4a5a2",
-          "#cdcecc",
-          "#eeefed"
-        ],
-        "note": "High contrast: transparent (grid removed)."
-      },
-      "ink": {
-        "role": "neutral",
-        "displayName": "Drill Ink",
-        "canonical": "#14161a",
-        "oklch": "oklch(20.0% 0.009 264.4)",
-        "tonalRamp": [
-          "#0b0b0c",
-          "#212224",
-          "#393a3d",
-          "#5b5e62",
-          "#7e8085",
-          "#a3a5a8",
-          "#ccced0",
-          "#eeeef0"
-        ]
-      },
-      "ink-2": {
-        "role": "neutral",
-        "displayName": "Pencil",
-        "canonical": "#4c5159",
-        "oklch": "oklch(43.3% 0.015 259.8)",
-        "tonalRamp": [
-          "#0a0b0d",
-          "#202225",
-          "#383b40",
-          "#595e65",
-          "#7c8188",
-          "#a1a5ab",
-          "#cbced2",
-          "#edeef1"
-        ]
-      },
-      "hair": {
-        "role": "neutral",
-        "displayName": "Hairline",
-        "canonical": "#d9dcd6",
-        "oklch": "oklch(89.0% 0.009 128.6)",
-        "tonalRamp": [
-          "#0b0b0a",
-          "#212220",
-          "#3a3b38",
-          "#5c5e5a",
-          "#7f817c",
-          "#a3a5a1",
-          "#cdcecb",
-          "#eeefed"
-        ],
-        "note": "High contrast: hair = ink."
-      },
-      "done": {
-        "role": "tertiary",
-        "displayName": "Field Green",
-        "canonical": "#2f6b3a",
-        "oklch": "oklch(47.5% 0.100 147.7)",
-        "tonalRamp": [
-          "#040e05",
-          "#112715",
-          "#214327",
-          "#386b40",
-          "#598f61",
-          "#88b18c",
-          "#bbd6bd",
-          "#e3f4e4"
-        ]
-      },
-      "due": {
-        "role": "tertiary",
-        "displayName": "Due Amber",
-        "canonical": "#9a4f08",
-        "oklch": "oklch(51.0% 0.123 54.9)",
-        "tonalRamp": [
-          "#160701",
-          "#361904",
-          "#592e0a",
-          "#8b4a15",
-          "#b36c39",
-          "#cf9771",
-          "#ecc5ac",
-          "#ffe9da"
-        ]
-      },
-      "late": {
-        "role": "tertiary",
-        "displayName": "Past-Due Red",
-        "canonical": "#a3261b",
-        "oklch": "oklch(47.2% 0.163 29.6)",
-        "tonalRamp": [
-          "#1a0402",
-          "#3e0f0a",
-          "#661f17",
-          "#9e3529",
-          "#c95749",
-          "#e2897b",
-          "#fbbcb2",
-          "#ffe4dd"
-        ]
+        "derivation": "White or #14161a, whichever contrasts more with the club fill."
       },
       "club-text-l": {
         "role": "primary",
@@ -208,16 +44,16 @@
         "canonical": "#5b2a86",
         "oklch": "oklch(40.0% 0.148 305.0)",
         "tonalRamp": [
-          "#0f0619",
-          "#2c193f",
-          "#4c2f69",
-          "#754ba0",
-          "#9870c4",
-          "#b99bdc",
-          "#dbc7f4",
-          "#f5e8ff"
+          "#130025",
+          "#340255",
+          "#53217d",
+          "#72429f",
+          "#9566c6",
+          "#b98ceb",
+          "#d7bdf7",
+          "#f3eaff"
         ],
-        "derivation": "Light paper: club if >= 4.5:1 on white, else darkened (same hue)."
+        "derivation": "Club color darkened until 4.5:1 on the light muted surface and on the light tint."
       },
       "club-text-d": {
         "role": "primary",
@@ -225,16 +61,16 @@
         "canonical": "#c9a7ea",
         "oklch": "oklch(78.2% 0.100 307.4)",
         "tonalRamp": [
-          "#0e0814",
-          "#2a1d36",
-          "#49365b",
-          "#71558b",
-          "#9478af",
-          "#b6a0cb",
-          "#d9cae8",
-          "#f3eafd"
+          "#11041c",
+          "#2f1544",
+          "#4e2f68",
+          "#6d4d89",
+          "#9070af",
+          "#b495d3",
+          "#d4c1e8",
+          "#f2ebfa"
         ],
-        "derivation": "Dark paper: lightened (same hue) until >= 4.5:1 on paper-dark."
+        "derivation": "Club color lightened until 4.5:1 on the dark muted surface and on the dark tint."
       },
       "club-text-lhc": {
         "role": "primary",
@@ -242,16 +78,16 @@
         "canonical": "#45206a",
         "oklch": "oklch(33.7% 0.124 303.3)",
         "tonalRamp": [
-          "#0e0717",
-          "#2a1c3b",
-          "#493364",
-          "#715197",
-          "#9475bc",
-          "#b59fd5",
-          "#d8c9ef",
-          "#f3e9ff"
+          "#110221",
+          "#300e4e",
+          "#4e2a74",
+          "#6c4996",
+          "#906cbd",
+          "#b492e1",
+          "#d4c0f1",
+          "#f2ebfd"
         ],
-        "derivation": ">= 7:1 on white."
+        "derivation": "Darkened until 7:1."
       },
       "club-text-dhc": {
         "role": "primary",
@@ -259,16 +95,16 @@
         "canonical": "#e5d3f7",
         "oklch": "oklch(89.3% 0.052 307.8)",
         "tonalRamp": [
-          "#0d0a10",
-          "#27212d",
-          "#453b4e",
-          "#6b5c79",
-          "#8e7f9c",
-          "#b1a5bc",
-          "#d5cddd",
-          "#f1ecf6"
+          "#0e0814",
+          "#2a1e35",
+          "#473855",
+          "#665675",
+          "#897899",
+          "#ad9dbd",
+          "#d0c6da",
+          "#f0edf4"
         ],
-        "derivation": ">= 7:1 on black."
+        "derivation": "Lightened until 7:1."
       },
       "club-tint-l": {
         "role": "primary",
@@ -276,16 +112,16 @@
         "canonical": "#f1ebf6",
         "oklch": "oklch(94.8% 0.016 310.1)",
         "tonalRamp": [
-          "#0c0b0d",
-          "#252327",
-          "#413e44",
-          "#66616a",
-          "#89848d",
-          "#ada9b0",
-          "#d2d0d4",
-          "#efeef1"
+          "#0c0a0e",
+          "#262229",
+          "#423d46",
+          "#605b64",
+          "#837e88",
+          "#a7a2ac",
+          "#ccc9cf",
+          "#efeef0"
         ],
-        "derivation": "Pale wash over white; club-text-l >= 4.5:1 on it."
+        "derivation": "Club color mixed 8% into the light surface."
       },
       "club-tint-d": {
         "role": "primary",
@@ -293,771 +129,857 @@
         "canonical": "#2a2133",
         "oklch": "oklch(26.6% 0.035 307.0)",
         "tonalRamp": [
-          "#0c0a0e",
-          "#26222a",
-          "#433d4a",
-          "#685f72",
-          "#8b8295",
-          "#aea7b6",
-          "#d3cfd9",
-          "#f0edf4"
+          "#0d0911",
+          "#282030",
+          "#453b4e",
+          "#63596d",
+          "#867b91",
+          "#aaa0b5",
+          "#cec7d5",
+          "#f0edf2"
         ],
-        "derivation": "Deep wash over near-black; club-text-d >= 4.5:1 on it."
+        "derivation": "Club color mixed 14% into the dark surface."
       },
-      "paper-dark": {
+      "ground": {
         "role": "neutral",
-        "displayName": "Night Paper",
-        "canonical": "#16181c",
-        "oklch": "oklch(20.9% 0.009 264.4)",
+        "displayName": "Near-White Ground",
+        "canonical": "#f7f7f8",
+        "oklch": "oklch(97.6% 0.001 286.4)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#242424",
+          "#404040",
+          "#5d5d5e",
+          "#808081",
+          "#a4a4a5",
+          "#cacacb",
+          "#eeeeee"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Surface",
+        "canonical": "#ffffff",
+        "oklch": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#242424",
+          "#404040",
+          "#5d5d5d",
+          "#808080",
+          "#a4a4a4",
+          "#cacaca",
+          "#eeeeee"
+        ]
+      },
+      "surface-raised": {
+        "role": "neutral",
+        "displayName": "Menu Surface",
+        "canonical": "#ffffff",
+        "oklch": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#242424",
+          "#404040",
+          "#5d5d5d",
+          "#808080",
+          "#a4a4a4",
+          "#cacaca",
+          "#eeeeee"
+        ]
+      },
+      "surface-muted": {
+        "role": "neutral",
+        "displayName": "Muted Surface",
+        "canonical": "#f2f2f4",
+        "oklch": "oklch(96.2% 0.003 286.3)",
+        "tonalRamp": [
+          "#0b0b0c",
+          "#242425",
+          "#3f3f41",
+          "#5d5d5f",
+          "#808082",
+          "#a4a4a6",
+          "#cacacb",
+          "#eeeeef"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "#e3e4e8",
+        "oklch": "oklch(91.9% 0.006 275.0)",
         "tonalRamp": [
           "#0b0b0c",
           "#232426",
-          "#3e4043",
-          "#616368",
-          "#84868b",
-          "#a9abae",
-          "#d0d1d3",
+          "#3f4043",
+          "#5d5d61",
+          "#7f8084",
+          "#a3a4a8",
+          "#cacacc",
+          "#eeeeef"
+        ]
+      },
+      "border-control": {
+        "role": "neutral",
+        "displayName": "Control Edge",
+        "canonical": "#cfd2d8",
+        "oklch": "oklch(86.3% 0.009 264.5)",
+        "tonalRamp": [
+          "#0a0b0d",
+          "#222428",
+          "#3d4045",
+          "#5b5e63",
+          "#7d8086",
+          "#a2a5aa",
+          "#c9cace",
           "#eeeef0"
         ]
       },
-      "grid-dark": {
+      "border-strong": {
         "role": "neutral",
-        "displayName": "Night Grid",
-        "canonical": "#22252b",
-        "oklch": "oklch(26.4% 0.012 264.3)",
+        "displayName": "Strong Edge (3:1)",
+        "canonical": "#8a8e98",
+        "oklch": "oklch(64.7% 0.016 268.4)",
+        "tonalRamp": [
+          "#0a0b0f",
+          "#21242b",
+          "#3c4048",
+          "#5a5d67",
+          "#7c808a",
+          "#a1a4ae",
+          "#c8cad0",
+          "#edeef1"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#18191d",
+        "oklch": "oklch(21.4% 0.008 274.5)",
+        "tonalRamp": [
+          "#0b0b0d",
+          "#232428",
+          "#3e3f44",
+          "#5c5d62",
+          "#7f8085",
+          "#a3a4a9",
+          "#c9cacd",
+          "#eeeeef"
+        ]
+      },
+      "ink-2": {
+        "role": "neutral",
+        "displayName": "Secondary Ink (4.5:1)",
+        "canonical": "#5c606a",
+        "oklch": "oklch(48.9% 0.017 268.3)",
+        "tonalRamp": [
+          "#0a0b0f",
+          "#21242b",
+          "#3c4049",
+          "#595d67",
+          "#7c808b",
+          "#a0a4af",
+          "#c8cad1",
+          "#edeef1"
+        ]
+      },
+      "ink-3": {
+        "role": "neutral",
+        "displayName": "Mark Gray (marks only, never text)",
+        "canonical": "#8a8e98",
+        "oklch": "oklch(64.7% 0.016 268.4)",
+        "tonalRamp": [
+          "#0a0b0f",
+          "#21242b",
+          "#3c4048",
+          "#5a5d67",
+          "#7c808a",
+          "#a1a4ae",
+          "#c8cad0",
+          "#edeef1"
+        ]
+      },
+      "done": {
+        "role": "tertiary",
+        "displayName": "Field Green",
+        "canonical": "#1d7344",
+        "oklch": "oklch(49.3% 0.110 154.5)",
+        "tonalRamp": [
+          "#001102",
+          "#00300b",
+          "#004f23",
+          "#176f40",
+          "#429362",
+          "#6db887",
+          "#acd7b9",
+          "#e3f3e8"
+        ]
+      },
+      "due": {
+        "role": "tertiary",
+        "displayName": "Due Amber",
+        "canonical": "#955400",
+        "oklch": "oklch(51.1% 0.118 62.0)",
+        "tonalRamp": [
+          "#1c0300",
+          "#441100",
+          "#692c00",
+          "#8b4b00",
+          "#b16e2a",
+          "#d69457",
+          "#ebc29f",
+          "#fbebde"
+        ]
+      },
+      "late": {
+        "role": "tertiary",
+        "displayName": "Past-Due Red",
+        "canonical": "#b3261e",
+        "oklch": "oklch(50.1% 0.178 28.7)",
+        "tonalRamp": [
+          "#270000",
+          "#5a0000",
+          "#860000",
+          "#ac1d17",
+          "#d64a3d",
+          "#fc7565",
+          "#ffb2a5",
+          "#ffe6e0"
+        ]
+      },
+      "done-soft": {
+        "role": "tertiary",
+        "displayName": "Green Tint",
+        "canonical": "#e7f4ec",
+        "oklch": "oklch(95.5% 0.017 159.1)",
+        "tonalRamp": [
+          "#080c0a",
+          "#1e2621",
+          "#38433c",
+          "#56615a",
+          "#78847c",
+          "#9ca8a1",
+          "#c5ccc8",
+          "#ecefed"
+        ]
+      },
+      "due-soft": {
+        "role": "tertiary",
+        "displayName": "Amber Tint",
+        "canonical": "#fcf1df",
+        "oklch": "oklch(96.2% 0.027 80.3)",
+        "tonalRamp": [
+          "#0e0b05",
+          "#2a2317",
+          "#473e30",
+          "#665c4d",
+          "#897f6f",
+          "#ada393",
+          "#d0cac0",
+          "#f0eeea"
+        ]
+      },
+      "late-soft": {
+        "role": "tertiary",
+        "displayName": "Red Tint",
+        "canonical": "#fceceb",
+        "oklch": "oklch(95.5% 0.017 21.8)",
+        "tonalRamp": [
+          "#0f0a09",
+          "#2b2121",
+          "#493c3c",
+          "#675a59",
+          "#8a7c7b",
+          "#afa1a0",
+          "#d1c8c8",
+          "#f1eded"
+        ]
+      },
+      "neutral-soft": {
+        "role": "neutral",
+        "displayName": "Neutral Tint",
+        "canonical": "#f0f1f3",
+        "oklch": "oklch(95.8% 0.003 264.5)",
+        "tonalRamp": [
+          "#0b0b0c",
+          "#232425",
+          "#3f4041",
+          "#5d5e5f",
+          "#7f8082",
+          "#a4a4a6",
+          "#cacacb",
+          "#eeeeef"
+        ]
+      },
+      "ground-dark": {
+        "role": "neutral",
+        "displayName": "Near-White Ground, dark",
+        "canonical": "#0f1012",
+        "oklch": "oklch(17.3% 0.004 264.5)",
+        "tonalRamp": [
+          "#0b0b0c",
+          "#232426",
+          "#3e4042",
+          "#5c5e60",
+          "#7f8083",
+          "#a3a4a7",
+          "#cacacc",
+          "#eeeeef"
+        ]
+      },
+      "surface-dark": {
+        "role": "neutral",
+        "displayName": "Surface, dark",
+        "canonical": "#16181c",
+        "oklch": "oklch(20.9% 0.009 264.4)",
         "tonalRamp": [
           "#0a0b0d",
-          "#232427",
-          "#3e4044",
-          "#60636a",
-          "#83868d",
-          "#a8abb0",
-          "#cfd1d4",
+          "#222428",
+          "#3d4044",
+          "#5b5e63",
+          "#7e8085",
+          "#a2a5aa",
+          "#c9cace",
+          "#eeeef0"
+        ]
+      },
+      "surface-raised-dark": {
+        "role": "neutral",
+        "displayName": "Menu Surface, dark",
+        "canonical": "#1e2025",
+        "oklch": "oklch(24.4% 0.010 268.3)",
+        "tonalRamp": [
+          "#0a0b0d",
+          "#222428",
+          "#3d4045",
+          "#5b5d63",
+          "#7e8086",
+          "#a2a4ab",
+          "#c9cace",
+          "#eeeef0"
+        ]
+      },
+      "surface-muted-dark": {
+        "role": "neutral",
+        "displayName": "Muted Surface, dark",
+        "canonical": "#1e2025",
+        "oklch": "oklch(24.4% 0.010 268.3)",
+        "tonalRamp": [
+          "#0a0b0d",
+          "#222428",
+          "#3d4045",
+          "#5b5d63",
+          "#7e8086",
+          "#a2a4ab",
+          "#c9cace",
+          "#eeeef0"
+        ]
+      },
+      "border-dark": {
+        "role": "neutral",
+        "displayName": "Hairline, dark",
+        "canonical": "#2a2d33",
+        "oklch": "oklch(29.7% 0.012 264.4)",
+        "tonalRamp": [
+          "#0a0b0e",
+          "#212429",
+          "#3d4046",
+          "#5a5e64",
+          "#7d8087",
+          "#a1a5ac",
+          "#c8cacf",
+          "#edeef0"
+        ]
+      },
+      "border-control-dark": {
+        "role": "neutral",
+        "displayName": "Control Edge, dark",
+        "canonical": "#3b3f46",
+        "oklch": "oklch(36.7% 0.013 261.7)",
+        "tonalRamp": [
+          "#0a0b0e",
+          "#21242a",
+          "#3c4047",
+          "#595e65",
+          "#7c8088",
+          "#a0a5ad",
+          "#c8cbcf",
+          "#edeef0"
+        ]
+      },
+      "border-strong-dark": {
+        "role": "neutral",
+        "displayName": "Strong Edge (3:1), dark",
+        "canonical": "#6f737d",
+        "oklch": "oklch(55.5% 0.016 268.4)",
+        "tonalRamp": [
+          "#0a0b0f",
+          "#21242b",
+          "#3c4049",
+          "#5a5d67",
+          "#7c808a",
+          "#a0a4af",
+          "#c8cad1",
           "#edeef1"
         ]
       },
       "ink-dark": {
         "role": "neutral",
-        "displayName": "Night Ink",
-        "canonical": "#eceee9",
-        "oklch": "oklch(94.6% 0.007 124.5)",
+        "displayName": "Ink, dark",
+        "canonical": "#ececee",
+        "oklch": "oklch(94.4% 0.003 286.3)",
         "tonalRamp": [
-          "#0b0b0a",
-          "#242423",
-          "#3f403d",
-          "#626460",
-          "#858783",
-          "#aaaba8",
-          "#d0d1cf",
-          "#eeefed"
+          "#0b0b0c",
+          "#242425",
+          "#3f3f41",
+          "#5d5d5f",
+          "#808082",
+          "#a4a4a6",
+          "#cacacb",
+          "#eeeeef"
         ]
       },
       "ink-2-dark": {
         "role": "neutral",
-        "displayName": "Night Pencil",
-        "canonical": "#a9aeb6",
-        "oklch": "oklch(74.9% 0.013 259.8)",
+        "displayName": "Secondary Ink (4.5:1), dark",
+        "canonical": "#a2a6ae",
+        "oklch": "oklch(72.4% 0.012 264.5)",
         "tonalRamp": [
-          "#0a0b0d",
-          "#222427",
-          "#3d4044",
-          "#5f636a",
-          "#82868d",
-          "#a8abb0",
-          "#cfd1d5",
-          "#edeef1"
+          "#0a0b0e",
+          "#212429",
+          "#3c4047",
+          "#5a5e65",
+          "#7c8088",
+          "#a1a5ac",
+          "#c8cacf",
+          "#edeef0"
         ]
       },
-      "hair-dark": {
+      "ink-3-dark": {
         "role": "neutral",
-        "displayName": "Night Hairline",
-        "canonical": "#3a3e45",
-        "oklch": "oklch(36.3% 0.013 261.7)",
+        "displayName": "Mark Gray (marks only, never text), dark",
+        "canonical": "#6f737d",
+        "oklch": "oklch(55.5% 0.016 268.4)",
         "tonalRamp": [
-          "#0a0b0d",
-          "#222427",
-          "#3d4045",
-          "#5f636a",
-          "#82868d",
-          "#a8abb0",
-          "#cfd1d5",
+          "#0a0b0f",
+          "#21242b",
+          "#3c4049",
+          "#5a5d67",
+          "#7c808a",
+          "#a0a4af",
+          "#c8cad1",
           "#edeef1"
         ]
       },
       "done-dark": {
         "role": "tertiary",
         "displayName": "Field Green, dark",
-        "canonical": "#6fcf86",
-        "oklch": "oklch(77.7% 0.139 149.9)",
+        "canonical": "#5fc68b",
+        "oklch": "oklch(74.9% 0.130 156.2)",
         "tonalRamp": [
-          "#010f04",
-          "#052c12",
-          "#0d4d23",
-          "#1a763a",
-          "#499a5e",
-          "#81bb8c",
-          "#b6ddbc",
-          "#def6e1"
+          "#001201",
+          "#003207",
+          "#00521f",
+          "#00723d",
+          "#28975f",
+          "#5bbb84",
+          "#a4d9b7",
+          "#e1f4e7"
         ]
       },
       "due-dark": {
         "role": "tertiary",
         "displayName": "Due Amber, dark",
-        "canonical": "#f0a24b",
-        "oklch": "oklch(77.3% 0.137 66.0)",
+        "canonical": "#e9a647",
+        "oklch": "oklch(77.2% 0.135 72.6)",
         "tonalRamp": [
-          "#150700",
-          "#381c00",
-          "#603300",
-          "#925100",
-          "#b6762a",
-          "#d2a06d",
-          "#edcaa8",
-          "#ffead5"
+          "#1c0300",
+          "#441200",
+          "#682d00",
+          "#8a4d00",
+          "#b07100",
+          "#d5973d",
+          "#e9c394",
+          "#fbecda"
         ]
       },
       "late-dark": {
         "role": "tertiary",
         "displayName": "Past-Due Red, dark",
-        "canonical": "#ff8b7e",
-        "oklch": "oklch(76.1% 0.143 27.6)",
+        "canonical": "#ff8b7d",
+        "oklch": "oklch(76.0% 0.143 28.1)",
         "tonalRamp": [
-          "#190503",
-          "#3f1411",
-          "#692722",
-          "#a04038",
-          "#c6665b",
-          "#e0948a",
-          "#f7c2bb",
-          "#ffe5e0"
+          "#230000",
+          "#510000",
+          "#7a0b0a",
+          "#9e342c",
+          "#c7594e",
+          "#ed8174",
+          "#fbb7ad",
+          "#ffe7e3"
         ]
       },
-      "paper-hc": {
-        "role": "neutral",
-        "displayName": "High-Contrast Paper (light)",
-        "canonical": "#ffffff",
-        "oklch": "oklch(100.0% 0.000 89.9)",
-        "tonalRamp": [
-          "#0b0b0b",
-          "#242424",
-          "#404040",
-          "#636363",
-          "#868686",
-          "#ababab",
-          "#d1d1d1",
-          "#eeeeee"
-        ]
-      },
-      "ink-hc": {
-        "role": "neutral",
-        "displayName": "High-Contrast Ink (light)",
-        "canonical": "#000000",
-        "oklch": "oklch(0.0% 0.000 0.0)",
-        "tonalRamp": [
-          "#0b0b0b",
-          "#242424",
-          "#404040",
-          "#636363",
-          "#868686",
-          "#ababab",
-          "#d1d1d1",
-          "#eeeeee"
-        ]
-      },
-      "ink-2-hc": {
-        "role": "neutral",
-        "displayName": "High-Contrast Pencil (light)",
-        "canonical": "#1f2328",
-        "oklch": "oklch(25.4% 0.011 254.0)",
-        "tonalRamp": [
-          "#0a0b0c",
-          "#222427",
-          "#3d4044",
-          "#5f6469",
-          "#82878c",
-          "#a8abaf",
-          "#cfd1d4",
-          "#edeef0"
-        ]
-      },
-      "done-hc": {
+      "done-soft-dark": {
         "role": "tertiary",
-        "displayName": "Field Green, light HC",
-        "canonical": "#1c4d25",
-        "oklch": "oklch(37.6% 0.085 147.3)",
+        "displayName": "Green Tint, dark",
+        "canonical": "#15291e",
+        "oklch": "oklch(26.0% 0.034 158.9)",
         "tonalRamp": [
-          "#050e06",
-          "#162918",
-          "#2a482e",
-          "#446f49",
-          "#68936c",
-          "#94b597",
-          "#c2d8c3",
-          "#e5f3e6"
+          "#050d08",
+          "#17281f",
+          "#304539",
+          "#4e6457",
+          "#708779",
+          "#95ab9d",
+          "#c1cec6",
+          "#ebf0ed"
         ]
       },
-      "due-hc": {
+      "due-soft-dark": {
         "role": "tertiary",
-        "displayName": "Due Amber, light HC",
-        "canonical": "#6b3500",
-        "oklch": "oklch(39.2% 0.096 56.0)",
+        "displayName": "Amber Tint, dark",
+        "canonical": "#2e2312",
+        "oklch": "oklch(26.4% 0.033 77.5)",
         "tonalRamp": [
-          "#130802",
-          "#351e0d",
-          "#59361b",
-          "#89552e",
-          "#ad7953",
-          "#caa185",
-          "#e7cbb7",
-          "#fdeade"
+          "#0f0a04",
+          "#2c2214",
+          "#4a3e2c",
+          "#685c49",
+          "#8b7e6b",
+          "#b0a38f",
+          "#d1c9bd",
+          "#f1eee9"
         ]
       },
-      "late-hc": {
+      "late-soft-dark": {
         "role": "tertiary",
-        "displayName": "Past-Due Red, light HC",
-        "canonical": "#7d1a12",
-        "oklch": "oklch(38.8% 0.135 29.4)",
+        "displayName": "Red Tint, dark",
+        "canonical": "#33191a",
+        "oklch": "oklch(25.0% 0.042 18.0)",
         "tonalRamp": [
-          "#180503",
-          "#3e1611",
-          "#672a22",
-          "#9d4338",
-          "#c3685b",
-          "#dd968a",
-          "#f5c3bb",
-          "#ffe6e0"
+          "#130708",
+          "#341d1d",
+          "#543737",
+          "#735455",
+          "#987777",
+          "#bc9b9b",
+          "#dac5c5",
+          "#f4ecec"
         ]
       },
-      "paper-dark-hc": {
+      "neutral-soft-dark": {
         "role": "neutral",
-        "displayName": "High-Contrast Paper (dark)",
-        "canonical": "#000000",
-        "oklch": "oklch(0.0% 0.000 0.0)",
+        "displayName": "Neutral Tint, dark",
+        "canonical": "#22252a",
+        "oklch": "oklch(26.4% 0.010 260.7)",
         "tonalRamp": [
-          "#0b0b0b",
-          "#242424",
-          "#404040",
-          "#636363",
-          "#868686",
-          "#ababab",
-          "#d1d1d1",
-          "#eeeeee"
-        ]
-      },
-      "ink-dark-hc": {
-        "role": "neutral",
-        "displayName": "High-Contrast Ink (dark)",
-        "canonical": "#ffffff",
-        "oklch": "oklch(100.0% 0.000 89.9)",
-        "tonalRamp": [
-          "#0b0b0b",
-          "#242424",
-          "#404040",
-          "#636363",
-          "#868686",
-          "#ababab",
-          "#d1d1d1",
-          "#eeeeee"
-        ]
-      },
-      "ink-2-dark-hc": {
-        "role": "neutral",
-        "displayName": "High-Contrast Pencil (dark)",
-        "canonical": "#e6e6e6",
-        "oklch": "oklch(92.5% 0.000 89.9)",
-        "tonalRamp": [
-          "#0b0b0b",
-          "#242424",
-          "#404040",
-          "#636363",
-          "#868686",
-          "#ababab",
-          "#d1d1d1",
-          "#eeeeee"
-        ]
-      },
-      "done-dark-hc": {
-        "role": "tertiary",
-        "displayName": "Field Green, dark HC",
-        "canonical": "#8ff0a4",
-        "oklch": "oklch(87.6% 0.140 149.7)",
-        "tonalRamp": [
-          "#010f04",
-          "#052c11",
-          "#0d4d23",
-          "#197639",
-          "#499a5d",
-          "#81bb8c",
-          "#b6ddbc",
-          "#ddf6e1"
-        ]
-      },
-      "due-dark-hc": {
-        "role": "tertiary",
-        "displayName": "Due Amber, dark HC",
-        "canonical": "#ffc06e",
-        "oklch": "oklch(84.9% 0.123 72.1)",
-        "tonalRamp": [
-          "#140800",
-          "#351e00",
-          "#5a3700",
-          "#8a5700",
-          "#ae7b34",
-          "#cba372",
-          "#e7ccab",
-          "#fdebd7"
-        ]
-      },
-      "late-dark-hc": {
-        "role": "tertiary",
-        "displayName": "Past-Due Red, dark HC",
-        "canonical": "#ffaaa0",
-        "oklch": "oklch(81.8% 0.102 26.9)",
-        "tonalRamp": [
-          "#150705",
-          "#381a17",
-          "#5f302c",
-          "#914d46",
-          "#b67169",
-          "#d29b94",
-          "#edc7c1",
-          "#ffe8e5"
+          "#0a0b0e",
+          "#212429",
+          "#3d4045",
+          "#5a5e64",
+          "#7d8087",
+          "#a1a5ab",
+          "#c8cbce",
+          "#eeeef0"
         ]
       }
     },
+    "highContrast": {
+      "source": "src/app/booster.css @tokens light-hc / dark-hc; src/lib/theme/palette.ts PALETTE.lightHc / PALETTE.darkHc",
+      "lightHc": {
+        "ground": "#ffffff",
+        "surface": "#ffffff",
+        "surface-raised": "#ffffff",
+        "surface-muted": "#f2f2f4",
+        "line": "#18191d",
+        "ink": "#000000",
+        "ink-2": "#2b2e34",
+        "ink-3": "#2b2e34",
+        "done": "#0f5530",
+        "due": "#6b3a00",
+        "late": "#8a1a14"
+      },
+      "darkHc": {
+        "ground": "#000000",
+        "surface": "#000000",
+        "surface-raised": "#141518",
+        "surface-muted": "#141518",
+        "line": "#ececee",
+        "ink": "#ffffff",
+        "ink-2": "#e2e4e8",
+        "ink-3": "#e2e4e8",
+        "done": "#8eeab1",
+        "due": "#ffc978",
+        "late": "#ffb0a6"
+      },
+      "ring": "3px"
+    },
+    "clubDerivation": {
+      "source": "src/lib/theme/contrast.ts deriveClubTokens(); applied by src/app/layout.tsx",
+      "clubOn": "white or #14161a, whichever has the higher contrast on the fill",
+      "clubText": "same hue and saturation, lightness moved until 4.5:1 on the mode's surface-muted (7:1 in high contrast), then 4.5:1 on its tint",
+      "clubTint": "8% of the club color in the light surface; 14% in the dark surface"
+    },
     "typographyMeta": {
-      "display": {
-        "displayName": "Display",
-        "purpose": "Amount owed; one per screen."
+      "page-title": {
+        "displayName": "Page title",
+        "purpose": "The page's h1 in PageHeader; 1.75rem from 760px."
       },
-      "headline": {
-        "displayName": "Headline",
-        "purpose": "Box headings."
+      "amount": {
+        "displayName": "Amount",
+        "purpose": "The one large figure: what is owed on Payments, a buy-out's amount."
       },
-      "club-name": {
-        "displayName": "Club Name",
-        "purpose": "Club name in the bar."
+      "stat": {
+        "displayName": "Stat",
+        "purpose": "One figure on a staff page."
       },
-      "set-number": {
-        "displayName": "Set Number",
-        "purpose": "Season ruler numbers."
-      },
-      "title": {
-        "displayName": "Title",
-        "purpose": "Person names in lists."
+      "card-title": {
+        "displayName": "Card title",
+        "purpose": "A Card's heading."
       },
       "body": {
         "displayName": "Body",
-        "purpose": "Default reading text, buttons, amounts."
+        "purpose": "Default text; prose about 70ch."
       },
-      "body-sm": {
-        "displayName": "Body Sm",
-        "purpose": "Box subtitles, helper text."
+      "row-title": {
+        "displayName": "Row title",
+        "purpose": "A ListRow's title; a table's row header."
+      },
+      "control": {
+        "displayName": "Control",
+        "purpose": "Buttons, top-nav links; also a card's quiet line, notice body, table cells."
       },
       "meta": {
         "displayName": "Meta",
-        "purpose": "Dates, as-of, part and grade."
+        "purpose": "A row's meta line, hints, as-of lines."
       },
       "label": {
         "displayName": "Label",
-        "purpose": "Uppercase season heading and definition terms naming adjacent content."
+        "purpose": "SectionLabel over a list; a field's label. Sentence case."
       },
-      "nav": {
-        "displayName": "Nav",
-        "purpose": "Desktop top nav in the club bar."
-      },
-      "tab": {
-        "displayName": "Tab",
-        "purpose": "Phone bottom tab labels."
-      },
-      "setting-legend": {
-        "displayName": "Setting Legend",
-        "purpose": "Name of a choice group on settings pages."
-      },
-      "body-row": {
-        "displayName": "Body Row",
-        "purpose": "Invoice and history rows, detail values, secondary buttons."
-      },
-      "set-label": {
-        "displayName": "Set Label",
-        "purpose": "Season ruler set names; 0.8125rem phone, 0.9375rem at 760px+."
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Table headers, tab labels, badges, step numbers. The 0.8125rem floor."
       }
     },
-    "clubThemeExamples": [
-      {
-        "name": "FZN purple (default)",
-        "club": "#5b2a86",
-        "club-on": "#ffffff",
-        "club-text-l": "#5b2a86",
-        "club-text-d": "#c9a7ea",
-        "club-text-lhc": "#45206a",
-        "club-text-dhc": "#e5d3f7",
-        "club-tint-l": "#f1ebf6",
-        "club-tint-d": "#2a2133"
-      },
-      {
-        "name": "Gold (light club color demo)",
-        "club": "#f2c200",
-        "club-on": "#14161a",
-        "club-text-l": "#7a5c00",
-        "club-text-d": "#f2c200",
-        "club-text-lhc": "#5c4500",
-        "club-text-dhc": "#ffd84d",
-        "club-tint-l": "#fdf6d6",
-        "club-tint-d": "#2e2a17"
-      }
-    ],
     "shadows": [
       {
-        "name": "rule-underline",
-        "value": "inset 0 -3px 0 var(--club-on)",
-        "purpose": "Current link in the club-bar top nav. An inset rule, not elevation."
+        "name": "shadow-menu",
+        "value": "0 8px 24px -6px rgb(16 17 20 / 0.14), 0 1px 3px rgb(16 17 20 / 0.08)",
+        "purpose": "Menus and popovers only (light)."
       },
       {
-        "name": "rule-top",
-        "value": "inset 0 3px 0 var(--club-text)",
-        "purpose": "Active phone tab. An inset rule."
+        "name": "shadow-menu-dark",
+        "value": "0 8px 24px -6px rgb(0 0 0 / 0.6), 0 1px 3px rgb(0 0 0 / 0.5)",
+        "purpose": "Menus and popovers only (dark)."
+      }
+    ],
+    "motion": [
+      {
+        "name": "dur-fast",
+        "value": "120ms",
+        "purpose": "Color and border transitions on controls, the nav caret."
       },
       {
-        "name": "dot-ring",
-        "value": "inset 0 0 0 2px var(--due)",
-        "purpose": "Student dot still to do on the current set."
+        "name": "dur",
+        "value": "200ms",
+        "purpose": "Longer state changes."
       },
       {
-        "name": "choice-checked",
-        "value": "inset 0 0 0 1px var(--club-text)",
-        "purpose": "Doubles the 2px border of a checked choice option. An inset rule."
-      },
-      {
-        "name": "dot-edge-on-club",
-        "value": "outline: 2px solid var(--club-on)",
-        "purpose": "Every student dot on the club-filled current set; dot gap widens to 8px."
+        "name": "ease",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "The system easing; controls use ease-out. Nothing moves under reduced motion."
       }
     ],
     "focus": {
-      "value": "outline: var(--ring) solid var(--club-text); outline-offset: 2px",
-      "ring": "3px; 4px in high contrast",
-      "purpose": "All focusable elements on paper; club-on inside the club bar; Highlight under forced colors."
+      "width": "2px (3px high contrast)",
+      "offset": "2px",
+      "color": "club-text"
     },
-    "motion": [
-      {
-        "name": "state-color",
-        "value": "background-color .15s ease-out, color .15s ease-out",
-        "purpose": "Button hover. Removed under prefers-reduced-motion or data-motion=\"reduce\"."
-      }
-    ],
     "breakpoints": [
       {
-        "name": "two-column",
-        "value": "760px"
+        "name": "phone-narrow",
+        "value": "480px",
+        "purpose": "Below it a list row's amount and action stack."
       },
       {
-        "name": "content-max",
-        "value": "1032px"
-      },
-      {
-        "name": "set-label-hide",
-        "value": "container max-width 76px (per ruler cell)"
+        "name": "wide",
+        "value": "760px",
+        "purpose": "Tabs give way to the top nav; Home goes to two columns; tables stop stacking; gutter 24px."
       }
-    ],
-    "grid": {
-      "cell": "24px",
-      "line": "1px var(--grid)",
-      "contentMax": "1032px",
-      "note": "At 1032px+ background-position calc(50% - 480px) 0 aligns grid lines to the content edge."
-    },
-    "unresolved": [
-      "Entrance motion moment not designed.",
-      "Monogram fallback for a club without a logo is prototype only.",
-      "Waiting and closed states: icon and color not drawn.",
-      "Inputs and forms beyond radio choice groups not designed."
-    ],
-    "displayModes": {
-      "storage": "localStorage key br-display, per device; applied before paint by display.js. Default for each is \"match my device\" (attribute removed).",
-      "attributes": [
-        {
-          "attr": "data-theme",
-          "values": [
-            "light",
-            "dark"
-          ],
-          "default": "prefers-color-scheme"
-        },
-        {
-          "attr": "data-contrast",
-          "values": [
-            "standard",
-            "more"
-          ],
-          "default": "prefers-contrast: more"
-        },
-        {
-          "attr": "data-text",
-          "values": [
-            "large",
-            "larger"
-          ],
-          "effect": "root font-size 112.5% / 125%; all type in rem"
-        },
-        {
-          "attr": "data-motion",
-          "values": [
-            "reduce"
-          ],
-          "default": "prefers-reduced-motion",
-          "effect": "transition: none on everything"
-        }
-      ],
-      "tokenSets": {
-        "light": {
-          "paper": "#ffffff",
-          "grid": "#e8eae6",
-          "ink": "#14161a",
-          "ink-2": "#4c5159",
-          "hair": "#d9dcd6",
-          "done": "#2f6b3a",
-          "due": "#9a4f08",
-          "late": "#a3261b",
-          "club-text": "club-text-l",
-          "club-tint": "club-tint-l",
-          "ring": "3px"
-        },
-        "dark": {
-          "note": "Chart paper at night: the world's ink becomes the paper.",
-          "paper": "#16181c",
-          "grid": "#22252b",
-          "ink": "#eceee9",
-          "ink-2": "#a9aeb6",
-          "hair": "#3a3e45",
-          "done": "#6fcf86",
-          "due": "#f0a24b",
-          "late": "#ff8b7e",
-          "club-text": "club-text-d",
-          "club-tint": "club-tint-d",
-          "ring": "3px"
-        },
-        "light-hc": {
-          "paper": "#ffffff",
-          "grid": "transparent",
-          "ink": "#000000",
-          "ink-2": "#1f2328",
-          "hair": "#000000",
-          "done": "#1c4d25",
-          "due": "#6b3500",
-          "late": "#7d1a12",
-          "club-text": "club-text-lhc",
-          "club-tint": "club-tint-l",
-          "ring": "4px"
-        },
-        "dark-hc": {
-          "paper": "#000000",
-          "grid": "transparent",
-          "ink": "#ffffff",
-          "ink-2": "#e6e6e6",
-          "hair": "#ffffff",
-          "done": "#8ff0a4",
-          "due": "#ffc06e",
-          "late": "#ffaaa0",
-          "club-text": "club-text-dhc",
-          "club-tint": "club-tint-d",
-          "ring": "4px"
-        }
-      },
-      "highContrastExtras": [
-        "Hash ticks at full opacity.",
-        "Disabled button: paper fill, dashed ink border, ink-2 text.",
-        "Link underline 2px."
-      ]
-    },
-    "forcedColors": [
-      "Page grid dropped; club bar gets a 2px CanvasText bottom rule; monogram a 2px CanvasText ring.",
-      "Current set: Highlight fill, HighlightText number/label/ticks (forced-color-adjust: none).",
-      "Hash ticks kept in CanvasText at full opacity (forced-color-adjust: none).",
-      "Student dots on Canvas with CanvasText initial and ring; done dots CanvasText fill, Canvas initial; outline HighlightText on the current set.",
-      "Current top-nav link and active tab underlined 3px; badge 1px CanvasText border.",
-      "Choice: ring CanvasText on Canvas; checked 3px Highlight border and Highlight dot; focus 3px dashed CanvasText, 4px offset.",
-      "All other focus rings: Highlight."
-    ],
-    "states": {
-      "qboOffline": "Last known figures stay; offline note under as-of in due, bold 0.875rem, role=status; every Pay disabled in place with the reason in its accessible name."
-    }
+    ]
   },
   "components": [
     {
       "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "Filled ink action; the soonest-due Pay.",
-      "html": "<a class=\"ds-btn\" href=\"#\">Pay <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" aria-hidden=\"true\"><path d=\"M5 12h14M13 6l6 6-6 6\"/></svg></a>",
-      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--ring:3px;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-btn{min-height:48px;padding:0 20px;border:2px solid var(--ink);background:var(--ink);color:var(--paper);font:700 17px var(--read);border-radius:0;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;cursor:pointer;transition:background-color .15s ease-out,color .15s ease-out}.ds-btn:hover{background:var(--paper);color:var(--ink)}.ds-btn:focus-visible{outline:var(--ring) solid var(--club-text);outline-offset:2px}.ds-btn svg{width:18px;height:18px}@media (prefers-reduced-motion:reduce){.ds-btn{transition:none}}"
+      "description": "Button/LinkButton (@/app/components/ui), variant primary: the club's fill, one per area.",
+      "html": "<span style=\"--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--ground:#f7f7f8;--surface:#fff;--surface-muted:#f2f2f4;--border:#e3e4e8;--border-control:#cfd2d8;--border-strong:#8a8e98;--ink:#18191d;--ink-2:#5c606a;--ink-3:#8a8e98;--done:#1d7344;--due:#955400;--late:#b3261e;--done-soft:#e7f4ec;--due-soft:#fcf1df;--late-soft:#fceceb;--neutral-soft:#f0f1f3;--overlay:rgb(0 0 0 / .08);font-family:Inter,ui-sans-serif,system-ui,sans-serif;\"><button class=\"ds-btn-primary\">Pay <svg viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" aria-hidden=\"true\"><path d=\"M5 12h14M13 6l6 6-6 6\"/></svg></button></span>",
+      "css": ".ds-btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 16px;border-radius:6px;font:500 0.9375rem/1.2 Inter,ui-sans-serif,system-ui,sans-serif;text-decoration:none;cursor:pointer;transition:background-color 120ms ease-out,border-color 120ms ease-out,color 120ms ease-out;border:1px solid var(--club);background-color:var(--club);color:var(--club-on)}.ds-btn-primary:hover{background-image:linear-gradient(var(--overlay),var(--overlay))}.ds-btn-primary:focus-visible{outline:2px solid var(--club-text,#5b2a86);outline-offset:2px;}"
     },
     {
-      "name": "Line Button",
+      "name": "Secondary Button",
       "kind": "button",
-      "refersTo": "button-line",
-      "description": "Outlined ink action; other Pay buttons and ordinary actions.",
-      "html": "<a class=\"ds-btn ds-btn-line\" href=\"#\">Update my details</a>",
-      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--ring:3px;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-btn{min-height:48px;padding:0 20px;border:2px solid var(--ink);background:var(--ink);color:var(--paper);font:700 17px var(--read);border-radius:0;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;cursor:pointer;transition:background-color .15s ease-out,color .15s ease-out}.ds-btn:hover{background:var(--paper);color:var(--ink)}.ds-btn:focus-visible{outline:var(--ring) solid var(--club-text);outline-offset:2px}.ds-btn svg{width:18px;height:18px}@media (prefers-reduced-motion:reduce){.ds-btn{transition:none}}.ds-btn-line{background:var(--paper);color:var(--ink);min-height:44px;font-size:16px}.ds-btn-line:hover{background:var(--ink);color:var(--paper)}"
+      "refersTo": "button-secondary",
+      "description": "Button/LinkButton variant secondary: every other action, and every Pay but the soonest.",
+      "html": "<span style=\"--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--ground:#f7f7f8;--surface:#fff;--surface-muted:#f2f2f4;--border:#e3e4e8;--border-control:#cfd2d8;--border-strong:#8a8e98;--ink:#18191d;--ink-2:#5c606a;--ink-3:#8a8e98;--done:#1d7344;--due:#955400;--late:#b3261e;--done-soft:#e7f4ec;--due-soft:#fcf1df;--late-soft:#fceceb;--neutral-soft:#f0f1f3;--overlay:rgb(0 0 0 / .08);font-family:Inter,ui-sans-serif,system-ui,sans-serif;\"><button class=\"ds-btn-secondary\">See your payments</button></span>",
+      "css": ".ds-btn-secondary{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 16px;border-radius:6px;font:500 0.9375rem/1.2 Inter,ui-sans-serif,system-ui,sans-serif;text-decoration:none;cursor:pointer;transition:background-color 120ms ease-out,border-color 120ms ease-out,color 120ms ease-out;border:1px solid var(--border-control);background:var(--surface);color:var(--ink)}.ds-btn-secondary:hover{background:var(--surface-muted)}.ds-btn-secondary:focus-visible{outline:2px solid var(--club-text,#5b2a86);outline-offset:2px;}"
     },
     {
-      "name": "Club Button",
+      "name": "Quiet Button",
       "kind": "button",
-      "refersTo": "button-club",
-      "description": "Outlined in club-text; season actions such as signing forms.",
-      "html": "<a class=\"ds-btn ds-btn-club\" href=\"#\">Sign Maya’s forms</a>",
-      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--ring:3px;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-btn{min-height:48px;padding:0 20px;border:2px solid var(--ink);background:var(--ink);color:var(--paper);font:700 17px var(--read);border-radius:0;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;cursor:pointer;transition:background-color .15s ease-out,color .15s ease-out}.ds-btn:hover{background:var(--paper);color:var(--ink)}.ds-btn:focus-visible{outline:var(--ring) solid var(--club-text);outline-offset:2px}.ds-btn svg{width:18px;height:18px}@media (prefers-reduced-motion:reduce){.ds-btn{transition:none}}.ds-btn-club{background:var(--paper);color:var(--club-text);border-color:var(--club-text);min-height:44px;font-size:16px}.ds-btn-club:hover{background:var(--club-tint);color:var(--club-text)}"
+      "refersTo": "button-quiet",
+      "description": "Button variant quiet: a small action in words, in club text.",
+      "html": "<span style=\"--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--ground:#f7f7f8;--surface:#fff;--surface-muted:#f2f2f4;--border:#e3e4e8;--border-control:#cfd2d8;--border-strong:#8a8e98;--ink:#18191d;--ink-2:#5c606a;--ink-3:#8a8e98;--done:#1d7344;--due:#955400;--late:#b3261e;--done-soft:#e7f4ec;--due-soft:#fcf1df;--late-soft:#fceceb;--neutral-soft:#f0f1f3;--overlay:rgb(0 0 0 / .08);font-family:Inter,ui-sans-serif,system-ui,sans-serif;\"><button class=\"ds-btn-quiet\">Change name</button></span>",
+      "css": ".ds-btn-quiet{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 16px;border-radius:6px;font:500 0.9375rem/1.2 Inter,ui-sans-serif,system-ui,sans-serif;text-decoration:none;cursor:pointer;transition:background-color 120ms ease-out,border-color 120ms ease-out,color 120ms ease-out;padding:0 12px;border:1px solid transparent;background:transparent;color:var(--club-text)}.ds-btn-quiet:hover{background:var(--club-tint)}.ds-btn-quiet:focus-visible{outline:2px solid var(--club-text,#5b2a86);outline-offset:2px;}"
     },
     {
-      "name": "Disabled Pay (QuickBooks offline)",
+      "name": "Danger Button",
       "kind": "button",
-      "refersTo": "button-disabled",
-      "description": "Pay unavailable while QuickBooks is offline; stays in place, reason in its name.",
-      "html": "<p class=\"ds-off\" role=\"status\">We can’t reach QuickBooks right now. These are the last figures we have, and paying will work again shortly.</p><a class=\"ds-btn\" role=\"link\" aria-disabled=\"true\" aria-label=\"Pay $85.00, unavailable while QuickBooks is offline\">Pay</a>",
-      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--ring:3px;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-off{font:700 .875rem/1.45 var(--read);color:var(--due);margin:0 0 12px}.ds-btn{min-height:48px;padding:0 20px;border:2px solid var(--hair);background:var(--hair);color:var(--ink-2);font:700 1.0625rem var(--read);border-radius:0;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;cursor:not-allowed}@media (prefers-contrast:more){.ds-btn{background:var(--paper);border:2px dashed var(--ink)}}"
+      "refersTo": "button-danger",
+      "description": "Button variant danger: removes or ends something, said in red.",
+      "html": "<span style=\"--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--ground:#f7f7f8;--surface:#fff;--surface-muted:#f2f2f4;--border:#e3e4e8;--border-control:#cfd2d8;--border-strong:#8a8e98;--ink:#18191d;--ink-2:#5c606a;--ink-3:#8a8e98;--done:#1d7344;--due:#955400;--late:#b3261e;--done-soft:#e7f4ec;--due-soft:#fcf1df;--late-soft:#fceceb;--neutral-soft:#f0f1f3;--overlay:rgb(0 0 0 / .08);font-family:Inter,ui-sans-serif,system-ui,sans-serif;\"><button class=\"ds-btn-danger\">Remove</button></span>",
+      "css": ".ds-btn-danger{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 16px;border-radius:6px;font:500 0.9375rem/1.2 Inter,ui-sans-serif,system-ui,sans-serif;text-decoration:none;cursor:pointer;transition:background-color 120ms ease-out,border-color 120ms ease-out,color 120ms ease-out;border:1px solid var(--border-control);background:var(--surface);color:var(--late)}.ds-btn-danger:hover{background:var(--late-soft);border-color:var(--late)}.ds-btn-danger:focus-visible{outline:2px solid var(--club-text,#5b2a86);outline-offset:2px;}"
     },
     {
-      "name": "Season Set Ruler",
-      "kind": "custom",
-      "refersTo": "set-cell",
-      "description": "Signature: season steps as yard-line cells, current set filled in club color, students as dots. Also the staff forms-matrix header.",
-      "html": "<section class=\"ds-season\"><h1>Fall season · <b>Set 2 of 5</b></h1><ol class=\"ds-sets\" style=\"--count:5\"><li class=\"done\"><span class=\"n\"><svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.4\" aria-hidden=\"true\"><path d=\"M3 8.5l3 3 7-7\"/></svg>1</span><span class=\"label\">Join</span></li><li aria-current=\"step\"><span class=\"n\">2</span><span class=\"label\">Forms</span><span class=\"on-set\"><i class=\"done\">L</i><i>M</i></span></li><li><span class=\"n\">3</span><span class=\"label\">Uniforms</span></li><li><span class=\"n\">4</span><span class=\"label\">Trip</span></li><li><span class=\"n\">5</span><span class=\"label\">Banquet</span></li></ol></section>",
-      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--ring:3px;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-season{background:var(--paper);border-bottom:2px solid var(--ink);padding:12px 0 8px;font-family:var(--read);color:var(--ink)}.ds-season h1{font:600 15px var(--mark);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2);margin:0}.ds-season h1 b{color:var(--ink)}.ds-sets{list-style:none;padding:0;margin:8px 0 0;display:grid;grid-template-columns:repeat(var(--count,5),minmax(0,1fr))}.ds-sets li{position:relative;border-left:2px solid var(--ink);padding:6px 6px 14px 8px;min-height:60px}.ds-sets li:last-child{border-right:2px solid var(--ink)}.ds-sets li::after{content:'';position:absolute;left:0;right:0;bottom:0;height:6px;background:linear-gradient(90deg,var(--ink) 2px,transparent 2px) 0 0/25% 100% repeat-x;opacity:.45}.ds-sets .n{display:flex;align-items:center;gap:4px;font:700 20px/1 var(--mark);color:var(--ink-2)}.ds-sets .n svg{width:15px;height:15px}.ds-sets .label{display:block;font-size:13px;line-height:1.2;margin-top:4px;color:var(--ink-2)}.ds-sets .done .n{color:var(--done)}.ds-sets [aria-current=step]{background:var(--club)}.ds-sets [aria-current=step] .n,.ds-sets [aria-current=step] .label{color:var(--club-on)}.ds-sets [aria-current=step]::after{background-image:linear-gradient(90deg,var(--club-on) 2px,transparent 2px)}.on-set{display:flex;gap:4px;margin-top:6px}.on-set i{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font:700 12px var(--mark);font-style:normal;background:var(--paper);color:var(--due);box-shadow:inset 0 0 0 2px var(--due)}.on-set i.done{background:var(--done);color:var(--paper);box-shadow:none}.ds-sets [aria-current=step] .on-set{gap:8px}.ds-sets [aria-current=step] .on-set i{outline:2px solid var(--club-on)}"
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "TextInput (@/app/components/ui): a label over a 44px control with a strong edge; hint tied by aria-describedby.",
+      "html": "<label class=\"ds-field\" style=\"--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--ground:#f7f7f8;--surface:#fff;--surface-muted:#f2f2f4;--border:#e3e4e8;--border-control:#cfd2d8;--border-strong:#8a8e98;--ink:#18191d;--ink-2:#5c606a;--ink-3:#8a8e98;--done:#1d7344;--due:#955400;--late:#b3261e;--done-soft:#e7f4ec;--due-soft:#fcf1df;--late-soft:#fceceb;--neutral-soft:#f0f1f3;--overlay:rgb(0 0 0 / .08);font-family:Inter,ui-sans-serif,system-ui,sans-serif;\"><span class=\"ds-field-label\">The family's name</span><input class=\"ds-input\" value=\"Rivera Family\"><span class=\"ds-field-hint\">As it shows to the family</span></label>",
+      "css": ".ds-field{display:grid;gap:6px;max-width:22rem}.ds-field-label{font-size:.875rem;font-weight:500;color:var(--ink)}.ds-field-hint{font-size:.875rem;color:var(--ink-2)}.ds-input{font:400 1rem/1.5 inherit;color:var(--ink);background:var(--surface);border:1px solid var(--border-strong);border-radius:6px;min-height:44px;padding:8px 12px;transition:border-color 120ms ease-out}.ds-input:hover{border-color:var(--ink-2)}.ds-input:focus-visible{outline:2px solid var(--club-text);outline-offset:1px;border-color:var(--club-text)}"
     },
     {
-      "name": "Money Box",
+      "name": "List with rows",
       "kind": "card",
-      "refersTo": "box",
-      "description": "Ruled box with owed figure, as-of line, urgency on the date line, and a 2px Total rule.",
-      "html": "<section class=\"ds-box\"><h2>Ramirez family</h2><div class=\"amt\">$185.00</div><div class=\"asof\">Owed now. From QuickBooks, as of 2:14 pm.</div><ul class=\"lines\"><li><span><span class=\"what\">Fall uniform fee, Maya</span><span class=\"when soon\">Due Nov 15, in 8 days</span></span><span class=\"amount\">$85.00</span></li><li><span><span class=\"what\">Spring trip deposit, Leo</span><span class=\"when\">Due Nov 22</span></span><span class=\"amount\">$100.00</span></li></ul><div class=\"sum\"><span>Total</span><span>$185.00</span></div></section>",
-      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--ring:3px;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-box{background:var(--paper);border:2px solid var(--ink);border-radius:0;padding:16px;font:400 17px/1.45 var(--read);color:var(--ink)}.ds-box h2{font:700 24px/1.1 var(--mark);margin:0}.ds-box .amt{font:700 40px/1 var(--read);letter-spacing:-.02em;margin-top:8px;font-variant-numeric:tabular-nums lining-nums}.ds-box .asof{font-size:14px;color:var(--ink-2);margin-top:6px}.ds-box .lines{list-style:none;padding:0;margin:16px 0 0;border-top:1px solid var(--hair)}.ds-box .lines li{display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:center;padding:12px 0;border-bottom:1px solid var(--hair)}.ds-box .lines li:last-child{border-bottom:0}.ds-box .what{font-size:16px}.ds-box .when{display:block;font-size:14px;color:var(--ink-2)}.ds-box .when.soon{color:var(--due);font-weight:700}.ds-box .when.late{color:var(--late);font-weight:700}.ds-box .amount{text-align:right;font-variant-numeric:tabular-nums lining-nums}.ds-box .sum{display:flex;justify-content:space-between;padding-top:12px;font-weight:700;border-top:2px solid var(--ink);font-variant-numeric:tabular-nums lining-nums}"
+      "refersTo": "list-row",
+      "description": "SectionLabel over List + ListRow: status ring, title, meta line, amount, compact action. The signature of the system.",
+      "html": "<div style=\"--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--ground:#f7f7f8;--surface:#fff;--surface-muted:#f2f2f4;--border:#e3e4e8;--border-control:#cfd2d8;--border-strong:#8a8e98;--ink:#18191d;--ink-2:#5c606a;--ink-3:#8a8e98;--done:#1d7344;--due:#955400;--late:#b3261e;--done-soft:#e7f4ec;--due-soft:#fcf1df;--late-soft:#fceceb;--neutral-soft:#f0f1f3;--overlay:rgb(0 0 0 / .08);font-family:Inter,ui-sans-serif,system-ui,sans-serif;background:var(--ground);padding:16px\"><h3 class=\"ds-label\">To do</h3><ul class=\"ds-list\"><li class=\"ds-row\"><svg class=\"ds-ring\" viewBox=\"0 0 16 16\" style=\"color:var(--late)\"><circle cx=\"8\" cy=\"8\" r=\"7\" fill=\"currentColor\"/><path d=\"M8 4.6v4.2M8 11.2v.1\" stroke=\"#fff\" stroke-width=\"1.9\" stroke-linecap=\"round\" fill=\"none\"/></svg><div class=\"ds-main\"><span class=\"ds-title\">Invoice QZ-1042</span><span class=\"ds-meta\"><span style=\"color:var(--late);font-weight:500\">Was due Nov 2</span></span></div><div class=\"ds-trail\"><span class=\"ds-amt\">$100.00</span><a class=\"ds-pay\" href=\"#\">Pay</a></div></li><li class=\"ds-row\"><svg class=\"ds-ring\" viewBox=\"0 0 16 16\" style=\"color:var(--due)\"><circle cx=\"8\" cy=\"8\" r=\"6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"/><path d=\"M8 4.5A3.5 3.5 0 0 1 11.5 8H8z\" fill=\"currentColor\"/></svg><div class=\"ds-main\"><span class=\"ds-title\">Uniform fitting attended</span><span class=\"ds-meta\"><span style=\"color:var(--due);font-weight:500\">Not done yet</span> · Yaretzi</span></div></li></ul></div>",
+      "css": ".ds-label{font-size:.875rem;font-weight:500;color:var(--ink-2);margin:0 0 8px}.ds-list{list-style:none;margin:0;padding:0;background:var(--surface);border:1px solid var(--border);border-radius:8px}.ds-row{display:flex;align-items:flex-start;gap:12px;min-height:56px;padding:10px 16px}.ds-row+.ds-row{border-top:1px solid var(--border)}.ds-row:hover{background:var(--surface-muted)}.ds-ring{width:16px;height:16px;flex:none;margin-top:3px}.ds-main{flex:1;display:grid;gap:1px;min-width:0}.ds-title{font-weight:500;color:var(--ink)}.ds-meta{font-size:.875rem;color:var(--ink-2)}.ds-trail{display:flex;align-items:center;gap:12px;align-self:center}.ds-amt{font-weight:500;font-variant-numeric:tabular-nums lining-nums}.ds-pay{display:inline-flex;align-items:center;min-height:44px;padding:0 12px;border-radius:6px;background:var(--club);color:var(--club-on);font-size:.875rem;font-weight:500;text-decoration:none}.ds-pay:focus-visible{outline:2px solid var(--club-text,#5b2a86);outline-offset:2px;}"
     },
     {
-      "name": "State Line",
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Card (@/app/components/ui): a white surface, hairline, 8px corner, title and a foot of actions. No shadow.",
+      "html": "<section class=\"ds-card\" style=\"--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--ground:#f7f7f8;--surface:#fff;--surface-muted:#f2f2f4;--border:#e3e4e8;--border-control:#cfd2d8;--border-strong:#8a8e98;--ink:#18191d;--ink-2:#5c606a;--ink-3:#8a8e98;--done:#1d7344;--due:#955400;--late:#b3261e;--done-soft:#e7f4ec;--due-soft:#fcf1df;--late-soft:#fceceb;--neutral-soft:#f0f1f3;--overlay:rgb(0 0 0 / .08);font-family:Inter,ui-sans-serif,system-ui,sans-serif;\"><h2>Total owed <span class=\"ds-card-amt\">$185.00</span></h2><p class=\"ds-card-asof\">Owed now. From QuickBooks, as of 6:19 PM.</p></section>",
+      "css": ".ds-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;color:var(--ink);max-width:24rem}.ds-card h2{display:flex;justify-content:space-between;align-items:baseline;margin:0;font-size:1.125rem;font-weight:600;letter-spacing:-.011em}.ds-card-amt{font-size:1.5rem;letter-spacing:-.018em;font-variant-numeric:tabular-nums lining-nums}.ds-card-asof{margin:4px 0 0;font-size:.875rem;color:var(--ink-2)}"
+    },
+    {
+      "name": "Status Badges",
       "kind": "chip",
-      "description": "Status as icon plus words; to do in amber, done in green.",
-      "html": "<div class=\"ds-state todo\"><svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><circle cx=\"8\" cy=\"8\" r=\"6\"/><path d=\"M8 5v3.5\"/><circle cx=\"8\" cy=\"11\" r=\".6\" fill=\"currentColor\"/></svg>2 forms to sign</div><div class=\"ds-state done\"><svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.4\" aria-hidden=\"true\"><path d=\"M3 8.5l3 3 7-7\"/></svg>All forms signed</div>",
-      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--ring:3px;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-state{font:700 15px var(--read);display:flex;align-items:center;gap:6px;margin:4px 0}.ds-state svg{width:16px;height:16px;flex:none}.ds-state.todo{color:var(--due)}.ds-state.done{color:var(--done)}"
+      "refersTo": "badge",
+      "description": "StatusBadge (@/app/components/ui): a tone's icon and words on its soft tint, 4px corner. Four tones only.",
+      "html": "<span style=\"--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--ground:#f7f7f8;--surface:#fff;--surface-muted:#f2f2f4;--border:#e3e4e8;--border-control:#cfd2d8;--border-strong:#8a8e98;--ink:#18191d;--ink-2:#5c606a;--ink-3:#8a8e98;--done:#1d7344;--due:#955400;--late:#b3261e;--done-soft:#e7f4ec;--due-soft:#fcf1df;--late-soft:#fceceb;--neutral-soft:#f0f1f3;--overlay:rgb(0 0 0 / .08);font-family:Inter,ui-sans-serif,system-ui,sans-serif;display:flex;gap:8px;flex-wrap:wrap\"><span class=\"ds-badge ds-done\">Paid</span><span class=\"ds-badge ds-due\">2 to sign</span><span class=\"ds-badge ds-late\">Overdue</span><span class=\"ds-badge\">Not started</span></span>",
+      "css": ".ds-badge{display:inline-flex;align-items:center;gap:5px;padding:1px 8px;border-radius:4px;background:var(--neutral-soft);color:var(--ink-2);font-size:.8125rem;font-weight:500;line-height:1.5}.ds-done{background:var(--done-soft);color:var(--done)}.ds-due{background:var(--due-soft);color:var(--due)}.ds-late{background:var(--late-soft);color:var(--late)}"
     },
     {
-      "name": "Club Bar with Top Nav",
+      "name": "Notice",
+      "kind": "custom",
+      "refersTo": "notice-warning",
+      "description": "Notice (src/app/components/notice.tsx): a status on its tone's tint, icon and word in the tone, body in ink.",
+      "html": "<div class=\"ds-notice\" style=\"--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--ground:#f7f7f8;--surface:#fff;--surface-muted:#f2f2f4;--border:#e3e4e8;--border-control:#cfd2d8;--border-strong:#8a8e98;--ink:#18191d;--ink-2:#5c606a;--ink-3:#8a8e98;--done:#1d7344;--due:#955400;--late:#b3261e;--done-soft:#e7f4ec;--due-soft:#fcf1df;--late-soft:#fceceb;--neutral-soft:#f0f1f3;--overlay:rgb(0 0 0 / .08);font-family:Inter,ui-sans-serif,system-ui,sans-serif;\" role=\"status\"><svg viewBox=\"0 0 20 20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M10 2.5l8 14.5H2L10 2.5z\"/><path d=\"M10 8v4\"/><circle cx=\"10\" cy=\"14.6\" r=\".8\" fill=\"currentColor\"/></svg><div><b>Needs attention</b> QuickBooks needs connecting again. Payments are paused until it is.</div></div>",
+      "css": ".ds-notice{display:grid;grid-template-columns:20px 1fr;gap:12px;padding:12px 16px;border:1px solid var(--border);border-radius:8px;background:var(--due-soft);color:var(--ink);font-size:.9375rem;max-width:32rem}.ds-notice svg{width:20px;height:20px;margin-top:2px;color:var(--due)}.ds-notice b{color:var(--due);font-weight:600;margin-right:4px}"
+    },
+    {
+      "name": "Club bar and tabs",
       "kind": "nav",
       "refersTo": "club-bar",
-      "description": "Club-colored header; desktop nav with an inset underline on the current page.",
-      "html": "<header class=\"ds-bar\"><span class=\"mono\">FZN</span><span class=\"club\">FZN Band Boosters</span><nav><a href=\"#\" aria-current=\"page\">Home</a><a href=\"#\">Forms</a><a href=\"#\">Payments</a><a href=\"#\">Family</a></nav></header>",
-      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--ring:3px;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-bar{background:var(--club);color:var(--club-on);height:56px;display:flex;align-items:center;gap:12px;padding:0 24px}.ds-bar .mono{width:34px;height:34px;border-radius:50%;background:var(--club-on);color:var(--club);display:grid;place-items:center;font:700 14px var(--mark)}.ds-bar .club{font:700 21px/1 var(--mark);letter-spacing:.01em}.ds-bar nav{margin-left:auto;display:flex;gap:4px}.ds-bar a{color:var(--club-on);text-decoration:none;font:600 18px var(--mark);padding:6px 12px}.ds-bar a[aria-current=page]{box-shadow:inset 0 -3px 0 var(--club-on)}"
-    },
-    {
-      "name": "Bottom Tabs",
-      "kind": "nav",
-      "refersTo": "tab",
-      "description": "Phone tab bar; active tab in club-text with a 3px inset top rule; square amber count badge.",
-      "html": "<nav class=\"ds-tabs\"><a href=\"#\" aria-current=\"page\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path d=\"M3 11l9-7 9 7v9h-6v-6H9v6H3z\"/></svg>Home</a><a href=\"#\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path d=\"M6 3h9l3 3v15H6z\"/><path d=\"M9 13l2 2 4-4\"/></svg><span>Forms<span class=\"badge\">2</span></span></a><a href=\"#\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><rect x=\"3\" y=\"6\" width=\"18\" height=\"12\"/><path d=\"M3 10h18M7 15h3\"/></svg>Payments</a><a href=\"#\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><circle cx=\"9\" cy=\"8\" r=\"3\"/><circle cx=\"17\" cy=\"9\" r=\"2.5\"/><path d=\"M3 20c0-3 3-5 6-5s6 2 6 5M15 15c3 0 6 1.5 6 4\"/></svg>Family</a></nav>",
-      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--ring:3px;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-tabs{background:var(--paper);border-top:2px solid var(--ink);display:grid;grid-template-columns:repeat(4,1fr)}.ds-tabs a{min-height:64px;display:grid;place-items:center;align-content:center;gap:2px;text-decoration:none;color:var(--ink-2);font:600 15px var(--mark);letter-spacing:.03em}.ds-tabs svg{width:24px;height:24px}.ds-tabs a[aria-current=page]{color:var(--club-text);box-shadow:inset 0 3px 0 var(--club-text)}.ds-tabs a:focus-visible{outline:var(--ring) solid var(--club-text);outline-offset:2px}.ds-tabs .badge{font:700 12px/18px var(--read);background:var(--due);color:var(--paper);padding:0 6px;margin-left:4px;display:inline-block}"
-    },
-    {
-      "name": "Choice Group (ruled options)",
-      "kind": "input",
-      "refersTo": "choice",
-      "description": "Radios drawn as square ruled options; checked in club-text with a dot; the Display page is built from these.",
-      "html": "<fieldset class=\"ds-setting\"><legend>Appearance</legend><p class=\"hint\">Light or dark background.</p><div class=\"ds-choices\"><label class=\"ds-choice\"><input type=\"radio\" name=\"ds-theme\" checked><span><b>Match my device</b><small>Follows your phone or computer</small></span></label><label class=\"ds-choice\"><input type=\"radio\" name=\"ds-theme\"><span><b>Light</b><small>Dark text on white</small></span></label><label class=\"ds-choice\"><input type=\"radio\" name=\"ds-theme\"><span><b>Dark</b><small>Light text on near-black</small></span></label></div></fieldset>",
-      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--ring:3px;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-setting{border:0;padding:0;margin:0;font:400 1.0625rem/1.45 var(--read);color:var(--ink)}.ds-setting legend{font:700 1.25rem/1.2 var(--mark);padding:0}.ds-setting .hint{color:var(--ink-2);font-size:.9375rem;margin:2px 0 0}.ds-choices{display:grid;gap:8px;margin-top:12px}.ds-choice{position:relative;display:block;cursor:pointer}.ds-choice input{position:absolute;opacity:0;width:1px;height:1px}.ds-choice span{display:grid;grid-template-columns:24px 1fr;gap:2px 12px;align-items:center;min-height:56px;padding:8px 16px;border:2px solid var(--ink);background:var(--paper)}.ds-choice span::before{content:'';width:20px;height:20px;border:2px solid var(--ink);border-radius:50%;grid-row:1/span 2;box-sizing:border-box}.ds-choice b{font-size:1.0625rem}.ds-choice small{grid-column:2;font-size:.875rem;color:var(--ink-2)}.ds-choice:hover span{background:var(--club-tint)}.ds-choice input:checked+span{border-color:var(--club-text);box-shadow:inset 0 0 0 1px var(--club-text)}.ds-choice input:checked+span::before{border-color:var(--club-text);background:radial-gradient(circle,var(--club-text) 0 5px,transparent 5.5px)}.ds-choice input:focus-visible+span{outline:var(--ring) solid var(--club-text);outline-offset:2px}@media (min-width:760px){.ds-choices{grid-template-columns:repeat(3,minmax(0,1fr))}}"
+      "description": "ClubBar and ParentTabs: a white 56px bar with the logo tile; the phone's tab bar with the current tab on the club tint.",
+      "html": "<div style=\"--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--ground:#f7f7f8;--surface:#fff;--surface-muted:#f2f2f4;--border:#e3e4e8;--border-control:#cfd2d8;--border-strong:#8a8e98;--ink:#18191d;--ink-2:#5c606a;--ink-3:#8a8e98;--done:#1d7344;--due:#955400;--late:#b3261e;--done-soft:#e7f4ec;--due-soft:#fcf1df;--late-soft:#fceceb;--neutral-soft:#f0f1f3;--overlay:rgb(0 0 0 / .08);font-family:Inter,ui-sans-serif,system-ui,sans-serif;background:var(--ground)\"><div class=\"ds-bar\"><span class=\"ds-tile\">E2E</span><span class=\"ds-club\">E2E Boosters</span><a class=\"ds-nav ds-here\" href=\"#\">Home</a><a class=\"ds-nav\" href=\"#\">Forms</a><span class=\"ds-acct\">ZQ</span></div><nav class=\"ds-tabs\"><a href=\"#\" class=\"ds-tab ds-tab-here\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M4 11l8-7 8 7v9H4z\"/></svg>Home</a><a href=\"#\" class=\"ds-tab\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><rect x=\"3\" y=\"6\" width=\"18\" height=\"12\" rx=\"2\"/></svg>Payments</a></nav></div>",
+      "css": ".ds-bar{display:flex;align-items:center;gap:12px;height:56px;padding:0 16px;background:var(--surface);border-bottom:1px solid var(--border)}.ds-tile{height:32px;min-width:32px;padding:0 5px;border-radius:8px;background:var(--club);color:var(--club-on);display:grid;place-items:center;font-size:.8125rem;font-weight:700}.ds-club{font-weight:600;color:var(--ink);margin-right:auto}.ds-nav{display:inline-flex;align-items:center;min-height:44px;padding:0 12px;border-radius:6px;color:var(--ink-2);font-size:.9375rem;font-weight:500;text-decoration:none}.ds-nav:hover{background:var(--surface-muted);color:var(--ink)}.ds-here{background:var(--club-tint);color:var(--club-text);font-weight:600}.ds-nav:focus-visible,.ds-tab:focus-visible{outline:2px solid var(--club-text,#5b2a86);outline-offset:2px;}.ds-acct{width:36px;height:36px;border-radius:999px;background:var(--surface-muted);display:grid;place-items:center;font-size:.8125rem;font-weight:600}.ds-tabs{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;background:var(--surface);border-top:1px solid var(--border);margin-top:48px}.ds-tab{min-height:64px;display:grid;place-items:center;align-content:center;gap:2px;color:var(--ink-2);font-size:.8125rem;font-weight:500;text-decoration:none}.ds-tab svg{width:48px;height:28px;padding:3px 13px;border-radius:999px}.ds-tab-here{color:var(--club-text);font-weight:600}.ds-tab-here svg{background:var(--club-tint)}"
     }
   ],
   "narrative": {
-    "northStar": "The Dot Book",
-    "overview": "The season is a drill, and a family always knows its next set. Every screen is a page from the dot book students carry: white chart paper ruled with a faint 24px coordinate grid, near-black 2px ink rules, square corners, and the club's own color used the way a drill writer uses a highlighter, to mark where you are now. Nothing floats; everything is drawn onto the paper.\n\nThe system is white-label. Each club supplies one color at runtime, and the app derives everything else from it (see Colors). The club leads; Booster Rocket is credited in the footer, never featured. The grid reads as plain graph paper, so a theater or sports club fits as well as a marching band.\n\nDensity is calm and phone-first: one column of ruled boxes on phones, a two-column box grid at 760px and up. Money is set like a ledger, with tabular figures in one right-aligned column that visibly sums to its total. The reference build is `design/reference/parent-home.html` (with `display-settings.html` for the Display page); every later surface, staff screens included, inherits from it.\n\nThe same page is drawn in four ink sets: light, dark (\"chart paper at night\", where the world's ink becomes the paper), and a high-contrast version of each. Layout, rules and shapes never change between modes; only the token values do. Windows contrast themes are honored on top of all four.",
+    "northStar": "The Calm Standard",
+    "overview": "Booster Rocket reads like a quiet, well-organized product of its category: structure comes from spacing, grouping and a strict type scale, not from heavy rules, boxes inside boxes or drop shadows. A near-white ground carries white surfaces with a 1px hairline and an 8px corner; Inter is the one face; near-black ink and one gray carry every word. The club's own color is an accent and nothing more: the primary button, the current place in the menu, the focus ring and the small logo tile in a white top bar.\n\nThe system is white-label. Each club supplies one color at runtime and the app derives every club role from it, checked against every ground of every display mode. The club leads; Booster Rocket is credited in the footer (\"Runs on Booster Rocket\"), never featured. The same layout is drawn in four display modes (light, dark, and high contrast for each), at three text sizes, with reduced motion and under Windows contrast themes; only token values change between them.\n\nParents are every age, often on older phones, so the category's density is translated humanely: body text is 1rem, nothing is set under 0.8125rem, every control is at least 44px tall, and WCAG 2.2 AA holds throughout. Staff at laptops get the same world denser, in DataTables, never smaller than that floor. Status is always words plus a small drawn icon, in four tones only.",
     "keyCharacteristics": [
-      "Chart paper ground: white with a 24px grid in `grid`, gutters and gaps on that grid.",
-      "2px `ink` rules for structure, 1px `hair` rules for list rows, no shadows, no rounded containers.",
-      "One runtime club color, derived into per-mode roles, used for the bar, the current set, and club actions.",
-      "Two faces: Atkinson Hyperlegible for anything read, Barlow Condensed for marks, labels and numbers on the chart.",
-      "Status is always a word plus an icon, never color alone.",
-      "Four display modes chosen per device, each defaulting to \"match my device\"."
+      "Near-white ground, white surfaces, 1px hairlines, corners of 8px (surfaces), 6px (controls) and 4px (badges).",
+      "One face, Inter, self-hosted; tabular figures only where a figure is read as a figure.",
+      "The club's color derived at runtime into fill, ink-on-fill, text and tint roles, used as an accent only.",
+      "Lists over tables for what a person acts on: a section label over one bordered list of rows, each a status ring, a title, a meta line, then an amount or a compact action.",
+      "Four status tones (done, due, late, neutral), always words plus an icon.",
+      "No shadow anywhere except under menus and popovers."
     ],
     "rules": [
       {
+        "name": "The Accent-Only Rule",
+        "body": "The club fill is for the primary button, the logo tile and the current step's track. Everywhere else the club appears as `club-text` or `club-tint`. The top bar and the tab bar are white surfaces, never the club's color.",
+        "section": "colors"
+      },
+      {
         "name": "The Derived Club Rule",
-        "body": "A club picks one color; the app computes `club-on`, the four `club-text-*` tones and the two `club-tint-*` washes from it. No club setting may produce a pairing below 4.5:1 (7:1 in high contrast), whatever color is supplied.",
+        "body": "A club picks one color; the app computes `club-on`, the four `club-text-*` tones and both `club-tint-*` washes. No club color can produce text under 4.5:1 (7:1 in high contrast) on any ground of its mode; `club` and `club-on` never change between modes.",
         "section": "colors"
       },
       {
-        "name": "The Highlighter Rule",
-        "body": "The club fill appears only on the club bar and the current set. Club color elsewhere is `club-text`: links, the club outline button, the active tab, the checked option, focus.",
+        "name": "The Four Tones Rule",
+        "body": "A status has one of four tones: done, due, late, neutral (`Tone`, `src/app/components/ui/tone.ts`). Information is ink on the neutral tint, never a blue. No fifth status color.",
         "section": "colors"
       },
       {
-        "name": "The Fixed Fill Rule",
-        "body": "`club` and `club-on` do not change between modes. The bar and the current set look the same by day and night; only club-text and club-tint adapt to the paper.",
+        "name": "The Measured Pair Rule",
+        "body": "A fixed color added to the stylesheet is added to `palette.ts` in the same commit and its text pairs meet 4.5:1 (7:1 high contrast), its marks 3:1, or the token test fails.",
         "section": "colors"
       },
       {
-        "name": "The Night Chart Rule",
-        "body": "Dark mode is the same chart with ink and paper swapped: same rules, same layout, same grid (in `grid-dark`). Never introduce surfaces, grays or elevation that the light chart lacks.",
-        "section": "colors"
-      },
-      {
-        "name": "The Full-Ink Contrast Rule",
-        "body": "High contrast removes the grid, draws every hairline in full ink, sets text at 7:1 or better, and thickens the focus ring to 4px. Nothing else moves.",
-        "section": "colors"
-      },
-      {
-        "name": "The Word-First Status Rule",
-        "body": "Every status color travels with a word and usually an icon (\"Due Nov 15, in 8 days\", a tick plus \"All forms signed\"). Color confirms; it never carries meaning alone.",
-        "section": "colors"
-      },
-      {
-        "name": "The Two-Hands Rule",
-        "body": "Atkinson for reading, Barlow for marking. A sentence is never set in Barlow; a set number is never set in Atkinson.",
+        "name": "The One Face Rule",
+        "body": "Inter for every word and figure. The only other faces are the system fallback on the offline page and in the static gallery (Inter comes through `next/font`), and the icon renderer's bundled Geist on the app icon.",
         "section": "typography"
       },
       {
-        "name": "The Ledger Figures Rule",
-        "body": "Every amount, count, phone number and date-with-digits uses tabular lining figures (`font-variant-numeric: tabular-nums lining-nums`).",
+        "name": "The Rem Floor Rule",
+        "body": "Every font size is in rem, from the scale, never under 0.8125rem; body text is 1rem.",
         "section": "typography"
       },
       {
-        "name": "The Rem-Only Rule",
-        "body": "Every font size is in rem so the Text size setting and browser zoom scale all of it. Never set type in px.",
+        "name": "The Figures-as-Figures Rule",
+        "body": "Tabular lining figures only where a figure lines up or is read as an amount: `.num`, a DataTable's `numeric` cells and times, a list's amount, money, stats, step numbers. The body keeps Inter's proportional figures (its tabular hyphen is set wide).",
         "section": "typography"
       },
       {
-        "name": "The On-Grid Rule",
-        "body": "Page gutters, box gaps and the header stack resolve to multiples of 24px so boxes sit on the paper's lines.",
+        "name": "The 44 Rule",
+        "body": "Every control and lone link is at least 44px tall: buttons (compact `size=\"sm\"` is narrower, not shorter), fields, tabs (64px), menu links (48px in the phone panel), disclosure summaries, a link alone on its line (`.link-line`), a table's links.",
         "section": "layout"
       },
       {
-        "name": "The Drawn-Not-Lifted Rule",
-        "body": "No drop shadows, blur, glow or offset shadows. If something needs emphasis, rule it heavier or fill it.",
+        "name": "The Menu-Only Shadow Rule",
+        "body": "Cards, lists, buttons, notices and bars never cast a shadow. If something needs emphasis, it gets a tone, a weight or a position.",
         "section": "elevation"
       },
       {
-        "name": "The Dots-Are-People Rule",
-        "body": "A circle means a person. Containers, buttons, chips and badges are never round or pill-shaped. The radio mark is the one sanctioned exception, and it lives inside a square option.",
+        "name": "The Three Corners Rule",
+        "body": "A new element takes 8px if it is a surface, 6px if it is a control, 4px if it is a label. Nothing else is a pill.",
         "section": "shapes"
       }
     ],
     "dos": [
-      "Do derive `club-on`, the four `club-text-*` tones and both `club-tint-*` washes from the club's one color; check every pairing reaches 4.5:1, and 7:1 in high contrast.",
-      "Do keep page gutters, box gaps and header heights on the 24px grid.",
-      "Do draw structure with 2px `ink` rules and rows with 1px `hair` rules.",
-      "Do set every amount in tabular figures, right-aligned in one column that sums to a 2px Total rule, with an \"as of\" time beside the owed figure.",
-      "Do give each invoice its own Pay; fill only the soonest-due one.",
-      "Do pair every status color with a word, and an icon where there is room.",
-      "Do keep tap targets at 44px or more (48px for the primary button, 56px for choice options, 64px for tabs) and the focus ring `club-text` 3px (4px in high contrast) with a 2px offset on paper (`club-on` inside the club bar).",
-      "Do reuse the season set ruler as the header of the staff forms matrix.",
-      "Do build every new color from the mode tokens so all four modes and forced colors work without extra rules; check a new surface in light, dark, both high-contrast sets and a Windows contrast theme.",
-      "Do set type in rem and let layouts reflow at 125% text.",
-      "Do make \"Match my device\" the first and default choice of every display setting, and store display choices on the device."
+      "**Do** derive `club-on`, the four `club-text-*` tones and both `club-tint-*` washes from the club's one color, and check every pair reaches 4.5:1 (7:1 in high contrast) on the hardest ground of its mode.",
+      "**Do** build pages from the primitives in `@/app/components/ui`; add a sample to the gallery and regenerate `design/system/gallery.html` when a primitive or state is added.",
+      "**Do** use tokens only in components: no hex, rgb or named color, and add any new fixed color to `palette.ts` in the same commit.",
+      "**Do** put a short list a person acts on in a `List` under a `SectionLabel`, and many like records in a `DataTable`.",
+      "**Do** say every status in words with an icon, in one of the four tones: done, due, late, neutral.",
+      "**Do** keep every control and lone link at least 44px tall, and a parent page's busy button `aria-disabled`.",
+      "**Do** set type in rem from the scale, never under 0.8125rem, and let layouts reflow at 125% text.",
+      "**Do** give each invoice its own Pay, the soonest-due payable one primary, and an as-of line beside the figures.",
+      "**Do** check a new surface in light, dark, both high-contrast sets and a Windows contrast theme.",
+      "**Do** make \"Match my device\" the first and default choice of every display setting, stored on the device."
     ],
     "donts": [
-      "Don't use drop shadows, blur or offset shadows; inset rules only.",
-      "Don't round containers, buttons, badges or chips; circles are for people (and the radio mark) only.",
-      "Don't use the club fill beyond the club bar and the current set, or change it between modes.",
-      "Don't color an amount red; past-due red goes on the date line only.",
-      "Don't set sentences in Barlow Condensed or numbers on the chart in Atkinson.",
-      "Don't put a small uppercase label above a heading as decoration; labels name content beside them.",
-      "Don't load fonts from Google in the app; self-host them.",
-      "Don't hide a Pay button when QuickBooks is offline; disable it in place and say why."
+      "**Don't** fill the club bar, the tab bar or any surface with the club's color; it is an accent for the primary button, the logo tile, the current step's track, the current nav item and focus.",
+      "**Don't** cast a shadow from anything but a menu or popover (`--shadow-menu`).",
+      "**Don't** nest a card in a card, or put a panel inside a list row.",
+      "**Don't** set a label in uppercase or put an eyebrow over a page title; a section label names the list under it.",
+      "**Don't** add a fifth status color or a blue information tone; information is ink on the neutral tint.",
+      "**Don't** use `ink-3` for text, or color alone for any meaning.",
+      "**Don't** make a pill: full rounds are for avatars, status marks, radio marks and the current tab's icon pill.",
+      "**Don't** color an amount; urgency goes on the date line only.",
+      "**Don't** hide a Pay when the figures are not current; pause it in place and say why.",
+      "**Don't** promise when a service will be back unless the portal knows.",
+      "**Don't** load fonts from Google in the app or set type in px.",
+      "**Don't** use an emoji or a Unicode glyph as an icon; icons are drawn SVG."
     ]
   }
 }
