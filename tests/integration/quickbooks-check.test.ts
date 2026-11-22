@@ -45,8 +45,8 @@ beforeEach(async () => {
 const posts = () => stub.apiCalls().filter((c) => c.method === "POST");
 const audits = async (action: string) => db.select().from(auditLog).where(eq(auditLog.action, action));
 const run = (writes = true) => runSandboxCheck({ staffUserId: admin.id, label: admin.email, ip: "203.0.113.9", writes });
-/** The ids of the customers the stub holds that the check made: every one named "Booster Rocket check". */
-const checkCustomers = () => stub.customers.filter((c) => String(c.DisplayName).startsWith("Booster Rocket check"));
+/** The ids of the customers the stub holds that the check made: every one named "Boosters Rocket check". */
+const checkCustomers = () => stub.customers.filter((c) => String(c.DisplayName).startsWith("Boosters Rocket check"));
 const WRITE_KEYS = EXPECTATIONS.filter((x) => x.group === "writes").map((x) => x.key);
 const READ_KEYS = EXPECTATIONS.filter((x) => x.group === "reads").map((x) => x.key);
 
@@ -132,7 +132,7 @@ describe("the check of the portal's requests against an Intuit sandbox company (
     const cached = await db.select().from(qboCustomer);
     const theirs = cached.filter((c) => ids.includes(c.qboId));
     expect(theirs).toHaveLength(4);
-    expect(theirs.every((c) => !c.active && c.displayName.startsWith("Booster Rocket check"))).toBe(true);
+    expect(theirs.every((c) => !c.active && c.displayName.startsWith("Boosters Rocket check"))).toBe(true);
     // No guardian row is linked to one, or in a family record linked to one.
     const theirLinks = (await db.select().from(accountingLink)).filter((l) => ids.includes(l.customerId));
     expect(theirLinks.filter((l) => l.guardianId !== null)).toEqual([]);
@@ -321,14 +321,14 @@ describe("the writes are only for an Intuit sandbox company", () => {
     await checkCompany(stub);
     const [row] = await db.insert(qboCheckRun).values({ realmId: REALM, environment: "sandbox", writes: true, tag: "t", startedBy: admin.id }).returning();
     const r: CheckRun = { id: row!.id, realmId: REALM, actor: { door: "staff", id: admin.id, label: admin.email }, ip: null };
-    const famRow = await made(r.id, "family", stub, "Booster Rocket check t family A");
-    const stuRow = await made(r.id, "student", stub, "Booster Rocket check t student", famRow);
+    const famRow = await made(r.id, "family", stub, "Boosters Rocket check t family A");
+    const stuRow = await made(r.id, "student", stub, "Boosters Rocket check t student", famRow);
     await db.insert(qboCheckRecord).values({ runId: r.id, realmId: REALM, kind: "invoice", qboId: "5001", name: "m" });
     await db.update(qboConnection).set({ environment: "production" });
     const before = stub.customers.map((c) => JSON.stringify(c));
     for (const send of everyWrite(r, famRow, stuRow, "5001")) await expect(send()).rejects.toMatchObject({ code: "not_sandbox" });
     await expect(checkMove(r, stuRow, "0", famRow)).rejects.toMatchObject({ code: "not_sandbox" });
-    await expect(checkCreateCustomer(r, { kind: "family", name: "Booster Rocket check t family B", typeQboId: "1", familyQboId: null, email: null })).rejects.toMatchObject({ code: "not_sandbox" });
+    await expect(checkCreateCustomer(r, { kind: "family", name: "Boosters Rocket check t family B", typeQboId: "1", familyQboId: null, email: null })).rejects.toMatchObject({ code: "not_sandbox" });
     // Nothing was listed as made, either.
     expect(await db.select().from(qboCheckRecord)).toHaveLength(3);
     expect(posts()).toEqual([]);
@@ -340,13 +340,13 @@ describe("the writes are only for an Intuit sandbox company", () => {
     const [row] = await db.insert(qboCheckRun).values({ realmId: REALM, environment: "sandbox", writes: true, tag: "t", startedBy: admin.id }).returning();
     const [other] = await db.insert(qboCheckRun).values({ realmId: REALM, environment: "sandbox", writes: true, tag: "u", startedBy: admin.id }).returning();
     const r: CheckRun = { id: row!.id, realmId: REALM, actor: { door: "staff", id: admin.id, label: admin.email }, ip: null };
-    const othersFamily = await made(other!.id, "family", stub, "Booster Rocket check u family A");
-    const mine = await made(r.id, "family", stub, "Booster Rocket check t family A");
+    const othersFamily = await made(other!.id, "family", stub, "Boosters Rocket check u family A");
+    const mine = await made(r.id, "family", stub, "Boosters Rocket check t family A");
     // A real family and student of the company, another run's family, an id of another kind, and ids that aren't QuickBooks ids.
     for (const id of ["10", "12", othersFamily, "5001", "abc", "", "10 or 1=1"]) {
       for (const send of everyWrite(r, id, id, id)) await expect(send(), id).rejects.toMatchObject({ code: "not_mine" });
       await expect(checkMove(r, id, "0", mine)).rejects.toMatchObject({ code: "not_mine" });
-      await expect(checkCreateCustomer(r, { kind: "student", name: "Booster Rocket check t s", typeQboId: "3", familyQboId: id, email: null })).rejects.toMatchObject({ code: "not_mine" });
+      await expect(checkCreateCustomer(r, { kind: "student", name: "Boosters Rocket check t s", typeQboId: "3", familyQboId: id, email: null })).rejects.toMatchObject({ code: "not_mine" });
     }
     expect(posts()).toEqual([]);
     expect(await db.select().from(qboCheckRecord).where(eq(qboCheckRecord.kind, "student"))).toEqual([]);
@@ -398,8 +398,8 @@ describe("a run cut off part way", () => {
     await checkCompany(stub);
     const [cut] = await db.insert(qboCheckRun).values({ realmId: REALM, environment: "sandbox", writes: true, tag: "2026-11-01 dead", startedBy: admin.id }).returning();
     // The create reached QuickBooks, and the server stopped before its answer was recorded.
-    stub.customers.push({ Id: "70", DisplayName: "Booster Rocket check 2026-11-01 dead family A", Active: true, SyncToken: "0", CustomerTypeRef: { value: "1" } });
-    await db.insert(qboCheckRecord).values({ runId: cut!.id, realmId: REALM, kind: "family", name: "Booster Rocket check 2026-11-01 dead family A" });
+    stub.customers.push({ Id: "70", DisplayName: "Boosters Rocket check 2026-11-01 dead family A", Active: true, SyncToken: "0", CustomerTypeRef: { value: "1" } });
+    await db.insert(qboCheckRecord).values({ runId: cut!.id, realmId: REALM, kind: "family", name: "Boosters Rocket check 2026-11-01 dead family A" });
     expect(await run()).toMatchObject({ ok: true, outcome: "passed" });
     const [after] = await db.select().from(qboCheckRun).where(eq(qboCheckRun.id, cut!.id));
     expect(after).toMatchObject({ outcome: "cut_off", stopCode: "cut_off" });
@@ -450,7 +450,7 @@ describe("a run cut off part way", () => {
   it("closes an earlier run's lost create that no customer carries the name of: QuickBooks made nothing", async () => {
     await checkCompany(stub);
     const [cut] = await db.insert(qboCheckRun).values({ realmId: REALM, environment: "sandbox", writes: true, tag: "2026-11-01 lost", startedBy: admin.id }).returning();
-    await db.insert(qboCheckRecord).values({ runId: cut!.id, realmId: REALM, kind: "family", name: "Booster Rocket check 2026-11-01 lost family A" });
+    await db.insert(qboCheckRecord).values({ runId: cut!.id, realmId: REALM, kind: "family", name: "Boosters Rocket check 2026-11-01 lost family A" });
     expect(await run()).toMatchObject({ ok: true, outcome: "passed" });
     const [rec] = await recordsOf(cut!.id);
     expect(rec).toMatchObject({ qboId: null, lastCode: "not_made" });
@@ -562,7 +562,7 @@ function everyWrite(r: CheckRun, family: string, student: string, invoice: strin
   return [
     () => checkUpdateContact(r, t("family", family), "0", { phone: "555-0100" }),
     () => checkUpdateEmail(r, t("family", family), "0", "x@example.com"),
-    () => checkRename(r, t("family", family), "0", "Booster Rocket check t other"),
+    () => checkRename(r, t("family", family), "0", "Boosters Rocket check t other"),
     () => checkSetActive(r, t("student", student), "0", false),
     () => checkSetActive(r, t("family", family), "0", false),
     () => checkCreateInvoice(r, { studentQboId: student, itemQboId: "7", units: 1, unitCents: 100, marker: "00000000-0000-4000-8000-000000000000" }),

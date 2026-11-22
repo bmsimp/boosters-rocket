@@ -1,14 +1,14 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-  Creates (or updates) the Booster Rocket staff sign-in app in your club's Microsoft Entra tenant.
+  Creates (or updates) the Boosters Rocket staff sign-in app in your club's Microsoft Entra tenant.
 .DESCRIPTION
   Signs you in with the normal Microsoft browser sign-in (never device code), then:
     1. finds the app "Booster Rocket (staff)" or creates it (single tenant),
     2. sets its redirect URI,
     3. requests the sign-in scopes openid, profile, email, offline_access and User.Read,
     4. creates its service principal and grants admin consent for those scopes,
-    5. adds Booster Rocket's certificate (made by your Booster Rocket
+    5. adds Boosters Rocket's certificate (made by your Boosters Rocket
        server; only its public half is in this script),
   and prints the values to enter in the portal: on the setup page, or under Settings, Staff sign-in. Nothing is written to disk.
   Safe to run again: it reuses the app and adds the certificate if it is not already there, leaving other certificates alone.
@@ -107,7 +107,7 @@ try {
   $existing = @((Invoke-MgGraphRequest GET "v1.0/applications/$($app.id)?`$select=keyCredentials").keyCredentials)
   $hash = [Convert]::ToBase64String($Certificate.GetCertHash())
   if ($existing | Where-Object { $_.customKeyIdentifier -eq $hash -or $_.key -eq $CertificateBase64 }) {
-    Write-Host 'The Booster Rocket certificate is already on the app.'
+    Write-Host 'The Boosters Rocket certificate is already on the app.'
   } else {
     if ($existing | Where-Object { -not $_.key }) {
       throw "Microsoft didn't return this app's existing certificates, so the script stopped rather than risk removing them. Upload the .cer from the portal by hand (the setup page, or Settings, Staff sign-in): Certificates & secrets > Certificates > Upload certificate."
@@ -120,7 +120,7 @@ try {
     $keys = @($existing | ForEach-Object { $k = @{}; foreach ($name in 'type', 'usage', 'key', 'displayName', 'keyId', 'customKeyIdentifier', 'startDateTime', 'endDateTime') { if ($null -ne $_.$name) { $k[$name] = $_.$name } }; $k })
     $keys += @{ type = 'AsymmetricX509Cert'; usage = 'Verify'; key = $CertificateBase64; displayName = "Booster Rocket $(Get-Date -Format 'yyyy-MM-dd')" }
     Invoke-MgGraphRequest PATCH "v1.0/applications/$($app.id)" -Body (@{ keyCredentials = @($keys) } | ConvertTo-Json -Depth 5) -ContentType 'application/json' | Out-Null
-    Write-Host 'Added the Booster Rocket certificate to the app. Certificates already on it were kept.'
+    Write-Host 'Added the Boosters Rocket certificate to the app. Certificates already on it were kept.'
   }
 
   if ($SetUpMail) {

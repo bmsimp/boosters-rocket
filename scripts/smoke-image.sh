@@ -65,6 +65,6 @@ offline="$(in_app "fetch('http://127.0.0.1:3000/offline.html',{redirect:'manual'
 [ "$offline" = "200 true" ] || fail "/offline.html returned: $offline"
 
 manifest="$(in_app "fetch('http://127.0.0.1:3000/manifest.webmanifest',{redirect:'manual'}).then(async r=>{const m=await r.json();process.stdout.write([r.status,r.headers.get('content-type'),m.name,m.start_url,m.display,m.icons.length].join(' '))})")"
-[ "$manifest" = "200 application/manifest+json Booster Rocket / standalone 4" ] || fail "/manifest.webmanifest returned: $manifest"
+[ "$manifest" = "200 application/manifest+json Boosters Rocket / standalone 4" ] || fail "/manifest.webmanifest returned: $manifest"
 
 echo "ok: image runs as non-root, migrates, is healthy, answers on 127.0.0.1 and by name, and serves its app icon, service worker, offline page and manifest"

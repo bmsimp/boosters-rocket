@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Run Booster Rocket in Docker on `linuxdev` at `https://portaltest.rhinoautomator.com` behind the existing Cloudflare tunnel and Cloudflare Access, with repeatable deploy and rollback, and prove staff and parent sign-in for real.
+**Goal:** Run Boosters Rocket in Docker on `linuxdev` at `https://portaltest.rhinoautomator.com` behind the existing Cloudflare tunnel and Cloudflare Access, with repeatable deploy and rollback, and prove staff and parent sign-in for real.
 
 **Architecture:** A multi-stage `Dockerfile` builds a Next.js standalone server on `node:26-slim`, plus a small `tools/` folder (plain-JS migration and seed scripts with only `drizzle-orm` and `postgres`). `docker-compose.poc.yml` runs `db` on a private network and `app` on that network plus `booster-rocket-edge`, which `cloudflared` also joins. Shell scripts on `linuxdev` do first-time setup, deploy (pull → build → migrate → recreate → wait healthy) and rollback.
 
@@ -646,7 +646,7 @@ The scripts always invoke compose as `docker compose -f docker-compose.poc.yml -
 - [ ] **Step 2: `.env.poc.example`**
 
 ```bash
-# Booster Rocket proof of concept on linuxdev. Copy to .env.poc (setup.sh does this), chmod 600, never commit.
+# Boosters Rocket proof of concept on linuxdev. Copy to .env.poc (setup.sh does this), chmod 600, never commit.
 # setup.sh fills BETTER_AUTH_SECRET and DB_PASSWORD with fresh random values.
 
 APP_URL=https://portaltest.rhinoautomator.com
@@ -789,7 +789,7 @@ describe("scripts/poc/deploy.sh", () => {
 
 ```bash
 #!/usr/bin/env bash
-# Deploys (or rolls back) the Booster Rocket proof of concept on linuxdev.
+# Deploys (or rolls back) the Boosters Rocket proof of concept on linuxdev.
 #   scripts/poc/deploy.sh             pull main, build, migrate, recreate app, wait healthy
 #   scripts/poc/deploy.sh --rollback  return to the previous image
 # Exit codes: 0 ok, 2 refused, 3 migrations failed (app untouched), 4 app unhealthy, 5 nothing to roll back to.
@@ -856,7 +856,7 @@ say "Deployed $(git rev-parse --short HEAD)."
 
 ```bash
 #!/usr/bin/env bash
-# One-time setup for the Booster Rocket proof of concept on linuxdev. Safe to run again.
+# One-time setup for the Boosters Rocket proof of concept on linuxdev. Safe to run again.
 set -euo pipefail
 
 BR_DIR="${BR_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"

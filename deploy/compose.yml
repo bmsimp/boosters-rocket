@@ -1,4 +1,4 @@
-# Booster Rocket for a club: the portal, its worker, Postgres with the portal's and Documenso's databases, Documenso,
+# Boosters Rocket for a club: the portal, its worker, Postgres with the portal's and Documenso's databases, Documenso,
 # a nightly backup and, if the club has no proxy of its own, a reverse proxy. docs/runbooks/first-install.md is the
 # walk-through; deploy/.env.example says what each setting is.
 #

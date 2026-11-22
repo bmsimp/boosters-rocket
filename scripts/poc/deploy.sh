@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploys (or rolls back) a Booster Rocket server run with docker compose.
+# Deploys (or rolls back) a Boosters Rocket server run with docker compose.
 #   scripts/poc/deploy.sh             pull main, build, back up the database, migrate, recreate app and worker, wait healthy
 #   scripts/poc/deploy.sh --rollback  return to the previous image
 # The backup goes to BR_BACKUP_DIR (default ~/booster-rocket-backups, outside this checkout), keeping the newest

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Issues the one-time code that unlocks Booster Rocket's setup page. Ships in the image as tools/scripts/setup-code.mjs.
+// Issues the one-time code that unlocks Boosters Rocket's setup page. Ships in the image as tools/scripts/setup-code.mjs.
 //   node setup-code.mjs            issue a code while setup is open; refuse (exit 3) once it is finished
 //   node setup-code.mjs --if-open  the same, but print nothing and exit 0 once setup is finished (deploy.sh uses this)
 //   node setup-code.mjs --reopen   reopen setup (stored sign-in values are kept), then issue a code

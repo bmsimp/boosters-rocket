@@ -10,7 +10,7 @@ import { clientAddress, stampingHandler } from "./client-address";
 
 function buildStaffAuth(p: LoadedProviders) {
   return betterAuth({
-    appName: "Booster Rocket staff",
+    appName: "Boosters Rocket staff",
     baseURL: env.APP_URL,
     basePath: "/api/auth/staff",
     secret: env.BETTER_AUTH_SECRET,

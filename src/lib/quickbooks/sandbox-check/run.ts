@@ -29,7 +29,7 @@ import {
  * The reads run against the connected company, sandbox or production, and keep only what was learned: counts, which
  * form worked, field names, host names. Never a name, an amount or an address. The writes run only when the run was
  * asked for them (the action asks only for a sandbox) and the connection is an Intuit sandbox at the moment each is
- * sent (./writes.ts), and only on records this run made: two families, a student and a parent named "Booster Rocket
+ * sent (./writes.ts), and only on records this run made: two families, a student and a parent named "Boosters Rocket
  * check <date> <tag> ..." with addresses at example.com, which can receive no mail, and one small invoice. At the end
  * every one is made inactive and the invoice voided (QuickBooks deletes no customer). While the writes run the check
  * holds the roster lock shared, so no roster refresh reads its records while they are active; once they are inactive,
@@ -304,7 +304,7 @@ class Check {
   /* ---- Writes: only on records this run makes ---- */
 
   private async writeSteps(): Promise<void> {
-    const run = this.run, base = `Booster Rocket check ${this.tag}`, mark = this.tag.replace(/\W+/g, "-");
+    const run = this.run, base = `Boosters Rocket check ${this.tag}`, mark = this.tag.replace(/\W+/g, "-");
     const shape = await getShape();
     const typeIds = this.typesFor(shape);
     if (!typeIds) { for (const x of EXPECTATIONS) if (x.group === "writes" && x.key !== "all_inactive") this.set(x.key, "not_run", {}, "no_types"); return; }

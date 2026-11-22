@@ -47,7 +47,7 @@ export const PARENT_DISABLED_PATHS = [
   "/passkey/list-user-passkeys", "/passkey/delete-passkey", "/passkey/update-passkey",
 ];
 
-const APP_NAME = "Booster Rocket";
+const APP_NAME = "Boosters Rocket";
 
 /**
  * The passkey library's server plugin (the sign-in release, slice SI-7a; the release's one new dependency): the WebAuthn

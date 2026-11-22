@@ -209,7 +209,7 @@ Rocket moved from Postgres 16 to Postgres 18 in this way; the release that does 
 
 Until the move is done, the database refuses to start on the new release, and nothing else starts either.
 `docker compose up -d` stops with `dependency failed to start: container ... db-1 is unhealthy`, and
-`docker compose logs db` says `Booster Rocket: Postgres was NOT started, and no data was changed or deleted.`, why, and
+`docker compose logs db` says `Boosters Rocket: Postgres was NOT started, and no data was changed or deleted.`, why, and
 the name of this section. Nothing is lost: the club's data is still in Postgres 16's own volume, exactly as it was. The
 move only reads it, through a read-only mount, to copy it: it is never written to, deleted or set up again, and the
 portal never starts on an empty database instead.

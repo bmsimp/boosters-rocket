@@ -30,7 +30,7 @@ export function foldLine(line: string): string {
 
 export function calendarFile(s: CalendarShift): string {
   const lines = [
-    "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Booster Rocket//Volunteer sign-up//EN", "CALSCALE:GREGORIAN", `METHOD:${s.cancelled ? "CANCEL" : "PUBLISH"}`,
+    "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Boosters Rocket//Volunteer sign-up//EN", "CALSCALE:GREGORIAN", `METHOD:${s.cancelled ? "CANCEL" : "PUBLISH"}`,
     "BEGIN:VEVENT",
     `UID:volunteer-signup-${s.signupId}@booster-rocket`,
     `SEQUENCE:${s.revision}`,

@@ -16,7 +16,7 @@ describe("parseMailForm", () => {
     expect(r).toEqual({ ok: false, errors: [
       "Host is a server name like smtp.example.org, without https:// or a path.",
       "Port must be a number from 1 to 65535.",
-      "Choose STARTTLS or TLS. Booster Rocket doesn't send mail unencrypted.",
+      "Choose STARTTLS or TLS. Boosters Rocket doesn't send mail unencrypted.",
     ] });
   });
   it("asks which way to send", () => {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Starts Postgres for Booster Rocket, unless doing so could greet the club with an empty portal. Every compose file's
+# Starts Postgres for Boosters Rocket, unless doing so could greet the club with an empty portal. Every compose file's
 # db service runs this in front of the image's own docker-entrypoint.sh (docker-compose.yml, docker-compose.poc.yml,
 # deploy/compose.yml), with two volumes:
 #   /var/lib/postgresql   the data of the Postgres this image is (18 keeps it in /var/lib/postgresql/18/docker)
@@ -39,12 +39,12 @@ case "$DATA" in "$NEW_ROOT"/*) ;; *) printf 'PGDATA (%s) is not under %s: this f
 refuse() {
   {
     printf '\n'
-    printf 'Booster Rocket: Postgres was NOT started, and no data was changed or deleted.\n\n'
+    printf 'Boosters Rocket: Postgres was NOT started, and no data was changed or deleted.\n\n'
     printf '%s\n' "$@"
     printf '\nWhat to do: %s\n' "$RUNBOOK"
-    printf "Until then this version of Booster Rocket can't start."
+    printf "Until then this version of Boosters Rocket can't start."
     if old_has_data; then
-      printf '\nThe Postgres 16 data is kept exactly as it is, so the previous version of Booster Rocket still\n'
+      printf '\nThe Postgres 16 data is kept exactly as it is, so the previous version of Boosters Rocket still\n'
       printf 'starts on it if you go back to it (that section says how).'
     fi
     printf '\n\n'
@@ -78,14 +78,14 @@ start_problem() {
   old_has_data || return 0
   case "$new" in
     empty)
-      refuse "This version of Booster Rocket runs Postgres $PG_MAJOR. The club's data is in the Postgres 16 data folder," \
+      refuse "This version of Boosters Rocket runs Postgres $PG_MAJOR. The club's data is in the Postgres 16 data folder," \
         "which Postgres $PG_MAJOR can't read until it is moved across. Starting here would make a new, empty database:" \
         "the portal would ask to be set up again as if it had never been used." \
         "The move backs up the data with Postgres 16, loads it into Postgres $PG_MAJOR and checks every table." ;;
     moved)
       [ "$(moved_from)" = "$(fingerprint)" ] && return 0
       refuse "The data was moved to Postgres $PG_MAJOR before, but Postgres 16 has been started on the old data since" \
-        "(the previous version of Booster Rocket was run again). The two copies may now differ: Postgres $PG_MAJOR holds the" \
+        "(the previous version of Boosters Rocket was run again). The two copies may now differ: Postgres $PG_MAJOR holds the" \
         "data as it was moved, with anything done on it before going back; Postgres 16 holds what was done since going" \
         "back. Neither was touched, and Postgres $PG_MAJOR is not started until you choose." \
         "To bring the Postgres 16 data across again, run the move with --again. It first backs up what Postgres $PG_MAJOR" \

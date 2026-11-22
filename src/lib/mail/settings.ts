@@ -92,7 +92,7 @@ export function parseMailForm(f: Record<string, string>): { ok: true; draft: Mai
   const port = Number((f.port ?? "").trim());
   if (!Number.isInteger(port) || port < 1 || port > 65535) errors.push("Port must be a number from 1 to 65535.");
   const security = (f.security ?? "").trim();
-  if (security !== "starttls" && security !== "tls") errors.push("Choose STARTTLS or TLS. Booster Rocket doesn't send mail unencrypted.");
+  if (security !== "starttls" && security !== "tls") errors.push("Choose STARTTLS or TLS. Boosters Rocket doesn't send mail unencrypted.");
   const username = (f.username ?? "").trim();
   if (!username) errors.push("Enter the SMTP username.");
   const from = normalizeEmail(f.from ?? "");

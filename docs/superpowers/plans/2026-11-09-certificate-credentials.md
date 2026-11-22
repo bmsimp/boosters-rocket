@@ -22,7 +22,7 @@ app instead of creating a secret. Google keeps its secret.
 - Microsoft sign-ins (`staff-microsoft`, `parent-oidc`) use **certificates only**. Google (`staff-google`) keeps
   its client secret, unchanged.
 - Key: RSA 2048, generated on the server. Certificate: self-signed X.509, valid 2 years (730 days), subject
-  `CN=Booster Rocket staff (<APP_URL host>)` or `CN=Booster Rocket parents (<APP_URL host>)`.
+  `CN=Booster Rocket staff (<APP_URL host>)` or `CN=Boosters Rocket parents (<APP_URL host>)`.
 - The private key is stored sealed with `secretBox()`, AAD `certificate:<id>`. It is never sent to the browser,
   logged, or audited. A retired certificate's key is set to null.
 - Assertion header: `alg` `PS256`, `typ` `JWT`, `x5t#S256` = base64url SHA-256 of the certificate DER. Claims:
@@ -496,7 +496,7 @@ export async function getOrCreatePendingCertificate(key: CertificateProviderKey,
   const existing = (await certificateRows(key)).pending;
   if (existing) return existing;
   // Key generation is slow, so it happens before taking the lock; a concurrent winner's row is returned instead.
-  const g = await generateCertificate(`Booster Rocket ${audience(key)} (${new URL(env.APP_URL).hostname})`);
+  const g = await generateCertificate(`Boosters Rocket ${audience(key)} (${new URL(env.APP_URL).hostname})`);
   return db.transaction(async (tx) => {
     await tx.execute(LOCK);
     const raced = (await certificateRows(key, tx)).pending;
@@ -1073,11 +1073,11 @@ In both scripts, add after the `$AppUrl` parameter guard:
 
 ```powershell
 $CertificateBase64 = '__BOOSTER_ROCKET_CERTIFICATE__'
-if ($CertificateBase64 -notmatch '^[A-Za-z0-9+/]{200,}={0,2}$') { throw 'Download this script from the Booster Rocket setup page; it carries the certificate to add to the app.' }
+if ($CertificateBase64 -notmatch '^[A-Za-z0-9+/]{200,}={0,2}$') { throw 'Download this script from the Boosters Rocket setup page; it carries the certificate to add to the app.' }
 $Certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([Convert]::FromBase64String($CertificateBase64))
 ```
 
-Update `.DESCRIPTION`: the last step now reads "adds Booster Rocket's certificate (made by your Booster Rocket
+Update `.DESCRIPTION`: the last step now reads "adds Boosters Rocket's certificate (made by your Boosters Rocket
 server; only its public half is in this script)". Remove every mention of a client secret.
 
 Replace each script's `addPassword` block (staff lines 72–74, parent lines 98–100) with the following. Use
@@ -1087,7 +1087,7 @@ Replace each script's `addPassword` block (staff lines 72–74, parent lines 98�
   $existing = @((Invoke-MgGraphRequest GET "v1.0/applications/$($app.id)?`$select=keyCredentials").keyCredentials)
   $hash = [Convert]::ToBase64String($Certificate.GetCertHash())
   if ($existing | Where-Object { $_.customKeyIdentifier -eq $hash }) {
-    Write-Host 'The Booster Rocket certificate is already on the app.'
+    Write-Host 'The Boosters Rocket certificate is already on the app.'
   } else {
     if ($existing | Where-Object { -not $_.key }) {
       throw "Microsoft didn't return this app's existing certificates, so the script stopped rather than risk removing them. Upload the .cer from the setup page by hand: Certificates & secrets > Certificates > Upload certificate."
@@ -1095,7 +1095,7 @@ Replace each script's `addPassword` block (staff lines 72–74, parent lines 98�
     $keys = @($existing | ForEach-Object { @{ type = $_.type; usage = $_.usage; key = $_.key; displayName = $_.displayName } })
     $keys += @{ type = 'AsymmetricX509Cert'; usage = 'Verify'; key = $CertificateBase64; displayName = "Booster Rocket $(Get-Date -Format 'yyyy-MM-dd')" }
     Invoke-MgGraphRequest PATCH "v1.0/applications/$($app.id)" -Body (@{ keyCredentials = $keys } | ConvertTo-Json -Depth 5) -ContentType 'application/json' | Out-Null
-    Write-Host 'Added the Booster Rocket certificate to the app. Certificates already on it were kept.'
+    Write-Host 'Added the Boosters Rocket certificate to the app. Certificates already on it were kept.'
   }
 ```
 
@@ -1103,7 +1103,7 @@ Replace the printed values. Staff:
 
 ```powershell
   Write-Host ''
-  Write-Host 'Enter these on the Booster Rocket setup page. There is no secret to copy.'
+  Write-Host 'Enter these on the Boosters Rocket setup page. There is no secret to copy.'
   Write-Host "  Tenant ID:            $tenant"
   Write-Host "  Client ID:            $($app.appId)"
   Write-Host "  Certificate:          $($Certificate.Thumbprint) (expires $($Certificate.NotAfter.ToUniversalTime().ToString('yyyy-MM-dd')))"
@@ -1206,7 +1206,7 @@ export function CertificatePanel({ fileName, summary, settings }: { fileName: st
     <div className="stack cert-panel">
       {active && <p className="hint">In use: thumbprint <code>{active.thumbprintSha1}</code>, expires <CalendarDate iso={active.notAfter} />.</p>}
       {pending && <p className="hint">{active ? "Replacement" : "Certificate"} ready to add to the app: Thumbprint <code>{pending.thumbprintSha1}</code>, expires <CalendarDate iso={pending.notAfter} />. {active ? "The one in use keeps working until the new one checks out." : ""}</p>}
-      {!shown && <p className="hint">Booster Rocket makes the certificate when you download it. Only the public half leaves the server.</p>}
+      {!shown && <p className="hint">Boosters Rocket makes the certificate when you download it. Only the public half leaves the server.</p>}
       <p><a className="btn btn-line" href={`/setup/certificates/${fileName}`} download onClick={() => setTimeout(() => router.refresh(), 1500)}>{label}</a></p>
     </div>
   );
@@ -1232,12 +1232,12 @@ Import `usesCertificate` from `@/lib/auth/provider-fields`.
 
 `instructions.tsx`:
 - **Microsoft staff, last step:** "Open **Certificates & secrets** > **Certificates** > **Upload certificate**,
-  choose the `booster-rocket-staff.cer` file you downloaded below, and select **Add**. Booster Rocket made this
+  choose the `booster-rocket-staff.cer` file you downloaded below, and select **Add**. Boosters Rocket made this
   certificate; its private key never leaves your server."
 - **Parent, step 5:** the same, with `booster-rocket-parents.cer`.
 - **`ScriptOption`:** add a paragraph before the run command: "On Windows, unblock the downloaded file first:"
   followed by `<CopyField label="Unblock" value={`Unblock-File .\\${script}`} />`. Change the description to say
-  the script "adds Booster Rocket's certificate to the app and prints the values to enter below".
+  the script "adds Boosters Rocket's certificate to the app and prints the values to enter below".
 - **Order:** the walk-through mentions downloading the certificate before uploading it. The download button is in
   the form below, so the upload step should say "you downloaded below (Download certificate)".
 
@@ -1245,7 +1245,7 @@ Import `usesCertificate` from `@/lib/auth/provider-fields`.
 
 Settings page:
 - Pass `settings` to `ProviderForm`.
-- Change the lede to "How staff and parents sign in. Microsoft sign-in uses a certificate Booster Rocket made;
+- Change the lede to "How staff and parents sign in. Microsoft sign-in uses a certificate Boosters Rocket made;
   Google uses a client secret, which is never shown again once saved."
 - Change the details summary text to "How to set this up or change the app".
 

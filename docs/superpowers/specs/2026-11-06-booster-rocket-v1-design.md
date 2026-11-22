@@ -1,4 +1,4 @@
-# Booster Rocket v1 — Design
+# Boosters Rocket v1 — Design
 
 **Date:** 2026-11-06
 **Status:** Built on the branch `parent-portal`: steps 1 to 6 of the roadmap (docs/superpowers/plans/2026-11-07-v1-roadmap.md) were done by 2026-11-16, and step 7 holds the whole portal against this spec, requirement by requirement (docs/conformance.md says where each stands). Not deployed for a club yet: the checks only a person can make come first (docs/runbooks/before-the-first-family.md). Later specs in this folder override the parts of this one that they name.
@@ -10,14 +10,14 @@
 
 ## 1. What this is
 
-Booster Rocket is an open-source parent portal for booster clubs and other parent groups that
+Boosters Rocket is an open-source parent portal for booster clubs and other parent groups that
 support youth programs. A parent signs in, sees their own students and what their family owes,
 pays open invoices, keeps their contact details current, and signs this season's commitment
 forms. Volunteers manage the family roster and forms from the same app.
 
 It replaces the WordPress + CiviCRM portal (`band-booster-portal` and `band-booster-portal-ext`).
 That stack worked, but its look and feel could not be made acceptable, and it tied the portal to
-the club's public WordPress site. Booster Rocket is a standalone app on its own subdomain. The
+the club's public WordPress site. Boosters Rocket is a standalone app on its own subdomain. The
 public site stays where it is.
 
 ### Who uses it
@@ -90,7 +90,7 @@ not make these hard to add later, but none of them is designed here.
   §6.3) and retries queued writes. Jobs are stored in Postgres, so there is no Redis.
 - **Database:** Postgres. One Postgres server holds two databases, `portal` and `documenso`.
 - **Documenso:** the upstream Community Edition image, unmodified, at `sign.<club domain>`.
-  Booster Rocket talks to it only through its v2 API, webhooks and embed SDK.
+  Boosters Rocket talks to it only through its v2 API, webhooks and embed SDK.
 - **Packaging:** one Docker image per release, published to GitHub Container Registry, with a
   `stable` tag. Database migrations run on start-up after a pre-migration backup check.
 - **FZN hosting:** Azure App Service for Containers (portal, worker, Documenso on one plan) and

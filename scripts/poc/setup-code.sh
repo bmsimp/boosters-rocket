@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prints a one-time setup code for the Booster Rocket setup page (replaces any earlier code).
+# Prints a one-time setup code for the Boosters Rocket setup page (replaces any earlier code).
 #   scripts/poc/setup-code.sh            while setup is open
 #   scripts/poc/setup-code.sh --reopen   reopen setup first (use reopen-setup.sh)
 set -euo pipefail

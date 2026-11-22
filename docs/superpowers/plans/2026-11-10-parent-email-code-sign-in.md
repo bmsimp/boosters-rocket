@@ -297,7 +297,7 @@ import { env } from "@/env";
 // The External ID door is gone; the portal's own email-code door replaces it (Task 6 of the email-code plan).
 function buildParentAuth() {
   return betterAuth({
-    appName: "Booster Rocket",
+    appName: "Boosters Rocket",
     baseURL: env.APP_URL,
     basePath: "/api/auth/parent",
     secret: env.BETTER_AUTH_SECRET,
@@ -446,7 +446,7 @@ export const goToStepAction = setupAction(async (step: SetupStep): Promise<void>
 
 `src/app/staff/(app)/settings/sign-in/page.tsx`: drop `ParentSteps`; `steps` has the two staff keys; `scripts` is
 `{ "staff-microsoft": "New-BoosterRocketStaffApp.ps1" } as const`; the lede reads *"How staff sign in. Microsoft sign-in
-uses a certificate Booster Rocket made; Google uses a client secret, which is never shown again once saved."*
+uses a certificate Boosters Rocket made; Google uses a client secret, which is never shown again once saved."*
 
 Delete `scripts/setup/New-BoosterRocketParentApp.ps1`, `src/lib/auth/parent-object-id.ts`,
 `src/lib/auth/parent-provider-id.ts`, `tests/integration/parent-object-id.test.ts`,
@@ -1119,7 +1119,7 @@ describe("parseMailForm", () => {
     expect(r).toEqual({ ok: false, errors: [
       "Host is a server name like smtp.example.org, without https:// or a path.",
       "Port must be a number from 1 to 65535.",
-      "Choose STARTTLS or TLS. Booster Rocket doesn't send mail unencrypted.",
+      "Choose STARTTLS or TLS. Boosters Rocket doesn't send mail unencrypted.",
     ] });
   });
   it("asks which way to send", () => {
@@ -1834,7 +1834,7 @@ export function parseMailForm(f: Record<string, string>): { ok: true; draft: Mai
   const port = Number((f.port ?? "").trim());
   if (!Number.isInteger(port) || port < 1 || port > 65535) errors.push("Port must be a number from 1 to 65535.");
   const security = (f.security ?? "").trim();
-  if (security !== "starttls" && security !== "tls") errors.push("Choose STARTTLS or TLS. Booster Rocket doesn't send mail unencrypted.");
+  if (security !== "starttls" && security !== "tls") errors.push("Choose STARTTLS or TLS. Boosters Rocket doesn't send mail unencrypted.");
   const username = (f.username ?? "").trim();
   if (!username) errors.push("Enter the SMTP username.");
   const from = normalizeEmail(f.from ?? "");
@@ -4451,7 +4451,7 @@ $MailSendAppRoleId = 'b633e1c5-b582-4048-a93e-9f11b44c7e96' # Microsoft Graph ap
 $ScopeName = 'Booster Rocket mail sender'
 ```
 
-Inside the existing `try { … }`, after the certificate block and **before** the final "Enter these on the Booster Rocket
+Inside the existing `try { … }`, after the certificate block and **before** the final "Enter these on the Boosters Rocket
 setup page" output, add:
 
 ```powershell

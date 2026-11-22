@@ -50,7 +50,7 @@ values in the Microsoft portals. Staff sign-in is proven working before setup is
 
 Until setup is finished, every page except `/api/health`, `/api/auth/*` and `/setup` redirects to **`/setup`**.
 
-1. **Unlock.** "Set up Booster Rocket. Enter the setup code from your server." (See §5.2 for where the code comes from.)
+1. **Unlock.** "Set up Boosters Rocket. Enter the setup code from your server." (See §5.2 for where the code comes from.)
 2. **Step 1: Staff sign-in.** Pick Microsoft, Google or both. At least one is required.
    - **Microsoft (band tenant).** Numbered instructions with direct links to the Entra admin center pages. Every
      value the admin types into Microsoft has a copy button:
@@ -252,7 +252,7 @@ The existing `admin.bootstrap`, `staff.bind` and `signin` entries still appear o
 - **Parent script:**
   1. The same app steps, with the parent name and redirect URI.
   2. Grant admin consent for `openid profile email offline_access`.
-  3. Find the user flow `Booster Rocket parents` or create it: email one-time passcode (`EmailOtpSignup-OAUTH`),
+  3. Find the user flow `Boosters Rocket parents` or create it: email one-time passcode (`EmailOtpSignup-OAUTH`),
      `isSignUpAllowed: false`.
   4. Add the app to the flow.
   5. Print the values.

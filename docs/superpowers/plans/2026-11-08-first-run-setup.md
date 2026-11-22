@@ -1050,7 +1050,7 @@ import { loadProviders, type LoadedProviders } from "./providers";
 
 function buildStaffAuth(p: LoadedProviders) {
   return betterAuth({
-    appName: "Booster Rocket staff",
+    appName: "Boosters Rocket staff",
     baseURL: env.APP_URL,
     basePath: "/api/auth/staff",
     secret: env.BETTER_AUTH_SECRET,
@@ -1746,7 +1746,7 @@ comment.
 
 ```js
 #!/usr/bin/env node
-// Issues the one-time code that unlocks Booster Rocket's setup page. Ships in the image as tools/scripts/setup-code.mjs.
+// Issues the one-time code that unlocks Boosters Rocket's setup page. Ships in the image as tools/scripts/setup-code.mjs.
 //   node setup-code.mjs            issue a code while setup is open; refuse (exit 3) once it is finished
 //   node setup-code.mjs --if-open  the same, but print nothing and exit 0 once setup is finished (deploy.sh uses this)
 //   node setup-code.mjs --reopen   reopen setup (stored sign-in values are kept), then issue a code
@@ -1877,7 +1877,7 @@ Expected: FAIL (ENOENT).
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-  Creates (or updates) the Booster Rocket staff sign-in app in your club's Microsoft Entra tenant.
+  Creates (or updates) the Boosters Rocket staff sign-in app in your club's Microsoft Entra tenant.
 .DESCRIPTION
   Signs you in with the normal Microsoft browser sign-in (never device code), then:
     1. finds the app "Booster Rocket (staff)" or creates it (single tenant),
@@ -1885,7 +1885,7 @@ Expected: FAIL (ENOENT).
     3. requests the sign-in scopes openid, profile, email, offline_access and User.Read,
     4. creates its service principal and grants admin consent for those scopes,
     5. adds a new 24-month client secret,
-  and prints the values to paste into the Booster Rocket setup page. Nothing is written to disk.
+  and prints the values to paste into the Boosters Rocket setup page. Nothing is written to disk.
   Safe to run again: it reuses the app and adds a new secret, leaving older secrets alone.
 .EXAMPLE
   ./New-BoosterRocketStaffApp.ps1 -TenantId 0f8fad5b-d9cb-469f-a165-70867728950e
@@ -1950,7 +1950,7 @@ try {
   if ($found.Count -eq 1) { Write-Host 'Added a new client secret. Older secrets on this app were left alone; delete them in the Entra admin center once the new one works.' }
 
   Write-Host ''
-  Write-Host 'Paste these into the Booster Rocket setup page now. The secret is shown only this once.'
+  Write-Host 'Paste these into the Boosters Rocket setup page now. The secret is shown only this once.'
   Write-Host "  Tenant ID:      $tenant"
   Write-Host "  Client ID:      $($app.appId)"
   Write-Host "  Client secret:  $($pw.secretText)"
@@ -1967,15 +1967,15 @@ try {
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-  Sets up Booster Rocket parent sign-in in your Microsoft Entra External ID tenant.
+  Sets up Boosters Rocket parent sign-in in your Microsoft Entra External ID tenant.
 .DESCRIPTION
   Signs you in with the normal Microsoft browser sign-in (never device code) to the External ID tenant, then:
     1. finds the app "Booster Rocket (parents)" or creates it, with its redirect URI and sign-in scopes,
     2. creates its service principal and grants admin consent for openid, profile, email and offline_access,
-    3. finds the user flow "Booster Rocket parents" or creates it, with email one-time passcode sign-in and sign-up turned off,
+    3. finds the user flow "Boosters Rocket parents" or creates it, with email one-time passcode sign-in and sign-up turned off,
     4. adds the app to that user flow,
     5. adds a new 24-month client secret,
-  and prints the values to paste into the Booster Rocket setup page. Nothing is written to disk.
+  and prints the values to paste into the Boosters Rocket setup page. Nothing is written to disk.
   The External ID tenant itself must already exist (create it in the Azure portal first).
 .EXAMPLE
   ./New-BoosterRocketParentApp.ps1 -TenantId fznparents.onmicrosoft.com
@@ -1996,7 +1996,7 @@ if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) {
 }
 
 $DisplayName = 'Booster Rocket (parents)'
-$FlowName = 'Booster Rocket parents'
+$FlowName = 'Boosters Rocket parents'
 $RedirectUri = "$AppUrl/api/auth/parent/callback/parent-oidc"
 $GraphAppId = '00000003-0000-0000-c000-000000000000'
 $Scopes = [ordered]@{
@@ -2065,7 +2065,7 @@ try {
   if ($found.Count -eq 1) { Write-Host 'Added a new client secret. Older secrets were left alone; delete them once the new one works.' }
 
   Write-Host ''
-  Write-Host 'Paste these into the Booster Rocket setup page now. The secret is shown only this once.'
+  Write-Host 'Paste these into the Boosters Rocket setup page now. The secret is shown only this once.'
   Write-Host "  Tenant subdomain: $subdomain"
   Write-Host "  Tenant ID:        $tenant"
   Write-Host "  Client ID:        $($app.appId)"
@@ -2500,7 +2500,7 @@ export function GoogleStaffSteps({ appUrl }: { appUrl: string }) {
   return (
     <ol className="steps-list">
       <li>Open <a href="https://console.cloud.google.com/apis/credentials" {...ext}>Credentials in the Google Cloud console</a> for the club&apos;s Google account, and create or pick a project.</li>
-      <li>If asked, set up the <b>OAuth consent screen</b> first: app name <b>Booster Rocket</b>, and the club&apos;s support email.</li>
+      <li>If asked, set up the <b>OAuth consent screen</b> first: app name <b>Boosters Rocket</b>, and the club&apos;s support email.</li>
       <li>Select <b>Create credentials</b> &gt; <b>OAuth client ID</b> &gt; <b>Web application</b>. Under <b>Authorized redirect URIs</b>, add:<CopyField label="Redirect URI" value={`${appUrl}/api/auth/staff/callback/google`} /> Then select <b>Create</b>.</li>
       <li>Copy the <b>Client ID</b> and <b>Client secret</b> into the form below.</li>
     </ol>
@@ -2515,7 +2515,7 @@ export function ParentSteps({ appUrl }: { appUrl: string }) {
       <li>Open <a href={ENTRA_APPS} {...ext}>App registrations</a> &gt; <b>New registration</b>.<CopyField label="Name" value="Booster Rocket (parents)" /> Choose <b>Accounts in this organizational directory only</b>, and under <b>Redirect URI</b> choose <b>Web</b>:<CopyField label="Redirect URI" value={`${appUrl}/api/auth/parent/callback/parent-oidc`} /> Select <b>Register</b> and copy the <b>Application (client) ID</b>.</li>
       <li><b>API permissions</b> &gt; <b>Add a permission</b> &gt; <b>Microsoft Graph</b> &gt; <b>Delegated permissions</b>: tick <b>openid</b>, <b>profile</b>, <b>email</b> and <b>offline_access</b>, add them, then <b>Grant admin consent</b>.</li>
       <li><b>Certificates &amp; secrets</b> &gt; <b>New client secret</b>, <b>24 months</b>. Copy its <b>Value</b> straight away.</li>
-      <li><b>External Identities</b> &gt; <b>User flows</b> &gt; <b>New user flow</b>.<CopyField label="User flow name" value="Booster Rocket parents" /> Under <b>Identity providers</b> choose <b>Email one-time passcode</b>, then <b>Create</b>. Open the flow, choose <b>Applications</b> &gt; <b>Add application</b>, and pick <b>Booster Rocket (parents)</b>.</li>
+      <li><b>External Identities</b> &gt; <b>User flows</b> &gt; <b>New user flow</b>.<CopyField label="User flow name" value="Boosters Rocket parents" /> Under <b>Identity providers</b> choose <b>Email one-time passcode</b>, then <b>Create</b>. Open the flow, choose <b>Applications</b> &gt; <b>Add application</b>, and pick <b>Booster Rocket (parents)</b>.</li>
       <li>Turn sign-up off, so strangers can&apos;t make accounts. The admin center has no switch for this, so use the PowerShell script above, or <a href="https://learn.microsoft.com/entra/external-id/customers/how-to-disable-sign-up-user-flow" {...ext}>Microsoft&apos;s instructions</a> with Graph Explorer, signed in to the External ID tenant.</li>
     </ol>
   );
@@ -2647,7 +2647,7 @@ import { providerSummaries, type ProviderKey, type ProviderSummary } from "@/lib
 import { UnlockForm } from "./unlock-form";
 import { StaffStep, ParentStep, AdminStep } from "./steps";
 
-export const metadata = { title: "Set up Booster Rocket" };
+export const metadata = { title: "Set up Boosters Rocket" };
 export const dynamic = "force-dynamic";
 
 const STEPS: { step: SetupStep; label: string }[] = [
@@ -2660,7 +2660,7 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
   if (!(await hasSetupSession())) {
     return (
       <main className="wrap signin">
-        <h1 className="page-title">Set up Booster Rocket</h1>
+        <h1 className="page-title">Set up Boosters Rocket</h1>
         <p className="lede">Enter the setup code from your server. <code>deploy.sh</code> prints it after a deploy, or run <code>scripts/poc/setup-code.sh</code> for a new one.</p>
         <UnlockForm />
       </main>
@@ -2674,7 +2674,7 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
   const appUrl = env.APP_URL.replace(/\/+$/, "");
   return (
     <main className="wrap single">
-      <h1 className="page-title">Set up Booster Rocket</h1>
+      <h1 className="page-title">Set up Boosters Rocket</h1>
       <ol className="setup-progress">{STEPS.map((s) => <li key={s.step} aria-current={s.step === step ? "step" : undefined}>{s.label}</li>)}</ol>
       {step === "staff" && <StaffStep appUrl={appUrl} byKey={byKey} error={one("error")} />}
       {step === "parent" && <ParentStep appUrl={appUrl} byKey={byKey} tested={one("tested")} />}
@@ -3105,7 +3105,7 @@ Expected: FAIL.
 
 ```bash
 #!/usr/bin/env bash
-# Prints a one-time setup code for the Booster Rocket setup page (replaces any earlier code).
+# Prints a one-time setup code for the Boosters Rocket setup page (replaces any earlier code).
 #   scripts/poc/setup-code.sh            while setup is open
 #   scripts/poc/setup-code.sh --reopen   reopen setup first (use reopen-setup.sh)
 set -euo pipefail

@@ -47,7 +47,7 @@ describe("the Settings page", () => {
       expect(box).toContain(`href="/staff/settings/${key}"`);
     }
     // A new installation: nothing set up, so each says so.
-    expect(textOf(html)).toContain("Not set yet: the portal still shows the name Booster Rocket");
+    expect(textOf(html)).toContain("Not set yet: the portal still shows the name Boosters Rocket");
     expect(textOf(html)).toContain("Nobody can sign in as staff yet");
     expect(html).not.toContain("<input");
     expect(html).not.toContain("<form");

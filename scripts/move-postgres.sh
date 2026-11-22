@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Moves Booster Rocket's databases from Postgres 16 to Postgres 18, on a machine whose compose files already say 18.
+# Moves Boosters Rocket's databases from Postgres 16 to Postgres 18, on a machine whose compose files already say 18.
 #   scripts/move-postgres.sh deploy <folder>       a club's installation (deploy/compose.yml, deploy/.env)
 #   scripts/move-postgres.sh poc <folder>          the proof of concept (docker-compose.poc.yml, .env.poc)
 #   scripts/move-postgres.sh dev <folder>          a developer's database (docker-compose.yml)

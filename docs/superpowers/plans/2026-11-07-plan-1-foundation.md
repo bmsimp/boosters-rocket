@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A running Booster Rocket app with Postgres, the CIPP-style permissions system, two separate sign-in doors (staff and parent), the first-admin bootstrap, roles and staff screens, club theming with display modes, the app shell, an audit log, and CI.
+**Goal:** A running Boosters Rocket app with Postgres, the CIPP-style permissions system, two separate sign-in doors (staff and parent), the first-admin bootstrap, roles and staff screens, club theming with display modes, the app shell, an audit log, and CI.
 
 **Architecture:** One Next.js (App Router, TypeScript strict) app. Drizzle ORM over Postgres. Two independent Better Auth instances, one per door, each with its own tables, cookie prefix and route base, so a staff session and a parent session can never be confused or linked. Every staff server action is wrapped by a guard that declares its permission, and a test fails the build if one isn't. Styling ports `design/reference/booster.css` with the club colour derived at runtime.
 
@@ -1118,7 +1118,7 @@ describe("club settings", () => {
   beforeEach(resetDb);
 
   it("has neutral defaults before setup", async () => {
-    expect(await getClubSettings()).toEqual({ name: "Booster Rocket", shortName: "BR", colour: "#5b2a86", treasurerEmail: null });
+    expect(await getClubSettings()).toEqual({ name: "Boosters Rocket", shortName: "BR", colour: "#5b2a86", treasurerEmail: null });
   });
 
   it("saves, normalises the colour, and audits before/after", async () => {
@@ -1158,7 +1158,7 @@ import { writeAudit, type Actor } from "@/lib/audit/log";
 
 export type ClubSettings = { name: string; shortName: string; colour: string; treasurerEmail: string | null };
 
-const DEFAULTS: ClubSettings = { name: "Booster Rocket", shortName: "BR", colour: "#5b2a86", treasurerEmail: null };
+const DEFAULTS: ClubSettings = { name: "Boosters Rocket", shortName: "BR", colour: "#5b2a86", treasurerEmail: null };
 const KEY = "club";
 
 const input = z.object({
@@ -1323,7 +1323,7 @@ import { staffAuthUser, staffAuthSession, staffAuthAccount, staffAuthVerificatio
 import { env, staffEntraEnabled, staffGoogleEnabled } from "@/env";
 
 export const staffAuth = betterAuth({
-  appName: "Booster Rocket staff",
+  appName: "Boosters Rocket staff",
   baseURL: env.APP_URL,
   basePath: "/api/auth/staff",
   secret: env.BETTER_AUTH_SECRET,
@@ -1360,7 +1360,7 @@ import { env, parentDoorEnabled } from "@/env";
 export const PARENT_PROVIDER_ID = "parent-oidc";
 
 export const parentAuth = betterAuth({
-  appName: "Booster Rocket",
+  appName: "Boosters Rocket",
   baseURL: env.APP_URL,
   basePath: "/api/auth/parent",
   secret: env.BETTER_AUTH_SECRET,
@@ -2686,7 +2686,7 @@ export default async function ParentLayout({ children }: { children: React.React
       <ClubBar name={club.name} shortName={club.shortName} nav={PARENT_NAV}
         account={{ href: "/display", initials: initials(ctx.name), label: `Your account and display settings, ${ctx.name}` }} />
       {children}
-      <footer className="wrap">{club.treasurerEmail && <>Questions about a charge? Email <a href={`mailto:${club.treasurerEmail}`}>{club.treasurerEmail}</a>. </>}Runs on Booster Rocket.</footer>
+      <footer className="wrap">{club.treasurerEmail && <>Questions about a charge? Email <a href={`mailto:${club.treasurerEmail}`}>{club.treasurerEmail}</a>. </>}Runs on Boosters Rocket.</footer>
       <ParentTabs />
     </>
   );
