@@ -396,7 +396,7 @@ fieldset.checks { border: 0; padding: 0; min-width: 0; }
    a hairline between rows, each row a leading status, a title over a meta line, then an amount or an action. --- */
 .list { list-style: none; padding: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
 .box > .list { margin: var(--s3) calc(-1 * var(--box-pad)) calc(-1 * var(--box-pad)); border-width: 1px 0 0; border-radius: 0 0 var(--radius) var(--radius); }
-.list-row { display: flex; align-items: center; gap: var(--s3); min-height: 56px; padding: 10px var(--s4); }
+.list-row { display: flex; align-items: flex-start; gap: var(--s3); min-height: 56px; padding: 10px var(--s4); }
 .list-row + .list-row { border-top: 1px solid var(--border); }
 .list-row > .status-icon { align-self: flex-start; margin-top: 3px; }
 .list-main { flex: 1 1 auto; min-width: 0; display: grid; gap: 1px; }
@@ -406,7 +406,7 @@ fieldset.checks { border: 0; padding: 0; min-width: 0; }
 .list-meta { font-size: var(--text-sm); color: var(--ink-2); overflow-wrap: anywhere; }
 .list-status { font-weight: 500; }
 .list-status.tone-done { color: var(--done); } .list-status.tone-due { color: var(--due); } .list-status.tone-late { color: var(--late); }
-.list-trail { flex: none; display: flex; align-items: center; gap: var(--s3); }
+.list-trail { flex: none; align-self: center; display: flex; align-items: center; gap: var(--s3); }
 .list-amount { font-weight: 500; font-variant-numeric: tabular-nums lining-nums; text-align: right; }
 .list-row > .empty { flex: 1 1 auto; }
 .list-meta .when.soon { color: var(--due); font-weight: 500; }
@@ -415,7 +415,7 @@ fieldset.checks { border: 0; padding: 0; min-width: 0; }
 .list-meta .optional, .list-title .optional, .list-sub-title .optional { color: var(--ink-2); font-weight: 400; }
 /* A row's parts (ListSubRow): indented under its title, on the row's own surface, a hairline above each. */
 .list-row.has-sub { flex-wrap: wrap; }
-.list-sub { flex: 1 0 100%; list-style: none; padding: 0; margin: var(--s1) 0 0 calc(16px + var(--s3)); }
+.list-sub { flex: 1 0 100%; list-style: none; padding: 0 0 0 calc(16px + var(--s3)); margin: var(--s1) 0 0; }
 .list-subrow { display: grid; gap: 1px; padding: var(--s2) 0; border-top: 1px solid var(--border); }
 .list-subrow:last-child { padding-bottom: 0; }
 .list-sub-title { font-size: 0.9375rem; overflow-wrap: anywhere; }
@@ -642,7 +642,7 @@ p.errors, .sign-out .errors { padding-left: 0; }
 /* Home's columns at 760px and wider: the lists on the left, the total and the details on the right. */
 @media (min-width: 760px) {
   main.wrap.home { grid-template-areas: none; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
-  .home > * { grid-area: auto; }
+  .home > *, .home-lists > *, .home-side > * { grid-area: auto; }
   .home > .home-head, .home > p, .home > .passkey-offer { grid-column: 1 / -1; }
   .home > .passkey-offer { max-width: 760px; }
   .home > section:only-of-type { grid-column: 1 / -1; max-width: 760px; }
@@ -733,6 +733,11 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 .forms-page .page-title { overflow-wrap: anywhere; }
 .forms-page .box > .state { margin-top: var(--s2); }
 .forms-page .list-trail { flex-wrap: wrap; justify-content: flex-end; gap: var(--s2); }
+/* On a phone a form's Open and Download sit side by side under its words, so the title keeps the width. */
+@media (max-width: 479.98px) {
+  .forms-page .list-row { flex-wrap: wrap; }
+  .forms-page .list-trail { flex: 1 0 100%; flex-direction: row; justify-content: flex-start; padding-left: calc(16px + var(--s3)); }
+}
 .consent { margin-top: var(--s3); display: grid; gap: var(--s3); max-width: 65ch; }
 /* Documenso's own page, in a frame: as wide as its box, and tall enough to read and sign a page on a phone. */
 .sign-frame { margin-top: var(--s3); }
