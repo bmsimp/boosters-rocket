@@ -211,7 +211,7 @@ export function Gallery() {
 
       <Section id="page-header" name="PageHeader" use="The top of every page: the way back when there is one, the h1, one quiet line, and the page's own actions." importLine={UI("PageHeader")}>
         <div className="ds-samples stacked">
-          <PageHeader back={{ href: "#ds-page-header", label: "Back to Roster" }} title="Sample Family" lede="2 students · 1 guardian · as of 2:14 pm" actions={<><Button variant="secondary">Rename</Button><Button>Add a student</Button></>} />
+          <PageHeader sample back={{ href: "#ds-page-header", label: "Back to Roster" }} title="Sample Family" lede="2 students · 1 guardian · as of 2:14 pm" actions={<><Button variant="secondary">Rename</Button><Button>Add a student</Button></>} />
         </div>
       </Section>
 
