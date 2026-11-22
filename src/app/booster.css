@@ -560,8 +560,10 @@ p.errors, .sign-out .errors { padding-left: 0; }
 /* --- Tabs: the parent's bottom bar on phones, one column for each tab in PARENT_NAV. The current tab's icon sits on
    the club's tint and its words are the club's color and weight: never the color alone. --- */
 .tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; background: var(--surface); border-top: 1px solid var(--border);
-  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); padding-bottom: env(safe-area-inset-bottom); }
-.tabs a { min-height: 64px; display: grid; place-items: center; align-content: center; gap: 2px; text-decoration: none;
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(max-content, 1fr); padding-bottom: env(safe-area-inset-bottom); }
+/* the columns share the width evenly unless a label needs more: at the Larger text size on a 360px phone "Volunteer"
+   takes the room it needs from the short labels beside it, rather than running into them */
+.tabs a { min-height: 64px; display: grid; place-items: center; align-content: center; gap: 2px; padding: 0 2px; text-decoration: none;
   color: var(--ink-2); font-size: var(--text-xs); font-weight: 500; }
 .tabs svg { width: 48px; height: 28px; padding: 3px 13px; border-radius: var(--radius-round); transition: background-color var(--dur-fast) ease-out; }
 .tabs a[aria-current="page"] { color: var(--club-text); font-weight: 600; }
