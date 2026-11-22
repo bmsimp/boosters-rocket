@@ -231,8 +231,8 @@ components:
     backgroundColor: "{colors.info-soft}"
   powered-by:
     textColor: "{colors.badge-ink}"
-    typography: "{typography.caption}"
     height: "44px"
+    width: "14.6875rem"
   field:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.ink}"
@@ -335,7 +335,7 @@ The brand's fixed status set (`brand/BRAND.md`, `brand/tokens.css`): a club can'
 - **Muted Surface** (`surface-muted`): hover fills, a total row, a table's group rows, the disabled fill, code samples.
 - **Hairline** (`border`): every 1px divider and surface edge. **Control Edge** (`border-control`): secondary buttons, option tiles, the Menu button. **Strong Edge** (`border-strong`): a text field's or tick box's edge, at 3:1 so the control can be seen.
 - **Ink** (`ink`): text and headings. **Secondary Ink** (`ink-2`): meta lines, hints, labels, table headers, inactive nav and tabs; 4.5:1 on every ground. **Mark Gray** (`ink-3`): drawn marks only (a neutral status ring, an empty state's icon), at 3:1; never text.
-- **Badge Ink** (`badge-ink`, the kit's `#6b6b6b` light and `#9a9aa2` dark): the footer's "Powered by Boosters Rocket" badge, 4.5:1 on the ground and the surface. The product's own colors (`--br-ink`, `--br-flame-ink`, `--br-disc`, `--br-flame`, `--br-ember`, `--br-smoke`) draw the sign-in page's full-color badge and the setup pages' product icon, and nothing else.
+- **Badge Ink** (`badge-ink`, the kit's `#6b6b6b` light and `#9a9aa2` dark): the footer's "Powered by Boosters Rocket" badge, 4.5:1 on the ground and the surface. The product's own colors (`--br-ink`, `--br-flame-ink`, `--br-disc`, `--br-flame`, `--br-ember`, `--br-glow`, `--br-smoke`) draw the sign-in page's full-color badge and the setup pages' product icon, and nothing else.
 - `--overlay` (black 8% in light, white 10% in dark) is the hover wash laid over a filled button. `--focus` is the focus ring's color: the element's own `club-text` (`:root, [data-theme], [data-contrast]` set it from `--club-text`, so a sample wrapper in another mode draws its own). Every focus ring is `var(--ring) solid var(--focus)`.
 
 ### Named Rules
@@ -367,7 +367,7 @@ The scale is six steps (`--text-xs` 0.8125rem to `--text-2xl` 2rem) plus `--text
 - **Caption** (500, 0.8125rem): table column headers, tab labels, badges, avatar initials, the step indicator's numbers. The floor: nothing smaller.
 
 ### Named Rules
-**The One Face Rule.** Inter for every word and figure. The brand's display face (Bricolage Grotesque) is for brand surfaces outside the app (the README's images, the website) and is never loaded in the app; the badge sets the product's name in Inter. The only other faces are the system fallback on the offline page and in the static gallery (Inter comes through `next/font`), and the icon renderer's bundled Geist on the app icon.
+**The One Face Rule.** Inter for every word and figure. The brand's display face (Bricolage Grotesque) is for brand surfaces outside the app (the README's images, the website) and is never loaded in the app; the badge's words, the wordmark among them, are the kit's outlines, paths and not text, so they load no face. The only other faces are the system fallback on the offline page and in the static gallery (Inter comes through `next/font`), and the icon renderer's bundled Geist on the app icon.
 
 **The Rem Floor Rule.** Every font size is in rem, from the scale, never under 0.8125rem; body text is 1rem.
 
@@ -479,11 +479,11 @@ The club's season steps as a thin segmented track, each step's number and name u
 - **Students on the current step:** one 22px marker each with the student's initial: done is a `done` disc with a white initial; still to do a white disc with a `due` ring and initial. Decoration: the Students list says the same in words.
 
 ### Powered by (`PoweredBy`, `src/app/components/powered-by.tsx`)
-The product's credit, the one place it is shown once a club is set up (`brand/BRAND.md`, co-branding: the club's name, logo and color lead). "Powered by", the small mark (in one ink the kit's small badge, `brand/logos/mark-mono-badge-small.svg`: a disc with the rocket and its three-puff trail knocked out, at 24px, over the kit's 20px floor, since the open mark's strokes break up at footer size; in color the small color mark; inline and static), then "Boosters Rocket" at 600, as live text in Inter: the kit's files set the name in the display face, which the app doesn't load. A 44px link to https://boostersrocket.com, its name "Powered by Boosters Rocket, at boostersrocket.com". No setting removes or changes it.
-- **One ink** (`variant="mono"`, the default), in `badge-ink` at 0.8125rem 500: the footer of every parent page (under the treasurer's line), every staff page, the family chooser, the refusal page, one more step and the signed-out not-found page.
-- **Full color** (`variant="color"`), under the sign-in form on every page before sign-in (parent and staff sign-in, the password request and link pages): the mark on its disc (Launch Indigo, Night Sky in dark, kept under forced colors), "Boosters" in `br-ink` and "Rocket" in `br-flame-ink`; in high contrast both in ink.
+The product's credit, the one place it is shown once a club is set up (`brand/BRAND.md`, co-branding: the club's name, logo and color lead). The kit's outlined badge (`brand/logos/powered-by-mono.svg` and `powered-by-color-light.svg`), drawn inline and static: "Powered by", the mark (in one ink the kit's open mark, the three-puff trail and the rocket with its window cut out, 22px, over the kit's 16px floor; in color the small color mark on its disc), then the wordmark "boostersrocket", every letter a path (`powered-by-paths.ts`, the kit's coordinates rounded to two places), so it loads no font. It is 1.5rem (24px) tall and 14.6875rem wide, which puts "Powered by" at about 13px, over the kit's 12px floor. Its inks are the app's tokens, not the file's. The drawing is hidden from assistive technology; the 44px link to https://boostersrocket.com is named by visually hidden text, "Powered by Boosters Rocket, at boostersrocket.com". On hover a 1px line is drawn under it. No setting removes or changes it.
+- **One ink** (`variant="mono"`, the default), in `badge-ink`: the footer of every parent page (under the treasurer's line), every staff page, the family chooser, the refusal page, one more step and the signed-out not-found page.
+- **Full color** (`variant="color"`), under the sign-in form on every page before sign-in (parent and staff sign-in, the password request and link pages): "Powered by" in `badge-ink`, the mark on its disc (Launch Indigo, Night Sky in dark, kept under forced colors), "boosters" in `br-ink` and "rocket" in `br-flame-ink` (the kit's file draws "rocket" in Flame Ink Large, `#CC3530`, which is for large text only: at this size the app keeps Flame Ink); in high contrast both in ink, and under forced colors every word in the link's system color.
 - **Mail:** every mail the portal sends ends with "Powered by Boosters Rocket": in the text part after a `-- ` line, in the HTML a small `#6b6b6b` line with the name in Launch Indigo. Words only, no image and no link.
-- **Setup:** before there is a club the product itself is shown: the setup pages' title has the product's icon (`brand/logos/app-icon-small.svg`, inline, `ProductMark`). The offline page keeps no product mark: it is the same for every club and names nothing.
+- **Setup:** before there is a club the product itself is shown: the setup pages' title has the product's icon (`brand/logos/app-icon.svg`, the rounded-square icon with its full trail, since it is drawn at 40px, over the kit's 32px line for the small one; inline, `ProductMark`, in the `--br-*` tokens). The offline page keeps no product mark: it is the same for every club and names nothing.
 
 ### Smaller primitives
 - **EmptyState:** a centered 28px `ink-3` icon, a 1rem 600 title, a kind `ink-2` line of what will be here, and the one action.

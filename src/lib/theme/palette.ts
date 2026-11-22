@@ -15,7 +15,7 @@ export const PALETTE = {
     done: "#1f6b3d", due: "#9a4a0b", late: "#a1231a", info: "#3b4cb8",
     "done-soft": "#e3f2e8", "due-soft": "#fdeedc", "late-soft": "#fbe4e2", "info-soft": "#e6e8fa", "neutral-soft": "#f0f1f3",
     "badge-ink": "#6b6b6b",
-    "br-ink": "#1e1b4b", "br-flame-ink": "#b82d28", "br-disc": "#1e1b4b", "br-flame": "#e8433a", "br-ember": "#f49a92", "br-smoke": "#ffffff",
+    "br-ink": "#1e1b4b", "br-flame-ink": "#b82d28", "br-disc": "#1e1b4b", "br-flame": "#e8433a", "br-ember": "#f49a92", "br-glow": "#fbd8d4", "br-smoke": "#ffffff",
   },
   dark: {
     ground: "#0f1012", surface: "#16181c", "surface-raised": "#1e2025", "surface-muted": "#1e2025",
@@ -24,7 +24,7 @@ export const PALETTE = {
     done: "#6cc38a", due: "#f2b36b", late: "#ff8a80", info: "#a5adff",
     "done-soft": "#12301f", "due-soft": "#3a2510", "late-soft": "#3d1512", "info-soft": "#1e2250", "neutral-soft": "#22252a",
     "badge-ink": "#9a9aa2",
-    "br-ink": "#ffffff", "br-flame-ink": "#f06a5f", "br-disc": "#332f72", "br-flame": "#e8433a", "br-ember": "#f49a92", "br-smoke": "#ffffff",
+    "br-ink": "#ffffff", "br-flame-ink": "#f06a5f", "br-disc": "#332f72", "br-flame": "#e8433a", "br-ember": "#f49a92", "br-glow": "#fbd8d4", "br-smoke": "#ffffff",
   },
   lightHc: {
     ground: "#ffffff", surface: "#ffffff", "surface-raised": "#ffffff", "surface-muted": "#f2f2f4",
@@ -33,7 +33,7 @@ export const PALETTE = {
     done: "#0f5530", due: "#6b3a00", late: "#8a1a14", info: "#2c3888",
     "done-soft": "#e3f2e8", "due-soft": "#fdeedc", "late-soft": "#fbe4e2", "info-soft": "#e6e8fa", "neutral-soft": "#f0f1f3",
     "badge-ink": "#2b2e34",
-    "br-ink": "#000000", "br-flame-ink": "#000000", "br-disc": "#1e1b4b", "br-flame": "#e8433a", "br-ember": "#f49a92", "br-smoke": "#ffffff",
+    "br-ink": "#000000", "br-flame-ink": "#000000", "br-disc": "#1e1b4b", "br-flame": "#e8433a", "br-ember": "#f49a92", "br-glow": "#fbd8d4", "br-smoke": "#ffffff",
   },
   darkHc: {
     ground: "#000000", surface: "#000000", "surface-raised": "#141518", "surface-muted": "#141518",
@@ -42,7 +42,7 @@ export const PALETTE = {
     done: "#8eeab1", due: "#ffc978", late: "#ffb0a6", info: "#bfc5ff",
     "done-soft": "#12301f", "due-soft": "#3a2510", "late-soft": "#3d1512", "info-soft": "#1e2250", "neutral-soft": "#22252a",
     "badge-ink": "#e2e4e8",
-    "br-ink": "#ffffff", "br-flame-ink": "#ffffff", "br-disc": "#332f72", "br-flame": "#e8433a", "br-ember": "#f49a92", "br-smoke": "#ffffff",
+    "br-ink": "#ffffff", "br-flame-ink": "#ffffff", "br-disc": "#332f72", "br-flame": "#e8433a", "br-ember": "#f49a92", "br-glow": "#fbd8d4", "br-smoke": "#ffffff",
   },
 } as const satisfies Record<Mode, Record<string, string>>;
 
