@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DataTable, type Column } from "@/app/components/data-table";
-import { ActionOutcome, Notice, TONE_WORDS } from "@/app/components/notice";
+import { ActionOutcome, Notice, NOTICE_STATUS_TONE, TONE_WORDS } from "@/app/components/notice";
 import { tableHeaders, tableRows } from "../helpers/table";
 
 type Row = { id: string; name: string; owed: string };
@@ -57,7 +57,7 @@ describe("the notice primitive", () => {
   it("says its tone in a word beside its icon, and is announced as a status, or as an alert for a problem", () => {
     for (const tone of ["info", "warning", "done", "problem"] as const) {
       const html = renderToStaticMarkup(h(Notice, { tone }, "Saved."));
-      expect(html).toContain(`class="notice notice-${tone}" role="${tone === "problem" ? "alert" : "status"}"`);
+      expect(html).toContain(`class="notice notice-${NOTICE_STATUS_TONE[tone]}" role="${tone === "problem" ? "alert" : "status"}"`);
       expect(html).toContain(`<span class="notice-word">${TONE_WORDS[tone]}</span> Saved.`);
       expect(html).toMatch(/<svg[^>]*aria-hidden="true"/);
     }
@@ -67,7 +67,7 @@ describe("the notice primitive", () => {
 
   it("with a title is a section named by its heading, the word read before it", () => {
     const html = renderToStaticMarkup(h(Notice, { tone: "warning", title: "QuickBooks needs attention", titleId: "q-h" }, "Reconnect it."));
-    expect(html).toContain('<section class="notice notice-warning" role="status" aria-labelledby="q-h">');
+    expect(html).toContain('<section class="notice notice-due" role="status" aria-labelledby="q-h">');
     expect(html).toContain('<h2 id="q-h" class="notice-title"><span class="visually-hidden">Needs attention: </span>QuickBooks needs attention</h2>');
   });
 
