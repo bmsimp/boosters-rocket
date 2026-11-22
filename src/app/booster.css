@@ -160,6 +160,7 @@ main.wrap.single > p[role="status"] { margin-top: var(--s5); }
 main.wrap.single > p, .box > p, .box > .help, .notice-body { max-width: 70ch; }
 html:has(nav.tabs) main.wrap.single > :is(.box, .notice, p[role="status"]) { max-width: 760px; }
 .stack { display: grid; gap: var(--s4); margin-top: var(--s3); max-width: 520px; }
+.stack > .btn { justify-self: start; } /* a button in a stack is as wide as its words, not the column */
 ul.stack { list-style: none; padding: 0; } /* the family chooser lists families as buttons, not bullets */
 .settings-grid { margin-top: var(--s5); display: grid; gap: var(--s4); }
 footer.wrap { padding-top: var(--s5); padding-bottom: var(--s5); color: var(--ink-2); font-size: var(--text-sm); }
@@ -242,13 +243,15 @@ footer a { color: var(--club-text); }
 /* --- Card (.box): a white surface with a hairline edge and an 8px corner. Lists and tables inside run to its edges. --- */
 .box { --box-pad: var(--s4); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--box-pad); min-width: 0; }
 .box > h2 { font-size: var(--text-lg); line-height: 1.35; }
-.box > h2 + p { color: var(--ink-2); font-size: 0.9375rem; margin-top: 2px; }
+/* A card's quiet line (Card's description) is the one paragraph in small gray; every other paragraph is body text. */
+.box > .card-lede { color: var(--ink-2); font-size: 0.9375rem; margin-top: 2px; }
+.box > h2 + p:not(.card-lede), .box > p + p { margin-top: var(--s2); }
 .box h3 { font-size: var(--text-md); line-height: 1.4; }
 .box-foot { margin-top: var(--s4); display: flex; flex-wrap: wrap; gap: var(--s2); }
 .card-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--s2) var(--s4); }
 .card-head > div { min-width: 0; flex: 1 1 14rem; }
 .card-head h2, .card-head h3 { font-size: var(--text-lg); line-height: 1.35; }
-.card-head p { color: var(--ink-2); font-size: 0.9375rem; margin-top: 2px; }
+.card-head .card-lede { color: var(--ink-2); font-size: 0.9375rem; margin-top: 2px; }
 .card-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
 @media (min-width: 760px) { .box { --box-pad: 20px; } }
 
@@ -568,7 +571,8 @@ p.errors, .sign-out .errors { padding-left: 0; }
 
 /* --- Toolbar: a row of filters over what they scope, wrapping on a phone. --- */
 .toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s3); }
-.toolbar > .field { flex: 1 1 12rem; }
+.toolbar > .field { flex: 1 1 12rem; max-width: 28rem; }
+.box > .toolbar, .box > form > .toolbar { margin-top: var(--s3); }
 .toolbar > .toolbar-end { margin-left: auto; display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; }
 
 /* ===== 5. Page blocks ===== */

@@ -6,6 +6,7 @@ import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { rosterCounts } from "../settings/quickbooks/roster-counts";
 import { DataTable, type Column } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
+import { Toolbar } from "@/app/components/ui/toolbar";
 import { DisconnectedNotice, Freshness } from "./freshness";
 import { CreateBox, WhatChanges } from "./changes";
 import { familyPage } from "@/app/staff/(app)/family-pages";
@@ -92,9 +93,11 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
       {roster && (
         <section className="box" aria-labelledby="roster-list-h"><h2 id="roster-list-h">{roster.kind === "flat" ? "Members" : "Families"}</h2>
           <p>{rosterCounts(roster)}</p>
-          <form method="get" role="search" className="stack">
-            <label className="field"><span>Find a {noun}</span><input name="q" type="search" defaultValue={typed} autoComplete="off" /></label>
-            <button className="btn btn-line">Find</button>
+          <form method="get" role="search">
+            <Toolbar label="Search the roster">
+              <label className="field"><span>Find a {noun}</span><input name="q" type="search" defaultValue={typed} autoComplete="off" /></label>
+              <button className="btn btn-line">Find</button>
+            </Toolbar>
           </form>
           {rows.length === 0
             ? <Notice tone="info">{typed ? <>No {noun} matches &quot;{typed}&quot;.</>

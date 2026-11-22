@@ -13,7 +13,7 @@ export function Card({ title, titleId, level = 2, description, actions, headActi
 }) {
   const H = level === 3 ? "h3" : "h2";
   const heading = title !== undefined && <H id={titleId}>{title}</H>;
-  const lede = description !== undefined && <p>{description}</p>;
+  const lede = description !== undefined && <p className="card-lede">{description}</p>;
   return (
     <section className={cx("box", className)} aria-labelledby={titleId}>
       {headActions ? <div className="card-head"><div>{heading}{lede}</div><div className="card-actions">{headActions}</div></div> : <>{heading}{lede}</>}
