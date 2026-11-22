@@ -120,14 +120,14 @@ export default async function SignedFormsPage({ searchParams }: { searchParams: 
 
       <section className="box" aria-labelledby="others-h">
         <h2 id="others-h">Other kept signed forms</h2>
-        <p>Signed forms the table above doesn&apos;t lead to: an earlier season&apos;s, or a family&apos;s or student&apos;s no longer on the roster. Each is kept as it was signed.</p>
+        <p>Signed forms not in the table above: earlier seasons&apos;, or for someone no longer on the roster. Each is kept as signed.</p>
         {others.entries.length === 0 ? <p>There are none{filter.search ? " matching the search" : ""}.</p> : <KeptTable entries={others.entries} caption="Each kept form, who it was for, and when it was signed" />}
         {others.more && <p className="help">Showing the newest {others.entries.length}. Search by a name above to find an older one.</p>}
       </section>
 
       <section className="box" aria-labelledby="archive-h">
         <h2 id="archive-h">Earlier company</h2>
-        <p>Signed forms set aside when the club connected a different QuickBooks company, before the portal kept families across such a change. They are the club&apos;s record, so they are never deleted; families don&apos;t see them. A form a family the portal still has signed under an earlier company stays with that family, above.</p>
+        <p>Forms set aside by a change of QuickBooks company, from before the portal kept families across one. They&apos;re the club&apos;s record, so they&apos;re never deleted, and families don&apos;t see them.</p>
         {archive.length === 0 ? <p>There are none.</p> : <KeptTable entries={archive} caption="Each form kept from a company no longer connected" />}
       </section>
     </main>

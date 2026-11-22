@@ -47,8 +47,8 @@ export default async function ParentsPage({ searchParams }: { searchParams: Prom
   const [people, settings, factors] = await Promise.all([listPeople(typed), getParentSettings(), factorCounts()]);
   return (
     <main className="wrap single">
-      <PageHeader title="Parents" lede="Everyone who can sign in to the portal, or once could, and each family they belong to. Who can sign in is kept by the portal itself: a change made in QuickBooks no longer gives anyone a sign-in or ends one." />
-      {!settings.signin && <Notice tone="warning">Parent sign-ins are off, so nobody can sign in, not even a guardian added here. An Admin switches them on under Parent sign-ins.</Notice>}
+      <PageHeader title="Parents" lede="Everyone who can sign in, or once could, and their families. A change in QuickBooks never gives or ends a sign-in." />
+      {!settings.signin && <Notice tone="warning">Parent sign-ins are off, so nobody can sign in. An Admin turns them on under Parent sign-ins.</Notice>}
       <FactorLine c={factors} strict={settings.level === "strict"} admin={can(ctx.effective, "Settings.Parents.ReadWrite")} signinOn={settings.signin} />
 
       <Card title="People" titleId="people-h">

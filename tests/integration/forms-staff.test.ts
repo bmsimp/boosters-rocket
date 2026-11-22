@@ -210,7 +210,7 @@ describe("attaching a template to a form requirement", () => {
     const change = await page();
     expect(change).toMatch(/<option value="envelope_[a-f0-9]+"[^>]*>Medical release 2027<\/option>/);
     expect(textOf(change)).toContain("a text field labelled Student name for the first signer");
-    expect(textOf(change)).toContain("Every one of those name fields must be set to Read only");
+    expect(textOf(change)).toContain("Set every name field to Read only");
     expect(stub.apiCalls().map((c) => c.path)).toEqual(["/api/v2/envelope"]);
     // Documenso unreachable: the address is pasted instead.
     stub.drop = true;

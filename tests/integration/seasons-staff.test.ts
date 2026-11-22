@@ -421,7 +421,7 @@ describe("requirements", () => {
     const fitting = fall.requirementIds["Uniform fitting attended"]!;
     expect(await removeRequirementAction(fitting)).toEqual({ ok: false, errors: [
       "Uniform fitting attended can't be removed: a tick or waiver is recorded against it. Clear them first on its progress page, or make it optional so it no longer holds the step open."] });
-    expect(textOf(await renderPage(RequirementPage, { params: { id: fall.seasonId, requirementId: fitting } }))).toContain("A tick or waiver is recorded against this requirement, so it can't be removed.");
+    expect(textOf(await renderPage(RequirementPage, { params: { id: fall.seasonId, requirementId: fitting } }))).toContain("It has a tick or waiver, so it can't be removed.");
     expect(await db.select().from(requirement)).toHaveLength(1);
     asStaff(ticker);
     await setTicksAction(fitting, TAG, [await S("12")], false);
@@ -831,7 +831,9 @@ describe("the season page says how the current step is found, and when the dates
   it("explains the rule by date, and says nothing more while the dates follow the order", async () => {
     const fall = await seedSeason({ name: "Fall 2027", steps: [{ name: "Join" }, { name: "Forms", endsOn: "2027-09-30" }, { name: "Volunteer", endsOn: "2027-10-31" }] });
     const text = textOf(await renderPage(SeasonSetupPage, { params: { id: fall.seasonId } }));
-    expect(text).toContain("By date: the first step that hasn't ended. A step ends when its end date has passed or, if it has none, when a later step starts or ends. "
+    expect(text).toContain("By date: the first step that hasn't ended.");
+    // The rest of the rule is behind How this works, still on the page.
+    expect(text).toContain("A step ends when its end date has passed or, if it has none, when a later step starts or ends. "
       + "A step that follows one with no end date needs a start date to be marked in its turn.");
     expect(text).not.toContain("out of order");
   });
@@ -840,8 +842,8 @@ describe("the season page says how the current step is found, and when the dates
     // Uniforms (starts Sep 1) was moved ahead of Forms (starts Aug 1).
     const fall = await seedSeason({ name: "Fall 2027", steps: [{ name: "Uniforms", startsOn: "2027-09-01" }, { name: "Forms", startsOn: "2027-08-01" }, { name: "Wrap-up", startsOn: "2027-11-01" }] });
     const page = () => renderPage(SeasonSetupPage, { params: { id: fall.seasonId } });
-    expect(textOf(await page())).toContain("The dates are out of order. Forms starts or ends before a step that comes earlier in this list. "
-      + "The steps are followed in the order shown here, so a step dated out of turn is passed over and is never the current one. Change the dates, or move the step.");
+    expect(textOf(await page())).toContain("The dates are out of order: Forms starts or ends before an earlier step. "
+      + "A step dated out of turn is skipped and never becomes the current one. Change the dates, or move the step.");
     // Moved back into its turn, nothing is out of order.
     expect(await moveStepAction(fall.stepIds.Forms!, "earlier")).toMatchObject({ ok: true });
     expect(textOf(await page())).not.toContain("out of order");
@@ -849,7 +851,7 @@ describe("the season page says how the current step is found, and when the dates
     await db.update(seasonStep).set({ name: "<b>Wrap-up</b>", startsOn: "2027-07-01" }).where(eq(seasonStep.id, fall.stepIds["Wrap-up"]!));
     await db.update(seasonStep).set({ endsOn: "2027-07-15" }).where(eq(seasonStep.id, fall.stepIds.Uniforms!));
     const html = await page();
-    expect(textOf(html)).toContain("The dates are out of order. Uniforms, &lt;b&gt;Wrap-up&lt;/b&gt; each start or end before a step that comes earlier in this list.");
+    expect(textOf(html)).toContain("The dates are out of order: Uniforms, &lt;b&gt;Wrap-up&lt;/b&gt; each start or end before an earlier step.");
     expect(html).not.toContain("<b>Wrap-up</b>");
   });
 });

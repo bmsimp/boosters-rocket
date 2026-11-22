@@ -54,9 +54,9 @@ const qc = (Id: string, DisplayName: string, typeId: string | null, extra: Recor
 const under = (id: string) => ({ ParentRef: { value: id }, Job: true });
 const mail = (address: string) => ({ PrimaryEmailAddr: { Address: address } });
 /** What the links page says beside every Confirm (src/app/staff/(app)/links/page.tsx), as the text of the page reads it. */
-const LINK_EFFECT = "Once linked, this family's guardians see this customer's open invoices and Pay links, and those of the students and parents the books hold directly under it, the next time they open Home or Payments, and a pay-instead choice for the family bills it. A link can be removed again on this page, with Unlink from the books in the family's row, but its guardians may have seen those invoices by then, so check it is the right household.";
+const LINK_EFFECT = "Once linked, the family's guardians see this customer's open invoices and Pay links (and those of students and parents directly under it) next time they open Home or Payments, and a pay-instead choice bills it. Unlink from the books undoes it, but they may have seen the invoices by then, so check it's the right household.";
 /** What it says beside every Confirm since slice M3c2, where the books have a parent type (fznCompany()'s Parent, 2). */
-const LINK_GUARDIANS_EFFECT = "A guardian linked with it has, from then on, a rename of them, their removal from this family and a change of their phone, mailing address or sign-in email sent to that Parent customer, by the portal's own rules, while it is theirs alone under this family. Linking sends nothing to the books, and the details the portal holds for them now aren't sent by it.";
+const LINK_GUARDIANS_EFFECT = "From then on, a guardian linked with it has their rename, removal and changes of phone, mailing address or sign-in email sent to that Parent customer, while it's theirs alone. Linking sends nothing, and what the portal holds now isn't sent.";
 /** Customers added in QuickBooks, then read by a roster read (which makes no record of them). */
 async function readAgain(...customers: ReturnType<typeof qc>[]) {
   stub.customers.push(...customers);

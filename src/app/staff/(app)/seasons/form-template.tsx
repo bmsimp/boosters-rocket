@@ -35,13 +35,13 @@ export async function FormTemplateBox({ requirementId, appliesTo, canChange }: {
         // Folded like the page's other forms, and left to the browser to open and close: drawn again after a
         // template is attached, it stays open, with what the action said still on the screen.
         <details className="more"><summary>{setting ? "Attach another template, or change who signs" : "Attach a template"}</summary>
-          <p className="hint">Make the form as a template in Documenso first. The portal fills in names, so the template needs: one or two signers;
+          <p className="hint">Make the form as a Documenso template first, with: one or two signers;
             {appliesTo === "student" ? <> a text field labelled <b>{SUBJECT_LABEL.student}</b> for the first signer;</> : <> if the family is named on it, a text field labelled <b>{SUBJECT_LABEL.family}</b> for the first signer;</>}
-            {" "}a text field labelled <b>{guardianLabel(1)}</b> for the first signer (and <b>{guardianLabel(2)}</b> for the second); a signature field for each signer.
-            Every one of those name fields must be set to Read only, or a signer could change a name.</p>
+            {" "}a text field labelled <b>{guardianLabel(1)}</b> for the first signer (<b>{guardianLabel(2)}</b> for the second); and a signature field for each.
+            Set every name field to Read only, or a signer could change a name.</p>
           {choices === null && <p className="hint">Documenso&apos;s templates couldn&apos;t be listed just now. Paste the address of the template&apos;s page instead.</p>}
           <FormTemplateForm choices={choices} current={setting?.templateId ?? null} signers={setting?.signers ?? "any"} save={attachFormTemplateAction.bind(null, requirementId)} />
-          {setting && <p className="hint">A form someone has already signed stays as it is. One that nobody has signed yet is made again from the new template the next time a guardian opens it.</p>}
+          {setting && <p className="hint">Signed forms stay as they are. Unsigned ones use the new template next time a guardian opens them.</p>}
         </details>
       )}
     </section>

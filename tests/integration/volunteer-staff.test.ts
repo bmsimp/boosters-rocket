@@ -111,7 +111,7 @@ describe("the volunteer permissions and pages", () => {
     expect(list).toContain("1 shift · 2 of 4 places filled");
     expect(list).toContain("Earlier events");
     expect(list).toContain("Last spring's car wash");
-    expect(list).toContain("until 48 hours before the shift starts");
+    expect(list).toContain("up to 48 hours before the shift.");
     expect(list).not.toContain("Add an event");
     const [event] = await db.select().from(volunteerEvent).where(eq(volunteerEvent.name, "Marching band car wash"));
     const page = textOf(await renderPage(VolunteerEventPage, { params: { id: event!.id } }));
@@ -302,7 +302,7 @@ describe("the cut-off and the volunteer kind of requirement", () => {
     const [row] = await db.select().from(setting).where(eq(setting.key, VOLUNTEER_SETTINGS_KEY));
     expect(row!.value).toEqual({ cutoffHours: 24 });
     expect((await audits("volunteer.settings.save"))[0]).toMatchObject({ before: { cutoffHours: null }, after: { cutoffHours: 24 } });
-    expect(textOf(await renderPage(VolunteerEventsPage))).toContain("until 24 hours before the shift starts");
+    expect(textOf(await renderPage(VolunteerEventsPage))).toContain("up to 24 hours before the shift.");
   });
 
   it("won't remove a volunteer requirement, or its step, while families hold places that count toward it; once they don't, the audit keeps its shifts", async () => {

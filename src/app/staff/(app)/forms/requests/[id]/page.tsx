@@ -77,7 +77,7 @@ export default async function FormRequestPage({ params }: { params: Promise<{ id
       {writes && restartable && (
         <section className="box" aria-labelledby="restart-h">
           <h2 id="restart-h">Start again</h2>
-          <p>For a form that was declined, that everyone signed more than six hours ago and still isn&apos;t sealed, whose document Documenso no longer has, or that a guardian who must sign can no longer reach.</p>
+          <p>Use it when the form was declined, isn&apos;t sealed six hours after everyone signed, is gone from Documenso, or a guardian who must sign can&apos;t reach it.</p>
           <StartAgainForm reasons={Object.entries(RESTART_REASONS).map(([value, label]) => ({ value, label }))} run={startAgainAction.bind(null, row.id)} />
         </section>
       )}

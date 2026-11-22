@@ -67,7 +67,7 @@ export default async function FamilyBalancePage({ params }: { params: Promise<{ 
       )}
 
       <Card title={<>QuickBooks&apos; own balances</>} titleId="check-h">
-        {family.check === null ? <p>The worker hasn&apos;t compared this family&apos;s balances in QuickBooks with its invoices yet. It does at its daily read of every family.</p> : (
+        {family.check === null ? <p>Not compared with its invoices yet. The worker does that at its daily read.</p> : (
           <>
             <p>Each customer&apos;s balance in QuickBooks beside what its open invoices add up to, checked <LocalTime iso={family.check.at} />.</p>
             <List>{family.check.customers.map((c) => (

@@ -286,7 +286,7 @@ describe("the roster pages", () => {
     await seedShape(); await addToCache([fam("10", "Rivera Family"), stu("12", "Maya Rivera", "10")]); await seedRosterRead();
     const html = await list();
     expect(html).toContain("1 family");
-    expect(html).toContain("QuickBooks lists families, but none of them is one of the portal&#x27;s own families: a read of QuickBooks doesn&#x27;t bring customers into the portal.");
+    expect(html).toContain("QuickBooks lists families, but none is one of the portal&#x27;s own. Reading QuickBooks doesn&#x27;t bring customers into the portal.");
     expect(html).not.toContain("QuickBooks lists no customers of the family type.");
     expect(html).not.toContain("Rivera Family</a>");
   });

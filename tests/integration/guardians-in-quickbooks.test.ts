@@ -62,7 +62,7 @@ describe("adding a guardian (item 2)", () => {
     const r = await addGuardian(chen, { name: "Mei Chen", email: "mei@example.com" }, op);
     expect(r).toMatchObject({ ok: true, outcome: "added", person: "new" });
     if (!r.ok) return;
-    expect(r.quickbooks).toEqual(["QuickBooks already has a customer named “Mei Chen” under Chen Family that isn't linked to Mei Chen, so no Parent customer was made for them. If it is a Parent customer no guardian is linked to, the two can be linked on Accounting links, in the opening of the family's row, by someone who may link families to accounting."]);
+    expect(r.quickbooks).toEqual(["QuickBooks already has a customer named “Mei Chen” under Chen Family that isn't linked to Mei Chen, so no Parent customer was made for them. If it is a Parent customer no guardian is linked to, the two can be linked on Accounting links, in the opening of the family's row, by someone who can link families."]);
     expect(posts()).toEqual([]);
     expect(await items()).toEqual([]);
     expect(await linkOfRow(r.guardianId)).toBeUndefined();

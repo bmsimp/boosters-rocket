@@ -19,7 +19,7 @@ const familiesWord = (n: number) => `${n} ${n === 1 ? "family" : "families"}`;
 function Run({ run }: { run: MoneyRunView }) {
   return (
     <Card title="Reading from QuickBooks" titleId="run-h"
-      description={<>The worker reads every family&apos;s invoices from QuickBooks once a day, one family at a time. A parent opening their own page reads theirs again too.</>}>
+      description={<>The worker reads every family&apos;s invoices once a day. A parent opening their page reads theirs again.</>}>
       {run.running
         ? <Notice tone="info">Reading every family now: {familiesWord(run.running.read)} read so far{run.running.failed ? `, ${run.running.failed} couldn't be read` : ""}. Started <LocalTime iso={run.running.startedAt} />.</Notice>
         : run.asked ? <Notice tone="info">A read of every family is asked for. The worker starts it within a minute.</Notice> : null}
@@ -66,14 +66,14 @@ export default async function BalancesPage({ searchParams }: { searchParams: Pro
 
       {balances.worthALook.length > 0 && (
         <Card title="Worth a look" titleId="look-h"
-          description={<>QuickBooks&apos; own balance for these customers isn&apos;t what their open invoices add up to. It may be a credit, a payment not yet applied, or a charge that isn&apos;t an invoice. Parents see the invoices.</>}>
+          description={<>QuickBooks&apos; balance for these customers doesn&apos;t match their open invoices. It may be a credit, an unapplied payment, or a charge that isn&apos;t an invoice. Parents see the invoices.</>}>
           <WorthALook rows={balances.worthALook} />
         </Card>
       )}
 
       <Card title="Families" titleId="families-h">
-        {balances.unlinked > 0 && <Notice tone="info" live="none">{balances.unlinked === 1 ? "1 family in the portal isn't" : `${balances.unlinked} families in the portal aren't`} linked to a customer in the books, so {balances.unlinked === 1 ? "it has" : "they have"} no figures here.
-          {" "}{mayLink ? <Link href="/staff/links">{balances.unlinked === 1 ? "Link it" : "Link them"} on Accounting links</Link> : `Someone who may link families to accounting links ${balances.unlinked === 1 ? "it" : "them"} on Accounting links.`}</Notice>}
+        {balances.unlinked > 0 && <Notice tone="info" live="none">{balances.unlinked === 1 ? "1 family isn't" : `${balances.unlinked} families aren't`} linked to the books, so {balances.unlinked === 1 ? "it has" : "they have"} no figures here.
+          {" "}{mayLink ? <Link href="/staff/links">{balances.unlinked === 1 ? "Link it" : "Link them"} on Accounting links</Link> : `Someone who can link families links ${balances.unlinked === 1 ? "it" : "them"} on Accounting links.`}</Notice>}
         <form method="get" action="/staff/balances">
           <Toolbar label="Filter the families"
             end={<><Button type="submit" variant="secondary">Show</Button>{filtered && <LinkButton variant="quiet" href="/staff/balances">Show every family</LinkButton>}</>}>
@@ -82,7 +82,7 @@ export default async function BalancesPage({ searchParams }: { searchParams: Pro
               <Checkbox id="balances-owing" name="owing" value="1" defaultChecked={owing} label=" Only families that owe something" /></fieldset>
           </Toolbar>
         </form>
-        {!balances.roster ? <Notice tone="warning">The roster can&apos;t be shown right now. Check QuickBooks under Roster.</Notice>
+        {!balances.roster ? <Notice tone="warning">The roster can&apos;t be shown right now. The Roster page says why.</Notice>
           : balances.rows.length === 0 ? (filtered ? <Notice tone="info">No family matches.</Notice> : <EmptyState title="There are no families on the roster." />)
           : <FamilyTable rows={balances.rows} caption={`${filtered ? `${balances.rows.length} of ${familiesWord(balances.families)}` : familiesWord(balances.families)}, by name.`} />}
       </Card>

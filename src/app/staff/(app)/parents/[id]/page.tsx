@@ -8,7 +8,7 @@ import { whoseDetails } from "@/lib/parents/my-family";
 import { getShape } from "@/lib/roster/shape";
 import { familyPagesStand } from "@/lib/roster/queries";
 import { getParentSettings, parentDoorClosed } from "@/lib/parents/settings";
-import { Card, DataTable, EmptyState, KeyValue, List, ListRow, LocalTime, Notice, PageHeader, StateWords, StatusBadge, type Tone } from "@/app/components/ui";
+import { Card, DataTable, EmptyState, HowThisWorks, KeyValue, List, ListRow, LocalTime, Notice, PageHeader, StateWords, StatusBadge, type Tone } from "@/app/components/ui";
 import { DetailsForm, NameForm, NoteAction, OneButton, ResetSigninForm } from "../forms";
 import { blockAction, unblockAction, resendWelcomeAction, renamePersonAction, resetSigninAction, savePersonDetailsAction } from "../actions";
 import { GuardianChange } from "../guardian-change";
@@ -87,31 +87,34 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           { key: "welcome", label: "Welcome email", value: p.welcomedAt ? <>Sent <LocalTime iso={p.welcomedAt} />{p.welcomeOwed ? ". An email with a link to choose a password is waiting to be sent" : null}</>
             : p.welcomeOwed ? "Waiting to be sent" : "Not sent" },
         ]} />
-        <p className="hint">The name and sign-in email are the portal&apos;s own. A parent changes their own sign-in email from the Family page; a change made in QuickBooks doesn&apos;t change them. Their phone and mailing address are the portal&apos;s own too, changed by them on their Family page or by staff (below, or on each family&apos;s page where the club&apos;s books have no parents of their own), and each change is then sent to their record in QuickBooks. A guardian is added to a family from that family&apos;s page. Where the club&apos;s books have parents of their own, each membership has its own Parent customer in QuickBooks under the family: a new name here is sent to each, and removing them makes theirs inactive only when it has no balance the portal can read, owed or a credit.</p>
+        <p className="hint">Their name, sign-in email, phone and mailing address are the portal&apos;s own. A change made in QuickBooks doesn&apos;t change them. Add a guardian to a family from that family&apos;s page.</p>
+        <HowThisWorks>
+          <p>Each family they&apos;re in has its own Parent customer in QuickBooks, where the books have parents. A new name here is sent to each. Removing them makes theirs inactive only if it has no balance the portal can read, owed or a credit.</p>
+        </HowThisWorks>
       </Card>
 
       <Card title="Phone and mailing address" titleId="pd-h">
         {contact ? (
           <>
-            <p>As the portal holds them: the parent changes them on their Family page, and you can change them here. A change is saved in the portal first, then sent to their own Parent customer under each family they are a guardian of; where QuickBooks holds details there the portal didn&apos;t know of, nothing is sent over them and the Reconciliation page lists it. What QuickBooks holds is shown only there, where someone who may see parents&apos; details can compare the two.</p>
+            <p>They can change these on their Family page, and you can change them here. Each change is saved here first, then sent to their Parent customer in each family. If QuickBooks has details the portal didn&apos;t know of, nothing is sent over them. Reconciliation lists those, so you can compare the two.</p>
             <DetailsForm initial={contact} act={savePersonDetailsAction.bind(null, p.parentId)} />
           </>
         ) : (
           <>
-            <p>The club&apos;s books have no parents of their own, so a phone and mailing address are each family&apos;s, shared by its guardians: they are shown and changed on the family&apos;s page.</p>
-            {!pagesStand && <Notice tone="info" live="none">A family&apos;s phone and mailing address can&apos;t be shown or changed by staff just now: the families&apos; pages are closed until the club&apos;s customer types are set again on Settings, QuickBooks. The parent can still change them on their Family page.</Notice>}
+            <p>The books have no parents of their own, so each family has one phone and mailing address, shared by its guardians. Change them on the family&apos;s page.</p>
+            {!pagesStand && <Notice tone="info" live="none">Staff can&apos;t see or change a family&apos;s phone and mailing address right now: family pages are closed until the customer types are set again in Settings, QuickBooks. The parent can still change them on their Family page.</Notice>}
             {familyPages.length > 0 && <List>{familyPages.map((f) => <ListRow key={f.key} title={<Link className="link-line" href={familyPage(f.id)}>{f.name}</Link>} />)}</List>}
           </>
         )}
       </Card>
 
-      <Card title="Name" titleId="pn-h" description={<>Changes their name in the portal: what staff see, and what the portal calls them. QuickBooks isn&apos;t changed.</>}>
+      <Card title="Name" titleId="pn-h" description={<>Changes the name staff see and the portal uses. Where the books have parents, it&apos;s sent to their Parent customer in each family.</>}>
         <NameForm name={p.name} act={renamePersonAction.bind(null, p.parentId)} />
       </Card>
 
       <Card title="Welcome email" titleId="pw-h">
-        <p>{p.hasPassword ? "Sends the welcome again, now: where to sign in, and that they sign in with this address and the password they chose."
-          : `Sends the welcome again, now, with a new link to choose their password. The link works once, for ${lifeWords(LINK_LIFE_MS.setup)}, and takes the place of any earlier one they haven't used, once the email has gone.`}</p>
+        <p>{p.hasPassword ? "Sends the welcome again: where to sign in, with this address and their password."
+          : `Sends the welcome again, with a new link to choose a password. It works once, for ${lifeWords(LINK_LIFE_MS.setup)}, and replaces any earlier unused link once the email has gone.`}</p>
         {parentDoorClosed(settings) ? <Notice tone="info" live="none">Parent sign-ins are switched off, so no welcome can be sent.</Notice>
           : canSignIn ? <OneButton label="Resend welcome email" pendingLabel="Sending…" act={resendWelcomeAction.bind(null, p.parentId)} />
           : <Notice tone="info" live="none">{p.blocked ? "This person is blocked, so no email can be sent." : "This person can't sign in to any family right now, so there is nothing to welcome them to."}</Notice>}
@@ -122,13 +125,13 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           <>
             <Notice tone="warning" live="none">Blocked{p.blockedAt ? <> <LocalTime iso={p.blockedAt} /></> : null}. Reason: {p.blockedReason ?? "none recorded"}</Notice>
             <p>{p.hasPassword
-              ? "Unblocking lets them sign in again with the password they had, to each family whose sign-in is still open. The phones and computers the portal remembered for them stay forgotten, and a link they had before the block no longer works."
-              : "Unblocking lets them sign in again to each family whose sign-in is still open, once they choose a password: they haven't chosen one, and a link they had before the block no longer works, so send them the welcome again (Resend welcome email) once they are unblocked. The phones and computers the portal remembered for them stay forgotten."}</p>
+              ? "They can sign in again with their old password, to each family still open to them. Remembered devices stay forgotten, and links from before the block don't work."
+              : "They can sign in again to each family still open to them once they choose a password. Links from before the block don't work, so resend the welcome after unblocking. Remembered devices stay forgotten."}</p>
             <OneButton label="Unblock" pendingLabel="Unblocking…" act={unblockAction.bind(null, p.parentId)} />
           </>
         ) : (
           <>
-            <p>Blocking signs this person out of every family at once, and stops them signing in, getting sign-in codes or using a password link. The phones and computers the portal remembered for them are forgotten; their password is kept. They aren&apos;t told. Use it for a custody matter or misuse.</p>
+            <p>Signs them out of every family at once, and stops them signing in, getting codes or using a password link. Remembered devices are forgotten, and their password is kept. They aren&apos;t told. For a custody matter or misuse.</p>
             <NoteAction label="Block" field="Why? (staff only)" pendingLabel="Blocking…" act={blockAction.bind(null, p.parentId)} />
           </>
         )}
@@ -151,8 +154,8 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
               <>
                 <p>Resetting signs this person out everywhere and removes their password, passkeys, authenticator app and backup codes, and the phones and computers the portal remembered for them. They&apos;re emailed a new link to choose a password, which works once, for {lifeWords(LINK_LIFE_MS.setup)}. {settings.level === "strict"
                   ? "The club is at Strict: once they've chosen a password, the portal asks them to add a passkey or an authenticator app before they see anything else."
-                  : "Choosing it signs them in on that phone or computer; on another one they sign in with that password and a code emailed to them. They can then add a passkey or an authenticator app again."} Their families, forms and everything else stay as they are.</p>
-                <p>Use it when they&apos;ve lost what they sign in with: their phone with its passkey or authenticator app and their backup codes, or passkeys that stopped working because the portal&apos;s address changed.</p>
+                  : "Choosing it signs them in on that phone or computer; on another one they sign in with that password and a code emailed to them. They can then add a passkey or an authenticator app again."} Their families and forms stay as they are.</p>
+                <p>Use it when they&apos;ve lost their phone, passkey or authenticator app and their backup codes, or when passkeys stopped working because the portal&apos;s address changed.</p>
                 <Notice tone="warning" live="none">Before you reset, call them back on a number the club already holds (on this page, on their family&apos;s page, or in the club&apos;s own records), never one the caller gives you, and make sure they asked for this. The link goes to the email address being reset, so whoever reads that mailbox can use it.</Notice>
                 <p className="hint">Only Admins can do this, and every other Admin sees it on their home page for a week.</p>
                 <ResetSigninForm act={resetSigninAction.bind(null, p.parentId)} />

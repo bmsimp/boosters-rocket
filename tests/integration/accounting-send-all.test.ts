@@ -369,7 +369,7 @@ describe("who may press it, and the page", () => {
     const whole = await renderPage(AccountingLinksPage);
     const list = listOf(whole);
     expect(list).toContain(`Send the app's for all (4)<span class="visually-hidden">: Send the app's for all</span>`);
-    expect(list).toContain("It passes over 1 make-inactive this list shows, as each reads a balance in QuickBooks first: send it on its own row.");
+    expect(list).toContain("It skips 1 make-inactive: each reads a balance first, so send it on its row.");
     expect(list).toContain("It passes over 1 difference whose customer QuickBooks has inactive: the portal sends nothing there, and never makes a customer active.");
     // No inactive family is listed, so none is spoken of.
     expect(list).not.toContain("The inactive families listed after the families");

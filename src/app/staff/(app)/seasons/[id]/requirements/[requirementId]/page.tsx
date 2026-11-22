@@ -121,7 +121,7 @@ export default async function RequirementPage({ params }: { params: Promise<{ id
       {canChange && (
         <section className="box" aria-labelledby="remove-h"><h2 id="remove-h">Remove</h2>
           {recorded > 0
-            ? <p>{recorded === 1 ? "A tick or waiver is" : `${recorded} ticks and waivers are`} recorded against this requirement, so it can&apos;t be removed. Clear them first on its progress page, or make it optional so it no longer holds the step open.</p>
+            ? <p>It has {recorded === 1 ? "a tick or waiver" : `${recorded} ticks and waivers`}, so it can&apos;t be removed. Clear them on its progress page first, or make it optional.</p>
             : <><p>Nothing is recorded against this requirement yet, so it can be removed.</p>
                 <OneButton label="Remove this requirement" pendingLabel="Removing…" act={removeRequirementAction.bind(null, r.id)} goTo={back} /></>}
         </section>

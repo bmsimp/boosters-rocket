@@ -480,7 +480,7 @@ describe("Send the app's for all", () => {
     expect((await loadAccountingLinks()).sendAll({ status: null, q: "" })).toMatchObject({ passedOver: { inactive: 1 }, guardians: 0 });
     asStaff(sender);
     const without = listOf(await renderPage(AccountingLinksPage));
-    expect(without).toContain("It passes over 1 make-inactive this list shows");
+    expect(without).toContain("It skips 1 make-inactive");
     expect(without).not.toContain("A guardian's Parent customer is sent from its own row.");
     await db.update(student).set({ active: true }).where(eq(student.id, leo));
     changeInBooks("10", { DisplayName: "Rivera Household" });

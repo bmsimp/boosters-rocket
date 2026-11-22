@@ -77,7 +77,7 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
   ];
   return (
     <main className="wrap single">
-      <PageHeader title="Roster" lede={<>The club&apos;s {roster?.kind === "flat" ? "members" : "families"}, each beside its customer in QuickBooks where it is linked to one. A change to a linked {roster?.kind === "flat" ? "member" : "family"} is sent to QuickBooks first, then made here too; one with no link is changed here only; and a change made in QuickBooks doesn&apos;t change the portal&apos;s {roster?.kind === "flat" ? "members" : "families"}.</>} />
+      <PageHeader title="Roster" lede={<>The club&apos;s {roster?.kind === "flat" ? "members" : "families"}, each beside the QuickBooks customer it&apos;s linked to. A change made in QuickBooks doesn&apos;t change them.</>} />
 
       {!roster && (
         <Notice tone={page.brokenTypes.length ? "warning" : "info"} title="Nothing to show yet" titleId="roster-none-h">
@@ -99,7 +99,7 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
           </form>
           {rows.length === 0
             ? <Notice tone="info">{typed ? <>No {noun} matches &quot;{typed}&quot;.</>
-                : listedInCache > 0 ? <>QuickBooks lists {nouns}, but none of them is one of the portal&apos;s own {nouns}: a read of QuickBooks doesn&apos;t bring customers into the portal.</>
+                : listedInCache > 0 ? <>QuickBooks lists {nouns}, but none is one of the portal&apos;s own. Reading QuickBooks doesn&apos;t bring customers into the portal.</>
                 : roster.kind === "flat" ? "QuickBooks lists no customers of the member types." : "QuickBooks lists no customers of the family type."}</Notice>
             : <DataTable caption={typed ? <>{rows.length} {rows.length === 1 ? noun : nouns} matching &quot;{typed}&quot;</> : <>Every {noun} on the roster, by name</>}
                 columns={columns} rows={rows} rowKey={(r) => String(r.id)} />}
@@ -113,7 +113,7 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
 
       {roster && page.attention.length > 0 && (
         <Card title={<>Needs attention ({page.attention.length})</>} titleId="roster-attn-h"
-          description={<>Things to tidy up in QuickBooks, or in the portal&apos;s sign-ins. Nothing here is changed by itself: fix each in QuickBooks, or from a family&apos;s page.</>}>
+          description={<>Things to tidy up. None of them fixes itself: fix each in QuickBooks, or on the family&apos;s page.</>}>
           <DataTable caption="What to tidy, for each customer" captionHidden rowKey={(a) => a.key} rows={page.attention.map((a, i) => ({ ...a, key: `${a.rule}-${a.qboId ?? a.name}-${i}` }))}
             columns={[
               { key: "name", header: "Customer", rowHeader: true, cell: (a) => named(a.qboId, a.name) },

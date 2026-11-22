@@ -26,7 +26,7 @@ import { moveAction, saveFamilyDetailsAction } from "../write-actions";
 import { offers } from "@/lib/roster/operations";
 import { placeWords } from "@/lib/roster/place";
 import type { Cust, Family } from "@/lib/roster/model";
-import { Card, DataTable, EmptyState, KeyValue, List, ListRow, LocalTime, Notice, PageHeader, type Column } from "@/app/components/ui";
+import { Card, DataTable, EmptyState, HowThisWorks, KeyValue, List, ListRow, LocalTime, Notice, PageHeader, type Column } from "@/app/components/ui";
 import { familyBalancePage, familyBuyoutsPage, familyCreditPage, familyProgressPage } from "@/app/staff/(app)/family-pages";
 
 export const metadata = { title: "Roster" };
@@ -100,7 +100,10 @@ function SignIns({ familyId, signins, links, changes, addable, inQuickBooks }: {
           <h3>Add a guardian</h3>
           {addable !== null ? <Notice tone="info" live="none">{addable}</Notice> : (
             <>
-              <p>They sign in with this address and a password they choose from a link the portal emails them: the welcome email brings one while welcome emails are on, and Resend welcome email on their page, or Set up or reset my password on the sign-in page, sends one at any time. If the address already belongs to someone in the portal, you are shown who it is and asked whether this is the same person before anything changes: one address is one person, who may be a guardian of several families. Where the club&apos;s books have parents of their own and this family is linked, the guardian then gets their own Parent customer under the family in QuickBooks, with their name and this address, unless QuickBooks already has a customer of that name here.</p>
+              <p>They sign in with this address and a password they choose from an emailed link: the welcome email, or Resend welcome email on their page, or &ldquo;Set up or reset my password&rdquo; on the sign-in page. If someone in the portal already has this address, you&apos;re asked whether it&apos;s the same person first. One address is one person, who can be a guardian in several families.</p>
+              <HowThisWorks>
+                <p>Where the books have parents and this family is linked, the guardian gets their own Parent customer under the family, with their name and this address, unless QuickBooks already has a customer of that name here.</p>
+              </HowThisWorks>
               <AddGuardianForm act={addGuardianAction.bind(null, String(familyId))} />
             </>
           )}
@@ -146,7 +149,7 @@ function FamilyDetails({ familyId, details, editable }: { familyId: AppFamilyId;
   const address = [v.line1, v.line2, v.city, [v.region, v.postalCode].filter(Boolean).join(" "), v.country].filter(Boolean).join(", ");
   return (
     <Card title="Phone and mailing address" titleId="entry-details-h">
-      <p>The club&apos;s books have no parents of their own, so these are the family&apos;s, shared by its guardians, as the portal holds them. Its guardians change them on their Family page{editable ? ", and you can change them here" : ""}. A change is saved in the portal first, then sent to the family&apos;s own customer in QuickBooks; where QuickBooks holds details there the portal didn&apos;t know of, nothing is sent over them and the Reconciliation page lists it.</p>
+      <p>The family&apos;s own, shared by its guardians, since the books have no parents. Guardians change them on their Family page{editable ? ", and you can here" : ""}. Each change is saved here first, then sent to the family&apos;s customer in QuickBooks. If QuickBooks has details the portal didn&apos;t know of, nothing is sent over them: Reconciliation lists those.</p>
       {editable ? <DetailsForm initial={details} act={saveFamilyDetailsAction.bind(null, String(familyId))} />
         : <KeyValue items={[{ key: "phone", label: "Phone", value: v.phone || "None" }, { key: "address", label: "Mailing address", value: address || "None" }]} />}
     </Card>
@@ -271,32 +274,32 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   const movable: MovableStudent[] = moves ? fam.students.filter((s) => s.active).map((s) => ({ id: String(s.id), name: s.name,
     blocked: beingMade.has(String(s.id)) ? "Making this student in QuickBooks is still waiting on the queue, so they can't be moved for now."
       : open.some((w) => w.studentId !== null && String(w.studentId) === String(s.id)) || (s.customer !== null && open.some((w) => "qboId" in w.write && w.write.qboId === s.customer!.qboId))
-        ? `A change to ${s.name} is waiting to reach QuickBooks, so they can't be moved until it has gone through, or been given up on the Reconciliation page.` : null })) : [];
+        ? `A change to ${s.name} is still on its way to QuickBooks. They can be moved once it goes through or is given up on Reconciliation.` : null })) : [];
   return (
     <main className="wrap single">
-      <PageHeader title={fam.name} back={{ href: "/staff/roster", label: "Back to the roster" }} lede={<>{entry.kind === "family" ? "A family" : "A member"} the portal keeps{customer ? <>, linked to its customer in QuickBooks{customer.active ? "" : ", which is inactive there"}</>
-        : fam.linked ? `, linked to a customer QuickBooks doesn't list as a ${entry.kind} now`
-        : making ? ", not linked to QuickBooks yet: its customer is being made there"
-        : heldFamily ? <>, not linked to QuickBooks: it was linked to &ldquo;{heldFamily.customerName}&rdquo; there until it was unlinked, &ldquo;{heldFamily.customerName}&rdquo; is still in the books, and a change to it is saved here only</>
-        : ", not linked to QuickBooks: it is in the portal only, and a change to it is saved here only"}.{heldFamily === null ? null
+      <PageHeader title={fam.name} back={{ href: "/staff/roster", label: "Back to the roster" }} lede={<>{entry.kind === "family" ? "A family" : "A member"}{customer ? <> linked to its QuickBooks customer{customer.active ? "" : ", which is inactive there"}</>
+        : fam.linked ? ` the portal keeps, linked to a customer QuickBooks doesn't list as a ${entry.kind} now`
+        : making ? " the portal keeps, not linked to QuickBooks yet: its customer is being made there"
+        : heldFamily ? <> not linked to QuickBooks. It was linked to &ldquo;{heldFamily.customerName}&rdquo;, which is still in the books, so changes are saved here only</>
+        : " in the portal only, not linked to QuickBooks. Changes are saved here only"}.{heldFamily === null ? null
           // Where Accounting links can't offer the customer (inactive in the books, under another customer or of another
           // type: the pool's rule, as the refusal says it, ENDED_HELD()), it is sorted out in QuickBooks first.
-          : !heldOffered ? <> Accounting links can&apos;t offer &ldquo;{heldFamily.customerName}&rdquo; for it until it is sorted out in QuickBooks, where it may be inactive, under another customer or of another type; once it is, {linker
-            ? <><Link href="/staff/links">link it again on Accounting links</Link>.</> : "someone who may link families to accounting links it again there."}</>
+          : !heldOffered ? <> Accounting links can&apos;t offer &ldquo;{heldFamily.customerName}&rdquo; for it until it is sorted out in QuickBooks, where it may be inactive, under another customer or of another type. Then {linker
+            ? <><Link href="/staff/links">link it again on Accounting links</Link>.</> : "someone who can link families links it again there."}</>
           : linker ? <> <Link href="/staff/links">Link it again on Accounting links</Link>.</>
-          : " Someone who may link families to accounting links it again on Accounting links."}</>} />
+          : " Someone who can link families links it again on Accounting links."}</>} />
       <DisconnectedNotice page={page} admin={admin} />
       {entry.kind === "family" ? (
         <>
           <People id="entry-students-h" title="Students" noun="Student" people={fam.students.map((s) => ({ key: String(s.id), name: s.name, customer: s.customer, standing: studentStanding(s, held.students) }))} contact={false} empty="The portal holds no students for this family." />
           <People id="entry-parents-h" title="Parents in QuickBooks" noun="Parent" contact empty="QuickBooks lists no parents under this family."
-            people={fam.parents.map((c) => ({ ...ofCustomer(c), standing: <>{standing(c)}: {ofGuardians.get(c.qboId) === "own" ? "a portal guardian's own, changed through them under Portal sign-ins and on their page"
+            people={fam.parents.map((c) => ({ ...ofCustomer(c), standing: <>{standing(c)}: {ofGuardians.get(c.qboId) === "own" ? "a portal guardian's own, changed through them"
               // Stage 4's slice M3c: a shared customer, or one only another family's guardian is linked to, is sorted out on
               // Accounting links by unlinking each guardian whose it isn't (and linking one of this family's where none is
               // left on it), and one no guardian is linked to is linked to one there; a link only for a reader who may link.
-              : ofGuardians.get(c.qboId) === "other" ? <>linked to a portal guardian, but not one guardian&apos;s own under this family (several share it, or theirs is another family), so the portal sends nothing for it: change it in QuickBooks, or on {linker ? <Link href="/staff/links">Accounting links</Link> : "Accounting links, by someone who may link families to accounting,"} unlink from it each guardian whose it isn&apos;t; once one guardian of this family alone is linked to it, it is theirs, and if none of this family&apos;s is left on it, one who isn&apos;t linked to a customer can be linked to it there</>
-              : ofGuardians.get(c.qboId) === "removed" ? "the own Parent customer of a guardian removed from this family, left active in QuickBooks (a removal makes it inactive only when its balance allows): adding them back under Portal sign-ins uses it again"
-              : <>not a portal guardian; adding the person under Portal sign-ins doesn&apos;t use it, and while it is active a guardian of this family who isn&apos;t linked to a customer can be linked to it on {linker ? <Link href="/staff/links">Accounting links</Link> : "Accounting links, by someone who may link families to accounting"}</>}</> }))} />
+              : ofGuardians.get(c.qboId) === "other" ? <>shared, or another family&apos;s guardian&apos;s, so nothing is sent for it. {edit ? "See the note under Change in QuickBooks" : <>Sort it out on {linker ? <Link href="/staff/links">Accounting links</Link> : "Accounting links"}</>}</>
+              : ofGuardians.get(c.qboId) === "removed" ? "a removed guardian's own, left active as it has a balance. Adding them back uses it again"
+              : <>no portal guardian is linked to it. Link one on {linker ? <Link href="/staff/links">Accounting links</Link> : "Accounting links, by someone who can link families"}</>}</> }))} />
         </>
       ) : (
         <People id="entry-member-h" title="In QuickBooks" noun="Member" people={customer ? [ofCustomer(customer)] : []} contact empty="QuickBooks lists no customer for this member." />

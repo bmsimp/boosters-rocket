@@ -238,9 +238,9 @@ describe("\"Create in QuickBooks and link\" after an unlink: no second customer 
     expect(await changeInPortal({ op: "rename_family", familyId: String(rivera), name: "Rivera Household" }, tag, createOp())).toMatchObject({ ok: true });
     asStaff(linker);
     const html = await renderPage(RosterEntryPage, { params: { id: String(rivera) } });
-    expect(textOf(ledeOf(html))).toContain("not linked to QuickBooks: it is in the portal only, and a change to it is saved here only.");
+    expect(textOf(ledeOf(html))).toContain("in the portal only, not linked to QuickBooks. Changes are saved here only.");
     const section = sectionOf(html, "create-link-h");
-    expect(textOf(section)).toContain("This makes Rivera Household a customer in QuickBooks, and links each to its record here.");
+    expect(textOf(section)).toContain("This makes Rivera Household a customer in QuickBooks, and links each.");
     expect(textOf(section)).toContain("Leo Rivera isn't offered: they were linked to “Leo Rivera” in QuickBooks until the family they were in was unlinked, and “Leo Rivera” is still there, so a second customer isn't made for them.");
     const r = await press(rivera);
     expect(r).toEqual({ changed: true, result: { ok: true, message: `Made in QuickBooks and linked: Rivera Household. ${STUDENT_HELD("Leo Rivera", "Leo Rivera", false)}` } });
@@ -258,7 +258,7 @@ describe("\"Create in QuickBooks and link\" after an unlink: no second customer 
     expect((await endedLinksHeld({ families: [rivera], students: [leo] })).families.size).toBe(0);
     asStaff(linker);
     const html = await renderPage(RosterEntryPage, { params: { id: String(rivera) } });
-    expect(textOf(sectionOf(html, "create-link-h"))).toContain("This makes Rivera Family a customer in QuickBooks, then Leo Rivera under it, one by one, and links each to its record here.");
+    expect(textOf(sectionOf(html, "create-link-h"))).toContain("This makes Rivera Family a customer in QuickBooks, then Leo Rivera under it, and links each.");
     const r = await press(rivera);
     expect(r).toMatchObject({ changed: true, result: { ok: true } });
     expect(sent().map((b) => b.DisplayName)).toEqual(["Rivera Family", "Leo Rivera"]);
@@ -405,7 +405,7 @@ describe("a guardian's Parent customer: none made beside the one their row was l
 
 describe("the family's pages after an unlink", () => {
   beforeEach(() => setUp());
-  const LEDE = "A family the portal keeps, not linked to QuickBooks: it was linked to “Rivera Family” there until it was unlinked, “Rivera Family” is still in the books, and a change to it is saved here only.";
+  const LEDE = "A family not linked to QuickBooks. It was linked to “Rivera Family”, which is still in the books, so changes are saved here only.";
 
   it("its page says what is true, links to Accounting links for a reader who may link, and offers no create", async () => {
     await unlinkThroughThePress(rivera, linker);
@@ -418,12 +418,12 @@ describe("the family's pages after an unlink", () => {
     expect(html).toMatch(/<p class="page-back"><a href="\/staff\/roster">.*Back to the roster<\/a><\/p>/);
     expect(html).not.toContain('id="create-link-h"');
     expect(html).not.toMatch(/<button[^>]*>Create in QuickBooks and link<\/button>/);
-    expect(textOf(sectionOf(html, "portal-changes-h"))).toContain("This family isn't linked to a customer in QuickBooks, so a change made here is saved in the portal only");
+    expect(textOf(sectionOf(html, "portal-changes-h"))).toContain("This family isn't linked to QuickBooks, so changes are saved here only");
     expect(textOf(sectionOf(html, "changes-h"))).toContain("This family isn't linked to a customer in QuickBooks: a change to it is saved in the portal only.");
     // A reader who may not link families is told who can, with no link.
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     const theirs = ledeOf(await renderPage(RosterEntryPage, { params: { id: String(rivera) } }));
-    expect(textOf(theirs)).toBe(`${LEDE} Someone who may link families to accounting links it again on Accounting links.`);
+    expect(textOf(theirs)).toBe(`${LEDE} Someone who can link families links it again on Accounting links.`);
     expect(theirs).not.toContain('href="/staff/links"');
     expect(stub.apiCalls()).toEqual([]);
   });
@@ -432,14 +432,14 @@ describe("the family's pages after an unlink", () => {
     await unlinkThroughThePress(rivera, linker);
     // Made inactive in the books: the cache's own row, by hand, with no read or import after it.
     await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, "10"));
-    const SORT = "Accounting links can't offer “Rivera Family” for it until it is sorted out in QuickBooks, where it may be inactive, under another customer or of another type; once it is,";
+    const SORT = "Accounting links can't offer “Rivera Family” for it until it is sorted out in QuickBooks, where it may be inactive, under another customer or of another type. Then";
     asStaff(linker);
     const lede = ledeOf(await renderPage(RosterEntryPage, { params: { id: String(rivera) } }));
     expect(textOf(lede)).toBe(`${LEDE} ${SORT} link it again on Accounting links.`);
     expect(lede).toContain('href="/staff/links"');
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     const theirs = ledeOf(await renderPage(RosterEntryPage, { params: { id: String(rivera) } }));
-    expect(textOf(theirs)).toBe(`${LEDE} ${SORT} someone who may link families to accounting links it again there.`);
+    expect(textOf(theirs)).toBe(`${LEDE} ${SORT} someone who can link families links it again there.`);
     expect(theirs).not.toContain('href="/staff/links"');
   });
 

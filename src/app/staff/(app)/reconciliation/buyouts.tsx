@@ -62,10 +62,10 @@ export async function EarlierCompanyBuyouts({ showAmounts, canChange = false }: 
   return (
     <section className="box" aria-labelledby="earlier-buyouts-h"><h2 id="earlier-buyouts-h">{anyHere ? "Ended by a change of QuickBooks company" : "From the earlier QuickBooks company"} ({items.length})</h2>
       {anyHere
-        ? <p>When the club connected a different QuickBooks company, the portal ended these volunteer buy-outs, or kept them where they were paid, and sent nothing more for them.
-            Each may still have something to settle by hand in the books its row names, an earlier company&apos;s or the one connected now: look it up there by its invoice, or by its note.</p>
-        : <p>When the club connected a different QuickBooks company, the portal ended these volunteer buy-outs, or kept them where they were paid, and sent nothing more to the earlier company.
-            Each may still have something to settle in that company&apos;s books, by hand: look it up there by its invoice, or by its note.</p>}
+        ? <p>When the club switched QuickBooks company, these buy-outs were ended (or kept, where paid), and nothing more was sent.
+            Some may need settling by hand in the books its row names: find each by its invoice or note.</p>
+        : <p>When the club switched QuickBooks company, these buy-outs were ended (or kept, where paid), and nothing more was sent.
+            Some may need settling by hand in the books of that company: find each by its invoice or note.</p>}
       <DataTable caption={anyHere ? "Volunteer buy-outs ended by a change of QuickBooks company" : "Volunteer buy-outs from the earlier QuickBooks company"} captionHidden rowKey={(b) => b.id} rows={items}
         columns={[
           { key: "family", header: "Family", rowHeader: true, cell: (b) => <>{b.familyPageStands ? <Link href={familyPage(b.familyId)}>{b.familyName}</Link> : b.familyName}

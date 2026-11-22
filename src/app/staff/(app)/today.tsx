@@ -20,18 +20,18 @@ export async function TodayBox({ writes, forms, shifts }: { writes: boolean; for
   ]);
   const items: Item[] = [];
   if (queue && queue.stuck > 0) items.push({ key: "stuck", words: count(queue.stuck, "change stuck on its way to QuickBooks", "changes stuck on their way to QuickBooks"),
-    detail: "The worker won't try again until someone asks, or gives up and makes the change in QuickBooks.", href: "/staff/reconciliation", link: "Open Reconciliation" });
+    detail: "It won't be tried again by itself. Try again, or give it up and make the change in QuickBooks.", href: "/staff/reconciliation", link: "Open Reconciliation" });
   // A change saved in the portal first that didn't go through (stage 3's slice 9e): kept, never tried again by itself.
   if (queue && queue.refused > 0) items.push({ key: "refused", words: count(queue.refused, "change kept in the portal that QuickBooks didn't take", "changes kept in the portal that QuickBooks didn't take"),
-    detail: "Each waits for someone to send the portal's value again or give it up.", href: "/staff/reconciliation", link: "Open Reconciliation" });
+    detail: "Send the portal's value again, or give it up.", href: "/staff/reconciliation", link: "Open Reconciliation" });
   if (queue && queue.waiting > 0) items.push({ key: "waiting", words: count(queue.waiting, "change waiting to reach QuickBooks", "changes waiting to reach QuickBooks"),
     detail: "The worker tries again by itself, at longer and longer gaps.", href: "/staff/reconciliation", link: "Open Reconciliation" });
   if (chase && chase.dueSoon.forms > 0) items.push({ key: "due", words: `${count(chase.dueSoon.unsigned, "form", "forms")} still to sign, due within ${SOON_DAYS} days or already due`,
     detail: `${chase.dueSoon.forms === 1 ? "One of this season's forms" : `${chase.dueSoon.forms} of this season's forms`}. "Remind now" emails the guardians who haven't signed.`, href: "/staff/forms", link: "Open Signed forms" });
   if (chase && chase.sealingLate > 0) items.push({ key: "sealing", words: `${count(chase.sealingLate, "form", "forms")} signed but not yet finished by Documenso`,
-    detail: "Everyone signed more than an hour ago. Documenso seals the signed copy; when it doesn't, the Health page says what to check.", href: "/staff/forms", link: "Open Signed forms" });
+    detail: "Everyone signed over an hour ago, but Documenso hasn't sealed it yet. The Health page says what to check.", href: "/staff/forms", link: "Open Signed forms" });
   if (chase && chase.evidenceLate > 0) items.push({ key: "evidence", words: `${count(chase.evidenceLate, "signed form", "signed forms")} waiting for the signed copy to be kept`,
-    detail: "Finished more than an hour ago. The worker fetches each from Documenso a few at a time.", href: "/staff/forms", link: "Open Signed forms" });
+    detail: "Sealed over an hour ago. The worker fetches signed copies from Documenso a few at a time.", href: "/staff/forms", link: "Open Signed forms" });
   if (fill && fill.shifts > 0) items.push({ key: "shifts", words: `${count(fill.places, "place", "places")} to fill on ${count(fill.shifts, "shift", "shifts")} in the next ${SOON_DAYS} days`,
     detail: "Families see how many places are left; nobody is told who signed up.", href: "/staff/volunteer", link: "Open Volunteering" });
 

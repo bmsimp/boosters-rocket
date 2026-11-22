@@ -129,7 +129,7 @@ describe("shown beside its difference, and still on Reconciliation", () => {
     // A Roster.Read reader: the same line, and who settles it there, with no link to a page they can't open.
     const read = await writes(reader);
     expect(read).toContain(ALSO_BESIDE);
-    expect(read).toContain("Someone who may link families to accounting sees it there.");
+    expect(read).toContain("Someone who can link families sees it there.");
     expect(read).not.toContain("/staff/links");
     expect(read).not.toContain("Give up");
   });
