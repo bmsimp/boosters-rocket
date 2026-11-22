@@ -207,7 +207,7 @@ footer a { color: var(--club-text); }
 /* --- Badge: a tone's word and icon on its soft tint. A word, never a color alone. --- */
 .badge { --tone: var(--ink-2); --tone-soft: var(--neutral-soft);
   display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: var(--radius-badge);
-  background: var(--tone-soft); color: var(--tone); font-size: var(--text-xs); font-weight: 500; line-height: 1.5; white-space: nowrap; }
+  background: var(--tone-soft); color: var(--tone); font-size: var(--text-xs); font-weight: 500; line-height: 1.5; white-space: nowrap; max-width: 100%; }
 .badge svg { width: 12px; height: 12px; flex: none; }
 .badge-done { --tone: var(--done); --tone-soft: var(--done-soft); }
 .badge-due { --tone: var(--due); --tone-soft: var(--due-soft); }
@@ -311,7 +311,8 @@ footer a { color: var(--club-text); }
   border-top: 0; border-bottom: 1px solid var(--border); padding-top: var(--s2); padding-bottom: var(--s2); vertical-align: bottom; overflow-wrap: normal; }
 .table tbody th[scope="row"] { font-weight: 500; }
 .table .t-num { text-align: right; font-variant-numeric: tabular-nums lining-nums; white-space: nowrap; }
-/* A figure, a date or a time never breaks across lines (a row's buttons keep their words whole too, below): the columns of words give way instead. */
+/* A figure, a date or a time never breaks across lines (a row's buttons keep their words whole too, below): the columns of words give way instead.
+   Only a stacked row on a phone too narrow for one lets a badge, a time or a row's button wrap (below). */
 .table time, .table .t-quiet .btn { white-space: nowrap; }
 .table .t-label { display: none; }
 .table .t-group th { padding-top: var(--s3); padding-bottom: var(--s2); font-size: var(--text-control); font-weight: 600; background: var(--surface-muted); }
@@ -344,6 +345,13 @@ footer a { color: var(--club-text); }
   .table .t-group th { padding-top: 0; background: none; }
   .table .t-quiet .row-actions, .table .t-quiet .one-button, .table .row-change { justify-content: flex-start; justify-items: start; }
   .table .row-change > details.more { margin-top: 0; }
+  /* Stacked, a value has only its share of a phone's width: a badge or a time that doesn't fit there, at a larger text
+     size or in a wider fallback face, wraps inside its cell rather than pushing the page sideways, and so do a
+     row's button and a long email address or name. */
+  .table th, .table td, .table .t-value { min-width: 0; }
+  .table .t-value, .table .badge, .table time { overflow-wrap: anywhere; }
+  .table .badge, .table time, .table .t-quiet .btn { white-space: normal; }
+  .table .t-quiet .btn { max-width: 100%; }
 }
 
 /* --- Details list (dl.details; KeyValue): quiet labels beside their values. --- */
