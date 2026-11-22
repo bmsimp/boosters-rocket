@@ -16,19 +16,16 @@ export const dynamic = "force-dynamic";
 
 const familiesWord = (n: number) => `${n} ${n === 1 ? "family" : "families"}`;
 
-function Run({ run }: { run: MoneyRunView }) {
-  return (
-    <Card title="Reading from QuickBooks" titleId="run-h"
-      description={<>The worker reads every family&apos;s invoices once a day. A parent opening their page reads theirs again.</>}>
-      {run.running
-        ? <Notice tone="info">Reading every family now: {familiesWord(run.running.read)} read so far{run.running.failed ? `, ${run.running.failed} couldn't be read` : ""}. Started <LocalTime iso={run.running.startedAt} />.</Notice>
-        : run.asked ? <Notice tone="info">A read of every family is asked for. The worker starts it within a minute.</Notice> : null}
-      {run.last
-        ? <p className="hint">Last finished <LocalTime iso={run.last.finishedAt} />{run.last.ok ? "" : ", part way"}: {run.last.detail ?? ""}</p>
-        : <p className="hint">Every family hasn&apos;t been read in one go yet.</p>}
-      {!run.running && !run.asked && <div className="box-foot"><OneButton label="Read every family now" pendingLabel="Asking…" act={askForMoneyRunAction} /></div>}
-    </Card>
-  );
+/**
+ * The read of every family from QuickBooks, said in the page's lede: under way, asked for, or when it last finished. Its
+ * press, "Read every family now", is the page's action (RunPress) while neither is so.
+ */
+function RunWords({ run }: { run: MoneyRunView }) {
+  return run.running
+    ? <>Reading every family now: {familiesWord(run.running.read)} read so far{run.running.failed ? `, ${run.running.failed} couldn't be read` : ""}. Started <LocalTime iso={run.running.startedAt} />.</>
+    : run.asked ? <>A read of every family is asked for. The worker starts it within a minute.</>
+    : run.last ? <>Every family was last read <LocalTime iso={run.last.finishedAt} />{run.last.ok ? "" : ", part way"}{run.last.detail ? `: ${run.last.detail}` : "."}</>
+    : <>Every family hasn&apos;t been read in one go yet.</>;
 }
 
 /** The families, one row each: what is open, when it was read, and what is owed, in one right-aligned column. */
@@ -60,9 +57,26 @@ export default async function BalancesPage({ searchParams }: { searchParams: Pro
   const mayLink = can(ctx.effective, "Accounting.Link.ReadWrite") && can(ctx.effective, "Roster.Read");
   return (
     <main className="wrap single">
-      <PageHeader title="Balances" lede="What each family owes, from the figures QuickBooks last gave. Opening this page asks QuickBooks nothing." />
+      <PageHeader title="Balances"
+        lede={<>What each family owes, from the figures QuickBooks last gave. Opening this page asks QuickBooks nothing. The worker reads every family&apos;s invoices once a day, and a parent opening their page reads theirs again. <RunWords run={run} /></>}
+        actions={!run.running && !run.asked && <OneButton label="Read every family now" pendingLabel="Asking…" act={askForMoneyRunAction} />} />
 
-      <Run run={run} />
+      <Card title="Families" titleId="families-h">
+        {balances.unlinked > 0 && <Notice tone="info" live="none">{balances.unlinked === 1 ? "1 family isn't" : `${balances.unlinked} families aren't`} linked to the books, so {balances.unlinked === 1 ? "it has" : "they have"} no figures here.
+          {" "}{mayLink ? <Link href="/staff/links">{balances.unlinked === 1 ? "Link it" : "Link them"} on Accounting links</Link> : `Someone who can link families links ${balances.unlinked === 1 ? "it" : "them"} on Accounting links.`}</Notice>}
+        <form method="get" action="/staff/balances">
+          <Toolbar label="Filter the families">
+            <TextInput id="balances-q" label="Find a family or a student" name="q" type="search" maxLength={SEARCH_MAX} defaultValue={search} />
+            <fieldset className="checks"><legend>Which families</legend>
+              <Checkbox id="balances-owing" name="owing" value="1" defaultChecked={owing} label=" Only families that owe something" /></fieldset>
+            <Button type="submit" variant="secondary">Show</Button>
+            {filtered && <LinkButton variant="quiet" href="/staff/balances">Show every family</LinkButton>}
+          </Toolbar>
+        </form>
+        {!balances.roster ? <Notice tone="warning">The roster can&apos;t be shown right now. The Roster page says why.</Notice>
+          : balances.rows.length === 0 ? (filtered ? <Notice tone="info">No family matches.</Notice> : <EmptyState title="There are no families on the roster." />)
+          : <FamilyTable rows={balances.rows} caption={`${filtered ? `${balances.rows.length} of ${familiesWord(balances.families)}` : familiesWord(balances.families)}, by name.`} />}
+      </Card>
 
       {balances.worthALook.length > 0 && (
         <Card title="Worth a look" titleId="look-h"
@@ -70,22 +84,6 @@ export default async function BalancesPage({ searchParams }: { searchParams: Pro
           <WorthALook rows={balances.worthALook} />
         </Card>
       )}
-
-      <Card title="Families" titleId="families-h">
-        {balances.unlinked > 0 && <Notice tone="info" live="none">{balances.unlinked === 1 ? "1 family isn't" : `${balances.unlinked} families aren't`} linked to the books, so {balances.unlinked === 1 ? "it has" : "they have"} no figures here.
-          {" "}{mayLink ? <Link href="/staff/links">{balances.unlinked === 1 ? "Link it" : "Link them"} on Accounting links</Link> : `Someone who can link families links ${balances.unlinked === 1 ? "it" : "them"} on Accounting links.`}</Notice>}
-        <form method="get" action="/staff/balances">
-          <Toolbar label="Filter the families"
-            end={<><Button type="submit" variant="secondary">Show</Button>{filtered && <LinkButton variant="quiet" href="/staff/balances">Show every family</LinkButton>}</>}>
-            <TextInput id="balances-q" label="Find a family or a student" name="q" type="search" maxLength={SEARCH_MAX} defaultValue={search} />
-            <fieldset className="checks"><legend>Which families</legend>
-              <Checkbox id="balances-owing" name="owing" value="1" defaultChecked={owing} label=" Only families that owe something" /></fieldset>
-          </Toolbar>
-        </form>
-        {!balances.roster ? <Notice tone="warning">The roster can&apos;t be shown right now. The Roster page says why.</Notice>
-          : balances.rows.length === 0 ? (filtered ? <Notice tone="info">No family matches.</Notice> : <EmptyState title="There are no families on the roster." />)
-          : <FamilyTable rows={balances.rows} caption={`${filtered ? `${balances.rows.length} of ${familiesWord(balances.families)}` : familiesWord(balances.families)}, by name.`} />}
-      </Card>
     </main>
   );
 }

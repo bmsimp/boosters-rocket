@@ -5,12 +5,10 @@ import { loadFamilyMoney, type FamilyMoney, type MoneyFigures } from "@/lib/mone
 import { buyoutTitleOf, type MyBuyoutInvoices } from "@/lib/money/my-buyout-invoices";
 import { CalendarDate } from "../components/calendar-date";
 import { LocalTime } from "../components/local-time";
-import { DueLine } from "./due-line";
-import { dueState } from "@/lib/money/due";
+import { DueLine, dueTone } from "./due-line";
 import { Card } from "../components/ui/card";
 import { LinkButton } from "../components/ui/button";
 import { List, ListRow, ListTotal } from "../components/ui/list";
-import type { Tone } from "../components/ui/tone";
 
 /**
  * The money box (Payments' look): what the signed-in family owes, said beside its title, each open invoice as a row
@@ -42,9 +40,6 @@ export function NotCurrentNote() {
   return <p className="offline-note" role="status">We couldn&apos;t get the latest figures from QuickBooks just now. These are the last ones we have. Paying here is paused until we can. Need to pay sooner? Ask the treasurer.</p>;
 }
 
-/** The ring before an invoice on Home: in the tone of its due date, as the due line's words say it. */
-const DUE_TONE: Record<"later" | "soon" | "late", Tone> = { later: "neutral", soon: "due", late: "late" };
-
 /**
  * The rows for the open invoices (ListRow), on Home's To do list and in the money box on Payments: what each is, its
  * due line in words, the amount, and a compact Pay, with a ring before it in the tone of its due date. The soonest-due
@@ -59,7 +54,7 @@ export function InvoiceRows({ f, today, buyouts, dates = "one" }: { f: MoneyFigu
     const filled = invoice.qboId === first;
     const variant = filled ? "primary" : "secondary";
     const buyout = buyoutTitleOf(buyouts, invoice);
-    const tone = invoice.dueDate ? DUE_TONE[dueState(invoice.dueDate, today).tone] : "neutral";
+    const tone = dueTone(invoice.dueDate, today);
     const dated = invoice.date && <span className="when">Invoice date <CalendarDate iso={invoice.date} /></span>;
     return (
       <ListRow key={invoice.qboId} className="invoice-row" status={{ tone }} title={invoiceName(invoice)} amount={amount}

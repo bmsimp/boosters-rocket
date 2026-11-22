@@ -1,5 +1,6 @@
 import { CalendarDate } from "../components/calendar-date";
 import { dueState, type DueTone } from "@/lib/money/due";
+import type { Tone } from "../components/ui/tone";
 
 const CLASS: Record<DueTone, string> = { later: "when", soon: "when soon", late: "when late" };
 
@@ -13,3 +14,7 @@ export function DueLine({ due, today }: { due: string; today: string }) {
   const { tone, lead, tail } = dueState(due, today);
   return <span className={CLASS[tone]}>{lead} <CalendarDate iso={due} />{tail}</span>;
 }
+
+/** The ring before an invoice (Home, Payments, and staff's view of a family's money): in the tone of its due date, as the due line's words say it. */
+const DUE_TONE: Record<DueTone, Tone> = { later: "neutral", soon: "due", late: "late" };
+export const dueTone = (due: string | null, today: string): Tone => (due ? DUE_TONE[dueState(due, today).tone] : "neutral");

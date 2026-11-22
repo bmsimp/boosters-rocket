@@ -74,7 +74,8 @@ test.describe("staff", () => {
 
   test("asks the worker to read every family, and says so", async ({ page }) => {
     await page.goto("/staff/balances");
-    const run = page.getByRole("region", { name: "Reading from QuickBooks" });
+    // The read is the page's action, and where it stands is said in the page's lede.
+    const run = page.locator("main .page-head");
     await run.getByRole("button", { name: "Read every family now" }).click();
     // The page is drawn again with the ask in it: the button gives way to the words.
     await expect(run).toContainText("A read of every family is asked for.");

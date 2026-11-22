@@ -6,6 +6,8 @@ import type { StoredInvoice } from "@/lib/db/schema";
 import { formatMoney } from "@/lib/money/cents";
 import { loadFamilyBalance } from "@/lib/money/balances";
 import { CalendarDate, Card, List, ListRow, ListTotal, LocalTime, Notice, PageHeader } from "@/app/components/ui";
+import { DueLine, dueTone } from "@/app/(parent)/due-line";
+import { clubToday } from "@/lib/settings/club";
 
 export const metadata = { title: "Balances" };
 export const dynamic = "force-dynamic";
@@ -13,12 +15,16 @@ export const dynamic = "force-dynamic";
 // QuickBooks text (the invoice number, a name) only ever becomes a text node here, through React.
 const invoiceName = (i: StoredInvoice) => `${i.number ? `Invoice ${i.number}` : "Invoice"}${i.forName ? `, ${i.forName}` : ""}`;
 
-/** One invoice as a row: what it is, its dates (and that it is part paid) on the meta line, and its amount; a paid one says "Paid" first, in the done tone. */
-function InvoiceLine({ invoice, paid }: { invoice: StoredInvoice; paid: boolean }) {
+/**
+ * One invoice as a row: what it is, its dates (and that it is part paid) on the meta line, and its amount; a paid one
+ * says "Paid" first, in the done tone. An open one has the ring and the due words the family reads on Payments (DueLine,
+ * against the club's date): staff never see less than the family does.
+ */
+function InvoiceLine({ invoice, paid, today }: { invoice: StoredInvoice; paid: boolean; today: string }) {
   return (
-    <ListRow status={paid ? { tone: "done", words: "Paid" } : undefined} title={invoiceName(invoice)} meta={[
+    <ListRow status={paid ? { tone: "done", words: "Paid" } : { tone: dueTone(invoice.dueDate, today) }} title={invoiceName(invoice)} meta={[
+      !paid && invoice.dueDate && <DueLine due={invoice.dueDate} today={today} />,
       invoice.date && <>Invoice date <CalendarDate iso={invoice.date} /></>,
-      !paid && invoice.dueDate && <>Due <CalendarDate iso={invoice.dueDate} /></>,
       !paid && invoice.balanceCents !== invoice.totalCents && `${formatMoney(invoice.totalCents, invoice.currency)} in all, part paid`,
     ]} amount={formatMoney(paid ? invoice.totalCents : invoice.balanceCents, invoice.currency)} />
   );
@@ -36,6 +42,7 @@ export default async function FamilyBalancePage({ params }: { params: Promise<{ 
   await writeAudit({ actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, action: "money.family.read", permission: "Finance.Balance.Read",
     targetType: "family", targetId: String(family.familyId), ip: ctx.ip });
   const f = family.figures;
+  const today = await clubToday();
   const total = f && f.currency !== null ? formatMoney(f.totalCents, f.currency) : null;
   return (
     <main className="wrap single">
@@ -48,7 +55,7 @@ export default async function FamilyBalancePage({ params }: { params: Promise<{ 
             <p className="asof">From QuickBooks, as of <LocalTime iso={f.readAt} />.</p>
             {f.open.length === 0 ? <p className="paid-up">Nothing owed.</p> : (
               <>
-                <List>{f.open.map((i) => <InvoiceLine key={i.qboId} invoice={i} paid={false} />)}</List>
+                <List>{f.open.map((i) => <InvoiceLine key={i.qboId} invoice={i} paid={false} today={today} />)}</List>
                 {total !== null ? <ListTotal label="Total" amount={total} />
                   : <p className="help">These invoices are in more than one currency, so there is no single total.</p>}
               </>
@@ -62,7 +69,7 @@ export default async function FamilyBalancePage({ params }: { params: Promise<{ 
       {f !== null && (
         <Card title="Paid in the last 12 months" titleId="paid-h">
           {f.paid.length === 0 ? <p>No paid invoices from the last 12 months.</p>
-            : <List>{f.paid.map((i) => <InvoiceLine key={i.qboId} invoice={i} paid />)}</List>}
+            : <List>{f.paid.map((i) => <InvoiceLine key={i.qboId} invoice={i} paid today={today} />)}</List>}
         </Card>
       )}
 
