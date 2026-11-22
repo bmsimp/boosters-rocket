@@ -70,7 +70,7 @@ async function finishTo(page: Page, code: string, baseURL: string) {
   await page.getByRole("button", { name: "Quetzalcoatl Family", exact: true }).click();
   await expect(page).toHaveURL(`${baseURL}/`);
   // The app proved the second step on a new browser: Home offers a passkey (slice SI-8). Not now.
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
   await passOffer(page);
 }
 

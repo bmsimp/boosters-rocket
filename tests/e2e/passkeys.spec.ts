@@ -176,7 +176,7 @@ test("Turn on in the passkey offer on Home adds a passkey with one tap and shows
     expect(rows.map((r) => r.name)).toEqual([null]);
     // Drawn again: no offer now she holds a passkey, and none of the codes.
     await page.reload();
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
     await expect(page.locator("[data-passkey-offer]")).toHaveCount(0);
     const html = await page.content();
     for (const c of codes) expect(html).not.toContain(c);
@@ -206,7 +206,7 @@ test("the passkey offer uses a phone's words on an iPhone, and draws nothing whe
     await without.addCookies([parentSessionCookie(token)]);
     const noPasskeys = await without.newPage();
     await noPasskeys.goto("/");
-    await expect(noPasskeys.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+    await expect(noPasskeys.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
     await expect(noPasskeys.locator('[data-passkey-offer="pending"]')).toHaveCount(0);
     await expect(noPasskeys.locator("[data-passkey-offer]")).toHaveCount(0);
     await expect(noPasskeys.getByText(OFFER.computerTitle)).toHaveCount(0);

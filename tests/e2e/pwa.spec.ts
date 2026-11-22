@@ -159,7 +159,7 @@ test("the worker takes charge, and pages still load and redirect through it", as
   const home = await page.goto("/");
   expect(home?.status()).toBe(200);
   expect(home?.fromServiceWorker()).toBe(true);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
 });
 
 test("offline, a page load shows the offline page, and Try again brings the page back", async ({ page, context }) => {
@@ -200,12 +200,12 @@ test("after a signed-in parent has browsed, the caches hold the offline page and
   await workerInCharge(page);
   // Browse as a parent does, with the worker in charge: full page loads, and moving between pages inside the app.
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
   await expect(page.getByText("Viewing Quetzalcoatl Family.")).toBeVisible();
   await page.getByRole("link", { name: /Your account and display settings/ }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Display");
   await page.goBack();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
   await page.goto("/display");
   await page.reload();
   // What the family owes, by its tab and asked for directly.
@@ -453,7 +453,7 @@ test("an app brought back to the front after a minute away reads its page again,
     await putAwayFor(61_000);
     await bringBack();
     await expect(owed).toHaveText("$100.00");
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
   } finally {
     await sql`UPDATE family_money SET total_cents = 18500 WHERE family_id = (SELECT family_id FROM accounting_link WHERE customer_id = 'E2E-FAMILY' AND family_id IS NOT NULL)`;
   }

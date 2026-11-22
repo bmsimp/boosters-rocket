@@ -6,13 +6,14 @@ import { mySignedDownloads } from "@/lib/forms/my-evidence";
 import { STATE_WORDS } from "@/lib/forms/states";
 import { dueState } from "@/lib/money/due";
 import { getClubSettings } from "@/lib/settings/club";
-import { CalendarDate } from "../../components/calendar-date";
-import { StateWords } from "../../components/state-words";
+import { buttonClass } from "../../components/ui/button";
+import { Card } from "../../components/ui/card";
+import { List, ListRow } from "../../components/ui/list";
+import type { Tone } from "../../components/ui/tone";
 import { NotSetUpBox } from "../family-boxes";
+import { RequirementDue, RequirementTitle } from "../season-parts";
 
 export const metadata = { title: "Forms" };
-
-const TONE = { later: "when", soon: "when soon", late: "when late" } as const;
 
 /** What the link to a form says: it names the person a form is signed for, as the buttons on Home do. */
 function linkWords(group: MyFormGroup, form: MyFormLine): string {
@@ -21,23 +22,27 @@ function linkWords(group: MyFormGroup, form: MyFormLine): string {
   return group.who === "student" ? `Sign for ${firstName(group.name) || group.name}` : "Sign";
 }
 
-/** One form: its title and the set it belongs to, its state in words, when it is due, and the way to it. */
-function FormLine({ group, form, today, download }: { group: MyFormGroup; form: MyFormLine; today: string; download: boolean }) {
+/** The ring before a form: done, waived, or still to do (late once its date has passed), as its words say. */
+function toneOf(line: MyFormLine["line"], today: string): Tone {
+  if (line.state === "done") return "done";
+  if (line.state === "waived") return "neutral";
+  return line.dueOn && dueState(line.dueOn, today).tone === "late" ? "late" : "due";
+}
+
+/** One form (a ListRow): its state in words with its ring, its title, the set it belongs to and when it is due, and the way to it. */
+function FormRow({ group, form, today, download }: { group: MyFormGroup; form: MyFormLine; today: string; download: boolean }) {
   const { line } = form;
-  const due = line.dueOn ? dueState(line.dueOn, today) : null;
   // A form that can't be opened yet has no link: there is nothing behind it. An address of a form never holds a
   // QuickBooks id: it is the portal's own id for the family's request. A plain link, not next/link: opening a form
   // makes its document and reads Documenso, which must happen when a guardian asks for it and never ahead of time.
   const canOpen = form.requestId !== null && line.words !== STATE_WORDS.notReady;
   return (
-    <li>
-      <span className="what">{line.title}{!line.required && <span className="optional"> (optional)</span>}</span>
-      <span className="when">{form.stepName}</span>
-      <StateWords state={line.state} words={line.words} />
-      {due && <span className={TONE[due.tone]}>{due.lead} <CalendarDate iso={line.dueOn!} />{due.tail}</span>}
-      {canOpen && <a className="btn btn-club form-open" href={`/forms/${form.requestId}`}>{linkWords(group, form)}<span className="visually-hidden">: {line.title}</span></a>}
-      {download && <a className="btn btn-line form-open" href={`/forms/${form.requestId}/signed`} download="signed-form.pdf">Download<span className="visually-hidden">: the signed {line.title}</span></a>}
-    </li>
+    <ListRow status={{ tone: toneOf(line, today), words: line.words }} title={<RequirementTitle line={line} />}
+      meta={[<span key="set" className="when">{form.stepName}</span>, line.dueOn && <RequirementDue key="due" line={line} today={today} />]}
+      action={(canOpen || download) && <>
+        {canOpen && <a className={buttonClass("club", "sm", "form-open")} href={`/forms/${form.requestId}`}>{linkWords(group, form)}<span className="visually-hidden">: {line.title}</span></a>}
+        {download && <a className={buttonClass("secondary", "sm", "form-open")} href={`/forms/${form.requestId}/signed`} download="signed-form.pdf">Download<span className="visually-hidden">: the signed {line.title}</span></a>}
+      </>} />
   );
 }
 
@@ -66,11 +71,10 @@ export default async function FormsPage() {
             <p className="lede">{forms.seasonName}: the forms for {family.name}, and where each one stands.</p>
             {!forms.ready && stillToSign(forms.groups) && <p className="help" role="status">The forms still to sign aren&apos;t ready yet. There&apos;s nothing you need to do right now: you can sign them here once they are.</p>}
             {forms.groups.map((group, i) => (
-              <section className="box" key={group.key} aria-labelledby={`forms-${i}`}>
-                <h2 id={`forms-${i}`}>{group.who === "family" ? "Your family" : group.name}</h2>
-                {group.who === "family" && <p>Signed once for {group.name}</p>}
-                <ul className="reqs">{group.forms.map((form) => <FormLine key={form.line.requirementId} group={group} form={form} today={forms.today} download={form.requestId !== null && (downloads.get(form.requestId) ?? 0) > 0} />)}</ul>
-              </section>
+              <Card key={group.key} title={group.who === "family" ? "Your family" : group.name} titleId={`forms-${i}`}
+                description={group.who === "family" ? <>Signed once for {group.name}</> : undefined}>
+                <List>{group.forms.map((form) => <FormRow key={form.line.requirementId} group={group} form={form} today={forms.today} download={form.requestId !== null && (downloads.get(form.requestId) ?? 0) > 0} />)}</List>
+              </Card>
             ))}
           </>
         )}

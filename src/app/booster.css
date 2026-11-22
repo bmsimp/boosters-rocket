@@ -394,6 +394,16 @@ fieldset.checks { border: 0; padding: 0; min-width: 0; }
 .list-trail { flex: none; display: flex; align-items: center; gap: var(--s3); }
 .list-amount { font-weight: 500; font-variant-numeric: tabular-nums lining-nums; text-align: right; }
 .list-row > .empty { flex: 1 1 auto; }
+.list-meta .when.soon { color: var(--due); font-weight: 500; }
+.list-meta .when.late { color: var(--late); font-weight: 500; }
+.list-meta .state { display: flex; margin-top: 1px; }
+.list-meta .optional, .list-title .optional, .list-sub-title .optional { color: var(--ink-2); font-weight: 400; }
+/* A row's parts (ListSubRow): indented under its title, on the row's own surface, a hairline above each. */
+.list-row.has-sub { flex-wrap: wrap; }
+.list-sub { flex: 1 0 100%; list-style: none; padding: 0; margin: var(--s1) 0 0 calc(16px + var(--s3)); }
+.list-subrow { display: grid; gap: 1px; padding: var(--s2) 0; border-top: 1px solid var(--border); }
+.list-subrow:last-child { padding-bottom: 0; }
+.list-sub-title { font-size: 0.9375rem; overflow-wrap: anywhere; }
 /* On a phone an amount and its action stack at the row's end, so the title keeps the width. */
 @media (max-width: 479.98px) { .list-trail { flex-direction: column; align-items: flex-end; gap: var(--s1); } }
 
@@ -556,7 +566,7 @@ p.errors, .sign-out .errors { padding-left: 0; }
 /* "Viewing <family>. Switch family", above the page for a person in more than one family. */
 .switch-family { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--s2); margin-top: var(--s2); font-size: var(--text-sm); color: var(--ink-2); }
 .switch-family a { display: inline-flex; align-items: center; min-height: 44px; color: var(--club-text); font-weight: 500; }
-.home-head .page-title, .family-page .page-title, .students .who, .money > h2 { overflow-wrap: anywhere; }
+.home-head .page-title, .family-page .page-title, .students .who, .money h2 { overflow-wrap: anywhere; }
 .home-head .page-title { margin-top: 0; }
 
 /* What the family owes: the total, when the figures are from, then each open invoice as a row running to the card's
@@ -587,44 +597,33 @@ p.errors, .sign-out .errors { padding-left: 0; }
   border-top: 1px solid var(--border); background: var(--surface-muted); font-weight: 600; }
 .sum .num { font-variant-numeric: tabular-nums lining-nums; }
 
-/* The family's students: a row each, a ring before it in the tone of the student's step, the count at the end, and
-   the step's requirements under the name on a muted panel. */
-.students { list-style: none; padding: 0; margin: var(--s3) calc(-1 * var(--box-pad, 0px)) 0; border-top: 1px solid var(--border); }
-.students > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s1) var(--s3); align-items: center;
-  padding: var(--s3) var(--box-pad, 0px); border-bottom: 1px solid var(--border); }
-.students > li:last-child { border-bottom: 0; }
-.students > li:has(> .state) { grid-template-columns: 16px minmax(0, 1fr) auto; }
-.students > li:has(> .state)::before { content: ""; grid-column: 1; grid-row: 1; align-self: center; width: 14px; height: 14px;
-  box-sizing: border-box; border-radius: 50%; border: 2px solid var(--ink-3); }
-.students > li:has(> .state.todo)::before { border-color: var(--due); }
-.students > li:has(> .state.done)::before { border-color: var(--done); background: var(--done); }
-.students > li:has(> .state) > .who { grid-column: 2; }
-.students > li:has(> .state) > .count { grid-column: 3; }
-.students > li:has(> .state) > .state, .students > li:has(> .state) > .reqs, .students > li:has(> .state) > .btn { grid-column: 2 / -1; }
+/* Home's lists (home-parts.tsx): To do and the students, each a section label over one List, then the total owed
+   (one amount beside its heading, the source line under it) and the details. The note for figures that are not
+   current stands over the To do list, where the paused Pays are. */
+.home-lists, .home-side { display: grid; gap: var(--s5); align-content: start; min-width: 0; }
+.home-todo > .offline-note { margin: 0 0 var(--s2); }
+.home-students > .help, .home-students > .paid-up { margin-top: var(--s3); }
+.home .page-head .lede { font-size: var(--text-sm); }
+.money .card-head { align-items: baseline; }
+.money .card-head .amt { font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.018em; line-height: 1.2; }
+.money .asof { font-size: var(--text-sm); color: var(--ink-2); margin-top: var(--s1); }
+.invoice-row .pay { min-width: 4.5rem; }
+/* The Family page's students: a row each, by name. */
+.students { list-style: none; padding: 0; margin: var(--s3) calc(-1 * var(--box-pad, 0px)) calc(-1 * var(--box-pad, 0px)); border-top: 1px solid var(--border); }
+.students > li { display: flex; align-items: center; min-height: 48px; padding: var(--s2) var(--box-pad, 0px); }
+.students > li + li { border-top: 1px solid var(--border); }
 .who b { font-size: var(--text-md); font-weight: 500; }
 .who span { display: block; font-size: var(--text-sm); color: var(--ink-2); }
-.count { font-size: var(--text-sm); color: var(--ink-2); text-align: right; white-space: nowrap; }
-.students .btn { grid-column: 1 / -1; }
-.students .reqs { margin-top: var(--s1); padding: 2px var(--s3); border-radius: var(--radius-control); background: var(--surface-muted); }
-.students .reqs li { padding: var(--s2) 0; border-bottom: 0; border-top: 1px solid var(--border); }
-.students .reqs li:first-child { border-top: 0; }
 
-/* Home's columns at 760px and wider. */
+/* Home's columns at 760px and wider: the lists on the left, the total and the details on the right. */
 @media (min-width: 760px) {
-  /* Boxes fill the two columns in order, so there is no empty column whichever boxes a family has. */
-  main.wrap.home { grid-template-areas: none; grid-template-rows: auto auto 1fr; }
+  main.wrap.home { grid-template-areas: none; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
   .home > * { grid-area: auto; }
-  .home > .home-head, .home > p { grid-column: 1 / -1; }
+  .home > .home-head, .home > p, .home > .passkey-offer { grid-column: 1 / -1; }
+  .home > .passkey-offer { max-width: 760px; }
   .home > section:only-of-type { grid-column: 1 / -1; max-width: 760px; }
-  /* With the money box, which comes first in the markup: money on the left, beside the students and the details
-     stacked on the right. The last row takes up whatever height the money box has over them. */
-  .home > .money { grid-column: 1; grid-row: 2 / span 2; }
-  .home > .money ~ .students-box, .home > .money ~ .details-box { grid-column: 2; }
-  /* The passkey offer (slice SI-8), drawn after the greeting only once the browser is read: across both columns, the
-     boxes a row lower. */
-  main.wrap.home:has(> .passkey-offer) { grid-template-rows: auto auto auto 1fr; }
-  .home > .passkey-offer { grid-column: 1 / -1; grid-row: 2; max-width: 760px; }
-  .home:has(> .passkey-offer) > .money { grid-row: 3 / span 2; }
+  .home > .home-lists { grid-column: 1; }
+  .home > .home-side { grid-column: 2; }
   .lines li { grid-template-columns: 1fr auto auto; }
   .lines .pay { grid-column: 2; grid-row: 1; min-width: 112px; }
   .lines .amount { grid-column: 3; grid-row: 1; min-width: 96px; }
@@ -709,7 +708,7 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 /* ---- Forms: the parent's Forms pages and the signing frame, and the staff signed-forms matrix. Keep new rules for them inside this block. ---- */
 .forms-page .page-title { overflow-wrap: anywhere; }
 .forms-page .box > .state { margin-top: var(--s2); }
-.form-open { justify-self: start; margin-top: var(--s2); }
+.forms-page .list-trail { flex-wrap: wrap; justify-content: flex-end; gap: var(--s2); }
 .consent { margin-top: var(--s3); display: grid; gap: var(--s3); max-width: 65ch; }
 /* Documenso's own page, in a frame: as wide as its box, and tall enough to read and sign a page on a phone. */
 .sign-frame { margin-top: var(--s3); }
@@ -916,8 +915,8 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
   .sets [aria-current="step"] .n, .sets [aria-current="step"] .label { text-decoration: underline; }
   .on-set i { forced-color-adjust: none; background: Canvas; color: CanvasText; box-shadow: inset 0 0 0 2px CanvasText; }
   .on-set i.done { background: CanvasText; color: Canvas; }
-  .money .lines li::before, .paid-box .lines li::before, .students > li:has(> .state)::before { forced-color-adjust: none; border-color: CanvasText; }
-  .paid-box .lines li::before, .students > li:has(> .state.done)::before { background: CanvasText; }
+  .money .lines li::before, .paid-box .lines li::before { forced-color-adjust: none; border-color: CanvasText; }
+  .paid-box .lines li::before { background: CanvasText; }
   .badge, .notice { border: 1px solid CanvasText; }
   .notice > svg { forced-color-adjust: none; color: CanvasText; }
   .choice span::before { forced-color-adjust: none; border-color: CanvasText; background: Canvas; }

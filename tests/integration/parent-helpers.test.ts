@@ -133,11 +133,11 @@ describe("the signed-in parent helpers", () => {
     const { a, b } = await seedTwoFamilies();
     const whoAmI = parentAction(async (ctx) => ({ family: String(ctx.familyId), ip: ctx.ip }));
     asParent(a.identity);
-    expect(await renderPage(ParentHome)).toContain("Hi, Ansgar");
+    expect(await renderPage(ParentHome)).toContain("Alderquist Family</h1>");
     expect(await whoAmI()).toEqual({ family: String(a.identity.familyId), ip: "203.0.113.50" });
     asParent(b.identity);
     fromIp("198.51.100.7");
-    expect(await renderPage(ParentHome)).toContain("Hi, Bettina");
+    expect(await renderPage(ParentHome)).toContain("Brackenmoor Family</h1>");
     expect(await whoAmI()).toEqual({ family: String(b.identity.familyId), ip: "198.51.100.7" });
   });
 

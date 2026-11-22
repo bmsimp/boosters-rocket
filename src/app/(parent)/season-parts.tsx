@@ -63,14 +63,24 @@ export function SeasonRuler({ season }: { season: MySeason }) {
   );
 }
 
+/** A requirement's due date in words while something is left ("Due Nov 22", "Was due Oct 30"); nothing otherwise. */
+export function RequirementDue({ line, today }: { line: Line; today: string }) {
+  const due = line.dueOn ? dueState(line.dueOn, today) : null;
+  return due ? <span className={TONE[due.tone]}>{due.lead} <CalendarDate iso={line.dueOn!} />{due.tail}</span> : null;
+}
+
+/** A requirement's title, and "(optional)" when it is not required. */
+export function RequirementTitle({ line }: { line: Line }) {
+  return <>{line.title}{!line.required && <span className="optional"> (optional)</span>}</>;
+}
+
 /** One requirement as it stands: its title, the state in words with its icon, and the due date while something is left. */
 function RequirementLine({ line, today }: { line: Line; today: string }) {
-  const due = line.dueOn ? dueState(line.dueOn, today) : null;
   return (
     <li>
-      <span className="what">{line.title}{!line.required && <span className="optional"> (optional)</span>}</span>
+      <span className="what"><RequirementTitle line={line} /></span>
       <StateWords state={line.state} words={line.words} />
-      {due && <span className={TONE[due.tone]}>{due.lead} <CalendarDate iso={line.dueOn!} />{due.tail}</span>}
+      <RequirementDue line={line} today={today} />
     </li>
   );
 }
@@ -79,18 +89,24 @@ export function RequirementLines({ lines, today }: { lines: Line[]; today: strin
   return <ul className="reqs">{lines.map((line) => <RequirementLine key={line.requirementId} line={line} today={today} />)}</ul>;
 }
 
-/** Where one student, or the family, stands in a step: done, or how much is left. */
-export function StepState({ lines, stepName }: { lines: Line[]; stepName: string }) {
+/** Where one student, or the family, stands in a step, in words: done, or how much is left. */
+export function stepWords(lines: Line[], stepName: string): { state: "done" | "todo"; words: string } {
   const left = linesLeft(lines);
-  if (lines.length === 0) return <StateWords state="done" words={`Nothing to do in ${stepName}`} />;
-  return left === 0 ? <StateWords state="done" words={`Done with ${stepName}`} /> : <StateWords state="todo" words={`${things(left)} left to do in ${stepName}`} />;
+  if (lines.length === 0) return { state: "done", words: `Nothing to do in ${stepName}` };
+  return left === 0 ? { state: "done", words: `Done with ${stepName}` } : { state: "todo", words: `${things(left)} left to do in ${stepName}` };
 }
 
-/** "2 of 3 done", counting the required items; nothing when none is required. */
-export function DoneCount({ lines }: { lines: Line[] }) {
+/** Where one student, or the family, stands in a step: done, or how much is left. */
+export function StepState({ lines, stepName }: { lines: Line[]; stepName: string }) {
+  const { state, words } = stepWords(lines, stepName);
+  return <StateWords state={state} words={words} />;
+}
+
+/** "2 of 3 done", counting the required items; null when none is required. */
+export function doneCount(lines: Line[]): string | null {
   const required = lines.filter((l) => l.required);
   if (required.length === 0) return null;
-  return <span className="count num">{required.length - linesLeft(lines)} of {required.length} done</span>;
+  return `${required.length - linesLeft(lines)} of ${required.length} done`;
 }
 
 /** The step Home shows: the current one, or null when the season has none to show. */
@@ -100,18 +116,11 @@ export const currentStep = (season: MySeason | null): StepStanding | null =>
 /** True when the season asks anything at all of this family, in any step. */
 export const asksAnything = (season: MySeason) => season.steps.some((s) => s.family.length > 0 || s.students.some((x) => x.lines.length > 0));
 
-/** Under the current step on Home: what the family itself is asked, what is left from earlier steps, or thanks when all is done. */
-export function SeasonFoot({ season }: { season: MySeason }) {
+/** Under Home's students: what is left from earlier steps, or thanks when every set is done. */
+export function SeasonNotes({ season }: { season: MySeason }) {
   const step = currentStep(season);
   return (
     <>
-      {step && step.family.length > 0 && (
-        <div className="family-reqs">
-          <h3>Your family</h3>
-          <StepState lines={step.family} stepName={step.name} />
-          <RequirementLines lines={step.family} today={season.today} />
-        </div>
-      )}
       {season.leftBefore > 0 && <p className="help">{things(season.leftBefore)} from an earlier set {season.leftBefore === 1 ? "is" : "are"} still to do. <a href="/season">See the whole season</a></p>}
       {!step && season.steps.length > 0 && asksAnything(season) && (
         <p className="paid-up"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M4 12.5l5 5 11-11" /></svg>You&apos;ve finished every set of {season.name}. Thank you!</p>

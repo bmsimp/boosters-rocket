@@ -8,7 +8,7 @@ export { StatusIcon } from "./status-icon";
 export { Badge, StatusBadge } from "./badge";
 export { Button, LinkButton, buttonClass, type ButtonVariant, type ButtonSize } from "./button";
 export { Card } from "./card";
-export { List, ListRow } from "./list";
+export { List, ListRow, ListSubRow } from "./list";
 export { PageHeader } from "./page-header";
 export { SectionLabel } from "./section-label";
 export { EmptyState } from "./empty-state";

@@ -166,8 +166,8 @@ describe("Home: the season ruler and the current step's requirements", () => {
 
     // The same facts in words, under each student.
     const text = textOf(html);
-    expect(text).toContain(`${BARNABY!.name} 1 of 2 done 1 thing left to do in Uniforms Uniform fitting attended Not done yet Sousaphone harness check QB83 Done`);
-    expect(text).toContain(`${BRISEIS!.name} 1 of 1 done Done with Uniforms Uniform fitting attended Done`);
+    expect(text).toContain(`${BARNABY!.name} 1 thing left to do in Uniforms 1 of 2 done Uniform fitting attended Not done yet Sousaphone harness check QB83 Done`);
+    expect(text).toContain(`${BRISEIS!.name} Done with Uniforms 1 of 1 done Uniform fitting attended Done`);
     // Nothing of step one, which is behind them, and nothing asked only of family A.
     expect(text).not.toContain("Trailer key");
     for (const marker of a.season!.markers) expect(html).not.toContain(marker);
@@ -182,7 +182,11 @@ describe("Home: the season ruler and the current step's requirements", () => {
     expect(html).not.toContain(`<li class="done">`);
     expect(html).toContain(`<li><span class="n">3</span><span class="label">Wrap-up</span><span class="visually-hidden"></span></li>`);
     expect(text).toContain(`${AURELIO!.name} Nothing to do in Sign-up`);
-    expect(text).toContain("Your family 1 thing left to do in Sign-up Handbook read Done Carpool pledge QA71 Not done yet");
+    expect(text).toContain("Your family 1 thing left to do in Sign-up 1 of 2 done Handbook read Done Carpool pledge QA71 Not done yet");
+    // What is still to do is To do's too, with the way to sign a form there; a form not ready yet has no way in.
+    const todo = textOf(html.slice(html.indexOf(`<section class="home-todo"`), html.indexOf(`<section class="home-students"`)));
+    expect(todo).toContain("Carpool pledge QA71 Not done yet Travel consent (optional) Not signed yet Sign : Travel consent Bus waiver QA74 (optional) Not ready yet");
+    expect(todo).not.toContain("Handbook read");
 
     // On the Season page the waiver reads "Waived"; the reason is nowhere.
     const page = textOf(await renderPage(SeasonPage));
@@ -200,7 +204,7 @@ describe("Home: the season ruler and the current step's requirements", () => {
     expect(html).not.toContain("sets");
     expect(html).not.toMatch(/Not current yet|Hidden step|Hidden item|Set \d|\/season/);
     // The students are listed as before, with nothing under them.
-    expect(html).toContain(`<li><span class="who"><b>${AURELIO!.name}</b></span></li>`);
+    expect(html).toContain(`<li class="list-row"><div class="list-main"><span class="list-title">${AURELIO!.name}</span></div></li>`);
     expect(textOf(await renderPage(SeasonPage))).toContain("The club hasn't set up a season here yet.");
   });
 
@@ -336,7 +340,7 @@ describe("a club that lists no students", () => {
     const html = await renderPage(ParentHome);
     const text = textOf(html);
     expect(text).toContain("Set 1 of 1 : Join");
-    expect(text).toContain("Members' year Join Your family 1 thing left to do in Join Dues form Not done yet");
+    expect(text).toContain("Members' year Your family 1 thing left to do in Join 0 of 1 done Dues form Not done yet");
     expect(html).not.toContain("on-set"); // nobody is a student, so the ruler has no dots
     expect(html).not.toMatch(/Only the other member|Other member|A per-student item|Your students/);
     expect(textOf(await renderPage(SeasonPage))).toContain("1. Join The current set 1 thing left to do Your family Dues form Not done yet");

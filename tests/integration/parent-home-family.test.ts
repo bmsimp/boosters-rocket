@@ -236,40 +236,44 @@ describe("loadMyFamily: one family from the app's own records, for its own paren
 });
 
 describe("Home", () => {
-  it("greets the parent and shows the family's name, its students and the parent's own details", async () => {
+  it("is headed with the family's name, and shows its students and the parent's own details", async () => {
     const { a, b } = await seedTwoFamilies();
     asParent(a.identity);
     const html = await renderPage(ParentHome);
-    expect(html).toContain("Hi, Ansgar</h1>");
-    expect(html).toContain("Alderquist Family</h2>");
+    expect(html).toContain(`<h1 class="page-title">Alderquist Family</h1>`);
     expect(html).toContain("Your students");
-    for (const name of A_STUDENTS) expect(html).toContain(`<b>${name}</b>`);
+    for (const name of A_STUDENTS) expect(html).toContain(`<span class="list-title">${name}</span>`);
     expect(html).toContain("Your details");
     expect(html).toContain(`<dt>Name</dt><dd>Ansgar Alderquist</dd><dt>Email</dt><dd>${FAMILY_A.parent.email}</dd><dt>Phone</dt><dd class="num">${FAMILY_A.parent.phone}</dd>`);
     expect(html).toContain("Ask the club");
     for (const name of B_STUDENTS) expect(html).not.toContain(name);
     for (const marker of b.markers) expect(html).not.toContain(marker);
     // No placeholder, and nothing that has no data yet: no forms counts, no part or grade. (The season is
-    // tests/integration/seasons-parent.test.ts.)
-    expect(html).not.toMatch(/will show here|\bforms\b|grade/i);
+    // tests/integration/seasons-parent.test.ts; a form still to sign is a To do row with the way to the Forms page.)
+    expect(html).not.toMatch(/will show here|\d+ forms\b|grade/i);
     // The details are the portal's own: nothing says they came from QuickBooks (stage 3's slice 11a).
     expect(html).not.toContain("roster-asof");
     expect(html).not.toContain("your contact details");
   });
 
-  it("shows what the family owes first, under the family's name, with the way to the Payments page", async () => {
+  it("shows what the family owes first, in To do with each invoice's Pay, then the total once, with the way to the Payments page", async () => {
     const { a, b } = await seedTwoFamilies();
     asParent(a.identity);
     const html = await renderPage(ParentHome);
-    // The season ruler, then the boxes in the order a phone shows them: money, students, details.
-    expect([...html.matchAll(/<section class="([^"]+)"/g)].map((m) => m[1])).toEqual(["season", "box money", "box students-box", "box details-box"]);
-    expect(html).toContain(`<section class="box money" aria-labelledby="money-h"><h2 id="money-h">Alderquist Family</h2>`);
-    // The family's name stands once, as that heading (the Display link's label and the details hold the parent's own name).
+    // The season ruler, then the sections in the order a phone shows them: To do, the students, the total owed, the details.
+    expect([...html.matchAll(/<section class="([^"]+)"/g)].map((m) => m[1])).toEqual(["season", "home-todo", "home-students", "box money", "box details-box"]);
+    // The family's name stands once, as the page's heading (the Display link's label and the details hold the parent's own name).
     expect(html.split("Alderquist Family")).toHaveLength(2);
-    expect(html).toContain(`<div class="amt num">$14,283.16</div>`);
-    expect(html).toMatch(/Owed now\. From QuickBooks, as of <time/);
+    // The open invoices are To do's first rows, each with a compact Pay: the soonest-due one primary, the others secondary.
+    const todo = html.slice(html.indexOf(`<section class="home-todo"`), html.indexOf(`<section class="home-students"`));
     for (const words of moneyMarkers(FAMILY_A, "open")) expect(html).toContain(words);
-    expect(html).toContain(`href="https://connect.intuit.com/t/scs-v1-alderquist-7101"`);
+    for (const words of moneyMarkers(FAMILY_A, "open").filter((w) => w !== "$14,283.16")) expect(todo).toContain(words);
+    expect(todo).toContain(`href="https://connect.intuit.com/t/scs-v1-alderquist-7101"`);
+    expect(todo).toMatch(/<a class="btn btn-sm pay" href="https:\/\/connect\.intuit\.com\//);
+    // The total is said once, beside its heading, with where and when the figures are from.
+    expect(html).toContain(`<section class="box money" aria-labelledby="money-h"><div class="card-head"><div><h2 id="money-h">Total owed</h2></div><div class="card-actions"><span class="amt num">$14,283.16</span></div></div>`);
+    expect(html.split("$14,283.16")).toHaveLength(2);
+    expect(html).toMatch(/Owed now\. From QuickBooks, as of <time/);
     // What was paid is on the Payments page, which the box leads to.
     expect(html).not.toContain("INV-ALDERQUIST-7103");
     expect(html).toContain(`<a class="btn btn-line" href="/payments">See your payments</a>`);
@@ -281,7 +285,7 @@ describe("Home", () => {
     const a = await seedSignedInParent();
     asParent(a.identity);
     const html = await renderPage(ParentHome);
-    expect(html).toContain(`<h2 id="money-h">Alderquist Family</h2><p class="help" role="status">We can&#x27;t show what you owe right now. Please check back in a little while.</p>`);
+    expect(html).toContain(`<h2 id="money-h">What you owe</h2><p class="help" role="status">We can&#x27;t show what you owe right now. Please check back in a little while.</p>`);
     expect(html).toContain("Your students");
     expect(html).toContain("Your details");
     expect(html).not.toContain(NOT_CONNECTED); // a linked family never reads the unlinked family's words
@@ -297,9 +301,9 @@ describe("Home", () => {
     expect(html).toContain(`<h2 id="money-h">What you owe</h2><p class="help" role="status">${NOT_CONNECTED} Until then, the treasurer can tell you what you owe.</p></section>`);
     expect(html).not.toMatch(/INV-|\$\d|connect\.intuit\.com|See your payments|offline-note|We can&#x27;t show what you owe/);
     // Everything else is the family's own records, as before.
-    expect(html).toContain("Hi, Ansgar</h1>");
+    expect(html).toContain(`<h1 class="page-title">Alderquist Family</h1>`);
     expect(html).toContain("Your students");
-    for (const name of A_STUDENTS) expect(html).toContain(`<b>${name}</b>`);
+    for (const name of A_STUDENTS) expect(html).toContain(`<span class="list-title">${name}</span>`);
     expect(html).toContain("Your details");
     expect(stub.apiCalls()).toEqual([]);
   });
@@ -368,15 +372,16 @@ describe("Home", () => {
     for (const name of A_STUDENTS) expect(html).not.toContain(name);
   });
 
-  it("layered with no parent type: the family's details are shown, and a household is greeted without a name", async () => {
+  it("layered with no parent type: the family's details are shown, under the household's own name", async () => {
     await seedShape({ kind: "layered", familyTypeId: "F", studentTypeId: "S", parentTypeId: null });
     await addToCache([fam("NP-FAM", "Noparent Family", { email: "home@noparent.example", phone: "512-555-0199" }), stu("NP-S1", "Nico Noparent", "NP-FAM")]);
     const p = await seedParentIn({ familyQboId: "NP-FAM", name: "Noparent Family", email: "home@noparent.example", sourceQboId: "NP-FAM" });
     await db.update(family).set({ phone: "512-555-0199" }).where(eq(family.id, p.identity.familyId));
     asParent(p.identity);
     const html = await renderPage(ParentHome);
-    expect(html).toContain(`<h1 class="page-title">Hi</h1>`);
-    expect(html).toContain("<b>Nico Noparent</b>");
+    expect(html).toContain(`<h1 class="page-title">Noparent Family</h1>`);
+    expect(html).not.toContain("Hi,");
+    expect(html).toContain(`<span class="list-title">Nico Noparent</span>`);
     expect(html).toContain(`<dd class="num">512-555-0199</dd>`);
   });
 
@@ -396,7 +401,7 @@ describe("Home", () => {
       expect(html).not.toContain("Your students");
       expect(html).not.toContain("Tobias");
     }
-    expect(await renderPage(ParentHome)).toContain("Hi, Marisol</h1>");
+    expect(await renderPage(ParentHome)).toContain(`<h1 class="page-title">Thackeray, Marisol</h1>`);
   });
 
   it("a guardian with no QuickBooks record sees the details the portal holds for them, and the way to change them", async () => {
@@ -405,7 +410,7 @@ describe("Home", () => {
     const p = await seedParentIn({ familyQboId: "HM-FAM", name: "Hester Handmade", email: "hester@handmade.example", phone: "512-555-0111" });
     asParent(p.identity);
     const html = await renderPage(ParentHome);
-    expect(html).toContain("<b>Hugo Handmade</b>");
+    expect(html).toContain(`<span class="list-title">Hugo Handmade</span>`);
     expect(html).toContain(`<dt>Name</dt><dd>Hester Handmade</dd><dt>Email</dt><dd>hester@handmade.example</dd><dt>Phone</dt><dd class="num">512-555-0111</dd></dl>`);
     expect(html).toContain(`<a class="btn btn-line" href="/family/details">Update my details</a>`);
     // With no phone set, none is shown.
@@ -431,7 +436,7 @@ describe("Home", () => {
     asParent(a.identity);
     for (const page of [ParentHome, FamilyPage]) {
       const html = await renderPage(page);
-      expect(html).toContain("<b>Aurelio Alderquist</b>");
+      expect(html).toMatch(/<(b|span class="list-title")>Aurelio Alderquist<\/(b|span)>/);
       expect(html).not.toContain("Azalea");
       expect(html).not.toContain("deleted");
     }
@@ -466,7 +471,7 @@ describe("Home", () => {
       for (const cached of ["Alderquist Family", ...A_STUDENTS, FAMILY_A.parent.phone, "as of", "QuickBooks"]) expect(html, cached).not.toContain(cached);
     }
     await seedRosterRead({ realmId: REALM });
-    expect(await renderPage(ParentHome)).toContain("<b>Aurelio Alderquist</b>");
+    expect(await renderPage(ParentHome)).toContain(`<span class="list-title">Aurelio Alderquist</span>`);
   });
 
   it("writes hostile QuickBooks text as text, never as markup or an address", async () => {
@@ -484,10 +489,10 @@ describe("Home", () => {
     for (const page of [ParentHome, FamilyPage]) {
       const html = await renderPage(page);
       expect(html).toContain("&lt;img src=x onerror=alert(1)&gt; Family");
-      expect(html).toContain("<b>Hal &lt;img src=x onerror=alert(1)&gt;</b>");
+      expect(html).toMatch(/<(b|span class="list-title")>Hal &lt;img src=x onerror=alert\(1\)&gt;<\/(b|span)>/);
       expect(html).toContain("Hana &lt;script&gt;alert(2)&lt;/script&gt;");
       expect(html).toContain("555&lt;svg onload=alert(3)&gt;");
-      expect(html).not.toMatch(/<img|<script|<svg|<b>bold/);
+      expect(html).not.toMatch(/<img|<script|<svg onload|<b>bold/);
       // The address is text, not a link, and only her sign-in address is shown: nothing else of the record's email field.
       expect(html).not.toContain("mailto:hana");
       expect(html).not.toContain("bold");

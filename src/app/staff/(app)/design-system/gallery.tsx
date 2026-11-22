@@ -3,7 +3,7 @@ import { formatMoney } from "@/lib/money/cents";
 import { contrastRatio } from "@/lib/theme/contrast";
 import { MARK_PAIRS, PALETTE, TEXT_PAIRS, type Mode, type Token } from "@/lib/theme/palette";
 import {
-  ActionOutcome, Avatar, Badge, Button, CalendarDate, Card, Checkbox, DataTable, EmptyState, KeyValue, LinkButton, List, ListRow, LocalTime,
+  ActionOutcome, Avatar, Badge, Button, CalendarDate, Card, Checkbox, DataTable, EmptyState, KeyValue, LinkButton, List, ListRow, ListSubRow, LocalTime,
   Notice, PageHeader, SectionLabel, Select, Stat, StateWords, StatusBadge, StatusIcon, StepIndicator, TextArea, TextInput, Toolbar, type Column,
 } from "../../../components/ui";
 import { ChoiceSample } from "./gallery-choice";
@@ -177,7 +177,7 @@ export function Gallery() {
         </div>
       </Section>
 
-      <Section id="list" name="List and ListRow" use="The core of the look: a bordered list of like rows, each a status icon with its words, a title, a meta line, then an amount or a compact action. Use it for To do, Students, Payments and any short list a person acts on. A long list of records with columns is a DataTable." importLine={UI("List, ListRow, SectionLabel")}>
+      <Section id="list" name="List and ListRow" use="The core of the look: a bordered list of like rows, each a status icon with its words, a title, a meta line, then an amount or a compact action. Use it for To do, Students, Payments and any short list a person acts on. A long list of records with columns is a DataTable." importLine={UI("List, ListRow, ListSubRow, SectionLabel")}>
         <div className="ds-samples stacked">
           <div>
             <SectionLabel level={3}>To do</SectionLabel>
@@ -187,6 +187,17 @@ export function Gallery() {
               <ListRow status={{ tone: "due", words: "Due Nov 22" }} title="Sample uniform fee with a long name that wraps onto a second line, Sam Sample" amount={formatMoney(8500)} action={<LinkButton plain size="sm" variant="secondary" href="#ds-list">Pay</LinkButton>} />
               <ListRow status={{ tone: "done", words: "All signed" }} title="Alex Sample" meta="Flute · Grade 10" />
               <ListRow status={{ tone: "neutral", words: "Not started" }} title="Volunteer shift" />
+            </List>
+          </div>
+          <div>
+            <SectionLabel level={3}>Students, each with its parts (ListSubRow)</SectionLabel>
+            <List>
+              <ListRow status={{ tone: "due", words: "1 thing left to do in Uniforms" }} title="Sam Sample" amount="1 of 2 done"
+                sub={<>
+                  <ListSubRow title="Uniform fitting attended" meta={<StateWords state="done" words="Done" />} />
+                  <ListSubRow title="Sample travel form" meta={<StateWords state="todo" words="Not signed yet" />} />
+                </>} />
+              <ListRow status={{ tone: "done", words: "Done with Uniforms" }} title="Alex Sample" amount="1 of 1 done" />
             </List>
           </div>
           <div>

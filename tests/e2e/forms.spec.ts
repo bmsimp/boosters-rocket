@@ -27,13 +27,13 @@ test("a parent sees this season's forms for the family and each student, with ea
   await expect(page.locator("main p[role=status]")).toContainText("The forms still to sign aren't ready yet. There's nothing you need to do right now");
   await expect(page.getByRole("heading", { level: 2 })).toHaveText(["Your family", "Xochitl Quetzalcoatl", "Yaretzi Quetzalcoatl"]);
   const family = page.getByRole("region", { name: "Your family" });
-  await expect(family.locator(".reqs li")).toHaveCount(1);
+  await expect(family.locator(".list-row")).toHaveCount(1);
   await expect(family).toContainText("Travel consent (optional)");
-  await expect(family.locator(".state")).toHaveText("Signed");
+  await expect(family.locator(".list-status")).toHaveText("Signed");
   for (const student of ["Xochitl Quetzalcoatl", "Yaretzi Quetzalcoatl"]) {
     const box = page.getByRole("region", { name: student });
     await expect(box).toContainText("Medical release (optional)");
-    await expect(box.locator(".state")).toHaveText("Not ready yet");
+    await expect(box.locator(".list-status")).toHaveText("Not ready yet");
     await expect(box.getByRole("link")).toHaveCount(0); // nothing behind it yet, so no way in
   }
   // Nothing of the form asked of another family alone.

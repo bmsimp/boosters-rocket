@@ -12,7 +12,7 @@ Import from the index: `import { Card, List, ListRow, LinkButton } from "@/app/c
 | --- | --- | --- |
 | A page's title, its one quiet line, its actions, the way back | `PageHeader` | a bare `h1.page-title` with buttons beside it |
 | A titled region (what a family owes, a setting, a form) | `Card` (`title` + `titleId` name the region; `actions` at the foot, `headActions` beside the title) | a card inside a card; a `<section class="box">` written by hand |
-| A short list a person acts on (To do, Students, Payments) | `List` + `ListRow` (`status`, `title`, `meta`, `amount`, `action`) | a table for five rows; a list of cards |
+| A short list a person acts on (To do, Students, Payments) | `List` + `ListRow` (`status`, `title`, `meta` (one part or a list, dotted), `amount`, `action`; `sub` of `ListSubRow` for a row's parts, indented) | a table for five rows; a list of cards; a panel inside a row |
 | Many records with the same columns (roster, Balances, audit) | `DataTable` | a hand-made `<table>`; sorting controls (say the order with `sorted`) |
 | The small heading over a list or table | `SectionLabel` | an uppercase label; an eyebrow over a page title |
 | Doing something | `Button` (`primary`, `secondary`, `quiet`, `danger`, `club`; `size="sm"` in a row; `busy`) | more than one primary in an area; `disabled` for busy on a parent page |

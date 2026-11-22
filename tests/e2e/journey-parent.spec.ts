@@ -60,11 +60,11 @@ test("a parent's visit: sign in by password and emailed code, read and do what t
   });
 
   await test.step("reads Home: what is owed, the season and each student", async () => {
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
     // The sign-in proved a second step on a new browser: Home offers a passkey first (slice SI-8). Not now.
     await passOffer(page);
     await expect(page.getByText("Viewing Quetzalcoatl Family.")).toBeVisible();
-    await expect(page.getByRole("region", { name: "Quetzalcoatl Family" }).locator(".total, .owed, .big").first()).toContainText("$185.00");
+    await expect(page.getByRole("region", { name: "Total owed" }).locator(".amt")).toContainText("$185.00");
     await expect(page.getByRole("heading", { name: "Your students" })).toBeVisible();
     await expect(page.locator("main")).not.toContainText(/Rivera|Second Family|Wolfgang/);
     await noSidewaysScroll(page);
@@ -75,7 +75,7 @@ test("a parent's visit: sign in by password and emailed code, read and do what t
     await tab("Forms").click();
     await expect(page).toHaveURL(/\/forms$/);
     const family = page.getByRole("region", { name: "Your family" });
-    await expect(family.locator(".state")).toHaveText("Signed");
+    await expect(family.locator(".list-status")).toHaveText("Signed");
     // The note that forms can't be signed yet speaks of those still to sign, never of the signed one.
     await expect(page.locator("main p[role=status]")).toHaveText(/^The forms still to sign aren't ready yet\./);
     await noSidewaysScroll(page);

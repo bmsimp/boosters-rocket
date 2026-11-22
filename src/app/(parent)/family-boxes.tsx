@@ -1,59 +1,22 @@
 import type { MyContact, MyStudent } from "@/lib/parents/my-family";
-import type { MySeason } from "@/lib/seasons/my-season";
 import { Card } from "../components/ui/card";
 import { KeyValue } from "../components/ui/key-value";
 import { LinkButton } from "../components/ui/button";
-import { DoneCount, RequirementLines, SeasonFoot, StepState, asksAnything, currentStep } from "./season-parts";
 
 /**
  * The boxes Home and Family share. Server components: every name, address and number here is the portal's own record
  * (a name or phone the take-in brought from QuickBooks among them) or the person's own, written as text only.
  */
 
-/**
- * The family's students. With `season` (Home), each student also shows where they stand in the current step: the state
- * in words, then each requirement asked of them. What the family itself is asked comes after the students.
- */
-export function StudentsBox({ students, season = null }: { students: MyStudent[]; season?: MySeason | null }) {
-  const step = currentStep(season);
-  // Matched by the student's own record, never by name (two students may share one) nor by a QuickBooks id.
-  const standing = new Map((step?.students ?? []).map((s) => [String(s.id), s]));
+/** The family's students, by name (the Family page). Home lists them with where each stands: home-parts.tsx. */
+export function StudentsBox({ students }: { students: MyStudent[] }) {
   return (
-    <Card className="students-box" title="Your students" titleId="stu-h" description={season && step ? <>{season.name} · {step.name}</> : undefined}>
+    <Card className="students-box" title="Your students" titleId="stu-h">
       {students.length > 0 ? (
         <ul className="students">
-          {students.map((s) => {
-            const mine = step ? standing.get(String(s.id)) : undefined;
-            return (
-              <li key={String(s.id)}>
-                <span className="who"><b>{s.name}</b></span>
-                {mine && step && (
-                  <>
-                    <DoneCount lines={mine.lines} />
-                    <StepState lines={mine.lines} stepName={step.name} />
-                    {mine.lines.length > 0 && <RequirementLines lines={mine.lines} today={season!.today} />}
-                  </>
-                )}
-              </li>
-            );
-          })}
+          {students.map((s) => <li key={String(s.id)}><span className="who"><b>{s.name}</b></span></li>)}
         </ul>
       ) : <p>The club has no active students listed for your family right now.</p>}
-      {season && <SeasonFoot season={season} />}
-    </Card>
-  );
-}
-
-/**
- * For a club that doesn't list students: what the current step asks of the family itself, in the students box's place.
- * Nothing when the step asks nothing of it and nothing is left behind.
- */
-export function FamilyStepBox({ season }: { season: MySeason }) {
-  const step = currentStep(season);
-  if (!(step && step.family.length > 0) && season.leftBefore === 0 && (step || !asksAnything(season))) return null;
-  return (
-    <Card className="students-box" title={season.name} titleId="step-h" description={step ? step.name : undefined}>
-      <SeasonFoot season={season} />
     </Card>
   );
 }

@@ -191,7 +191,7 @@ test("a parent's journeys by keyboard alone: sign in, Home to Payments, a form, 
   });
 
   await test.step("2. Home: Skip to the page is the first stop and goes past the bar; then Payments and its Pay link", async () => {
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
     // The sign-in proved the code on a new browser, so Home offers a passkey first (slice SI-8): journey 13 walks it by
     // keyboard; here it is answered Not now, and the walk starts from the top as before.
     await passOffer(page);
@@ -787,7 +787,7 @@ test.describe("13. the passkey offer on Home, by keyboard: reached, Not now, the
       FROM parent_auth_session WHERE token = ${PARENT_SESSION_TOKEN}`;
     await context.addCookies([parentSessionCookie(OFFER_SESSION_TOKEN)]);
     await page.goto("/");
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
     const offer = page.getByRole("region", { name: "Sign in with a passkey next time?" });
     await expect(offer).toBeVisible();
     await fromTheTop(page);
@@ -853,7 +853,7 @@ test.describe("14. Strict's enrolment, by keyboard: signed in by the password, t
     await page.keyboard.press("Tab");
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(`${baseURL}/`);
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText(`Hi, ${STRICT_PARENT.first}`);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
     ringsShown();
   });
 });

@@ -74,7 +74,7 @@ const NO_FAMILY_DATA: Record<string, string> = {
 const MUST_SHOW: Record<string, (family: SeededParent) => string[]> = {
   // The greeting, the roster, and what the family owes now (what it has paid is on the Payments page).
   // And the season ruler with the step the family is on, and what that step asks of it.
-  "/": (family) => [`Hi, ${family.spec.parent.name.split(" ")[0]}`, ...rosterOf(family), ...moneyMarkers(family.spec, "open"), ...family.season!.home],
+  "/": (family) => [`${family.spec.family.name}</h1>`, ...rosterOf(family), ...moneyMarkers(family.spec, "open"), ...family.season!.home],
   "/family": (family) => rosterOf(family),
   // The family's name, every invoice's number and amount, the total, and the address behind the Pay button.
   "/payments": (family) => [family.spec.family.name, ...moneyMarkers(family.spec)],
