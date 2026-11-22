@@ -266,6 +266,8 @@ footer a { color: var(--club-text); }
 .card-head h2, .card-head h3 { font-size: var(--text-lg); line-height: 1.35; }
 .card-head .card-lede { color: var(--ink-2); font-size: var(--text-control); margin-top: 2px; }
 .card-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
+/* The actions beside a title (an amount, a button) keep to their own width at the end, the title taking the rest. */
+.card-head > .card-actions { flex: 0 1 auto; justify-content: flex-end; }
 @media (min-width: 760px) { .box { --box-pad: 20px; } }
 
 /* --- Choice group: radio buttons drawn as bordered options, the whole tile the control. --- */
@@ -427,7 +429,7 @@ fieldset.checks { border: 0; padding: 0; min-width: 0; }
 .list-subrow { display: grid; gap: 1px; padding: var(--s2) 0; border-top: 1px solid var(--border); }
 .list-subrow:last-child { padding-bottom: 0; }
 /* What belongs under a row at its full width (ListRow's detail): a note, or the small form in place of its action. */
-.list-detail { flex: 1 0 100%; min-width: 0; display: grid; gap: var(--s2); }
+.list-detail { flex: 1 0 100%; min-width: 0; display: grid; gap: var(--s2); justify-items: start; }
 .list-row:has(> .status-icon) > .list-detail { padding-left: calc(16px + var(--s3)); }
 .list-detail > .help, .list-detail > p { margin-top: 0; }
 .list-title strong, .list-meta strong { font-weight: 600; }
@@ -724,6 +726,7 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 .volunteer-done { margin-top: var(--s3); font-weight: 600; }
 /* The status line that outlives the rows it speaks for (Announcer) takes no room until it says something. */
 .volunteer-done.announce:empty { margin: 0; }
+.box > .list:has(+ .announce:empty:last-child) { margin-bottom: calc(-1 * var(--box-pad)); border-bottom-width: 0; border-radius: 0 0 var(--radius) var(--radius); }
 .volunteer-cancel { margin-top: var(--s2); }
 .lines li > div > .state { margin-top: 2px; }
 /* Checking in: a full-width button per person on a phone, then one for everyone. */
