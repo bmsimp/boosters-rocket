@@ -27,6 +27,7 @@ Import from the index: `import { Card, List, ListRow, LinkButton } from "@/app/c
 | A few options that need explaining | `ChoiceGroup` (an option `disabled` when it can't be chosen now) | a dropdown of two |
 | Facts about one thing, label beside value | `KeyValue` | a two-column table |
 | Filters over a list or table | `Toolbar` | filters scattered above several cards |
+| A card's longer explanation, read once and then known | `HowThisWorks` (`summary` defaults to "How this works") | a wall of prose before the card's list or form; hiding what a reader must know before they press |
 | Where something stands in a few steps | `StepIndicator` (the season ruler) | a progress bar with no words |
 | A person's initials | `Avatar` | an initial in a square |
 | The display choices (Appearance, Contrast, Text size, Motion), saved on the device | `DisplaySettings` (`src/app/(parent)/display/display-settings.tsx`; the staff account page passes `title`) | a copy of its choices or its storage on another page |

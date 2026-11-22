@@ -18,6 +18,7 @@ export { Avatar } from "./avatar";
 export { StepIndicator, type Step } from "./step-indicator";
 export { KeyValue, type KeyValueItem } from "./key-value";
 export { Toolbar } from "./toolbar";
+export { HowThisWorks } from "./how-this-works";
 // The primitives that were here before this folder: use them as they are.
 export { DataTable, type Column, type RowGroup } from "../data-table";
 export { Notice, ActionOutcome, TONE_WORDS, type Tone as NoticeTone } from "../notice";

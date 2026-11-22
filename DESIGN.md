@@ -462,6 +462,7 @@ The club's season steps as a thin segmented track, each step's number and name u
 - **Stat** (several in `.stats`): a 0.875rem `ink-2` label over a 1.5rem 600 tabular figure. Staff pages only.
 - **KeyValue** (`dl.details`): `ink-2` 0.875rem labels beside values; long values wrap where they stand.
 - **Toolbar:** filters in a wrapping row over what they scope, actions at its end.
+- **HowThisWorks:** a card's longer explanation behind one quiet summary ("How this works"): a `details.more` whose 44px summary is `club-text` 500 with a 16px caret that turns a quarter when open; the body is body text held to 70ch, a list where it is a list. What a reader must know before pressing stays outside it.
 - **Avatar:** initials on a `surface-muted` disc (2.25rem; 1.75rem small; `club` variant on the tint).
 - **LocalTime, CalendarDate, `formatMoney()`** (`@/lib/money/cents`): an instant in the viewer's zone, a calendar date the same for everyone, an amount. Never formatted by hand.
 - **Hint** (`.hint`, `.help`): an `ink-2` line explaining what is above it; never a state. **Link line** (`.link-line`): a lone link, 44px. **Box foot / row actions / one button:** the buttons that close a card, two or more side by side, a button with its answer under it.

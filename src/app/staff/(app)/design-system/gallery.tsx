@@ -3,7 +3,7 @@ import { formatMoney } from "@/lib/money/cents";
 import { contrastRatio } from "@/lib/theme/contrast";
 import { MARK_PAIRS, PALETTE, TEXT_PAIRS, type Mode, type Token } from "@/lib/theme/palette";
 import {
-  ActionOutcome, Avatar, Badge, Button, CalendarDate, Card, Checkbox, DataTable, EmptyState, KeyValue, LinkButton, List, ListRow, ListSubRow, ListTotal, LocalTime,
+  ActionOutcome, Avatar, Badge, Button, CalendarDate, Card, Checkbox, DataTable, EmptyState, HowThisWorks, KeyValue, LinkButton, List, ListRow, ListSubRow, ListTotal, LocalTime,
   Notice, PageHeader, SectionLabel, Select, Stat, StateWords, StatusBadge, StatusIcon, StepIndicator, TextArea, TextInput, Toolbar, type Column,
 } from "../../../components/ui";
 import { ChoiceSample, TakenChoiceSample } from "./gallery-choice";
@@ -23,7 +23,7 @@ const MODES: { mode: Mode; label: string; theme: "light" | "dark"; contrast?: "m
 
 const SECTIONS = [
   ["tokens", "Tokens"], ["contrast", "Contrast"], ["button", "Button"], ["badge", "Badge"], ["card", "Card"], ["list", "List"],
-  ["page-header", "PageHeader"], ["section-label", "SectionLabel"], ["empty-state", "EmptyState"], ["stat", "Stat"], ["fields", "Fields"],
+  ["page-header", "PageHeader"], ["section-label", "SectionLabel"], ["empty-state", "EmptyState"], ["how-this-works", "HowThisWorks"], ["stat", "Stat"], ["fields", "Fields"],
   ["avatar", "Avatar"], ["step-indicator", "StepIndicator"], ["key-value", "KeyValue"], ["toolbar", "Toolbar"], ["data-table", "DataTable"],
   ["notice", "Notice"], ["state-words", "StateWords"], ["time-money", "Time and money"], ["frame", "Bar and tabs"], ["themes", "Display modes"],
 ] as const;
@@ -240,6 +240,14 @@ export function Gallery() {
 
       <Section id="empty-state" name="EmptyState" use="Where a list or table has nothing yet: say what will be here, kindly, and the one action that fills it." importLine={UI("EmptyState")}>
         <EmptyState title="No volunteer events yet" action={<Button>Add an event</Button>}>When you add one, families see it on their Volunteer page.</EmptyState>
+      </Section>
+
+      <Section id="how-this-works" name="HowThisWorks" use="A card's longer explanation, folded under one quiet 44px summary ('How this works', or words of its own) whose caret turns when open. What a reader must know before pressing stays outside it." importLine={UI("HowThisWorks")}>
+        <Card title="Move a student" titleId="ds-how-h" description="A move is saved here first and takes effect at once.">
+          <HowThisWorks summary="What a move changes">
+            <ul><li>Completed forms go with the student, and unfinished ones start again in the new family.</li><li>Credit they earned stays with the old family.</li></ul>
+          </HowThisWorks>
+        </Card>
       </Section>
 
       <Section id="stat" name="Stat" use="One figure that matters on a staff page, with its label. Group a few in .stats. Not a hero number on a parent page: there the amount sits in its card." importLine={UI("Stat")}>

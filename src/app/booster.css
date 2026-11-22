@@ -336,6 +336,14 @@ dl.details dd { min-width: 0; overflow-wrap: anywhere; } /* a long name or email
 details.more { margin-top: var(--s3); }
 details.more > summary { cursor: pointer; padding: 10px 0; font-weight: 500; color: var(--club-text); }
 details > summary { min-height: 44px; box-sizing: border-box; padding-block: 10px; }
+/* How this works (HowThisWorks): a card's longer explanation behind one quiet summary, its caret turning when open. */
+details.how > summary { display: flex; align-items: center; gap: 6px; list-style: none; width: fit-content; }
+details.how > summary::-webkit-details-marker { display: none; }
+.how-caret { width: 16px; height: 16px; flex: none; transition: transform var(--dur-fast) ease-out; }
+details.how[open] > summary .how-caret { transform: rotate(90deg); }
+.how-body { display: grid; gap: var(--s2); max-width: 70ch; padding-bottom: var(--s1); }
+.how-body > * { margin: 0; }
+.how-body ul { padding-left: 1.2em; display: grid; gap: var(--s1); }
 
 /* --- Empty state: what isn't there yet, said kindly, with the way forward. --- */
 .empty { display: grid; justify-items: center; gap: var(--s2); text-align: center; padding: var(--s6) var(--s4); color: var(--ink-2); }
