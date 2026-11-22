@@ -54,7 +54,7 @@
   --ink: #18191d; --ink-2: #5c606a; --ink-3: #8a8e98;
   --done: #1d7344; --due: #955400; --late: #b3261e;
   --done-soft: #e7f4ec; --due-soft: #fcf1df; --late-soft: #fceceb; --neutral-soft: #f0f1f3;
-  --overlay: rgb(0 0 0 / 0.08);
+  --overlay: rgb(0 0 0 / 0.08); --overlay-mix: black 8%; /* the same wash as a color-mix() term (a filled button's hover) */
   --shadow-menu: 0 8px 24px -6px rgb(16 17 20 / 0.14), 0 1px 3px rgb(16 17 20 / 0.08);
   --club-text: var(--club-text-l); --club-tint: var(--club-tint-l); --club-text-hc: var(--club-text-lhc);
   /* @tokens light-hc */
@@ -73,7 +73,7 @@
   --ink: #ececee; --ink-2: #a2a6ae; --ink-3: #6f737d;
   --done: #5fc68b; --due: #e9a647; --late: #ff8b7d;
   --done-soft: #15291e; --due-soft: #2e2312; --late-soft: #33191a; --neutral-soft: #22252a;
-  --overlay: rgb(255 255 255 / 0.1);
+  --overlay: rgb(255 255 255 / 0.1); --overlay-mix: white 10%;
   --shadow-menu: 0 8px 24px -6px rgb(0 0 0 / 0.6), 0 1px 3px rgb(0 0 0 / 0.5);
   --club-text: var(--club-text-d); --club-tint: var(--club-tint-d); --club-text-hc: var(--club-text-dhc);
   /* @tokens dark-hc */
@@ -91,7 +91,7 @@
     --ink: #ececee; --ink-2: #a2a6ae; --ink-3: #6f737d;
     --done: #5fc68b; --due: #e9a647; --late: #ff8b7d;
     --done-soft: #15291e; --due-soft: #2e2312; --late-soft: #33191a; --neutral-soft: #22252a;
-    --overlay: rgb(255 255 255 / 0.1);
+    --overlay: rgb(255 255 255 / 0.1); --overlay-mix: white 10%;
     --shadow-menu: 0 8px 24px -6px rgb(0 0 0 / 0.6), 0 1px 3px rgb(0 0 0 / 0.5);
     --club-text: var(--club-text-d); --club-tint: var(--club-tint-d); --club-text-hc: var(--club-text-dhc);
     --hc-ground: #000000; --hc-surface: #000000; --hc-surface-raised: #141518; --hc-surface-muted: #141518;
@@ -226,16 +226,17 @@ footer a { color: var(--club-text); }
   background-color: var(--club); color: var(--club-on); font-size: var(--text-control); font-weight: 500; line-height: 1.2;
   text-align: center; text-decoration: none; white-space: normal;
   transition: background-color var(--dur-fast) ease-out, border-color var(--dur-fast) ease-out, color var(--dur-fast) ease-out; }
-.btn:hover { background-image: linear-gradient(var(--overlay), var(--overlay)); }
+/* the overlay wash mixed into the fill, not laid over it as an image: a solid color, so its contrast can be measured */
+.btn:hover { background-color: color-mix(in srgb, var(--club), var(--overlay-mix)); }
 .btn svg { width: 16px; height: 16px; flex: none; }
 .btn-line { background-color: var(--surface); color: var(--ink); border-color: var(--border-control); }
-.btn-line:hover { background-image: none; background-color: var(--surface-muted); }
+.btn-line:hover { background-color: var(--surface-muted); }
 .btn-club { background-color: var(--club-tint); color: var(--club-text); border-color: transparent; }
-.btn-club:hover { background-image: none; border-color: var(--club-text); }
+.btn-club:hover { background-color: var(--club-tint); border-color: var(--club-text); }
 .btn-quiet { min-height: 44px; padding: 0 var(--s3); border-color: transparent; background-color: transparent; color: var(--club-text); }
-.btn-quiet:hover { background-image: none; background-color: var(--club-tint); }
+.btn-quiet:hover { background-color: var(--club-tint); }
 .btn-danger { background-color: var(--surface); color: var(--late); border-color: var(--border-control); }
-.btn-danger:hover { background-image: none; background-color: var(--late-soft); border-color: var(--late); }
+.btn-danger:hover { background-color: var(--late-soft); border-color: var(--late); }
 .btn-sm { padding: 0 var(--s3); font-size: var(--text-sm); }
 .btn[aria-disabled="true"], .btn:disabled, .btn:disabled:hover, .btn[aria-disabled="true"]:hover {
   background-color: var(--surface-muted); background-image: none; border-color: var(--border); color: var(--ink-2); cursor: not-allowed; }
@@ -830,8 +831,8 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 .ds-type .t-sm { font-size: var(--text-sm); color: var(--ink-2); }
 .ds-type .t-xs { font-size: var(--text-xs); color: var(--ink-2); }
 .ds-tone { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-sm); color: var(--ink-2); }
-.btn.ds-hover { background-image: linear-gradient(var(--overlay), var(--overlay)); }
-.btn-line.ds-hover { background-image: none; background-color: var(--surface-muted); }
+.btn.ds-hover { background-color: color-mix(in srgb, var(--club), var(--overlay-mix)); }
+.btn-line.ds-hover { background-color: var(--surface-muted); }
 .ds-focus { outline: var(--ring) solid var(--focus); outline-offset: 2px; }
 .ds-frame { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-top: var(--s4); background: var(--ground); }
 .ds-frame .bar .wrap { max-width: none; }
