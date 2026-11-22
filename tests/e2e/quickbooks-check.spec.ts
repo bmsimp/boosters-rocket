@@ -19,7 +19,7 @@ test("an Admin opens the check from QuickBooks settings, and is told it can't ru
   await expect(run).toContainText("This connection can't be checked");
   await expect(page.getByRole("button", { name: "Run the check" })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), "the page scrolls sideways").toBe(true);
-  await page.getByRole("link", { name: "Back to Settings" }).click();
-  await expect(page).toHaveURL(/\/staff\/settings$/);
+  await page.getByRole("link", { name: "Back to QuickBooks settings" }).click();
+  await expect(page).toHaveURL(/\/staff\/settings\/quickbooks$/);
   expect(toIntuit).toEqual([]);
 });

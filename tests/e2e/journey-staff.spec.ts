@@ -2,7 +2,7 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import postgres from "postgres";
 import { parentSessionCookie } from "./parent-session";
 import { staffSessionCookie } from "./staff-session";
-import { noSidewaysScroll, shot, staffMenuTo } from "./journey-helpers";
+import { noSidewaysScroll, settingsTo, shot, staffMenuTo } from "./journey-helpers";
 import { familyPages } from "./family-records";
 
 // A staff member's working session, walked by what they would tap (docs/walkthrough.md): the seeded Admin goes from the
@@ -239,8 +239,9 @@ test("a staff member's session: the roster, a season, volunteering, forms, money
   });
 
   await test.step("reads the audit log, finds the walk's own visits, and exports it", async () => {
-    await staffMenuTo(page, "Admin", "Audit");
-    await expect(page).toHaveURL(/\/staff\/audit/);
+    await staffMenuTo(page, null, "Settings");
+    await settingsTo(page, "Audit log");
+    await expect(page).toHaveURL(/\/staff\/settings\/audit/);
     await expect(page.locator("main")).toContainText("Requirement waived");
     await noSidewaysScroll(page);
     await shot(page, "s14-audit");
@@ -250,14 +251,15 @@ test("a staff member's session: the roster, a season, volunteering, forms, money
   });
 
   await test.step("opens Health and Settings", async () => {
-    await staffMenuTo(page, "Admin", "Health");
+    await staffMenuTo(page, null, "Settings");
+    await settingsTo(page, "Health");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Health");
     await noSidewaysScroll(page);
     await shot(page, "s15-health");
     await staffMenuTo(page, null, "Settings");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Settings");
-    await page.getByRole("link", { name: "Open club settings" }).click();
-    await expect(page.getByRole("link", { name: "Back to Settings" })).toBeVisible();
+    await settingsTo(page, "Club");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Club");
     await noSidewaysScroll(page);
     await shot(page, "s16-settings-club");
   });

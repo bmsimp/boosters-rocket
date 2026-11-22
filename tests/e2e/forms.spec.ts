@@ -84,7 +84,7 @@ test("an Admin finds Forms settings not set up, with the webhook address on the 
   await context.addCookies([staffSessionCookie()]);
   const res = await page.goto("/staff/settings/forms");
   expect(res?.status()).toBe(200);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Forms");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Documenso");
   await expect(page.getByRole("region", { name: "Connection", exact: true })).toContainText("Forms aren't set up yet.");
   // The steps are on their own page, opened from the plain view.
   await page.getByRole("region", { name: "Set up", exact: true }).getByRole("link", { name: "Set up" }).click();

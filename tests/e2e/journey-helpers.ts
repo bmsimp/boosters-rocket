@@ -58,6 +58,11 @@ export async function staffMenuTo(page: Page, group: string | null, entry: strin
   await nav.getByRole("link", { name: entry, exact: true }).click();
 }
 
+/** From Settings, opens one item of its rail (on a phone the rail is the first screen of Settings). */
+export async function settingsTo(page: Page, item: string): Promise<void> {
+  await page.getByRole("navigation", { name: "Settings" }).getByRole("link", { name: new RegExp(`^${item}`) }).click();
+}
+
 /**
  * Presses "Not now" on the passkey offer on Home (the sign-in release, slice SI-8) when Home drew it, and waits for its
  * answer: every spec that signs Zelda in by her password and the emailed code lands on Home with the offer, since that

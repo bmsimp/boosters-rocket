@@ -100,7 +100,7 @@ test("the audit log pages, filters by who and by day, and exports what was found
   await page.getByRole("button", { name: "Show" }).click();
   await expect(page.getByText("Nothing matches. Try fewer filters.")).toBeVisible();
   await page.getByRole("link", { name: "Show everything" }).click();
-  await expect(page).toHaveURL(/\/staff\/audit$/);
+  await expect(page).toHaveURL(/\/staff\/settings\/audit$/);
 });
 
 test("the setup page shows the portal's address, and warns when the browser reached it under another one", async ({ page, baseURL }) => {
