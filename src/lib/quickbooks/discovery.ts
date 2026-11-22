@@ -31,7 +31,7 @@ export function isIntuitEndpoint(value: unknown): value is string {
 async function readDocument(address: string): Promise<OAuthEndpoints | string> {
   let res: Response;
   try {
-    res = await fetch(address, { signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error", headers: { accept: "application/json" } });
+    res = await fetch(address, { method: "GET", signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error", headers: { accept: "application/json" } });
   } catch {
     return "unreachable";
   }

@@ -80,7 +80,7 @@ behind ([reconnecting QuickBooks](quickbooks-reconnect.md#connecting-a-different
    payment; it keeps an audit log of every change. It finds Intuit's OAuth endpoints (sign-in, token and revoke) in Intuit's
    discovery document (`https://developer.api.intuit.com/.well-known/openid_configuration`, and
    `openid_sandbox_configuration` for a sandbox company), kept for a day; if that can't be read, or names an address
-   that isn't https on intuit.com, it uses the endpoints it was built with and logs that it did. When Intuit refuses a
+   that isn't https on an Intuit address, it uses the endpoints it was built with and logs that it did. When Intuit refuses a
    request, it keeps Intuit's `intuit_tid` with the failure and shows it to staff as "Intuit reference", for Intuit
    support.
 4. Submit it, and answer Intuit's follow-up questions by email.

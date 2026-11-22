@@ -86,10 +86,21 @@ describe("what the roster pages load", () => {
     expect(page.roster).not.toBeNull();
   });
 
-  it("a refresh that returns no customer types leaves every named type missing", async () => {
+  it("a refresh that returns no customer types while the shape names some keeps the roster (no_customer_types)", async () => {
     await saveShape(FZN_SHAPE, staffOp);
     await refreshRoster(worker);
+    const before = await loadRosterPage();
     stub.types = [];
+    expect(await refreshRoster(worker)).toMatchObject({ ok: false, reason: "failed", error: expect.stringContaining("(no_customer_types)") });
+    const page = await loadRosterPage();
+    expect(page.brokenTypes).toEqual([]);
+    expect(page.roster).toEqual(before.roster);
+  });
+
+  it("a refresh whose types no longer hold the ones the shape names leaves them missing", async () => {
+    await saveShape(FZN_SHAPE, staffOp);
+    await refreshRoster(worker);
+    stub.types = [{ Id: "9", Name: "Something else", Active: true }];
     expect(await refreshRoster(worker)).toMatchObject({ ok: true });
     const page = await loadRosterPage();
     expect([...page.brokenTypes].sort()).toEqual(["1", "2", "3"]);
