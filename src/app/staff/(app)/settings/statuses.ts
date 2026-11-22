@@ -48,13 +48,21 @@ export type IntegrationRow = {
   expires: { what: string; iso: string } | null;
 };
 
+/** The Health page's lines, read once a request: the rail counts them, and the Health and integration pages show them. */
+export const healthLines = cache(() => healthReport());
+
 const QB_DOES = "Reads families, students and invoices; sends the names and changes staff make on the roster.";
 
+/**
+ * QuickBooks' status takes in its Health line too (a change stuck on its way there, a check that failed), so the row,
+ * the page's badge, the rail and the Overview never say "Connected" while the page itself says it needs attention.
+ */
 export const quickbooksRow = cache(async (): Promise<IntegrationRow> => {
-  const [conn, problems] = await Promise.all([connectionView(), quickbooksProblems()]);
+  const [conn, problems, lines] = await Promise.all([connectionView(), quickbooksProblems(), healthLines()]);
+  const health = lines.find((l) => l.key === "quickbooks");
   const status: Status = !conn.configured ? { tone: "neutral", words: "Not set up" }
     : !conn.connected ? { tone: "due", words: "Not connected" }
-    : problems.length ? { tone: "due", words: "Needs attention" }
+    : problems.length || health?.state === "attention" ? { tone: "due", words: "Needs attention" }
     : { tone: "done", words: "Connected" };
   return { key: "quickbooks", item: "quickbooks", name: "QuickBooks Online", does: QB_DOES, status, href: "/staff/settings/quickbooks", expires: null,
     badge: conn.configured && conn.environment !== "production" ? "Sandbox" : null };
@@ -88,14 +96,20 @@ export const mailRows = cache(async (): Promise<IntegrationRow[]> => {
   ];
 });
 
+/**
+ * Staff sign-in's two rows. While neither provider works nobody can sign in as staff, so every row that isn't working
+ * needs attention, "Not set up" included: one tone for that state wherever it is shown.
+ */
 export const signInRows = cache(async (): Promise<IntegrationRow[]> => {
   const saved = await providerSummaries();
   const now = new Date();
+  const works = (s: ProviderSummary | undefined) => s !== undefined && ["working", "expiring"].includes(credentialStanding(s, now));
+  const nobody = !saved.some((s) => works(s));
   const row = (key: "staff-microsoft" | "staff-google", s: ProviderSummary | undefined): IntegrationRow => {
     const cert = key === "staff-microsoft";
     const what = cert ? "Certificate" : "Secret";
     const standing = s ? credentialStanding(s, now) : null;
-    const status: Status = !s ? { tone: "neutral", words: "Not set up" }
+    const status: Status = !s ? { tone: nobody ? "due" : "neutral", words: "Not set up" }
       : standing === "unreadable" ? { tone: "due", words: "Can't be read" }
       : standing === "expired" ? { tone: "due", words: "Expired" }
       : standing === "expiring" ? { tone: "due", words: `${what} expires soon` }
@@ -124,6 +138,7 @@ export async function integrationRows(items: readonly SettingsItem[]): Promise<I
  * by its one method in use; staff sign-in is working when one provider works and none needs attention.
  */
 export function systemStatus(rows: IntegrationRow[]): Status {
+  if (rows[0]?.item === "sign-in" && !rows.some((r) => r.status.tone === "done")) return { tone: "due", words: "Nobody can sign in" };
   if (rows.some((r) => r.status.tone === "due")) return { tone: "due", words: "Needs attention" };
   if (rows.some((r) => r.status.tone === "done")) return { tone: "done", words: "Working" };
   return { tone: "neutral", words: "Not set up" };
@@ -136,8 +151,6 @@ export async function systemStatuses(items: readonly SettingsItem[]): Promise<{ 
   return items4.map((item) => ({ item, status: systemStatus(rows.filter((r) => r.item === item)) }));
 }
 
-/** The Health page's lines, read once a request: the rail counts them, and the Health and integration pages show them. */
-export const healthLines = cache(() => healthReport());
 const healthCount = cache(async () => (await healthLines()).filter((l) => l.state === "attention").length);
 
 /** Each rail item's status. Only an item the person may see is asked for (the layout reads `railItems()`). */

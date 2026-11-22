@@ -1,7 +1,7 @@
 import { requireStaffPage } from "@/lib/guards";
 import { Card, List, ListRow, Notice, PageHeader } from "@/app/components/ui";
 import { integrationItems, railItems, settingsItems } from "./sections";
-import { RAIL_STATUS, integrationRows, type Status } from "./statuses";
+import { RAIL_STATUS, integrationRows, systemStatus, type Status } from "./statuses";
 
 export const metadata = { title: "Settings" };
 export const dynamic = "force-dynamic";
@@ -20,9 +20,13 @@ export default async function SettingsPage() {
   const visible = settingsItems(ctx.effective);
   const pages = railItems(ctx.effective).filter((i) => i.key !== "integrations");
   const [statuses, rows] = await Promise.all([Promise.all(pages.map((i) => RAIL_STATUS[i.key](visible))), integrationRows(integrationItems(ctx.effective))]);
+  const signIn = rows.filter((r) => r.item === "sign-in");
+  const nobody = signIn.length > 0 && systemStatus(signIn).words === "Nobody can sign in" ? systemStatus(signIn) : null;
   const attention: { key: string; title: string; href: string; status: Status }[] = [
     ...pages.flatMap((i, n) => (statuses[n]!.tone === "due" ? [{ key: i.key, title: i.title, href: i.href, status: statuses[n]! }] : [])),
-    ...rows.filter((r) => r.status.tone === "due").map((r) => ({ key: r.key, title: r.name, href: r.href, status: r.status })),
+    ...rows.filter((r) => r.status.tone === "due" && !(nobody && r.item === "sign-in")).map((r) => ({ key: r.key, title: r.name, href: r.href, status: r.status })),
+    // While nobody can sign in as staff, that is one thing to see to, not one for each provider.
+    ...(nobody ? [{ key: "sign-in", title: "Staff sign-in", href: "/staff/settings/sign-in", status: nobody }] : []),
   ];
   return (
     <main className="wrap single settings-overview">

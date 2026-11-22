@@ -61,9 +61,10 @@ describe("the Settings rail", () => {
     await asAdmin();
     await saveClubSettings(CLUB, SYSTEM, null);
     await seedWorkingMail({ method: "graph", mailbox: "webmaster@example.org" });
-    expect(await rail()).toEqual(expect.arrayContaining(["Club: Set", "Integrations: 3 not set up"]));
-    await seedProvider("staff-google", { clientId: "x.apps.googleusercontent.com" }, "google-secret", new Date(Date.now() - 86_400_000));
-    expect(await rail()).toContain("Integrations: 1 needs attention");
+    // Mail works; QuickBooks and Documenso are not set up; nobody can sign in as staff, which needs attention.
+    expect(await rail()).toEqual(expect.arrayContaining(["Club: Set", "Integrations: 1 needs attention"]));
+    await seedProvider("staff-google", { clientId: "x.apps.googleusercontent.com" }, "google-secret", new Date(Date.now() + 90 * 86_400_000));
+    expect(await rail()).toContain("Integrations: 2 not set up");
   });
 
   it("shows someone who may read the club settings the Club and the design system, and nobody else an Admin-only item", async () => {
@@ -98,11 +99,18 @@ describe("the Overview", () => {
 
   it("lists what needs attention, each a row that leads to it, an integration by its own name", async () => {
     await asAdmin();
+    // Nobody can sign in as staff: one row, not one for each provider.
     await seedProvider("staff-google", { clientId: "x.apps.googleusercontent.com" }, "google-secret", new Date(Date.now() - 86_400_000));
-    const html = await renderPage(SettingsPage);
-    const rows = [...html.matchAll(/data-attention="([^"]+)"/g)].map((m) => m[1]);
-    expect(rows).toEqual(expect.arrayContaining(["club", "staff-google"]));
+    let html = await renderPage(SettingsPage);
+    let rows = [...html.matchAll(/data-attention="([^"]+)"/g)].map((m) => m[1]);
+    expect(rows).toEqual(expect.arrayContaining(["club", "sign-in"]));
     expect(rows).not.toContain("integrations");
+    expect(rows).not.toContain("staff-google");
+    expect(textOf(html)).toContain("Staff sign-in Nobody can sign in");
+    // Microsoft works, so Google's expired secret is its own row.
+    await seedProvider("staff-microsoft", { tenantId: "t", clientId: "c" }, "unused");
+    html = await renderPage(SettingsPage);
+    rows = [...html.matchAll(/data-attention="([^"]+)"/g)].map((m) => m[1]);
     expect(html).toContain('href="/staff/settings/sign-in#staff-google"');
     expect(textOf(html)).toContain("Google Expired");
     expect(html).not.toContain("<input");
