@@ -3,6 +3,7 @@ import { qboConnection, type QboEnvironment } from "@/lib/db/schema";
 import { secretBox, SecretBoxError } from "@/lib/crypto/secret-box";
 import { writeAudit } from "@/lib/audit/log";
 import { errorNeedsAdmin, qboEndpoints, QboError, QBO_MINOR_VERSION } from "./endpoints";
+import { oauthEndpoints } from "./discovery";
 
 const TIMEOUT_MS = 15_000;
 const REFRESH_EARLY_MS = 5 * 60_000;
@@ -14,10 +15,11 @@ export type TokenSet = { accessToken: string; refreshToken: string; accessExpire
 export type QboApp = { clientId: string; clientSecret: string };
 
 /** One request to Intuit's token endpoint (a code exchange or a refresh). Failures keep Intuit's error code and none of its text. */
-export async function tokenRequest(form: Record<string, string>, app: QboApp): Promise<TokenSet> {
+export async function tokenRequest(form: Record<string, string>, app: QboApp, environment: QboEnvironment): Promise<TokenSet> {
+  const endpoint = (await oauthEndpoints(environment)).token;
   let res: Response;
   try {
-    res = await fetch(qboEndpoints().token, {
+    res = await fetch(endpoint, {
       method: "POST", body: new URLSearchParams(form).toString(), signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error",
       headers: { authorization: `Basic ${Buffer.from(`${app.clientId}:${app.clientSecret}`).toString("base64")}`, accept: "application/json", "content-type": "application/x-www-form-urlencoded" },
     });
@@ -92,7 +94,7 @@ function tokenUnderLock(o: { force?: boolean; noWait?: boolean }): Promise<Refre
       if (saved) return { ok: true, access: { token: box.open(saved, QBO_AAD.access), realmId: c.realmId, environment: c.environment } };
       const t = await tokenRequest(
         { grant_type: "refresh_token", refresh_token: box.open({ ciphertext: c.refreshTokenCiphertext, keyId: c.refreshTokenKeyId }, QBO_AAD.refresh) },
-        { clientId: c.clientId, clientSecret: box.open({ ciphertext: c.clientSecretCiphertext, keyId: c.clientSecretKeyId }, QBO_AAD.secret) });
+        { clientId: c.clientId, clientSecret: box.open({ ciphertext: c.clientSecretCiphertext, keyId: c.clientSecretKeyId }, QBO_AAD.secret) }, c.environment);
       await tx.update(qboConnection).set(sealTokens(t));
       return { ok: true, access: { token: t.accessToken, realmId: c.realmId, environment: c.environment } };
     } catch (e) {

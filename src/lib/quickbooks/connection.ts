@@ -5,7 +5,8 @@ import { db, type Tx } from "@/lib/db/client";
 import { qboConnection, setting, type QboEnvironment } from "@/lib/db/schema";
 import { secretBox, SecretBoxError } from "@/lib/crypto/secret-box";
 import { writeAudit, type Actor } from "@/lib/audit/log";
-import { errorNeedsAdmin, qboEndpoints, QboError, QBO_SCOPE } from "./endpoints";
+import { errorNeedsAdmin, QboError, QBO_SCOPE } from "./endpoints";
+import { oauthEndpoints } from "./discovery";
 import { QBO_AAD, qboGet, sealTokens, tokenRequest, type TokenSet } from "./client";
 import { clearRosterOfOtherCompany, dropSwitchAsk, getRosterSource, getSwitchRecord, setSwitchRecord, storedSwitchOf, SWITCH_KEY, type SwitchRecord } from "@/lib/roster/source";
 
@@ -96,9 +97,9 @@ export async function saveQboApp(d: QboAppDraft, o: QboOp): Promise<{ ok: true }
  * Asks Intuit to revoke a refresh token (and the access token that came with it). Best effort: true only when Intuit
  * confirmed it; an unreachable Intuit, a timeout or a refusal is false. It never throws and keeps nothing of the answer.
  */
-async function revokeAtIntuit(refreshToken: string, app: { clientId: string; clientSecret: string }): Promise<boolean> {
+async function revokeAtIntuit(refreshToken: string, app: { clientId: string; clientSecret: string }, environment: QboEnvironment): Promise<boolean> {
   try {
-    const res = await fetch(qboEndpoints().revoke, {
+    const res = await fetch((await oauthEndpoints(environment)).revoke, {
       method: "POST", body: JSON.stringify({ token: refreshToken }), signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error",
       headers: { authorization: `Basic ${Buffer.from(`${app.clientId}:${app.clientSecret}`).toString("base64")}`, accept: "application/json", "content-type": "application/json" },
     });
@@ -113,8 +114,8 @@ const newState = (staffUserId: string) => {
   const state = randomBytes(32).toString("base64url");
   return { state, set: { stateHash: sha256(state), stateStaffUserId: staffUserId, stateExpiresAt: new Date(Date.now() + STATE_TTL_MS), updatedAt: new Date() } };
 };
-const intuitUrl = (clientId: string, state: string) =>
-  `${qboEndpoints().authorize}?${new URLSearchParams({ client_id: clientId, response_type: "code", scope: QBO_SCOPE, redirect_uri: qboRedirectUri(), state })}`;
+const intuitUrl = async (clientId: string, environment: QboEnvironment, state: string) =>
+  `${(await oauthEndpoints(environment)).authorize}?${new URLSearchParams({ client_id: clientId, response_type: "code", scope: QBO_SCOPE, redirect_uri: qboRedirectUri(), state })}`;
 
 /**
  * Starts a connect: a new single-use state for this Admin (replacing any earlier one) and the Intuit address to send
@@ -129,7 +130,7 @@ export async function beginConnect(staffUserId: string): Promise<Begun> {
     await dropSwitchAsk(tx);
     return row;
   });
-  return c ? { ok: true, url: intuitUrl(c.clientId, state) } : { ok: false, reason: "not_configured" };
+  return c ? { ok: true, url: await intuitUrl(c.clientId, c.environment, state) } : { ok: false, reason: "not_configured" };
 }
 
 /**
@@ -150,7 +151,7 @@ export async function beginSwitchConnect(staffUserId: string, o: QboOp): Promise
     await writeAudit({ actor: o.actor, action: "quickbooks.switch.asked", permission: o.permission, ...TARGET, after: { fromRealmId }, ip: o.ip }, tx);
     return row;
   });
-  return c ? { ok: true, url: intuitUrl(c.clientId, state) } : { ok: false, reason: "not_configured" };
+  return c ? { ok: true, url: await intuitUrl(c.clientId, c.environment, state) } : { ok: false, reason: "not_configured" };
 }
 
 /**
@@ -219,7 +220,7 @@ export async function completeConnect(
   // 2. Exchange the code. No row lock is held while Intuit answers.
   let tokens: TokenSet;
   try {
-    tokens = await tokenRequest({ grant_type: "authorization_code", code: p.code!, redirect_uri: qboRedirectUri() }, claim);
+    tokens = await tokenRequest({ grant_type: "authorization_code", code: p.code!, redirect_uri: qboRedirectUri() }, claim, claim.environment);
   } catch (e) {
     if (e instanceof QboError) return refuse("intuit", { code: e.code });
     throw e;
@@ -227,7 +228,7 @@ export async function completeConnect(
   // 3. Store the connection, unless another company got connected while Intuit was answering. From here until the
   // row is saved the portal holds tokens Intuit issued: if it doesn't keep them, it asks Intuit to revoke them, so a
   // refused connect leaves no grant standing. The revoke changes nothing about the refusal.
-  const revokeIssued = () => revokeAtIntuit(tokens.refreshToken, claim);
+  const revokeIssued = () => revokeAtIntuit(tokens.refreshToken, claim, claim.environment);
   // When storing throws: Intuit's revoke can cancel the company's whole grant to the app, not just these tokens. So
   // if the row still holds a connection to this company (the Admin was signing in again to renew it), nothing is
   // revoked and that connection carries on. The row is read fresh; if even that fails, nothing is revoked. The
@@ -304,7 +305,7 @@ export async function disconnect(o: QboOp): Promise<{ ok: true; revoked: boolean
     const box = secretBox();
     const clientSecret = box.open({ ciphertext: c.clientSecretCiphertext, keyId: c.clientSecretKeyId }, QBO_AAD.secret);
     const token = box.open({ ciphertext: c.refreshTokenCiphertext, keyId: c.refreshTokenKeyId }, QBO_AAD.refresh);
-    revoked = await revokeAtIntuit(token, { clientId: c.clientId, clientSecret });
+    revoked = await revokeAtIntuit(token, { clientId: c.clientId, clientSecret }, c.environment);
   } catch {
     revoked = false; // the keys unreadable (Intuit unreachable is false already): the tokens are still deleted here
   }

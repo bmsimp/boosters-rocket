@@ -1,12 +1,20 @@
 import type { QboEnvironment } from "@/lib/db/schema";
 
-export type QboEndpoints = { authorize: string; token: string; revoke: string; api: Record<QboEnvironment, string> };
+/**
+ * `authorize`, `token` and `revoke` are the fallback for Intuit's discovery document (./discovery.ts), which is where the
+ * OAuth endpoints are read from; `discovery` names that document for each environment.
+ */
+export type QboEndpoints = { authorize: string; token: string; revoke: string; api: Record<QboEnvironment, string>; discovery?: Record<QboEnvironment, string> };
 
 const INTUIT: QboEndpoints = {
   authorize: "https://appcenter.intuit.com/connect/oauth2",
   token: "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer",
   revoke: "https://developer.api.intuit.com/v2/oauth2/tokens/revoke",
   api: { sandbox: "https://sandbox-quickbooks.api.intuit.com", production: "https://quickbooks.api.intuit.com" },
+  discovery: {
+    production: "https://developer.api.intuit.com/.well-known/openid_configuration",
+    sandbox: "https://developer.api.intuit.com/.well-known/openid_sandbox_configuration",
+  },
 };
 
 /** Where Intuit and QuickBooks live. A function so integration tests can replace it (vi.mock) with a stub server; the app has no other switch. */
