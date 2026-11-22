@@ -210,11 +210,11 @@ components:
     textColor: "{colors.ink}"
     rounded: "{rounded.surface}"
     padding: "12px 16px"
-  notice-warning:
+  notice-due:
     backgroundColor: "{colors.due-soft}"
   notice-done:
     backgroundColor: "{colors.done-soft}"
-  notice-problem:
+  notice-late:
     backgroundColor: "{colors.late-soft}"
   field:
     backgroundColor: "{colors.surface}"
@@ -316,7 +316,7 @@ The frontmatter values are the default club's purple (`DEFAULT_COLOR`). **The ap
 - **Muted Surface** (`surface-muted`): hover fills, a total row, a table's group rows, the disabled fill, code samples.
 - **Hairline** (`border`): every 1px divider and surface edge. **Control Edge** (`border-control`): secondary buttons, option tiles, the Menu button. **Strong Edge** (`border-strong`): a text field's or tick box's edge, at 3:1 so the control can be seen.
 - **Ink** (`ink`): text and headings. **Secondary Ink** (`ink-2`): meta lines, hints, labels, table headers, inactive nav and tabs; 4.5:1 on every ground. **Mark Gray** (`ink-3`): drawn marks only (a neutral status ring, an empty state's icon), at 3:1; never text.
-- `--overlay` (black 8% in light, white 10% in dark) is the hover wash laid over a filled button. The focus ring is drawn in `club-text` directly (there is no separate focus token).
+- `--overlay` (black 8% in light, white 10% in dark) is the hover wash laid over a filled button. `--focus` is the focus ring's color: the element's own `club-text` (`:root, [data-theme], [data-contrast]` set it from `--club-text`, so a sample wrapper in another mode draws its own). Every focus ring is `var(--ring) solid var(--focus)`.
 
 ### Named Rules
 **The Accent-Only Rule.** The club fill is for the primary button, the logo tile and the current step's track. Everywhere else the club appears as `club-text` or `club-tint`. The top bar and the tab bar are white surfaces, never the club's color.
@@ -331,17 +331,17 @@ The frontmatter values are the default club's purple (`DEFAULT_COLOR`). **The ap
 
 **Face:** Inter (self-hosted through `next/font/google` in `src/app/layout.tsx`, fetched at build time and served from the portal; a variable font), falling back to `ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`.
 
-**Character:** One plain, neutral face for everything, with weight (400, 500, 600) and a short scale doing the work that a second face did before. Headings are 600 with a slight negative tracking; labels are sentence case, never uppercase.
+**Character:** One plain, neutral face for everything, with weight (400, 500, 600; 700 only for the club logo tile) and a short scale doing the work that a second face did before. Headings are 600 with a slight negative tracking; labels are sentence case, never uppercase.
 
 ### Hierarchy
-The scale is six steps (`--text-xs` 0.8125rem to `--text-2xl` 2rem) plus the 0.9375rem control size; rem against a 16px root (18px Large, 20px Larger).
+The scale is six steps (`--text-xs` 0.8125rem to `--text-2xl` 2rem) plus `--text-control` (0.9375rem), the control size; rem against a 16px root (18px Large, 20px Larger).
 - **Amount** (600, 2rem, 1.15, tabular): the one large figure (the amount owed on Payments, a buy-out's amount). Home's Total owed sets it at 1.5rem beside its title.
 - **Page title** (600, 1.5rem, 1.75rem from 760px, 1.25): the page's `h1` in `PageHeader`.
 - **Stat** (600, 1.5rem, tabular): one figure on a staff page.
 - **Card title** (600, 1.125rem, 1.35): a `Card`'s heading; `h3` inside a card is 1rem 600.
 - **Body** (400, 1rem, 1.5): default text; prose held to about 70ch.
 - **Row title** (500, 1rem): a `ListRow`'s title, a table's row header.
-- **Control** (500, 0.9375rem): buttons, top-nav links, the Menu button; also the size of a card's quiet line, a notice's body, table cells and hints that sit as a paragraph (`.help`).
+- **Control** (500, `--text-control` 0.9375rem): buttons, top-nav links, the Menu button; also the size of a card's quiet line, a notice's body, table cells and hints that sit as a paragraph (`.help`).
 - **Meta** (400, 0.875rem): a row's meta line, field hints, as-of lines, the step indicator's heading.
 - **Label** (500, 0.875rem, `ink-2` for `SectionLabel`, `ink` for a field's label): the small heading over a list, a field's label.
 - **Caption** (500, 0.8125rem): table column headers, tab labels, badges, avatar initials, the step indicator's numbers. The floor: nothing smaller.
@@ -415,14 +415,14 @@ The core of the look. A `SectionLabel` (a real heading, 0.875rem 500 `ink-2`, se
 - **Busy and disabled** share one look: `surface-muted` fill, hairline edge, `ink-2` words, not-allowed cursor, no hover. `busy` adds a spinner and is `aria-disabled`, never `disabled` (a disabled button drops the focus); the caller ignores presses. In high contrast it is white with a dashed ink edge; under forced colors dashed with `GrayText`.
 
 ### Badges (`Badge`, `StatusBadge`)
-A short label on a tint: 0.8125rem 500, 1px 8px padding, 4px corner. `Badge` takes a tone or `club` (a role, a count); `StatusBadge` is a tone's icon and words (the tone's own word when none is given). In high contrast a 1px inner edge in the tone; under forced colors a `CanvasText` border.
+A short label on a tint: 0.8125rem 500, 1px 8px padding, 4px corner. `Badge` takes a tone or `club` (a role, a count; `club` is a label style, not a status tone); `StatusBadge` is a tone's icon and words (the tone's own word when none is given). In high contrast a 1px inner edge in the tone; under forced colors a `CanvasText` border.
 
 ### State words (`StateWords`, `src/app/components/state-words.tsx`)
-A state inside a row or cell: a 16px icon and 0.875rem 500 words. Done is a tick in `done`; to do is an alert circle in `due`; waived is a struck circle in `ink-2`, for a requirement the club let a family or student off (the reason is never shown to the family).
+A state inside a row or cell: a 16px icon and 0.875rem 500 words. Done is a tick in `done`; to do is the status icon's due mark in `due` (the product's one to-do mark); waived is a struck circle in `ink-2`, for a requirement the club let a family or student off (the reason is never shown to the family).
 
 ### Notices (`Notice`, `ActionOutcome`, `src/app/components/notice.tsx`)
 A status that stands apart from the text around it, or what an action answered. On its tone's soft tint with a hairline edge and an 8px corner, 12px 16px padding: a 20px icon and the tone's word in the tone's ink, the body in `ink` at 0.9375rem.
-- information "Note" (circled i, `ink` on `neutral-soft`); needs attention "Needs attention" (triangle, `due`); done "Done" (tick, `done`); problem "Problem" (circled cross, `late`).
+- One status vocabulary: a notice's tones are the four status tones, its props keeping their own names. `info` is neutral "Note" (circled i, `ink` on `neutral-soft`); `warning` is due "Needs attention" (triangle, `due`); `done` is done "Done" (tick, `done`); `problem` is late "Problem" (circled cross, `late`). The classes are `notice-neutral`, `notice-due`, `notice-done`, `notice-late`.
 - **With a title** a notice is a section of its own (the staff home's warnings): a 1rem 600 heading, the word read out before it but not drawn, its link or button under the text.
 - **Announced:** a problem is an alert, every other tone a status; one that is simply part of the page as it loads is announced as neither (`live="none"`).
 - `ActionOutcome` turns a server action's `{ ok, message }` or `{ ok: false, errors }` into a done or problem notice (information for `waiting`, needs attention for `attention`).
@@ -470,7 +470,7 @@ A card per part: its title, a state in words with an icon, a KeyValue of what is
 Reached from the account avatar. One card of four choice groups in order: **Appearance** (Match my device, Light, Dark), **Contrast** (Match my device, Standard, High contrast), **Text size** (Standard, Large, Larger), **Motion** (Match my device, Reduce motion; two columns). "Match my device" is first and the default. Changes apply at once; a closing `ink-2` note: "Saved on this device. Sign in somewhere else and you can choose again there." The install hint is permanent here.
 
 ### Focus
-`:focus-visible` everywhere: a `club-text` outline, 2px (3px in high contrast), 2px offset (1px on fields, hugging the mark on tick boxes). High contrast also thickens link underlines to 2px. The skip link's landing point takes the focus with no ring.
+`:focus-visible` everywhere: a `--focus` (`club-text`) outline, 2px (3px in high contrast), 2px offset (1px on fields, hugging the mark on tick boxes). High contrast also thickens link underlines to 2px. The skip link's landing point takes the focus with no ring.
 
 ### Windows contrast themes (forced colors)
 Under `forced-colors: active` the system palette wins; the build keeps every state readable without its own colors: the bars and the logo tile, account and avatars get `CanvasText` edges; the current nav link and tab are underlined 3px; menus get `CanvasText` borders; the step track is `GrayText`, done steps `CanvasText`, the current one `Highlight` and 6px tall with its words underlined; student markers draw on `Canvas` with a `CanvasText` ring (done inverted); money rings and paid marks in `CanvasText`; badges and notices get a `CanvasText` border and the notice icon `CanvasText`; choice tiles and tick boxes draw themselves (checked in `Highlight`, focus a 3px dashed `CanvasText` outline on tiles); selects use the platform's arrow; disabled is dashed with `GrayText`; focus rings use `Highlight`. QR codes and the club preview keep their own colors (`forced-color-adjust: none`).

@@ -748,7 +748,7 @@
       },
       "control": {
         "displayName": "Control",
-        "purpose": "Buttons, top-nav links; also a card's quiet line, notice body, table cells."
+        "purpose": "Buttons, top-nav links; also a card's quiet line, notice body, table cells. Token --text-control, 0.9375rem."
       },
       "meta": {
         "displayName": "Meta",
@@ -795,7 +795,7 @@
     "focus": {
       "width": "2px (3px high contrast)",
       "offset": "2px",
-      "color": "club-text"
+      "color": "focus (the club text role of the mode)"
     },
     "breakpoints": [
       {
