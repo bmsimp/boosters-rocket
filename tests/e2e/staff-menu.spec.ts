@@ -54,7 +54,8 @@ for (const width of [760, 900, 1032, 1440]) {
     expect(measured.club.width, "the club's name was squeezed out").toBeGreaterThan(60);
     expect(measured.account.right).toBeLessThanOrEqual(measured.wrap.right + 1);
     // With so few entries the bar is the one row it is for parents, wherever the club's name leaves room.
-    if (width >= 900) expect(measured.bar.height).toBe(56);
+    // The row is 56px; the bar under it draws a 1px hairline (the bar's bottom border).
+    if (width >= 900) expect(measured.wrap.height).toBe(56);
 
     // Each group opens below the bar with its links, inside the page, and one at a time.
     for (const [name, links] of Object.entries(GROUPS)) {
@@ -135,7 +136,7 @@ test("on a phone the same entries are behind the Menu button, each group under i
   const page = await context.newPage();
   await page.goto("/staff/health");
   await expect(nav(page)).toBeHidden();
-  expect(await page.locator("header.bar").evaluate((el) => el.getBoundingClientRect().height)).toBe(56);
+  expect(await page.locator("header.bar .wrap").evaluate((el) => el.getBoundingClientRect().height)).toBe(56); // the one row, above the hairline
   const menu = page.getByRole("button", { name: "Menu" });
   await expect(menu).toHaveAttribute("aria-expanded", "false");
   await menu.click();
