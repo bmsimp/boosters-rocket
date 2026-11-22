@@ -87,7 +87,7 @@ describe("the page a parent asked for", () => {
     });
 
     it("tells a parent confirming a new sign-in address to sign in with the one they use now", async () => {
-      const hint = "sign in with the address you use now";
+      const hint = "Sign in with the email you use now to confirm your new one.";
       expect(await renderPage(ParentSignIn, { searchParams: { next: "/family/email/Abc123-token_x" } })).toContain(hint);
       expect(await renderPage(ParentSignIn, { searchParams: { next: "/payments" } })).not.toContain(hint);
     });
