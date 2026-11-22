@@ -4,6 +4,8 @@ import { checklistView } from "@/lib/permissions/checklist";
 import { ADMIN_ONLY_WORDS } from "@/lib/permissions/words";
 import { DeleteRole, RoleForm } from "./role-form";
 
+import { SettingsHeader } from "../back-to-settings";
+
 export const metadata = { title: "Roles" };
 
 const people = (n: number) => (n === 0 ? "Nobody holds this role yet." : `${n} ${n === 1 ? "person holds" : "people hold"} this role.`);
@@ -13,8 +15,7 @@ export default async function RolesPage() {
   const roles = await listRoles();
   return (
     <main className="wrap single roles-page">
-      <h1 className="page-title">Roles</h1>
-      <p className="lede">A role is a set of things staff may do. Tick what each role lets its people do, then save. A person can hold more than one role, and gets everything their roles give.</p>
+      <SettingsHeader title="Roles" lede="A role is a set of things staff may do. Tick what each role lets its people do, then save. A person can hold more than one role, and gets everything their roles give." />
       <details className="box"><summary>What only an Admin can do</summary>
         <p>The Admin role holds everything. These are kept for Admins alone, so no other role can be given them. The audit log is one, because its rows hold notes staff write about parents.</p>
         <ul>{ADMIN_ONLY_WORDS.map((w) => <li key={w}>{w}</li>)}</ul>

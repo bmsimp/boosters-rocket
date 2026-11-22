@@ -25,7 +25,7 @@ export function IntegrationLogo({ of, size = "row" }: { of: IntegrationRowKey; s
   return (
     <span className={`logo-tile logo-${size}`} aria-hidden="true">
       {img ??
-        ("text" in m ? <span className="logo-text">{m.text}</span>
+        ("text" in m ? <span className="logo-text" data-mark={m.text} />
         : <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"><rect x="2.5" y="4.5" width="15" height="11" rx="1.5" /><path d="M3 5.5l7 5.5 7-5.5" /></svg>)}
     </span>
   );

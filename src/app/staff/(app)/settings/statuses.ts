@@ -50,7 +50,7 @@ export type IntegrationRow = {
 
 const QB_DOES = "Reads families, students and invoices; sends the names and changes staff make on the roster.";
 
-const quickbooksRow = cache(async (): Promise<IntegrationRow> => {
+export const quickbooksRow = cache(async (): Promise<IntegrationRow> => {
   const [conn, problems] = await Promise.all([connectionView(), quickbooksProblems()]);
   const status: Status = !conn.configured ? { tone: "neutral", words: "Not set up" }
     : !conn.connected ? { tone: "due", words: "Not connected" }
@@ -60,7 +60,7 @@ const quickbooksRow = cache(async (): Promise<IntegrationRow> => {
     badge: conn.configured && conn.environment !== "production" ? "Sandbox" : null };
 });
 
-const documensoRow = cache(async (): Promise<IntegrationRow> => {
+export const documensoRow = cache(async (): Promise<IntegrationRow> => {
   const f = await formsSummary();
   const status: Status = f.origin === null ? { tone: "neutral", words: "Not set up" }
     : !f.tokenReadable ? { tone: "due", words: "Token can't be read" }
@@ -71,7 +71,7 @@ const documensoRow = cache(async (): Promise<IntegrationRow> => {
     href: "/staff/settings/forms", badge: null, expires: null };
 });
 
-const mailRows = cache(async (): Promise<IntegrationRow[]> => {
+export const mailRows = cache(async (): Promise<IntegrationRow[]> => {
   const [m, attention] = await Promise.all([mailSummary(), mailAttention()]);
   const chosen = m.config?.method ?? null;
   const status = (method: "graph" | "smtp"): Status => chosen === null ? { tone: "neutral", words: "Not set up" }
@@ -88,7 +88,7 @@ const mailRows = cache(async (): Promise<IntegrationRow[]> => {
   ];
 });
 
-const signInRows = cache(async (): Promise<IntegrationRow[]> => {
+export const signInRows = cache(async (): Promise<IntegrationRow[]> => {
   const saved = await providerSummaries();
   const now = new Date();
   const row = (key: "staff-microsoft" | "staff-google", s: ProviderSummary | undefined): IntegrationRow => {
@@ -136,7 +136,9 @@ export async function systemStatuses(items: readonly SettingsItem[]): Promise<{ 
   return items4.map((item) => ({ item, status: systemStatus(rows.filter((r) => r.item === item)) }));
 }
 
-const healthCount = cache(async () => (await healthReport()).filter((l) => l.state === "attention").length);
+/** The Health page's lines, read once a request: the rail counts them, and the Health and integration pages show them. */
+export const healthLines = cache(() => healthReport());
+const healthCount = cache(async () => (await healthLines()).filter((l) => l.state === "attention").length);
 
 /** Each rail item's status. Only an item the person may see is asked for (the layout reads `railItems()`). */
 export const RAIL_STATUS: Record<PageKey, (items: readonly SettingsItem[]) => Promise<Status>> = {

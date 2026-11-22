@@ -1,5 +1,6 @@
 import { requireStaffPage } from "@/lib/guards";
 import { Gallery } from "./gallery";
+import { BackToSettings } from "../back-to-settings";
 
 export const metadata = { title: "Design system" };
 
@@ -12,6 +13,7 @@ export default async function DesignSystemPage() {
   await requireStaffPage("Settings.Club.Read");
   return (
     <main className="wrap single ds-page">
+      <BackToSettings />
       <Gallery />
     </main>
   );

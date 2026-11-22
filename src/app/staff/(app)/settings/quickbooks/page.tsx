@@ -1,5 +1,6 @@
-import { Notice } from "@/app/components/notice";
+import { Card, HowThisWorks, KeyValue, LinkButton, Notice } from "@/app/components/ui";
 import { requireStaffPage } from "@/lib/guards";
+import { can } from "@/lib/permissions/effective";
 import { connectionView } from "@/lib/quickbooks/connection";
 import { quickbooksProblems } from "@/lib/quickbooks/health";
 import { QUICKBOOKS_USE } from "@/lib/quickbooks/what-it-does";
@@ -11,67 +12,75 @@ import { disconnectAction } from "./actions";
 import { rosterCounts } from "./roster-counts";
 import { getParentSettings } from "@/lib/parents/settings";
 import { peopleWithAccess } from "@/lib/parents/switches";
-import { BackToSettings } from "../back-to-settings";
 import { disconnectWarning, SWITCH_PAGE, SWITCH_WORDS } from "./switch-words";
 import { getRosterSource } from "@/lib/roster/source";
-import { StateWords } from "@/app/components/state-words";
 import { lastCheck, lastCheckWords } from "@/lib/quickbooks/sandbox-check/view";
+import { IntegrationHead, IntegrationHealth } from "../integration-head";
+import { healthLines, quickbooksRow } from "../statuses";
 
 export const metadata = { title: "QuickBooks settings" };
 export const dynamic = "force-dynamic";
 
-/** What is set, shown plainly, with no inputs (spec §3 The settings view). Changing anything opens the steps. */
+/**
+ * QuickBooks, an integration's page (the Settings spec, "Integration pages"): its head with the status, what is set,
+ * its Health line, its own cards (the membership shape, the roster, the portal's requests), then the change, ending with
+ * Disconnect. What is set is shown plainly, with no inputs; changing anything opens the steps.
+ */
 export default async function QuickBooksSettingsPage() {
-  await requireStaffPage("Settings.QuickBooks.ReadWrite");
-  const [conn, page, wake, problems, settings, people, checked, source] = await Promise.all([connectionView(), loadRosterPage(), lastWake(), quickbooksProblems(), getParentSettings(), peopleWithAccess(), lastCheck(), getRosterSource()]);
+  const ctx = await requireStaffPage("Settings.QuickBooks.ReadWrite");
+  const [conn, page, wake, problems, settings, people, checked, source, row, lines] = await Promise.all([connectionView(), loadRosterPage(), lastWake(), quickbooksProblems(),
+    getParentSettings(), peopleWithAccess(), lastCheck(), getRosterSource(), quickbooksRow(), can(ctx.effective, "Admin.Health.Read") ? healthLines() : []]);
   const when = (iso: string | null) => (iso ? <LocalTime iso={iso} /> : "Not yet");
   const warning = settings.signin && people > 0 ? disconnectWarning(people) : undefined;
   return (
     <main className="wrap single">
-      <BackToSettings />
-      <h1 className="page-title">QuickBooks</h1>
-      <p className="lede">{QUICKBOOKS_USE.reads} {QUICKBOOKS_USE.writes} Each change is in the audit log. Only Admins can change these settings, because they reach the club&apos;s books.</p>
+      <IntegrationHead of="quickbooks" title="QuickBooks" status={row.status}
+        lede={<>{row.does} Only Admins can change these settings, because they reach the club&apos;s books.</>} />
       {problems.length > 0 && <Notice tone="warning" title="Needs attention" titleId="qbo-problems-h"><ul className="notice-list">{problems.map((p) => <li key={p.kind}>{p.text}</li>)}</ul></Notice>}
 
-      <section className="box" aria-labelledby="qbo-conn-h"><h2 id="qbo-conn-h">Connection</h2>
-        <StateWords state={conn.connected && problems.length === 0 ? "done" : "todo"} words={!conn.configured ? "Not set up yet" : !conn.connected ? "Not connected" : problems.length ? "Connected, and something needs attention" : "Connected"} />
+      <Card title="Connection" titleId="qbo-conn-h">
+        <HowThisWorks summary="What the portal does with QuickBooks"><p>{QUICKBOOKS_USE.reads} {QUICKBOOKS_USE.writes} Each change is in the audit log.</p></HowThisWorks>
         {!conn.configured ? <p>QuickBooks isn&apos;t set up yet.</p> : (
-          <dl className="details">
-            <dt>Status</dt><dd>{conn.connected ? <>Connected to <b>{conn.companyName ?? "a QuickBooks company"}</b></> : "Not connected. The Intuit app's keys are saved."}</dd>
-            <dt>Which QuickBooks</dt><dd>{conn.environment === "production" ? "Production (the club's real books)" : "Sandbox (an Intuit test company)"}</dd>
-            <dt>Client ID</dt><dd><code>{conn.clientId}</code></dd>
-            {conn.connected && <><dt>Connected</dt><dd>{when(conn.connectedAt)}</dd>
-              <dt>Last renewed</dt><dd>{when(conn.lastTokenRefreshAt)}</dd>
-              <dt>Expires</dt><dd>{when(conn.refreshExpiresAt)} unless it is renewed first. The worker renews it every day.</dd></>}
-          </dl>
+          // The company's name is QuickBooks text: a text child, never markup.
+          <KeyValue items={[
+            { key: "status", label: "Status", value: conn.connected ? <>Connected to <b>{conn.companyName ?? "a QuickBooks company"}</b></> : "Not connected. The Intuit app's keys are saved." },
+            { key: "env", label: "Which QuickBooks", value: conn.environment === "production" ? "Production (the club's real books)" : "Sandbox (an Intuit test company)" },
+            { key: "client", label: "Client ID", value: <code>{conn.clientId}</code> },
+            conn.connected && { key: "at", label: "Connected", value: when(conn.connectedAt) },
+            conn.connected && { key: "renewed", label: "Last renewed", value: when(conn.lastTokenRefreshAt) },
+            conn.connected && { key: "expires", label: "Expires", value: <>{when(conn.refreshExpiresAt)} unless it is renewed first. The worker renews it every day.</> },
+          ]} />
         )}
-      </section>
+      </Card>
 
-      <section className="box" aria-labelledby="qbo-shape-h"><h2 id="qbo-shape-h">Membership shape</h2>
+      <IntegrationHealth id="qbo" here="/staff/settings/quickbooks" line={lines.find((l) => l.key === "quickbooks")} />
+
+      <Card title="Membership shape" titleId="qbo-shape-h">
         <p>{page.shapeWords ?? "Not chosen yet."}</p>
         {page.brokenTypes.length > 0 && <Notice tone="warning">This shape names a customer type QuickBooks no longer has. Choose the shape again.</Notice>}
-      </section>
+      </Card>
 
-      <section className="box" aria-labelledby="qbo-roster-h"><h2 id="qbo-roster-h">Roster</h2>
-        <dl className="details">
-          <dt>Last read from QuickBooks</dt><dd>{page.lastOkAt ? <LocalTime iso={page.lastOkAt} /> : "Not yet"}{page.lastRun && !page.lastRun.ok ? <> (the latest try failed: {page.lastRun.detail})</> : null}{!conn.connected && page.lastOkAt ? ". QuickBooks is disconnected, so the roster is no longer current." : null}</dd>
-          <dt>What it found</dt><dd>{rosterCounts(page.roster) || "Nothing to show until a shape is chosen."}</dd>
-          <dt>Worker</dt><dd>{wake ? <>Last checked in <LocalTime iso={wake} /></> : "Hasn't checked in yet."}</dd>
-        </dl>
-      </section>
+      <Card title="Roster" titleId="qbo-roster-h">
+        <KeyValue items={[
+          { key: "read", label: "Last read from QuickBooks", value: <>{page.lastOkAt ? <LocalTime iso={page.lastOkAt} /> : "Not yet"}{page.lastRun && !page.lastRun.ok ? <> (the latest try failed: {page.lastRun.detail})</> : null}{!conn.connected && page.lastOkAt ? ". QuickBooks is disconnected, so the roster is no longer current." : null}</> },
+          { key: "found", label: "What it found", value: rosterCounts(page.roster) || "Nothing to show until a shape is chosen." },
+          { key: "worker", label: "Worker", value: wake ? <>Last checked in <LocalTime iso={wake} /></> : "Hasn't checked in yet." },
+        ]} />
+      </Card>
 
-      <section className="box" aria-labelledby="qbo-check-h"><h2 id="qbo-check-h">The portal&apos;s requests</h2>
+      <Card title={"The portal's requests"} titleId="qbo-check-h">
         <p>{lastCheckWords(checked)}{checked ? <> (<LocalTime iso={checked.at} />)</> : null}</p>
         <p><a className="link-line" href="/staff/settings/quickbooks/check">Check the portal&apos;s requests</a></p>
-      </section>
+      </Card>
 
-      <section className="box" aria-labelledby="qbo-change-h"><h2 id="qbo-change-h">{conn.configured ? "Change" : "Set up"}</h2>
+      <Card title={conn.configured ? "Change" : "Set up"} titleId="qbo-change-h">
         <p>{conn.configured ? "Open the steps to change the Intuit app's keys, renew the connection or choose the shape again." : "Three steps: the Intuit app's keys, signing in to Intuit, and the shape of your membership."}</p>
-        <p><a className="btn" href="/staff/settings/quickbooks/setup">{conn.configured ? "Change" : "Set up"}</a></p>
-        <Disconnect connected={conn.connected} disconnect={disconnectAction} warning={warning} />
+        <p className="settings-open"><LinkButton href="/staff/settings/quickbooks/setup" variant="primary">{conn.configured ? "Change" : "Set up"}</LinkButton></p>
         {/* A first connect needs no switch: offered only while the roster names a company. */}
         {source !== null && <p>{SWITCH_WORDS.setupHint} <a className="link-line" href={SWITCH_PAGE}>{SWITCH_WORDS.setupLink}</a></p>}
-      </section>
+        {/* Disconnect, last, as it is today: it stays in place after it is pressed, to say what it did. */}
+        <Disconnect connected={conn.connected} disconnect={disconnectAction} warning={warning} />
+      </Card>
     </main>
   );
 }

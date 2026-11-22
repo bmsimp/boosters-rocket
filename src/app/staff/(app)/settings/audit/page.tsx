@@ -8,6 +8,8 @@ import { DataTable } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
 import { AuditFilterForm } from "./filter-form";
 
+import { SettingsHeader } from "../back-to-settings";
+
 export const metadata = { title: "Audit log" };
 export const dynamic = "force-dynamic";
 
@@ -21,8 +23,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
   const filtered = hasFilters(filters);
   return (
     <main className="wrap single">
-      <h1 className="page-title">Audit log</h1>
-      <p className="lede">Every change, sign-in and staff look at a family&apos;s record, newest first. Only Admins can read it, as some rows hold staff notes about parents. Nothing here can be changed.</p>
+      <SettingsHeader title="Audit log" lede={<>Every change, sign-in and staff look at a family&apos;s record, newest first. Only Admins can read it, as some rows hold staff notes about parents. Nothing here can be changed.</>} />
 
       <section className="box" aria-labelledby="audit-find-h"><h2 id="audit-find-h">Find</h2>
         <AuditFilterForm actions={actions.map((code) => ({ code, name: actionName(code) }))}

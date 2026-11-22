@@ -5,7 +5,7 @@ import { clubSaved } from "@/lib/setup/club-step";
 import { StateWords } from "@/app/components/state-words";
 import { MailWarning } from "../../mail-warning";
 import { seesMailWarning } from "../../mail-warning-rule";
-import { BackToSettings } from "../back-to-settings";
+import { SettingsHeader } from "../back-to-settings";
 
 export const metadata = { title: "Club settings" };
 export const dynamic = "force-dynamic";
@@ -17,9 +17,7 @@ export default async function ClubSettingsPage() {
   const canChange = can(ctx.effective, "Settings.Club.ReadWrite");
   return (
     <main className="wrap single">
-      <BackToSettings />
-      <h1 className="page-title">Club</h1>
-      <p className="lede">The club&apos;s name and color are on every page, in every email and on the app parents put on their phones.</p>
+      <SettingsHeader title="Club" lede={<>The club&apos;s name and color are on every page, in every email and on the app parents put on their phones.</>} />
       {seesMailWarning(ctx.effective) && <MailWarning canFix={can(ctx.effective, "Settings.Mail.ReadWrite")} />}
       <section className="box" aria-labelledby="club-h"><h2 id="club-h">What is set</h2>
         {!saved ? <StateWords state="todo" words="Not set yet: the portal still shows the name Boosters Rocket" />

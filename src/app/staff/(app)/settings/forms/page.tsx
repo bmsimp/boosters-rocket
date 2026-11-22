@@ -1,48 +1,48 @@
 import { requireStaffPage } from "@/lib/guards";
+import { can } from "@/lib/permissions/effective";
 import { apiFailing, formsSummary } from "@/lib/forms/settings";
-import { LocalTime } from "@/app/components/local-time";
-import { StateWords } from "@/app/components/state-words";
-import { BackToSettings } from "../back-to-settings";
+import { Card, KeyValue, LinkButton, LocalTime } from "@/app/components/ui";
+import { IntegrationHead, IntegrationHealth } from "../integration-head";
+import { documensoRow, healthLines } from "../statuses";
 
 export const metadata = { title: "Forms settings" };
 export const dynamic = "force-dynamic";
 
 /**
- * How the portal reaches the club's own Documenso, where forms are signed (v1 spec §9). Admin only: the API token can
- * read every signed form. The saved token and webhook secret are never sent to this page; it shows only whether each
- * is saved. It shows no family's data, so opening it is not audited. What is set is shown plainly here; the steps that
- * set it up or change it are on their own page (setup/page.tsx), the pattern the QuickBooks page set.
+ * How the portal reaches the club's own Documenso, where forms are signed (v1 spec §9), an integration's page (the
+ * Settings spec): its head with the status, what is set, its Health line, and the change. Admin only: the API token
+ * can read every signed form. The saved token and webhook secret are never sent to this page; it shows only whether
+ * each is saved. It shows no family's data, so opening it is not audited. The steps are on their own page
+ * (setup/page.tsx). Documenso has no disconnect, and this page adds none.
  */
 export default async function FormsSettingsPage() {
-  await requireStaffPage("Settings.Forms.ReadWrite");
-  const summary = await formsSummary();
+  const ctx = await requireStaffPage("Settings.Forms.ReadWrite");
+  const [summary, row, lines] = await Promise.all([formsSummary(), documensoRow(), can(ctx.effective, "Admin.Health.Read") ? healthLines() : []]);
   const when = (iso: string | null) => (iso ? <LocalTime iso={iso} /> : "Not yet");
   const failing = apiFailing(summary.status);
   return (
     <main className="wrap single">
-      <BackToSettings />
-      <h1 className="page-title">Forms</h1>
-      <p className="lede">Parents sign the club&apos;s forms inside the portal, in a Documenso the club runs itself. This page connects the two. Only Admins can change it, because the API token can read every signed form.</p>
+      <IntegrationHead of="documenso" title="Documenso" status={row.status}
+        lede={<>Parents sign the club&apos;s forms inside the portal, in a Documenso the club runs itself. This page connects the two. Only Admins can change it, because the API token can read every signed form.</>} />
 
-      <section className="box" aria-labelledby="forms-conn-h"><h2 id="forms-conn-h">Connection</h2>
-        {summary.origin === null ? <StateWords state="todo" words="Not set up yet" />
-          : !summary.tokenReadable || failing || !summary.status.lastApiOkAt ? <StateWords state="todo" words={failing ? "The latest call to Documenso failed" : !summary.tokenReadable ? "The API token can't be read" : "Saved, but not checked yet"} />
-          : <StateWords state="done" words="Connected" />}
+      <Card title="Connection" titleId="forms-conn-h">
         {summary.origin === null ? <p>Forms aren&apos;t set up yet. Until they are, parents read that forms aren&apos;t ready, and nothing else changes for them.</p> : (
-          <dl className="details">
-            <dt>Documenso</dt><dd><code>{summary.origin}</code></dd>
-            <dt>API token</dt><dd>{summary.tokenReadable ? "Saved" : "Saved, but it can't be opened with this server's encryption key. Enter it again."}</dd>
-            <dt>Last answered</dt><dd>{when(summary.status.lastApiOkAt)}{failing ? <> (the latest call failed, <LocalTime iso={summary.status.lastApiFailureAt!} />)</> : null}</dd>
-            <dt>Webhook secret</dt><dd>{summary.webhookSecretSaved ? "Saved" : "Not made yet"}</dd>
-            <dt>Last webhook</dt><dd>{when(summary.status.lastWebhookAt)}</dd>
-          </dl>
+          <KeyValue items={[
+            { key: "origin", label: "Documenso", value: <code>{summary.origin}</code> },
+            { key: "token", label: "API token", value: summary.tokenReadable ? "Saved" : "Saved, but it can't be opened with this server's encryption key. Enter it again." },
+            { key: "answered", label: "Last answered", value: <>{when(summary.status.lastApiOkAt)}{failing ? <> (the latest call failed, <LocalTime iso={summary.status.lastApiFailureAt!} />)</> : null}</> },
+            { key: "secret", label: "Webhook secret", value: summary.webhookSecretSaved ? "Saved" : "Not made yet" },
+            { key: "webhook", label: "Last webhook", value: when(summary.status.lastWebhookAt) },
+          ]} />
         )}
-      </section>
+      </Card>
 
-      <section className="box" aria-labelledby="forms-change-h"><h2 id="forms-change-h">{summary.origin === null ? "Set up" : "Change"}</h2>
+      <IntegrationHealth id="forms" here="/staff/settings/forms" line={lines.find((l) => l.key === "forms")} />
+
+      <Card title={summary.origin === null ? "Set up" : "Change"} titleId="forms-change-h">
         <p>{summary.origin === null ? "Four steps: Documenso's address and an API token, a check, the webhook, and a template for each form." : "Open the steps to change the address or the API token, check the connection again, or make a new webhook secret."}</p>
-        <p className="settings-open"><a className="btn" href="/staff/settings/forms/setup">{summary.origin === null ? "Set up" : "Change"}</a></p>
-      </section>
+        <p className="settings-open"><LinkButton href="/staff/settings/forms/setup" variant="primary">{summary.origin === null ? "Set up" : "Change"}</LinkButton></p>
+      </Card>
     </main>
   );
 }

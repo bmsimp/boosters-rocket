@@ -990,14 +990,20 @@ main.wrap.single > .page-head + p { margin-top: var(--s4); }
 .list-trail .status-dot { font-size: var(--text-sm); }
 @media (min-width: 760px) {
   .settings-layout { display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: var(--s5); align-items: start; }
-  .settings-rail { padding-top: calc(var(--s3) + 44px + var(--s1)); } /* its title level with the page title, below the back line kept above it */
+  .settings-rail { padding-top: calc(44px + var(--s1)); } /* its title level with the page title, below the back line kept above it */
   .back-to-settings { display: none; }
+  /* A settings page's way back to Settings is for phones: here its line keeps its room, so every title is level with the rail's. */
+  .settings-head .page-back { visibility: hidden; }
 }
 @media (min-width: 1024px) { .settings-layout { grid-template-columns: 264px minmax(0, 1fr); gap: var(--s6); } }
 @media (max-width: 759.98px) {
   .settings-rail:not(.is-root) { display: none; }
   .settings-rail.is-root { padding-top: var(--s4); }
-  .rail-group a { min-height: 52px; }
+  /* The first screen: each group a bordered list, each item a full-width row with its status under its name. */
+  .rail-group ul { gap: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .rail-group li + li { border-top: 1px solid var(--border); }
+  .rail-group a { flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; min-height: 56px; padding: var(--s2) var(--s4); border-radius: 0; }
+  .rail-label { margin-inline: 0; }
 }
 /* The Overview, and the Integrations page: each kind of system, its rule, and its rows. */
 .settings-overview > .notice, .settings-overview > .box { margin-top: var(--s5); }
@@ -1012,13 +1018,16 @@ main.wrap.single > .page-head + p { margin-top: var(--s4); }
   background: var(--surface); color: var(--ink-2); }
 .logo-tile img, .logo-tile svg { display: block; width: 20px; height: 20px; }
 .logo-text { font-size: var(--text-sm); font-weight: 700; letter-spacing: 0.02em; color: var(--ink); }
-.logo-head { width: 48px; height: 48px; }
+.logo-text::before { content: attr(data-mark); } /* drawn, not text: the name beside the tile is the words */
+.logo-head { width: 48px; height: 40px; }
 .logo-head img, .logo-head svg { width: 24px; height: 24px; }
 @media (max-width: 759.98px) { .logo-row { width: 48px; } }
-/* An integration's own page: the mark beside its title. */
-.integration-head { display: flex; align-items: flex-start; gap: var(--s4); }
-.integration-head > .page-head { flex: 1 1 auto; min-width: 0; }
-.integration-head > .logo-tile { margin-top: calc(44px + var(--s1)); }
+/* An integration's own page: the mark in its tile before the title's words, the status badge level with the title. */
+.integration-head { align-items: flex-start; }
+.integration-head .page-title { display: flex; align-items: center; gap: var(--s3); }
+.integration-head > .page-actions { padding-top: calc(44px + var(--s1) + 6px); }
+.integration-head .page-actions .badge { font-size: var(--text-sm); }
+@media (max-width: 759.98px) { .integration-head > .page-actions { padding-top: 0; } }
 .settings-open { margin-top: var(--s4); display: flex; flex-wrap: wrap; gap: var(--s2); }
 /* The way back to Settings, above a settings page's title: on a phone only (the rail is beside the page from 760px). */
 .back-to-settings { margin-top: var(--s3); }
