@@ -167,7 +167,7 @@ describe("a rename of a guardian's Parent customer", () => {
     await noPressAtGuardians(riveras, { guardianSends: ["guardian_name"], sendNotes: [] });
     expect(guardianDifferenceNext(riveras.differences[0]!)).toBe(NAME_NEXT);
     const cells = await cellsOf("Rivera Family");
-    expect(cells[3]).toContain("1 difference with the books: guardians' Parent customers.");
+    expect(cells[4]).toContain("1 difference with the books: guardians' Parent customers.");
     expect(cells[4]).toContain(`Ana Lopez's name on their Parent customer. In the portal: “Ana Lopez”. In the books: “Ana Rivera”. ${NAME_NEXT}`);
     expect(cells[4]).not.toContain("See the change on Reconciliation");
     expect(cells[4]).not.toContain("Take QuickBooks' into the app");
@@ -225,7 +225,7 @@ describe("a removed guardian's Parent customer left active", () => {
     await noPressAtGuardians(riveras, { guardianSends: ["guardian_inactive"], sendNotes: [] });
     expect(riveras.guardianSends[0]!.words).toHaveLength(1);
     const cells = await cellsOf("Rivera Family");
-    expect(cells[3]).toContain("1 difference with the books: guardians' Parent customers.");
+    expect(cells[4]).toContain("1 difference with the books: guardians' Parent customers.");
     expect(cells[4]).toContain(`Whether Ana Rivera is this family's guardian. In the portal: Removed from this family. In the books: Their Parent customer is active. ${REMOVED_NEXT}`);
     // Still listed among the removed guardians, as slice M3c draws them.
     expect(cells[4]).toContain("Removed guardians, with their own Parent customers in the books:Ana Rivera: linked to Ana Rivera, active in the books");

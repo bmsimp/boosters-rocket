@@ -388,7 +388,9 @@ describe("who may press it, and the page", () => {
     const linker = await staffWith("linker@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
     asStaff(linker);
     const theirs = listOf(await renderPage(AccountingLinksPage));
-    expect(theirs).not.toContain("Send the app's for all");
+    // Neither the press nor its notice: How links are made, in the card, still names it for what it is.
+    expect(theirs).not.toContain("Send the app's for all (");
+    expect(theirs).not.toContain("Send the app's for all sends only");
     // Oak made inactive in the portal, its customer active in the books: listed after the families, and so spoken of.
     await db.update(student).set({ active: false }).where(eq(student.familyId, oak));
     await db.update(family).set({ active: false }).where(eq(family.id, oak));

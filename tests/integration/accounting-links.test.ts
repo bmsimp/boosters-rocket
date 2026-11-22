@@ -155,7 +155,7 @@ describe("the statuses of linked families", () => {
     await asStaff(await seedStaff({ email: "admin@club.org", name: "Ada Admin", admin: true }));
     const html = await renderPage(AccountingLinksPage);
     const at = html.indexOf('id="links-list-h"');
-    expect(rowNamed(html.slice(at, html.indexOf("</section>", at)), "Oak Family")![3]).toMatch(/^LinkedMade in the books from the portal by linker, on .+\.$/);
+    expect(rowNamed(html.slice(at, html.indexOf("</section>", at)), "Oak Family")![4]).toMatch(/^Details: Oak FamilyMade in the books from the portal by linker, on .+?\./);
   });
 
   it("tells a customer gone from the books, and keeps the link as it is", async () => {
@@ -186,8 +186,8 @@ describe("the statuses of linked families", () => {
     await asStaff(await seedStaff({ email: "admin@club.org", name: "Ada Admin", admin: true }));
     const html = await renderPage(AccountingLinksPage);
     const at = html.indexOf('id="links-list-h"');
-    expect(rowNamed(html.slice(at, html.indexOf("</section>", at)), "Chen Family")![3])
-      .toBe("Not a family nowThe linked customer is still in the books, but isn't a family there now: it has another customer type there. The link is kept as it is.");
+    expect(rowNamed(html.slice(at, html.indexOf("</section>", at)), "Chen Family")![4])
+      .toContain("The linked customer is still in the books, but isn't a family there now: it has another customer type there. The link is kept as it is.");
   });
 
   it("says a linked customer with no customer type at all has none, and joins each reason that applies", async () => {
@@ -446,16 +446,18 @@ describe("the page", () => {
     expect(tableRows(html)).toHaveLength(3);
     const rivera = rowNamed(html, "Rivera Family")!;
     expect(rivera.slice(0, 3)).toEqual(["Rivera Family", "ana@example.com", "Rivera FamilyNo email address"]);
-    expect(rivera[3]).toMatch(/^Carried overCarried over from the roster by the portal, on .+\. Nobody has confirmed it since\.$/);
-    expect(rivera[4]).toBe("Students and guardians: Rivera FamilyStudents:Leo Rivera: linked to Leo RiveraGuardians:Ana Rivera (ana@example.com): linked to Ana Rivera" + ANA_OWN + riveraPresses());
+    // The status cell is the badge and one short line; the whole sentence opens the row's Details.
+    expect(rivera[3]).toMatch(/^Carried overCarried over .+ · not confirmed$/);
+    expect(rivera[4]).toMatch(/^Details: Rivera FamilyCarried over from the roster by the portal, on .+?\. Nobody has confirmed it since\.Students:/);
+    expect(rivera[4]!.replace(/^Details: Rivera FamilyCarried over from the roster by the portal, on .+?\. Nobody has confirmed it since\./, "")).toBe("Students:Leo Rivera: linked to Leo RiveraGuardians:Ana Rivera (ana@example.com): linked to Ana Rivera" + ANA_OWN + riveraPresses());
     const patel = rowNamed(html, "The Patels")!;
     expect(patel.slice(1)).toEqual(["asha@example.com", "Patel Familyasha@example.com",
-      "SuggestedA guardian's sign-in address matches: asha@example.com, on this customer.",
+      "SuggestedA guardian's sign-in address matches",
       // Since slice M3a a Suggested row's opening says what Confirm links, and offers it and Leave unlinked.
-      "Students and guardians: The PatelsNo active students.Guardians:Asha Patel (asha@example.com): no link of its own"
+      "Details: The PatelsA guardian's sign-in address matches: asha@example.com, on this customer.No active students.Guardians:Asha Patel (asha@example.com): no link of its own"
         + "Confirming links it to “Patel Family”. Nothing is sent to the books.No student would be linked with it." + LINK_EFFECT + LINK_GUARDIANS_EFFECT + "Confirm: The PatelsLeave unlinked: The Patels"]);
     expect(withoutIds(html)).toContain('href="/staff/roster/<id>"');
-    expect(html).toContain("<details class=\"more\"><summary>Students and guardians<span class=\"visually-hidden\">: The Patels</span></summary>");
+    expect(html).toContain("<details class=\"more\"><summary>Details<span class=\"visually-hidden\">: The Patels</span></summary>");
     expect((await db.select().from(auditLog)).length).toBe(audits);
     // The customers with no family have their own part of this page since slice M6 (on Reconciliation before), counted
     // by the pool's own rule, and the page says a family the portal has is linked here, that "Create a family from this"
@@ -490,8 +492,8 @@ describe("the page", () => {
     await asAdmin();
     const patel = rowNamed(list(await renderPage(AccountingLinksPage)), "The Patels")!;
     expect(patel.slice(1)).toEqual(["None that can sign in", "None",
-      "No matchNone of this family's guardians can sign in, so there is no address to match.",
-      "Students and guardians: The PatelsNo active students.Guardians:Asha Patel (asha@example.com), can't sign in, so this address isn't matched: no link of its own"
+      "No matchNo guardian can sign in",
+      "Details: The PatelsNone of this family's guardians can sign in, so there is no address to match.No active students.Guardians:Asha Patel (asha@example.com), can't sign in, so this address isn't matched: no link of its own"
         + "Pick a different customer: The PatelsLeave unlinked: The Patels"]);
   });
 
@@ -655,7 +657,8 @@ describe("differences, for a link that stands (slice M2)", () => {
     expect(rowOf(view, "The Patels").differences).toEqual([]); // no link: nothing compared there
     await asAdmin();
     const html = list(await renderPage(AccountingLinksPage));
-    expect(rowNamed(html, "Rivera Family")![3]).toMatch(/1 difference with the books: where a student is.$/);
+    expect(rowNamed(html, "Rivera Family")![3]).toMatch(/ · 1 difference$/);
+    expect(rowNamed(html, "Rivera Family")![4]).toContain("1 difference with the books: where a student is.");
     expect(rowNamed(html, "Rivera Family")![4]).toContain(
       `A student the books have under this family. In the portal: Their record is in The Patels. In the books: “Leo Rivera”, a student customer under this family. ${words} See the change on Reconciliation`);
   });
@@ -722,8 +725,9 @@ describe("differences, for a link that stands (slice M2)", () => {
     await readAgain();
     expect((await diffsOf("Rivera Family")).map((d) => d.kind)).toEqual(["name", "place", "parent_customers"]);
     await asAdmin();
-    expect(rowNamed(list(await renderPage(AccountingLinksPage)), "Rivera Family")![3])
-      .toMatch(/^Linked, with differencesCarried over from the roster by the portal, on .+\. Nobody has confirmed it since\. 3 differences with the books: names, where a student is, Parent customers or guardians on one side only\.$/);
+    const row = rowNamed(list(await renderPage(AccountingLinksPage)), "Rivera Family")!;
+    expect(row[3]).toMatch(/^Linked, with differencesCarried over .+ · not confirmed · 3 differences$/);
+    expect(row[4]).toMatch(/^Details: Rivera FamilyCarried over from the roster by the portal, on .+?\. Nobody has confirmed it since\. 3 differences with the books: names, where a student is, Parent customers or guardians on one side only\./);
   });
 
   it("in flat books: the member's name and whether it is active, and nothing of students or guardians", async () => {
@@ -774,8 +778,10 @@ describe("differences, for a link that stands (slice M2)", () => {
     expect(html).toContain("1 family whose link was carried over has differences, so it is counted under both Carried over and Linked, with differences.");
     expect(whole).toContain("A carried-over family with differences is counted under both Carried over and Linked, with differences.");
     // Each row says how its link was made, beside its differences.
-    expect(rowNamed(html, "Patel Family")![3]).toMatch(/^Linked, with differencesConfirmed by treasurer, on this page or with “Create a family from this”, on .+\. 1 difference with the books: names\.$/);
-    expect(rowNamed(html, "Chen Family")![3]).toMatch(/^Linked, with differencesCarried over from the roster by the portal, on .+\. Nobody has confirmed it since\. 1 difference with the books: Parent customers or guardians on one side only\.$/);
+    expect(rowNamed(html, "Patel Family")![3]).toMatch(/^Linked, with differencesConfirmed .+ · 1 difference$/);
+    expect(rowNamed(html, "Patel Family")![4]).toMatch(/^Details: Patel FamilyConfirmed by treasurer, on this page or with “Create a family from this”, on .+?\. 1 difference with the books: names\./);
+    expect(rowNamed(html, "Chen Family")![3]).toMatch(/^Linked, with differencesCarried over .+ · not confirmed · 1 difference$/);
+    expect(rowNamed(html, "Chen Family")![4]).toMatch(/^Details: Chen FamilyCarried over from the roster by the portal, on .+?\. Nobody has confirmed it since\. 1 difference with the books: Parent customers or guardians on one side only\./);
     const filtered = list(await renderPage(AccountingLinksPage, { searchParams: { status: "carried_over" } }));
     expect(tableRows(filtered).map((r) => r[0])).toEqual(["Chen Family", "Rivera Family"]);
   });
@@ -905,8 +911,8 @@ describe("differences, for a link that stands (slice M2)", () => {
     const html = list(whole);
     expect(html).not.toContain("<b>Bold</b>");
     expect(html).toContain("In the books: “&lt;b&gt;Bold&lt;/b&gt; Rivera”.");
-    expect(html).toContain("<details class=\"more\"><summary>Students, guardians and differences<span class=\"visually-hidden\">: Rivera Family</span></summary>");
-    expect(rowNamed(html, "Rivera Family")![4]).toBe("Students, guardians and differences: Rivera FamilyStudents:Leo Rivera: linked to Leo RiveraGuardians:Ana Rivera (ana@example.com): linked to Ana Rivera" + ANA_OWN
+    expect(html).toContain("<details class=\"more\"><summary>Details<span class=\"visually-hidden\">: Rivera Family</span></summary>");
+    expect(rowNamed(html, "Rivera Family")![4]!.replace(/^Details: Rivera FamilyCarried over from the roster by the portal, on .+?\. Nobody has confirmed it since\. 1 difference with the books: names\./, "")).toBe("Students:Leo Rivera: linked to Leo RiveraGuardians:Ana Rivera (ana@example.com): linked to Ana Rivera" + ANA_OWN
       + "Where the portal and the books differ:The family's name. In the portal: “Rivera Family”. In the books: “<b>Bold</b> Rivera”."
       // Since slice M4a, the press that takes the books' name, with what it does, the books' name as text.
       + "Takes “<b>Bold</b> Rivera” as this family's name in the portal, as the books have it. Nothing is sent to the books."

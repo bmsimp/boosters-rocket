@@ -313,8 +313,9 @@ describe("Leave unlinked, and Undo", () => {
     const html = await renderPage(AccountingLinksPage);
     expect(html).toContain('<option value="left_unlinked">Left unlinked (3)</option>');
     const list = html.slice(html.indexOf('id="links-list-h"'));
-    expect(rowNamed(list, "The Quiets")![3]).toMatch(/^Left unlinkedLeft unlinked by linker, on .+\. No customer is suggested for it until someone undoes this or links it\.$/);
-    expect(rowNamed(list, "The Quiets")![4]).toBe("Students and guardians: The QuietsNo active students.No guardians.Pick a different customer: The QuietsUndo Left unlinked: The Quiets");
+    // The status cell: the badge and who and when, in short; the whole sentence opens the row's Details.
+    expect(rowNamed(list, "The Quiets")![3]).toMatch(/^Left unlinkedBy linker, .+$/);
+    expect(rowNamed(list, "The Quiets")![4]).toMatch(/^Details: The QuietsLeft unlinked by linker, on .+\. No customer is suggested for it until someone undoes this or links it\.No active students\.No guardians\.Pick a different customer: The QuietsUndo Left unlinked: The Quiets$/);
     const filtered = await renderPage(AccountingLinksPage, { searchParams: { status: "left_unlinked" } });
     expect(tableRows(filtered.slice(filtered.indexOf('id="links-list-h"'))).map((r) => r[0])).toEqual(["Ada's Family", "The Patels", "The Quiets"]);
 
@@ -627,7 +628,7 @@ describe("who may press, and the page", () => {
     const list = (html: string) => { const at = html.indexOf('id="links-list-h"'); return html.slice(at, html.indexOf("</section>", at)); };
     const pick = (html: string) => { const at = html.indexOf('id="links-pick-h"'); return at < 0 ? null : html.slice(at, html.indexOf("</section>", at)); };
     let html = await renderPage(AccountingLinksPage);
-    expect(rowNamed(list(html), "The Patels")![4]).toBe("Students and guardians: The PatelsStudents:Asha Patel: no link of its ownMia Patel: no link of its ownravi patel: no link of its own"
+    expect(rowNamed(list(html), "The Patels")![4]).toBe("Details: The PatelsA guardian's sign-in address matches: asha@example.com, on this customer.Students:Asha Patel: no link of its ownMia Patel: no link of its ownravi patel: no link of its own"
       + "Guardians:Asha Patel (asha@example.com): no link of its own"
       + "Confirming links it to “Patel Family”. Nothing is sent to the books.Students linked with it, by name:Asha Patel with Asha Patelravi patel with Ravi Patel (inactive in the books)"
       + "Left with no link, of the portal's students:Mia PatelLeft with no record in the portal, of the student customers under it in the books:Dev Patel"

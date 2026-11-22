@@ -464,7 +464,7 @@ describe("the family's page points at Accounting links only for a reader who may
   it("a Parent customer two of the family's guardians share: how it is sorted out, with a link or in words", async () => {
     await linkRowTo(await rowIn(rivera, "Rafa Rivera", "rafa@example.com"), "11");
     // A reader who changes families is pointed at the note under Change in QuickBooks, which says how.
-    const seeNote = "shared, or another family's guardian's, so nothing is sent for it. See the note under Change in QuickBooks";
+    const seeNote = "Shared, or another family's guardian's, so nothing is sent for it. See the note under Change in QuickBooks";
     asStaff(await staffWith("both@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Accounting.Link.ReadWrite"]));
     let html = await renderPage(RosterEntryPage, { params: { id: String(rivera) } });
     let parents = sectionOf(html, "entry-parents-h"), changes = sectionOf(html, "family-changes-h");
@@ -481,7 +481,7 @@ describe("the family's page points at Accounting links only for a reader who may
     // A reader who links families but doesn't change them sees no note: the cell itself points at Accounting links.
     asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]));
     parents = sectionOf(await renderPage(RosterEntryPage, { params: { id: String(rivera) } }), "entry-parents-h");
-    expect(text(parents)).toContain("shared, or another family's guardian's, so nothing is sent for it. Sort it out on Accounting links");
+    expect(text(parents)).toContain("Shared, or another family's guardian's, so nothing is sent for it. Sort it out on Accounting links");
     expect(parents).toContain('href="/staff/links"');
     expect(stub.apiCalls()).toEqual([]);
   });

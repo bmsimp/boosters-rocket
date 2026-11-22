@@ -103,6 +103,10 @@ export function noFamilyRows(customers: readonly NoFamilyCustomer[], aims: Reado
 export function CustomersWithNoFamily({ view, mayChangeFamilies, children }: { view: Pick<LinksView, "state" | "noFamilyList" | "aims">; mayChangeFamilies: boolean; children?: ReactNode }) {
   const list = view.noFamilyList;
   const rows = list === null ? [] : noFamilyRows(list, view.aims);
+  // With none to list (and so nothing to offer), the part is one line, so the families' table comes up the page.
+  if (view.state === "listed" && list !== null && rows.length === 0) {
+    return <Notice tone="done" live="none" title="Customers with no family" titleId={NO_FAMILY_H} className="notice-inline">{NO_FAMILY_WORDS.none}</Notice>;
+  }
   return (
     <Card title={<>Customers with no family{rows.length ? ` (${rows.length})` : ""}</>} titleId={NO_FAMILY_H}>
       <p>{list !== null && list.length > 0 ? `${NO_FAMILY_WORDS.count(list.length)} ` : ""}{NO_FAMILY_WORDS.lead(mayChangeFamilies)}</p>

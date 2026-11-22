@@ -68,6 +68,31 @@ function StatusDetail({ status, row }: { status: LinkStatus; row: LinkRow }) {
   }
 }
 
+/** How a link was made, in a few words, for the status cell's line: the day, and who or what made it. */
+function MadeMeta({ made }: { made: LinkMade }) {
+  return made.key === "carried_over" ? <>Carried over <LocalTime iso={made.at} dateOnly /> · not confirmed</>
+    : made.origin === "confirmed" ? <>Confirmed <LocalTime iso={made.at} dateOnly /></>
+    : <>Made in the books <LocalTime iso={made.at} dateOnly /></>;
+}
+
+/**
+ * The status cell's one short line under its badge. The whole sentence (StatusDetail), and the differences, are in the
+ * row's Details.
+ */
+function StatusMeta({ status, row }: { status: LinkStatus; row: LinkRow }) {
+  switch (status.key) {
+    case "carried_over": case "linked": return <MadeMeta made={status} />;
+    case "with_differences": return <><MadeMeta made={status.made} /> · {plural(row.differences.length, "difference", "differences")}</>;
+    case "customer_gone": return <>Customer not in the books&apos; copy</>;
+    case "not_a_family": return <>Customer isn&apos;t a family there now</>;
+    case "suggested": return <>A guardian&apos;s sign-in address matches</>;
+    case "several": return status.why === "many" ? <>More than one customer matches</> : <>Its customer matches other families too</>;
+    case "no_match": return status.noGuardians ? <>No guardians yet</> : row.addresses.length === 0 ? <>No guardian can sign in</> : <>No customer holds their addresses</>;
+    case "left_unlinked": return <>{status.by ? `By ${status.by}, ` : ""}<LocalTime iso={status.at} dateOnly /></>;
+    case "not_checked": return <>The books can&apos;t be checked now</>;
+  }
+}
+
 /** A student's or guardian's own link, in words. */
 const ownLinkWords = (l: OwnLink) => (l.state === "linked" ? `linked to ${l.customer}` : l.state === "gone" ? "linked to a customer that isn't in the books' copy any more"
   : l.state === "none" ? "no link of its own" : "its link can't be checked now");
@@ -292,7 +317,8 @@ const pickHref = (familyId: string, customerId?: string) => `/staff/links?pick=$
 function Opening({ row, tag, guardianLinks, maySend }: { row: LinkRow; tag: string; guardianLinks: boolean; maySend: boolean }) {
   const id = String(row.familyId);
   return (
-    <details className="more"><summary>{row.differences.length > 0 ? "Students, guardians and differences" : "Students and guardians"}<span className="visually-hidden">: {row.name}</span></summary>
+    <details className="more"><summary>Details<span className="visually-hidden">: {row.name}</span></summary>
+      <p><StatusDetail status={row.status} row={row} /></p>
       <p>{row.students.length === 0 ? "No active students." : "Students:"}</p>
       {row.students.length > 0 && <ul>{row.students.map((s) => <li key={String(s.id)}>{s.name}: {ownLinkWords(s.link)}</li>)}</ul>}
       <p>{row.guardians.length === 0 ? "No guardians." : "Guardians:"}</p>
@@ -541,11 +567,11 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
   const importAsked = sp.import === "1";
   const columns: Column<LinkRow>[] = [
     { key: "family", header: "Family", rowHeader: true, sorted: "ascending", cell: (r) => (view.familyPages ? <Link href={familyPage(r.familyId)}>{r.name}</Link> : r.name) },
-    { key: "addresses", header: "Guardians' sign-in addresses", cell: (r) => (r.addresses.length > 0 ? r.addresses.join(", ") : r.guardians.length === 0 ? "None yet" : "None that can sign in") },
-    { key: "customer", header: "Customer in the books", cell: (r) => (r.customer === null ? (r.status.key === "not_checked" ? "Not checked now" : "None")
+    { key: "addresses", header: "Sign-in addresses", cell: (r) => (r.addresses.length > 0 ? r.addresses.join(", ") : r.guardians.length === 0 ? "None yet" : "None that can sign in") },
+    { key: "customer", header: "Customer", cell: (r) => (r.customer === null ? (r.status.key === "not_checked" ? "Not checked now" : "None")
       : <>{r.customer.name}<span className="when">{r.customer.email ?? "No email address"}</span></>) },
-    { key: "status", header: "Status", cell: (r) => <><StatusBadge tone={TONE[r.status.key]}>{STATUS_WORDS[r.status.key]}</StatusBadge><span className="when"><StatusDetail status={r.status} row={r} /></span></> },
-    { key: "more", header: "Students and guardians", cell: (r) => <Opening row={r} tag={tag} guardianLinks={view.guardianLinks} maySend={maySend} /> },
+    { key: "status", header: "Status", cell: (r) => <><StatusBadge tone={TONE[r.status.key]}>{STATUS_WORDS[r.status.key]}</StatusBadge><span className="when"><StatusMeta status={r.status} row={r} /></span></> },
+    { key: "more", header: "Details", cell: (r) => <Opening row={r} tag={tag} guardianLinks={view.guardianLinks} maySend={maySend} /> },
   ];
   return (
     <main className="wrap single">
@@ -554,11 +580,21 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
           Only three things here send anything to the books: Send the app&apos;s to QuickBooks, Send the app&apos;s for all, and a student&apos;s move taken from the books, which voids an unpaid volunteer buy-out invoice of theirs there.</>} />
         <LinkAnswersShown />
 
-        <Card title="How links are made" titleId="links-how-h">
-          <Notice tone="warning" live="none">Link a family this page suggests a customer for here, with Confirm.
+        {view.state !== "listed" && <Notice tone="warning" live="none">{WHY_NOT_CHECKED[view.state]}</Notice>}
+
+        {pick !== null && <PickPart view={view} familyId={pick} customerId={customer} cq={cq} tag={tag} made={made} />}
+
+        <CustomersWithNoFamily view={view} mayChangeFamilies={maySend}>
+          <ImportOffer proposable={proposable} mayChangeFamilies={maySend} />
+        </CustomersWithNoFamily>
+
+        {importAsked && <ImportReview review={maySend && proposable > 0 ? await view.importReview() : null} mayChangeFamilies={maySend} tag={tag} />}
+
+        <Card title="Families" titleId="links-list-h"
+          description={<>Link a family this page suggests a customer for here, with Confirm.
             &ldquo;Create a family from this&rdquo; is refused for such a customer, or for one QuickBooks made for a change that was given up.
-            &ldquo;Create in QuickBooks and link&rdquo; would make a second customer in the books. It isn&apos;t offered for a family unlinked while its customer is still there.</Notice>
-          <HowThisWorks>
+            &ldquo;Create in QuickBooks and link&rdquo; would make a second customer in the books. It isn&apos;t offered for a family unlinked while its customer is still there.</>}>
+          <HowThisWorks summary="How links are made">
             <h3>Linking</h3>
             <ul>
               <li>A customer is suggested only when a guardian&apos;s sign-in address is exactly on a customer no family is linked to: in its email field, or on a parent record under it.</li>
@@ -607,27 +643,15 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
               <li>Adding a family on the Roster makes one too, when someone who can link families adds it while the books are connected.</li>
             </ul>
           </HowThisWorks>
-        </Card>
-
-        {view.state !== "listed" && <Notice tone="warning" live="none">{WHY_NOT_CHECKED[view.state]}</Notice>}
-
-        {pick !== null && <PickPart view={view} familyId={pick} customerId={customer} cq={cq} tag={tag} made={made} />}
-
-        <CustomersWithNoFamily view={view} mayChangeFamilies={maySend}>
-          <ImportOffer proposable={proposable} mayChangeFamilies={maySend} />
-        </CustomersWithNoFamily>
-
-        {importAsked && <ImportReview review={maySend && proposable > 0 ? await view.importReview() : null} mayChangeFamilies={maySend} tag={tag} />}
-
-        <Card title="Families" titleId="links-list-h">
           <form method="get" action="/staff/links" role="search">
-            <Toolbar label="Filter the families"
-              end={<><Button type="submit" variant="secondary">Show</Button>{filtered && <LinkButton variant="quiet" href="/staff/links">Show every family</LinkButton>}</>}>
+            <Toolbar label="Filter the families">
               <Select id="links-status" label="Status" name="status" defaultValue={filter.status ?? ""}>
                 <option value="">Every status ({view.rows.length})</option>
                 {STATUS_KEYS.map((k) => <option key={k} value={k}>{STATUS_WORDS[k]} ({counts[k]})</option>)}
               </Select>
               <TextInput id="links-q" label="Family name or email address" name="q" type="search" maxLength={SEARCH_MAX} defaultValue={filter.q} autoComplete="off" />
+              <Button type="submit" variant="secondary">Show</Button>
+              {filtered && <LinkButton variant="quiet" href="/staff/links">Show every family</LinkButton>}
             </Toolbar>
           </form>
           {overlap > 0 && <p>{overlap === 1 ? "1 family whose link was carried over has differences, so it is counted under both Carried over and Linked, with differences."
