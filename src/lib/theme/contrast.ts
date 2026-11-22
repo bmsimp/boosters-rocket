@@ -76,30 +76,70 @@ function mix(a: string, b: string, weightA: number): string {
 }
 
 export type ClubTokens = {
-  club: string; clubOn: string; textL: string; textD: string; textLhc: string; textDhc: string; tintL: string; tintD: string;
+  /** The club's color as picked, and its ink: the light modes' fill, and the app icon's (src/lib/pwa/icons.ts). */
+  club: string; clubOn: string;
+  /** The dark modes' fill and its ink: the club's color, lightened (same hue) until it stands 3:1 off the dark grounds. */
+  clubD: string; clubOnD: string;
+  textL: string; textD: string; textLhc: string; textDhc: string; tintL: string; tintD: string;
 };
+
+/** A fill's ink: white or near-black, whichever has the higher contrast against it. */
+const inkOn = (fill: string) => (contrastRatio(WHITE, fill) >= contrastRatio(INK, fill) ? WHITE : INK);
+
+/** A fill (a primary button, the logo tile) must stand this far off the ground it is drawn on: a control's 3:1 (WCAG 1.4.11). */
+const FILL_RATIO = 3;
+/** The current nav item's tint must be told from the surface around it: at least this ratio in dark, where a dark club's 14% wash all but vanished. */
+const TINT_RATIO_D = 1.3;
+
+/**
+ * The dark modes' fill: the club's color as it is when it already stands 3:1 off the hardest dark ground, otherwise
+ * lightened (same hue) until it does, stopping at the first step whose ink still reads 4.5:1 on it.
+ */
+function darkFill(club: string): string {
+  if (contrastRatio(club, GROUND_D) >= FILL_RATIO) return club;
+  const [h, s, l0] = rgbToHsl(toRgb(club));
+  for (let i = 1; i <= 100; i++) {
+    const candidate = toHex(hslToRgb([h, s, l0 + (1 - l0) * (i / 100)]));
+    if (contrastRatio(candidate, GROUND_D) >= FILL_RATIO && contrastRatio(inkOn(candidate), candidate) >= 4.5) return candidate;
+  }
+  return club;
+}
+
+/** The dark tint: the dark fill washed into the dark surface, 14% at least and more until it is told from the surface. */
+function darkTint(fill: string): string {
+  for (let w = 0.14; w <= 0.6; w += 0.02) {
+    const tint = mix(fill, CLUB_TINT_SURFACE.dark, w);
+    if (contrastRatio(tint, CLUB_TINT_SURFACE.dark) >= TINT_RATIO_D) return tint;
+  }
+  return mix(fill, CLUB_TINT_SURFACE.dark, 0.6);
+}
 
 export function deriveClubTokens(input: string): ClubTokens {
   const club = normalizeHex(input);
   if (!club) throw new InvalidColorError(`“${input}” isn't a color. Use a hex value like #5b2a86.`);
-  const clubOn = contrastRatio(WHITE, club) >= contrastRatio(INK, club) ? WHITE : INK;
+  const clubOn = inkOn(club);
+  const clubD = darkFill(club);
+  const clubOnD = inkOn(clubD);
   const textL = adjustUntil(club, GROUND_L, 4.5, "darker");
   const textD = adjustUntil(club, GROUND_D, 4.5, "lighter");
   const textLhc = adjustUntil(club, GROUND_LHC, 7, "darker");
   const textDhc = adjustUntil(club, GROUND_DHC, 7, "lighter");
   const tintL = mix(club, CLUB_TINT_SURFACE.light, 0.08);
-  const tintD = mix(club, CLUB_TINT_SURFACE.dark, 0.14);
+  const tintD = darkTint(clubD);
+  // The club's text is read on its tint too (the current nav item), at its mode's floor: 4.5:1, or 7:1 in high contrast.
   return {
-    club, clubOn,
+    club, clubOn, clubD, clubOnD,
     textL: adjustUntil(textL, tintL, 4.5, "darker"),
     textD: adjustUntil(textD, tintD, 4.5, "lighter"),
-    textLhc, textDhc, tintL, tintD,
+    textLhc: adjustUntil(textLhc, tintL, 7, "darker"),
+    textDhc: adjustUntil(textDhc, tintD, 7, "lighter"),
+    tintL, tintD,
   };
 }
 
 export function clubCssVars(t: ClubTokens): Record<string, string> {
   return {
-    "--club": t.club, "--club-on": t.clubOn,
+    "--club-l": t.club, "--club-on-l": t.clubOn, "--club-d": t.clubD, "--club-on-d": t.clubOnD,
     "--club-text-l": t.textL, "--club-text-d": t.textD,
     "--club-text-lhc": t.textLhc, "--club-text-dhc": t.textDhc,
     "--club-tint-l": t.tintL, "--club-tint-d": t.tintD,

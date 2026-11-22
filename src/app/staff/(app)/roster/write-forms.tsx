@@ -1,7 +1,9 @@
 "use client";
-import { startTransition, useActionState, useState } from "react";
+import { startTransition, useActionState, useId, useState } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { Notice } from "@/app/components/notice";
+import { Button } from "@/app/components/ui/button";
+import { Select, TextInput } from "@/app/components/ui/field";
 
 // The forms that change the roster in QuickBooks. As on the season pages, no form `action` on a form with a field: React
 // resets a form after one, and what was typed would vanish on a refusal. Each is given only what it shows, and the
@@ -29,14 +31,26 @@ function Outcome({ state, onOffer, pending }: { state: WriteResult | null; onOff
         <p>Now in QuickBooks: {state.current.name}{state.current.familyName ? `, in ${state.current.familyName}` : ""}{state.current.active ? "" : ", inactive"}.</p>
       )}
       {state.offer && onOffer && (
-        <p><button type="button" className="btn" disabled={pending} onClick={() => onOffer(state.offer!)}>Use “{state.offer}”</button></p>
+        <p><Button disabled={pending} onClick={() => onOffer(state.offer!)}>Use “{state.offer}”</Button></p>
       )}
     </Notice>
   );
 }
 
+/** The kinds of member a new member can be, as a dropdown (a flat club with several member types). */
+function MemberTypes({ id, types, type, setType }: { id: string; types: { qboId: string; name: string }[]; type: string; setType: (t: string) => void }) {
+  return (
+    <Select id={id} label="Kind of member" value={type} onChange={(e) => setType(e.target.value)}>
+      <option value="">Choose one</option>
+      {types.map((t) => <option key={t.qboId} value={t.qboId}>{t.name}</option>)}
+    </Select>
+  );
+}
+
 /** One name and a button: a new family or member, a new student, or a new name for someone. A free name offered is used with one press. */
-export function NameForm({ field, label, pendingLabel, initial = "", act }: { field: string; label: string; pendingLabel: string; initial?: string; act: (name: string) => Promise<WriteResult> }) {
+export function NameForm({ field, label, pendingLabel, initial = "", act, variant = "secondary" }: { field: string; label: string; pendingLabel: string; initial?: string;
+  act: (name: string) => Promise<WriteResult>; variant?: "primary" | "secondary" }) {
+  const id = useId();
   const [name, setName] = useState(initial);
   const [state, run, pending] = useActionState(async (_: WriteResult | null, asked: string) => {
     const r = await safely(() => act(asked), failed);
@@ -46,9 +60,9 @@ export function NameForm({ field, label, pendingLabel, initial = "", act }: { fi
   const send = (asked: string) => startTransition(() => run(asked));
   return (
     <form onSubmit={noSubmit} className="stack">
-      <label className="field"><span>{field}</span><input maxLength={100} value={name} onChange={(e) => setName(e.target.value)} /></label>
+      <TextInput id={`${id}-name`} label={field} maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />
       <Outcome state={state} pending={pending} onOffer={(offer) => { setName(offer); send(offer); }} />
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => send(name)}>{pending ? pendingLabel : label}</button>
+      <Button variant={variant} disabled={pending} onClick={() => send(name)}>{pending ? pendingLabel : label}</Button>
     </form>
   );
 }
@@ -58,6 +72,7 @@ export function NameForm({ field, label, pendingLabel, initial = "", act }: { fi
  * QuickBooks: `types` is empty otherwise). Saved in the portal first (stage 3's slice 9d).
  */
 export function MemberForm({ types, act, pendingLabel }: { types: { qboId: string; name: string }[]; act: (name: string, typeQboId: string | null) => Promise<WriteResult>; pendingLabel: string }) {
+  const id = useId();
   const [name, setName] = useState("");
   const [type, setType] = useState(types.length === 1 ? types[0]!.qboId : "");
   const [state, run, pending] = useActionState(async (_: WriteResult | null, asked: string) => {
@@ -68,16 +83,10 @@ export function MemberForm({ types, act, pendingLabel }: { types: { qboId: strin
   const send = (asked: string) => startTransition(() => run(asked));
   return (
     <form onSubmit={noSubmit} className="stack">
-      <label className="field"><span>The member&apos;s name</span><input maxLength={100} value={name} onChange={(e) => setName(e.target.value)} /></label>
-      {types.length > 1 && (
-        <label className="field"><span>Kind of member</span>
-          <select value={type} onChange={(e) => setType(e.target.value)}>
-            <option value="">Choose one</option>
-            {types.map((t) => <option key={t.qboId} value={t.qboId}>{t.name}</option>)}
-          </select></label>
-      )}
+      <TextInput id={`${id}-name`} label="The member's name" maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />
+      {types.length > 1 && <MemberTypes id={`${id}-type`} types={types} type={type} setType={setType} />}
       <Outcome state={state} pending={pending} onOffer={(offer) => { setName(offer); send(offer); }} />
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => send(name)}>{pending ? pendingLabel : "Add the member"}</button>
+      <Button variant="secondary" disabled={pending} onClick={() => send(name)}>{pending ? pendingLabel : "Add the member"}</Button>
     </form>
   );
 }
@@ -88,36 +97,31 @@ export function MemberForm({ types, act, pendingLabel }: { types: { qboId: strin
  * server. After a stop part way the answer stays on screen and the page is made again, so pressing again carries on.
  */
 export function CreateAndLinkForm({ types, act }: { types: { qboId: string; name: string }[]; act: (typeQboId: string | null) => Promise<WriteResult> }) {
+  const id = useId();
   const [type, setType] = useState(types.length === 1 ? types[0]!.qboId : "");
   const [state, run, pending] = useActionState(async () => safely(() => act(types.length ? type || null : null), failed), null);
   return (
     <form onSubmit={noSubmit} className="stack">
-      {types.length > 1 && (
-        <label className="field"><span>Kind of member</span>
-          <select value={type} onChange={(e) => setType(e.target.value)}>
-            <option value="">Choose one</option>
-            {types.map((t) => <option key={t.qboId} value={t.qboId}>{t.name}</option>)}
-          </select></label>
-      )}
+      {types.length > 1 && <MemberTypes id={`${id}-type`} types={types} type={type} setType={setType} />}
       <Outcome state={state} pending={pending} />
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Making it in QuickBooks…" : "Create in QuickBooks and link"}</button>
+      <Button variant="secondary" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Making it in QuickBooks…" : "Create in QuickBooks and link"}</Button>
     </form>
   );
 }
 
 /** Another family for a student, chosen from the portal's own active families: the form sends the family's app id (stage 3's slice 9f). */
 export function MoveForm({ families, act }: { families: { id: string; name: string }[]; act: (toFamilyId: string) => Promise<WriteResult> }) {
+  const id = useId();
   const [to, setTo] = useState("");
   const [state, run, pending] = useActionState(async () => safely(() => act(to), failed), null);
   return (
     <form onSubmit={noSubmit} className="stack">
-      <label className="field"><span>Move to</span>
-        <select value={to} onChange={(e) => setTo(e.target.value)}>
-          <option value="">Choose a family</option>
-          {families.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-        </select></label>
+      <Select id={`${id}-to`} label="Move to" value={to} onChange={(e) => setTo(e.target.value)}>
+        <option value="">Choose a family</option>
+        {families.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+      </Select>
       <Outcome state={state} pending={pending} />
-      <button type="button" className="btn btn-line" disabled={pending || to === ""} onClick={() => startTransition(() => run())}>{pending ? "Moving them in the portal…" : "Move"}</button>
+      <Button variant="secondary" disabled={pending || to === ""} onClick={() => startTransition(() => run())}>{pending ? "Moving them in the portal…" : "Move"}</Button>
     </form>
   );
 }
@@ -125,7 +129,8 @@ export function MoveForm({ families, act }: { families: { id: string; name: stri
 /**
  * Making a family inactive with everyone under it, behind a second press that lists who that covers. Given the names it
  * shows and nothing else. After a stop part way the answer stays on screen, the page is made again, and the list then
- * holds whoever is still active, so pressing again carries on.
+ * holds whoever is still active, so pressing again carries on. The second press is the pair a removal takes: a danger
+ * button and a quiet way back.
  */
 export function FamilyInactiveForm({ familyName, names, act }: { familyName: string; names: string[]; act: () => Promise<WriteResult> }) {
   const [sure, setSure] = useState(false);
@@ -133,7 +138,7 @@ export function FamilyInactiveForm({ familyName, names, act }: { familyName: str
   const label = `Make ${familyName} inactive`;
   return (
     <form onSubmit={noSubmit} className="stack">
-      {!sure ? <button type="button" className="btn btn-line" onClick={() => setSure(true)}>{label}</button> : (
+      {!sure ? <Button variant="secondary" onClick={() => setSure(true)}>{label}</Button> : (
         <>
           {names.length ? (
             <>
@@ -141,11 +146,11 @@ export function FamilyInactiveForm({ familyName, names, act }: { familyName: str
               <ul className="notice-list">{names.map((n, i) => <li key={`${i}-${n}`}>{n}</li>)}</ul>
             </>
           ) : <p>Nobody under {familyName} is active in QuickBooks, so this makes {familyName} alone inactive.</p>}
-          <p>Its parents lose access to the portal at once. Before anything is changed, the portal asks QuickBooks what each of them owes: if anyone has a balance, owed or a credit, or the portal can&apos;t read it, nobody is made inactive until it is settled in QuickBooks.</p>
+          <p>Its parents lose access at once. The portal first asks QuickBooks what each of them owes. If anyone has a balance, owed or a credit, or it can&apos;t be read, nobody is made inactive until it&apos;s settled.</p>
           <Outcome state={state} pending={pending} />
           <div className="row-actions">
-            <button type="button" className="btn" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Making them inactive…" : names.length ? "Yes, make them all inactive" : "Yes, make it inactive"}</button>
-            <button type="button" className="btn btn-line" disabled={pending} onClick={() => setSure(false)}>Keep it active</button>
+            <Button variant="danger" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Making them inactive…" : names.length ? "Yes, make them all inactive" : "Yes, make it inactive"}</Button>
+            <Button variant="quiet" disabled={pending} onClick={() => setSure(false)}>Keep it active</Button>
           </div>
         </>
       )}
@@ -153,19 +158,19 @@ export function FamilyInactiveForm({ familyName, names, act }: { familyName: str
   );
 }
 
-/** Making someone inactive, behind a second press that says what follows. */
+/** Making someone inactive, behind a second press that says what follows: a danger button and a quiet way back. */
 export function DeactivateForm({ label, warning, act }: { label: string; warning: string; act: () => Promise<WriteResult> }) {
   const [sure, setSure] = useState(false);
   const [state, run, pending] = useActionState(async () => safely(() => act(), failed), null);
   return (
     <form onSubmit={noSubmit} className="stack">
-      {!sure ? <button type="button" className="btn btn-line" onClick={() => setSure(true)}>{label}</button> : (
+      {!sure ? <Button variant="secondary" onClick={() => setSure(true)}>{label}</Button> : (
         <>
           <p>{warning}</p>
           <Outcome state={state} pending={pending} />
           <div className="row-actions">
-            <button type="button" className="btn" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Making it inactive…" : "Yes, make it inactive"}</button>
-            <button type="button" className="btn btn-line" disabled={pending} onClick={() => setSure(false)}>Keep it active</button>
+            <Button variant="danger" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Making it inactive…" : "Yes, make it inactive"}</Button>
+            <Button variant="quiet" disabled={pending} onClick={() => setSure(false)}>Keep it active</Button>
           </div>
         </>
       )}

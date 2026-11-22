@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time setup for a Booster Rocket server run with docker compose. Safe to run again.
+# One-time setup for a Boosters Rocket server run with docker compose. Safe to run again.
 #   scripts/poc/setup.sh https://portal.yourclub.org   the first time: the address people will use for the portal
 #   scripts/poc/setup.sh                               later: checks what is there and changes nothing
 # The address is part of setting the portal up: sign-in, the links in emails and the installed app are built on it.

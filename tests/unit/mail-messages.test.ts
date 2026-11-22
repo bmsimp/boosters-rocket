@@ -3,8 +3,17 @@ import { changeCodeMessage, signinCodeMessage, welcomeMessage, emailChangeConfir
   passwordSetupMessage, passwordResetMessage, choosePasswordMessage, passwordChangedMessage, signinResetMessage } from "@/lib/mail/messages";
 
 const b = { clubName: "FZN <Band> Boosters", color: "#5b2a86" };
+/** A mail's own words: its text without the "Powered by" footer every mail ends with (tested on its own below). */
+const ownText = (t: string) => t.replace(/\n\n-- \nPowered by Boosters Rocket\n$/, "\n");
+/** Its HTML without that footer's paragraph. */
+const ownHtml = (h: string) => h.replace(/<p style="margin:24px 0 0;[^"]*">Powered by <span[^>]*>Boosters Rocket<\/span><\/p>/, "");
 
 describe("mail messages", () => {
+  it("ends every mail with the Powered by line, in words: no image and no link", () => {
+    const m = signinCodeMessage(b, "ana@example.com", "482913", { passwordPage: "https://p.example/sign-in/password", minutes: 10 });
+    expect(m.text.endsWith("\n\n-- \nPowered by Boosters Rocket\n")).toBe(true);
+    expect(m.html).toMatch(/Powered by <span[^>]*>Boosters Rocket<\/span><\/p><\/div><\/body><\/html>$/);
+  });
   const passwordPage = "https://portal.example.org/sign-in/password";
   it("puts the code in the subject and body, says 10 minutes, and says what to do if the reader didn't just sign in", () => {
     const m = signinCodeMessage(b, "ana@example.com", "482913", { passwordPage, minutes: 10 });
@@ -45,7 +54,7 @@ describe("mail messages", () => {
       "Your FZN <Band> Boosters sign-in code is 482913.",
       "Someone signed in to the FZN <Band> Boosters portal as you has asked to change how you sign in. This code confirms that change. It expires in 10 minutes.",
       `If that wasn't you, don't share this code. Sign out everywhere from Sign-in settings at ${settingsPage}, or ask the club for help.`,
-    ].join("\n\n") + "\n");
+    ].join("\n\n") + "\n\n-- \nPowered by Boosters Rocket\n");
     for (const part of [m.text, m.html]) {
       expect(part).toContain("482913");
       expect(part).not.toMatch(/device|entered correctly|reset my password/i);
@@ -90,7 +99,7 @@ describe("mail messages", () => {
     /** The sentences of the HTML part, as text: every paragraph, unescaped, a link's paragraph as its address. */
     const htmlLines = (h: string) => [...h.matchAll(/<p style="margin:0 0 16px">([\s\S]*?)<\/p>/g)]
       .map((m) => m[1]!.replace(/^<a href="([^"]*)">\1<\/a>$/, "$1").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&"));
-    const textLines = (t: string) => t.trim().split("\n\n");
+    const textLines = (t: string) => ownText(t).trim().split("\n\n");
     const messages = [
       ["the welcome at Standard", welcomeMessage(b, "ana@example.com", { appUrl, contact: "boosters@example.org", link: standard })],
       ["the welcome at Strict", welcomeMessage(b, "ana@example.com", { appUrl, contact: "boosters@example.org", link: strict })],
@@ -231,7 +240,7 @@ describe("mail messages", () => {
   describe("the notice that a password was changed", () => {
     const m = passwordChangedMessage(b, "ana@example.com", { passwordPage, contact: "treasurer@boosters.example.org" });
     /** The words of the mail's HTML body, with its markup taken out and its escaping undone. */
-    const htmlWords = m.html.replace(/<div style="background[^>]*>[^<]*<\/div>/, "").replace(/<[^>]+>/g, "\n").split("\n").map((l) => l.trim()).filter(Boolean)
+    const htmlWords = ownHtml(m.html).replace(/<div style="background[^>]*>[^<]*<\/div>/, "").replace(/<[^>]+>/g, "\n").split("\n").map((l) => l.trim()).filter(Boolean)
       .map((l) => l.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&"));
     it("says where to write to the club when it has an address, and leaves the line out when it has none", () => {
       // The reader is signed out everywhere, so the mail itself says where to tell the club.
@@ -254,7 +263,7 @@ describe("mail messages", () => {
       expect(m.html).not.toMatch(/<a\s/);
     });
     it("says the same in its text and its HTML, names no family, student or other person, and escapes the club's name", () => {
-      expect(htmlWords).toEqual(m.text.trim().split("\n\n"));
+      expect(htmlWords).toEqual(ownText(m.text).trim().split("\n\n"));
       expect(`${m.text}${m.html.replace(/font-family:/g, "")}`).not.toMatch(/family|student|guardian/i);
       expect(m.html).toContain("FZN &lt;Band&gt; Boosters");
       expect(m.html).not.toContain("<Band>");
@@ -266,7 +275,7 @@ describe("mail messages", () => {
     const link = "https://portal.example.org/sign-in/set-up/AbC-123_xyz";
     const m = signinResetMessage(b, "ana@example.com", { link, life: "7 days", contact: "treasurer@boosters.example.org", strict: false });
     /** The words of the mail's HTML body, with its markup taken out and its escaping undone. */
-    const htmlWords = m.html.replace(/<div style="background[^>]*>[^<]*<\/div>/, "").replace(/<[^>]+>/g, "\n").split("\n").map((l) => l.trim()).filter(Boolean)
+    const htmlWords = ownHtml(m.html).replace(/<div style="background[^>]*>[^<]*<\/div>/, "").replace(/<[^>]+>/g, "\n").split("\n").map((l) => l.trim()).filter(Boolean)
       .map((l) => l.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&"));
     it("goes to the address, with its subject, the set-up link on a line of its own and how long it works", () => {
       expect(m.to).toBe("ana@example.com");
@@ -299,7 +308,7 @@ describe("mail messages", () => {
       expect(`${strict.text}${strict.html.replace(/font-family:/g, "")}`).not.toMatch(/family|student|guardian|admin|staff/i);
     });
     it("says the same in its text and its HTML, names no family, student, guardian or Admin, and escapes the club's name", () => {
-      expect(htmlWords).toEqual(m.text.trim().split("\n\n"));
+      expect(htmlWords).toEqual(ownText(m.text).trim().split("\n\n"));
       expect(`${m.text}${m.html.replace(/font-family:/g, "")}`).not.toMatch(/family|student|guardian|admin|staff/i);
       expect(m.html).toContain("FZN &lt;Band&gt; Boosters");
       expect(m.html).not.toContain("<Band>");

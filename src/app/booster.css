@@ -1,5 +1,5 @@
 /*
-  Booster Rocket styles. One file, in this order:
+  Boosters Rocket styles. One file, in this order:
     1. Tokens          color roles per display mode, type, space, radii, the menu shadow, motion
     2. Base            reset, body, type, links, selection, focus
     3. Layout          the page column, the grids pages sit in
@@ -18,18 +18,20 @@
   Windows contrast themes (forced-colors) are honored in section 6.
 
   Club color. The app derives every --club-* value from the one color a club picks (src/lib/theme/contrast.ts):
-    --club          fill for primary buttons and the club's logo tile (same in every mode)
-    --club-on       ink on that fill: white or near-black, whichever passes 4.5:1
+    --club-l/-d     fill for primary buttons and the club's logo tile, per theme: the color as picked in light; in dark,
+                    lightened (same hue) until it stands 3:1 off the dark grounds. --club picks the theme's.
+    --club-on-l/-d  ink on that fill: white or near-black, whichever passes 4.5:1. --club-on picks the theme's.
     --club-text-*   the club color as text, link and focus ring, per mode: l, d (4.5:1), lhc, dhc (7:1)
-    --club-tint-*   a quiet wash for the current nav item and hover, per theme
+    --club-tint-*   a quiet wash for the current nav item and hover, per theme (in dark, at least 1.3:1 off the surface)
   The fixed colors below are also in src/lib/theme/palette.ts, which tests/unit/design-tokens.test.ts holds to these.
 */
 
 /* ===== 1. Tokens ===== */
 :root {
-  --club: #5b2a86; --club-on: #ffffff;
-  --club-text-l: #5b2a86; --club-text-d: #c9a7ea; --club-text-lhc: #45206a; --club-text-dhc: #e5d3f7;
-  --club-tint-l: #f1ebf6; --club-tint-d: #2a2133;
+  /* the default club color, Launch Indigo, derived (src/app/layout.tsx writes the club's own over these) */
+  --club-l: #1e1b4b; --club-on-l: #ffffff; --club-d: #635dc5; --club-on-d: #ffffff;
+  --club-text-l: #1e1b4b; --club-text-d: #928dd7; --club-text-lhc: #1e1b4b; --club-text-dhc: #bab7e5;
+  --club-tint-l: #ededf1; --club-tint-d: #2c2b4b;
 
   --font: var(--font-sans, "Inter"), "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   /* type scale: six steps plus the control size (buttons, nav links, table cells, quiet lines); never under 0.8125rem; body is 1rem */
@@ -37,8 +39,8 @@
   /* space, on a 4px base */
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px;
   --cell: 16px;                 /* the page gutter: 16px on a phone, 24px from 760px */
-  --radius: 8px;                /* surfaces: cards, lists, notices, menus */
-  --radius-control: 6px;        /* buttons, fields, the current nav item */
+  --radius: 12px;               /* surfaces: cards, lists, notices, menus */
+  --radius-control: 8px;        /* buttons, fields, the current nav item, the logo tile */
   --radius-badge: 4px;
   --radius-round: 999px;        /* avatars and status dots only */
   --ring: 2px;
@@ -52,15 +54,19 @@
   --ground: #f7f7f8; --surface: #ffffff; --surface-raised: #ffffff; --surface-muted: #f2f2f4;
   --border: #e3e4e8; --border-control: #cfd2d8; --border-strong: #8a8e98;
   --ink: #18191d; --ink-2: #5c606a; --ink-3: #8a8e98;
-  --done: #1d7344; --due: #955400; --late: #b3261e;
-  --done-soft: #e7f4ec; --due-soft: #fcf1df; --late-soft: #fceceb; --neutral-soft: #f0f1f3;
+  --done: #1f6b3d; --due: #9a4a0b; --late: #a1231a; --info: #3b4cb8;
+  --done-soft: #e3f2e8; --due-soft: #fdeedc; --late-soft: #fbe4e2; --info-soft: #e6e8fa; --neutral-soft: #f0f1f3;
+  --badge-ink: #6b6b6b; /* the footer's one-color "Powered by Boosters Rocket" badge */
+  /* the product's own colors (brand/BRAND.md), for the sign-in page's full-color badge only: never portal UI */
+  --br-ink: #1e1b4b; --br-flame-ink: #b82d28; --br-disc: #1e1b4b; --br-flame: #e8433a; --br-ember: #f49a92; --br-smoke: #ffffff;
   --overlay: rgb(0 0 0 / 0.08); --overlay-mix: black 8%; /* the same wash as a color-mix() term (a filled button's hover) */
   --shadow-menu: 0 8px 24px -6px rgb(16 17 20 / 0.14), 0 1px 3px rgb(16 17 20 / 0.08);
+  --club: var(--club-l); --club-on: var(--club-on-l);
   --club-text: var(--club-text-l); --club-tint: var(--club-tint-l); --club-text-hc: var(--club-text-lhc);
   /* @tokens light-hc */
   --hc-ground: #ffffff; --hc-surface: #ffffff; --hc-surface-raised: #ffffff; --hc-surface-muted: #f2f2f4;
   --hc-line: #18191d; --hc-ink: #000000; --hc-ink-2: #2b2e34;
-  --hc-done: #0f5530; --hc-due: #6b3a00; --hc-late: #8a1a14;
+  --hc-done: #0f5530; --hc-due: #6b3a00; --hc-late: #8a1a14; --hc-info: #2c3888;
   /* @end */
 }
 /* @end */
@@ -71,15 +77,18 @@
   --ground: #0f1012; --surface: #16181c; --surface-raised: #1e2025; --surface-muted: #1e2025;
   --border: #2a2d33; --border-control: #3b3f46; --border-strong: #6f737d;
   --ink: #ececee; --ink-2: #a2a6ae; --ink-3: #6f737d;
-  --done: #5fc68b; --due: #e9a647; --late: #ff8b7d;
-  --done-soft: #15291e; --due-soft: #2e2312; --late-soft: #33191a; --neutral-soft: #22252a;
+  --done: #6cc38a; --due: #f2b36b; --late: #ff8a80; --info: #a5adff;
+  --done-soft: #12301f; --due-soft: #3a2510; --late-soft: #3d1512; --info-soft: #1e2250; --neutral-soft: #22252a;
+  --badge-ink: #9a9aa2;
+  --br-ink: #ffffff; --br-flame-ink: #f06a5f; --br-disc: #332f72; --br-flame: #e8433a; --br-ember: #f49a92; --br-smoke: #ffffff;
   --overlay: rgb(255 255 255 / 0.1); --overlay-mix: white 10%;
   --shadow-menu: 0 8px 24px -6px rgb(0 0 0 / 0.6), 0 1px 3px rgb(0 0 0 / 0.5);
+  --club: var(--club-d); --club-on: var(--club-on-d);
   --club-text: var(--club-text-d); --club-tint: var(--club-tint-d); --club-text-hc: var(--club-text-dhc);
   /* @tokens dark-hc */
   --hc-ground: #000000; --hc-surface: #000000; --hc-surface-raised: #141518; --hc-surface-muted: #141518;
   --hc-line: #ececee; --hc-ink: #ffffff; --hc-ink-2: #e2e4e8;
-  --hc-done: #8eeab1; --hc-due: #ffc978; --hc-late: #ffb0a6;
+  --hc-done: #8eeab1; --hc-due: #ffc978; --hc-late: #ffb0a6; --hc-info: #bfc5ff;
   /* @end */
 }
 /* @end */
@@ -89,14 +98,17 @@
     --ground: #0f1012; --surface: #16181c; --surface-raised: #1e2025; --surface-muted: #1e2025;
     --border: #2a2d33; --border-control: #3b3f46; --border-strong: #6f737d;
     --ink: #ececee; --ink-2: #a2a6ae; --ink-3: #6f737d;
-    --done: #5fc68b; --due: #e9a647; --late: #ff8b7d;
-    --done-soft: #15291e; --due-soft: #2e2312; --late-soft: #33191a; --neutral-soft: #22252a;
+    --done: #6cc38a; --due: #f2b36b; --late: #ff8a80; --info: #a5adff;
+    --done-soft: #12301f; --due-soft: #3a2510; --late-soft: #3d1512; --info-soft: #1e2250; --neutral-soft: #22252a;
+    --badge-ink: #9a9aa2;
+    --br-ink: #ffffff; --br-flame-ink: #f06a5f; --br-disc: #332f72; --br-flame: #e8433a; --br-ember: #f49a92; --br-smoke: #ffffff;
     --overlay: rgb(255 255 255 / 0.1); --overlay-mix: white 10%;
     --shadow-menu: 0 8px 24px -6px rgb(0 0 0 / 0.6), 0 1px 3px rgb(0 0 0 / 0.5);
+    --club: var(--club-d); --club-on: var(--club-on-d);
     --club-text: var(--club-text-d); --club-tint: var(--club-tint-d); --club-text-hc: var(--club-text-dhc);
     --hc-ground: #000000; --hc-surface: #000000; --hc-surface-raised: #141518; --hc-surface-muted: #141518;
     --hc-line: #ececee; --hc-ink: #ffffff; --hc-ink-2: #e2e4e8;
-    --hc-done: #8eeab1; --hc-due: #ffc978; --hc-late: #ffb0a6;
+    --hc-done: #8eeab1; --hc-due: #ffc978; --hc-late: #ffb0a6; --hc-info: #bfc5ff;
   }
 }
 
@@ -105,7 +117,7 @@
   --ground: var(--hc-ground); --surface: var(--hc-surface); --surface-raised: var(--hc-surface-raised); --surface-muted: var(--hc-surface-muted);
   --border: var(--hc-line); --border-control: var(--hc-line); --border-strong: var(--hc-line);
   --ink: var(--hc-ink); --ink-2: var(--hc-ink-2); --ink-3: var(--hc-ink-2);
-  --done: var(--hc-done); --due: var(--hc-due); --late: var(--hc-late);
+  --done: var(--hc-done); --due: var(--hc-due); --late: var(--hc-late); --info: var(--hc-info); --badge-ink: var(--hc-ink-2); --br-ink: var(--hc-ink); --br-flame-ink: var(--hc-ink);
   --club-text: var(--club-text-hc);
   --ring: 3px;
 }
@@ -114,7 +126,7 @@
     --ground: var(--hc-ground); --surface: var(--hc-surface); --surface-raised: var(--hc-surface-raised); --surface-muted: var(--hc-surface-muted);
     --border: var(--hc-line); --border-control: var(--hc-line); --border-strong: var(--hc-line);
     --ink: var(--hc-ink); --ink-2: var(--hc-ink-2); --ink-3: var(--hc-ink-2);
-    --done: var(--hc-done); --due: var(--hc-due); --late: var(--hc-late);
+    --done: var(--hc-done); --due: var(--hc-due); --late: var(--hc-late); --info: var(--hc-info); --badge-ink: var(--hc-ink-2); --br-ink: var(--hc-ink); --br-flame-ink: var(--hc-ink);
     --club-text: var(--club-text-hc);
     --ring: 3px;
   }
@@ -195,17 +207,18 @@ footer a { color: var(--club-text); }
 /* --- Badge: a tone's word and icon on its soft tint. A word, never a color alone. --- */
 .badge { --tone: var(--ink-2); --tone-soft: var(--neutral-soft);
   display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: var(--radius-badge);
-  background: var(--tone-soft); color: var(--tone); font-size: var(--text-xs); font-weight: 500; line-height: 1.5; white-space: nowrap; }
+  background: var(--tone-soft); color: var(--tone); font-size: var(--text-xs); font-weight: 500; line-height: 1.5; white-space: nowrap; max-width: 100%; }
 .badge svg { width: 12px; height: 12px; flex: none; }
 .badge-done { --tone: var(--done); --tone-soft: var(--done-soft); }
 .badge-due { --tone: var(--due); --tone-soft: var(--due-soft); }
 .badge-late { --tone: var(--late); --tone-soft: var(--late-soft); }
+.badge-info { --tone: var(--info); --tone-soft: var(--info-soft); }
 .badge-club { --tone: var(--club-text); --tone-soft: var(--club-tint); }
 
 /* --- Club bar: a white top bar with the club's logo tile, its name, the menu and the account. --- */
 .bar { position: relative; background: var(--surface); color: var(--ink); border-bottom: 1px solid var(--border); }
 .bar .wrap { height: 56px; display: flex; align-items: center; gap: var(--s3); }
-.monogram { min-width: 32px; max-width: 4.5rem; height: 32px; padding: 0 5px; border-radius: var(--radius); background: var(--club); color: var(--club-on);
+.monogram { min-width: 32px; max-width: 4.5rem; height: 32px; padding: 0 5px; border-radius: var(--radius-control); background: var(--club); color: var(--club-on);
   display: grid; place-items: center; font-size: var(--text-xs); font-weight: 700; letter-spacing: -0.01em; flex: none; overflow: hidden; white-space: nowrap; }
 .club { font-size: var(--text-md); font-weight: 600; letter-spacing: -0.006em; line-height: 1.2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Staff pages at 760px and wider: the menu can hold more links than one row has room for (fourteen for an Admin), so
@@ -298,7 +311,8 @@ footer a { color: var(--club-text); }
   border-top: 0; border-bottom: 1px solid var(--border); padding-top: var(--s2); padding-bottom: var(--s2); vertical-align: bottom; overflow-wrap: normal; }
 .table tbody th[scope="row"] { font-weight: 500; }
 .table .t-num { text-align: right; font-variant-numeric: tabular-nums lining-nums; white-space: nowrap; }
-/* A figure, a date or a time never breaks across lines (a row's buttons keep their words whole too, below): the columns of words give way instead. */
+/* A figure, a date or a time never breaks across lines (a row's buttons keep their words whole too, below): the columns of words give way instead.
+   Only a stacked row on a phone too narrow for one lets a badge, a time or a row's button wrap (below). */
 .table time, .table .t-quiet .btn { white-space: nowrap; }
 .table .t-label { display: none; }
 .table .t-group th { padding-top: var(--s3); padding-bottom: var(--s2); font-size: var(--text-control); font-weight: 600; background: var(--surface-muted); }
@@ -311,6 +325,11 @@ footer a { color: var(--club-text); }
 .table .t-quiet .btn { white-space: nowrap; } /* a row's button keeps its words on one line; the columns of words give way instead */
 .table details.more { margin-top: var(--s1); }
 .table details.more > summary { padding: 10px 0; }
+/* A row's Remove (or Reinstate) is its own action at the row's end, on the row's first line; opened, its form takes room
+   enough to read and type in, its words from the left. */
+.table .row-change { margin-top: 0; justify-items: end; }
+.table .row-change > details.more { margin: -10px 0 0; }
+.table .row-change > details.more[open] { width: min(20rem, 70vw); }
 .table a:not(.btn):not(.matrix-link) { display: inline-flex; align-items: center; min-height: 44px; margin: -10px 0; color: var(--club-text); font-weight: 500; } /* a 44px tap target, sized from the line, without a taller row */
 @media (hover: hover) { .table tbody tr:not(.t-group):hover > * { background: var(--surface-muted); } }
 @media (max-width: 759.98px) {
@@ -324,7 +343,15 @@ footer a { color: var(--club-text); }
   .table .t-label { display: block; font-size: var(--text-xs); font-weight: 500; line-height: 1.4; color: var(--ink-2); }
   .table tbody tr.t-group { background: var(--surface-muted); padding-bottom: var(--s2); }
   .table .t-group th { padding-top: 0; background: none; }
-  .table .t-quiet .row-actions, .table .t-quiet .one-button { justify-content: flex-start; justify-items: start; }
+  .table .t-quiet .row-actions, .table .t-quiet .one-button, .table .row-change { justify-content: flex-start; justify-items: start; }
+  .table .row-change > details.more { margin-top: 0; }
+  /* Stacked, a value has only its share of a phone's width: a badge or a time that doesn't fit there, at a larger text
+     size or in a wider fallback face, wraps inside its cell rather than pushing the page sideways, and so do a
+     row's button and a long email address or name. */
+  .table th, .table td, .table .t-value { min-width: 0; }
+  .table .t-value, .table .badge, .table time { overflow-wrap: anywhere; }
+  .table .badge, .table time, .table .t-quiet .btn { white-space: normal; }
+  .table .t-quiet .btn { max-width: 100%; }
 }
 
 /* --- Details list (dl.details; KeyValue): quiet labels beside their values. --- */
@@ -336,6 +363,24 @@ dl.details dd { min-width: 0; overflow-wrap: anywhere; } /* a long name or email
 details.more { margin-top: var(--s3); }
 details.more > summary { cursor: pointer; padding: 10px 0; font-weight: 500; color: var(--club-text); }
 details > summary { min-height: 44px; box-sizing: border-box; padding-block: 10px; }
+/* Every disclosure's summary is drawn as How this works' is: no browser marker, the same 16px caret before its words,
+   turning when open (HowThisWorks draws its caret as an SVG; the others are given the same path as a mask). */
+details.more > summary { list-style: none; }
+details.more > summary::-webkit-details-marker { display: none; }
+details.more:not(.how) > summary { display: flex; align-items: center; gap: 6px; width: fit-content; }
+details.more:not(.how) > summary::before {
+  content: ""; width: 16px; height: 16px; flex: none; background: currentColor; transition: transform var(--dur-fast) ease-out;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.8'%3E%3Cpath d='M6 3.5L10.5 8 6 12.5'/%3E%3C/svg%3E") center / 16px 16px no-repeat;
+}
+details.more:not(.how)[open] > summary::before { transform: rotate(90deg); }
+/* How this works (HowThisWorks): a card's longer explanation behind one quiet summary, its caret turning when open. */
+details.how > summary { display: flex; align-items: center; gap: 6px; list-style: none; width: fit-content; }
+details.how > summary::-webkit-details-marker { display: none; }
+.how-caret { width: 16px; height: 16px; flex: none; transition: transform var(--dur-fast) ease-out; }
+details.how[open] > summary .how-caret { transform: rotate(90deg); }
+.how-body { display: grid; gap: var(--s2); max-width: 70ch; padding-bottom: var(--s1); }
+.how-body > * { margin: 0; }
+.how-body ul { padding-left: 1.2em; display: grid; gap: var(--s1); }
 
 /* --- Empty state: what isn't there yet, said kindly, with the way forward. --- */
 .empty { display: grid; justify-items: center; gap: var(--s2); text-align: center; padding: var(--s6) var(--s4); color: var(--ink-2); }
@@ -404,9 +449,12 @@ fieldset.checks { border: 0; padding: 0; min-width: 0; }
 .list-title { font-weight: 500; overflow-wrap: anywhere; }
 .list-title a { text-decoration: none; }
 .list-title a:hover { text-decoration: underline; }
+/* A row that is only a way somewhere (a family's other pages): its title is a lone link, in the club's text color, 44px tall. */
+.list-title a.link-line { color: var(--club-text); margin-block: -10px; }
 .list-meta { font-size: var(--text-sm); color: var(--ink-2); overflow-wrap: anywhere; }
 .list-status { font-weight: 500; }
 .list-status.tone-done { color: var(--done); } .list-status.tone-due { color: var(--due); } .list-status.tone-late { color: var(--late); }
+.list-status.tone-info { color: var(--info); }
 .list-trail { flex: none; align-self: center; display: flex; align-items: center; gap: var(--s3); }
 .list-amount { font-weight: 500; font-variant-numeric: tabular-nums lining-nums; text-align: right; }
 .list-row > .empty { flex: 1 1 auto; }
@@ -477,13 +525,14 @@ fieldset.checks { border: 0; padding: 0; min-width: 0; }
 
 /* --- Notice (src/app/components/notice.tsx): a status that stands apart from the text around it, on its tone's soft
    tint with a hairline edge. The tone is said by its icon and its word, in the tone's ink; the body stays in ink.
-   Four status tones and no more, the same as everywhere: neutral (a Notice's info) in ink on the neutral tint, due (warning) amber, done green, late (problem) red. --- */
+   The status tones, the same as everywhere: info blue (a Notice's info), due (warning) amber, done green, late (problem) red. --- */
 .notice { --tone: var(--ink); --tone-soft: var(--neutral-soft);
   display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: var(--s3); align-items: start;
   padding: var(--s3) var(--s4); border: 1px solid var(--border); border-radius: var(--radius); background: var(--tone-soft); color: var(--ink); }
 .notice-due { --tone: var(--due); --tone-soft: var(--due-soft); }
 .notice-done { --tone: var(--done); --tone-soft: var(--done-soft); }
 .notice-late { --tone: var(--late); --tone-soft: var(--late-soft); }
+.notice-info { --tone: var(--info); --tone-soft: var(--info-soft); }
 .notice > svg { width: 20px; height: 20px; margin-top: 2px; color: var(--tone); }
 .notice-body { min-width: 0; overflow-wrap: anywhere; font-size: var(--text-control); }
 .notice-body > * + * { margin-top: var(--s2); }
@@ -493,6 +542,9 @@ fieldset.checks { border: 0; padding: 0; min-width: 0; }
 .notice .box-foot { margin-top: var(--s3); }
 .notice a:not(.btn) { color: inherit; font-weight: 600; }
 main.wrap.single > .notice { margin-top: var(--s5); }
+/* A titled notice that is one line: its title, then its words beside it (a part with nothing in it, Accounting links). */
+.notice-inline .notice-body { max-width: none; }
+.notice-inline .notice-title { display: inline; margin-right: var(--s2); }
 .box > .notice, .box > form + .notice, .box > p + .notice { margin-top: var(--s3); }
 
 /* --- Page header: the page's title, one quiet line under it, its actions and the way back. --- */
@@ -506,7 +558,25 @@ main.wrap.single > .notice { margin-top: var(--s5); }
 .page-back a, .back-to-settings a { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; color: var(--ink-2); font-size: var(--text-sm); font-weight: 500; text-decoration: none; }
 .page-back a:hover, .back-to-settings a:hover { color: var(--ink); text-decoration: underline; }
 .page-back svg { width: 16px; height: 16px; }
+/* A staff page's title stands at the same height with or without its way back: the back line's 44px is kept above
+   every title, and the link, when there is one, is drawn in it. So there is more room above a title than below it. */
+html:not(:has(nav.tabs)) main.wrap.single:has(> .page-head) { padding-top: 0; }
+html:not(:has(nav.tabs)) main.wrap.single > .page-head > div:first-child { padding-top: calc(44px + var(--s1)); }
+html:not(:has(nav.tabs)) main.wrap.single > .page-head .page-back { margin-top: calc(-44px - var(--s1)); }
 @media (min-width: 760px) { .page-title { font-size: 1.75rem; } }
+
+/* --- Powered by (src/app/components/powered-by.tsx): the product's credit, the club leading everywhere else. One ink
+   in every footer; the sign-in page's is in the product's colors. Live text beside the mark; never removed by a setting. --- */
+.powered-by { display: flex; width: fit-content; align-items: center; gap: 6px; min-height: 44px; color: var(--badge-ink);
+  font-size: var(--text-xs); font-weight: 500; text-decoration: none; }
+.powered-by:hover .pb-name { text-decoration: underline; }
+.pb-mark { width: 1.375rem; height: 1.375rem; flex: none; fill: currentColor; }
+.pb-name { font-weight: 600; }
+.powered-by-color .pb-boosters { color: var(--br-ink); } .powered-by-color .pb-rocket { color: var(--br-flame-ink); }
+.powered-by-color .pb-disc { fill: var(--br-disc); } .powered-by-color .pb-smoke { fill: var(--br-smoke); }
+.powered-by-color .pb-ember { fill: var(--br-ember); } .powered-by-color .pb-flame { fill: var(--br-flame); }
+footer.wrap .powered-by { color: var(--badge-ink); } /* not the footer's club-colored links */
+.signin-foot { max-width: 440px; margin: var(--s5) auto 0; padding: 0 var(--cell); display: flex; justify-content: center; }
 
 /* --- Section label: a small quiet heading over a list, the way the lists on Home are named. --- */
 .section-label { font-size: var(--text-sm); font-weight: 500; color: var(--ink-2); letter-spacing: 0; margin-bottom: var(--s2); }
@@ -542,7 +612,7 @@ p.errors, .sign-out .errors { padding-left: 0; }
 /* --- Status icon: the small ring before a row, its shape and tone telling the state the row's words say. --- */
 .status-icon { width: 16px; height: 16px; flex: none; color: var(--ink-3); }
 .status-icon.tone-done { color: var(--done); } .status-icon.tone-due { color: var(--due); }
-.status-icon.tone-late { color: var(--late); }
+.status-icon.tone-late { color: var(--late); } .status-icon.tone-info { color: var(--info); }
 .status-icon .status-mark { stroke: var(--surface); }
 
 /* --- Step indicator (the season ruler; StepIndicator): a thin track in segments, each step's number and name under
@@ -606,6 +676,10 @@ p.errors, .sign-out .errors { padding-left: 0; }
 /* --- Toolbar: a row of filters over what they scope, wrapping on a phone. --- */
 .toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s3); }
 .toolbar > .field { flex: 1 1 12rem; max-width: 28rem; }
+/* A group of tick boxes among the fields: its legend sits where a field's label does, 6px over the 44px control, so
+   the labels and the controls of the row line up. */
+.toolbar > fieldset.checks > legend { float: left; width: 100%; margin-bottom: 6px; }
+.toolbar > fieldset.checks > .checks { clear: both; }
 .box > .toolbar, .box > form > .toolbar { margin-top: var(--s3); }
 .toolbar > .toolbar-end { margin-left: auto; display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; }
 
@@ -793,6 +867,10 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 .steps-list li { padding-left: var(--s1); }
 .steps-list li::marker { color: var(--ink-2); font-weight: 500; }
 /* A set-up's steps: each name in a quiet row, the current one in ink and underlined, the links 44px tall. */
+.setup-title { display: flex; align-items: center; gap: var(--s3); }
+.product-mark { width: 2.5rem; height: 2.5rem; flex: none; forced-color-adjust: none; } /* the product's icon, before there is a club (setup) */
+.product-mark .pm-tile { fill: var(--br-disc); } .product-mark .pm-smoke { fill: var(--br-smoke); }
+.product-mark .pm-ember { fill: var(--br-ember); } .product-mark .pm-flame { fill: var(--br-flame); }
 .setup-progress { display: flex; gap: var(--s1) var(--s4); flex-wrap: wrap; margin-top: var(--s3); list-style: none; padding: 0; font-size: var(--text-sm); color: var(--ink-2); }
 .setup-progress [aria-current="step"] { color: var(--ink); font-weight: 600; text-decoration: underline; text-decoration-color: var(--club-text); text-decoration-thickness: 2px; text-underline-offset: 0.35em; }
 .setup-progress a { display: inline-flex; align-items: center; min-height: 44px; color: var(--club-text); }
@@ -859,6 +937,13 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 .ds-frame .tabs { position: static; display: grid; margin-top: var(--s7); }
 @media (max-width: 559.98px) { .ds-frame .top-nav.ds-show { display: none; } }
 @media (min-width: 760px) { .ds-pair { grid-template-columns: 1fr 1fr; } }
+/* The rebuilt staff pages: a state line under a card's title, a details list and the words after it, a notice and its
+   hint, a lone paragraph after a toolbar's form or under the page head, and a card's list of rules, each with room. */
+.box > h2 + .state { margin-top: var(--s2); }
+.box > dl.details + p, .box > dl.details + .hint, .box > .notice + .hint, .box > form + p { margin-top: var(--s3); }
+main.wrap.single > .page-head + p { margin-top: var(--s4); }
+.box > ul:not([class]) { padding-left: 1.25em; margin-top: var(--s2); display: grid; gap: var(--s1); max-width: 70ch; }
+.box h3.table-head:first-child { margin-top: 0; }
 /* ---- End of Staff pages ---- */
 
 /* ---- Settings and the staff menu: the Settings page and every settings page, the roles checklist, the Staff page and
@@ -878,6 +963,10 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 .mail-steps .state { display: inline-flex; }
 /* A club color picked on the setup's club step or the Club page, shown where it will be used: on the logo tile and a
    primary button's fill. */
+/* The preview draws the color being picked (its own --club-l and --club-d), in the theme the page is in. */
+.club-preview { --club: var(--club-l); --club-on: var(--club-on-l); }
+[data-theme="dark"] .club-preview { --club: var(--club-d); --club-on: var(--club-on-d); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .club-preview { --club: var(--club-d); --club-on: var(--club-on-d); } }
 .club-preview { display: flex; align-items: center; gap: var(--s3); min-height: 56px; padding: 0 var(--s4); background: var(--club); color: var(--club-on);
   border-radius: var(--radius); }
 .club-preview .club { font-size: var(--text-md); font-weight: 600; }
@@ -954,6 +1043,7 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 /* Windows contrast themes: let the system palette win, keep every state readable without our colors. */
 @media (forced-colors: active) {
   .bar, .tabs { border-color: CanvasText; }
+  .powered-by-color .pb-mark { forced-color-adjust: none; } /* the product's mark keeps its own colors, its disc its own ground */
   .monogram, .account, .avatar { border: 1px solid CanvasText; }
   .top-nav a[aria-current="page"], .nav-group-button.here, .top-nav .nav-panel a[aria-current="page"], .menu-panel a[aria-current="page"],
   .tabs a[aria-current="page"] { text-decoration: underline; text-decoration-thickness: 3px; text-underline-offset: 6px; }
@@ -980,6 +1070,7 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
   .checks input:disabled::before { border-color: GrayText; }
   .btn:disabled, .btn[aria-disabled="true"], .field :disabled { border-style: dashed; color: GrayText; }
   .club-preview { forced-color-adjust: none; }
+  details.more:not(.how) > summary::before { forced-color-adjust: none; background: CanvasText; } /* the caret's mask fill, which the system palette would otherwise drop */
   :focus-visible { outline-color: Highlight; }
 }
 

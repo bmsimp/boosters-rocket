@@ -626,7 +626,7 @@ describe("connecting a different company", () => {
     expect(section).toContain("The company connected now: the club switched away and back");
     expect(section).not.toContain("From the earlier QuickBooks company");
     expect(section).not.toContain("In the earlier company");
-    expect(section).not.toContain("sent nothing more to the earlier company");
+    expect(section).not.toContain("in the books of that company");
   });
 
   it("an item the clear gave up before its send sends nothing", async () => {

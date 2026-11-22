@@ -3,6 +3,7 @@ import { PROVIDER_LABELS } from "@/app/components/sign-in-settings/labels";
 import { usesCertificate } from "@/lib/auth/provider-fields";
 import { CalendarDate } from "@/app/components/calendar-date";
 import { Notice } from "@/app/components/notice";
+import { LinkButton } from "@/app/components/ui";
 import { expiringSecrets, certificateNextStep } from "./secret-expiry-rule";
 
 /** Shown to people who manage sign-in: secrets and certificates that expire within 30 days, or that can't be read. */
@@ -20,7 +21,7 @@ export async function SecretExpiryWarning() {
             ? "the saved secret can't be read with this server's encryption key. Enter it again."
             : <>the client secret expires <CalendarDate iso={i.expiresAt!.toISOString()} />. Create a new one and save it.</>)}</li>
       ))}</ul>
-      <p className="box-foot"><a className="btn btn-line" href="/staff/settings/sign-in">Open sign-in settings</a></p>
+      <p className="box-foot"><LinkButton plain variant="secondary" href="/staff/settings/sign-in">Open sign-in settings</LinkButton></p>
     </Notice>
   );
 }

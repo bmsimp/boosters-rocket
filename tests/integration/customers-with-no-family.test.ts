@@ -392,7 +392,7 @@ describe("the action and the section on Accounting links (on Reconciliation unti
     expect(recon).toContain('href="/staff/links#no-family-h"');
     const html = section(await renderPage(AccountingLinksPage))!;
     expect(html).toContain("Customers with no family");
-    expect(html).toContain("It makes no guardian and gives nobody a sign-in: someone who may change families adds its guardians on the family&#x27;s page, under Families.");
+    expect(html).toContain("It adds no guardian: someone who may change families does that on the family&#x27;s page.");
     expect(tableRows(html)).toHaveLength(2);
     expect(rowNamed(html, "Patel Family")).toEqual(["Patel Family", "2 students, 1 inactive",
       "A family, linked to this customer, with 2 students, each linked to their own. 1 student is inactive in QuickBooks and stays inactive here.",
@@ -407,7 +407,7 @@ describe("the action and the section on Accounting links (on Reconciliation unti
     await connectRoster(stub);
     asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]));
     let html = section(await renderPage(AccountingLinksPage))!;
-    expect(html).toContain("Nothing: every active family customer the books have at the top level, under no other customer, is linked to a family in the portal, or is about to be by a change on Reconciliation.");
+    expect(html).toContain("Nothing: every active family customer is linked to a family, or is about to be.");
     expect(tableRows(html)).toEqual([]);
     expect(await renderPage(ReconciliationPage)).not.toContain("no family in the portal: see");
     await db.delete(setting).where(eq(setting.key, SHAPE_KEY));
@@ -530,7 +530,7 @@ describe("a customer meant for a family the portal has (stage 4's slice M3a2)", 
     expect(list).toContain(`href="/staff/links?pick=${String(quiets)}&amp;customer=90#links-pick-h"`);
     expect(rowNamed(list, "Plain Family")![3]).toBe("Create a family from this: Plain Family");
     expect(list).not.toContain("nothing can link the two yet");
-    expect(list).toContain("isn&#x27;t made a family here: its row names that family and says where the two are linked.");
+    expect(list).toContain("isn&#x27;t made a family here: its row says where to link it.");
     // The given-up create's own section points at picking it for the family saved first, with a link to that step.
     const madeAnyway = section(html, "made-anyway-h").replaceAll("<!-- -->", "");
     expect(madeAnyway).toContain("It isn&#x27;t offered to bring in under Customers with no family: if it is the family the portal saved first, pick it for that family on Accounting links");
@@ -604,7 +604,7 @@ describe("a customer meant for a family the portal has (stage 4's slice M3a2)", 
     expect(section(html, "no-family-h")).toBe("");
     const madeAnyway = section(html, "made-anyway-h").replaceAll("<!-- -->", "").replaceAll("&#x27;", "'");
     expect(madeAnyway).toContain("It isn't offered to bring in under Customers with no family: if it is the family the portal saved first, pick it for that family on Accounting links;"
-      + " if it isn't wanted, make it inactive in QuickBooks. Someone who may link families to accounting does this on Accounting links.");
+      + " if it isn't wanted, make it inactive in QuickBooks. Someone who can link families does this on Accounting links.");
     expect(madeAnyway).not.toContain("saved first inactive");
     expect(madeAnyway).not.toContain('href="/staff/links');
   });

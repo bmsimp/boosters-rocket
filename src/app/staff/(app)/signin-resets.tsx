@@ -30,7 +30,7 @@ export async function SigninResets({ viewerStaffId }: { viewerStaffId: string })
         );
       })}</ul>
       {more && <p>These are the latest {resets.length}. There were more this week: <Link href={all}>every reset is in the audit log</Link>.</p>}
-      <p>If you didn&apos;t expect one of these, ask whoever did it, and read their reason in the audit log.</p>
+      <p>Didn&apos;t expect one? Ask whoever did it. Their reason is in the audit log.</p>
     </Notice>
   );
 }

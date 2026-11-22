@@ -9,10 +9,11 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Gallery } from "../src/app/staff/(app)/design-system/gallery";
+import { PoweredBy } from "../src/app/components/powered-by";
 import { clubCssVars, deriveClubTokens } from "../src/lib/theme/contrast";
 
 /** DEFAULT_COLOR in src/lib/settings/club.ts, which is not imported: that module opens the database. */
-const DEFAULT_COLOR = "#5b2a86";
+const DEFAULT_COLOR = "#1e1b4b";
 
 const css = readFileSync("src/app/booster.css", "utf8");
 const vars = Object.entries(clubCssVars(deriveClubTokens(DEFAULT_COLOR))).map(([k, v]) => `${k}: ${v}`).join("; ");
@@ -26,6 +27,7 @@ const body = renderToStaticMarkup(
       </div>
     </header>
     <main className="wrap single ds-page"><Gallery /></main>
+    <footer className="wrap"><PoweredBy /></footer>
   </>,
 );
 
@@ -36,7 +38,7 @@ const html = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Design system · Booster Rocket</title>
+<title>Design system · Boosters Rocket</title>
 <style>
 ${css}
 </style>

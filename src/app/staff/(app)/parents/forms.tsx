@@ -1,8 +1,10 @@
 "use client";
 import Link from "next/link";
-import { startTransition, useActionState, useEffect, useRef, useState } from "react";
+import { startTransition, useActionState, useEffect, useId, useRef, useState } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { ActionOutcome, Notice } from "@/app/components/notice";
+import { Button } from "@/app/components/ui/button";
+import { Checkbox, TextArea, TextInput } from "@/app/components/ui/field";
 import { CONTACT_FIELDS, type ContactForm, type ContactValues } from "@/lib/parents/contact-fields";
 
 // No form `action` on the forms with a text field: React resets a form after one, and the note would vanish on a
@@ -16,15 +18,17 @@ function Outcome({ state }: { state: Done | null }) {
   return <ActionOutcome state={state} />;
 }
 
-/** A text field and one button: used to block a person. */
-export function NoteAction({ label, field, pendingLabel, act }: { label: string; field: string; pendingLabel: string; act: (text: string) => Promise<Done> }) {
+/** A text field and one button: used to block a person (`variant="danger"`: it takes their sign-in away). */
+export function NoteAction({ label, field, pendingLabel, act, variant = "secondary" }: { label: string; field: string; pendingLabel: string; act: (text: string) => Promise<Done>;
+  variant?: "secondary" | "danger" }) {
+  const id = useId();
   const [text, setText] = useState("");
   const [state, run, pending] = useActionState(async () => safely(() => act(text), failed), null);
   return (
     <form onSubmit={noSubmit} className="stack">
-      <label className="field"><span>{field}</span><textarea rows={2} maxLength={500} value={text} onChange={(e) => setText(e.target.value)} /></label>
+      <TextArea id={`${id}-note`} label={field} rows={2} maxLength={500} value={text} onChange={(e) => setText(e.target.value)} />
       <Outcome state={state} />
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? pendingLabel : label}</button>
+      <Button variant={variant} disabled={pending} onClick={() => startTransition(() => run())}>{pending ? pendingLabel : label}</Button>
     </form>
   );
 }
@@ -36,6 +40,7 @@ export function NoteAction({ label, field, pendingLabel, act }: { label: string;
  * emptied, so a second press needs both again.
  */
 export function ResetSigninForm({ act }: { act: (reason: string, calledBack: boolean) => Promise<Done> }) {
+  const id = useId();
   const [calledBack, setCalledBack] = useState(false);
   const [reason, setReason] = useState("");
   const [state, run, pending] = useActionState(async () => {
@@ -46,11 +51,12 @@ export function ResetSigninForm({ act }: { act: (reason: string, calledBack: boo
   return (
     <form onSubmit={noSubmit} className="stack">
       <fieldset className="checks"><legend>Before you reset</legend>
-        <label><input type="checkbox" required checked={calledBack} onChange={(e) => setCalledBack(e.target.checked)} /> I called them back on a number the club already holds, and they asked for this</label>
+        <Checkbox id={`${id}-called`} required checked={calledBack} onChange={(e) => setCalledBack(e.target.checked)}
+          label=" I called them back on a number the club already holds, and they asked for this" />
       </fieldset>
-      <label className="field"><span>Why? (staff only)</span><textarea rows={2} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+      <TextArea id={`${id}-reason`} label="Why? (staff only)" rows={2} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
       <Outcome state={state} />
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Resetting…" : "Reset sign-in"}</button>
+      <Button variant="danger" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Resetting…" : "Reset sign-in"}</Button>
     </form>
   );
 }
@@ -61,7 +67,7 @@ export function OneButton({ label, pendingLabel, act }: { label: string; pending
   return (
     <form action={run} className="stack">
       <Outcome state={state} />
-      <button className="btn btn-line" disabled={pending}>{pending ? pendingLabel : label}</button>
+      <Button type="submit" variant="secondary" disabled={pending}>{pending ? pendingLabel : label}</Button>
     </form>
   );
 }
@@ -74,6 +80,7 @@ export function OneButton({ label, pendingLabel, act }: { label: string; pending
 export function GuardianChangeControls({ name, open, reinstatable, remove, reinstate }: {
   name: string; open: boolean; reinstatable: boolean; remove: (note: string) => Promise<Done>; reinstate: () => Promise<Done>;
 }) {
+  const id = useId();
   const [note, setNote] = useState("");
   const [state, run, pending] = useActionState(async (_: Done | null, what: "remove" | "reinstate") => {
     const r = await safely(() => (what === "remove" ? remove(note) : reinstate()), failed);
@@ -84,19 +91,19 @@ export function GuardianChangeControls({ name, open, reinstatable, remove, reins
   useEffect(() => { if (state?.ok) said.current?.focus(); }, [state]);
   if (!state && !open && !reinstatable) return null;
   return (
-    <div className="stack">
-      {state ? <div ref={said} tabIndex={-1}><ActionOutcome state={state} /></div> : null}
+    <div className="stack row-change">
+      {state ? <ActionOutcome state={state} ref={said} /> : null}
       {open ? (
         <details className="more"><summary>Remove<span className="visually-hidden"> {name}</span></summary>
           <p>They can&apos;t sign in to this family any more, and are signed out of it at once, whatever the family owes. Forms still waiting for their signature start again.</p>
           <form onSubmit={noSubmit} className="stack">
-            <label className="field"><span>Why? (staff only)</span><textarea rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>
-            <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run("remove"))}>{pending ? "Removing…" : "Remove"}</button>
+            <TextArea id={`${id}-note`} label="Why? (staff only)" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
+            <Button variant="danger" disabled={pending} onClick={() => startTransition(() => run("remove"))}>{pending ? "Removing…" : "Remove"}</Button>
           </form>
         </details>
       ) : reinstatable ? (
         <form action={() => run("reinstate")} className="stack">
-          <button className="btn btn-line" disabled={pending}>{pending ? "Reinstating…" : `Reinstate ${name}`}</button>
+          <Button type="submit" variant="secondary" disabled={pending}>{pending ? "Reinstating…" : `Reinstate ${name}`}</Button>
         </form>
       ) : null}
     </div>
@@ -113,6 +120,7 @@ type AddDone = Done | { ok: false; errors: string[]; samePerson: string };
  * that person's id back with the same address, and is offered only while the address is the one asked about.
  */
 export function AddGuardianForm({ act }: { act: (name: string, email: string, samePerson: string | null) => Promise<AddDone> }) {
+  const id = useId();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [asked, setAsked] = useState<{ email: string; parentId: string } | null>(null);
@@ -127,24 +135,26 @@ export function AddGuardianForm({ act }: { act: (name: string, email: string, sa
   const asking = question !== null && asked !== null && asked.email === email;
   return (
     <form onSubmit={noSubmit} className="stack">
-      <label className="field"><span>Name</span><input type="text" maxLength={100} autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} /></label>
-      <label className="field"><span>Email address they sign in with</span><input type="email" maxLength={320} autoComplete="off" spellCheck={false} value={email} onChange={(e) => setEmail(e.target.value)} /></label>
+      <TextInput id={`${id}-name`} label="Name" maxLength={100} autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} />
+      <TextInput id={`${id}-email`} label="Email address they sign in with" type="email" maxLength={320} autoComplete="off" spellCheck={false} value={email} onChange={(e) => setEmail(e.target.value)} />
       {question ? (asking ? <Notice tone="warning">{question.errors[0]}</Notice> : null) : <Outcome state={state} />}
-      {asking ? <button type="button" className="btn" disabled={pending} onClick={() => startTransition(() => run(true))}>{pending ? "Adding…" : "Yes, add them"}</button> : null}
-      <button type="button" className={asking ? "btn btn-line" : "btn"} disabled={pending} onClick={() => startTransition(() => run(false))}>{pending ? "Adding…" : "Add guardian"}</button>
+      {/* One primary at a time: while the portal asks whether it is the same person, "Yes, add them" is it. */}
+      {asking ? <Button disabled={pending} onClick={() => startTransition(() => run(true))}>{pending ? "Adding…" : "Yes, add them"}</Button> : null}
+      <Button variant={asking ? "secondary" : "primary"} disabled={pending} onClick={() => startTransition(() => run(false))}>{pending ? "Adding…" : "Add guardian"}</Button>
     </form>
   );
 }
 
 /** A person's name, changed in the portal: the field starts from the name they have. */
 export function NameForm({ name: current, act }: { name: string; act: (name: string) => Promise<Done> }) {
+  const id = useId();
   const [name, setName] = useState(current);
   const [state, run, pending] = useActionState(async () => safely(() => act(name), failed), null);
   return (
     <form onSubmit={noSubmit} className="stack">
-      <label className="field"><span>Name</span><input type="text" maxLength={100} autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} /></label>
+      <TextInput id={`${id}-name`} label="Name" maxLength={100} autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} />
       <Outcome state={state} />
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : "Save name"}</button>
+      <Button variant="secondary" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : "Save name"}</Button>
     </form>
   );
 }
@@ -161,6 +171,7 @@ const detailsFailed: DetailsDone = { ok: false, errors: [ACTION_FAILED] };
  * otherwise what was typed stays. A kept change's compare view is linked for a reader who may open it (`compare`).
  */
 export function DetailsForm({ initial, act }: { initial: ContactForm; act: (sent: Record<string, string>) => Promise<DetailsDone> }) {
+  const id = useId();
   const [shown, setShown] = useState(initial);
   const [values, setValues] = useState<ContactValues>(initial.values);
   const [state, run, pending] = useActionState(async () => {
@@ -171,15 +182,14 @@ export function DetailsForm({ initial, act }: { initial: ContactForm; act: (sent
   return (
     <form onSubmit={noSubmit} className="stack">
       {CONTACT_FIELDS.map(({ name, label, max }) => (
-        <label className="field" key={name}><span>{label}</span>
-          <input type={name === "phone" ? "tel" : "text"} maxLength={max} autoComplete="off" value={values[name]} onChange={(e) => setValues({ ...values, [name]: e.target.value })} />
-        </label>
+        <TextInput key={name} id={`${id}-${name}`} label={label} type={name === "phone" ? "tel" : "text"} maxLength={max} autoComplete="off" value={values[name]}
+          onChange={(e) => setValues({ ...values, [name]: e.target.value })} />
       ))}
       <Outcome state={state} />
-      {state?.ok && state.compare.map((id) => (
-        <Link key={id} className="link-line" href={`/staff/reconciliation?compare=${id}#writes-h`}>Compare the two on the Reconciliation page</Link>
+      {state?.ok && state.compare.map((c) => (
+        <Link key={c} className="link-line" href={`/staff/reconciliation?compare=${c}#writes-h`}>Compare the two on the Reconciliation page</Link>
       ))}
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving, then sending to QuickBooks…" : "Save details"}</button>
+      <Button variant="secondary" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving, then sending to QuickBooks…" : "Save details"}</Button>
     </form>
   );
 }
@@ -194,10 +204,10 @@ export function ReleaseHoldControl({ release }: { release: () => Promise<Done> }
   useEffect(() => { if (state?.ok) said.current?.focus(); }, [state]);
   return (
     <div className="stack">
-      {state ? <div ref={said} tabIndex={-1}><ActionOutcome state={state} /></div> : null}
+      {state ? <ActionOutcome state={state} ref={said} /> : null}
       {state?.ok ? null : (
         <form action={run} className="row-actions">
-          <button className="btn" disabled={pending}>{pending ? "Letting them in…" : "Let its guardians sign in"}</button>
+          <Button type="submit" disabled={pending}>{pending ? "Letting them in…" : "Let its guardians sign in"}</Button>
         </form>
       )}
     </div>

@@ -7,7 +7,7 @@
 export const QUICKBOOKS_USE = {
   reads: "The portal reads the club's families and members, with the email, phone and mailing address on their records, what each family owes, and the products and services its invoices are for, from QuickBooks. "
     + "What it reads there decides whose invoices each family sees; it changes none of the portal's own families, students or sign-ins, "
-    + "so a name, a student's family, or a customer made inactive or active again in QuickBooks stays as the portal has it until someone who may link families to accounting takes it into the portal, on the accounting links screen, "
+    + "so a name, a student's family, or a customer made inactive or active again in QuickBooks stays as the portal has it until someone who can link families takes it into the portal, on the accounting links screen, "
     + "and the guardians of a family made active again that way sign in to it only once someone who may change families lets them in. "
     + "A guardian's phone and mailing address are the portal's own: it takes them in once, from the guardian's own record, after the first roster read since the update that made them so, "
     + "and a change made to them in QuickBooks after that stays there.",
@@ -25,7 +25,7 @@ export const QUICKBOOKS_USE = {
     + "And one kind of invoice: when a guardian chooses to pay instead of volunteering, it creates that invoice, and voids it if they switch back before paying anything on it. "
     + "The invoice carries that guardian's sign-in email address as its bill-to address, so it can be paid online; nothing is emailed, by the portal or by QuickBooks. "
     + "It never deletes anything, never changes any other invoice, and never touches payments. "
-    + "In an Intuit sandbox company only, an Admin can also run a check of these requests: it makes a few test records named “Booster Rocket check”, tries each change on them, and makes them inactive at the end.",
+    + "In an Intuit sandbox company only, an Admin can also run a check of these requests: it makes a few test records named “Boosters Rocket check”, tries each change on them, and makes them inactive at the end.",
 } as const;
 
 /** The audit actions of those changes, for the pages that say when one was last made. */

@@ -1,6 +1,7 @@
 "use client";
 import { createContext, useContext, useState, useTransition, type ReactNode } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
+import { Button } from "@/app/components/ui/button";
 import { useLinkAnswer } from "./link-press";
 
 // The reviewed import's form (stage 4's slice M6): a tick for each family the review proposes, each ticked to begin
@@ -33,7 +34,7 @@ export function ImportForm({ ids, act, children }: { ids: string[]; act: (ticked
     <Ticks.Provider value={{ ticked, flip }}>
       {children}
       <div className="row-actions">
-        <button type="button" className="btn" aria-disabled={pending} onClick={go}>{pending ? "Making the families…" : IMPORT_PRESS(chosen.length)}</button>
+        <Button busy={pending} onClick={go}>{pending ? "Making the families…" : IMPORT_PRESS(chosen.length)}</Button>
       </div>
     </Ticks.Provider>
   );

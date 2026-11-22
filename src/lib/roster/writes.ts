@@ -1753,8 +1753,8 @@ const LINKED_ALREADY = "This family is linked to QuickBooks already, so nothing 
  */
 export const ENDED_HELD = (name: string, customer: string, offered: boolean) =>
   `${name} was linked to “${customer}” in QuickBooks until it was unlinked, and “${customer}” is still there, so making it again would make a second customer for the same household. Nothing was made.${offered
-    ? " To link the two again, someone who may link families to accounting does it on the Accounting links page: with Confirm on its row, or with Pick a different customer once the row offers it (a Suggested row offers it once it is left unlinked)."
-    : ` The Accounting links page can't offer “${customer}” for it until it is sorted out in QuickBooks, where it may be inactive, under another customer or of another type; once it is, someone who may link families to accounting links the two there.`}`;
+    ? " To link the two again, someone who can link families does it on the Accounting links page: with Confirm on its row, or with Pick a different customer once the row offers it (a Suggested row offers it once it is left unlinked)."
+    : ` The Accounting links page can't offer “${customer}” for it until it is sorted out in QuickBooks, where it may be inactive, under another customer or of another type; once it is, someone who can link families links the two there.`}`;
 /**
  * A student left out of "Create in QuickBooks and link" (slice M3b2): linked to a customer the books still hold until
  * the family they were in was unlinked (this family, or one they have since been moved out of), so a second customer isn't made for the same child, wherever the books hold the first (the
@@ -1800,7 +1800,7 @@ const LINKED_HERE = "That is linked to QuickBooks, so it is changed there first:
 const GIVEN_UP_MAYBE_MADE = "Making this in QuickBooks was given up on the Reconciliation page after a try QuickBooks may have taken. Once the roster has been read again (within a few minutes), the Reconciliation page says whether QuickBooks made it; if it didn't, press “Create in QuickBooks and link” again.";
 /** A family's create given up after QuickBooks made its customer (madeAfterGivingUp()): no second customer is made for it. */
 const madeAfterGivingUpWords = (name: string, noun: string) =>
-  `QuickBooks made the customer “${name}” for this ${noun} before making it was given up on the Reconciliation page, and no ${noun} in the portal is linked to it, so a second one wasn't made. If it is this ${noun}, pick it for this ${noun} on the Accounting links page, which links the two (someone who may link families to accounting can; where that page suggests another customer for this ${noun}, they leave it unlinked there first, as only then is a different customer picked for it). If it isn't, make it inactive in QuickBooks, then press “Create in QuickBooks and link” again.`;
+  `QuickBooks made the customer “${name}” for this ${noun} before making it was given up on the Reconciliation page, and no ${noun} in the portal is linked to it, so a second one wasn't made. If it is this ${noun}, pick it for this ${noun} on the Accounting links page, which links the two (someone who can link families can; where that page suggests another customer for this ${noun}, they leave it unlinked there first, as only then is a different customer picked for it). If it isn't, make it inactive in QuickBooks, then press “Create in QuickBooks and link” again.`;
 const COLLATOR = new Intl.Collator("en", { sensitivity: "base" });
 const isFamilyCreate = sql`${writeQueue.request}->>'op' = 'create' and ${writeQueue.request}->>'role' in ('family', 'member')`;
 const isStudentCreate = sql`${writeQueue.request}->>'op' = 'create' and ${writeQueue.request}->>'role' = 'student'`;
@@ -6094,7 +6094,7 @@ export function guardianSentWords(sent: readonly GuardianSent[], op: "grant" | "
       // the Portal sign-ins box and the person's page say which.
       case "not_sent": return s.why === "failed" ? ["Nothing was sent to QuickBooks for their Parent customer: the portal couldn't save that part of the change, so nothing will be sent for it. Their access in the portal is as said."] : [];
       case "nothing": case "not_own": return op === "remove" ? ["Nothing was sent to QuickBooks for them: they have no Parent customer of their own there."] : [];
-      case "named_like": return [`QuickBooks already has a customer named “${s.holds}” ${under} that isn't linked to ${who}, so no Parent customer was made for them. If it is a Parent customer no guardian is linked to, the two can be linked on Accounting links, in the opening of the family's row, by someone who may link families to accounting.`];
+      case "named_like": return [`QuickBooks already has a customer named “${s.holds}” ${under} that isn't linked to ${who}, so no Parent customer was made for them. If it is a Parent customer no guardian is linked to, the two can be linked on Accounting links, in the opening of the family's row, by someone who can link families.`];
       // One person, one name (the lead's decision 1 in slice 9h's last round).
       case "named_elsewhere": return [`QuickBooks already has ${who}'s record under ${s.elsewhere}, and takes a name once, so no Parent customer was made for them ${under}.`];
       case "name_held": return [`Nothing was sent for their Parent customer ${under}, which QuickBooks refused before as a taken name: ${s.elsewhere !== undefined

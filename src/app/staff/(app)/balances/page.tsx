@@ -5,10 +5,7 @@ import { writeAudit } from "@/lib/audit/log";
 import { formatMoney } from "@/lib/money/cents";
 import { loadBalances, SEARCH_MAX, type BalanceRow } from "@/lib/money/balances";
 import { moneyRunView, type MoneyRunView } from "@/lib/money/sweep";
-import { CalendarDate } from "@/app/components/calendar-date";
-import { LocalTime } from "@/app/components/local-time";
-import { DataTable } from "@/app/components/data-table";
-import { Notice } from "@/app/components/notice";
+import { Button, CalendarDate, Card, Checkbox, DataTable, EmptyState, LinkButton, LocalTime, Notice, PageHeader, TextInput, Toolbar } from "@/app/components/ui";
 import { familyBalancePage } from "@/app/staff/(app)/family-pages";
 import { OneButton } from "../seasons/forms";
 import { askForMoneyRunAction } from "./actions";
@@ -19,19 +16,16 @@ export const dynamic = "force-dynamic";
 
 const familiesWord = (n: number) => `${n} ${n === 1 ? "family" : "families"}`;
 
-function Run({ run }: { run: MoneyRunView }) {
-  return (
-    <section className="box" aria-labelledby="run-h"><h2 id="run-h">Reading from QuickBooks</h2>
-      <p>The worker reads every family&apos;s invoices from QuickBooks once a day, one family at a time. A parent opening their own page reads theirs again too.</p>
-      {run.running
-        ? <Notice tone="info">Reading every family now: {familiesWord(run.running.read)} read so far{run.running.failed ? `, ${run.running.failed} couldn't be read` : ""}. Started <LocalTime iso={run.running.startedAt} />.</Notice>
-        : run.asked ? <Notice tone="info">A read of every family is asked for. The worker starts it within a minute.</Notice> : null}
-      {run.last
-        ? <p className="hint">Last finished <LocalTime iso={run.last.finishedAt} />{run.last.ok ? "" : ", part way"}: {run.last.detail ?? ""}</p>
-        : <p className="hint">Every family hasn&apos;t been read in one go yet.</p>}
-      {!run.running && !run.asked && <div className="box-foot"><OneButton label="Read every family now" pendingLabel="Asking…" act={askForMoneyRunAction} /></div>}
-    </section>
-  );
+/**
+ * The read of every family from QuickBooks, said in the page's lede: under way, asked for, or when it last finished. Its
+ * press, "Read every family now", is the page's action (RunPress) while neither is so.
+ */
+function RunWords({ run }: { run: MoneyRunView }) {
+  return run.running
+    ? <>Reading every family now: {familiesWord(run.running.read)} read so far{run.running.failed ? `, ${run.running.failed} couldn't be read` : ""}. Started <LocalTime iso={run.running.startedAt} />.</>
+    : run.asked ? <>A read of every family is asked for. The worker starts it within a minute.</>
+    : run.last ? <>Every family was last read <LocalTime iso={run.last.finishedAt} />{run.last.ok ? "" : ", part way"}{run.last.detail ? `: ${run.last.detail}` : "."}</>
+    : <>Every family hasn&apos;t been read in one go yet.</>;
 }
 
 /** The families, one row each: what is open, when it was read, and what is owed, in one right-aligned column. */
@@ -63,30 +57,33 @@ export default async function BalancesPage({ searchParams }: { searchParams: Pro
   const mayLink = can(ctx.effective, "Accounting.Link.ReadWrite") && can(ctx.effective, "Roster.Read");
   return (
     <main className="wrap single">
-      <h1 className="page-title">Balances</h1>
-      <p className="lede">What each family owes, from the figures QuickBooks last gave. Opening this page asks QuickBooks nothing.</p>
+      <PageHeader title="Balances"
+        lede={<>What each family owes, from the figures QuickBooks last gave. Opening this page asks QuickBooks nothing. The worker reads every family&apos;s invoices once a day, and a parent opening their page reads theirs again. <RunWords run={run} /></>}
+        actions={!run.running && !run.asked && <OneButton label="Read every family now" pendingLabel="Asking…" act={askForMoneyRunAction} />} />
 
-      <Run run={run} />
+      <Card title="Families" titleId="families-h">
+        {balances.unlinked > 0 && <Notice tone="info" live="none">{balances.unlinked === 1 ? "1 family isn't" : `${balances.unlinked} families aren't`} linked to the books, so {balances.unlinked === 1 ? "it has" : "they have"} no figures here.
+          {" "}{mayLink ? <Link href="/staff/links">{balances.unlinked === 1 ? "Link it" : "Link them"} on Accounting links</Link> : `Someone who can link families links ${balances.unlinked === 1 ? "it" : "them"} on Accounting links.`}</Notice>}
+        <form method="get" action="/staff/balances">
+          <Toolbar label="Filter the families">
+            <TextInput id="balances-q" label="Find a family or a student" name="q" type="search" maxLength={SEARCH_MAX} defaultValue={search} />
+            <fieldset className="checks"><legend>Which families</legend>
+              <Checkbox id="balances-owing" name="owing" value="1" defaultChecked={owing} label=" Only families that owe something" /></fieldset>
+            <Button type="submit" variant="secondary">Show</Button>
+            {filtered && <LinkButton variant="quiet" href="/staff/balances">Show every family</LinkButton>}
+          </Toolbar>
+        </form>
+        {!balances.roster ? <Notice tone="warning">The roster can&apos;t be shown right now. The Roster page says why.</Notice>
+          : balances.rows.length === 0 ? (filtered ? <Notice tone="info">No family matches.</Notice> : <EmptyState title="There are no families on the roster." />)
+          : <FamilyTable rows={balances.rows} caption={`${filtered ? `${balances.rows.length} of ${familiesWord(balances.families)}` : familiesWord(balances.families)}, by name.`} />}
+      </Card>
 
       {balances.worthALook.length > 0 && (
-        <section className="box" aria-labelledby="look-h"><h2 id="look-h">Worth a look</h2>
-          <p>QuickBooks&apos; own balance for these customers isn&apos;t what their open invoices add up to. It may be a credit, a payment not yet applied, or a charge that isn&apos;t an invoice. Parents see the invoices.</p>
+        <Card title="Worth a look" titleId="look-h"
+          description={<>QuickBooks&apos; balance for these customers doesn&apos;t match their open invoices. It may be a credit, an unapplied payment, or a charge that isn&apos;t an invoice. Parents see the invoices.</>}>
           <WorthALook rows={balances.worthALook} />
-        </section>
+        </Card>
       )}
-
-      <section className="box" aria-labelledby="families-h"><h2 id="families-h">Families</h2>
-        {balances.unlinked > 0 && <Notice tone="info" live="none">{balances.unlinked === 1 ? "1 family in the portal isn't" : `${balances.unlinked} families in the portal aren't`} linked to a customer in the books, so {balances.unlinked === 1 ? "it has" : "they have"} no figures here.
-          {" "}{mayLink ? <Link href="/staff/links">{balances.unlinked === 1 ? "Link it" : "Link them"} on Accounting links</Link> : `Someone who may link families to accounting links ${balances.unlinked === 1 ? "it" : "them"} on Accounting links.`}</Notice>}
-        <form method="get" action="/staff/balances" className="stack">
-          <label className="field"><span>Find a family or a student</span><input name="q" type="search" maxLength={SEARCH_MAX} defaultValue={search} /></label>
-          <fieldset className="checks"><legend>Which families</legend><label><input type="checkbox" name="owing" value="1" defaultChecked={owing} /> Only families that owe something</label></fieldset>
-          <div className="row-actions"><button className="btn btn-line">Show</button>{filtered && <Link className="btn btn-line" href="/staff/balances">Show every family</Link>}</div>
-        </form>
-        {!balances.roster ? <Notice tone="warning">The roster can&apos;t be shown right now. Check QuickBooks under Roster.</Notice>
-          : balances.rows.length === 0 ? <Notice tone="info">{filtered ? "No family matches." : "There are no families on the roster."}</Notice>
-          : <FamilyTable rows={balances.rows} caption={`${filtered ? `${balances.rows.length} of ${familiesWord(balances.families)}` : familiesWord(balances.families)}, by name.`} />}
-      </section>
     </main>
   );
 }

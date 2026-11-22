@@ -176,7 +176,7 @@ describe("making a family inactive from its page: one action, the amount of a ba
     expect(await riveraInactive(tag)).toEqual({ ok: true, message: "Made inactive in QuickBooks: Ana Rivera and Leo Rivera, then Rivera Family." });
     expect(revalidatedPaths()).toContain("/");
     const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
-    expect(html).toContain("A family the portal keeps, linked to its customer in QuickBooks, which is inactive there.");
+    expect(html).toContain("A family linked to its QuickBooks customer, which is inactive there.");
     // The family's own record is inactive in the portal now: no form that would send anything for it is offered.
     expect(html).not.toContain("Make Rivera Family inactive");
     for (const words of ["Change in QuickBooks", "Change the family Rivera Family", "Change the student Leo Rivera", "Change the parent Ana Rivera", "Add a student"]) expect(html).not.toContain(words);
@@ -188,7 +188,7 @@ describe("making a family inactive from its page: one action, the amount of a ba
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     expect(html).toContain("Make Rivera Family inactive");
-    expect(html).toContain("QuickBooks has Rivera Family inactive already");
+    expect(html).toContain("QuickBooks already has Rivera Family inactive");
     stub.calls.length = 0;
     expect(await riveraInactive(tag)).toMatchObject({ ok: true, message: expect.stringContaining("Rivera Family is inactive in QuickBooks already, so nothing was sent.") });
     expect(posts()).toEqual([]);
@@ -280,14 +280,14 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
     const rivera = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     expect(rivera).toContain("Ana Rivera is a portal guardian&#x27;s own Parent customer, so it is changed through them");
     expect(rivera).not.toContain("Change the parent Ana Rivera");
-    expect(rivera).toContain("a portal guardian&#x27;s own, changed through them under Portal sign-ins and on their page");
+    expect(rivera).toContain("A portal guardian&#x27;s own, changed through them");
     // The Portal sign-ins box says where QuickBooks stands for her.
     const box = rivera.slice(rivera.indexOf('id="entry-signins-h"'), rivera.indexOf("</section>", rivera.indexOf('id="entry-signins-h"')));
     expect(box).toContain("Linked to their own Parent customer “Ana Rivera”.");
     // Mei Chen is in QuickBooks only: her forms stay, and the page says she isn't a portal guardian.
     const chen = await renderPage(RosterEntryPage, { params: { id: await idOf("20") } });
     expect(chen).toContain("Change the parent Mei Chen");
-    expect(chen).toContain("not a portal guardian; adding the person under Portal sign-ins doesn&#x27;t use it, and while it is active a guardian of this family who isn&#x27;t linked to a customer can be linked to it on Accounting links, by someone who may link families to accounting");
+    expect(chen).toContain("No portal guardian is linked to it. Link one on Accounting links, by someone who can link families");
   });
 
   it("says a removed guardian's Parent customer, left active, is their own and used again if they are added back (stage 3's slice 9h)", async () => {
@@ -297,15 +297,15 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
     await db.update(guardian).set({ status: "disabled", disabledReason: "removed", statusBeforeDisable: "active" }).where(eq(guardian.id, row.id));
     const rivera = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     const parents = rivera.slice(rivera.indexOf('id="entry-parents-h"'), rivera.indexOf("</section>", rivera.indexOf('id="entry-parents-h"')));
-    expect(parents).toContain("the own Parent customer of a guardian removed from this family, left active in QuickBooks (a removal makes it inactive only when its balance allows): adding them back under Portal sign-ins uses it again");
-    expect(parents).not.toContain("not a portal guardian");
+    expect(parents).toContain("A removed guardian&#x27;s own, left active as it has a balance. Adding them back uses it again");
+    expect(parents).not.toContain("No portal guardian is linked to it");
   });
 
   it("a family's page, with both permissions: rename, add a student, move and make inactive; no \"Add a parent\" (stage 3's slice 9h)", async () => {
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     for (const words of ["Change in QuickBooks", "Add a student", "Change the student Leo Rivera", "Change the parent Ana Rivera", "Move to", "Make Rivera Family inactive",
-      "From the portal you can make a family, add a student, give each guardian added under Portal sign-ins their own Parent customer in QuickBooks, rename a family, student or parent, move a student to another family and make a family, student or parent inactive."]) {
+      "From the portal you can make a family, add a student, give each new guardian their own Parent customer, rename a family, student or parent, move a student to another family and make a family, student or parent inactive."]) {
       expect(html, words).toContain(words.replaceAll("'", "&#x27;"));
     }
     // A guardian is added under Portal sign-ins, which makes their Parent customer: the QuickBooks-only form is gone.
@@ -313,7 +313,7 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
     // A guardian's phone and address are the portal's own (stage 3's slice 11a), sent on after each save (slice 11b):
     // nothing says staff change them in QuickBooks.
     expect(html).toContain(NOT_HERE.contact.replaceAll("'", "&#x27;"));
-    expect(NOT_HERE.contact).toMatch(/phone and mailing address are the portal's own: they change them themselves on their Family page/);
+    expect(NOT_HERE.contact).toMatch(/A guardian's phone and mailing address are the portal's own\. Guardians change them on their Family page/);
     expect(html).not.toMatch(/phone numbers and mailing addresses are changed in QuickBooks/);
     expect(html).toContain("Phone in QuickBooks");
   });
@@ -332,7 +332,7 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
     await db.insert(student).values({ name: "Hal Handmade", active: true, familyId: hand!.id });
     expect(rowNamed(await renderPage(RosterPage), "Handmade Family")).toEqual(["Handmade Family", "1", "0", "Not linked: in the portal only"]);
     const html = await renderPage(RosterEntryPage, { params: { id: String(hand!.id) } });
-    expect(html).toContain("A family the portal keeps, not linked to QuickBooks: it is in the portal only, and a change to it is saved here only.");
+    expect(html).toContain("A family in the portal only, not linked to QuickBooks. Changes are saved here only.");
     expect(html).toContain("Hal Handmade");
     const portal = html.slice(html.indexOf('id="portal-changes-h"'), html.indexOf("</section>", html.indexOf('id="portal-changes-h"')));
     for (const words of ["Change the family Handmade Family", "Add a student", "Change the student Hal Handmade"]) expect(portal, words).toContain(words);
@@ -340,7 +340,7 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
     expect(html).toContain("Add a guardian");
     // Without the linking permission, "Create in QuickBooks and link" says who may press it, and offers no button.
     const link = html.slice(html.indexOf('id="create-link-h"'), html.indexOf("</section>", html.indexOf('id="create-link-h"')));
-    expect(link).toContain("Someone who may link families to accounting can make it in QuickBooks and link it.");
+    expect(link).toContain("Someone who can link families can make it in QuickBooks and link it.");
     expect(link).not.toContain("<button");
     expect(posts()).toEqual([]);
   });
@@ -722,7 +722,7 @@ describe("a change QuickBooks refused that the portal kept (stage 3's slice 9e)"
     expect(inactive).not.toContain("Send the portal");
     expect(inactive).toContain("QuickBooks has this customer inactive, and the portal never makes a customer active again");
     // Drawn as a notice, never a bare paragraph.
-    expect(inactive).toMatch(/<div class="notice notice-neutral"><svg[\s\S]*?<\/svg><div class="notice-body"><span class="notice-word">Note<\/span> QuickBooks has this customer inactive/);
+    expect(inactive).toMatch(/<div class="notice notice-info"><svg[\s\S]*?<\/svg><div class="notice-body"><span class="notice-word">Note<\/span> QuickBooks has this customer inactive/);
     // A customer the roster doesn't hold at all is said as that, not as inactive.
     await db.delete(qboCustomer).where(eq(qboCustomer.qboId, "12"));
     const gone = sectionOf(await renderPage(ReconciliationPage), "writes-h");

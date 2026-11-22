@@ -1,9 +1,11 @@
 "use client";
 import Link from "next/link";
-import { useRef, useState, useTransition } from "react";
+import { useTransition } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { DataTable } from "@/app/components/data-table";
-import { ActionOutcome, Notice } from "@/app/components/notice";
+import { Notice } from "@/app/components/notice";
+import { Button } from "@/app/components/ui/button";
+import { useLinkAnswer } from "./link-press";
 
 type Done = { ok: true; message: string } | { ok: false; errors: string[] };
 const failed: Done = { ok: false, errors: [ACTION_FAILED] };
@@ -21,17 +23,16 @@ export type NoFamilyRow = { key: string; name: string; students: string; makes: 
 const about = (name: string, r: Done): Done => (r.ok ? r : { ok: false, errors: r.errors.map((e) => `${name}: ${e}`) });
 
 /**
- * The list of customers with no family and an answer for each press, the newest first. The answers are kept here,
- * above the table, not in the rows: a family made takes its customer off the list when the page is read again, and its
- * answer stays. Each press keeps its own, so two pressed one after the other both stay.
+ * The list of customers with no family. Each press's answer is kept with every other press's on the page, above
+ * everything (LinkAnswers, ./link-press.tsx), not in the rows: a family made takes its customer off the list when the
+ * page is read again, and the part folds to one line when it was the last, and its answer stays. Each press keeps its
+ * own, so two pressed one after the other both stay.
  */
 export function NoFamilyRows({ rows, none }: { rows: NoFamilyRow[]; none: string }) {
-  const [outcomes, setOutcomes] = useState<{ n: number; state: Done }[]>([]);
-  const pressed = useRef(0);
-  const onDone = (name: string, r: Done) => { const n = ++pressed.current; setOutcomes((had) => [{ n, state: about(name, r) }, ...had]); };
+  const add = useLinkAnswer();
+  const onDone = (name: string, r: Done) => add(about(name, r));
   return (
     <>
-      {outcomes.map((o) => <ActionOutcome key={o.n} state={o.state} />)}
       {rows.length === 0 ? <Notice tone="done" live="none">{none}</Notice> : (
         <DataTable caption="Customers with no family" captionHidden rowKey={(r) => r.key} rows={rows}
           columns={[
@@ -52,9 +53,9 @@ function MakeFamily({ name, act, onDone }: { name: string; act: () => Promise<Do
   const press = () => { if (!pending) start(async () => onDone(await safely(() => act(), failed))); };
   return (
     <div className="row-actions">
-      <button type="button" className="btn btn-line" aria-disabled={pending} onClick={press}>
+      <Button variant="secondary" size="sm" busy={pending} onClick={press}>
         {pending ? "Making the family…" : "Create a family from this"}<span className="visually-hidden">: {name}</span>
-      </button>
+      </Button>
     </div>
   );
 }

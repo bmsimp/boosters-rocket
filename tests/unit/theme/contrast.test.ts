@@ -39,7 +39,7 @@ describe("deriveClubTokens", () => {
   });
   it("produces CSS variables containing only hex values", () => {
     const vars = clubCssVars(deriveClubTokens("#f2c200"));
-    expect(Object.keys(vars)).toEqual(["--club", "--club-on", "--club-text-l", "--club-text-d", "--club-text-lhc", "--club-text-dhc", "--club-tint-l", "--club-tint-d"]);
+    expect(Object.keys(vars)).toEqual(["--club-l", "--club-on-l", "--club-d", "--club-on-d", "--club-text-l", "--club-text-d", "--club-text-lhc", "--club-text-dhc", "--club-tint-l", "--club-tint-d"]);
     for (const v of Object.values(vars)) expect(v).toMatch(/^#[0-9a-f]{6}$/);
   });
 });

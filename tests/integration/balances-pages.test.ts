@@ -136,13 +136,13 @@ describe("the Balances page", () => {
   });
 
   it("counts the families in the portal with no link in one line, pointing at Accounting links for whoever may link them (stage 4's slice M3b)", async () => {
-    const unlinkedLine = "families in the portal aren't linked to a customer in the books";
-    expect(textOf(await renderPage(BalancesPage))).not.toContain("linked to a customer in the books");
+    const unlinkedLine = "families aren't linked to the books";
+    expect(textOf(await renderPage(BalancesPage))).not.toContain("linked to the books, so");
     // Family A's link ends (as an unlink ends it): its record stands with no link, and its customer has no family now.
     const a = await recordOfCustomer(FAMILY_A.family.qboId, "family");
     await db.delete(accountingLink).where(eq(accountingLink.familyId, a));
     let html = await renderPage(BalancesPage);
-    expect(textOf(html)).toContain("1 family in the portal isn't linked to a customer in the books, so it has no figures here. Someone who may link families to accounting links it on Accounting links.");
+    expect(textOf(html)).toContain("1 family isn't linked to the books, so it has no figures here. Someone who can link families links it on Accounting links.");
     expect(html).not.toContain('href="/staff/links"');
     expect(textOf(html)).not.toContain(unlinkedLine);
     // Its old customer is listed as a roster family with no family in the portal, linking nowhere.
@@ -152,7 +152,7 @@ describe("the Balances page", () => {
     asStaff(await withRole("linker@club.org", ["Finance.Balance.Read", "Accounting.Link.ReadWrite", "Roster.Read"]));
     html = await renderPage(BalancesPage);
     expect(html).toContain('href="/staff/links"');
-    expect(textOf(html)).toContain("1 family in the portal isn't linked to a customer in the books, so it has no figures here. Link it on Accounting links");
+    expect(textOf(html)).toContain("1 family isn't linked to the books, so it has no figures here. Link it on Accounting links");
     // Either permission alone isn't enough to be offered the link.
     asStaff(await withRole("half@club.org", ["Finance.Balance.Read", "Accounting.Link.ReadWrite"]));
     expect(await renderPage(BalancesPage)).not.toContain('href="/staff/links"');
@@ -171,7 +171,8 @@ describe("one family's money", () => {
     const text = textOf(html);
     expect(text).toContain("Invoice INV-ALDERQUIST-7101");
     expect(text).toContain(`Total ${owedBy(FAMILY_A)}`);
-    expect(text).toContain(`Paid in the last 12 months Invoice INV-ALDERQUIST-7103 Invoice date 2026-10-01 ${formatMoney(717311)} Paid`);
+    // A paid row says "Paid" first on its meta line, in the done tone, then its date, then its amount.
+    expect(text).toContain(`Paid in the last 12 months Invoice INV-ALDERQUIST-7103 Paid · Invoice date 2026-10-01 ${formatMoney(717311)}`);
     expect(text).toContain(`With the invoices raised on ${[...FAMILY_A.students.map((s) => s.name), FAMILY_A.parent.name].sort().join(", ")}.`);
     // Nothing of the other family.
     for (const i of FAMILY_B.invoices!) expect(html).not.toContain(i.number);
@@ -191,7 +192,7 @@ describe("one family's money", () => {
     expect(html).toContain("Chen &lt;b&gt;Family&lt;/b&gt;");
     expect(html).toContain("Kai &lt;i&gt;Chen&lt;/i&gt;");
     expect(textOf(html)).toContain("Nothing has been read from QuickBooks for this family yet");
-    expect(textOf(html)).toContain("The worker hasn't compared this family's balances in QuickBooks with its invoices yet.");
+    expect(textOf(html)).toContain("Not compared with its invoices yet. The worker does that at its daily read.");
   });
 
   it("shows the last check, customer by customer", async () => {

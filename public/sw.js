@@ -1,5 +1,5 @@
 /*
-  Booster Rocket's service worker. It does one thing: when a page can't be loaded because there is no connection, it
+  Boosters Rocket's service worker. It does one thing: when a page can't be loaded because there is no connection, it
   shows /offline.html instead of the browser's error screen.
 
   The privacy rule this file keeps: NOTHING FROM THE APP IS EVER STORED HERE. Not a page, not the data a page loads

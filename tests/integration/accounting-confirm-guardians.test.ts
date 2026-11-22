@@ -195,10 +195,9 @@ describe("a family's Confirm links the guardian a match was on", () => {
     asStaff(linker);
     // The page says what the bulk press and a family's Confirm link of guardians; the Okafors have no student, and their row says both.
     const page = textOf(await renderPage(AccountingLinksPage));
-    expect(page).toContain("to the customer filled in on its row, with the students and guardians its row's opening lists.");
-    expect(page).toContain("and, where the books have Parent customers, each of its guardians whose sign-in address is in the email field of exactly one Parent customer under it"
-      + " that no one is linked to (nor kept for another guardian whose link to it an unlink ended) and that holds no other of its guardians' addresses,"
-      + " unless a change for them or that customer is waiting, stuck or kept on Reconciliation.");
+    expect(page).toContain("to the customer on its row, with the students and guardians its row lists.");
+    expect(page).toContain("Where the books have Parent customers, it links each guardian whose sign-in address is in the email field of exactly one Parent customer under it,"
+      + " if that customer holds no other guardian's address and isn't linked or kept for anyone. This doesn't happen while a change for them waits on Reconciliation.");
     expect(await openingOf("The Okafors")).toContain("No student would be linked with it."
       + "Guardians linked with it, by the sign-in address their Parent customer's email field holds:Ike Okafor with Ike Okafor");
     stub.calls.length = 0;
@@ -378,7 +377,7 @@ describe("in books with no parent type, and flat books", () => {
     const row = rowOf(view, "The Patels");
     expect(row.confirm!.proposals).toMatchObject({ guardians: [], guardiansHeld: [] });
     asStaff(linker);
-    expect(await openingOf("The Patels")).not.toContain("A guardian linked with it has");
+    expect(await openingOf("The Patels")).not.toContain("a guardian linked with it has");
     const r = await linkFamilyToCustomer({ familyId: String(patels), customerId: "70", chosen: "suggested", stamp: row.confirm!.stamp }, tag, linkOp());
     expect(r).toMatchObject({ ok: true });
     expect(r.ok && r.message).not.toContain("guardian");

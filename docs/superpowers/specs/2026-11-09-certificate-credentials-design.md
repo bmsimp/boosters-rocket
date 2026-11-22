@@ -125,7 +125,7 @@ New messages:
 ### 4.4 Certificate lifecycle (`src/lib/auth/certificates.ts`)
 
 - `getOrCreatePendingCertificate(providerKey, actor, ip)`: returns the pending row, creating it (key pair,
-  self-signed certificate with subject `CN=Booster Rocket <staff|parents> (<APP_URL host>)`, 2-year validity)
+  self-signed certificate with subject `CN=Boosters Rocket <staff|parents> (<APP_URL host>)`, 2-year validity)
   if none exists. Audited `certificate.create` (provider key, thumbprints, not-after; never key material).
 - `activatePendingCertificate(providerKey, actor, ip, tx)`: inside the provider save transaction, marks the
   pending row active and the previous active row retired (private key nulled). Audited
@@ -153,7 +153,7 @@ New messages:
 - Both scripts stop creating secrets. Instead, after the app, service principal and consent steps:
   1. Read the app's `keyCredentials` (`GET applications/{id}?$select=keyCredentials`).
   2. If no entry has this certificate's thumbprint, PATCH `keyCredentials` with the existing entries plus
-     `{ type: "AsymmetricX509Cert", usage: "Verify", key: <base64 DER>, displayName: "Booster Rocket <date>" }`.
+     `{ type: "AsymmetricX509Cert", usage: "Verify", key: <base64 DER>, displayName: "Boosters Rocket <date>" }`.
      Existing certificates are kept.
   3. Print only the tenant ID, client ID (parents: tenant subdomain too), and the certificate's SHA-1
      thumbprint and expiry so the admin can match it in Entra.

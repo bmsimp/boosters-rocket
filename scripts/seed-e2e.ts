@@ -310,8 +310,8 @@ async function main() {
     const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
     const files = [
       { kind: "sealed_pdf", itemId: "envelope_item_e2equetzalcoatl1", bytes: Buffer.from(E2E_SIGNED_PDF, "latin1") },
-      { kind: "certificate_pdf", itemId: null, bytes: Buffer.from("%PDF-1.4\n% Booster Rocket e2e signing certificate\n%%EOF\n", "latin1") },
-      { kind: "audit_log_pdf", itemId: null, bytes: Buffer.from("%PDF-1.4\n% Booster Rocket e2e audit log\n%%EOF\n", "latin1") },
+      { kind: "certificate_pdf", itemId: null, bytes: Buffer.from("%PDF-1.4\n% Boosters Rocket e2e signing certificate\n%%EOF\n", "latin1") },
+      { kind: "audit_log_pdf", itemId: null, bytes: Buffer.from("%PDF-1.4\n% Boosters Rocket e2e audit log\n%%EOF\n", "latin1") },
       { kind: "audit_log_json", itemId: null, bytes: Buffer.from(JSON.stringify({ envelopeId: "envelope_e2equetzalcoatl", count: 1, entries: [{ type: "DOCUMENT_COMPLETED" }] })) },
     ];
     const [evidence] = await tx`INSERT INTO signed_form_evidence (request_id, realm_id, requirement_id, family_qbo_id, subject_qbo_id, subject_kind, family_id, form_title, family_name, subject_name, season_name,

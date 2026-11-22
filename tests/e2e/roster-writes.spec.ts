@@ -63,7 +63,7 @@ test.describe("staff", () => {
 
   test("a family's page says what can be changed here and what is changed in QuickBooks", async ({ page }) => {
     await page.goto(await familyPages.roster("E2E-40"));
-    await expect(page.getByRole("region", { name: "Changing the roster" })).toContainText("A guardian's phone and mailing address are the portal's own: they change them themselves on their Family page, and staff change them on the person's page");
+    await expect(page.getByRole("region", { name: "Changing the roster" })).toContainText("A guardian's phone and mailing address are the portal's own. Guardians change them on their Family page, and staff on the person's page");
     const waiting = page.getByRole("region", { name: "Waiting to reach QuickBooks" });
     await expect(waiting).toContainText("Rename the parent “Sam Okafor” to “Samuel Okafor”");
     await expect(page.getByText("A change to Sam Okafor is waiting to reach QuickBooks, so nothing else can be changed for now.")).toBeVisible();

@@ -22,7 +22,7 @@ export async function BuyoutBox({ requirementId, unit, rosterTag, canChange }: {
   return (
     <section className="box" aria-labelledby="buyout-h"><h2 id="buyout-h">Paying instead</h2>
       <p>{offered
-        ? <>Families may pay instead of volunteering: {formatMoney(b.unitCents!)} {per} still owed after the volunteering they have done{unit === "hours" ? ", rounded up to whole hours" : ""}, billed with <b>{b.item!.name ?? `the QuickBooks product or service numbered ${b.item!.qboId}`}</b>. The portal makes the invoice in QuickBooks when a guardian confirms, and the requirement is met once that invoice is paid.</>
+        ? <>Families may pay instead: {formatMoney(b.unitCents!)} {per} not yet volunteered{unit === "hours" ? ", rounded up to whole hours" : ""}, billed with <b>{b.item!.name ?? `the QuickBooks product or service numbered ${b.item!.qboId}`}</b>. The invoice is made in QuickBooks when a guardian confirms, and the requirement is met once it&apos;s paid.</>
         : <>Families can&apos;t pay instead of volunteering for this. Offer a buy-out to let a guardian choose an invoice instead, priced {per} still owed.</>}</p>
       {b.live > 0 && <p className="hint">{b.live === 1 ? "One buy-out has" : `${b.live} buy-outs have`} been chosen. Changing the price or switching it off leaves {b.live === 1 ? "it as it is" : "them as they are"}.</p>}
       {offered && !b.item!.active && <Notice tone="warning" live="none">It isn&apos;t an active product or service in the list last read from QuickBooks.</Notice>}

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Notice } from "@/app/components/notice";
+import { Card, HowThisWorks, Notice } from "@/app/components/ui";
 import { GUARDIAN_NAMED, IMPORT_MAX, type ImportProposal, type NotProposedGuardian, type ProposedFamily, type ProposedGuardian } from "@/lib/accounting/import-proposals";
 import { importKeys } from "@/lib/accounting/import-proposals";
 import { importStamp } from "@/lib/accounting/stamp";
@@ -20,19 +20,22 @@ export const IMPORT_STEP = `/staff/links?import=1#${IMPORT_H}`;
  */
 export const IMPORT_WORDS = {
   offer: "Propose families from the books",
-  offerLead: (n: number) => `The portal can propose ${n === 1 ? "a family for the customer" : `a family for each of the ${n} customers`} listed here that this page doesn't link to a family the portal has, with its students and guardians, for you to look over before anything is saved. Up to ${IMPORT_MAX} are proposed at a time.`,
-  offerNeeds: "Someone who may change families can propose families from the books here: the import gives each guardian a sign-in to their family, so it takes the permission that changes families.",
+  offerLead: (n: number) => `The portal can propose a family, with students and guardians, for ${n === 1 ? "the customer" : `each of the ${n} customers`} here. You look them over before anything is saved. Up to ${IMPORT_MAX} at a time.`,
+  offerNeeds: "Someone who may change families can propose families here, since it gives guardians a sign-in.",
   heading: "Propose families from the books",
-  needs: "Proposing families from the books takes the permission that changes families too, as it gives each guardian a sign-in to their family. Nothing is shown here without it.",
+  needs: "This needs the permission to change families too, since it gives guardians a sign-in.",
   nothing: "No family is proposed now: every customer listed here is one this page links to a family the portal has, or none is listed.",
   intro: (welcomes: boolean) => [
     "This is what the portal would make from the books. Look it over, untick any family you don't want made now, then press the button at the end.",
-    "Nothing is sent to QuickBooks. Families, students and people the portal has already are never changed: a person whose address the portal knows is added as they are, with their name as it is.",
-    "Each family is made linked to its customer, and each student to theirs, confirmed by you. Each guardian is then added as on a family's page, and where the books have Parent customers, linked to their own.",
     welcomes
-      ? "Welcome emails are on, so each person added who has never been welcomed is mailed a welcome with a link to set up their sign-in. The portal sends a few at a time, so it can take a little while for everyone."
+      ? "Welcome emails are on, so everyone added who hasn't been welcomed gets one, a few at a time."
       : "Welcome emails are off, so nobody is mailed now: each person added who has never been welcomed is welcomed, with a link to set up their sign-in, once an Admin switches welcome emails on.",
     "A family you untick stays in the list of customers with no family, to make later, here or with “Create a family from this”.",
+  ],
+  /** The rest of the intro, behind How this works. */
+  introMore: [
+    "Nothing is sent to QuickBooks. Families, students and people the portal has already are never changed: a person whose address the portal knows is added as they are, with their name as it is.",
+    "Each family is made linked to its customer, and each student to theirs, confirmed by you. Each guardian is then added as on a family's page, and where the books have Parent customers, linked to their own.",
   ],
   aimed: (n: number) => `${plural(n, "customer listed here isn't", "customers listed here aren't")} proposed, as this page suggests ${n === 1 ? "it" : "each"} for, or lists ${n === 1 ? "it" : "each"} as a possible customer of, a family the portal has: ${n === 1 ? "it is" : "they are"} linked on this page instead.`,
   pastCap: (n: number) => `${plural(n, "more customer isn't", "more customers aren't")} proposed yet, as up to ${IMPORT_MAX} are proposed at a time: ${n === 1 ? "it is" : "they are"} proposed here once these are made.`,
@@ -111,6 +114,7 @@ export function ImportReview({ review, mayChangeFamilies, tag }: { review: { pro
     return (
       <div className="stack">
         {IMPORT_WORDS.intro(welcomes).map((w) => <p key={w}>{w}</p>)}
+        <HowThisWorks>{IMPORT_WORDS.introMore.map((w) => <p key={w}>{w}</p>)}</HowThisWorks>
         <p>{GUARDIAN_NAMED[proposal.from]}</p>
         <ImportForm ids={proposal.families.map((f) => f.customerId)} act={saveImportAction.bind(null, tag, stamp)}>
           <fieldset className="checks"><legend>{IMPORT_WORDS.legend}</legend>
@@ -122,9 +126,9 @@ export function ImportReview({ review, mayChangeFamilies, tag }: { review: { pro
     );
   };
   return (
-    <section className="box" aria-labelledby={IMPORT_H}><h2 id={IMPORT_H}>{IMPORT_WORDS.heading}</h2>
+    <Card title={IMPORT_WORDS.heading} titleId={IMPORT_H}>
       {body()}
       <p className="link-line"><Link href="/staff/links">Close</Link></p>
-    </section>
+    </Card>
   );
 }

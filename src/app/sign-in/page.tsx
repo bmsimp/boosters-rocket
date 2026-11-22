@@ -7,6 +7,7 @@ import { ClubBar } from "@/app/components/club-bar";
 import { InstallHint } from "@/app/components/pwa/install-hint";
 import { PasswordSignIn } from "./password-sign-in";
 import { env } from "@/env";
+import { PoweredBy } from "@/app/components/powered-by";
 
 export const metadata = { title: "Sign in" };
 export const dynamic = "force-dynamic";
@@ -35,6 +36,7 @@ export default async function ParentSignIn({ searchParams }: { searchParams?: Pr
         {/* How to put the portal on the home screen. It takes nothing from the server, and "Not now" puts it away on this device. */}
         <InstallHint />
       </main>
+      <footer className="signin-foot"><PoweredBy variant="color" /></footer>
     </>
   );
 }

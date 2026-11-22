@@ -463,21 +463,26 @@ describe("the family's page points at Accounting links only for a reader who may
   const text = (html: string) => html.replace(/<[^>]+>/g, "").replaceAll("&#x27;", "'").replaceAll("&quot;", '"').replaceAll("&amp;", "&");
   it("a Parent customer two of the family's guardians share: how it is sorted out, with a link or in words", async () => {
     await linkRowTo(await rowIn(rivera, "Rafa Rivera", "rafa@example.com"), "11");
-    const sortedOut = "unlink from it each guardian whose it isn't; once one guardian of this family alone is linked to it, it is theirs, and if none of this family's is left on it, one who isn't linked to a customer can be linked to it there";
+    // A reader who changes families is pointed at the note under Change in QuickBooks, which says how.
+    const seeNote = "Shared, or another family's guardian's, so nothing is sent for it. See the note under Change in QuickBooks";
     asStaff(await staffWith("both@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Accounting.Link.ReadWrite"]));
     let html = await renderPage(RosterEntryPage, { params: { id: String(rivera) } });
     let parents = sectionOf(html, "entry-parents-h"), changes = sectionOf(html, "family-changes-h");
-    expect(text(parents)).toContain(`so the portal sends nothing for it: change it in QuickBooks, or on Accounting links ${sortedOut}`);
-    expect(parents).toContain('href="/staff/links"');
-    expect(text(changes)).toContain("so the portal sends nothing for it: change it in QuickBooks, or on Accounting links unlink from it each guardian whose it isn't. Once one guardian of this family alone is linked to it, it is theirs;");
+    expect(text(parents)).toContain(seeNote);
+    expect(text(changes)).toContain("so the portal sends nothing for it. Change it in QuickBooks. Or, on Accounting links unlink each guardian it doesn't belong to. Once only one of this family's guardians is on it, it's theirs.");
     expect(changes).toContain('href="/staff/links"');
     asStaff(await staffWith("reader@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     html = await renderPage(RosterEntryPage, { params: { id: String(rivera) } });
     parents = sectionOf(html, "entry-parents-h"); changes = sectionOf(html, "family-changes-h");
-    expect(text(parents)).toContain(`change it in QuickBooks, or on Accounting links, by someone who may link families to accounting, ${sortedOut}`);
-    expect(text(changes)).toContain("change it in QuickBooks, or on Accounting links, by someone who may link families to accounting, unlink from it each guardian whose it isn't.");
+    expect(text(parents)).toContain(seeNote);
+    expect(text(changes)).toContain("Change it in QuickBooks. Or, on Accounting links, by someone who can link families, unlink each guardian it doesn't belong to.");
     expect(parents).not.toContain('href="/staff/links"');
     expect(changes).not.toContain('href="/staff/links"');
+    // A reader who links families but doesn't change them sees no note: the cell itself points at Accounting links.
+    asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]));
+    parents = sectionOf(await renderPage(RosterEntryPage, { params: { id: String(rivera) } }), "entry-parents-h");
+    expect(text(parents)).toContain("Shared, or another family's guardian's, so nothing is sent for it. Sort it out on Accounting links");
+    expect(parents).toContain('href="/staff/links"');
     expect(stub.apiCalls()).toEqual([]);
   });
 });

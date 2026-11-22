@@ -1,8 +1,10 @@
 "use client";
-import { createContext, useContext, useRef, useState, useTransition, type ReactNode } from "react";
+import { createContext, useContext, useId, useRef, useState, useTransition, type ReactNode } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { ActionOutcome } from "@/app/components/notice";
 import { ChoiceGroup } from "@/app/components/choice-group";
+import { Button } from "@/app/components/ui/button";
+import { TextArea } from "@/app/components/ui/field";
 
 // The accounting links screen's presses (stage 4's slice M3a): each a button bound to its server action, and what it
 // answered. A press re-reads the page, and a family linked or left unlinked changes its row (its button may go), so
@@ -37,9 +39,9 @@ export function LinkPress({ label, busy, about, act }: { label: string; busy: st
   // A refusal is said with the family it is about (an answer that went through names it itself), so answers are told apart.
   const press = () => { if (!pending) start(async () => { const r = await safely(() => act(), failed); add(r.ok ? r : { ok: false, errors: r.errors.map((e) => `${about}: ${e}`) }); }); };
   return (
-    <button type="button" className="btn btn-line" aria-disabled={pending} onClick={press}>
+    <Button variant="secondary" busy={pending} onClick={press}>
       {pending ? busy : label}<span className="visually-hidden">: {about}</span>
-    </button>
+    </Button>
   );
 }
 
@@ -64,9 +66,9 @@ export function GuardianLinkPress({ name, who, about, options, suggested }: { na
       <ChoiceGroup name={name} legend={`Which Parent customer is ${who}'s`} cols={1} value={chosen} onChange={setChosen}
         options={options.map((o) => ({ value: o.value, label: o.label, hint: o.hint }))} />
       <div className="row-actions">
-        <button type="button" className="btn btn-line" aria-disabled={pending} onClick={press}>
+        <Button variant="secondary" busy={pending} onClick={press}>
           {pending ? "Linking…" : `Link ${who} to this Parent customer`}<span className="visually-hidden">: {about}</span>
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -79,6 +81,7 @@ export function GuardianLinkPress({ name, who, about, options, suggested }: { na
  */
 export function LinkGiveUp({ about, act }: { about: string; act: (note: string) => Promise<Done> }) {
   const { add } = useContext(Answers);
+  const id = useId();
   const [text, setText] = useState("");
   const [pending, start] = useTransition();
   const press = () => {
@@ -87,11 +90,10 @@ export function LinkGiveUp({ about, act }: { about: string; act: (note: string) 
   };
   return (
     <div className="stack">
-      <label className="field"><span>Why? (kept in the audit log)</span>
-        <textarea rows={2} maxLength={500} value={text} onChange={(e) => setText(e.target.value)} /></label>
-      <button type="button" className="btn btn-line" aria-disabled={pending} onClick={press}>
+      <TextArea id={`${id}-why`} label="Why? (kept in the audit log)" rows={2} maxLength={500} value={text} onChange={(e) => setText(e.target.value)} />
+      <Button variant="secondary" busy={pending} onClick={press}>
         {pending ? "Giving up…" : "Give up"}<span className="visually-hidden">: {about}</span>
-      </button>
+      </Button>
     </div>
   );
 }

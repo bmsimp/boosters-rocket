@@ -33,7 +33,7 @@ export default async function VolunteerEventsPage() {
   return (
     <main className="wrap single">
       <h1 className="page-title">Volunteer</h1>
-      <p className="lede">Events with shifts that families sign up for. Parents see each shift and how many places are filled, never who. Dates and times are the club&apos;s own, in the time zone set under Club.</p>
+      <p className="lede">Events with shifts families sign up for. Parents see how many places are filled, never who.</p>
 
       <section className="box" aria-labelledby="upcoming-h"><h2 id="upcoming-h">Coming up</h2>
         {upcoming.length === 0 ? <p>No events coming up.{canChange ? " Add one below." : ""}</p> : <EventList events={upcoming} caption="Events coming up, the soonest first" />}
@@ -52,7 +52,7 @@ export default async function VolunteerEventsPage() {
       )}
 
       <section className="box" aria-labelledby="cutoff-h"><h2 id="cutoff-h">Cancelling</h2>
-        <p>A guardian can cancel a sign-up on the portal until {cutoffHours} {cutoffHours === 1 ? "hour" : "hours"} before the shift starts. After that, the page asks them to contact the event&apos;s contact.</p>
+        <p>Guardians can cancel a sign-up up to {cutoffHours} {cutoffHours === 1 ? "hour" : "hours"} before the shift. After that, they&apos;re asked to contact the event&apos;s contact.</p>
         {canChange && <details className="more"><summary>Change the cut-off</summary><CutoffForm initial={cutoffHours} save={saveCutoffAction} /></details>}
       </section>
 

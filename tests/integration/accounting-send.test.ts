@@ -717,7 +717,7 @@ describe("the page", () => {
     const list = listOf(whole);
     expect(pressed(list, "Send the app's to QuickBooks")).toEqual(["Leo Rivera's family", "Leo Rivera's family", "Leo Rivera's name", "Zoe Rivera's active status"]);
     // Beside the Take it pairs with, in the same row-actions.
-    expect(list).toContain(`Take QuickBooks' into the app<span class="visually-hidden">: Leo Rivera's name</span></button><button type="button" class="btn btn-line" aria-disabled="false">Send the app's to QuickBooks<span class="visually-hidden">: Leo Rivera's name</span></button></div>`);
+    expect(list).toContain(`Take QuickBooks' into the app<span class="visually-hidden">: Leo Rivera's name</span></button><button type="button" class="btn btn-line">Send the app's to QuickBooks<span class="visually-hidden">: Leo Rivera's name</span></button></div>`);
     expect(list).toContain("Sends “Leo Rivera” to the books as Leo Rivera's name, in place of “Leo M. Rivera” there. The books' name is replaced.");
     // The family's name another customer holds, Chen inactive in the books, and nothing for Max (not a student customer
     // now), Mei Chen's Parent customer or the Chens' own active status.
@@ -734,7 +734,7 @@ describe("the page", () => {
     expect(part).toContain(OAK_SENT);
     // The props are only words and bound actions: no stamp is drawn into the page.
     for (const s of [...view.rows.flatMap((r) => [...r.sends, ...r.takes]), ...view.inactive.flatMap((r) => (r.take ? [r.take] : []))]) expect(whole).not.toContain(s.stamp);
-    expect(whole).toContain("can instead be sent to the books with Send the app&#x27;s to QuickBooks, by someone who may also change families");
+    expect(whole).toContain("Send the app&#x27;s to QuickBooks (for someone who may also change families) puts the portal&#x27;s value in the books.");
     for (const s of view.inactive.flatMap((r) => (r.send ? [r.send] : []))) expect(whole).not.toContain(s.stamp);
 
     // A reader without Roster.Family.ReadWrite: the Takes as before, no Send and none of its sentences.

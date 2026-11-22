@@ -3,6 +3,7 @@ import { loadProviders } from "@/lib/auth/providers";
 import { ClubBar } from "@/app/components/club-bar";
 import { SignInButton } from "./sign-in-button";
 import { Notice } from "@/app/components/notice";
+import { PoweredBy } from "@/app/components/powered-by";
 
 export const metadata = { title: "Staff sign in" };
 
@@ -20,6 +21,7 @@ export default async function StaffSignIn() {
         {google && <SignInButton provider="google" label="Sign in with Google" primary={!ms} />}
         {!ms && !google && <Notice tone="info">No staff sign-in is set up yet.</Notice>}
       </main>
+      <footer className="signin-foot"><PoweredBy variant="color" /></footer>
     </>
   );
 }

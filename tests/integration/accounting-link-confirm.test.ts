@@ -54,9 +54,9 @@ const qc = (Id: string, DisplayName: string, typeId: string | null, extra: Recor
 const under = (id: string) => ({ ParentRef: { value: id }, Job: true });
 const mail = (address: string) => ({ PrimaryEmailAddr: { Address: address } });
 /** What the links page says beside every Confirm (src/app/staff/(app)/links/page.tsx), as the text of the page reads it. */
-const LINK_EFFECT = "Once linked, this family's guardians see this customer's open invoices and Pay links, and those of the students and parents the books hold directly under it, the next time they open Home or Payments, and a pay-instead choice for the family bills it. A link can be removed again on this page, with Unlink from the books in the family's row, but its guardians may have seen those invoices by then, so check it is the right household.";
+const LINK_EFFECT = "Once linked, the family's guardians see this customer's open invoices and Pay links (and those of students and parents directly under it) next time they open Home or Payments, and a pay-instead choice bills it. Unlink from the books undoes it, but they may have seen the invoices by then, so check it's the right household.";
 /** What it says beside every Confirm since slice M3c2, where the books have a parent type (fznCompany()'s Parent, 2). */
-const LINK_GUARDIANS_EFFECT = "A guardian linked with it has, from then on, a rename of them, their removal from this family and a change of their phone, mailing address or sign-in email sent to that Parent customer, by the portal's own rules, while it is theirs alone under this family. Linking sends nothing to the books, and the details the portal holds for them now aren't sent by it.";
+const LINK_GUARDIANS_EFFECT = "From then on, a guardian linked with it has their rename, removal and changes of phone, mailing address or sign-in email sent to that Parent customer, while it's theirs alone. Linking sends nothing, and what the portal holds now isn't sent.";
 /** Customers added in QuickBooks, then read by a roster read (which makes no record of them). */
 async function readAgain(...customers: ReturnType<typeof qc>[]) {
   stub.customers.push(...customers);
@@ -313,8 +313,9 @@ describe("Leave unlinked, and Undo", () => {
     const html = await renderPage(AccountingLinksPage);
     expect(html).toContain('<option value="left_unlinked">Left unlinked (3)</option>');
     const list = html.slice(html.indexOf('id="links-list-h"'));
-    expect(rowNamed(list, "The Quiets")![3]).toMatch(/^Left unlinkedLeft unlinked by linker, on .+\. No customer is suggested for it until someone undoes this or links it\.$/);
-    expect(rowNamed(list, "The Quiets")![4]).toBe("Students and guardians: The QuietsNo active students.No guardians.Pick a different customer: The QuietsUndo Left unlinked: The Quiets");
+    // The status cell: the badge and who and when, in short; the whole sentence opens the row's Details.
+    expect(rowNamed(list, "The Quiets")![3]).toMatch(/^Left unlinkedBy linker, .+$/);
+    expect(rowNamed(list, "The Quiets")![4]).toMatch(/^Details: The QuietsLeft unlinked by linker, on .+\. No customer is suggested for it until someone undoes this or links it\.No active students\.No guardians\.Pick a different customer: The QuietsUndo Left unlinked: The Quiets$/);
     const filtered = await renderPage(AccountingLinksPage, { searchParams: { status: "left_unlinked" } });
     expect(tableRows(filtered.slice(filtered.indexOf('id="links-list-h"'))).map((r) => r[0])).toEqual(["Ada's Family", "The Patels", "The Quiets"]);
 
@@ -627,7 +628,7 @@ describe("who may press, and the page", () => {
     const list = (html: string) => { const at = html.indexOf('id="links-list-h"'); return html.slice(at, html.indexOf("</section>", at)); };
     const pick = (html: string) => { const at = html.indexOf('id="links-pick-h"'); return at < 0 ? null : html.slice(at, html.indexOf("</section>", at)); };
     let html = await renderPage(AccountingLinksPage);
-    expect(rowNamed(list(html), "The Patels")![4]).toBe("Students and guardians: The PatelsStudents:Asha Patel: no link of its ownMia Patel: no link of its ownravi patel: no link of its own"
+    expect(rowNamed(list(html), "The Patels")![4]).toBe("Details: The PatelsA guardian's sign-in address matches: asha@example.com, on this customer.Students:Asha Patel: no link of its ownMia Patel: no link of its ownravi patel: no link of its own"
       + "Guardians:Asha Patel (asha@example.com): no link of its own"
       + "Confirming links it to “Patel Family”. Nothing is sent to the books.Students linked with it, by name:Asha Patel with Asha Patelravi patel with Ravi Patel (inactive in the books)"
       + "Left with no link, of the portal's students:Mia PatelLeft with no record in the portal, of the student customers under it in the books:Dev Patel"

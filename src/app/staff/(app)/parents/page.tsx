@@ -4,10 +4,8 @@ import { listPeople, type PersonRow } from "@/lib/parents/directory";
 import { getParentSettings } from "@/lib/parents/settings";
 import { factorCounts, type FactorCounts } from "@/lib/parents/switches";
 import { can } from "@/lib/permissions/effective";
-import { LocalTime } from "@/app/components/local-time";
-import { DataTable } from "@/app/components/data-table";
-import { Notice } from "@/app/components/notice";
-import { StateWords } from "@/app/components/state-words";
+import { Button, Card, DataTable, EmptyState, LocalTime, Notice, PageHeader, StateWords, StatusBadge, TextInput, Toolbar } from "@/app/components/ui";
+import { accessTone } from "./access-state";
 
 export const metadata = { title: "Parents" };
 export const dynamic = "force-dynamic";
@@ -23,7 +21,7 @@ function People({ people, typed }: { people: PersonRow[]; typed: string }) {
       { key: "welcome", header: "Welcome email", cell: (p) => (p.welcomedAt ? <>Sent <LocalTime iso={p.welcomedAt} /></> : "Not sent yet") },
       // Family names are text here, never links: a previous company's row carries that company's ID.
       { key: "families", header: "Families", cell: (p) => (p.families.length === 0 ? "No families"
-        : p.families.map((f) => <span key={f.guardianId} className="t-line">{f.familyName}: {f.words}</span>)) },
+        : p.families.map((f) => <span key={f.guardianId} className="t-line">{f.familyName}: <StatusBadge tone={accessTone(f.kind, p.hasPassword)}>{f.words}</StatusBadge></span>)) },
     ]} />
   );
 }
@@ -40,7 +38,7 @@ function FactorLine({ c, strict, admin, signinOn }: { c: FactorCounts; strict: b
   const counts = `Of the ${n(c.people, "person", "people")} ${who}, ${n(c.passkey, "has", "have")} a passkey and ${c.app} an authenticator app (someone with both is counted twice); ${n(c.neither, "has", "have")} neither.`;
   const level = strict ? " The club is at Strict: anyone with neither adds one the next time they sign in."
     : admin ? " You can ask everyone for one under Settings, Parent sign-ins, step 3, once most have one." : "";
-  return <p>{counts}{level}</p>;
+  return <Notice tone="info" live="none">{counts}{level}</Notice>;
 }
 
 export default async function ParentsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -50,18 +48,19 @@ export default async function ParentsPage({ searchParams }: { searchParams: Prom
   const [people, settings, factors] = await Promise.all([listPeople(typed), getParentSettings(), factorCounts()]);
   return (
     <main className="wrap single">
-      <h1 className="page-title">Parents</h1>
-      <p className="lede">Everyone who can sign in to the portal, or once could, and each family they belong to. Who can sign in is kept by the portal itself: a change made in QuickBooks no longer gives anyone a sign-in or ends one.</p>
-      {!settings.signin && <Notice tone="warning">Parent sign-ins are off, so nobody can sign in, not even a guardian added here. An Admin switches them on under Parent sign-ins.</Notice>}
+      <PageHeader title="Parents" lede="Everyone who can sign in, or once could, and their families. A change in QuickBooks never gives or ends a sign-in." />
+      {!settings.signin && <Notice tone="warning">Parent sign-ins are off, so nobody can sign in. An Admin turns them on under Parent sign-ins.</Notice>}
       <FactorLine c={factors} strict={settings.level === "strict"} admin={can(ctx.effective, "Settings.Parents.ReadWrite")} signinOn={settings.signin} />
 
-      <section className="box" aria-labelledby="people-h"><h2 id="people-h">People</h2>
-        <form method="get" role="search" className="stack">
-          <label className="field"><span>Find a person by name or email</span><input name="q" type="search" defaultValue={typed} autoComplete="off" /></label>
-          <button className="btn btn-line">Find</button>
+      <Card title="People" titleId="people-h">
+        <form method="get" role="search">
+          <Toolbar label="Search the parents">
+            <TextInput id="parents-q" label="Find a person by name or email" name="q" type="search" defaultValue={typed} autoComplete="off" />
+            <Button type="submit" variant="secondary">Find</Button>
+          </Toolbar>
         </form>
-        {people.length === 0 ? <Notice tone="info">{typed ? "Nobody matches." : "Nobody yet."}</Notice> : <People people={people} typed={typed} />}
-      </section>
+        {people.length === 0 ? (typed ? <Notice tone="info">Nobody matches.</Notice> : <EmptyState title="Nobody yet." />) : <People people={people} typed={typed} />}
+      </Card>
     </main>
   );
 }

@@ -725,7 +725,7 @@ describe("the person's page: the details, and where QuickBooks stands for them (
     await storeShape(NO_PARENT_TYPE);
     asStaff(registrar);
     const html = await page(a.ana.id);
-    expect(html).toContain("a phone and mailing address are each family's, shared by its guardians");
+    expect(html).toContain("so each family has one phone and mailing address, shared by its guardians");
     expect(html).toContain(`href="/staff/roster/${String(rivera)}"`);
     expect(html).not.toContain("555-0101");
     expect(html).not.toContain("Save details");
@@ -738,14 +738,14 @@ describe("the person's page: the details, and where QuickBooks stands for them (
     asStaff(registrar);
     expect(await pageOutcome(RosterEntryPage, { params: { id: String(rivera) } })).toEqual({ notFound: true });
     const section = detailsSection(await page(a.ana.id));
-    expect(section).toContain("a phone and mailing address are each family's");
+    expect(section).toContain("so each family has one phone and mailing address");
     expect(section).not.toContain(`href="/staff/roster/${String(rivera)}"`);
-    expect(section).toContain("A family's phone and mailing address can't be shown or changed by staff just now: the families' pages are closed until the club's customer types are set again on Settings, QuickBooks. The parent can still change them on their Family page.");
+    expect(section).toContain("Staff can't see or change a family's phone and mailing address right now: family pages are closed until the customer types are set again in Settings, QuickBooks. The parent can still change them on their Family page.");
     // Set again, the link is back and the words gone.
     await storeShape(NO_PARENT_TYPE);
     const mended = detailsSection(await page(a.ana.id));
     expect(mended).toContain(`href="/staff/roster/${String(rivera)}"`);
-    expect(mended).not.toContain("can't be shown or changed by staff just now");
+    expect(mended).not.toContain("Staff can't see or change a family's phone and mailing address right now");
   });
 
   /** The page's "Phone and mailing address" section alone. */
@@ -757,7 +757,7 @@ describe("the person's page: the details, and where QuickBooks stands for them (
     await db.execute(sql`update guardian set status = 'disabled' where id = ${a.row.id}`);
     asStaff(registrar);
     const section = detailsSection(await page(a.ana.id));
-    expect(section).toContain("a phone and mailing address are each family's");
+    expect(section).toContain("so each family has one phone and mailing address");
     expect(section).not.toContain(`href="/staff/roster/${String(rivera)}"`);
   });
 

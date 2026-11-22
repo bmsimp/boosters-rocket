@@ -1,4 +1,4 @@
-# Documenso Community Edition: hands-on verification for Booster Rocket forms
+# Documenso Community Edition: hands-on verification for Boosters Rocket forms
 
 **Date:** 2026-11-14 to 2026-11-15 (three agent sessions; the second was cut off by a machine reboot)
 **Spec checked against:** `docs/superpowers/specs/2026-11-06-booster-rocket-v1-design.md`, sections 3, 9, 14 and 15
@@ -12,7 +12,7 @@ An independent check followed; its corrections are section 1a and win where they
 
 ## 1. Verdict
 
-Booster Rocket can build commitment forms on Documenso Community Edition as section 9 describes: an unmodified image, the v2
+Boosters Rocket can build commitment forms on Documenso Community Edition as section 9 describes: an unmodified image, the v2
 API, webhooks and embedded signing, with Documenso sending no mail about documents. Everything the portal needs is in the AGPL
 edition and none of it is gated on a self-hosted instance. Embedded signing worked in a cross-site frame with no cookies in
 Chromium, WebKit and iPhone-emulated WebKit. DocuSeal is not needed as a fallback.
@@ -283,7 +283,7 @@ panel lets an admin tick `hidePoweredBy`, `embedSigning`, `embedSigningWhiteLabe
 out the seven enterprise flags. Before the two flags: `css`/`cssVars` ignored and the badge shown. After: applied and hidden
 (`evidence/screenshots/whitelabel-{before,after}-flags.png`).
 
-AGPL: the club runs the image unmodified and Booster Rocket talks to it over HTTP, so there is nothing to publish.
+AGPL: the club runs the image unmodified and Boosters Rocket talks to it over HTTP, so there is nothing to publish.
 Without a key Documenso does not contact the licence server (`license-client.ts` returns before the request).
 
 ### f. Staff sign-in through OIDC. Pass against a mock provider; a real tenant is an owner check

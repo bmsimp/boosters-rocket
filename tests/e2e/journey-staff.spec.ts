@@ -22,7 +22,10 @@ const SEASON = "Walk season (e2e)", EVENT = "Walk car wash (e2e)", NOTE = "Walk 
 const GUARDIAN = { name: "Walk Guardian", email: "walk.guardian@example.com" };
 
 async function tidy() {
-  // The guardian the walk adds and removes: their row, then the person (their sign-in account goes with them).
+  // The guardian the walk adds and removes: their row, then the person (their sign-in account goes with them). The add
+  // queues their Parent customer's create, which the seed's ids have refused and kept; the remove gives it up, but a walk
+  // stopped between the two leaves it, and Reconciliation's kept count (tests/e2e/roster-writes.spec.ts) with it.
+  await sql`DELETE FROM write_queue WHERE request->>'guardianId' IN (SELECT g.id::text FROM guardian g JOIN parent p ON p.id = g.parent_id WHERE p.email = ${GUARDIAN.email})`;
   for (const p of await sql`SELECT id FROM parent WHERE email = ${GUARDIAN.email}`) {
     await sql`DELETE FROM parent_auth_session WHERE user_id IN (SELECT id FROM parent_auth_user WHERE parent_id = ${p.id as string})`;
     await sql`DELETE FROM guardian WHERE parent_id = ${p.id as string}`;

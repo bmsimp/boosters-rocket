@@ -94,7 +94,7 @@ describe("the page a parent asked for", () => {
 
     it("carries the club bar: the club's name and monogram, and no menu", async () => {
       const html = await renderPage(ParentSignIn);
-      expect(html).toContain("<header class=\"bar\"><div class=\"wrap\"><span class=\"monogram\" aria-hidden=\"true\">BR</span><span class=\"club\">Booster Rocket</span>");
+      expect(html).toContain("<header class=\"bar\"><div class=\"wrap\"><span class=\"monogram\" aria-hidden=\"true\">BR</span><span class=\"club\">Boosters Rocket</span>");
       expect(html).not.toContain("<a href=\"/payments\"");
       expect(html).toContain("<h1 class=\"page-title\">Sign in</h1>");
     });

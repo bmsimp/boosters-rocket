@@ -19,7 +19,7 @@ describe("the label under the home-screen icon", () => {
   it("is the club's short name when the name is longer", () => {
     expect(appLabel({ name: "E2E Boosters!", shortName: "E2E" })).toBe("E2E"); // 13
     expect(appLabel({ name: "FZN Band Boosters", shortName: " FZN " })).toBe("FZN");
-    expect(appLabel({ name: "Booster Rocket", shortName: "BR" })).toBe("BR");
+    expect(appLabel({ name: "Boosters Rocket", shortName: "BR" })).toBe("BR");
   });
   it("counts characters, not bytes, and never comes out empty", () => {
     expect(appLabel({ name: "École Élèves", shortName: "ÉÉ" })).toBe("École Élèves"); // 12 characters
@@ -182,7 +182,7 @@ describe("icon names, art and versions", () => {
     expect(iconArt({ shortName: "🚀", color: "#003366" })).toEqual({ kind: "plain", background: "#003366", foreground: "#ffffff" });
   });
   it("falls back to the default color for a value that is not a color", () => {
-    expect(iconArt({ shortName: "BR", color: "red;}" }).background).toBe("#5b2a86");
+    expect(iconArt({ shortName: "BR", color: "red;}" }).background).toBe("#1e1b4b");
   });
   it("the version changes with the color and the short name, and with nothing else", () => {
     const base = iconVersion({ shortName: "BR", color: "#5b2a86" });

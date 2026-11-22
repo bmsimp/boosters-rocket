@@ -11,6 +11,7 @@ import { customersWithNoFamily, handful } from "@/lib/roster/no-family";
 import { LocalTime } from "@/app/components/local-time";
 import { DataTable, type Column } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
+import { HowThisWorks } from "@/app/components/ui";
 import { WorthALook } from "../balances/worth-a-look";
 import { OneButton, TextAction } from "../seasons/forms";
 import { giveUpAction, linkMadeStudentAction, sendPortalValueAction, tryAgainAction } from "../roster/write-actions";
@@ -153,7 +154,7 @@ function Refused({ items, canChange, compared, mayCompare, onLinks, linking }: {
     { key: "what", header: "Change", rowHeader: true, cell: (i) => <>{i.words}<span className="when">{waitingWords(i)}</span>{i.moneyNote ? <span className="when">{i.moneyNote}</span> : null}
       {onLinks.has(i.id) && <span className="when">{alsoOnLinks(onLinks.get(i.id)!)}{" "}{linking
         ? <Link href={onLinksHref(onLinks.get(i.id)!)}>See it on Accounting links<span className="visually-hidden">: {i.words}</span></Link>
-        : "Someone who may link families to accounting sees it there."}</span>}</> },
+        : "Someone who can link families sees it there."}</span>}</> },
     { key: "why", header: "Why it didn't go through", cell: (i) => <>{keptWordsFor(i.write, i.lastCode, i.holds, i.differs, i.joined)}{isCompared(i)
       ? <ContactCell i={i} compared={compared} mayCompare={isEmail(i) ? emailMayCompare(i, mayCompare) : mayCompare} /> : null}</> },
     { key: "asked", header: "Asked", cell: (i) => <><LocalTime iso={i.askedAt} />{i.askedBy ? <span className="when">by {i.askedBy}</span> : null}</> },
@@ -213,7 +214,7 @@ function MadeAfterGivingUp({ items, linking, canChange, rosterTag, aims }: { ite
     // Aimed at nobody: the family saved first is inactive or linked already (or nothing can be suggested now), so it is brought in.
     if (aim === undefined) {
       return `A ${m.role} customer that no ${m.role} in the portal is linked to. ${linking ? "Bring it in with “Create a family from this” under Customers with no family on Accounting links"
-        : "Someone who may link families to accounting can bring it in from Customers with no family on Accounting links"}, then make the ${m.role} the portal saved first inactive on its page; ${stop}`;
+        : "Someone who can link families can bring it in from Customers with no family on Accounting links"}, then make the ${m.role} the portal saved first inactive on its page; ${stop}`;
     }
     const ours = aim.why === "given_up" && m.familyId !== null && String(aim.families[0].id) === String(m.familyId);
     const pick = ours && aim.why === "given_up" && aim.pickable;
@@ -225,7 +226,7 @@ function MadeAfterGivingUp({ items, linking, canChange, rosterTag, aims }: { ite
       : "/staff/links?status=suggested";
     return <>A {m.role} customer that no {m.role} in the portal is linked to. It isn&apos;t offered to bring in under Customers with no family: {what}
       {" "}{linking ? <Link href={at}>{pick ? "Pick it on Accounting links" : "See it on Accounting links"}<span className="visually-hidden">: {m.name}</span></Link>
-        : "Someone who may link families to accounting does this on Accounting links."}</>;
+        : "Someone who can link families does this on Accounting links."}</>;
   };
   const student = (m: GivenUpMadeView) => {
     const say = "A student customer that no student in the portal is linked to. If it is the student the portal saved first, link the two; if it isn't wanted, make it inactive in QuickBooks.";
@@ -235,7 +236,7 @@ function MadeAfterGivingUp({ items, linking, canChange, rosterTag, aims }: { ite
   };
   return (
     <section className="box" aria-labelledby="made-anyway-h"><h2 id="made-anyway-h">Made in QuickBooks after it was given up ({items.length})</h2>
-      <p>These were given up here while QuickBooks may still have been making them, and QuickBooks did make them. Nothing in the portal is linked to them, and no second customer is made for them.</p>
+      <p>These were given up while QuickBooks was still making them, and it made them. Nothing here is linked to them, and no second customer is made.</p>
       <DataTable caption="Each customer QuickBooks made for a change given up" captionHidden rows={items} rowKey={(m) => m.queueId} columns={[
         { key: "name", header: "In QuickBooks", rowHeader: true, cell: (m) => m.name },
         { key: "what", header: "What to do", cell: (m) => (m.role === "student"
@@ -300,13 +301,17 @@ export default async function ReconciliationPage({ searchParams }: { searchParam
       <section className="box" aria-labelledby="writes-h"><h2 id="writes-h">Changes waiting to reach QuickBooks</h2>
         {writes.length === 0 ? <Notice tone="done" live="none">Nothing is waiting: every change staff and parents made has reached QuickBooks.</Notice> : (
           <>
-            <p>QuickBooks couldn&apos;t take these when they were asked for, or they are a guardian&apos;s phone and mailing address, changed by the parent or by staff (a staff member&apos;s is tried at once, then left for the worker; a parent&apos;s goes at the worker&apos;s next wake). The worker tries a waiting change again, at longer and longer gaps;
-              one QuickBooks may already have made is first looked for in a fresh copy of the roster, so nothing is made twice or overwritten.
-              One QuickBooks took that the portal couldn&apos;t take in at the time waits here too, until the portal finishes it on its side.
-              A stuck change waits for you: try it again, or give it up and make it in QuickBooks.
-              A change saved in the portal first that didn&apos;t go through (QuickBooks refused it, the portal held it back as QuickBooks has something else, or it couldn&apos;t be sent) is kept in the portal: send the portal&apos;s value again on purpose, or give it up and leave QuickBooks as it is.
-              A guardian&apos;s phone and mailing address are among them: saved in the portal first, then sent on, and never sent over details QuickBooks holds that the portal didn&apos;t know of.
-              So is a parent&apos;s new sign-in email, sent on to each record of theirs at the worker&apos;s next wake after they change it, and never over an address QuickBooks holds that the portal didn&apos;t know there.</p>
+            <ul>
+              <li>Kept in the portal: saved here but not in QuickBooks. Send it again, or give it up and leave QuickBooks as it is.</li>
+              <li>Stuck: waits for you. Try again, or give it up and make the change in QuickBooks.</li>
+              <li>Waiting: the worker tries again by itself, at longer and longer gaps.</li>
+            </ul>
+            <HowThisWorks>
+              <p>A staff member&apos;s change to a guardian&apos;s phone or mailing address is tried at once. A parent&apos;s, and a new sign-in email, go at the worker&apos;s next wake.
+                Before trying again, the worker checks a fresh copy of the roster, so nothing is made twice or overwritten.
+                A change QuickBooks took that the portal couldn&apos;t finish waits here until it does.
+                A phone, mailing address or sign-in email is never sent over details QuickBooks has that the portal didn&apos;t know of. It is kept here instead.</p>
+            </HowThisWorks>
             {refused.length > 0 && <><h3 className="table-head">Not in QuickBooks, kept in the portal ({refused.length})</h3><Refused items={refused} canChange={canChange} compared={compared} mayCompare={mayCompare} onLinks={onLinks} linking={linking} /></>}
             {stuck.length > 0 && <><h3 className="table-head">Stuck ({stuck.length})</h3><Writes items={stuck} caption="Stuck changes" canChange={canChange} mayLink={linking} /></>}
             {waiting.length > 0 && <><h3 className="table-head">Waiting ({waiting.length})</h3><Writes items={waiting} caption="Changes waiting" canChange={canChange} mayLink={linking} /></>}
@@ -339,7 +344,7 @@ export default async function ReconciliationPage({ searchParams }: { searchParam
         <section className="box" aria-labelledby="look-h"><h2 id="look-h">Money worth a look</h2>
           {balances.worthALook.length === 0 ? <Notice tone="done" live="none">Nothing: every family&apos;s balance in QuickBooks is what its open invoices add up to, as last checked.</Notice> : (
             <>
-              <p>QuickBooks&apos; own balance for these customers isn&apos;t what their open invoices add up to. It may be a credit, a payment not yet applied, or a charge that isn&apos;t an invoice. Parents see the invoices.</p>
+              <p>QuickBooks&apos; balance for these customers doesn&apos;t match their open invoices. It may be a credit, an unapplied payment, or a charge that isn&apos;t an invoice. Parents see the invoices.</p>
               <WorthALook rows={balances.worthALook} />
             </>
           )}

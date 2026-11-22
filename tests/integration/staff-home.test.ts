@@ -138,7 +138,7 @@ describe("the staff home's sign-in resets", () => {
     expect(plain(line)).toContain(`ada@club.org reset ${FAMILY_A.parent.name}'s sign-in `);
     expect(line).toContain(`href="/staff/parents/${anaId}"`);
     expect(line).toContain(`href="/staff/audit${filtersQuery({ ...NO_FILTERS, action: "parent.signin.reset", record: { type: "parent", id: anaId } }).replaceAll("&", "&amp;")}"`);
-    expect(text(line)).toContain("If you didn't expect one of these, ask whoever did it, and read their reason in the audit log.");
+    expect(text(line)).toContain("Didn't expect one? Ask whoever did it. Their reason is in the audit log.");
     expect(line).not.toContain(FAMILY_B.parent.name);
     expect(html).not.toContain(REASON);
     expect(html).not.toContain("Called back");

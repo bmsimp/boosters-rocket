@@ -41,7 +41,7 @@ describe("setup asks for the club first on a new installation", () => {
     expect(progress(html)).toEqual(["1. Your club", "2. Staff sign-in", "3. Outgoing mail", "4. First Admin"]);
     expect(html).toContain("Step 1: Your club");
     // The form starts blank, never with the default name.
-    expect(html).not.toContain('value="Booster Rocket"');
+    expect(html).not.toContain('value="Boosters Rocket"');
     expect(html).toMatch(/<button class="btn" disabled="">Next: staff sign-in/);
   });
 
@@ -50,7 +50,7 @@ describe("setup asks for the club first on a new installation", () => {
       "Club name is required.", "Short name must be 4 characters or fewer.", "Color must be a hex value like #5b2a86."] });
     expect(await saveSetupClubAction({ ...CLUB, timeZone: "+05:00" })).toEqual({ ok: false, errors: ["Choose a time zone from the list."] });
     expect(await saveSetupClubAction({ ...CLUB, name: 42 })).toEqual({ ok: false, errors: ["That didn't go through. Reload the page and try again."] });
-    expect((await getClubSettings()).name).toBe("Booster Rocket");
+    expect((await getClubSettings()).name).toBe("Boosters Rocket");
     expect(await saveSetupClubAction(CLUB)).toEqual({ ok: true, message: "Saved. Go on to staff sign-in when you're ready." });
     expect(await getClubSettings()).toMatchObject({ ...CLUB, treasurerEmail: null });
     const [row] = await db.select().from(auditLog).where(eq(auditLog.action, "settings.club.save"));
@@ -117,6 +117,6 @@ describe("setup asks for the club first on a new installation", () => {
     state.setup = false;
     expect(await saveSetupClubAction(CLUB)).toEqual({ ok: false, errors: [SETUP_SESSION_ENDED] });
     expect(await saveFirstAdminAction(null, form({ name: "Ana", email: "ana@club.org" }))).toEqual({ error: SETUP_SESSION_ENDED });
-    expect((await getClubSettings()).name).toBe("Booster Rocket");
+    expect((await getClubSettings()).name).toBe("Boosters Rocket");
   });
 });

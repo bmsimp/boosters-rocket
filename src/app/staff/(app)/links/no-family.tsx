@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Notice } from "@/app/components/notice";
+import { Card, HowThisWorks, Notice } from "@/app/components/ui";
 import type { CustomerAim, LinksState, LinksView } from "@/lib/accounting/mapping";
 import { handful, type NoFamilyCustomer } from "@/lib/roster/no-family";
 import { familyFromCustomerAction } from "./actions";
@@ -17,12 +17,13 @@ export const NO_FAMILY_H = "no-family-h";
 export const NO_FAMILY_WORDS = {
   /** How many there are, first in the part (the screen's count before slice M6), when there is at least one. */
   count: (n: number) => `${plural(n, "active customer the books list as a family at the top level, under no other customer, has", "active customers the books list as a family at the top level, under no other customer, have")} no family in the portal.`,
-  lead: (mayChangeFamilies: boolean) => "These are the active customers the books list as a family at the top level, under no other customer, that no family in the portal is linked to: one added in QuickBooks since the portal's families were set up, say."
-    + " A customer a family's waiting or stuck change on Reconciliation would be found as is left out until that change goes through or is given up there. An inactive family customer isn't offered."
-    + " “Create a family from this” makes the family and its students in the portal, linked to their customers, so its invoices show to its guardians."
-    + ` It makes no guardian and gives nobody a sign-in: ${mayChangeFamilies ? "add its guardians" : "someone who may change families adds its guardians"} on the family's page, under Families. Nothing is sent to QuickBooks.`
-    + " A customer this page suggests for, or lists as a possible customer of, a family the portal has, or one QuickBooks made for a family the portal saved first whose change was given up, isn't made a family here: its row names that family and says where the two are linked.",
-  none: "Nothing: every active family customer the books have at the top level, under no other customer, is linked to a family in the portal, or is about to be by a change on Reconciliation.",
+  lead: (mayChangeFamilies: boolean) => "One added in QuickBooks since the portal's families were set up, say."
+    + " “Create a family from this” makes the family and its students here, linked, so its invoices show to its guardians."
+    + ` It adds no guardian: ${mayChangeFamilies ? "do that" : "someone who may change families does that"} on the family's page. Nothing is sent to QuickBooks.`,
+  /** The rest of the rule, behind How this works. */
+  more: "Inactive family customers aren't offered. A customer a waiting or stuck change on Reconciliation would match is left out until that change goes through or is given up."
+    + " A customer this page suggests or lists for a family isn't made a family here: its row says where to link it.",
+  none: "Nothing: every active family customer is linked to a family, or is about to be.",
   aimedMakes: "Nothing here: it is linked to a family on this page.",
   /**
    * Said on Reconciliation, to a holder of the linking permission, in place of the list that was there until this slice
@@ -102,11 +103,16 @@ export function noFamilyRows(customers: readonly NoFamilyCustomer[], aims: Reado
 export function CustomersWithNoFamily({ view, mayChangeFamilies, children }: { view: Pick<LinksView, "state" | "noFamilyList" | "aims">; mayChangeFamilies: boolean; children?: ReactNode }) {
   const list = view.noFamilyList;
   const rows = list === null ? [] : noFamilyRows(list, view.aims);
+  // With none to list (and so nothing to offer), the part is one line, so the families' table comes up the page.
+  if (view.state === "listed" && list !== null && rows.length === 0) {
+    return <Notice tone="done" live="none" title="Customers with no family" titleId={NO_FAMILY_H} className="notice-inline">{NO_FAMILY_WORDS.none}</Notice>;
+  }
   return (
-    <section className="box" aria-labelledby={NO_FAMILY_H}><h2 id={NO_FAMILY_H}>Customers with no family{rows.length ? ` (${rows.length})` : ""}</h2>
+    <Card title={<>Customers with no family{rows.length ? ` (${rows.length})` : ""}</>} titleId={NO_FAMILY_H}>
       <p>{list !== null && list.length > 0 ? `${NO_FAMILY_WORDS.count(list.length)} ` : ""}{NO_FAMILY_WORDS.lead(mayChangeFamilies)}</p>
+      <HowThisWorks><p>{NO_FAMILY_WORDS.more}</p></HowThisWorks>
       {view.state !== "listed" || list === null ? <Notice tone="warning" live="none">{WHY_NONE[view.state === "listed" ? "no_shape" : view.state]}</Notice> : <NoFamilyRows rows={rows} none={NO_FAMILY_WORDS.none} />}
       {children}
-    </section>
+    </Card>
   );
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Backs up Booster Rocket's databases into a folder, and keeps the newest few backups of each there.
+# Backs up Boosters Rocket's databases into a folder, and keeps the newest few backups of each there.
 #   scripts/backup.sh <folder>             write booster-rocket-<UTC time>.dump (the portal's database) and, when the
 #                                          server has Documenso's database, documenso-<UTC time>.dump beside it; keep
 #                                          the newest 14 of each

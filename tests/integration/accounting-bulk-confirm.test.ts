@@ -145,7 +145,7 @@ describe("the rows a filter shows", () => {
     asStaff(linker);
     const list = listOf(await renderPage(AccountingLinksPage));
     expect(list).toContain("Confirm all exact email matches (2)<span class=\"visually-hidden\">: Confirm all exact email matches</span>");
-    expect(list).toContain("Confirm all exact email matches links each of the 2 families this list shows as Suggested to the customer filled in on its row");
+    expect(list).toContain("Links each of the 2 Suggested families shown to the customer on its row");
     expect(list).toContain("Nothing is sent to the books.");
     expect(listOf(await renderPage(AccountingLinksPage, { searchParams: { q: "books@okafor" } }))).toContain("Confirm all exact email matches (1)");
     expect(listOf(await renderPage(AccountingLinksPage, { searchParams: { status: "no_match" } }))).not.toContain("Confirm all exact email matches (");
@@ -224,7 +224,7 @@ describe("the rows a filter shows", () => {
     // Narrowed to the Riveras alone, no press is offered, and the notice says why.
     expect(bulkOf(view, null, "riv@")).toEqual({ count: 0, stamp: null, waiting: 1 });
     asStaff(linker);
-    const notice = "1 Suggested row this list shows isn&#x27;t counted in Confirm all exact email matches, as a press can&#x27;t link it now: making the family in the books is still waiting on the queue";
+    const notice = "1 Suggested row isn&#x27;t included: it is waiting to be made in the books";
     const all = listOf(await renderPage(AccountingLinksPage)).replaceAll("<!-- -->", "");
     expect(all).toContain("Confirm all exact email matches (2)");
     expect(all).toContain(notice);

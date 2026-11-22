@@ -5,6 +5,7 @@ import { myFamilyNames } from "@/lib/parents/my-family-names";
 import { RETURN_PARAM, safeReturnPath, withReturnPath } from "@/lib/auth/return-path";
 import { SignOutButton } from "@/app/components/sign-out-button";
 import { chooseFamilyAction } from "./actions";
+import { PoweredBy } from "@/app/components/powered-by";
 
 export const metadata = { title: "Choose a family" };
 export const dynamic = "force-dynamic";
@@ -26,20 +27,23 @@ export default async function ChooseFamily({ searchParams }: { searchParams?: Pr
   // sent to the browser, neither as a label nor as the form's bound argument.
   const names = await myFamilyNames(parentId, families.map((f) => f.guardianId));
   return (
-    <main className="wrap signin">
-      <h1 className="page-title">{club.name}</h1>
-      <p className="lede">{families.length > 1 ? "You're a guardian in more than one family. Choose the one to look at; you can switch later." : "Choose the family to look at."}</p>
-      <ul className="stack">
-        {families.map((f) => (
-          <li key={f.guardianId}>
-            {/* Both arguments are bound, always: a form adds its FormData after them, and it must never arrive as `next`. */}
-            <form action={chooseFamilyAction.bind(null, f.guardianId, next ?? undefined)}>
-              <button className="btn" aria-current={f.guardianId === current ? "true" : undefined}>{names.get(f.guardianId)}</button>
-            </form>
-          </li>
-        ))}
-      </ul>
-      <SignOutButton door="parent" />
-    </main>
+    <>
+      <main className="wrap signin">
+        <h1 className="page-title">{club.name}</h1>
+        <p className="lede">{families.length > 1 ? "You're a guardian in more than one family. Choose the one to look at; you can switch later." : "Choose the family to look at."}</p>
+        <ul className="stack">
+          {families.map((f) => (
+            <li key={f.guardianId}>
+              {/* Both arguments are bound, always: a form adds its FormData after them, and it must never arrive as `next`. */}
+              <form action={chooseFamilyAction.bind(null, f.guardianId, next ?? undefined)}>
+                <button className="btn" aria-current={f.guardianId === current ? "true" : undefined}>{names.get(f.guardianId)}</button>
+              </form>
+            </li>
+          ))}
+        </ul>
+        <SignOutButton door="parent" />
+      </main>
+      <footer className="signin-foot"><PoweredBy /></footer>
+    </>
   );
 }

@@ -2,6 +2,7 @@ import { getClubSettings } from "@/lib/settings/club";
 import { linkVerdict, type LinkPurpose } from "@/lib/parents/signin-links";
 import { ClubBar } from "@/app/components/club-bar";
 import { PasswordLinkBody } from "./password-form";
+import { PoweredBy } from "@/app/components/powered-by";
 
 /**
  * The page a set-up or reset link opens (./set-up/[token], ./reset/[token]). No session: the link is the guard. Opening
@@ -22,6 +23,7 @@ export async function PasswordLinkPage({ purpose, token }: { purpose: LinkPurpos
         {/* The form, or the one message, drawn by one client component, so a sign-in's answer outlives the page being drawn again (./password-form.tsx). */}
         <PasswordLinkBody token={token} purpose={purpose} usable={verdict.ok} />
       </main>
+      <footer className="signin-foot"><PoweredBy variant="color" /></footer>
     </>
   );
 }

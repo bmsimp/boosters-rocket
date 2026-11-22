@@ -159,9 +159,9 @@ describe("the review", () => {
     await club();
     asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]));
     const html = (await renderPage(AccountingLinksPage, { searchParams: { import: "1" } })).replaceAll("&#x27;", "'");
-    expect(html).toContain("Someone who may change families can propose families from the books here");
+    expect(html).toContain("Someone who may change families can propose families here, since it gives guardians a sign-in.");
     expect(html).not.toContain('href="/staff/links?import=1#import-h"');
-    expect(html).toContain("Proposing families from the books takes the permission that changes families too");
+    expect(html).toContain("This needs the permission to change families too, since it gives guardians a sign-in.");
     expect(html).not.toContain("Make these families");
   });
 });

@@ -1,4 +1,4 @@
-# Booster Rocket proof of concept on linuxdev — Design
+# Boosters Rocket proof of concept on linuxdev — Design
 
 **Date:** 2026-11-08
 **Status:** Built by plan `2026-11-08-poc-linuxdev.md` and running since 2026-11-09. Its runbook (docs/runbooks/poc-linuxdev.md) records checks 1 to 17 passed and 18 to 25 not yet run; the next deploy there is part 1 of docs/runbooks/before-the-first-family.md. A club's real installation is `deploy/` (docs/runbooks/first-install.md), not this one.
@@ -9,7 +9,7 @@
 
 ## 1. What this is
 
-A running, publicly reachable proof of concept of Booster Rocket on the owner's Linux host
+A running, publicly reachable proof of concept of Boosters Rocket on the owner's Linux host
 `linuxdev` (192.168.1.2), at **`https://portaltest.rhinoautomator.com`**, behind the owner's existing
 Cloudflare tunnel with **Cloudflare Access** in front. It proves the foundation works for real:
 staff sign in with Microsoft through the band's Entra tenant, a test parent signs in through Entra
@@ -44,13 +44,13 @@ key already has access). One compose file, **`docker-compose.poc.yml`**, defines
 | Service | What it is | Networks | Ports |
 |---|---|---|---|
 | `db` | Postgres 16, named volume `booster-rocket-pgdata`, healthcheck. Since 2026-11-17 the compose file runs Postgres 18 with its data in `booster-rocket-postgres`, and mounts `booster-rocket-pgdata` read only beside it until a person removes it; the host's data is moved by hand (`docs/runbooks/poc-linuxdev.md`, section 8, "Moving the database to Postgres 18") | `internal` | none |
-| `app` | The Booster Rocket image built from the repo's `Dockerfile`, healthcheck on `/api/health` | `internal`, `edge` | none |
+| `app` | The Boosters Rocket image built from the repo's `Dockerfile`, healthcheck on `/api/health` | `internal`, `edge` | none |
 | `migrate` | One-off, profile `tools`: same image as `app`, runs migrations and exits | `internal` | none |
 
 - **`internal`**: private to this project. Only `app` and `migrate` reach `db`.
 - **`edge`** (named `booster-rocket-edge`): shared only by `app` and `cloudflared`. It is added to
   `cloudflared`'s networks in **`~/n8n/docker-compose.yml`** (as an external network), so the
-  weekly `update-cloudflared.sh` recreate keeps the connection. Booster Rocket never joins
+  weekly `update-cloudflared.sh` recreate keeps the connection. Boosters Rocket never joins
   `cipp-tracker-net`, and no other project can reach its database.
 - **No published ports** for any service. The only way in is the tunnel.
 - **Secrets** live in `~/booster-rocket/.env.poc` on linuxdev, mode 600, never committed. The

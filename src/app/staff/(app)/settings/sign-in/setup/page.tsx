@@ -23,7 +23,7 @@ export default async function SignInSetupPage() {
     <main className="wrap single">
       <p className="back-to-settings"><a href="/staff/settings/sign-in">Back to sign-in settings</a></p>
       <h1 className="page-title">Set up staff sign-in</h1>
-      <p className="lede">Set up one way or both. Microsoft sign-in uses a certificate Booster Rocket made; Google uses a client secret, which is never shown again once saved.</p>
+      <p className="lede">Set up one way or both. Microsoft sign-in uses a certificate Boosters Rocket made; Google uses a client secret, which is never shown again once saved.</p>
       {PROVIDER_KEYS.map((key) => {
         const s = summaries.find((x) => x.key === key);
         return (

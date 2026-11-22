@@ -63,7 +63,7 @@ const LOADERS: Record<SettingsKey, () => Promise<Summary>> = {
   async club() {
     const [club, saved] = await Promise.all([getClubSettings(), clubSaved()]);
     const state = saved && club.storedColorValid ? "done" : "todo";
-    const words = !saved ? "Not set yet: the portal still shows the name Booster Rocket" : club.storedColorValid ? "Set" : "The saved color isn't valid, so the default purple is used";
+    const words = !saved ? "Not set yet: the portal still shows the name Boosters Rocket" : club.storedColorValid ? "Set" : "The saved color isn't valid, so the default indigo is used";
     return { state, words, open: "Open club settings", details: [
       ["Name", club.name], ["Short name", club.shortName], ["Time zone", club.timeZone.replaceAll("_", " ")],
       ["Treasurer email", club.treasurerEmail ?? "None"],

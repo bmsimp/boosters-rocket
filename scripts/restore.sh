@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Loads one Booster Rocket backup (made by scripts/backup.sh) into a database: the portal's (booster-rocket-*.dump) or
+# Loads one Boosters Rocket backup (made by scripts/backup.sh) into a database: the portal's (booster-rocket-*.dump) or
 # Documenso's (documenso-*.dump).
 #   scripts/restore.sh <backup file> <database>                  refuses if <database> already holds tables
 #   scripts/restore.sh <backup file> <database> --replace        replaces everything in <database> with the backup

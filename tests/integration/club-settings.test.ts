@@ -10,7 +10,7 @@ describe("club settings", () => {
   beforeEach(resetDb);
 
   it("has neutral defaults before setup", async () => {
-    expect(await getClubSettings()).toEqual({ name: "Booster Rocket", shortName: "BR", color: "#5b2a86", treasurerEmail: null, timeZone: "UTC", storedColorValid: true });
+    expect(await getClubSettings()).toEqual({ name: "Boosters Rocket", shortName: "BR", color: "#1e1b4b", treasurerEmail: null, timeZone: "UTC", storedColorValid: true });
   });
 
   it("saves, normalizes the color, and audits before/after", async () => {
@@ -26,13 +26,13 @@ describe("club settings", () => {
     await db.insert(setting).values({ key: "club", value: { name: "Odd Club", shortName: "OC", color: "#000;}body{display:none", treasurerEmail: null } });
     const s = await getClubSettings();
     expect(s.storedColorValid).toBe(false);
-    expect(s.color).toBe("#5b2a86");
+    expect(s.color).toBe("#1e1b4b");
     expect(s.name).toBe("Odd Club");
   });
 
   it("flags a stored color of the wrong type", async () => {
     await db.insert(setting).values({ key: "club", value: { color: 42 } });
-    expect(await getClubSettings()).toMatchObject({ color: "#5b2a86", storedColorValid: false });
+    expect(await getClubSettings()).toMatchObject({ color: "#1e1b4b", storedColorValid: false });
   });
 
   it("normalizes a valid stored color and reports it valid", async () => {

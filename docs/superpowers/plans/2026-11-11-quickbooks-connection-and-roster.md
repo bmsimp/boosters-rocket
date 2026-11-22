@@ -2426,7 +2426,7 @@ export async function POST(req: Request): Promise<Response> {
 
 ```js
 #!/usr/bin/env node
-// Booster Rocket's worker. Ships in the image as tools/scripts/worker.mjs and runs as its own container.
+// Boosters Rocket's worker. Ships in the image as tools/scripts/worker.mjs and runs as its own container.
 // It has no job logic and no dependencies: every minute it asks the app to run whichever scheduled jobs are due
 // (POST /api/internal/worker). The token is derived from BETTER_AUTH_SECRET, which the app derives the same way
 // (src/lib/jobs/worker-token.ts).

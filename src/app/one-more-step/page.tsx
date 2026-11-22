@@ -5,6 +5,7 @@ import { SignOutButton } from "@/app/components/sign-out-button";
 import { env } from "@/env";
 import { confirmEnrolmentAppAction, startEnrolmentAppAction } from "./actions";
 import { EnrolmentSteps } from "./enrolment-steps";
+import { PoweredBy } from "@/app/components/powered-by";
 
 export const metadata = { title: WORDS.title };
 export const dynamic = "force-dynamic";
@@ -27,12 +28,15 @@ export default async function OneMoreStep({ searchParams }: { searchParams?: Pro
   const next = safeReturnPath(query?.[RETURN_PARAM]);
   const portalOrigin = new URL(env.APP_URL).origin;
   return (
-    <main className="wrap signin">
-      <h1 className="page-title">{WORDS.title}</h1>
-      <p className="lede">{WORDS.lede}</p>
-      {/* The steps draw the foot's words too, while there is a step to do. */}
-      <EnrolmentSteps portalOrigin={portalOrigin} next={next} startApp={startEnrolmentAppAction} confirmApp={confirmEnrolmentAppAction} />
-      <SignOutButton door="parent" />
-    </main>
+    <>
+      <main className="wrap signin">
+        <h1 className="page-title">{WORDS.title}</h1>
+        <p className="lede">{WORDS.lede}</p>
+        {/* The steps draw the foot's words too, while there is a step to do. */}
+        <EnrolmentSteps portalOrigin={portalOrigin} next={next} startApp={startEnrolmentAppAction} confirmApp={confirmEnrolmentAppAction} />
+        <SignOutButton door="parent" />
+      </main>
+      <footer className="signin-foot"><PoweredBy /></footer>
+    </>
   );
 }

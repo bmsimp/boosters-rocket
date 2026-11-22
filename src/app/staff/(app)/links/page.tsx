@@ -8,10 +8,7 @@ import type { Holder } from "@/lib/accounting/match";
 import type { Proposals } from "@/lib/accounting/proposals";
 import { recordNameWords } from "@/lib/families/words";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
-import { DataTable, type Column } from "@/app/components/data-table";
-import { LocalTime } from "@/app/components/local-time";
-import { Notice } from "@/app/components/notice";
-import { StateWords } from "@/app/components/state-words";
+import { Button, Card, DataTable, EmptyState, HowThisWorks, LinkButton, LocalTime, Notice, PageHeader, Select, StatusBadge, TextInput, Toolbar, type Column, type Tone } from "@/app/components/ui";
 import { familyPage } from "@/app/staff/(app)/family-pages";
 import { confirmAllAction, confirmLinkAction, leaveUnlinkedAction, linkGuardianAction, reviewLinkAction, sendAllAction, sendDifferenceAction, takeDifferenceAction, undoLeaveUnlinkedAction, unlinkAction, unlinkGuardianAction } from "./actions";
 import { GuardianLinkPress, LinkAnswers, LinkAnswersShown, LinkGiveUp, LinkPress } from "./link-press";
@@ -26,14 +23,14 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 
 /** Why nothing can be suggested now, in words. Differences aren't checked in any of these states either. */
 const WHY_NOT_CHECKED: Record<Exclude<LinksState, "listed">, string> = {
-  no_company: "The portal hasn't read the club's books yet, so no family's link can be checked and nothing is suggested. Each family is listed as not checked. Differences between the portal and the books aren't checked either.",
-  other_company: "QuickBooks is connected to a different company than the one the roster was read from, so no link is read and nothing is suggested. Each family is listed as not checked. Differences between the portal and the books aren't checked either. An Admin can see why under Settings, QuickBooks.",
-  no_shape: "The membership shape isn't chosen, or names a customer type the books no longer have, so the portal can't tell which customers are families. Links are shown as they are, but nothing is suggested, and a family with no link is listed as not checked. Differences between the portal and the books aren't checked either. An Admin can choose the shape under Settings, QuickBooks.",
+  no_company: "The portal hasn't read the books yet, so links, suggestions and differences can't be checked. Each family shows as not checked.",
+  other_company: "QuickBooks is connected to a different company from the roster's, so links, suggestions and differences can't be checked. Each family shows as not checked. An Admin can see why under Settings, QuickBooks.",
+  no_shape: "The membership shape isn't chosen, or names a customer type the books no longer have, so the portal can't tell which customers are families. Links show as they are, but nothing is suggested or checked. An Admin can choose the shape under Settings, QuickBooks.",
 };
 
-/** The icon a status carries beside its words: a link that stands, something to look at, or nothing checked or wanted. */
-const ICON: Record<StatusKey, "done" | "todo" | "waived"> = {
-  carried_over: "done", linked: "done", with_differences: "todo", suggested: "todo", several: "todo", no_match: "todo", left_unlinked: "waived", not_a_family: "todo", customer_gone: "todo", not_checked: "waived",
+/** The tone a status badge carries with its words: a link that stands, something to look at, or nothing checked or wanted. */
+const TONE: Record<StatusKey, Tone> = {
+  carried_over: "done", linked: "done", with_differences: "due", suggested: "due", several: "due", no_match: "due", left_unlinked: "neutral", not_a_family: "due", customer_gone: "due", not_checked: "neutral",
 };
 
 /** At most this many customers are listed at once in the chooser; a search narrows them. */
@@ -71,6 +68,31 @@ function StatusDetail({ status, row }: { status: LinkStatus; row: LinkRow }) {
   }
 }
 
+/** How a link was made, in a few words, for the status cell's line: the day, and who or what made it. */
+function MadeMeta({ made }: { made: LinkMade }) {
+  return made.key === "carried_over" ? <>Carried over <LocalTime iso={made.at} dateOnly /> · not confirmed</>
+    : made.origin === "confirmed" ? <>Confirmed <LocalTime iso={made.at} dateOnly /></>
+    : <>Made in the books <LocalTime iso={made.at} dateOnly /></>;
+}
+
+/**
+ * The status cell's one short line under its badge. The whole sentence (StatusDetail), and the differences, are in the
+ * row's Details.
+ */
+function StatusMeta({ status, row }: { status: LinkStatus; row: LinkRow }) {
+  switch (status.key) {
+    case "carried_over": case "linked": return <MadeMeta made={status} />;
+    case "with_differences": return <><MadeMeta made={status.made} /> · {plural(row.differences.length, "difference", "differences")}</>;
+    case "customer_gone": return <>Customer not in the books&apos; copy</>;
+    case "not_a_family": return <>Customer isn&apos;t a family there now</>;
+    case "suggested": return <>A guardian&apos;s sign-in address matches</>;
+    case "several": return status.why === "many" ? <>More than one customer matches</> : <>Its customer matches other families too</>;
+    case "no_match": return status.noGuardians ? <>No guardians yet</> : row.addresses.length === 0 ? <>No guardian can sign in</> : <>No customer holds their addresses</>;
+    case "left_unlinked": return <>{status.by ? `By ${status.by}, ` : ""}<LocalTime iso={status.at} dateOnly /></>;
+    case "not_checked": return <>The books can&apos;t be checked now</>;
+  }
+}
+
 /** A student's or guardian's own link, in words. */
 const ownLinkWords = (l: OwnLink) => (l.state === "linked" ? `linked to ${l.customer}` : l.state === "gone" ? "linked to a customer that isn't in the books' copy any more"
   : l.state === "none" ? "no link of its own" : "its link can't be checked now");
@@ -95,14 +117,14 @@ function standingWords(g: GuardianShown): string {
 }
 
 /** What Link this guardian does, said beside every one (linkGuardian(), src/lib/accounting/guardian-links.ts). */
-const GUARDIAN_LINK_EFFECT = "Linking sends nothing to the books and changes nothing of their access in the portal. From then on, a rename of them, their removal from this family and a change of their phone, mailing address or sign-in email go to that Parent customer, by the portal's own rules, while it is theirs alone under this family. The details the portal holds for them now aren't sent by it.";
+const GUARDIAN_LINK_EFFECT = "Linking sends nothing to the books and doesn't change their access. From then on, while it's theirs alone, their rename, removal and changes of phone, mailing address or sign-in email go to that Parent customer. What the portal holds now isn't sent.";
 /**
  * What Unlink this guardian does, as a warning beside every one (unlinkGuardian()): a change of their details refuses
  * it nothing (a waiting one is given up at its next try, a stuck or kept one stays on Reconciliation), and linking them
  * again is offered here only where the family may have a guardian linked (`relink`). The press is drawn only while
  * nothing on the queue holds it back (`unlinkHeld`), so the warning needn't say what does.
  */
-const GUARDIAN_UNLINK_EFFECT = (who: string, relink: boolean) => `Unlinking ends only ${who}'s own link: nothing is sent to the books, the customer stays there as it is, and their access in the portal is as it was. A change of their details waiting to reach it is given up unsent at its next try, and one that is stuck or kept stays on the Reconciliation page, where it can be given up. Nothing is sent for them to a Parent customer then, and no Parent customer is made for them by this, or later by itself. ${relink ? "They can be linked again here." : "Linking them again isn't offered here until this family is linked to a family customer that stands in the books and the membership shape has a parent type."}`;
+const GUARDIAN_UNLINK_EFFECT = (who: string, relink: boolean) => `Unlinking ends only ${who}'s own link. Nothing is sent to the books, and their access doesn't change. A waiting change of their details is dropped unsent. One that's stuck or kept stays on Reconciliation to give up. Nothing more is sent for them, and no Parent customer is made for them. ${relink ? "They can be linked again here." : "Linking them again isn't offered here until this family is linked to a family customer that stands in the books and the membership shape has a parent type."}`;
 
 /** Reconciliation's list of changes, where a change the queue holds is shown with what can be done about it. */
 const RECONCILIATION_CHANGES = "/staff/reconciliation#writes-h";
@@ -231,12 +253,12 @@ function InactivePart({ rows, tag, familyPages, maySend }: { rows: InactiveRow[]
     } },
   ];
   return (
-    <section className="box" aria-labelledby="links-inactive-h"><h2 id="links-inactive-h">Inactive in the portal, active in the books</h2>
-      <p>Each of these families is inactive in the portal and linked to a customer the books have active. Taking the books&apos; value makes the family active again in the portal, alone, and sends nothing to the books.
-        Its guardians can&apos;t sign in to it until someone who may change families lets them in, on its page.
-        {maySend && " Sending the app's value instead makes it inactive in the books, with everyone active under it there, as its row says, and changes nothing in the portal."}</p>
+    <Card title="Inactive in the portal, active in the books" titleId="links-inactive-h">
+      <p>Inactive here, active in the books. Taking the books&apos; value makes the family active again here, on its own, and sends nothing.
+        Its guardians can&apos;t sign in until someone who may change families lets them in on its page.
+        {maySend && " Sending the app's value makes it inactive in the books instead, with everyone under it, and changes nothing here."}</p>
       <DataTable caption={plural(rows.length, "inactive family the books have active", "inactive families the books have active")} captionHidden columns={columns} rows={rows} rowKey={(r) => String(r.familyId)} />
-    </section>
+    </Card>
   );
 }
 
@@ -280,13 +302,13 @@ function StudentProposalsShown({ proposals }: { proposals: Proposals }) {
 }
 
 /** What a link does on the parents' side, and how it is taken back: said beside every Confirm. */
-const LINK_EFFECT = "Once linked, this family's guardians see this customer's open invoices and Pay links, and those of the students and parents the books hold directly under it, the next time they open Home or Payments, and a pay-instead choice for the family bills it. A link can be removed again on this page, with Unlink from the books in the family's row, but its guardians may have seen those invoices by then, so check it is the right household.";
+const LINK_EFFECT = "Once linked, the family's guardians see this customer's open invoices and Pay links (and those of students and parents directly under it) next time they open Home or Payments, and a pay-instead choice bills it. Unlink from the books undoes it, but they may have seen the invoices by then, so check it's the right household.";
 /**
  * What a guardian linked with a family's Confirm has from then on (slice M3c2), said beside every Confirm only where the
  * books have a parent type (LinksView.guardianLinks): the same as Link this guardian's (GUARDIAN_LINK_EFFECT), so the two
  * are kept true together.
  */
-const LINK_GUARDIANS_EFFECT = "A guardian linked with it has, from then on, a rename of them, their removal from this family and a change of their phone, mailing address or sign-in email sent to that Parent customer, by the portal's own rules, while it is theirs alone under this family. Linking sends nothing to the books, and the details the portal holds for them now aren't sent by it.";
+const LINK_GUARDIANS_EFFECT = "From then on, a guardian linked with it has their rename, removal and changes of phone, mailing address or sign-in email sent to that Parent customer, while it's theirs alone. Linking sends nothing, and what the portal holds now isn't sent.";
 
 /** The address of the chooser for a family, or of its confirm step for a customer. */
 const pickHref = (familyId: string, customerId?: string) => `/staff/links?pick=${encodeURIComponent(familyId)}${customerId ? `&customer=${encodeURIComponent(customerId)}` : ""}#${PICK}`;
@@ -295,7 +317,8 @@ const pickHref = (familyId: string, customerId?: string) => `/staff/links?pick=$
 function Opening({ row, tag, guardianLinks, maySend }: { row: LinkRow; tag: string; guardianLinks: boolean; maySend: boolean }) {
   const id = String(row.familyId);
   return (
-    <details className="more"><summary>{row.differences.length > 0 ? "Students, guardians and differences" : "Students and guardians"}<span className="visually-hidden">: {row.name}</span></summary>
+    <details className="more"><summary>Details<span className="visually-hidden">: {row.name}</span></summary>
+      <p><StatusDetail status={row.status} row={row} /></p>
       <p>{row.students.length === 0 ? "No active students." : "Students:"}</p>
       {row.students.length > 0 && <ul>{row.students.map((s) => <li key={String(s.id)}>{s.name}: {ownLinkWords(s.link)}</li>)}</ul>}
       <p>{row.guardians.length === 0 ? "No guardians." : "Guardians:"}</p>
@@ -356,10 +379,10 @@ function UnlinkShown({ unlink }: { unlink: UnlinkOffer }) {
       <p>Unlinking ends this family&apos;s link to {unlink.customer === null ? "its customer, which the books' copy doesn't hold now" : <>&ldquo;{unlink.customer}&rdquo;</>}
         {unlink.students.length === 0 ? ", with no student's link" : `, with the ${unlink.students.length === 1 ? "link of its student" : "links of its students"} ${unlink.students.map((s) => s.name).join(", ")}`}{guardians}.
         {" "}{unlink.customer === null ? "Nothing is sent to the books." : "Nothing is sent to the books, and the customer stays there as it is."}</p>
-      <p>Its guardians then read that the club hasn&apos;t connected their payments to the portal yet, with no invoices, Pay or buy-out offer, until it is linked again, and its stored figures are forgotten at once.
-        The family, its students, guardians, sign-ins, season, volunteering and forms stay as they are.
-        It isn&apos;t unlinked while a buy-out of the family or its students isn&apos;t settled, or while a change of it waits on Reconciliation.</p>
-      <p>To link it again, use this page, with Confirm or Pick a different customer once its row shows them. While its customer is still in the books, &ldquo;Create in QuickBooks and link&rdquo; isn&apos;t offered on its page, nor for its students whose customers are, so that no second customer is made for them.</p>
+      <p>Its guardians then see no invoices, Pay or buy-out offer until it&apos;s linked again, and its stored figures are forgotten.
+        Everything else (students, guardians, sign-ins, season, volunteering, forms) stays.
+        It can&apos;t be unlinked while a buy-out isn&apos;t settled or a change waits on Reconciliation.</p>
+      <p>Link it again here, with Confirm or Pick a different customer. While its customer is still in the books, &ldquo;Create in QuickBooks and link&rdquo; isn&apos;t offered, so no second customer is made.</p>
     </>
   );
 }
@@ -372,9 +395,8 @@ function UnlinkShown({ unlink }: { unlink: UnlinkOffer }) {
  */
 function BulkPress({ bulk, filter, tag }: { bulk: BulkOffer; filter: LinksFilter; tag: string }) {
   const held = bulk.waiting === 0 ? null : (
-    <Notice tone="info" live="none">{bulk.waiting === 1 ? "1 Suggested row this list shows isn't" : `${bulk.waiting} Suggested rows this list shows aren't`} counted
-      in Confirm all exact email matches, as a press can&apos;t link {bulk.waiting === 1 ? "it" : "them"} now: making the family in the books is still waiting on the queue, until that has gone through
-      or been given up on Reconciliation, or the family is linked to a customer of another company. Each row&apos;s own Confirm says which.</Notice>
+    <Notice tone="info" live="none">{bulk.waiting === 1 ? "1 Suggested row isn't" : `${bulk.waiting} Suggested rows aren't`} included: {bulk.waiting === 1 ? "it is" : "each is"} waiting to be made in the books,
+      or is linked to another company&apos;s customer. Each row&apos;s Confirm says which.</Notice>
   );
   if (bulk.count === 0) return held;
   if (bulk.stamp === null) {
@@ -383,9 +405,9 @@ function BulkPress({ bulk, filter, tag }: { bulk: BulkOffer; filter: LinksFilter
   return (
     <div className="stack">
       {held}
-      <p>Confirm all exact email matches links each of the {plural(bulk.count, "family", "families")} this list shows as Suggested to the customer filled in on its row, with the students and guardians its row&apos;s opening lists.
-        Only the rows this filter shows now are linked: if the list has changed by the time you press, nothing is linked and it is shown again. Nothing is sent to the books.</p>
-      <p>Once linked, each family&apos;s guardians see its customer&apos;s open invoices and Pay links, and those of the students and parents the books hold directly under it, the next time they open Home or Payments. A link can be removed again in its row, with Unlink from the books, but by then its guardians may have seen those invoices, so look the rows over first.</p>
+      <p>Links each of the {plural(bulk.count, "Suggested family", "Suggested families")} shown to the customer on its row, with the students and guardians its row lists.
+        If the list changes before you press, nothing is linked and it&apos;s shown again. Nothing is sent to the books.</p>
+      <p>Guardians then see their customer&apos;s open invoices and Pay links (and those of students and parents under it) next time they open Home or Payments. Unlink from the books undoes a link, but they may have seen the invoices by then, so look the rows over first.</p>
       <div className="row-actions">
         <LinkPress label={`Confirm all exact email matches (${bulk.count})`} busy="Linking…" about="Confirm all exact email matches"
           act={confirmAllAction.bind(null, filter.status ?? "", filter.q, bulk.count, tag, bulk.stamp)} />
@@ -405,7 +427,7 @@ function BulkPress({ bulk, filter, tag }: { bulk: BulkOffer; filter: LinksFilter
 function SendAllPress({ offer, filter, tag }: { offer: SendAllOffer; filter: LinksFilter; tag: string }) {
   const { inactive, booksInactive } = offer.passedOver;
   const said = [
-    inactive > 0 ? `It passes over ${plural(inactive, "make-inactive", "make-inactives")} this list shows, as each reads a balance in QuickBooks first: send ${inactive === 1 ? "it" : "each"} on its own row.` : null,
+    inactive > 0 ? `It skips ${plural(inactive, "make-inactive", "make-inactives")}: each reads a balance first, so send ${inactive === 1 ? "it" : "each"} on its row.` : null,
     booksInactive > 0 ? `It passes over ${plural(booksInactive, "difference whose customer QuickBooks has inactive", "differences whose customer QuickBooks has inactive")}: the portal sends nothing there, and never makes a customer active.` : null,
     offer.later > 0 ? `${offer.later === 1 ? "One more difference waits" : `${offer.later} more differences wait`} for a change this press queues to reach QuickBooks first, as ${offer.later === 1 ? "it reads" : "they read"} the same customer: press again once it has.` : null,
     // Slice M3c4: a guardian's send is never part of it, said only where the list shows one.
@@ -421,9 +443,9 @@ function SendAllPress({ offer, filter, tag }: { offer: SendAllOffer; filter: Lin
   return (
     <div className="stack">
       {notes}
-      <p>Send the app&apos;s for all queues the portal&apos;s value of each of the {plural(offer.count, "name and student's family", "names and students' families")} this list shows, over the books&apos; value its row shows, each as its row&apos;s own Send would.
-        Nothing is sent at the press: the portal sends each within a few minutes, and one QuickBooks has changed since this page was drawn is held back and kept, never sent over. The Reconciliation page shows any that waits or is kept.
-        Only what this filter shows now is queued: if the list has changed by the time you press, nothing is queued and it is shown again.</p>
+      <p>Queues the portal&apos;s value for each of the {plural(offer.count, "name and student's family", "names and students' families")} shown, as each row&apos;s Send would.
+        They go within a few minutes. One QuickBooks changed since this page loaded is kept, not sent over, and shows on Reconciliation.
+        If the list changes before you press, nothing is queued.</p>
       <div className="row-actions">
         <LinkPress label={`Send the app's for all (${offer.count})`} busy="Queueing…" about="Send the app's for all"
           act={sendAllAction.bind(null, filter.status ?? "", filter.q, offer.count, tag, offer.stamp)} />
@@ -459,7 +481,7 @@ function PickPart({ view, familyId, customerId, cq, tag, made }: { view: LinksVi
     { key: "do", header: "What you can do", quiet: true, cell: (c) => <Link className="link-line" href={pickHref(id, c.qboId)}>Look at it<span className="visually-hidden">: {c.name}</span></Link> },
   ];
   return (
-    <section className="box" aria-labelledby={PICK}><h2 id={PICK}>A customer for {row.name}</h2>
+    <Card title={<>A customer for {row.name}</>} titleId={PICK}>
       {made.map((m) => <Notice key={m.queueId} tone="info" live="none">Making this family in the books was given up after a try the books may have taken, and they have the customer &ldquo;{m.name}&rdquo; from it, with no family linked to it. If it is this family, picking it ties the two together.</Notice>)}
       {step !== null && !step.ok && <Notice tone="warning" live="none">{step.why === "customer" ? "That customer isn't one with no family in the portal now, so it can't be linked here. Pick another from the list." : "That customer can't be linked to this family from here now."}</Notice>}
       {step !== null && step.ok && (
@@ -476,16 +498,18 @@ function PickPart({ view, familyId, customerId, cq, tag, made }: { view: LinksVi
           <div className="row-actions"><ConfirmPress familyId={id} about={row.name} offer={step.offer} tag={tag} /></div>
         </div>
       )}
-      <form method="get" action="/staff/links" role="search" className="matrix-filter">
+      <form method="get" action="/staff/links" role="search">
         <input type="hidden" name="pick" value={id} />
-        <label className="field"><span>Customer name or email address</span><input name="cq" type="search" maxLength={SEARCH_MAX} defaultValue={cq} autoComplete="off" /></label>
-        <div className="matrix-filter-go"><button type="submit" className="btn btn-line">Search</button><Link href="/staff/links">Close</Link></div>
+        <Toolbar label="Search the customers with no family"
+          end={<><Button type="submit" variant="secondary">Search</Button><LinkButton variant="quiet" href="/staff/links">Close</LinkButton></>}>
+          <TextInput id="links-cq" label="Customer name or email address" name="cq" type="search" maxLength={SEARCH_MAX} defaultValue={cq} autoComplete="off" />
+        </Toolbar>
       </form>
-      {view.pool.length === 0 ? <Notice tone="info" live="none">Every customer the books list as a family is linked to a family in the portal already, so there is none to pick.</Notice>
+      {view.pool.length === 0 ? <EmptyState title="Every customer the books list as a family is linked to a family in the portal already, so there is none to pick." />
         : found.length === 0 ? <Notice tone="info">No customer with no family matches that.</Notice>
         : <DataTable caption={found.length > shown.length ? `${shown.length} of ${plural(found.length, "customer", "customers")} with no family that match: search to narrow them` : `${plural(found.length, "customer", "customers")} with no family`}
             columns={columns} rows={shown} rowKey={(c) => c.qboId} />}
-    </section>
+    </Card>
   );
 }
 
@@ -543,46 +567,18 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
   const importAsked = sp.import === "1";
   const columns: Column<LinkRow>[] = [
     { key: "family", header: "Family", rowHeader: true, sorted: "ascending", cell: (r) => (view.familyPages ? <Link href={familyPage(r.familyId)}>{r.name}</Link> : r.name) },
-    { key: "addresses", header: "Guardians' sign-in addresses", cell: (r) => (r.addresses.length > 0 ? r.addresses.join(", ") : r.guardians.length === 0 ? "None yet" : "None that can sign in") },
-    { key: "customer", header: "Customer in the books", cell: (r) => (r.customer === null ? (r.status.key === "not_checked" ? "Not checked now" : "None")
+    { key: "addresses", header: "Sign-in addresses", cell: (r) => (r.addresses.length > 0 ? r.addresses.join(", ") : r.guardians.length === 0 ? "None yet" : "None that can sign in") },
+    { key: "customer", header: "Customer", cell: (r) => (r.customer === null ? (r.status.key === "not_checked" ? "Not checked now" : "None")
       : <>{r.customer.name}<span className="when">{r.customer.email ?? "No email address"}</span></>) },
-    { key: "status", header: "Status", cell: (r) => <><StateWords state={ICON[r.status.key]} words={STATUS_WORDS[r.status.key]} /><span className="when"><StatusDetail status={r.status} row={r} /></span></> },
-    { key: "more", header: "Students and guardians", cell: (r) => <Opening row={r} tag={tag} guardianLinks={view.guardianLinks} maySend={maySend} /> },
+    { key: "status", header: "Status", cell: (r) => <><StatusBadge tone={TONE[r.status.key]}>{STATUS_WORDS[r.status.key]}</StatusBadge><span className="when"><StatusMeta status={r.status} row={r} /></span></> },
+    { key: "more", header: "Details", cell: (r) => <Opening row={r} tag={tag} guardianLinks={view.guardianLinks} maySend={maySend} /> },
   ];
   return (
     <main className="wrap single">
       <LinkAnswers>
-        <h1 className="page-title">Accounting links</h1>
-        <p className="lede">Every family in the portal, beside the customer in the books it is linked to, or the one that looks like its own.
-          A family with no link can be linked here, to its suggestion or a customer you pick, or left unlinked. Only three things here send anything to the books: Send the app&apos;s to QuickBooks, Send the app&apos;s for all, and a student&apos;s move taken from the books, which voids an unpaid volunteer buy-out invoice of theirs there.
-          For a family whose link stands, it also lists where the portal and the books differ. A name, a record the books have inactive or active, or the family the books have a student under can be taken into the portal with Take QuickBooks&apos; into the app, which changes only the portal&apos;s records, except that a student&apos;s move voids an unpaid volunteer buy-out invoice of theirs in the books, as any move does.
-          A name, the family a student is in, or a student or member inactive in the portal whose customer the books have active can instead be sent to the books with Send the app&apos;s to QuickBooks, by someone who may also change families: it replaces the books&apos; value with the portal&apos;s, and a make-inactive reads the balance first and sends nothing while there is any. Every other difference is only shown.
-          Send the app&apos;s for all, above the list, queues every name and student&apos;s family the list shows, up to {SEND_ALL_MAX} at once, for the portal to send within a few minutes, but for one that must wait for another change queued by the same press (a family&apos;s name, then a student&apos;s move into or out of it), which it leaves for the next press and says so; it passes over every make-inactive, which is sent on its own row.
-          A linked family inactive in the portal whose customer the books have active is listed after the families, and made active again the same way, but its guardians sign in to it only once someone who may change families lets them in, on its page. It can instead be made inactive in the books with everyone under it, on its row, by the balance rule, deepest first and the family last.</p>
+        <PageHeader title="Accounting links" lede={<>Each family in the portal, beside the customer in the books it&apos;s linked to or looks like.
+          Only three things here send anything to the books: Send the app&apos;s to QuickBooks, Send the app&apos;s for all, and a student&apos;s move taken from the books, which voids an unpaid volunteer buy-out invoice of theirs there.</>} />
         <LinkAnswersShown />
-
-        <section className="box" aria-labelledby="links-how-h"><h2 id="links-how-h">How links are made</h2>
-          <p>A customer is suggested only when one of the family&apos;s guardians signs in with an address that is, exactly, on a customer no family is linked to:
-            in its own email field, or on a parent record under it. A name never suggests a customer, and a customer another family is linked to is never suggested.
-            A guardian who can&apos;t sign in, because they are blocked, is listed under the family, but their address is never matched.</p>
-          <p>A family the portal has is linked here: Confirm its suggestion, or one of its possible customers, or pick a different customer from those no family is linked to.
-            Nothing is sent to the books: the press ties the family to its customer in the portal, with each of its students whose name is on exactly one student on each side,
-            and, where the books have Parent customers, each of its guardians whose sign-in address is in the email field of exactly one Parent customer under it that no one is linked to (nor kept for another guardian whose link to it an unlink ended) and that holds no other of its guardians&apos; addresses, unless a change for them or that customer is waiting, stuck or kept on Reconciliation.
-            Students left that way aren&apos;t linked, and show with the family&apos;s row among its differences, but for a student customer inactive in the books, which is only counted there. Leave unlinked keeps a family out of the suggestions until someone undoes it.</p>
-          <p>A link also comes with something new. &ldquo;Create a family from this&rdquo;, under Customers with no family on this page, makes a new family in the portal from a customer no family is linked to.
-            &ldquo;Create in QuickBooks and link&rdquo;, on a family&apos;s page, makes a new customer in the books for a family that has none, but not for one unlinked while its customer is still in the books, nor for a student of it whose customer is; and adding a family under Families makes one too, when someone who may link families adds it while the books are connected.</p>
-          <p>For each family whose link stands, the portal compares the names, whether each is active, the family each student is under, and the students and Parent customers only one side has,
-            against its copy of the books{view.readAt ? <>, from its last read of them on <LocalTime iso={view.readAt} /></> : ", though it hasn't read the books yet"}.
-            A family whose link was carried over and that has differences is found under both Carried over and Linked, with differences, and counted under both.</p>
-          <p>Confirm all exact email matches, above the list, links every Suggested row the list shows, up to {BULK_MAX} at once, each as its own Confirm would.
-            A link carried over from the roster is confirmed in its row&apos;s opening with Confirm this link, which records it as checked by you.
-            A linked family is unlinked in its row&apos;s opening with Unlink from the books, which ends its link with its students&apos; and guardians&apos; links and sends nothing to the books: to link it to a different customer, unlink it, then link it again here.</p>
-          <p>Where the books have Parent customers, a guardian of a linked family is linked in its row&apos;s opening to a Parent customer under it that no guardian is linked to, and one guardian&apos;s link is ended there alone: a Parent customer several guardians share is nobody&apos;s own, so the portal sends nothing for it until all but one are unlinked from it.
-            Neither sends anything to the books. A removed guardian&apos;s Parent customer is shown with the family, and offered to nobody else.</p>
-          <Notice tone="warning" live="none">For a family this page suggests a customer for, or lists possible customers of, link it here with Confirm.
-            &ldquo;Create a family from this&rdquo; is refused for a customer this page suggests or lists for a family the portal has, or that a given-up change of a family the portal saved first made.
-            And &ldquo;Create in QuickBooks and link&rdquo; on the family&apos;s page would make a second customer in the books for a family whose customer is already there but was never linked to it; it isn&apos;t offered for one unlinked while its customer is still in the books.</Notice>
-        </section>
 
         {view.state !== "listed" && <Notice tone="warning" live="none">{WHY_NOT_CHECKED[view.state]}</Notice>}
 
@@ -594,26 +590,80 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
 
         {importAsked && <ImportReview review={maySend && proposable > 0 ? await view.importReview() : null} mayChangeFamilies={maySend} tag={tag} />}
 
-        <section className="box" aria-labelledby="links-list-h"><h2 id="links-list-h">Families</h2>
-          <form method="get" action="/staff/links" role="search" className="matrix-filter">
-            <label className="field"><span>Status</span>
-              <select name="status" defaultValue={filter.status ?? ""}>
+        <Card title="Families" titleId="links-list-h"
+          description={<>Link a family this page suggests a customer for here, with Confirm.
+            &ldquo;Create a family from this&rdquo; is refused for such a customer, or for one QuickBooks made for a change that was given up.
+            &ldquo;Create in QuickBooks and link&rdquo; would make a second customer in the books. It isn&apos;t offered for a family unlinked while its customer is still there.</>}>
+          <HowThisWorks summary="How links are made">
+            <h3>Linking</h3>
+            <ul>
+              <li>A customer is suggested only when a guardian&apos;s sign-in address is exactly on a customer no family is linked to: in its email field, or on a parent record under it.</li>
+              <li>A name never suggests one. Nor does a customer another family has.</li>
+              <li>A blocked guardian&apos;s address is never matched.</li>
+              <li>A family the portal has is linked here: Confirm its suggestion, or one of its possible customers, or pick a different customer from those no family is linked to.</li>
+              <li>Confirming sends nothing to the books. It also links each student whose name is on exactly one student on each side.</li>
+              <li>Where the books have Parent customers, it links each guardian whose sign-in address is in the email field of exactly one Parent customer under it, if that customer holds no other guardian&apos;s address and isn&apos;t linked or kept for anyone. This doesn&apos;t happen while a change for them waits on Reconciliation.</li>
+              <li>Students left over show among the row&apos;s differences. An inactive student customer is only counted.</li>
+              <li>Leave unlinked keeps a family out of the suggestions until someone undoes it.</li>
+            </ul>
+            <h3>Many at once</h3>
+            <ul>
+              <li>Confirm all exact email matches links every Suggested row shown, up to {BULK_MAX}.</li>
+              <li>Confirm this link marks a carried-over link as checked by you.</li>
+            </ul>
+            <h3>Unlinking</h3>
+            <ul>
+              <li>Unlink from the books ends the family&apos;s link and its students&apos; and guardians&apos; links, and sends nothing. To change customer, unlink, then link again.</li>
+            </ul>
+            <h3>Guardians</h3>
+            <ul>
+              <li>A guardian&apos;s own link to a Parent customer is made or ended in the family&apos;s row.</li>
+              <li>A Parent customer several guardians share is nobody&apos;s, so nothing is sent for it until only one is left on it.</li>
+              <li>A removed guardian&apos;s Parent customer is offered to nobody else.</li>
+            </ul>
+            <h3>Differences</h3>
+            <ul>
+              <li>For each linked family, the portal compares names, active or inactive, each student&apos;s family, and records only one side has.
+                It compares against its last read of the books{view.readAt ? <> (<LocalTime iso={view.readAt} />)</> : ", though it hasn't read them yet"}.</li>
+              <li>A carried-over family with differences is counted under both Carried over and Linked, with differences.</li>
+              <li>Take QuickBooks&apos; into the app changes only the portal&apos;s records.</li>
+              <li>Send the app&apos;s to QuickBooks (for someone who may also change families) puts the portal&apos;s value in the books. A make-inactive reads the balance first and sends nothing while there is any.</li>
+              <li>Send the app&apos;s for all queues every name and student&apos;s family shown, up to {SEND_ALL_MAX}, sent within a few minutes. It skips each make-inactive (send those on their rows), and anything that must wait for another change from the same press (press again).</li>
+              <li>Every other difference is only shown.</li>
+            </ul>
+            <h3>Inactive here, active in the books</h3>
+            <ul>
+              <li>These are listed after the families. Taking the books&apos; value makes one active again, but its guardians sign in only once someone who may change families lets them in on its page.</li>
+              <li>Or make it inactive in the books, everyone under it first.</li>
+            </ul>
+            <h3>Making new</h3>
+            <ul>
+              <li>&ldquo;Create a family from this&rdquo; (under Customers with no family) makes a portal family from a customer.</li>
+              <li>&ldquo;Create in QuickBooks and link&rdquo; (on a family&apos;s page) makes a customer for a family with none.</li>
+              <li>Adding a family on the Roster makes one too, when someone who can link families adds it while the books are connected.</li>
+            </ul>
+          </HowThisWorks>
+          <form method="get" action="/staff/links" role="search">
+            <Toolbar label="Filter the families">
+              <Select id="links-status" label="Status" name="status" defaultValue={filter.status ?? ""}>
                 <option value="">Every status ({view.rows.length})</option>
                 {STATUS_KEYS.map((k) => <option key={k} value={k}>{STATUS_WORDS[k]} ({counts[k]})</option>)}
-              </select></label>
-            <label className="field"><span>Family name or email address</span><input name="q" type="search" maxLength={SEARCH_MAX} defaultValue={filter.q} autoComplete="off" /></label>
-            <div className="matrix-filter-go"><button type="submit" className="btn btn-line">Show</button>{filtered && <Link href="/staff/links">Show every family</Link>}</div>
+              </Select>
+              <TextInput id="links-q" label="Family name or email address" name="q" type="search" maxLength={SEARCH_MAX} defaultValue={filter.q} autoComplete="off" />
+              <Button type="submit" variant="secondary">Show</Button>
+              {filtered && <LinkButton variant="quiet" href="/staff/links">Show every family</LinkButton>}
+            </Toolbar>
           </form>
           {overlap > 0 && <p>{overlap === 1 ? "1 family whose link was carried over has differences, so it is counted under both Carried over and Linked, with differences."
             : `${overlap} families whose links were carried over have differences, so each is counted under both Carried over and Linked, with differences.`}</p>}
           {bulk !== null && <BulkPress bulk={bulk} filter={filter} tag={tag} />}
           {sendAll !== null && <SendAllPress offer={sendAll} filter={filter} tag={tag} />}
           {filter.tooLong && <Notice tone="warning" live="none">That search was too long, so nothing was searched for. Try a shorter part of a name or an address, up to {SEARCH_MAX} characters.</Notice>}
-          {view.rows.length === 0 ? <Notice tone="info" live="none">The portal has no active families yet.</Notice>
+          {view.rows.length === 0 ? <EmptyState title="The portal has no active families yet." />
             : rows.length === 0 ? <Notice tone="info">No family matches that.</Notice>
             : <DataTable caption={filtered ? `${plural(rows.length, "family", "families")} of ${view.rows.length} shown` : `Every family, by name: ${plural(rows.length, "family", "families")}`}
                 columns={columns} rows={rows} rowKey={(r) => String(r.familyId)} />}
-        </section>
+        </Card>
 
         {view.inactive.length > 0 && <InactivePart rows={view.inactive} tag={tag} familyPages={view.familyPages} maySend={maySend} />}
       </LinkAnswers>

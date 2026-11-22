@@ -13,16 +13,25 @@ const COLOR = /^#[0-9a-f]{6}$/i;
 type Line = string | { link: string };
 const PARAGRAPH = `<p style="margin:0 0 16px">`;
 
-/** Simple HTML: a colored bar with the club name, then paragraphs. No images, no remote content. */
+/**
+ * The footer of every mail the portal sends (brand/BRAND.md, co-branding: the club leads, the product is a "Powered by"
+ * line). Words only: no image, no link, so a sign-in mail carries no address but its own and nothing is fetched.
+ */
+export const POWERED_BY = "Powered by Boosters Rocket";
+/** The footer in HTML: the brand's badge ink, with the product's name in Launch Indigo (brand/tokens.css). */
+const POWERED_BY_HTML = `<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #e3e4e8;font-size:13px;color:#6b6b6b">`
+  + `Powered by <span style="color:#1e1b4b;font-weight:bold">Boosters Rocket</span></p>`;
+
+/** Simple HTML: a colored bar with the club name, then paragraphs, then the "Powered by" line. No images, no remote content. */
 function html(b: Brand, paragraphs: Line[], big?: string): string {
-  const color = COLOR.test(b.color) ? b.color : "#5b2a86";
+  const color = COLOR.test(b.color) ? b.color : "#1e1b4b";
   const body = paragraphs.map((p) => (typeof p === "string" ? `${PARAGRAPH}${esc(p)}</p>` : `${PARAGRAPH}<a href="${esc(p.link)}">${esc(p.link)}</a></p>`)).join("");
   const code = big ? `<p style="margin:0 0 16px;font-size:32px;letter-spacing:6px;font-weight:bold">${esc(big)}</p>` : "";
   return `<!doctype html><html><body style="margin:0;font-family:Arial,Helvetica,sans-serif;color:#1a1a1a">`
     + `<div style="background:${color};color:#ffffff;padding:16px 24px;font-size:18px;font-weight:bold">${esc(b.clubName)}</div>`
-    + `<div style="padding:24px">${code}${body}</div></body></html>`;
+    + `<div style="padding:24px">${code}${body}${POWERED_BY_HTML}</div></body></html>`;
 }
-const text = (lines: Line[]) => `${lines.map((l) => (typeof l === "string" ? l : l.link)).join("\n\n")}\n`;
+const text = (lines: Line[]) => `${lines.map((l) => (typeof l === "string" ? l : l.link)).join("\n\n")}\n\n-- \n${POWERED_BY}\n`;
 
 /**
  * The second step of a sign-in on a new device (the sign-in release, slice SI-3b): the code is sent only after the right

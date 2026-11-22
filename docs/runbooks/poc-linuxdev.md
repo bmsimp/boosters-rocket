@@ -1,4 +1,4 @@
-# Booster Rocket proof of concept on linuxdev: runbook
+# Boosters Rocket proof of concept on linuxdev: runbook
 
 Follow this top to bottom, with one exception: the `/setup` page only exists after the first deploy (section 8).
 Sign-in and outgoing mail are set up on the setup page after the first deploy (sections 3 and 4); a site that already finished setup uses "Upgrading a site that already finished setup" in section 4 instead. Each section is numbered steps. Anything in `monospace` is typed or
@@ -17,7 +17,7 @@ host's among them, are in [before the first family](before-the-first-family.md).
 
 ## 1. What this is
 
-This puts Booster Rocket on the Linux host `linuxdev` at https://portaltest.rhinoautomator.com, behind
+This puts Boosters Rocket on the Linux host `linuxdev` at https://portaltest.rhinoautomator.com, behind
 a Cloudflare tunnel (and, optionally, Cloudflare Access), so you can prove that staff sign-in (the band's Entra
 tenant or Google), parent sign-in (a password, with a 6-digit code the portal emails from
 `webmaster@fznband.org` as a second step on a device it doesn't remember) and the audit log work for real. It also proves that the portal can connect to a
@@ -70,7 +70,7 @@ Do this over SSH as user `brian`.
      ```
      (Keep the other entries already there, for example `cipp-tracker-net`.)
 
-   This goes in the n8n file, not a Booster Rocket file, because the weekly cron script that updates
+   This goes in the n8n file, not a Boosters Rocket file, because the weekly cron script that updates
    cloudflared recreates it from that file and would otherwise drop the connection.
    The edit adds `booster-rocket-edge` to the `networks:` list cloudflared already has, and to the
    top-level `networks:` as external.
@@ -424,13 +424,13 @@ HTTP Host Header location and default (empty)
 1. Add the One-time PIN login method once (skip if already there): **Zero Trust** > **Integrations** >
    **Identity providers** > **Add new identity provider** > **One-time PIN**.
 2. Create the policy: **Zero Trust** > **Access controls** > **Policies** > **Add a policy**. **Policy
-   name:** `Booster Rocket testers`. **Action:** **Allow**. Set a **Session duration**. Under **Rules**, add
+   name:** `Boosters Rocket testers`. **Action:** **Allow**. Set a **Session duration**. Under **Rules**, add
    an **Include** rule with the **Emails** selector and enter each tester's email (the owner and the
    test parents). **Save**.
 3. Create the application: **Zero Trust** > **Access controls** > **Applications** > **Create new
    application** > **Self-hosted and private**. Select **Add public hostname**, enter subdomain
    `portaltest` and domain `rhinoautomator.com`. Under **Access policies** add the existing
-   `Booster Rocket testers` policy. Under identity providers select **One-time PIN** (turn off
+   `Boosters Rocket testers` policy. Under identity providers select **One-time PIN** (turn off
    others you do not want). Choose a **Session Duration**, then **Create**.
 4. Check: open https://portaltest.rhinoautomator.com in a private window. You should be asked for an email
    and then get a code by email (10-minute expiry). An email *not* on the list gets no email, but the

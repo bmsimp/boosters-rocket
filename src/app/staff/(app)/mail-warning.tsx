@@ -1,6 +1,7 @@
 import { mailAttention } from "@/lib/mail/settings";
 import { LocalTime } from "@/app/components/local-time";
 import { Notice } from "@/app/components/notice";
+import { LinkButton } from "@/app/components/ui";
 
 /** Shown on the staff home and the Settings pages while parents can't be sent sign-in codes or password links. */
 export async function MailWarning({ canFix }: { canFix: boolean }) {
@@ -13,7 +14,7 @@ export async function MailWarning({ canFix }: { canFix: boolean }) {
         : a.kind === "not_tested"
           ? "The mail settings changed and haven't been tested since, so parents can't sign in. Open the mail steps and send a test email."
           : "Outgoing mail isn't set up, so parents can't sign in. The mail steps take you through it."}</p>
-      <p className="box-foot">{canFix ? <a className="btn btn-line" href="/staff/settings/mail/setup">Open the mail steps</a> : "An Admin can fix this under Settings, Outgoing mail."}</p>
+      <p className="box-foot">{canFix ? <LinkButton plain variant="secondary" href="/staff/settings/mail/setup">Open the mail steps</LinkButton> : "An Admin can fix this under Settings, Outgoing mail."}</p>
     </Notice>
   );
 }
