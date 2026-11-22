@@ -99,34 +99,3 @@ export function StaffNav({ menu }: { menu: MenuEntry[] }) {
     </nav>
   );
 }
-
-/**
- * On narrow screens the top menu is hidden. Parent pages use the bottom tabs; staff pages use this Menu button, which
- * opens the same entries, each group under its name. It closes when a link is chosen or Escape is pressed.
- */
-export function StaffMobileMenu({ menu }: { menu: MenuEntry[] }) {
-  const path = usePathname();
-  const current = currentHref(path, hrefsOf(menu));
-  const [open, setOpen] = useState(false);
-  const button = useRef<HTMLButtonElement>(null);
-  const link = (l: MenuLink) => (
-    <Link key={l.href} href={l.href} aria-current={currentKey(l) === current ? "page" : undefined} onClick={() => setOpen(false)}>{l.label}</Link>
-  );
-  return (
-    <div className="menu-mobile" onKeyDown={(e) => { if (e.key === "Escape" && open) { setOpen(false); button.current?.focus(); } }}>
-      <button ref={button} type="button" className="menu-button" aria-expanded={open} aria-controls="mobile-menu" onClick={() => setOpen((o) => !o)}>
-        {open ? "Close" : "Menu"}
-      </button>
-      {open && (
-        <nav id="mobile-menu" className="menu-panel" aria-label="Main">
-          {menu.map((m, i) => m.kind === "link" ? link(m) : (
-            <div key={m.label} className="menu-group" role="group" aria-labelledby={`mobile-group-${i}`}>
-              <p id={`mobile-group-${i}`} className="menu-group-name">{m.label}</p>
-              {m.links.map(link)}
-            </div>
-          ))}
-        </nav>
-      )}
-    </div>
-  );
-}

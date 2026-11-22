@@ -54,3 +54,31 @@ export function staffMenu(e: Effective): MenuEntry[] {
 
 /** Every address in the menu, in its order. */
 export const menuHrefs = (menu: MenuEntry[]): string[] => menu.flatMap((m) => (m.kind === "link" ? [m.href] : m.links.map((l) => l.href)));
+
+/** The hub of each group: a list of its pages, for the phone's tab bar (src/app/staff/(app)/<hub>/page.tsx). */
+export const GROUP_HUBS: Record<string, string> = { Families: "/staff/families", Season: "/staff/season", Money: "/staff/money" };
+
+/**
+ * One tab of the staff tab bar on a phone: Home, each group the person has an entry in, and Settings. A group's tab
+ * opens its hub, or its one page straight away when the person may open only one. `owns`: the addresses that mark the
+ * tab current (the hub and every page of the group; Home only itself).
+ */
+export type StaffTab = { key: "home" | "families" | "season" | "money" | "settings"; href: string; label: string; owns: string[]; exact?: boolean };
+
+/** The staff tab bar for one person, read from the same menu as the bar at 760px and wider: one permission logic. */
+export function staffTabs(e: Effective): StaffTab[] {
+  return staffMenu(e).map((m): StaffTab => {
+    if (m.kind === "link") {
+      return m.label === "Home" ? { key: "home", href: m.href, label: "Home", owns: ["/staff"], exact: true }
+        : { key: "settings", href: m.href, label: m.label, owns: [m.section ?? m.href] };
+    }
+    const hub = GROUP_HUBS[m.label]!;
+    return { key: m.label.toLowerCase() as StaffTab["key"], href: m.links.length === 1 ? m.links[0]!.href : hub, label: m.label, owns: [hub, ...m.links.map((l) => l.href)] };
+  });
+}
+
+/** A group's pages for one person, for its hub: empty when they may open none of them. */
+export function groupLinks(e: Effective, label: string): MenuLink[] {
+  const g = staffMenu(e).find((m) => m.kind === "group" && m.label === label);
+  return g && g.kind === "group" ? g.links : [];
+}

@@ -4,7 +4,7 @@ import { ADMIN_ONLY, GRANTABLE, PERMISSIONS, type Permission } from "@/lib/permi
 import { expandRules } from "@/lib/permissions/rules";
 import type { Effective } from "@/lib/permissions/effective";
 import { SETTINGS_GROUPS, SETTINGS_ITEMS, integrationItems, railItems, settingsHome, settingsItems } from "@/app/staff/(app)/settings/sections";
-import { staffMenu, menuHrefs, type MenuEntry } from "@/app/staff/(app)/staff-menu";
+import { groupLinks, staffMenu, staffTabs, menuHrefs, type MenuEntry } from "@/app/staff/(app)/staff-menu";
 
 const only = (...permissions: Permission[]): Effective => ({ isAdmin: false, permissions: new Set(permissions) });
 const ADMIN: Effective = { isAdmin: true, permissions: new Set(PERMISSIONS) };
@@ -124,5 +124,33 @@ describe("the staff menu", () => {
   it("never shows Roles, the audit log or Health to a custom role, however wide", () => {
     for (const h of ["/staff/settings/roles", "/staff/settings/audit", "/staff/settings/health"]) expect(menuHrefs(staffMenu(WIDEST))).not.toContain(h);
     expect(shape(staffMenu(WIDEST)).at(-1)).toBe("Settings");
+  });
+});
+
+describe("the staff tab bar on a phone", () => {
+  it("has Home, each group the person has an entry in, and Settings, read from the same menu", () => {
+    expect(staffTabs(ADMIN).map((t) => t.label)).toEqual(["Home", "Families", "Season", "Money", "Settings"]);
+    expect(staffTabs(only()).map((t) => t.label)).toEqual(["Home"]);
+    expect(staffTabs(only("Finance.Balance.Read")).map((t) => t.label)).toEqual(["Home", "Money"]);
+  });
+
+  it("opens a group's hub, or its one page straight away, and Settings where the menu's entry leads", () => {
+    const href = (e: Effective, label: string) => staffTabs(e).find((t) => t.label === label)!.href;
+    expect(href(ADMIN, "Families")).toBe("/staff/families");
+    expect(href(ADMIN, "Season")).toBe("/staff/season");
+    expect(href(ADMIN, "Money")).toBe("/staff/money");
+    expect(href(only("Finance.Balance.Read"), "Money")).toBe("/staff/balances");
+    expect(href(only("Roster.Read"), "Families")).toBe("/staff/roster");
+    expect(href(ADMIN, "Settings")).toBe("/staff/settings");
+    expect(href(only("Staff.Users.Read"), "Settings")).toBe("/staff/settings/staff");
+  });
+
+  it("is current on its hub and every page of its group, Settings on every settings page, Home only on the staff home", () => {
+    const tabs = staffTabs(ADMIN);
+    expect(tabs.find((t) => t.key === "families")!.owns).toEqual(["/staff/families", "/staff/roster", "/staff/parents", "/staff/links"]);
+    expect(tabs.find((t) => t.key === "settings")!.owns).toEqual(["/staff/settings"]);
+    expect(tabs.find((t) => t.key === "home")).toMatchObject({ owns: ["/staff"], exact: true });
+    expect(groupLinks(ADMIN, "Money").map((l) => l.href)).toEqual(["/staff/balances", "/staff/reconciliation"]);
+    expect(groupLinks(only(), "Money")).toEqual([]);
   });
 });

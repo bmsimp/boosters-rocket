@@ -1,9 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { asStaff, atPath, renderPage } from "../helpers/signed-in";
+import { asStaff, atPath, pageOutcome, renderPage } from "../helpers/signed-in";
 
 import { db } from "@/lib/db/client";
 import { role, roleAssignment, roleRule } from "@/lib/db/schema";
 import StaffLayout from "@/app/staff/(app)/layout";
+import FamiliesHub from "@/app/staff/(app)/families/page";
+import SeasonHub from "@/app/staff/(app)/season/page";
+import MoneyHub from "@/app/staff/(app)/money/page";
 import { resetDb, seedStaff } from "../helpers/db";
 
 /** Each entry is shown only to someone who can open the page it leads to. */
@@ -182,5 +185,34 @@ describe("the staff menu", () => {
     expect(groups).toEqual([["Families", "nav-group-button"], ["Season", "nav-group-button here"], ["Money", "nav-group-button"]]);
     expect(await menu()).toContain('aria-label="Season, current section"');
     expect(await menu()).not.toContain('aria-label="Families, current section"');
+  });
+});
+
+describe("the phone's tab bar and the group hubs", () => {
+  beforeEach(resetDb);
+  /** The tab bar's links, as "label href". */
+  const tabBar = async () => {
+    const html = await renderPage(StaffLayout);
+    const nav = /<nav class="tabs staff-tabs"[^>]*>(.*?)<\/nav>/.exec(html)?.[1] ?? "";
+    return [...nav.matchAll(/<a href="([^"]+)"[^>]*>.*?<\/svg>([^<]*)<\/a>/g)].map((m) => `${m[2]} ${m[1]}`);
+  };
+
+  it("draws an Admin's tabs, each group opening its hub, and Settings", async () => {
+    await asAdmin();
+    expect(await tabBar()).toEqual(["Home /staff", "Families /staff/families", "Season /staff/season", "Money /staff/money", "Settings /staff/settings"]);
+  });
+
+  it("draws a group's tab only for someone with a page in it, straight to the page when there is one", async () => {
+    await staffWith("Finance.Balance.Read");
+    expect(await tabBar()).toEqual(["Home /staff", "Money /staff/balances"]);
+  });
+
+  it("lists on each hub only the pages of its group the person may open, and refuses someone with none", async () => {
+    await staffWith("Season.Progress.Read", "Volunteer.Credit.ReadWrite");
+    const html = await renderPage(SeasonHub);
+    expect([...html.matchAll(/<a class="list-link" href="([^"]+)"/g)].map((m) => m[1])).toEqual(["/staff/seasons/progress", "/staff/volunteer/credit"]);
+    expect(html).toContain('<h1 class="page-title">Season</h1>');
+    expect(await pageOutcome(MoneyHub)).toEqual({ redirect: "/refused" });
+    expect(await pageOutcome(FamiliesHub)).toEqual({ redirect: "/refused" });
   });
 });

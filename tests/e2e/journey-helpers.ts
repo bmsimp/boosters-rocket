@@ -46,11 +46,16 @@ export async function codeFor(sql: postgres.Sql, sink: MailSink, email: string):
   return found;
 }
 
-/** Opens one group of the staff menu (or the phone's Menu first) and follows one of its entries, as a person would. */
+/**
+ * Opens one group of the staff menu and follows one of its entries, as a person would: on a phone, the group's tab in
+ * the bottom tab bar, then the entry on its hub (Home and Settings are tabs of their own).
+ */
 export async function staffMenuTo(page: Page, group: string | null, entry: string): Promise<void> {
   if ((page.viewportSize()?.width ?? 0) < 760) {
-    await page.getByRole("button", { name: "Menu" }).click();
-    await page.locator("#mobile-menu").getByRole("link", { name: entry, exact: true }).click();
+    const tabs = page.locator("nav.tabs.staff-tabs");
+    if (!group) { await tabs.getByRole("link", { name: entry, exact: true }).click(); return; }
+    await tabs.getByRole("link", { name: group, exact: true }).click();
+    await page.locator("main").getByRole("link", { name: new RegExp(`^${entry}`) }).first().click();
     return;
   }
   const nav = page.locator("header.bar nav.top-nav");

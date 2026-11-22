@@ -129,27 +129,55 @@ test("on a Progress page only Progress is marked current, though its address sit
   await context.close();
 });
 
-test("on a phone the same entries are behind the Menu button, each group under its name, and the bar keeps its one row", async ({ browser }) => {
+test("on a phone the menu is a bottom tab bar: Home, each group, Settings; a group's tab opens its hub, and its pages lead back to it", async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   await context.addCookies([staffSessionCookie()]);
   const page = await context.newPage();
-  await page.goto("/staff/settings/health");
+  await page.goto("/staff");
   await expect(nav(page)).toBeHidden();
+  // The bar keeps the club and the initials only: no Menu button.
+  await expect(page.getByRole("button", { name: "Menu" })).toHaveCount(0);
   expect(await page.locator("header.bar .wrap").evaluate((el) => el.getBoundingClientRect().height)).toBe(56); // the one row, above the hairline
-  const menu = page.getByRole("button", { name: "Menu" });
-  await expect(menu).toHaveAttribute("aria-expanded", "false");
-  await menu.click();
-  const panel = page.locator("#mobile-menu");
-  await expect(panel.getByRole("link")).toHaveText(["Home", ...GROUPS.Families!, ...GROUPS.Season!, ...GROUPS.Money!, "Settings"]);
-  for (const name of Object.keys(GROUPS)) await expect(panel.getByRole("group", { name })).toBeVisible();
-  await expect(panel.getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-  await page.keyboard.press("Escape");
-  await expect(panel).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Menu" })).toBeFocused();
-  await page.getByRole("button", { name: "Menu" }).click();
-  await page.locator("#mobile-menu").getByRole("link", { name: "Settings" }).click();
+  const tabs = page.locator("nav.tabs.staff-tabs");
+  await expect(tabs.getByRole("link")).toHaveText(["Home", "Families", "Season", "Money", "Settings"]);
+  await expect(tabs.getByRole("link", { name: "Home" })).toHaveAttribute("aria-current", "page");
+  // Every tab is a 44px target or more, inside the screen, and the page above it clears the bar.
+  for (const box of await tabs.getByRole("link").evaluateAll((all) => all.map((a) => a.getBoundingClientRect().toJSON() as DOMRect))) {
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(box.right).toBeLessThanOrEqual(390);
+  }
+  expect(await page.evaluate(() => parseFloat(getComputedStyle(document.body).paddingBottom))).toBeGreaterThanOrEqual(64);
+
+  // A group's tab opens its hub: its pages as rows, each its own page.
+  await tabs.getByRole("link", { name: "Families" }).click();
+  await expect(page).toHaveURL(/\/staff\/families$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Families");
+  await expect(page.locator("main").getByRole("link")).toHaveText(GROUPS.Families!.map((l) => new RegExp(`^${l}`)));
+  await expect(tabs.getByRole("link", { name: "Families" })).toHaveAttribute("aria-current", "page");
+  await page.locator("main").getByRole("link", { name: /^Roster/ }).click();
+  await expect(page).toHaveURL(/\/staff\/roster$/);
+  await expect(tabs.getByRole("link", { name: "Families" })).toHaveAttribute("aria-current", "page");
+  // The page leads back to its hub.
+  await page.locator("p.hub-back").getByRole("link", { name: "Families" }).click();
+  await expect(page).toHaveURL(/\/staff\/families$/);
+
+  // Settings goes straight to Settings, whose rail is its first screen.
+  await tabs.getByRole("link", { name: "Settings" }).click();
   await expect(page).toHaveURL(/\/staff\/settings$/);
+  await expect(tabs.getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+  await page.goto("/staff/settings/health");
+  await expect(tabs.getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await context.close();
+});
+
+test("at 760px and wider the staff tab bar is hidden and the hub's way back is not drawn", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await context.addCookies([staffSessionCookie()]);
+  const page = await context.newPage();
+  await page.goto("/staff/roster");
+  await expect(page.locator("nav.tabs.staff-tabs")).toBeHidden();
+  await expect(page.locator("p.hub-back")).toBeHidden();
   await context.close();
 });
 

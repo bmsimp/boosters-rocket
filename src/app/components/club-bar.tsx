@@ -1,4 +1,4 @@
-import { AccountLink, StaffMobileMenu, StaffNav, TopNav } from "./top-nav";
+import { AccountLink, StaffNav, TopNav } from "./top-nav";
 import type { MenuEntry } from "@/app/staff/(app)/staff-menu";
 
 type NavItem = { href: string; label: string };
@@ -8,8 +8,8 @@ const PAGE_START = "page-start";
 
 /**
  * The club bar. Parent pages pass `nav`: a row of links, always one 56px row. Staff pages pass `menu` instead: grouped
- * entries (StaffNav), behind a Menu button on a phone, and at 760px and wider the bar may take more than one row
- * (`bar-rows`) should the entries need it. The sign-in pages pass an empty `nav`: the bar with no menu.
+ * entries (StaffNav) at 760px and wider, where the bar may take more than one row (`bar-rows`) should the entries need
+ * it; on a phone the bar holds the club and the initials only, and the staff tab bar (StaffTabs) holds the menu. The sign-in pages pass an empty `nav`: the bar with no menu.
  *
  * A bar with links in it starts with "Skip to the page" (WCAG 2.4.1): the first Tab stop, drawn only while it has the
  * focus, which takes the keyboard past the bar to the PageStart its frame places. A bar with nothing to tab through
@@ -25,7 +25,7 @@ export function ClubBar({ name, shortName, nav = [], menu, account }: {
       <div className="wrap">
         <span className="monogram" aria-hidden="true">{shortName}</span>
         <span className="club">{name}</span>
-        {menu ? <><StaffNav menu={menu} /><StaffMobileMenu menu={menu} /></> : <TopNav nav={nav} />}
+        {menu ? <StaffNav menu={menu} /> : <TopNav nav={nav} />}
         {account && <AccountLink href={account.href} initials={account.initials} label={account.label} />}
       </div>
     </header>

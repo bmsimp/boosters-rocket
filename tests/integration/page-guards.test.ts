@@ -22,10 +22,13 @@ const PARENT_PAGES = "src/app/(parent)/";
 const STAFF_PAGES = "src/app/staff/(app)/";
 const STAFF_HOME = "src/app/staff/(app)/page.tsx";
 /**
- * The pages every signed-in staff member may open, which ask for no permission: the staff home, and the staff member's
- * own account page (their name, display and sign out: it takes no id and shows nobody else's data).
+ * The pages every signed-in staff member may open, which ask for no permission: the staff home, the staff member's
+ * own account page (their name, display and sign out: it takes no id and shows nobody else's data), and the phone's
+ * group hubs (Families, Season, Money: each lists only the pages of its group the person may open, reads nothing else,
+ * and refuses someone with none; tests/integration/staff-menu.test.ts).
  */
-const STAFF_OWN_PAGES = new Set([STAFF_HOME, "src/app/staff/(app)/account/page.tsx"]);
+const STAFF_OWN_PAGES = new Set([STAFF_HOME, "src/app/staff/(app)/account/page.tsx", "src/app/staff/(app)/families/page.tsx",
+  "src/app/staff/(app)/season/page.tsx", "src/app/staff/(app)/money/page.tsx"]);
 
 const read = (file: string) => readFileSync(path.join(root, file), "utf8");
 /** The code without comments, so a guard that is only mentioned, or commented out, doesn't count. */

@@ -12,8 +12,7 @@ const rail = (page: Page) => page.getByRole("navigation", { name: "Settings" });
 test("an Admin opens Settings from the menu, follows an item of the rail to its page and comes back", async ({ page }) => {
   await page.goto("/staff");
   if (isPhone(page)) {
-    await page.getByRole("button", { name: "Menu" }).click();
-    await page.locator("#mobile-menu").getByRole("link", { name: "Settings" }).click();
+    await page.locator("nav.tabs.staff-tabs").getByRole("link", { name: "Settings" }).click();
   } else {
     await page.locator("header.bar nav.top-nav").getByRole("link", { name: "Settings" }).click();
   }
