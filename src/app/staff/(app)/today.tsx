@@ -1,10 +1,11 @@
 import { queueCounts } from "@/lib/roster/queue";
 import { formsToChase, shiftsToFill, SOON_DAYS } from "@/lib/staff-home/today";
-import { Card, List, ListRow, LinkButton, StateWords } from "@/app/components/ui";
+import { Card, List, ListRow, LinkButton, StateWords, type Tone } from "@/app/components/ui";
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-type Item = { key: string; words: string; detail: string; href: string; link: string };
+/** `tone`: the ring before the row; due (a clock) unless it needs a person now (late, an alert: a change stuck, which nothing retries). */
+type Item = { key: string; words: string; detail: string; href: string; link: string; tone?: Tone };
 
 /**
  * What needs doing today on the staff home (staff home, DESIGN.md): one line for each thing waiting, as a count in words
@@ -20,7 +21,7 @@ export async function TodayBox({ writes, forms, shifts }: { writes: boolean; for
   ]);
   const items: Item[] = [];
   if (queue && queue.stuck > 0) items.push({ key: "stuck", words: count(queue.stuck, "change stuck on its way to QuickBooks", "changes stuck on their way to QuickBooks"),
-    detail: "It won't be tried again by itself. Try again, or give it up and make the change in QuickBooks.", href: "/staff/reconciliation", link: "Open Reconciliation" });
+    detail: "It won't be tried again by itself. Try again, or give it up and make the change in QuickBooks.", href: "/staff/reconciliation", link: "Open Reconciliation", tone: "late" });
   // A change saved in the portal first that didn't go through (stage 3's slice 9e): kept, never tried again by itself.
   if (queue && queue.refused > 0) items.push({ key: "refused", words: count(queue.refused, "change kept in the portal that QuickBooks didn't take", "changes kept in the portal that QuickBooks didn't take"),
     detail: "Send the portal's value again, or give it up.", href: "/staff/reconciliation", link: "Open Reconciliation" });
@@ -39,7 +40,7 @@ export async function TodayBox({ writes, forms, shifts }: { writes: boolean; for
     <Card title="Today" titleId="today-h">
       {items.length === 0 ? <StateWords state="done" words="Nothing needs doing today." /> : (
         <List>{items.map((i) => (
-          <ListRow key={i.key} data-today={i.key} status={{ tone: "due" }} title={i.words} meta={i.detail}
+          <ListRow key={i.key} data-today={i.key} status={{ tone: i.tone ?? "due" }} title={i.words} meta={i.detail}
             action={<LinkButton variant="secondary" size="sm" href={i.href}>{i.link}</LinkButton>} />))}</List>
       )}
     </Card>
