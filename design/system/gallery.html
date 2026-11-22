@@ -447,6 +447,8 @@ fieldset.checks { border: 0; padding: 0; min-width: 0; }
 .list:has(+ .list-total) { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 .box > .list-total { margin: 0 calc(-1 * var(--box-pad)); border-width: 0 0 1px; border-radius: 0; }
 .box > .list-total:last-child { margin-bottom: calc(-1 * var(--box-pad)); border-bottom: 0; border-radius: 0 0 var(--radius) var(--radius); }
+/* Rows in a card take the card's own side padding (20px from 760px), so their words line up with the card's title. */
+.box .list > .list-row, .box > .list-total { padding-inline: var(--box-pad); }
 @media (min-width: 480px) { .list:has(+ .list-total) .list-trail { flex-direction: row-reverse; } }
 
 /* --- Menu: the top bar's links and groups (parent and staff), and the phone's Menu panel for staff. --- */
@@ -686,7 +688,8 @@ p.errors, .sign-out .errors { padding-left: 0; }
 .app-key, .backup-codes code { font-family: var(--font); font-variant-numeric: tabular-nums slashed-zero; font-size: 1.0625rem; font-weight: 600; letter-spacing: 0.06em;
   overflow-wrap: anywhere; user-select: all; }
 .app-key { display: block; margin-top: var(--s2); }
-ul.backup-codes { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: var(--s2) var(--s4); margin-top: var(--s3); }
+ul.backup-codes { list-style: none; padding: var(--s3) var(--s4); display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: var(--s2) var(--s4); margin-top: var(--s3);
+  background: var(--surface-muted); border: 1px solid var(--border); border-radius: var(--radius); } /* the codes on one quiet surface, like a card's total row */
 /* Signing in and out. */
 .signin { max-width: 440px; margin: 0 auto; padding-top: var(--s7); }
 .signin .btn { width: 100%; margin-top: var(--s3); }
