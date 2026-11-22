@@ -55,7 +55,7 @@ test.describe("signed in", () => {
     await page.goto("/family");
     const details = page.getByRole("region", { name: "Your details" });
     await expect(details).toContainText("You can change your phone, mailing address and sign-in email below. To change your name, ask the club.");
-    await expect(details.locator("dd")).toHaveText(["Zelda Quetzalcoatl", "zelda@example.com", E2E_DETAILS.phone]);
+    await expect(details.locator("dd")).toHaveText(["Zelda Quetzalcoatl", E2E_DETAILS.phone]);
     const link = details.getByRole("link", { name: "Update my details" });
     expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await link.click();
@@ -105,7 +105,7 @@ test.describe("signed in", () => {
     await noSidewaysScroll(page);
 
     await page.goto("/family");
-    await expect(page.getByRole("region", { name: "Your details" }).locator("dd")).toHaveText(["Zelda Quetzalcoatl", "zelda@example.com", "505-555-0199"]);
+    await expect(page.getByRole("region", { name: "Your details" }).locator("dd")).toHaveText(["Zelda Quetzalcoatl", "505-555-0199"]);
   });
 
   test("Home's details box leads there too", async ({ page }) => {

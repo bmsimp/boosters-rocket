@@ -37,13 +37,15 @@ export function AskTheClub({ treasurerEmail }: { treasurerEmail: string | null }
  * box below (Family, which offers it) or on the Family page (Home). The new address is the one they then sign in with,
  * and the club's records are brought up to date with it.
  */
-export function DetailsBox({ who, treasurerEmail, ownEmail = false }: { who: MyContact; treasurerEmail: string | null; ownEmail?: false | "below" | "family" }) {
+export function DetailsBox({ who, treasurerEmail, ownEmail = false, showEmail = true }: { who: MyContact; treasurerEmail: string | null; ownEmail?: false | "below" | "family";
+  /** False on Family, where the sign-in email is shown once, in Your account, beside how it is used. */
+  showEmail?: boolean }) {
   return (
     <Card className="details-box" title="Your details" titleId="det-h" description="How the club reaches you"
       actions={who.edits && <LinkButton plain variant="secondary" href="/family/details">Update my details</LinkButton>}>
       <KeyValue items={[
         { key: "name", label: "Name", value: who.name },
-        who.email ? { key: "email", label: "Email", value: who.email } : null,
+        showEmail && who.email ? { key: "email", label: "Email", value: who.email } : null,
         // In books with no parent type the phone is the family's, shared by its parents: said so beside the person's own name and email.
         who.phone ? { key: "phone", label: who.edits === "family" ? "Family phone" : "Phone", value: who.phone, numeric: true } : null,
       ]} />

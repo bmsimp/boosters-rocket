@@ -172,7 +172,10 @@ describe("Your details, on Family and on Home", () => {
     for (const page of [FamilyPage, ParentHome]) {
       const html = await renderPage(page);
       expect(html).toContain(LINK);
-      expect(html).toContain("<dt>Name</dt><dd>Hollis Handmade</dd><dt>Email</dt><dd>hollis.handmade@family-r.example</dd></dl>");
+      // On Family the sign-in email is in Your account, once on the page; Home's details box shows it.
+      if (page === FamilyPage) expect(html).toContain("<dt>Name</dt><dd>Hollis Handmade</dd></dl>");
+      else expect(html).toContain("<dt>Name</dt><dd>Hollis Handmade</dd><dt>Email</dt><dd>hollis.handmade@family-r.example</dd></dl>");
+      expect(html.match(/<dd>hollis\.handmade@family-r\.example<\/dd>/g)).toHaveLength(1);
     }
   });
 

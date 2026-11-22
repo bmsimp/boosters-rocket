@@ -416,6 +416,8 @@ fieldset.checks { border: 0; padding: 0; min-width: 0; }
 .list-meta .optional, .list-title .optional, .list-sub-title .optional { color: var(--ink-2); font-weight: 400; }
 /* A row's parts (ListSubRow): indented under its title, on the row's own surface, a hairline above each. */
 .list-row.has-sub { flex-wrap: wrap; }
+/* A row that wraps (its parts or its detail under it) keeps its ring beside its title: the title gives way, never the ring. */
+.list-row.has-sub > .list-main { flex-basis: 0; }
 .list-sub { flex: 1 0 100%; list-style: none; padding: 0 0 0 calc(16px + var(--s3)); margin: var(--s1) 0 0; }
 .list-subrow { display: grid; gap: 1px; padding: var(--s2) 0; border-top: 1px solid var(--border); }
 .list-subrow:last-child { padding-bottom: 0; }
