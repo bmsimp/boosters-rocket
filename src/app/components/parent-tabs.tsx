@@ -6,23 +6,19 @@ import type { StaffTab } from "@/app/staff/(app)/staff-menu";
 import { PARENT_NAV } from "./parent-nav";
 import { isCurrent } from "./top-nav";
 
-const HOME = <path d="M3 11l9-7 9 7v9h-6v-6H9v6H3z" />;
-const FAMILY = <><circle cx="9" cy="8" r="3" /><circle cx="17" cy="9" r="2.5" /><path d="M3 20c0-3 3-5 6-5s6 2 6 5M15 15c3 0 6 1.5 6 4" /></>;
-const MONEY = <><rect x="3" y="6" width="18" height="12" /><path d="M3 10h18M7 15h3" /></>;
-
 const ICONS: Record<string, ReactNode> = {
-  "/": HOME,
+  "/": <path d="M3 11l9-7 9 7v9h-6v-6H9v6H3z" />,
   "/forms": <><path d="M6 3h9l3 3v15H6z" /><path d="M9 13l2 2 4-4" /></>,
-  "/payments": MONEY,
+  "/payments": <><rect x="3" y="6" width="18" height="12" /><path d="M3 10h18M7 15h3" /></>,
   "/volunteer": <path d="M12 20s-8-4.6-8-10.2A4.3 4.3 0 0 1 12 7.4a4.3 4.3 0 0 1 8 2.4C20 15.4 12 20 12 20z" />,
-  "/family": FAMILY,
+  "/family": <><circle cx="9" cy="8" r="3" /><circle cx="17" cy="9" r="2.5" /><path d="M3 20c0-3 3-5 6-5s6 2 6 5M15 15c3 0 6 1.5 6 4" /></>,
 };
 
 const STAFF_ICONS: Record<StaffTab["key"], ReactNode> = {
-  home: HOME,
-  families: FAMILY,
+  home: ICONS["/"],
+  families: ICONS["/family"],
   season: <><rect x="3" y="5" width="18" height="16" /><path d="M3 10h18M8 3v4M16 3v4" /></>,
-  money: MONEY,
+  money: ICONS["/payments"],
   settings: <><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1" /></>,
 };
 
