@@ -26,7 +26,7 @@ export default async function ParentSignIn({ searchParams }: { searchParams?: Pr
       <ClubBar name={club.name} shortName={club.shortName} nav={[]} />
       <main className="wrap signin">
         <h1 className="page-title">Sign in</h1>
-        {ready && confirmingEmail && <p className="help">To confirm your new email, sign in with the address you use now. The new one works once the change is confirmed.</p>}
+        {ready && confirmingEmail && <p className="help">Sign in with the email you use now to confirm your new one.</p>}
         {/* The portal's own origin (APP_URL's, no secret), where passkeys work: reached at any other address, the form says so. */}
         {ready ? <PasswordSignIn next={next} portalOrigin={new URL(env.APP_URL).origin} /> : <p role="status">{SIGNIN_UNAVAILABLE}</p>}
         {/* A set-up link for a first password, or a reset link for a forgotten one (./password, slice SI-3a). */}

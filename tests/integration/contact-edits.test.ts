@@ -157,7 +157,7 @@ describe("a parent saves their phone and address in the portal", () => {
     asParent(r.identity);
     expect(await loadMyContact(ctxOf(r.identity))).toMatchObject({ state: "ok", me: { name: RIVERA.parent.name, edits: "family", phone: null }, form: { values: NO_DETAILS, version: "f:0" } });
     let page = await renderPage(FamilyDetailsPage);
-    expect(page).toContain("These are the details the club uses to reach your family. Every parent in your family shares them, so a change here changes them for all of you.");
+    expect(page).toContain("Every parent in your family shares these details, so a change here changes them for all of you.");
     for (const theirs of ["737-555-0999", "48 Cormorant Court", "Cedar Park"]) expect(page, theirs).not.toContain(theirs);
     expect(await save({ ...NO_DETAILS, phone: NEW_PHONE, ...NEW_ADDRESS }, "f:0")).toEqual({ ok: true, message: CONTACT_COPY.savedFamily,
       current: { values: { phone: NEW_PHONE, ...NEW_ADDRESS }, version: "f:1" } });
@@ -189,7 +189,7 @@ describe("a parent saves their phone and address in the portal", () => {
     expect(await familyDetails(m.identity.familyId)).toEqual({ values: { ...NO_DETAILS, line1: "3 Wren Row", city: "Pflugerville", region: "TX" }, version: 1 });
     expect(await familyDetails(other.identity.familyId)).toEqual({ values: { ...NO_DETAILS, phone: "512-555-0155", line1: "1 Elsewhere Row" }, version: 0 });
     const page = await renderPage(FamilyDetailsPage);
-    expect(page).toContain("These are the details the club uses to reach your family.");
+    expect(page).toContain("Every parent in your family shares these details");
     expect(page).not.toContain("1 Elsewhere Row");
     expect((await audits())[0]).toMatchObject({ action: "parent.details.save", targetType: "family", targetId: String(m.identity.familyId) });
     expect(stub.apiCalls()).toEqual([]);

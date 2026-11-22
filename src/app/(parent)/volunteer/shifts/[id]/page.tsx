@@ -45,7 +45,7 @@ export default async function ShiftPage({ params }: { params: Promise<{ id: stri
 
       <Card title="Sign up" titleId="signup-h">
         {shift.state === "started" ? <Notice tone="info" live="none">This shift has started, so it&apos;s too late to sign up.</Notice>
-          : shift.state === "full" ? <Notice tone="info" live="none">This shift is full. Every place has been taken.</Notice>
+          : shift.state === "full" ? <Notice tone="info" live="none">This shift is full.</Notice>
           : <SignUpForm choices={view.choices} act={signUpAction.bind(null, shift.id)} />}
       </Card>
     </main>

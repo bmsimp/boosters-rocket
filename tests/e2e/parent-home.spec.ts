@@ -47,7 +47,7 @@ test("Home is headed with the family's name and shows what is to do, its student
   // Her phone is the portal's own (stage 3's slice 11a), and nothing says it came from QuickBooks.
   await expect(details.locator("dd")).toHaveText(["Zelda Quetzalcoatl", "zelda@example.com", E2E_DETAILS.phone]);
   // Her sign-in email is hers to change too, from Family, though she is in two families (stage 3's slice 11d).
-  await expect(details).toContainText("You can change your phone and mailing address yourself, and your sign-in email on your Family page. The club changes your name for you. Ask the club and they'll update it.");
+  await expect(details).toContainText("You can change your phone, mailing address and sign-in email on your Family page. To change your name, ask the club.");
   await expect(details.getByRole("link", { name: "Update my details" })).toHaveAttribute("href", "/family/details");
   await expect(page.locator(".roster-asof")).toHaveCount(0);
 

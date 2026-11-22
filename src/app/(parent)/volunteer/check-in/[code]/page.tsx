@@ -44,7 +44,7 @@ export default async function CheckInPage({ params }: { params: Promise<{ code: 
 
       <Card title={family.name} titleId="checkin-h">
         {view.people.length === 0 ? (
-          <p>Nobody in your family is signed up for this shift, so there&apos;s no one to check in here. If you&apos;d like to help, you can find a shift with a free place on the <Link href="/volunteer">Volunteer page</Link>.</p>
+          <p>Nobody in your family is signed up for this shift. Want to help? Find a shift with a free place on the <Link href="/volunteer">Volunteer page</Link>.</p>
         ) : (
           <Announcer>
             {closed && <Notice tone="info" live="none">{closed}</Notice>}

@@ -227,7 +227,7 @@ export async function signUpForShift(ctx: ParentCtx, shiftId: unknown, who: unkn
     const { start } = shiftInstants(event.onDate, shift.startsAt, shift.endsAt, zone);
     if (start.getTime() <= now.getTime()) return { r: no("That shift has started, so it's too late to sign up for it.") };
     const filled = (await filledOn([shift.id], tx)).get(shift.id) ?? 0;
-    if (filled >= shift.places) return { r: no("Sorry, that shift is full now. Every place has been taken.") };
+    if (filled >= shift.places) return { r: no("Sorry, that shift is full now.") };
     const [already] = await tx.select({ id: volunteerSignup.id }).from(volunteerSignup).where(and(eq(volunteerSignup.shiftId, shift.id), isNull(volunteerSignup.cancelledAt),
       student ? eq(volunteerSignup.studentId, student.id) : and(eq(volunteerSignup.fillerKind, "guardian"), eq(volunteerSignup.fillerParentId, ctx.parentId))));
     if (already) return { r: no(student ? `${student.name} is signed up for this shift already.` : "You're signed up for this shift already.") };
@@ -257,7 +257,7 @@ export async function signUpForShift(ctx: ParentCtx, shiftId: unknown, who: unkn
   return { ok: true, message: sent.ok ? `${whoDone}. Thank you! We've emailed you the details, with a calendar file.` : `${whoDone}. Thank you! We couldn't send the email with the details just now; they're on this page.` };
 }
 
-export const ROSTER_BUSY = "The club's list of families is being brought up to date just now. Please try again in a minute.";
+export const ROSTER_BUSY = "The club is updating its list of families. Please try again in a minute.";
 /** Postgres could not take a lock in time (lock_not_available). Drizzle wraps the driver's error, so its cause is read too. */
 const lockNotAvailable = (e: unknown): boolean => {
   const code = (v: unknown) => (typeof v === "object" && v !== null ? (v as { code?: unknown }).code : undefined);
@@ -294,11 +294,11 @@ export async function cancelMySignup(ctx: ParentCtx, signupId: unknown, now: Dat
     if ((await creditedSignups([s.id], tx)).has(s.id)) return no("This place is checked in already, so it can't be cancelled. Thank you for helping!");
     const { start } = shiftInstants(event.onDate, shift.startsAt, shift.endsAt, zone);
     if (!beforeCutoff(start, cutoffHours, now)) {
-      return no(`It's too close to the shift to cancel here: the portal takes cancellations until ${cutoffHours} ${cutoffHours === 1 ? "hour" : "hours"} before it starts. Please contact ${contactWords(event)}.`);
+      return no(`It's too late to cancel here: cancelling closes ${cutoffHours} ${cutoffHours === 1 ? "hour" : "hours"} before the shift. Please contact ${contactWords(event)}.`);
     }
     await tx.update(volunteerSignup).set({ cancelledAt: now, cancelledByDoor: "parent", cancelledBy: ctx.parentId }).where(eq(volunteerSignup.id, s.id));
     await writeAudit({ actor: { door: "parent", id: ctx.parentId, label: ctx.email }, action: "volunteer.signup.cancel", targetType: "volunteer_signup", targetId: s.id, ip: ctx.ip,
       before: { familyId: String(s.familyId), shiftId: s.shiftId, event: event.name, onDate: event.onDate, fillerName: s.fillerName }, after: { cancelled: true } }, tx);
-    return { ok: true as const, message: `Cancelled. ${s.fillerKind === "guardian" && s.fillerParentId === ctx.parentId ? "Your" : `${s.fillerName}'s`} place is free for someone else now. Thanks for letting us know. If you added it to your calendar, you can delete it there.` };
+    return { ok: true as const, message: `Cancelled, so ${s.fillerKind === "guardian" && s.fillerParentId === ctx.parentId ? "your" : `${s.fillerName}'s`} place is free for someone else. Thanks for letting us know! If it's in your calendar, you can delete it there.` };
   });
 }

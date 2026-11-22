@@ -34,11 +34,11 @@ export const EMAIL_COPY = {
   invalid: "Please enter a whole email address, like name@example.com.",
   same: "That's the address you sign in with now.",
   /** Asked without a recent proof (asking again, slice SI-5a): nothing is stored or mailed. */
-  proveFirst: "Before you change your sign-in email, please show it's you with your password and a code we email you. Please reload this page and do that first, or do it in Sign-in settings on the Family page.",
+  proveFirst: "First, please show it's you with your password and a code we email you. Reload this page to do that, or use Sign-in settings on the Family page.",
   /** The same, for a guardian with an authenticator app in force (slice SI-6b), who is asked for its code and emailed nothing. */
-  proveFirstWithApp: "Before you change your sign-in email, please show it's you with your password and the code from your authenticator app. Please reload this page and do that first, or do it in Sign-in settings on the Family page.",
+  proveFirstWithApp: "First, please show it's you with your password and the code from your authenticator app. Reload this page to do that, or use Sign-in settings on the Family page.",
   /** The same, for a guardian with a passkey (slice SI-7b), who is asked for it and emailed nothing. */
-  proveFirstWithPasskey: "Before you change your sign-in email, please show it's you with your passkey. Please reload this page and do that first, or do it in Sign-in settings on the Family page.",
+  proveFirstWithPasskey: "First, please show it's you with your passkey. Reload this page to do that, or use Sign-in settings on the Family page.",
   sent: (email: string) => `We've sent a link to ${email}. Open it within 24 hours to finish the change. Until then, keep signing in with the address you use now.`,
   notSent: "We couldn't send the email just now, so nothing has changed. Please try again in a little while.",
   tooManyAsks: "You've asked to change your sign-in email a few times in the last hour. Please wait a little while before trying again.",

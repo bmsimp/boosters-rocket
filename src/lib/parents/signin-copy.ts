@@ -4,14 +4,14 @@
  * anyone is known, so it says nothing of what that step is (an emailed code, since slice SI-6b a guardian's
  * authenticator app, since SI-7a their passkey): the step after the password says which.
  */
-export const SIGNIN_LEDE = "Sign in with your email and password to see your students, what's owed, the forms to sign and the volunteer shifts. On a device we don't know yet, we'll ask for one more thing to be sure it's you.";
+export const SIGNIN_LEDE = "Sign in with your email and password. On a new device, we'll ask for one more thing to be sure it's you.";
 /**
  * The passkey's way in on the first screen (the sign-in release, slice SI-7a; open question 30): the same for every
  * visitor, with no address asked, since the browser offers the passkey. The sentence says what a passkey is, for a
  * parent who has never heard the word, and promises nothing about adding one.
  */
 export const PASSKEY_BUTTON = "Sign in with a passkey";
-export const PASSKEY_EXPLAINED = "A passkey lets your phone or computer sign you in with your face, fingerprint or PIN, with no password to type.";
+export const PASSKEY_EXPLAINED = "A passkey signs you in with your face, fingerprint or PIN instead of a password.";
 /** Said in the button's place where the browser can't use passkeys at all. */
 export const PASSKEY_UNSUPPORTED = "This browser can't use passkeys. You can still sign in with your email and password.";
 /** Said in the button's place when the page was reached at an address other than the portal's own. */
@@ -25,14 +25,14 @@ export const PASSKEY_REJECTED = "That passkey didn't work. Try it again, or sign
  * emailed you", since nothing is. Beside it, for a guardian with an authenticator app too, the app's code or a backup
  * code (PASSKEY_OR_APP); with nothing beside it, that the club can help (PASSKEY_ONLY).
  */
-export const PASSKEY_ASKED = "To finish signing in on this device, use your passkey. Your phone or computer will ask for your face, fingerprint or PIN.";
+export const PASSKEY_ASKED = "Use your passkey to finish signing in on this device.";
 export const PASSKEY_OR_APP = "Or enter the 6-digit code from your authenticator app, or one of your backup codes.";
 export const PASSKEY_ONLY = "If you don't have your passkey with you, ask the club for help.";
 /**
  * Beside the passkey for a guardian with no authenticator app who holds unspent backup codes (slice SI-7b: they get ten
  * with their first passkey), in one field labelled BACKUP_CODE_LABEL; every refusal there is BACKUP_REJECTED.
  */
-export const PASSKEY_OR_BACKUP = "If you don't have your passkey with you, enter one of your backup codes instead. If you have neither, ask the club for help.";
+export const PASSKEY_OR_BACKUP = "No passkey with you? Use one of your backup codes. If you have neither, ask the club for help.";
 export const BACKUP_CODE_LABEL = "Backup code";
 /** One answer for a wrong or used backup code beside a passkey alone, or a second step that has ended. */
 export const BACKUP_REJECTED = "That code didn't work. Enter a backup code you haven't used yet, use your passkey, or start again with your email and password.";
@@ -63,7 +63,7 @@ export const CODE_SENT = "To finish signing in on this device, enter the 6-digit
  * The second step for a guardian with an authenticator app (the sign-in release, slice SI-6a; open question 24): the
  * code comes from their app, a backup code works in its place, and with neither the club can help. Nothing is emailed.
  */
-export const APP_ASKED = "To finish signing in on this device, enter the 6-digit code from your authenticator app. If you don't have your phone with you, enter one of your backup codes instead. If you have neither, ask the club for help.";
+export const APP_ASKED = "Enter the 6-digit code from your authenticator app, or one of your backup codes. If you have neither, ask the club for help.";
 /** The app step's one field: the app's code, or a backup code. */
 export const APP_CODE_LABEL = "Code from your authenticator app, or a backup code";
 /** One answer for a wrong or used code at the app step, or a second step that has ended. */

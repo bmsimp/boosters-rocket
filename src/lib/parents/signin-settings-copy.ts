@@ -8,7 +8,7 @@ import { TOO_MANY_TRIES } from "./signin-copy";
  * said after each of the words for a set-up that is over. It never says which entry by order: an app may save them in
  * any order, and the one that works is the one from the set-up that was finished, whichever window it was in.
  */
-const APP_LEFTOVERS = "Once a set-up is finished, only the entry it made in your authenticator app works for this portal, so you can delete any others; if you can't tell them apart, turn the app off here and set it up once more.";
+const APP_LEFTOVERS = "Only the entry from the set-up you finished works, so you can delete the others. Can't tell them apart? Turn the app off here and set it up again.";
 
 export const SIGNIN_SETTINGS_COPY = {
   title: "Sign-in settings",
@@ -18,7 +18,7 @@ export const SIGNIN_SETTINGS_COPY = {
   password: "Password",
   passwordChosen: "Chosen",
   passwordNotChosen: "Not chosen yet",
-  how: "You sign in with this address and your password. On a device we don't know yet, we also email a code to this address.",
+  how: "You sign in with this address and your password. On a new device, we also email a code to this address.",
   /** For a person with no password yet (a session from before passwords): they stay signed in, and need one to sign in again. */
   howNoPassword: "You're signed in here, but you haven't chosen a password yet. To sign in again on any device, you'll need one.",
   changeEmail: "Change my sign-in email",
@@ -26,10 +26,10 @@ export const SIGNIN_SETTINGS_COPY = {
   noPassword: "You haven't chosen a password yet. We can email a link to choose one to the address you sign in with.",
   setupButton: "Email me a link to choose a password",
   setupBusy: "Sending…",
-  askAgainForPassword: "Before you change your password, please show it's you: enter your password, then the code we email you.",
-  askAgainForEmail: "Before you change your sign-in email, please show it's you: enter your password, then the code we email you.",
+  askAgainForPassword: "First, show it's you: enter your password, then the code we email you.",
+  askAgainForEmail: "First, show it's you: enter your password, then the code we email you.",
   choosePasswordForEmail: "Before you can change your sign-in email here, please choose a password.",
-  signsOutEverywhere: "Changing your password signs you out everywhere, this device too. Then you sign in again with your new password, and on each device you enter the code we email you.",
+  signsOutEverywhere: "This signs you out everywhere, this device too. Then sign in with your new password, and the code we email you on each device.",
   newPassword: "New password",
   newPasswordAgain: "New password again",
   changeButton: "Change my password",
@@ -38,14 +38,14 @@ export const SIGNIN_SETTINGS_COPY = {
   changedNext: "Sign in again with your new password. On each device you'll also enter a code we email you.",
   signIn: "Sign in",
   everywhereTitle: "Sign out everywhere",
-  everywhereLede: "Lost a phone, or signed in on a computer that isn't yours? This signs you out on every device, this one included, and we forget every device we remember for you.",
+  everywhereLede: "Lost a phone, or used a computer that isn't yours? This signs you out on every device, this one too, and forgets them all.",
   everywhereThen: "Then you sign in again with your email and password, and on each device you enter the code we email you.",
   everywhereButton: "Sign out everywhere",
   everywhereBusy: "Signing out…",
   everywhereDone: "You're signed out everywhere, this device too.",
   everywhereNext: "Sign in again with your email and password. On each device you'll also enter a code we email you.",
   /** The same, for a person with no password yet: they choose one first, from "Set up or reset my password". */
-  everywhereThenNoPassword: "You haven't chosen a password yet, so to sign in again you'll first choose one from a link we email you. After that, on each device you sign in with your email and password and enter the code we email you.",
+  everywhereThenNoPassword: "You haven't chosen a password yet, so to sign in again, you'll first choose one from a link we email you.",
   everywhereNextNoPassword: "To sign in again, first choose a password: we'll email you a link to choose one.",
   choosePassword: "Choose a password",
   /** The same, for a person with no password under Strict, where no link is mailed on request: only the club can help. */
@@ -53,7 +53,7 @@ export const SIGNIN_SETTINGS_COPY = {
   everywhereNextStrict: "Please ask the club to help you sign in again.",
   devicesTitle: "Remembered devices",
   // The device list (slice SI-5b): what the portal remembers, and forgetting.
-  devicesLede: "These are the phones and computers we remember for you. On them, you sign in with your password, without a code from us.",
+  devicesLede: "Phones and computers we remember for you. On these, your password is enough, with no code from us.",
   devicesNoNames: "We don't keep a device's name, its browser or where it is, so each one is shown by when we first remembered it and when it was last used.",
   devicesNone: "We don't remember any device for you right now. The next time you sign in, we'll also email you a code, and then remember that device.",
   thisDevice: "This device",
@@ -74,7 +74,7 @@ export const SIGNIN_SETTINGS_COPY = {
   /** The same button when the session names none of the listed devices: it forgets them all, whichever is in use. */
   forgetAll: "Forget every device",
   forgetHere: "Forgetting the device you're using now doesn't sign you out here. The next time you sign in on it, we'll email you a code again.",
-  askAgainForDevices: "Before you forget a device, please show it's you: enter your password, then the code we email you.",
+  askAgainForDevices: "First, show it's you: enter your password, then the code we email you.",
   choosePasswordForDevices: "To forget a device here, please choose a password first. Signing out everywhere forgets every device too.",
   deviceForgotten: "That device is forgotten. The next time you sign in on it, we'll email you a code.",
   otherDevicesForgotten: "Every other device is forgotten. The next time you sign in on one of them, we'll email you a code.",
@@ -84,14 +84,14 @@ export const SIGNIN_SETTINGS_COPY = {
   deviceNotFound: "That device isn't one we remember for you now. Please reload this page.",
   // The authenticator app (slice SI-6b, in place of SI-5a's words that more ways to sign in would come here): setting it up, its backup codes, making new ones, and turning it off.
   appTitle: "Authenticator app",
-  appWhat: "An authenticator app on your phone, like Google Authenticator or Microsoft Authenticator, shows a new 6-digit code every 30 seconds. Once you set one up, when you sign in on a device we don't know yet we ask for its code instead of emailing you one.",
+  appWhat: "An app like Google or Microsoft Authenticator shows a new 6-digit code every 30 seconds. Once it's set up, on a new device we ask for its code instead of emailing you one.",
   /** The same at Strict (slice SI-10b), where the app is asked for every time: in place of a passkey, not of an emailed code. */
-  appWhatStrict: "An authenticator app on your phone, like Google Authenticator or Microsoft Authenticator, shows a new 6-digit code every 30 seconds. Once you set one up, you can enter its code after your password in place of your passkey.",
+  appWhatStrict: "An app like Google or Microsoft Authenticator shows a new 6-digit code every 30 seconds. Once it's set up, you can enter its code after your password instead of using your passkey.",
   /** Setting one up keeps the remembered devices (open question 26 lists what forgets them): said beside the device list. */
   appKeepsDevices: "Setting up an app doesn't forget the devices we remember for you.",
   appNeedsPassword: "To set up an authenticator app, please choose a password first.",
-  askAgainForApp: "Before you set up an authenticator app, please show it's you: enter your password, then the code we email you.",
-  askAgainForPasskeys: "Before you add a passkey, please show it's you: enter your password, then the code we email you.",
+  askAgainForApp: "First, show it's you: enter your password, then the code we email you.",
+  askAgainForPasskeys: "First, show it's you: enter your password, then the code we email you.",
   appSetUp: "Set up an authenticator app",
   appSetUpBusy: "Starting…",
   appScan: "Scan this QR code with your authenticator app. If the app is on this phone, copy the key below into the app instead.",
@@ -107,14 +107,14 @@ export const SIGNIN_SETTINGS_COPY = {
    * The set-up lives only in this page, and is finished only within the asking-again window (10 minutes from the proof,
    * not from the press): a reload, or running out of time, starts again with a new key, and the app's first entry is dead.
    */
-  appSetupLost: "Please finish within 10 minutes of showing it's you. Switching to your authenticator app and back to this page is fine. If you reload this page or take longer, nothing is kept: you'll start again with a new QR code, and the entry your app saved this time won't work, so delete it from the app.",
+  appSetupLost: "Please finish within 10 minutes of showing it's you. You can switch to your app and back. If you reload or run out of time, you'll start over with a new QR code, so delete the entry your app just saved.",
   appSetupWrong: "That code didn't work. Check that it's the newest code the app shows for this portal, and try again.",
   /** The set-up ran out (or there is none): the box goes back to its set-up press. */
   appSetupGone: `That set-up has run out, so nothing was kept. Press "Set up an authenticator app" to start again. ${APP_LEFTOVERS}`,
   /** Another window began a newer set-up since this page's: the box goes back to its set-up press. */
   appSetupReplaced: `You started a newer set-up in another window. Finish it there, or start again here. ${APP_LEFTOVERS}`,
   /** The 10 minutes since the proof ran out before the set-up was finished: the box goes back to its set-up press. */
-  appSetupTimedOut: "It's been more than 10 minutes since you showed it's you, so this set-up can't be finished, and nothing was kept. Please delete this portal's entry from your authenticator app, since it won't work, then reload this page, show it's you again and start over.",
+  appSetupTimedOut: "More than 10 minutes have passed since you showed it's you, so nothing was kept. Delete this portal's entry from your app, then reload this page and start again.",
   /** An app is in force already, finished in another window (or by the other of two presses at once): the page is drawn again with the app on. */
   appSetupDoneElsewhere: `Your authenticator app is already set up, from another window. ${APP_LEFTOVERS}`,
   appAlreadyOn: "You already have an authenticator app set up. Please reload this page.",
@@ -122,26 +122,26 @@ export const SIGNIN_SETTINGS_COPY = {
   appOn: "Your authenticator app is set up.",
   appOnSince: "Set up",
   backupCodesTitle: "Your backup codes",
-  backupCodesKeep: "Each backup code works once, in place of a code from your app. If you lose your phone, they're how you get in, so keep them somewhere safe that isn't on your phone, like on paper or in a password manager on another device. We won't show them again.",
+  backupCodesKeep: "Each code works once, in place of a code from your app. If you lose your phone, they're how you get in, so keep them safe somewhere else, like on paper. We won't show them again.",
   copyCodes: "Copy the backup codes",
   backupCodesLeft: "Backup codes left",
   backupCodesNone: "You've used all your backup codes. Make new ones now, while your app still works.",
-  askAgainForAppChange: "Before you make new backup codes or turn off your authenticator app, please show it's you: enter your password, then the code from your authenticator app.",
+  askAgainForAppChange: "First, show it's you: enter your password, then the code from your authenticator app.",
   newCodes: "Make new backup codes",
   newCodesBusy: "Making…",
   newCodesMade: "Here are your new backup codes. Your old ones no longer work.",
-  turnOffWords: "If you turn off your authenticator app, your backup codes stop working too, and when you sign in on a device we don't know yet, we'll email you a code again.",
+  turnOffWords: "If you turn off your authenticator app, your backup codes stop working too, and when you sign in on a new device, we'll email you a code again.",
   turnOff: "Turn off the authenticator app",
   turnOffBusy: "Turning off…",
-  turnedOff: "Your authenticator app is turned off, and your backup codes no longer work. When you sign in on a device we don't know yet, we'll email you a code again.",
+  turnedOff: "Your authenticator app is turned off, and your backup codes no longer work. When you sign in on a new device, we'll email you a code again.",
   /** Under Strict the app stays while it is the guardian's only second step (open question 33): add a passkey first. */
-  turnOffStrict: "Your authenticator app is your only second step, and the club asks everyone for one, so it can't be turned off while it's your only one. Add a passkey first, then you can turn the app off.",
+  turnOffStrict: "The club asks everyone for a second step, so you can't turn off your app while it's your only one. Add a passkey first.",
   /** Turning the app off beside a passkey (slice SI-7b): the backup codes stay, and the passkey is the second step. */
-  turnOffWordsBesidePasskey: "If you turn off your authenticator app, your passkey stays your second step. Your backup codes stay too, and work in place of your passkey when you sign in and when this page asks you to show it's you.",
-  turnedOffBesidePasskey: "Your authenticator app is turned off. Your passkey is still your second step, and your backup codes still work in place of it when you sign in and when this page asks you to show it's you.",
+  turnOffWordsBesidePasskey: "If you turn off your app, your passkey stays your second step, and your backup codes keep working in its place.",
+  turnedOffBesidePasskey: "Your authenticator app is off. Your passkey is still your second step, and your backup codes still work in its place.",
   // Passkeys (slice SI-7b): adding, naming, listing and removing them, and their backup codes.
   passkeysTitle: "Passkeys",
-  passkeysWhat: "A passkey lets your phone or computer sign you in with your face, fingerprint or PIN, with no password to type. It can be kept on a phone, a computer, a password manager or a security key, and you can add more than one.",
+  passkeysWhat: "A passkey signs you in with your face, fingerprint or PIN instead of a password. You can add one on each phone, computer, password manager or security key you use.",
   passkeysNone: "You haven't added a passkey yet.",
   passkeyNeedsPassword: "To add a passkey, please choose a password first.",
   passkeysUnsupported: "This browser can't add a passkey. Try another browser, or another phone or computer.",
@@ -154,7 +154,7 @@ export const SIGNIN_SETTINGS_COPY = {
   passkeyRejected: "That passkey couldn't be added. Please try again.",
   passkeyAlready: "That passkey is already added here.",
   /** The browser or password manager refused to make a second passkey for this account, as it holds one already (slice SI-7b). */
-  passkeyAlreadyHeld: "This phone, computer or password manager already holds one of your passkeys for this portal, so there's nothing more to add here. To add another, use a different one.",
+  passkeyAlreadyHeld: "This phone, computer or password manager already has one of your passkeys for this portal. To add another, use a different one.",
   /** A passkey listed with no name of its own: these words, then the day it was added. */
   passkeyNoName: "Passkey added",
   passkeyAddedOn: "Added",
@@ -171,10 +171,10 @@ export const SIGNIN_SETTINGS_COPY = {
   passkeyRemoveBusy: "Removing…",
   passkeyRemoved: "That passkey is removed. If your phone or computer still offers it, it won't work here any more.",
   /** Before the press, beside the last passkey (open question 33), at Standard. */
-  passkeyRemoveLastWords: "This is your only passkey. If you remove it, your backup codes stop working too, and when you sign in on a device we don't know yet, we'll email you a code again.",
-  passkeyRemoveLastAppWords: "This is your only passkey. If you remove it, when you sign in on a device we don't know yet, we'll ask for the code from your authenticator app.",
-  passkeyRemovedLast: "That passkey is removed, and your backup codes no longer work. When you sign in on a device we don't know yet, we'll email you a code again.",
-  passkeyRemovedLastApp: "That passkey is removed. When you sign in on a device we don't know yet, we'll ask for the code from your authenticator app.",
+  passkeyRemoveLastWords: "This is your only passkey. If you remove it, your backup codes stop working too, and when you sign in on a new device, we'll email you a code again.",
+  passkeyRemoveLastAppWords: "This is your only passkey. If you remove it, when you sign in on a new device, we'll ask for the code from your authenticator app.",
+  passkeyRemovedLast: "That passkey is removed, and your backup codes no longer work. When you sign in on a new device, we'll email you a code again.",
+  passkeyRemovedLastApp: "That passkey is removed. When you sign in on a new device, we'll ask for the code from your authenticator app.",
   /**
    * The same two beside an app, at Strict (slice SI-10b): no remembered device stands in for a step there
    * (checkPasswordSignin()), so the app's code is asked at every sign-in.
@@ -182,7 +182,7 @@ export const SIGNIN_SETTINGS_COPY = {
   passkeyRemoveLastAppWordsStrict: "This is your only passkey. If you remove it, each time you sign in we'll ask for your password and then the code from your authenticator app.",
   passkeyRemovedLastAppStrict: "That passkey is removed. Each time you sign in, we'll ask for your password and then the code from your authenticator app.",
   /** Under Strict the last second factor stays (open question 33): add another first. */
-  passkeyRemoveStrict: "This passkey is your only second step, and the club asks everyone for one, so it can't be removed while it's your only one. Add another passkey or set up an authenticator app first, then you can remove this one.",
+  passkeyRemoveStrict: "The club asks everyone for a second step, so you can't remove your only one. Add another passkey or an authenticator app first.",
   passkeyNotFound: "That passkey isn't one of yours now. Please reload this page.",
   /** The backup codes made with a first passkey of a guardian with no app (open question 25). */
   passkeyCodesMade: "Your passkey is added, and here are your backup codes.",
@@ -191,7 +191,7 @@ export const SIGNIN_SETTINGS_COPY = {
    * sign-in page's passkey step (its backup-code field, offered while the person holds unspent ones) and when this page
    * asks again, so they are the way in when the passkey's device is lost.
    */
-  backupCodesKeepPasskey: "Each backup code works once, in place of your passkey, when you sign in and when this page asks you to show it's you. If you lose the phone or computer that holds your passkey, they're how you get in, so keep them somewhere safe that isn't on that device, like on paper or in a password manager on another device. We won't show them again.",
+  backupCodesKeepPasskey: "Each code works once, in place of your passkey, when you sign in or when this page checks it's you. If you lose the device with your passkey, they're how you get in, so keep them safe somewhere else, like on paper. We won't show them again.",
   /**
    * Under Strict, wherever this page shows new backup codes (open question 25; slice SI-10b): a press under the box's
    * "I've saved my backup codes somewhere safe" (ENROLMENT_COPY.saved) that puts them away, and what the box says then.
@@ -212,10 +212,10 @@ export const SIGNIN_SETTINGS_COPY = {
   yourPassword: "Your password",
   continue: "Continue",
   checking: "Checking…",
-  codeSent: "We've emailed you a 6-digit code. Enter it here to go on. It can take a minute. Check your spam folder too.",
+  codeSent: "Enter the 6-digit code we've emailed you to go on. It can take a minute, so check your spam folder too.",
   code: "6-digit code",
   /** Asking again of a guardian with an authenticator app (slice SI-6a): nothing is emailed; the app's code or a backup code. */
-  appAsked: "Enter the 6-digit code from your authenticator app to go on. If you don't have your phone with you, enter one of your backup codes instead.",
+  appAsked: "Enter the 6-digit code from your authenticator app to go on, or a backup code if your phone isn't with you.",
   appCode: "Code from your authenticator app, or a backup code",
   /** One answer for a wrong or used app code or backup code, and a step that has ended or that this page never began. */
   appRejected: "That code didn't work. Enter the newest code from your authenticator app, or a backup code you haven't used yet, or start again with your password.",
@@ -250,15 +250,15 @@ export const passkeysAddedOnlyAt = (origin: string) => `Passkeys can be added on
  * SIGNIN_SETTINGS_COPY, through howYouSignIn(), so a page or form picks one by whether the person has an app (MySignin.app).
  */
 const WITH_APP = {
-  how: "You sign in with this address and your password. On a device we don't know yet, we also ask for the code from your authenticator app, or one of your backup codes.",
-  askAgainForPassword: "Before you change your password, please show it's you: enter your password, then the code from your authenticator app.",
-  askAgainForEmail: "Before you change your sign-in email, please show it's you: enter your password, then the code from your authenticator app.",
-  askAgainForDevices: "Before you forget a device, please show it's you: enter your password, then the code from your authenticator app.",
-  signsOutEverywhere: "Changing your password signs you out everywhere, this device too. Then you sign in again with your new password, and on each device you enter the code from your authenticator app.",
+  how: "You sign in with this address and your password. On a new device, we also ask for the code from your authenticator app, or one of your backup codes.",
+  askAgainForPassword: "First, show it's you: enter your password, then the code from your authenticator app.",
+  askAgainForEmail: "First, show it's you: enter your password, then the code from your authenticator app.",
+  askAgainForDevices: "First, show it's you: enter your password, then the code from your authenticator app.",
+  signsOutEverywhere: "This signs you out everywhere, this device too. Then sign in with your new password, and the code from your authenticator app on each device.",
   changedNext: "Sign in again with your new password. On each device you'll also enter the code from your authenticator app.",
   everywhereThen: "Then you sign in again with your email and password, and on each device you enter the code from your authenticator app.",
   everywhereNext: "Sign in again with your email and password. On each device you'll also enter the code from your authenticator app.",
-  devicesLede: "These are the phones and computers we remember for you. On them, you sign in with your password, without a code from your authenticator app.",
+  devicesLede: "Phones and computers we remember for you. On these, your password is enough, with no code from your authenticator app.",
   devicesNone: "We don't remember any device for you right now. The next time you sign in, we'll also ask for the code from your authenticator app, and then remember that device.",
   forgetHere: "Forgetting the device you're using now doesn't sign you out here. The next time you sign in on it, we'll ask for the code from your authenticator app again.",
   deviceForgotten: "That device is forgotten. The next time you sign in on it, we'll ask for the code from your authenticator app.",
@@ -266,7 +266,7 @@ const WITH_APP = {
   everyDeviceForgotten: "Every device is forgotten. The next time you sign in on any device, this one included, we'll ask for the code from your authenticator app.",
   askAgainForApp: SIGNIN_SETTINGS_COPY.askAgainForApp,
   askAgainForAppChange: SIGNIN_SETTINGS_COPY.askAgainForAppChange,
-  askAgainForPasskeys: "Before you add a passkey, please show it's you: enter your password, then the code from your authenticator app.",
+  askAgainForPasskeys: "First, show it's you: enter your password, then the code from your authenticator app.",
 } as const;
 
 /**
@@ -278,23 +278,23 @@ function withPasskey(app: boolean): HowWords {
   const second = app ? "your passkey or the code from your authenticator app" : "your passkey";
   const prove = app ? "with your passkey, or enter your password and then the code from your authenticator app" : "with your passkey";
   return {
-    how: `You can sign in with your passkey alone. With this address and your password instead, on a device we don't know yet, we also ask for ${second}.`,
-    askAgainForPassword: `Before you change your password, please show it's you ${prove}.`,
-    askAgainForEmail: `Before you change your sign-in email, please show it's you ${prove}.`,
-    askAgainForDevices: `Before you forget a device, please show it's you ${prove}.`,
-    signsOutEverywhere: `Changing your password signs you out everywhere, this device too. Then you sign in again with your passkey, or with your new password and then ${second}.`,
+    how: `You can sign in with just your passkey. If you use your email and password on a new device, we also ask for ${second}.`,
+    askAgainForPassword: `First, show it's you ${prove}.`,
+    askAgainForEmail: `First, show it's you ${prove}.`,
+    askAgainForDevices: `First, show it's you ${prove}.`,
+    signsOutEverywhere: `This signs you out everywhere, this device too. Then sign in again with your passkey, or with your new password and then ${second}.`,
     changedNext: `Sign in again with your passkey, or with your new password and then ${second}.`,
     everywhereThen: `Then you sign in again with your passkey, or with your email and password and then ${second}.`,
     everywhereNext: `Sign in again with your passkey, or with your email and password and then ${second}.`,
-    devicesLede: `These are the phones and computers we remember for you. On them, you can sign in with your password, without ${second}.`,
+    devicesLede: `Phones and computers we remember for you. On these, your password is enough, without ${second}.`,
     devicesNone: `We don't remember any device for you right now. The next time you sign in with your password, we'll also ask for ${second}, and then remember that device.`,
     forgetHere: `Forgetting the device you're using now doesn't sign you out here. The next time you sign in on it with your password, we'll ask for ${second} again.`,
     deviceForgotten: `That device is forgotten. The next time you sign in on it with your password, we'll ask for ${second}.`,
     otherDevicesForgotten: `Every other device is forgotten. The next time you sign in on one of them with your password, we'll ask for ${second}.`,
     everyDeviceForgotten: `Every device is forgotten. The next time you sign in with your password on any device, this one included, we'll ask for ${second}.`,
-    askAgainForApp: `Before you set up an authenticator app, please show it's you ${prove}.`,
-    askAgainForAppChange: `Before you make new backup codes or turn off your authenticator app, please show it's you ${prove}.`,
-    askAgainForPasskeys: `Before you add or remove a passkey, or make new backup codes, please show it's you ${prove}.`,
+    askAgainForApp: `First, show it's you ${prove}.`,
+    askAgainForAppChange: `First, show it's you ${prove}.`,
+    askAgainForPasskeys: `First, show it's you ${prove}.`,
   };
 }
 
@@ -318,9 +318,9 @@ function strictWords(f: Factors, words: HowWords): HowWords {
   const second = f.passkey ? (f.app ? "your passkey or the code from your authenticator app" : "your passkey") : "the code from your authenticator app";
   return {
     ...words,
-    how: f.passkey ? `You can sign in with your passkey alone. With this address and your password instead, we also ask for ${second}, every time, on every phone or computer.`
+    how: f.passkey ? `You can sign in with just your passkey. If you use your email and password, we also ask for ${second} every time, on every phone or computer.`
       : "You sign in with this address and your password, and then the code from your authenticator app or one of your backup codes, every time, on every phone or computer.",
-    devicesLede: `These are the phones and computers we remember for you. The club asks everyone for a passkey or an authenticator app each time they sign in, so on these too, after your password we ask for ${second}.`,
+    devicesLede: `Phones and computers we remember for you. The club asks for a second step every time, so here too we ask for ${second} after your password.`,
     devicesNone: `We don't remember any device for you right now. Wherever you sign in with your password, we ask for ${second} too.`,
     forgetHere: "Forgetting the device you're using now doesn't sign you out here, and doesn't change how you sign in on it.",
     deviceForgotten: "That device is forgotten. You sign in on it the same way as before.",

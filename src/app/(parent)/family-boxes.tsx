@@ -22,11 +22,11 @@ export function StudentsBox({ students }: { students: MyStudent[] }) {
   );
 }
 
-/** How to reach the club about a change: the treasurer's address when the club has set one. */
-function AskTheClub({ treasurerEmail }: { treasurerEmail: string | null }) {
+/** Who to ask about a change, mid-sentence: the treasurer at their address when the club has set one, otherwise the club. */
+export function AskTheClub({ treasurerEmail }: { treasurerEmail: string | null }) {
   return treasurerEmail
-    ? <>Email the treasurer at <a href={`mailto:${treasurerEmail}`}>{treasurerEmail}</a> and they&apos;ll update it.</>
-    : <>Ask the club and they&apos;ll update it.</>;
+    ? <>ask the treasurer at <a href={`mailto:${treasurerEmail}`}>{treasurerEmail}</a></>
+    : <>ask the club</>;
 }
 
 /**
@@ -49,9 +49,9 @@ export function DetailsBox({ who, treasurerEmail, ownEmail = false }: { who: MyC
       ]} />
       {who.edits ? (
         <p className="help">{ownEmail
-          ? <>You can change {who.edits === "family" ? "your family's" : "your"} phone and mailing address yourself, and your sign-in email {ownEmail === "below" ? "below" : "on your Family page"}. The club changes your name for you. <AskTheClub treasurerEmail={treasurerEmail} /></>
-          : <>You can change {who.edits === "family" ? "your family's" : "your"} phone and mailing address yourself. The club changes your name and email for you. <AskTheClub treasurerEmail={treasurerEmail} /></>}</p>
-      ) : <p className="help">For now, the club makes changes for you. <AskTheClub treasurerEmail={treasurerEmail} /></p>}
+          ? <>{who.edits === "family" ? "You can change your family's phone and mailing address, and your sign-in email" : "You can change your phone, mailing address and sign-in email"} {ownEmail === "below" ? "below" : "on your Family page"}. To change your name, <AskTheClub treasurerEmail={treasurerEmail} />.</>
+          : <>You can change {who.edits === "family" ? "your family's" : "your"} phone and mailing address. To change your name or email, <AskTheClub treasurerEmail={treasurerEmail} />.</>}</p>
+      ) : <p className="help">For now, <AskTheClub treasurerEmail={treasurerEmail} /> to make any changes.</p>}
     </Card>
   );
 }

@@ -181,7 +181,7 @@ describe("asking for the change", () => {
     expect((await audits()).filter((a) => a.action === "parent.email.request.failed").map((a) => a.after)).toEqual([{ code: "not_proved" }]);
     // The page at Strict: the asking again with the app's code, and no Strict branch in place of the form.
     const asksAgain = await renderPage(FamilyEmailPage);
-    expect(asksAgain).toContain("Before you change your sign-in email, please show it&#x27;s you: enter your password, then the code from your authenticator app.");
+    expect(asksAgain).toContain("First, show it&#x27;s you: enter your password, then the code from your authenticator app.");
     expect(asksAgain).not.toContain("Send me a link");
     // Proved under Strict: the form, and the change asked, as at Standard.
     await proveRecently(r.identity);
@@ -367,7 +367,7 @@ describe("the link's page, and who is offered the change", () => {
       await proveRecently(who);
       expect(await renderPage(FamilyPage), who.name).toContain(OFFER);
       expect(await renderPage(FamilyDetailsPage), who.name).toContain(OFFER);
-      expect(await renderPage(HomePage), who.name).toContain("and your sign-in email on your Family page");
+      expect(await renderPage(HomePage), who.name).toContain("mailing address and sign-in email on your Family page");
       expect(await renderPage(FamilyEmailPage), who.name).toContain("Send me a link");
     }
   });
@@ -378,7 +378,7 @@ describe("the link's page, and who is offered the change", () => {
     expect(await renderPage(FamilyEmailPage)).toContain("Email me a link to choose a password");
     await proveRecently(r.identity, PROVEN_PASSWORD, new Date(Date.now() - 11 * 60_000));
     const asksAgain = await renderPage(FamilyEmailPage);
-    expect(asksAgain).toContain("Before you change your sign-in email, please show it&#x27;s you");
+    expect(asksAgain).toContain("First, show it&#x27;s you");
     expect(asksAgain).not.toContain("Send me a link");
     await proveRecently(r.identity);
     expect(await renderPage(FamilyEmailPage)).toContain("Send me a link");

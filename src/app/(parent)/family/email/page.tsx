@@ -32,7 +32,7 @@ export default async function FamilyEmailPage() {
   return (
     <main className="wrap single family-page">
       <PageHeader title="Change your sign-in email" lede={me.canChangeEmail
-        ? <>You sign in with {ctx.email}. A new address becomes the one you sign in with, and the club&apos;s records are brought up to date with it.</> : undefined} />
+        ? <>You sign in with {ctx.email} now. A new address becomes your sign-in and updates the club&apos;s records too.</> : undefined} />
       {me.canChangeEmail ? (
         <Card title="Your new email" titleId="new-h">
           {!me.hasPassword ? (

@@ -66,11 +66,11 @@ export default async function FormsPage() {
     <main className="wrap single forms-page">
       <h1 className="page-title">Forms</h1>
       {!family ? <NotSetUpBox treasurerEmail={club.treasurerEmail} />
-        : !forms || forms.groups.length === 0 ? <p className="lede">There are no forms for {family.name} to sign right now. There&apos;s nothing you need to do.</p>
+        : !forms || forms.groups.length === 0 ? <p className="lede">There&apos;s nothing for {family.name} to sign right now.</p>
         : (
           <>
             <p className="lede">{forms.seasonName}: the forms for {family.name}, and where each one stands.</p>
-            {!forms.ready && stillToSign(forms.groups) && <p className="help" role="status">The forms still to sign aren&apos;t ready yet. There&apos;s nothing you need to do right now: you can sign them here once they are.</p>}
+            {!forms.ready && stillToSign(forms.groups) && <p className="help" role="status">Some forms aren&apos;t ready to sign yet. You can sign them here once they are.</p>}
             {forms.groups.map((group, i) => (
               <Card key={group.key} title={group.who === "family" ? "Your family" : group.name} titleId={`forms-${i}`}
                 description={group.who === "family" ? <>Signed once for {group.name}</> : undefined}>

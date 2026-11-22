@@ -36,7 +36,7 @@ const NOTHING = "We can&#x27;t show what you owe right now. Please check back in
 const NOT_SET_UP = "Your family isn&#x27;t set up here yet";
 const PAID_UP = "You&#x27;re all paid up. Thank you!";
 const NOT_CONNECTED = "The club hasn&#x27;t connected your payments to the portal yet. Until then, the treasurer can tell you what you owe.";
-const CREDIT = "The boosters may be holding a credit for you. The treasurer can tell you how it will be applied.";
+const CREDIT = "The boosters may be holding a credit for you. Ask the treasurer how it will be used.";
 /** Every Pay button on the page, as its opening tag. */
 const pays = (html: string) => [...html.matchAll(/<a\b[^>]*class="btn[^"]*\bpay"[^>]*>/g)].map((m) => m[0]);
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
@@ -77,7 +77,7 @@ describe("the Payments page", () => {
     expect(pay).not.toMatch(/target=|aria-disabled/); // the same tab, and switched on
     expect(html).not.toContain("offline-note");
     expect(html).not.toContain(CREDIT);
-    expect(html).toContain("An invoice with no Pay button can&#x27;t be paid online. The treasurer can tell you how to pay it.");
+    expect(html).toContain("No Pay button? The treasurer can tell you how to pay that one.");
     // Paid in the last 12 months: listed with the word, not counted in the total.
     const paid = html.slice(html.indexOf("Paid in the last 12 months"));
     expect(paid).toContain('<span class="list-title">Invoice INV-ALDERQUIST-7103</span>');

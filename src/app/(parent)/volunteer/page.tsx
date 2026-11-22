@@ -105,7 +105,7 @@ export default async function VolunteerPage() {
 
       {credit.length > 0 && (
         <Card title="Done so far" titleId="done-h">
-          <p>Thank you! This is the volunteering your family has to its name, newest first.</p>
+          <p>Thank you! Here&apos;s what your family has done so far, newest first.</p>
           <List>
             {credit.map((c) => c.kind === "checkin"
               ? <ListRow key={c.id} status={{ tone: "done", words: c.words }} title={c.event} meta={[c.when, c.who === "You" ? "you" : c.who]} />

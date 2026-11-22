@@ -77,7 +77,7 @@ test("a parent's visit: sign in by password and emailed code, read and do what t
     const family = page.getByRole("region", { name: "Your family" });
     await expect(family.locator(".list-status")).toHaveText("Signed");
     // The note that forms can't be signed yet speaks of those still to sign, never of the signed one.
-    await expect(page.locator("main p[role=status]")).toHaveText(/^The forms still to sign aren't ready yet\./);
+    await expect(page.locator("main p[role=status]")).toHaveText(/^Some forms aren't ready to sign yet\./);
     await noSidewaysScroll(page);
     await shot(page, "p04-forms");
     await family.getByRole("link", { name: /^Open/ }).click();

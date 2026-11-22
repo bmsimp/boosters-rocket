@@ -123,7 +123,7 @@ the hand walk below was made on the code door before it and has not been made ag
     "Keep it" left it on nothing again. The question now puts the focus on "Keep it" (the choice that changes
     nothing), inside a group named "Cancel my sign-up?", so a screen reader says what is asked; "Keep it" gives the
     focus back to "Cancel my sign-up"; Shift+Tab reaches "Yes, cancel it".
-  - A cancelled place leaves the list, so its message ("Cancelled. Your place is free for someone else now…")
+  - A cancelled place leaves the list, so its message ("Cancelled, so your place is free for someone else…")
     vanished with it, never shown or announced. It now goes to a status line the box keeps
     (`src/app/(parent)/announce.tsx`), which is announced and takes the focus.
   - These buttons were disabled while busy; now `aria-disabled`, so they keep the focus.

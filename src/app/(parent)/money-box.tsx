@@ -104,13 +104,13 @@ export function HomeTotal({ money, buyouts }: { money: FamilyMoney; buyouts?: My
       {f.open.length > 0 ? (
         <p className="help">
           {payable && <>Each invoice opens on QuickBooks&apos; secure payment page. </>}
-          {unpayable && <>An invoice with no Pay button can&apos;t be paid online. The treasurer can tell you how to pay it. </>}
+          {unpayable && <>No Pay button? The treasurer can tell you how to pay that one. </>}
           Need more time? Ask the treasurer. They&apos;re happy to work something out.
         </p>
       ) : (
         <PaidUp />
       )}
-      {f.credit && <p className="help">The boosters may be holding a credit for you. The treasurer can tell you how it will be applied.</p>}
+      {f.credit && <p className="help">The boosters may be holding a credit for you. Ask the treasurer how it will be used.</p>}
     </Card>
   );
 }
@@ -135,12 +135,12 @@ function Figures({ f, today, buyouts }: { f: MoneyFigures; today: string; buyout
             : <p className="help">These invoices are in more than one currency, so there is no single total.</p>}
           <p className="help">
             {payable && <>Each invoice opens on QuickBooks&apos; secure payment page. </>}
-            {unpayable && <>An invoice with no Pay button can&apos;t be paid online. The treasurer can tell you how to pay it. </>}
+            {unpayable && <>No Pay button? The treasurer can tell you how to pay that one. </>}
             Need more time? Ask the treasurer. They&apos;re happy to work something out.
           </p>
         </>
       ) : <PaidUp />}
-      {f.credit && <p className="help">The boosters may be holding a credit for you. The treasurer can tell you how it will be applied.</p>}
+      {f.credit && <p className="help">The boosters may be holding a credit for you. Ask the treasurer how it will be used.</p>}
     </>
   );
 }

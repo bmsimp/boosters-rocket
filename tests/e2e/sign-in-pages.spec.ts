@@ -26,5 +26,5 @@ test("the parent door promises what a parent finds today: their students, what's
   await page.goto("/sign-in");
   // Since the sign-in release's slice SI-3b: the email and password, and one more thing only on a device the portal
   // doesn't know (since SI-7a it never says which: a code, the app or a passkey).
-  await expect(page.locator("main .lede").first()).toHaveText("Sign in with your email and password to see your students, what's owed, the forms to sign and the volunteer shifts. On a device we don't know yet, we'll ask for one more thing to be sure it's you.");
+  await expect(page.locator("main .lede").first()).toHaveText("Sign in with your email and password. On a new device, we'll ask for one more thing to be sure it's you.");
 });

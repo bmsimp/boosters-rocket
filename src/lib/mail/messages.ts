@@ -34,7 +34,7 @@ const text = (lines: Line[]) => `${lines.map((l) => (typeof l === "string" ? l :
 export function signinCodeMessage(b: Brand, to: string, code: string, o: { passwordPage: string; minutes: number }): MailMessage {
   const lines = [
     `Your ${b.clubName} sign-in code is ${code}.`,
-    `It expires in ${o.minutes === 1 ? "1 minute" : `${o.minutes} minutes`}. We send it after your password was entered correctly on a device we don't know yet. Nobody can sign in there without it.`,
+    `It expires in ${o.minutes === 1 ? "1 minute" : `${o.minutes} minutes`}. We send it after your password was entered correctly on a new device. Nobody can sign in there without it.`,
     `If you didn't just sign in, don't share this code: someone may know your password. Set a new one from "Set up or reset my password" at ${o.passwordPage}`,
   ];
   return { to, subject: `Your ${b.clubName} sign-in code: ${code}`, text: text(lines), html: html(b, lines, code) };

@@ -245,7 +245,7 @@ describe("Home", () => {
     for (const name of A_STUDENTS) expect(html).toContain(`<span class="list-title">${name}</span>`);
     expect(html).toContain("Your details");
     expect(html).toContain(`<dt>Name</dt><dd>Ansgar Alderquist</dd><dt>Email</dt><dd>${FAMILY_A.parent.email}</dd><dt>Phone</dt><dd class="num">${FAMILY_A.parent.phone}</dd>`);
-    expect(html).toContain("Ask the club");
+    expect(html).toContain("ask the club.");
     for (const name of B_STUDENTS) expect(html).not.toContain(name);
     for (const marker of b.markers) expect(html).not.toContain(marker);
     // No placeholder, and nothing that has no data yet: no forms counts, no part or grade. (The season is
@@ -338,8 +338,8 @@ describe("Home", () => {
     await setTreasurer("treasurer@club.example");
     asParent(a.identity);
     const html = await renderPage(ParentHome);
-    expect(html).toContain(`Email the treasurer at <a href="mailto:treasurer@club.example">treasurer@club.example</a>`);
-    expect(html).not.toContain("Ask the club");
+    expect(html).toContain(`ask the treasurer at <a href="mailto:treasurer@club.example">treasurer@club.example</a>`);
+    expect(html).not.toContain("ask the club");
   });
 
   it("says nothing of QuickBooks about the details once the roster has been read either: they are the portal's own", async () => {

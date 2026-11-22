@@ -24,7 +24,7 @@ export default async function ConfirmEmailPage({ params }: { params: Promise<{ t
       <PageHeader title="Your sign-in email" />
       {view.state === "ask" ? (
         <Card title={`Use ${view.newEmail} to sign in from now on?`} titleId="confirm-h">
-          <p>You sign in with {ctx.email} now. Once you say yes, you sign in again with the new address, and the club&apos;s records are brought up to date with it.</p>
+          <p>You sign in with {ctx.email} now. Once you say yes, sign in again with the new address. The club&apos;s records update too.</p>
           <ConfirmEmailForm token={token} />
         </Card>
       ) : (

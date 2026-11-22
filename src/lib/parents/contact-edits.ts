@@ -26,7 +26,7 @@ export const CONTACT_COPY = {
   saved: "Saved. These are your details now.",
   savedFamily: "Saved. These are your family's details now, for every parent in your family.",
   nothingChanged: "Those are the details you already have here, so there was nothing to change.",
-  changed: "Your details changed while you were editing, so nothing was saved. Here they are as they stand now. Please make your change again.",
+  changed: "Your details changed while you were editing, so nothing was saved. Here they are now. Please make your change again.",
   tooMany: "You've saved your details a few times in the last hour. Please wait a little while before trying again.",
   askTheClub: "These details can't be changed here. Please ask the club and they'll update them.",
 } as const;

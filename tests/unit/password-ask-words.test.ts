@@ -16,8 +16,8 @@ describe("the request form's words", () => {
     // Changed on purpose by slice SI-10b: SI-6a mails a factor holder a reset at Strict, so "no link is emailed" was untrue.
     const w = askWords(true);
     expect(w).toEqual({ lede: PASSWORD_COPY.askLedeStrict, note: PASSWORD_COPY.askStrict, answer: PASSWORD_COPY.askAnswerStrict });
-    expect(w.lede).toBe("Enter the email address you sign in with. If you have a passkey or an authenticator app, we'll email you a link to choose a new password.");
-    expect(w.note).toBe("If you don't have a passkey or an authenticator app yet, or you've lost yours, please ask the club. They'll help you set up or reset your sign-in.");
+    expect(w.lede).toBe("Enter the email you sign in with. If you have a passkey or an authenticator app, we'll email you a link to choose a new password.");
+    expect(w.note).toBe("No passkey or authenticator app yet, or lost yours? Please ask the club, and they'll help you sign in.");
     expect(w.answer).toBe("If that address can reset its password here, we've emailed it a link. It can take a minute, and the link works once. Check your spam folder too. If no email comes, please ask the club.");
     // Nothing promises a link to set up a password: none is mailed on request at Strict.
     for (const words of [w.lede, w.note!, w.answer!]) expect(words).not.toMatch(/link to set up|set up your password/i);

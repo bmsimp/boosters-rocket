@@ -1304,15 +1304,15 @@ describe("Sign-in settings at Strict (slice SI-10b)", () => {
   it("says how an app holder, a passkey holder and one with both sign in at Strict, and what a device spares, word for word", () => {
     const app = howYouSignIn({ app: true, passkey: false, strict: true });
     expect(app.how).toBe("You sign in with this address and your password, and then the code from your authenticator app or one of your backup codes, every time, on every phone or computer.");
-    expect(app.devicesLede).toBe("These are the phones and computers we remember for you. The club asks everyone for a passkey or an authenticator app each time they sign in, so on these too, after your password we ask for the code from your authenticator app.");
+    expect(app.devicesLede).toBe("Phones and computers we remember for you. The club asks for a second step every time, so here too we ask for the code from your authenticator app after your password.");
     expect(app.devicesNone).toBe("We don't remember any device for you right now. Wherever you sign in with your password, we ask for the code from your authenticator app too.");
     const passkey = howYouSignIn({ app: false, passkey: true, strict: true });
-    expect(passkey.how).toBe("You can sign in with your passkey alone. With this address and your password instead, we also ask for your passkey, every time, on every phone or computer.");
-    expect(passkey.devicesLede).toBe("These are the phones and computers we remember for you. The club asks everyone for a passkey or an authenticator app each time they sign in, so on these too, after your password we ask for your passkey.");
+    expect(passkey.how).toBe("You can sign in with just your passkey. If you use your email and password, we also ask for your passkey every time, on every phone or computer.");
+    expect(passkey.devicesLede).toBe("Phones and computers we remember for you. The club asks for a second step every time, so here too we ask for your passkey after your password.");
     expect(passkey.devicesNone).toBe("We don't remember any device for you right now. Wherever you sign in with your password, we ask for your passkey too.");
     const both = howYouSignIn({ app: true, passkey: true, strict: true });
-    expect(both.how).toBe("You can sign in with your passkey alone. With this address and your password instead, we also ask for your passkey or the code from your authenticator app, every time, on every phone or computer.");
-    expect(both.devicesLede).toBe("These are the phones and computers we remember for you. The club asks everyone for a passkey or an authenticator app each time they sign in, so on these too, after your password we ask for your passkey or the code from your authenticator app.");
+    expect(both.how).toBe("You can sign in with just your passkey. If you use your email and password, we also ask for your passkey or the code from your authenticator app every time, on every phone or computer.");
+    expect(both.devicesLede).toBe("Phones and computers we remember for you. The club asks for a second step every time, so here too we ask for your passkey or the code from your authenticator app after your password.");
     expect(both.devicesNone).toBe("We don't remember any device for you right now. Wherever you sign in with your password, we ask for your passkey or the code from your authenticator app too.");
     for (const w of [app, passkey, both]) {
       expect(w.forgetHere).toBe("Forgetting the device you're using now doesn't sign you out here, and doesn't change how you sign in on it.");
@@ -1333,9 +1333,9 @@ describe("Sign-in settings at Strict (slice SI-10b)", () => {
   });
 
   it("says Strict's words of the last factor and of what an app is, word for word", () => {
-    expect(COPY.turnOffStrict).toBe("Your authenticator app is your only second step, and the club asks everyone for one, so it can't be turned off while it's your only one. Add a passkey first, then you can turn the app off.");
-    expect(COPY.passkeyRemoveStrict).toBe("This passkey is your only second step, and the club asks everyone for one, so it can't be removed while it's your only one. Add another passkey or set up an authenticator app first, then you can remove this one.");
-    expect(COPY.appWhatStrict).toBe("An authenticator app on your phone, like Google Authenticator or Microsoft Authenticator, shows a new 6-digit code every 30 seconds. Once you set one up, you can enter its code after your password in place of your passkey.");
+    expect(COPY.turnOffStrict).toBe("The club asks everyone for a second step, so you can't turn off your app while it's your only one. Add a passkey first.");
+    expect(COPY.passkeyRemoveStrict).toBe("The club asks everyone for a second step, so you can't remove your only one. Add another passkey or an authenticator app first.");
+    expect(COPY.appWhatStrict).toBe("An app like Google or Microsoft Authenticator shows a new 6-digit code every 30 seconds. Once it's set up, you can enter its code after your password instead of using your passkey.");
     expect(COPY.codesDone).toBe("Done");
     expect(COPY.codesPutAway).toBe("Your backup codes aren't shown here any more. We won't show them again.");
   });

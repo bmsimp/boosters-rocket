@@ -360,7 +360,7 @@ describe("setting it up", () => {
   });
 
   it("the words for a set-up that is over never name an entry by its order, and each ends with what to do with the app's leftovers", () => {
-    const leftovers = "Once a set-up is finished, only the entry it made in your authenticator app works for this portal, so you can delete any others; if you can't tell them apart, turn the app off here and set it up once more.";
+    const leftovers = "Only the entry from the set-up you finished works, so you can delete the others. Can't tell them apart? Turn the app off here and set it up again.";
     expect(COPY.appSetupReplaced).toBe(`You started a newer set-up in another window. Finish it there, or start again here. ${leftovers}`);
     expect(COPY.appSetupDoneElsewhere).toBe(`Your authenticator app is already set up, from another window. ${leftovers}`);
     expect(COPY.appSetupGone).toBe(`That set-up has run out, so nothing was kept. Press "Set up an authenticator app" to start again. ${leftovers}`);

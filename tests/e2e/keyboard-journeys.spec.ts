@@ -276,7 +276,7 @@ test("a parent's journeys by keyboard alone: sign in, Home to Payments, a form, 
     await expect(place.getByRole("button", { name: "Yes, cancel it" })).toBeFocused();
     await page.keyboard.press("Enter");
     // The place leaves the list; what it said goes to the box's status line, which takes the focus.
-    await expect(page.getByRole("status").filter({ hasText: /^Cancelled\./ })).toBeFocused();
+    await expect(page.getByRole("status").filter({ hasText: /^Cancelled, so / })).toBeFocused();
     await expect(page.getByRole("region", { name: "Your sign-ups" })).not.toContainText("Pancake breakfast, Cleanup");
     ringsShown();
   });

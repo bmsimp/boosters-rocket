@@ -41,7 +41,7 @@ describe("the Forms page, from what the portal has stored (forms not set up)", (
     const html = await renderPage(FormsPage);
     const text = textOf(html);
     expect(text).toContain("Autumn Field Season: the forms for Alderquist Family");
-    expect(text).toContain("The forms still to sign aren't ready yet. There's nothing you need to do right now");
+    expect(text).toContain("Some forms aren't ready to sign yet. You can sign them here once they are.");
     // The family's own forms, then each student's, with the step each belongs to.
     expect(text).toMatch(/Your family Signed once for Alderquist Family Travel consent \(optional\) Not signed yet · Sign-up/);
     expect(text).toMatch(/Bus waiver QA74 \(optional\) Not ready yet · Sign-up/);
@@ -233,7 +233,7 @@ describe("signing a form on its page", () => {
     for (const text of await everywhere()) expect(text).toMatch(/Medical release (Forms )?Signed, being finished/);
     expect((await everywhere())[0]).toContain("Aurelio Alderquist 1 thing left to do in Forms 0 of 1 done Medical release Signed, being finished"); // signed by everyone is not yet done
     const sealing = textOf(await renderPage(FormPage, { params: { id } }));
-    expect(sealing).toContain("Everyone has signed. The signed copy is being finished");
+    expect(sealing).toContain("Everyone has signed. The signed copy will be ready in a few seconds");
 
     stub.seal(document.id);
     expect(await checkFormAction(id)).toEqual({ ok: true, message: "Signed", settled: true });
@@ -267,7 +267,7 @@ describe("signing a form on its page", () => {
     const { requirement } = await import("@/lib/db/schema");
     await db.delete(requirement).where(eq(requirement.id, requirementId));
     asParent(a.identity);
-    expect(textOf(await renderPage(FormsPage))).toContain("There are no forms for Alderquist Family to sign right now. There's nothing you need to do.");
+    expect(textOf(await renderPage(FormsPage))).toContain("There's nothing for Alderquist Family to sign right now.");
     const b = await seedSignedInParent(FAMILY_B);
     const { qboCustomer } = await import("@/lib/db/schema");
     await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, FAMILY_B.family.qboId));
@@ -287,7 +287,7 @@ describe("the note that forms can't be signed yet (forms not set up)", () => {
     const season = await seedSeason({ name: "Fall 2027", steps: [{ name: "Forms" }] });
     const requirementId = await seedFormRequirement({ stepId: season.stepIds.Forms!, title: "Travel consent", appliesTo: "family", form: formSetting({ id: "envelope_seedtemplate", updatedAt: "2026-11-01T12:00:00.000Z" }) });
     asParent(a.identity);
-    expect(textOf(await renderPage(FormsPage))).toContain("The forms still to sign aren't ready yet.");
+    expect(textOf(await renderPage(FormsPage))).toContain("Some forms aren't ready to sign yet.");
     await db.update(signatureRequest).set({ state: "complete", envelopeId: "envelope_seeddone", envelopeStatus: "COMPLETED", completedAt: new Date(), allSignedAt: new Date() })
       .where(eq(signatureRequest.requirementId, requirementId));
     const text = textOf(await renderPage(FormsPage));

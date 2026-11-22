@@ -9,10 +9,10 @@ export const PASSKEY_OFFER_COPY = {
    * device", never "your phone" (the owner's approved words, 2026-11-21).
    */
   phoneTitle: "Sign in with Face ID or your fingerprint next time?",
-  phoneBody: "This device can keep a passkey for the portal. Next time, you sign in with a tap, with no password or code to type.",
+  phoneBody: "This device can keep a passkey for the portal. Next time, sign in with a tap. No password or code to type.",
   /** On a computer, a tablet that isn't Apple's included. */
   computerTitle: "Sign in with a passkey next time?",
-  computerBody: "A passkey lets you sign in with Face ID, your fingerprint, Windows Hello or your password manager, with no password or code to type.",
+  computerBody: "A passkey signs you in with Face ID, your fingerprint, Windows Hello or your password manager. No password or code to type.",
   removeAnyTime: "You can remove it any time under Sign-in settings.",
   turnOn: "Turn on",
   turnOnBusy: "Turning on…",
