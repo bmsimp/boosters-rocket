@@ -159,12 +159,9 @@ ul.stack { list-style: none; padding: 0; } /* the family chooser lists families 
 .settings-grid { margin-top: var(--s5); display: grid; gap: var(--s4); }
 footer.wrap { padding-top: var(--s5); padding-bottom: var(--s5); color: var(--ink-2); font-size: var(--text-sm); }
 footer a { color: var(--club-text); }
+/* The bar's menu at 760px and wider (the top nav in, the tab bar and the phone's Menu out) is in section 4, after the
+   Menu and Tabs rules it overrides. */
 @media (min-width: 760px) {
-  body { padding-bottom: 0; }
-  .tabs { display: none; }
-  .top-nav { display: flex; }
-  .menu-mobile { display: none; }
-  .account { margin-left: var(--s3); }
   main.wrap { padding-top: var(--s6); gap: var(--s5); grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "money students" "paid details"; align-items: start; }
   main.wrap.single { padding-top: var(--s3); }
   .money { grid-area: money; } .students-box { grid-area: students; } .details-box { grid-area: details; } .paid-box { grid-area: paid; }
@@ -553,6 +550,14 @@ p.errors, .sign-out .errors { padding-left: 0; }
 .tabs svg { width: 48px; height: 28px; padding: 3px 13px; border-radius: var(--radius-round); transition: background-color var(--dur-fast) ease-out; }
 .tabs a[aria-current="page"] { color: var(--club-text); font-weight: 600; }
 .tabs a[aria-current="page"] svg { background: var(--club-tint); }
+/* At 760px and wider the top nav takes the tab bar's place, and the staff bar's links take the Menu button's. These
+   rules come after the Menu and Tabs rules so they win; the avatar stays at the bar's right edge, the nav just before it. */
+@media (min-width: 760px) {
+  .tabs { display: none; }
+  .top-nav { display: flex; }
+  .menu-mobile { display: none; }
+  .top-nav + .account { margin-left: var(--s3); }
+}
 
 /* --- Toolbar: a row of filters over what they scope, wrapping on a phone. --- */
 .toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s3); }
@@ -809,7 +814,7 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 .ds-frame { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-top: var(--s4); background: var(--ground); }
 .ds-frame .bar .wrap { max-width: none; }
 .ds-frame .top-nav.ds-show { display: flex; }
-.ds-frame .tabs { position: static; margin-top: var(--s7); }
+.ds-frame .tabs { position: static; display: grid; margin-top: var(--s7); }
 @media (max-width: 559.98px) { .ds-frame .top-nav.ds-show { display: none; } }
 @media (min-width: 760px) { .ds-pair { grid-template-columns: 1fr 1fr; } }
 /* ---- End of Staff pages ---- */
@@ -947,6 +952,8 @@ body { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
 .menu-panel a { padding-left: max(var(--cell), env(safe-area-inset-left)); padding-right: max(var(--cell), env(safe-area-inset-right)); }
 .tabs { padding-bottom: env(safe-area-inset-bottom); padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
 @media (min-width: 760px) { body { padding-bottom: env(safe-area-inset-bottom); } }
+/* A page with no tab bar (staff, sign-in) keeps no room for one at any width. */
+body:not(:has(> nav.tabs)) { padding-bottom: env(safe-area-inset-bottom); }
 
 /* Install hint (src/app/components/pwa/install-hint.tsx) */
 .install-hint .install-first { margin-top: var(--s3); }
