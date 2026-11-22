@@ -5,6 +5,7 @@ import { SIGNIN_UNAVAILABLE } from "@/lib/parents/signin-copy";
 import { PASSWORD_COPY } from "@/lib/parents/password-copy";
 import { ClubBar } from "@/app/components/club-bar";
 import { PasswordRequestForm } from "../password-request-form";
+import { PoweredBy } from "@/app/components/powered-by";
 
 export const metadata = { title: "Set up or reset my password" };
 export const dynamic = "force-dynamic";
@@ -28,6 +29,7 @@ export default async function PasswordRequestPage() {
         {ready ? <PasswordRequestForm strict={settings.level === "strict"} /> : <p role="status">{SIGNIN_UNAVAILABLE}</p>}
         <p><a className="link-line" href="/sign-in">Back to sign in</a></p>
       </main>
+      <footer className="signin-foot"><PoweredBy variant="color" /></footer>
     </>
   );
 }

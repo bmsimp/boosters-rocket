@@ -22,8 +22,8 @@ export default async function ClubSettingsPage() {
       <p className="lede">The club&apos;s name and color are on every page, in every email and on the app parents put on their phones.</p>
       {seesMailWarning(ctx.effective) && <MailWarning canFix={can(ctx.effective, "Settings.Mail.ReadWrite")} />}
       <section className="box" aria-labelledby="club-h"><h2 id="club-h">What is set</h2>
-        {!saved ? <StateWords state="todo" words="Not set yet: the portal still shows the name Booster Rocket" />
-          : !club.storedColorValid ? <StateWords state="todo" words="The saved club color wasn't valid, so the portal is using the default purple. Pick a color and save to fix it." />
+        {!saved ? <StateWords state="todo" words="Not set yet: the portal still shows the name Boosters Rocket" />
+          : !club.storedColorValid ? <StateWords state="todo" words="The saved club color wasn't valid, so the portal is using the default indigo. Pick a color and save to fix it." />
           : <StateWords state="done" words="Set" />}
         <dl className="details">
           <dt>Club name</dt><dd>{club.name}</dd>

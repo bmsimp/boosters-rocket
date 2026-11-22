@@ -22,7 +22,8 @@ function hcBlock(name: string): Record<string, string> {
     ground: hc["hc-ground"]!, surface: hc["hc-surface"]!, "surface-raised": hc["hc-surface-raised"]!, "surface-muted": hc["hc-surface-muted"]!,
     border: line, "border-control": line, "border-strong": line,
     ink: hc["hc-ink"]!, "ink-2": hc["hc-ink-2"]!, "ink-3": hc["hc-ink-2"]!,
-    done: hc["hc-done"]!, due: hc["hc-due"]!, late: hc["hc-late"]!,
+    done: hc["hc-done"]!, due: hc["hc-due"]!, late: hc["hc-late"]!, info: hc["hc-info"]!, "badge-ink": hc["hc-ink-2"]!,
+    "br-ink": hc["hc-ink"]!, "br-flame-ink": hc["hc-ink"]!,
   };
 }
 const inCss: Record<Mode, Record<string, string>> = {
@@ -51,7 +52,7 @@ describe("every pair passes its floor", () => {
     for (const [fg, bg] of TEXT_PAIRS) expect(contrastRatio(p[fg]!, p[bg]!), `${fg} on ${bg}`).toBeGreaterThanOrEqual(floor);
     for (const [fg, bg] of MARK_PAIRS) expect(contrastRatio(p[fg]!, p[bg]!), `${fg} on ${bg}`).toBeGreaterThanOrEqual(3);
   });
-  it.each(["#5b2a86", "#f2c200", "#003366", "#e0f7fa", "#ff0000", "#1d7344"])("the club color %s, as text, on every surface of its mode", (hex) => {
+  it.each(["#1e1b4b", "#5b2a86", "#f2c200", "#003366", "#e0f7fa", "#ff0000", "#1d7344"])("the club color %s, as text, on every surface of its mode", (hex) => {
     const t = deriveClubTokens(hex);
     for (const bg of [PALETTE.light.ground, PALETTE.light.surface, PALETTE.light["surface-muted"], t.tintL]) expect(contrastRatio(t.textL, bg)).toBeGreaterThanOrEqual(4.5);
     for (const bg of [PALETTE.dark.ground, PALETTE.dark.surface, PALETTE.dark["surface-raised"], t.tintD]) expect(contrastRatio(t.textD, bg)).toBeGreaterThanOrEqual(4.5);
@@ -72,5 +73,29 @@ describe("the stylesheet keeps to the type floor and to rem", () => {
   });
   it("the scale's own steps are the six it names, plus the control size between sm and md", () => {
     expect(css).toContain("--text-xs: 0.8125rem; --text-sm: 0.875rem; --text-control: 0.9375rem; --text-md: 1rem; --text-lg: 1.125rem; --text-xl: 1.5rem; --text-2xl: 2rem;");
+  });
+});
+
+describe("the brand's fixed colors (brand/tokens.json)", () => {
+  const brand = JSON.parse(readFileSync("brand/tokens.json", "utf8")) as {
+    color: { brand: { indigo: string }; status_light: Record<string, { fg: string; bg: string }>; status_dark_proposed: Record<string, { fg: string; bg: string }>;
+      app_light: { badge_ink: string }; app_dark_proposed: { badge_ink: string } };
+  };
+  const lower = (hex: string) => hex.toLowerCase();
+  // the brand's paid, due, overdue and info are the app's done, due, late and info
+  const TONES = { paid: "done", due: "due", overdue: "late", info: "info" } as const;
+  it("a club that hasn't chosen a color is drawn in Launch Indigo", () => {
+    const club = readFileSync("src/lib/settings/club.ts", "utf8");
+    expect(/export const DEFAULT_COLOR = "(#[0-9a-f]{6})";/.exec(club)?.[1]).toBe(lower(brand.color.brand.indigo));
+    expect(readFileSync("scripts/design-gallery.tsx", "utf8")).toContain(`const DEFAULT_COLOR = "${lower(brand.color.brand.indigo)}";`);
+    expect(css).toContain(`--club: ${lower(brand.color.brand.indigo)};`);
+  });
+  it.each(Object.entries(TONES))("the status %s is the brand's, in light and in dark", (name, tone) => {
+    const [light, dark] = [brand.color.status_light[name]!, brand.color.status_dark_proposed[name]!];
+    expect([PALETTE.light[tone], PALETTE.light[`${tone}-soft`]]).toEqual([lower(light.fg), lower(light.bg)]);
+    expect([PALETTE.dark[tone], PALETTE.dark[`${tone}-soft`]]).toEqual([lower(dark.fg), lower(dark.bg)]);
+  });
+  it("the Powered by badge is in the brand's badge ink", () => {
+    expect([PALETTE.light["badge-ink"], PALETTE.dark["badge-ink"]]).toEqual([lower(brand.color.app_light.badge_ink), lower(brand.color.app_dark_proposed.badge_ink)]);
   });
 });

@@ -90,7 +90,7 @@ export function CertificatePanel({ fileName, summary, actions }: { fileName: str
       {pending && (pendingReadable
         ? <p className="hint">{active ? "Replacement" : "Certificate"} ready to add to the app: Thumbprint <code>{pending.thumbprintSha1}</code>, expires <CalendarDate iso={pending.notAfter} />. {active ? "The one in use keeps working until the new one checks out." : ""}</p>
         : <p className="hint">The {active ? "replacement " : ""}certificate waiting to be added (thumbprint <code>{pending.thumbprintSha1}</code>) can&apos;t be read with this server&apos;s encryption key. Replace it with a new one.</p>)}
-      {!shown && <p className="hint">Booster Rocket makes the certificate when you download it. Only the public half leaves the server.</p>}
+      {!shown && <p className="hint">Boosters Rocket makes the certificate when you download it. Only the public half leaves the server.</p>}
       <DownloadLink fileName={fileName} />
       {replace}
       {canDiscard && <ActionButton label="Discard replacement" busy="Discarding…" action={actions!.discard}

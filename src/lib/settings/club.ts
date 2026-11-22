@@ -8,9 +8,9 @@ import { writeAudit, type Actor } from "@/lib/audit/log";
 /** `timeZone` is the IANA name of the zone the club keeps its calendar in ("America/Chicago"): what "today" means for a step's dates and a due date. */
 export type ClubSettings = { name: string; shortName: string; color: string; treasurerEmail: string | null; timeZone: string };
 
-export const DEFAULT_COLOR = "#5b2a86";
+export const DEFAULT_COLOR = "#1e1b4b";
 export const DEFAULT_TIME_ZONE = "UTC";
-const DEFAULTS: ClubSettings = { name: "Booster Rocket", shortName: "BR", color: DEFAULT_COLOR, treasurerEmail: null, timeZone: DEFAULT_TIME_ZONE };
+const DEFAULTS: ClubSettings = { name: "Boosters Rocket", shortName: "BR", color: DEFAULT_COLOR, treasurerEmail: null, timeZone: DEFAULT_TIME_ZONE };
 const KEY = "club";
 
 /** True for a time zone name this server can keep a calendar in: an IANA name such as "America/Chicago", or "UTC". Never an offset such as "+05:00". */

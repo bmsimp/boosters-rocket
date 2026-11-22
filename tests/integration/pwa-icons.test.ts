@@ -49,7 +49,7 @@ describe("the club's app icons", () => {
   it("draws the default club before anything is saved (setup still open)", async () => {
     const res = await ask("icon-192.png");
     expect(res.status).toBe(200);
-    expect(res.headers.get("etag")).toBe(`"${iconVersion({ shortName: "BR", color: "#5b2a86" })}"`);
+    expect(res.headers.get("etag")).toBe(`"${iconVersion({ shortName: "BR", color: "#1e1b4b" })}"`);
     expect(isSquarePng(await bytesOf(res), 192)).toBe(true);
   });
 
@@ -189,7 +189,7 @@ describe("the manifest route", () => {
 
   it("is built on each request, from the club's settings as they are now", async () => {
     expect(manifestDynamic).toBe("force-dynamic");
-    expect(await manifest()).toMatchObject({ name: "Booster Rocket", short_name: "BR", theme_color: "#ffffff", background_color: "#f7f7f8" });
+    expect(await manifest()).toMatchObject({ name: "Boosters Rocket", short_name: "BR", theme_color: "#ffffff", background_color: "#f7f7f8" });
     await saveClub(CLUB);
     expect(await manifest()).toMatchObject({ name: "FZN Band Boosters", short_name: "FZN", theme_color: "#ffffff", background_color: "#f7f7f8", start_url: "/", scope: "/", id: "/" });
     await saveClub({ ...CLUB, name: "FZN Boosters" });

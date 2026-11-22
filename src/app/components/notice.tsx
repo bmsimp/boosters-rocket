@@ -10,10 +10,10 @@ import type { Tone as StatusTone } from "./ui/tone";
 export type Tone = "info" | "warning" | "done" | "problem";
 
 /**
- * A notice speaks the product's one status vocabulary (src/app/components/ui/tone.ts): info is neutral, warning is
+ * A notice speaks the product's one status vocabulary (src/app/components/ui/tone.ts): info is info (blue), warning is
  * due, done is done and problem is late. The prop keeps its own names; the class and the colors follow the status tone.
  */
-export const NOTICE_STATUS_TONE: Record<Tone, StatusTone> = { info: "neutral", warning: "due", done: "done", problem: "late" };
+export const NOTICE_STATUS_TONE: Record<Tone, StatusTone> = { info: "info", warning: "due", done: "done", problem: "late" };
 
 export const TONE_WORDS: Record<Tone, string> = { info: "Note", warning: "Needs attention", done: "Done", problem: "Problem" };
 

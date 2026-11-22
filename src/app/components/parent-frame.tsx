@@ -4,10 +4,11 @@ import { myFamilyNames } from "@/lib/parents/my-family-names";
 import { ClubBar, PageStart, initials } from "./club-bar";
 import { ParentTabs } from "./parent-tabs";
 import { PARENT_NAV } from "./parent-nav";
+import { PoweredBy } from "./powered-by";
 
 /**
  * What surrounds every parent page: the club bar, the Switch family line for a person in more than one family, the
- * footer and the tabs. The parent layout and the not-found page both draw it, from the session's own identity.
+ * footer (the treasurer's address, and the "Powered by Boosters Rocket" badge) and the tabs. The parent layout and the not-found page both draw it, from the session's own identity.
  * Only the family being viewed is named, from the app's own record through the session's guardian row: the others are
  * listed on the chooser.
  */
@@ -25,7 +26,10 @@ export async function ParentFrame({ who, children }: { who: Pick<ParentIdentity,
       )}
       <PageStart />
       {children}
-      <footer className="wrap">{club.treasurerEmail && <>Questions about a charge? Email <a href={`mailto:${club.treasurerEmail}`}>{club.treasurerEmail}</a>. </>}Runs on Booster Rocket.</footer>
+      <footer className="wrap">
+        {club.treasurerEmail && <p>Questions about a charge? Email <a href={`mailto:${club.treasurerEmail}`}>{club.treasurerEmail}</a>.</p>}
+        <PoweredBy />
+      </footer>
       <ParentTabs />
     </>
   );

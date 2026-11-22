@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getParentState } from "@/lib/auth/identity";
 import { ParentFrame } from "./components/parent-frame";
+import { PoweredBy } from "@/app/components/powered-by";
 
 export const metadata = { title: "We can't find that page" };
 
@@ -20,6 +21,6 @@ export default async function NotFound() {
       <p className="lede"><Link className="link-line" href="/">Back to the home page</Link></p>
     </>
   );
-  if (state.status !== "ok") return <main className="wrap signin">{words}</main>;
+  if (state.status !== "ok") return <><main className="wrap signin">{words}</main><footer className="signin-foot"><PoweredBy /></footer></>;
   return <ParentFrame who={state.identity}><main className="wrap single">{words}</main></ParentFrame>;
 }

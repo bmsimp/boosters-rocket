@@ -9,8 +9,9 @@ import { StaffStep, MailStep, AdminStep, ClubStep } from "./steps";
 import { PortalAddress } from "../components/portal-address";
 import { clubStepOwed, setupAsksForClub, CLUB_FIRST_URL } from "@/lib/setup/club-step";
 import { getClubSettings, timeZoneChoices } from "@/lib/settings/club";
+import { ProductMark } from "./product-mark";
 
-export const metadata = { title: "Set up Booster Rocket" };
+export const metadata = { title: "Set up Boosters Rocket" };
 export const dynamic = "force-dynamic";
 
 const NAMES: Record<SetupStep, string> = { club: "Your club", staff: "Staff sign-in", mail: "Outgoing mail", admin: "First Admin" };
@@ -32,7 +33,7 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
   if (!(await hasSetupSession())) {
     return (
       <main className="wrap signin setup-page">
-        <h1 className="page-title">Set up Booster Rocket</h1>
+        <h1 className="page-title setup-title"><ProductMark />Set up Boosters Rocket</h1>
         <p className="lede">Enter the setup code from your server. To get one, run <code>docker compose run --rm migrate node tools/scripts/setup-code.mjs</code> in the installation folder (the first installation runbook, <code>docs/runbooks/first-install.md</code>, says how).</p>
         <UnlockForm />
         <AddressBox />
@@ -55,7 +56,7 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
   const appUrl = env.APP_URL.replace(/\/+$/, "");
   return (
     <main className="wrap single setup-page">
-      <h1 className="page-title">Set up Booster Rocket</h1>
+      <h1 className="page-title setup-title"><ProductMark />Set up Boosters Rocket</h1>
       <ol className="setup-progress">{steps.map((s) => <li key={s} aria-current={s === step ? "step" : undefined}>{`${n(s)}. ${NAMES[s]}`}</li>)}</ol>
       {step === "club" && <ClubStep initial={await clubValues()} timeZones={timeZoneChoices((await getClubSettings()).timeZone)} saved={!(await clubStepOwed())} error={one("error")} />}
       {step === "staff" && <StaffStep n={n("staff")} appUrl={appUrl} byKey={byKey} error={one("error")} />}

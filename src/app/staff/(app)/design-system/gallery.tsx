@@ -6,6 +6,7 @@ import {
   ActionOutcome, Avatar, Badge, Button, CalendarDate, Card, Checkbox, DataTable, EmptyState, HowThisWorks, KeyValue, LinkButton, List, ListRow, ListSubRow, ListTotal, LocalTime,
   Notice, PageHeader, SectionLabel, Select, Stat, StateWords, StatusBadge, StatusIcon, StepIndicator, TextArea, TextInput, Toolbar, type Column,
 } from "../../../components/ui";
+import { PoweredBy } from "../../../components/powered-by";
 import { ChoiceSample, TakenChoiceSample } from "./gallery-choice";
 
 /**
@@ -25,7 +26,7 @@ const SECTIONS = [
   ["tokens", "Tokens"], ["contrast", "Contrast"], ["button", "Button"], ["badge", "Badge"], ["card", "Card"], ["list", "List"],
   ["page-header", "PageHeader"], ["section-label", "SectionLabel"], ["empty-state", "EmptyState"], ["how-this-works", "HowThisWorks"], ["stat", "Stat"], ["fields", "Fields"],
   ["avatar", "Avatar"], ["step-indicator", "StepIndicator"], ["key-value", "KeyValue"], ["toolbar", "Toolbar"], ["data-table", "DataTable"],
-  ["notice", "Notice"], ["state-words", "StateWords"], ["time-money", "Time and money"], ["frame", "Bar and tabs"], ["themes", "Display modes"],
+  ["notice", "Notice"], ["state-words", "StateWords"], ["time-money", "Time and money"], ["frame", "Bar and tabs"], ["powered-by", "Powered by"], ["themes", "Display modes"],
 ] as const;
 
 function Section({ id, name, use, importLine, children }: { id: string; name: string; use: ReactNode; importLine: string; children: ReactNode }) {
@@ -77,7 +78,7 @@ const invoiceColumns: Column<Invoice>[] = [
 ];
 
 const SWATCHES = ["ground", "surface", "surface-muted", "border", "border-control", "border-strong", "ink", "ink-2", "ink-3",
-  "done", "done-soft", "due", "due-soft", "late", "late-soft", "neutral-soft"] as const;
+  "done", "done-soft", "due", "due-soft", "late", "late-soft", "info", "info-soft", "neutral-soft", "badge-ink"] as const;
 
 /** A small piece of Home, drawn again in each display mode. */
 function MiniHome({ id }: { id: string }) {
@@ -158,13 +159,13 @@ export function Gallery() {
           <StatusBadge tone="done">Paid</StatusBadge>
           <StatusBadge tone="due">2 to sign</StatusBadge>
           <StatusBadge tone="late">Overdue</StatusBadge>
-          <StatusBadge tone="neutral">Waiting for QuickBooks</StatusBadge>
+          <StatusBadge tone="info">Waiting for QuickBooks</StatusBadge>
           <StatusBadge tone="neutral">Not started</StatusBadge>
           <Badge>Admin</Badge>
           <Badge tone="club">New</Badge>
         </div>
         <div className="ds-samples">
-          {(["done", "due", "late", "neutral"] as const).map((t) => <span key={t} className="ds-tone"><StatusIcon tone={t} />StatusIcon {t}</span>)}
+          {(["done", "due", "late", "info", "neutral"] as const).map((t) => <span key={t} className="ds-tone"><StatusIcon tone={t} />StatusIcon {t}</span>)}
         </div>
       </Section>
 
@@ -341,6 +342,18 @@ export function Gallery() {
             <a href="#ds-frame"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M6 3h9l3 3v15H6z" /><path d="M9 13l2 2 4-4" /></svg>Forms</a>
             <a href="#ds-frame"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="3" y="6" width="18" height="12" /><path d="M3 10h18M7 15h3" /></svg>Payments</a>
           </nav>
+        </div>
+      </Section>
+
+      <Section id="powered-by" name="Powered by" use="The product's credit, the club leading everywhere else (brand/BRAND.md). One ink in the footer of every portal page, parent and staff; in the product's colors under the sign-in form. A link to boostersrocket.com whose name says so. No club setting removes it; never put the product's indigo or flame anywhere else in the portal." importLine={`import { PoweredBy } from "@/app/components/powered-by";`}>
+        <div className="ds-pair">
+          {MODES.map(({ mode, label, theme, contrast }) => (
+            <div key={mode} className="theme-sample" data-theme={theme} data-contrast={contrast}>
+              <p className="section-label">{label}</p>
+              <PoweredBy />
+              <PoweredBy variant="color" />
+            </div>
+          ))}
         </div>
       </Section>
 

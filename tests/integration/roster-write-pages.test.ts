@@ -722,7 +722,7 @@ describe("a change QuickBooks refused that the portal kept (stage 3's slice 9e)"
     expect(inactive).not.toContain("Send the portal");
     expect(inactive).toContain("QuickBooks has this customer inactive, and the portal never makes a customer active again");
     // Drawn as a notice, never a bare paragraph.
-    expect(inactive).toMatch(/<div class="notice notice-neutral"><svg[\s\S]*?<\/svg><div class="notice-body"><span class="notice-word">Note<\/span> QuickBooks has this customer inactive/);
+    expect(inactive).toMatch(/<div class="notice notice-info"><svg[\s\S]*?<\/svg><div class="notice-body"><span class="notice-word">Note<\/span> QuickBooks has this customer inactive/);
     // A customer the roster doesn't hold at all is said as that, not as inactive.
     await db.delete(qboCustomer).where(eq(qboCustomer.qboId, "12"));
     const gone = sectionOf(await renderPage(ReconciliationPage), "writes-h");
