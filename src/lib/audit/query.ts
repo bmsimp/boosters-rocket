@@ -438,6 +438,12 @@ export async function auditPage(f: AuditFilters, cursor: { before?: number | nul
   return { rows, total: n, newer: anyNewer ? first : null, older: anyOlder ? last : null };
 }
 
+/** When the newest row was written, or null for an empty log: the Settings rail's one line for the audit log. */
+export async function newestAuditAt(): Promise<Date | null> {
+  const [row] = await db.select({ at: auditLog.at }).from(auditLog).orderBy(desc(auditLog.id)).limit(1);
+  return row?.at ?? null;
+}
+
 /** The actions the log holds, for the filter's list. */
 export async function auditActions(): Promise<string[]> {
   return (await db.selectDistinct({ action: auditLog.action }).from(auditLog).orderBy(asc(auditLog.action)).limit(500)).map((r) => r.action);

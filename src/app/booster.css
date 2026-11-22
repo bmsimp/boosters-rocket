@@ -178,7 +178,6 @@ html:has(nav.tabs) main.wrap.single > :is(.box, .notice, p[role="status"]) { max
 .stack { display: grid; gap: var(--s4); margin-top: var(--s3); max-width: 520px; }
 .stack > .btn { justify-self: start; } /* a button in a stack is as wide as its words, not the column */
 ul.stack { list-style: none; padding: 0; } /* the family chooser lists families as buttons, not bullets */
-.settings-grid { margin-top: var(--s5); display: grid; gap: var(--s4); }
 footer.wrap { padding-top: var(--s5); padding-bottom: var(--s5); color: var(--ink-2); font-size: var(--text-sm); }
 footer a { color: var(--club-text); }
 /* The bar's menu at 760px and wider (the top nav in, the tab bar and the phone's Menu out) is in section 4, after the
@@ -187,7 +186,6 @@ footer a { color: var(--club-text); }
   main.wrap { padding-top: var(--s6); gap: var(--s5); grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "money students" "paid details"; align-items: start; }
   main.wrap.single { padding-top: var(--s3); }
   .money { grid-area: money; } .students-box { grid-area: students; } .details-box { grid-area: details; } .paid-box { grid-area: paid; }
-  .settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--s5); }
 }
 
 /* ===== 4. Components, A to Z ===== */
@@ -482,6 +480,26 @@ fieldset.checks { border: 0; padding: 0; min-width: 0; }
 .box > .list-total:last-child { margin-bottom: calc(-1 * var(--box-pad)); border-bottom: 0; border-radius: 0 0 var(--radius) var(--radius); }
 /* Rows in a card take the card's own side padding (20px from 760px), so their words line up with the card's title. */
 .box .list > .list-row, .box > .list-total { padding-inline: var(--box-pad); }
+/* A row that is one link (ListRow's href): the whole row presses, its title underlines on hover, a chevron at its end.
+   The ring is drawn inside the row, so the list's clipped corners never cut it. `logo` is a tile before the title. */
+.list:has(.list-link) { overflow: hidden; }
+.list-row.is-link, .box .list > .list-row.is-link { padding: 0; }
+.list-link { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: var(--s3); min-height: 56px; padding: 10px var(--s4); color: inherit; text-decoration: none; }
+.box .list > .list-row.is-link > .list-link { padding-inline: var(--box-pad); }
+.list-link:hover { background: var(--surface-muted); }
+.list-link:hover .list-title { text-decoration: underline; }
+.list-link:focus-visible { outline-offset: calc(-1 * var(--ring)); }
+.list-link > .status-icon { align-self: flex-start; margin-top: 3px; }
+.list-logo { flex: none; display: flex; }
+.list-chevron { flex: none; width: 16px; height: 16px; color: var(--ink-3); }
+.list-title .badge { margin-left: var(--s2); vertical-align: 1px; }
+@media (max-width: 759.98px) {
+  /* With a logo, the status goes under the row's words: the tile, the words over the status, then the chevron. */
+  .list-link:has(> .list-logo) { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: var(--s3); row-gap: var(--s1); }
+  .list-link:has(> .list-logo) > .list-logo { grid-row: 1 / span 2; align-self: start; }
+  .list-link:has(> .list-logo) > .list-trail { grid-column: 2; grid-row: 2; justify-self: start; flex-direction: row; }
+  .list-link:has(> .list-logo) > .list-chevron { grid-column: 3; grid-row: 1 / span 2; align-self: center; }
+}
 @media (min-width: 480px) { .list:has(+ .list-total) .list-trail { flex-direction: row-reverse; } }
 
 /* --- Menu: the top bar's links and groups (parent and staff), and the phone's Menu panel for staff. --- */
@@ -941,11 +959,68 @@ main.wrap.single > .page-head + p { margin-top: var(--s4); }
 /* ---- Settings and the staff menu: the Settings page and every settings page, the roles checklist, the Staff page and
    the setup's club step. Keep new rules for them inside this block. ---- */
 
-/* The Settings page: a card per part, its state in words with an icon, what is set, and the way to its own page. */
-.settings-page .box > .state { margin-top: var(--s2); }
-.settings-page .box .details { margin-top: var(--s3); }
+/* Every settings page: the rail beside the page from 760px, in the bar's column. On a phone the rail is drawn only at
+   /staff/settings, as the first screen, and each item opens as its own page with the way back above its title. */
+.settings-layout { max-width: 1120px; margin: 0 auto; padding: 0 var(--cell); }
+.settings-layout > main.wrap { max-width: none; margin: 0; padding-left: 0; padding-right: 0; }
+.settings-rail { padding-top: var(--s5); }
+.rail-title { font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.018em; line-height: 1.25; margin: 0 0 var(--s4); }
+.rail-find { position: relative; }
+.rail-find svg { position: absolute; left: 12px; top: 50%; translate: 0 -50%; width: 16px; height: 16px; color: var(--ink-2); pointer-events: none; }
+.rail-find input { width: 100%; min-height: 44px; padding: 0 12px 0 36px; border: 1px solid var(--border-strong); border-radius: var(--radius-control);
+  background: var(--surface); color: var(--ink); font: inherit; font-size: var(--text-control); }
+.rail-find input::placeholder { color: var(--ink-2); }
+.rail-none { font-size: var(--text-sm); color: var(--ink-2); margin: var(--s3) var(--s3) 0; }
+.rail-none:empty { margin: 0; }
+.rail-group { margin-top: var(--s4); }
+.rail-label { font-size: var(--text-sm); font-weight: 500; color: var(--ink-2); margin: 0 var(--s3) var(--s1); }
+.rail-group ul { list-style: none; padding: 0; display: grid; gap: 2px; }
+.rail-group a { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); min-height: 44px; padding: var(--s1) var(--s3);
+  border-radius: var(--radius-control); color: var(--ink); text-decoration: none; font-size: var(--text-control); font-weight: 500; }
+.rail-group a:hover { background: var(--surface-muted); }
+.rail-group a[aria-current="page"] { background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); color: var(--club-text); font-weight: 600; }
+.rail-name { min-width: 0; overflow-wrap: anywhere; }
+.rail-sub a { padding-left: var(--s5); }
+.rail-in { font-size: var(--text-xs); font-weight: 500; color: var(--ink-2); white-space: nowrap; }
+/* A status in words with a dot before them (StatusDot): the dot only repeats the words' tone. */
+.status-dot { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-xs); font-weight: 500; color: var(--ink-2); white-space: nowrap; }
+.status-dot .dot { width: 8px; height: 8px; flex: none; border-radius: var(--radius-round); background: var(--ink-3); }
+.status-dot.tone-done { color: var(--done); } .status-dot.tone-done .dot { background: var(--done); }
+.status-dot.tone-due { color: var(--due); } .status-dot.tone-due .dot { background: var(--due); }
+.list-trail .status-dot { font-size: var(--text-sm); }
+@media (min-width: 760px) {
+  .settings-layout { display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: var(--s5); align-items: start; }
+  .settings-rail { padding-top: calc(var(--s3) + 44px + var(--s1)); } /* its title level with the page title, below the back line kept above it */
+  .back-to-settings { display: none; }
+}
+@media (min-width: 1024px) { .settings-layout { grid-template-columns: 264px minmax(0, 1fr); gap: var(--s6); } }
+@media (max-width: 759.98px) {
+  .settings-rail:not(.is-root) { display: none; }
+  .settings-rail.is-root { padding-top: var(--s4); }
+  .rail-group a { min-height: 52px; }
+}
+/* The Overview, and the Integrations page: each kind of system, its rule, and its rows. */
+.settings-overview > .notice, .settings-overview > .box { margin-top: var(--s5); }
+.integration-kind { margin-top: var(--s5); }
+.integration-kind + .integration-kind { padding-top: var(--s5); border-top: 1px solid var(--border); }
+.integration-kind h2 { font-size: var(--text-lg); line-height: 1.35; }
+.kind-lede { color: var(--ink-2); font-size: var(--text-control); margin-top: 2px; max-width: 70ch; }
+.kind-rule { color: var(--ink); font-weight: 500; }
+.integration-kind > .list { margin-top: var(--s3); }
+/* An integration's mark in its tile (IntegrationLogo): the vendor's own file, small and never recolored, or a text tile. */
+.logo-tile { flex: none; display: grid; place-items: center; width: 64px; height: 40px; border: 1px solid var(--border); border-radius: var(--radius-control);
+  background: var(--surface); color: var(--ink-2); }
+.logo-tile img, .logo-tile svg { display: block; width: 20px; height: 20px; }
+.logo-text { font-size: var(--text-sm); font-weight: 700; letter-spacing: 0.02em; color: var(--ink); }
+.logo-head { width: 48px; height: 48px; }
+.logo-head img, .logo-head svg { width: 24px; height: 24px; }
+@media (max-width: 759.98px) { .logo-row { width: 48px; } }
+/* An integration's own page: the mark beside its title. */
+.integration-head { display: flex; align-items: flex-start; gap: var(--s4); }
+.integration-head > .page-head { flex: 1 1 auto; min-width: 0; }
+.integration-head > .logo-tile { margin-top: calc(44px + var(--s1)); }
 .settings-open { margin-top: var(--s4); display: flex; flex-wrap: wrap; gap: var(--s2); }
-/* The way back to Settings (or to a part's own page), above a settings page's title. */
+/* The way back to Settings, above a settings page's title: on a phone only (the rail is beside the page from 760px). */
 .back-to-settings { margin-top: var(--s3); }
 .back-to-settings + .page-title { margin-top: var(--s1); }
 /* The mail steps: each step's name, a link to it, and whether it is done, in words. */
