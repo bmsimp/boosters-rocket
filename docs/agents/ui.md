@@ -15,7 +15,7 @@ Import from the index: `import { Card, List, ListRow, LinkButton } from "@/app/c
 | A short list a person acts on (To do, Students, Payments) | `List` + `ListRow` (`status`, `title`, `meta` (one part or a list, dotted), `amount`, `action`; `sub` of `ListSubRow` for a row's parts, indented); `ListTotal` right after a list of amounts that add up (Payments) | a table for five rows; a list of cards; a panel inside a row; a total written by hand |
 | Many records with the same columns (roster, Balances, audit) | `DataTable` | a hand-made `<table>`; sorting controls (say the order with `sorted`) |
 | The small heading over a list or table | `SectionLabel` | an uppercase label; an eyebrow over a page title |
-| Doing something | `Button` (`primary`, `secondary`, `quiet`, `danger`, `club`; `size="sm"` in a row; `busy`) | more than one primary in an area; `disabled` for busy on a parent page |
+| Doing something | `Button` (`primary`, `secondary`, `quiet`, `danger`, `club`; `size="sm"` in a row; `busy`; `ref` for a press the focus goes back to). Two in a row: a compact secondary and a quiet one (Forms' Open and Download) | more than one primary in an area; `disabled` for busy on a parent page; a tinted and an outlined button side by side |
 | Going somewhere, styled as a button | `LinkButton` (`plain` for a full load or an outside address) | a `<button>` that navigates |
 | A state in a row or cell, in words with an icon | `StateWords` (done, todo, waived) or `StatusBadge` (a tone, its icon, its words) | color alone; a colored dot with no words |
 | A short label (a role, a count) | `Badge` (`tone="club"` is a label style only, the club's wash, not a status tone) | a pill: corners are 4px, full circles are for avatars and status dots |

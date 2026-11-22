@@ -40,8 +40,9 @@ function FormRow({ group, form, today, download }: { group: MyFormGroup; form: M
     <ListRow status={{ tone: toneOf(line, today), words: line.words }} title={<RequirementTitle line={line} />}
       meta={[<span key="set" className="when">{form.stepName}</span>, line.dueOn && <RequirementDue key="due" line={line} today={today} />]}
       action={(canOpen || download) && <>
-        {canOpen && <a className={buttonClass("club", "sm", "form-open")} href={`/forms/${form.requestId}`}>{linkWords(group, form)}<span className="visually-hidden">: {line.title}</span></a>}
-        {download && <a className={buttonClass("secondary", "sm", "form-open")} href={`/forms/${form.requestId}/signed`} download="signed-form.pdf">Download<span className="visually-hidden">: the signed {line.title}</span></a>}
+        {/* Open (or Sign) is the row's compact secondary, as Home's are; Download its quiet companion. One family of buttons, no second outline. */}
+        {canOpen && <a className={buttonClass("secondary", "sm", "form-open")} href={`/forms/${form.requestId}`}>{linkWords(group, form)}<span className="visually-hidden">: {line.title}</span></a>}
+        {download && <a className={buttonClass("quiet", "sm", "form-open")} href={`/forms/${form.requestId}/signed`} download="signed-form.pdf">Download<span className="visually-hidden">: the signed {line.title}</span></a>}
       </>} />
   );
 }

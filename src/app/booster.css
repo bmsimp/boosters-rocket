@@ -891,6 +891,8 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 .staff-roles fieldset.checks label { min-height: 44px; }
 .staff-name-edit { display: grid; gap: var(--s2); justify-items: start; }
 .staff-name-edit .field { width: 100%; max-width: 24rem; }
+/* A quiet press alone on its line (Change my name) lines its words up with the text above it: its padding hangs into the margin. */
+.staff-name-edit > .btn-quiet { margin-inline-start: calc(-1 * var(--s3)); }
 @media (min-width: 760px) {
   .staff-person { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.4fr) auto; align-items: start; }
   .staff-person > [role="alert"], .staff-person > [role="status"] { grid-column: 1 / -1; }

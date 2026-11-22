@@ -409,7 +409,8 @@ The core of the look. A `SectionLabel` (a real heading, 0.875rem 500 `ink-2`, se
 `Button` does something; `LinkButton` goes somewhere (`plain` for a full load or an outside address). 44px tall, 6px corner, 0.9375rem 500, color transitions at 120ms ease-out.
 - **Primary:** the club fill with `club-on` ink; hover lays the overlay wash over it. One per area.
 - **Secondary:** white with the control edge and ink; hover `surface-muted`.
-- **Quiet:** words in `club-text`, no edge; hover `club-tint`.
+- **Quiet:** words in `club-text`, no edge; hover `club-tint`. Alone at the start of a line (the staff home's "Change my name") it hangs its padding into the margin, so its words line up with the text above it.
+- **Pairs in a row:** a row's actions are one family: a compact secondary for the main one and a quiet one beside it (Forms' Open and Download), never two outlined or tinted styles side by side.
 - **Club:** `club-text` on `club-tint`; hover adds a `club-text` edge.
 - **Danger:** white, control edge, words in `late`; hover `late-soft` with a `late` edge.
 - **Small** (`size="sm"`): 12px side padding and 0.875rem; still 44px tall.
