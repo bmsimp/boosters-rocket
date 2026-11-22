@@ -257,6 +257,8 @@ footer a { color: var(--club-text); }
 .card-head h2, .card-head h3 { font-size: var(--text-lg); line-height: 1.35; }
 .card-head .card-lede { color: var(--ink-2); font-size: var(--text-control); margin-top: 2px; }
 .card-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
+/* The actions beside a title (an amount, a button) keep to their own width at the end, the title taking the rest. */
+.card-head > .card-actions { flex: 0 1 auto; justify-content: flex-end; }
 @media (min-width: 760px) { .box { --box-pad: 20px; } }
 
 /* --- Choice group: radio buttons drawn as bordered options, the whole tile the control. --- */
@@ -266,6 +268,9 @@ footer a { color: var(--club-text); }
 .choices { display: grid; gap: var(--s2); margin-top: var(--s3); }
 .choice { position: relative; display: block; cursor: pointer; }
 .choice input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: inherit; } /* the whole tile: the keyboard scrolls all of it into view, and a screen reader outlines it */
+/* An option that can't be chosen now (a place already taken): drawn quiet, its words still readable. */
+.choice:has(input:disabled) { cursor: not-allowed; }
+.choice input:disabled + span { background: var(--surface-muted); color: var(--ink-2); }
 .choice span { display: grid; grid-template-columns: 18px 1fr; gap: 2px var(--s3); align-items: center; min-height: 56px;
   padding: var(--s2) var(--s4); border: 1px solid var(--border-control); border-radius: var(--radius); background: var(--surface);
   transition: border-color var(--dur-fast) ease-out, background-color var(--dur-fast) ease-out; }
@@ -411,12 +416,33 @@ fieldset.checks { border: 0; padding: 0; min-width: 0; }
 .list-meta .optional, .list-title .optional, .list-sub-title .optional { color: var(--ink-2); font-weight: 400; }
 /* A row's parts (ListSubRow): indented under its title, on the row's own surface, a hairline above each. */
 .list-row.has-sub { flex-wrap: wrap; }
+/* A row that wraps (its parts or its detail under it) keeps its ring beside its title: the title gives way, never the ring. */
+.list-row.has-sub > .list-main { flex-basis: 0; }
 .list-sub { flex: 1 0 100%; list-style: none; padding: 0 0 0 calc(16px + var(--s3)); margin: var(--s1) 0 0; }
 .list-subrow { display: grid; gap: 1px; padding: var(--s2) 0; border-top: 1px solid var(--border); }
 .list-subrow:last-child { padding-bottom: 0; }
+/* What belongs under a row at its full width (ListRow's detail): a note, or the small form in place of its action. */
+.list-detail { flex: 1 0 100%; min-width: 0; display: grid; gap: var(--s2); justify-items: start; }
+.list-row:has(> .status-icon) > .list-detail { padding-left: calc(16px + var(--s3)); }
+.list-detail > .help, .list-detail > p { margin-top: 0; }
+.list-title strong, .list-meta strong { font-weight: 600; }
 .list-sub-title { font-size: var(--text-control); overflow-wrap: anywhere; }
 /* On a phone an amount and its action stack at the row's end, so the title keeps the width. */
 @media (max-width: 479.98px) { .list-trail { flex-direction: column; align-items: flex-end; gap: var(--s1); } }
+/* A list in a card's stack (the rows of a setting among its words and buttons) runs to the card's edges too. */
+.box > .stack > .list { margin-inline: calc(-1 * var(--box-pad)); border-width: 1px 0; border-radius: 0; }
+/* A list with something after it in its card keeps a hairline under its last row instead of running to the card's foot. */
+.box > .list:not(:last-child) { margin-bottom: 0; border-bottom-width: 1px; border-radius: 0; }
+/* The total under a list of amounts (ListTotal): on the muted surface, its figure in the rows' amount column. Over it,
+   each row's amount comes after its action, so the figures make one right-aligned column with the total. */
+.list-total { display: flex; justify-content: space-between; gap: var(--s3); padding: var(--s3) var(--s4); background: var(--surface-muted);
+  border: 1px solid var(--border); border-top: 0; border-radius: 0 0 var(--radius) var(--radius); font-weight: 600; }
+.list:has(+ .list-total) { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.box > .list-total { margin: 0 calc(-1 * var(--box-pad)); border-width: 0 0 1px; border-radius: 0; }
+.box > .list-total:last-child { margin-bottom: calc(-1 * var(--box-pad)); border-bottom: 0; border-radius: 0 0 var(--radius) var(--radius); }
+/* Rows in a card take the card's own side padding (20px from 760px), so their words line up with the card's title. */
+.box .list > .list-row, .box > .list-total { padding-inline: var(--box-pad); }
+@media (min-width: 480px) { .list:has(+ .list-total) .list-trail { flex-direction: row-reverse; } }
 
 /* --- Menu: the top bar's links and groups (parent and staff), and the phone's Menu panel for staff. --- */
 .top-nav { display: none; margin-left: auto; gap: 2px; align-items: center; }
@@ -593,8 +619,8 @@ p.errors, .sign-out .errors { padding-left: 0; }
 .home-head .page-title, .family-page .page-title, .students .who, .money h2 { overflow-wrap: anywhere; }
 .home-head .page-title { margin-top: 0; }
 
-/* What the family owes: the total, when the figures are from, then each open invoice as a row running to the card's
-   edges, a ring before it in the tone of its due date, the amount in one right-aligned column over the total. */
+/* Money lines on the staff pages (a family's Balances page, Health, a person's families): the total, when the figures
+   are from, then a row per line running to the card's edges. Home and Payments draw theirs with List and ListTotal. */
 .owed { margin-top: var(--s2); }
 .owed .amt { font-size: var(--text-2xl); font-weight: 600; line-height: 1.15; letter-spacing: -0.025em; font-variant-numeric: tabular-nums lining-nums; }
 .owed .asof { font-size: var(--text-sm); color: var(--ink-2); margin-top: var(--s1); }
@@ -608,15 +634,6 @@ p.errors, .sign-out .errors { padding-left: 0; }
 .lines .when.late { color: var(--late); font-weight: 500; }
 .lines .amount { text-align: right; font-size: var(--text-md); font-weight: 500; font-variant-numeric: tabular-nums lining-nums; }
 .lines .pay { grid-column: 1 / -1; }
-.money .lines li, .paid-box .lines li { grid-template-columns: 16px minmax(0, 1fr) auto; column-gap: var(--s3); }
-.money .lines li::before, .paid-box .lines li::before { content: ""; grid-column: 1; grid-row: 1; align-self: start; margin-top: 4px;
-  width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; border: 2px solid var(--ink-3); }
-.money .lines li:has(.when.soon)::before { border-color: var(--due); }
-.money .lines li:has(.when.late)::before { border-color: var(--late); background: radial-gradient(circle, var(--late) 0 2.5px, transparent 3px); }
-.paid-box .lines li::before { border-color: var(--done); background: var(--done); }
-.money .lines li > span:first-child, .paid-box .lines li > span:first-child { grid-column: 2; grid-row: 1 / span 2; }
-.money .lines .amount, .paid-box .lines .amount { grid-column: 3; grid-row: 1; }
-.money .lines .pay { grid-column: 3; grid-row: 2; justify-self: end; min-width: 4.5rem; padding: 0 var(--s3); font-size: var(--text-sm); }
 .sum { display: flex; justify-content: space-between; margin: 0 calc(-1 * var(--box-pad, 0px)); padding: var(--s3) var(--box-pad, 0px);
   border-top: 1px solid var(--border); background: var(--surface-muted); font-weight: 600; }
 .sum .num { font-variant-numeric: tabular-nums lining-nums; }
@@ -651,10 +668,6 @@ p.errors, .sign-out .errors { padding-left: 0; }
   .lines li { grid-template-columns: 1fr auto auto; }
   .lines .pay { grid-column: 2; grid-row: 1; min-width: 112px; }
   .lines .amount { grid-column: 3; grid-row: 1; min-width: 96px; }
-  .money .lines li { grid-template-columns: 16px minmax(0, 1fr) auto auto; }
-  .money .lines li > span:first-child { grid-row: 1; }
-  .money .lines .pay { grid-column: 3; grid-row: 1; min-width: 112px; justify-self: stretch; }
-  .money .lines .amount { grid-column: 4; }
 }
 /* The passkey offer's two buttons sit side by side, wrapping under each other where there is no room. */
 .passkey-offer-buttons { display: flex; flex-wrap: wrap; gap: var(--s3); }
@@ -668,7 +681,8 @@ p.errors, .sign-out .errors { padding-left: 0; }
 .app-key, .backup-codes code { font-family: var(--font); font-variant-numeric: tabular-nums slashed-zero; font-size: 1.0625rem; font-weight: 600; letter-spacing: 0.06em;
   overflow-wrap: anywhere; user-select: all; }
 .app-key { display: block; margin-top: var(--s2); }
-ul.backup-codes { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: var(--s2) var(--s4); margin-top: var(--s3); }
+ul.backup-codes { list-style: none; padding: var(--s3) var(--s4); display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: var(--s2) var(--s4); margin-top: var(--s3);
+  background: var(--surface-muted); border: 1px solid var(--border); border-radius: var(--radius); } /* the codes on one quiet surface, like a card's total row */
 /* Signing in and out. */
 .signin { max-width: 440px; margin: 0 auto; padding-top: var(--s7); }
 .signin .btn { width: 100%; margin-top: var(--s3); }
@@ -706,6 +720,9 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 .volunteer-confirm { margin-top: var(--s4); width: 100%; }
 @media (min-width: 760px) { .volunteer-confirm { width: auto; } }
 .volunteer-done { margin-top: var(--s3); font-weight: 600; }
+/* The status line that outlives the rows it speaks for (Announcer) takes no room until it says something. */
+.volunteer-done.announce:empty { margin: 0; }
+.box > .list:has(+ .announce:empty:last-child) { margin-bottom: calc(-1 * var(--box-pad)); border-bottom-width: 0; border-radius: 0 0 var(--radius) var(--radius); }
 .volunteer-cancel { margin-top: var(--s2); }
 .lines li > div > .state { margin-top: 2px; }
 /* Checking in: a full-width button per person on a phone, then one for everyone. */
@@ -882,6 +899,8 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 .staff-roles fieldset.checks label { min-height: 44px; }
 .staff-name-edit { display: grid; gap: var(--s2); justify-items: start; }
 .staff-name-edit .field { width: 100%; max-width: 24rem; }
+/* A quiet press alone on its line (Change my name) lines its words up with the text above it: its padding hangs into the margin. */
+.staff-name-edit > .btn-quiet { margin-inline-start: calc(-1 * var(--s3)); }
 @media (min-width: 760px) {
   .staff-person { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.4fr) auto; align-items: start; }
   .staff-person > [role="alert"], .staff-person > [role="status"] { grid-column: 1 / -1; }
@@ -945,8 +964,6 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
   .sets [aria-current="step"] .n, .sets [aria-current="step"] .label { text-decoration: underline; }
   .on-set i { forced-color-adjust: none; background: Canvas; color: CanvasText; box-shadow: inset 0 0 0 2px CanvasText; }
   .on-set i.done { background: CanvasText; color: Canvas; }
-  .money .lines li::before, .paid-box .lines li::before { forced-color-adjust: none; border-color: CanvasText; }
-  .paid-box .lines li::before { background: CanvasText; }
   .badge, .notice { border: 1px solid CanvasText; }
   .notice > svg { forced-color-adjust: none; color: CanvasText; }
   .choice span::before { forced-color-adjust: none; border-color: CanvasText; background: Canvas; }

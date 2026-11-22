@@ -1,4 +1,4 @@
-import type { AnchorHTMLAttributes, ButtonHTMLAttributes, ReactNode } from "react";
+import type { AnchorHTMLAttributes, ButtonHTMLAttributes, ReactNode, Ref } from "react";
 import Link from "next/link";
 import { cx } from "./cx";
 
@@ -15,6 +15,8 @@ type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "className" | "
   variant?: ButtonVariant; size?: ButtonSize; className?: string; children: ReactNode;
   /** Working: drawn disabled with a spinner and aria-disabled (never `disabled`, which drops the focus). The caller ignores presses while busy. */
   busy?: boolean;
+  /** For a button the focus goes back to (a Cancel that draws it again). */
+  ref?: Ref<HTMLButtonElement>;
 };
 
 /** A button: primary (the club's fill, one per area), secondary, quiet (words), danger (removes or ends something), or club (tinted). */

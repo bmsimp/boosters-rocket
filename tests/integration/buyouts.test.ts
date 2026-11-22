@@ -889,7 +889,7 @@ describe("how the requirement reads, on the parent's pages", () => {
 // switch an Admin asks for reaches: the tests run it directly.
 describe("after the club connects a different QuickBooks company", () => {
   const admin = { actor: { door: "staff" as const, id: null, label: "admin@club.org" }, ip: null };
-  const ENDED_LINE = "The club moved its books to a new QuickBooks company, so your earlier buy-out for this was ended. If anything is still owed on it, the club will be in touch.";
+  const ENDED_LINE = "The club moved to new books, so your earlier buy-out for this was ended. If anything is still owed on it, the club will be in touch.";
   /**
    * The new company connected and its roster read, and the family linked again there, as the accounting links screen
    * leaves it: its customer, the shape, and the requirements' product chosen again.

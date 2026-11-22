@@ -19,7 +19,7 @@ test.beforeEach(async ({ context }) => { await context.addCookies([parentSession
 test("a parent opens a buy-out, sees the amount and what will happen, confirms, and is told calmly it couldn't be set up", async ({ page }) => {
   const res = await page.goto("/volunteer");
   expect(res?.status()).toBe(200);
-  const offer = payInstead(page).locator(".lines li").filter({ hasText: "Pit crew hours" });
+  const offer = payInstead(page).locator(".list-row").filter({ hasText: "Pit crew hours" });
   await expect(offer).toContainText("Your family");
   await expect(offer).toContainText("0 of 2 hours done");
   // The other family's requirement is never shown, not even its title.
@@ -41,7 +41,7 @@ test("a parent opens a buy-out, sees the amount and what will happen, confirms, 
   expect(box!.height, "a tap target at least 44px tall").toBeGreaterThanOrEqual(44);
 
   await confirm.click();
-  await expect(cost.getByRole("alert")).toHaveText("Sorry, the club's invoice couldn't be set up, so nothing has been billed. Please ask the club about paying instead.");
+  await expect(cost.getByRole("alert")).toHaveText("Problem Sorry, the club's invoice couldn't be set up, so nothing has been billed. Please ask the club about paying instead.");
   // Refused before anything was sent: the buy-out is recorded as refused and the queue holds nothing waiting for it.
   const rows = await sql`SELECT state, last_code FROM buyout WHERE requirement_id = ${E2E_BUYOUT.offered} ORDER BY created_at DESC LIMIT 1`;
   expect(rows[0]).toMatchObject({ state: "refused", last_code: "bad_id" });
@@ -53,7 +53,7 @@ test("a parent opens a buy-out, sees the amount and what will happen, confirms, 
 
 test("a buy-out already chosen reads 'Buy-out invoiced', and its invoice is on Payments", async ({ page }) => {
   await page.goto("/volunteer");
-  const bought = payInstead(page).locator(".lines li").filter({ hasText: "Concession help" });
+  const bought = payInstead(page).locator(".list-row").filter({ hasText: "Concession help" });
   await expect(bought).toContainText("Buy-out invoiced");
   await bought.getByRole("link", { name: /^See your buy-out/ }).click();
   await expect(page).toHaveURL(new RegExp(`/volunteer/pay-instead/${E2E_BUYOUT.invoiced}/family$`));
@@ -64,6 +64,6 @@ test("a buy-out already chosen reads 'Buy-out invoiced', and its invoice is on P
 
   await page.goto("/payments");
   const owed = page.getByRole("region", { name: "Quetzalcoatl Family" });
-  const line = owed.locator(".lines li").filter({ hasText: `Invoice ${E2E_BUYOUT.invoiceNumber}` });
-  await expect(line.locator(".amount")).toHaveText(E2E_BUYOUT.invoicedAmount);
+  const line = owed.locator(".list-row").filter({ hasText: `Invoice ${E2E_BUYOUT.invoiceNumber}` });
+  await expect(line.locator(".list-amount")).toHaveText(E2E_BUYOUT.invoicedAmount);
 });

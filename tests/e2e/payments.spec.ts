@@ -28,27 +28,28 @@ test("a parent sees what the family owes, each open invoice, the total and what 
   await expect(owed.locator(".asof time")).not.toContainText("UTC");
   await expect(owed.locator(".offline-note")).toHaveCount(0);
 
-  const lines = owed.locator(".lines li");
+  const lines = owed.locator(".list-row");
   await expect(lines).toHaveCount(2);
   // Soonest due first: here, the one whose date has passed. Said in words; the color only follows them.
   await expect(lines.nth(0)).toContainText("Invoice QZ-1042");
   // The portal made it for the family's own buy-out (tests/e2e/buyout-seed.ts), so it says what it pays for; the other doesn't.
   await expect(lines.nth(0)).toContainText("Paying instead of volunteering: Concession help");
   await expect(lines.nth(1)).not.toContainText("Paying instead of volunteering");
-  await expect(lines.nth(0).locator(".amount")).toHaveText("$100.00");
+  await expect(lines.nth(0).locator(".list-amount")).toHaveText("$100.00");
   await expect(lines.nth(0).locator(".when.late")).toHaveText(/^Was due \S.*\d{4}$/);
   await expect(lines.nth(1)).toContainText("Invoice QZ-1041, Xochitl Quetzalcoatl");
-  await expect(lines.nth(1).locator(".amount")).toHaveText("$85.00");
+  await expect(lines.nth(1).locator(".list-amount")).toHaveText("$85.00");
   await expect(lines.nth(1).locator(".when.soon")).toHaveText(/^Due \S.*, in [78] days$/); // 8 by the club's date (UTC here, as the seed counts), or 7 when the run crosses that midnight
   await expect(lines.nth(1)).toContainText("Invoice date ");
-  await expect(owed.locator(".sum")).toHaveText("Total$185.00");
-  await expect(owed).toContainText("An invoice with no Pay button can't be paid online. The treasurer can tell you how to pay it.");
+  await expect(owed.locator(".list-total")).toHaveText("Total$185.00");
+  await expect(owed).toContainText("No Pay button? The treasurer can tell you how to pay that one.");
   await expect(owed).toContainText("Need more time? Ask the treasurer. They're happy to work something out.");
 
   const paid = page.getByRole("region", { name: "Paid in the last 12 months" });
-  await expect(paid.locator(".lines li")).toHaveCount(1);
+  await expect(paid.locator(".list-row")).toHaveCount(1);
   await expect(paid).toContainText("Invoice QZ-1017");
-  await expect(paid.locator(".amount")).toHaveText("$150.00Paid");
+  await expect(paid.locator(".list-amount")).toHaveText("$150.00");
+  await expect(paid.locator(".list-status")).toHaveText("Paid");
   await expect(paid.getByRole("link")).toHaveCount(0);
 });
 
@@ -74,9 +75,9 @@ test("the page fits the screen at this width, and the amounts line up", async ({
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   expect(overflow).toBe(false);
   const width = page.viewportSize()!.width;
-  const [late, soon] = [page.locator(".money .lines li").nth(0), page.locator(".money .lines li").nth(1)];
-  const amount = (await soon.locator(".amount").boundingBox())!, otherAmount = (await late.locator(".amount").boundingBox())!;
-  const total = (await page.locator(".money .sum .num").boundingBox())!;
+  const [late, soon] = [page.locator(".money .list-row").nth(0), page.locator(".money .list-row").nth(1)];
+  const amount = (await soon.locator(".list-amount").boundingBox())!, otherAmount = (await late.locator(".list-amount").boundingBox())!;
+  const total = (await page.locator(".money .list-total .list-amount").boundingBox())!;
   // One right-aligned column of figures that sums to the total (DESIGN.md, Money lines).
   expect(Math.abs(amount.x + amount.width - (otherAmount.x + otherAmount.width))).toBeLessThanOrEqual(1);
   expect(Math.abs(amount.x + amount.width - (total.x + total.width))).toBeLessThanOrEqual(1);
@@ -87,10 +88,10 @@ test("the page fits the screen at this width, and the amounts line up", async ({
     expect(Math.abs(pay.x + pay.width - (amount.x + amount.width))).toBeLessThanOrEqual(1);
     expect(pay.width).toBeLessThan(row.width / 2);
   } else {
-    // Desktop: text | Pay | amount, on one line.
+    // Desktop: text | Pay | amount, on one line, the Pay compact.
     expect(pay.x + pay.width).toBeLessThanOrEqual(amount.x + 1);
     expect(pay.y).toBeLessThan(amount.y + amount.height);
-    expect(pay.width).toBeGreaterThanOrEqual(112);
+    expect(pay.width).toBeLessThan(row.width / 4);
   }
 });
 

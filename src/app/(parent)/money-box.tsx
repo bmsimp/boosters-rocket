@@ -9,12 +9,12 @@ import { DueLine } from "./due-line";
 import { dueState } from "@/lib/money/due";
 import { Card } from "../components/ui/card";
 import { LinkButton } from "../components/ui/button";
-import { ListRow } from "../components/ui/list";
+import { List, ListRow, ListTotal } from "../components/ui/list";
 import type { Tone } from "../components/ui/tone";
 
 /**
- * The money box (Payments' look): what the signed-in family owes, each open invoice with its Pay button, and when
- * QuickBooks gave the figures. A server component:
+ * The money box (Payments' look): what the signed-in family owes, said beside its title, each open invoice as a row
+ * with its Pay button over the total, and when QuickBooks gave the figures. A server component:
  *
  *   const ctx = await requireParentPage("/its-address");
  *   ...
@@ -32,36 +32,6 @@ export async function MoneyBox({ ctx }: { ctx: Pick<ParentCtx, "familyId"> }) {
 const invoiceName = (i: StoredInvoice) => `${i.number ? `Invoice ${i.number}` : "Invoice"}${i.forName ? `, ${i.forName}` : ""}`;
 const payName = (i: StoredInvoice) => `${i.number ? `invoice ${i.number}` : "this invoice"}${i.forName ? ` for ${i.forName}` : ""}`;
 
-/** Under an invoice the portal made for one of the family's own buy-outs: what it pays for. Payments passes them (loadMyBuyoutInvoices). */
-function BuyoutLine({ title }: { title: string | null }) {
-  return title ? <span className="when">Paying instead of volunteering: {title}</span> : null;
-}
-
-function OpenLine({ invoice, today, current, filled, buyouts }: { invoice: StoredInvoice; today: string; current: boolean; filled: boolean; buyouts?: MyBuyoutInvoices }) {
-  const amount = formatMoney(invoice.balanceCents, invoice.currency);
-  // The soonest-due invoice that can be paid is the primary button, the others secondary (their class: "btn pay", "btn btn-line pay").
-  const variant = filled ? "primary" : "secondary";
-  return (
-    <li>
-      <span>
-        <span className="what">{invoiceName(invoice)}</span>
-        <BuyoutLine title={buyoutTitleOf(buyouts, invoice)} />
-        {invoice.date && <span className="when">Invoice date <CalendarDate iso={invoice.date} /></span>}
-        {invoice.dueDate && <DueLine due={invoice.dueDate} today={today} />}
-      </span>
-      <span className="amount num">{amount}</span>
-      {invoice.payLink && (current ? (
-        // A plain link in the same tab: an installed app opens it in the phone's in-app browser, with a way back.
-        <LinkButton plain variant={variant} className="pay" href={invoice.payLink} rel="noopener noreferrer" referrerPolicy="no-referrer" aria-label={`Pay ${amount}, ${payName(invoice)}`}>
-          Pay{filled && <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>}
-        </LinkButton>
-      ) : (
-        <LinkButton plain variant={variant} className="pay" aria-disabled="true" role="link" aria-label={`Pay ${amount}, paused until the figures are up to date`}>Pay</LinkButton>
-      ))}
-    </li>
-  );
-}
-
 /**
  * The note for figures that are not current, on Home over the To do list (where each Pay is paused in place) and in
  * the money box on Payments. Not current for many reasons, some of which last until a person acts (QuickBooks needs
@@ -76,11 +46,13 @@ export function NotCurrentNote() {
 const DUE_TONE: Record<"later" | "soon" | "late", Tone> = { later: "neutral", soon: "due", late: "late" };
 
 /**
- * Home's To do rows for the open invoices (ListRow): what each is, its due line in words, the amount, and a compact
- * Pay. The soonest-due one that can be paid is the primary Pay, the others secondary; while the figures are not
- * current every Pay stays in its place, paused, and says why in its accessible name.
+ * The rows for the open invoices (ListRow), on Home's To do list and in the money box on Payments: what each is, its
+ * due line in words, the amount, and a compact Pay, with a ring before it in the tone of its due date. The soonest-due
+ * one that can be paid is the primary Pay, the others secondary; while the figures are not current every Pay stays in
+ * its place, paused, and says why in its accessible name. Home says the due date, or the invoice's date when it has
+ * none; Payments (`dates="both"`) says both.
  */
-export function InvoiceRows({ f, today, buyouts }: { f: MoneyFigures; today: string; buyouts?: MyBuyoutInvoices }) {
+export function InvoiceRows({ f, today, buyouts, dates = "one" }: { f: MoneyFigures; today: string; buyouts?: MyBuyoutInvoices; dates?: "one" | "both" }) {
   const first = f.open.find((i) => i.payLink !== null)?.qboId;
   return f.open.map((invoice) => {
     const amount = formatMoney(invoice.balanceCents, invoice.currency);
@@ -88,10 +60,12 @@ export function InvoiceRows({ f, today, buyouts }: { f: MoneyFigures; today: str
     const variant = filled ? "primary" : "secondary";
     const buyout = buyoutTitleOf(buyouts, invoice);
     const tone = invoice.dueDate ? DUE_TONE[dueState(invoice.dueDate, today).tone] : "neutral";
+    const dated = invoice.date && <span className="when">Invoice date <CalendarDate iso={invoice.date} /></span>;
     return (
       <ListRow key={invoice.qboId} className="invoice-row" status={{ tone }} title={invoiceName(invoice)} amount={amount}
         meta={[
-          invoice.dueDate ? <DueLine due={invoice.dueDate} today={today} /> : invoice.date && <span className="when">Invoice date <CalendarDate iso={invoice.date} /></span>,
+          invoice.dueDate ? <DueLine due={invoice.dueDate} today={today} /> : dated,
+          dates === "both" && invoice.dueDate && dated,
           buyout && <span className="when">Paying instead of volunteering: {buyout}</span>,
         ]}
         action={invoice.payLink && (f.current ? (
@@ -105,6 +79,11 @@ export function InvoiceRows({ f, today, buyouts }: { f: MoneyFigures; today: str
     );
   });
 }
+
+/** The thanks for a family that owes nothing. */
+const PaidUp = () => (
+  <p className="paid-up"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M4 12.5l5 5 11-11" /></svg>You&apos;re all paid up. Thank you!</p>
+);
 
 /**
  * Home's total: what the family owes said once, in tabular figures, with where and when the figures are from, what to
@@ -125,47 +104,43 @@ export function HomeTotal({ money, buyouts }: { money: FamilyMoney; buyouts?: My
       {f.open.length > 0 ? (
         <p className="help">
           {payable && <>Each invoice opens on QuickBooks&apos; secure payment page. </>}
-          {unpayable && <>An invoice with no Pay button can&apos;t be paid online. The treasurer can tell you how to pay it. </>}
+          {unpayable && <>No Pay button? The treasurer can tell you how to pay that one. </>}
           Need more time? Ask the treasurer. They&apos;re happy to work something out.
         </p>
       ) : (
-        <p className="paid-up"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M4 12.5l5 5 11-11" /></svg>You&apos;re all paid up. Thank you!</p>
+        <PaidUp />
       )}
-      {f.credit && <p className="help">The boosters may be holding a credit for you. The treasurer can tell you how it will be applied.</p>}
+      {f.credit && <p className="help">The boosters may be holding a credit for you. Ask the treasurer how it will be used.</p>}
     </Card>
   );
 }
 
+/**
+ * The money box's figures on Payments: when they are from, then each open invoice as a row (InvoiceRows, as on Home)
+ * over its Total (ListTotal), then what to do about paying. The total itself is said beside the card's title.
+ */
 function Figures({ f, today, buyouts }: { f: MoneyFigures; today: string; buyouts?: MyBuyoutInvoices }) {
   const total = f.currency === null ? null : formatMoney(f.totalCents, f.currency);
-  // QuickBooks pays one invoice at a time: the soonest-due one that can be paid gets the filled button.
-  const first = f.open.find((i) => i.payLink !== null)?.qboId;
+  const payable = f.open.some((i) => i.payLink !== null);
   const unpayable = f.open.some((i) => i.payLink === null);
   return (
     <>
-      <div className="owed">
-        {total !== null && <div className="amt num">{total}</div>}
-        <div className="asof">{f.open.length ? "Owed now." : "Nothing owed."} From QuickBooks, as of <LocalTime iso={f.asOf} />.</div>
-        {!f.current && <NotCurrentNote />}
-      </div>
+      <p className="asof">{f.open.length ? "Owed now." : "Nothing owed."} From QuickBooks, as of <LocalTime iso={f.asOf} />.</p>
+      {!f.current && <NotCurrentNote />}
       {f.open.length > 0 ? (
         <>
-          <ul className="lines">
-            {f.open.map((i) => <OpenLine key={i.qboId} invoice={i} today={today} current={f.current} filled={i.qboId === first} buyouts={buyouts} />)}
-          </ul>
+          <List><InvoiceRows f={f} today={today} buyouts={buyouts} dates="both" /></List>
           {total !== null
-            ? <div className="sum"><span>Total</span><span className="num">{total}</span></div>
+            ? <ListTotal label="Total" amount={total} />
             : <p className="help">These invoices are in more than one currency, so there is no single total.</p>}
           <p className="help">
-            {first !== undefined && <>Each invoice opens on QuickBooks&apos; secure payment page. </>}
-            {unpayable && <>An invoice with no Pay button can&apos;t be paid online. The treasurer can tell you how to pay it. </>}
+            {payable && <>Each invoice opens on QuickBooks&apos; secure payment page. </>}
+            {unpayable && <>No Pay button? The treasurer can tell you how to pay that one. </>}
             Need more time? Ask the treasurer. They&apos;re happy to work something out.
           </p>
         </>
-      ) : (
-        <p className="paid-up"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M4 12.5l5 5 11-11" /></svg>You&apos;re all paid up. Thank you!</p>
-      )}
-      {f.credit && <p className="help">The boosters may be holding a credit for you. The treasurer can tell you how it will be applied.</p>}
+      ) : <PaidUp />}
+      {f.credit && <p className="help">The boosters may be holding a credit for you. Ask the treasurer how it will be used.</p>}
     </>
   );
 }
@@ -175,8 +150,12 @@ function Figures({ f, today, buyouts }: { f: MoneyFigures; today: string; buyout
  * (loadMyBuyoutInvoices(ctx.familyId)), names each one as the volunteering buy-out it is.
  */
 export function MoneySection({ money, more = false, buyouts, title }: { money: FamilyMoney; more?: boolean; buyouts?: MyBuyoutInvoices; title?: string }) {
+  const f = money.figures;
+  // The total, said once beside the title, in tabular figures: none for invoices in more than one currency.
+  const total = f && f.currency !== null ? formatMoney(f.totalCents, f.currency) : null;
   return (
     <Card className="money" title={title ?? money.familyName ?? "What you owe"} titleId="money-h"
+      headActions={total !== null && <span className="amt num">{total}</span>}
       actions={more && !money.notConnected && <LinkButton variant="secondary" href="/payments">See your payments</LinkButton>}>
       {money.figures
         ? <Figures f={money.figures} today={money.today} buyouts={buyouts} />
@@ -189,25 +168,25 @@ export function MoneySection({ money, more = false, buyouts, title }: { money: F
   );
 }
 
-/** Invoices paid in the last 12 months (the Payments page). Nothing when there are no figures to show. */
+/**
+ * Invoices paid in the last 12 months (the Payments page): a row each, its "Paid" in words with the done ring, what it
+ * was and its date, and what it came to. Nothing when there are no figures to show.
+ */
 export function PaidSection({ money, buyouts }: { money: FamilyMoney; buyouts?: MyBuyoutInvoices }) {
   if (!money.figures) return null;
   const { paid } = money.figures;
   return (
     <Card className="paid-box" title="Paid in the last 12 months" titleId="paid-h">
       {paid.length > 0 ? (
-        <ul className="lines">
-          {paid.map((i) => (
-            <li key={i.qboId}>
-              <span>
-                <span className="what">{invoiceName(i)}</span>
-                <BuyoutLine title={buyoutTitleOf(buyouts, i)} />
-                {i.date && <span className="when">Invoice date <CalendarDate iso={i.date} /></span>}
-              </span>
-              <span className="amount num">{formatMoney(i.totalCents, i.currency)}<span className="paid">Paid</span></span>
-            </li>
-          ))}
-        </ul>
+        <List>
+          {paid.map((i) => {
+            const buyout = buyoutTitleOf(buyouts, i);
+            return (
+              <ListRow key={i.qboId} status={{ tone: "done", words: "Paid" }} title={invoiceName(i)} amount={formatMoney(i.totalCents, i.currency)}
+                meta={[i.date && <span className="when">Invoice date <CalendarDate iso={i.date} /></span>, buyout && <span className="when">Paying instead of volunteering: {buyout}</span>]} />
+            );
+          })}
+        </List>
       ) : (
         <p className="help">No paid invoices from the last 12 months.</p>
       )}

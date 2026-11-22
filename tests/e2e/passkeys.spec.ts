@@ -55,7 +55,7 @@ test.afterAll(async () => {
 async function showItsHer(box: Locator) {
   await box.getByLabel("Your password").fill(E2E_SIGNIN.password);
   await box.getByRole("button", { name: "Continue" }).click();
-  await expect(box.getByRole("status")).toContainText("We've emailed you a 6-digit code.");
+  await expect(box.getByRole("status")).toContainText("Enter the 6-digit code we've emailed you to go on.");
   await box.getByLabel("6-digit code").fill(await codeFor(sql, sink, ZELDA_EMAIL));
   await box.getByRole("button", { name: "Confirm" }).click();
   await expect(box.getByText("Thank you, that's you.")).toBeVisible();

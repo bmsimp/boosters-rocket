@@ -1,6 +1,7 @@
 "use client";
 import { useState, type ReactNode, type Ref } from "react";
 import { SIGNIN_SETTINGS_COPY as COPY } from "@/lib/parents/signin-settings-copy";
+import { Button, Field } from "@/app/components/ui";
 
 /** A press that copies `text`, and only it, saying in words whether it did. */
 export function CopyButton({ text, label }: { text: string; label: string }) {
@@ -10,7 +11,7 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
   };
   return (
     <div className="stack">
-      <button type="button" className="btn btn-line" onClick={() => void copy()}>{label}</button>
+      <Button variant="secondary" onClick={() => void copy()}>{label}</Button>
       <p role="status" className="help">{state === "copied" ? COPY.copied : state === "failed" ? COPY.copyFailed : ""}</p>
     </div>
   );
@@ -41,13 +42,14 @@ export function AppSetupForm({ setup, code, onCode, onConfirm, busy, answered, l
       <CopyButton text={setup.key.replace(/ /g, "")} label={COPY.copyKey} />
       <form className="stack" onSubmit={(e) => { e.preventDefault(); onConfirm(); }}>
         <p id="app-confirm-lede">{COPY.appConfirmLede}</p>
-        <label className="field"><span>{COPY.appConfirmCode}</span>
-          <input name="code" aria-describedby="app-confirm-lede" inputMode="numeric" autoComplete="one-time-code" maxLength={20} required
-            value={code} onChange={(e) => onCode(e.target.value)} />
-        </label>
+        {/* The field is described by the line above it, which says what to enter. */}
+        <Field id="app-confirm-code" label={COPY.appConfirmCode}>
+          {(aria) => <input {...aria} name="code" aria-describedby="app-confirm-lede" inputMode="numeric" autoComplete="one-time-code" maxLength={20} required
+            value={code} onChange={(e) => onCode(e.target.value)} />}
+        </Field>
         {answered}
         {/* Busy is aria-disabled, not disabled: a disabled button drops the focus, and the keyboard's place with it. */}
-        <button className="btn" aria-disabled={busy || undefined}>{busy ? COPY.checking : COPY.appConfirm}</button>
+        <Button type="submit" busy={busy}>{busy ? COPY.checking : COPY.appConfirm}</Button>
       </form>
       <p className="help">{lost}</p>
     </div>

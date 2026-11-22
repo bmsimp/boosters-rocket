@@ -13,9 +13,9 @@ describe("what the sign-in page says when a request fails", () => {
 });
 
 describe("the sign-in page's words (the sign-in release, slice SI-3b)", () => {
-  it("asks for the email and password, and says a device the portal doesn't know asks one more thing, never which", () => {
+  it("asks for the email and password, and says a new device asks one more thing, never which", () => {
     expect(SIGNIN_LEDE).toMatch(/email and password/);
-    expect(SIGNIN_LEDE).toMatch(/On a device we don't know yet, we'll ask for one more thing to be sure it's you\./);
+    expect(SIGNIN_LEDE).toMatch(/On a new device, we'll ask for one more thing to be sure it's you\./);
     // Said before anyone is known: true for a guardian with an authenticator app or a passkey too (slice SI-7a), so it
     // never says what the step is.
     expect(SIGNIN_LEDE).not.toMatch(/code|authenticator|passkey/i);

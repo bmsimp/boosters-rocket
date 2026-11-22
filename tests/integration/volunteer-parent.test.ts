@@ -178,23 +178,23 @@ describe("signing up", () => {
     const refresh = db.transaction(async (tx) => { await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`); taken(); await until; });
     await holding;
     try {
-      expect(await signUpForShift(ctxOf(a.identity), shift!.id, "me")).toEqual({ ok: false, errors: ["The club's list of families is being brought up to date just now. Please try again in a minute."] });
+      expect(await signUpForShift(ctxOf(a.identity), shift!.id, "me")).toEqual({ ok: false, errors: ["The club is updating its list of families. Please try again in a minute."] });
     } finally { letGo(); await refresh; }
     expect(await live()).toEqual([]);
   });
 
-  it("says Full, Started and Signed up in plain words, never with the icons that mean done or waived", async () => {
+  it("says Full, Started and Signed up as neutral statuses in words, never with the marks that mean done, to do or waived", async () => {
     const a = await seedSignedInParent(FAMILY_A), b = await seedSignedInParent(FAMILY_B);
     const { shifts: [full, mine] } = await seedEvent({ shifts: [{ places: 1, startsAt: "09:00", endsAt: "10:00" }, { places: 3, startsAt: "11:00", endsAt: "12:00" }] });
     await seedSignup({ shiftId: full!.id, familyQboId: FAMILY_B.family.qboId, signedUpBy: b.identity.parentId, guardianName: FAMILY_B.parent.name });
     await seedSignup({ shiftId: mine!.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, guardianName: FAMILY_A.parent.name });
     asParent(a.identity);
     const html = await renderPage(VolunteerPage);
-    expect(html).toContain('<span class="state">Full</span>');
-    expect(html).toContain('<span class="state">Signed up</span>');
-    expect(html).not.toMatch(/class="state (done|waived)"/);
+    expect(html).toContain('<span class="list-status tone-neutral">Full</span>');
+    expect(html).toContain('<span class="list-status tone-neutral">Signed up</span>');
+    expect(html).not.toMatch(/class="state (done|todo|waived)"|tone-(done|due|late)"/);
     const shift = await renderPage(ShiftPage, { params: { id: full!.id } });
-    expect(textOf(shift)).toContain("This shift is full. Every place has been taken.");
+    expect(textOf(shift)).toContain("This shift is full.");
     expect(shift).not.toMatch(/class="state (done|waived)"/);
   });
 
@@ -215,7 +215,7 @@ describe("signing up", () => {
     const { shifts: [full, open] } = await seedEvent({ shifts: [{ places: 1 }, { places: 5 }] });
     await seedSignup({ shiftId: full!.id, familyQboId: "SOMEONE-ELSE", signedUpBy: NO_SUCH, guardianName: "Someone" });
     asParent(a.identity);
-    expect(await signUpAction(full!.id, "me")).toEqual({ ok: false, errors: ["Sorry, that shift is full now. Every place has been taken."] });
+    expect(await signUpAction(full!.id, "me")).toEqual({ ok: false, errors: ["Sorry, that shift is full now."] });
     expect(await signUpAction(open!.id, await studentChoice(AZALEA!))).toMatchObject({ ok: true });
     expect(await signUpAction(open!.id, await studentChoice(AZALEA!))).toEqual({ ok: false, errors: [`${AZALEA!.name} is signed up for this shift already.`] });
     expect(await signUpAction(open!.id, "me")).toMatchObject({ ok: true });
@@ -295,7 +295,7 @@ describe("signing up", () => {
       // Six people from two families, each on their own connection, all at once.
       const results = await Promise.all(people.map((go) => go()));
       expect(results.filter((r) => r.ok)).toHaveLength(places);
-      expect(results.filter((r) => !r.ok).map((r) => (r as { errors: string[] }).errors)).toEqual(Array(6 - places).fill(["Sorry, that shift is full now. Every place has been taken."]));
+      expect(results.filter((r) => !r.ok).map((r) => (r as { errors: string[] }).errors)).toEqual(Array(6 - places).fill(["Sorry, that shift is full now."]));
       expect(await db.select().from(volunteerSignup).where(and(eq(volunteerSignup.shiftId, shiftId), isNull(volunteerSignup.cancelledAt)))).toHaveLength(places);
     }
   });
@@ -332,10 +332,10 @@ describe("cancelling", () => {
     const { a, mine } = await seedOwn();
     const cutoff = new Date("2027-03-08T18:00:00Z");
     expect(await cancelMySignup(ctxOf(a.identity), mine.id, cutoff)).toEqual({ ok: false,
-      errors: ["It's too close to the shift to cancel here: the portal takes cancellations until 48 hours before it starts. Please contact Pat Organizer (pat@club.example)."] });
+      errors: ["It's too late to cancel here: cancelling closes 48 hours before the shift. Please contact Pat Organizer (pat@club.example)."] });
     expect((await live()).map((s) => s.id)).toContain(mine.id);
     expect(await cancelMySignup(ctxOf(a.identity), mine.id, new Date(cutoff.getTime() - 1000))).toEqual({ ok: true,
-      message: `Cancelled. ${AURELIO!.name}'s place is free for someone else now. Thanks for letting us know. If you added it to your calendar, you can delete it there.` });
+      message: `Cancelled, so ${AURELIO!.name}'s place is free for someone else. Thanks for letting us know! If it's in your calendar, you can delete it there.` });
     const [row] = await db.select().from(volunteerSignup).where(eq(volunteerSignup.id, mine.id));
     expect(row).toMatchObject({ cancelledByDoor: "parent", cancelledBy: a.identity.parentId });
     expect((await audits("volunteer.signup.cancel"))[0]).toMatchObject({ door: "parent", actorId: a.identity.parentId, targetId: mine.id, after: { cancelled: true } });

@@ -73,7 +73,7 @@ export default async function FormPage({ params }: { params: Promise<{ id: strin
           : <StateWords state={step.kind === "complete" ? "done" : "todo"} words={stateWords} />}
         {due && <p className="help">{due.lead} <CalendarDate iso={form.line.dueOn!} />{due.tail}</p>}
 
-        {step.kind === "not_ready" && <p className="help">The club is still getting this form ready. There&apos;s nothing you need to do right now: it will be here to sign when it is.</p>}
+        {step.kind === "not_ready" && <p className="help">The club is still getting this form ready. You can sign it here once it is.</p>}
 
         {step.kind === "consent" && (
           <div className="consent">
@@ -92,7 +92,7 @@ export default async function FormPage({ params }: { params: Promise<{ id: strin
 
         {step.kind === "sealing" && (
           <>
-            <p className="help">Everyone has signed. The signed copy is being finished, which usually takes a few seconds. You don&apos;t need to do anything more.</p>
+            <p className="help">Everyone has signed. The signed copy will be ready in a few seconds, and there&apos;s nothing more to do.</p>
             <FinishingNote requestId={form.row.id} />
           </>
         )}

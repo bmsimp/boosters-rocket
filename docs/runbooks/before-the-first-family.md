@@ -794,8 +794,8 @@ work another. Any time before the pilot.
 9. Checking in from inside the installed app: decided on 2026-11-16 (the roadmap): scanning the shift's code with the
    phone's camera stays the way, and on an iPhone that opens Safari. Native apps may come later.
 10. Whether the Family page should name a person's other families (it gives the count and **Switch family**).
-11. The words parents read when something isn't there yet, for the voice: "For now, the club makes changes for you. Ask
-    the club and they'll update it.", "Your family isn't set up here yet", "The club has no active students listed for
+11. The words parents read when something isn't there yet, for the voice: "For now, ask the club to make any
+    changes.", "Your family isn't set up here yet", "The club has no active students listed for
     your family right now." and "Sign in to see your students and what's owed."
 12. Whether opening the audit log, filtered to one person's records, should itself be written in the audit log. Today
     only an export is.

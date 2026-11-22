@@ -3,10 +3,10 @@ import { formatMoney } from "@/lib/money/cents";
 import { contrastRatio } from "@/lib/theme/contrast";
 import { MARK_PAIRS, PALETTE, TEXT_PAIRS, type Mode, type Token } from "@/lib/theme/palette";
 import {
-  ActionOutcome, Avatar, Badge, Button, CalendarDate, Card, Checkbox, DataTable, EmptyState, KeyValue, LinkButton, List, ListRow, ListSubRow, LocalTime,
+  ActionOutcome, Avatar, Badge, Button, CalendarDate, Card, Checkbox, DataTable, EmptyState, KeyValue, LinkButton, List, ListRow, ListSubRow, ListTotal, LocalTime,
   Notice, PageHeader, SectionLabel, Select, Stat, StateWords, StatusBadge, StatusIcon, StepIndicator, TextArea, TextInput, Toolbar, type Column,
 } from "../../../components/ui";
-import { ChoiceSample } from "./gallery-choice";
+import { ChoiceSample, TakenChoiceSample } from "./gallery-choice";
 
 /**
  * The design system's living gallery: every primitive in every state, with what it is for and how to import it. Only
@@ -179,7 +179,7 @@ export function Gallery() {
         </div>
       </Section>
 
-      <Section id="list" name="List and ListRow" use="The core of the look: a bordered list of like rows, each a status icon with its words, a title, a meta line, then an amount or a compact action. Use it for To do, Students, Payments and any short list a person acts on. A long list of records with columns is a DataTable." importLine={UI("List, ListRow, ListSubRow, SectionLabel")}>
+      <Section id="list" name="List and ListRow" use="The core of the look: a bordered list of like rows, each a status icon with its words, a title, a meta line, then an amount or a compact action. Use it for To do, Students, Payments and any short list a person acts on; ListTotal under a list of amounts sums them. A long list of records with columns is a DataTable." importLine={UI("List, ListRow, ListSubRow, ListTotal, SectionLabel")}>
         <div className="ds-samples stacked">
           <div>
             <SectionLabel level={3}>To do</SectionLabel>
@@ -200,6 +200,25 @@ export function Gallery() {
                   <ListSubRow title="Sample travel form" meta={<StateWords state="todo" words="Not signed yet" />} />
                 </>} />
               <ListRow status={{ tone: "done", words: "Done with Uniforms" }} title="Alex Sample" amount="1 of 1 done" />
+            </List>
+          </div>
+          <Card title="Rows that add up (ListTotal)" titleId="ds-list-total" description="Payments: each amount comes after its Pay, in one column with the total.">
+            <List>
+              <ListRow className="invoice-row" status={{ tone: "late" }} title="Invoice QZ-1042" meta="Was due Oct 30" amount={formatMoney(10000)} />
+              <ListRow className="invoice-row" status={{ tone: "due" }} title="Invoice QZ-1041, Sam Sample" meta={["Due Nov 15, in 8 days", "Invoice date Oct 1, 2026"]} amount={formatMoney(8500)}
+                action={<LinkButton plain size="sm" href="#ds-list-total">Pay</LinkButton>} />
+            </List>
+            <ListTotal label="Total" amount={formatMoney(18500)} />
+            <p className="help">Need more time? Ask the treasurer.</p>
+          </Card>
+          <div>
+            <SectionLabel level={3}>A row with a detail under it, and a pair of actions</SectionLabel>
+            <List>
+              <ListRow title={<strong>Sample passkey</strong>} meta={["Added Oct 1, 2026", "Last used Nov 20, 2026"]}
+                action={<><Button size="sm" variant="quiet">Rename</Button><Button size="sm" variant="danger">Remove</Button></>}
+                detail={<p className="help">Removing your last passkey means we ask for the emailed code again.</p>} />
+              <ListRow title="Pancake breakfast, Griddle" meta={["Saturday, 7:00 am to 9:00 am", "You're doing this one"]}
+                detail={<><span className="state">Signed up</span><Button size="sm" variant="secondary">Cancel my sign-up</Button></>} />
             </List>
           </div>
           <div>
@@ -247,6 +266,7 @@ export function Gallery() {
           </div>
         </div>
         <ChoiceSample />
+          <TakenChoiceSample />
       </Section>
 
       <Section id="avatar" name="Avatar" use="A person's initials beside their name. The club bar's account control is one, with a 44px tap target." importLine={UI("Avatar")}>
@@ -283,7 +303,7 @@ export function Gallery() {
         <DataTable caption="Grouped by family" columns={invoiceColumns} groups={[{ key: "g", heading: "Sample Family", rows: INVOICES.slice(0, 2) }]} rowKey={(i) => `g${i.id}`} />
       </Section>
 
-      <Section id="notice" name="Notice and ActionOutcome" use="A status that stands apart: information, needs attention, done, a problem. ActionOutcome shows what a server action answered. A problem is announced as an alert, the rest as a status." importLine={UI("Notice, ActionOutcome")}>
+      <Section id="notice" name="Notice and ActionOutcome" use="A status that stands apart: information, needs attention, done, a problem. ActionOutcome shows what a server action answered. A problem is announced as an alert, the rest as a status. An answer that replaces the form that was pressed takes the focus: give it a ref (and Notice tabIndex={-1})." importLine={UI("Notice, ActionOutcome")}>
         <div className="ds-samples stacked">
           <Notice tone="info">The figures are from QuickBooks, as of 2:14 pm.</Notice>
           <Notice tone="warning">Two families have no sign-in yet.</Notice>

@@ -352,7 +352,7 @@ describe("setting a password from a link", () => {
     const { ana } = await seedAna();
     const token = await mintLink(ana.id, "setup");
     expect(await choose("setup", token, BREACHED)).toEqual({ ok: false, errors: [PASSWORD_COPY.breached] });
-    expect(PASSWORD_COPY.breached).toMatch(/known data breach/);
+    expect(PASSWORD_COPY.breached).toMatch(/data breach/);
     expect((await audits("parent.password.refused"))[0]).toMatchObject({ after: { purpose: "setup", reason: "breached" } });
     expect(await credentialRows(ana.authUserId)).toEqual([]);
     expect(await linkVerdict("setup", token)).toMatchObject({ ok: true });

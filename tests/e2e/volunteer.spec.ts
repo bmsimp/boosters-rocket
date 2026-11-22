@@ -17,7 +17,7 @@ test.afterAll(async () => { await sink.close(); });
 
 const noSidewaysScroll = async (page: Page) =>
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), `${page.url()} scrolls sideways`).toBe(false);
-const griddle = (page: Page) => page.locator(".lines li").filter({ hasText: "7:00 am to 9:00 am, Griddle" });
+const griddle = (page: Page) => page.locator(".list-row").filter({ hasText: "7:00 am to 9:00 am, Griddle" });
 
 test("a parent signs up for a shift, sees the count and their own sign-up, gets the calendar file, and cancels", async ({ context, page }) => {
   await context.addCookies([parentSessionCookie()]);

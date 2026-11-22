@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireParentPage } from "@/lib/guards";
 import { loadMyFamily } from "@/lib/parents/my-family";
@@ -8,6 +7,7 @@ import { placesWords } from "@/lib/volunteer/rules";
 import { NotSetUpBox } from "../../../family-boxes";
 import { signUpAction } from "../../actions";
 import { SignUpForm } from "../../volunteer-forms";
+import { Card, KeyValue, Notice, PageHeader } from "../../../../components/ui";
 
 export const metadata = { title: "Sign up for a shift" };
 
@@ -21,33 +21,33 @@ export default async function ShiftPage({ params }: { params: Promise<{ id: stri
   const ctx = await requireParentPage(`/volunteer/shifts/${encodeURIComponent(id)}`);
   const [family, club] = await Promise.all([loadMyFamily(ctx), getClubSettings()]);
   if (!family) {
-    return <main className="wrap single"><h1 className="page-title">Volunteer</h1><NotSetUpBox treasurerEmail={club.treasurerEmail} /></main>;
+    return <main className="wrap single"><PageHeader title="Volunteer" /><NotSetUpBox treasurerEmail={club.treasurerEmail} /></main>;
   }
   const view = await loadShiftForMe(ctx, id);
   if (!view) notFound();
   const { event, shift } = view;
   return (
     <main className="wrap single volunteer-page">
-      <h1 className="page-title">{event.name}</h1>
-      <p className="lede">{event.dateWords}, {shift.timeWords}{shift.role ? `, ${shift.role}` : ""}. <Link href="/volunteer">Back to Volunteer</Link></p>
+      {/* The date, time and role are in the shift's own rows below: the head names the event alone. */}
+      <PageHeader title={event.name} back={{ href: "/volunteer", label: "Back to Volunteer" }} />
 
-      <section className="box" aria-labelledby="shift-h"><h2 id="shift-h">The shift</h2>
-        <dl className="details">
-          <dt>When</dt><dd>{event.dateWords}, {shift.timeWords}</dd>
-          {shift.role && <><dt>Doing</dt><dd>{shift.role}</dd></>}
-          <dt>Where</dt><dd>{event.location}</dd>
-          <dt>Places</dt><dd className="num">{placesWords(shift)}</dd>
-          <dt>Contact</dt><dd>{event.contact}</dd>
-        </dl>
+      <Card title="The shift" titleId="shift-h">
+        <KeyValue items={[
+          { key: "when", label: "When", value: <>{event.dateWords}, {shift.timeWords}</> },
+          shift.role ? { key: "doing", label: "Doing", value: shift.role } : null,
+          { key: "where", label: "Where", value: event.location },
+          { key: "places", label: "Places", value: placesWords(shift), numeric: true },
+          { key: "contact", label: "Contact", value: event.contact },
+        ]} />
         {event.description && <p className="volunteer-about">{event.description}</p>}
         {view.mine.length > 0 && <p className="help">Signed up from your family: {view.mine.map((m) => `${m.who === "You" ? "you" : m.who}${m.checkedIn ? " (checked in)" : ""}`).join(", ")}.</p>}
-      </section>
+      </Card>
 
-      <section className="box" aria-labelledby="signup-h"><h2 id="signup-h">Sign up</h2>
-        {shift.state === "started" ? <p className="state">This shift has started, so it&apos;s too late to sign up.</p>
-          : shift.state === "full" ? <p className="state">This shift is full. Every place has been taken.</p>
+      <Card title="Sign up" titleId="signup-h">
+        {shift.state === "started" ? <Notice tone="info" live="none">This shift has started, so it&apos;s too late to sign up.</Notice>
+          : shift.state === "full" ? <Notice tone="info" live="none">This shift is full.</Notice>
           : <SignUpForm choices={view.choices} act={signUpAction.bind(null, shift.id)} />}
-      </section>
+      </Card>
     </main>
   );
 }

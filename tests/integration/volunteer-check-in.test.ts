@@ -212,7 +212,7 @@ describe("after checking in", () => {
     expect(leaked(forA, b.markers)).toEqual([]);
     asParent(b.identity);
     const forB = textOf(await renderPage(VolunteerPage));
-    expect(forB).toContain(`2 hours toward ${TWO_FAMILY_HOURS} Your family Added by the club`);
+    expect(forB).toContain(`2 hours toward ${TWO_FAMILY_HOURS} Added by the club · Your family`);
     expect(forB).toContain("2 of 6 hours done, signed up for 3");
     // The note staff wrote is for staff alone, the family's own included.
     for (const note of b.season!.staffOnly) expect(forB).not.toContain(note);

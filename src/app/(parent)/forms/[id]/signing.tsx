@@ -130,7 +130,7 @@ export function SigningFrame({ requestId, frameUrl, origin, title }: { requestId
   return (
     <div className="sign-frame">
       <iframe ref={frame} src={frameUrl} title={`Sign: ${title}`} />
-      <p className="help">When you&apos;ve finished signing, this page says so by itself. If it doesn&apos;t, check here.</p>
+      <p className="help">This page updates by itself once you&apos;ve signed. If it doesn&apos;t, press the button below.</p>
       <div className="one-button">
         <button type="button" className="btn btn-line" aria-disabled={checking || undefined} onClick={() => { if (!checking) void check(); }}>{checking ? "Checking…" : "Check whether it's signed"}</button>
         <Outcome result={result} />

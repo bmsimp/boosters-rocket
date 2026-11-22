@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { requireParentPage } from "@/lib/guards";
 import { loadMySignin } from "@/lib/parents/signin-settings";
 import { SIGNIN_SETTINGS_COPY as COPY, howYouSignIn } from "@/lib/parents/signin-settings-copy";
@@ -6,6 +5,7 @@ import { AskAgain, ChangePasswordForm, RememberedDevices, SetupLinkForm, SignInS
 import { AuthenticatorBox } from "./authenticator-box";
 import { PasskeyBox } from "./passkey-box";
 import { env } from "@/env";
+import { Card, KeyValue, LinkButton, PageHeader } from "../../../components/ui";
 
 export const metadata = { title: "Sign-in settings" };
 
@@ -39,51 +39,44 @@ export default async function SignInSettingsPage() {
     : { then: COPY.everywhereThenNoPassword, next: COPY.everywhereNextNoPassword, signIn: { href: "/sign-in/password", label: COPY.choosePassword } };
   return (
     <main className="wrap single family-page">
-      <h1 className="page-title">{COPY.title}</h1>
-      <p className="lede">{COPY.lede}</p>
+      {/* What showing it's you takes is said once, here, while a change would ask it: each box keeps only its field and Continue. */}
+      <PageHeader title={COPY.title} back={{ href: "/family", label: "Back to Family" }}
+        lede={me.hasPassword && !me.provedRecently ? <>{COPY.lede} {words.askAgainForPassword}</> : COPY.lede} />
       <SignInSettingsFrame>
-        <section className="box" aria-labelledby="how-h">
-          <h2 id="how-h">{COPY.howTitle}</h2>
-          <dl className="details">
-            <dt>{COPY.email}</dt><dd>{me.email}</dd>
-            <dt>{COPY.password}</dt><dd>{me.hasPassword ? COPY.passwordChosen : COPY.passwordNotChosen}</dd>
-          </dl>
+        {/* No id in the link: the page takes whose address it is from the session. */}
+        <Card title={COPY.howTitle} titleId="how-h" actions={me.canChangeEmail && <LinkButton variant="secondary" href="/family/email">{COPY.changeEmail}</LinkButton>}>
+          <KeyValue items={[
+            { key: "email", label: COPY.email, value: me.email },
+            { key: "password", label: COPY.password, value: me.hasPassword ? COPY.passwordChosen : COPY.passwordNotChosen },
+          ]} />
           <p className="help">{me.hasPassword ? words.how : COPY.howNoPassword}</p>
-          {/* No id in the link: the page takes whose address it is from the session. */}
-          {me.canChangeEmail && <div className="box-foot"><Link className="btn btn-line" href="/family/email">{COPY.changeEmail}</Link></div>}
-        </section>
-        <section className="box" aria-labelledby="password-h">
-          <h2 id="password-h">{COPY.passwordTitle}</h2>
+        </Card>
+        <Card title={COPY.passwordTitle} titleId="password-h">
           {!me.hasPassword ? <><p>{COPY.noPassword}</p><SetupLinkForm /></>
             : (
-              <AskAgain email={me.email} proved={me.provedRecently} lede={words.askAgainForPassword} passkey={me.hasPasskey} portalOrigin={portalOrigin}>
+              <AskAgain email={me.email} proved={me.provedRecently} section={COPY.passwordTitle} passkey={me.hasPasskey} portalOrigin={portalOrigin}>
                 <ChangePasswordForm email={me.email} app={me.app !== null} passkey={me.hasPasskey} strict={me.strict} />
               </AskAgain>
             )}
-        </section>
-        <section className="box" aria-labelledby="everywhere-h">
-          <h2 id="everywhere-h">{COPY.everywhereTitle}</h2>
+        </Card>
+        <Card title={COPY.everywhereTitle} titleId="everywhere-h">
           <SignOutEverywhereForm then={again.then} next={again.next} signIn={again.signIn} />
-        </section>
-        <section className="box" aria-labelledby="devices-h">
-          <h2 id="devices-h">{COPY.devicesTitle}</h2>
+        </Card>
+        <Card title={COPY.devicesTitle} titleId="devices-h">
           {/* Each device is given only its row's id, whether it is this session's, and its two times. */}
           <RememberedDevices devices={me.devices} proved={me.provedRecently} email={me.email} app={me.app !== null} passkey={me.hasPasskey} strict={me.strict}
             portalOrigin={portalOrigin} canAsk={me.hasPassword} cantAsk={COPY.choosePasswordForDevices} />
-        </section>
-        <section className="box" aria-labelledby="app-h">
-          <h2 id="app-h">{COPY.appTitle}</h2>
+        </Card>
+        <Card title={COPY.appTitle} titleId="app-h">
           {/* Given the app's two facts and nothing else of it: the key, the QR code and the backup codes come only in a press's answer. */}
           <AuthenticatorBox email={me.email} app={me.app} proved={me.provedRecently} hasPassword={me.hasPassword} strict={me.strict}
             passkey={me.hasPasskey} portalOrigin={portalOrigin} />
-        </section>
-        <section className="box" aria-labelledby="passkeys-h">
-          <h2 id="passkeys-h">{COPY.passkeysTitle}</h2>
+        </Card>
+        <Card title={COPY.passkeysTitle} titleId="passkeys-h">
           {/* Each passkey is given only its row's id, its name and its two times: never a credential id, a key or the device's type. */}
           <PasskeyBox email={me.email} passkeys={me.passkeys} proved={me.provedRecently} hasPassword={me.hasPassword} strict={me.strict}
             app={me.app !== null} backupCodesLeft={me.backupCodesLeft} portalOrigin={portalOrigin} />
-        </section>
-        <p><Link className="link-line" href="/family">Back to Family</Link></p>
+        </Card>
       </SignInSettingsFrame>
     </main>
   );

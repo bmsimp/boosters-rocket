@@ -5,7 +5,8 @@ import { safely } from "@/app/components/action-error";
 import { offerDevice, type OfferDevice } from "@/app/components/pwa/install-platform";
 import { PASSKEY_OFFER_COPY as WORDS } from "@/lib/parents/passkey-offer-copy";
 import { SIGNIN_SETTINGS_COPY as COPY } from "@/lib/parents/signin-settings-copy";
-import { BackupCodesShown, Tick, addPasskeyHere } from "./family/sign-in/passkey-add";
+import { BackupCodesShown, addPasskeyHere } from "./family/sign-in/passkey-add";
+import { Notice } from "../components/ui";
 import { passkeysAddIn } from "./family/sign-in/passkey-adding";
 import { declinePasskeyOfferAction } from "./passkey-offer-actions";
 
@@ -39,7 +40,7 @@ export function PasskeyOffer({ portalOrigin }: { portalOrigin: string }) {
   const [toSettings, setToSettings] = useState(false);
   const [on, setOn] = useState<{ codes?: string[] } | null>(null);
   const [declined, setDeclined] = useState<{ message: string; last: boolean } | null>(null);
-  const said = useRef<HTMLParagraphElement>(null);
+  const said = useRef<HTMLDivElement>(null);
   const refused = useRef<HTMLDivElement>(null);
   useEffect(() => { if (on || declined) said.current?.focus(); }, [on, declined]);
   useEffect(() => { if (errors) refused.current?.focus(); }, [errors]);
@@ -68,7 +69,7 @@ export function PasskeyOffer({ portalOrigin }: { portalOrigin: string }) {
   if (declined) {
     return (
       <div className="passkey-offer passkey-offer-said" data-passkey-offer="said">
-        <p ref={said} role="status" tabIndex={-1} className="paid-up"><Tick />{declined.message}</p>
+        <Notice tone="done" ref={said} tabIndex={-1}>{declined.message}</Notice>
         {declined.last && <p><Link className="link-line" href="/family/sign-in">{WORDS.signInSettings}</Link></p>}
       </div>
     );
@@ -86,7 +87,7 @@ export function PasskeyOffer({ portalOrigin }: { portalOrigin: string }) {
             <BackupCodesShown message={COPY.passkeyCodesMade} list={on.codes} app={false} lineRef={said} keep={WORDS.backupCodesKeep} />
             <p>{WORDS.turnedOn}</p>
           </>
-        ) : <p ref={said} role="status" tabIndex={-1} className="paid-up"><Tick />{WORDS.turnedOn}</p>
+        ) : <Notice tone="done" ref={said} tabIndex={-1}>{WORDS.turnedOn}</Notice>
       ) : (
         <>
           <p>{phone ? WORDS.phoneBody : WORDS.computerBody}</p>

@@ -54,8 +54,8 @@ test.describe("signed in", () => {
   test("Update my details leads from Family to the edit page, whose form holds the portal's own details", async ({ page }) => {
     await page.goto("/family");
     const details = page.getByRole("region", { name: "Your details" });
-    await expect(details).toContainText("You can change your phone and mailing address yourself, and your sign-in email below. The club changes your name for you.");
-    await expect(details.locator("dd")).toHaveText(["Zelda Quetzalcoatl", "zelda@example.com", E2E_DETAILS.phone]);
+    await expect(details).toContainText("You can change your phone, mailing address and sign-in email below. To change your name, ask the club.");
+    await expect(details.locator("dd")).toHaveText(["Zelda Quetzalcoatl", E2E_DETAILS.phone]);
     const link = details.getByRole("link", { name: "Update my details" });
     expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await link.click();
@@ -69,7 +69,7 @@ test.describe("signed in", () => {
     const who = page.getByRole("region", { name: "You", exact: true });
     await expect(who.locator("dd")).toHaveText(["Zelda Quetzalcoatl", "zelda@example.com"]);
     // Her sign-in email is hers to change, though she is in two families (stage 3's slice 11d).
-    await expect(who).toContainText("You can change the email you sign in with yourself. The club changes names. Ask the club and they'll update yours.");
+    await expect(who).toContainText("You can change your sign-in email below. To change your name, ask the club.");
 
     const edit = page.getByRole("region", { name: "Phone and mailing address" });
     await expect(edit.getByLabel("Phone")).toHaveValue(E2E_DETAILS.phone);
@@ -98,14 +98,14 @@ test.describe("signed in", () => {
     await edit.getByRole("button", { name: "Save my details" }).click();
     // The answer speaks of the portal only.
     const saved = edit.getByRole("status");
-    await expect(saved).toHaveText("Saved. These are your details now.");
+    await expect(saved).toHaveText("Done Saved. These are your details now.");
     await expect(edit.getByLabel("Phone")).toHaveValue("505-555-0199");
     const [row] = await sql`SELECT phone, address_city, contact_version FROM parent WHERE email = 'zelda@example.com'`;
     expect(row).toEqual({ phone: "505-555-0199", address_city: "Santa Fe", contact_version: 1 });
     await noSidewaysScroll(page);
 
     await page.goto("/family");
-    await expect(page.getByRole("region", { name: "Your details" }).locator("dd")).toHaveText(["Zelda Quetzalcoatl", "zelda@example.com", "505-555-0199"]);
+    await expect(page.getByRole("region", { name: "Your details" }).locator("dd")).toHaveText(["Zelda Quetzalcoatl", "505-555-0199"]);
   });
 
   test("Home's details box leads there too", async ({ page }) => {

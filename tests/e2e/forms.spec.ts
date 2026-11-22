@@ -24,7 +24,7 @@ test("a parent sees this season's forms for the family and each student, with ea
   expect(res?.status()).toBe(200);
   await expect(page).toHaveTitle(/^Forms · /);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Forms");
-  await expect(page.locator("main p[role=status]")).toContainText("The forms still to sign aren't ready yet. There's nothing you need to do right now");
+  await expect(page.locator("main p[role=status]")).toContainText("Some forms aren't ready to sign yet. You can sign them here once they are.");
   await expect(page.getByRole("heading", { level: 2 })).toHaveText(["Your family", "Xochitl Quetzalcoatl", "Yaretzi Quetzalcoatl"]);
   const family = page.getByRole("region", { name: "Your family" });
   await expect(family.locator(".list-row")).toHaveCount(1);

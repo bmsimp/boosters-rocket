@@ -36,7 +36,7 @@ const NOTHING = "We can&#x27;t show what you owe right now. Please check back in
 const NOT_SET_UP = "Your family isn&#x27;t set up here yet";
 const PAID_UP = "You&#x27;re all paid up. Thank you!";
 const NOT_CONNECTED = "The club hasn&#x27;t connected your payments to the portal yet. Until then, the treasurer can tell you what you owe.";
-const CREDIT = "The boosters may be holding a credit for you. The treasurer can tell you how it will be applied.";
+const CREDIT = "The boosters may be holding a credit for you. Ask the treasurer how it will be used.";
 /** Every Pay button on the page, as its opening tag. */
 const pays = (html: string) => [...html.matchAll(/<a\b[^>]*class="btn[^"]*\bpay"[^>]*>/g)].map((m) => m[0]);
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
@@ -58,12 +58,12 @@ describe("the Payments page", () => {
     const html = await renderPage(PaymentsPage);
     expect(html).toContain('<h1 class="page-title">Payments</h1>');
     expect(html).toContain("Alderquist Family</h2>");
-    expect(html).toContain('<div class="amt num">$14,283.16</div>'); // 7,131.07 + 7,152.09: the paid invoice is not owed
+    expect(html).toContain('<span class="amt num">$14,283.16</span>'); // 7,131.07 + 7,152.09: the paid invoice is not owed
     expect(html).toMatch(/Owed now\. From QuickBooks, as of <time dateTime="[^"]+"[^>]*>[^<]+<\/time>\./);
-    expect(html).toContain('<span class="what">Invoice INV-ALDERQUIST-7101</span>');
-    expect(html).toContain('<span class="amount num">$7,131.07</span>');
-    expect(html).toContain('<span class="amount num">$7,152.09</span>');
-    expect(html).toContain('<div class="sum"><span>Total</span><span class="num">$14,283.16</span></div>');
+    expect(html).toContain('<span class="list-title">Invoice INV-ALDERQUIST-7101</span>');
+    expect(html).toContain('<span class="list-amount num">$7,131.07</span>');
+    expect(html).toContain('<span class="list-amount num">$7,152.09</span>');
+    expect(html).toContain('<div class="list-total"><span>Total</span><span class="list-amount num">$14,283.16</span></div>');
     expect(html).toMatch(/<span class="when">Invoice date <time dateTime="2026-10-01">2026-10-01<\/time><\/span>/);
     // The due date is on the page as it arrives, in words that depend on the club's day (the tests below).
     expect(html).toMatch(/<span class="when[^"]*">(Due|Was due) <time dateTime="2026-12-01">2026-12-01<\/time>[^<]*<\/span>/);
@@ -77,11 +77,11 @@ describe("the Payments page", () => {
     expect(pay).not.toMatch(/target=|aria-disabled/); // the same tab, and switched on
     expect(html).not.toContain("offline-note");
     expect(html).not.toContain(CREDIT);
-    expect(html).toContain("An invoice with no Pay button can&#x27;t be paid online. The treasurer can tell you how to pay it.");
+    expect(html).toContain("No Pay button? The treasurer can tell you how to pay that one.");
     // Paid in the last 12 months: listed with the word, not counted in the total.
     const paid = html.slice(html.indexOf("Paid in the last 12 months"));
-    expect(paid).toContain('<span class="what">Invoice INV-ALDERQUIST-7103</span>');
-    expect(paid).toContain('<span class="amount num">$7,173.11<span class="paid">Paid</span></span>');
+    expect(paid).toContain('<span class="list-title">Invoice INV-ALDERQUIST-7103</span>');
+    expect(paid).toMatch(/<span class="list-status tone-done">Paid<\/span>.*<span class="list-amount num">\$7,173\.11<\/span>/);
     expect(pays(paid)).toEqual([]);
     expect(stub.calls).toHaveLength(0); // fresh: QuickBooks is not asked
     expect(await db.select().from(auditLog)).toHaveLength(0); // a parent viewing their own family is not audited
@@ -100,20 +100,20 @@ describe("the Payments page", () => {
     const html = await renderPage(PaymentsPage);
     expect(html).not.toContain("INV-OLD-STALE");
     expect(html).not.toContain("$999.99");
-    expect(html).toContain('<div class="amt num">$125.50</div>');
-    expect(html).toContain('<span class="what">Invoice INV-2, Rafferty Riverquill</span>'); // raised on the student
-    expect(html).toContain('<span class="what">Invoice INV-1</span>');                      // raised on the family itself
-    expect(html).toContain('<span class="amount num">$40.50</span>');                        // what is still due, not the invoice's total
+    expect(html).toContain('<span class="amt num">$125.50</span>');
+    expect(html).toContain('<span class="list-title">Invoice INV-2, Rafferty Riverquill</span>'); // raised on the student
+    expect(html).toContain('<span class="list-title">Invoice INV-1</span>');                      // raised on the family itself
+    expect(html).toContain('<span class="list-amount num">$40.50</span>');                        // what is still due, not the invoice's total
     expect(html).not.toContain("offline-note");
     // The soonest-due invoice comes first and has the filled button; the other is outlined.
     const [first, second] = pays(html);
-    expect(first).toContain('class="btn pay"');
+    expect(first).toContain('class="btn btn-sm pay"');
     expect(first).toContain('aria-label="Pay $40.50, invoice INV-2 for Rafferty Riverquill"');
-    expect(second).toContain('class="btn btn-line pay"');
+    expect(second).toContain('class="btn btn-line btn-sm pay"');
     expect(second).toContain('href="https://connect.intuit.com/t/one"');
     expect(html).toContain("Each invoice opens on QuickBooks&#x27; secure payment page.");
-    expect(html).toContain('<span class="what">Invoice INV-3, Rosalind Riverquill</span>');
-    expect(html).toContain('$85.00<span class="paid">Paid</span>');
+    expect(html).toContain('<span class="list-title">Invoice INV-3, Rosalind Riverquill</span>');
+    expect(html.slice(html.indexOf("Paid in the last 12 months"))).toMatch(/<span class="list-status tone-done">Paid<\/span>.*<span class="list-amount num">\$85\.00<\/span>/);
     expect(invoiceQueries(stub)).toEqual([`select * from Invoice where CustomerRef in ('7010','7011','7012','7013') orderby Id startposition 1 maxresults 1000`]);
     expect(await db.select().from(auditLog)).toHaveLength(0);
   });
@@ -127,9 +127,9 @@ describe("the Payments page", () => {
     stub.failNext = 2;
     const html = await renderPage(PaymentsPage);
     expect(html).toContain(`<p class="offline-note" role="status">${NOT_CURRENT}</p>`);
-    expect(html).toContain('<div class="amt num">$185.00</div>');
-    expect(html).toContain('<span class="amount num">$85.00</span>');
-    expect(html).toContain('<div class="sum"><span>Total</span><span class="num">$185.00</span></div>');
+    expect(html).toContain('<span class="amt num">$185.00</span>');
+    expect(html).toContain('<span class="list-amount num">$85.00</span>');
+    expect(html).toContain('<div class="list-total"><span>Total</span><span class="list-amount num">$185.00</span></div>');
     const [pay, ...more] = pays(html);
     expect(more).toEqual([]);
     expect(pay).toContain('aria-disabled="true"');
@@ -158,7 +158,7 @@ describe("the Payments page", () => {
     expect((await moneyRow(FAMILY))!.failedCode).toBe(code);
     expect(html).toContain(`<p class="offline-note" role="status">${NOT_CURRENT}</p>`);
     expect(text(html)).not.toMatch(/shortly|\bsoon\b|can&#x27;t reach|offline|minutes/i);
-    expect(html).toContain('<div class="amt num">$85.00</div>');
+    expect(html).toContain('<span class="amt num">$85.00</span>');
     const [pay] = pays(html);
     expect(pay).toContain('aria-disabled="true"');
     expect(pay).toContain('aria-label="Pay $85.00, paused until the figures are up to date"');
@@ -188,12 +188,12 @@ describe("the Payments page", () => {
     stub.invoices = [inv("1", FAMILY, { Balance: 0, TxnDate: new Date(Date.now() - 10 * 86_400_000).toISOString().slice(0, 10), InvoiceLink: "https://connect.intuit.com/t/one" })];
     asParent(r.identity);
     const html = await renderPage(PaymentsPage);
-    expect(html).toContain('<div class="amt num">$0.00</div>');
+    expect(html).toContain('<span class="amt num">$0.00</span>');
     expect(html).toContain("Nothing owed. From QuickBooks, as of ");
     expect(html).toMatch(new RegExp(`<p class="paid-up"><svg[^>]*aria-hidden="true"[^>]*>.*?</svg>${PAID_UP}</p>`));
-    expect(html).not.toContain('class="sum"');
+    expect(html).not.toContain('class="list-total"');
     expect(pays(html)).toEqual([]);
-    expect(html).toContain('$85.00<span class="paid">Paid</span>');
+    expect(html.slice(html.indexOf("Paid in the last 12 months"))).toMatch(/<span class="list-status tone-done">Paid<\/span>.*<span class="list-amount num">\$85\.00<\/span>/);
     expect(html).not.toContain(CREDIT);
   });
 
@@ -214,7 +214,7 @@ describe("the Payments page", () => {
     asParent(r.identity);
     const html = await renderPage(PaymentsPage);
     expect(html).toContain(`<p class="help">${CREDIT}</p>`);
-    expect(html).toContain('<div class="amt num">$185.00</div>');
+    expect(html).toContain('<span class="amt num">$185.00</span>');
     expect(html).not.toContain("$135.00");
     expect(html).not.toContain("$50.00");
     // Recorded for staff, by the system, not as something the parent did.
@@ -262,7 +262,7 @@ describe("the Payments page", () => {
     const r = await riverquills();
     stub.invoices = [inv("1", FAMILY, { InvoiceLink: "https://connect.intuit.com/t/one" }), inv("2", FAMILY, { Balance: 0, TxnDate: new Date().toISOString().slice(0, 10) })];
     asParent(r.identity);
-    expect(await renderPage(PaymentsPage)).toContain('<div class="amt num">$85.00</div>'); // stored, and fresh
+    expect(await renderPage(PaymentsPage)).toContain('<span class="amt num">$85.00</span>'); // stored, and fresh
     await db.update(qboCustomer).set({ active: false, displayName: "Riverquill Family (deleted)" }).where(eq(qboCustomer.qboId, FAMILY));
     await syncAppRecords(); // as the roster read that found it inactive leaves the records
     const asked = stub.calls.length;
@@ -278,7 +278,7 @@ describe("the Payments page", () => {
     const r = await riverquills();
     stub.invoices = [inv("1", FAMILY, { InvoiceLink: "https://connect.intuit.com/t/one" })];
     asParent(r.identity);
-    expect(await renderPage(PaymentsPage)).toContain('<div class="amt num">$85.00</div>');
+    expect(await renderPage(PaymentsPage)).toContain('<span class="amt num">$85.00</span>');
     // The family is the app's own record, so the page is the family's; its money is QuickBooks', read through the
     // family's link, which answers nothing while another company is connected (clearing the old cache hasn't happened).
     const NO_FIGURES = /INV-|\$\d|connect\.intuit\.com|\(deleted\)/i;
@@ -307,7 +307,7 @@ describe("the Payments page", () => {
     balanceWithJobs(85);
     asParent(r.identity);
     const html = await renderPage(PaymentsPage);
-    expect(html).toContain('<div class="amt num">$85.00</div>');
+    expect(html).toContain('<span class="amt num">$85.00</span>');
     expect(html).toContain("Invoice INV-1");
     expect(html).not.toContain("INV-2");
     expect(invoiceQueries(stub)).toEqual([`select * from Invoice where CustomerRef = '7010' orderby Id startposition 1 maxresults 1000`]);
@@ -317,15 +317,15 @@ describe("the Payments page", () => {
     const r = await riverquills();
     stub.invoices = [inv("1", FAMILY, { CurrencyRef: { value: "CAD" } })];
     asParent(r.identity);
-    expect(await renderPage(PaymentsPage)).toContain('<div class="amt num">CA$85.00</div>');
+    expect(await renderPage(PaymentsPage)).toContain('<span class="amt num">CA$85.00</span>');
     stub.invoices.push(inv("2", STUDENT));
     await ageMoney(FAMILY, 6 * MINUTE);
     const html = await renderPage(PaymentsPage);
     expect(html).toContain("These invoices are in more than one currency, so there is no single total.");
     expect(html).not.toContain('class="amt num"');
-    expect(html).not.toContain('class="sum"');
-    expect(html).toContain('<span class="amount num">CA$85.00</span>');
-    expect(html).toContain('<span class="amount num">$85.00</span>');
+    expect(html).not.toContain('class="list-total"');
+    expect(html).toContain('<span class="list-amount num">CA$85.00</span>');
+    expect(html).toContain('<span class="list-amount num">$85.00</span>');
   });
 });
 
@@ -417,7 +417,7 @@ describe("QuickBooks text and links on the Payments page", () => {
     const html = await renderPage(PaymentsPage);
     expect(pays(html)).toEqual([]);
     expect(html).not.toMatch(/javascript:|data:text|evil\.example|http:\/\/connect/);
-    expect(html).toContain('<span class="amount num">$85.00</span>'); // the invoice itself is still shown
+    expect(html).toContain('<span class="list-amount num">$85.00</span>'); // the invoice itself is still shown
     expect((await moneyRow(FAMILY))!.invoices![0]!.payLink).toBeNull(); // and the link was never stored
   });
 
@@ -483,7 +483,7 @@ describe("the money box for Home", () => {
   it("shows the same figures for the signed-in family, with the way to the Payments page", async () => {
     const { a, b } = await seedTwoFamilies();
     const html = await renderPage(() => MoneyBox({ ctx: a.identity }));
-    expect(html).toMatch(/^<section class="box money" aria-labelledby="money-h"><h2 id="money-h">Alderquist Family<\/h2>/);
+    expect(html).toMatch(/^<section class="box money" aria-labelledby="money-h"><div class="card-head"><div><h2 id="money-h">Alderquist Family<\/h2>/);
     for (const mine of moneyMarkers(FAMILY_A).filter((m) => !m.includes("7103") && m !== "$7,173.11")) expect(html).toContain(mine);
     expect(html).not.toMatch(/INV-ALDERQUIST-7103|\$7,173\.11|Paid in the last/); // the paid list is on the Payments page
     expect(html).toMatch(/<a class="btn btn-line" href="\/payments">See your payments<\/a>/);
@@ -535,7 +535,7 @@ describe("one family never sees another's money", () => {
     asParent(c.identity);
     const other = await renderPage(PaymentsPage);
     expect(other).toContain("INV-CHENOWETH-ONLY");
-    expect(other).toContain('<div class="amt num">$512.34</div>');
+    expect(other).toContain('<span class="amt num">$512.34</span>');
     expect(withoutIds(other)).not.toMatch(/RIVERQUILL|Rosalind|Rafferty|Romilly|\$85\.00|7010|7011|7012|7013/i);
     expect(invoiceQueries(stub)).toEqual([
       "select * from Invoice where CustomerRef in ('7010','7011','7012','7013') orderby Id startposition 1 maxresults 1000",
@@ -591,10 +591,10 @@ describe("a buy-out's invoice on Payments", () => {
     const { a, b } = await withBuyoutInvoices();
     asParent(a.identity);
     const html = text(await renderPage(PaymentsPage));
-    expect(html).toContain("Invoice BUY-9174 Paying instead of volunteering: Concession stand shifts QA74 Invoice date");
+    expect(html).toMatch(/Invoice BUY-9174 Due [^·$]*· Invoice date [^·$]*· Paying instead of volunteering: Concession stand shifts QA74 \$74\.38/);
     expect(html.match(/Paying instead of volunteering/g)).toHaveLength(1);
     // An invoice id of B's buy-out, even among A's own invoices, names nothing of B's.
-    expect(html).toContain("Invoice BUY-9285 Invoice date");
+    expect(html).toContain("Invoice BUY-9285 Paid · Invoice date");
     for (const theirs of b.buyout!.markers) expect(html).not.toContain(theirs);
 
     asParent(b.identity);
@@ -630,7 +630,7 @@ describe("a buy-out's invoice on Payments", () => {
     expect(await loadMyBuyoutInvoices(a.identity.familyId)).toEqual(new Map());
     asParent(a.identity);
     const html = text(await renderPage(PaymentsPage));
-    expect(html).toContain("Invoice BUY-9174 Invoice date");
+    expect(html).toMatch(/Invoice BUY-9174 Due [^·$]*· Invoice date [^·$]* \$74\.38/);
     expect(html).not.toContain("Paying instead of volunteering");
   });
 });

@@ -47,7 +47,7 @@ describe("the page where a parent changes their phone and address", () => {
     expect(html).not.toMatch(/club&#x27;s books|QuickBooks/);
     expect(html).toContain(`<dt>Name</dt><dd>${RIVERA.parent.name}</dd><dt>Email</dt><dd>${RIVERA.parent.email}</dd></dl>`);
     // Their sign-in email is theirs to change too (tests/integration/email-change.test.ts), from its own page.
-    expect(html).toContain("You can change the email you sign in with yourself. The club changes names. Ask the club and they&#x27;ll update yours.");
+    expect(html).toContain("You can change your sign-in email below. To change your name, ask the club.");
     expect(html).toContain(`<a class="btn btn-line" href="/family/email">Change my sign-in email</a>`);
     expect(html).toMatch(field("phone", RIVERA.parent.phone));
     expect(html).toMatch(field("line1", "12 Heron Lane"));
@@ -56,7 +56,7 @@ describe("the page where a parent changes their phone and address", () => {
     expect(html).toMatch(field("region", "TX"));
     expect(html).toMatch(field("postalCode", "78745"));
     expect(html).toMatch(field("country", ""));
-    for (const { label, max } of CONTACT_FIELDS) { expect(html).toContain(`<span>${label}`); expect(html).toContain(`maxLength="${max}"`); }
+    for (const { name, label, max } of CONTACT_FIELDS) { expect(html).toContain(`<label class="field-label" for="contact-${name}">${label}`); expect(html).toContain(`maxLength="${max}"`); }
     expect(html).toContain("Address line 2 (optional)");
     expect(html).toContain(">Save my details</button>");
     expect(html).toContain(`<a class="btn btn-line" href="/family">Back to Family</a>`);
@@ -74,10 +74,10 @@ describe("the page where a parent changes their phone and address", () => {
     const { r } = await seedContactFamilies(stub);
     await db.insert(setting).values({ key: "club", value: { name: "Test Boosters", shortName: "TB", color: "#5b2a86", treasurerEmail: "treasurer@club.example" } });
     asParent(r.identity);
-    expect(await renderPage(FamilyDetailsPage)).toContain(`The club changes names. Email the treasurer at <a href="mailto:treasurer@club.example">treasurer@club.example</a> and they&#x27;ll update yours.`);
+    expect(await renderPage(FamilyDetailsPage)).toContain(`To change your name, ask the treasurer at <a href="mailto:treasurer@club.example">treasurer@club.example</a>.`);
     // While parent sign-ins are off, the email is the club's to change as well.
     await seedParentSettings({ signin: false });
-    expect(await renderPage(FamilyDetailsPage)).toContain(`The club changes names and email addresses. Email the treasurer at <a href="mailto:treasurer@club.example">treasurer@club.example</a> and they&#x27;ll update them.`);
+    expect(await renderPage(FamilyDetailsPage)).toContain(`To change your name or email, ask the treasurer at <a href="mailto:treasurer@club.example">treasurer@club.example</a>.`);
   });
 
   it.each([
@@ -131,7 +131,7 @@ describe("the page where a parent changes their phone and address", () => {
     await setFamilyDetails(r.identity.familyId, { phone: "512-555-0199", line1: "4 Riverside Way" });
     asParent(r.identity);
     const html = await renderPage(FamilyDetailsPage);
-    expect(html).toContain("These are the details the club uses to reach your family. Every parent in your family shares them, so a change here changes them for all of you.");
+    expect(html).toContain("Every parent in your family shares these details, so a change here changes them for all of you.");
     expect(html).toContain("Your family&#x27;s phone and mailing address</h2>");
     expect(html).toMatch(field("phone", "512-555-0199"));
     expect(html).toMatch(field("line1", "4 Riverside Way"));
@@ -155,12 +155,12 @@ describe("Your details, on Family and on Home", () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
     // Both say the sign-in email is theirs to change too: Family offers it in the box below, Home sends them to Family.
-    const words = new Map([[FamilyPage, "You can change your phone and mailing address yourself, and your sign-in email below. The club changes your name for you."],
-      [ParentHome, "You can change your phone and mailing address yourself, and your sign-in email on your Family page. The club changes your name for you."]]);
+    const words = new Map([[FamilyPage, "You can change your phone, mailing address and sign-in email below. To change your name,"],
+      [ParentHome, "You can change your phone, mailing address and sign-in email on your Family page. To change your name,"]]);
     for (const [page, said] of words) {
       const html = await renderPage(page);
       expect(html).toContain(`<dt>Phone</dt><dd class="num">${RIVERA.parent.phone}</dd>`);
-      expect(html).toContain(`<p class="help">${said} Ask the club and they&#x27;ll update it.</p><div class="box-foot">${LINK}</div></section>`);
+      expect(html).toContain(`<p class="help">${said} ask the club.</p><div class="box-foot">${LINK}</div></section>`);
       expect(html).not.toContain("roster-asof");
     }
   });
@@ -172,7 +172,10 @@ describe("Your details, on Family and on Home", () => {
     for (const page of [FamilyPage, ParentHome]) {
       const html = await renderPage(page);
       expect(html).toContain(LINK);
-      expect(html).toContain("<dt>Name</dt><dd>Hollis Handmade</dd><dt>Email</dt><dd>hollis.handmade@family-r.example</dd></dl>");
+      // On Family the sign-in email is in Your account, once on the page; Home's details box shows it.
+      if (page === FamilyPage) expect(html).toContain("<dt>Name</dt><dd>Hollis Handmade</dd></dl>");
+      else expect(html).toContain("<dt>Name</dt><dd>Hollis Handmade</dd><dt>Email</dt><dd>hollis.handmade@family-r.example</dd></dl>");
+      expect(html.match(/<dd>hollis\.handmade@family-r\.example<\/dd>/g)).toHaveLength(1);
     }
   });
 
@@ -182,7 +185,7 @@ describe("Your details, on Family and on Home", () => {
     await setFamilyDetails(r.identity.familyId, { phone: "512-555-0199" });
     asParent(r.identity);
     const html = await renderPage(FamilyPage);
-    expect(html).toContain("You can change your family&#x27;s phone and mailing address yourself");
+    expect(html).toContain("You can change your family&#x27;s phone and mailing address, and your sign-in email below.");
     // The phone is the family's, beside the person's own name and email: said so.
     expect(html).toContain(`<dt>Family phone</dt><dd class="num">512-555-0199</dd>`);
     expect(html).not.toContain("<dt>Phone</dt>");

@@ -5,6 +5,7 @@ import { readCeremony, type CeremonyOutcome } from "@/app/sign-in/passkey-ceremo
 import { SIGNIN_SETTINGS_COPY as COPY } from "@/lib/parents/signin-settings-copy";
 import { ENROLMENT_COPY } from "@/lib/parents/enrolment-copy";
 import { CopyButton } from "./app-setup";
+import { Button, Checkbox, Notice } from "@/app/components/ui";
 import { toPortalAdd } from "./passkey-adding";
 
 /**
@@ -71,12 +72,12 @@ export async function addPasskeyHere(name: string): Promise<AddOutcome> {
  * Sign-in settings, whose words say "this page"), the list and its copy button.
  */
 export function BackupCodesShown({ message, list, app, lineRef, keep, heading = 3 }: { message: string; list: string[]; app: boolean;
-  lineRef: Ref<HTMLParagraphElement>; keep?: string; heading?: 2 | 3 }) {
+  lineRef: Ref<HTMLDivElement>; keep?: string; heading?: 2 | 3 }) {
   // Under a box's h2 on Sign-in settings (h3, the default); straight under the page's h1 on /one-more-step (h2).
   const Heading = heading === 2 ? "h2" : "h3";
   return (
     <div className="stack">
-      <p ref={lineRef} role="status" tabIndex={-1} className="paid-up"><Tick />{message}</p>
+      <Notice tone="done" ref={lineRef} tabIndex={-1}>{message}</Notice>
       <Heading>{COPY.backupCodesTitle}</Heading>
       <p>{keep ?? (app ? COPY.backupCodesKeep : COPY.backupCodesKeepPasskey)}</p>
       <ul className="backup-codes" aria-label={COPY.backupCodesTitle}>
@@ -99,14 +100,10 @@ export function CodesSaved({ onDone }: { onDone: () => void }) {
   const [nudge, setNudge] = useState("");
   return (
     <form className="stack" onSubmit={(e) => { e.preventDefault(); if (!ticked) { setNudge(ENROLMENT_COPY.tickFirst); return; } onDone(); }}>
-      <div className="checks">
-        <label>
-          <input type="checkbox" name="saved" checked={ticked} onChange={(e) => { setTicked(e.target.checked); if (e.target.checked) setNudge(""); }} />
-          <span>{ENROLMENT_COPY.saved}</span>
-        </label>
-      </div>
+      <Checkbox id="codes-saved" label={ENROLMENT_COPY.saved} name="saved" checked={ticked}
+        onChange={(e) => { setTicked(e.target.checked); if (e.target.checked) setNudge(""); }} />
       {/* aria-disabled, never disabled: a press while unticked says why, and the focus stays on the button. */}
-      <button className="btn" aria-disabled={!ticked || undefined}>{COPY.codesDone}</button>
+      <Button type="submit" aria-disabled={!ticked || undefined}>{COPY.codesDone}</Button>
       <p role="status" className="help">{nudge}</p>
     </form>
   );

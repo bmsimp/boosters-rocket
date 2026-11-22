@@ -14,7 +14,7 @@ test("a parent opens the check-in address of a shift that is open now, checks in
   expect(res?.status()).toBe(200);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Check in");
   await expect(page.locator(".lede")).toContainText("Concession stand, Popcorn");
-  const me = page.locator(".lines li").first();
+  const me = page.locator(".list-row").first();
   await expect(me).toContainText("You");
   await noSidewaysScroll(page);
   const button = page.getByRole("button", { name: "Check me in" });
@@ -44,7 +44,7 @@ test("a check-in address outside its window says so, and offers no button", asyn
   expect(res?.status()).toBe(200);
   await expect(page.locator(".lede")).toContainText("Car wash, Rinse crew");
   await expect(page.getByText("Check-in for this shift has closed: it's over.")).toBeVisible();
-  await expect(page.locator(".lines li").first()).toContainText("Not checked in yet");
+  await expect(page.locator(".list-row").first()).toContainText("Not checked in yet");
   await expect(page.getByRole("button", { name: /Check (me|everyone) in/ })).toHaveCount(0);
   await noSidewaysScroll(page);
 });
