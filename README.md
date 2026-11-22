@@ -1,7 +1,14 @@
-# Booster Rocket
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/logos/lockup-horizontal-color-dark-bg.svg">
+    <img alt="Boosters Rocket" src="brand/logos/lockup-horizontal-color.svg" width="360" height="64">
+  </picture>
+</h1>
 
-An open-source parent portal for booster clubs and other parent groups that support youth
-programs.
+An open-source parent portal for booster clubs: families see what they owe, pay it, sign forms and
+sign up to volunteer, under the club's own name.
+
+Boosters Rocket is for booster clubs and other parent groups that support youth programs.
 
 Each family signs in and sees only its own students, what it owes and what it must sign.
 Volunteers manage the roster, forms and settings from the same app. The club's books stay in
@@ -106,4 +113,11 @@ For whoever works on the portal: `AGENTS.md` holds the rules every change follow
 `PRODUCT.md` and `DESIGN.md` say who it is for and how it looks, and `docs/ui-backlog.md` lists
 the interface problems still open.
 
-Licensed under [AGPL-3.0](LICENSE).
+## The brand
+
+[The brand guide](brand/BRAND.md) has the logos, the colors and how the portal is co-branded: inside a club's
+portal the club's name, logo and color lead, and Boosters Rocket is a "Powered by" badge in the footer.
+
+Licensed under [AGPL-3.0](LICENSE). The code is open; the name "Boosters Rocket" and its logos are reserved:
+a fork that changes the software uses its own name and logo, and a club running it unmodified may show
+"Powered by Boosters Rocket". [TRADEMARKS.md](TRADEMARKS.md) has the details.

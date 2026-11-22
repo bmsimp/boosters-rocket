@@ -1,0 +1,89 @@
+/* Boosters Rocket — brand tokens
+ * Source of truth for colors, type and shape. See BRAND.md for when to use what.
+ *
+ * Two layers:
+ *   --br-*      Boosters Rocket's own brand (marketing site, repo, sign-in badge, emails).
+ *   --app-*     The parent-portal UI. Accent comes from the CLUB, not from Boosters Rocket.
+ */
+
+@import url("https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Inter:wght@400;500;600;700&display=swap");
+
+:root {
+  /* ---------- Brand palette ---------- */
+  --br-indigo: #1E1B4B;        /* Launch Indigo: primary dark, text, mark disc */
+  --br-night: #332F72;         /* Night Sky: mark disc on dark backgrounds */
+  --br-flame: #E8433A;         /* Booster Flame (red-coral): accent fills, CTAs. White text on it. */
+  --br-flame-ink: #B82D28;     /* Red text on light backgrounds (small text OK) */
+  --br-flame-ink-lg: #CC3530;  /* "rocket" in the wordmark on light; large text only */
+  --br-flame-on-dark: #F06A5F; /* Red text/wordmark on dark backgrounds */
+  --br-ember: #F49A92;         /* Fills only, never text */
+  --br-glow: #FBD8D4;          /* Fills/backgrounds only, never text */
+  --br-field: #FAF6F3;         /* Warm off-white page background */
+  --br-smoke: #FFFFFF;
+
+  /* ---------- Type ---------- */
+  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif; /* 800 headings, 600 subheads */
+  --font-ui: "Inter", ui-sans-serif, system-ui, sans-serif;                    /* 400/500/600 */
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 16px;
+  --text-lg: 20px;
+  --text-xl: 24px;
+  --text-2xl: 32px;
+  --text-3xl: 40px;
+  --text-display: 56px;
+  /* Money: always font-variant-numeric: tabular-nums */
+
+  /* ---------- Shape & spacing ---------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --radius-control: 8px;  /* buttons, inputs (matches current app) */
+  --radius-card: 12px;    /* app cards */
+  --radius-panel: 20px;   /* marketing panels */
+  --radius-pill: 999px;
+  --tap-min: 44px;        /* minimum touch target */
+
+  /* ---------- App surface (light) ---------- */
+  --app-bg: #F6F6F6;
+  --app-surface: #FFFFFF;
+  --app-border: #E5E5E5;
+  --app-text: #1A1A1A;
+  --app-text-muted: #5E5E5E;
+  --app-badge-ink: #6B6B6B; /* one-color "Powered by" badge in app chrome */
+
+  /* Club accent: set per club at runtime. Default = Boosters Rocket indigo. */
+  --app-accent: var(--club-accent, #1E1B4B);
+  --app-accent-contrast: var(--club-accent-contrast, #FFFFFF);
+  --app-accent-soft: var(--club-accent-soft, #E8E7F3);
+
+  /* ---------- Status (fixed; clubs cannot override) ---------- */
+  --status-paid-fg: #1F6B3D;     --status-paid-bg: #E3F2E8;
+  --status-due-fg: #9A4A0B;      --status-due-bg: #FDEEDC;
+  --status-overdue-fg: #A1231A;  --status-overdue-bg: #FBE4E2;
+  --status-info-fg: #3B4CB8;     --status-info-bg: #E6E8FA;
+}
+
+/* ---------- Dark mode (PROPOSED — not yet reviewed) ---------- */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --app-bg: #0F1113;
+    --app-surface: #17191C;
+    --app-border: #2A2D31;
+    --app-text: #F2F2F2;
+    --app-text-muted: #A3A3AD;
+    --app-badge-ink: #9A9AA2;
+    --app-accent-soft: var(--club-accent-soft-dark, #23214A);
+
+    --status-paid-fg: #6CC38A;     --status-paid-bg: #12301F;
+    --status-due-fg: #F2B36B;      --status-due-bg: #3A2510;
+    --status-overdue-fg: #FF8A80;  --status-overdue-bg: #3D1512;
+    --status-info-fg: #A5ADFF;     --status-info-bg: #1E2250;
+  }
+}
