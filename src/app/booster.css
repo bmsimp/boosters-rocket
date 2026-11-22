@@ -562,7 +562,7 @@ html:not(:has(nav.tabs)) main.wrap.single > .page-head .page-back { margin-top: 
 .powered-by { display: flex; width: fit-content; align-items: center; gap: 6px; min-height: 44px; color: var(--badge-ink);
   font-size: var(--text-xs); font-weight: 500; text-decoration: none; }
 .powered-by:hover .pb-name { text-decoration: underline; }
-.pb-mark { width: 1.375rem; height: 1.375rem; flex: none; fill: currentColor; }
+.pb-mark { width: 1.5rem; height: 1.5rem; flex: none; fill: currentColor; } /* 24px: over the kit's 20px floor for the small badge */
 .pb-name { font-weight: 600; }
 .powered-by-color .pb-boosters { color: var(--br-ink); } .powered-by-color .pb-rocket { color: var(--br-flame-ink); }
 .powered-by-color .pb-disc { fill: var(--br-disc); } .powered-by-color .pb-smoke { fill: var(--br-smoke); }
