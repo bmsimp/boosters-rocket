@@ -18,8 +18,9 @@ function Outcome({ state }: { state: Done | null }) {
   return <ActionOutcome state={state} />;
 }
 
-/** A text field and one button: used to block a person. */
-export function NoteAction({ label, field, pendingLabel, act }: { label: string; field: string; pendingLabel: string; act: (text: string) => Promise<Done> }) {
+/** A text field and one button: used to block a person (`variant="danger"`: it takes their sign-in away). */
+export function NoteAction({ label, field, pendingLabel, act, variant = "secondary" }: { label: string; field: string; pendingLabel: string; act: (text: string) => Promise<Done>;
+  variant?: "secondary" | "danger" }) {
   const id = useId();
   const [text, setText] = useState("");
   const [state, run, pending] = useActionState(async () => safely(() => act(text), failed), null);
@@ -27,7 +28,7 @@ export function NoteAction({ label, field, pendingLabel, act }: { label: string;
     <form onSubmit={noSubmit} className="stack">
       <TextArea id={`${id}-note`} label={field} rows={2} maxLength={500} value={text} onChange={(e) => setText(e.target.value)} />
       <Outcome state={state} />
-      <Button variant="secondary" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? pendingLabel : label}</Button>
+      <Button variant={variant} disabled={pending} onClick={() => startTransition(() => run())}>{pending ? pendingLabel : label}</Button>
     </form>
   );
 }
@@ -55,7 +56,7 @@ export function ResetSigninForm({ act }: { act: (reason: string, calledBack: boo
       </fieldset>
       <TextArea id={`${id}-reason`} label="Why? (staff only)" rows={2} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
       <Outcome state={state} />
-      <Button variant="secondary" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Resetting…" : "Reset sign-in"}</Button>
+      <Button variant="danger" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Resetting…" : "Reset sign-in"}</Button>
     </form>
   );
 }
@@ -90,7 +91,7 @@ export function GuardianChangeControls({ name, open, reinstatable, remove, reins
   useEffect(() => { if (state?.ok) said.current?.focus(); }, [state]);
   if (!state && !open && !reinstatable) return null;
   return (
-    <div className="stack">
+    <div className="stack row-change">
       {state ? <ActionOutcome state={state} ref={said} /> : null}
       {open ? (
         <details className="more"><summary>Remove<span className="visually-hidden"> {name}</span></summary>

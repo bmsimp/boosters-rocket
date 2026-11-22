@@ -4,7 +4,8 @@ import { listPeople, type PersonRow } from "@/lib/parents/directory";
 import { getParentSettings } from "@/lib/parents/settings";
 import { factorCounts, type FactorCounts } from "@/lib/parents/switches";
 import { can } from "@/lib/permissions/effective";
-import { Button, Card, DataTable, EmptyState, LocalTime, Notice, PageHeader, StateWords, TextInput, Toolbar } from "@/app/components/ui";
+import { Button, Card, DataTable, EmptyState, LocalTime, Notice, PageHeader, StateWords, StatusBadge, TextInput, Toolbar } from "@/app/components/ui";
+import { accessTone } from "./access-state";
 
 export const metadata = { title: "Parents" };
 export const dynamic = "force-dynamic";
@@ -20,7 +21,7 @@ function People({ people, typed }: { people: PersonRow[]; typed: string }) {
       { key: "welcome", header: "Welcome email", cell: (p) => (p.welcomedAt ? <>Sent <LocalTime iso={p.welcomedAt} /></> : "Not sent yet") },
       // Family names are text here, never links: a previous company's row carries that company's ID.
       { key: "families", header: "Families", cell: (p) => (p.families.length === 0 ? "No families"
-        : p.families.map((f) => <span key={f.guardianId} className="t-line">{f.familyName}: {f.words}</span>)) },
+        : p.families.map((f) => <span key={f.guardianId} className="t-line">{f.familyName}: <StatusBadge tone={accessTone(f.kind, p.hasPassword)}>{f.words}</StatusBadge></span>)) },
     ]} />
   );
 }
@@ -37,7 +38,7 @@ function FactorLine({ c, strict, admin, signinOn }: { c: FactorCounts; strict: b
   const counts = `Of the ${n(c.people, "person", "people")} ${who}, ${n(c.passkey, "has", "have")} a passkey and ${c.app} an authenticator app (someone with both is counted twice); ${n(c.neither, "has", "have")} neither.`;
   const level = strict ? " The club is at Strict: anyone with neither adds one the next time they sign in."
     : admin ? " You can ask everyone for one under Settings, Parent sign-ins, step 3, once most have one." : "";
-  return <p>{counts}{level}</p>;
+  return <Notice tone="info" live="none">{counts}{level}</Notice>;
 }
 
 export default async function ParentsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {

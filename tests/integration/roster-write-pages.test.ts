@@ -280,14 +280,14 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
     const rivera = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     expect(rivera).toContain("Ana Rivera is a portal guardian&#x27;s own Parent customer, so it is changed through them");
     expect(rivera).not.toContain("Change the parent Ana Rivera");
-    expect(rivera).toContain("a portal guardian&#x27;s own, changed through them");
+    expect(rivera).toContain("A portal guardian&#x27;s own, changed through them");
     // The Portal sign-ins box says where QuickBooks stands for her.
     const box = rivera.slice(rivera.indexOf('id="entry-signins-h"'), rivera.indexOf("</section>", rivera.indexOf('id="entry-signins-h"')));
     expect(box).toContain("Linked to their own Parent customer “Ana Rivera”.");
     // Mei Chen is in QuickBooks only: her forms stay, and the page says she isn't a portal guardian.
     const chen = await renderPage(RosterEntryPage, { params: { id: await idOf("20") } });
     expect(chen).toContain("Change the parent Mei Chen");
-    expect(chen).toContain("no portal guardian is linked to it. Link one on Accounting links, by someone who can link families");
+    expect(chen).toContain("No portal guardian is linked to it. Link one on Accounting links, by someone who can link families");
   });
 
   it("says a removed guardian's Parent customer, left active, is their own and used again if they are added back (stage 3's slice 9h)", async () => {
@@ -297,8 +297,8 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
     await db.update(guardian).set({ status: "disabled", disabledReason: "removed", statusBeforeDisable: "active" }).where(eq(guardian.id, row.id));
     const rivera = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     const parents = rivera.slice(rivera.indexOf('id="entry-parents-h"'), rivera.indexOf("</section>", rivera.indexOf('id="entry-parents-h"')));
-    expect(parents).toContain("a removed guardian&#x27;s own, left active as it has a balance. Adding them back uses it again");
-    expect(parents).not.toContain("no portal guardian is linked to it");
+    expect(parents).toContain("A removed guardian&#x27;s own, left active as it has a balance. Adding them back uses it again");
+    expect(parents).not.toContain("No portal guardian is linked to it");
   });
 
   it("a family's page, with both permissions: rename, add a student, move and make inactive; no \"Add a parent\" (stage 3's slice 9h)", async () => {

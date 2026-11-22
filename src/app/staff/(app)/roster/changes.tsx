@@ -24,8 +24,12 @@ import { addStudentAction, addStudentHereAction, createAction, createAndLinkActi
  * are QuickBooks text, or the portal's own, shown as text only.
  */
 
-/** What can be changed here for this club, and why the rest can't, in words (src/lib/roster/operations.ts). */
-export function WhatChanges({ shape, canChange, unlinked = false }: { shape: MembershipShape; canChange: boolean; unlinked?: boolean }) {
+/**
+ * What can be changed here for this club, and why the rest can't, in words (src/lib/roster/operations.ts): one line,
+ * and the rest under How this works. On a family's page (`onFamily`) a move's and a new guardian's consequences are left
+ * out, as Move a student and Add a guardian say them there.
+ */
+export function WhatChanges({ shape, canChange, unlinked = false, onFamily = false }: { shape: MembershipShape; canChange: boolean; unlinked?: boolean; onFamily?: boolean }) {
   const { offered, notOffered } = shapeOperations(shape);
   const words: [RosterOperation, string][] = shape.kind === "flat"
     ? [["create_member", "make a member"], ["rename_member", "rename one"], ["deactivate_member", "make one inactive"]]
@@ -35,18 +39,18 @@ export function WhatChanges({ shape, canChange, unlinked = false }: { shape: Mem
   const list = can.length > 1 ? `${can.slice(0, -1).join(", ")} and ${can.at(-1)}` : can[0] ?? "";
   return (
     <Card title="Changing the roster" titleId="changes-h">
-      <p>{canChange ? <>From the portal you can {list}.</>
-        : <>Staff who may change the roster can {list} from the portal. For a family linked to QuickBooks, a rename, a new student or a move of a student is saved in the portal first; making someone inactive is sent to QuickBooks first.</>}</p>
-      <ul>
-        {canChange && <li>A rename, new student or move of a linked family is saved here first, then sent. If QuickBooks refuses, it stays here and Reconciliation lists it.</li>}
-        {canChange && <li>Making someone inactive goes to QuickBooks first. The roster shows it once QuickBooks has it.</li>}
-        {unlinked ? <li>This family isn&apos;t linked to a customer in QuickBooks: a change to it is saved in the portal only.</li>
-          : <><li>A new family is saved here, and made in QuickBooks too if you can link families.</li><li>A family with no link is changed here only.</li></>}
-      </ul>
-      {notOffered.map((n) => <p key={n.why}>{n.why}</p>)}
+      <p>{canChange ? <>From the portal you can {list}.</> : <>Staff who may change the roster can {list} from the portal.</>}</p>
       <HowThisWorks>
-        {canChange && <p>A move: the student takes their completed forms, and unfinished ones start again. They give up places on shifts still to come. Earned credit stays with the old family. An unpaid buy-out invoice is voided, and a paid one is flagged for the club. Invoices follow once QuickBooks has the move.</p>}
-        {canChange && <p>A new guardian gets their own Parent customer under the family, with their name and sign-in address, unless one of that name is there already. It is renamed with them. When they&apos;re removed it is made inactive, but only if it has no balance the portal can read, owed or a credit.</p>}
+        {!canChange && <p>For a family linked to QuickBooks, a rename, a new student or a move of a student is saved in the portal first; making someone inactive is sent to QuickBooks first.</p>}
+        <ul>
+          {canChange && <li>A rename, new student or move of a linked family is saved here first, then sent. If QuickBooks refuses, it stays here and Reconciliation lists it.</li>}
+          {canChange && <li>Making someone inactive goes to QuickBooks first. The roster shows it once QuickBooks has it.</li>}
+          {unlinked ? <li>This family isn&apos;t linked to a customer in QuickBooks: a change to it is saved in the portal only.</li>
+            : <><li>A new family is saved here, and made in QuickBooks too if you can link families.</li><li>A family with no link is changed here only.</li></>}
+        </ul>
+        {notOffered.map((n) => <p key={n.why}>{n.why}</p>)}
+        {canChange && !onFamily && <p>A move: the student takes their completed forms, and unfinished ones start again. They give up places on shifts still to come. Earned credit stays with the old family. An unpaid buy-out invoice is voided, and a paid one is flagged for the club. Invoices follow once QuickBooks has the move.</p>}
+        {canChange && !onFamily && <p>A new guardian gets their own Parent customer under the family, with their name and sign-in address, unless one of that name is there already. It is renamed with them. When they&apos;re removed it is made inactive, but only if it has no balance the portal can read, owed or a credit.</p>}
         <p>{NOT_HERE.contact}</p>
       </HowThisWorks>
     </Card>
@@ -117,7 +121,7 @@ export function CreateBox({ shape, rosterTag, memberTypes, goes }: { shape: Memb
   return (
     <Card title="Make a family" titleId="create-h">
       <p>{addGoesWords(goes, "family", "family type")} Add its students and guardians from the family&apos;s page once it is saved.</p>
-      <NameForm field="The family's name" label="Make the family" pendingLabel={pendingLabel} act={createAction.bind(null, rosterTag, "family")} />
+      <NameForm field="The family's name" label="Make the family" variant="primary" pendingLabel={pendingLabel} act={createAction.bind(null, rosterTag, "family")} />
     </Card>
   );
 }

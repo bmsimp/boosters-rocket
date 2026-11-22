@@ -8,11 +8,11 @@ import { whoseDetails } from "@/lib/parents/my-family";
 import { getShape } from "@/lib/roster/shape";
 import { familyPagesStand } from "@/lib/roster/queries";
 import { getParentSettings, parentDoorClosed } from "@/lib/parents/settings";
-import { Card, DataTable, EmptyState, HowThisWorks, KeyValue, List, ListRow, LocalTime, Notice, PageHeader, StateWords, StatusBadge, type Tone } from "@/app/components/ui";
+import { Card, DataTable, EmptyState, HowThisWorks, KeyValue, List, ListRow, LocalTime, Notice, PageHeader, StatusBadge } from "@/app/components/ui";
 import { DetailsForm, NameForm, NoteAction, OneButton, ResetSigninForm } from "../forms";
 import { blockAction, unblockAction, resendWelcomeAction, renamePersonAction, resetSigninAction, savePersonDetailsAction } from "../actions";
 import { GuardianChange } from "../guardian-change";
-import { accessState } from "../access-state";
+import { accessTone } from "../access-state";
 import { familyPage } from "@/app/staff/(app)/family-pages";
 import { lifeWords } from "@/lib/parents/link-delivery";
 import { LINK_LIFE_MS } from "@/lib/parents/signin-links";
@@ -21,8 +21,6 @@ import { signinHeld } from "@/lib/parents/signin-reset";
 
 export const metadata = { title: "Parent" };
 
-/** A family's sign-in state as a status badge's tone: can sign in, still to do, or blocked (accessState()). */
-const ACCESS_TONE: Record<ReturnType<typeof accessState>, Tone> = { done: "done", todo: "due", waived: "neutral" };
 export const dynamic = "force-dynamic";
 
 export default async function PersonPage({ params }: { params: Promise<{ id: string }> }) {
@@ -55,13 +53,19 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   const mayReset = can(ctx.effective, "Parents.SignInReset.ReadWrite");
   const held = mayReset ? await signinHeld(p.parentId) : null;
   const familyPages = !pagesStand ? [] : p.families.flatMap((f) => (!f.previousCompany && f.open && f.familyId !== null && f.pageStands ? [{ key: f.guardianId, id: f.familyId, name: f.familyName }] : []));
+  // When they last signed in, their password and their welcome: shown to every reader of the page.
+  const signinFacts = [
+    { key: "signin", label: "Last signed in", value: p.lastSigninAt ? <LocalTime iso={p.lastSigninAt} /> : "Never" },
+    { key: "password", label: "Password", value: p.hasPassword ? "Chosen" : "Not chosen yet" },
+    // Owed while welcomed before: the mail an Admin asked for on the parents' settings page, with a link to choose a password.
+    { key: "welcome", label: "Welcome email", value: p.welcomedAt ? <>Sent <LocalTime iso={p.welcomedAt} />{p.welcomeOwed ? ". An email with a link to choose a password is waiting to be sent" : null}</>
+      : p.welcomeOwed ? "Waiting to be sent" : "Not sent" },
+  ];
   return (
     <main className="wrap single">
-      <PageHeader title={p.name} back={{ href: "/staff/parents", label: "Back to Parents" }} lede={<>{p.email}.</>} />
+      <PageHeader title={p.name} back={{ href: "/staff/parents", label: "Back to Parents" }} lede={p.email} />
 
       <Card title="Families" titleId="pf-h">
-        <StateWords state={p.blocked ? "waived" : canSignIn && p.hasPassword ? "done" : "todo"}
-          words={p.blocked ? "Blocked: can't sign in to any family" : canSignIn ? (p.hasPassword ? "Can sign in" : "Can sign in once they choose a password") : "Can't sign in to any family right now"} />
         {p.families.length === 0 ? <EmptyState title={<>This person isn&apos;t linked to any family.</>} /> : (
           <DataTable caption="Each family this person is linked to, and whether they can sign in to it" captionHidden
             rows={p.families} rowKey={(f) => f.guardianId} columns={[
@@ -69,7 +73,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
               // made inactive in the portal with no link has no page to open (stage 3's slice 9d).
               { key: "family", header: "Family", rowHeader: true, cell: (f) => (f.previousCompany || f.familyId === null || !f.pageStands ? f.familyName
                 : <Link href={familyPage(f.familyId)}>{f.familyName}</Link>) },
-              { key: "access", header: "Sign-in", cell: (f) => <StatusBadge tone={ACCESS_TONE[accessState(f.kind, p.hasPassword)]}>{f.words}</StatusBadge> },
+              { key: "access", header: "Sign-in", cell: (f) => <StatusBadge tone={accessTone(f.kind, p.hasPassword)}>{f.words}</StatusBadge> },
               { key: "quickbooks", header: "In QuickBooks", cell: (f) => {
                 const said = inQuickBooks.get(f.guardianId) ?? "Nothing in QuickBooks for this membership.";
                 const item = kept.get(f.guardianId);
@@ -80,18 +84,14 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
               ...(changesGuardians ? [{ key: "change", header: "Change", quiet: true, cell: (f: PersonFamily) => <GuardianChange name={f.familyName} guardianId={f.guardianId} open={f.open} reinstatable={f.reinstatable} /> }] : []),
             ]} />
         )}
-        <KeyValue items={[
-          { key: "signin", label: "Last signed in", value: p.lastSigninAt ? <LocalTime iso={p.lastSigninAt} /> : "Never" },
-          { key: "password", label: "Password", value: p.hasPassword ? "Chosen" : "Not chosen yet" },
-          // Owed while welcomed before: the mail an Admin asked for on the parents' settings page, with a link to choose a password.
-          { key: "welcome", label: "Welcome email", value: p.welcomedAt ? <>Sent <LocalTime iso={p.welcomedAt} />{p.welcomeOwed ? ". An email with a link to choose a password is waiting to be sent" : null}</>
-            : p.welcomeOwed ? "Waiting to be sent" : "Not sent" },
-        ]} />
         <p className="hint">Their name, sign-in email, phone and mailing address are the portal&apos;s own. A change made in QuickBooks doesn&apos;t change them. Add a guardian to a family from that family&apos;s page.</p>
         <HowThisWorks>
           <p>Each family they&apos;re in has its own Parent customer in QuickBooks, where the books have parents. A new name here is sent to each. Removing them makes theirs inactive only if it has no balance the portal can read, owed or a credit.</p>
         </HowThisWorks>
       </Card>
+
+      {/* How they sign in: its own card, or, for an Admin who may reset it, the top of Reset sign-in. */}
+      {!held && <Card title="Sign-in" titleId="ps-h"><KeyValue items={signinFacts} /></Card>}
 
       <Card title="Phone and mailing address" titleId="pd-h">
         {contact ? (
@@ -132,7 +132,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
         ) : (
           <>
             <p>Signs them out of every family at once, and stops them signing in, getting codes or using a password link. Remembered devices are forgotten, and their password is kept. They aren&apos;t told. For a custody matter or misuse.</p>
-            <NoteAction label="Block" field="Why? (staff only)" pendingLabel="Blocking…" act={blockAction.bind(null, p.parentId)} />
+            <NoteAction label="Block" field="Why? (staff only)" pendingLabel="Blocking…" variant="danger" act={blockAction.bind(null, p.parentId)} />
           </>
         )}
       </Card>
@@ -140,7 +140,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
       {held && (
         <Card title="Reset sign-in" titleId="pr-h">
           <KeyValue items={[
-            { key: "password", label: "Password", value: held.password ? "Chosen" : "Not chosen" },
+            ...signinFacts,
             { key: "passkeys", label: "Passkeys", value: held.passkeys },
             { key: "app", label: "Authenticator app", value: held.app ? "On" : "Off" },
             { key: "backup", label: "Backup codes left", value: held.backupCodes },

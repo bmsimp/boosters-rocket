@@ -26,7 +26,8 @@ import { moveAction, saveFamilyDetailsAction } from "../write-actions";
 import { offers } from "@/lib/roster/operations";
 import { placeWords } from "@/lib/roster/place";
 import type { Cust, Family } from "@/lib/roster/model";
-import { Card, DataTable, EmptyState, HowThisWorks, KeyValue, List, ListRow, LocalTime, Notice, PageHeader, type Column } from "@/app/components/ui";
+import { Card, DataTable, EmptyState, HowThisWorks, KeyValue, List, ListRow, LocalTime, Notice, PageHeader, StatusBadge, type Column, type Tone } from "@/app/components/ui";
+import { accessTone } from "@/app/staff/(app)/parents/access-state";
 import { familyBalancePage, familyBuyoutsPage, familyCreditPage, familyProgressPage } from "@/app/staff/(app)/family-pages";
 
 export const metadata = { title: "Roster" };
@@ -41,11 +42,17 @@ const standing = (c: Cust | null) => (c === null ? "No customer" : c.active ? "A
  * one that is no family here, no longer a student customer, or gone. QuickBooks text, as text. A record with no link
  * whose customer from before an unlink is still in the books (`held`, endedLinksHeld(): stage 4's slice M3b2) says so.
  */
-const studentStanding = (s: RecordStudent, held: ReadonlyMap<AppStudentId, EndedHeld>) => (s.customer ? standing(s.customer) : s.place ? placeWords(s.place)
-  : s.linked ? "Not under a family in QuickBooks" : held.has(s.id) ? "Not linked: their customer from before an unlink is still in the books" : "No customer");
+const studentStanding = (s: RecordStudent, held: ReadonlyMap<AppStudentId, EndedHeld>): Standing => (s.customer ? { tone: standingTone(s.customer), words: standing(s.customer) }
+  : s.place ? { tone: "due", words: placeWords(s.place) }
+  : s.linked ? { tone: "due", words: "Not under a family in QuickBooks" } : held.has(s.id) ? { tone: "due", words: "Not linked: their customer from before an unlink is still in the books" }
+  : { tone: "neutral", words: "No customer" });
+/** A customer's standing as a badge's tone: active, or inactive or none. */
+const standingTone = (c: Cust | null): Tone => (c !== null && c.active ? "done" : "neutral");
 
+/** A row's standing in QuickBooks as a status badge (its tone and words), with what follows from it on a line under it. */
+type Standing = { tone: Tone; words: string; detail?: ReactNode };
 /** One row of a people table: a record's name (a student's) or a customer's (a parent's, a member's), with what QuickBooks holds for them. */
-type Person = { key: string; name: string; customer: Cust | null; standing?: ReactNode };
+type Person = { key: string; name: string; customer: Cust | null; standing?: Standing };
 const ofCustomer = (c: Cust): Person => ({ key: c.qboId, name: c.displayName, customer: c });
 
 /**
@@ -63,7 +70,10 @@ function People({ id, title, noun, people, contact, empty }: { id: string; title
       // Reconciliation): this column is what QuickBooks holds.
       { key: "phone", header: "Phone in QuickBooks", cell: (p: Person) => p.customer?.phone ?? "No phone number" },
     ] : []),
-    { key: "status", header: "In QuickBooks", cell: (p) => p.standing ?? standing(p.customer) },
+    { key: "status", header: "In QuickBooks", cell: (p) => {
+      const st = p.standing ?? { tone: standingTone(p.customer), words: standing(p.customer) };
+      return <><StatusBadge tone={st.tone}>{st.words}</StatusBadge>{st.detail ? <span className="when">{st.detail}</span> : null}</>;
+    } },
   ];
   return (
     <Card title={title} titleId={id}>
@@ -85,7 +95,7 @@ function SignIns({ familyId, signins, links, changes, addable, inQuickBooks }: {
   const columns: Column<FamilySignin>[] = [
     { key: "name", header: "Person", rowHeader: true, cell: (s) => (links ? <Link href={`/staff/parents/${s.parentId}`}>{s.name}</Link> : s.name) },
     { key: "email", header: "Email", cell: (s) => s.email },
-    { key: "words", header: "Sign-in", cell: (s) => s.words },
+    { key: "words", header: "Sign-in", cell: (s) => <StatusBadge tone={accessTone(s.kind, s.hasPassword)}>{s.words}</StatusBadge> },
     // Where QuickBooks stands for the guardian's own Parent customer (stage 3's slice 9h), in words.
     { key: "quickbooks", header: "In QuickBooks", cell: (s) => inQuickBooks.get(s.guardianId) ?? "Nothing in QuickBooks for this membership." },
     ...(changes ? [{ key: "change", header: "Change", quiet: true, cell: (s: FamilySignin) => <GuardianChange name={s.name} guardianId={s.guardianId} open={s.open} reinstatable={s.reinstatable} /> }] : []),
@@ -100,9 +110,10 @@ function SignIns({ familyId, signins, links, changes, addable, inQuickBooks }: {
           <h3 className="table-head">Add a guardian</h3>
           {addable !== null ? <Notice tone="info" live="none">{addable}</Notice> : (
             <>
-              <p>They sign in with this address and a password they choose from an emailed link: the welcome email, or Resend welcome email on their page, or &ldquo;Set up or reset my password&rdquo; on the sign-in page. If someone in the portal already has this address, you&apos;re asked whether it&apos;s the same person first. One address is one person, who can be a guardian in several families.</p>
+              <p>They sign in with this address and a password they choose from an emailed link.</p>
               <HowThisWorks>
-                <p>Where the books have parents and this family is linked, the guardian gets their own Parent customer under the family, with their name and this address, unless QuickBooks already has a customer of that name here.</p>
+                <p>The link is the welcome email, or Resend welcome email on their page, or &ldquo;Set up or reset my password&rdquo; on the sign-in page. If someone in the portal already has this address, you&apos;re asked whether it&apos;s the same person first. One address is one person, who can be a guardian in several families.</p>
+                <p>Where the books have parents and this family is linked, the guardian gets their own Parent customer under the family, with their name and this address, unless QuickBooks already has a customer of that name here. It is renamed with them. When they&apos;re removed it is made inactive, but only if it has no balance the portal can read, owed or a credit.</p>
               </HowThisWorks>
               <AddGuardianForm act={addGuardianAction.bind(null, String(familyId))} />
             </>
@@ -293,13 +304,13 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
         <>
           <People id="entry-students-h" title="Students" noun="Student" people={fam.students.map((s) => ({ key: String(s.id), name: s.name, customer: s.customer, standing: studentStanding(s, held.students) }))} contact={false} empty="The portal holds no students for this family." />
           <People id="entry-parents-h" title="Parents in QuickBooks" noun="Parent" contact empty="QuickBooks lists no parents under this family."
-            people={fam.parents.map((c) => ({ ...ofCustomer(c), standing: <>{standing(c)}: {ofGuardians.get(c.qboId) === "own" ? "a portal guardian's own, changed through them"
+            people={fam.parents.map((c) => ({ ...ofCustomer(c), standing: { tone: standingTone(c), words: standing(c), detail: <>{ofGuardians.get(c.qboId) === "own" ? "A portal guardian's own, changed through them"
               // Stage 4's slice M3c: a shared customer, or one only another family's guardian is linked to, is sorted out on
               // Accounting links by unlinking each guardian whose it isn't (and linking one of this family's where none is
               // left on it), and one no guardian is linked to is linked to one there; a link only for a reader who may link.
-              : ofGuardians.get(c.qboId) === "other" ? <>shared, or another family&apos;s guardian&apos;s, so nothing is sent for it. {edit ? "See the note under Change in QuickBooks" : <>Sort it out on {linker ? <Link href="/staff/links">Accounting links</Link> : "Accounting links"}</>}</>
-              : ofGuardians.get(c.qboId) === "removed" ? "a removed guardian's own, left active as it has a balance. Adding them back uses it again"
-              : <>no portal guardian is linked to it. Link one on {linker ? <Link href="/staff/links">Accounting links</Link> : "Accounting links, by someone who can link families"}</>}</> }))} />
+              : ofGuardians.get(c.qboId) === "other" ? <>Shared, or another family&apos;s guardian&apos;s, so nothing is sent for it. {edit ? "See the note under Change in QuickBooks" : <>Sort it out on {linker ? <Link href="/staff/links">Accounting links</Link> : "Accounting links"}</>}</>
+              : ofGuardians.get(c.qboId) === "removed" ? "A removed guardian's own, left active as it has a balance. Adding them back uses it again"
+              : <>No portal guardian is linked to it. Link one on {linker ? <Link href="/staff/links">Accounting links</Link> : "Accounting links, by someone who can link families"}</>}</> } }))} />
         </>
       ) : (
         <People id="entry-member-h" title="In QuickBooks" noun="Member" people={customer ? [ofCustomer(customer)] : []} contact empty="QuickBooks lists no customer for this member." />
@@ -323,7 +334,7 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
         students={studentType ? toCreate.map((s) => s.name) : []} notOffered={studentType ? notOffered : []} rosterTag={rosterTag} ready={page.connected && page.roster !== null}
         may={can(ctx.effective, "Accounting.Link.ReadWrite")}
         types={page.shape?.kind === "flat" ? page.shape.memberTypeIds.map((t) => ({ qboId: t, name: page.types.find((x) => x.qboId === t)?.name ?? "A member type" })) : []} />}
-      {page.shape && <WhatChanges shape={page.shape} canChange={canChange} unlinked={!fam.linked} />}
+      {page.shape && <WhatChanges shape={page.shape} canChange={canChange} unlinked={!fam.linked} onFamily />}
       {hold !== null && <SigninHold name={fam.name} hold={hold} notNow={holdNotNow} guardians={signins.filter((s) => s.open && s.kind !== "blocked").map((s) => s.name)}
         release={changesGuardians ? releaseSigninHoldAction.bind(null, String(familyId)) : null} />}
       <SignIns familyId={familyId} signins={signins} links={links} changes={changesGuardians} inQuickBooks={signinStandings}

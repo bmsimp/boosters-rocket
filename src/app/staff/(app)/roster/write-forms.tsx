@@ -48,7 +48,8 @@ function MemberTypes({ id, types, type, setType }: { id: string; types: { qboId:
 }
 
 /** One name and a button: a new family or member, a new student, or a new name for someone. A free name offered is used with one press. */
-export function NameForm({ field, label, pendingLabel, initial = "", act }: { field: string; label: string; pendingLabel: string; initial?: string; act: (name: string) => Promise<WriteResult> }) {
+export function NameForm({ field, label, pendingLabel, initial = "", act, variant = "secondary" }: { field: string; label: string; pendingLabel: string; initial?: string;
+  act: (name: string) => Promise<WriteResult>; variant?: "primary" | "secondary" }) {
   const id = useId();
   const [name, setName] = useState(initial);
   const [state, run, pending] = useActionState(async (_: WriteResult | null, asked: string) => {
@@ -61,7 +62,7 @@ export function NameForm({ field, label, pendingLabel, initial = "", act }: { fi
     <form onSubmit={noSubmit} className="stack">
       <TextInput id={`${id}-name`} label={field} maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />
       <Outcome state={state} pending={pending} onOffer={(offer) => { setName(offer); send(offer); }} />
-      <Button variant="secondary" disabled={pending} onClick={() => send(name)}>{pending ? pendingLabel : label}</Button>
+      <Button variant={variant} disabled={pending} onClick={() => send(name)}>{pending ? pendingLabel : label}</Button>
     </form>
   );
 }

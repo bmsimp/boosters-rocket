@@ -106,11 +106,6 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
         </Card>
       )}
 
-      {/* Not while the cache names no company (read before the portal recorded it): addFamily() refuses there. */}
-      {roster && page.shape && mayAdd && rosterTag !== "none" && <CreateBox shape={page.shape} rosterTag={rosterTag} goes={goes}
-        memberTypes={page.shape.kind === "flat" ? page.shape.memberTypeIds.map((t) => ({ qboId: t, name: page.types.find((x) => x.qboId === t)?.name ?? "A member type" })) : []} />}
-      {roster && page.shape && <WhatChanges shape={page.shape} canChange={canChange} />}
-
       {roster && page.attention.length > 0 && (
         <Card title={<>Needs attention ({page.attention.length})</>} titleId="roster-attn-h"
           description={<>Things to tidy up. None of them fixes itself: fix each in QuickBooks, or on the family&apos;s page.</>}>
@@ -121,6 +116,11 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
             ]} />
         </Card>
       )}
+
+      {/* Not while the cache names no company (read before the portal recorded it): addFamily() refuses there. */}
+      {roster && page.shape && mayAdd && rosterTag !== "none" && <CreateBox shape={page.shape} rosterTag={rosterTag} goes={goes}
+        memberTypes={page.shape.kind === "flat" ? page.shape.memberTypeIds.map((t) => ({ qboId: t, name: page.types.find((x) => x.qboId === t)?.name ?? "A member type" })) : []} />}
+      {roster && page.shape && <WhatChanges shape={page.shape} canChange={canChange} />}
 
       <Freshness page={page} admin={admin} />
     </main>

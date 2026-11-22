@@ -125,32 +125,34 @@ describe("the staff pages for parents", () => {
 
   it("says how many who can sign in have a passkey, an app or neither, naming nobody, and where an Admin asks for one", async () => {
     // Section 9 of the app-owned families spec ("Sign-in"): staff see the counts; the sign-in release's slice SI-10b.
-    const counts = (html: string) => { const at = html.indexOf("<p>Of the "); return at < 0 ? "" : html.slice(at, html.indexOf("</p>", at)).replaceAll("&#x27;", "'"); };
+    // The counts are an information notice of their own, under the page's head.
+    const counts = (html: string) => { const at = html.indexOf("Of the "); return at < 0 ? "" : html.slice(at, html.indexOf("</div>", at)).replaceAll("<!-- -->", "").replaceAll("&#x27;", "'"); };
+    expect(await parentsPage()).toMatch(/<div class="notice notice-info"><svg[^]*?<span class="notice-word">Note<\/span> (<!-- -->)?Of the /);
     const readsBefore = (await db.select().from(auditLog)).length;
     // Ana can sign in, with neither; Sam's rows are closed, so Sam isn't counted. The registrar holds no Settings.Parents.ReadWrite.
-    expect(counts(await parentsPage())).toBe("<p>Of the 1 person who can sign in, 0 have a passkey and 0 an authenticator app (someone with both is counted twice); 1 has neither.");
+    expect(counts(await parentsPage())).toBe("Of the 1 person who can sign in, 0 have a passkey and 0 an authenticator app (someone with both is counted twice); 1 has neither.");
     const ana = await anaRow();
     await seedPasskey(ana.id); await seedAuthenticator(ana.id);
     const sam = (await db.select().from(parent).where(eq(parent.email, "sam@example.com")))[0]!;
     await db.update(guardian).set({ status: "invited", disabledReason: null, statusBeforeDisable: null }).where(eq(guardian.parentId, sam.id));
-    expect(counts(await parentsPage())).toBe("<p>Of the 2 people who can sign in, 1 has a passkey and 1 an authenticator app (someone with both is counted twice); 1 has neither.");
+    expect(counts(await parentsPage())).toBe("Of the 2 people who can sign in, 1 has a passkey and 1 an authenticator app (someone with both is counted twice); 1 has neither.");
     // An Admin is told where the level is chosen; at Strict, everyone is told what happens to those with neither.
     as(await seedStaff({ email: "ada@club.org", name: "Ada Admin", admin: true }));
-    expect(counts(await parentsPage())).toBe("<p>Of the 2 people who can sign in, 1 has a passkey and 1 an authenticator app (someone with both is counted twice); 1 has neither. You can ask everyone for one under Settings, Parent sign-ins, step 3, once most have one.");
+    expect(counts(await parentsPage())).toBe("Of the 2 people who can sign in, 1 has a passkey and 1 an authenticator app (someone with both is counted twice); 1 has neither. You can ask everyone for one under Settings, Parent sign-ins, step 3, once most have one.");
     await seedParentSettings({ level: "strict" });
     const strict = " The club is at Strict: anyone with neither adds one the next time they sign in.";
-    expect(counts(await parentsPage())).toBe(`<p>Of the 2 people who can sign in, 1 has a passkey and 1 an authenticator app (someone with both is counted twice); 1 has neither.${strict}`);
+    expect(counts(await parentsPage())).toBe(`Of the 2 people who can sign in, 1 has a passkey and 1 an authenticator app (someone with both is counted twice); 1 has neither.${strict}`);
     as(registrar);
-    expect(counts(await parentsPage())).toBe(`<p>Of the 2 people who can sign in, 1 has a passkey and 1 an authenticator app (someone with both is counted twice); 1 has neither.${strict}`);
+    expect(counts(await parentsPage())).toBe(`Of the 2 people who can sign in, 1 has a passkey and 1 an authenticator app (someone with both is counted twice); 1 has neither.${strict}`);
     await seedParentSettings({ level: "standard" });
     expect(counts(await parentsPage())).not.toContain("step 3");
     // With parent sign-ins off nobody can sign in: the counts are of who could once they are on (slice SI-11), the rest as it was.
     await seedParentSettings({ signin: false });
-    expect(counts(await parentsPage())).toBe("<p>Of the 2 people who could sign in once sign-ins are on, 1 has a passkey and 1 an authenticator app (someone with both is counted twice); 1 has neither.");
+    expect(counts(await parentsPage())).toBe("Of the 2 people who could sign in once sign-ins are on, 1 has a passkey and 1 an authenticator app (someone with both is counted twice); 1 has neither.");
     await seedParentSettings({ level: "strict" });
-    expect(counts(await parentsPage())).toBe(`<p>Of the 2 people who could sign in once sign-ins are on, 1 has a passkey and 1 an authenticator app (someone with both is counted twice); 1 has neither.${strict}`);
+    expect(counts(await parentsPage())).toBe(`Of the 2 people who could sign in once sign-ins are on, 1 has a passkey and 1 an authenticator app (someone with both is counted twice); 1 has neither.${strict}`);
     await seedParentSettings({ signin: true, level: "standard" });
-    expect(counts(await parentsPage())).toBe("<p>Of the 2 people who can sign in, 1 has a passkey and 1 an authenticator app (someone with both is counted twice); 1 has neither.");
+    expect(counts(await parentsPage())).toBe("Of the 2 people who can sign in, 1 has a passkey and 1 an authenticator app (someone with both is counted twice); 1 has neither.");
     // Counts only: reading them writes no audit row.
     expect((await db.select().from(auditLog)).length).toBe(readsBefore);
   });
@@ -222,7 +224,7 @@ describe("the staff pages for parents", () => {
     expect(html).not.toContain(`href="/staff/roster/${await recordOfCustomer("20", "family")}"`);
     expect(html).not.toContain("Chen");
     const people = (await parentsPage("ana")).split('id="people-h"')[1]!;
-    expect(people).toContain("A family in the previous QuickBooks company: Can&#x27;t sign in: a different QuickBooks company was connected");
+    expect(people.replace(/<[^>]+>/g, "")).toContain("A family in the previous QuickBooks company: Can&#x27;t sign in: a different QuickBooks company was connected");
     expect(people).not.toContain("Chen");
   });
 
