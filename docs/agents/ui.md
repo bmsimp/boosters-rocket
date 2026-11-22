@@ -12,7 +12,7 @@ Import from the index: `import { Card, List, ListRow, LinkButton } from "@/app/c
 | --- | --- | --- |
 | A page's title, its one quiet line, its actions, the way back | `PageHeader` | a bare `h1.page-title` with buttons beside it |
 | A titled region (what a family owes, a setting, a form) | `Card` (`title` + `titleId` name the region; `actions` at the foot, `headActions` beside the title) | a card inside a card; a `<section class="box">` written by hand |
-| A short list a person acts on (To do, Students, Payments) | `List` + `ListRow` (`status`, `title`, `meta` (one part or a list, dotted), `amount`, `action`; `sub` of `ListSubRow` for a row's parts, indented) | a table for five rows; a list of cards; a panel inside a row |
+| A short list a person acts on (To do, Students, Payments) | `List` + `ListRow` (`status`, `title`, `meta` (one part or a list, dotted), `amount`, `action`; `sub` of `ListSubRow` for a row's parts, indented); `ListTotal` right after a list of amounts that add up (Payments) | a table for five rows; a list of cards; a panel inside a row; a total written by hand |
 | Many records with the same columns (roster, Balances, audit) | `DataTable` | a hand-made `<table>`; sorting controls (say the order with `sorted`) |
 | The small heading over a list or table | `SectionLabel` | an uppercase label; an eyebrow over a page title |
 | Doing something | `Button` (`primary`, `secondary`, `quiet`, `danger`, `club`; `size="sm"` in a row; `busy`) | more than one primary in an area; `disabled` for busy on a parent page |
@@ -20,10 +20,10 @@ Import from the index: `import { Card, List, ListRow, LinkButton } from "@/app/c
 | A state in a row or cell, in words with an icon | `StateWords` (done, todo, waived) or `StatusBadge` (a tone, its icon, its words) | color alone; a colored dot with no words |
 | A short label (a role, a count) | `Badge` (`tone="club"` is a label style only, the club's wash, not a status tone) | a pill: corners are 4px, full circles are for avatars and status dots |
 | The ring before a row | `StatusIcon` (inside `ListRow` already) | an emoji or a Unicode glyph |
-| A status that stands apart, or what an action answered | `Notice` (info, warning, done, problem: neutral, due, done and late in the tone vocabulary below) and `ActionOutcome` | a bare status paragraph; an alert for anything but a problem |
+| A status that stands apart, or what an action answered | `Notice` (info, warning, done, problem: neutral, due, done and late in the tone vocabulary below) and `ActionOutcome`; an answer drawn in place of the form that was pressed takes the focus (`ref`, and Notice's `tabIndex={-1}`) | a bare status paragraph; an alert for anything but a problem; a green line of words for an action's answer |
 | Nothing here yet | `EmptyState` (what will be here, and the one action) | "No data"; an empty table |
 | One figure that matters on a staff page | `Stat` (several in `.stats`) | a hero number on a parent page: the amount sits in its card |
-| A text field, a few lines, a dropdown, a tick box | `TextInput`, `TextArea`, `Select`, `Checkbox` (each takes `id`, `label`, `hint`, `error`) | a placeholder instead of a label; an error in color alone |
+| A text field, a few lines, a dropdown, a tick box | `TextInput`, `TextArea`, `Select`, `Checkbox` (each takes `id`, `label`, `hint`, `error`; `TextInput` a `ref` for a field that takes the focus) | a placeholder instead of a label; an error in color alone; your own `aria-describedby` on a `TextInput` (it is replaced: say it with `hint`) |
 | A few options that need explaining | `ChoiceGroup` | a dropdown of two |
 | Facts about one thing, label beside value | `KeyValue` | a two-column table |
 | Filters over a list or table | `Toolbar` | filters scattered above several cards |

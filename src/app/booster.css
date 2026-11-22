@@ -417,6 +417,16 @@ fieldset.checks { border: 0; padding: 0; min-width: 0; }
 .list-sub-title { font-size: var(--text-control); overflow-wrap: anywhere; }
 /* On a phone an amount and its action stack at the row's end, so the title keeps the width. */
 @media (max-width: 479.98px) { .list-trail { flex-direction: column; align-items: flex-end; gap: var(--s1); } }
+/* A list with something after it in its card keeps a hairline under its last row instead of running to the card's foot. */
+.box > .list:not(:last-child) { margin-bottom: 0; border-bottom-width: 1px; border-radius: 0; }
+/* The total under a list of amounts (ListTotal): on the muted surface, its figure in the rows' amount column. Over it,
+   each row's amount comes after its action, so the figures make one right-aligned column with the total. */
+.list-total { display: flex; justify-content: space-between; gap: var(--s3); padding: var(--s3) var(--s4); background: var(--surface-muted);
+  border: 1px solid var(--border); border-top: 0; border-radius: 0 0 var(--radius) var(--radius); font-weight: 600; }
+.list:has(+ .list-total) { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.box > .list-total { margin: 0 calc(-1 * var(--box-pad)); border-width: 0 0 1px; border-radius: 0; }
+.box > .list-total:last-child { margin-bottom: calc(-1 * var(--box-pad)); border-bottom: 0; border-radius: 0 0 var(--radius) var(--radius); }
+@media (min-width: 480px) { .list:has(+ .list-total) .list-trail { flex-direction: row-reverse; } }
 
 /* --- Menu: the top bar's links and groups (parent and staff), and the phone's Menu panel for staff. --- */
 .top-nav { display: none; margin-left: auto; gap: 2px; align-items: center; }
@@ -593,8 +603,8 @@ p.errors, .sign-out .errors { padding-left: 0; }
 .home-head .page-title, .family-page .page-title, .students .who, .money h2 { overflow-wrap: anywhere; }
 .home-head .page-title { margin-top: 0; }
 
-/* What the family owes: the total, when the figures are from, then each open invoice as a row running to the card's
-   edges, a ring before it in the tone of its due date, the amount in one right-aligned column over the total. */
+/* Money lines on the staff pages (a family's Balances page, Health, a person's families): the total, when the figures
+   are from, then a row per line running to the card's edges. Home and Payments draw theirs with List and ListTotal. */
 .owed { margin-top: var(--s2); }
 .owed .amt { font-size: var(--text-2xl); font-weight: 600; line-height: 1.15; letter-spacing: -0.025em; font-variant-numeric: tabular-nums lining-nums; }
 .owed .asof { font-size: var(--text-sm); color: var(--ink-2); margin-top: var(--s1); }
@@ -608,15 +618,6 @@ p.errors, .sign-out .errors { padding-left: 0; }
 .lines .when.late { color: var(--late); font-weight: 500; }
 .lines .amount { text-align: right; font-size: var(--text-md); font-weight: 500; font-variant-numeric: tabular-nums lining-nums; }
 .lines .pay { grid-column: 1 / -1; }
-.money .lines li, .paid-box .lines li { grid-template-columns: 16px minmax(0, 1fr) auto; column-gap: var(--s3); }
-.money .lines li::before, .paid-box .lines li::before { content: ""; grid-column: 1; grid-row: 1; align-self: start; margin-top: 4px;
-  width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; border: 2px solid var(--ink-3); }
-.money .lines li:has(.when.soon)::before { border-color: var(--due); }
-.money .lines li:has(.when.late)::before { border-color: var(--late); background: radial-gradient(circle, var(--late) 0 2.5px, transparent 3px); }
-.paid-box .lines li::before { border-color: var(--done); background: var(--done); }
-.money .lines li > span:first-child, .paid-box .lines li > span:first-child { grid-column: 2; grid-row: 1 / span 2; }
-.money .lines .amount, .paid-box .lines .amount { grid-column: 3; grid-row: 1; }
-.money .lines .pay { grid-column: 3; grid-row: 2; justify-self: end; min-width: 4.5rem; padding: 0 var(--s3); font-size: var(--text-sm); }
 .sum { display: flex; justify-content: space-between; margin: 0 calc(-1 * var(--box-pad, 0px)); padding: var(--s3) var(--box-pad, 0px);
   border-top: 1px solid var(--border); background: var(--surface-muted); font-weight: 600; }
 .sum .num { font-variant-numeric: tabular-nums lining-nums; }
@@ -651,10 +652,6 @@ p.errors, .sign-out .errors { padding-left: 0; }
   .lines li { grid-template-columns: 1fr auto auto; }
   .lines .pay { grid-column: 2; grid-row: 1; min-width: 112px; }
   .lines .amount { grid-column: 3; grid-row: 1; min-width: 96px; }
-  .money .lines li { grid-template-columns: 16px minmax(0, 1fr) auto auto; }
-  .money .lines li > span:first-child { grid-row: 1; }
-  .money .lines .pay { grid-column: 3; grid-row: 1; min-width: 112px; justify-self: stretch; }
-  .money .lines .amount { grid-column: 4; }
 }
 /* The passkey offer's two buttons sit side by side, wrapping under each other where there is no room. */
 .passkey-offer-buttons { display: flex; flex-wrap: wrap; gap: var(--s3); }
@@ -945,8 +942,6 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
   .sets [aria-current="step"] .n, .sets [aria-current="step"] .label { text-decoration: underline; }
   .on-set i { forced-color-adjust: none; background: Canvas; color: CanvasText; box-shadow: inset 0 0 0 2px CanvasText; }
   .on-set i.done { background: CanvasText; color: Canvas; }
-  .money .lines li::before, .paid-box .lines li::before { forced-color-adjust: none; border-color: CanvasText; }
-  .paid-box .lines li::before { background: CanvasText; }
   .badge, .notice { border: 1px solid CanvasText; }
   .notice > svg { forced-color-adjust: none; color: CanvasText; }
   .choice span::before { forced-color-adjust: none; border-color: CanvasText; background: Canvas; }

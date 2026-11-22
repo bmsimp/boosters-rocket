@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import type { Tone as StatusTone } from "./ui/tone";
 
 /**
@@ -26,7 +26,7 @@ const ICONS: Record<Tone, ReactNode> = {
 
 type Live = "status" | "alert" | "none";
 
-export function Notice({ tone, title, titleId, level = 2, live, className, children }: {
+export function Notice({ tone, title, titleId, level = 2, live, className, children, ref, tabIndex }: {
   tone: Tone;
   /** A heading for a notice that is a section of its own (the staff home's warnings). */
   title?: ReactNode; titleId?: string; level?: 2 | 3;
@@ -34,6 +34,11 @@ export function Notice({ tone, title, titleId, level = 2, live, className, child
   live?: Live;
   className?: string;
   children?: ReactNode;
+  /**
+   * For an answer that takes the focus once it is drawn (the form that was pressed is gone, and the keyboard's place
+   * with it): its element, and `tabIndex={-1}` so it can hold the focus. The notice itself is then what is focused and read.
+   */
+  ref?: Ref<HTMLDivElement>; tabIndex?: number;
 }) {
   const announced = live ?? (tone === "problem" ? "alert" : "status");
   const role = announced === "none" ? undefined : announced;
@@ -41,7 +46,7 @@ export function Notice({ tone, title, titleId, level = 2, live, className, child
   const Heading = level === 3 ? "h3" : "h2";
   if (title) {
     return (
-      <section className={cls} role={role} aria-labelledby={titleId}>
+      <section ref={ref as Ref<HTMLElement>} tabIndex={tabIndex} className={cls} role={role} aria-labelledby={titleId}>
         {ICONS[tone]}
         <div className="notice-body">
           <Heading id={titleId} className="notice-title"><span className="visually-hidden">{TONE_WORDS[tone]}: </span>{title}</Heading>
@@ -51,7 +56,7 @@ export function Notice({ tone, title, titleId, level = 2, live, className, child
     );
   }
   return (
-    <div className={cls} role={role}>
+    <div ref={ref} tabIndex={tabIndex} className={cls} role={role}>
       {ICONS[tone]}
       <div className="notice-body"><span className="notice-word">{TONE_WORDS[tone]}</span> {children}</div>
     </div>
@@ -64,11 +69,14 @@ export function Notice({ tone, title, titleId, level = 2, live, className, child
  * QuickBooks, or the portal can't tell yet, is information; `attention`, refused, held back or given up meanwhile,
  * needs attention); an answer with none is done, as every other page's is.
  */
-export function ActionOutcome({ state }: { state: { ok: true; message: string; status?: "waiting" | "attention" } | { ok: false; errors: string[] } | null }) {
+export function ActionOutcome({ state, ref }: { state: { ok: true; message: string; status?: "waiting" | "attention" } | { ok: false; errors: string[] } | null;
+  /** Given, the answer takes the focus where the caller puts it there (a form drawn again after its answer: Notice's `ref`). */
+  ref?: Ref<HTMLDivElement> }) {
   if (!state) return null;
-  if (state.ok) return <Notice tone={state.status === "attention" ? "warning" : state.status === "waiting" ? "info" : "done"}>{state.message}</Notice>;
+  const focus = ref ? { ref, tabIndex: -1 } : {};
+  if (state.ok) return <Notice tone={state.status === "attention" ? "warning" : state.status === "waiting" ? "info" : "done"} {...focus}>{state.message}</Notice>;
   return (
-    <Notice tone="problem">
+    <Notice tone="problem" {...focus}>
       {state.errors.length === 1 ? state.errors[0] : <ul className="notice-list">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>}
     </Notice>
   );

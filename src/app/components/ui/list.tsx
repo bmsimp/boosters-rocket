@@ -51,3 +51,12 @@ export function ListSubRow({ title, meta, className }: { title: ReactNode; meta?
     </li>
   );
 }
+
+/**
+ * The total under a List of amounts (Payments' open invoices): its label and the sum, on the muted surface, right after
+ * the list. A list followed by one draws each row's amount last, after its action, so the figures make one column with
+ * the total.
+ */
+export function ListTotal({ label, amount, className }: { label: ReactNode; amount: ReactNode; className?: string }) {
+  return <div className={cx("list-total", className)}><span>{label}</span><span className="list-amount num">{amount}</span></div>;
+}

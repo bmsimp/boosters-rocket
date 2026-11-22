@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
+import type { InputHTMLAttributes, ReactNode, Ref, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
 import { cx } from "./cx";
 
 /** What a control inside a Field is given: its id and the ids of its hint and error, and whether it is in error. */
@@ -33,7 +33,7 @@ export function Field({ id, label, hint, error, className, children }: Described
 }
 
 /** A one-line text field (text, email, tel, number, search, date) with its label, hint and error. */
-export function TextInput({ id, label, hint, error, className, ...input }: Described & Omit<InputHTMLAttributes<HTMLInputElement>, "id" | "className">) {
+export function TextInput({ id, label, hint, error, className, ...input }: Described & Omit<InputHTMLAttributes<HTMLInputElement>, "id" | "className"> & { ref?: Ref<HTMLInputElement> }) {
   return <Field id={id} label={label} hint={hint} error={error} className={className}>{(aria) => <input type="text" {...input} {...aria} />}</Field>;
 }
 

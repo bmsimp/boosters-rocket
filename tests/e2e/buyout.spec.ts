@@ -64,6 +64,6 @@ test("a buy-out already chosen reads 'Buy-out invoiced', and its invoice is on P
 
   await page.goto("/payments");
   const owed = page.getByRole("region", { name: "Quetzalcoatl Family" });
-  const line = owed.locator(".lines li").filter({ hasText: `Invoice ${E2E_BUYOUT.invoiceNumber}` });
-  await expect(line.locator(".amount")).toHaveText(E2E_BUYOUT.invoicedAmount);
+  const line = owed.locator(".list-row").filter({ hasText: `Invoice ${E2E_BUYOUT.invoiceNumber}` });
+  await expect(line.locator(".list-amount")).toHaveText(E2E_BUYOUT.invoicedAmount);
 });

@@ -5,6 +5,7 @@ import { loadMyFamily } from "@/lib/parents/my-family";
 import { getClubSettings } from "@/lib/settings/club";
 import { NotSetUpBox } from "../family-boxes";
 import { MoneySection, PaidSection } from "../money-box";
+import { PageHeader } from "../../components/ui/page-header";
 
 export const metadata = { title: "Payments" };
 
@@ -16,7 +17,7 @@ export default async function PaymentsPage() {
   if (!family) {
     return (
       <main className="wrap single">
-        <h1 className="page-title">Payments</h1>
+        <PageHeader title="Payments" />
         <NotSetUpBox treasurerEmail={club.treasurerEmail} />
       </main>
     );
@@ -28,8 +29,7 @@ export default async function PaymentsPage() {
   const buyouts = await loadMyBuyoutInvoices(ctx.familyId);
   return (
     <main className="wrap single">
-      <h1 className="page-title">Payments</h1>
-      <p className="lede">What your family owes the boosters, and what you&apos;ve paid.</p>
+      <PageHeader title="Payments" lede={<>What your family owes the boosters, and what you&apos;ve paid.</>} />
       <MoneySection money={money} buyouts={buyouts} />
       <PaidSection money={money} buyouts={buyouts} />
     </main>
