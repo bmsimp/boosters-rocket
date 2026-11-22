@@ -17,6 +17,7 @@ import { getRosterSource } from "@/lib/roster/source";
 import { lastCheck, lastCheckWords } from "@/lib/quickbooks/sandbox-check/view";
 import { IntegrationHead, IntegrationHealth } from "../integration-head";
 import { healthLines, quickbooksRow } from "../statuses";
+import { SupportLine } from "../../support-line";
 
 export const metadata = { title: "QuickBooks settings" };
 export const dynamic = "force-dynamic";
@@ -73,6 +74,7 @@ export default async function QuickBooksSettingsPage() {
         {/* Disconnect, last, as it is today: it stays in place after it is pressed, to say what it did. */}
         <Disconnect connected={conn.connected} disconnect={disconnectAction} warning={warning} />
       </Card>
+      <SupportLine />
     </main>
   );
 }

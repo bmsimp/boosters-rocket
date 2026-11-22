@@ -4,6 +4,7 @@ import { Notice } from "@/app/components/notice";
 import { SettingsHeader } from "../back-to-settings";
 import { HealthLineWords, StateWord } from "./health-line";
 import { healthLines } from "../statuses";
+import { SupportLine } from "../../support-line";
 
 export const metadata = { title: "Health" };
 export const dynamic = "force-dynamic";
@@ -34,6 +35,7 @@ export default async function HealthPage() {
       <section className="box" aria-labelledby="health-address-h"><h2 id="health-address-h">The portal&apos;s address</h2>
         <PortalAddress />
       </section>
+      <SupportLine />
     </main>
   );
 }
