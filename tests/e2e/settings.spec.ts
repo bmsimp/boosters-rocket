@@ -20,7 +20,7 @@ test("an Admin opens Settings from the menu, follows an item of the rail to its 
   await expect(page).toHaveURL(/\/staff\/settings$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Settings");
   // The rail: every item an Admin may open, in its group, each with its status in words.
-  await expect(rail(page).getByRole("link")).toHaveText([/^Club/, /^Staff/, /^Roles/, /^Parent sign-ins/, /^Integrations/, /^Audit log/, /^Health/, /^Design system/]);
+  await expect(rail(page).getByRole("link")).toHaveText([...(isPhone(page) ? [] : [/^Overview/]), /^Club/, /^Staff/, /^Roles/, /^Parent sign-ins/, /^Integrations/, /^Audit log/, /^Health/, /^Design system/]);
   for (const group of ["Club", "People and access", "Connections", "Administration"]) await expect(rail(page).getByRole("list", { name: group, exact: true })).toBeVisible();
   await expect(rail(page).getByRole("link", { name: /^Club/ })).toContainText("Set");
   await noSidewaysScroll(page);
@@ -64,7 +64,8 @@ test("the Integrations page groups the systems by kind, and each row opens its p
   for (const kind of ["Accounting", "Forms and signing", "Outgoing mail", "Staff sign-in"]) await expect(page.getByRole("region", { name: kind, exact: true })).toBeVisible();
   const accounting = page.getByRole("region", { name: "Accounting", exact: true });
   await expect(accounting).toContainText("One QuickBooks company is connected at a time.");
-  await expect(accounting.getByRole("link", { name: /^QuickBooks Online/ })).toContainText("Connected");
+  // The seed keeps a change QuickBooks refused, so its Health line, and with it the row, says it needs attention.
+  await expect(accounting.getByRole("link", { name: /^QuickBooks Online/ })).toContainText("Needs attention");
   await noSidewaysScroll(page);
   await page.getByRole("region", { name: "Staff sign-in", exact: true }).getByRole("link", { name: /^Google/ }).click();
   await expect(page).toHaveURL(/\/staff\/settings\/sign-in#staff-google$/);

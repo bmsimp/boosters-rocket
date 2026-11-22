@@ -18,9 +18,10 @@ test("an Admin sees what is set for QuickBooks, and no inputs on the view", asyn
   await page.goto("/staff");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, E2E");
   await page.goto("/staff/settings/quickbooks");
-  // The Connection card says it; the Health line under it says it again in the Health page's words.
-  await expect(page.getByRole("region", { name: "Connection" }).getByText("Connected to E2E Sandbox Company")).toBeVisible();
-  await expect(page.getByRole("region", { name: "Health" })).toContainText("Connected to E2E Sandbox Company (an Intuit sandbox");
+  // The Connection card names the company. The seed keeps a stuck change, so the head and a Notice say it needs attention.
+  await expect(page.getByRole("region", { name: "Connection" }).getByText("E2E Sandbox Company", { exact: true })).toBeVisible();
+  await expect(page.locator(".integration-head .status-dot")).toHaveText("Needs attention");
+  await expect(page.locator("main")).toContainText("Health says needs attention.");
   await expect(page.getByText("Sandbox (an Intuit test company)")).toBeVisible();
   await expect(page.getByText(LAYERED_WORDS)).toBeVisible();
   await expect(page.getByText("6 families, 4 students, 5 parents; 1 customer outside the portal")).toBeVisible();
