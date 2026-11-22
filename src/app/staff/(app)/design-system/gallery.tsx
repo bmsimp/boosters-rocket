@@ -77,7 +77,7 @@ const invoiceColumns: Column<Invoice>[] = [
 ];
 
 const SWATCHES = ["ground", "surface", "surface-muted", "border", "border-control", "border-strong", "ink", "ink-2", "ink-3",
-  "done", "done-soft", "due", "due-soft", "late", "late-soft", "info", "info-soft", "neutral-soft"] as const;
+  "done", "done-soft", "due", "due-soft", "late", "late-soft", "neutral-soft"] as const;
 
 /** A small piece of Home, drawn again in each display mode. */
 function MiniHome({ id }: { id: string }) {
@@ -156,13 +156,13 @@ export function Gallery() {
           <StatusBadge tone="done">Paid</StatusBadge>
           <StatusBadge tone="due">2 to sign</StatusBadge>
           <StatusBadge tone="late">Overdue</StatusBadge>
-          <StatusBadge tone="info">Waiting for QuickBooks</StatusBadge>
+          <StatusBadge tone="neutral">Waiting for QuickBooks</StatusBadge>
           <StatusBadge tone="neutral">Not started</StatusBadge>
           <Badge>Admin</Badge>
           <Badge tone="club">New</Badge>
         </div>
         <div className="ds-samples">
-          {(["done", "due", "late", "info", "neutral"] as const).map((t) => <span key={t} className="ds-tone"><StatusIcon tone={t} />StatusIcon {t}</span>)}
+          {(["done", "due", "late", "neutral"] as const).map((t) => <span key={t} className="ds-tone"><StatusIcon tone={t} />StatusIcon {t}</span>)}
         </div>
       </Section>
 

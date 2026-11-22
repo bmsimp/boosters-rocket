@@ -22,7 +22,7 @@ function hcBlock(name: string): Record<string, string> {
     ground: hc["hc-ground"]!, surface: hc["hc-surface"]!, "surface-raised": hc["hc-surface-raised"]!, "surface-muted": hc["hc-surface-muted"]!,
     border: line, "border-control": line, "border-strong": line,
     ink: hc["hc-ink"]!, "ink-2": hc["hc-ink-2"]!, "ink-3": hc["hc-ink-2"]!,
-    done: hc["hc-done"]!, due: hc["hc-due"]!, late: hc["hc-late"]!, info: hc["hc-info"]!,
+    done: hc["hc-done"]!, due: hc["hc-due"]!, late: hc["hc-late"]!,
   };
 }
 const inCss: Record<Mode, Record<string, string>> = {

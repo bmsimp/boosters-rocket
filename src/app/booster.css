@@ -52,15 +52,15 @@
   --ground: #f7f7f8; --surface: #ffffff; --surface-raised: #ffffff; --surface-muted: #f2f2f4;
   --border: #e3e4e8; --border-control: #cfd2d8; --border-strong: #8a8e98;
   --ink: #18191d; --ink-2: #5c606a; --ink-3: #8a8e98;
-  --done: #1d7344; --due: #955400; --late: #b3261e; --info: #3f5a8a;
-  --done-soft: #e7f4ec; --due-soft: #fcf1df; --late-soft: #fceceb; --info-soft: #edf1f8; --neutral-soft: #f0f1f3;
+  --done: #1d7344; --due: #955400; --late: #b3261e;
+  --done-soft: #e7f4ec; --due-soft: #fcf1df; --late-soft: #fceceb; --neutral-soft: #f0f1f3;
   --overlay: rgb(0 0 0 / 0.08);
   --shadow-menu: 0 8px 24px -6px rgb(16 17 20 / 0.14), 0 1px 3px rgb(16 17 20 / 0.08);
   --club-text: var(--club-text-l); --club-tint: var(--club-tint-l); --club-text-hc: var(--club-text-lhc);
   /* @tokens light-hc */
   --hc-ground: #ffffff; --hc-surface: #ffffff; --hc-surface-raised: #ffffff; --hc-surface-muted: #f2f2f4;
   --hc-line: #18191d; --hc-ink: #000000; --hc-ink-2: #2b2e34;
-  --hc-done: #0f5530; --hc-due: #6b3a00; --hc-late: #8a1a14; --hc-info: #23406e;
+  --hc-done: #0f5530; --hc-due: #6b3a00; --hc-late: #8a1a14;
   /* @end */
 }
 /* @end */
@@ -71,15 +71,15 @@
   --ground: #0f1012; --surface: #16181c; --surface-raised: #1e2025; --surface-muted: #1e2025;
   --border: #2a2d33; --border-control: #3b3f46; --border-strong: #6f737d;
   --ink: #ececee; --ink-2: #a2a6ae; --ink-3: #6f737d;
-  --done: #5fc68b; --due: #e9a647; --late: #ff8b7d; --info: #93b4ef;
-  --done-soft: #15291e; --due-soft: #2e2312; --late-soft: #33191a; --info-soft: #18233a; --neutral-soft: #22252a;
+  --done: #5fc68b; --due: #e9a647; --late: #ff8b7d;
+  --done-soft: #15291e; --due-soft: #2e2312; --late-soft: #33191a; --neutral-soft: #22252a;
   --overlay: rgb(255 255 255 / 0.1);
   --shadow-menu: 0 8px 24px -6px rgb(0 0 0 / 0.6), 0 1px 3px rgb(0 0 0 / 0.5);
   --club-text: var(--club-text-d); --club-tint: var(--club-tint-d); --club-text-hc: var(--club-text-dhc);
   /* @tokens dark-hc */
   --hc-ground: #000000; --hc-surface: #000000; --hc-surface-raised: #141518; --hc-surface-muted: #141518;
   --hc-line: #ececee; --hc-ink: #ffffff; --hc-ink-2: #e2e4e8;
-  --hc-done: #8eeab1; --hc-due: #ffc978; --hc-late: #ffb0a6; --hc-info: #bcd2fb;
+  --hc-done: #8eeab1; --hc-due: #ffc978; --hc-late: #ffb0a6;
   /* @end */
 }
 /* @end */
@@ -89,14 +89,14 @@
     --ground: #0f1012; --surface: #16181c; --surface-raised: #1e2025; --surface-muted: #1e2025;
     --border: #2a2d33; --border-control: #3b3f46; --border-strong: #6f737d;
     --ink: #ececee; --ink-2: #a2a6ae; --ink-3: #6f737d;
-    --done: #5fc68b; --due: #e9a647; --late: #ff8b7d; --info: #93b4ef;
-    --done-soft: #15291e; --due-soft: #2e2312; --late-soft: #33191a; --info-soft: #18233a; --neutral-soft: #22252a;
+    --done: #5fc68b; --due: #e9a647; --late: #ff8b7d;
+    --done-soft: #15291e; --due-soft: #2e2312; --late-soft: #33191a; --neutral-soft: #22252a;
     --overlay: rgb(255 255 255 / 0.1);
     --shadow-menu: 0 8px 24px -6px rgb(0 0 0 / 0.6), 0 1px 3px rgb(0 0 0 / 0.5);
     --club-text: var(--club-text-d); --club-tint: var(--club-tint-d); --club-text-hc: var(--club-text-dhc);
     --hc-ground: #000000; --hc-surface: #000000; --hc-surface-raised: #141518; --hc-surface-muted: #141518;
     --hc-line: #ececee; --hc-ink: #ffffff; --hc-ink-2: #e2e4e8;
-    --hc-done: #8eeab1; --hc-due: #ffc978; --hc-late: #ffb0a6; --hc-info: #bcd2fb;
+    --hc-done: #8eeab1; --hc-due: #ffc978; --hc-late: #ffb0a6;
   }
 }
 
@@ -105,7 +105,7 @@
   --ground: var(--hc-ground); --surface: var(--hc-surface); --surface-raised: var(--hc-surface-raised); --surface-muted: var(--hc-surface-muted);
   --border: var(--hc-line); --border-control: var(--hc-line); --border-strong: var(--hc-line);
   --ink: var(--hc-ink); --ink-2: var(--hc-ink-2); --ink-3: var(--hc-ink-2);
-  --done: var(--hc-done); --due: var(--hc-due); --late: var(--hc-late); --info: var(--hc-info);
+  --done: var(--hc-done); --due: var(--hc-due); --late: var(--hc-late);
   --club-text: var(--club-text-hc);
   --ring: 3px;
 }
@@ -114,7 +114,7 @@
     --ground: var(--hc-ground); --surface: var(--hc-surface); --surface-raised: var(--hc-surface-raised); --surface-muted: var(--hc-surface-muted);
     --border: var(--hc-line); --border-control: var(--hc-line); --border-strong: var(--hc-line);
     --ink: var(--hc-ink); --ink-2: var(--hc-ink-2); --ink-3: var(--hc-ink-2);
-    --done: var(--hc-done); --due: var(--hc-due); --late: var(--hc-late); --info: var(--hc-info);
+    --done: var(--hc-done); --due: var(--hc-due); --late: var(--hc-late);
     --club-text: var(--club-text-hc);
     --ring: 3px;
   }
@@ -196,7 +196,6 @@ footer a { color: var(--club-text); }
 .badge-done { --tone: var(--done); --tone-soft: var(--done-soft); }
 .badge-due { --tone: var(--due); --tone-soft: var(--due-soft); }
 .badge-late { --tone: var(--late); --tone-soft: var(--late-soft); }
-.badge-info { --tone: var(--info); --tone-soft: var(--info-soft); }
 .badge-club { --tone: var(--club-text); --tone-soft: var(--club-tint); }
 
 /* --- Club bar: a white top bar with the club's logo tile, its name, the menu and the account. --- */
@@ -447,8 +446,8 @@ fieldset.checks { border: 0; padding: 0; min-width: 0; }
 
 /* --- Notice (src/app/components/notice.tsx): a status that stands apart from the text around it, on its tone's soft
    tint with a hairline edge. The tone is said by its icon and its word, in the tone's ink; the body stays in ink.
-   Information is blue-gray, needs attention amber, done green, a problem red. --- */
-.notice { --tone: var(--info); --tone-soft: var(--info-soft);
+   Four status tones and no more: information in ink on the neutral tint, needs attention amber, done green, a problem red. --- */
+.notice { --tone: var(--ink); --tone-soft: var(--neutral-soft);
   display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: var(--s3); align-items: start;
   padding: var(--s3) var(--s4); border: 1px solid var(--border); border-radius: var(--radius); background: var(--tone-soft); color: var(--ink); }
 .notice-warning { --tone: var(--due); --tone-soft: var(--due-soft); }
@@ -512,7 +511,7 @@ p.errors, .sign-out .errors { padding-left: 0; }
 /* --- Status icon: the small ring before a row, its shape and tone telling the state the row's words say. --- */
 .status-icon { width: 16px; height: 16px; flex: none; color: var(--ink-3); }
 .status-icon.tone-done { color: var(--done); } .status-icon.tone-due { color: var(--due); }
-.status-icon.tone-late { color: var(--late); } .status-icon.tone-info { color: var(--info); } .status-icon.tone-club { color: var(--club-text); }
+.status-icon.tone-late { color: var(--late); } .status-icon.tone-club { color: var(--club-text); }
 .status-icon .status-mark { stroke: var(--surface); }
 
 /* --- Step indicator (the season ruler; StepIndicator): a thin track in segments, each step's number and name under

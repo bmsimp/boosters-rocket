@@ -12,29 +12,29 @@ export const PALETTE = {
     ground: "#f7f7f8", surface: "#ffffff", "surface-raised": "#ffffff", "surface-muted": "#f2f2f4",
     border: "#e3e4e8", "border-control": "#cfd2d8", "border-strong": "#8a8e98",
     ink: "#18191d", "ink-2": "#5c606a", "ink-3": "#8a8e98",
-    done: "#1d7344", due: "#955400", late: "#b3261e", info: "#3f5a8a",
-    "done-soft": "#e7f4ec", "due-soft": "#fcf1df", "late-soft": "#fceceb", "info-soft": "#edf1f8", "neutral-soft": "#f0f1f3",
+    done: "#1d7344", due: "#955400", late: "#b3261e",
+    "done-soft": "#e7f4ec", "due-soft": "#fcf1df", "late-soft": "#fceceb", "neutral-soft": "#f0f1f3",
   },
   dark: {
     ground: "#0f1012", surface: "#16181c", "surface-raised": "#1e2025", "surface-muted": "#1e2025",
     border: "#2a2d33", "border-control": "#3b3f46", "border-strong": "#6f737d",
     ink: "#ececee", "ink-2": "#a2a6ae", "ink-3": "#6f737d",
-    done: "#5fc68b", due: "#e9a647", late: "#ff8b7d", info: "#93b4ef",
-    "done-soft": "#15291e", "due-soft": "#2e2312", "late-soft": "#33191a", "info-soft": "#18233a", "neutral-soft": "#22252a",
+    done: "#5fc68b", due: "#e9a647", late: "#ff8b7d",
+    "done-soft": "#15291e", "due-soft": "#2e2312", "late-soft": "#33191a", "neutral-soft": "#22252a",
   },
   lightHc: {
     ground: "#ffffff", surface: "#ffffff", "surface-raised": "#ffffff", "surface-muted": "#f2f2f4",
     border: "#18191d", "border-control": "#18191d", "border-strong": "#18191d",
     ink: "#000000", "ink-2": "#2b2e34", "ink-3": "#2b2e34",
-    done: "#0f5530", due: "#6b3a00", late: "#8a1a14", info: "#23406e",
-    "done-soft": "#e7f4ec", "due-soft": "#fcf1df", "late-soft": "#fceceb", "info-soft": "#edf1f8", "neutral-soft": "#f0f1f3",
+    done: "#0f5530", due: "#6b3a00", late: "#8a1a14",
+    "done-soft": "#e7f4ec", "due-soft": "#fcf1df", "late-soft": "#fceceb", "neutral-soft": "#f0f1f3",
   },
   darkHc: {
     ground: "#000000", surface: "#000000", "surface-raised": "#141518", "surface-muted": "#141518",
     border: "#ececee", "border-control": "#ececee", "border-strong": "#ececee",
     ink: "#ffffff", "ink-2": "#e2e4e8", "ink-3": "#e2e4e8",
-    done: "#8eeab1", due: "#ffc978", late: "#ffb0a6", info: "#bcd2fb",
-    "done-soft": "#15291e", "due-soft": "#2e2312", "late-soft": "#33191a", "info-soft": "#18233a", "neutral-soft": "#22252a",
+    done: "#8eeab1", due: "#ffc978", late: "#ffb0a6",
+    "done-soft": "#15291e", "due-soft": "#2e2312", "late-soft": "#33191a", "neutral-soft": "#22252a",
   },
 } as const satisfies Record<Mode, Record<string, string>>;
 
@@ -42,10 +42,10 @@ export type Token = keyof (typeof PALETTE)["light"];
 
 /** Every text color the system sets on every ground it sets it on. Text floors: 4.5:1, or 7:1 in high contrast. */
 export const TEXT_PAIRS: readonly [fg: Token, bg: Token][] = [
-  ...(["ink", "ink-2", "done", "due", "late", "info"] as const).flatMap((fg) =>
+  ...(["ink", "ink-2", "done", "due", "late"] as const).flatMap((fg) =>
     (["ground", "surface", "surface-raised", "surface-muted"] as const).map((bg) => [fg, bg] as [Token, Token])),
-  ["done", "done-soft"], ["due", "due-soft"], ["late", "late-soft"], ["info", "info-soft"],
-  ["ink", "done-soft"], ["ink", "due-soft"], ["ink", "late-soft"], ["ink", "info-soft"],
+  ["done", "done-soft"], ["due", "due-soft"], ["late", "late-soft"],
+  ["ink", "done-soft"], ["ink", "due-soft"], ["ink", "late-soft"],
   ["ink-2", "neutral-soft"], ["ink", "neutral-soft"],
 ];
 
