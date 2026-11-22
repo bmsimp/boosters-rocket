@@ -7,7 +7,7 @@ export type Step = {
   done?: boolean;
   /** The step things are on now: the club's color, aria-current="step". */
   current?: boolean;
-  /** Read out after the label: ", current set", ", done", ", not finished", or nothing. The track says it to the eye. */
+  /** Read out after the label: ", current step", ", done", ", not finished", or nothing. The track says it to the eye. */
   words: string;
   /** Drawn under the current step's label (the season ruler's students on it); give it aria-hidden when the words are elsewhere. */
   marker?: ReactNode;

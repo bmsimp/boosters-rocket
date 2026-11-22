@@ -42,7 +42,7 @@ describe("the Forms page, from what the portal has stored (forms not set up)", (
     const text = textOf(html);
     expect(text).toContain("Autumn Field Season: the forms for Alderquist Family");
     expect(text).toContain("The forms still to sign aren't ready yet. There's nothing you need to do right now");
-    // The family's own forms, then each student's, with the set each belongs to.
+    // The family's own forms, then each student's, with the step each belongs to.
     expect(text).toMatch(/Your family Signed once for Alderquist Family Travel consent \(optional\) Not signed yet · Sign-up/);
     expect(text).toMatch(/Bus waiver QA74 \(optional\) Not ready yet · Sign-up/);
     expect(text).toMatch(/Aurelio Alderquist Uniform agreement \(optional\) Signed, being finished · Uniforms/);

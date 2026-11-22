@@ -253,11 +253,11 @@ export function Gallery() {
         <div className="ds-samples"><Avatar initials="AS" /><Avatar initials="SS" club /><Avatar initials="RS" size="sm" /><span className="account" aria-hidden="true">AS</span></div>
       </Section>
 
-      <Section id="step-indicator" name="StepIndicator" use="Where something stands in a short sequence of steps: the season's sets on Home. Done steps are ticked, the current one is the club's color and named in words. Not a control." importLine={UI("StepIndicator")}>
-        <p className="season-title">Sample season · <b>Set 2 of 4: Uniforms</b></p>
+      <Section id="step-indicator" name="StepIndicator" use="Where something stands in a short sequence of steps: the season's steps on Home. Done steps are ticked, the current one is the club's color and named in words. Not a control." importLine={UI("StepIndicator")}>
+        <p className="season-title">Sample season · <b>Step 2 of 4: Uniforms</b></p>
         <StepIndicator steps={[
           { key: "a", label: "Join", done: true, words: ", done" },
-          { key: "b", label: "Uniforms", current: true, words: ", current set", marker: <span className="on-set" aria-hidden="true"><i className="done" title="Alex is done">A</i><i title="Sam has more to do">S</i></span> },
+          { key: "b", label: "Uniforms", current: true, words: ", current step", marker: <span className="on-set" aria-hidden="true"><i className="done" title="Alex is done">A</i><i title="Sam has more to do">S</i></span> },
           { key: "c", label: "Trip", words: "" },
           { key: "d", label: "Banquet", words: "" },
         ]} />

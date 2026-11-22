@@ -20,11 +20,11 @@ const first = (name: string) => name.trim().split(/\s+/)[0] || name;
 /**
  * The season ruler (StepIndicator, docs/agents/ui.md): the steps in order on a thin track, the finished ones behind the
  * current one ticked, the current one in the club's color, and a dot for each student on it. Not a control. The dots are decoration: the same
- * facts are in words in the students box. Nothing is drawn for a season with no steps. To a parent a step is a "set",
- * the word the ruler's design uses; staff, who build the season, call it a step.
+ * facts are in words in the students box. Nothing is drawn for a season with no steps. Parents and staff both call it a
+ * step.
  *
- * A season that asks nothing of this family, in any set, is not called done. With no dates every set of it counts as
- * finished, and the ruler would tick them all and say so, until the day staff add the first requirement. Its sets are
+ * A season that asks nothing of this family, in any step, is not called done. With no dates every step of it counts as
+ * finished, and the ruler would tick them all and say so, until the day staff add the first requirement. Its steps are
  * drawn with no ticks, and the heading says there is nothing to do yet.
  */
 export function SeasonRuler({ season }: { season: MySeason }) {
@@ -37,20 +37,20 @@ export function SeasonRuler({ season }: { season: MySeason }) {
       <div className="wrap">
         <div className="season-head">
           <p id="season-h" className="season-title">{season.name} · <b>{current
-            ? <>Set {currentIndex! + 1} of {steps.length}<span className="current-name">: {current.name}</span></>
+            ? <>Step {currentIndex! + 1} of {steps.length}<span className="current-name">: {current.name}</span></>
             : nothingAsked ? <>Nothing to do yet</>
-            : steps.length === 1 ? <>The one set is done</> : <>All {steps.length} sets done</>}</b></p>
+            : steps.length === 1 ? <>The one step is done</> : <>All {steps.length} steps done</>}</b></p>
           <a href="/season">See the whole season</a>
         </div>
         <StepIndicator steps={steps.map((step, i) => {
           const isCurrent = i === currentIndex;
-          // The ruler reads from left to right: only a set behind the current one is ticked. One still ahead is
+          // The ruler reads from left to right: only a step behind the current one is ticked. One still ahead is
           // drawn as still to come, even when it asks nothing of this family and so is done already.
           const behind = currentIndex === null || i < currentIndex;
           const ticked = behind && step.done && !nothingAsked;
           return {
             key: step.id, label: step.name, done: ticked, current: isCurrent,
-            words: isCurrent ? ", current set" : ticked ? ", done" : behind && !nothingAsked ? ", not finished" : "",
+            words: isCurrent ? ", current step" : ticked ? ", done" : behind && !nothingAsked ? ", not finished" : "",
             marker: isCurrent && step.students.length > 0 && (
               <span className="on-set" aria-hidden="true">
                 {step.students.map((s) => <i key={String(s.id)} className={s.done ? "done" : undefined} title={s.done ? `${first(s.name)} is done` : `${first(s.name)} has more to do`}>{initial(s.name)}</i>)}
@@ -116,14 +116,14 @@ export const currentStep = (season: MySeason | null): StepStanding | null =>
 /** True when the season asks anything at all of this family, in any step. */
 export const asksAnything = (season: MySeason) => season.steps.some((s) => s.family.length > 0 || s.students.some((x) => x.lines.length > 0));
 
-/** Under Home's students: what is left from earlier steps, or thanks when every set is done. */
+/** Under Home's students: what is left from earlier steps, or thanks when every step is done. */
 export function SeasonNotes({ season }: { season: MySeason }) {
   const step = currentStep(season);
   return (
     <>
-      {season.leftBefore > 0 && <p className="help">{things(season.leftBefore)} from an earlier set {season.leftBefore === 1 ? "is" : "are"} still to do. <a href="/season">See the whole season</a></p>}
+      {season.leftBefore > 0 && <p className="help">{things(season.leftBefore)} from an earlier step {season.leftBefore === 1 ? "is" : "are"} still to do. <a href="/season">See the whole season</a></p>}
       {!step && season.steps.length > 0 && asksAnything(season) && (
-        <p className="paid-up"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M4 12.5l5 5 11-11" /></svg>You&apos;ve finished every set of {season.name}. Thank you!</p>
+        <p className="paid-up"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M4 12.5l5 5 11-11" /></svg>You&apos;ve finished every step of {season.name}. Thank you!</p>
       )}
     </>
   );

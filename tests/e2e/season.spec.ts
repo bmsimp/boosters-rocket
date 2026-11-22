@@ -40,8 +40,8 @@ test("Home shows the season ruler for the current season, and each student's pro
   // The ruler: a band under the club bar, above the greeting. Not a control: one link, to the Season page.
   const ruler = page.getByRole("region", { name: /^Fall 2026/ });
   await expect(ruler).toBeVisible();
-  await expect(ruler.locator(".season-title")).toHaveText("Fall 2026 · Set 2 of 4: Uniforms");
-  // On a phone the current set's name is in the heading, so a label that doesn't fit its cell loses nothing; on a wide
+  await expect(ruler.locator(".season-title")).toHaveText("Fall 2026 · Step 2 of 4: Uniforms");
+  // On a phone the current step's name is in the heading, so a label that doesn't fit its cell loses nothing; on a wide
   // screen every cell shows its own label and the heading drops the name.
   if (isPhone(page)) await expect(ruler.locator(".current-name")).toBeVisible();
   else await expect(ruler.locator(".current-name")).toBeHidden();
@@ -51,9 +51,9 @@ test("Home shows the season ruler for the current season, and each student's pro
   await expect(cells.nth(0)).toHaveClass("done");
   await expect(cells.nth(0)).toContainText("Join, done");
   await expect(cells.nth(1)).toHaveAttribute("aria-current", "step");
-  await expect(cells.nth(1)).toContainText("Uniforms, current set");
+  await expect(cells.nth(1)).toContainText("Uniforms, current step");
   await expect(ruler.locator("[aria-current]")).toHaveCount(1);
-  // Season asks nothing of the family, but it is still ahead: only a set behind the current one is ticked.
+  // Season asks nothing of the family, but it is still ahead: only a step behind the current one is ticked.
   await expect(ruler.locator("ol.sets > li.done")).toHaveCount(1);
   // The current step's segment of the track is the club's color; the others are not.
   const fill = (i: number) => cells.nth(i).evaluate((el) => getComputedStyle(el, "::before").backgroundColor);
@@ -99,8 +99,8 @@ test("Home shows the season ruler for the current season, and each student's pro
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Fall 2026");
   await expect(page.getByRole("heading", { level: 2 })).toHaveText(["1. Join", "2. Uniforms", "3. Season", "4. Wrap-up"]);
   await expect(page.getByRole("region", { name: "1. Join" })).toContainText("DoneYour familyHandbook readDone");
-  await expect(page.getByRole("region", { name: "2. Uniforms" })).toContainText("The current set");
-  await expect(page.getByRole("region", { name: "3. Season" })).toContainText("Nothing is asked of your family in this set.");
+  await expect(page.getByRole("region", { name: "2. Uniforms" })).toContainText("The current step");
+  await expect(page.getByRole("region", { name: "3. Season" })).toContainText("Nothing is asked of your family in this step.");
   const wrap = page.getByRole("region", { name: "4. Wrap-up" });
   await expect(wrap).toContainText("Banquet RSVP");
   await expect(wrap.locator(".when")).toContainText("Due ");
@@ -123,7 +123,7 @@ test("staff tick a student off, and the parent then sees it; unticked, the famil
   // The parent: both students have finished Uniforms, Season asks nothing, so the family is on Wrap-up.
   await page.goto("/");
   const ruler = page.getByRole("region", { name: /^Fall 2026/ });
-  await expect(ruler.locator(".season-title")).toContainText("Set 4 of 4");
+  await expect(ruler.locator(".season-title")).toContainText("Step 4 of 4");
   await expect(ruler.locator("ol.sets > li.done")).toHaveCount(3);
   await expect(ruler.locator("ol.sets > li").nth(3)).toHaveAttribute("aria-current", "step");
   await expect(page.getByRole("region", { name: "Your students" })).toContainText(/Your family1 thing left to do in Wrap-up(\d of \d done)?Banquet RSVPNot done yet/);
@@ -140,7 +140,7 @@ test("staff tick a student off, and the parent then sees it; unticked, the famil
   await expect(again.getByRole("button", { name: "Tick", exact: true })).toBeVisible();
   await expect(again.locator(".state")).toHaveText("Not done yet");
   await page.goto("/");
-  await expect(page.getByRole("region", { name: /^Fall 2026/ }).locator(".season-title")).toContainText("Set 2 of 4");
+  await expect(page.getByRole("region", { name: /^Fall 2026/ }).locator(".season-title")).toContainText("Step 2 of 4");
 });
 
 test("staff open one family's season from a requirement's list, and the visit is in the audit log", async ({ page }) => {

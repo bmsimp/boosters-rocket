@@ -29,7 +29,7 @@ function toneOf(line: MyFormLine["line"], today: string): Tone {
   return line.dueOn && dueState(line.dueOn, today).tone === "late" ? "late" : "due";
 }
 
-/** One form (a ListRow): its state in words with its ring, its title, the set it belongs to and when it is due, and the way to it. */
+/** One form (a ListRow): its state in words with its ring, its title, the step it belongs to and when it is due, and the way to it. */
 function FormRow({ group, form, today, download }: { group: MyFormGroup; form: MyFormLine; today: string; download: boolean }) {
   const { line } = form;
   // A form that can't be opened yet has no link: there is nothing behind it. An address of a form never holds a
