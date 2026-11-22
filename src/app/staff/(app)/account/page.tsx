@@ -2,7 +2,7 @@ import { requireStaffPage } from "@/lib/guards";
 import { Card, PageHeader } from "@/app/components/ui";
 import { SignOutButton } from "@/app/components/sign-out-button";
 import { DisplaySettings } from "@/app/(parent)/display/display-settings";
-import { NameEdit } from "../people/people-client";
+import { NameEdit } from "../settings/staff/people-client";
 
 export const metadata = { title: "Your account" };
 

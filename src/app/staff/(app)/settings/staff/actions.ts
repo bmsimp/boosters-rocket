@@ -12,19 +12,19 @@ const NOT_FROM_PAGE = { ok: false as const, errors: ["That didn't go through. Re
 export const inviteStaffAction = staffAction("Staff.Users.ReadWrite", async (ctx, form: FormData) => {
   const r = await inviteStaff({ name: String(form.get("name") ?? ""), email: String(form.get("email") ?? "") }, roleIds(form),
     { actor: actor(ctx), ip: ctx.ip });
-  revalidatePath("/staff/people");
+  revalidatePath("/staff/settings/staff");
   return r;
 });
 
 export const setStaffRolesAction = staffAction("Staff.Users.ReadWrite", async (ctx, staffUserId: string, form: FormData) => {
   const r = await setStaffRoles(staffUserId, roleIds(form),
     { actor: actor(ctx), actorStaffUserId: ctx.staffUserId, ip: ctx.ip });
-  revalidatePath("/staff/people");
+  revalidatePath("/staff/settings/staff");
   return r;
 });
 
 export const setStaffStatusAction = staffAction("Staff.Users.ReadWrite", async (ctx, id: string, status: "active" | "disabled") => {
-  const r = await setStaffStatus(id, status, actor(ctx), ctx.ip); revalidatePath("/staff/people"); return r;
+  const r = await setStaffStatus(id, status, actor(ctx), ctx.ip); revalidatePath("/staff/settings/staff"); return r;
 });
 
 /** Anyone's name, for someone who manages staff. */

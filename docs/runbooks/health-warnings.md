@@ -1,6 +1,6 @@
 # What to do when the Health page warns
 
-**Health** in the staff menu (under **Admin**, for Admins only) has one line for each part of the portal, with a word for its state and
+**Health** under **Settings** in the staff menu (for Admins only, `/staff/settings/health`) has one line for each part of the portal, with a word for its state and
 when it last worked. "Needs attention" or a red word means someone should look; "Off" or "Not set up" may be a choice.
 Each entry below starts with the line's title and the words it shows.
 

@@ -399,7 +399,7 @@ how each rule is built is `docs/agents/sign-in.md`. The pages are `/sign-in`, `/
 | Row | What is missing | Rough size | It would touch |
 |---|---|---|---|
 | 10.1.10 | Coverage by grade or section | Days, and an owner decision first: QuickBooks holds no grade | A data source for grade, `requirement_cover`, the coverage rules and pages |
-| 13.4 | Auditing a view of the audit log filtered to one family or person | An hour once the owner decides | `src/app/staff/(app)/audit/page.tsx`, an action name |
+| 13.4 | Auditing a view of the audit log filtered to one family or person | An hour once the owner decides | `src/app/staff/(app)/settings/audit/page.tsx`, an action name |
 | 14.1, 14.4 | A release and the dependency updates actually run | Owner check once pushing is allowed | GitHub |
 | 14.6 | The restore runbook carried out once on real data | An hour of the owner's | The owner's runbook, part 1 item 7, and its Results table |
 | I.11 | A warning from setup (or a test that holds the runbook's) that a change of `APP_URL` stops every passkey | An hour for a test of the runbook's sentence; more for a warning in setup | `tests/unit/runbooks.test.ts`, or `src/app/setup/` |

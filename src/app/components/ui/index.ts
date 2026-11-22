@@ -6,6 +6,7 @@ export { cx } from "./cx";
 export { TONE_WORD, type Tone } from "./tone";
 export { StatusIcon } from "./status-icon";
 export { Badge, StatusBadge } from "./badge";
+export { StatusDot } from "./status-dot";
 export { Button, LinkButton, buttonClass, type ButtonVariant, type ButtonSize } from "./button";
 export { Card } from "./card";
 export { List, ListRow, ListSubRow, ListTotal } from "./list";

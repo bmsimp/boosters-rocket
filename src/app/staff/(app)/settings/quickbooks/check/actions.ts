@@ -20,7 +20,7 @@ export const runCheckAction = staffAction(P, async (ctx): Promise<Result> => {
   const writes = (await getConnection())?.environment === "sandbox";
   const r = await runSandboxCheck({ staffUserId: ctx.staffUserId, label: ctx.email, ip: ctx.ip, writes });
   revalidatePath("/staff/settings/quickbooks", "layout");
-  revalidatePath("/staff/health");
+  revalidatePath("/staff/settings/health");
   if (!r.ok) return { ok: false, errors: [r.reason === "running" ? "A check is running already. Wait for it to finish, then reload the page." : NOT_READY_WORDS.not_connected] };
   return {
     ok: true,

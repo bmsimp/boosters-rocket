@@ -1,4 +1,5 @@
 import { Fragment, type LiHTMLAttributes, type ReactNode } from "react";
+import Link from "next/link";
 import { cx } from "./cx";
 import { StatusIcon } from "./status-icon";
 import type { Tone } from "./tone";
@@ -17,16 +18,27 @@ export function List({ label, className, children }: { label?: string; className
  * thing (a student's requirements), never a card inside a card. `detail` is what belongs under the row at its full
  * width, indented to the title: a note about it, or the small form that takes the place of its action (a passkey's new
  * name). Any other attribute (a `data-*` hook) goes on the row's `li`.
+ *
+ * `href` makes the whole row one link to where it leads (a Settings item, an integration's page), with a chevron at its
+ * end; such a row holds nothing else to press, so its end is `trail` (words, a StatusDot), never `action`. `logo` is a
+ * tile before the title (an integration's mark: IntegrationLogo), in place of the status ring's place.
  */
-export function ListRow({ status, title, meta, amount, action, sub, detail, className, ...li }: {
+export function ListRow({ status, title, meta, amount, action, trail, sub, detail, href, logo, className, ...li }: {
   status?: { tone: Tone; words?: string }; title: ReactNode; meta?: ReactNode | ReactNode[]; amount?: ReactNode; action?: ReactNode; sub?: ReactNode;
   detail?: ReactNode; className?: string;
+  /** Where the whole row leads: the row is then one link, with a chevron. */
+  href?: string;
+  /** Words or a status at the row's end that aren't a control: the end of a linked row. */
+  trail?: ReactNode;
+  /** A tile before the title: an integration's mark. */
+  logo?: ReactNode;
 } & Omit<LiHTMLAttributes<HTMLLIElement>, "title" | "className" | "children">) {
   const words = status?.words;
   const parts = (Array.isArray(meta) ? meta : [meta]).filter((m) => m !== undefined && m !== null && m !== false && m !== "");
   const dot = <span aria-hidden="true"> · </span>;
-  return (
-    <li className={cx("list-row", (sub !== undefined || Boolean(detail)) && "has-sub", className)} {...li}>
+  const body = (
+    <>
+      {logo !== undefined && <span className="list-logo">{logo}</span>}
       {status && <StatusIcon tone={status.tone} />}
       <div className="list-main">
         <span className="list-title">{title}</span>
@@ -37,9 +49,15 @@ export function ListRow({ status, title, meta, amount, action, sub, detail, clas
           </span>
         )}
       </div>
-      {(amount !== undefined || action) && (
-        <div className="list-trail">{amount !== undefined && <span className="list-amount num">{amount}</span>}{action}</div>
+      {(amount !== undefined || action || trail !== undefined) && (
+        <div className="list-trail">{amount !== undefined && <span className="list-amount num">{amount}</span>}{trail}{href ? null : action}</div>
       )}
+      {href && <svg className="list-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5" /></svg>}
+    </>
+  );
+  return (
+    <li className={cx("list-row", href && "is-link", (sub !== undefined || Boolean(detail)) && "has-sub", className)} {...li}>
+      {href ? <Link className="list-link" href={href}>{body}</Link> : body}
       {Boolean(detail) && <div className="list-detail">{detail}</div>}
       {sub !== undefined && <ul className="list-sub">{sub}</ul>}
     </li>

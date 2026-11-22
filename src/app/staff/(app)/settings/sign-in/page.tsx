@@ -1,14 +1,12 @@
-import { Notice } from "@/app/components/notice";
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { providerSummaries, pendingOnlySummaries, PROVIDER_KEYS, type ProviderSummary } from "@/lib/auth/providers";
 import { PROVIDER_LABELS } from "@/app/components/sign-in-settings/labels";
-import { StateWords } from "@/app/components/state-words";
-import { CalendarDate } from "@/app/components/calendar-date";
-import { LocalTime } from "@/app/components/local-time";
+import { CalendarDate, Card, KeyValue, LinkButton, LocalTime, Notice, StateWords } from "@/app/components/ui";
 import { MailWarning } from "../../mail-warning";
 import { seesMailWarning } from "../../mail-warning-rule";
-import { BackToSettings } from "../back-to-settings";
+import { IntegrationHead } from "../integration-head";
+import { signInRows, systemStatus } from "../statuses";
 
 export const metadata = { title: "Sign-in settings" };
 export const dynamic = "force-dynamic";
@@ -22,35 +20,41 @@ function state(key: string, s: ProviderSummary | undefined): { state: "done" | "
   return { state: "done", words: "Working" };
 }
 
-/** What is set, shown plainly, with no inputs (the pattern the QuickBooks page set). The steps are on their own page. */
+/**
+ * Staff sign-in, an integration's page (the Settings spec): its head with the status, then one card for each provider
+ * (Microsoft, Google: the spec's decision 7), each with what is set, its credential's expiry (staff sign-in has no
+ * Health line, so the expiry is said here), and the change. Each card is an anchor the Integrations page's rows lead
+ * to (`#staff-microsoft`, `#staff-google`). Removing a provider is on the steps' page, as it is today.
+ */
 export default async function SignInSettingsPage() {
   const ctx = await requireStaffPage("Settings.SignIn.ReadWrite");
-  const saved = await providerSummaries();
+  const [saved, rows] = await Promise.all([providerSummaries(), signInRows()]);
   const summaries = [...saved, ...(await pendingOnlySummaries(saved.map((x) => x.key)))];
   const working = saved.some((s) => s.readable);
   return (
     <main className="wrap single">
-      <BackToSettings />
-      <h1 className="page-title">Staff sign-in</h1>
-      <p className="lede">How board members and directors sign in: with Microsoft, Google, or both. Only Admins can change this.</p>
+      <IntegrationHead title="Staff sign-in" status={systemStatus(rows)}
+        lede="How board members and directors sign in: with Microsoft, Google, or both. Only Admins can change this." />
       {seesMailWarning(ctx.effective) && <MailWarning canFix={can(ctx.effective, "Settings.Mail.ReadWrite")} />}
       {PROVIDER_KEYS.map((key) => {
         const s = summaries.find((x) => x.key === key);
         const st = state(key, s);
+        const row = rows.find((r) => r.key === key);
         const id = s?.config.clientId;
         return (
-          <section key={key} className="box" aria-labelledby={`${key}-h`}><h2 id={`${key}-h`}>{PROVIDER_LABELS[key]}</h2>
+          <Card key={key} id={key} title={PROVIDER_LABELS[key]} titleId={`${key}-h`}>
             <StateWords state={st.state} words={st.words} />
+            {row?.expires && <Notice tone="warning" live="none">{row.expires.what} <CalendarDate iso={row.expires.iso} />{row.status.words === "Expired" ? ": staff can't sign in with it." : "."}</Notice>}
             {s && (s.readable || s.certificate) && (
-              <dl className="details">
-                {s.config.tenantId && <><dt>Directory (tenant) ID</dt><dd><code>{s.config.tenantId}</code></dd></>}
-                {id && <><dt>{key === "staff-google" ? "Client ID" : "Application (client) ID"}</dt><dd><code>{id}</code></dd></>}
-                {s.certificate && <><dt>Certificate</dt><dd>Thumbprint <code>{s.certificate.thumbprintSha1}</code>, expires <CalendarDate iso={s.certificate.notAfter.toISOString()} /></dd></>}
-                {key === "staff-google" && <><dt>Client secret</dt><dd>Saved <LocalTime iso={s.credentialUpdatedAt.toISOString()} />{s.expiresAt && <>, expires <CalendarDate iso={s.expiresAt.toISOString()} /></>}</dd></>}
-              </dl>
+              <KeyValue items={[
+                s.config.tenantId ? { key: "tenant", label: "Directory (tenant) ID", value: <code>{s.config.tenantId}</code> } : null,
+                id ? { key: "client", label: key === "staff-google" ? "Client ID" : "Application (client) ID", value: <code>{id}</code> } : null,
+                s.certificate ? { key: "cert", label: "Certificate", value: <>Thumbprint <code>{s.certificate.thumbprintSha1}</code>, expires <CalendarDate iso={s.certificate.notAfter.toISOString()} /></> } : null,
+                key === "staff-google" ? { key: "secret", label: "Client secret", value: <>Saved <LocalTime iso={s.credentialUpdatedAt.toISOString()} />{s.expiresAt && <>, expires <CalendarDate iso={s.expiresAt.toISOString()} /></>}</> } : null,
+              ]} />
             )}
-            <p className="settings-open"><a className="btn btn-line" href="/staff/settings/sign-in/setup">{s ? "Change" : "Set up"}<span className="visually-hidden"> {PROVIDER_LABELS[key]}</span></a></p>
-          </section>
+            <p className="settings-open"><LinkButton href="/staff/settings/sign-in/setup" variant="secondary">{s ? "Change" : "Set up"}<span className="visually-hidden"> {PROVIDER_LABELS[key]}</span></LinkButton></p>
+          </Card>
         );
       })}
       {!working && <Notice tone="warning">Nobody can sign in as staff until one of these works.</Notice>}

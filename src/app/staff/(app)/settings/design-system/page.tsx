@@ -1,5 +1,6 @@
 import { requireStaffPage } from "@/lib/guards";
 import { Gallery } from "./gallery";
+import { BackToSettings } from "../back-to-settings";
 
 export const metadata = { title: "Design system" };
 
@@ -9,9 +10,10 @@ export const metadata = { title: "Design system" };
  * role is likely to hold, the club settings' read (the club's name and color, which the samples are drawn in).
  */
 export default async function DesignSystemPage() {
-  await requireStaffPage("Settings.Club.Read");
+  const ctx = await requireStaffPage("Settings.Club.Read");
   return (
     <main className="wrap single ds-page">
+      <BackToSettings effective={ctx.effective} />
       <Gallery />
     </main>
   );

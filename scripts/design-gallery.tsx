@@ -1,5 +1,5 @@
 /**
- * Writes design/system/gallery.html: the design-system gallery (src/app/staff/(app)/design-system/gallery.tsx) as one
+ * Writes design/system/gallery.html: the design-system gallery (src/app/staff/(app)/settings/design-system/gallery.tsx) as one
  * self-contained page, the stylesheet inlined and the default club color set, so the system can be opened and
  * screenshotted without the app or a database. It fetches nothing: no font (Inter comes through next/font in the app,
  * so the twin shows the fallback face), no script, no image. Run it again after changing a primitive or booster.css:
@@ -8,7 +8,7 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Gallery } from "../src/app/staff/(app)/design-system/gallery";
+import { Gallery } from "../src/app/staff/(app)/settings/design-system/gallery";
 import { PoweredBy } from "../src/app/components/powered-by";
 import { clubCssVars, deriveClubTokens } from "../src/lib/theme/contrast";
 

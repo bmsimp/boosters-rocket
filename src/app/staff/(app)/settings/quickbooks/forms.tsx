@@ -158,7 +158,7 @@ export function Disconnect({ connected, disconnect, warning }: { connected: bool
   const [state, run, pending] = useActionState(async () => safely(() => disconnect(), { ok: false as const, error: ACTION_FAILED }), null);
   if (!connected) return state?.ok ? <Notice tone="done">{disconnectedNote(state.revoked)}</Notice> : null;
   return (
-    <details><summary>Disconnect</summary>
+    <details className="more"><summary>Disconnect</summary>
       <p>This asks Intuit to cancel the portal&apos;s access and deletes its copy of the connection. The Intuit app&apos;s keys and the last roster stay, and the roster is marked as no longer current.</p>
       {warning && <Notice tone="warning">{warning}</Notice>}
       <form action={run} className="stack">

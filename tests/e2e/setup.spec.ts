@@ -21,7 +21,7 @@ function reopen(): string {
 
 test("while setup is open, every page goes to /setup, and a wrong code is refused", async ({ page }) => {
   reopen();
-  for (const path of ["/", "/sign-in", "/staff", "/staff/roles"]) {
+  for (const path of ["/", "/sign-in", "/staff", "/staff/settings/roles"]) {
     await page.goto(path);
     await expect(page).toHaveURL(/\/setup$/);
   }

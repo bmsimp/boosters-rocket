@@ -160,7 +160,7 @@ APP_COMMIT="$(git rev-parse --short HEAD)" docker compose -f compose.yml -f comp
    opens only once a test email has gone out.
 6. **Step 4, first Admin.** Enter the name and the email of the person who will be Admin, **Save name and email**,
    and sign in as them with Microsoft or Google. Setup closes and the staff home opens: you are signed in as the Admin.
-7. Open **Health** in the staff menu (under **Admin**). Every line should be there;
+7. Open **Settings** in the staff menu, then **Health**. Every line should be there;
    [Health page warnings](health-warnings.md) says what each one means. QuickBooks, Forms and parent sign-ins say "Not
    set up" or "Off" until the next steps; the password breach check says "Not used yet" until a parent chooses a
    password.

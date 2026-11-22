@@ -6,7 +6,6 @@ import { requireStaffPage } from "@/lib/guards";
 import type { CheckResult } from "@/lib/db/schema";
 import { codeWords, EXPECTATIONS, expectation, notRunWords, OUTCOME_WORDS, stopWords } from "@/lib/quickbooks/sandbox-check/expectations";
 import { checkPageView, NOT_READY_WORDS, type RunView } from "@/lib/quickbooks/sandbox-check/view";
-import { BackToSettings } from "../../back-to-settings";
 import { runCheckAction } from "./actions";
 import { RunCheckButton } from "./run-button";
 
@@ -60,7 +59,7 @@ export default async function CheckRequestsPage() {
   const latest = view.latest;
   return (
     <main className="wrap single">
-      <BackToSettings />
+      <p className="back-to-settings"><a href="/staff/settings/quickbooks">Back to QuickBooks settings</a></p>
       <h1 className="page-title">Check the portal&apos;s requests</h1>
       <p className="lede">The portal&apos;s requests to QuickBooks were written from Intuit&apos;s documentation. This check sends each of them to the connected company and says whether QuickBooks answered as the portal expects, and what it learned. It shows no family&apos;s name, amount or address: only counts, codes and the names of web addresses.</p>
 

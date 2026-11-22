@@ -174,11 +174,10 @@ main.wrap.single > p[role="status"] { margin-top: var(--s5); }
 /* Staff pages use the whole content width (1072px at most), so a table or grid has room; prose keeps a readable
    measure. A parent page (the one with the tab bar) keeps its boxes to one 760px column. */
 main.wrap.single > p, .box > p, .box > .help, .notice-body { max-width: 70ch; }
-html:has(nav.tabs) main.wrap.single > :is(.box, .notice, p[role="status"]) { max-width: 760px; }
+html:has(nav.tabs:not(.staff-tabs)) main.wrap.single > :is(.box, .notice, p[role="status"]) { max-width: 760px; }
 .stack { display: grid; gap: var(--s4); margin-top: var(--s3); max-width: 520px; }
 .stack > .btn { justify-self: start; } /* a button in a stack is as wide as its words, not the column */
 ul.stack { list-style: none; padding: 0; } /* the family chooser lists families as buttons, not bullets */
-.settings-grid { margin-top: var(--s5); display: grid; gap: var(--s4); }
 footer.wrap { padding-top: var(--s5); padding-bottom: var(--s5); color: var(--ink-2); font-size: var(--text-sm); }
 footer a { color: var(--club-text); }
 /* The bar's menu at 760px and wider (the top nav in, the tab bar and the phone's Menu out) is in section 4, after the
@@ -187,7 +186,6 @@ footer a { color: var(--club-text); }
   main.wrap { padding-top: var(--s6); gap: var(--s5); grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "money students" "paid details"; align-items: start; }
   main.wrap.single { padding-top: var(--s3); }
   .money { grid-area: money; } .students-box { grid-area: students; } .details-box { grid-area: details; } .paid-box { grid-area: paid; }
-  .settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--s5); }
 }
 
 /* ===== 4. Components, A to Z ===== */
@@ -363,16 +361,17 @@ dl.details dd { min-width: 0; overflow-wrap: anywhere; } /* a long name or email
 details.more { margin-top: var(--s3); }
 details.more > summary { cursor: pointer; padding: 10px 0; font-weight: 500; color: var(--club-text); }
 details > summary { min-height: 44px; box-sizing: border-box; padding-block: 10px; }
-/* Every disclosure's summary is drawn as How this works' is: no browser marker, the same 16px caret before its words,
-   turning when open (HowThisWorks draws its caret as an SVG; the others are given the same path as a mask). */
-details.more > summary { list-style: none; }
-details.more > summary::-webkit-details-marker { display: none; }
-details.more:not(.how) > summary { display: flex; align-items: center; gap: 6px; width: fit-content; }
-details.more:not(.how) > summary::before {
+/* Every disclosure's summary, whatever its class, is drawn as How this works' is: no browser marker, the same 16px
+   caret before its words, turning when open (HowThisWorks draws its caret as an SVG; every other is given the same path
+   as a mask). */
+details > summary { list-style: none; cursor: pointer; }
+details > summary::-webkit-details-marker { display: none; }
+details:not(.how) > summary { display: flex; align-items: center; gap: 6px; width: fit-content; }
+details:not(.how) > summary::before {
   content: ""; width: 16px; height: 16px; flex: none; background: currentColor; transition: transform var(--dur-fast) ease-out;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.8'%3E%3Cpath d='M6 3.5L10.5 8 6 12.5'/%3E%3C/svg%3E") center / 16px 16px no-repeat;
 }
-details.more:not(.how)[open] > summary::before { transform: rotate(90deg); }
+details:not(.how)[open] > summary::before { transform: rotate(90deg); }
 /* How this works (HowThisWorks): a card's longer explanation behind one quiet summary, its caret turning when open. */
 details.how > summary { display: flex; align-items: center; gap: 6px; list-style: none; width: fit-content; }
 details.how > summary::-webkit-details-marker { display: none; }
@@ -490,6 +489,26 @@ fieldset.checks { border: 0; padding: 0; min-width: 0; }
 .box > .list-total:last-child { margin-bottom: calc(-1 * var(--box-pad)); border-bottom: 0; border-radius: 0 0 var(--radius) var(--radius); }
 /* Rows in a card take the card's own side padding (20px from 760px), so their words line up with the card's title. */
 .box .list > .list-row, .box > .list-total { padding-inline: var(--box-pad); }
+/* A row that is one link (ListRow's href): the whole row presses, its title underlines on hover, a chevron at its end.
+   The ring is drawn inside the row, so the list's clipped corners never cut it. `logo` is a tile before the title. */
+.list:has(.list-link) { overflow: hidden; }
+.list-row.is-link, .box .list > .list-row.is-link { padding: 0; }
+.list-link { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: var(--s3); min-height: 56px; padding: 10px var(--s4); color: inherit; text-decoration: none; }
+.box .list > .list-row.is-link > .list-link { padding-inline: var(--box-pad); }
+.list-link:hover { background: var(--surface-muted); }
+.list-link:hover .list-title { text-decoration: underline; }
+.list-link:focus-visible { outline-offset: calc(-1 * var(--ring)); }
+.list-link > .status-icon { align-self: flex-start; margin-top: 3px; }
+.list-logo { flex: none; display: flex; }
+.list-chevron { flex: none; width: 16px; height: 16px; color: var(--ink-3); }
+.list-title .badge { margin-left: var(--s2); vertical-align: 1px; }
+@media (max-width: 759.98px) {
+  /* With a logo, the status goes under the row's words: the tile, the words over the status, then the chevron. */
+  .list-link:has(> .list-logo) { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: var(--s3); row-gap: var(--s1); }
+  .list-link:has(> .list-logo) > .list-logo { grid-row: 1 / span 2; align-self: start; }
+  .list-link:has(> .list-logo) > .list-trail { grid-column: 2; grid-row: 2; justify-self: start; flex-direction: row; }
+  .list-link:has(> .list-logo) > .list-chevron { grid-column: 3; grid-row: 1 / span 2; align-self: center; }
+}
 @media (min-width: 480px) { .list:has(+ .list-total) .list-trail { flex-direction: row-reverse; } }
 
 /* --- Menu: the top bar's links and groups (parent and staff), and the phone's Menu panel for staff. --- */
@@ -510,18 +529,9 @@ fieldset.checks { border: 0; padding: 0; min-width: 0; }
 .nav-panel[hidden] { display: none; }
 .top-nav .nav-panel a { min-height: 44px; padding: 0 var(--s3); color: var(--ink); font-weight: 500; }
 .top-nav .nav-panel a[aria-current="page"] { color: var(--club-text); background: var(--club-tint); font-weight: 600; }
-.menu-mobile { margin-left: auto; }
-.menu-mobile + .account { margin-left: var(--s2); }
-.menu-button { min-height: 44px; padding: 0 14px; border: 1px solid var(--border-control); border-radius: var(--radius-control);
-  background: var(--surface); color: var(--ink); font-size: var(--text-control); font-weight: 500; }
-.menu-button[aria-expanded="true"] { background: var(--surface-muted); }
-.menu-panel { position: absolute; left: 0; right: 0; top: 56px; z-index: 20; display: grid; background: var(--surface-raised);
-  border-bottom: 1px solid var(--border); box-shadow: var(--shadow-menu); padding: var(--s2) 0; max-height: calc(100dvh - 56px); overflow-y: auto; }
-.menu-panel a { color: var(--ink); text-decoration: none; font-size: var(--text-md); font-weight: 500; min-height: 48px;
-  display: flex; align-items: center; padding: 0 var(--cell); }
-.menu-panel a[aria-current="page"] { color: var(--club-text); background: var(--club-tint); font-weight: 600; }
-.menu-group { display: grid; margin-top: var(--s2); border-top: 1px solid var(--border); padding-top: var(--s2); }
-.menu-group-name { font-size: var(--text-xs); font-weight: 500; color: var(--ink-2); padding: var(--s1) var(--cell) 0; }
+/* On a phone the staff bar holds the club and the initials only (the staff tab bar holds the menu): the initials keep
+   the bar's right edge. */
+@media (max-width: 759.98px) { .bar-rows .account { margin-left: auto; } }
 
 /* --- Notice (src/app/components/notice.tsx): a status that stands apart from the text around it, on its tone's soft
    tint with a hairline edge. The tone is said by its icon and its word, in the tone's ink; the body stays in ink.
@@ -560,9 +570,9 @@ main.wrap.single > .notice { margin-top: var(--s5); }
 .page-back svg { width: 16px; height: 16px; }
 /* A staff page's title stands at the same height with or without its way back: the back line's 44px is kept above
    every title, and the link, when there is one, is drawn in it. So there is more room above a title than below it. */
-html:not(:has(nav.tabs)) main.wrap.single:has(> .page-head) { padding-top: 0; }
-html:not(:has(nav.tabs)) main.wrap.single > .page-head > div:first-child { padding-top: calc(44px + var(--s1)); }
-html:not(:has(nav.tabs)) main.wrap.single > .page-head .page-back { margin-top: calc(-44px - var(--s1)); }
+html:not(:has(nav.tabs:not(.staff-tabs))) main.wrap.single:has(> .page-head) { padding-top: 0; }
+html:not(:has(nav.tabs:not(.staff-tabs))) main.wrap.single > .page-head > div:first-child { padding-top: calc(44px + var(--s1)); }
+html:not(:has(nav.tabs:not(.staff-tabs))) main.wrap.single > .page-head .page-back { margin-top: calc(-44px - var(--s1)); }
 @media (min-width: 760px) { .page-title { font-size: 1.75rem; } }
 
 /* --- Powered by (src/app/components/powered-by.tsx): the product's credit, the club leading everywhere else. One ink
@@ -570,7 +580,7 @@ html:not(:has(nav.tabs)) main.wrap.single > .page-head .page-back { margin-top: 
 .powered-by { display: flex; width: fit-content; align-items: center; gap: 6px; min-height: 44px; color: var(--badge-ink);
   font-size: var(--text-xs); font-weight: 500; text-decoration: none; }
 .powered-by:hover .pb-name { text-decoration: underline; }
-.pb-mark { width: 1.375rem; height: 1.375rem; flex: none; fill: currentColor; }
+.pb-mark { width: 1.5rem; height: 1.5rem; flex: none; fill: currentColor; } /* 24px: over the kit's 20px floor for the small badge */
 .pb-name { font-weight: 600; }
 .powered-by-color .pb-boosters { color: var(--br-ink); } .powered-by-color .pb-rocket { color: var(--br-flame-ink); }
 .powered-by-color .pb-disc { fill: var(--br-disc); } .powered-by-color .pb-smoke { fill: var(--br-smoke); }
@@ -653,7 +663,8 @@ p.errors, .sign-out .errors { padding-left: 0; }
   .sets .label { font-size: var(--text-sm); }
 }
 
-/* --- Tabs: the parent's bottom bar on phones, one column for each tab in PARENT_NAV. The current tab's icon sits on
+/* --- Tabs: the bottom bar on phones, one column for each tab: the parent's PARENT_NAV, or the staff's staffTabs()
+   (`.staff-tabs`: Home, the groups, Settings). The current tab's icon sits on
    the club's tint and its words are the club's color and weight: never the color alone. --- */
 .tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; background: var(--surface); border-top: 1px solid var(--border);
   display: grid; grid-auto-flow: column; grid-auto-columns: minmax(max-content, 1fr); padding-bottom: env(safe-area-inset-bottom); }
@@ -664,14 +675,23 @@ p.errors, .sign-out .errors { padding-left: 0; }
 .tabs svg { width: 48px; height: 28px; padding: 3px 13px; border-radius: var(--radius-round); transition: background-color var(--dur-fast) ease-out; }
 .tabs a[aria-current="page"] { color: var(--club-text); font-weight: 600; }
 .tabs a[aria-current="page"] svg { background: var(--club-tint); }
-/* At 760px and wider the top nav takes the tab bar's place, and the staff bar's links take the Menu button's. These
-   rules come after the Menu and Tabs rules so they win; the avatar stays at the bar's right edge, the nav just before it. */
+/* At 760px and wider the top nav takes the tab bar's place, for parents and staff alike. These rules come after the
+   Menu and Tabs rules so they win; the avatar stays at the bar's right edge, the nav just before it. */
 @media (min-width: 760px) {
   .tabs { display: none; }
   .top-nav { display: flex; }
-  .menu-mobile { display: none; }
   .top-nav + .account { margin-left: var(--s3); }
 }
+
+/* A group's page on a phone leads back to its hub (HubBack), above the page's head, which then keeps no second line for
+   a way back. Hidden from 760px, where the top nav holds the group. */
+.hub-back a { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; color: var(--ink-2); font-size: var(--text-sm); font-weight: 500; text-decoration: none; }
+.hub-back svg { width: 16px; height: 16px; }
+@media (max-width: 759.98px) {
+  html:not(:has(nav.tabs:not(.staff-tabs))) .hub-back + main.wrap.single:has(> .page-head) { padding-top: 0; }
+  html:not(:has(nav.tabs:not(.staff-tabs))) .hub-back + main.wrap.single > .page-head > div:first-child { padding-top: 0; }
+}
+@media (min-width: 760px) { .hub-back { display: none; } }
 
 /* --- Toolbar: a row of filters over what they scope, wrapping on a phone. --- */
 .toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s3); }
@@ -898,7 +918,7 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 .email-sample { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 68ch; padding: var(--s3) var(--s4); border-radius: var(--radius-control); background: var(--surface-muted); }
 /* Check the portal's requests: a result keeps its words whole on one line, so its column is given the room. */
 .check-results .state { white-space: nowrap; overflow-wrap: normal; }
-/* The design system gallery (/staff/design-system, and its static twin design/system/gallery.html): each component's
+/* The design system gallery (/staff/settings/design-system, and its static twin design/system/gallery.html): each component's
    name, use and import over its samples. The .ds-hover and .ds-focus samples draw a state a pointer or keyboard
    would; the frame sample shows the bar and the tabs in place instead of fixed to the screen. */
 .ds-page > .page-head { margin-top: var(--s5); }
@@ -949,11 +969,88 @@ main.wrap.single > .page-head + p { margin-top: var(--s4); }
 /* ---- Settings and the staff menu: the Settings page and every settings page, the roles checklist, the Staff page and
    the setup's club step. Keep new rules for them inside this block. ---- */
 
-/* The Settings page: a card per part, its state in words with an icon, what is set, and the way to its own page. */
-.settings-page .box > .state { margin-top: var(--s2); }
-.settings-page .box .details { margin-top: var(--s3); }
+/* Every settings page: the rail beside the page from 760px, in the bar's column. On a phone the rail is drawn only at
+   /staff/settings, as the first screen, and each item opens as its own page with the way back above its title. */
+.settings-layout { max-width: 1120px; margin: 0 auto; padding: 0 var(--cell); }
+.settings-layout > main.wrap { max-width: none; margin: 0; padding-left: 0; padding-right: 0; }
+.settings-rail { padding-top: var(--s5); }
+.rail-title { font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.018em; line-height: 1.25; margin: 0 0 var(--s4); }
+.rail-find { position: relative; }
+.rail-find svg { position: absolute; left: 12px; top: 50%; translate: 0 -50%; width: 16px; height: 16px; color: var(--ink-2); pointer-events: none; }
+.rail-find input { width: 100%; min-height: 44px; padding: 0 12px 0 36px; border: 1px solid var(--border-strong); border-radius: var(--radius-control);
+  background: var(--surface); color: var(--ink); font: inherit; font-size: var(--text-control); }
+.rail-find input::placeholder { color: var(--ink-2); }
+.rail-none { font-size: var(--text-sm); color: var(--ink-2); margin: var(--s3) var(--s3) 0; }
+.rail-none:empty { margin: 0; }
+.rail-group { margin-top: var(--s4); }
+.rail-label { font-size: var(--text-sm); font-weight: 500; color: var(--ink-2); margin: 0 var(--s3) var(--s1); }
+.rail-group ul { list-style: none; padding: 0; display: grid; gap: 2px; }
+:is(.rail-group, .rail-top) a { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); min-height: 44px; padding: var(--s1) var(--s3);
+  border-radius: var(--radius-control); color: var(--ink); text-decoration: none; font-size: var(--text-control); font-weight: 500; }
+:is(.rail-group, .rail-top) a:hover { background: var(--surface-muted); }
+:is(.rail-group, .rail-top) a[aria-current="page"] { background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); color: var(--club-text); font-weight: 600; }
+.rail-name { min-width: 0; overflow-wrap: anywhere; }
+.rail-sub a { padding-left: var(--s5); }
+.rail-in { font-size: var(--text-xs); font-weight: 500; color: var(--ink-2); white-space: nowrap; }
+/* A status in words with a dot before them (StatusDot): the dot only repeats the words' tone. */
+.status-dot { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-xs); font-weight: 500; color: var(--ink-2); white-space: nowrap; }
+.status-dot .dot { width: 8px; height: 8px; flex: none; border-radius: var(--radius-round); background: var(--ink-3); }
+.status-dot.tone-done { color: var(--done); } .status-dot.tone-done .dot { background: var(--done); }
+.status-dot.tone-due { color: var(--due); } .status-dot.tone-due .dot { background: var(--due); }
+.list-trail .status-dot, .integration-head .page-actions .status-dot { font-size: var(--text-sm); }
+/* The rail's Overview entry, above the groups. */
+.rail-top { list-style: none; padding: 0; margin-top: var(--s4); }
+@media (min-width: 760px) {
+  .settings-layout { display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: var(--s5); align-items: start; }
+  .settings-rail { padding-top: calc(44px + var(--s1)); } /* its title level with the page title, below the back line kept above it */
+  .back-to-settings.phone-only { display: none; }
+  /* A settings page's way back to Settings is for phones: here its line keeps its room, so every title is level with the rail's. */
+  .settings-head .page-back { visibility: hidden; }
+}
+@media (min-width: 1024px) { .settings-layout { grid-template-columns: 264px minmax(0, 1fr); gap: var(--s6); } }
+@media (max-width: 759.98px) {
+  .settings-rail:not(.is-root) { display: none; }
+  .settings-rail.is-root { padding-top: var(--s4); }
+  /* The first screen: each group a bordered list, each item a full-width row with its status under its name. */
+  .rail-group ul { gap: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .rail-group li + li { border-top: 1px solid var(--border); }
+  .rail-group a { flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; min-height: 56px; padding: var(--s2) var(--s4); border-radius: 0; }
+  .rail-label { margin-inline: 0; }
+  .rail-top { display: none; } /* the rail is the Overview's own first screen here */
+}
+/* The Overview, and the Integrations page: each kind of system, its rule, and its rows. */
+.settings-overview > .notice, .settings-overview > .box { margin-top: var(--s5); }
+.integration-kind { margin-top: var(--s5); }
+.integration-kind + .integration-kind { padding-top: var(--s5); border-top: 1px solid var(--border); }
+.integration-kind h2 { font-size: var(--text-lg); line-height: 1.35; }
+.kind-lede { color: var(--ink-2); font-size: var(--text-control); margin-top: 2px; max-width: 70ch; }
+.integration-kind > .list { margin-top: var(--s3); }
+/* An integration's mark in its tile (IntegrationLogo): the vendor's own file, small and never recolored, or a text tile. */
+.logo-tile { flex: none; display: grid; place-items: center; width: 64px; height: 40px; border: 1px solid var(--border); border-radius: var(--radius-control);
+  background: var(--surface); color: var(--ink-2); }
+.logo-tile img, .logo-tile svg { display: block; width: 20px; height: 20px; }
+/* A one-ink vendor mark (Documenso's): its file as a mask, filled with the ink, as the vendor draws it in currentColor. */
+.logo-ink { display: block; width: 20px; height: 20px; background: var(--ink); mask: center / contain no-repeat; }
+.logo-head .logo-ink { width: 24px; height: 24px; }
+.logo-documenso { mask-image: url("/integrations/documenso.svg"); }
+.logo-text { font-size: var(--text-sm); font-weight: 700; letter-spacing: 0.02em; color: var(--ink); }
+.logo-text::before { content: attr(data-mark); } /* drawn, not text: the name beside the tile is the words */
+.logo-head { width: 48px; height: 40px; }
+.logo-head img, .logo-head svg { width: 24px; height: 24px; }
+@media (max-width: 759.98px) { .logo-row { width: 48px; } }
+/* An integration's own page: the mark in its tile before the title's words, the status badge level with the title. */
+.integration-head { align-items: flex-start; }
+.integration-head .page-title { display: flex; align-items: center; gap: var(--s3); }
+.integration-head > .page-actions { padding-top: calc(44px + var(--s1) + 6px); }
+@media (max-width: 759.98px) { .integration-head > .page-actions { padding-top: 0; } }
 .settings-open { margin-top: var(--s4); display: flex; flex-wrap: wrap; gap: var(--s2); }
-/* The way back to Settings (or to a part's own page), above a settings page's title. */
+/* A section inside a settings card (QuickBooks' roster under its connection): a hairline across the card, its own small
+   heading. One surface with sections, never a card in a card. */
+.box > .box-section { margin: var(--s4) calc(-1 * var(--box-pad)) 0; padding: var(--s4) var(--box-pad) 0; border-top: 1px solid var(--border); }
+.box-section > h3 { font-size: var(--text-md); font-weight: 600; }
+.box-section > .details { margin-top: var(--s2); }
+.roles-admin-only > ul { padding-left: 1.25em; display: grid; gap: var(--s1); max-width: 70ch; }
+/* The way back to Settings, above a settings page's title: on a phone only (the rail is beside the page from 760px). */
 .back-to-settings { margin-top: var(--s3); }
 .back-to-settings + .page-title { margin-top: var(--s1); }
 /* The mail steps: each step's name, a link to it, and whether it is done, in words. */
@@ -1045,9 +1142,10 @@ main.wrap.single > .page-head + p { margin-top: var(--s4); }
   .bar, .tabs { border-color: CanvasText; }
   .powered-by-color .pb-mark { forced-color-adjust: none; } /* the product's mark keeps its own colors, its disc its own ground */
   .monogram, .account, .avatar { border: 1px solid CanvasText; }
-  .top-nav a[aria-current="page"], .nav-group-button.here, .top-nav .nav-panel a[aria-current="page"], .menu-panel a[aria-current="page"],
+  .top-nav a[aria-current="page"], .nav-group-button.here, .top-nav .nav-panel a[aria-current="page"],
   .tabs a[aria-current="page"] { text-decoration: underline; text-decoration-thickness: 3px; text-underline-offset: 6px; }
-  .menu-button, .menu-panel, .nav-panel { border: 1px solid CanvasText; }
+  .nav-panel { border: 1px solid CanvasText; }
+  .logo-ink { forced-color-adjust: none; background: CanvasText; } /* the mask's fill, which the system palette would otherwise drop */
   .sets .track { forced-color-adjust: none; background: GrayText; }
   .sets li.done .track { background: CanvasText; }
   .sets [aria-current="step"] .track { background: Highlight; height: 6px; }
@@ -1070,7 +1168,7 @@ main.wrap.single > .page-head + p { margin-top: var(--s4); }
   .checks input:disabled::before { border-color: GrayText; }
   .btn:disabled, .btn[aria-disabled="true"], .field :disabled { border-style: dashed; color: GrayText; }
   .club-preview { forced-color-adjust: none; }
-  details.more:not(.how) > summary::before { forced-color-adjust: none; background: CanvasText; } /* the caret's mask fill, which the system palette would otherwise drop */
+  details:not(.how) > summary::before { forced-color-adjust: none; background: CanvasText; } /* the caret's mask fill, which the system palette would otherwise drop */
   :focus-visible { outline-color: Highlight; }
 }
 
@@ -1081,8 +1179,6 @@ main.wrap.single > .page-head + p { margin-top: var(--s4); }
 body { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
 .wrap { padding-left: max(var(--cell), env(safe-area-inset-left)); padding-right: max(var(--cell), env(safe-area-inset-right)); }
 .bar { padding-top: env(safe-area-inset-top); }
-.menu-panel { top: calc(56px + env(safe-area-inset-top)); }
-.menu-panel a { padding-left: max(var(--cell), env(safe-area-inset-left)); padding-right: max(var(--cell), env(safe-area-inset-right)); }
 .tabs { padding-bottom: env(safe-area-inset-bottom); padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
 @media (min-width: 760px) { body { padding-bottom: env(safe-area-inset-bottom); } }
 /* A page with no tab bar (staff, sign-in) keeps no room for one at any width. */

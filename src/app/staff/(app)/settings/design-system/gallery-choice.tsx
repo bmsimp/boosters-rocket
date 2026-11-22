@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { ChoiceGroup } from "../../../components/choice-group";
+import { ChoiceGroup } from "@/app/components/choice-group";
 
 /** The gallery's ChoiceGroup sample: it holds its own choice, as a page's form would. Nothing is saved. */
 export function ChoiceSample() {

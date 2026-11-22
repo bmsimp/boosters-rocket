@@ -22,10 +22,13 @@ const PARENT_PAGES = "src/app/(parent)/";
 const STAFF_PAGES = "src/app/staff/(app)/";
 const STAFF_HOME = "src/app/staff/(app)/page.tsx";
 /**
- * The pages every signed-in staff member may open, which ask for no permission: the staff home, and the staff member's
- * own account page (their name, display and sign out: it takes no id and shows nobody else's data).
+ * The pages every signed-in staff member may open, which ask for no permission: the staff home, the staff member's
+ * own account page (their name, display and sign out: it takes no id and shows nobody else's data), and the phone's
+ * group hubs (Families, Season, Money: each lists only the pages of its group the person may open, reads nothing else,
+ * and refuses someone with none; tests/integration/staff-menu.test.ts).
  */
-const STAFF_OWN_PAGES = new Set([STAFF_HOME, "src/app/staff/(app)/account/page.tsx"]);
+const STAFF_OWN_PAGES = new Set([STAFF_HOME, "src/app/staff/(app)/account/page.tsx", "src/app/staff/(app)/families/page.tsx",
+  "src/app/staff/(app)/season/page.tsx", "src/app/staff/(app)/money/page.tsx"]);
 
 const read = (file: string) => readFileSync(path.join(root, file), "utf8");
 /** The code without comments, so a guard that is only mentioned, or commented out, doesn't count. */
@@ -117,7 +120,7 @@ const ROUTE_HANDLERS: Record<string, string> = {
   "src/app/api/internal/worker/route.ts": "The worker's token (isWorkerRequest); without it, a bare 404 (tests/integration/jobs-runner.test.ts).",
   "src/app/api/quickbooks/callback/route.ts": "A staff session with Settings.QuickBooks.ReadWrite, checked in the handler, and the state value from the connect step (tests/integration/quickbooks-connection.test.ts).",
   "src/app/icons/[name]/route.ts": "Public on purpose: the club's app icons, which a phone fetches before anyone signs in. It answers a fixed list of names with a picture of the club's short name on the club's color, and reads no family data (tests/integration/pwa-icons.test.ts).",
-  "src/app/staff/(app)/audit/export/route.ts": "A staff session with Audit.Log.Read, which only an Admin holds, checked in the handler before anything is read; anyone else is redirected with no rows. Each export is audited and sent no-store (tests/integration/audit-log.test.ts).",
+  "src/app/staff/(app)/settings/audit/export/route.ts": "A staff session with Audit.Log.Read, which only an Admin holds, checked in the handler before anything is read; anyone else is redirected with no rows. Each export is audited and sent no-store (tests/integration/audit-log.test.ts).",
   "src/app/(parent)/forms/[id]/signed/route.ts": "The parent session, checked first in the handler by requireParentPage() (signed out: to sign-in and back; refused: /refused). The request id is looked up within the session's app family (activeFamilyOf()) and its evidence by request, by that app family and by the roster's company, never an earlier company's (findMySignedPdf); an id that isn't a uuid, nobody's, another family's or one with no kept evidence all answer the same 404 with no bytes. Sent no-store with a fixed file name (tests/integration/signed-forms-downloads.test.ts).",
   "src/app/staff/(app)/forms/evidence/[id]/[file]/route.ts": "A staff session with Forms.Signature.Read, checked in the handler before anything is read; anyone else is redirected with no bytes. Each download is audited (forms.evidence.download) before a byte is sent, no-store, with a fixed file name (tests/integration/signed-forms-downloads.test.ts).",
   "src/app/setup/certificates/[name]/route.ts": "downloadAccess(): the setup session while setup is open, or an Admin afterward; otherwise 404 (tests/integration/setup-certificates-route.test.ts).",

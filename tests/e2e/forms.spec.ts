@@ -84,8 +84,10 @@ test("an Admin finds Forms settings not set up, with the webhook address on the 
   await context.addCookies([staffSessionCookie()]);
   const res = await page.goto("/staff/settings/forms");
   expect(res?.status()).toBe(200);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Forms");
-  await expect(page.getByRole("region", { name: "Connection", exact: true })).toContainText("Forms aren't set up yet.");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Documenso");
+  // Not set up: the head says so, there is no Connection card to say it again, and Set up says what it means for parents.
+  await expect(page.getByRole("region", { name: "Connection", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Set up", exact: true })).toContainText("Until forms are set up, parents read that forms aren't ready");
   // The steps are on their own page, opened from the plain view.
   await page.getByRole("region", { name: "Set up", exact: true }).getByRole("link", { name: "Set up" }).click();
   await expect(page).toHaveURL(/\/staff\/settings\/forms\/setup$/);
@@ -95,7 +97,7 @@ test("an Admin finds Forms settings not set up, with the webhook address on the 
   await expect(page.getByRole("region", { name: "2. Check the connection" }).getByRole("alert")).toContainText("Save Documenso's address and API token first.");
   await noSidewaysScroll(page);
   // The Health page says the same, and leads here.
-  await page.goto("/staff/health");
+  await page.goto("/staff/settings/health");
   const line = page.locator('li[data-health="forms"]');
   await expect(line).toContainText("Forms (Documenso)");
   await expect(line).toContainText("Not set up");

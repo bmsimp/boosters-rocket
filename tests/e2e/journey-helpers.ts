@@ -46,16 +46,26 @@ export async function codeFor(sql: postgres.Sql, sink: MailSink, email: string):
   return found;
 }
 
-/** Opens one group of the staff menu (or the phone's Menu first) and follows one of its entries, as a person would. */
+/**
+ * Opens one group of the staff menu and follows one of its entries, as a person would: on a phone, the group's tab in
+ * the bottom tab bar, then the entry on its hub (Home and Settings are tabs of their own).
+ */
 export async function staffMenuTo(page: Page, group: string | null, entry: string): Promise<void> {
   if ((page.viewportSize()?.width ?? 0) < 760) {
-    await page.getByRole("button", { name: "Menu" }).click();
-    await page.locator("#mobile-menu").getByRole("link", { name: entry, exact: true }).click();
+    const tabs = page.locator("nav.tabs.staff-tabs");
+    if (!group) { await tabs.getByRole("link", { name: entry, exact: true }).click(); return; }
+    await tabs.getByRole("link", { name: group, exact: true }).click();
+    await page.locator("main").getByRole("link", { name: new RegExp(`^${entry}`) }).first().click();
     return;
   }
   const nav = page.locator("header.bar nav.top-nav");
   if (group) await nav.getByRole("button", { name: new RegExp(`^${group}`) }).click();
   await nav.getByRole("link", { name: entry, exact: true }).click();
+}
+
+/** From Settings, opens one item of its rail (on a phone the rail is the first screen of Settings). */
+export async function settingsTo(page: Page, item: string): Promise<void> {
+  await page.getByRole("navigation", { name: "Settings" }).getByRole("link", { name: new RegExp(`^${item}`) }).click();
 }
 
 /**

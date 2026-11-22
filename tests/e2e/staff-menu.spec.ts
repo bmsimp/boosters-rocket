@@ -1,15 +1,14 @@
 import { test, expect, type Page } from "@playwright/test";
 import { staffSessionCookie } from "./staff-session";
 
-// The seeded staff member is an Admin, who has every menu entry there is. The menu is grouped: Home, four groups behind
-// buttons, and Settings as one entry. Layout and the keyboard are things only a browser can show, so they are checked
+// The seeded staff member is an Admin, who has every menu entry there is. The menu is grouped: Home, three groups behind
+// buttons, and Settings as one entry (Staff, Roles, the audit log, Health and the design system are under it). Layout and the keyboard are things only a browser can show, so they are checked
 // here and not in vitest (tests/integration/staff-menu.test.ts checks who sees what).
-const TOP = ["Home", "Families", "Season", "Money", "Settings", "Admin"];
+const TOP = ["Home", "Families", "Season", "Money", "Settings"];
 const GROUPS: Record<string, string[]> = {
   Families: ["Roster", "Parents", "Accounting links"],
   Season: ["Seasons", "Progress", "Signed forms", "Volunteering", "Volunteer credit"],
   Money: ["Balances", "Reconciliation"],
-  Admin: ["Staff", "Roles", "Audit", "Health", "Design system"],
 };
 const nav = (page: Page) => page.locator("header.bar nav.top-nav");
 /** The menu's own entries, in order: the links and group buttons of the bar, not the links inside a group. */
@@ -21,9 +20,9 @@ for (const width of [760, 900, 1032, 1440]) {
     const context = await browser.newContext({ viewport: { width, height: 900 } });
     await context.addCookies([staffSessionCookie()]);
     const page = await context.newPage();
-    await page.goto("/staff/health");
+    await page.goto("/staff/settings/health");
     await expect(nav(page)).toBeVisible();
-    // A group's button carries ", current section" for a screen reader when the page is in it (Admin, for Health).
+    // Health is a settings page: Settings is the current entry, and no group is.
     await expect(topEntries(page)).toHaveText(TOP.map((t) => new RegExp(`^${t}`)));
     await expect(page.locator("header.bar .club")).toBeVisible();
 
@@ -69,12 +68,12 @@ for (const width of [760, 900, 1032, 1440]) {
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), `${name} open makes the page scroll sideways`).toBe(true);
       await expect(nav(page).locator(".nav-panel:not([hidden])")).toHaveCount(1);
     }
-    // Health, the page this is, is current inside its group, and the group says so.
-    await group(page, "Admin").click();
-    await expect(group(page, "Admin")).toHaveAttribute("aria-expanded", "false");
-    await expect(group(page, "Admin")).toHaveAccessibleName(/Admin, current section/);
-    await group(page, "Admin").click();
-    await expect(nav(page).getByRole("link", { name: "Health" })).toHaveAttribute("aria-current", "page");
+    // Health, the page this is, is under Settings, which is current; no group says it holds the page.
+    await group(page, "Money").click();
+    await expect(group(page, "Money")).toHaveAttribute("aria-expanded", "false");
+    await expect(nav(page).locator(":scope > a", { hasText: "Settings" })).toHaveAttribute("aria-current", "page");
+    for (const name of Object.keys(GROUPS)) await expect(group(page, name)).not.toHaveAccessibleName(/current section/);
+    await group(page, "Money").click();
     // A press outside the menu closes it.
     await page.locator("main").click({ position: { x: 5, y: 5 } });
     await expect(nav(page).locator(".nav-panel:not([hidden])")).toHaveCount(0);
@@ -130,27 +129,55 @@ test("on a Progress page only Progress is marked current, though its address sit
   await context.close();
 });
 
-test("on a phone the same entries are behind the Menu button, each group under its name, and the bar keeps its one row", async ({ browser }) => {
+test("on a phone the menu is a bottom tab bar: Home, each group, Settings; a group's tab opens its hub, and its pages lead back to it", async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   await context.addCookies([staffSessionCookie()]);
   const page = await context.newPage();
-  await page.goto("/staff/health");
+  await page.goto("/staff");
   await expect(nav(page)).toBeHidden();
+  // The bar keeps the club and the initials only: no Menu button.
+  await expect(page.getByRole("button", { name: "Menu" })).toHaveCount(0);
   expect(await page.locator("header.bar .wrap").evaluate((el) => el.getBoundingClientRect().height)).toBe(56); // the one row, above the hairline
-  const menu = page.getByRole("button", { name: "Menu" });
-  await expect(menu).toHaveAttribute("aria-expanded", "false");
-  await menu.click();
-  const panel = page.locator("#mobile-menu");
-  await expect(panel.getByRole("link")).toHaveText(["Home", ...GROUPS.Families!, ...GROUPS.Season!, ...GROUPS.Money!, "Settings", ...GROUPS.Admin!]);
-  for (const name of Object.keys(GROUPS)) await expect(panel.getByRole("group", { name })).toBeVisible();
-  await expect(panel.getByRole("link", { name: "Health" })).toHaveAttribute("aria-current", "page");
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-  await page.keyboard.press("Escape");
-  await expect(panel).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Menu" })).toBeFocused();
-  await page.getByRole("button", { name: "Menu" }).click();
-  await page.locator("#mobile-menu").getByRole("link", { name: "Settings" }).click();
+  const tabs = page.locator("nav.tabs.staff-tabs");
+  await expect(tabs.getByRole("link")).toHaveText(["Home", "Families", "Season", "Money", "Settings"]);
+  await expect(tabs.getByRole("link", { name: "Home" })).toHaveAttribute("aria-current", "page");
+  // Every tab is a 44px target or more, inside the screen, and the page above it clears the bar.
+  for (const box of await tabs.getByRole("link").evaluateAll((all) => all.map((a) => a.getBoundingClientRect().toJSON() as DOMRect))) {
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(box.right).toBeLessThanOrEqual(390);
+  }
+  expect(await page.evaluate(() => parseFloat(getComputedStyle(document.body).paddingBottom))).toBeGreaterThanOrEqual(64);
+
+  // A group's tab opens its hub: its pages as rows, each its own page.
+  await tabs.getByRole("link", { name: "Families" }).click();
+  await expect(page).toHaveURL(/\/staff\/families$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Families");
+  await expect(page.locator("main").getByRole("link")).toHaveText(GROUPS.Families!.map((l) => new RegExp(`^${l}`)));
+  await expect(tabs.getByRole("link", { name: "Families" })).toHaveAttribute("aria-current", "page");
+  await page.locator("main").getByRole("link", { name: /^Roster/ }).click();
+  await expect(page).toHaveURL(/\/staff\/roster$/);
+  await expect(tabs.getByRole("link", { name: "Families" })).toHaveAttribute("aria-current", "page");
+  // The page leads back to its hub.
+  await page.locator("p.hub-back").getByRole("link", { name: "Families" }).click();
+  await expect(page).toHaveURL(/\/staff\/families$/);
+
+  // Settings goes straight to Settings, whose rail is its first screen.
+  await tabs.getByRole("link", { name: "Settings" }).click();
   await expect(page).toHaveURL(/\/staff\/settings$/);
+  await expect(tabs.getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+  await page.goto("/staff/settings/health");
+  await expect(tabs.getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await context.close();
+});
+
+test("at 760px and wider the staff tab bar is hidden and the hub's way back is not drawn", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await context.addCookies([staffSessionCookie()]);
+  const page = await context.newPage();
+  await page.goto("/staff/roster");
+  await expect(page.locator("nav.tabs.staff-tabs")).toBeHidden();
+  await expect(page.locator("p.hub-back")).toBeHidden();
   await context.close();
 });
 

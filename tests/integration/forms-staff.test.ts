@@ -8,7 +8,7 @@ import { ADMIN_ONLY, GRANTABLE } from "@/lib/permissions/registry";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import FormsSettingsPage from "@/app/staff/(app)/settings/forms/page";
 import FormsSetupPage from "@/app/staff/(app)/settings/forms/setup/page";
-import HealthPage from "@/app/staff/(app)/health/page";
+import HealthPage from "@/app/staff/(app)/settings/health/page";
 import RequirementPage from "@/app/staff/(app)/seasons/[id]/requirements/[requirementId]/page";
 import SeasonSetupPage from "@/app/staff/(app)/seasons/[id]/page";
 import { checkFormsConnectionAction, newWebhookSecretAction, saveFormsSettingsAction } from "@/app/staff/(app)/settings/forms/actions";
@@ -68,7 +68,8 @@ describe("forms settings", () => {
 
   it("says forms aren't set up, gives the webhook address, and tells an Admin what to do in Documenso", async () => {
     asStaff(admin);
-    expect(textOf(await renderPage(FormsSettingsPage))).toContain("Forms aren't set up yet. Until they are, parents read that forms aren't ready, and nothing else changes for them.");
+    // The head says "Not set up"; the page says it once more only where it says what that means for parents.
+    expect(textOf(await renderPage(FormsSettingsPage))).toContain("Until forms are set up, parents read that forms aren't ready, and nothing else changes for them.");
     // The steps are on their own page (the pattern the QuickBooks page set).
     const text = textOf(await renderPage(FormsSetupPage));
     expect(text).toContain("Open the team's settings, then API Tokens . Create a token that doesn't expire");

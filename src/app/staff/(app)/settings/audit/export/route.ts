@@ -10,7 +10,7 @@ import { AUDIT_CSV_HEADER, auditCsvLine, csvLine } from "@/lib/audit/csv";
 export const dynamic = "force-dynamic";
 
 /**
- * The audit log as a CSV file, with the same filters as the page (/staff/audit). A route handler has no page guard, so
+ * The audit log as a CSV file, with the same filters as the page (/staff/settings/audit). A route handler has no page guard, so
  * the session and the permission are checked here, first: Audit.Log.Read, which only an Admin holds. Anyone else is
  * sent where the pages send them and gets no rows. Every export is itself audited, with its filters and its row count,
  * before a row is sent. Never cached.
