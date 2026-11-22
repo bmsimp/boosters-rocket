@@ -7,7 +7,7 @@ works (**Pass**), and what to do when it doesn't (**If not**). Write the date an
 [Results](#results) table at the end; a "no" is as useful as a "yes".
 
 Words in `<angle brackets>` are yours to fill in. Anything in `monospace` is typed exactly. "Settings, QuickBooks"
-means: open **Settings** in the staff menu, then the **QuickBooks** box on that page. Where a screen no longer matches
+means: open **Settings** in the staff menu, then **Integrations** in its list on the left (on a phone, the list is the first screen), then **QuickBooks Online**. Staff, Roles, the audit log and Health are in that list too. Where a screen no longer matches
 what is written here, trust the screen and note it.
 
 The other runbooks: [a first installation](first-install.md), [Intuit](intuit.md), [outgoing mail](mail.md),
@@ -51,7 +51,7 @@ sandbox company and the club's Microsoft 365 mail, but no Documenso.
    is in `~/booster-rocket-backups`. **If not:** the exit code says why (the table in that section): 2 refused, 3
    migrations failed, 4 the app didn't become healthy, 6 `git pull` failed, 7 the build failed, 8 the backup failed
    (nothing was migrated and the running app wasn't touched).
-5. **Open the Health page** (`/staff/settings/health`, Admin, Health in the staff menu).
+5. **Open the Health page** (`/staff/settings/health`, Admin: **Settings** in the staff menu, then **Health**).
    **Pass:** **Version** names the commit just deployed; **Worker** says it woke within the last minute; **Last
    backup** shows the deploy's backup (it also says Documenso's database wasn't part of it: this host has none); the
    address box says the browser reached the portal at its own address.
@@ -83,7 +83,7 @@ sandbox company and the club's Microsoft 365 mail, but no Documenso.
    **Pass:** after the first switch, every family is still on the portal unlinked, a test parent still signs in and
    reads that payments aren't connected, and Reconciliation lists the unpaid buy-outs ended; after the second, Roster
    lists the first sandbox company's families again, linked, and a test parent sees their balance.
-9. **Export the audit log once** (Audit in the staff menu, **Export ... (CSV)**) after a parent whose name has an accent
+9. **Export the audit log once** (**Settings**, then **Audit log**, **Export ... (CSV)**) after a parent whose name has an accent
    has signed in, and open the file in Excel or Google Sheets.
    **Pass:** the accent shows as it should, and the columns read well. **If not:** note which program and what it
    showed.
@@ -781,7 +781,7 @@ work another. Any time before the pilot.
 5. A parent changes their own sign-in email in the portal, whatever families they are in. Until the staff email change
    ships (open question 8 of the app-owned families spec) the club can't change it for them: a change made in
    QuickBooks no longer changes anyone's sign-in address.
-6. The staff menu's groups (Families, Season, Money, Admin, with Reconciliation under Money and Settings as one entry)
+6. The staff menu's groups (Families, Season, Money, with Reconciliation under Money, and Settings as one entry holding Staff, Roles, the audit log and Health)
    and its labels ("Signed forms", "Volunteer credit", "Reconciliation"); the mapping screen's name and place,
    "Accounting links" under Families after Parents, shown to whoever may link families to accounting and see the
    roster; setup asks for the club before the first
