@@ -97,7 +97,7 @@ function SignIns({ familyId, signins, links, changes, addable, inQuickBooks }: {
       )}
       {changes && (
         <>
-          <h3>Add a guardian</h3>
+          <h3 className="table-head">Add a guardian</h3>
           {addable !== null ? <Notice tone="info" live="none">{addable}</Notice> : (
             <>
               <p>They sign in with this address and a password they choose from an emailed link: the welcome email, or Resend welcome email on their page, or &ldquo;Set up or reset my password&rdquo; on the sign-in page. If someone in the portal already has this address, you&apos;re asked whether it&apos;s the same person first. One address is one person, who can be a guardian in several families.</p>

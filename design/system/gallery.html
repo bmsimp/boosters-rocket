@@ -421,6 +421,8 @@ fieldset.checks { border: 0; padding: 0; min-width: 0; }
 .list-title { font-weight: 500; overflow-wrap: anywhere; }
 .list-title a { text-decoration: none; }
 .list-title a:hover { text-decoration: underline; }
+/* A row that is only a way somewhere (a family's other pages): its title is a lone link, in the club's text color, 44px tall. */
+.list-title a.link-line { color: var(--club-text); margin-block: -10px; }
 .list-meta { font-size: var(--text-sm); color: var(--ink-2); overflow-wrap: anywhere; }
 .list-status { font-weight: 500; }
 .list-status.tone-done { color: var(--done); } .list-status.tone-due { color: var(--due); } .list-status.tone-late { color: var(--late); }
@@ -876,6 +878,13 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 .ds-frame .tabs { position: static; display: grid; margin-top: var(--s7); }
 @media (max-width: 559.98px) { .ds-frame .top-nav.ds-show { display: none; } }
 @media (min-width: 760px) { .ds-pair { grid-template-columns: 1fr 1fr; } }
+/* The rebuilt staff pages: a state line under a card's title, a details list and the words after it, a notice and its
+   hint, a lone paragraph after a toolbar's form or under the page head, and a card's list of rules, each with room. */
+.box > h2 + .state { margin-top: var(--s2); }
+.box > dl.details + p, .box > dl.details + .hint, .box > .notice + .hint, .box > form + p { margin-top: var(--s3); }
+main.wrap.single > .page-head + p { margin-top: var(--s4); }
+.box > ul:not([class]) { padding-left: 1.25em; margin-top: var(--s2); display: grid; gap: var(--s1); max-width: 70ch; }
+.box h3.table-head:first-child { margin-top: 0; }
 /* ---- End of Staff pages ---- */
 
 /* ---- Settings and the staff menu: the Settings page and every settings page, the roles checklist, the Staff page and
