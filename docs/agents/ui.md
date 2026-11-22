@@ -34,7 +34,7 @@ Import from the index: `import { Card, List, ListRow, LinkButton } from "@/app/c
 Rules:
 - No new one-off class where a primitive does the job. A page block that needs one goes in its area's block of `booster.css` (below), built from tokens.
 - No hex color, rgb or named color in a component: tokens only. A fixed color the stylesheet gains is added to `src/lib/theme/palette.ts` in the same commit, where `tests/unit/design-tokens.test.ts` checks it matches the stylesheet and passes its contrast in every mode.
-- Font sizes in rem, from the scale, never under 0.8125rem (`--text-xs`); body text is 1rem. Numbers are tabular (the body sets it).
+- Font sizes in rem, from the scale, never under 0.8125rem (`--text-xs`); body text is 1rem. Figures are tabular only where they are read as figures: `.num` (and `numeric` on a DataTable column, `KeyValue`'s `numeric`), amounts, stats, a table's times; the body keeps Inter's proportional figures, whose tabular hyphen is set wide.
 - Every control and lone link is at least 44px tall (buttons, fields, tabs, menu links, `.link-line`). `size="sm"` is narrower, not shorter.
 - Every status is words plus an icon; color only repeats them. The current nav item and tab carry the club's color and weight (and the tab its tinted icon pill).
 - Only menus and popovers have a shadow (`--shadow-menu`). Lists and tables inside a `Card` run to its edges by themselves (`--box-pad`).

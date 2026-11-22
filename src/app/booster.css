@@ -133,7 +133,6 @@ body {
   color: var(--ink);
   background-color: var(--ground);
   font: 400 var(--text-md)/1.5 var(--font);
-  font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
   padding-bottom: 88px;
 }
@@ -144,7 +143,9 @@ input, textarea { caret-color: var(--club-text); }
 :focus-visible { outline: var(--ring) solid var(--club-text); outline-offset: 2px; }
 a { color: inherit; text-underline-offset: 0.2em; text-decoration-thickness: 1px; }
 button { font: inherit; cursor: pointer; }
-.num { font-variant-numeric: tabular-nums lining-nums; }
+/* Figures are tabular only where they line up or are read as an amount (Inter's tabular forms set a hyphen wide, so
+   the body keeps proportional figures): .num, a table's numeric cells and times, list amounts, money, stats, step numbers. */
+.num, .amt, .buyout-amount, .table time, .sets .n { font-variant-numeric: tabular-nums lining-nums; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .theme-sample { background: var(--ground); color: var(--ink); }
 
