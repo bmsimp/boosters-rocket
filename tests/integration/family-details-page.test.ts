@@ -56,7 +56,7 @@ describe("the page where a parent changes their phone and address", () => {
     expect(html).toMatch(field("region", "TX"));
     expect(html).toMatch(field("postalCode", "78745"));
     expect(html).toMatch(field("country", ""));
-    for (const { label, max } of CONTACT_FIELDS) { expect(html).toContain(`<span>${label}`); expect(html).toContain(`maxLength="${max}"`); }
+    for (const { name, label, max } of CONTACT_FIELDS) { expect(html).toContain(`<label class="field-label" for="contact-${name}">${label}`); expect(html).toContain(`maxLength="${max}"`); }
     expect(html).toContain("Address line 2 (optional)");
     expect(html).toContain(">Save my details</button>");
     expect(html).toContain(`<a class="btn btn-line" href="/family">Back to Family</a>`);

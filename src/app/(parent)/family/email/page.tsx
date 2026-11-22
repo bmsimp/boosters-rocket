@@ -6,6 +6,7 @@ import { getClubSettings } from "@/lib/settings/club";
 import { env } from "@/env";
 import { AskAgain, SetupLinkForm } from "../sign-in/signin-forms";
 import { NewEmailForm } from "./email-forms";
+import { Card, LinkButton, PageHeader } from "../../../components/ui";
 
 export const metadata = { title: "Change your sign-in email" };
 
@@ -30,33 +31,28 @@ export default async function FamilyEmailPage() {
   const [me, club] = await Promise.all([loadMySignin(ctx), getClubSettings()]);
   return (
     <main className="wrap single family-page">
-      <h1 className="page-title">Change your sign-in email</h1>
+      <PageHeader title="Change your sign-in email" lede={me.canChangeEmail
+        ? <>You sign in with {ctx.email}. A new address becomes the one you sign in with, and the club&apos;s records are brought up to date with it.</> : undefined} />
       {me.canChangeEmail ? (
-        <>
-          <p className="lede">You sign in with {ctx.email}. A new address becomes the one you sign in with, and the club&apos;s records are brought up to date with it.</p>
-          <section className="box" aria-labelledby="new-h">
-            <h2 id="new-h">Your new email</h2>
-            {!me.hasPassword ? (
-                <>
-                  <p>{SIGNIN_SETTINGS_COPY.choosePasswordForEmail} {SIGNIN_SETTINGS_COPY.noPassword}</p>
-                  <SetupLinkForm />
-                </>
-              ) : (
-                <AskAgain email={me.email} proved={me.provedRecently} lede={howYouSignIn({ app: me.app !== null, passkey: me.hasPasskey, strict: me.strict }).askAgainForEmail}
-                  passkey={me.hasPasskey} portalOrigin={portalOrigin()}>
-                  <p>We&apos;ll email a link to the new address. Nothing changes until you open it and say yes.</p>
-                  <NewEmailForm />
-                </AskAgain>
-              )}
-          </section>
-        </>
+        <Card title="Your new email" titleId="new-h">
+          {!me.hasPassword ? (
+              <>
+                <p>{SIGNIN_SETTINGS_COPY.choosePasswordForEmail} {SIGNIN_SETTINGS_COPY.noPassword}</p>
+                <SetupLinkForm />
+              </>
+            ) : (
+              <AskAgain email={me.email} proved={me.provedRecently} lede={howYouSignIn({ app: me.app !== null, passkey: me.hasPasskey, strict: me.strict }).askAgainForEmail}
+                passkey={me.hasPasskey} portalOrigin={portalOrigin()}>
+                <p>We&apos;ll email a link to the new address. Nothing changes until you open it and say yes.</p>
+                <NewEmailForm />
+              </AskAgain>
+            )}
+        </Card>
       ) : (
-        <section className="box" aria-labelledby="ask-h">
-          <h2 id="ask-h">Ask the club</h2>
+        <Card title="Ask the club" titleId="ask-h" actions={<LinkButton plain variant="secondary" href="/family">Back to Family</LinkButton>}>
           <p className="help">{EMAIL_COPY.askTheClub}{club.treasurerEmail
             ? <> You can email the treasurer at <a href={`mailto:${club.treasurerEmail}`}>{club.treasurerEmail}</a>.</> : null}</p>
-          <div className="box-foot"><a className="btn btn-line" href="/family">Back to Family</a></div>
-        </section>
+        </Card>
       )}
     </main>
   );

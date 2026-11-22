@@ -2,21 +2,22 @@ import type { MyContact, MyStudent } from "@/lib/parents/my-family";
 import { Card } from "../components/ui/card";
 import { KeyValue } from "../components/ui/key-value";
 import { LinkButton } from "../components/ui/button";
+import { List, ListRow } from "../components/ui/list";
 
 /**
  * The boxes Home and Family share. Server components: every name, address and number here is the portal's own record
  * (a name or phone the take-in brought from QuickBooks among them) or the person's own, written as text only.
  */
 
-/** The family's students, by name (the Family page). Home lists them with where each stands: home-parts.tsx. */
+/** The family's students, a row each by name (the Family page). Home lists them with where each stands: home-parts.tsx. */
 export function StudentsBox({ students }: { students: MyStudent[] }) {
   return (
     <Card className="students-box" title="Your students" titleId="stu-h">
-      {students.length > 0 ? (
-        <ul className="students">
-          {students.map((s) => <li key={String(s.id)}><span className="who"><b>{s.name}</b></span></li>)}
-        </ul>
-      ) : <p>The club has no active students listed for your family right now.</p>}
+      <List>
+        {students.length > 0
+          ? students.map((s) => <ListRow key={String(s.id)} title={s.name} />)
+          : <ListRow title="The club has no active students listed for your family right now." />}
+      </List>
     </Card>
   );
 }

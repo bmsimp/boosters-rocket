@@ -436,7 +436,7 @@ describe("Home", () => {
     asParent(a.identity);
     for (const page of [ParentHome, FamilyPage]) {
       const html = await renderPage(page);
-      expect(html).toMatch(/<(b|span class="list-title")>Aurelio Alderquist<\/(b|span)>/);
+      expect(html).toMatch(/<span class="list-title">Aurelio Alderquist<\/span>/);
       expect(html).not.toContain("Azalea");
       expect(html).not.toContain("deleted");
     }
@@ -489,7 +489,7 @@ describe("Home", () => {
     for (const page of [ParentHome, FamilyPage]) {
       const html = await renderPage(page);
       expect(html).toContain("&lt;img src=x onerror=alert(1)&gt; Family");
-      expect(html).toMatch(/<(b|span class="list-title")>Hal &lt;img src=x onerror=alert\(1\)&gt;<\/(b|span)>/);
+      expect(html).toMatch(/<span class="list-title">Hal &lt;img src=x onerror=alert\(1\)&gt;<\/span>/);
       expect(html).toContain("Hana &lt;script&gt;alert(2)&lt;/script&gt;");
       expect(html).toContain("555&lt;svg onload=alert(3)&gt;");
       expect(html).not.toMatch(/<img|<script|<svg onload|<b>bold/);
@@ -509,7 +509,7 @@ describe("Family", () => {
     asParent(a.identity);
     const html = await renderPage(FamilyPage);
     expect(html).toContain(`<h1 class="page-title">Alderquist Family</h1>`);
-    for (const name of A_STUDENTS) expect(html).toContain(`<b>${name}</b>`);
+    for (const name of A_STUDENTS) expect(html).toContain(`<span class="list-title">${name}</span>`);
     expect(html).toContain(`<dd class="num">${FAMILY_A.parent.phone}</dd>`);
     expect(html).toContain("Your account");
     expect(html).toContain(`How you sign in to the portal</p><dl class="details"><dt>Name</dt><dd>Ansgar Alderquist</dd><dt>Email</dt><dd>${FAMILY_A.parent.email}</dd></dl>`);

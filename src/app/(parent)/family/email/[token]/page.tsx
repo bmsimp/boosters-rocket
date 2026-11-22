@@ -1,6 +1,7 @@
 import { requireParentPage } from "@/lib/guards";
 import { EMAIL_COPY, findMyEmailChange } from "@/lib/parents/email-change";
 import { ConfirmEmailForm } from "../email-forms";
+import { Card, LinkButton, PageHeader } from "../../../../components/ui";
 
 export const metadata = { title: "Your new sign-in email" };
 // Each open looks the link up again: a link is spent, or runs out, between one open and the next.
@@ -20,22 +21,18 @@ export default async function ConfirmEmailPage({ params }: { params: Promise<{ t
   const view = await findMyEmailChange(ctx, token);
   return (
     <main className="wrap single family-page">
-      <h1 className="page-title">Your sign-in email</h1>
-      <section className="box" aria-labelledby="confirm-h">
-        {view.state === "ask" ? (
-          <>
-            <h2 id="confirm-h">{`Use ${view.newEmail} to sign in from now on?`}</h2>
-            <p>You sign in with {ctx.email} now. Once you say yes, you sign in again with the new address, and the club&apos;s records are brought up to date with it.</p>
-            <ConfirmEmailForm token={token} />
-          </>
-        ) : (
-          <>
-            <h2 id="confirm-h">{view.state === "ask_club" ? "Ask the club" : "This link can't be used"}</h2>
-            <p className="help">{view.state === "ask_club" ? EMAIL_COPY.askTheClub : EMAIL_COPY.linkNoGood}</p>
-            <div className="box-foot"><a className="btn btn-line" href="/family">Back to Family</a></div>
-          </>
-        )}
-      </section>
+      <PageHeader title="Your sign-in email" />
+      {view.state === "ask" ? (
+        <Card title={`Use ${view.newEmail} to sign in from now on?`} titleId="confirm-h">
+          <p>You sign in with {ctx.email} now. Once you say yes, you sign in again with the new address, and the club&apos;s records are brought up to date with it.</p>
+          <ConfirmEmailForm token={token} />
+        </Card>
+      ) : (
+        <Card title={view.state === "ask_club" ? "Ask the club" : "This link can't be used"} titleId="confirm-h"
+          actions={<LinkButton plain variant="secondary" href="/family">Back to Family</LinkButton>}>
+          <p className="help">{view.state === "ask_club" ? EMAIL_COPY.askTheClub : EMAIL_COPY.linkNoGood}</p>
+        </Card>
+      )}
     </main>
   );
 }

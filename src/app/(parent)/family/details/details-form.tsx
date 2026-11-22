@@ -2,6 +2,7 @@
 import { useActionState, useEffect, useRef } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { CONTACT_FIELDS, type ContactField, type ContactForm, type ContactValues } from "@/lib/parents/contact-fields";
+import { ActionOutcome, Button, LinkButton, TextInput } from "@/app/components/ui";
 import { saveDetailsAction } from "./actions";
 
 type Result = { ok: true; message: string } | { ok: false; errors: string[] };
@@ -47,25 +48,15 @@ export function DetailsEditor({ initial }: { initial: ContactForm }) {
   return (
     <form action={action} className="stack" onSubmit={(e) => { if (pending) e.preventDefault(); }}>
       {CONTACT_FIELDS.map(({ name, label, max }) => (
-        <label className="field" key={`${name}-${state.round}`}>
-          <span>{label}{OPTIONAL.includes(name) ? " (optional)" : ""}</span>
-          <input name={name} defaultValue={state.shown.values[name]} maxLength={max} {...FILLS[name]} />
-        </label>
+        <TextInput key={`${name}-${state.round}`} id={`contact-${name}`} label={<>{label}{OPTIONAL.includes(name) ? " (optional)" : ""}</>}
+          name={name} defaultValue={state.shown.values[name]} maxLength={max} {...FILLS[name]} />
       ))}
-      {state.result && (
-        <div ref={answer} tabIndex={-1} key={state.round}>
-          {!state.result.ok && <ul role="alert" className="errors">{state.result.errors.map((e) => <li key={e}>{e}</li>)}</ul>}
-          {state.result.ok && (
-            <p role="status" className="paid-up">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M4 12.5l5 5 11-11" /></svg>
-              {state.result.message}
-            </p>
-          )}
-        </div>
-      )}
+      {state.result && <ActionOutcome key={state.round} state={state.result} ref={answer} />}
       {/* Busy is aria-disabled, not disabled: a disabled button drops the focus, and the keyboard's place with it. */}
-      <button className="btn" aria-disabled={pending || undefined}>{pending ? "Saving…" : "Save my details"}</button>
-      <a className="btn btn-line" href="/family">Back to Family</a>
+      <div className="row-actions">
+        <Button type="submit" busy={pending}>{pending ? "Saving…" : "Save my details"}</Button>
+        <LinkButton plain variant="secondary" href="/family">Back to Family</LinkButton>
+      </div>
     </form>
   );
 }

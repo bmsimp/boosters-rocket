@@ -87,7 +87,7 @@ test.describe("a parent changes their sign-in email", () => {
     const send = page.getByRole("button", { name: "Send me a link" });
     expect((await send.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await send.click();
-    await expect(page.getByRole("main").getByRole("status")).toHaveText(`We've sent a link to ${NEW}. Open it within 24 hours to finish the change. Until then, keep signing in with the address you use now.`);
+    await expect(page.getByRole("main").getByRole("status")).toHaveText(`Done We've sent a link to ${NEW}. Open it within 24 hours to finish the change. Until then, keep signing in with the address you use now.`);
 
     // The link goes to the new address, and a notice with no link to the old one.
     await expect.poll(() => sink.messages.filter((m) => m.to.includes(NEW)).length, { timeout: 15_000 }).toBe(1);
@@ -111,7 +111,7 @@ test.describe("a parent changes their sign-in email", () => {
     const yes = page.getByRole("button", { name: "Yes, use this address" });
     expect((await yes.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await yes.click();
-    await expect(page.getByRole("main").getByRole("alert")).toHaveText("That change can't be made here, so nothing was changed. Please ask the club to change your sign-in email.");
+    await expect(page.getByRole("main").getByRole("alert")).toHaveText("Problem That change can't be made here, so nothing was changed. Please ask the club to change your sign-in email.");
     const [refusal] = await sql`SELECT after FROM audit_log WHERE action = 'parent.email.save.failed' ORDER BY id DESC LIMIT 1`;
     expect(refusal!.after).toEqual({ code: "address_taken" });
     expect(await sql`SELECT 1 FROM audit_log WHERE action = 'parent.email.save'`).toHaveLength(0);

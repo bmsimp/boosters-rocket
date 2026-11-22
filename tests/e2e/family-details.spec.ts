@@ -98,7 +98,7 @@ test.describe("signed in", () => {
     await edit.getByRole("button", { name: "Save my details" }).click();
     // The answer speaks of the portal only.
     const saved = edit.getByRole("status");
-    await expect(saved).toHaveText("Saved. These are your details now.");
+    await expect(saved).toHaveText("Done Saved. These are your details now.");
     await expect(edit.getByLabel("Phone")).toHaveValue("505-555-0199");
     const [row] = await sql`SELECT phone, address_city, contact_version FROM parent WHERE email = 'zelda@example.com'`;
     expect(row).toEqual({ phone: "505-555-0199", address_city: "Santa Fe", contact_version: 1 });
