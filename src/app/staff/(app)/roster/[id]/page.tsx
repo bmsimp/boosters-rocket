@@ -26,9 +26,7 @@ import { moveAction, saveFamilyDetailsAction } from "../write-actions";
 import { offers } from "@/lib/roster/operations";
 import { placeWords } from "@/lib/roster/place";
 import type { Cust, Family } from "@/lib/roster/model";
-import { DataTable, type Column } from "@/app/components/data-table";
-import { Notice } from "@/app/components/notice";
-import { LocalTime } from "@/app/components/local-time";
+import { Card, DataTable, EmptyState, KeyValue, List, ListRow, LocalTime, Notice, PageHeader, type Column } from "@/app/components/ui";
 import { familyBalancePage, familyBuyoutsPage, familyCreditPage, familyProgressPage } from "@/app/staff/(app)/family-pages";
 
 export const metadata = { title: "Roster" };
@@ -68,10 +66,10 @@ function People({ id, title, noun, people, contact, empty }: { id: string; title
     { key: "status", header: "In QuickBooks", cell: (p) => p.standing ?? standing(p.customer) },
   ];
   return (
-    <section className="box" aria-labelledby={id}><h2 id={id}>{title}</h2>
-      {people.length === 0 ? <Notice tone="info" live="none">{empty}</Notice>
+    <Card title={title} titleId={id}>
+      {people.length === 0 ? <EmptyState title={empty} />
         : <DataTable caption={title} captionHidden columns={columns} rows={people} rowKey={(p) => p.key} />}
-    </section>
+    </Card>
   );
 }
 
@@ -93,9 +91,8 @@ function SignIns({ familyId, signins, links, changes, addable, inQuickBooks }: {
     ...(changes ? [{ key: "change", header: "Change", quiet: true, cell: (s: FamilySignin) => <GuardianChange name={s.name} guardianId={s.guardianId} open={s.open} reinstatable={s.reinstatable} /> }] : []),
   ];
   return (
-    <section className="box" aria-labelledby="entry-signins-h"><h2 id="entry-signins-h">Portal sign-ins</h2>
-      <p>The family&apos;s guardians in the portal, and whether each can sign in.</p>
-      {signins.length === 0 ? <Notice tone="info" live="none">Nobody can sign in for it yet.</Notice> : (
+    <Card title="Portal sign-ins" titleId="entry-signins-h" description={<>The family&apos;s guardians in the portal, and whether each can sign in.</>}>
+      {signins.length === 0 ? <EmptyState title="Nobody can sign in for it yet." /> : (
         <DataTable caption="Each person, and whether they can sign in" captionHidden rows={signins} rowKey={(s) => s.guardianId} columns={columns} />
       )}
       {changes && (
@@ -109,7 +106,7 @@ function SignIns({ familyId, signins, links, changes, addable, inQuickBooks }: {
           )}
         </>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -127,14 +124,14 @@ function SigninHold({ name, hold, notNow, guardians, release }: { name: string; 
     : notNow === null ? `Every open guardian of it can then sign in to it at once, while parent sign-ins are on: ${them}.`
     : `Every open guardian of it can then sign in to it once what keeps them out above no longer stands: ${them}.`;
   return (
-    <section className="box" aria-labelledby="entry-hold-h"><h2 id="entry-hold-h">Sign-ins held</h2>
+    <Card title="Sign-ins held" titleId="entry-hold-h">
       <Notice tone="warning" live="none">
         {name}&apos;s guardians can&apos;t sign in to it now. It was made active again from the books on the accounting links screen (the family, or one of its students),
         {hold.by ? ` by ${hold.by},` : ""} on <LocalTime iso={hold.at} />, and its sign-ins were held then, until someone who may change families lets its guardians in.
         {" "}{notNow === null ? "Once let in, they count at once: the family is active and nothing else keeps them out." : `Even once let in, they can't sign in yet: ${notNow}.`}
       </Notice>
       {release !== null && <><p>Let its guardians sign in ends the hold. {who}</p><ReleaseHoldControl release={release} /></>}
-    </section>
+    </Card>
   );
 }
 
@@ -148,11 +145,11 @@ function FamilyDetails({ familyId, details, editable }: { familyId: AppFamilyId;
   const v = details.values;
   const address = [v.line1, v.line2, v.city, [v.region, v.postalCode].filter(Boolean).join(" "), v.country].filter(Boolean).join(", ");
   return (
-    <section className="box" aria-labelledby="entry-details-h"><h2 id="entry-details-h">Phone and mailing address</h2>
+    <Card title="Phone and mailing address" titleId="entry-details-h">
       <p>The club&apos;s books have no parents of their own, so these are the family&apos;s, shared by its guardians, as the portal holds them. Its guardians change them on their Family page{editable ? ", and you can change them here" : ""}. A change is saved in the portal first, then sent to the family&apos;s own customer in QuickBooks; where QuickBooks holds details there the portal didn&apos;t know of, nothing is sent over them and the Reconciliation page lists it.</p>
       {editable ? <DetailsForm initial={details} act={saveFamilyDetailsAction.bind(null, String(familyId))} />
-        : <dl className="details"><dt>Phone</dt><dd>{v.phone || "None"}</dd><dt>Mailing address</dt><dd>{address || "None"}</dd></dl>}
-    </section>
+        : <KeyValue items={[{ key: "phone", label: "Phone", value: v.phone || "None" }, { key: "address", label: "Mailing address", value: address || "None" }]} />}
+    </Card>
   );
 }
 
@@ -163,14 +160,14 @@ function FamilyDetails({ familyId, details, editable }: { familyId: AppFamilyId;
 function Elsewhere({ familyId, money, season, credit, buyouts }: { familyId: AppFamilyId; money: boolean; season: boolean; credit: boolean; buyouts: boolean }) {
   if (!money && !season && !credit && !buyouts) return null;
   return (
-    <section className="box" aria-labelledby="entry-elsewhere-h"><h2 id="entry-elsewhere-h">More about this family</h2>
-      <ul className="lines">
-        {money && <li><Link className="link-line" href={familyBalancePage(familyId)}>What it owes</Link></li>}
-        {season && <li><Link className="link-line" href={familyProgressPage(familyId)}>Where it stands this season</Link></li>}
-        {credit && <li><Link className="link-line" href={familyCreditPage(familyId)}>Its volunteering credit</Link></li>}
-        {buyouts && <li><Link className="link-line" href={familyBuyoutsPage(familyId)}>Its volunteer buy-outs</Link></li>}
-      </ul>
-    </section>
+    <Card title="More about this family" titleId="entry-elsewhere-h">
+      <List>
+        {money && <ListRow title={<Link className="link-line" href={familyBalancePage(familyId)}>What it owes</Link>} />}
+        {season && <ListRow title={<Link className="link-line" href={familyProgressPage(familyId)}>Where it stands this season</Link>} />}
+        {credit && <ListRow title={<Link className="link-line" href={familyCreditPage(familyId)}>Its volunteering credit</Link>} />}
+        {buyouts && <ListRow title={<Link className="link-line" href={familyBuyoutsPage(familyId)}>Its volunteer buy-outs</Link>} />}
+      </List>
+    </Card>
   );
 }
 
@@ -277,8 +274,7 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
         ? `A change to ${s.name} is waiting to reach QuickBooks, so they can't be moved until it has gone through, or been given up on the Reconciliation page.` : null })) : [];
   return (
     <main className="wrap single">
-      <h1 className="page-title">{fam.name}</h1>
-      <p className="lede">{entry.kind === "family" ? "A family" : "A member"} the portal keeps{customer ? <>, linked to its customer in QuickBooks{customer.active ? "" : ", which is inactive there"}</>
+      <PageHeader title={fam.name} back={{ href: "/staff/roster", label: "Back to the roster" }} lede={<>{entry.kind === "family" ? "A family" : "A member"} the portal keeps{customer ? <>, linked to its customer in QuickBooks{customer.active ? "" : ", which is inactive there"}</>
         : fam.linked ? `, linked to a customer QuickBooks doesn't list as a ${entry.kind} now`
         : making ? ", not linked to QuickBooks yet: its customer is being made there"
         : heldFamily ? <>, not linked to QuickBooks: it was linked to &ldquo;{heldFamily.customerName}&rdquo; there until it was unlinked, &ldquo;{heldFamily.customerName}&rdquo; is still in the books, and a change to it is saved here only</>
@@ -288,7 +284,7 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
           : !heldOffered ? <> Accounting links can&apos;t offer &ldquo;{heldFamily.customerName}&rdquo; for it until it is sorted out in QuickBooks, where it may be inactive, under another customer or of another type; once it is, {linker
             ? <><Link href="/staff/links">link it again on Accounting links</Link>.</> : "someone who may link families to accounting links it again there."}</>
           : linker ? <> <Link href="/staff/links">Link it again on Accounting links</Link>.</>
-          : " Someone who may link families to accounting links it again on Accounting links."} <Link href="/staff/roster">Back to the roster</Link></p>
+          : " Someone who may link families to accounting links it again on Accounting links."}</>} />
       <DisconnectedNotice page={page} admin={admin} />
       {entry.kind === "family" ? (
         <>

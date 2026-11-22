@@ -412,8 +412,10 @@ describe("the family's pages after an unlink", () => {
     asStaff(linker);
     const html = await renderPage(RosterEntryPage, { params: { id: String(rivera) } });
     const lede = ledeOf(html);
-    expect(textOf(lede)).toBe(`${LEDE} Link it again on Accounting links. Back to the roster`);
+    expect(textOf(lede)).toBe(`${LEDE} Link it again on Accounting links.`);
     expect(lede).toContain('href="/staff/links"');
+    // The way back is the page header's, above the title.
+    expect(html).toMatch(/<p class="page-back"><a href="\/staff\/roster">.*Back to the roster<\/a><\/p>/);
     expect(html).not.toContain('id="create-link-h"');
     expect(html).not.toMatch(/<button[^>]*>Create in QuickBooks and link<\/button>/);
     expect(textOf(sectionOf(html, "portal-changes-h"))).toContain("This family isn't linked to a customer in QuickBooks, so a change made here is saved in the portal only");
@@ -421,7 +423,7 @@ describe("the family's pages after an unlink", () => {
     // A reader who may not link families is told who can, with no link.
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     const theirs = ledeOf(await renderPage(RosterEntryPage, { params: { id: String(rivera) } }));
-    expect(textOf(theirs)).toBe(`${LEDE} Someone who may link families to accounting links it again on Accounting links. Back to the roster`);
+    expect(textOf(theirs)).toBe(`${LEDE} Someone who may link families to accounting links it again on Accounting links.`);
     expect(theirs).not.toContain('href="/staff/links"');
     expect(stub.apiCalls()).toEqual([]);
   });
@@ -433,11 +435,11 @@ describe("the family's pages after an unlink", () => {
     const SORT = "Accounting links can't offer “Rivera Family” for it until it is sorted out in QuickBooks, where it may be inactive, under another customer or of another type; once it is,";
     asStaff(linker);
     const lede = ledeOf(await renderPage(RosterEntryPage, { params: { id: String(rivera) } }));
-    expect(textOf(lede)).toBe(`${LEDE} ${SORT} link it again on Accounting links. Back to the roster`);
+    expect(textOf(lede)).toBe(`${LEDE} ${SORT} link it again on Accounting links.`);
     expect(lede).toContain('href="/staff/links"');
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     const theirs = ledeOf(await renderPage(RosterEntryPage, { params: { id: String(rivera) } }));
-    expect(textOf(theirs)).toBe(`${LEDE} ${SORT} someone who may link families to accounting links it again there. Back to the roster`);
+    expect(textOf(theirs)).toBe(`${LEDE} ${SORT} someone who may link families to accounting links it again there.`);
     expect(theirs).not.toContain('href="/staff/links"');
   });
 

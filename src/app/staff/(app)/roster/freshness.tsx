@@ -1,6 +1,6 @@
 import type { RosterPage } from "@/lib/roster/queries";
 import { LocalTime } from "@/app/components/local-time";
-import { Notice } from "@/app/components/notice";
+import { Card, Notice } from "@/app/components/ui";
 import { RefreshButton } from "./refresh-button";
 import { refreshRosterAction } from "./actions";
 
@@ -21,10 +21,10 @@ export function DisconnectedNotice({ page, admin }: { page: RosterPage; admin: b
 export function Freshness({ page, admin }: { page: RosterPage; admin: boolean }) {
   const failed = page.lastRun && !page.lastRun.ok;
   return (
-    <section className="box" aria-labelledby="roster-fresh-h"><h2 id="roster-fresh-h">How fresh this is</h2>
+    <Card title="How fresh this is" titleId="roster-fresh-h">
       <p>{page.lastOkAt ? <>Last read from QuickBooks <LocalTime iso={page.lastOkAt} />.</> : "Not read from QuickBooks yet."}{page.connected ? " The worker reads it again every day." : null}</p>
       {failed && <Notice tone="problem" live="none">The latest try failed: {page.lastRun!.detail}<WhoCanFix admin={admin} /></Notice>}
       {page.connected && <RefreshButton refresh={refreshRosterAction} />}
-    </section>
+    </Card>
   );
 }

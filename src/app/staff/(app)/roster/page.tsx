@@ -4,9 +4,7 @@ import { loadRosterPage, rosterFamilies } from "@/lib/roster/queries";
 import { connectedToAnotherCompany, linksOfCustomers } from "@/lib/families/links";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { rosterCounts } from "../settings/quickbooks/roster-counts";
-import { DataTable, type Column } from "@/app/components/data-table";
-import { Notice } from "@/app/components/notice";
-import { Toolbar } from "@/app/components/ui/toolbar";
+import { Button, Card, DataTable, Notice, PageHeader, StatusBadge, TextInput, Toolbar, type Column, type Tone } from "@/app/components/ui";
 import { DisconnectedNotice, Freshness } from "./freshness";
 import { CreateBox, WhatChanges } from "./changes";
 import { familyPage } from "@/app/staff/(app)/family-pages";
@@ -27,6 +25,8 @@ type Row = { id: AppFamilyId; name: string; students: number | null; parents: nu
 /** Whether a family is linked to QuickBooks, in words, and its customer's standing there when it is. */
 const linkWords = (r: Row) => (r.status !== null ? (r.status ? "Linked: active" : "Linked: inactive") : r.linked ? "Linked: not listed as a family now"
   : r.making ? "Not linked yet: being made in QuickBooks" : r.held ? "Not linked: its customer is still in the books" : "Not linked: in the portal only");
+/** The tone of those words' badge: linked and active, something to look at (a link QuickBooks doesn't list as a family, a customer still in the books), or neither. */
+const linkTone = (r: Row): Tone => (r.status !== null ? (r.status ? "done" : "neutral") : r.linked || r.held ? "due" : "neutral");
 
 export default async function RosterPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireStaffPage("Roster.Read");
@@ -73,12 +73,11 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
       { key: "students", header: "Students", numeric: true, cell: (r: Row) => r.students },
       { key: "parents", header: "Parents", numeric: true, cell: (r: Row) => r.parents },
     ]),
-    { key: "status", header: "In QuickBooks", cell: linkWords },
+    { key: "status", header: "In QuickBooks", cell: (r) => <StatusBadge tone={linkTone(r)}>{linkWords(r)}</StatusBadge> },
   ];
   return (
     <main className="wrap single">
-      <h1 className="page-title">Roster</h1>
-      <p className="lede">The club&apos;s {roster?.kind === "flat" ? "members" : "families"}, each beside its customer in QuickBooks where it is linked to one. A change to a linked {roster?.kind === "flat" ? "member" : "family"} is sent to QuickBooks first, then made here too; one with no link is changed here only; and a change made in QuickBooks doesn&apos;t change the portal&apos;s {roster?.kind === "flat" ? "members" : "families"}.</p>
+      <PageHeader title="Roster" lede={<>The club&apos;s {roster?.kind === "flat" ? "members" : "families"}, each beside its customer in QuickBooks where it is linked to one. A change to a linked {roster?.kind === "flat" ? "member" : "family"} is sent to QuickBooks first, then made here too; one with no link is changed here only; and a change made in QuickBooks doesn&apos;t change the portal&apos;s {roster?.kind === "flat" ? "members" : "families"}.</>} />
 
       {!roster && (
         <Notice tone={page.brokenTypes.length ? "warning" : "info"} title="Nothing to show yet" titleId="roster-none-h">
@@ -91,12 +90,11 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
 
       {roster && <DisconnectedNotice page={page} admin={admin} />}
       {roster && (
-        <section className="box" aria-labelledby="roster-list-h"><h2 id="roster-list-h">{roster.kind === "flat" ? "Members" : "Families"}</h2>
-          <p>{rosterCounts(roster)}</p>
+        <Card title={roster.kind === "flat" ? "Members" : "Families"} titleId="roster-list-h" description={rosterCounts(roster)}>
           <form method="get" role="search">
             <Toolbar label="Search the roster">
-              <label className="field"><span>Find a {noun}</span><input name="q" type="search" defaultValue={typed} autoComplete="off" /></label>
-              <button className="btn btn-line">Find</button>
+              <TextInput id="roster-q" label={`Find a ${noun}`} name="q" type="search" defaultValue={typed} autoComplete="off" />
+              <Button type="submit" variant="secondary">Find</Button>
             </Toolbar>
           </form>
           {rows.length === 0
@@ -105,7 +103,7 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
                 : roster.kind === "flat" ? "QuickBooks lists no customers of the member types." : "QuickBooks lists no customers of the family type."}</Notice>
             : <DataTable caption={typed ? <>{rows.length} {rows.length === 1 ? noun : nouns} matching &quot;{typed}&quot;</> : <>Every {noun} on the roster, by name</>}
                 columns={columns} rows={rows} rowKey={(r) => String(r.id)} />}
-        </section>
+        </Card>
       )}
 
       {/* Not while the cache names no company (read before the portal recorded it): addFamily() refuses there. */}
@@ -114,14 +112,14 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
       {roster && page.shape && <WhatChanges shape={page.shape} canChange={canChange} />}
 
       {roster && page.attention.length > 0 && (
-        <section className="box" aria-labelledby="roster-attn-h"><h2 id="roster-attn-h">Needs attention ({page.attention.length})</h2>
-          <p>Things to tidy up in QuickBooks, or in the portal&apos;s sign-ins. Nothing here is changed by itself: fix each in QuickBooks, or from a family&apos;s page.</p>
+        <Card title={<>Needs attention ({page.attention.length})</>} titleId="roster-attn-h"
+          description={<>Things to tidy up in QuickBooks, or in the portal&apos;s sign-ins. Nothing here is changed by itself: fix each in QuickBooks, or from a family&apos;s page.</>}>
           <DataTable caption="What to tidy, for each customer" captionHidden rowKey={(a) => a.key} rows={page.attention.map((a, i) => ({ ...a, key: `${a.rule}-${a.qboId ?? a.name}-${i}` }))}
             columns={[
               { key: "name", header: "Customer", rowHeader: true, cell: (a) => named(a.qboId, a.name) },
               { key: "detail", header: "What to tidy", cell: (a) => a.detail },
             ]} />
-        </section>
+        </Card>
       )}
 
       <Freshness page={page} admin={admin} />

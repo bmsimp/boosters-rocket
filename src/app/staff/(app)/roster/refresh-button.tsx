@@ -2,6 +2,7 @@
 import { useActionState } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { Notice } from "@/app/components/notice";
+import { Button } from "@/app/components/ui/button";
 
 type Result = { ok: true; message: string } | { ok: false; error: string };
 
@@ -11,7 +12,7 @@ export function RefreshButton({ refresh }: { refresh: () => Promise<Result> }) {
     <form action={run} className="stack">
       {state && !state.ok && <Notice tone="problem">{state.error}</Notice>}
       {state?.ok && <Notice tone="done">{state.message}</Notice>}
-      <button className="btn btn-line" disabled={pending}>{pending ? "Reading QuickBooks…" : "Refresh now"}</button>
+      <Button type="submit" variant="secondary" disabled={pending}>{pending ? "Reading QuickBooks…" : "Refresh now"}</Button>
     </form>
   );
 }
