@@ -1,5 +1,5 @@
 import { requireStaffPage } from "@/lib/guards";
-import { integrationItems, railItems, settingsItems, SETTINGS_GROUPS } from "./sections";
+import { integrationItems, railItems, settingsHome, settingsItems, SETTINGS_GROUPS, SETTINGS_ROOT } from "./sections";
 import { RAIL_STATUS } from "./statuses";
 import { SettingsRail, type RailGroup } from "./settings-rail";
 
@@ -21,7 +21,7 @@ export default async function SettingsLayout({ children }: { children: React.Rea
   const extras = integrationItems(ctx.effective).map((i) => ({ key: i.key, title: i.title, href: i.href, keywords: [...i.keywords] }));
   return (
     <div className="settings-layout">
-      <SettingsRail groups={groups} extras={extras} />
+      <SettingsRail groups={groups} extras={extras} overview={settingsHome(ctx.effective) === SETTINGS_ROOT} />
       {children}
     </div>
   );

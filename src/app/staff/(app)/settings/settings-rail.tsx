@@ -17,13 +17,13 @@ const matches = (q: string, title: string, keywords: string[]) => [title, ...key
 
 /**
  * The Settings rail: Find a setting, then each group's items with their one-line status, the current one marked. It is
- * navigation, never a guard: the layout gives it only the items the person may open, and each page checks again. On a
+ * navigation, never a guard (Overview at its top, for whoever may open it): the layout gives it only the items the person may open, and each page checks again. On a
  * phone it is drawn only at /staff/settings, as the first screen (each item opens as its own page, with a way back).
  *
  * Find a setting filters in the browser, with no request: an item's title and its fixed keywords, and the integrations
  * by theirs, shown under Integrations ("smtp" leads to Outgoing mail). Enter opens the first result; Escape clears.
  */
-export function SettingsRail({ groups, extras }: { groups: RailGroup[]; extras: RailExtra[] }) {
+export function SettingsRail({ groups, extras, overview }: { groups: RailGroup[]; extras: RailExtra[]; overview: boolean }) {
   const path = usePathname();
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -53,6 +53,8 @@ export function SettingsRail({ groups, extras }: { groups: RailGroup[]; extras: 
         <input id={`${id}-find`} type="search" placeholder="Find a setting" autoComplete="off" value={query}
           onChange={(e) => setQuery(e.target.value)} onKeyDown={onKey} aria-describedby={`${id}-found`} />
       </div>
+      {/* The way back to the Overview, for whoever may open it: current only at /staff/settings itself. */}
+      {overview && !q && <ul className="rail-top"><li><Link href={ROOT} aria-current={root ? "page" : undefined}><span className="rail-name">Overview</span></Link></li></ul>}
       <div id={`${id}-found`} className="rail-none" role="status">{q && shown.length === 0 ? "No setting matches" : ""}</div>
       {shown.map((g) => (
         <div key={g.label} className="rail-group">
