@@ -6,7 +6,7 @@ import {
   ActionOutcome, Avatar, Badge, Button, CalendarDate, Card, Checkbox, DataTable, EmptyState, KeyValue, LinkButton, List, ListRow, ListSubRow, ListTotal, LocalTime,
   Notice, PageHeader, SectionLabel, Select, Stat, StateWords, StatusBadge, StatusIcon, StepIndicator, TextArea, TextInput, Toolbar, type Column,
 } from "../../../components/ui";
-import { ChoiceSample } from "./gallery-choice";
+import { ChoiceSample, TakenChoiceSample } from "./gallery-choice";
 
 /**
  * The design system's living gallery: every primitive in every state, with what it is for and how to import it. Only
@@ -212,6 +212,16 @@ export function Gallery() {
             <p className="help">Need more time? Ask the treasurer.</p>
           </Card>
           <div>
+            <SectionLabel level={3}>A row with a detail under it, and a pair of actions</SectionLabel>
+            <List>
+              <ListRow title={<strong>Sample passkey</strong>} meta={["Added Oct 1, 2026", "Last used Nov 20, 2026"]}
+                action={<><Button size="sm" variant="quiet">Rename</Button><Button size="sm" variant="danger">Remove</Button></>}
+                detail={<p className="help">Removing your last passkey means we ask for the emailed code again.</p>} />
+              <ListRow title="Pancake breakfast, Griddle" meta={["Saturday, 7:00 am to 9:00 am", "You're doing this one"]}
+                detail={<><span className="state">Signed up</span><Button size="sm" variant="secondary">Cancel my sign-up</Button></>} />
+            </List>
+          </div>
+          <div>
             <SectionLabel level={3}>Students (empty)</SectionLabel>
             <List><li className="list-row"><EmptyState title="No students yet">The club will add them. There&apos;s nothing you need to do.</EmptyState></li></List>
           </div>
@@ -256,6 +266,7 @@ export function Gallery() {
           </div>
         </div>
         <ChoiceSample />
+          <TakenChoiceSample />
       </Section>
 
       <Section id="avatar" name="Avatar" use="A person's initials beside their name. The club bar's account control is one, with a 44px tap target." importLine={UI("Avatar")}>

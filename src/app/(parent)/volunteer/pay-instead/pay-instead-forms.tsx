@@ -67,7 +67,7 @@ export function SwitchBack({ act }: { act: () => Promise<Result> }) {
       {!asking ? <Button ref={ask} variant="secondary" onClick={() => toggle(true)}>Volunteer instead</Button> : (
         <div className="row-actions" role="group" aria-label="Volunteer instead?">
           <Button variant="danger" busy={pending} onClick={press}>{pending ? "Cancelling the invoice…" : "Yes, cancel the invoice"}</Button>
-          <Button ref={keep} variant="secondary" aria-disabled={pending || undefined} onClick={() => { if (!pending) toggle(false); }}>Keep paying instead</Button>
+          <Button ref={keep} variant="quiet" aria-disabled={pending || undefined} onClick={() => { if (!pending) toggle(false); }}>Keep paying instead</Button>
         </div>
       )}
       <Outcome state={state} />

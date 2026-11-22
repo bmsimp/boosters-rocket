@@ -78,7 +78,7 @@ export function CancelSignup({ label, act }: { label: string; act: () => Promise
       {!asking ? <Button ref={ask} size="sm" variant="secondary" onClick={() => toggle(true)}>{label}</Button> : (
         <div className="row-actions" role="group" aria-label={`${label}?`}>
           <Button size="sm" variant="danger" busy={pending} onClick={() => { if (!pending) startTransition(() => run()); }}>{pending ? "Cancelling…" : "Yes, cancel it"}</Button>
-          <Button ref={keep} size="sm" variant="secondary" aria-disabled={pending || undefined} onClick={() => { if (!pending) toggle(false); }}>Keep it</Button>
+          <Button ref={keep} size="sm" variant="quiet" aria-disabled={pending || undefined} onClick={() => { if (!pending) toggle(false); }}>Keep it</Button>
         </div>
       )}
       <Outcome state={state} />

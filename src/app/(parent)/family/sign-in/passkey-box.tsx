@@ -135,7 +135,7 @@ export function PasskeyBox({ email, passkeys, proved, hasPassword, strict, app, 
               ]}
               action={renaming !== k.id && (
                 <>
-                  <Button size="sm" variant="secondary" aria-disabled={busy !== null || undefined}
+                  <Button size="sm" variant="quiet" aria-disabled={busy !== null || undefined}
                     ref={(el: HTMLButtonElement | null) => { if (el) renameButtons.current.set(k.id, el); else renameButtons.current.delete(k.id); }}
                     onClick={() => { setNewName(k.name ?? ""); setRenaming(k.id); }}>{COPY.passkeyRename}<span className="visually-hidden"> {k.name ?? COPY.passkeyNoName}</span></Button>
                   {canChange && !(last && strict && !app) && (

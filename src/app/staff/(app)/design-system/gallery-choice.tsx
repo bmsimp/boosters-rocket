@@ -14,3 +14,15 @@ export function ChoiceSample() {
       ]} />
   );
 }
+
+/** The same with an option that can't be chosen now: a place someone has already taken. */
+export function TakenChoiceSample() {
+  const [value, setValue] = useState("me");
+  return (
+    <ChoiceGroup name="ds-who" legend="Who will do this shift?" hint="A sample: one option is taken." value={value} onChange={setValue} cols={1}
+      options={[
+        { value: "me", label: "Me (Sam Sample)", hint: "Counts as 1 shift toward Spring volunteering." },
+        { value: "alex", label: "Alex Sample (signed up already)", hint: "Counts as 1 shift toward Spring volunteering.", disabled: true },
+      ]} />
+  );
+}
