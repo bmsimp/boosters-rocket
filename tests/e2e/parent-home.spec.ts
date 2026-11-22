@@ -85,7 +85,8 @@ test("Family shows the same students and details, the account, and the way to sw
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
   await expect(page.getByRole("region", { name: "Your students" }).getByRole("listitem")).toHaveText(STUDENTS);
   await expect(page.getByRole("region", { name: "Your details" }).locator("dd")).toHaveText(["Zelda Quetzalcoatl", "zelda@example.com", E2E_DETAILS.phone]);
-  await expect(page.getByRole("region", { name: "Your account" }).locator("dd")).toHaveText(["Zelda Quetzalcoatl", "zelda@example.com"]);
+  // Your details shows the name and email, so Your account doesn't repeat them.
+  await expect(page.getByRole("region", { name: "Your account" }).locator("dd")).toHaveCount(0);
 
   // She is in two families: the page says so and names only the one she is looking at. The chooser lists them.
   const families = page.getByRole("region", { name: "Your families" });

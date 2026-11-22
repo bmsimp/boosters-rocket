@@ -183,16 +183,16 @@ describe("signing up", () => {
     expect(await live()).toEqual([]);
   });
 
-  it("says Full, Started and Signed up in plain words, never with the icons that mean done or waived", async () => {
+  it("says Full, Started and Signed up as neutral statuses in words, never with the marks that mean done, to do or waived", async () => {
     const a = await seedSignedInParent(FAMILY_A), b = await seedSignedInParent(FAMILY_B);
     const { shifts: [full, mine] } = await seedEvent({ shifts: [{ places: 1, startsAt: "09:00", endsAt: "10:00" }, { places: 3, startsAt: "11:00", endsAt: "12:00" }] });
     await seedSignup({ shiftId: full!.id, familyQboId: FAMILY_B.family.qboId, signedUpBy: b.identity.parentId, guardianName: FAMILY_B.parent.name });
     await seedSignup({ shiftId: mine!.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, guardianName: FAMILY_A.parent.name });
     asParent(a.identity);
     const html = await renderPage(VolunteerPage);
-    expect(html).toContain('<span class="state">Full</span>');
-    expect(html).toContain('<span class="state">Signed up</span>');
-    expect(html).not.toMatch(/class="state (done|waived)"/);
+    expect(html).toContain('<span class="list-status tone-neutral">Full</span>');
+    expect(html).toContain('<span class="list-status tone-neutral">Signed up</span>');
+    expect(html).not.toMatch(/class="state (done|todo|waived)"|tone-(done|due|late)"/);
     const shift = await renderPage(ShiftPage, { params: { id: full!.id } });
     expect(textOf(shift)).toContain("This shift is full.");
     expect(shift).not.toMatch(/class="state (done|waived)"/);

@@ -50,9 +50,9 @@ export default async function CheckInPage({ params }: { params: Promise<{ code: 
             {closed && <Notice tone="info" live="none">{closed}</Notice>}
             <List>
               {view.people.map((p) => (
-                // Plain words: the state icons mean done, to do and waived.
+                // Done once checked in; neutral until then, or once the club updated it.
                 <ListRow key={p.signupId} title={p.who === "You" ? "You" : p.who}
-                  meta={<span className="state">{p.checkedIn ? "Checked in" : p.corrected ? "Updated by the club" : "Not checked in yet"}</span>}
+                  status={p.checkedIn ? { tone: "done", words: "Checked in" } : { tone: "neutral", words: p.corrected ? "Updated by the club" : "Not checked in yet" }}
                   detail={(p.corrected || (!p.checkedIn && view.state === "open")) && <>
                     {p.corrected && <p className="help">The club has updated this check-in. If something isn&apos;t right, please talk to {view.contact}.</p>}
                     {!p.checkedIn && !p.corrected && view.state === "open" && (

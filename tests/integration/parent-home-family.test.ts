@@ -512,7 +512,10 @@ describe("Family", () => {
     for (const name of A_STUDENTS) expect(html).toContain(`<span class="list-title">${name}</span>`);
     expect(html).toContain(`<dd class="num">${FAMILY_A.parent.phone}</dd>`);
     expect(html).toContain("Your account");
-    expect(html).toContain(`How you sign in to the portal</p><dl class="details"><dt>Name</dt><dd>Ansgar Alderquist</dd><dt>Email</dt><dd>${FAMILY_A.parent.email}</dd></dl>`);
+    // The name and email are in Your details; Your account doesn't say them twice.
+    expect(html).toContain(`<dt>Name</dt><dd>Ansgar Alderquist</dd><dt>Email</dt><dd>${FAMILY_A.parent.email}</dd>`);
+    expect(html.match(/<dt>Email<\/dt>/g)).toHaveLength(1);
+    expect(html).toMatch(/How you sign in to the portal<\/p><p class="help">/);
     expect(html).not.toContain("roster-asof");
     // One family: nothing about switching.
     expect(html).not.toMatch(/Your families|choose-family/);

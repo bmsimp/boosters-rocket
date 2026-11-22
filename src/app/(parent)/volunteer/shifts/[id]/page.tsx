@@ -28,8 +28,8 @@ export default async function ShiftPage({ params }: { params: Promise<{ id: stri
   const { event, shift } = view;
   return (
     <main className="wrap single volunteer-page">
-      <PageHeader title={event.name} back={{ href: "/volunteer", label: "Back to Volunteer" }}
-        lede={<>{event.dateWords}, {shift.timeWords}{shift.role ? `, ${shift.role}` : ""}.</>} />
+      {/* The date, time and role are in the shift's own rows below: the head names the event alone. */}
+      <PageHeader title={event.name} back={{ href: "/volunteer", label: "Back to Volunteer" }} />
 
       <Card title="The shift" titleId="shift-h">
         <KeyValue items={[

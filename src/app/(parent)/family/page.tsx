@@ -40,7 +40,10 @@ export default async function FamilyPage() {
           <LinkButton variant="secondary" href="/family/sign-in">Sign-in settings</LinkButton>
           {ownEmail && <LinkButton variant="secondary" href="/family/email">Change my sign-in email</LinkButton>}
         </>}>
-        <KeyValue items={[{ key: "name", label: "Name", value: ctx.name }, { key: "email", label: "Email", value: ctx.email }]} />
+        {/* What Your details already shows isn't said twice: with the family shown, its name always and its email when it has one. */}
+        {!(family && family.me.email) && (
+          <KeyValue items={[!family && { key: "name", label: "Name", value: ctx.name }, { key: "email", label: "Email", value: ctx.email }]} />
+        )}
         {/* How they sign in: their passkey (since SI-7b), on a new device the code from their authenticator app (since SI-6b), or the code we email; at Strict, every time (SI-10b). */}
         <p className="help">{howYouSignIn({ app, passkey, strict: settings.level === "strict" }).how}</p>
       </Card>

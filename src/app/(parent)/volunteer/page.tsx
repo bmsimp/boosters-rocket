@@ -64,8 +64,8 @@ export default async function VolunteerPage() {
       )}
 
       {payInstead.length > 0 && (
-        <Card title="Pay instead of volunteering" titleId="pay-h">
-          <p>If you can&apos;t make the shifts, you can pay for what&apos;s left instead. The club sends an invoice to your Payments page.</p>
+        <Card title="Pay instead of volunteering" titleId="pay-h"
+          description={<>If you can&apos;t make the shifts, you can pay for what&apos;s left instead. The club sends an invoice to your Payments page.</>}>
           <List>
             {payInstead.map((b) => (
               <ListRow key={`${b.requirementId}-${b.key}`} title={b.title} meta={[b.who, b.standing]}
@@ -82,11 +82,13 @@ export default async function VolunteerPage() {
         {mine.signups.length === 0 ? <p>Nobody in your family is signed up for a shift yet.</p> : (
           <List>
             {mine.signups.map((s) => (
+              // A place is neutral while it stands ("Signed up") and done once checked in; one the club cancelled has no
+              // state of its own, only the sentence under it.
               <ListRow key={s.id} title={<>{s.eventName}{s.role ? `, ${s.role}` : ""}</>}
+                status={s.checkedIn ? { tone: "done", words: "Checked in" } : s.cancel === "cancelled" ? undefined : { tone: "neutral", words: "Signed up" }}
                 meta={[<>{s.dateWords}, {s.timeWords} · {s.location}</>, s.who === "You" ? "You're doing this one" : `${s.who} is doing this one`]}
                 detail={<>
-                  {/* Plain words: the state icons mean done, to do and waived, and a place is none of those. */}
-                  <span className="state">{s.checkedIn ? "Checked in" : s.cancel === "cancelled" ? "The club cancelled this shift. There's nothing you need to do." : "Signed up"}</span>
+                  {s.cancel === "cancelled" && <p className="help">The club cancelled this shift. There&apos;s nothing you need to do.</p>}
                   {s.cancel === "open" && (
                     <>
                       <span className="hint">You can cancel here until {s.cancelUntil}.</span>
@@ -104,8 +106,7 @@ export default async function VolunteerPage() {
       </Card>
 
       {credit.length > 0 && (
-        <Card title="Done so far" titleId="done-h">
-          <p>Thank you! Here&apos;s what your family has done so far, newest first.</p>
+        <Card title="Done so far" titleId="done-h" description={<>Thank you! Here&apos;s what your family has done so far, newest first.</>}>
           <List>
             {credit.map((c) => c.kind === "checkin"
               ? <ListRow key={c.id} status={{ tone: "done", words: c.words }} title={c.event} meta={[c.when, c.who === "You" ? "you" : c.who]} />
@@ -122,10 +123,10 @@ export default async function VolunteerPage() {
           <p className="help">Questions? Contact {e.contact}.</p>
           <List>
             {e.shifts.map((s) => (
-              <ListRow key={s.id} title={<>{s.timeWords}{s.role ? `, ${s.role}` : ""}</>} meta={<span className="num">{placesWords(s)}</span>}
-                action={s.state === "open"
-                  ? <LinkButton size="sm" variant="secondary" className="pay" href={`/volunteer/shifts/${s.id}`}>Sign up<span className="visually-hidden"> for {s.timeWords}{s.role ? `, ${s.role}` : ""}</span></LinkButton>
-                  : <span className="state">{s.state === "full" ? "Full" : "Started"}</span>} />
+              <ListRow key={s.id} title={<>{s.timeWords}{s.role ? `, ${s.role}` : ""}</>}
+                status={s.state === "open" ? undefined : { tone: "neutral", words: s.state === "full" ? "Full" : "Started" }}
+                meta={<span className="num">{placesWords(s)}</span>}
+                action={s.state === "open" && <LinkButton size="sm" variant="secondary" className="pay" href={`/volunteer/shifts/${s.id}`}>Sign up<span className="visually-hidden"> for {s.timeWords}{s.role ? `, ${s.role}` : ""}</span></LinkButton>} />
             ))}
           </List>
         </Card>

@@ -796,7 +796,7 @@ test.describe("13. the passkey offer on Home, by keyboard: reached, Not now, the
     await expect(offer.getByRole("button", { name: "Not now", exact: true })).toBeFocused();
     await page.keyboard.press("Enter");
     const said = page.locator('[data-passkey-offer="said"]').getByRole("status");
-    await expect(said).toHaveText("No problem. We'll leave it for now.");
+    await expect(said).toHaveText("Done No problem. We'll leave it for now.");
     await expect(said).toBeFocused();
     await expect(offer).toHaveCount(0);
     expect((await sql`SELECT passkey_offer_declines AS n FROM parent WHERE email = 'zelda@example.com'`)[0]?.n).toBe(1);

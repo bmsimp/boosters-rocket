@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { safely } from "@/app/components/action-error";
 import { LocalTime } from "@/app/components/local-time";
 import { ActionOutcome, Button, KeyValue, Notice } from "@/app/components/ui";
-import { SIGNIN_SETTINGS_COPY as COPY, howYouSignIn } from "@/lib/parents/signin-settings-copy";
+import { SIGNIN_SETTINGS_COPY as COPY } from "@/lib/parents/signin-settings-copy";
 import { confirmAuthenticatorAction, newBackupCodesAction, startAuthenticatorAction, turnOffAuthenticatorAction } from "./actions";
 import { AskAgain } from "./signin-forms";
 import { AppSetupForm, CopyButton } from "./app-setup";
@@ -45,7 +45,6 @@ type Busy = "start" | "confirm" | "codes" | "off" | null;
  */
 export function AuthenticatorBox({ email, app, proved, hasPassword, strict, passkey = false, portalOrigin = "" }: { email: string; app: ShownApp | null; proved: boolean;
   hasPassword: boolean; strict: boolean; passkey?: boolean; portalOrigin?: string }) {
-  const words = howYouSignIn({ app: app !== null, passkey, strict });
   const [setup, setSetup] = useState<Setup | null>(null);
   const [codes, setCodes] = useState<{ message: string; list: string[] } | null>(null);
   const [answer, setAnswer] = useState<Result | null>(null);
@@ -100,7 +99,7 @@ export function AuthenticatorBox({ email, app, proved, hasPassword, strict, pass
 
   const answered = answer && <ActionOutcome ref={answerLine} state={answer} />;
   const on = app && <AppOn app={app} email={email} proved={proved} strict={strict} busy={busy} answered={codes ? null : answered} newCodes={newCodes} turnOff={turnOff}
-    passkey={passkey} portalOrigin={portalOrigin} lede={words.askAgainForAppChange} />;
+    passkey={passkey} portalOrigin={portalOrigin} />;
 
   // The backup codes, once, as they were made, above the app's box.
   if (codes) {
@@ -136,7 +135,7 @@ export function AuthenticatorBox({ email, app, proved, hasPassword, strict, pass
       <p className="help">{COPY.appKeepsDevices}</p>
       {!hasPassword ? <p>{COPY.appNeedsPassword}</p>
         : (
-          <AskAgain email={email} proved={proved} lede={words.askAgainForApp} passkey={passkey} portalOrigin={portalOrigin}>
+          <AskAgain email={email} proved={proved} section={COPY.appTitle} passkey={passkey} portalOrigin={portalOrigin}>
             <Button busy={busy === "start"} aria-disabled={busy !== null || undefined} onClick={() => void start()}>
               {busy === "start" ? COPY.appSetUpBusy : COPY.appSetUp}
             </Button>
@@ -147,8 +146,8 @@ export function AuthenticatorBox({ email, app, proved, hasPassword, strict, pass
 }
 
 /** The app in force: since when, the backup codes left, and, asked again, new codes and turning it off (Strict: words). */
-function AppOn({ app, email, proved, strict, busy, answered, newCodes, turnOff, passkey, portalOrigin, lede }: { app: ShownApp; email: string; proved: boolean; strict: boolean;
-  busy: Busy; answered: ReactNode; newCodes: () => Promise<void>; turnOff: () => Promise<void>; passkey: boolean; portalOrigin: string; lede: string }) {
+function AppOn({ app, email, proved, strict, busy, answered, newCodes, turnOff, passkey, portalOrigin }: { app: ShownApp; email: string; proved: boolean; strict: boolean;
+  busy: Busy; answered: ReactNode; newCodes: () => Promise<void>; turnOff: () => Promise<void>; passkey: boolean; portalOrigin: string }) {
   return (
     <div className="stack">
       <p className="paid-up"><Tick />{COPY.appOn}</p>
@@ -158,7 +157,7 @@ function AppOn({ app, email, proved, strict, busy, answered, newCodes, turnOff, 
       ]} />
       {app.backupCodesLeft === 0 && <p>{COPY.backupCodesNone}</p>}
       {answered}
-      <AskAgain email={email} proved={proved} lede={lede} passkey={passkey} portalOrigin={portalOrigin}>
+      <AskAgain email={email} proved={proved} section={COPY.appTitle} passkey={passkey} portalOrigin={portalOrigin}>
         <div className="stack">
           <Button variant="secondary" busy={busy === "codes"} aria-disabled={busy !== null || undefined} onClick={() => void newCodes()}>
             {busy === "codes" ? COPY.newCodesBusy : COPY.newCodes}

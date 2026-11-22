@@ -122,6 +122,6 @@ test.describe("a parent changes their sign-in email", () => {
     expect((await zelda()).email).toBe("zelda@example.com");
     expect((await sql`SELECT email FROM qbo_customer WHERE qbo_id = 'E2E-P1'`)[0]).toEqual({ email: "zelda@example.com" });
     await page.goto("/family");
-    await expect(page.getByRole("region", { name: "Your account" })).toContainText("zelda@example.com");
+    await expect(page.getByRole("region", { name: "Your details" })).toContainText("zelda@example.com");
   });
 });

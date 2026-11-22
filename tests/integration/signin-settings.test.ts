@@ -690,7 +690,9 @@ describe("remembered devices", () => {
     expect(box).not.toContain(`>${COPY.forgetOne}<`);
     expect(box).not.toContain(COPY.forgetOthers);
     expect(box).not.toContain(COPY.forgetAll);
-    expect(box).toContain(html(COPY.askAgainForDevices));
+    // What showing it's you takes is said once, at the top of the page; the box keeps its own field, named for it.
+    expect(box).not.toContain(html(COPY.askAgainForDevices));
+    expect(box).toContain("Your password<span class=\"visually-hidden\">, to change remembered devices</span>");
     expect(box).toMatch(/autocomplete="current-password"/i);
   });
 
@@ -1038,11 +1040,14 @@ describe("the authenticator app box (slice SI-6b)", () => {
     const a = await seedSignedInParent(FAMILY_A);
     await withPassword(a);
     asParent(a.identity);
-    const page = box(await renderPage(SignInSettingsPage));
+    const whole = await renderPage(SignInSettingsPage);
+    const page = box(whole);
     expect(page).toContain(COPY.appTitle);
     expect(page).toContain(html(COPY.appWhat));
     expect(page).toContain(html(COPY.appKeepsDevices));
-    expect(page).toContain(html(COPY.askAgainForApp));
+    // What showing it's you takes is said once, at the top of the page; the box has its own field for it.
+    expect(whole).toContain(html(COPY.askAgainForApp));
+    expect(page).toContain("Your password<span class=\"visually-hidden\">, to change authenticator app</span>");
     expect(page).toMatch(/autocomplete="current-password"/i);
     expect(page).not.toContain(COPY.appSetUp);
   });
@@ -1099,7 +1104,8 @@ describe("the authenticator app box (slice SI-6b)", () => {
     await seedAuthenticator(a.identity.parentId);
     asParent(a.identity);
     const page = await renderPage(SignInSettingsPage);
-    expect(box(page)).toContain(html(COPY.askAgainForAppChange));
+    expect(box(page)).toContain("Your password<span class=\"visually-hidden\">, to change authenticator app</span>");
+    expect(page.split(html(COPY.askAgainForAppChange)).length - 1).toBe(1); // once, at the top of the page
     expect(box(page)).toContain(html(COPY.backupCodesNone));
     expect(box(page)).not.toContain(COPY.newCodes);
     expect(page).toContain(html(WITH_APP.askAgainForPassword));
@@ -1192,7 +1198,7 @@ describe("a passkey and asking again (slice SI-7a's newest-factor rule; since SI
 
 describe("the Passkeys box, drawn (slice SI-7b)", () => {
   /** The passkeys box alone: from its heading to the page's way back to Family. */
-  const passkeysBox = (page: string) => page.slice(page.indexOf(`id="passkeys-h"`), page.indexOf("Back to Family"));
+  const passkeysBox = (page: string) => page.slice(page.indexOf(`id="passkeys-h"`), page.indexOf("</main>"));
   const AAGUID = "ea9b8d66-4d01-1d21-3ce4-b6b48cb575d4";
   /** Two passkeys of the person: one named and used, one with no name and never used, each with an AAGUID stored. */
   async function twoPasskeys(parentId: string) {
@@ -1236,7 +1242,8 @@ describe("the Passkeys box, drawn (slice SI-7b)", () => {
     expect(box.match(/>Rename</g)).toHaveLength(2);
     expect(box).not.toContain(">Remove<");
     expect(box).not.toContain(COPY.passkeyAdd);
-    expect(box).toContain(html(howYouSignIn({ app: false, passkey: true, strict: false }).askAgainForPasskeys));
+    expect(whole).toContain(html(howYouSignIn({ app: false, passkey: true, strict: false }).askAgainForPasskeys));
+    expect(box).not.toContain(html(howYouSignIn({ app: false, passkey: true, strict: false }).askAgainForPasskeys));
     expect(box).toContain(COPY.usePasskey);
     for (const v of secretsOf(keys)) expect(whole).not.toContain(v);
   });
@@ -1378,9 +1385,9 @@ describe("Sign-in settings at Strict (slice SI-10b)", () => {
 
   it("draws the confirm of new backup codes: the box to tick, labelled, and Done, aria-disabled until it is ticked", () => {
     const drawn = renderToStaticMarkup(createElement(CodesSaved, { onDone: () => undefined })).replaceAll("&#x27;", "'");
-    expect(drawn).toContain('<div class="checks"><label><input type="checkbox" name="saved"');
-    expect(drawn).toContain(`<span>${ENROLMENT_COPY.saved}</span></label></div>`);
-    expect(drawn).toMatch(/<button class="btn" aria-disabled="true">Done<\/button>/);
+    expect(drawn).toContain('<div class="checks"><label for="codes-saved"><input type="checkbox" id="codes-saved" name="saved"');
+    expect(drawn).toContain(`/>${ENROLMENT_COPY.saved}</label></div>`);
+    expect(drawn).toMatch(/<button type="submit" class="btn" aria-disabled="true">Done<\/button>/);
     expect(drawn).not.toMatch(/\sdisabled=""/);
     expect(drawn).toContain('<p role="status" class="help"></p>');
   });

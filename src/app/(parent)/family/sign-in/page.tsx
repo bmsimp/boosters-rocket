@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { requireParentPage } from "@/lib/guards";
 import { loadMySignin } from "@/lib/parents/signin-settings";
 import { SIGNIN_SETTINGS_COPY as COPY, howYouSignIn } from "@/lib/parents/signin-settings-copy";
@@ -40,7 +39,9 @@ export default async function SignInSettingsPage() {
     : { then: COPY.everywhereThenNoPassword, next: COPY.everywhereNextNoPassword, signIn: { href: "/sign-in/password", label: COPY.choosePassword } };
   return (
     <main className="wrap single family-page">
-      <PageHeader title={COPY.title} lede={COPY.lede} />
+      {/* What showing it's you takes is said once, here, while a change would ask it: each box keeps only its field and Continue. */}
+      <PageHeader title={COPY.title} back={{ href: "/family", label: "Back to Family" }}
+        lede={me.hasPassword && !me.provedRecently ? <>{COPY.lede} {words.askAgainForPassword}</> : COPY.lede} />
       <SignInSettingsFrame>
         {/* No id in the link: the page takes whose address it is from the session. */}
         <Card title={COPY.howTitle} titleId="how-h" actions={me.canChangeEmail && <LinkButton variant="secondary" href="/family/email">{COPY.changeEmail}</LinkButton>}>
@@ -53,7 +54,7 @@ export default async function SignInSettingsPage() {
         <Card title={COPY.passwordTitle} titleId="password-h">
           {!me.hasPassword ? <><p>{COPY.noPassword}</p><SetupLinkForm /></>
             : (
-              <AskAgain email={me.email} proved={me.provedRecently} lede={words.askAgainForPassword} passkey={me.hasPasskey} portalOrigin={portalOrigin}>
+              <AskAgain email={me.email} proved={me.provedRecently} section={COPY.passwordTitle} passkey={me.hasPasskey} portalOrigin={portalOrigin}>
                 <ChangePasswordForm email={me.email} app={me.app !== null} passkey={me.hasPasskey} strict={me.strict} />
               </AskAgain>
             )}
@@ -76,7 +77,6 @@ export default async function SignInSettingsPage() {
           <PasskeyBox email={me.email} passkeys={me.passkeys} proved={me.provedRecently} hasPassword={me.hasPassword} strict={me.strict}
             app={me.app !== null} backupCodesLeft={me.backupCodesLeft} portalOrigin={portalOrigin} />
         </Card>
-        <p><Link className="link-line" href="/family">Back to Family</Link></p>
       </SignInSettingsFrame>
     </main>
   );

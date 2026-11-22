@@ -37,7 +37,7 @@ Rules:
 - Font sizes in rem, from the scale, never under 0.8125rem (`--text-xs`); body text is 1rem. Figures are tabular only where they are read as figures: `.num` (and `numeric` on a DataTable column, `KeyValue`'s `numeric`), amounts, stats, a table's times; the body keeps Inter's proportional figures, whose tabular hyphen is set wide.
 - Every control and lone link is at least 44px tall (buttons, fields, tabs, menu links, `.link-line`). `size="sm"` is narrower, not shorter.
 - Every status is words plus an icon; color only repeats them. The current nav item and tab carry the club's color and weight (and the tab its tinted round icon pill, the one allowed exception to "nothing is a pill").
-- Only menus and popovers have a shadow (`--shadow-menu`). Lists and tables inside a `Card` run to its edges by themselves (`--box-pad`).
+- Only menus and popovers have a shadow (`--shadow-menu`). Lists and tables inside a `Card` run to its edges by themselves (`--box-pad`), and a list's rows take the card's side padding, so their words line up with the card's title.
 
 ## Tokens
 

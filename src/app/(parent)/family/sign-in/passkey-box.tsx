@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { safely } from "@/app/components/action-error";
 import { LocalTime } from "@/app/components/local-time";
 import { ActionOutcome, Button, List, ListRow, TextInput } from "@/app/components/ui";
-import { SIGNIN_SETTINGS_COPY as COPY, howYouSignIn, passkeysAddedOnlyAt } from "@/lib/parents/signin-settings-copy";
+import { SIGNIN_SETTINGS_COPY as COPY, passkeysAddedOnlyAt } from "@/lib/parents/signin-settings-copy";
 import { newBackupCodesAction, removePasskeyAction, renamePasskeyAction } from "./actions";
 import { BackupCodesShown, CodesSaved, addPasskeyHere } from "./passkey-add";
 import { passkeysAddIn } from "./passkey-adding";
@@ -40,7 +40,6 @@ function WhenDrawn({ then }: { then: () => void }) {
 export function PasskeyBox({ email, passkeys, proved, hasPassword, strict, app, backupCodesLeft, portalOrigin }: { email: string; passkeys: ShownPasskey[]; proved: boolean;
   hasPassword: boolean; strict: boolean; app: boolean; backupCodesLeft: number; portalOrigin: string }) {
   const router = useRouter();
-  const words = howYouSignIn({ app, passkey: passkeys.length > 0, strict });
   const [provedHere, setProvedHere] = useState(false);
   const [where, setWhere] = useState<"here" | "unsupported" | "elsewhere">("here");
   useEffect(() => {
@@ -55,7 +54,7 @@ export function PasskeyBox({ email, passkeys, proved, hasPassword, strict, app, 
   const [renaming, setRenaming] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const said = useRef<HTMLDivElement>(null);
-  const codesLine = useRef<HTMLParagraphElement>(null);
+  const codesLine = useRef<HTMLDivElement>(null);
   // "Rename" draws the name field in place of the buttons: the field takes the focus.
   const renameField = useRef<HTMLInputElement>(null);
   // "Cancel" draws the buttons again: the passkey's own "Rename" takes the focus back, so the keyboard keeps its place.
@@ -167,7 +166,7 @@ export function PasskeyBox({ email, passkeys, proved, hasPassword, strict, app, 
       {/* Proved here, by the asking below: AskAgain gives way to the change at once, so its thanks is drawn here, and keeps the focus. */}
       {provedHere && <Said message={COPY.proved} />}
       {!hasPassword ? <p>{COPY.passkeyNeedsPassword}</p> : !canChange ? (
-        <AskAgain email={email} proved={false} lede={words.askAgainForPasskeys} passkey={passkeys.length > 0} portalOrigin={portalOrigin}>
+        <AskAgain email={email} proved={false} section={COPY.passkeysTitle} passkey={passkeys.length > 0} portalOrigin={portalOrigin}>
           <WhenDrawn then={() => setProvedHere(true)} />
         </AskAgain>
       ) : (

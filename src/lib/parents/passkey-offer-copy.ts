@@ -22,7 +22,7 @@ export const PASSKEY_OFFER_COPY = {
    * How to keep the backup codes a first passkey makes, shown here in place of Sign-in settings' words (which say "this
    * page", and Home never asks the parent to show it's them).
    */
-  backupCodesKeep: "Each backup code works once, in place of your passkey, when you sign in and when Sign-in settings asks you to show it's you. If you lose the phone or computer that holds your passkey, they're how you get in, so keep them somewhere safe that isn't on that device, like on paper or in a password manager on another device. We won't show them again.",
+  backupCodesKeep: "Each code works once, in place of your passkey, when you sign in or when Sign-in settings checks it's you. If you lose the device with your passkey, they're how you get in, so keep them safe somewhere else, like on paper. We won't show them again.",
   /**
    * Turn on refused because the session may no longer add a passkey from here (most often: the ten minutes after
    * signing in have passed). Home has no way to show it's you again, so this points to Sign-in settings, which has.

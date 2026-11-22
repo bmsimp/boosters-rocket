@@ -78,7 +78,9 @@ export function SignInSettingsFrame({ children }: { children: ReactNode }) {
  * they hold unspent ones and no app (`backupCodes`). `portalOrigin` is APP_URL's
  * origin, where passkeys work: reached at any other address, the form says so in place of the button.
  */
-export function AskAgain({ email, proved, lede, children, passkey = false, portalOrigin = "" }: { email: string; proved: boolean; lede: string; children: ReactNode;
+export function AskAgain({ email, proved, lede, section, children, passkey = false, portalOrigin = "" }: { email: string; proved: boolean; lede?: string;
+  /** On Sign-in settings, where the page says once what showing it's you takes: the section this asking unlocks, read with its field. */
+  section?: string; children: ReactNode;
   passkey?: boolean; portalOrigin?: string }) {
   const [step, setStep] = useState<"password" | "code" | "app" | "passkey" | "proved" | "arrived">(proved ? "proved" : "password");
   // At the passkey's step after the password: what is taken beside it, the app's code or a backup code (`app`), a
@@ -166,12 +168,12 @@ export function AskAgain({ email, proved, lede, children, passkey = false, porta
   if (step === "password") {
     return (
       <form className="stack" onSubmit={(e) => { e.preventDefault(); if (!busy) void checkPassword(); }}>
-        <p>{lede}</p>
+        {lede && <p>{lede}</p>}
         {/* A passkey holder's passkey first (slice SI-7b), the password beside it. */}
         {passkeyPress}
         {passkey && <p>{COPY.orPassword}</p>}
         <Username email={email} />
-        <TextInput id={fieldId} label={COPY.yourPassword} ref={field} name="password" type="password" required autoComplete="current-password" maxLength={1024}
+        <TextInput id={fieldId} label={section ? <>{COPY.yourPassword}<span className="visually-hidden">, to change {section.charAt(0).toLowerCase() + section.slice(1)}</span></> : COPY.yourPassword} ref={field} name="password" type="password" required autoComplete="current-password" maxLength={1024}
           value={password} onChange={(e) => setPassword(e.target.value)} />
         {errors && <Errors errors={errors} />}
         {/* Busy is aria-disabled, not disabled: a disabled button drops the focus, and the keyboard's place with it. */}
@@ -394,7 +396,7 @@ export function RememberedDevices({ devices, proved, canAsk, cantAsk, email, app
           onClick={() => void forget("others")}>{busy === "others" ? COPY.forgetBusy : knowsThisOne ? COPY.forgetOthers : COPY.forgetAll}</Button>
       )}
       {!canForget && listed.length > 0 && (canAsk
-        ? <AskAgain email={email} proved={false} lede={words.askAgainForDevices} passkey={passkey} portalOrigin={portalOrigin}><WhenDrawn then={() => setProvedHere(true)} /></AskAgain>
+        ? <AskAgain email={email} proved={false} section={COPY.devicesTitle} passkey={passkey} portalOrigin={portalOrigin}><WhenDrawn then={() => setProvedHere(true)} /></AskAgain>
         : <p>{cantAsk}</p>)}
     </div>
   );

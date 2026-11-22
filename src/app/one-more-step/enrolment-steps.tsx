@@ -3,7 +3,8 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { safely } from "@/app/components/action-error";
 import { ENROLMENT_COPY as WORDS } from "@/lib/parents/enrolment-copy";
-import { BackupCodesShown, Tick, addPasskeyHere } from "@/app/(parent)/family/sign-in/passkey-add";
+import { BackupCodesShown, addPasskeyHere } from "@/app/(parent)/family/sign-in/passkey-add";
+import { Notice } from "@/app/components/ui";
 import { passkeysAddIn } from "@/app/(parent)/family/sign-in/passkey-adding";
 import { AppSetupForm, type AppSetupShown } from "@/app/(parent)/family/sign-in/app-setup";
 import type { EnrolmentAppConfirm, EnrolmentAppStart } from "./actions";
@@ -49,7 +50,7 @@ export function EnrolmentSteps({ portalOrigin, next, startApp, confirmApp }: { p
   const [nudge, setNudge] = useState("");
   // Where the focus lands after a press that draws something new: the words at the top of what it drew.
   const landing = useRef<HTMLParagraphElement>(null);
-  const said = useRef<HTMLParagraphElement>(null);
+  const said = useRef<HTMLDivElement>(null);
   const refusal = useRef<HTMLDivElement>(null);
   const appAnswer = useRef<HTMLDivElement>(null);
   const [landed, setLanded] = useState(0);
@@ -114,7 +115,7 @@ export function EnrolmentSteps({ portalOrigin, next, startApp, confirmApp }: { p
         {done.codes ? (
           <BackupCodesShown message={words} list={done.codes} app={done.kind === "app"} lineRef={said} heading={2}
             keep={done.kind === "passkey" ? WORDS.backupCodesKeepPasskey : undefined} />
-        ) : <p ref={said} role="status" tabIndex={-1} className="paid-up"><Tick />{words}</p>}
+        ) : <Notice tone="done" ref={said} tabIndex={-1}>{words}</Notice>}
         <form className="stack" onSubmit={(e) => { e.preventDefault(); goOn(); }}>
           {done.codes && (
             <div className="checks">

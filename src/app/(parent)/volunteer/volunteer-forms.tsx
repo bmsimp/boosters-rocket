@@ -24,6 +24,8 @@ function Done({ message }: { message: string }) {
   return <Notice tone="done" ref={line} tabIndex={-1}>{message}</Notice>;
 }
 
+const COUNTS_NOTHING = "This shift doesn't count toward anything the club asks of your family this season.";
+
 export type Choice = { value: string; label: string; taken: boolean; countsToward: { title: string; whoMust: string; counts: string; standing: string }[] };
 
 /** Who will fill the place, each choice with what it would count toward, then the one button that signs them up. */
@@ -34,12 +36,15 @@ export function SignUpForm({ choices, act }: { choices: Choice[]; act: (who: str
   if (state?.ok) return <Outcome state={state} />;
   if (open.length === 0) return <p>Everyone in your family who could take a place here has one already.</p>;
   const chosen = choices.find((c) => c.value === who);
+  const countsNothing = choices.every((c) => c.countsToward.length === 0);
   return (
     <form onSubmit={(e) => { e.preventDefault(); if (!pending) startTransition(() => run()); }}>
-      <ChoiceGroup name="who" legend="Who will do this shift?" hint="Students don't sign in. You sign them up here." value={who} onChange={setWho} cols={1}
+      {/* When the shift counts toward nothing for anyone, that is said once, under the question, not on every tile. */}
+      <ChoiceGroup name="who" legend="Who will do this shift?" value={who} onChange={setWho} cols={1}
+        hint={countsNothing ? `Students don't sign in. You sign them up here. ${COUNTS_NOTHING}` : "Students don't sign in. You sign them up here."}
         options={choices.map((c) => ({
           value: c.value, label: `${c.label}${c.taken ? " (signed up already)" : ""}`, disabled: c.taken,
-          hint: c.countsToward.length === 0 ? "This shift doesn't count toward anything the club asks of your family this season."
+          hint: countsNothing ? undefined : c.countsToward.length === 0 ? COUNTS_NOTHING
             : c.countsToward.map((t) => `Counts as ${t.counts} toward ${t.title}. ${t.whoMust}. ${t.standing}.`).join(" "),
         }))} />
       <Outcome state={state} />
