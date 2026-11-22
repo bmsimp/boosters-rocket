@@ -2,6 +2,7 @@
 import { startTransition, useActionState, useEffect, useRef, useState } from "react";
 import { ACTION_FAILED, safely } from "../../components/action-error";
 import { useSay } from "../announce";
+import { ActionOutcome, Button, ChoiceGroup, Notice } from "../../components/ui";
 
 /**
  * The things a parent does on the Volunteer pages: sign someone up for a shift, cancel a sign-up, and check in. Each is given
@@ -13,14 +14,14 @@ const failed: Result = { ok: false, errors: [ACTION_FAILED] };
 
 function Outcome({ state }: { state: Result | null }) {
   if (!state) return null;
-  return state.ok ? <Done message={state.message} /> : <ul role="alert" className="errors">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>;
+  return state.ok ? <Done message={state.message} /> : <ActionOutcome state={state} />;
 }
 
 /** The words for a thing done, in place of the form that did it: they take the focus, which the form's button had. */
 function Done({ message }: { message: string }) {
-  const line = useRef<HTMLParagraphElement>(null);
+  const line = useRef<HTMLDivElement>(null);
   useEffect(() => { line.current?.focus(); }, []);
-  return <p ref={line} role="status" tabIndex={-1} className="volunteer-done">{message}</p>;
+  return <Notice tone="done" ref={line} tabIndex={-1}>{message}</Notice>;
 }
 
 export type Choice = { value: string; label: string; taken: boolean; countsToward: { title: string; whoMust: string; counts: string; standing: string }[] };
@@ -35,27 +36,17 @@ export function SignUpForm({ choices, act }: { choices: Choice[]; act: (who: str
   const chosen = choices.find((c) => c.value === who);
   return (
     <form onSubmit={(e) => { e.preventDefault(); if (!pending) startTransition(() => run()); }}>
-      <fieldset className="setting">
-        <legend>Who will do this shift?</legend>
-        <p className="hint">Students don&apos;t sign in. You sign them up here.</p>
-        <div className="choices" style={{ ["--cols" as string]: 1 }}>
-          {choices.map((c) => (
-            <label className="choice" key={c.value}>
-              <input type="radio" name="who" value={c.value} checked={who === c.value} disabled={c.taken} onChange={() => setWho(c.value)} />
-              <span>
-                <b>{c.label}{c.taken ? " (signed up already)" : ""}</b>
-                <small>{c.countsToward.length === 0 ? "This shift doesn't count toward anything the club asks of your family this season."
-                  : c.countsToward.map((t) => `Counts as ${t.counts} toward ${t.title}. ${t.whoMust}. ${t.standing}.`).join(" ")}</small>
-              </span>
-            </label>
-          ))}
-        </div>
-      </fieldset>
+      <ChoiceGroup name="who" legend="Who will do this shift?" hint="Students don't sign in. You sign them up here." value={who} onChange={setWho} cols={1}
+        options={choices.map((c) => ({
+          value: c.value, label: `${c.label}${c.taken ? " (signed up already)" : ""}`, disabled: c.taken,
+          hint: c.countsToward.length === 0 ? "This shift doesn't count toward anything the club asks of your family this season."
+            : c.countsToward.map((t) => `Counts as ${t.counts} toward ${t.title}. ${t.whoMust}. ${t.standing}.`).join(" "),
+        }))} />
       <Outcome state={state} />
       {/* Busy is aria-disabled, not disabled: a disabled button drops the focus, and the keyboard's place with it. */}
-      <button className="btn volunteer-confirm" disabled={!chosen || chosen.taken} aria-disabled={pending || undefined}>
+      <Button type="submit" className="volunteer-confirm" disabled={!chosen || chosen.taken} busy={pending}>
         {pending ? "Signing up…" : chosen?.value === "me" ? "Sign me up" : `Sign up ${chosen?.label ?? ""}`}
-      </button>
+      </Button>
     </form>
   );
 }
@@ -84,10 +75,10 @@ export function CancelSignup({ label, act }: { label: string; act: () => Promise
   if (state?.ok) return say ? null : <Outcome state={state} />;
   return (
     <div className="row-actions volunteer-cancel">
-      {!asking ? <button ref={ask} type="button" className="btn btn-line" onClick={() => toggle(true)}>{label}</button> : (
+      {!asking ? <Button ref={ask} size="sm" variant="secondary" onClick={() => toggle(true)}>{label}</Button> : (
         <div className="row-actions" role="group" aria-label={`${label}?`}>
-          <button type="button" className="btn btn-line" aria-disabled={pending || undefined} onClick={() => { if (!pending) startTransition(() => run()); }}>{pending ? "Cancelling…" : "Yes, cancel it"}</button>
-          <button ref={keep} type="button" className="btn btn-line" aria-disabled={pending || undefined} onClick={() => { if (!pending) toggle(false); }}>Keep it</button>
+          <Button size="sm" variant="danger" busy={pending} onClick={() => { if (!pending) startTransition(() => run()); }}>{pending ? "Cancelling…" : "Yes, cancel it"}</Button>
+          <Button ref={keep} size="sm" variant="secondary" aria-disabled={pending || undefined} onClick={() => { if (!pending) toggle(false); }}>Keep it</Button>
         </div>
       )}
       <Outcome state={state} />
@@ -100,7 +91,7 @@ export function CancelSignup({ label, act }: { label: string; act: () => Promise
  * and checks both again. The page is drawn again without this button once the person reads "Checked in", so the words
  * that say so go to the box's Announcer, which stays.
  */
-export function CheckInButton({ label, act, wide }: { label: string; act: () => Promise<Result>; wide?: boolean }) {
+export function CheckInButton({ label, act, wide, variant = "primary" }: { label: string; act: () => Promise<Result>; wide?: boolean; variant?: "primary" | "secondary" }) {
   const say = useSay();
   const [state, run, pending] = useActionState(async () => {
     const r = await safely(() => act(), failed);
@@ -110,8 +101,8 @@ export function CheckInButton({ label, act, wide }: { label: string; act: () => 
   if (state?.ok) return say ? null : <Outcome state={state} />;
   return (
     <div className={wide ? "checkin-all" : "checkin-one"}>
-      <button type="button" className={wide ? "btn volunteer-confirm" : "btn btn-club pay"} aria-disabled={pending || undefined}
-        onClick={() => { if (!pending) startTransition(() => run()); }}>{pending ? "Checking in…" : label}</button>
+      <Button variant={wide ? "primary" : variant} className={wide ? "volunteer-confirm" : "pay"} busy={pending}
+        onClick={() => { if (!pending) startTransition(() => run()); }}>{pending ? "Checking in…" : label}</Button>
       <Outcome state={state} />
     </div>
   );

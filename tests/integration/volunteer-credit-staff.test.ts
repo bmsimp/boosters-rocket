@@ -329,7 +329,7 @@ describe("a family's credit page", () => {
     // The family reads "Added by the club" and the amount, never the note; the other family reads nothing of it.
     asParent(a.identity);
     const page = textOf(await renderPage(VolunteerPage));
-    expect(page).toContain(`1.5 hours toward ${TWO_FAMILY_HOURS} Your family Added by the club`);
+    expect(page).toContain(`1.5 hours toward ${TWO_FAMILY_HOURS} Added by the club · Your family`);
     expect(page).toContain("4.5 of 6 hours done");
     expect(page).not.toContain("Painted the set");
     asParent(b.identity);

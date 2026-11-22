@@ -8,6 +8,7 @@ import { NotSetUpBox } from "../../../family-boxes";
 import { checkInAction } from "../../actions";
 import { CheckInButton } from "../../volunteer-forms";
 import { Announcer } from "../../../announce";
+import { Card, List, ListRow, Notice, PageHeader } from "../../../../components/ui";
 
 export const metadata = { title: "Check in" };
 
@@ -30,7 +31,7 @@ export default async function CheckInPage({ params }: { params: Promise<{ code: 
   const ctx = await requireParentPage(`/volunteer/check-in/${encodeURIComponent(code)}`);
   const [family, club] = await Promise.all([loadMyFamily(ctx), getClubSettings()]);
   if (!family) {
-    return <main className="wrap single"><h1 className="page-title">Check in</h1><NotSetUpBox treasurerEmail={club.treasurerEmail} /></main>;
+    return <main className="wrap single"><PageHeader title="Check in" /><NotSetUpBox treasurerEmail={club.treasurerEmail} /></main>;
   }
   const view = await loadCheckInForMe(ctx, code);
   if (!view) notFound();
@@ -38,34 +39,36 @@ export default async function CheckInPage({ params }: { params: Promise<{ code: 
   const waiting = view.people.filter((p) => !p.checkedIn && !p.corrected);
   return (
     <main className="wrap single volunteer-page">
-      <h1 className="page-title">Check in</h1>
-      <p className="lede">{view.event}{view.role ? `, ${view.role}` : ""}: {view.dateWords}, {view.timeWords} · {view.location}</p>
+      <PageHeader title="Check in" back={{ href: "/volunteer", label: "Back to Volunteer" }}
+        lede={<>{view.event}{view.role ? `, ${view.role}` : ""}: {view.dateWords}, {view.timeWords} · {view.location}</>} />
 
-      <section className="box" aria-labelledby="checkin-h"><h2 id="checkin-h">{family.name}</h2>
+      <Card title={family.name} titleId="checkin-h">
         {view.people.length === 0 ? (
           <p>Nobody in your family is signed up for this shift, so there&apos;s no one to check in here. If you&apos;d like to help, you can find a shift with a free place on the <Link href="/volunteer">Volunteer page</Link>.</p>
         ) : (
           <Announcer>
-            {closed && <p className="state">{closed}</p>}
-            <ul className="lines">{view.people.map((p) => (
-              <li key={p.signupId}><div>
-                <span className="what">{p.who === "You" ? "You" : p.who}</span>
-                {/* Plain words: the state icons mean done, to do and waived. */}
-                <span className="state">{p.checkedIn ? "Checked in" : p.corrected ? "Updated by the club" : "Not checked in yet"}</span>
-              </div>
-                {p.corrected && <p className="help">The club has updated this check-in. If something isn&apos;t right, please talk to {view.contact}.</p>}
-                {!p.checkedIn && !p.corrected && view.state === "open" && (
-                  <CheckInButton label={p.who === "You" ? "Check me in" : `Check in ${p.who}`} act={checkInAction.bind(null, code, p.signupId)} />
-                )}
-              </li>))}</ul>
+            {closed && <Notice tone="info" live="none">{closed}</Notice>}
+            <List>
+              {view.people.map((p) => (
+                // Plain words: the state icons mean done, to do and waived.
+                <ListRow key={p.signupId} title={p.who === "You" ? "You" : p.who}
+                  meta={<span className="state">{p.checkedIn ? "Checked in" : p.corrected ? "Updated by the club" : "Not checked in yet"}</span>}
+                  detail={(p.corrected || (!p.checkedIn && view.state === "open")) && <>
+                    {p.corrected && <p className="help">The club has updated this check-in. If something isn&apos;t right, please talk to {view.contact}.</p>}
+                    {!p.checkedIn && !p.corrected && view.state === "open" && (
+                      <CheckInButton label={p.who === "You" ? "Check me in" : `Check in ${p.who}`} act={checkInAction.bind(null, code, p.signupId)}
+                        variant={waiting.length > 1 ? "secondary" : "primary"} />
+                    )}
+                  </>} />
+              ))}
+            </List>
             {view.state === "open" && waiting.length > 1 && (
               <CheckInButton label="Check everyone in" act={checkInAction.bind(null, code, "all")} wide />
             )}
-            {view.state === "open" && view.people.every((p) => p.checkedIn) && <p className="volunteer-done">Everyone here is checked in. Thank you for helping!</p>}
+            {view.state === "open" && view.people.every((p) => p.checkedIn) && <Notice tone="done" live="none">Everyone here is checked in. Thank you for helping!</Notice>}
           </Announcer>
         )}
-        <p className="help"><Link className="link-line" href="/volunteer">Back to Volunteer</Link></p>
-      </section>
+      </Card>
     </main>
   );
 }

@@ -287,7 +287,7 @@ test("a parent's journeys by keyboard alone: sign in, Home to Payments, a form, 
     await tabTo(page, page.getByRole("button", { name: "Check me in" }));
     await page.keyboard.press("Enter");
     await expect(page.getByRole("status").filter({ hasText: "Checked in" })).toBeFocused();
-    await expect(page.locator(".lines li").first()).toContainText("Checked in");
+    await expect(page.locator(".list-row").first()).toContainText("Checked in");
     await tabsOut(page);
     ringsShown();
   });

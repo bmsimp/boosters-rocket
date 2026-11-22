@@ -11,6 +11,7 @@ import { NotSetUpBox } from "../../../../family-boxes";
 import { confirmBuyoutAction, switchBackAction } from "../../actions";
 import { ConfirmBuyout, SwitchBack } from "../../pay-instead-forms";
 import { Announcer } from "../../../../announce";
+import { Card, PageHeader } from "../../../../../components/ui";
 
 export const metadata = { title: "Pay instead of volunteering" };
 export const dynamic = "force-dynamic";
@@ -28,7 +29,7 @@ export default async function PayInsteadPage({ params }: { params: Promise<{ req
   // family isn't set up, as it did when loadMyFamily() went by the shape (shapeHolds(), the buy-out's and money's rule).
   const [family, club, holds] = await Promise.all([loadMyFamily(ctx), getClubSettings(), shapeHolds()]);
   if (!family || !holds) {
-    return <main className="wrap single"><h1 className="page-title">Pay instead of volunteering</h1><NotSetUpBox treasurerEmail={club.treasurerEmail} /></main>;
+    return <main className="wrap single"><PageHeader title="Pay instead of volunteering" /><NotSetUpBox treasurerEmail={club.treasurerEmail} /></main>;
   }
   const found = await findMyBuyout(ctx, requirementId, choice);
   if (!found) notFound();
@@ -37,19 +38,18 @@ export default async function PayInsteadPage({ params }: { params: Promise<{ req
   const b = v.buyout;
   return (
     <main className="wrap single volunteer-page">
-      <h1 className="page-title">Pay instead of volunteering</h1>
-      <p className="lede">{v.title}, for {forWhom}. <Link href="/volunteer">Back to Volunteer</Link></p>
+      <PageHeader title="Pay instead of volunteering" back={{ href: "/volunteer", label: "Back to Volunteer" }} lede={<>{v.title}, for {forWhom}.</>} />
 
-      <section className="box" aria-labelledby="where-h"><h2 id="where-h">Where it stands</h2>
+      <Card title="Where it stands" titleId="where-h">
         <p className="state">{v.standing}</p>
         {v.refusedBefore && <p className="help">The last time, the club&apos;s invoice couldn&apos;t be set up, so nothing was billed. You can try again, or ask the club.</p>}
         {v.endedForCompany && <p className="help">The club moved its books to a new QuickBooks company, so your earlier buy-out for this was ended. If anything is still owed on it, the club will be in touch.</p>}
-      </section>
+      </Card>
 
       {/* The answer to a confirm or a switch-back outlives the section it was pressed in: the page redraws into another. */}
       <Announcer>
       {b ? (
-        <section className="box" aria-labelledby="buyout-h"><h2 id="buyout-h">Your buy-out</h2>
+        <Card title="Your buy-out" titleId="buyout-h">
           <p>{unitsWords(v.unit, b.units)} at {formatMoney(b.unitCents)} {perUnitWords(v.unit)}: <b className="num">{formatMoney(b.amountCents)}</b>.</p>
           {b.state === "being_invoiced" && <p>The club&apos;s invoice is being set up. It will be on your <Link href="/payments">Payments</Link> page soon, with a Pay button. Once it&apos;s there, you can switch back here if you change your mind.</p>}
           {b.clubLooking && b.state !== "paid" && !b.invoicePaid && <p>The club is looking at this invoice, so nothing can be changed here for now. You don&apos;t need to do anything; if you have questions, please ask the club.</p>}
@@ -65,9 +65,9 @@ export default async function PayInsteadPage({ params }: { params: Promise<{ req
             </>
           )}
           {b.state === "invoiced" && b.invoicePaid && <p className="help">It&apos;s paid, so it can&apos;t be switched back here. If something isn&apos;t right, the club&apos;s treasurer can sort it out.</p>}
-        </section>
+        </Card>
       ) : v.quote.ok && v.stamp ? (
-        <section className="box" aria-labelledby="cost-h"><h2 id="cost-h">What it costs</h2>
+        <Card title="What it costs" titleId="cost-h">
           <p>{unitsWords(v.unit, v.quote.units)} still to do, at {formatMoney(v.quote.unitCents)} {perUnitWords(v.unit)}{v.unit === "hours" ? ", rounded up to whole hours" : ""}:</p>
           <p className="buyout-amount num">{formatMoney(v.quote.amountCents)}</p>
           <h3>What happens when you confirm</h3>
@@ -77,11 +77,11 @@ export default async function PayInsteadPage({ params }: { params: Promise<{ req
             <li>You can switch back to volunteering until it&apos;s paid, and the invoice is then cancelled.</li>
           </ul>
           <ConfirmBuyout label={`Confirm: invoice me ${formatMoney(v.quote.amountCents)}`} act={confirmBuyoutAction.bind(null, v.requirementId, v.key, v.subjectStamp, v.stamp)} />
-        </section>
+        </Card>
       ) : (
-        <section className="box" aria-labelledby="cost-h"><h2 id="cost-h">Nothing to pay</h2>
+        <Card title="Nothing to pay" titleId="cost-h">
           <p>{v.quote.ok || v.quote.why === "met" ? "This is done already, so there's nothing to pay. Thank you!" : "Paying instead isn't offered for this right now. If you'd like to, please ask the club."}</p>
-        </section>
+        </Card>
       )}
       </Announcer>
     </main>

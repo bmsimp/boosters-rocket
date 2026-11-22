@@ -266,6 +266,9 @@ footer a { color: var(--club-text); }
 .choices { display: grid; gap: var(--s2); margin-top: var(--s3); }
 .choice { position: relative; display: block; cursor: pointer; }
 .choice input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: inherit; } /* the whole tile: the keyboard scrolls all of it into view, and a screen reader outlines it */
+/* An option that can't be chosen now (a place already taken): drawn quiet, its words still readable. */
+.choice:has(input:disabled) { cursor: not-allowed; }
+.choice input:disabled + span { background: var(--surface-muted); color: var(--ink-2); }
 .choice span { display: grid; grid-template-columns: 18px 1fr; gap: 2px var(--s3); align-items: center; min-height: 56px;
   padding: var(--s2) var(--s4); border: 1px solid var(--border-control); border-radius: var(--radius); background: var(--surface);
   transition: border-color var(--dur-fast) ease-out, background-color var(--dur-fast) ease-out; }
@@ -710,6 +713,8 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 .volunteer-confirm { margin-top: var(--s4); width: 100%; }
 @media (min-width: 760px) { .volunteer-confirm { width: auto; } }
 .volunteer-done { margin-top: var(--s3); font-weight: 600; }
+/* The status line that outlives the rows it speaks for (Announcer) takes no room until it says something. */
+.volunteer-done.announce:empty { margin: 0; }
 .volunteer-cancel { margin-top: var(--s2); }
 .lines li > div > .state { margin-top: 2px; }
 /* Checking in: a full-width button per person on a phone, then one for everyone. */

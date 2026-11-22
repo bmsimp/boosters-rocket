@@ -126,7 +126,7 @@ test("a parent's visit: sign in by password and emailed code, read and do what t
       await place.getByRole("button", { name: "Yes, cancel it" }).click();
       await expect(mine).not.toContainText(`Pancake breakfast, ${role}`);
     }
-    await expect(page.locator(".lines li").filter({ hasText: "7:00 am to 9:00 am, Griddle" })).toContainText("1 of 4 places filled");
+    await expect(page.locator(".list-row").filter({ hasText: "7:00 am to 9:00 am, Griddle" })).toContainText("1 of 4 places filled");
     // The shift on now: what is left to do is check in there.
     await expect(mine.locator("li", { hasText: "Concession stand" })).toContainText(/This shift has started|Checked in/);
   });
@@ -136,7 +136,7 @@ test("a parent's visit: sign in by password and emailed code, read and do what t
     await page.goto(`/volunteer/check-in/${E2E_VOLUNTEER.openCode}`);
     const button = page.getByRole("button", { name: "Check me in" });
     if (await button.isVisible()) await button.click();
-    await expect(page.locator(".lines li").first()).toContainText("Checked in");
+    await expect(page.locator(".list-row").first()).toContainText("Checked in");
     await noSidewaysScroll(page);
     await shot(page, "p09-check-in");
     await page.getByRole("link", { name: "Back to Volunteer" }).click();
@@ -145,7 +145,7 @@ test("a parent's visit: sign in by password and emailed code, read and do what t
 
   await test.step("chooses to pay instead, and is told calmly it couldn't be set up", async () => {
     const payInstead = page.getByRole("region", { name: "Pay instead of volunteering" });
-    await payInstead.locator(".lines li").filter({ hasText: "Pit crew hours" }).getByRole("link", { name: /^Pay instead of volunteering \(\$25\.00\)/ }).click();
+    await payInstead.locator(".list-row").filter({ hasText: "Pit crew hours" }).getByRole("link", { name: /^Pay instead of volunteering \(\$25\.00\)/ }).click();
     await expect(page).toHaveURL(new RegExp(`/volunteer/pay-instead/${E2E_BUYOUT.offered}/family$`));
     await noSidewaysScroll(page);
     await shot(page, "p10-pay-instead");
@@ -155,7 +155,7 @@ test("a parent's visit: sign in by password and emailed code, read and do what t
 
   await test.step("asks to switch a buy-out back to volunteering, and nothing is changed", async () => {
     await page.goto("/volunteer");
-    await page.getByRole("region", { name: "Pay instead of volunteering" }).locator(".lines li").filter({ hasText: "Concession help" })
+    await page.getByRole("region", { name: "Pay instead of volunteering" }).locator(".list-row").filter({ hasText: "Concession help" })
       .getByRole("link", { name: /^See your buy-out/ }).click();
     await expect(page).toHaveURL(new RegExp(`/volunteer/pay-instead/${E2E_BUYOUT.invoiced}/family$`));
     await page.getByRole("button", { name: "Volunteer instead" }).click();

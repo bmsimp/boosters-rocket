@@ -3,6 +3,7 @@ import Link from "next/link";
 import { startTransition, useActionState, useEffect, useRef, useState } from "react";
 import { ACTION_FAILED, safely } from "../../../components/action-error";
 import { useSay } from "../../announce";
+import { ActionOutcome, Button } from "../../../components/ui";
 
 /**
  * The two things a guardian does on the pay-instead page: confirm a buy-out, and switch back to volunteering. Each is
@@ -19,7 +20,7 @@ function Outcome({ state }: { state: Result | null }) {
   if (!state) return null;
   return state.ok
     ? <div role="status" className="volunteer-done"><p>{state.message}</p><p className="buyout-next"><Link href="/payments">Go to Payments</Link> · <Link href="/volunteer">Back to Volunteer</Link></p></div>
-    : <ul role="alert" className="errors">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>;
+    : <ActionOutcome state={state} />;
 }
 
 /** Runs the action once at a time, and tells the page's Announcer what a success says. */
@@ -40,7 +41,7 @@ export function ConfirmBuyout({ label, act }: { label: string; act: () => Promis
   return (
     <div>
       <Outcome state={state} />
-      <button type="button" className="btn volunteer-confirm" aria-disabled={pending || undefined} onClick={press}>{pending ? "Setting it up…" : label}</button>
+      <Button className="volunteer-confirm" busy={pending} onClick={press}>{pending ? "Setting it up…" : label}</Button>
     </div>
   );
 }
@@ -63,10 +64,10 @@ export function SwitchBack({ act }: { act: () => Promise<Result> }) {
   if (state?.ok) return say ? null : <Outcome state={state} />;
   return (
     <div className="row-actions volunteer-cancel">
-      {!asking ? <button ref={ask} type="button" className="btn btn-line" onClick={() => toggle(true)}>Volunteer instead</button> : (
+      {!asking ? <Button ref={ask} variant="secondary" onClick={() => toggle(true)}>Volunteer instead</Button> : (
         <div className="row-actions" role="group" aria-label="Volunteer instead?">
-          <button type="button" className="btn btn-line" aria-disabled={pending || undefined} onClick={press}>{pending ? "Cancelling the invoice…" : "Yes, cancel the invoice"}</button>
-          <button ref={keep} type="button" className="btn btn-line" aria-disabled={pending || undefined} onClick={() => { if (!pending) toggle(false); }}>Keep paying instead</button>
+          <Button variant="danger" busy={pending} onClick={press}>{pending ? "Cancelling the invoice…" : "Yes, cancel the invoice"}</Button>
+          <Button ref={keep} variant="secondary" aria-disabled={pending || undefined} onClick={() => { if (!pending) toggle(false); }}>Keep paying instead</Button>
         </div>
       )}
       <Outcome state={state} />
