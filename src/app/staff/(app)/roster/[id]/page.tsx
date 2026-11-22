@@ -327,7 +327,7 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
       <Waiting items={waiting} compare={compareIds} />
       {edit && inQuickBooks && entry.kind === "family" && page.shape?.kind === "layered" && <FamilyChanges shape={page.shape} family={inQuickBooks} edit={edit} cover={cover} inactiveRecords={inactiveRecords} linker={linker} />}
       {moves && <MoveStudents students={movable} families={moveTo.families} refusedHere={moveTo.refusedHere} rosterTag={rosterTag} act={moveAction} />}
-      {edit && inQuickBooks && entry.kind === "member" && <MemberChanges member={inQuickBooks.customer} edit={edit} />}
+      {edit && inQuickBooks && entry.kind === "member" && page.shape && <MemberChanges member={inQuickBooks.customer} edit={edit} shape={page.shape} />}
       {changesHere && page.shape && <PortalChanges familyId={String(familyId)} name={fam.name} noun={entry.kind} unlinked={!fam.linked}
         addStudents={offers(page.shape, "add_student")} students={hereStudents.map((s) => ({ id: String(s.id), name: s.name }))} rosterTag={rosterTag} />}
       {changesHere && toMake && <CreateInQuickBooks familyId={String(familyId)} name={fam.name} noun={entry.kind} unlinked={!fam.linked}

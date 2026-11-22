@@ -310,7 +310,7 @@ export function FamilyChanges({ shape, family, edit, cover, inactiveRecords, lin
   const f = family.customer;
   return (
     <Card title="Change in QuickBooks" titleId="family-changes-h">
-      <ChangesInQuickBooks />
+      <ChangesInQuickBooks shape={shape} />
       <RecordChanges who="the family" c={f} rename={offered.has("rename_family")} deactivate={false} edit={edit} warning=""
         extra={offered.has("deactivate_family") && cover ? <FamilyInactive family={f} cover={cover} edit={edit} /> : null} />
       {f.active && offered.has("add_student") && (
@@ -339,23 +339,24 @@ export function FamilyChanges({ shape, family, edit, cover, inactiveRecords, lin
 }
 
 /** What a family's or member's changes in QuickBooks do, folded under the card's title: the roster page says it in Changing the roster. */
-function ChangesInQuickBooks() {
+function ChangesInQuickBooks({ shape }: { shape: MembershipShape }) {
   return (
     <HowThisWorks>
       <ul>
         <li>A rename, new student or move of a linked family is saved here first, then sent. If QuickBooks refuses, it stays here and Reconciliation lists it.</li>
         <li>Making someone inactive goes to QuickBooks first. The roster shows it once QuickBooks has it.</li>
       </ul>
+      {shapeOperations(shape).notOffered.map((n) => <p key={n.why}>{n.why}</p>)}
       <p>{NOT_HERE.contact}</p>
     </HowThisWorks>
   );
 }
 
 /** A flat club's member: rename and make inactive. */
-export function MemberChanges({ member, edit }: { member: Cust; edit: Edit }) {
+export function MemberChanges({ member, edit, shape }: { member: Cust; edit: Edit; shape: MembershipShape }) {
   return (
     <Card title="Change in QuickBooks" titleId="member-changes-h">
-      <ChangesInQuickBooks />
+      <ChangesInQuickBooks shape={shape} />
       <RecordChanges who="the member" c={member} rename deactivate edit={edit} follow warning="They can no longer sign in. If QuickBooks shows a balance, owed or a credit, or the portal can't read it, nothing is made inactive until it's settled there." />
     </Card>
   );
