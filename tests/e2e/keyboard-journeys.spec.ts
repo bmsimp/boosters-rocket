@@ -477,7 +477,7 @@ test.describe("10. sign-in settings, by keyboard: asking again, then the change 
     // A wrong code is an alert, and the focus stays in the field.
     await page.keyboard.type("000000");
     await page.keyboard.press("Enter");
-    await expect(passwordBox.getByRole("alert")).toHaveText("That code didn't work. Check the newest email from us and try again, or start again with your password.");
+    await expect(passwordBox.getByRole("alert")).toHaveText("Problem That code didn't work. Check the newest email from us and try again, or start again with your password.");
     await expect(passwordBox.getByRole("button", { name: "Confirm" })).toBeVisible(); // no longer Checking…
     await expect(code).toBeFocused();
     await page.keyboard.press("ControlOrMeta+A");
@@ -521,7 +521,7 @@ test.describe("10. sign-in settings, by keyboard: asking again, then the change 
     await expect(own).toHaveCount(1);
     await tabTo(page, own, { back: true });
     await page.keyboard.press("Enter");
-    await expect(devices.getByRole("status")).toHaveText("That device is forgotten. The next time you sign in on it, we'll email you a code.");
+    await expect(devices.getByRole("status")).toHaveText("Done That device is forgotten. The next time you sign in on it, we'll email you a code.");
     await expect(devices.getByRole("status")).toBeFocused();
     await expect(rowButtons).toHaveCount(listed - 1);
     await expect(own).toHaveCount(0);
@@ -552,7 +552,7 @@ test.describe("10. sign-in settings, by keyboard: asking again, then the change 
     await expect(thisOne).toHaveAttribute("data-device", hereDevices[0]!);
     await tabTo(page, thisOne.getByRole("button", { name: "Forget this device", exact: true }), { max: 60 });
     await page.keyboard.press("Enter");
-    await expect(devices.getByRole("status")).toHaveText("That device is forgotten. The next time you sign in on it, we'll email you a code.");
+    await expect(devices.getByRole("status")).toHaveText("Done That device is forgotten. The next time you sign in on it, we'll email you a code.");
     await expect(devices.getByRole("status")).toBeFocused();
     await expect(thisOne).toHaveCount(0);
     // The page is drawn again with the session naming no device: the box still knows the rest are the others.

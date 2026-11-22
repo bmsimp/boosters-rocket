@@ -3,15 +3,15 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { safely } from "@/app/components/action-error";
 import { LocalTime } from "@/app/components/local-time";
+import { ActionOutcome, Button, List, ListRow, TextInput } from "@/app/components/ui";
 import { SIGNIN_SETTINGS_COPY as COPY, howYouSignIn, passkeysAddedOnlyAt } from "@/lib/parents/signin-settings-copy";
 import { newBackupCodesAction, removePasskeyAction, renamePasskeyAction } from "./actions";
-import { BackupCodesShown, CodesSaved, Tick, addPasskeyHere } from "./passkey-add";
+import { BackupCodesShown, CodesSaved, addPasskeyHere } from "./passkey-add";
 import { passkeysAddIn } from "./passkey-adding";
 import { AskAgain, Said } from "./signin-forms";
 
 type Result = { ok: true; message: string } | { ok: false; errors: string[] };
 const FAILED = { ok: false as const, errors: [COPY.failed] };
-const Errors = ({ errors }: { errors: string[] }) => <ul role="alert" className="errors">{errors.map((e) => <li key={e}>{e}</li>)}</ul>;
 
 /** A passkey as the page lists it (MyPasskey, src/lib/parents/signin-settings.ts): its row's id, its name, and its two times. */
 export type ShownPasskey = { id: string; name: string | null; createdAt: string; lastUsedAt: string | null };
@@ -122,44 +122,46 @@ export function PasskeyBox({ email, passkeys, proved, hasPassword, strict, app, 
       {/* Under Strict (open question 25; slice SI-10b): put away once the parent says they saved them, and the box says so. */}
       {/* Keyed by the list: a new set of codes (new codes pressed again, or another passkey's) starts unticked. */}
       {codes && strict && <CodesSaved key={codes.list.join(" ")} onDone={() => { setCodes(null); setAnswer({ ok: true, message: COPY.codesPutAway }); }} />}
-      {answer && (
-        <div ref={said} tabIndex={-1}>
-          {answer.ok ? <p role="status" className="paid-up"><Tick />{answer.message}</p> : <Errors errors={answer.errors} />}
-        </div>
-      )}
+      <ActionOutcome ref={said} state={answer} />
       {passkeys.length === 0 ? <p>{COPY.passkeysNone}</p> : (
-        <ul className="stack">
+        // A row each: its name (or "Passkey added" and its date), when it was added and last used, and Rename and
+        // Remove. Renaming draws the name field under the row, in place of the buttons.
+        <List className="passkeys">
           {passkeys.map((k) => (
-            <li key={k.id}>
-              <p className="passkey-name"><strong>{k.name ?? <>{COPY.passkeyNoName} <LocalTime iso={k.createdAt} /></>}</strong></p>
-              <dl className="details">
-                <dt>{COPY.passkeyAddedOn}</dt><dd><LocalTime iso={k.createdAt} /></dd>
-                <dt>{COPY.passkeyLastUsed}</dt><dd>{k.lastUsedAt ? <LocalTime iso={k.lastUsedAt} /> : COPY.passkeyNotUsed}</dd>
-              </dl>
-              {renaming === k.id ? (
-                <form className="stack" onSubmit={(e) => { e.preventDefault(); void rename(k.id); }}>
-                  <label className="field"><span>{COPY.passkeyRenameLabel}</span>
-                    <input name="passkey-name" maxLength={50} value={newName} onChange={(e) => setNewName(e.target.value)} ref={renameField} />
-                  </label>
-                  <button className="btn" aria-disabled={busy !== null || undefined}>{busy === `rename:${k.id}` ? COPY.passkeyRenameBusy : COPY.passkeyRenameSave}</button>
-                  <button type="button" className="btn btn-line" onClick={() => { backTo.current = k.id; setRenaming(null); }}>{COPY.passkeyRenameCancel}</button>
-                </form>
-              ) : (
-                <div className="box-foot">
-                  <button type="button" className="btn btn-line" aria-disabled={busy !== null || undefined}
-                    ref={(el) => { if (el) renameButtons.current.set(k.id, el); else renameButtons.current.delete(k.id); }}
-                    onClick={() => { setNewName(k.name ?? ""); setRenaming(k.id); }}>{COPY.passkeyRename}<span className="visually-hidden"> {k.name ?? COPY.passkeyNoName}</span></button>
+            <ListRow key={k.id} title={<span className="passkey-name"><strong>{k.name ?? <>{COPY.passkeyNoName} <LocalTime iso={k.createdAt} /></>}</strong></span>}
+              meta={[
+                <span key="added">{COPY.passkeyAddedOn} <LocalTime iso={k.createdAt} /></span>,
+                <span key="used">{COPY.passkeyLastUsed} {k.lastUsedAt ? <LocalTime iso={k.lastUsedAt} /> : COPY.passkeyNotUsed}</span>,
+              ]}
+              action={renaming !== k.id && (
+                <>
+                  <Button size="sm" variant="secondary" aria-disabled={busy !== null || undefined}
+                    ref={(el: HTMLButtonElement | null) => { if (el) renameButtons.current.set(k.id, el); else renameButtons.current.delete(k.id); }}
+                    onClick={() => { setNewName(k.name ?? ""); setRenaming(k.id); }}>{COPY.passkeyRename}<span className="visually-hidden"> {k.name ?? COPY.passkeyNoName}</span></Button>
                   {canChange && !(last && strict && !app) && (
-                    <button type="button" className="btn btn-line" aria-disabled={busy !== null || undefined} onClick={() => void remove(k.id)}>
+                    <Button size="sm" variant="danger" busy={busy === `remove:${k.id}`} aria-disabled={busy !== null || undefined} onClick={() => void remove(k.id)}>
                       {busy === `remove:${k.id}` ? COPY.passkeyRemoveBusy : COPY.passkeyRemove}<span className="visually-hidden"> {k.name ?? COPY.passkeyNoName}</span>
-                    </button>
+                    </Button>
                   )}
-                </div>
+                </>
               )}
-              {canChange && lastWords && <p className="help">{lastWords}</p>}
-            </li>
+              detail={(renaming === k.id || (canChange && lastWords)) && (
+                <>
+                  {renaming === k.id && (
+                    <form className="stack" onSubmit={(e) => { e.preventDefault(); void rename(k.id); }}>
+                      <TextInput id={`passkey-rename-${k.id}`} label={COPY.passkeyRenameLabel} ref={renameField} name="passkey-name" maxLength={50} value={newName}
+                        onChange={(e) => setNewName(e.target.value)} />
+                      <div className="row-actions">
+                        <Button type="submit" busy={busy === `rename:${k.id}`} aria-disabled={busy !== null || undefined}>{busy === `rename:${k.id}` ? COPY.passkeyRenameBusy : COPY.passkeyRenameSave}</Button>
+                        <Button variant="secondary" onClick={() => { backTo.current = k.id; setRenaming(null); }}>{COPY.passkeyRenameCancel}</Button>
+                      </div>
+                    </form>
+                  )}
+                  {canChange && lastWords && <p className="help">{lastWords}</p>}
+                </>
+              )} />
           ))}
-        </ul>
+        </List>
       )}
       {passkeys.length > 0 && !app && <p className="help">{COPY.backupCodesLeft}: {backupCodesLeft}</p>}
       {/* Proved here, by the asking below: AskAgain gives way to the change at once, so its thanks is drawn here, and keeps the focus. */}
@@ -171,18 +173,16 @@ export function PasskeyBox({ email, passkeys, proved, hasPassword, strict, app, 
       ) : (
         <div className="stack">
           {passkeys.length > 0 && !app && (
-            <button type="button" className="btn btn-line" aria-disabled={busy !== null || undefined} onClick={() => void newCodes()}>
+            <Button variant="secondary" busy={busy === "codes"} aria-disabled={busy !== null || undefined} onClick={() => void newCodes()}>
               {busy === "codes" ? COPY.newCodesBusy : COPY.newCodes}
-            </button>
+            </Button>
           )}
           {where === "here" ? (
             <form className="stack" onSubmit={(e) => { e.preventDefault(); void add(); }}>
-              <label className="field"><span>{COPY.passkeyName}</span>
-                <input name="passkey-name" maxLength={50} autoComplete="off" aria-describedby="passkey-name-help" value={name} onChange={(e) => setName(e.target.value)} />
-              </label>
-              <p className="help" id="passkey-name-help">{COPY.passkeyNameHelp}</p>
+              <TextInput id="passkey-name" label={COPY.passkeyName} hint={COPY.passkeyNameHelp} name="passkey-name" maxLength={50} autoComplete="off"
+                value={name} onChange={(e) => setName(e.target.value)} />
               {/* Busy is aria-disabled, not disabled: a disabled button drops the focus, and the keyboard's place with it. */}
-              <button className="btn" aria-disabled={busy !== null || undefined}>{busy === "add" ? COPY.passkeyAddBusy : COPY.passkeyAdd}</button>
+              <Button type="submit" busy={busy === "add"} aria-disabled={busy !== null || undefined}>{busy === "add" ? COPY.passkeyAddBusy : COPY.passkeyAdd}</Button>
             </form>
           ) : <p>{where === "elsewhere" ? passkeysAddedOnlyAt(portalOrigin) : COPY.passkeysUnsupported}</p>}
         </div>

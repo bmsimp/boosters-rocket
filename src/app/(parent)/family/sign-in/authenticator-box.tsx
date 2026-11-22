@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { safely } from "@/app/components/action-error";
 import { LocalTime } from "@/app/components/local-time";
+import { ActionOutcome, Button, KeyValue, Notice } from "@/app/components/ui";
 import { SIGNIN_SETTINGS_COPY as COPY, howYouSignIn } from "@/lib/parents/signin-settings-copy";
 import { confirmAuthenticatorAction, newBackupCodesAction, startAuthenticatorAction, turnOffAuthenticatorAction } from "./actions";
 import { AskAgain } from "./signin-forms";
@@ -10,7 +11,6 @@ import { CodesSaved } from "./passkey-add";
 
 type Result = { ok: true; message: string } | { ok: false; errors: string[] };
 const FAILED = { ok: false as const, errors: [COPY.failed] };
-const Errors = ({ errors }: { errors: string[] }) => <ul role="alert" className="errors">{errors.map((e) => <li key={e}>{e}</li>)}</ul>;
 const Tick = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M4 12.5l5 5 11-11" /></svg>;
 
 // The copy press and the set-up's form live in app-setup.tsx since slice SI-10a, shared with Strict's enrolment.
@@ -53,9 +53,11 @@ export function AuthenticatorBox({ email, app, proved, hasPassword, strict, pass
   const [busy, setBusy] = useState<Busy>(null);
   // Where the focus lands after a press that draws something new: the words at the top of what it drew.
   const landing = useRef<HTMLParagraphElement>(null);
+  // The backup codes' line, drawn as a done notice, takes the focus the same way.
+  const codesLine = useRef<HTMLDivElement>(null);
   const answerLine = useRef<HTMLDivElement>(null);
   const [landed, setLanded] = useState(0);
-  useEffect(() => { if (landed) landing.current?.focus(); }, [landed]);
+  useEffect(() => { if (landed) (codesLine.current ?? landing.current)?.focus(); }, [landed]);
   // Turning off draws the box again without the app once the page is drawn again: the answer takes the focus then too.
   const appOn = app !== null;
   useEffect(() => { if (answer) answerLine.current?.focus(); }, [answer, appOn]);
@@ -96,11 +98,7 @@ export function AuthenticatorBox({ email, app, proved, hasPassword, strict, pass
     setAnswer(r);
   };
 
-  const answered = answer && (
-    <div ref={answerLine} tabIndex={-1}>
-      {answer.ok ? <p role="status" className="paid-up"><Tick />{answer.message}</p> : <Errors errors={answer.errors} />}
-    </div>
-  );
+  const answered = answer && <ActionOutcome ref={answerLine} state={answer} />;
   const on = app && <AppOn app={app} email={email} proved={proved} strict={strict} busy={busy} answered={codes ? null : answered} newCodes={newCodes} turnOff={turnOff}
     passkey={passkey} portalOrigin={portalOrigin} lede={words.askAgainForAppChange} />;
 
@@ -108,7 +106,7 @@ export function AuthenticatorBox({ email, app, proved, hasPassword, strict, pass
   if (codes) {
     return (
       <div className="stack">
-        <p ref={landing} role="status" tabIndex={-1} className="paid-up"><Tick />{codes.message}</p>
+        <Notice tone="done" ref={codesLine} tabIndex={-1}>{codes.message}</Notice>
         <h3>{COPY.backupCodesTitle}</h3>
         <p>{COPY.backupCodesKeep}</p>
         <ul className="backup-codes" aria-label={COPY.backupCodesTitle}>
@@ -139,9 +137,9 @@ export function AuthenticatorBox({ email, app, proved, hasPassword, strict, pass
       {!hasPassword ? <p>{COPY.appNeedsPassword}</p>
         : (
           <AskAgain email={email} proved={proved} lede={words.askAgainForApp} passkey={passkey} portalOrigin={portalOrigin}>
-            <button type="button" className="btn" aria-disabled={busy !== null || undefined} onClick={() => void start()}>
+            <Button busy={busy === "start"} aria-disabled={busy !== null || undefined} onClick={() => void start()}>
               {busy === "start" ? COPY.appSetUpBusy : COPY.appSetUp}
-            </button>
+            </Button>
           </AskAgain>
         )}
     </div>
@@ -154,24 +152,24 @@ function AppOn({ app, email, proved, strict, busy, answered, newCodes, turnOff, 
   return (
     <div className="stack">
       <p className="paid-up"><Tick />{COPY.appOn}</p>
-      <dl className="details">
-        <dt>{COPY.appOnSince}</dt><dd><LocalTime iso={app.since} /></dd>
-        <dt>{COPY.backupCodesLeft}</dt><dd>{app.backupCodesLeft}</dd>
-      </dl>
+      <KeyValue items={[
+        { key: "since", label: COPY.appOnSince, value: <LocalTime iso={app.since} /> },
+        { key: "codes", label: COPY.backupCodesLeft, value: app.backupCodesLeft },
+      ]} />
       {app.backupCodesLeft === 0 && <p>{COPY.backupCodesNone}</p>}
       {answered}
       <AskAgain email={email} proved={proved} lede={lede} passkey={passkey} portalOrigin={portalOrigin}>
         <div className="stack">
-          <button type="button" className="btn btn-line" aria-disabled={busy !== null || undefined} onClick={() => void newCodes()}>
+          <Button variant="secondary" busy={busy === "codes"} aria-disabled={busy !== null || undefined} onClick={() => void newCodes()}>
             {busy === "codes" ? COPY.newCodesBusy : COPY.newCodes}
-          </button>
+          </Button>
           {/* Under Strict the app stays while it is the only second step; beside a passkey (slice SI-7b) it can go. */}
           {strict && !passkey ? <p>{COPY.turnOffStrict}</p> : (
             <>
               <p>{passkey ? COPY.turnOffWordsBesidePasskey : COPY.turnOffWords}</p>
-              <button type="button" className="btn btn-line" aria-disabled={busy !== null || undefined} onClick={() => void turnOff()}>
+              <Button variant="danger" busy={busy === "off"} aria-disabled={busy !== null || undefined} onClick={() => void turnOff()}>
                 {busy === "off" ? COPY.turnOffBusy : COPY.turnOff}
-              </button>
+              </Button>
             </>
           )}
         </div>

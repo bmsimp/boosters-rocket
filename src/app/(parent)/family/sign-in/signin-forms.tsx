@@ -7,6 +7,7 @@ import { passkeysWorkIn, readCeremony, type CeremonyOutcome } from "@/app/sign-i
 import { PASSKEY_STEP_UNSUPPORTED, passkeyStepElsewhere } from "@/lib/parents/signin-copy";
 import { toPortalAgain } from "./passkey-adding";
 import { LocalTime } from "@/app/components/local-time";
+import { ActionOutcome, Button, Card, Field, LinkButton, List, ListRow, Notice, TextInput } from "@/app/components/ui";
 import { PASSWORD_COPY } from "@/lib/parents/password-copy";
 import { SIGNIN_SETTINGS_COPY as COPY, howYouSignIn } from "@/lib/parents/signin-settings-copy";
 import { askAgainCodeAction, askAgainPasswordAction, askSetupLinkAction, changePasswordAction, forgetDeviceAction, forgetOtherDevicesAction, signOutEverywhereAction } from "./actions";
@@ -14,8 +15,8 @@ import { askAgainCodeAction, askAgainPasswordAction, askSetupLinkAction, changeP
 type Result = { ok: true; message: string } | { ok: false; errors: string[] };
 const FAILED: Result = { ok: false, errors: [COPY.failed] };
 
-const Errors = ({ errors }: { errors: string[] }) => <ul role="alert" className="errors">{errors.map((e) => <li key={e}>{e}</li>)}</ul>;
-const Tick = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M4 12.5l5 5 11-11" /></svg>;
+/** A press's refusal, in its words: a problem notice, announced as an alert. */
+const Errors = ({ errors }: { errors: string[] }) => <ActionOutcome state={{ ok: false, errors }} />;
 
 /**
  * The address the parent signs in with, for a password manager: it tells which account the password fields are for.
@@ -25,11 +26,11 @@ const Username = ({ email }: { email: string }) => <input type="email" name="use
 
 /** Words that take the focus once they are drawn: the answer to a press whose form has gone. */
 export function Said({ message, children }: { message: string; children?: ReactNode }) {
-  const line = useRef<HTMLParagraphElement>(null);
+  const line = useRef<HTMLDivElement>(null);
   useEffect(() => { line.current?.focus(); }, []);
   return (
     <>
-      <p ref={line} role="status" tabIndex={-1} className="paid-up"><Tick />{message}</p>
+      <Notice tone="done" ref={line} tabIndex={-1}>{message}</Notice>
       {children}
     </>
   );
@@ -44,7 +45,7 @@ type Out = { message: string; next: string; signIn: SignInAgain };
 const SignedOut = ({ message, next, signIn }: Out) => (
   <Said message={message}>
     <p className="help">{next}</p>
-    {signIn && <div className="box-foot"><a className="btn" href={signIn.href}>{signIn.label}</a></div>}
+    {signIn && <div className="box-foot"><LinkButton plain href={signIn.href}>{signIn.label}</LinkButton></div>}
   </Said>
 );
 
@@ -58,7 +59,7 @@ const SignedOutContext = createContext<((out: Out) => void) | null>(null);
  */
 export function SignInSettingsFrame({ children }: { children: ReactNode }) {
   const [out, setOut] = useState<Out | null>(null);
-  if (out) return <section className="box"><SignedOut {...out} /></section>;
+  if (out) return <Card><SignedOut {...out} /></Card>;
   return <SignedOutContext.Provider value={setOut}>{children}</SignedOutContext.Provider>;
 }
 
@@ -105,6 +106,8 @@ export function AskAgain({ email, proved, lede, children, passkey = false, porta
   // The code field is described by the words that say a code was emailed: a live region drawn with its words already
   // in it is seldom read out, so the field that takes the focus carries them.
   const sentId = useId();
+  // The fields' own ids: the page draws this asking in more than one box at once.
+  const fieldId = useId();
   useEffect(() => { if (moved.current) (field.current ?? stepLine.current)?.focus(); }, [step]);
   // A proof that stops counting while the page is open (since slice SI-6b's second read: an authenticator app set up
   // on this page, which leaves every earlier proof of the person behind) reaches here as `proved` turning false once
@@ -146,7 +149,7 @@ export function AskAgain({ email, proved, lede, children, passkey = false, porta
     setErrors([outcome.kind === "cancelled" ? COPY.passkeyAgainCancelled : outcome.kind === "answer" ? COPY.passkeyAgainRejected : COPY.failed]);
   };
   const passkeyPress = passkey && (keysHere === "here"
-    ? <button type="button" className="btn" aria-disabled={busy || undefined} onClick={() => { if (!busy) void provePasskey(); }}>{busy ? COPY.checking : COPY.usePasskey}</button>
+    ? <Button busy={busy} onClick={() => { if (!busy) void provePasskey(); }}>{busy ? COPY.checking : COPY.usePasskey}</Button>
     : <p className="help">{keysHere === "elsewhere" ? passkeyStepElsewhere(portalOrigin) : PASSKEY_STEP_UNSUPPORTED}</p>);
   const checkCode = async () => {
     setBusy(true); setErrors(null);
@@ -168,12 +171,11 @@ export function AskAgain({ email, proved, lede, children, passkey = false, porta
         {passkeyPress}
         {passkey && <p>{COPY.orPassword}</p>}
         <Username email={email} />
-        <label className="field"><span>{COPY.yourPassword}</span>
-          <input ref={field} name="password" type="password" required autoComplete="current-password" maxLength={1024} value={password} onChange={(e) => setPassword(e.target.value)} />
-        </label>
+        <TextInput id={fieldId} label={COPY.yourPassword} ref={field} name="password" type="password" required autoComplete="current-password" maxLength={1024}
+          value={password} onChange={(e) => setPassword(e.target.value)} />
         {errors && <Errors errors={errors} />}
         {/* Busy is aria-disabled, not disabled: a disabled button drops the focus, and the keyboard's place with it. */}
-        <button className="btn" aria-disabled={busy || undefined}>{busy ? COPY.checking : COPY.continue}</button>
+        <Button type="submit" busy={busy}>{busy ? COPY.checking : COPY.continue}</Button>
       </form>
     );
   }
@@ -184,7 +186,7 @@ export function AskAgain({ email, proved, lede, children, passkey = false, porta
         <p ref={stepLine} role="status" tabIndex={-1}>{COPY.passkeyAsked}</p>
         {passkeyPress}
         {errors && <Errors errors={errors} />}
-        <button type="button" className="btn btn-line" onClick={startAgain}>{COPY.startAgain}</button>
+        <Button variant="secondary" onClick={startAgain}>{COPY.startAgain}</Button>
       </div>
     );
   }
@@ -194,15 +196,18 @@ export function AskAgain({ email, proved, lede, children, passkey = false, porta
     <form className="stack" onSubmit={(e) => { e.preventDefault(); if (!busy) void checkCode(); }}>
       <p role="status" id={sentId}>{step === "passkey" ? (beside === "app" ? COPY.passkeyOrAppAsked : COPY.passkeyOrBackupAsked) : app ? COPY.appAsked : COPY.codeSent}</p>
       {step === "passkey" && passkeyPress}
-      <label className="field"><span>{step === "passkey" && beside === "codes" ? COPY.backupCode : app ? COPY.appCode : COPY.code}</span>
-        {app
-          ? <input ref={field} name="code" aria-describedby={sentId} inputMode="text" autoCapitalize="characters" autoCorrect="off" spellCheck={false}
+      {/* The field is described by the words that say a code was sent, above it. */}
+      <Field id={fieldId} label={step === "passkey" && beside === "codes" ? COPY.backupCode : app ? COPY.appCode : COPY.code}>
+        {(aria) => app
+          ? <input {...aria} ref={field} name="code" aria-describedby={sentId} inputMode="text" autoCapitalize="characters" autoCorrect="off" spellCheck={false}
             autoComplete="one-time-code" maxLength={20} required value={code} onChange={(e) => setCode(e.target.value)} />
-          : <input ref={field} name="code" aria-describedby={sentId} inputMode="numeric" autoComplete="one-time-code" maxLength={9} required value={code} onChange={(e) => setCode(e.target.value)} />}
-      </label>
+          : <input {...aria} ref={field} name="code" aria-describedby={sentId} inputMode="numeric" autoComplete="one-time-code" maxLength={9} required value={code} onChange={(e) => setCode(e.target.value)} />}
+      </Field>
       {errors && <Errors errors={errors} />}
-      <button className="btn" aria-disabled={busy || undefined}>{busy ? COPY.checking : COPY.confirm}</button>
-      <button type="button" className="btn btn-line" onClick={startAgain}>{COPY.startAgain}</button>
+      <div className="row-actions">
+        <Button type="submit" busy={busy}>{busy ? COPY.checking : COPY.confirm}</Button>
+        <Button variant="secondary" onClick={startAgain}>{COPY.startAgain}</Button>
+      </div>
     </form>
   );
 }
@@ -230,17 +235,14 @@ export function ChangePasswordForm({ email, app, passkey = false, strict }: { em
   return (
     <form className="stack" onSubmit={(e) => { e.preventDefault(); if (!busy) void change(); }}>
       <Username email={email} />
-      <p className="help" id="new-password-rule">{PASSWORD_COPY.rule}</p>
-      <label className="field"><span>{COPY.newPassword}</span>
-        <input name="new-password" type="password" required autoComplete="new-password" maxLength={1024} aria-describedby="new-password-rule"
-          value={password} onChange={(e) => setPassword(e.target.value)} />
-      </label>
-      <label className="field"><span>{COPY.newPasswordAgain}</span>
-        <input name="new-password-again" type="password" required autoComplete="new-password" maxLength={1024} value={again} onChange={(e) => setAgain(e.target.value)} />
-      </label>
+      {/* The rule is said above the field, and read with it. */}
+      <TextInput id="new-password" label={COPY.newPassword} hint={PASSWORD_COPY.rule} name="new-password" type="password" required autoComplete="new-password" maxLength={1024}
+        value={password} onChange={(e) => setPassword(e.target.value)} />
+      <TextInput id="new-password-again" label={COPY.newPasswordAgain} name="new-password-again" type="password" required autoComplete="new-password" maxLength={1024}
+        value={again} onChange={(e) => setAgain(e.target.value)} />
       <p>{words.signsOutEverywhere}</p>
       {result && !result.ok && <Errors errors={result.errors} />}
-      <button className="btn" aria-disabled={busy || undefined}>{busy ? COPY.changeBusy : COPY.changeButton}</button>
+      <Button type="submit" busy={busy}>{busy ? COPY.changeBusy : COPY.changeButton}</Button>
     </form>
   );
 }
@@ -266,7 +268,7 @@ export function SignOutEverywhereForm({ then, next, signIn }: { then: string; ne
       <p>{COPY.everywhereLede}</p>
       <p>{then}</p>
       {result && !result.ok && <Errors errors={result.errors} />}
-      <button className="btn btn-line" aria-disabled={busy || undefined}>{busy ? COPY.everywhereBusy : COPY.everywhereButton}</button>
+      <Button type="submit" variant="secondary" busy={busy}>{busy ? COPY.everywhereBusy : COPY.everywhereButton}</Button>
     </form>
   );
 }
@@ -283,9 +285,8 @@ export function SetupLinkForm() {
   };
   return (
     <form className="stack" onSubmit={(e) => { e.preventDefault(); if (!busy) void press(); }}>
-      {result && !result.ok && <Errors errors={result.errors} />}
-      {result?.ok && <p role="status" className="paid-up"><Tick />{result.message}</p>}
-      <button className="btn" aria-disabled={busy || undefined}>{busy ? COPY.setupBusy : COPY.setupButton}</button>
+      <ActionOutcome state={result} />
+      <Button type="submit" busy={busy}>{busy ? COPY.setupBusy : COPY.setupButton}</Button>
     </form>
   );
 }
@@ -336,7 +337,7 @@ export function RememberedDevices({ devices, proved, canAsk, cantAsk, email, app
   // page (it revalidates it), and the session then names no device (its `device_id` went null with the row), so the
   // redrawn list marks none: this is how the box still knows the rest are the other devices.
   const [forgotThisOne, setForgotThisOne] = useState(false);
-  const said = useRef<HTMLParagraphElement>(null);
+  const said = useRef<HTMLDivElement>(null);
   useEffect(() => { if (result) said.current?.focus(); }, [result]);
   const listed = devices.filter((d) => !gone.has(d.id));
   const canForget = proved || provedHere;
@@ -363,42 +364,34 @@ export function RememberedDevices({ devices, proved, canAsk, cantAsk, email, app
       <p>{words.devicesLede}</p>
       <p className="help">{COPY.devicesNoNames}</p>
       {provedHere && <Said message={COPY.proved} />}
-      {result && (result.ok
-        ? <p ref={said} role="status" tabIndex={-1} className="paid-up"><Tick />{result.message}</p>
-        : <div ref={said} tabIndex={-1}><Errors errors={result.errors} /></div>)}
+      <ActionOutcome ref={said} state={result} />
       {listed.length === 0 ? <p>{words.devicesNone}</p> : (
         <>
           {!knowsThisOne && <p>{COPY.devicesWhichUnknown}</p>}
-          <ul className="stack">
+          {/* A row each: when it was last used and first remembered, the session's own marked, and its forget press. */}
+          <List className="devices">
             {listed.map((d, i) => (
-              <li key={d.id} data-device={d.id}>
-                {d.thisOne && <p><strong>{COPY.thisDevice}</strong></p>}
-                <dl className="details">
-                  <dt>{COPY.firstRemembered}</dt><dd><LocalTime iso={d.createdAt} /></dd>
-                  <dt>{COPY.lastUsed}</dt><dd><LocalTime iso={d.lastUsedAt} /></dd>
-                </dl>
-                {canForget && (
-                  <div className="box-foot">
-                    <button type="button" className="btn btn-line" aria-disabled={busy !== null || undefined} onClick={() => void forget("one", d.id)}>
-                      {busy === d.id ? COPY.forgetBusy : d.thisOne ? COPY.forgetDevice : COPY.forgetOne}
-                      {!d.thisOne && (
-                        <span className="visually-hidden">
-                          {" "}{COPY.forgetWhichFirst} <LocalTime iso={d.createdAt} />, {COPY.forgetWhichLast} <LocalTime iso={d.lastUsedAt} />
-                          {listed.some((o) => o.id !== d.id && !o.thisOne && sameMinutes(o, d)) && <>, {COPY.forgetWhichRow} {i + 1}</>}
-                        </span>
-                      )}
-                    </button>
-                  </div>
-                )}
-              </li>
+              <ListRow key={d.id} data-device={d.id} title={<>{COPY.lastUsed} <LocalTime iso={d.lastUsedAt} /></>}
+                meta={[d.thisOne && <strong key="this">{COPY.thisDevice}</strong>, <span key="first">{COPY.firstRemembered} <LocalTime iso={d.createdAt} /></span>]}
+                action={canForget && (
+                  <Button size="sm" variant="secondary" busy={busy === d.id} aria-disabled={busy !== null || undefined} onClick={() => void forget("one", d.id)}>
+                    {busy === d.id ? COPY.forgetBusy : d.thisOne ? COPY.forgetDevice : COPY.forgetOne}
+                    {!d.thisOne && (
+                      <span className="visually-hidden">
+                        {" "}{COPY.forgetWhichFirst} <LocalTime iso={d.createdAt} />, {COPY.forgetWhichLast} <LocalTime iso={d.lastUsedAt} />
+                        {listed.some((o) => o.id !== d.id && !o.thisOne && sameMinutes(o, d)) && <>, {COPY.forgetWhichRow} {i + 1}</>}
+                      </span>
+                    )}
+                  </Button>
+                )} />
             ))}
-          </ul>
+          </List>
         </>
       )}
       {listed.some((d) => d.thisOne) && <p className="help">{words.forgetHere}</p>}
       {canForget && others.length > 0 && listed.length > 1 && (
-        <button type="button" className="btn btn-line" aria-disabled={busy !== null || undefined}
-          onClick={() => void forget("others")}>{busy === "others" ? COPY.forgetBusy : knowsThisOne ? COPY.forgetOthers : COPY.forgetAll}</button>
+        <Button variant="secondary" busy={busy === "others"} aria-disabled={busy !== null || undefined}
+          onClick={() => void forget("others")}>{busy === "others" ? COPY.forgetBusy : knowsThisOne ? COPY.forgetOthers : COPY.forgetAll}</Button>
       )}
       {!canForget && listed.length > 0 && (canAsk
         ? <AskAgain email={email} proved={false} lede={words.askAgainForDevices} passkey={passkey} portalOrigin={portalOrigin}><WhenDrawn then={() => setProvedHere(true)} /></AskAgain>

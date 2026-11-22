@@ -414,9 +414,16 @@ fieldset.checks { border: 0; padding: 0; min-width: 0; }
 .list-sub { flex: 1 0 100%; list-style: none; padding: 0 0 0 calc(16px + var(--s3)); margin: var(--s1) 0 0; }
 .list-subrow { display: grid; gap: 1px; padding: var(--s2) 0; border-top: 1px solid var(--border); }
 .list-subrow:last-child { padding-bottom: 0; }
+/* What belongs under a row at its full width (ListRow's detail): a note, or the small form in place of its action. */
+.list-detail { flex: 1 0 100%; min-width: 0; display: grid; gap: var(--s2); }
+.list-row:has(> .status-icon) > .list-detail { padding-left: calc(16px + var(--s3)); }
+.list-detail > .help, .list-detail > p { margin-top: 0; }
+.list-title strong, .list-meta strong { font-weight: 600; }
 .list-sub-title { font-size: var(--text-control); overflow-wrap: anywhere; }
 /* On a phone an amount and its action stack at the row's end, so the title keeps the width. */
 @media (max-width: 479.98px) { .list-trail { flex-direction: column; align-items: flex-end; gap: var(--s1); } }
+/* A list in a card's stack (the rows of a setting among its words and buttons) runs to the card's edges too. */
+.box > .stack > .list { margin-inline: calc(-1 * var(--box-pad)); border-width: 1px 0; border-radius: 0; }
 /* A list with something after it in its card keeps a hairline under its last row instead of running to the card's foot. */
 .box > .list:not(:last-child) { margin-bottom: 0; border-bottom-width: 1px; border-radius: 0; }
 /* The total under a list of amounts (ListTotal): on the muted surface, its figure in the rows' amount column. Over it,
