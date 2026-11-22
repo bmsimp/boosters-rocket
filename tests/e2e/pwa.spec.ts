@@ -43,7 +43,7 @@ test("the manifest answers as a manifest, built from the club's settings, with n
   const manifest = await res.json();
   expect(manifest).toMatchObject({
     name: CLUB.name, short_name: CLUB.name, id: "/", start_url: "/", scope: "/", display: "standalone",
-    theme_color: CLUB.color, background_color: CLUB.color,
+    theme_color: "#ffffff", background_color: "#f7f7f8", // the look's surface and ground, not the club's color
   });
   expect(manifest.icons.map((i: { sizes: string; purpose: string }) => `${i.sizes} ${i.purpose}`))
     .toEqual(["192x192 any", "512x512 any", "192x192 maskable", "512x512 maskable"]);

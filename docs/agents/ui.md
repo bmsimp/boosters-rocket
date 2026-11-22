@@ -60,6 +60,6 @@ Section 1 of `booster.css`; the fixed colors are mirrored in `src/lib/theme/pale
 
 ## Installed app
 
-- The manifest (`src/app/manifest.ts`) and the icons are built on each request from the club's settings and hold no hostname; the manifest's theme and background color are the club's (the splash). Icon names are `ICONS` in `src/lib/pwa/icons.ts`. `InstallHint` and `RefreshOnResume` (`src/app/components/pwa/`) are given no club or family data.
+- The manifest (`src/app/manifest.ts`) and the icons are built on each request from the club's settings and hold no hostname; the manifest's theme color is the light surface (white) and its background (the splash) the light ground, not the club's color, which is on the icon. Icon names are `ICONS` in `src/lib/pwa/icons.ts`. `InstallHint` and `RefreshOnResume` (`src/app/components/pwa/`) are given no club or family data.
 - The page's `theme-color` is the top bar's surface: white in light, `#16181c` in dark (`THEME_COLOR`, `src/lib/theme/palette.ts`), by `prefers-color-scheme`.
 - `public/offline.html` is drawn in the same look with its own inline styles and the system font, the same for every club.
