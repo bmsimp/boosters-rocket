@@ -8,9 +8,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 <!-- END:nextjs-agent-rules -->
 
-## Booster Rocket: rules for agents
+## Boosters Rocket: rules for agents
 
-Booster Rocket is an open-source, self-hosted parent portal for booster clubs: each family signs in and sees only its own students, what it owes and what it must sign, while staff manage the roster. QuickBooks Online holds the club's books; the portal reads them and keeps a cache, which decides whose invoices a family sees. Families, students, guardians and sign-ins are the portal's own records, and it writes back to QuickBooks only what someone asks it to (`docs/agents/quickbooks-writes.md`).
+Boosters Rocket is an open-source, self-hosted parent portal for booster clubs: each family signs in and sees only its own students, what it owes and what it must sign, while staff manage the roster. QuickBooks Online holds the club's books; the portal reads them and keeps a cache, which decides whose invoices a family sees. Families, students, guardians and sign-ins are the portal's own records, and it writes back to QuickBooks only what someone asks it to (`docs/agents/quickbooks-writes.md`).
 
 **Where the truth lives**
 - `PRODUCT.md`: users, principles, terms, voice. The visual system: `src/app/booster.css` (tokens and every class), the primitives in `src/app/components/ui/`, their index `docs/agents/ui.md`, and the gallery at `/staff/design-system` (static twin `design/system/gallery.html`). `DESIGN.md` still describes the earlier look until it is rewritten from the shipped one; where they disagree, the stylesheet and `docs/agents/ui.md` win.
@@ -123,6 +123,15 @@ Rules for all of them:
 - Show an instant with `LocalTime` and a calendar date with `CalendarDate` (`src/app/components/`), not with your own formatting. Show an amount with `formatMoney()`.
 - Staff pages, Settings and parent pages use the same primitives (`docs/agents/ui.md`): `DataTable`, `Notice` and `ActionOutcome`, the `.field` and `.checks` controls (`TextInput`, `Checkbox`) and `ChoiceGroup`. Font sizes never under 0.8125rem, body text 1rem. A parent page's busy button is `aria-disabled`, never `disabled` (a disabled button drops the focus). A link alone on its line, or on a line made only of links, takes `.link-line` (44px). Every club bar that has links starts with "Skip to the page" (`ClubBar`), drawn only while focused, landing on `PageStart` past the bar and the Switch family line (`ParentFrame`, the staff layout); a page's `<main>` needn't change. A form's page is titled with its form's name, found by `findMyForm()` within the session's family ("Form" otherwise). An account link's accessible name starts with the initials it shows. `env(safe-area-inset-*)` for the top and sides appears only in that last block.
 - Copy follows the voice in `PRODUCT.md`: a warm, plain neighbor, kind about money. US English.
+
+#### Brand & UI
+- Follow `brand/BRAND.md` (the owner's brand kit, in `brand/`) for UI, copy and asset decisions, through this repo's own tokens: they live in `src/app/booster.css` (mirrored in `src/lib/theme/palette.ts`), never in `brand/tokens.css`, whose px sizes and Google Fonts import are for brand surfaces outside the app. Sizes stay in rem, from our scale.
+- The club leads. Inside the portal the club's name, logo and color drive buttons, links and active states (`--club-*`, derived at runtime); a club that hasn't chosen a color gets the brand's Launch Indigo (`DEFAULT_COLOR`). Never write the product's indigo or flame red into portal UI: they appear only in the "Powered by" badge's full-color form and the setup pages' product icon (`--br-*`).
+- The status colors are fixed (done/paid, due, late/overdue, info: the brand's), each always color + icon + word, plus the neutral gray. A club can't change them, nor the neutrals or the focus ring.
+- Every portal page's footer carries the one-color "Powered by Boosters Rocket" badge (`PoweredBy`, `src/app/components/powered-by.tsx`: the mark inline plus live text, in `--badge-ink`, linking to https://boostersrocket.com); the pages before sign-in carry its full-color form under the form, and every mail ends with the words "Powered by Boosters Rocket" (no image, no link). No club setting removes it.
+- Money copy is calm and never shaming; amounts use tabular figures.
+- Fonts: Inter only in the app, self-hosted. Bricolage Grotesque is for brand surfaces outside the app (the README's images) and is never loaded by it.
+- The product is "Boosters Rocket" wherever people read it; infrastructure identifiers keep `booster-rocket` (Docker names, paths, env names, the database, file names), and so do names stored in a club's Microsoft tenant or QuickBooks ("Booster Rocket (staff)", "Booster Rocket mail sender", the buy-out note "Booster Rocket buy-out", the staff certificate's subject), which existing installations look up. `TRADEMARKS.md` says who may use the name and logos.
 
 ### Git
 - Commit messages: `type(scope): what is now true`, a short body saying why, and the trailer `Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>`. See `git log`.

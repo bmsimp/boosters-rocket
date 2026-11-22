@@ -1,15 +1,15 @@
 ---
-name: Booster Rocket
+name: Boosters Rocket
 description: A white-label parent portal for booster clubs, drawn as the calm category standard so a family reads what is left to do, pay and sign in seconds.
 colors:
-  club: "#5b2a86"
+  club: "#1e1b4b"
   club-on: "#ffffff"
-  club-text-l: "#5b2a86"
-  club-text-d: "#c9a7ea"
-  club-text-lhc: "#45206a"
-  club-text-dhc: "#e5d3f7"
-  club-tint-l: "#f1ebf6"
-  club-tint-d: "#2a2133"
+  club-text-l: "#1e1b4b"
+  club-text-d: "#837ed1"
+  club-text-lhc: "#1e1b4b"
+  club-text-dhc: "#a09cdb"
+  club-tint-l: "#ededf1"
+  club-tint-d: "#171823"
   ground: "#f7f7f8"
   surface: "#ffffff"
   surface-raised: "#ffffff"
@@ -20,13 +20,16 @@ colors:
   ink: "#18191d"
   ink-2: "#5c606a"
   ink-3: "#8a8e98"
-  done: "#1d7344"
-  due: "#955400"
-  late: "#b3261e"
-  done-soft: "#e7f4ec"
-  due-soft: "#fcf1df"
-  late-soft: "#fceceb"
+  done: "#1f6b3d"
+  due: "#9a4a0b"
+  late: "#a1231a"
+  info: "#3b4cb8"
+  done-soft: "#e3f2e8"
+  due-soft: "#fdeedc"
+  late-soft: "#fbe4e2"
+  info-soft: "#e6e8fa"
   neutral-soft: "#f0f1f3"
+  badge-ink: "#6b6b6b"
   ground-dark: "#0f1012"
   surface-dark: "#16181c"
   surface-raised-dark: "#1e2025"
@@ -37,13 +40,16 @@ colors:
   ink-dark: "#ececee"
   ink-2-dark: "#a2a6ae"
   ink-3-dark: "#6f737d"
-  done-dark: "#5fc68b"
-  due-dark: "#e9a647"
-  late-dark: "#ff8b7d"
-  done-soft-dark: "#15291e"
-  due-soft-dark: "#2e2312"
-  late-soft-dark: "#33191a"
+  done-dark: "#6cc38a"
+  due-dark: "#f2b36b"
+  late-dark: "#ff8a80"
+  info-dark: "#a5adff"
+  done-soft-dark: "#12301f"
+  due-soft-dark: "#3a2510"
+  late-soft-dark: "#3d1512"
+  info-soft-dark: "#1e2250"
   neutral-soft-dark: "#22252a"
+  badge-ink-dark: "#9a9aa2"
 typography:
   page-title:
     fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif"
@@ -104,8 +110,8 @@ typography:
     lineHeight: 1.3
 rounded:
   badge: "4px"
-  control: "6px"
-  surface: "8px"
+  control: "8px"
+  surface: "12px"
   round: "999px"
 spacing:
   s1: "4px"
@@ -125,7 +131,7 @@ components:
   logo-tile:
     backgroundColor: "{colors.club}"
     textColor: "{colors.club-on}"
-    rounded: "{rounded.surface}"
+    rounded: "{rounded.control}"
     size: "32px"
   button-primary:
     backgroundColor: "{colors.club}"
@@ -205,6 +211,9 @@ components:
   badge-late:
     backgroundColor: "{colors.late-soft}"
     textColor: "{colors.late}"
+  badge-info:
+    backgroundColor: "{colors.info-soft}"
+    textColor: "{colors.info}"
   notice:
     backgroundColor: "{colors.neutral-soft}"
     textColor: "{colors.ink}"
@@ -216,6 +225,12 @@ components:
     backgroundColor: "{colors.done-soft}"
   notice-late:
     backgroundColor: "{colors.late-soft}"
+  notice-info:
+    backgroundColor: "{colors.info-soft}"
+  powered-by:
+    textColor: "{colors.badge-ink}"
+    typography: "{typography.caption}"
+    height: "44px"
   field:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.ink}"
@@ -261,7 +276,7 @@ components:
     size: "2.25rem"
 ---
 
-# Design System: Booster Rocket
+# Design System: Boosters Rocket
 
 The stylesheet (`src/app/booster.css`) is what the browser reads and is the source of every value here; `src/lib/theme/palette.ts` mirrors its fixed colors and `tests/unit/design-tokens.test.ts` holds the two together and measures every pair. The components are the primitives in `src/app/components/ui/` (import from `@/app/components/ui`), indexed in `docs/agents/ui.md` and drawn in every state in the living gallery (`/staff/design-system`, and its static twin `design/system/gallery.html`). Parent Home (`src/app/(parent)/page.tsx`) is the reference surface.
 
@@ -269,23 +284,23 @@ The stylesheet (`src/app/booster.css`) is what the browser reads and is the sour
 
 **Creative North Star: "The Calm Standard"**
 
-Booster Rocket reads like a quiet, well-organized product of its category: structure comes from spacing, grouping and a strict type scale, not from heavy rules, boxes inside boxes or drop shadows. A near-white ground carries white surfaces with a 1px hairline and an 8px corner; Inter is the one face; near-black ink and one gray carry every word. The club's own color is an accent and nothing more: the primary button, the current place in the menu, the focus ring and the small logo tile in a white top bar.
+Boosters Rocket reads like a quiet, well-organized product of its category: structure comes from spacing, grouping and a strict type scale, not from heavy rules, boxes inside boxes or drop shadows. A near-white ground carries white surfaces with a 1px hairline and a 12px corner; Inter is the one face; near-black ink and one gray carry every word. The club's own color is an accent and nothing more: the primary button, the current place in the menu, the focus ring and the small logo tile in a white top bar.
 
-The system is white-label. Each club supplies one color at runtime and the app derives every club role from it, checked against every ground of every display mode. The club leads; Booster Rocket is credited in the footer ("Runs on Booster Rocket"), never featured. The same layout is drawn in four display modes (light, dark, and high contrast for each), at three text sizes, with reduced motion and under Windows contrast themes; only token values change between them.
+The system is white-label. Each club supplies one color at runtime and the app derives every club role from it, checked against every ground of every display mode. The club leads; Boosters Rocket is credited by a one-color "Powered by Boosters Rocket" badge in the footer of every page (in full color under the sign-in form), never featured (`brand/BRAND.md`, co-branding). The same layout is drawn in four display modes (light, dark, and high contrast for each), at three text sizes, with reduced motion and under Windows contrast themes; only token values change between them.
 
-Parents are every age, often on older phones, so the category's density is translated humanely: body text is 1rem, nothing is set under 0.8125rem, every control is at least 44px tall, and WCAG 2.2 AA holds throughout. Staff at laptops get the same world denser, in DataTables, never smaller than that floor. Status is always words plus a small drawn icon, in four tones only.
+Parents are every age, often on older phones, so the category's density is translated humanely: body text is 1rem, nothing is set under 0.8125rem, every control is at least 44px tall, and WCAG 2.2 AA holds throughout. Staff at laptops get the same world denser, in DataTables, never smaller than that floor. Status is always words plus a small drawn icon, in the brand's four fixed status colors (done, due, late, info) or the neutral gray.
 
 **Key Characteristics:**
-- Near-white ground, white surfaces, 1px hairlines, corners of 8px (surfaces), 6px (controls) and 4px (badges).
+- Near-white ground, white surfaces, 1px hairlines, corners of 12px (surfaces), 8px (controls) and 4px (badges).
 - One face, Inter, self-hosted; tabular figures only where a figure is read as a figure.
 - The club's color derived at runtime into fill, ink-on-fill, text and tint roles, used as an accent only.
 - Lists over tables for what a person acts on: a section label over one bordered list of rows, each a status ring, a title, a meta line, then an amount or a compact action.
-- Four status tones (done, due, late, neutral), always words plus an icon.
+- Four fixed status colors (done green, due amber, late red, info blue) and a neutral gray, always words plus an icon.
 - No shadow anywhere except under menus and popovers.
 
 ## Colors
 
-A neutral near-white and near-black palette with one runtime club accent and three field-status colors, defined for four display modes.
+A neutral near-white and near-black palette with one runtime club accent and the brand's four fixed status colors, defined for four display modes.
 
 ### Display modes
 Modes are attributes on `<html>`, set before paint by `src/app/display-script.ts` from the person's choices on the Display page, stored on the device (`localStorage`, key `br-display`). Every mode's default is "Match my device", which removes the attribute so the media query decides.
@@ -295,20 +310,22 @@ Modes are attributes on `<html>`, set before paint by `src/app/display-script.ts
 - **Motion** `data-motion` `reduce` removes every transition and animation (a busy spinner holds still); default follows `prefers-reduced-motion`.
 - Any element may carry `data-theme` / `data-contrast` with `.theme-sample` to show a mode in place (the gallery does).
 
-The light and dark values are in the frontmatter (dark keys end `-dark`). The high-contrast values live in the stylesheet's `@tokens light-hc` / `dark-hc` blocks and `PALETTE.lightHc` / `PALETTE.darkHc` in `palette.ts`: light HC is a white ground with `#000000` ink, `#2b2e34` secondary ink, `#18191d` lines and status `#0f5530` / `#6b3a00` / `#8a1a14`; dark HC is a black ground with `#ffffff` ink, `#e2e4e8` secondary ink, `#ececee` lines and status `#8eeab1` / `#ffc978` / `#ffb0a6`.
+The light and dark values are in the frontmatter (dark keys end `-dark`). The high-contrast values live in the stylesheet's `@tokens light-hc` / `dark-hc` blocks and `PALETTE.lightHc` / `PALETTE.darkHc` in `palette.ts`: light HC is a white ground with `#000000` ink, `#2b2e34` secondary ink, `#18191d` lines and status `#0f5530` / `#6b3a00` / `#8a1a14` / `#2c3888` (done, due, late, info); dark HC is a black ground with `#ffffff` ink, `#e2e4e8` secondary ink, `#ececee` lines and status `#8eeab1` / `#ffc978` / `#ffb0a6` / `#bfc5ff`. In high contrast the badge ink takes the secondary ink and the sign-in badge's name is in plain ink.
 
 ### Primary (runtime, per club)
-The frontmatter values are the default club's purple (`DEFAULT_COLOR`). **The app derives these; a club is never asked for them** (`deriveClubTokens()`, `src/lib/theme/contrast.ts`, written onto `<html>` as custom properties by `src/app/layout.tsx`; an invalid stored color falls back to the default with a server warning):
+The frontmatter values are the default club color, the brand's Launch Indigo `#1e1b4b` (`DEFAULT_COLOR`), drawn for a club that hasn't chosen one; indigo is never written into portal UI otherwise. **The app derives these; a club is never asked for them** (`deriveClubTokens()`, `src/lib/theme/contrast.ts`, written onto `<html>` as custom properties by `src/app/layout.tsx`; an invalid stored color falls back to the default with a server warning):
 - **Club Fill** (`club`): the color the club picked, the same in every mode. Fills the primary button, the logo tile, the current step's track in the step indicator, and the club preview on the Club settings page.
 - **On Club** (`club-on`): ink on the club fill, the same in every mode: white or `#14161a`, whichever has the higher contrast against the fill.
 - **Club Text** (`club-text`, resolved per mode from `club-text-l` / `-d` / `-lhc` / `-dhc`): the club color as text, link, quiet button, checked control, current nav item and focus ring. Darkened (light) or lightened (dark), same hue and saturation, until it reaches 4.5:1 against the hardest ground of its mode (`surface-muted`, `CLUB_TEXT_GROUND`), or 7:1 in high contrast; the light and dark tones are then checked again on the club tint.
 - **Club Wash** (`club-tint-l` / `-d`): the club color mixed 8% into the light surface, 14% into the dark one. The current nav item, the current tab's icon pill, a checked choice tile, the club button and quiet-button hover, text selection, the account control while Display is open.
 
 ### Tertiary (status, per mode)
-- **Field Green** (`done`): done, paid, signed, finished steps.
-- **Due Amber** (`due`): still to do, due soon, a student with more to do, the note for figures that are not current, needs attention.
-- **Past-Due Red** (`late`): past due, a problem (something that didn't go through), a field's error, the danger button's words.
-- Each has a soft tint (`done-soft`, `due-soft`, `late-soft`) for badges and notices; `neutral-soft` is the fourth tint, for neutral badges and information notices. The tone's ink and plain `ink` both pass on its tint.
+The brand's fixed status set (`brand/BRAND.md`, `brand/tokens.css`): a club can't change them. The light values are the kit's, measured on the app's grounds; the kit's dark values were a proposal, measured here and kept; the high-contrast values are the app's own, derived to 7:1.
+- **Paid Green** (`done`, the kit's paid): done, paid, signed, finished steps. Its icon is a tick.
+- **Due Amber** (`due`): still to do, due soon, a student with more to do, the note for figures that are not current, needs attention. Its icon is a clock.
+- **Overdue Red** (`late`, the kit's overdue): past due, a problem (something that didn't go through), a field's error, the danger button's words. Its icon is an alert.
+- **Info Blue** (`info`): a note, something to know (a Notice's information tone, "Waiting for QuickBooks"). Its icon is an i.
+- Each has a soft tint (`done-soft`, `due-soft`, `late-soft`, `info-soft`) for badges and notices; `neutral-soft` is the gray tint, for neutral badges ("Not started", a role). The tone's ink and plain `ink` both pass on its tint.
 
 ### Neutral
 - **Near-White Ground** (`ground`): the page behind everything.
@@ -316,6 +333,7 @@ The frontmatter values are the default club's purple (`DEFAULT_COLOR`). **The ap
 - **Muted Surface** (`surface-muted`): hover fills, a total row, a table's group rows, the disabled fill, code samples.
 - **Hairline** (`border`): every 1px divider and surface edge. **Control Edge** (`border-control`): secondary buttons, option tiles, the Menu button. **Strong Edge** (`border-strong`): a text field's or tick box's edge, at 3:1 so the control can be seen.
 - **Ink** (`ink`): text and headings. **Secondary Ink** (`ink-2`): meta lines, hints, labels, table headers, inactive nav and tabs; 4.5:1 on every ground. **Mark Gray** (`ink-3`): drawn marks only (a neutral status ring, an empty state's icon), at 3:1; never text.
+- **Badge Ink** (`badge-ink`, the kit's `#6b6b6b` light and `#9a9aa2` dark): the footer's "Powered by Boosters Rocket" badge, 4.5:1 on the ground and the surface. The product's own colors (`--br-ink`, `--br-flame-ink`, `--br-disc`, `--br-flame`, `--br-ember`, `--br-smoke`) draw the sign-in page's full-color badge and the setup pages' product icon, and nothing else.
 - `--overlay` (black 8% in light, white 10% in dark) is the hover wash laid over a filled button. `--focus` is the focus ring's color: the element's own `club-text` (`:root, [data-theme], [data-contrast]` set it from `--club-text`, so a sample wrapper in another mode draws its own). Every focus ring is `var(--ring) solid var(--focus)`.
 
 ### Named Rules
@@ -323,7 +341,7 @@ The frontmatter values are the default club's purple (`DEFAULT_COLOR`). **The ap
 
 **The Derived Club Rule.** A club picks one color; the app computes `club-on`, the four `club-text-*` tones and both `club-tint-*` washes. No club color can produce text under 4.5:1 (7:1 in high contrast) on any ground of its mode; `club` and `club-on` never change between modes.
 
-**The Four Tones Rule.** A status has one of four tones: done, due, late, neutral (`Tone`, `src/app/components/ui/tone.ts`). Information is ink on the neutral tint, never a blue. No fifth status color.
+**The Fixed Status Rule.** A status has one of five tones: done, due, late, info and neutral (`Tone`, `src/app/components/ui/tone.ts`): the brand's four fixed colors and the gray. Information is `info` blue on its tint. No other status color, and the club's color is never a status. Booster Flame (the product's red-coral) is never an error and the late red never decoration.
 
 **The Measured Pair Rule.** A fixed color added to the stylesheet is added to `palette.ts` in the same commit and its text pairs meet 4.5:1 (7:1 high contrast), its marks 3:1, or the token test fails.
 
@@ -347,7 +365,7 @@ The scale is six steps (`--text-xs` 0.8125rem to `--text-2xl` 2rem) plus `--text
 - **Caption** (500, 0.8125rem): table column headers, tab labels, badges, avatar initials, the step indicator's numbers. The floor: nothing smaller.
 
 ### Named Rules
-**The One Face Rule.** Inter for every word and figure. The only other faces are the system fallback on the offline page and in the static gallery (Inter comes through `next/font`), and the icon renderer's bundled Geist on the app icon.
+**The One Face Rule.** Inter for every word and figure. The brand's display face (Bricolage Grotesque) is for brand surfaces outside the app (the README's images, the website) and is never loaded in the app; the badge sets the product's name in Inter. The only other faces are the system fallback on the offline page and in the static gallery (Inter comes through `next/font`), and the icon renderer's bundled Geist on the app icon.
 
 **The Rem Floor Rule.** Every font size is in rem, from the scale, never under 0.8125rem; body text is 1rem.
 
@@ -376,39 +394,39 @@ Flat. Depth comes from tone (a white surface on a near-white ground, a muted fil
 
 ## Shapes
 
-Gently rounded and consistent: 8px for surfaces (cards, lists, notices, menus, choice tiles, the logo tile, the offline page's card), 6px for controls (buttons, fields, the current nav item, the skip link, the Menu button), 4px for badges and tick boxes, and a full round only for people and status marks: avatars and the account control, status rings, the step indicator's student markers, radio marks, and the current tab's tinted icon pill. Edges are 1px hairlines; a field's and tick box's edges use the stronger edge color. The step indicator's track segments are 4px tall with a 2px corner.
+Gently rounded and consistent (the brand's "app cards 12px, controls 8px"): 12px for surfaces (cards, lists, notices, menus, choice tiles), 8px for controls (buttons, fields, the current nav item, the skip link, the Menu button) and the logo tile, 8px for the offline page's card (a static page of its own), 4px for badges and tick boxes, and a full round only for people and status marks: avatars and the account control, status rings, the step indicator's student markers, radio marks, and the current tab's tinted icon pill. Edges are 1px hairlines; a field's and tick box's edges use the stronger edge color. The step indicator's track segments are 4px tall with a 2px corner.
 
-**The Three Corners Rule.** A new element takes 8px if it is a surface, 6px if it is a control, 4px if it is a label. Nothing else is a pill.
+**The Three Corners Rule.** A new element takes 12px if it is a surface, 8px if it is a control, 4px if it is a label. Nothing else is a pill.
 
 ## Components
 
 Every component below is a primitive; import it from `@/app/components/ui` unless another path is named. `docs/agents/ui.md` holds the same index with what not to do; the gallery draws each one in every state.
 
 ### Club bar (`ClubBar`, `src/app/components/club-bar.tsx`; `ParentFrame`, `ParentTabs`)
-A white 56px bar with a hairline foot: the club's logo tile (the short name in `club-on` on the `club` fill, 32px tall, 8px corner, decorative), the club's name (1rem 600, ellipsized), the menu, and the account avatar.
+A white 56px bar with a hairline foot: the club's logo tile (the short name in `club-on` on the `club` fill, 32px tall, 8px corner (a control's), decorative), the club's name (1rem 600, ellipsized), the menu, and the account avatar.
 - **Account:** a link to the parent's Display page (staff: their account page, `/staff/account`: their name with Change my name, the same Display choices saved on the device, and Sign out; its name "AR: Your account and display settings, signed in as Ana Ramirez"), a 44px target with a 36px `surface-muted` disc of initials; its accessible name starts with the initials it shows. On its own page it takes the club tint and club text.
 - **Skip to the page:** the first Tab stop of every bar with links, drawn only while focused as a secondary button at the top of the bar in the page's flow; it lands on `PageStart`, past the bar and the "Viewing <family>. Switch family" line.
 
 ### Navigation (`src/app/components/top-nav.tsx`, `parent-tabs.tsx`; `staffMenu()`, `src/app/staff/(app)/staff-menu.ts`)
 - **Phone, parent:** a fixed white tab bar with a hairline top, one equal column per `PARENT_NAV` tab (Home, Forms, Payments, Volunteer, Family): a line icon over a 0.8125rem label in `ink-2`. The current tab's label is `club-text` at 600 and its icon sits on a `club-tint` pill: never the color alone.
-- **760px and up:** links in the bar, 0.9375rem 500 `ink-2`, 44px, 6px corner; hover `surface-muted`; the current one `club-text` on `club-tint` at 600.
-- **Staff menu (grouped):** Home, the groups (Families, Season, Money), Settings as one entry, then Admin; an entry shows only to someone who may open its page, a group only when it holds one. A group is a button drawn like a link with a 12px caret that turns over when open. It opens on click or keyboard only, never hover, as a disclosure; its links drop into a `surface-raised` panel with a hairline, an 8px corner and the menu shadow, right-aligned to the button. One group open at a time; it closes on Escape (focus back to the button), on tabbing out, on choosing a link and on a press outside. The group holding the current page is marked like a current link. Below 760px the Menu button opens one full-width panel: Home, each group's links under its name (0.8125rem `ink-2`, a hairline above), Settings, links 48px tall; it scrolls within the screen.
+- **760px and up:** links in the bar, 0.9375rem 500 `ink-2`, 44px, 8px corner; hover `surface-muted`; the current one `club-text` on `club-tint` at 600.
+- **Staff menu (grouped):** Home, the groups (Families, Season, Money), Settings as one entry, then Admin; an entry shows only to someone who may open its page, a group only when it holds one. A group is a button drawn like a link with a 12px caret that turns over when open. It opens on click or keyboard only, never hover, as a disclosure; its links drop into a `surface-raised` panel with a hairline, a 12px corner and the menu shadow, right-aligned to the button. One group open at a time; it closes on Escape (focus back to the button), on tabbing out, on choosing a link and on a press outside. The group holding the current page is marked like a current link. Below 760px the Menu button opens one full-width panel: Home, each group's links under its name (0.8125rem `ink-2`, a hairline above), Settings, links 48px tall; it scrolls within the screen.
 
 ### Page header (`PageHeader`)
 The way back when there is one (a 44px `ink-2` link with a chevron), the page title, one quiet `ink-2` line (`lede`, Home's at 0.875rem: the season and step, and "Payments as of <time>"), and the page's actions to the right, wrapping under on a phone. Settings pages start with `<BackToSettings />` instead.
 
 ### Cards (`Card`)
-A white surface, 1px hairline, 8px corner, 16px padding (20px from 760px), no shadow. A title (`title` + `titleId` name the region), an optional quiet line (`description`, `ink-2` 0.9375rem), `headActions` beside the title, `actions` at the foot. Never a card inside a card.
+A white surface, 1px hairline, 12px corner, 16px padding (20px from 760px), no shadow. A title (`title` + `titleId` name the region), an optional quiet line (`description`, `ink-2` 0.9375rem), `headActions` beside the title, `actions` at the foot. Never a card inside a card.
 
 ### Lists (`List`, `ListRow`, `ListSubRow`, `ListTotal`, `SectionLabel`, `StatusIcon`)
 The core of the look. A `SectionLabel` (a real heading, 0.875rem 500 `ink-2`, sentence case) over one bordered list; a hairline between rows; each row at least 56px with 10px 16px padding: a 16px status ring, a title (500) over a meta line (0.875rem `ink-2`, its parts joined by a dot), then a right-aligned tabular amount and a compact action (`size="sm"`). A status with words puts them first on the meta line in the tone's color; a status without words draws only its ring, for a row whose meta line already says the state. A row's parts are `ListSubRow`s, indented under its title with a hairline above each, never a card inside a row. Inside a `Card`, a list runs to the card's edges and its rows take the card's own side padding (16px, 20px from 760px), so a row's words line up with the card's title; with something after it in the card it keeps a hairline under its last row.
 - **Detail** (`ListRow`'s `detail`): what belongs under a row at its full width, indented to the title: a note about it (what removing the last passkey means), a place's state and its cancel, or the small form that takes the place of the row's action (a passkey's new name). Any other attribute (a `data-*` hook) goes on the row's `li`.
 - **A way somewhere:** a row whose title is a lone link (a family's other staff pages) draws it in `club-text`, 44px tall (`.link-line`).
 - **Total** (`ListTotal`): under a list of amounts (Payments' open invoices), "Total" and the sum on `surface-muted` at 600, its figure in the rows' amount column. Over a total, from 480px each row's amount comes after its action, so the figures make one right-aligned column; on a phone the amount stands over the action, as in every list.
-- **Status ring** (`StatusIcon`, decorative): shape tells the tone as well as color does: done a filled disc with a tick, due a ring with a quarter filled, late a filled disc with a bar, neutral a dashed ring in `ink-3`.
+- **Status ring** (`StatusIcon`, decorative): shape tells the tone as well as color does: done a filled disc with a tick, due a clock, late a filled disc with an alert bar, info a filled disc with an i, neutral a dashed ring in `ink-3`.
 
 ### Buttons (`Button`, `LinkButton`, `buttonClass()`)
-`Button` does something; `LinkButton` goes somewhere (`plain` for a full load or an outside address). 44px tall, 6px corner, 0.9375rem 500, color transitions at 120ms ease-out.
+`Button` does something; `LinkButton` goes somewhere (`plain` for a full load or an outside address). 44px tall, 8px corner, 0.9375rem 500, color transitions at 120ms ease-out.
 - **Primary:** the club fill with `club-on` ink; hover lays the overlay wash over it. One per area.
 - **Secondary:** white with the control edge and ink; hover `surface-muted`.
 - **Quiet:** words in `club-text`, no edge; hover `club-tint`. Alone at the start of a line (the staff home's "Change my name") it hangs its padding into the margin, so its words line up with the text above it.
@@ -419,23 +437,23 @@ The core of the look. A `SectionLabel` (a real heading, 0.875rem 500 `ink-2`, se
 - **Busy and disabled** share one look: `surface-muted` fill, hairline edge, `ink-2` words, not-allowed cursor, no hover. `busy` adds a spinner and is `aria-disabled`, never `disabled` (a disabled button drops the focus); the caller ignores presses. In high contrast it is white with a dashed ink edge; under forced colors dashed with `GrayText`.
 
 ### Badges (`Badge`, `StatusBadge`)
-A short label on a tint: 0.8125rem 500, 1px 8px padding, 4px corner. `Badge` takes a tone or `club` (a role, a count; `club` is a label style, not a status tone); `StatusBadge` is a tone's icon and words (the tone's own word when none is given). In high contrast a 1px inner edge in the tone; under forced colors a `CanvasText` border.
+A short label on a tint: 0.8125rem 500, 1px 8px padding, 4px corner. `Badge` takes a tone (done, due, late, info, neutral) or `club` (a role, a count; `club` is a label style, not a status tone); `StatusBadge` is a tone's icon and words (the tone's own word when none is given). In high contrast a 1px inner edge in the tone; under forced colors a `CanvasText` border.
 
 ### State words (`StateWords`, `src/app/components/state-words.tsx`)
-A state inside a row or cell: a 16px icon and 0.875rem 500 words. Done is a tick in `done`; to do is the status icon's due mark in `due` (the product's one to-do mark); waived is a struck circle in `ink-2`, for a requirement the club let a family or student off (the reason is never shown to the family).
+A state inside a row or cell: a 16px icon and 0.875rem 500 words. Done is a tick in `done`; to do is the status icon's due clock in `due` (the product's one to-do mark); waived is a struck circle in `ink-2`, for a requirement the club let a family or student off (the reason is never shown to the family).
 
 ### Notices (`Notice`, `ActionOutcome`, `src/app/components/notice.tsx`)
-A status that stands apart from the text around it, or what an action answered. On its tone's soft tint with a hairline edge and an 8px corner, 12px 16px padding: a 20px icon and the tone's word in the tone's ink, the body in `ink` at 0.9375rem.
-- One status vocabulary: a notice's tones are the four status tones, its props keeping their own names. `info` is neutral "Note" (circled i, `ink` on `neutral-soft`); `warning` is due "Needs attention" (triangle, `due`); `done` is done "Done" (tick, `done`); `problem` is late "Problem" (circled cross, `late`). The classes are `notice-neutral`, `notice-due`, `notice-done`, `notice-late`.
+A status that stands apart from the text around it, or what an action answered. On its tone's soft tint with a hairline edge and a 12px corner, 12px 16px padding: a 20px icon and the tone's word in the tone's ink, the body in `ink` at 0.9375rem.
+- One status vocabulary: a notice's tones are the four status colors, its props keeping their own names. `info` is info "Note" (circled i, `info` on `info-soft`); `warning` is due "Needs attention" (triangle, `due`); `done` is done "Done" (tick, `done`); `problem` is late "Problem" (circled cross, `late`). The classes are `notice-info`, `notice-due`, `notice-done`, `notice-late`.
 - **With a title** a notice is a section of its own (the staff home's warnings): a 1rem 600 heading, the word read out before it but not drawn, its link or button under the text.
 - **Announced:** a problem is an alert, every other tone a status; one that is simply part of the page as it loads is announced as neither (`live="none"`).
 - **Taking the focus:** an answer drawn in place of the form that was pressed (a parent's change saved, a sign-in setting changed) takes the focus, so the keyboard keeps its place: `Notice` takes a `ref` and `tabIndex={-1}`, `ActionOutcome` a `ref`.
 - `ActionOutcome` turns a server action's `{ ok, message }` or `{ ok: false, errors }` into a done or problem notice (information for `waiting`, needs attention for `attention`).
 
 ### Fields (`TextInput`, `TextArea`, `Select`, `Checkbox`, `Field`; `ChoiceGroup`, `src/app/components/choice-group.tsx`)
-- **Text fields, text areas, selects:** a 0.875rem 500 label above, a 44px white control with a 1px strong edge and a 6px corner, 8px 12px padding; hover darkens the edge to `ink-2`; focus wears the ring and a `club-text` edge. A hint (`ink-2` 0.875rem) and an error (`late`, 500, with an icon) are tied by `aria-describedby`; an invalid control's edge is `late`. Fields fill their column and never run past it; a text area grows downward only; a select draws its own `ink-2` chevron (the platform's under forced colors). Disabled: `surface-muted`, hairline edge, `ink-2`.
+- **Text fields, text areas, selects:** a 0.875rem 500 label above, a 44px white control with a 1px strong edge and an 8px corner, 8px 12px padding; hover darkens the edge to `ink-2`; focus wears the ring and a `club-text` edge. A hint (`ink-2` 0.875rem) and an error (`late`, 500, with an icon) are tied by `aria-describedby`; an invalid control's edge is `late`. Fields fill their column and never run past it; a text area grows downward only; a select draws its own `ink-2` chevron (the platform's under forced colors). Disabled: `surface-muted`, hairline edge, `ink-2`.
 - **Check boxes and radio marks** (`.checks`): an 18px mark drawn inside a 44 by 44 control, 1.5px strong edge, 4px corner (a circle for radio); checked fills with `club-text` and a white tick (radio: a `club-text` dot); the focus ring hugs the mark.
-- **Choice group:** an option can be `disabled` (a place already taken): its tile on `surface-muted`, words in `ink-2`, a not-allowed cursor. Radio buttons drawn as tiles: the whole 56px tile is the control, a control edge and an 8px corner, an 18px radio mark, the option's name (1rem 500) and an optional `ink-2` description. Hover `surface-muted`; checked a `club-text` edge doubled by a 1px inset, `club-tint` fill and a filled mark. The legend is 1rem 600 with an optional hint. Stacked on a phone, `--cols` columns from 760px.
+- **Choice group:** an option can be `disabled` (a place already taken): its tile on `surface-muted`, words in `ink-2`, a not-allowed cursor. Radio buttons drawn as tiles: the whole 56px tile is the control, a control edge and a 12px corner, an 18px radio mark, the option's name (1rem 500) and an optional `ink-2` description. Hover `surface-muted`; checked a `club-text` edge doubled by a 1px inset, `club-tint` fill and a filled mark. The legend is 1rem 600 with an optional hint. Stacked on a phone, `--cols` columns from 760px.
 - **Password fields:** a text field with its rule said in words above it, in "characters"; choosing one asks for it twice ("Type it again"), each `autocomplete="new-password"`, with no username.
 
 ### Tables (`DataTable`, `src/app/components/data-table.tsx`)
@@ -458,6 +476,13 @@ The club's season steps as a thin segmented track, each step's number and name u
 - **Labels that don't fit:** each step is a size container; under 76px wide its label hides and the number stays; labels clamp to two lines. With more than six steps on a phone every label hides.
 - **Students on the current step:** one 22px marker each with the student's initial: done is a `done` disc with a white initial; still to do a white disc with a `due` ring and initial. Decoration: the Students list says the same in words.
 
+### Powered by (`PoweredBy`, `src/app/components/powered-by.tsx`)
+The product's credit, the one place it is shown once a club is set up (`brand/BRAND.md`, co-branding: the club's name, logo and color lead). "Powered by", the small mark (the rocket and a three-puff trail, `brand/logos/powered-by-mono.svg`'s, inline and static), then "Boosters Rocket" at 600, as live text in Inter: the kit's files set the name in the display face, which the app doesn't load. A 44px link to https://boostersrocket.com, its name "Powered by Boosters Rocket, at boostersrocket.com". No setting removes or changes it.
+- **One ink** (`variant="mono"`, the default), in `badge-ink` at 0.8125rem 500: the footer of every parent page (under the treasurer's line), every staff page, the family chooser, the refusal page, one more step and the signed-out not-found page.
+- **Full color** (`variant="color"`), under the sign-in form on every page before sign-in (parent and staff sign-in, the password request and link pages): the mark on its disc (Launch Indigo, Night Sky in dark, kept under forced colors), "Boosters" in `br-ink` and "Rocket" in `br-flame-ink`; in high contrast both in ink.
+- **Mail:** every mail the portal sends ends with "Powered by Boosters Rocket": in the text part after a `-- ` line, in the HTML a small `#6b6b6b` line with the name in Launch Indigo. Words only, no image and no link.
+- **Setup:** before there is a club the product itself is shown: the setup pages' title has the product's icon (`brand/logos/app-icon-small.svg`, inline, `ProductMark`). The offline page keeps no product mark: it is the same for every club and names nothing.
+
 ### Smaller primitives
 - **EmptyState:** a centered 28px `ink-3` icon, a 1rem 600 title, a kind `ink-2` line of what will be here, and the one action.
 - **Stat** (several in `.stats`): a 0.875rem `ink-2` label over a 1.5rem 600 tabular figure. Staff pages only.
@@ -470,7 +495,7 @@ The club's season steps as a thin segmented track, each step's number and name u
 - **Visually hidden** (`.visually-hidden`): words a screen reader reads that the page doesn't draw (which invoice a Pay pays).
 
 ### Settings view (`SETTINGS_SECTIONS`, `src/app/staff/(app)/settings/`)
-A card per part: its title, a state in words with an icon, a KeyValue of what is set, and one button to that part's own page. No inputs on the view; step pages use the fields above and answer every action with `ActionOutcome`. Two columns from 760px. The club step of setup and the Club page show the chosen color in a 56px preview strip (`club` fill, `club-on` name, 8px corner) before saving.
+A card per part: its title, a state in words with an icon, a KeyValue of what is set, and one button to that part's own page. No inputs on the view; step pages use the fields above and answer every action with `ActionOutcome`. Two columns from 760px. The club step of setup and the Club page show the chosen color in a 56px preview strip (`club` fill, `club-on` name, 12px corner) before saving.
 
 ### Display page (`src/app/(parent)/display/`)
 Reached from the account avatar. The staff account page (`src/app/staff/(app)/account/`) draws the same choices (`DisplaySettings`, given a card title there) under "Your name" and before "Signed in as" with Sign out. One card of four choice groups in order: **Appearance** (Match my device, Light, Dark), **Contrast** (Match my device, Standard, High contrast), **Text size** (Standard, Large, Larger), **Motion** (Match my device, Reduce motion; two columns). "Match my device" is first and the default. Changes apply at once; a closing `ink-2` note: "Saved on this device. Sign in somewhere else and you can choose again there." The install hint is permanent here.
@@ -500,7 +525,7 @@ The voice is PRODUCT.md's warm, plain neighbor, kind about money. State facts pl
 - **Do** build pages from the primitives in `@/app/components/ui`; add a sample to the gallery and regenerate `design/system/gallery.html` when a primitive or state is added.
 - **Do** use tokens only in components: no hex, rgb or named color, and add any new fixed color to `palette.ts` in the same commit.
 - **Do** put a short list a person acts on in a `List` under a `SectionLabel`, and many like records in a `DataTable`.
-- **Do** say every status in words with an icon, in one of the four tones: done, due, late, neutral.
+- **Do** say every status in words with an icon, in one of its tones: done, due, late, info, neutral.
 - **Do** keep every control and lone link at least 44px tall, and a parent page's busy button `aria-disabled`.
 - **Do** set type in rem from the scale, never under 0.8125rem, and let layouts reflow at 125% text.
 - **Do** give each invoice its own Pay, the soonest-due payable one primary, and an as-of line beside the figures.
@@ -512,11 +537,12 @@ The voice is PRODUCT.md's warm, plain neighbor, kind about money. State facts pl
 - **Don't** cast a shadow from anything but a menu or popover (`--shadow-menu`).
 - **Don't** nest a card in a card, or put a panel inside a list row.
 - **Don't** set a label in uppercase or put an eyebrow over a page title; a section label names the list under it.
-- **Don't** add a fifth status color or a blue information tone; information is ink on the neutral tint.
+- **Don't** add a status color beyond the brand's four (done, due, late, info) and the neutral gray, or use the club's color or Booster Flame as a status.
 - **Don't** use `ink-3` for text, or color alone for any meaning.
 - **Don't** make a pill: full rounds are for avatars, status marks, radio marks and the current tab's icon pill.
 - **Don't** color an amount; urgency goes on the date line only.
 - **Don't** hide a Pay when the figures are not current; pause it in place and say why.
 - **Don't** promise when a service will be back unless the portal knows.
-- **Don't** load fonts from Google in the app or set type in px.
+- **Don't** load fonts from Google in the app or set type in px; the brand kit's `tokens.css` import and px scale are for brand surfaces outside it.
+- **Don't** hard-code the product's indigo or flame into portal UI, or hide, move or restyle the "Powered by" badge from a club setting.
 - **Don't** use an emoji or a Unicode glyph as an icon; icons are drawn SVG.

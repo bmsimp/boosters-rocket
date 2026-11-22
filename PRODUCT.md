@@ -80,8 +80,11 @@ themselves.
 
 ## Brand Commitments
 
-- Product name: **Booster Rocket**. Each club's own name and logo lead in the parent-facing app;
-  Booster Rocket is credited, not featured.
+- Product name: **Boosters Rocket** (two words in prose; the brand kit is `brand/BRAND.md`). Each
+  club's own name, logo and color lead in the app; Boosters Rocket is credited, not featured: a
+  "Powered by Boosters Rocket" badge in every page's footer and every mail, and its Launch Indigo
+  only as the color of a club that hasn't chosen one. The name and logos are reserved
+  (`TRADEMARKS.md`).
 - FZN has no fixed brand assets. The default theme must work for any club and must stay legible
   and accessible whatever logo and colors a club supplies.
 - Voice: a warm, plain-spoken neighbor. Short sentences and everyday words. Never scolding or
