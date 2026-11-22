@@ -157,8 +157,8 @@ describe("Home: the season ruler and the current step's requirements", () => {
     // The steps in order, the first done, the second current.
     expect(html).toContain(`<p id="season-h" class="season-title">${TWO_FAMILY_SEASON} · <b>Step 2 of 3<span class="current-name">: Uniforms</span></b></p>`);
     expect(html).toContain(`<ol class="sets" style="--count:3">`);
-    expect(html).toMatch(/<li class="done"><span class="n"><svg[^>]*>.*?<\/svg>1<\/span><span class="label">Sign-up<\/span><span class="visually-hidden">, done<\/span><\/li>/);
-    expect(html).toMatch(/<li aria-current="step"><span class="n">2<\/span><span class="label">Uniforms<\/span><span class="visually-hidden">, current step<\/span>/);
+    expect(html).toMatch(/<li class="done"><span class="track" aria-hidden="true"><\/span><span class="n"><svg[^>]*>.*?<\/svg>1<\/span><span class="label">Sign-up<\/span><span class="visually-hidden">, done<\/span><\/li>/);
+    expect(html).toMatch(/<li aria-current="step"><span class="track" aria-hidden="true"><\/span><span class="n">2<\/span><span class="label">Uniforms<\/span><span class="visually-hidden">, current step<\/span>/);
     // Barnaby still has the fitting to do; Briseis has finished the step. The dots are decoration, hidden from a screen reader.
     expect(html).toContain(`<span class="on-set" aria-hidden="true"><i title="Barnaby has more to do">B</i><i class="done" title="Briseis is done">B</i></span>`);
     expect(html).toContain(`<a href="/season">See the whole season</a>`);
@@ -180,7 +180,7 @@ describe("Home: the season ruler and the current step's requirements", () => {
     expect(text).toContain("Step 1 of 3 : Sign-up");
     // Wrap-up asks nothing, so it is done already; but it is still ahead, and the ruler draws it as a step to come.
     expect(html).not.toContain(`<li class="done">`);
-    expect(html).toContain(`<li><span class="n">3</span><span class="label">Wrap-up</span><span class="visually-hidden"></span></li>`);
+    expect(html).toContain(`<li><span class="track" aria-hidden="true"></span><span class="n">3</span><span class="label">Wrap-up</span><span class="visually-hidden"></span></li>`);
     expect(text).toContain(`${AURELIO!.name} Nothing to do in Sign-up`);
     expect(text).toContain("Your family 1 thing left to do in Sign-up 1 of 2 done Handbook read Done Carpool pledge QA71 Not done yet");
     // What is still to do is To do's too, with the way to sign a form there; a form not ready yet has no way in.
@@ -268,7 +268,7 @@ describe("Home: the season ruler and the current step's requirements", () => {
     ] });
     asParent(a.identity);
     const html = await renderPage(ParentHome);
-    expect(html).toMatch(/<li><span class="n">1<\/span><span class="label">Join<\/span><span class="visually-hidden">, not finished<\/span><\/li>/);
+    expect(html).toMatch(/<li><span class="track" aria-hidden="true"><\/span><span class="n">1<\/span><span class="label">Join<\/span><span class="visually-hidden">, not finished<\/span><\/li>/);
     expect(textOf(html)).toContain("1 thing from an earlier step is still to do. See the whole season");
     expect(textOf(html)).not.toContain("Membership form"); // it is on the Season page, with the step it belongs to
     expect(textOf(await renderPage(SeasonPage))).toContain("1. Join Ends " + day(-3) + " 1 thing left to do Your family Membership form Not done yet");

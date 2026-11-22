@@ -25,6 +25,7 @@ export function StepIndicator({ steps }: { steps: Step[] }) {
     <ol className={steps.length > 6 ? "sets many" : "sets"} style={{ ["--count" as string]: steps.length }}>
       {steps.map((step, i) => (
         <li key={step.key} className={step.done ? "done" : undefined} aria-current={step.current ? "step" : undefined}>
+          <span className="track" aria-hidden="true" />
           <span className="n">{step.done && <Tick />}{i + 1}</span>
           <span className="label">{step.label}</span>
           <span className="visually-hidden">{step.words}</span>
