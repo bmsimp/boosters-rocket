@@ -535,8 +535,8 @@ fieldset.checks { border: 0; padding: 0; min-width: 0; }
 .notice a:not(.btn) { color: inherit; font-weight: 600; }
 main.wrap.single > .notice { margin-top: var(--s5); }
 /* A titled notice that is one line: its title, then its words beside it (a part with nothing in it, Accounting links). */
-.notice-inline .notice-body { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--s2); }
-.notice-inline .notice-body > * + * { margin-top: 0; }
+.notice-inline .notice-body { max-width: none; }
+.notice-inline .notice-title { display: inline; margin-right: var(--s2); }
 .box > .notice, .box > form + .notice, .box > p + .notice { margin-top: var(--s3); }
 
 /* --- Page header: the page's title, one quiet line under it, its actions and the way back. --- */
