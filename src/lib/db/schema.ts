@@ -705,6 +705,7 @@ export const writeQueue = pgTable("write_queue", {
   sent: boolean("sent").notNull(),                    // QuickBooks may have acted on the last try
   tries: integer("tries").notNull().default(1),
   lastCode: text("last_code"),                        // the last short code, never QuickBooks' words
+  lastIntuitTid: text("last_intuit_tid"),             // Intuit's reference (intuit_tid) for the last failed try, when it gave one
   lastTriedAt: timestamp("last_tried_at", { withTimezone: true }).notNull().defaultNow(),
   nextTryAt: timestamp("next_try_at", { withTimezone: true }),
   askedBy: uuid("asked_by"),                          // staff_user.id

@@ -4,7 +4,7 @@ import { jobRun, qboCustomer, qboCustomerType } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getConnection } from "@/lib/quickbooks/connection";
 import { qboQueryAll, qboCustomerTypes } from "@/lib/quickbooks/client";
-import { QboError } from "@/lib/quickbooks/endpoints";
+import { failureWords, QboError } from "@/lib/quickbooks/endpoints";
 import { billingAddressOf } from "@/lib/parents/contact-fields";
 import { noteAddressesKept } from "@/lib/parents/contact-take-in";
 import { getShape, shapeTypeIds, ROSTER_LOCK, NO_ADDRESS_COLUMNS } from "./shape";
@@ -134,7 +134,7 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
       customers = await qboQueryAll("Customer", "Active in (true, false)");
     } catch (e) {
       // Only a QboError's own fixed sentence and code are kept; anything else gets a fixed sentence.
-      return e instanceof QboError ? fail(`${e.message} (${e.code})`, e.code) : fail("The roster couldn't be read. (unexpected)", "unexpected");
+      return e instanceof QboError ? fail(failureWords(e), e.code) : fail("The roster couldn't be read. (unexpected)", "unexpected");
     }
     // No types while the shape names some is believed only of the company the shape was chosen for, not one switched to.
     if (typesRefused || (from === realmId && types.filter(isRow).length === 0 && shapeTypeIds(await getShape(tx)).length > 0)) {

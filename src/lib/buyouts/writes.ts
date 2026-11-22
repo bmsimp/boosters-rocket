@@ -159,7 +159,7 @@ const GIVEN_UP_MEANWHILE: BuyoutStep = "stuck";
 
 /** The queue item finished: done, with what QuickBooks made or changed, audited as the queue audits its own. Only while it is still waiting. */
 async function itemDone(tx: Tx, item: Item, how: "sent" | "found", resultQboId: string | null, actor: Actor): Promise<void> {
-  const [still] = await tx.update(writeQueue).set({ state: "done", resultQboId, tries: item.tries + 1, lastTriedAt: new Date(), nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
+  const [still] = await tx.update(writeQueue).set({ state: "done", lastIntuitTid: null, resultQboId, tries: item.tries + 1, lastTriedAt: new Date(), nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
     .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
   if (!still) return;
   await writeAudit({ actor, action: "roster.write.done", targetType: "write_queue", targetId: item.id,
@@ -185,11 +185,11 @@ async function keepInvoiceOnItem(tx: Tx, item: Item, invoiceQboId: string): Prom
  * `sent` is kept once set: a write QuickBooks may have acted on is looked for before it is sent again. An item given up
  * meanwhile stays given up and its buy-out is left as it is: one a change of company ended is never made stuck again.
  */
-async function tryFailed(item: Item, b: Row, code: string, sent: boolean, now: Date, actor: Actor): Promise<BuyoutStep> {
+async function tryFailed(item: Item, b: Row, code: string, sent: boolean, now: Date, actor: Actor, tid: string | null = null): Promise<BuyoutStep> {
   const next = afterFailedTry(item.tries + 1, item.createdAt, now);
   const went = await db.transaction(async (tx) => {
     if (!(await lockForFinish(tx, item))) return false;
-    const [still] = await tx.update(writeQueue).set({ state: next.state, lastCode: short(code), sent, tries: item.tries + 1, lastTriedAt: now,
+    const [still] = await tx.update(writeQueue).set({ state: next.state, lastCode: short(code), lastIntuitTid: tid, sent, tries: item.tries + 1, lastTriedAt: now,
       nextTryAt: next.state === "waiting" ? next.nextTryAt : null, updatedAt: new Date() }).where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
     if (!still) return false;
     await writeAudit({ actor, action: next.state === "stuck" ? "roster.write.stuck" : "roster.write.retry", targetType: "write_queue", targetId: item.id,
@@ -380,7 +380,7 @@ export async function sendBuyoutWrite(item: Item, now: Date, o: { mayWait: boole
       let found: Invoice | undefined;
       try { found = (await invoicesOf(w.customerQboId, item.realmId, o.mayWait)).find((i) => carries(i, b.id)); } catch (e) {
         if (!(e instanceof QboError)) throw e;
-        return tryFailed(item, b, `check_${e.code}`, true, now, actor);
+        return tryFailed(item, b, `check_${e.code}`, true, now, actor, e.tid);
       }
       if (found) return created(item, w, b, found, "found", actor, o.mayWait);
     }
@@ -398,7 +398,7 @@ export async function sendBuyoutWrite(item: Item, now: Date, o: { mayWait: boole
       if (!(e instanceof QboError)) throw e;
       const f = classify(e.code);
       if (f.kind !== "retry") return createRefused(item, b, e.code, actor);
-      return tryFailed(item, b, e.code, item.sent || f.sent, now, actor);
+      return tryFailed(item, b, e.code, item.sent || f.sent, now, actor, e.tid);
     }
     const inv = invoiceOf(answer);
     // An answer the portal can't read may still be an invoice made: it is looked for before anything is sent again.
@@ -410,7 +410,7 @@ export async function sendBuyoutWrite(item: Item, now: Date, o: { mayWait: boole
     if (!(e instanceof QboError)) throw e;
     const f = classify(e.code);
     if (f.kind !== "retry") return voidKept(item, b, { state: "invoiced", flag: w.why === "student_moved" ? "student_moved" : "void_refused", code: e.code }, actor);
-    return tryFailed(item, b, `check_${e.code}`, item.sent, now, actor);
+    return tryFailed(item, b, `check_${e.code}`, item.sent, now, actor, e.tid);
   }
   const inv = invoices.find((i) => i.qboId === w.invoiceQboId);
   if (!inv) return voidKept(item, b, { state: "stuck", flag: w.why === "student_moved" ? "student_moved" : "missing", code: "invoice_gone" }, actor);
@@ -429,7 +429,7 @@ export async function sendBuyoutWrite(item: Item, now: Date, o: { mayWait: boole
     if (!(e instanceof QboError)) throw e;
     const f = classify(e.code);
     if (f.kind !== "retry") return voidKept(item, b, { state: "invoiced", flag: w.why === "student_moved" ? "student_moved" : "void_refused", code: e.code }, actor);
-    return tryFailed(item, b, e.code, item.sent || f.sent, now, actor);
+    return tryFailed(item, b, e.code, item.sent || f.sent, now, actor, e.tid);
   }
   return voided(item, w, b, "sent", actor);
 }

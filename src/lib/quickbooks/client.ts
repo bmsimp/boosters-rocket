@@ -2,7 +2,7 @@ import { db } from "@/lib/db/client";
 import { qboConnection, type QboEnvironment } from "@/lib/db/schema";
 import { secretBox, SecretBoxError } from "@/lib/crypto/secret-box";
 import { writeAudit } from "@/lib/audit/log";
-import { errorNeedsAdmin, qboEndpoints, QboError, QBO_MINOR_VERSION } from "./endpoints";
+import { errorNeedsAdmin, failureWords, intuitTid, qboEndpoints, QboError, QBO_MINOR_VERSION } from "./endpoints";
 import { oauthEndpoints } from "./discovery";
 
 const TIMEOUT_MS = 15_000;
@@ -29,7 +29,7 @@ export async function tokenRequest(form: Record<string, string>, app: QboApp, en
   const body = (await res.json().catch(() => ({}))) as { access_token?: unknown; refresh_token?: unknown; expires_in?: unknown; x_refresh_token_expires_in?: unknown; error?: unknown };
   if (!res.ok || typeof body.access_token !== "string" || typeof body.refresh_token !== "string") {
     const code = typeof body.error === "string" && /^[a-z_]{1,40}$/.test(body.error) ? body.error : `http_${res.status}`;
-    throw new QboError(code === "invalid_grant" ? "Intuit no longer accepts this connection. Connect QuickBooks again." : "Intuit refused the request.", code);
+    throw new QboError(code === "invalid_grant" ? "Intuit no longer accepts this connection. Connect QuickBooks again." : "Intuit refused the request.", code, intuitTid(res));
   }
   const seconds = (v: unknown, fallback: number) => (typeof v === "number" && v > 0 ? v : fallback);
   const now = Date.now();
@@ -104,9 +104,11 @@ function tokenUnderLock(o: { force?: boolean; noWait?: boolean }): Promise<Refre
       if (!error) throw e;
       // Returned, not thrown, so this record of the failure is committed. Audited only when the error changes, so a
       // failure repeated on every try doesn't bury the log; the time of the latest try is always kept.
-      const lastError = `${error.message} (${error.code})`;
+      const lastError = failureWords(error);
       await tx.update(qboConnection).set({ lastError, lastErrorAt: new Date(), updatedAt: new Date() });
-      if (lastError !== c.lastError) await writeAudit({ actor: WORKER_ACTOR, action: "quickbooks.token_refresh.failed", targetType: "qbo_connection", targetId: "singleton", after: { code: error.code } }, tx);
+      // Intuit's reference differs on every try, so it isn't what makes the error a new one.
+      const withoutReference = (words: string | null) => words?.replace(/ Intuit reference: [A-Za-z0-9-]+\./, "") ?? null;
+      if (withoutReference(lastError) !== withoutReference(c.lastError)) await writeAudit({ actor: WORKER_ACTOR, action: "quickbooks.token_refresh.failed", targetType: "qbo_connection", targetId: "singleton", after: { code: error.code } }, tx);
       return { ok: false, error };
     }
   });
@@ -213,7 +215,7 @@ export async function qboGet(path: string, params: Record<string, string> = {}, 
       await pause(RETRY_WAIT_MS.min + Math.random() * RETRY_WAIT_MS.spread, o.signal); // jitter: callers refused together don't come back together
       continue;
     }
-    if (!res.ok) throw new QboError("QuickBooks refused the request.", `http_${res.status}`);
+    if (!res.ok) throw new QboError("QuickBooks refused the request.", `http_${res.status}`, intuitTid(res));
     try { return await res.json(); } catch { throw gaveUp() ? timedOut() : new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer"); }
   }
 }
@@ -463,7 +465,7 @@ export async function qboUpdateCustomerContact(customerId: string, syncToken: st
   const body = JSON.stringify(CUSTOMER_UPDATE.body(customerId, syncToken, change));
   let force = false, refreshed = false;
   for (;;) {
-    const a = await within(accessTokenForPage(force), o.signal).catch((e: unknown) => { throw e instanceof QboError ? new QboError(e.message, `${NO_TOKEN}${e.code}`) : e; });
+    const a = await within(accessTokenForPage(force), o.signal).catch((e: unknown) => { throw e instanceof QboError ? new QboError(e.message, `${NO_TOKEN}${e.code}`, e.tid) : e; });
     force = false;
     if (a.realmId !== o.realmId) throw new QboError("A different QuickBooks company is connected.", "other_company");
     const url = new URL(`${qboEndpoints().api[a.environment]}/v3/company/${encodeURIComponent(a.realmId)}/${CUSTOMER_UPDATE.path}`);
@@ -482,7 +484,7 @@ export async function qboUpdateCustomerContact(customerId: string, syncToken: st
       await res.body?.cancel().catch(() => {});
       continue;
     }
-    if (!res.ok) throw new QboError("QuickBooks refused the change.", await refusalCode(res));
+    if (!res.ok) throw new QboError("QuickBooks refused the change.", await refusalCode(res), intuitTid(res));
     let customer: unknown;
     try { customer = ((await res.json()) as { Customer?: unknown } | null)?.Customer; } catch { throw gaveUp() ? timedOut() : new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer"); }
     if (typeof customer !== "object" || customer === null || Array.isArray(customer)) throw new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer");
@@ -545,7 +547,7 @@ export async function qboUpdateCustomerEmail(customerId: string, syncToken: stri
   const body = JSON.stringify(EMAIL_UPDATE.body(customerId, syncToken, field));
   let force = false, refreshed = false;
   for (;;) {
-    const a = await within(accessTokenForPage(force), o.signal).catch((e: unknown) => { throw e instanceof QboError ? new QboError(e.message, `${NO_TOKEN}${e.code}`) : e; });
+    const a = await within(accessTokenForPage(force), o.signal).catch((e: unknown) => { throw e instanceof QboError ? new QboError(e.message, `${NO_TOKEN}${e.code}`, e.tid) : e; });
     force = false;
     if (a.realmId !== o.realmId) throw new QboError("A different QuickBooks company is connected.", "other_company");
     const url = new URL(`${qboEndpoints().api[a.environment]}/v3/company/${encodeURIComponent(a.realmId)}/${EMAIL_UPDATE.path}`);
@@ -564,7 +566,7 @@ export async function qboUpdateCustomerEmail(customerId: string, syncToken: stri
       await res.body?.cancel().catch(() => {});
       continue;
     }
-    if (!res.ok) throw new QboError("QuickBooks refused the change.", await refusalCode(res));
+    if (!res.ok) throw new QboError("QuickBooks refused the change.", await refusalCode(res), intuitTid(res));
     let customer: unknown;
     try { customer = ((await res.json()) as { Customer?: unknown } | null)?.Customer; } catch { throw gaveUp() ? timedOut() : new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer"); }
     if (typeof customer !== "object" || customer === null || Array.isArray(customer)) throw new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer");
@@ -652,7 +654,7 @@ async function sendRosterWrite(payload: Record<string, unknown>, o: QboRosterWri
   let force = false, refreshed = false;
   for (;;) {
     const token = o.mayWait ? accessToken({ force }) : accessTokenForPage(force);
-    const a = await within(token, o.signal).catch((e: unknown) => { throw e instanceof QboError ? new QboError(e.message, `${NO_TOKEN}${e.code}`) : e; });
+    const a = await within(token, o.signal).catch((e: unknown) => { throw e instanceof QboError ? new QboError(e.message, `${NO_TOKEN}${e.code}`, e.tid) : e; });
     force = false;
     if (a.realmId !== o.realmId) throw new QboError("A different QuickBooks company is connected.", "other_company");
     const url = new URL(`${qboEndpoints().api[a.environment]}/v3/company/${encodeURIComponent(a.realmId)}/${CUSTOMER_WRITES.path}`);
@@ -671,7 +673,7 @@ async function sendRosterWrite(payload: Record<string, unknown>, o: QboRosterWri
       await res.body?.cancel().catch(() => {});
       continue;
     }
-    if (!res.ok) throw new QboError("QuickBooks refused the change.", await refusalCode(res));
+    if (!res.ok) throw new QboError("QuickBooks refused the change.", await refusalCode(res), intuitTid(res));
     let customer: unknown;
     try { customer = ((await res.json()) as { Customer?: unknown } | null)?.Customer; } catch { throw gaveUp() ? timedOut() : new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer"); }
     if (typeof customer !== "object" || customer === null || Array.isArray(customer)) throw new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer");
@@ -799,7 +801,7 @@ async function sendInvoiceWrite(payload: Record<string, unknown>, voiding: boole
   let force = false, refreshed = false;
   for (;;) {
     const token = o.mayWait ? accessToken({ force }) : accessTokenForPage(force);
-    const a = await within(token, o.signal).catch((e: unknown) => { throw e instanceof QboError ? new QboError(e.message, `${NO_TOKEN}${e.code}`) : e; });
+    const a = await within(token, o.signal).catch((e: unknown) => { throw e instanceof QboError ? new QboError(e.message, `${NO_TOKEN}${e.code}`, e.tid) : e; });
     force = false;
     if (a.realmId !== o.realmId) throw new QboError("A different QuickBooks company is connected.", "other_company");
     const url = new URL(`${qboEndpoints().api[a.environment]}/v3/company/${encodeURIComponent(a.realmId)}/${INVOICE_WRITES.path}`);
@@ -819,7 +821,7 @@ async function sendInvoiceWrite(payload: Record<string, unknown>, voiding: boole
       await res.body?.cancel().catch(() => {});
       continue;
     }
-    if (!res.ok) throw new QboError("QuickBooks refused the change.", await refusalCode(res));
+    if (!res.ok) throw new QboError("QuickBooks refused the change.", await refusalCode(res), intuitTid(res));
     let invoice: unknown;
     try { invoice = ((await res.json()) as { Invoice?: unknown } | null)?.Invoice; } catch { throw gaveUp() ? timedOut() : new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer"); }
     if (typeof invoice !== "object" || invoice === null || Array.isArray(invoice)) throw new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer");

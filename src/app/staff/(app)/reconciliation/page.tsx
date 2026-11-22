@@ -65,7 +65,8 @@ function Writes({ items, caption, canChange, mayLink }: { items: QueueView[]; ca
     { key: "asked", header: "Asked", cell: (i) => <><LocalTime iso={i.askedAt} />{i.askedBy ? <span className="when">by {i.askedBy}</span> : null}</> },
     { key: "tries", header: "Tries", cell: (i) => (
       <>{i.tries} {i.tries === 1 ? "time" : "times"}, last <LocalTime iso={i.lastTriedAt} />{i.state === "waiting" && i.nextTryAt ? <span className="when">Next try <LocalTime iso={i.nextTryAt} /></span> : null}</>) },
-    { key: "last", header: "Last time", cell: (i) => { const words = codeWords(i.lastCode); return words ? `${words} (${i.lastCode})` : "No answer recorded"; } },
+    { key: "last", header: "Last time", cell: (i) => { const words = codeWords(i.lastCode);
+      return <>{words ? `${words} (${i.lastCode})` : "No answer recorded"}{i.intuitTid ? <span className="when">Intuit reference: {i.intuitTid}</span> : null}</>; } },
     { key: "family", header: "Family", cell: (i) => (i.familyId ? <Link href={familyPage(i.familyId)}>Open the family</Link> : "None") },
     ...(canChange ? [{ key: "do", header: "What you can do", quiet: true, cell: (i: QueueView) => (
       <div className="row-actions">

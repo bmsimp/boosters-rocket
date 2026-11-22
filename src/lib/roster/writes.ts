@@ -1083,7 +1083,7 @@ export type DeactivateTry =
   | { is: "answer"; write: DeactivateWrite; answer: Record<string, unknown>; resent: boolean }
   | { is: "inactive_there"; answer: Record<string, unknown>; sent: boolean }
   | { is: "stopped"; stop: BalanceStop }
-  | { is: "failed"; code: string; sent: boolean; write: DeactivateWrite }
+  | { is: "failed"; code: string; sent: boolean; write: DeactivateWrite; tid?: string | null }
   | { is: "stale_again"; write: DeactivateWrite };
 type DeactivateHow = { mayWait: boolean; name: string; showAmounts: boolean; actor: Actor; ip: string | null; permission?: string };
 /**
@@ -1113,7 +1113,7 @@ export async function sendDeactivate(w: DeactivateWrite, read: Extract<Owed, { o
   } catch (e) {
     if (!(e instanceof QboError)) throw e;
     const failure = classify(e.code);
-    if (failure.kind !== "stale") return { is: "failed", code: e.code, sent: failure.kind === "retry" && failure.sent, write: first };
+    if (failure.kind !== "stale") return { is: "failed", code: e.code, sent: failure.kind === "retry" && failure.sent, write: first, tid: e.tid };
   }
   // The field is the arbiter: whether QuickBooks has the customer active now, read live (never the cache, never a page).
   const live = await owedBy(w.qboId, realmId, { mayWait: o.mayWait });
@@ -1130,7 +1130,7 @@ export async function sendDeactivate(w: DeactivateWrite, read: Extract<Owed, { o
     if (!(e instanceof QboError)) throw e;
     const failure = classify(e.code);
     if (failure.kind === "stale") return { is: "stale_again", write: again };
-    return { is: "failed", code: e.code, sent: failure.kind === "retry" && failure.sent, write: again };
+    return { is: "failed", code: e.code, sent: failure.kind === "retry" && failure.sent, write: again, tid: e.tid };
   }
 }
 
@@ -2627,7 +2627,7 @@ async function readLive(qboId: string, realmId: string, mayWait: boolean): Promi
 export type RenameTry =
   | { is: "answer"; write: RenameWrite; answer: Record<string, unknown>; resent: "stale" | "no_version" | "differs" | null }
   | { is: "in_place" }
-  | { is: "failed"; code: string; sent: boolean; write: RenameWrite }
+  | { is: "failed"; code: string; sent: boolean; write: RenameWrite; tid?: string | null }
   | { is: "changed"; code: string; holds: string | null }
   | { is: "stale_again" };
 export async function tryRename(w: RenameWrite, realmId: string, o: { mayWait: boolean; readFirst: "moved_on" | "differs" | null; actor: Actor; ip: string | null; permission?: string }): Promise<RenameTry> {
@@ -2640,7 +2640,7 @@ export async function tryRename(w: RenameWrite, realmId: string, o: { mayWait: b
     } catch (e) {
       if (!(e instanceof QboError)) throw e;
       const failure = classify(e.code);
-      if (failure.kind !== "stale") return { is: "failed", code: e.code, sent: failure.kind === "retry" && failure.sent, write: w };
+      if (failure.kind !== "stale") return { is: "failed", code: e.code, sent: failure.kind === "retry" && failure.sent, write: w, tid: e.tid };
       why = "stale";
     }
   }
@@ -2661,7 +2661,7 @@ export async function tryRename(w: RenameWrite, realmId: string, o: { mayWait: b
     if (!(e instanceof QboError)) throw e;
     const failure = classify(e.code);
     if (failure.kind === "stale") return { is: "stale_again" };
-    return { is: "failed", code: e.code, sent: failure.kind === "retry" && failure.sent, write: again };
+    return { is: "failed", code: e.code, sent: failure.kind === "retry" && failure.sent, write: again, tid: e.tid };
   }
 }
 
@@ -2679,7 +2679,7 @@ export async function tryRename(w: RenameWrite, realmId: string, o: { mayWait: b
 type MoveTry =
   | { is: "answer"; write: MoveWrite; answer: Record<string, unknown>; resent: "stale" | "no_version" | "differs" | null }
   | { is: "in_place" }
-  | { is: "failed"; code: string; sent: boolean; write: MoveWrite }
+  | { is: "failed"; code: string; sent: boolean; write: MoveWrite; tid?: string | null }
   | { is: "changed"; code: string; holds: string | null }
   | { is: "stale_again" };
 async function tryMove(w: MoveWrite, realmId: string, o: { mayWait: boolean; readFirst: "moved_on" | "differs" | null; actor: Actor; ip: string | null; permission?: string }): Promise<MoveTry> {
@@ -2693,7 +2693,7 @@ async function tryMove(w: MoveWrite, realmId: string, o: { mayWait: boolean; rea
     } catch (e) {
       if (!(e instanceof QboError)) throw e;
       const failure = classify(e.code);
-      if (failure.kind !== "stale") return { is: "failed", code: e.code, sent: failure.kind === "retry" && failure.sent, write: w };
+      if (failure.kind !== "stale") return { is: "failed", code: e.code, sent: failure.kind === "retry" && failure.sent, write: w, tid: e.tid };
       why = "stale";
     }
   }
@@ -2715,7 +2715,7 @@ async function tryMove(w: MoveWrite, realmId: string, o: { mayWait: boolean; rea
     if (!(e instanceof QboError)) throw e;
     const failure = classify(e.code);
     if (failure.kind === "stale") return { is: "stale_again" };
-    return { is: "failed", code: e.code, sent: failure.kind === "retry" && failure.sent, write: again };
+    return { is: "failed", code: e.code, sent: failure.kind === "retry" && failure.sent, write: again, tid: e.tid };
   }
 }
 /** The customer a customer answer names as its parent: null for one at the top of the tree. */
@@ -2772,7 +2772,7 @@ export function contactShownUnder(key: string, held: HeldContact, w: Pick<Contac
 type ContactTry =
   | { is: "answer"; write: ContactWrite; answer: Record<string, unknown>; resent: "stale" | "no_version" | "differs" | null }
   | { is: "in_place" }
-  | { is: "failed"; code: string; sent: boolean; write: ContactWrite }
+  | { is: "failed"; code: string; sent: boolean; write: ContactWrite; tid?: string | null }
   | { is: "changed"; code: string }
   | { is: "stale_again" };
 async function tryContact(w: ContactWrite, realmId: string, o: { mayWait: boolean; readFirst: "moved_on" | "differs" | null; actor: Actor; ip: string | null; permission?: string }): Promise<ContactTry> {
@@ -2785,7 +2785,7 @@ async function tryContact(w: ContactWrite, realmId: string, o: { mayWait: boolea
     } catch (e) {
       if (!(e instanceof QboError)) throw e;
       const failure = classify(e.code);
-      if (failure.kind !== "stale") return { is: "failed", code: e.code, sent: failure.kind === "retry" && failure.sent, write: w };
+      if (failure.kind !== "stale") return { is: "failed", code: e.code, sent: failure.kind === "retry" && failure.sent, write: w, tid: e.tid };
       why = "stale";
     }
   }
@@ -2806,7 +2806,7 @@ async function tryContact(w: ContactWrite, realmId: string, o: { mayWait: boolea
     if (!(e instanceof QboError)) throw e;
     const failure = classify(e.code);
     if (failure.kind === "stale") return { is: "stale_again" };
-    return { is: "failed", code: e.code, sent: failure.kind === "retry" && failure.sent, write: again };
+    return { is: "failed", code: e.code, sent: failure.kind === "retry" && failure.sent, write: again, tid: e.tid };
   }
 }
 
@@ -3114,7 +3114,7 @@ async function othersSignInWith(w: EmailWrite): Promise<Set<string>> {
 type EmailTry =
   | { is: "answer"; write: EmailWrite; answer: Record<string, unknown>; resent: "stale" | "no_version" | "differs" | null }
   | { is: "in_place" }
-  | { is: "failed"; code: string; sent: boolean; write: EmailWrite }
+  | { is: "failed"; code: string; sent: boolean; write: EmailWrite; tid?: string | null }
   | { is: "changed"; code: string }
   | { is: "stale_again" };
 async function tryEmail(w: EmailWrite, realmId: string, o: { mayWait: boolean; preset?: string; actor: Actor; ip: string | null; permission?: string }): Promise<EmailTry> {
@@ -3125,7 +3125,7 @@ async function tryEmail(w: EmailWrite, realmId: string, o: { mayWait: boolean; p
       if (!(e instanceof QboError)) throw e;
       const failure = classify(e.code);
       if (failure.kind === "stale") return { stale: true };
-      return { failed: { is: "failed", code: e.code, sent: failure.kind === "retry" && failure.sent, write: sent } };
+      return { failed: { is: "failed", code: e.code, sent: failure.kind === "retry" && failure.sent, write: sent, tid: e.tid } };
     }
   };
   if (o.preset !== undefined) {
@@ -3516,13 +3516,13 @@ export type SavedTry =
   | { is: "not_yet" };
 
 /** The state an item of a change saved first is settled to, with its audit row, in one transaction, only while it is still waiting. Whether it was. */
-async function settleSaved(item: QueueRow, to: { state: "done"; resultQboId: string | null } | { state: "waiting" | "stuck"; code: string; sent: boolean; request: RosterWrite; nextTryAt: Date | null }
+async function settleSaved(item: QueueRow, to: { state: "done"; resultQboId: string | null } | { state: "waiting" | "stuck"; code: string; sent: boolean; request: RosterWrite; nextTryAt: Date | null; tid?: string | null }
   | { state: "refused"; code: string | null; before: Before }, triedAt: Date, o: { by: TryBy; actor: Actor; ip: string | null; permission?: string }): Promise<boolean> {
   return db.transaction(async (tx) => {
     const audit = (action: string, after: Record<string, unknown>) => writeAudit({ actor: o.actor, action, permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: item.id,
       before: { state: item.state, tries: item.tries, code: item.lastCode }, after }, tx);
     if (to.state === "done") {
-      const [still] = await tx.update(writeQueue).set({ state: "done", resultQboId: to.resultQboId, tries: item.tries + 1, lastTriedAt: triedAt, nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
+      const [still] = await tx.update(writeQueue).set({ state: "done", lastIntuitTid: null, resultQboId: to.resultQboId, tries: item.tries + 1, lastTriedAt: triedAt, nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
         .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
       if (still) await audit("roster.write.done", { state: "done", how: "found", tries: item.tries + 1, ...(to.resultQboId ? { resultQboId: to.resultQboId } : {}) });
       if (still) await closeEarlierContacts(tx, item, o);
@@ -3538,7 +3538,7 @@ async function settleSaved(item: QueueRow, to: { state: "done"; resultQboId: str
       if (still) await closeEarlierContacts(tx, item, o);
       return still !== undefined;
     }
-    const [still] = await tx.update(writeQueue).set({ state: to.state, lastCode: short(to.code), sent: to.sent, request: to.request, tries: item.tries + 1, lastTriedAt: triedAt,
+    const [still] = await tx.update(writeQueue).set({ state: to.state, lastCode: short(to.code), lastIntuitTid: to.tid ?? null, sent: to.sent, request: to.request, tries: item.tries + 1, lastTriedAt: triedAt,
       nextTryAt: to.nextTryAt, updatedAt: new Date() }).where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
     if (still) {
       await audit(to.state === "stuck" ? "roster.write.stuck" : o.by === "worker" ? "roster.write.retry" : "roster.write.queued",
@@ -3550,7 +3550,7 @@ async function settleSaved(item: QueueRow, to: { state: "done"; resultQboId: str
 
 /** A try of a change saved first QuickBooks took, finished in applyWritten()'s transaction: done, audited, only while it is still waiting (given up meanwhile, it stays so). */
 async function doneIn(tx: Tx, item: QueueRow, resultQboId: string | null, triedAt: Date, o: { actor: Actor; ip: string | null; permission?: string }): Promise<void> {
-  const [still] = await tx.update(writeQueue).set({ state: "done", resultQboId, tries: item.tries + 1, lastTriedAt: triedAt, nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
+  const [still] = await tx.update(writeQueue).set({ state: "done", lastIntuitTid: null, resultQboId, tries: item.tries + 1, lastTriedAt: triedAt, nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
     .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
   if (!still) return;
   await writeAudit({ actor: o.actor, action: "roster.write.done", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: item.id,
@@ -3689,18 +3689,18 @@ export async function trySavedItem(item: QueueRow, write: RenameWrite | CreateWr
   const refused = async (code: string, holds: string | null): Promise<SavedTry> =>
     (await settleSaved(item, { state: "refused", code, before }, triedAt, o)) ? { is: "refused", code, holds } : gone;
   /** For a later try: `sentNow`, this try may have reached QuickBooks; `request`, what a later look finds it as. */
-  const later = async (code: string, sentNow: boolean, request: RosterWrite): Promise<SavedTry> => {
+  const later = async (code: string, sentNow: boolean, request: RosterWrite, tid: string | null = null): Promise<SavedTry> => {
     if (o.by === "press" && !sentNow) return (await settleSaved(item, { state: "refused", code: null, before }, triedAt, o)) ? { is: "not_reached", code } : gone;
     const next = o.by === "press" ? { state: "waiting" as const, nextTryAt: new Date(Date.now() + SAVED_LEASE_MS) } : afterFailedTry(item.tries + 1, ageFrom, now);
     const sent = sentNow || (o.by !== "press" && before.sent);
-    const ok = await settleSaved(item, { state: next.state, code, sent, request, nextTryAt: next.state === "waiting" ? next.nextTryAt : null }, triedAt, o);
+    const ok = await settleSaved(item, { state: next.state, code, sent, request, nextTryAt: next.state === "waiting" ? next.nextTryAt : null, tid }, triedAt, o);
     return !ok ? gone : next.state === "stuck" ? { is: "stuck", code } : { is: "waiting", sent };
   };
-  const failed = async (code: string, sentNow: boolean, sent: RosterWrite): Promise<SavedTry> => {
+  const failed = async (code: string, sentNow: boolean, sent: RosterWrite, tid: string | null = null): Promise<SavedTry> => {
     const failure = classify(code);
-    if (failure.kind === "retry") return later(code, sentNow, sentNow ? sent : before.request);
+    if (failure.kind === "retry") return later(code, sentNow, sentNow ? sent : before.request, tid);
     if (o.by === "worker" && (failure.kind === "needs_admin" || failure.kind === "not_connected" || failure.kind === "other_company")) {
-      const ok = await settleSaved(item, { state: "stuck", code, sent: before.sent, request: before.request, nextTryAt: null }, triedAt, o);
+      const ok = await settleSaved(item, { state: "stuck", code, sent: before.sent, request: before.request, nextTryAt: null, tid }, triedAt, o);
       return ok ? { is: "stuck", code } : gone;
     }
     return refused(code, null);
@@ -3725,7 +3725,7 @@ export async function trySavedItem(item: QueueRow, write: RenameWrite | CreateWr
       // Changed in QuickBooks at that very moment, twice: nothing was made. A press is kept refused, as QuickBooks answered.
       case "stale_again": return o.by === "press" ? refused("fault_5010", null) : later("fault_5010", false, before.request);
       case "changed": return refused(t.code, t.holds);
-      case "failed": return failed(t.code, t.sent, t.write);
+      case "failed": return failed(t.code, t.sent, t.write, t.tid ?? null);
     }
   }
   if (write.op === "move") {
@@ -3745,7 +3745,7 @@ export async function trySavedItem(item: QueueRow, write: RenameWrite | CreateWr
       }
       case "stale_again": return o.by === "press" ? refused("fault_5010", null) : later("fault_5010", false, before.request);
       case "changed": return refused(t.code, await placeName(t.holds));
-      case "failed": return failed(t.code, t.sent, t.write);
+      case "failed": return failed(t.code, t.sent, t.write, t.tid ?? null);
     }
   }
   if (write.op === "deactivate") {
@@ -3767,7 +3767,7 @@ export async function trySavedItem(item: QueueRow, write: RenameWrite | CreateWr
         return later(code, false, before.request);
       }
       case "stale_again": return o.by === "press" ? refused("fault_5010", null) : later("fault_5010", false, before.request);
-      case "failed": return failed(t.code, t.sent, t.write);
+      case "failed": return failed(t.code, t.sent, t.write, t.tid ?? null);
     }
   }
   if (write.op === "contact") {
@@ -3787,7 +3787,7 @@ export async function trySavedItem(item: QueueRow, write: RenameWrite | CreateWr
       case "in_place": return (await settleSaved(item, { state: "done", resultQboId: write.qboId }, triedAt, o)) ? { is: "found" } : gone;
       case "stale_again": return o.by === "press" ? refused("fault_5010", null) : later("fault_5010", false, before.request);
       case "changed": return refused(t.code, null);
-      case "failed": return failed(t.code, t.sent, t.write);
+      case "failed": return failed(t.code, t.sent, t.write, t.tid ?? null);
     }
   }
   if (write.op === "email") {
@@ -3801,7 +3801,7 @@ export async function trySavedItem(item: QueueRow, write: RenameWrite | CreateWr
       case "in_place": return (await settleSaved(item, { state: "done", resultQboId: write.qboId }, triedAt, o)) ? { is: "found" } : gone;
       case "stale_again": return o.by === "press" ? refused("fault_5010", null) : later("fault_5010", false, before.request);
       case "changed": return refused(t.code, null);
-      case "failed": return failed(t.code, t.sent, t.write);
+      case "failed": return failed(t.code, t.sent, t.write, t.tid ?? null);
     }
   }
   let answer: Record<string, unknown>;
@@ -3810,7 +3810,7 @@ export async function trySavedItem(item: QueueRow, write: RenameWrite | CreateWr
   } catch (e) {
     if (!(e instanceof QboError)) throw e;
     const failure = classify(e.code);
-    return failed(e.code, failure.kind === "retry" && failure.sent, write);
+    return failed(e.code, failure.kind === "retry" && failure.sent, write, e.tid);
   }
   return taken(write, answer, null);
 }
@@ -5280,7 +5280,7 @@ async function giveUpSupersededEmailIn(tx: Tx, item: QueueRow, o: { actor: Actor
     before: { state: "refused", tries: item.tries, code: item.lastCode, op: "email" }, after: { state: "given_up", why: "superseded", sentNow: false } }, tx);
 }
 async function refusedFoundIn(tx: Tx, item: QueueRow, resultQboId: string | null, o: { actor: Actor; ip: string | null; permission?: string }): Promise<boolean> {
-  const [still] = await tx.update(writeQueue).set({ state: "done", resultQboId, tries: item.tries + 1, lastTriedAt: new Date(), nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
+  const [still] = await tx.update(writeQueue).set({ state: "done", lastIntuitTid: null, resultQboId, tries: item.tries + 1, lastTriedAt: new Date(), nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
     .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "refused"))).returning({ id: writeQueue.id });
   if (!still) return false;
   await writeAudit({ actor: o.actor, action: "roster.write.done", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: item.id,

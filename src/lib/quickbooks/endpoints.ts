@@ -23,9 +23,26 @@ export function qboEndpoints(): QboEndpoints { return INTUIT; }
 export const QBO_SCOPE = "com.intuit.quickbooks.accounting";
 export const QBO_MINOR_VERSION = "75";
 
-/** A QuickBooks or Intuit failure, already reduced to a sentence that is safe to show and a short code (spec §2). */
+/**
+ * A QuickBooks or Intuit failure, already reduced to a sentence that is safe to show and a short code (spec §2), with
+ * Intuit's `intuit_tid` when the refusal carried one: the reference Intuit support looks a request up by.
+ */
 export class QboError extends Error {
-  constructor(message: string, readonly code: string) { super(message); this.name = "QboError"; }
+  constructor(message: string, readonly code: string, readonly tid: string | null = null) { super(message); this.name = "QboError"; }
+}
+
+/**
+ * The `intuit_tid` header of an Intuit or QuickBooks answer, kept only with a failure: letters, digits and dashes, at
+ * most 64, and nothing else of the answer. Null when it is missing or looks like anything else.
+ */
+export function intuitTid(res: Response): string | null {
+  const v = res.headers.get("intuit_tid")?.trim() ?? "";
+  return /^[A-Za-z0-9-]{1,64}$/.test(v) ? v : null;
+}
+
+/** The words a recorded failure keeps (`<sentence> (<code>)`), with Intuit's reference before the code when it gave one. */
+export function failureWords(e: QboError): string {
+  return `${e.message}${e.tid ? ` Intuit reference: ${e.tid}.` : ""} (${e.code})`;
 }
 
 /**
