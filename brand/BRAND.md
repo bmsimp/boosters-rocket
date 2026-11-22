@@ -35,16 +35,21 @@ Implementation:
 
 **Mark ("Afterburn"):** a rocket climbing up and to the right, leaving a smoke trail shaped like a checkmark (balance paid, shift filled). The trail runs hot → cool: flame red at the engine, ember, glow, then white.
 
-| File | Use |
+All files in `logos/` have **text converted to outlines** (no fonts needed). Ready-made PNG/PDF/EPS/icons are in `exports/`.
+
+| File (`logos/`) | Use |
 |---|---|
 | `mark-color.svg` | Default mark, ≥ 32 px |
-| `mark-color-small.svg` | ≤ 32 px (3-puff trail) |
+| `mark-color-small.svg` | 16–32 px (3-puff trail) |
 | `mark-color-dark-bg.svg` | On dark/near-black backgrounds (Night Sky disc) |
-| `mark-mono-badge.svg` / `-small` | One ink, disc with knocked-out trail. Uses `currentColor`. |
-| `mark-mono-open.svg` / `-small` | One ink, no disc. Works on any color incl. club shirts. `currentColor`. |
-| `app-icon.svg` / `-small`, `favicon.svg` | Rounded-square icon; favicon drops the window |
-| `lockup-horizontal-*.svg` | Mark + wordmark (live text: convert to outlines before sending to a printer) |
-| `powered-by-color-light.svg`, `powered-by-color-dark.svg`, `powered-by-mono.svg` | Co-branding badge |
+| `mark-mono-open-white.svg` / `-small-white` | White one-color mark for dark or colored backgrounds |
+| `mark-mono-badge.svg` / `-small`, `mark-mono-open.svg` / `-small` | One-color, `currentColor` (inherits CSS `color`) |
+| `app-icon.svg`, `app-icon-small.svg`, `favicon.svg` | Rounded-square icon; favicon drops the window |
+| `lockup-horizontal-color.svg`, `-color-dark-bg.svg`, `-mono.svg` | Mark + wordmark (website header, README, GitHub) |
+| `lockup-stacked-color.svg`, `-color-dark-bg.svg`, `-mono.svg` | Mark over "BOOSTERS / ROCKET" |
+| `powered-by-color-light.svg`, `-color-dark.svg`, `-mono.svg` | Co-branding badge; readable at 20 px tall |
+
+Also in `exports/`: `icons/` (16, 32, 48, 180, 192, 512, maskable 512, favicon.ico/svg) and `social/github-social-preview-1280x640.png`.
 
 Rules:
 - Clear space: half the mark's height on every side.
