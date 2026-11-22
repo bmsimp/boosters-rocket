@@ -58,6 +58,15 @@ installation with. `docker compose ps` shows what is running, and `docker compos
     **Disconnect**, **Disconnect QuickBooks**, then **Change** and connect the first company again ([Reconnecting
     QuickBooks: The same company](quickbooks-reconnect.md#the-same-company)), or, to move to the other company, switch
     ([Connecting a different company](quickbooks-reconnect.md#connecting-a-different-company)).
+  - "QuickBooks no longer offers customer types on this company's plan, so the membership shape can't be read. ..."
+    (`no_customer_types`, also on Settings, QuickBooks and the staff home, each with a link to the membership shape
+    step): QuickBooks refused the customer type query while it still read the customers, or answered that the company
+    has no customer types at all while the shape names some. It happens when the company moves to a plan without
+    customer types (a downgrade). Both shapes, Flat and Layered, go by customer types, so the portal can't tell whose
+    customers are a family's. Nothing is cleared: the roster, the shape and every family's records stay as they were
+    last read, and parents see their figures as last read. Turn customer types back on in QuickBooks (or move the
+    company to a plan that has them), then press **Refresh** on the Roster page; if QuickBooks gave the types new IDs,
+    **Settings**, **QuickBooks**, **Change**, step 3: choose the shape again.
   - "The roster hasn't been refreshed from QuickBooks in more than 2 days": the worker isn't running (see Worker).
   - "The membership shape names a customer type QuickBooks no longer has": someone renamed or removed a customer type in
     QuickBooks. **Settings**, **QuickBooks**, **Change**, step 3: choose the shape again.
