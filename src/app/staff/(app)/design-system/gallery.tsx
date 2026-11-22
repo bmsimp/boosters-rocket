@@ -118,12 +118,14 @@ export function Gallery() {
           <p className="t-2xl">--text-2xl 2rem: an amount ($185.00)</p>
           <p className="t-xl">--text-xl 1.5rem: a page title (1.75rem from 760px)</p>
           <p className="t-lg">--text-lg 1.125rem: a card&apos;s title</p>
+          <p className="t-control">--text-control 0.9375rem: buttons, nav links, table cells, a card&apos;s quiet line</p>
           <p className="t-md">--text-md 1rem: body text, the least a phone ever reads</p>
           <p className="t-sm">--text-sm 0.875rem: a meta line, a label</p>
           <p className="t-xs">--text-xs 0.8125rem: table headers and badges, the floor</p>
         </div>
         <h3 className="table-head">Space and corners</h3>
         <p className="ds-note">Space: --s1 4px, --s2 8px, --s3 12px, --s4 16px, --s5 24px, --s6 32px, --s7 48px; the page gutter --cell is 16px on a phone and 24px from 760px. Corners: --radius 8px (cards, lists, notices, menus), --radius-control 6px (buttons, fields), --radius-badge 4px, --radius-round only for avatars and status dots. One shadow, --shadow-menu, on menus. Motion: --dur-fast 120ms and --dur 200ms, nothing at all with reduced motion.</p>
+        <p className="ds-note">Focus: every ring is --ring (2px, 3px in high contrast) in --focus, the mode&apos;s own club text color. Weights: 400, 500, 600, and 700 only for the club logo tile.</p>
       </Section>
 
       <Section id="contrast" name="Contrast" use="Every text and ground pair the system draws, in every display mode, measured (src/lib/theme/palette.ts; tests/unit/design-tokens.test.ts fails when one falls under its floor). The club's color is derived per club to pass on every ground of its mode." importLine={`import { PALETTE, TEXT_PAIRS } from "@/lib/theme/palette";`}>
