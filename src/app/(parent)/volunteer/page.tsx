@@ -68,7 +68,7 @@ export default async function VolunteerPage() {
           <p>If you can&apos;t make the shifts, you can pay for what&apos;s left instead. The club sends an invoice to your Payments page.</p>
           <List>
             {payInstead.map((b) => (
-              <ListRow key={`${b.requirementId}-${b.key}`} title={b.title} meta={[b.who, <span key="standing" className="state">{b.standing}</span>]}
+              <ListRow key={`${b.requirementId}-${b.key}`} title={b.title} meta={[b.who, b.standing]}
                 detail={b.buyout === null && b.quote.ok
                   ? <LinkButton size="sm" variant="secondary" className="pay" href={`/volunteer/pay-instead/${b.requirementId}/${b.key}`}>Pay instead of volunteering ({formatMoney(b.quote.amountCents)})<span className="visually-hidden">: {b.title}, {b.who}</span></LinkButton>
                   : <LinkButton size="sm" variant="secondary" className="pay" href={`/volunteer/pay-instead/${b.requirementId}/${b.key}`}>See your buy-out<span className="visually-hidden">: {b.title}, {b.who}</span></LinkButton>} />
