@@ -171,7 +171,8 @@ describe("one family's money", () => {
     const text = textOf(html);
     expect(text).toContain("Invoice INV-ALDERQUIST-7101");
     expect(text).toContain(`Total ${owedBy(FAMILY_A)}`);
-    expect(text).toContain(`Paid in the last 12 months Invoice INV-ALDERQUIST-7103 Invoice date 2026-10-01 ${formatMoney(717311)} Paid`);
+    // A paid row says "Paid" first on its meta line, in the done tone, then its date, then its amount.
+    expect(text).toContain(`Paid in the last 12 months Invoice INV-ALDERQUIST-7103 Paid · Invoice date 2026-10-01 ${formatMoney(717311)}`);
     expect(text).toContain(`With the invoices raised on ${[...FAMILY_A.students.map((s) => s.name), FAMILY_A.parent.name].sort().join(", ")}.`);
     // Nothing of the other family.
     for (const i of FAMILY_B.invoices!) expect(html).not.toContain(i.number);
