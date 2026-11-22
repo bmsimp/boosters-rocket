@@ -1,7 +1,6 @@
-import Link from "next/link";
 import { queueCounts } from "@/lib/roster/queue";
 import { formsToChase, shiftsToFill, SOON_DAYS } from "@/lib/staff-home/today";
-import { StateWords } from "@/app/components/state-words";
+import { Card, List, ListRow, LinkButton, StateWords } from "@/app/components/ui";
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -9,7 +8,8 @@ type Item = { key: string; words: string; detail: string; href: string; link: st
 
 /**
  * What needs doing today on the staff home (staff home, DESIGN.md): one line for each thing waiting, as a count in words
- * with the way to it. Each kind is read only for staff who hold its permission, and only counts are read. With nothing
+ * with the way to it: a row of a List each, its due ring, its count as the title, what it means under it, and its link
+ * as the row's compact action. Each kind is read only for staff who hold its permission, and only counts are read. With nothing
  * waiting the box says so in one calm line.
  */
 export async function TodayBox({ writes, forms, shifts }: { writes: boolean; forms: boolean; shifts: boolean }) {
@@ -36,14 +36,12 @@ export async function TodayBox({ writes, forms, shifts }: { writes: boolean; for
     detail: "Families see how many places are left; nobody is told who signed up.", href: "/staff/volunteer", link: "Open Volunteering" });
 
   return (
-    <section className="box" aria-labelledby="today-h"><h2 id="today-h">Today</h2>
+    <Card title="Today" titleId="today-h">
       {items.length === 0 ? <StateWords state="done" words="Nothing needs doing today." /> : (
-        <ul className="today">{items.map((i) => (
-          <li key={i.key} data-today={i.key}>
-            <div><StateWords state="todo" words={i.words} /><span className="when">{i.detail}</span></div>
-            <Link href={i.href}>{i.link}</Link>
-          </li>))}</ul>
+        <List>{items.map((i) => (
+          <ListRow key={i.key} data-today={i.key} status={{ tone: "due" }} title={i.words} meta={i.detail}
+            action={<LinkButton variant="secondary" size="sm" href={i.href}>{i.link}</LinkButton>} />))}</List>
       )}
-    </section>
+    </Card>
   );
 }
