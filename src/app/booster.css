@@ -991,7 +991,7 @@ main.wrap.single > .page-head + p { margin-top: var(--s4); }
 @media (min-width: 760px) {
   .settings-layout { display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: var(--s5); align-items: start; }
   .settings-rail { padding-top: calc(44px + var(--s1)); } /* its title level with the page title, below the back line kept above it */
-  .back-to-settings { display: none; }
+  .back-to-settings.phone-only { display: none; }
   /* A settings page's way back to Settings is for phones: here its line keeps its room, so every title is level with the rail's. */
   .settings-head .page-back { visibility: hidden; }
 }

@@ -33,7 +33,7 @@ export default async function ParentSettingsPage() {
   const sample = s.signin && s.welcome && noPassword > 0 ? await sampleChoosePassword("parent@example.org") : null;
   return (
     <main className="wrap single">
-      <SettingsHeader title="Parent sign-ins" lede={level === "strict"
+      <SettingsHeader effective={ctx.effective} title="Parent sign-ins" lede={level === "strict"
         ? <>Parents sign in to the portal with their email address and a password, which they choose from a link the portal emails them, and then a passkey or an authenticator app, every time. Who can sign in is the portal&apos;s own list of each family&apos;s guardians: a change made in QuickBooks no longer gives anyone a sign-in or ends one. Only Admins can change this.</>
         : <>Parents sign in to the portal with their email address and a password, which they choose from a link the portal emails them; on a phone or computer the portal doesn&apos;t know yet, it emails them a code too. Who can sign in is the portal&apos;s own list of each family&apos;s guardians: a change made in QuickBooks no longer gives anyone a sign-in or ends one. Only Admins can change this.</>} />
 

@@ -4,8 +4,9 @@ import { contrastRatio } from "@/lib/theme/contrast";
 import { MARK_PAIRS, PALETTE, TEXT_PAIRS, type Mode, type Token } from "@/lib/theme/palette";
 import {
   ActionOutcome, Avatar, Badge, Button, CalendarDate, Card, Checkbox, DataTable, EmptyState, HowThisWorks, KeyValue, LinkButton, List, ListRow, ListSubRow, ListTotal, LocalTime,
-  Notice, PageHeader, SectionLabel, Select, Stat, StateWords, StatusBadge, StatusIcon, StepIndicator, TextArea, TextInput, Toolbar, type Column,
+  Notice, PageHeader, SectionLabel, Select, Stat, StateWords, StatusBadge, StatusDot, StatusIcon, StepIndicator, TextArea, TextInput, Toolbar, type Column,
 } from "@/app/components/ui";
+import { IntegrationLogo } from "../integration-logo";
 import { PoweredBy } from "@/app/components/powered-by";
 import { ChoiceSample, TakenChoiceSample } from "./gallery-choice";
 
@@ -26,7 +27,7 @@ const SECTIONS = [
   ["tokens", "Tokens"], ["contrast", "Contrast"], ["button", "Button"], ["badge", "Badge"], ["card", "Card"], ["list", "List"],
   ["page-header", "PageHeader"], ["section-label", "SectionLabel"], ["empty-state", "EmptyState"], ["how-this-works", "HowThisWorks"], ["stat", "Stat"], ["fields", "Fields"],
   ["avatar", "Avatar"], ["step-indicator", "StepIndicator"], ["key-value", "KeyValue"], ["toolbar", "Toolbar"], ["data-table", "DataTable"],
-  ["notice", "Notice"], ["state-words", "StateWords"], ["time-money", "Time and money"], ["frame", "Bar and tabs"], ["powered-by", "Powered by"], ["themes", "Display modes"],
+  ["notice", "Notice"], ["state-words", "StateWords"], ["settings-rail", "Settings rail"], ["time-money", "Time and money"], ["frame", "Bar and tabs"], ["powered-by", "Powered by"], ["themes", "Display modes"],
 ] as const;
 
 function Section({ id, name, use, importLine, children }: { id: string; name: string; use: ReactNode; importLine: string; children: ReactNode }) {
@@ -223,6 +224,14 @@ export function Gallery() {
             </List>
           </div>
           <div>
+            <SectionLabel level={3}>Rows that are one link each, with a logo (the Integrations page)</SectionLabel>
+            <List label="Sample integrations">
+              <ListRow href="#ds-list" logo={<IntegrationLogo of="mail-graph" />} title="Microsoft 365" meta="Sends as webmaster@sample.org." trail={<StatusDot tone="done" words="Working" />} />
+              <ListRow href="#ds-list" logo={<IntegrationLogo of="mail-smtp" />} title="SMTP" meta="Sends through any mail server that takes a user name and password." trail={<StatusDot tone="neutral" words="Not in use" />} />
+              <ListRow href="#ds-list" logo={<IntegrationLogo of="documenso" />} title="Documenso" meta="Sends each form to sign and tells the portal when it is signed." trail={<StatusDot tone="due" words="Not checked yet" />} />
+            </List>
+          </div>
+          <div>
             <SectionLabel level={3}>Students (empty)</SectionLabel>
             <List><li className="list-row"><EmptyState title="No students yet">The club will add them. There&apos;s nothing you need to do.</EmptyState></li></List>
           </div>
@@ -324,6 +333,22 @@ export function Gallery() {
 
       <Section id="state-words" name="StateWords" use="A state inside a row or a cell, as words with an icon: done, still to do, waived." importLine={UI("StateWords")}>
         <div className="ds-samples"><StateWords state="done" words="Done with Uniforms" /><StateWords state="todo" words="1 thing left to do" /><StateWords state="waived" words="Waived" /></div>
+        <p className="ds-use">StatusDot: a quiet one-line status beside a name, its words with a dot that only repeats them (the Settings rail, an integration row).</p>
+        <div className="ds-samples"><StatusDot tone="done" words="Connected" /><StatusDot tone="due" words="Needs attention" /><StatusDot tone="neutral" words="Not set up" /></div>
+      </Section>
+
+      <Section id="settings-rail" name="Settings rail" use="Beside every settings page from 760px (SettingsRail, drawn by settings/layout.tsx): Find a setting, then sentence-case groups of items, each with its status. Drawn here as a sample, without its search." importLine={`import { SettingsRail } from "@/app/staff/(app)/settings/settings-rail";`}>
+        <div className="settings-rail ds-rail" aria-label="Sample settings rail" role="group">
+          <p className="rail-title">Settings</p>
+          {([["People and access", [["Staff", "done", "6 people", false], ["Roles", "done", "4 roles", true]]], ["Connections", [["Integrations", "due", "1 needs attention", false]]]] as const).map(([group, items]) => (
+            <div key={group} className="rail-group">
+              <p className="rail-label">{group}</p>
+              <ul>{items.map(([name, tone, words, current]) => (
+                <li key={name}><a href="#ds-settings-rail" aria-current={current ? "page" : undefined}><span className="rail-name">{name}</span><StatusDot tone={tone} words={words} className="rail-status" /></a></li>
+              ))}</ul>
+            </div>
+          ))}
+        </div>
       </Section>
 
       <Section id="time-money" name="LocalTime, CalendarDate and formatMoney" use="An instant in the viewer's own time, a calendar date the same for everyone, and an amount in tabular figures. Never format these yourself." importLine={`import { LocalTime, CalendarDate } from "@/app/components/ui";  import { formatMoney } from "@/lib/money/cents";`}>

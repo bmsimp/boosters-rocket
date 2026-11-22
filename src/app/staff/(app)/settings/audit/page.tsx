@@ -16,14 +16,14 @@ export const dynamic = "force-dynamic";
 const rowsWord = (n: number) => `${n.toLocaleString("en-US")} ${n === 1 ? "row" : "rows"}`;
 
 export default async function AuditPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  await requireStaffPage("Audit.Log.Read");
+  const ctx = await requireStaffPage("Audit.Log.Read");
   const sp = await searchParams;
   const filters = parseAuditFilters(sp);
   const [page, actions] = await Promise.all([auditPage(filters, { before: parseCursor(sp, "before"), after: parseCursor(sp, "after") }), auditActions()]);
   const filtered = hasFilters(filters);
   return (
     <main className="wrap single">
-      <SettingsHeader title="Audit log" lede={<>Every change, sign-in and staff look at a family&apos;s record, newest first. Only Admins can read it, as some rows hold staff notes about parents. Nothing here can be changed.</>} />
+      <SettingsHeader effective={ctx.effective} title="Audit log" lede={<>Every change, sign-in and staff look at a family&apos;s record, newest first. Only Admins can read it, as some rows hold staff notes about parents. Nothing here can be changed.</>} />
 
       <section className="box" aria-labelledby="audit-find-h"><h2 id="audit-find-h">Find</h2>
         <AuditFilterForm actions={actions.map((code) => ({ code, name: actionName(code) }))}

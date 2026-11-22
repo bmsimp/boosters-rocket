@@ -13,12 +13,12 @@ export const dynamic = "force-dynamic";
  * the page to open after an update or a restore. It shows no family's data, so opening it is not audited.
  */
 export default async function HealthPage() {
-  await requireStaffPage("Admin.Health.Read");
+  const ctx = await requireStaffPage("Admin.Health.Read");
   const lines = await healthLines();
   const attention = lines.filter((l) => l.state === "attention").length;
   return (
     <main className="wrap single">
-      <SettingsHeader title="Health" lede={<>Whether each part of the portal is working, and when it last worked. Look here after an update or a restore. Only Admins see this page.</>} />
+      <SettingsHeader effective={ctx.effective} title="Health" lede={<>Whether each part of the portal is working, and when it last worked. Look here after an update or a restore. Only Admins see this page.</>} />
       <Notice tone={attention === 0 ? "done" : "warning"}>{attention === 0 ? "Everything that is set up is working." : attention === 1 ? "1 thing needs attention." : `${attention} things need attention.`}</Notice>
 
       <section className="box" aria-labelledby="health-h"><h2 id="health-h">The portal</h2>

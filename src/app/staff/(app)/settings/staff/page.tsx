@@ -14,7 +14,7 @@ export default async function PeoplePage() {
   const options = roles.map((r) => ({ id: r.id, name: r.name, admin: r.key === "admin" }));
   return (
     <main className="wrap single">
-      <SettingsHeader title="Staff" lede="Who signs in as staff, and the roles each holds." />
+      <SettingsHeader effective={ctx.effective} title="Staff" lede="Who signs in as staff, and the roles each holds." />
       <section className="box" aria-labelledby="staff-h">
         <h2 id="staff-h">People who sign in as staff</h2>
         {canEdit && <p>Tick a person&apos;s roles and select Save roles. What each role lets people do is on the <a href="/staff/settings/roles">Roles</a> page.</p>}

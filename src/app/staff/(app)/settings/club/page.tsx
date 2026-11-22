@@ -17,7 +17,7 @@ export default async function ClubSettingsPage() {
   const canChange = can(ctx.effective, "Settings.Club.ReadWrite");
   return (
     <main className="wrap single">
-      <SettingsHeader title="Club" lede={<>The club&apos;s name and color are on every page, in every email and on the app parents put on their phones.</>} />
+      <SettingsHeader effective={ctx.effective} title="Club" lede={<>The club&apos;s name and color are on every page, in every email and on the app parents put on their phones.</>} />
       {seesMailWarning(ctx.effective) && <MailWarning canFix={can(ctx.effective, "Settings.Mail.ReadWrite")} />}
       <section className="box" aria-labelledby="club-h"><h2 id="club-h">What is set</h2>
         {!saved ? <StateWords state="todo" words="Not set yet: the portal still shows the name Boosters Rocket" />

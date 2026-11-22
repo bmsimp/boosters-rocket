@@ -38,7 +38,7 @@ export default async function IntegrationsPage() {
   const rows = await integrationRows(integrationItems(ctx.effective));
   return (
     <main className="wrap single integrations-page">
-      <SettingsHeader title="Integrations" lede="The accounting system, forms service, mail service and staff sign-in providers the portal works with. Open one to set it up, change it or check it." />
+      <SettingsHeader effective={ctx.effective} title="Integrations" lede="The accounting system, forms service, mail service and staff sign-in providers the portal works with. Open one to set it up, change it or check it." />
       {KINDS.map((k) => {
         const mine = rows.filter((r) => r.item === k.item);
         if (mine.length === 0) return null;

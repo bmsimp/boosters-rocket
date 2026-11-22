@@ -53,7 +53,7 @@ export function SettingsRail({ groups, extras }: { groups: RailGroup[]; extras: 
         <input id={`${id}-find`} type="search" placeholder="Find a setting" autoComplete="off" value={query}
           onChange={(e) => setQuery(e.target.value)} onKeyDown={onKey} aria-describedby={`${id}-found`} />
       </div>
-      <p id={`${id}-found`} className="rail-none" role="status">{q && shown.length === 0 ? "No setting matches" : ""}</p>
+      <div id={`${id}-found`} className="rail-none" role="status">{q && shown.length === 0 ? "No setting matches" : ""}</div>
       {shown.map((g) => (
         <div key={g.label} className="rail-group">
           <p className="rail-label" id={`${id}-${g.label.replaceAll(" ", "-")}`}>{g.label}</p>
