@@ -21,8 +21,8 @@ export const saveRoleChecklistAction = staffAction(P, async (ctx, id: unknown, n
   if (!rules.ok) return rules;
   const r = await saveRole({ id: id ?? undefined, name, include: rules.rules.include, exclude: [] }, actor(ctx), ctx.ip);
   if (!r.ok) return r;
-  revalidatePath("/staff/roles");
-  revalidatePath("/staff/people");
+  revalidatePath("/staff/settings/roles");
+  revalidatePath("/staff/settings/staff");
   return { ok: true, message: id ? "Saved." : "Role made." };
 });
 
@@ -31,7 +31,7 @@ export const deleteRoleAction = staffAction(P, async (ctx, id: unknown): Promise
   if (typeof id !== "string" || !UUID.test(id)) return NOT_FROM_PAGE;
   const r = await deleteRole(id, actor(ctx), ctx.ip);
   if (!r.ok) return { ok: false, errors: [r.error ?? "That didn't go through."] };
-  revalidatePath("/staff/roles");
-  revalidatePath("/staff/people");
+  revalidatePath("/staff/settings/roles");
+  revalidatePath("/staff/settings/staff");
   return { ok: true, message: "Deleted." };
 });

@@ -14,12 +14,12 @@ import { recentSigninResets } from "@/lib/parents/signin-reset";
 export async function SigninResets({ viewerStaffId }: { viewerStaffId: string }) {
   const { resets, more } = await recentSigninResets(viewerStaffId);
   if (resets.length === 0) return null;
-  const all = `/staff/audit${filtersQuery({ ...NO_FILTERS, action: "parent.signin.reset" })}`;
+  const all = `/staff/settings/audit${filtersQuery({ ...NO_FILTERS, action: "parent.signin.reset" })}`;
   return (
     <Notice tone="info" title="Sign-in resets this week" titleId="resets-h">
       <ul className="notice-list">{resets.map((r) => {
         const who = r.by ?? "Someone";
-        const audit = `/staff/audit${filtersQuery({ ...NO_FILTERS, action: "parent.signin.reset", record: { type: "parent", id: r.parentId } })}`;
+        const audit = `/staff/settings/audit${filtersQuery({ ...NO_FILTERS, action: "parent.signin.reset", record: { type: "parent", id: r.parentId } })}`;
         return (
           <li key={r.auditId}>
             {r.name !== null

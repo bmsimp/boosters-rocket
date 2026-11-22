@@ -890,7 +890,7 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 .email-sample { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 68ch; padding: var(--s3) var(--s4); border-radius: var(--radius-control); background: var(--surface-muted); }
 /* Check the portal's requests: a result keeps its words whole on one line, so its column is given the room. */
 .check-results .state { white-space: nowrap; overflow-wrap: normal; }
-/* The design system gallery (/staff/design-system, and its static twin design/system/gallery.html): each component's
+/* The design system gallery (/staff/settings/design-system, and its static twin design/system/gallery.html): each component's
    name, use and import over its samples. The .ds-hover and .ds-focus samples draw a state a pointer or keyboard
    would; the frame sample shows the bar and the tabs in place instead of fixed to the screen. */
 .ds-page > .page-head { margin-top: var(--s5); }

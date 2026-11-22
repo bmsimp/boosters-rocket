@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, buyout, family, jobRun, parentAuthPasskey, qboConnection, qboCustomerType, role, roleAssignment, roleRule, setting, writeQueue } from "@/lib/db/schema";
-import HealthPage from "@/app/staff/(app)/health/page";
+import HealthPage from "@/app/staff/(app)/settings/health/page";
 import QuickBooksSettingsPage from "@/app/staff/(app)/settings/quickbooks/page";
 import QuickBooksSetupPage from "@/app/staff/(app)/settings/quickbooks/setup/page";
 import { writeAudit } from "@/lib/audit/log";

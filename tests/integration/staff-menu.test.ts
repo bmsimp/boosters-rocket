@@ -7,11 +7,11 @@ import StaffLayout from "@/app/staff/(app)/layout";
 import { resetDb, seedStaff } from "../helpers/db";
 
 /** Each entry is shown only to someone who can open the page it leads to. */
-const SEASONS = 'href="/staff/seasons"', PROGRESS = 'href="/staff/seasons/progress"', HEALTH = 'href="/staff/health"';
+const SEASONS = 'href="/staff/seasons"', PROGRESS = 'href="/staff/seasons/progress"', HEALTH = 'href="/staff/settings/health"';
 const BALANCES = 'href="/staff/balances"', VOLUNTEERING = 'href="/staff/volunteer"', SETTINGS = 'href="/staff/settings"';
 const RECONCILIATION = 'href="/staff/reconciliation"', CREDIT = 'href="/staff/volunteer/credit"', SIGNED = 'href="/staff/forms"';
-const ROLES = 'href="/staff/roles"', AUDIT = 'href="/staff/audit"', STAFF = 'href="/staff/people"';
-const LINKS = 'href="/staff/links"', DESIGN = 'href="/staff/design-system"';
+const ROLES = 'href="/staff/settings/roles"', AUDIT = 'href="/staff/settings/audit"', STAFF = 'href="/staff/settings/staff"';
+const LINKS = 'href="/staff/links"', DESIGN = 'href="/staff/settings/design-system"';
 
 async function staffWith(...patterns: string[]) {
   const s = await seedStaff({ email: "helper@club.org", name: "Hal Helper" });
@@ -42,7 +42,7 @@ async function current(path: string) {
 describe("the staff menu", () => {
   beforeEach(resetDb);
 
-  it("groups an Admin's entries: Home, Families, Season, Money, Settings as one entry, then Admin", async () => {
+  it("groups an Admin's entries: Home, Families, Season, Money, and Settings as one entry, with no Admin group", async () => {
     await asAdmin();
     expect(await entries()).toEqual([
       "Home",
@@ -50,7 +50,6 @@ describe("the staff menu", () => {
       "Season: Seasons, Progress, Signed forms, Volunteering, Volunteer credit",
       "Money: Balances, Reconciliation",
       "Settings",
-      "Admin: Staff, Roles, Audit, Health, Design system",
     ]);
   });
 
@@ -58,7 +57,7 @@ describe("the staff menu", () => {
     await asAdmin();
     const nav = await menu();
     const buttons = [...nav.matchAll(/<button\b([^>]*)>/g)].map((b) => b[1]!);
-    expect(buttons).toHaveLength(4);
+    expect(buttons).toHaveLength(3);
     for (const b of buttons) {
       expect(b).toContain('type="button"');
       expect(b).toContain('aria-expanded="false"');
@@ -84,18 +83,19 @@ describe("the staff menu", () => {
     expect(await entries()).toEqual(["Home", "Season: Seasons"]);
   });
 
-  it("never shows Roles, Audit or Health to a custom role, however wide, and gives it Settings for the Club alone", async () => {
+  it("never shows Roles, the audit log or Health to a custom role, however wide, and gives it Settings", async () => {
     await staffWith("*", "Admin.*", "Admin.Health.Read", "Audit.Log.Read", "Settings.*");
     const nav = await menu();
-    for (const entry of [SEASONS, PROGRESS, STAFF, SETTINGS]) expect(nav).toContain(entry);
-    for (const entry of [HEALTH, ROLES, AUDIT]) expect(nav).not.toContain(entry);
-    expect((await entries()).at(-1)).toBe("Admin: Staff, Design system");
+    for (const entry of [SEASONS, PROGRESS, SETTINGS]) expect(nav).toContain(entry);
+    for (const entry of [HEALTH, ROLES, AUDIT, STAFF, DESIGN]) expect(nav).not.toContain(entry);
+    expect((await entries()).at(-1)).toBe("Settings");
   });
 
   it("shows Settings to someone who may read the club settings, and to nobody without a settings permission", async () => {
     await staffWith("Settings.Club.Read");
-    // The design system gallery is for anyone who may read the club's settings, the look it is drawn in.
-    expect(await entries()).toEqual(["Home", "Settings", "Admin: Design system"]);
+    // The design system gallery is for anyone who may read the club's settings: it is under Settings, not in the menu.
+    expect(await entries()).toEqual(["Home", "Settings"]);
+    expect(await menu()).not.toContain(DESIGN);
     await resetDb();
     await staffWith("Roster.Read", "Season.Steps.ReadWrite", "Finance.Balance.Read");
     expect(await menu()).not.toContain(SETTINGS);
@@ -150,9 +150,12 @@ describe("the staff menu", () => {
     }
   });
 
-  it("shows the Staff entry to someone who may read the staff list, and Roles only to an Admin", async () => {
+  it("leads someone who may only read the staff list from Settings straight to Staff, which is current there", async () => {
     await staffWith("Staff.Users.Read");
-    expect(await entries()).toEqual(["Home", "Admin: Staff"]);
+    expect(await entries()).toEqual(["Home", "Settings"]);
+    expect(await menu()).toContain('href="/staff/settings/staff"');
+    expect(await menu()).not.toContain(SETTINGS);
+    expect(await current("/staff/settings/staff")).toEqual(["/staff/settings/staff"]);
   });
 
   it("marks one entry current, and the group that holds it", async () => {
@@ -161,7 +164,6 @@ describe("the staff menu", () => {
     expect(await current("/staff/seasons/0b0f2a8e-0000-4000-8000-000000000001")).toEqual(["/staff/seasons"]);
     expect(await current("/staff/seasons/progress")).toEqual(["/staff/seasons/progress"]);
     expect(await current("/staff/seasons/progress/family/10")).toEqual(["/staff/seasons/progress"]);
-    expect(await current("/staff/health")).toEqual(["/staff/health"]);
     expect(await current("/staff")).toEqual(["/staff"]);
     expect(await current("/staff/parents/abc")).toEqual(["/staff/parents"]);
     expect(await current("/staff/balances/10")).toEqual(["/staff/balances"]);
@@ -170,14 +172,14 @@ describe("the staff menu", () => {
     expect(await current("/staff/forms/evidence/0b0f2a8e-0000-4000-8000-000000000001")).toEqual(["/staff/forms"]);
     expect(await current("/staff/reconciliation")).toEqual(["/staff/reconciliation"]);
     expect(await current("/staff/links")).toEqual(["/staff/links"]);
-    expect(await current("/staff/design-system")).toEqual(["/staff/design-system"]);
-    // Every settings page is under the one Settings entry.
-    for (const path of ["/staff/settings", "/staff/settings/forms", "/staff/settings/parents/setup", "/staff/settings/club/edit"]) {
+    // Every settings page is under the one Settings entry: Staff, Roles, the audit log, Health and the design system too.
+    for (const path of ["/staff/settings", "/staff/settings/forms", "/staff/settings/parents/setup", "/staff/settings/club/edit", "/staff/settings/health",
+      "/staff/settings/audit", "/staff/settings/staff", "/staff/settings/roles", "/staff/settings/design-system", "/staff/settings/integrations"]) {
       expect(await current(path), path).toEqual(["/staff/settings"]);
     }
     atPath("/staff/volunteer/credit");
     const groups = [...(await menu()).matchAll(/<button\b[^>]*class="([^"]*)"[^>]*>([^<]*)/g)].map((b) => [b[2], b[1]]);
-    expect(groups).toEqual([["Families", "nav-group-button"], ["Season", "nav-group-button here"], ["Money", "nav-group-button"], ["Admin", "nav-group-button"]]);
+    expect(groups).toEqual([["Families", "nav-group-button"], ["Season", "nav-group-button here"], ["Money", "nav-group-button"]]);
     expect(await menu()).toContain('aria-label="Season, current section"');
     expect(await menu()).not.toContain('aria-label="Families, current section"');
   });

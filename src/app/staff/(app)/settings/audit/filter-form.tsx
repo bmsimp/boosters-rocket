@@ -39,11 +39,11 @@ export function AuditFilterForm({ values, actions }: { values: AuditFilterValues
     if (from) q.set("from", from.toISOString());
     if (to) q.set("to", to.toISOString());
     const s = q.toString();
-    router.push(s ? `/staff/audit?${s}` : "/staff/audit");
+    router.push(s ? `/staff/settings/audit?${s}` : "/staff/settings/audit");
   }
 
   return (
-    <form method="get" action="/staff/audit" role="search" className="stack" onSubmit={submit}>
+    <form method="get" action="/staff/settings/audit" role="search" className="stack" onSubmit={submit}>
       <label className="field"><span>What happened</span>
         <input name="action" list="audit-actions" defaultValue={values.action} autoComplete="off" placeholder="Anything" />
         <datalist id="audit-actions">{actions.map((a) => <option key={a.code} value={a.code}>{a.name ?? a.code}</option>)}</datalist>

@@ -45,7 +45,7 @@ import ParentSettingsPage from "@/app/staff/(app)/settings/parents/page";
 import ParentSetupPage from "@/app/staff/(app)/settings/parents/setup/page";
 import QuickBooksSettingsPage from "@/app/staff/(app)/settings/quickbooks/page";
 import StaffLayout from "@/app/staff/(app)/layout";
-import { SETTINGS_SECTIONS } from "@/app/staff/(app)/settings/sections";
+import { SETTINGS_ITEMS } from "@/app/staff/(app)/settings/sections";
 import { oweSetupMailsAction, removeOldAddressPasskeysAction, setLevelAction, setSigninsAction, setWelcomeAction, setRequireStudentsAction } from "@/app/staff/(app)/settings/parents/actions";
 import { OLD_PASSKEYS_CHANGED, OLD_PASSKEYS_COPY as OLD } from "@/lib/parents/old-passkeys-copy";
 import { LEVEL_COUNT_CHANGED, LEVEL_UNREADABLE } from "@/lib/parents/switches";
@@ -107,12 +107,11 @@ describe("the Parent sign-ins settings", () => {
     expect(renderToStaticMarkup(await StaffLayout({ children: null }))).not.toContain('href="/staff/settings/parents"');
   });
 
-  it("Parent sign-ins is a part of Settings for an Admin, after QuickBooks, and not an entry of the staff menu beside Parents", async () => {
+  it("Parent sign-ins is a part of Settings for an Admin, under People and access, and not an entry of the staff menu beside Parents", async () => {
     const html = renderToStaticMarkup(await StaffLayout({ children: null }));
     expect(html).toContain('href="/staff/settings"');
     expect(html).not.toContain('href="/staff/settings/parents"');
-    const keys = SETTINGS_SECTIONS.map((x) => x.key);
-    expect(keys.indexOf("parents")).toBe(keys.indexOf("quickbooks") + 1);
+    expect(SETTINGS_ITEMS.find((x) => x.key === "parents")).toMatchObject({ kind: "page", group: "People and access", title: "Parent sign-ins" });
   });
 
   it("the view shows what is set, plainly, with no inputs, and what switching on needs", async () => {

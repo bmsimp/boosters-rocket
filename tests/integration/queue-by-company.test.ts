@@ -29,7 +29,7 @@ import { addGuardian } from "@/lib/parents/guardians";
 import ReconciliationPage from "@/app/staff/(app)/reconciliation/page";
 import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
 import AccountingLinksPage from "@/app/staff/(app)/links/page";
-import HealthPage from "@/app/staff/(app)/health/page";
+import HealthPage from "@/app/staff/(app)/settings/health/page";
 import StaffHome from "@/app/staff/(app)/page";
 import { resetDb, seedParent, seedStaff } from "../helpers/db";
 import { fznCompany, startQboStub, type QboStub } from "../helpers/qbo-stub";

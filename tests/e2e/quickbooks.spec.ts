@@ -171,7 +171,7 @@ test("staff open a family from the roster, hostile names stay text, and the visi
   const reads = await sql`SELECT target_type, target_id, actor_label FROM audit_log WHERE id > ${mark!.id} AND action = 'roster.family.read'`;
   // One visit, one row, naming the app's own family record.
   expect(reads.map((r) => ({ ...r }))).toEqual([{ target_type: "family", target_id: await familyIdOf("E2E-10"), actor_label: "e2e-admin@example.org" }]);
-  await page.goto("/staff/audit");
+  await page.goto("/staff/settings/audit");
   await expect(page.getByText("roster.family.read").first()).toBeVisible();
 });
 

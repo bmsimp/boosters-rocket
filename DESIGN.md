@@ -280,7 +280,7 @@ components:
 
 # Design System: Boosters Rocket
 
-The stylesheet (`src/app/booster.css`) is what the browser reads and is the source of every value here; `src/lib/theme/palette.ts` mirrors its fixed colors and `tests/unit/design-tokens.test.ts` holds the two together and measures every pair. The components are the primitives in `src/app/components/ui/` (import from `@/app/components/ui`), indexed in `docs/agents/ui.md` and drawn in every state in the living gallery (`/staff/design-system`, and its static twin `design/system/gallery.html`). Parent Home (`src/app/(parent)/page.tsx`) is the reference surface.
+The stylesheet (`src/app/booster.css`) is what the browser reads and is the source of every value here; `src/lib/theme/palette.ts` mirrors its fixed colors and `tests/unit/design-tokens.test.ts` holds the two together and measures every pair. The components are the primitives in `src/app/components/ui/` (import from `@/app/components/ui`), indexed in `docs/agents/ui.md` and drawn in every state in the living gallery (`/staff/settings/design-system`, and its static twin `design/system/gallery.html`). Parent Home (`src/app/(parent)/page.tsx`) is the reference surface.
 
 ## Overview
 

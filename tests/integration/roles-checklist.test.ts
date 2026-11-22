@@ -7,8 +7,8 @@ import { auditLog, role, roleAssignment, roleRule } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
 import { effectivePermissions } from "@/lib/permissions/effective";
 import { listRoles } from "@/lib/staff/roles";
-import RolesPage from "@/app/staff/(app)/roles/page";
-import { saveRoleChecklistAction, deleteRoleAction } from "@/app/staff/(app)/roles/actions";
+import RolesPage from "@/app/staff/(app)/settings/roles/page";
+import { saveRoleChecklistAction, deleteRoleAction } from "@/app/staff/(app)/settings/roles/actions";
 import { resetDb, seedStaff, adminRoleId } from "../helpers/db";
 import { seedSignedInParent } from "../helpers/parent";
 

@@ -3,8 +3,8 @@ import { asRefusedStaff, asStaff, pageOutcome, renderPage } from "../helpers/sig
 
 import { db } from "@/lib/db/client";
 import { auditLog, role, roleAssignment, roleRule } from "@/lib/db/schema";
-import AuditPage from "@/app/staff/(app)/audit/page";
-import { GET as exportAudit } from "@/app/staff/(app)/audit/export/route";
+import AuditPage from "@/app/staff/(app)/settings/audit/page";
+import { GET as exportAudit } from "@/app/staff/(app)/settings/audit/export/route";
 import { AUDIT_PAGE_SIZE, NO_FILTERS, auditPage, filtersQuery, parseAuditFilters, parseCursor, type AuditFilters } from "@/lib/audit/query";
 import { ACTION_NAMES, actionName } from "@/lib/audit/actions";
 import { csvCell } from "@/lib/audit/csv";
@@ -17,7 +17,7 @@ const seedRows = async (n: number, row: (i: number) => Partial<NewRow> = () => (
   db.insert(auditLog).values(Array.from({ length: n }, (_, i) => ({ at: new Date(T0 + i * 60_000), door: "staff" as const, actorLabel: "sam@club.org", action: "signin", ...row(i) }))).returning({ id: auditLog.id });
 const filters = (f: Partial<AuditFilters>): AuditFilters => ({ ...NO_FILTERS, ...f });
 const allRows = async () => (await db.select().from(auditLog)).sort((a, b) => a.id - b.id);
-const exportRequest = (query = "") => new Request(`http://localhost:3000/staff/audit/export${query}`, { headers: { "cf-connecting-ip": "203.0.113.9" } });
+const exportRequest = (query = "") => new Request(`http://localhost:3000/staff/settings/audit/export${query}`, { headers: { "cf-connecting-ip": "203.0.113.9" } });
 /** A CSV file as rows of cells. Every cell is quoted, quotes are doubled, and a cell may hold a line break. */
 function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
@@ -86,7 +86,7 @@ describe("the audit log page", () => {
     expect(html).toContain("2 rows");
     expect(html).toContain("203.0.113.7");
     // The record is a link to that record's own history.
-    expect(html).toContain('href="/staff/audit?record=parent%3Ap-1"');
+    expect(html).toContain('href="/staff/settings/audit?record=parent%3Ap-1"');
   });
 
   it("names every action the portal writes", () => {
@@ -120,9 +120,9 @@ describe("the audit log page", () => {
 
     const html = await renderPage(AuditPage, { searchParams: { before: String(first.older) } });
     expect(html).toContain("125 rows");
-    expect(html).toContain(`href="/staff/audit?after=${second.rows[0]!.id}"`);
-    expect(html).toContain(`href="/staff/audit?before=${second.rows.at(-1)!.id}"`);
-    expect(html).toContain('href="/staff/audit/export"');
+    expect(html).toContain(`href="/staff/settings/audit?after=${second.rows[0]!.id}"`);
+    expect(html).toContain(`href="/staff/settings/audit?before=${second.rows.at(-1)!.id}"`);
+    expect(html).toContain('href="/staff/settings/audit/export"');
   });
 
   it("filters by action, by who, by the record and by date, alone and together", async () => {
@@ -158,7 +158,7 @@ describe("the audit log page", () => {
     expect(html).toContain("1 row found");
     expect(html).toContain("Parent blocked");
     expect(html).not.toContain("<code>roster.family.read</code>");
-    expect(html).toContain('href="/staff/audit/export?action=parent.block&amp;who=sam"');
+    expect(html).toContain('href="/staff/settings/audit/export?action=parent.block&amp;who=sam"');
   });
 
   it("reads filters from an address strictly: what it can't read is no filter, never a guess", () => {

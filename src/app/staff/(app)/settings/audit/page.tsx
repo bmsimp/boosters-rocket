@@ -27,7 +27,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
       <section className="box" aria-labelledby="audit-find-h"><h2 id="audit-find-h">Find</h2>
         <AuditFilterForm actions={actions.map((code) => ({ code, name: actionName(code) }))}
           values={{ action: filters.action ?? "", who: filters.who ?? "", record: recordText(filters.record), from: filters.from?.toISOString() ?? null, to: filters.to?.toISOString() ?? null }} />
-        {filtered && <p className="box-foot"><Link href="/staff/audit">Show everything</Link></p>}
+        {filtered && <p className="box-foot"><Link href="/staff/settings/audit">Show everything</Link></p>}
       </section>
 
       <section className="box" aria-labelledby="audit-h"><h2 id="audit-h">{filtered ? `${rowsWord(page.total)} found` : rowsWord(page.total)}</h2>
@@ -42,15 +42,15 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
             } },
             { key: "who", header: "Who", cell: (r) => <>{r.actorLabel ?? "system"}<span className="when">{r.door}{r.ip ? ` · ${r.ip}` : ""}</span></> },
             { key: "record", header: "Record", cell: (r) => (r.targetType
-              ? (r.targetId ? <Link href={`/staff/audit${filtersQuery({ ...filters, record: { type: r.targetType, id: r.targetId } })}`}>{r.targetType} {r.targetId}</Link> : r.targetType)
+              ? (r.targetId ? <Link href={`/staff/settings/audit${filtersQuery({ ...filters, record: { type: r.targetType, id: r.targetId } })}`}>{r.targetType} {r.targetId}</Link> : r.targetType)
               : "None") },
           ]} />
         )}
         <div className="row-actions box-foot">
-          {page.newer !== null && <Link className="btn btn-line" href={`/staff/audit${filtersQuery(filters, { after: page.newer })}`}>Newer</Link>}
-          {page.older !== null && <Link className="btn btn-line" href={`/staff/audit${filtersQuery(filters, { before: page.older })}`}>Older</Link>}
+          {page.newer !== null && <Link className="btn btn-line" href={`/staff/settings/audit${filtersQuery(filters, { after: page.newer })}`}>Newer</Link>}
+          {page.older !== null && <Link className="btn btn-line" href={`/staff/settings/audit${filtersQuery(filters, { before: page.older })}`}>Older</Link>}
           {/* A plain link, not a Link: it is a file to download, and it must never be fetched ahead of a click (each export is audited). */}
-          {page.total > 0 && <a className="btn btn-line" href={`/staff/audit/export${filtersQuery(filters)}`} download>Export {filtered ? `these ${rowsWord(page.total)}` : `all ${rowsWord(page.total)}`} (CSV)</a>}
+          {page.total > 0 && <a className="btn btn-line" href={`/staff/settings/audit/export${filtersQuery(filters)}`} download>Export {filtered ? `these ${rowsWord(page.total)}` : `all ${rowsWord(page.total)}`} (CSV)</a>}
         </div>
       </section>
     </main>

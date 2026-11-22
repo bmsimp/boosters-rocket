@@ -5,8 +5,8 @@ import { MARK_PAIRS, PALETTE, TEXT_PAIRS, type Mode, type Token } from "@/lib/th
 import {
   ActionOutcome, Avatar, Badge, Button, CalendarDate, Card, Checkbox, DataTable, EmptyState, HowThisWorks, KeyValue, LinkButton, List, ListRow, ListSubRow, ListTotal, LocalTime,
   Notice, PageHeader, SectionLabel, Select, Stat, StateWords, StatusBadge, StatusIcon, StepIndicator, TextArea, TextInput, Toolbar, type Column,
-} from "../../../components/ui";
-import { PoweredBy } from "../../../components/powered-by";
+} from "@/app/components/ui";
+import { PoweredBy } from "@/app/components/powered-by";
 import { ChoiceSample, TakenChoiceSample } from "./gallery-choice";
 
 /**

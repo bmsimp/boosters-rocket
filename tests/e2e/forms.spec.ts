@@ -95,7 +95,7 @@ test("an Admin finds Forms settings not set up, with the webhook address on the 
   await expect(page.getByRole("region", { name: "2. Check the connection" }).getByRole("alert")).toContainText("Save Documenso's address and API token first.");
   await noSidewaysScroll(page);
   // The Health page says the same, and leads here.
-  await page.goto("/staff/health");
+  await page.goto("/staff/settings/health");
   const line = page.locator('li[data-health="forms"]');
   await expect(line).toContainText("Forms (Documenso)");
   await expect(line).toContainText("Not set up");

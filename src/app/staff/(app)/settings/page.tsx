@@ -13,12 +13,14 @@ import { apiFailing, formsSummary } from "@/lib/forms/settings";
 import { StateWords } from "@/app/components/state-words";
 import { LocalTime } from "@/app/components/local-time";
 import { CalendarDate } from "@/app/components/calendar-date";
-import { settingsSections, type SettingsKey, type SettingsSection } from "./sections";
+import { settingsItems, type SettingsItem } from "./sections";
 import { credentialStanding } from "../secret-expiry-rule";
 
 export const metadata = { title: "Settings" };
 export const dynamic = "force-dynamic";
 
+type Section = Extract<SettingsItem, { key: BoxKey }>;
+type BoxKey = "club" | "sign-in" | "mail" | "quickbooks" | "parents" | "forms";
 type Summary = { state: "done" | "todo"; words: string; details: [string, ReactNode][]; open: string };
 const n = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
@@ -32,7 +34,7 @@ const n = (count: number, one: string, many: string) => `${count} ${count === 1 
  */
 export default async function SettingsPage() {
   const ctx = await requireStaffPage("Settings.Club.Read");
-  const sections = settingsSections(ctx.effective);
+  const sections = settingsItems(ctx.effective).filter((s): s is Section => s.key in LOADERS);
   if (sections.length === 0) redirect("/refused");
   const summaries = await Promise.all(sections.map((s) => LOADERS[s.key]()));
   return (
@@ -46,7 +48,7 @@ export default async function SettingsPage() {
   );
 }
 
-function SectionBox({ section, summary }: { section: SettingsSection; summary: Summary }) {
+function SectionBox({ section, summary }: { section: Section; summary: Summary }) {
   const id = `settings-${section.key}-h`;
   return (
     <section className="box" aria-labelledby={id} data-settings={section.key}>
@@ -59,7 +61,7 @@ function SectionBox({ section, summary }: { section: SettingsSection; summary: S
 }
 const Detail = ({ term, value }: { term: string; value: ReactNode }) => <><dt>{term}</dt><dd>{value}</dd></>;
 
-const LOADERS: Record<SettingsKey, () => Promise<Summary>> = {
+const LOADERS: Record<BoxKey, () => Promise<Summary>> = {
   async club() {
     const [club, saved] = await Promise.all([getClubSettings(), clubSaved()]);
     const state = saved && club.storedColorValid ? "done" : "todo";

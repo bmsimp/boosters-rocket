@@ -42,7 +42,7 @@ test("an Admin opens Settings from the menu, follows a section to its page and c
 
 test("an Admin makes a role by ticking what it lets people do, changes it, and deletes it", async ({ page }, info) => {
   const name = `Ticked role ${info.project.name}`;
-  await page.goto("/staff/roles");
+  await page.goto("/staff/settings/roles");
   await expect(page.locator("main textarea")).toHaveCount(0); // no patterns to type
   const fresh = page.getByRole("region", { name: "New role" });
   await fresh.getByLabel("Name", { exact: true }).fill(name);
@@ -79,7 +79,7 @@ test("an Admin makes a role by ticking what it lets people do, changes it, and d
 });
 
 test("the Staff page shows each person's roles as ticks with their own Save, and a quieter Turn off sign-in", async ({ page }) => {
-  await page.goto("/staff/people");
+  await page.goto("/staff/settings/staff");
   await expect(page.locator("main details")).toHaveCount(0);
   const rows = page.locator("li.staff-person");
   await expect(rows.first().getByRole("group", { name: /^Roles for / })).toBeVisible();

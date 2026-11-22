@@ -8,7 +8,7 @@ import { ADMIN_ONLY, GRANTABLE } from "@/lib/permissions/registry";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import FormsSettingsPage from "@/app/staff/(app)/settings/forms/page";
 import FormsSetupPage from "@/app/staff/(app)/settings/forms/setup/page";
-import HealthPage from "@/app/staff/(app)/health/page";
+import HealthPage from "@/app/staff/(app)/settings/health/page";
 import RequirementPage from "@/app/staff/(app)/seasons/[id]/requirements/[requirementId]/page";
 import SeasonSetupPage from "@/app/staff/(app)/seasons/[id]/page";
 import { checkFormsConnectionAction, newWebhookSecretAction, saveFormsSettingsAction } from "@/app/staff/(app)/settings/forms/actions";

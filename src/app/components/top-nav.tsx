@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { MenuEntry } from "@/app/staff/(app)/staff-menu";
+import type { MenuEntry, MenuLink } from "@/app/staff/(app)/staff-menu";
 
 /** "/" and "/staff" are section roots, so only an exact match marks them current; others match by prefix. */
 const EXACT = new Set(["/", "/staff"]);
@@ -41,7 +41,10 @@ export function AccountLink({ href, initials, label }: { href: string; initials:
   return <Link className="account" href={href} aria-label={label} aria-current={isCurrent(path, href) ? "page" : undefined}>{initials}</Link>;
 }
 
-const hrefsOf = (menu: MenuEntry[]) => menu.flatMap((m) => (m.kind === "link" ? [m.href] : m.links.map((l) => l.href)));
+/** The address that marks an entry current: its section's where it has one (Settings, for every page under it), else its own. */
+const currentKey = (l: MenuLink): string => l.section ?? l.href;
+/** What marks each entry current: its section where it has one (Settings), else its address. */
+const hrefsOf = (menu: MenuEntry[]) => menu.flatMap((m) => (m.kind === "link" ? [currentKey(m)] : m.links.map(currentKey)));
 const groupId = (i: number) => `staff-menu-${i}`;
 
 /**
@@ -75,8 +78,8 @@ export function StaffNav({ menu }: { menu: MenuEntry[] }) {
   return (
     <nav className="top-nav" aria-label="Main" ref={navRef}>
       {menu.map((m, i) => {
-        if (m.kind === "link") return <Link key={m.href} href={m.href} aria-current={m.href === current ? "page" : undefined}>{m.label}</Link>;
-        const here = m.links.some((l) => l.href === current);
+        if (m.kind === "link") return <Link key={m.href} href={m.href} aria-current={currentKey(m) === current ? "page" : undefined}>{m.label}</Link>;
+        const here = m.links.some((l) => currentKey(l) === current);
         const isOpen = open === i;
         return (
           <div key={m.label} className="nav-group" onKeyDown={onKey(i)} onBlur={onBlur(i)}>
@@ -87,7 +90,7 @@ export function StaffNav({ menu }: { menu: MenuEntry[] }) {
             </button>
             <div id={groupId(i)} className="nav-panel" hidden={!isOpen}>
               {m.links.map((l) => (
-                <Link key={l.href} href={l.href} aria-current={l.href === current ? "page" : undefined} onClick={() => setOpen(null)}>{l.label}</Link>
+                <Link key={l.href} href={l.href} aria-current={currentKey(l) === current ? "page" : undefined} onClick={() => setOpen(null)}>{l.label}</Link>
               ))}
             </div>
           </div>
@@ -106,8 +109,8 @@ export function StaffMobileMenu({ menu }: { menu: MenuEntry[] }) {
   const current = currentHref(path, hrefsOf(menu));
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
-  const link = (l: NavItem) => (
-    <Link key={l.href} href={l.href} aria-current={l.href === current ? "page" : undefined} onClick={() => setOpen(false)}>{l.label}</Link>
+  const link = (l: MenuLink) => (
+    <Link key={l.href} href={l.href} aria-current={currentKey(l) === current ? "page" : undefined} onClick={() => setOpen(false)}>{l.label}</Link>
   );
   return (
     <div className="menu-mobile" onKeyDown={(e) => { if (e.key === "Escape" && open) { setOpen(false); button.current?.focus(); } }}>

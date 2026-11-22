@@ -51,7 +51,7 @@ sandbox company and the club's Microsoft 365 mail, but no Documenso.
    is in `~/booster-rocket-backups`. **If not:** the exit code says why (the table in that section): 2 refused, 3
    migrations failed, 4 the app didn't become healthy, 6 `git pull` failed, 7 the build failed, 8 the backup failed
    (nothing was migrated and the running app wasn't touched).
-5. **Open the Health page** (`/staff/health`, Admin, Health in the staff menu).
+5. **Open the Health page** (`/staff/settings/health`, Admin, Health in the staff menu).
    **Pass:** **Version** names the commit just deployed; **Worker** says it woke within the last minute; **Last
    backup** shows the deploy's backup (it also says Documenso's database wasn't part of it: this host has none); the
    address box says the browser reached the portal at its own address.

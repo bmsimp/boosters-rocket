@@ -137,7 +137,7 @@ describe("the staff home's sign-in resets", () => {
     expect(text(line)).toContain("Sign-in resets this week");
     expect(plain(line)).toContain(`ada@club.org reset ${FAMILY_A.parent.name}'s sign-in `);
     expect(line).toContain(`href="/staff/parents/${anaId}"`);
-    expect(line).toContain(`href="/staff/audit${filtersQuery({ ...NO_FILTERS, action: "parent.signin.reset", record: { type: "parent", id: anaId } }).replaceAll("&", "&amp;")}"`);
+    expect(line).toContain(`href="/staff/settings/audit${filtersQuery({ ...NO_FILTERS, action: "parent.signin.reset", record: { type: "parent", id: anaId } }).replaceAll("&", "&amp;")}"`);
     expect(text(line)).toContain("Didn't expect one? Ask whoever did it. Their reason is in the audit log.");
     expect(line).not.toContain(FAMILY_B.parent.name);
     expect(html).not.toContain(REASON);
@@ -165,7 +165,7 @@ describe("the staff home's sign-in resets", () => {
     const many = (n: number) => db.insert(auditLog).values(Array.from({ length: n }, (_, i) => ({ door: "staff" as const, actorId: ada.id, actorLabel: ada.email,
       action: "parent.signin.reset", permission: "Parents.SignInReset.ReadWrite", targetType: "parent", targetId: anaId,
       after: { reason: REASON, calledBack: true }, at: new Date(Date.now() - (i + 1) * HOUR) })));
-    const all = `href="/staff/audit${filtersQuery({ ...NO_FILTERS, action: "parent.signin.reset" }).replaceAll("&", "&amp;")}"`;
+    const all = `href="/staff/settings/audit${filtersQuery({ ...NO_FILTERS, action: "parent.signin.reset" }).replaceAll("&", "&amp;")}"`;
     await many(50);
     let line = section(await home());
     expect(line.match(/<li[ >]/g)).toHaveLength(50);

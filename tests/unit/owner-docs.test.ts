@@ -9,7 +9,7 @@ import path from "node:path";
  *  - a file of the repository named in backticks (`docs/...`, `src/...`, `deploy/...`, a root file such as `AGENTS.md`)
  *    that doesn't exist;
  *  - a link to a file of the repository that doesn't exist, or to a heading that file doesn't have;
- *  - a page address in backticks (`/staff/health`, `/volunteer/check-in/<code>`, `<APP_URL>/api/...`) that no page or
+ *  - a page address in backticks (`/staff/settings/health`, `/volunteer/check-in/<code>`, `<APP_URL>/api/...`) that no page or
  *    route handler under src/app answers.
  */
 const root = path.resolve(__dirname, "../..");
@@ -94,7 +94,7 @@ const exists = (name: string) => existsSync(path.join(root, name));
 
 describe("the documents' own reading of the repository", () => {
   it("finds the pages src/app answers, through route groups and dynamic segments", () => {
-    expect(answers("/staff/health")).toBe(true);
+    expect(answers("/staff/settings/health")).toBe(true);
     expect(answers("/volunteer/check-in/<code>")).toBe(true);
     expect(answers("/staff/volunteer/check-in/<shiftId>")).toBe(true);
     expect(answers("/forms/<id>/signed")).toBe(true);
@@ -112,7 +112,7 @@ describe("the documents' own reading of the repository", () => {
 
   it("reads files, pages and links out of a document's text", () => {
     const named = namedIn("docs/runbooks/before-the-first-family.md");
-    expect(named.pages).toEqual(expect.arrayContaining(["/staff/health", "/staff/volunteer/check-in/<shiftId>", "/payments"]));
+    expect(named.pages).toEqual(expect.arrayContaining(["/staff/settings/health", "/staff/volunteer/check-in/<shiftId>", "/payments"]));
     expect(named.files).toEqual(expect.arrayContaining(["src/lib/forms/consent.ts", "docs/ui-backlog.md"]));
     expect(named.links.map((l) => l.target)).toEqual(expect.arrayContaining(["docs/runbooks/poc-linuxdev.md"]));
   });

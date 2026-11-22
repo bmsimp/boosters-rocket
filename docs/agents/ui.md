@@ -6,7 +6,7 @@ The look is the calm category standard (the owner's choice of 2026-11-21, `PRODU
 
 ## Components
 
-Import from the index: `import { Card, List, ListRow, LinkButton } from "@/app/components/ui";` (server components unless the file says `"use client"`). See each one in every state at `/staff/design-system` (Admin menu), or in `design/system/gallery.html` without the app.
+Import from the index: `import { Card, List, ListRow, LinkButton } from "@/app/components/ui";` (server components unless the file says `"use client"`). See each one in every state at `/staff/settings/design-system` (Admin menu), or in `design/system/gallery.html` without the app.
 
 | Need | Use | Don't |
 | --- | --- | --- |
@@ -59,7 +59,7 @@ Section 1 of `booster.css`; the fixed colors are mirrored in `src/lib/theme/pale
 
 ## The gallery
 
-`/staff/design-system` (`src/app/staff/(app)/design-system/`, permission `Settings.Club.Read`, an Admin menu entry) draws `Gallery` (`gallery.tsx`): sample content only, no reads, not audited. A new primitive or state gets a sample there in the same commit, then `pnpm tsx scripts/design-gallery.tsx` writes the static twin `design/system/gallery.html` (the same components and stylesheet, inlined, fetching nothing; it shows the fallback face, as Inter comes through `next/font`).
+`/staff/settings/design-system` (`src/app/staff/(app)/settings/design-system/`, permission `Settings.Club.Read`, an Admin menu entry) draws `Gallery` (`gallery.tsx`): sample content only, no reads, not audited. A new primitive or state gets a sample there in the same commit, then `pnpm tsx scripts/design-gallery.tsx` writes the static twin `design/system/gallery.html` (the same components and stylesheet, inlined, fetching nothing; it shows the fallback face, as Inter comes through `next/font`).
 
 ## The account control
 

@@ -1,8 +1,9 @@
 import { can, type Effective } from "@/lib/permissions/effective";
 import type { Permission } from "@/lib/permissions/registry";
-import { settingsSections } from "./settings/sections";
+import { SETTINGS_ROOT, settingsHome } from "./settings/sections";
 
-export type MenuLink = { href: string; label: string };
+/** `section`: the address whose pages all mark this entry current, where it differs from `href` (Settings). */
+export type MenuLink = { href: string; label: string; section?: string };
 export type MenuGroup = { label: string; links: MenuLink[] };
 /** An entry of the staff menu: a link of its own, or a group of links behind a button. */
 export type MenuEntry = ({ kind: "link" } & MenuLink) | ({ kind: "group" } & MenuGroup);
@@ -28,20 +29,14 @@ const groups: { label: string; links: Rule[] }[] = [
     { href: "/staff/balances", label: "Balances", when: holds("Finance.Balance.Read") },
     { href: "/staff/reconciliation", label: "Reconciliation", when: holds("Roster.Read") },
   ] },
-  { label: "Admin", links: [
-    { href: "/staff/people", label: "Staff", when: holds("Staff.Users.Read") },
-    { href: "/staff/roles", label: "Roles", when: holds("Admin.Roles.ReadWrite") },
-    { href: "/staff/audit", label: "Audit", when: holds("Audit.Log.Read") },
-    { href: "/staff/health", label: "Health", when: holds("Admin.Health.Read") },
-    // The components pages are built from, with sample content only: for anyone who may read the club's own settings.
-    { href: "/staff/design-system", label: "Design system", when: holds("Settings.Club.Read") },
-  ] },
 ];
 
 /**
  * The staff menu for one person: Home, the groups that hold an entry for them, and Settings as one entry when they may
- * see any part of it. Each entry is there only for someone who may open the page it leads to; a group with none is left
- * out. Pure, so the layout and the tests read the same menu.
+ * see any part of it (Staff, Roles, the audit log, Health and the design system are under Settings too). Each entry is
+ * there only for someone who may open the page it leads to; a group with none is left out. Settings leads to the
+ * Overview, or straight to someone's one item when they may not open the Overview (settingsHome()), and is current on
+ * every page under /staff/settings. Pure, so the layout and the tests read the same menu.
  */
 export function staffMenu(e: Effective): MenuEntry[] {
   const group = (label: string): MenuEntry[] => {
@@ -49,13 +44,13 @@ export function staffMenu(e: Effective): MenuEntry[] {
     const links = g.links.filter((l) => l.when(e)).map(({ href, label: l }) => ({ href, label: l }));
     return links.length ? [{ kind: "group", label, links }] : [];
   };
+  const settings = settingsHome(e);
   return [
     { kind: "link", href: "/staff", label: "Home" },
     ...group("Families"), ...group("Season"), ...group("Money"),
-    ...(settingsSections(e).length ? [{ kind: "link" as const, href: "/staff/settings", label: "Settings" }] : []),
-    ...group("Admin"),
+    ...(settings ? [{ kind: "link" as const, href: settings, label: "Settings", ...(settings === SETTINGS_ROOT ? {} : { section: SETTINGS_ROOT }) }] : []),
   ];
 }
 
-/** Every address in the menu, in its order: what decides which one entry is current. */
+/** Every address in the menu, in its order. */
 export const menuHrefs = (menu: MenuEntry[]): string[] => menu.flatMap((m) => (m.kind === "link" ? [m.href] : m.links.map((l) => l.href)));

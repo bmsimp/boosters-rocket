@@ -21,7 +21,7 @@ const localDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad
 
 test("the Health page tells an Admin what is working, in words, and that the address matches", async ({ page, context, baseURL }) => {
   await context.addCookies([staffSessionCookie()]);
-  await page.goto("/staff/health");
+  await page.goto("/staff/settings/health");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Health");
   const line = (key: string) => page.locator(`li[data-health="${key}"]`);
   for (const key of ["database", "worker", "cleanup", "quickbooks", "money", "buyout_check", "mail", "volunteer_reminders", "forms", "parents", "breach_check", "due_reminders", "backup", "version"]) await expect(line(key)).toBeVisible();
@@ -45,7 +45,7 @@ test("the Health page tells an Admin what is working, in words, and that the add
 test("the Health page, the audit log and its export are refused without a staff session", async ({ browser }) => {
   const context = await browser.newContext();
   const page = await context.newPage();
-  for (const path of ["/staff/health", "/staff/audit", "/staff/audit/export"]) {
+  for (const path of ["/staff/settings/health", "/staff/settings/audit", "/staff/settings/audit/export"]) {
     await page.goto(path);
     await expect(page).toHaveURL(/\/staff\/sign-in$/);
   }
@@ -60,7 +60,7 @@ test("the audit log pages, filters by who and by day, and exports what was found
   const who = `ops-e2e-${Date.now()}@example.org`;
   await sql`INSERT INTO audit_log (door, actor_label, action, target_type, target_id)
             SELECT 'staff', ${who}, CASE WHEN n % 2 = 0 THEN 'parent.block' ELSE 'signin' END, 'parent', 'ops-e2e-' || n FROM generate_series(1, 60) AS n`;
-  await page.goto("/staff/audit");
+  await page.goto("/staff/settings/audit");
   await page.getByLabel("Who did it (part of a name or email)").fill(who.toUpperCase());
   await page.getByRole("button", { name: "Show" }).click();
   await expect(page.getByRole("heading", { name: "60 rows found" })).toBeVisible();
