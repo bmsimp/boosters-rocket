@@ -18,19 +18,20 @@
   Windows contrast themes (forced-colors) are honored in section 6.
 
   Club color. The app derives every --club-* value from the one color a club picks (src/lib/theme/contrast.ts):
-    --club          fill for primary buttons and the club's logo tile (same in every mode)
-    --club-on       ink on that fill: white or near-black, whichever passes 4.5:1
+    --club-l/-d     fill for primary buttons and the club's logo tile, per theme: the color as picked in light; in dark,
+                    lightened (same hue) until it stands 3:1 off the dark grounds. --club picks the theme's.
+    --club-on-l/-d  ink on that fill: white or near-black, whichever passes 4.5:1. --club-on picks the theme's.
     --club-text-*   the club color as text, link and focus ring, per mode: l, d (4.5:1), lhc, dhc (7:1)
-    --club-tint-*   a quiet wash for the current nav item and hover, per theme
+    --club-tint-*   a quiet wash for the current nav item and hover, per theme (in dark, at least 1.3:1 off the surface)
   The fixed colors below are also in src/lib/theme/palette.ts, which tests/unit/design-tokens.test.ts holds to these.
 */
 
 /* ===== 1. Tokens ===== */
 :root {
   /* the default club color, Launch Indigo, derived (src/app/layout.tsx writes the club's own over these) */
-  --club: #1e1b4b; --club-on: #ffffff;
-  --club-text-l: #1e1b4b; --club-text-d: #837ed1; --club-text-lhc: #1e1b4b; --club-text-dhc: #a09cdb;
-  --club-tint-l: #ededf1; --club-tint-d: #171823;
+  --club-l: #1e1b4b; --club-on-l: #ffffff; --club-d: #635dc5; --club-on-d: #ffffff;
+  --club-text-l: #1e1b4b; --club-text-d: #928dd7; --club-text-lhc: #1e1b4b; --club-text-dhc: #bab7e5;
+  --club-tint-l: #ededf1; --club-tint-d: #2c2b4b;
 
   --font: var(--font-sans, "Inter"), "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   /* type scale: six steps plus the control size (buttons, nav links, table cells, quiet lines); never under 0.8125rem; body is 1rem */
@@ -60,6 +61,7 @@
   --br-ink: #1e1b4b; --br-flame-ink: #b82d28; --br-disc: #1e1b4b; --br-flame: #e8433a; --br-ember: #f49a92; --br-smoke: #ffffff;
   --overlay: rgb(0 0 0 / 0.08); --overlay-mix: black 8%; /* the same wash as a color-mix() term (a filled button's hover) */
   --shadow-menu: 0 8px 24px -6px rgb(16 17 20 / 0.14), 0 1px 3px rgb(16 17 20 / 0.08);
+  --club: var(--club-l); --club-on: var(--club-on-l);
   --club-text: var(--club-text-l); --club-tint: var(--club-tint-l); --club-text-hc: var(--club-text-lhc);
   /* @tokens light-hc */
   --hc-ground: #ffffff; --hc-surface: #ffffff; --hc-surface-raised: #ffffff; --hc-surface-muted: #f2f2f4;
@@ -81,6 +83,7 @@
   --br-ink: #ffffff; --br-flame-ink: #f06a5f; --br-disc: #332f72; --br-flame: #e8433a; --br-ember: #f49a92; --br-smoke: #ffffff;
   --overlay: rgb(255 255 255 / 0.1); --overlay-mix: white 10%;
   --shadow-menu: 0 8px 24px -6px rgb(0 0 0 / 0.6), 0 1px 3px rgb(0 0 0 / 0.5);
+  --club: var(--club-d); --club-on: var(--club-on-d);
   --club-text: var(--club-text-d); --club-tint: var(--club-tint-d); --club-text-hc: var(--club-text-dhc);
   /* @tokens dark-hc */
   --hc-ground: #000000; --hc-surface: #000000; --hc-surface-raised: #141518; --hc-surface-muted: #141518;
@@ -101,6 +104,7 @@
     --br-ink: #ffffff; --br-flame-ink: #f06a5f; --br-disc: #332f72; --br-flame: #e8433a; --br-ember: #f49a92; --br-smoke: #ffffff;
     --overlay: rgb(255 255 255 / 0.1); --overlay-mix: white 10%;
     --shadow-menu: 0 8px 24px -6px rgb(0 0 0 / 0.6), 0 1px 3px rgb(0 0 0 / 0.5);
+    --club: var(--club-d); --club-on: var(--club-on-d);
     --club-text: var(--club-text-d); --club-tint: var(--club-tint-d); --club-text-hc: var(--club-text-dhc);
     --hc-ground: #000000; --hc-surface: #000000; --hc-surface-raised: #141518; --hc-surface-muted: #141518;
     --hc-line: #ececee; --hc-ink: #ffffff; --hc-ink-2: #e2e4e8;
@@ -923,6 +927,10 @@ main.wrap.single > .page-head + p { margin-top: var(--s4); }
 .mail-steps .state { display: inline-flex; }
 /* A club color picked on the setup's club step or the Club page, shown where it will be used: on the logo tile and a
    primary button's fill. */
+/* The preview draws the color being picked (its own --club-l and --club-d), in the theme the page is in. */
+.club-preview { --club: var(--club-l); --club-on: var(--club-on-l); }
+[data-theme="dark"] .club-preview { --club: var(--club-d); --club-on: var(--club-on-d); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .club-preview { --club: var(--club-d); --club-on: var(--club-on-d); } }
 .club-preview { display: flex; align-items: center; gap: var(--s3); min-height: 56px; padding: 0 var(--s4); background: var(--club); color: var(--club-on);
   border-radius: var(--radius); }
 .club-preview .club { font-size: var(--text-md); font-weight: 600; }

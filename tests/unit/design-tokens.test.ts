@@ -62,6 +62,43 @@ describe("every pair passes its floor", () => {
   });
 });
 
+// A dark club color (Launch Indigo, the default, above all) barely parted from the dark grounds: its fill is lightened
+// in dark until a primary button and the logo tile stand 3:1 off every dark ground, with its ink worked out again, and
+// its tint is washed in until the current nav item is told from the surface (1.3:1) while the club's text on it reads.
+describe("a dark club color in dark mode", () => {
+  const DARK_GROUNDS = [PALETTE.dark.ground, PALETTE.dark.surface, PALETTE.dark["surface-raised"], PALETTE.dark["surface-muted"]];
+  const HC_GROUNDS = [PALETTE.darkHc.ground, PALETTE.darkHc.surface, PALETTE.darkHc["surface-raised"]];
+  it.each(["#1e1b4b", "#000000", "#003366", "#2b0000", "#5b2a86", "#333333", "#1d7344", "#0000ff", "#f2c200", "#e0f7fa", "#ff0000", "#ffffff", "#808080"])("%s: the fill stands off the ground, and the tint off the surface", (hex) => {
+    const t = deriveClubTokens(hex);
+    for (const bg of [...DARK_GROUNDS, ...HC_GROUNDS]) expect(contrastRatio(t.clubD, bg), `fill on ${bg}`).toBeGreaterThanOrEqual(3);
+    expect(contrastRatio(t.clubOnD, t.clubD), "ink on the dark fill").toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(t.tintD, PALETTE.dark.surface), "tint on the surface").toBeGreaterThanOrEqual(1.3);
+    expect(contrastRatio(t.textD, t.tintD), "club text on the tint").toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(t.textDhc, t.tintD), "high-contrast club text on the tint").toBeGreaterThanOrEqual(7);
+    expect(contrastRatio(t.textLhc, t.tintL), "high-contrast club text on the light tint").toBeGreaterThanOrEqual(7);
+  });
+  it("keeps a color that already stands off the dark grounds as it is, and lightens only one that doesn't, in its own hue", () => {
+    expect(deriveClubTokens("#f2c200").clubD).toBe("#f2c200");
+    expect(deriveClubTokens("#ff0000").clubD).toBe("#ff0000");
+    const indigo = deriveClubTokens("#1e1b4b");
+    expect(indigo.club).toBe("#1e1b4b");
+    expect(indigo.clubD).not.toBe("#1e1b4b");
+    const hue = (hex: string) => { const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255) as [number, number, number];
+      const max = Math.max(r, g, b), d = max - Math.min(r, g, b); return max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4; };
+    expect(Math.abs(hue(indigo.clubD) - hue(indigo.club))).toBeLessThan(0.1);
+  });
+  it("the stylesheet's default (Launch Indigo, before a club picks a color) is what the derivation gives", () => {
+    const t = deriveClubTokens("#1e1b4b");
+    for (const [name, value] of Object.entries({ "club-l": t.club, "club-on-l": t.clubOn, "club-d": t.clubD, "club-on-d": t.clubOnD, "club-text-l": t.textL, "club-text-d": t.textD,
+      "club-text-lhc": t.textLhc, "club-text-dhc": t.textDhc, "club-tint-l": t.tintL, "club-tint-d": t.tintD })) expect(css).toContain(`--${name}: ${value};`);
+  });
+  it("each theme picks its own fill: light the color as picked, dark the lightened one", () => {
+    expect(css).toMatch(/:root, \[data-theme="light"\] \{[^}]*--club: var\(--club-l\); --club-on: var\(--club-on-l\);/);
+    expect(css).toMatch(/\[data-theme="dark"\] \{[^}]*--club: var\(--club-d\); --club-on: var\(--club-on-d\);/);
+    expect(css).toMatch(/:root:not\(\[data-theme="light"\]\) \{[^}]*--club: var\(--club-d\); --club-on: var\(--club-on-d\);/);
+  });
+});
+
 describe("the stylesheet keeps to the type floor and to rem", () => {
   it("no font size under 0.8125rem, and none in px", () => {
     const sizes = [...css.matchAll(/font-size:\s*([^;}]+)/g)].map((m) => m[1]!.trim());
@@ -88,7 +125,7 @@ describe("the brand's fixed colors (brand/tokens.json)", () => {
     const club = readFileSync("src/lib/settings/club.ts", "utf8");
     expect(/export const DEFAULT_COLOR = "(#[0-9a-f]{6})";/.exec(club)?.[1]).toBe(lower(brand.color.brand.indigo));
     expect(readFileSync("scripts/design-gallery.tsx", "utf8")).toContain(`const DEFAULT_COLOR = "${lower(brand.color.brand.indigo)}";`);
-    expect(css).toContain(`--club: ${lower(brand.color.brand.indigo)};`);
+    expect(css).toContain(`--club-l: ${lower(brand.color.brand.indigo)};`);
   });
   it.each(Object.entries(TONES))("the status %s is the brand's, in light and in dark", (name, tone) => {
     const [light, dark] = [brand.color.status_light[name]!, brand.color.status_dark_proposed[name]!];

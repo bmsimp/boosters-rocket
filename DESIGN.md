@@ -4,12 +4,14 @@ description: A white-label parent portal for booster clubs, drawn as the calm ca
 colors:
   club: "#1e1b4b"
   club-on: "#ffffff"
+  club-dark: "#635dc5"
+  club-on-dark: "#ffffff"
   club-text-l: "#1e1b4b"
-  club-text-d: "#837ed1"
+  club-text-d: "#928dd7"
   club-text-lhc: "#1e1b4b"
-  club-text-dhc: "#a09cdb"
+  club-text-dhc: "#bab7e5"
   club-tint-l: "#ededf1"
-  club-tint-d: "#171823"
+  club-tint-d: "#2c2b4b"
   ground: "#f7f7f8"
   surface: "#ffffff"
   surface-raised: "#ffffff"
@@ -314,10 +316,10 @@ The light and dark values are in the frontmatter (dark keys end `-dark`). The hi
 
 ### Primary (runtime, per club)
 The frontmatter values are the default club color, the brand's Launch Indigo `#1e1b4b` (`DEFAULT_COLOR`), drawn for a club that hasn't chosen one; indigo is never written into portal UI otherwise. **The app derives these; a club is never asked for them** (`deriveClubTokens()`, `src/lib/theme/contrast.ts`, written onto `<html>` as custom properties by `src/app/layout.tsx`; an invalid stored color falls back to the default with a server warning):
-- **Club Fill** (`club`): the color the club picked, the same in every mode. Fills the primary button, the logo tile, the current step's track in the step indicator, and the club preview on the Club settings page.
-- **On Club** (`club-on`): ink on the club fill, the same in every mode: white or `#14161a`, whichever has the higher contrast against the fill.
+- **Club Fill** (`club`, resolved per theme from `club-l` / `-d`): in light, the color the club picked; in dark, the same color where it already stands 3:1 off every dark ground (a control's non-text contrast), otherwise lightened (same hue and saturation) until it does, so a dark club color (Launch Indigo above all) never sinks into the dark ground. Fills the primary button, the logo tile, the current step's track in the step indicator, and the club preview on the Club settings page. The fill is fixed (the color as picked, in every mode) only where no theme applies: the app icons and the manifest (`src/lib/pwa/icons.ts`).
+- **On Club** (`club-on`, from `club-on-l` / `-d`): ink on the club fill of its theme: white or `#14161a`, whichever has the higher contrast against that fill (4.5:1 at least).
 - **Club Text** (`club-text`, resolved per mode from `club-text-l` / `-d` / `-lhc` / `-dhc`): the club color as text, link, quiet button, checked control, current nav item and focus ring. Darkened (light) or lightened (dark), same hue and saturation, until it reaches 4.5:1 against the hardest ground of its mode (`surface-muted`, `CLUB_TEXT_GROUND`), or 7:1 in high contrast; the light and dark tones are then checked again on the club tint.
-- **Club Wash** (`club-tint-l` / `-d`): the club color mixed 8% into the light surface, 14% into the dark one. The current nav item, the current tab's icon pill, a checked choice tile, the club button and quiet-button hover, text selection, the account control while Display is open.
+- **Club Wash** (`club-tint-l` / `-d`): the club color mixed 8% into the light surface; in dark, the dark fill mixed into the dark surface, 14% or more until the wash stands 1.3:1 off the surface, so the current nav item is seen. Club text (and its high-contrast tone, at 7:1) is checked again on it. The current nav item, the current tab's icon pill, a checked choice tile, the club button and quiet-button hover, text selection, the account control while Display is open.
 
 ### Tertiary (status, per mode)
 The brand's fixed status set (`brand/BRAND.md`, `brand/tokens.css`): a club can't change them. The light values are the kit's, measured on the app's grounds; the kit's dark values were a proposal, measured here and kept; the high-contrast values are the app's own, derived to 7:1.
