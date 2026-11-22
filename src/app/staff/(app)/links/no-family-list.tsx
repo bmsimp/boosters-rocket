@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { DataTable } from "@/app/components/data-table";
 import { ActionOutcome, Notice } from "@/app/components/notice";
+import { Button } from "@/app/components/ui/button";
 
 type Done = { ok: true; message: string } | { ok: false; errors: string[] };
 const failed: Done = { ok: false, errors: [ACTION_FAILED] };
@@ -52,9 +53,9 @@ function MakeFamily({ name, act, onDone }: { name: string; act: () => Promise<Do
   const press = () => { if (!pending) start(async () => onDone(await safely(() => act(), failed))); };
   return (
     <div className="row-actions">
-      <button type="button" className="btn btn-line" aria-disabled={pending} onClick={press}>
+      <Button variant="secondary" size="sm" busy={pending} onClick={press}>
         {pending ? "Making the family…" : "Create a family from this"}<span className="visually-hidden">: {name}</span>
-      </button>
+      </Button>
     </div>
   );
 }

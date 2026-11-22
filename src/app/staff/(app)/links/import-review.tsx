@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Notice } from "@/app/components/notice";
+import { Card, Notice } from "@/app/components/ui";
 import { GUARDIAN_NAMED, IMPORT_MAX, type ImportProposal, type NotProposedGuardian, type ProposedFamily, type ProposedGuardian } from "@/lib/accounting/import-proposals";
 import { importKeys } from "@/lib/accounting/import-proposals";
 import { importStamp } from "@/lib/accounting/stamp";
@@ -122,9 +122,9 @@ export function ImportReview({ review, mayChangeFamilies, tag }: { review: { pro
     );
   };
   return (
-    <section className="box" aria-labelledby={IMPORT_H}><h2 id={IMPORT_H}>{IMPORT_WORDS.heading}</h2>
+    <Card title={IMPORT_WORDS.heading} titleId={IMPORT_H}>
       {body()}
       <p className="link-line"><Link href="/staff/links">Close</Link></p>
-    </section>
+    </Card>
   );
 }

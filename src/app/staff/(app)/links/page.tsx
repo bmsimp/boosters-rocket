@@ -8,10 +8,7 @@ import type { Holder } from "@/lib/accounting/match";
 import type { Proposals } from "@/lib/accounting/proposals";
 import { recordNameWords } from "@/lib/families/words";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
-import { DataTable, type Column } from "@/app/components/data-table";
-import { LocalTime } from "@/app/components/local-time";
-import { Notice } from "@/app/components/notice";
-import { StateWords } from "@/app/components/state-words";
+import { Button, Card, DataTable, EmptyState, LinkButton, LocalTime, Notice, PageHeader, Select, StatusBadge, TextInput, Toolbar, type Column, type Tone } from "@/app/components/ui";
 import { familyPage } from "@/app/staff/(app)/family-pages";
 import { confirmAllAction, confirmLinkAction, leaveUnlinkedAction, linkGuardianAction, reviewLinkAction, sendAllAction, sendDifferenceAction, takeDifferenceAction, undoLeaveUnlinkedAction, unlinkAction, unlinkGuardianAction } from "./actions";
 import { GuardianLinkPress, LinkAnswers, LinkAnswersShown, LinkGiveUp, LinkPress } from "./link-press";
@@ -31,9 +28,9 @@ const WHY_NOT_CHECKED: Record<Exclude<LinksState, "listed">, string> = {
   no_shape: "The membership shape isn't chosen, or names a customer type the books no longer have, so the portal can't tell which customers are families. Links are shown as they are, but nothing is suggested, and a family with no link is listed as not checked. Differences between the portal and the books aren't checked either. An Admin can choose the shape under Settings, QuickBooks.",
 };
 
-/** The icon a status carries beside its words: a link that stands, something to look at, or nothing checked or wanted. */
-const ICON: Record<StatusKey, "done" | "todo" | "waived"> = {
-  carried_over: "done", linked: "done", with_differences: "todo", suggested: "todo", several: "todo", no_match: "todo", left_unlinked: "waived", not_a_family: "todo", customer_gone: "todo", not_checked: "waived",
+/** The tone a status badge carries with its words: a link that stands, something to look at, or nothing checked or wanted. */
+const TONE: Record<StatusKey, Tone> = {
+  carried_over: "done", linked: "done", with_differences: "due", suggested: "due", several: "due", no_match: "due", left_unlinked: "neutral", not_a_family: "due", customer_gone: "due", not_checked: "neutral",
 };
 
 /** At most this many customers are listed at once in the chooser; a search narrows them. */
@@ -231,12 +228,12 @@ function InactivePart({ rows, tag, familyPages, maySend }: { rows: InactiveRow[]
     } },
   ];
   return (
-    <section className="box" aria-labelledby="links-inactive-h"><h2 id="links-inactive-h">Inactive in the portal, active in the books</h2>
+    <Card title="Inactive in the portal, active in the books" titleId="links-inactive-h">
       <p>Each of these families is inactive in the portal and linked to a customer the books have active. Taking the books&apos; value makes the family active again in the portal, alone, and sends nothing to the books.
         Its guardians can&apos;t sign in to it until someone who may change families lets them in, on its page.
         {maySend && " Sending the app's value instead makes it inactive in the books, with everyone active under it there, as its row says, and changes nothing in the portal."}</p>
       <DataTable caption={plural(rows.length, "inactive family the books have active", "inactive families the books have active")} captionHidden columns={columns} rows={rows} rowKey={(r) => String(r.familyId)} />
-    </section>
+    </Card>
   );
 }
 
@@ -459,7 +456,7 @@ function PickPart({ view, familyId, customerId, cq, tag, made }: { view: LinksVi
     { key: "do", header: "What you can do", quiet: true, cell: (c) => <Link className="link-line" href={pickHref(id, c.qboId)}>Look at it<span className="visually-hidden">: {c.name}</span></Link> },
   ];
   return (
-    <section className="box" aria-labelledby={PICK}><h2 id={PICK}>A customer for {row.name}</h2>
+    <Card title={<>A customer for {row.name}</>} titleId={PICK}>
       {made.map((m) => <Notice key={m.queueId} tone="info" live="none">Making this family in the books was given up after a try the books may have taken, and they have the customer &ldquo;{m.name}&rdquo; from it, with no family linked to it. If it is this family, picking it ties the two together.</Notice>)}
       {step !== null && !step.ok && <Notice tone="warning" live="none">{step.why === "customer" ? "That customer isn't one with no family in the portal now, so it can't be linked here. Pick another from the list." : "That customer can't be linked to this family from here now."}</Notice>}
       {step !== null && step.ok && (
@@ -476,16 +473,18 @@ function PickPart({ view, familyId, customerId, cq, tag, made }: { view: LinksVi
           <div className="row-actions"><ConfirmPress familyId={id} about={row.name} offer={step.offer} tag={tag} /></div>
         </div>
       )}
-      <form method="get" action="/staff/links" role="search" className="matrix-filter">
+      <form method="get" action="/staff/links" role="search">
         <input type="hidden" name="pick" value={id} />
-        <label className="field"><span>Customer name or email address</span><input name="cq" type="search" maxLength={SEARCH_MAX} defaultValue={cq} autoComplete="off" /></label>
-        <div className="matrix-filter-go"><button type="submit" className="btn btn-line">Search</button><Link href="/staff/links">Close</Link></div>
+        <Toolbar label="Search the customers with no family"
+          end={<><Button type="submit" variant="secondary">Search</Button><LinkButton variant="quiet" href="/staff/links">Close</LinkButton></>}>
+          <TextInput id="links-cq" label="Customer name or email address" name="cq" type="search" maxLength={SEARCH_MAX} defaultValue={cq} autoComplete="off" />
+        </Toolbar>
       </form>
-      {view.pool.length === 0 ? <Notice tone="info" live="none">Every customer the books list as a family is linked to a family in the portal already, so there is none to pick.</Notice>
+      {view.pool.length === 0 ? <EmptyState title="Every customer the books list as a family is linked to a family in the portal already, so there is none to pick." />
         : found.length === 0 ? <Notice tone="info">No customer with no family matches that.</Notice>
         : <DataTable caption={found.length > shown.length ? `${shown.length} of ${plural(found.length, "customer", "customers")} with no family that match: search to narrow them` : `${plural(found.length, "customer", "customers")} with no family`}
             columns={columns} rows={shown} rowKey={(c) => c.qboId} />}
-    </section>
+    </Card>
   );
 }
 
@@ -546,22 +545,21 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
     { key: "addresses", header: "Guardians' sign-in addresses", cell: (r) => (r.addresses.length > 0 ? r.addresses.join(", ") : r.guardians.length === 0 ? "None yet" : "None that can sign in") },
     { key: "customer", header: "Customer in the books", cell: (r) => (r.customer === null ? (r.status.key === "not_checked" ? "Not checked now" : "None")
       : <>{r.customer.name}<span className="when">{r.customer.email ?? "No email address"}</span></>) },
-    { key: "status", header: "Status", cell: (r) => <><StateWords state={ICON[r.status.key]} words={STATUS_WORDS[r.status.key]} /><span className="when"><StatusDetail status={r.status} row={r} /></span></> },
+    { key: "status", header: "Status", cell: (r) => <><StatusBadge tone={TONE[r.status.key]}>{STATUS_WORDS[r.status.key]}</StatusBadge><span className="when"><StatusDetail status={r.status} row={r} /></span></> },
     { key: "more", header: "Students and guardians", cell: (r) => <Opening row={r} tag={tag} guardianLinks={view.guardianLinks} maySend={maySend} /> },
   ];
   return (
     <main className="wrap single">
       <LinkAnswers>
-        <h1 className="page-title">Accounting links</h1>
-        <p className="lede">Every family in the portal, beside the customer in the books it is linked to, or the one that looks like its own.
+        <PageHeader title="Accounting links" lede={<>Every family in the portal, beside the customer in the books it is linked to, or the one that looks like its own.
           A family with no link can be linked here, to its suggestion or a customer you pick, or left unlinked. Only three things here send anything to the books: Send the app&apos;s to QuickBooks, Send the app&apos;s for all, and a student&apos;s move taken from the books, which voids an unpaid volunteer buy-out invoice of theirs there.
           For a family whose link stands, it also lists where the portal and the books differ. A name, a record the books have inactive or active, or the family the books have a student under can be taken into the portal with Take QuickBooks&apos; into the app, which changes only the portal&apos;s records, except that a student&apos;s move voids an unpaid volunteer buy-out invoice of theirs in the books, as any move does.
           A name, the family a student is in, or a student or member inactive in the portal whose customer the books have active can instead be sent to the books with Send the app&apos;s to QuickBooks, by someone who may also change families: it replaces the books&apos; value with the portal&apos;s, and a make-inactive reads the balance first and sends nothing while there is any. Every other difference is only shown.
           Send the app&apos;s for all, above the list, queues every name and student&apos;s family the list shows, up to {SEND_ALL_MAX} at once, for the portal to send within a few minutes, but for one that must wait for another change queued by the same press (a family&apos;s name, then a student&apos;s move into or out of it), which it leaves for the next press and says so; it passes over every make-inactive, which is sent on its own row.
-          A linked family inactive in the portal whose customer the books have active is listed after the families, and made active again the same way, but its guardians sign in to it only once someone who may change families lets them in, on its page. It can instead be made inactive in the books with everyone under it, on its row, by the balance rule, deepest first and the family last.</p>
+          A linked family inactive in the portal whose customer the books have active is listed after the families, and made active again the same way, but its guardians sign in to it only once someone who may change families lets them in, on its page. It can instead be made inactive in the books with everyone under it, on its row, by the balance rule, deepest first and the family last.</>} />
         <LinkAnswersShown />
 
-        <section className="box" aria-labelledby="links-how-h"><h2 id="links-how-h">How links are made</h2>
+        <Card title="How links are made" titleId="links-how-h">
           <p>A customer is suggested only when one of the family&apos;s guardians signs in with an address that is, exactly, on a customer no family is linked to:
             in its own email field, or on a parent record under it. A name never suggests a customer, and a customer another family is linked to is never suggested.
             A guardian who can&apos;t sign in, because they are blocked, is listed under the family, but their address is never matched.</p>
@@ -582,7 +580,7 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
           <Notice tone="warning" live="none">For a family this page suggests a customer for, or lists possible customers of, link it here with Confirm.
             &ldquo;Create a family from this&rdquo; is refused for a customer this page suggests or lists for a family the portal has, or that a given-up change of a family the portal saved first made.
             And &ldquo;Create in QuickBooks and link&rdquo; on the family&apos;s page would make a second customer in the books for a family whose customer is already there but was never linked to it; it isn&apos;t offered for one unlinked while its customer is still in the books.</Notice>
-        </section>
+        </Card>
 
         {view.state !== "listed" && <Notice tone="warning" live="none">{WHY_NOT_CHECKED[view.state]}</Notice>}
 
@@ -594,26 +592,27 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
 
         {importAsked && <ImportReview review={maySend && proposable > 0 ? await view.importReview() : null} mayChangeFamilies={maySend} tag={tag} />}
 
-        <section className="box" aria-labelledby="links-list-h"><h2 id="links-list-h">Families</h2>
-          <form method="get" action="/staff/links" role="search" className="matrix-filter">
-            <label className="field"><span>Status</span>
-              <select name="status" defaultValue={filter.status ?? ""}>
+        <Card title="Families" titleId="links-list-h">
+          <form method="get" action="/staff/links" role="search">
+            <Toolbar label="Filter the families"
+              end={<><Button type="submit" variant="secondary">Show</Button>{filtered && <LinkButton variant="quiet" href="/staff/links">Show every family</LinkButton>}</>}>
+              <Select id="links-status" label="Status" name="status" defaultValue={filter.status ?? ""}>
                 <option value="">Every status ({view.rows.length})</option>
                 {STATUS_KEYS.map((k) => <option key={k} value={k}>{STATUS_WORDS[k]} ({counts[k]})</option>)}
-              </select></label>
-            <label className="field"><span>Family name or email address</span><input name="q" type="search" maxLength={SEARCH_MAX} defaultValue={filter.q} autoComplete="off" /></label>
-            <div className="matrix-filter-go"><button type="submit" className="btn btn-line">Show</button>{filtered && <Link href="/staff/links">Show every family</Link>}</div>
+              </Select>
+              <TextInput id="links-q" label="Family name or email address" name="q" type="search" maxLength={SEARCH_MAX} defaultValue={filter.q} autoComplete="off" />
+            </Toolbar>
           </form>
           {overlap > 0 && <p>{overlap === 1 ? "1 family whose link was carried over has differences, so it is counted under both Carried over and Linked, with differences."
             : `${overlap} families whose links were carried over have differences, so each is counted under both Carried over and Linked, with differences.`}</p>}
           {bulk !== null && <BulkPress bulk={bulk} filter={filter} tag={tag} />}
           {sendAll !== null && <SendAllPress offer={sendAll} filter={filter} tag={tag} />}
           {filter.tooLong && <Notice tone="warning" live="none">That search was too long, so nothing was searched for. Try a shorter part of a name or an address, up to {SEARCH_MAX} characters.</Notice>}
-          {view.rows.length === 0 ? <Notice tone="info" live="none">The portal has no active families yet.</Notice>
+          {view.rows.length === 0 ? <EmptyState title="The portal has no active families yet." />
             : rows.length === 0 ? <Notice tone="info">No family matches that.</Notice>
             : <DataTable caption={filtered ? `${plural(rows.length, "family", "families")} of ${view.rows.length} shown` : `Every family, by name: ${plural(rows.length, "family", "families")}`}
                 columns={columns} rows={rows} rowKey={(r) => String(r.familyId)} />}
-        </section>
+        </Card>
 
         {view.inactive.length > 0 && <InactivePart rows={view.inactive} tag={tag} familyPages={view.familyPages} maySend={maySend} />}
       </LinkAnswers>

@@ -717,7 +717,7 @@ describe("the page", () => {
     const list = listOf(whole);
     expect(pressed(list, "Send the app's to QuickBooks")).toEqual(["Leo Rivera's family", "Leo Rivera's family", "Leo Rivera's name", "Zoe Rivera's active status"]);
     // Beside the Take it pairs with, in the same row-actions.
-    expect(list).toContain(`Take QuickBooks' into the app<span class="visually-hidden">: Leo Rivera's name</span></button><button type="button" class="btn btn-line" aria-disabled="false">Send the app's to QuickBooks<span class="visually-hidden">: Leo Rivera's name</span></button></div>`);
+    expect(list).toContain(`Take QuickBooks' into the app<span class="visually-hidden">: Leo Rivera's name</span></button><button type="button" class="btn btn-line">Send the app's to QuickBooks<span class="visually-hidden">: Leo Rivera's name</span></button></div>`);
     expect(list).toContain("Sends “Leo Rivera” to the books as Leo Rivera's name, in place of “Leo M. Rivera” there. The books' name is replaced.");
     // The family's name another customer holds, Chen inactive in the books, and nothing for Max (not a student customer
     // now), Mei Chen's Parent customer or the Chens' own active status.

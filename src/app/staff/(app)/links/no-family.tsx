@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Notice } from "@/app/components/notice";
+import { Card, Notice } from "@/app/components/ui";
 import type { CustomerAim, LinksState, LinksView } from "@/lib/accounting/mapping";
 import { handful, type NoFamilyCustomer } from "@/lib/roster/no-family";
 import { familyFromCustomerAction } from "./actions";
@@ -103,10 +103,10 @@ export function CustomersWithNoFamily({ view, mayChangeFamilies, children }: { v
   const list = view.noFamilyList;
   const rows = list === null ? [] : noFamilyRows(list, view.aims);
   return (
-    <section className="box" aria-labelledby={NO_FAMILY_H}><h2 id={NO_FAMILY_H}>Customers with no family{rows.length ? ` (${rows.length})` : ""}</h2>
+    <Card title={<>Customers with no family{rows.length ? ` (${rows.length})` : ""}</>} titleId={NO_FAMILY_H}>
       <p>{list !== null && list.length > 0 ? `${NO_FAMILY_WORDS.count(list.length)} ` : ""}{NO_FAMILY_WORDS.lead(mayChangeFamilies)}</p>
       {view.state !== "listed" || list === null ? <Notice tone="warning" live="none">{WHY_NONE[view.state === "listed" ? "no_shape" : view.state]}</Notice> : <NoFamilyRows rows={rows} none={NO_FAMILY_WORDS.none} />}
       {children}
-    </section>
+    </Card>
   );
 }
