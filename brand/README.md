@@ -35,3 +35,22 @@ Add this to the repo's `CLAUDE.md`:
 ```
 
 Lockup and "Powered by" SVGs use live text (Bricolage Grotesque / Inter). In the app, render them as HTML text + the mark SVG instead, or convert the text to outlines for print.
+
+## Other companies' marks
+
+The Integrations page in Settings draws the mark of each system the portal can connect to, small, in a tile before its
+name. These marks belong to their owners, are not Boosters Rocket's, and are not covered by the repository's license or
+by `TRADEMARKS.md`. They are used only to say which system a row is for, as each vendor publishes them for that, and are
+never recolored, cropped into something else or made larger than the tile. The files are in `public/integrations/`.
+
+| File | Mark | Source |
+| --- | --- | --- |
+| `microsoft.svg` | The Microsoft logo (four squares), © Microsoft | Microsoft's "Sign in with Microsoft" branding guidelines, `ms-symbollockup_mssymbol_19.svg`, unchanged: https://learn.microsoft.com/en-us/entra/identity-platform/howto-add-branding-in-apps. Used for the Microsoft 365 mail row and the Microsoft staff sign-in row. |
+| `google.svg` | The Google "G", © Google | Google's Sign in with Google branding guidelines, `signin-assets.zip`, the light square button without text (`Theme=Light, Show text=No, Shape=Square`), with the button's white tile and border taken out and the frame cut to the "G": https://developers.google.com/identity/branding-guidelines. |
+
+No official file is kept yet for **QuickBooks** (Intuit) or **Documenso**, so their rows show a plain text tile
+("QB", "D") in the page's own ink. Intuit's press logos are for editorial use only, and its marks for apps come with
+the Intuit developer program's brand guidelines; Documenso publishes no brand kit (its own mark is in its source code).
+Replacing either tile with the vendor's file is a change to `IntegrationLogo`
+(`src/app/staff/(app)/settings/integration-logo.tsx`) and a row in this table. SMTP is not a vendor: its tile is a
+plain envelope drawn by the app.
