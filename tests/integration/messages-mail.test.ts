@@ -26,6 +26,7 @@ import StaffMessagesPage from "@/app/staff/(app)/messages/page";
 import NewMessagePage from "@/app/staff/(app)/messages/new/page";
 import StaffMessagePage from "@/app/staff/(app)/messages/[id]/page";
 import EditMessagePage from "@/app/staff/(app)/messages/[id]/edit/page";
+import MessagesSettingsPage from "@/app/staff/(app)/settings/messages/page";
 import ParentMessagesPage from "@/app/(parent)/messages/page";
 import ParentMessagePage from "@/app/(parent)/messages/[id]/page";
 import { GET as parentFileRoute } from "@/app/(parent)/messages/files/[id]/route";
@@ -249,6 +250,27 @@ describe("the worker's mail", () => {
     await sendMessageMail(at(320));
     expect(mail.outbox.map((m) => m.to).sort()).toEqual(everyone);
     expect((await rows()).map((r) => [r.status, r.tries, r.reason])).toEqual(everyone.map(() => ["sent", 0, null]));
+  });
+
+  it("holds every queued email while the club's switch is off, unsent, undropped, its tries untouched, and sends it once it is on", async () => {
+    await allowEmail(true);
+    await post();
+    mail.refuse.add(b.spec.parent.email);
+    await sendMessageMail();
+    expect(mail.outbox).toHaveLength(3);
+    await allowEmail(false);
+    mail.refuse.clear();
+    for (let i = 0; i < 5; i++) expect(await sendMessageMail()).toEqual({ sent: 0, failed: 0, retrying: 0 });
+    expect(mail.outbox).toHaveLength(3);
+    expect((await rows()).find((r) => r.address === b.spec.parent.email)).toMatchObject({ status: "queued", tries: 1 });
+    // The Settings page says so.
+    asStaff(admin);
+    const settings = await renderPage(MessagesSettingsPage);
+    expect(settings).toContain("While this is off, email already waiting to go to families isn&#x27;t sent. Nothing is dropped: it goes once emailing is turned back on.");
+    await allowEmail(true);
+    await sendMessageMail();
+    expect(mail.outbox.map((m) => m.to)).toContain(b.spec.parent.email);
+    expect((await rows()).every((r) => r.status === "sent")).toBe(true);
   });
 
   it("sends at most a batch at a wake", async () => {

@@ -26,6 +26,7 @@ export default async function MessagesSettingsPage() {
         <p>{on
           ? "When someone posts a message or edits one, \"Also email families\" is offered, ticked. Each parent who can sign in is emailed once, at their sign-in address."
           : "Parents read messages in the portal only. Nothing is emailed, whatever is chosen when a message is posted."}</p>
+        <p>While this is off, email already waiting to go to families isn&apos;t sent. Nothing is dropped: it goes once emailing is turned back on.</p>
         {canChange
           ? <SwitchButton quiet={on} label={on ? "Stop emailing messages" : "Allow messages to be emailed to families"} pendingLabel="Saving…" act={setMessagesEmailAction.bind(null, !on)} />
           : <p className="hint">Only an Admin can change this.</p>}

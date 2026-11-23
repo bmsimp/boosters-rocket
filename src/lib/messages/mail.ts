@@ -187,7 +187,9 @@ export function outageWaitMinutes(row: { nextTryAt: Date | null; createdAt: Date
 }
 
 /**
- * One wake's share of the club messages' mail, while outgoing mail works: at most MESSAGE_MAIL_BATCH emails that are
+ * One wake's share of the club messages' mail, while outgoing mail works and the club allows messages to be emailed
+ * (read again at each wake: while an Admin has it off, every queued email waits, unsent, undropped, its tries as they
+ * were, and goes once it is on again): at most MESSAGE_MAIL_BATCH emails that are
  * due, oldest first, each read again before it is sent. An address the server refuses is tried again at a later wake,
  * at most MESSAGE_MAIL_TRIES times in all, then counted as failed with its reason (a short sentence, never a secret):
  * only such a refusal is the address's own, and only it counts a try or marks a row failed. A failure that is the
@@ -199,7 +201,8 @@ export function outageWaitMinutes(row: { nextTryAt: Date | null; createdAt: Date
  */
 export async function sendMessageMail(now: Date = new Date()): Promise<{ sent: number; failed: number; retrying: number }> {
   const none = { sent: 0, failed: 0, retrying: 0 };
-  if (!(await mailWorking())) return none;
+  // While the club's switch is off, the queue waits: nothing is sent or dropped, and no try is counted.
+  if (!(await mailWorking()) || !(await messagesEmailAllowed())) return none;
   return db.transaction(async (lockTx) => {
     const [lock] = (await lockTx.execute(sql`select pg_try_advisory_xact_lock(${SEND_LOCK}) as locked`)) as unknown as { locked: boolean }[];
     if (!lock?.locked) return none;
