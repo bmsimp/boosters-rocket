@@ -279,7 +279,7 @@ function drawBlocks(blocks: BodyBlock[], o: RenderOptions, key: string): ReactNo
 
 /**
  * A checked body as React elements, every piece of text a text node. The editor's headings (levels 2 and 3) are drawn
- * one level down (`h3`, `h4`), under the message's own title. Never HTML, never dangerouslySetInnerHTML.
+ * one level down (`h3`, `h4`), under the message's own title. Never HTML, and never markup set by hand.
  */
 export function renderBody(body: MessageBody, o: RenderOptions): ReactNode {
   return h("div", { className: "msg-body" }, ...drawBlocks(body.content, o, "b"));
