@@ -209,6 +209,14 @@ export function RichTextEditor({ id, label, hint, initial, pictures, ref }: {
     content: initial && pictures ? fromBody(initial, pictures.fileHref) : (initial ?? null),
   });
 
+  // The template's tools work out whether they can act as each transaction draws them, and the first one comes only
+  // when the writing area is first touched, so until then every tool was drawn unavailable: "Add image" on a fresh
+  // form couldn't be pressed. One empty transaction, once the view is mounted (EditorContent's effect runs first),
+  // draws them as they are.
+  useEffect(() => {
+    if (editor && !editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta("addToHistory", false));
+  }, [editor]);
+
   useImperativeHandle(ref, () => ({
     getJSON: () => toBody(editor?.getJSON() ?? { type: "doc", content: [] }, idOf),
     removePicture: (attachment) => {
