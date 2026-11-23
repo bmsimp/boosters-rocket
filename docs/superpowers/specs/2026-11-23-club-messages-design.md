@@ -66,14 +66,14 @@ read, and may be emailed as an update. An Admin may delete a message outright.
 - **New message** (`/staff/messages/new`): a title (required, up to 120 characters *(proposed)*), the body in the rich
   editor (required: some words or a picture; files attached alone, or only spaces, don't count, and the post or edit is
   refused with "Add a few words or a picture to the message." *(Owner's change, 2026-11-23: slice 2 let a message be
-  its title alone.)*), files, and, when the club allows email, "Also email families", ticked. **Preview** shows the message as a
-  parent will see it, with "This goes to 87 families" and, when emailing, "and is emailed to 142 addresses". **Post**
-  posts it.
+  its title alone.)*), files, and, when the club allows email, "Also email families", ticked, with "Goes to 142 addresses" beside it,
+  and "This goes to 87 families" under the form. **Post** posts it. *(Owner's change, 2026-11-23: there is no
+  Preview, which showed the message as a parent would see it with those counts; the editor is what staff see.)*
 - **A message** (`/staff/messages/[id]`): the message as parents see it, its versions, and its mail results: delivered
   and failed counts per emailed version, with the failed addresses listed. **Edit** for its poster alone; **Delete**
   for an Admin alone, behind a confirm step that says no mail is sent and the content can't be brought back.
 - **Edit** (`/staff/messages/[id]/edit`): the same form, opened on the current version, with "Email families about this
-  change", ticked, when the club allows email. Saving adds a version. Anyone else who opens the address is refused.
+  change", ticked, and its "Goes to 142 addresses", when the club allows email. Saving adds a version. Anyone else who opens the address is refused.
 
 **Your account** (`/staff/account`) gains a card, "Contact email shown to families": the address parents see on the
 staff member's profile. It starts as their sign-in address; they may set another (a club mailbox such as
@@ -112,7 +112,10 @@ when the slice starts and writes the version in the slice's report. The editor r
 component; parent pages and mail never load it.
 
 **What the editor offers:** paragraphs, headings (two levels), bold, italic, underline, bulleted and numbered lists,
-links, line breaks and pictures. Nothing else is accepted, whatever the browser sends: tables, code, colors, fonts,
+links, line breaks and pictures, with undo and redo. *(Owner's change, 2026-11-23: its toolbar and look are those of
+Tiptap's MIT "Simple Editor" template, brought in as code as one shared component, `RichTextEditor` in
+`src/app/components/rich-text-editor/`, restyled in the portal's tokens and kept to the allowlist below: the template's
+tools for anything else are left out. An email template's settings page is to use it too.)* Nothing else is accepted, whatever the browser sends: tables, code, colors, fonts,
 embeds and raw HTML are not.
 
 **Stored as JSON, checked on the server.** The body is Tiptap's document JSON, kept in a `jsonb` column. Every save goes

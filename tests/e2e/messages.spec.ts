@@ -72,20 +72,31 @@ test("staff post a message with its email, a parent reads it and its poster's pr
   expect((await staff.goto("/staff/messages/new"))?.status()).toBe(200);
   await expect(editorOf(staff)).toBeVisible();
   await staff.getByLabel("Title", { exact: true }).fill(title);
+  // A title alone isn't a message: the body needs some words or a picture.
+  await staff.getByRole("button", { name: "Post", exact: true }).click();
+  await expect(staff.getByText("Add a few words or a picture to the message.")).toBeVisible();
+  await expect(staff).toHaveURL(/\/staff\/messages\/new$/);
   await editorOf(staff).click();
   await staff.keyboard.type("The bus leaves the school at 3:15.");
+  // The toolbar's buttons work on what is written, and say when they are on.
+  await staff.keyboard.press("Enter");
+  const bullets = staff.getByRole("button", { name: "Bulleted list", exact: true });
+  await bullets.click();
+  await expect(bullets).toHaveAttribute("aria-pressed", "true");
+  await staff.keyboard.type("Bring water.");
   const box = staff.getByRole("checkbox", { name: "Also email families" });
   await expect(box).toBeChecked();
+  // The editor is what staff see (no Preview): beside the box, how many addresses the email goes to.
+  await expect(staff.getByText(/^Goes to \d+ address(es)?\./)).toBeVisible();
+  await expect(staff.getByText(/^This goes to \d+ famil(y|ies)\.$/)).toBeVisible();
+  await expect(staff.getByRole("toolbar", { name: "Formatting" })).toBeVisible();
   await checked(staff, "/staff/messages/new");
-  await staff.getByRole("button", { name: "Preview" }).click();
-  await expect(staff.getByText(/This goes to \d+ famil(y|ies) and is emailed to \d+ address(es)?\./).first()).toBeVisible();
-  await expect(staff.locator(".message-preview")).toContainText("The bus leaves the school at 3:15.");
-  await checked(staff, "/staff/messages/new, previewing");
   await staff.getByRole("button", { name: "Post", exact: true }).click();
   await expect(staff).toHaveURL(/\/staff\/messages\/[0-9a-f-]{36}$/);
   const id = new URL(staff.url()).pathname.split("/").pop()!;
   made = id;
   await expect(staff.getByRole("heading", { level: 1 })).toHaveText(title);
+  await expect(staff.locator(".msg-body li").first()).toHaveText("Bring water.");
   // Its email is queued for every parent who can sign in, Zelda among them; staff see how far it has got.
   const [queued] = await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM message_mail m JOIN message_version v ON v.id = m.version_id
                                                WHERE v.message_id = ${id} AND m.address = 'zelda@example.com'`;
