@@ -55,8 +55,8 @@ const pictureNode = (fileHref: ((id: string) => string) | undefined) => Image.ex
   parseHTML() { return [{ tag: "img[data-attachment]" }]; },
 }).configure({ inline: false, allowBase64: false });
 
-/** What the editor offers, and nothing else: StarterKit without code, quotes, rules or strike-through, headings at two levels. */
-const extensionsFor = (fileHref: ((id: string) => string) | undefined) => [
+/** What the editor offers, and nothing else: StarterKit without code, quotes, rules or strike-through, headings at two levels (tests/unit/rich-text-editor.test.ts holds its schema to body.ts). */
+export const extensionsFor = (fileHref: ((id: string) => string) | undefined) => [
   StarterKit.configure({
     blockquote: false, code: false, codeBlock: false, horizontalRule: false, strike: false,
     heading: { levels: [2, 3] },
