@@ -380,6 +380,8 @@ function staffOnlyImportProblems(file: string, source = read(file)): string[] {
 const PARENT_CODE_ELSEWHERE = [
   "src/lib/parents/my-family.ts",
   "src/lib/parents/contact-edits.ts",
+  // A club message's body, checked and drawn: the staff form's preview and the parent pages (club messages, slice 3) read it.
+  "src/lib/messages/body.ts",
   // The queueing of a parent's change of their details, in the save's transaction, to be sent on by the worker (stage 3's slice 11b).
   "src/lib/parents/contact-queue.ts",
   "src/lib/parents/contact-fields.ts",
