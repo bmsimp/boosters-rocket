@@ -32,12 +32,15 @@ export const PERMISSIONS = [
   "Forms.Signature.ReadWrite",     // remind guardians to sign, set a form's reminder schedule, and start a form that isn't finished again
   "Volunteer.Credit.ReadWrite",    // see a family's volunteer credit, add a missed check-in, remove one, credit volunteering done outside the portal
   "Accounting.Link.ReadWrite",     // link families to accounting: see every family's link to the books (Accounting links, with Roster.Read: every family's guardians' names and sign-in addresses in one list, not audited) and make a family from a QuickBooks customer no family is linked to (open question 1 of the app-owned families spec; not Admin-only, so a treasurer's role can hold it)
+  "Messages.Post.ReadWrite",       // see every message staff posted and its mail results, post a message to every family, and edit one's own (club messages; not Admin-only)
+  "Messages.Delete.ReadWrite",     // admin-only: delete any message outright, every version's content and files, with no undo
+  "Settings.Messages.ReadWrite",   // admin-only: allow messages to be emailed to families, or stop it
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
 
 /** Never grantable through a custom role; only the built-in Admin holds them. */
-export const ADMIN_ONLY: readonly Permission[] = ["Admin.Roles.ReadWrite", "Staff.Users.ReadWrite", "Settings.SignIn.ReadWrite", "Settings.Mail.ReadWrite", "Settings.QuickBooks.ReadWrite", "Settings.Parents.ReadWrite", "Audit.Log.Read", "Admin.Health.Read", "Settings.Forms.ReadWrite", "Parents.SignInReset.ReadWrite"];
+export const ADMIN_ONLY: readonly Permission[] = ["Admin.Roles.ReadWrite", "Staff.Users.ReadWrite", "Settings.SignIn.ReadWrite", "Settings.Mail.ReadWrite", "Settings.QuickBooks.ReadWrite", "Settings.Parents.ReadWrite", "Audit.Log.Read", "Admin.Health.Read", "Settings.Forms.ReadWrite", "Parents.SignInReset.ReadWrite", "Messages.Delete.ReadWrite", "Settings.Messages.ReadWrite"];
 
 export const GRANTABLE: readonly Permission[] = PERMISSIONS.filter((p) => !ADMIN_ONLY.includes(p));
 

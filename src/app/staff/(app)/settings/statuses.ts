@@ -9,6 +9,7 @@ import { connectionView } from "@/lib/quickbooks/connection";
 import { quickbooksProblems } from "@/lib/quickbooks/health";
 import { apiFailing, formsSummary } from "@/lib/forms/settings";
 import { healthReport } from "@/lib/health/report";
+import { messagesEmailAllowed } from "@/lib/settings/messages";
 import { newestAuditAt } from "@/lib/audit/query";
 import { credentialStanding } from "../secret-expiry-rule";
 import type { IntegrationKey, PageKey, SettingsItem } from "./sections";
@@ -158,6 +159,9 @@ export const RAIL_STATUS: Record<PageKey, (items: readonly SettingsItem[]) => Pr
   async club() {
     const [club, saved] = await Promise.all([getClubSettings(), clubSaved()]);
     return !saved ? { tone: "due", words: "Not set yet" } : !club.storedColorValid ? { tone: "due", words: "Color not valid" } : { tone: "done", words: "Set" };
+  },
+  async messages() {
+    return (await messagesEmailAllowed()) ? { tone: "done", words: "Emailing on" } : { tone: "neutral", words: "Emailing off" };
   },
   async staff() {
     const people = (await listStaff()).length;

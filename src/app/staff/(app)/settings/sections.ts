@@ -36,6 +36,8 @@ type Item = {
 export const SETTINGS_ITEMS = [
   { key: "club", kind: "page", group: "Club", title: "Club", keywords: ["name", "short name", "color", "colour", "time zone", "treasurer"],
     see: "Settings.Club.Read", change: "Settings.Club.ReadWrite", href: "/staff/settings/club", owns: ["/staff/settings/club"] },
+  { key: "messages", kind: "page", group: "Club", title: "Messages", keywords: ["announcements", "news", "email families"],
+    see: "Settings.Club.Read", change: "Settings.Messages.ReadWrite", href: "/staff/settings/messages", owns: ["/staff/settings/messages"] },
   { key: "staff", kind: "page", group: "People and access", title: "Staff", keywords: ["people", "board", "directors", "invite", "add someone", "block"],
     see: "Staff.Users.Read", change: "Staff.Users.ReadWrite", href: "/staff/settings/staff", owns: ["/staff/settings/staff"] },
   { key: "roles", kind: "page", group: "People and access", title: "Roles", keywords: ["permissions", "access", "treasurer", "admin"],

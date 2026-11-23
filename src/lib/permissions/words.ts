@@ -33,6 +33,9 @@ export const PERMISSION_WORDS: Record<Permission, string> = {
   "Forms.Signature.ReadWrite": "Remind guardians to sign, and start an unfinished form again",
   "Volunteer.Credit.ReadWrite": "Add, remove and correct a family's volunteer credit",
   "Accounting.Link.ReadWrite": "Link families to accounting: see every family's link to the books, with every family's guardians' names and sign-in addresses; make a family in the portal from a QuickBooks customer no family is linked to; and take a name, an inactive customer or an active one, or a student's family from the books into the portal; and, with the permission that changes families, send the portal's name, student's family or inactive status of a difference to QuickBooks",
+  "Messages.Post.ReadWrite": "Post messages to every family, edit your own, and see every message with who it was emailed to",
+  "Messages.Delete.ReadWrite": "Delete any message for good, with every earlier version and its files",
+  "Settings.Messages.ReadWrite": "Allow messages to be emailed to families, or stop it",
 };
 
 /** The areas of the checklist, in the order the Roles page shows them. Each grantable permission is in exactly one. */
@@ -42,6 +45,7 @@ export const PERMISSION_AREAS: { area: string; permissions: readonly Permission[
   { area: "Forms", permissions: ["Forms.Signature.Read", "Forms.Signature.ReadWrite"] },
   { area: "Volunteering", permissions: ["Volunteer.Event.Read", "Volunteer.Event.ReadWrite", "Volunteer.Credit.ReadWrite"] },
   { area: "Money", permissions: ["Finance.Balance.Read"] },
+  { area: "Messages", permissions: ["Messages.Post.ReadWrite"] },
   { area: "Staff and club", permissions: ["Staff.Users.Read", "Settings.Club.Read", "Settings.Club.ReadWrite"] },
 ];
 

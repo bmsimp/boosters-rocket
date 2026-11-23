@@ -41,6 +41,17 @@ describe("every permission has words", () => {
     expect(rulesFromChecklist(["Accounting.Link.ReadWrite"])).toEqual({ ok: true, rules: { include: ["Roster.Read", "Accounting.Link.ReadWrite"], exclude: [] } });
   });
 
+  it("has the club messages permissions: posting a custom role may hold, deleting and the email switch an Admin's alone", () => {
+    // Club messages, spec section 10.
+    expect(GRANTABLE).toContain("Messages.Post.ReadWrite");
+    expect(ADMIN_ONLY).toContain("Messages.Delete.ReadWrite");
+    expect(ADMIN_ONLY).toContain("Settings.Messages.ReadWrite");
+    expect(PERMISSION_AREAS.find((a) => a.permissions.includes("Messages.Post.ReadWrite"))?.area).toBe("Messages");
+    // There is no Messages.Post.Read: posting brings nothing else with it.
+    expect(readTwinOf("Messages.Post.ReadWrite")).toBeNull();
+    expect(expandRules({ include: ["*"], exclude: [] }).has("Messages.Delete.ReadWrite")).toBe(false);
+  });
+
   it("puts every permission a role may hold in exactly one area, and no Admin-only one in any", () => {
     const listed = PERMISSION_AREAS.flatMap((a) => a.permissions);
     expect([...listed].sort()).toEqual([...GRANTABLE].sort());
