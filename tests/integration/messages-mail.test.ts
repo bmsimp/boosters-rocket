@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 type Msg = { to: string; subject: string; text: string; html: string; attachments?: unknown[] };
-const mail = vi.hoisted(() => ({ outbox: [] as Msg[], refuse: new Set<string>(), down: false }));
+const mail = vi.hoisted(() => ({ outbox: [] as Msg[], refuse: new Set<string>(), down: false, tried: 0 }));
 vi.mock("@/lib/mail/senders", async () => {
   const { MailSendError } = await import("@/lib/mail/types");
   return {
     SMTP_PASSWORD_AAD: "mail:smtp-password",
     buildSender: async () => async (m: Msg) => {
+      mail.tried++;
       if (mail.down) throw new MailSendError("The mail server couldn't be reached. (ECONNREFUSED)");
       if (mail.refuse.has(m.to)) throw new MailSendError("The mail server refused this address. (550)", true);
       mail.outbox.push(m);
@@ -69,7 +70,7 @@ let coach: Staff, admin: Staff, a: SeededParent, b: SeededParent;
 let everyone: string[];
 beforeEach(async () => {
   await resetDb();
-  mail.outbox.length = 0; mail.refuse.clear(); mail.down = false;
+  mail.outbox.length = 0; mail.refuse.clear(); mail.down = false; mail.tried = 0;
   coach = await seedStaff({ email: "coach@club.org", name: "Casey Coach" });
   const { roleAssignment, role, roleRule } = await import("@/lib/db/schema");
   const [r] = await db.insert(role).values({ key: "poster", name: "Poster" }).returning();
@@ -200,16 +201,17 @@ describe("the worker's mail", () => {
     expect(await renderPage(StaffMessagesPage)).toContain("Emailed 3 · 1 couldn&#x27;t be delivered");
   });
 
-  it("stops a wake's batch when the mail itself fails, spending one email's try, and sends nothing while mail isn't working", async () => {
+  it("stops a wake's batch when the mail itself fails, counting no try, and sends nothing while mail isn't working", async () => {
     await allowEmail(true);
     await post();
     mail.down = true;
     await sendMessageMail();
     expect(mail.outbox).toEqual([]);
-    expect((await rows()).map((r) => r.tries).sort()).toEqual([0, 0, 0, 1]);
+    expect(mail.tried).toBe(1);
+    expect((await rows()).map((r) => r.tries)).toEqual([0, 0, 0, 0]);
     expect((await rows()).every((r) => r.status === "queued")).toBe(true);
     mail.down = false;
-    await sendMessageMail();
+    await sendMessageMail(new Date(Date.now() + 5 * 60_000));
     expect(mail.outbox).toHaveLength(4);
     expect((await rows()).every((r) => r.status === "sent")).toBe(true);
     // Mail not set up (or not verified): nothing is tried.
@@ -218,6 +220,36 @@ describe("the worker's mail", () => {
     await post({ title: "Second" });
     await sendMessageMail();
     expect(mail.outbox).toHaveLength(4);
+  });
+
+  it("leaves every email queued through a run of outage wakes, its tries untouched, asking the mail 5, 15, then 60 minutes apart", async () => {
+    await allowEmail(true);
+    await post();
+    mail.down = true;
+    const t0 = Date.now(), at = (minutes: number) => new Date(t0 + minutes * 60_000);
+    // Queued a minute before the first wake, by the test's clock, not the database's.
+    await db.update(messageMail).set({ createdAt: at(-1) });
+    const nextTries = async () => [...new Set((await db.select({ at: messageMail.nextTryAt }).from(messageMail)).map((r) => r.at?.getTime()))];
+    // A wake every minute for the first 25, then every 5 to five hours: the mail is asked only when the queue is due again.
+    const askedAt: number[] = [];
+    for (let minute = 0; minute <= 300; minute += minute < 25 ? 1 : 5) {
+      const before = mail.tried;
+      await sendMessageMail(at(minute));
+      if (mail.tried > before) askedAt.push(minute);
+      if (minute === 0) expect(await nextTries()).toEqual([at(5).getTime()]);
+    }
+    expect(askedAt).toEqual([0, 5, 20, 80, 140, 200, 260]);
+    expect(mail.outbox).toEqual([]);
+    const after = await rows();
+    expect(after.map((r) => [r.status, r.tries])).toEqual(everyone.map(() => ["queued", 0]));
+    expect(after.filter((r) => r.reason !== null).map((r) => r.reason)).toEqual(["The mail server couldn't be reached. (ECONNREFUSED)"]);
+    // Once the mail works, the next wake that is due sends every one.
+    mail.down = false;
+    await sendMessageMail(at(301));
+    expect(mail.outbox).toEqual([]);
+    await sendMessageMail(at(320));
+    expect(mail.outbox.map((m) => m.to).sort()).toEqual(everyone);
+    expect((await rows()).map((r) => [r.status, r.tries, r.reason])).toEqual(everyone.map(() => ["sent", 0, null]));
   });
 
   it("sends at most a batch at a wake", async () => {

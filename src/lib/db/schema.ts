@@ -1596,8 +1596,9 @@ export const messageRead = pgTable("message_read", {
 /**
  * One email of one emailed version to one address (a parent's sign-in address, trimmed and lower-cased, once however
  * many families it is in), queued in the post's or edit's transaction and sent by the worker (slice 4): staff only,
- * since it holds every family's addresses. `reason` is short, with no secret. Rows of a version saved over 90 days ago
- * are removed by the daily clean-up.
+ * since it holds every family's addresses. `reason` is short, with no secret. `tries` counts only the tries this
+ * address was refused; a failure of the mail itself counts none and puts the queue off (`next_try_at`, migration 0058).
+ * Rows of a version saved over 90 days ago are removed by the daily clean-up.
  */
 export const messageMail = pgTable("message_mail", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -1607,6 +1608,8 @@ export const messageMail = pgTable("message_mail", {
   tries: integer("tries").notNull().default(0),
   reason: text("reason"),
   sentAt: timestamp("sent_at", { withTimezone: true }),
+  /** While the mail itself is failing (not this address), not tried before this time: 5, 15, then every 60 minutes. Null: due now. */
+  nextTryAt: timestamp("next_try_at", { withTimezone: true }),
   createdAt: created(),
 }, (t) => [
   uniqueIndex("message_mail_address_uq").on(t.versionId, t.address),

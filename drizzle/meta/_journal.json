@@ -407,6 +407,13 @@
       "when": 1795441057064,
       "tag": "0057_club_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1795445893472,
+      "tag": "0058_message_mail_backoff",
+      "breakpoints": true
     }
   ]
 }

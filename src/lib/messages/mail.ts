@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, exists, inArray, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, exists, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { clubMessage, guardian, messageFile, messageMail, messageVersion, messageVersionFile, parent, staffUser } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
@@ -20,8 +20,14 @@ import { isPicture } from "./file-types";
 export const MESSAGES_MAIL_JOB = "messages.mail";
 /** How many emails go at one wake (the worker wakes every minute): a club's worth goes out over some minutes, not in one burst. */
 export const MESSAGE_MAIL_BATCH = 20;
-/** How many times one email is tried, at one wake each, before it is counted as failed with its reason. */
+/**
+ * How many times one address may be refused, at one wake each, before its email is counted as failed with its reason.
+ * Only a refusal of the address counts: a failure of the mail itself (the server can't be reached, it refuses to send
+ * anything) counts no try, and puts the whole queue off instead (MESSAGE_MAIL_WAITS).
+ */
 export const MESSAGE_MAIL_TRIES = 3;
+/** How long the queue waits after a failure of the mail itself, in minutes: 5, then 15, then every 60. */
+export const MESSAGE_MAIL_WAITS = [5, 15, 60] as const;
 const REASON_MAX = 200;
 /** Only one wake sends at a time: a second finds the lock taken and sends nothing, so an email is never sent twice at once. */
 const SEND_LOCK = 7461057;
@@ -129,30 +135,42 @@ async function mailOf(versionId: string) {
   };
 }
 
-/** Takes one queued email for this try, counting it: none when it was sent, failed or dropped by a delete in the meantime. */
-async function claim(id: string): Promise<{ versionId: string; address: string; tries: number } | null> {
-  const [row] = await db.update(messageMail).set({ tries: sql`${messageMail.tries} + 1` })
-    .where(and(eq(messageMail.id, id), eq(messageMail.status, "queued")))
-    .returning({ versionId: messageMail.versionId, address: messageMail.address, tries: messageMail.tries });
+/** Reads one queued email again right before it is sent: none when it was sent, failed or dropped by a delete in the meantime. */
+async function claim(id: string): Promise<{ versionId: string; address: string; nextTryAt: Date | null; createdAt: Date } | null> {
+  const [row] = await db.select({ versionId: messageMail.versionId, address: messageMail.address, nextTryAt: messageMail.nextTryAt, createdAt: messageMail.createdAt })
+    .from(messageMail).where(and(eq(messageMail.id, id), eq(messageMail.status, "queued")));
   return row ?? null;
 }
 
 /**
- * One wake's share of the club messages' mail, while outgoing mail works: at most MESSAGE_MAIL_BATCH emails, oldest
- * first, each claimed before it is sent. A send that fails is tried again at a later wake, at most MESSAGE_MAIL_TRIES
- * times in all, then counted as failed with its reason (a short sentence, never a secret). A failure that is the mail's
- * own (not the server refusing that one address) ends the wake's batch, so an outage is not hammered and spends the
- * tries of one email a wake, not of the whole queue; so do two refused addresses and nothing sent, which may be a
- * server refusing to relay. A message deleted in the meantime sends nothing more: its queued rows are gone. Audited
- * once per wake that sent or failed something, with counts, never an address.
+ * How long the queue waits after the mail itself failed on this email: 5 minutes when it had not been put off before,
+ * then 15 while it is under 20 minutes old (it was queued with the outage), then 60, every hour until the mail works.
  */
-export async function sendMessageMail(): Promise<{ sent: number; failed: number; retrying: number }> {
+export function outageWaitMinutes(row: { nextTryAt: Date | null; createdAt: Date }, now: Date): number {
+  const [first, second, last] = MESSAGE_MAIL_WAITS;
+  if (row.nextTryAt === null) return first;
+  return now.getTime() - row.createdAt.getTime() < 20 * 60_000 ? second : last;
+}
+
+/**
+ * One wake's share of the club messages' mail, while outgoing mail works: at most MESSAGE_MAIL_BATCH emails that are
+ * due, oldest first, each read again before it is sent. An address the server refuses is tried again at a later wake,
+ * at most MESSAGE_MAIL_TRIES times in all, then counted as failed with its reason (a short sentence, never a secret):
+ * only such a refusal is the address's own, and only it counts a try or marks a row failed. A failure that is the
+ * mail's own (the server can't be reached, it sends nothing) counts no try: it ends the wake's batch, keeps its reason
+ * on that email, and puts every queued email off (`next_try_at`, outageWaitMinutes()), so an outage is asked about
+ * once in 5, 15, then 60 minutes and uses up no address's tries. Two refused addresses and nothing sent also end the
+ * batch, which may be a server refusing to relay. A message deleted in the meantime sends nothing more: its queued rows
+ * are gone. Audited once per wake that sent or tried something, with counts, never an address. `now` is for tests.
+ */
+export async function sendMessageMail(now: Date = new Date()): Promise<{ sent: number; failed: number; retrying: number }> {
   const none = { sent: 0, failed: 0, retrying: 0 };
   if (!(await mailWorking())) return none;
   return db.transaction(async (lockTx) => {
     const [lock] = (await lockTx.execute(sql`select pg_try_advisory_xact_lock(${SEND_LOCK}) as locked`)) as unknown as { locked: boolean }[];
     if (!lock?.locked) return none;
-    const due = await db.select({ id: messageMail.id }).from(messageMail).where(eq(messageMail.status, "queued"))
+    const due = await db.select({ id: messageMail.id }).from(messageMail)
+      .where(and(eq(messageMail.status, "queued"), or(isNull(messageMail.nextTryAt), lte(messageMail.nextTryAt, now))))
       .orderBy(asc(messageMail.createdAt), asc(messageMail.id)).limit(MESSAGE_MAIL_BATCH);
     if (!due.length) return none;
     const brand = await currentBrand();
@@ -166,14 +184,24 @@ export async function sendMessageMail(): Promise<{ sent: number; failed: number;
       if (!m) continue; // its message was deleted: the delete drops its rows
       const out = await sendMail(clubMessageMail(brand, row.address, m), { purpose: m.update ? "club_message_update" : "club_message", actor: ACTOR });
       if (out.ok) {
-        await db.update(messageMail).set({ status: "sent", sentAt: new Date(), reason: null }).where(eq(messageMail.id, id));
+        await db.update(messageMail).set({ status: "sent", sentAt: new Date(), reason: null, nextTryAt: null }).where(eq(messageMail.id, id));
         sent++;
         continue;
       }
-      const last = row.tries >= MESSAGE_MAIL_TRIES;
-      await db.update(messageMail).set({ status: last ? "failed" : "queued", reason: out.error.slice(0, REASON_MAX) }).where(eq(messageMail.id, id));
+      const reason = out.error.slice(0, REASON_MAX);
+      if (!out.recipientRefused) {
+        // The mail's own failure: no try is counted, and the whole queue waits (never sooner than it already does).
+        const until = new Date(now.getTime() + outageWaitMinutes(row, now) * 60_000);
+        await db.update(messageMail).set({ reason }).where(eq(messageMail.id, id));
+        await db.update(messageMail).set({ nextTryAt: sql`greatest(${messageMail.nextTryAt}, ${until.toISOString()}::timestamptz)` }).where(eq(messageMail.status, "queued"));
+        retrying++;
+        break;
+      }
+      const [tried] = await db.update(messageMail).set({ tries: sql`${messageMail.tries} + 1`, reason })
+        .where(eq(messageMail.id, id)).returning({ tries: messageMail.tries });
+      const last = (tried?.tries ?? MESSAGE_MAIL_TRIES) >= MESSAGE_MAIL_TRIES;
+      if (last) await db.update(messageMail).set({ status: "failed" }).where(eq(messageMail.id, id));
       if (last) failed++; else retrying++;
-      if (!out.recipientRefused) break;
       if (++refused >= 2 && sent === 0) break;
     }
     if (sent + failed + retrying > 0) {

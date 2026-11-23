@@ -1,0 +1,1 @@
+ALTER TABLE "message_mail" ADD COLUMN "next_try_at" timestamp with time zone;
