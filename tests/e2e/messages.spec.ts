@@ -106,6 +106,9 @@ test("staff post a message with its email, a parent reads it and its poster's pr
   await toolbar.getByRole("button", { name: "List options" }).click();
   await expect(staff.getByRole("menuitem", { name: /Task List/ })).toHaveCount(0);
   await staff.getByRole("menuitem", { name: /Bullet List/ }).click();
+  // The menu hands the focus back to the writing area as it closes: type once the list is there and it has the focus.
+  await expect(editorOf(staff).locator("li")).toHaveCount(1);
+  await expect(editorOf(staff)).toBeFocused();
   await staff.keyboard.type("Bring water.");
   // Out of the list, a picture, uploaded and described.
   await staff.keyboard.press("Enter");
