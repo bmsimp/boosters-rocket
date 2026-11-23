@@ -5,6 +5,13 @@ GitHub's hosted runners unless the repository variable `CI_RUNNER_LABELS` names 
 list of its labels: `["self-hosted","br-ci"]` for the one in this folder. Delete the variable and they go back to the
 hosted runners.
 
+This repository no longer uses it: it is public, so the hosted runners are free, `CI_RUNNER_LABELS` is unset, and the
+runner this folder once ran for it was stopped and removed from GitHub on 2026-11-23. The folder stays for a fork, or a
+club with a private repository, that wants a runner of its own.
+
+**Never use it for a public repository.** A pull request from a fork would run its code on the machine the runner
+lives on. (Fork pull requests also need the owner's approval before workflows run, but approval is not a defence.)
+
 **Only for code the club trusts.** A job on this runner can start a privileged container in the runner's own Docker
 daemon, and so become root on the machine the runner lives on. Use it only for a private repository whose code and
 dependencies the club trusts; keep "Run workflows from fork pull requests" switched off in the repository's Actions
