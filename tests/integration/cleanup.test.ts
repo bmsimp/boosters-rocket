@@ -4,11 +4,11 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: as
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, family, familyMoney, jobRun, parentAuthenticator, parentAuthSession, parentBackupCode, parentAuthVerification, parentDevice, parentEmailChange, parentSigninToken, rateLimitEvent, setting, signinCode, staffAuthSession, staffAuthUser, staffAuthVerification, writeQueue } from "@/lib/db/schema";
+import { accountingLink, auditLog, clubMessage, family, familyMoney, jobRun, messageFile, messageMail, messageVersion, messageVersionFile, parentAuthenticator, parentAuthSession, parentBackupCode, parentAuthVerification, parentDevice, parentEmailChange, parentSigninToken, rateLimitEvent, setting, signinCode, staffAuthSession, staffAuthUser, staffAuthVerification, writeQueue } from "@/lib/db/schema";
 import * as schema from "@/lib/db/schema";
 import { getTableName, is } from "drizzle-orm";
 import { PgTable } from "drizzle-orm/pg-core";
-import { cleanUp, runCleanup, describeCleanup, sweepExpiredChallenges, CHALLENGE_SWEEP_JOB, CLEANED_TABLES, KEPT_TABLES, CLEANUP_JOB, RETIRED_SETTINGS, FINISHED_WRITES_DAYS, JOB_HISTORY_DAYS, REMINDER_CLAIM_DAYS, type CleanupCounts } from "@/lib/jobs/cleanup";
+import { cleanUp, runCleanup, describeCleanup, sweepExpiredChallenges, CHALLENGE_SWEEP_JOB, CLEANED_TABLES, KEPT_TABLES, CLEANUP_JOB, RETIRED_SETTINGS, FINISHED_WRITES_DAYS, HELD_MESSAGE_FILE_HOURS, JOB_HISTORY_DAYS, MESSAGE_MAIL_DAYS, REMINDER_CLAIM_DAYS, type CleanupCounts } from "@/lib/jobs/cleanup";
 import { CHALLENGE_SWEEP_MARK, markJob, readMark } from "@/lib/jobs/marks";
 import { runDueJobs } from "@/lib/jobs/runner";
 import { RATE_LIMITS } from "@/lib/parents/rate-limit";
@@ -16,7 +16,7 @@ import { CODE_TTL_MS, RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
 import { AUTHENTICATOR_SETUP_LIFE_MS } from "@/lib/parents/authenticator";
 import { EMAIL_CHANGE_TTL_MS } from "@/lib/parents/email-change";
 import { ROSTER_JOB } from "@/lib/roster/refresh";
-import { resetDb, seedParent, seedParentSession } from "../helpers/db";
+import { resetDb, seedParent, seedParentSession, seedStaff } from "../helpers/db";
 import { addToCache, fam } from "../helpers/roster-cache";
 import { recordOfCustomer } from "../helpers/app-records";
 import { QUICKBOOKS } from "@/lib/families/ids";
@@ -28,7 +28,7 @@ const MONEY_COMPANY = "4620000000000001";
 const NOW = new Date("2026-11-15T12:00:00.000Z");
 const at = (ms: number) => new Date(NOW.getTime() + ms);
 const SEC = 1000, DAY = 86_400_000;
-const NOTHING: CleanupCounts = { staffSessions: 0, parentSessions: 0, signinCodes: 0, signinLinks: 0, unfinishedAuthenticators: 0, spentBackupCodes: 0, rememberedDevices: 0, rateLimitEvents: 0, emailChanges: 0, familyMoney: 0, jobRuns: 0, reminderClaims: 0, writeQueue: 0, verifications: 0, retiredSettings: 0 };
+const NOTHING: CleanupCounts = { staffSessions: 0, parentSessions: 0, signinCodes: 0, signinLinks: 0, unfinishedAuthenticators: 0, spentBackupCodes: 0, rememberedDevices: 0, rateLimitEvents: 0, emailChanges: 0, familyMoney: 0, jobRuns: 0, reminderClaims: 0, writeQueue: 0, verifications: 0, retiredSettings: 0, heldMessageFiles: 0, messageMail: 0 };
 const clean = (now = NOW) => db.transaction((tx) => cleanUp(tx, now));
 
 async function staffSession(id: string, expiresAt: Date) {
@@ -308,6 +308,47 @@ describe("the daily clean-up deletes only what is past use", () => {
     expect(describeCleanup({ ...NOTHING, verifications: 2 })).toBe("Removed 2 expired sign-in checks.");
   });
 
+  it("message files: one held and never posted goes after 24 hours, one a second inside stays, and a posted file stays however old", async () => {
+    const sam = await seedStaff({ email: "sam@club.org" });
+    const [m] = await db.insert(clubMessage).values({ postedBy: sam.id, postedAt: at(-400 * DAY) }).returning();
+    const [v] = await db.insert(messageVersion).values({ messageId: m!.id, n: 1, title: "Picture day", body: { type: "doc", content: [] }, savedAt: at(-400 * DAY) }).returning();
+    const file = async (name: string, uploadedAt: Date, o: { held: boolean; messageId?: string }) => String((await db.insert(messageFile)
+      .values({ name, type: "pdf", size: 4, bytes: Buffer.from("%PDF"), uploadedAt, heldBy: o.held ? sam.id : null, messageId: o.messageId ?? null }).returning({ id: messageFile.id }))[0]!.id);
+    const H = HELD_MESSAGE_FILE_HOURS * 3_600_000;
+    const goneNew = await file("over.pdf", at(-H - SEC), { held: true });
+    const goneEdit = await file("over-edit.pdf", at(-H - SEC), { held: true, messageId: m!.id });
+    const edge = await file("edge.pdf", at(-H), { held: true });
+    const inside = await file("inside.pdf", at(-H + SEC), { held: true });
+    const posted = await file("posted.pdf", at(-400 * DAY), { held: false, messageId: m!.id });
+    await db.insert(messageVersionFile).values({ versionId: v!.id, fileId: posted, position: 1 });
+    expect(await clean()).toEqual({ ...NOTHING, heldMessageFiles: 2 });
+    const left = await ids(db.select({ id: messageFile.id }).from(messageFile));
+    expect(left).toEqual([edge, inside, posted].sort());
+    for (const gone of [goneNew, goneEdit]) expect(left).not.toContain(gone);
+    expect(describeCleanup({ ...NOTHING, heldMessageFiles: 2 })).toBe("Removed 2 files uploaded for messages and never posted.");
+  });
+
+  it("message mail: the rows of a version saved over 90 days ago go, a second inside stay, and the message and its versions stay", async () => {
+    const sam = await seedStaff({ email: "sam@club.org" });
+    const [m] = await db.insert(clubMessage).values({ postedBy: sam.id, postedAt: at(-400 * DAY) }).returning();
+    const D = MESSAGE_MAIL_DAYS * DAY;
+    const version = async (n: number, savedAt: Date) => String((await db.insert(messageVersion)
+      .values({ messageId: m!.id, n, title: `Version ${n}`, body: { type: "doc", content: [] }, savedAt, emailed: true }).returning({ id: messageVersion.id }))[0]!.id);
+    const old = await version(1, at(-D - SEC)), edge = await version(2, at(-D)), inside = await version(3, at(-D + SEC));
+    await db.insert(messageMail).values([
+      { versionId: old, address: "ana@example.com", status: "sent", tries: 1, sentAt: at(-D) },
+      { versionId: old, address: "ben@example.com", status: "failed", tries: 3, reason: "refused" },
+      { versionId: edge, address: "ana@example.com", status: "sent", tries: 1 },
+      { versionId: inside, address: "ana@example.com" },
+    ]);
+    expect(await clean()).toEqual({ ...NOTHING, messageMail: 2 });
+    const left = await db.select({ versionId: messageMail.versionId }).from(messageMail);
+    expect(left.map((l) => l.versionId).sort()).toEqual([edge, inside].sort());
+    expect(await db.select().from(messageVersion)).toHaveLength(3);
+    expect(await db.select().from(clubMessage)).toHaveLength(1);
+    expect(describeCleanup({ ...NOTHING, messageMail: 1 })).toBe("Removed 1 record of a message emailed over 90 days ago.");
+  });
+
   it("never touches the audit log, however old", async () => {
     await db.insert(auditLog).values({ at: at(-3650 * DAY), door: "system", action: "signin" });
     expect(await clean()).toEqual(NOTHING);
@@ -379,7 +420,7 @@ describe("a run of the clean-up", () => {
   it("says what it removed in plain words", () => {
     expect(describeCleanup(NOTHING)).toBe("Nothing to remove.");
     expect(describeCleanup({ ...NOTHING, staffSessions: 1 })).toBe("Removed 1 expired staff session.");
-    expect(describeCleanup({ staffSessions: 2, parentSessions: 1, signinCodes: 3, signinLinks: 0, unfinishedAuthenticators: 0, spentBackupCodes: 0, rememberedDevices: 0, rateLimitEvents: 4, emailChanges: 1, familyMoney: 1, jobRuns: 5, reminderClaims: 0, writeQueue: 0, verifications: 0, retiredSettings: 0 }))
+    expect(describeCleanup({ staffSessions: 2, parentSessions: 1, signinCodes: 3, signinLinks: 0, unfinishedAuthenticators: 0, spentBackupCodes: 0, rememberedDevices: 0, rateLimitEvents: 4, emailChanges: 1, familyMoney: 1, jobRuns: 5, reminderClaims: 0, writeQueue: 0, verifications: 0, retiredSettings: 0, heldMessageFiles: 0, messageMail: 0 }))
       .toBe("Removed 2 expired staff sessions, 1 expired parent session, 3 sign-in codes, 4 rate-limit records, 1 expired email change, 1 set of figures for a family no longer in the roster and 5 old job records.");
     expect(describeCleanup({ ...NOTHING, reminderClaims: 3 })).toBe("Removed 3 reminder records older than a year.");
   });
