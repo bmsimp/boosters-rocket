@@ -136,7 +136,11 @@ through the existing `esc()`. Neither uses Tiptap's HTML output or `dangerouslyS
 
 - **What may be uploaded:** pictures (JPEG, PNG, GIF, WebP) shown in the body, and attached files: PDF, Word
   (`.docx`, `.doc`), Excel (`.xlsx`, `.xls`), PowerPoint (`.pptx`, `.ppt`) and the same picture types. SVG is not
-  accepted. **At most 10 files per message and 10 MB each**, pictures in the body included.
+  accepted. **At most 10 files per version and 10 MB each**, pictures in the body included. *(Lead's changes,
+  2026-11-23: this said "per message"; the limit is a version's, since an edit may drop files and add others. The
+  limits are counted on the server from what the database holds, never from what the browser says its form lists: an
+  upload is refused while the staff member already holds 10 files for that message (for a new message, the files they
+  hold for no message yet), or when what they hold unposted in all, across their messages, would pass 100 MB.)*
 - **Checked by their contents.** The type is read from the file's first bytes (the magic numbers of each allowed type;
   for the Office formats, a ZIP whose entries name the Office part, or the OLE header for the older ones), never from
   its name or the browser's word. A file whose contents match no allowed type is refused with the name and a plain
@@ -161,11 +165,23 @@ through the existing `esc()`. Neither uses Tiptap's HTML output or `dangerouslyS
 
 - **Who gets it:** the sign-in address of every parent with an active membership of an active family, once per
   address, however many families the address belongs to. Addresses are the portal's own (`docs/agents/app-records.md`),
-  never QuickBooks'.
+  never QuickBooks'. *(Lead's change, 2026-11-23: as built, this is the reminders' rule: every person who isn't blocked
+  and has a guardian row that counts at the gate, `guardianRowCounts()` in `src/lib/parents/sessions.ts`, so nobody is
+  emailed about a message they couldn't sign in to read.)*
 - **Queued with the post.** Posting or saving an edit with the box ticked writes the version and one row per address to
   a mail queue in the same transaction. The worker (`runDueJobs()`, `src/lib/jobs/runner.ts`) sends a batch at each
   wake, a new job `messages.mail` with mail purposes `club_message` and `club_message_update`. A send that fails is
   tried again at the next wake, at most three times *(proposed)*, then counted as failed with its reason.
+  *(Lead's changes, 2026-11-23: only a failure that belongs to the address, the server refusing that one address,
+  counts a try, and only such failures ever mark a row failed. A failure of the mail itself (the server can't be
+  reached, or sends nothing) counts no try: it ends the wake's batch and puts every queued email off (`next_try_at`),
+  5 minutes, then 15, then every 60, so an outage uses up no good address's tries. The worker reads the club's switch
+  at each wake: while an Admin has it off, queued email waits, not sent, not dropped, its tries untouched, and goes once
+  it is on again; Settings › Messages says so. An edit settles the email still queued for the message's earlier
+  versions in its own transaction: an emailed edit drops it, so those addresses get the edit's email alone, one email
+  for the edit; a quiet edit moves it onto the new version, so addresses that never got anything get the message as it
+  now is, as an ordinary first email, not an update. The worker also drops, unsent, any queued email whose version is no
+  longer the message's newest.)*
 - **What it says.** Subject: the title for a post, "Updated: <title>" for an edit. Body: the club's name bar, "<name>
   posted a message" (or "updated a message"), the body as section 6 draws it, each picture as a line "There's a picture
   here: view it in the portal", the files' names as a list with "Open the message in the portal to download them", and
@@ -185,7 +201,10 @@ through the existing `esc()`. Neither uses Tiptap's HTML output or `dangerouslyS
 - **Delete is an Admin's** (a new Admin-only permission, section 10). It erases the content of every version, their
   files' bytes and the queued mail in one transaction, and keeps the message row with who deleted it and when, so the
   staff list can say so. Its audit row names the message by its id and number of versions, and holds none of its content, its title included (a title can hold what had to be removed). Parents stop
-  seeing it at once; a link to it, or to one of its files, is "not found". There is no undo.
+  seeing it at once; a link to it, or to one of its files, is "not found". There is no undo. *(Lead's change, 2026-11-23: as built, the
+  delete removes the rows themselves, not only their content: every version, every file of the message (posted, or
+  held for an edit), and every mail row, sent or still queued, go with the version and file rows, and every parent's
+  read row too; the message row stays with `deleted_by` and `deleted_at`.)*
 
 ## 10. Permissions, audit and settings
 
@@ -223,7 +242,9 @@ of writing.)*
   included.
 - `message_read`: `message_id`, `parent_id`, `version_n` read, `read_at`; unique on message and parent.
 - `message_mail`: id, `version_id`, `address` (trimmed, lower-cased; unique with the version), `status` (queued, sent,
-  failed), `tries`, `reason` (short, no secret), `sent_at`.
+  failed), `tries`, `reason` (short, no secret), `sent_at`. *(Lead's change, 2026-11-23: also `created_at`, the
+  queue's order, and `next_try_at`, nullable, the time before which the queue isn't tried after a failure of the mail
+  itself; `tries` counts only the address's own refusals.)*
 - `staff_user.contact_email` (nullable): the address shown on the profile; null means the sign-in address.
 
 The daily clean-up (`tests/integration/cleanup.test.ts` names every table) removes held files over 24 hours old and
@@ -249,9 +270,10 @@ QuickBooks id, so a change of company clears nothing here.
   built from the primitives (`PageHeader`, `Card`, `DataTable`, `Notice`, `ActionOutcome`, `TextInput`, `Checkbox`,
   `Button`); the menu entry in `staffMenu()`, `tests/integration/staff-menu.test.ts`, `GROUPS` in
   `tests/e2e/staff-menu.spec.ts`, and its `ABOUT` line in `hub-page.tsx`.
-- **Staff actions:** post, edit, upload and remove a held file (`staffAction("Messages.Post.ReadWrite", …)`), delete
+- **Staff actions:** post, edit and remove a held file (`staffAction("Messages.Post.ReadWrite", …)`), delete
   (`staffAction("Messages.Delete.ReadWrite", …)`), the setting (`staffAction("Settings.Messages.ReadWrite", …)`), and
-  the contact email (`staffSelfAction`, taking no id).
+  the contact email (`staffSelfAction`, taking no id). *(Lead's change, 2026-11-23: an upload is not an action but the staff route
+  `POST /staff/messages/files`, section 7, listed in `ROUTE_HANDLERS` beside the file routes.)*
 - **Settings item** `messages` in `SETTINGS_ITEMS` with its keywords ("announcements", "news", "email families") and
   `RAIL_STATUS`, starting with `<SettingsHeader />`.
 - **An area document**, `docs/agents/messages.md`, with its row in the table of `AGENTS.md`, written in the first slice.
