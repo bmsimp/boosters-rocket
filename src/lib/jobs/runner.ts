@@ -18,6 +18,7 @@ import { REMINDERS_JOB, sendVolunteerReminders } from "@/lib/volunteer/reminders
 import { DUE_REMINDERS_JOB, sendDueReminders } from "@/lib/seasons/due-reminders";
 import { WRITE_QUEUE_JOB, runWriteQueue } from "@/lib/roster/queue";
 import { BUYOUT_CHECK_JOB, checkBuyoutInvoices } from "@/lib/buyouts/daily-check";
+import { MESSAGES_MAIL_JOB, sendMessageMail } from "@/lib/messages/mail";
 
 export const TOKEN_JOB = "quickbooks.token_refresh";
 export const WAKE_KEY = "worker.last_wake";
@@ -97,6 +98,14 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
     if (due.sent + due.failed > 0) ran.push({ job: DUE_REMINDERS_JOB, ok: due.failed === 0 });
   } catch {
     ran.push({ job: DUE_REMINDERS_JOB, ok: false });
+  }
+  // Club messages emailed to families (src/lib/messages/mail.ts): a batch of what a post or an edit queued, at each wake,
+  // while outgoing mail works. Guarded the same way; in this wake's answer only when it sent or tried something.
+  try {
+    const m = await sendMessageMail();
+    if (m.sent + m.failed + m.retrying > 0) ran.push({ job: MESSAGES_MAIL_JOB, ok: m.failed + m.retrying === 0 });
+  } catch {
+    ran.push({ job: MESSAGES_MAIL_JOB, ok: false });
   }
   // A guardian's phone and mailing address taken into the portal, once, after the first successful roster read by this
   // build since migration 0044 (src/lib/parents/contact-take-in.ts). It reads the roster cache and asks QuickBooks nothing, so it

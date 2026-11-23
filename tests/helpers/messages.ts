@@ -1,5 +1,6 @@
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { clubMessage, messageRead, messageVersion } from "@/lib/db/schema";
+import { clubMessage, messageMail, messageRead, messageVersion } from "@/lib/db/schema";
 import { seedStaff } from "./db";
 
 /**
@@ -21,17 +22,22 @@ export type FamilyMessages = { home: string[]; markers: string[] };
 
 /**
  * For seedTwoFamilies(): one message the club posted, the same for every family, which family B's parent has read and
- * family A's hasn't. What is B's own is that read row: its id is B's marker (no page shows it), and A's Home must still
- * say the message is new to A. `messageId` and `staffId` (its poster) open the message and the poster's profile.
+ * family A's hasn't, and whose email couldn't be delivered to B's parent. What is B's own is that read row and that
+ * failed mail row (staff only: its address and reason): their ids and the reason are B's markers (no parent page shows
+ * them), and A's Home must still say the message is new to A. `messageId` and `staffId` (its poster) open the message
+ * and the poster's profile.
  */
-export async function seedTwoFamilyMessages(bParentId: string): Promise<{ messageId: string; staffId: string; title: string; a: FamilyMessages; b: FamilyMessages }> {
+export async function seedTwoFamilyMessages(bParentId: string, bAddress: string): Promise<{ messageId: string; staffId: string; title: string; a: FamilyMessages; b: FamilyMessages }> {
   const poster = await seedStaff({ email: "messages.poster@club.example", name: "Marisol Messenger" });
   const title = "Clubhouse keys and the spring schedule";
   const messageId = await seedMessage({ postedBy: poster.id, titles: [title] });
   const [read] = await db.insert(messageRead).values({ messageId, parentId: bParentId, versionN: 1 }).returning({ id: messageRead.id });
+  const [version] = await db.update(messageVersion).set({ emailed: true }).where(eq(messageVersion.messageId, messageId)).returning({ id: messageVersion.id });
+  const reason = "Mailbox full at Brackenmoor QR-MAIL-77";
+  const [failed] = await db.insert(messageMail).values({ versionId: version!.id, address: bAddress, status: "failed", tries: 3, reason }).returning({ id: messageMail.id });
   return {
     messageId, staffId: poster.id, title,
     a: { home: ["1 new message from the club", title], markers: [] },
-    b: { home: ['href="/messages">Messages</a>'], markers: [read!.id] },
+    b: { home: ['href="/messages">Messages</a>'], markers: [read!.id, failed!.id, reason] },
   };
 }

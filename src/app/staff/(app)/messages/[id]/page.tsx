@@ -1,15 +1,21 @@
 import { notFound } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
 import { staffMessage } from "@/lib/messages/staff";
-import { Card, LinkButton, LocalTime, Notice, PageHeader } from "@/app/components/ui";
+import { mailResults, mailWords } from "@/lib/messages/mail";
+import { can } from "@/lib/permissions/effective";
+import { Card, DataTable, LinkButton, LocalTime, Notice, PageHeader } from "@/app/components/ui";
 import { VersionView } from "../message-view";
+import { DeleteMessage } from "../delete-message";
 
 export const metadata = { title: "Message" };
 export const dynamic = "force-dynamic";
 
 /**
  * One message as families see it (spec section 4): the current version, who posted it and when, and each earlier
- * version by its date. Edit is for its poster alone. Not audited: a message is the same for every family.
+ * version by its date, and its mail results: delivered, failed and waiting per emailed version, with the failed
+ * addresses (staff only: they are other families' addresses). Edit is for its poster alone, Delete for those who may
+ * delete (an Admin), behind its confirm step. Not audited: a message is the same for every family, and the failed
+ * addresses are a list across families, like the roster's.
  */
 export default async function StaffMessagePage({ params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireStaffPage("Messages.Post.ReadWrite");
@@ -27,6 +33,8 @@ export default async function StaffMessagePage({ params }: { params: Promise<{ i
   }
   const [current, ...earlier] = m.versions;
   const isPoster = m.postedBy.id === ctx.staffUserId;
+  const mail = await mailResults(m.id);
+  const mayDelete = can(ctx.effective, "Messages.Delete.ReadWrite");
   return (
     <main className="wrap single">
       <PageHeader title={current!.title} back={back}
@@ -47,6 +55,26 @@ export default async function StaffMessagePage({ params }: { params: Promise<{ i
               </div>
             </details>
           ))}
+        </Card>
+      )}
+      {mail.length > 0 && (
+        <Card title="Email" titleId="mail-h" description="Only staff see who it went to. Each address is tried up to three times.">
+          {mail.map((v) => (
+            <div key={v.versionId} className="stack">
+              <h3>Version {v.n}: {mailWords(v)}</h3>
+              {v.failures.length > 0 && (
+                <DataTable caption={`Addresses version ${v.n} couldn't be delivered to`} rows={v.failures} rowKey={(f) => f.address} columns={[
+                  { key: "address", header: "Address", rowHeader: true, cell: (f) => f.address },
+                  { key: "reason", header: "Why", cell: (f) => f.reason },
+                ]} />
+              )}
+            </div>
+          ))}
+        </Card>
+      )}
+      {mayDelete && (
+        <Card title="Delete" titleId="delete-h" description="For a message that must disappear, say one that held the wrong family's details.">
+          <DeleteMessage messageId={m.id} />
         </Card>
       )}
     </main>

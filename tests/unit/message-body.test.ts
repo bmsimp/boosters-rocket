@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { BODY_MAX_TEXT, checkBody, EMPTY_BODY, isEmptyBody, renderBody, storedBody, type MessageBody } from "@/lib/messages/body";
+import { BODY_MAX_TEXT, bodyMail, checkBody, EMPTY_BODY, isEmptyBody, MAIL_PICTURE_LINE, renderBody, storedBody, type MessageBody } from "@/lib/messages/body";
 
 /** A club message's body is checked against an allowlist and drawn by our own code (spec sections 6 and 13). */
 const PIC = "8b7c2a4e-1f3d-4c5b-9a6e-0d1c2b3a4f5e", OTHER = "11111111-2222-4333-8444-555555555555";
@@ -158,5 +158,48 @@ describe("renderBody()", () => {
     expect(html).toContain('<a href="https://club.org/schedule" rel="noopener noreferrer"><strong>schedule</strong> page</a><span class="msg-link-address"> (https://club.org/schedule)</span>');
     expect(html).toContain('<a href="https://club.org/" rel="noopener noreferrer">https://club.org/</a></p>');
     expect(html).toContain('<a href="mailto:coach@club.org" rel="noopener noreferrer">coach@club.org</a></p>');
+  });
+});
+
+describe("bodyMail()", () => {
+  const full = () => kept(doc(
+    { type: "heading", attrs: { level: 2 }, content: [t("Practice")] },
+    p(t("Bring "), t("water", [{ type: "bold" }]), { type: "hardBreak" }, t("and "), t("the form", [link("https://club.org/form")])),
+    { type: "bulletList", content: [{ type: "listItem", content: [p(t("one"))] }, { type: "listItem", content: [p(t("two"))] }] },
+    { type: "orderedList", attrs: { start: 3 }, content: [{ type: "listItem", content: [p(t("three"))] }] },
+    { type: "image", attrs: { attachment: PIC, alt: "The team" } },
+    p(t("https://club.org/schedule", [link("https://club.org/schedule")])),
+  )).body;
+
+  it("draws the body as plain text, a link's address after its words when they differ, a picture as a line pointing to the portal", () => {
+    const { text } = bodyMail(full());
+    expect(text).toBe([
+      "Practice",
+      "Bring water\nand the form (https://club.org/form)",
+      "- one\n- two",
+      "3. three",
+      MAIL_PICTURE_LINE,
+      "https://club.org/schedule",
+    ].join("\n\n"));
+  });
+
+  it("draws it as HTML with its marks, lists and links, and no image, nothing loaded and no script", () => {
+    const { html } = bodyMail(full());
+    expect(html).toContain("<strong>water</strong><br>and ");
+    expect(html).toContain('<a href="https://club.org/form">the form</a> (https://club.org/form)');
+    expect(html).toMatch(/<ul[^>]*><li><p[^>]*>one<\/p><\/li><li><p[^>]*>two<\/p><\/li><\/ul>/);
+    expect(html).toMatch(/<ol[^>]*start="3">/);
+    expect(html).toContain(MAIL_PICTURE_LINE.replace("'", "&#39;"));
+    expect(html).not.toMatch(/<img\b|src=|<script|<style|url\(/i);
+    expect(html).not.toContain(PIC);
+  });
+
+  it("escapes a stored <script>, every piece of text and every attribute", () => {
+    const body = kept(doc(p(t("<script>alert(1)</script> & \"quotes\""), t("x", [link("https://club.org/?a=1&b=\"2\"")])))).body;
+    const { text, html } = bodyMail(body);
+    expect(html).not.toContain("<script>");
+    expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt; &amp; &quot;quotes&quot;");
+    expect(html).toContain('href="https://club.org/?a=1&amp;b=%222%22"');
+    expect(text).toContain("<script>alert(1)</script>"); // plain text is text: nothing reads it as HTML
   });
 });

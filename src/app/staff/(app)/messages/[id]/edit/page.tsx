@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
 import { writeAudit } from "@/lib/audit/log";
 import { familiesReached, staffMessage } from "@/lib/messages/staff";
+import { emailReach } from "@/lib/messages/mail";
 import { Card, PageHeader } from "@/app/components/ui";
 import { MessageForm } from "../../message-form";
 
@@ -23,13 +24,13 @@ export default async function EditMessagePage({ params }: { params: Promise<{ id
     redirect("/refused");
   }
   const current = m.versions[0]!;
-  const families = await familiesReached();
+  const [families, emailTo] = await Promise.all([familiesReached(), emailReach()]);
   return (
     <main className="wrap single">
       <PageHeader title="Edit message" back={{ href: `/staff/messages/${m.id}`, label: "Back to the message" }}
         lede="Saving adds a new version. Families see it, marked Edited, and can still open the earlier ones." />
       <Card>
-        <MessageForm families={families} edit={{ messageId: m.id, title: current.title, body: current.body, files: current.files }} />
+        <MessageForm families={families} emailTo={emailTo} edit={{ messageId: m.id, title: current.title, body: current.body, files: current.files }} />
       </Card>
     </main>
   );

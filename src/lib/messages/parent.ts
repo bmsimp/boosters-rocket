@@ -21,7 +21,10 @@ export type ParentMessageRow = {
   id: string; title: string; poster: { id: string; name: string }; postedAt: Date;
   /** When it was last edited, for a message with more than one version. */
   editedAt: Date | null;
-  /** This parent hasn't opened it yet. */
+  /**
+   * New to this parent: they haven't opened it, or an edit emailed as an update was saved after the version they read
+   * (a quiet edit, not emailed, leaves a read message read).
+   */
   isNew: boolean;
 };
 export type ParentMessage = Omit<ParentMessageRow, "isNew"> & {
@@ -37,14 +40,19 @@ async function messageRows(parentId: string, postedBy?: string): Promise<ParentM
     .where(and(isNull(clubMessage.deletedAt), postedBy ? eq(clubMessage.postedBy, postedBy) : undefined))
     .orderBy(desc(clubMessage.postedAt), desc(clubMessage.id));
   if (!rows.length) return [];
-  const versions = await db.select({ messageId: messageVersion.messageId, title: messageVersion.title, savedAt: messageVersion.savedAt, n: messageVersion.n })
+  const versions = await db.select({ messageId: messageVersion.messageId, title: messageVersion.title, savedAt: messageVersion.savedAt, n: messageVersion.n, emailed: messageVersion.emailed })
     .from(messageVersion).where(inArray(messageVersion.messageId, rows.map((r) => r.id))).orderBy(asc(messageVersion.n));
   const last = new Map<string, (typeof versions)[number]>();
-  for (const v of versions) last.set(v.messageId, v);
+  const lastEmailedEdit = new Map<string, number>();
+  for (const v of versions) {
+    last.set(v.messageId, v);
+    if (v.emailed && v.n > 1) lastEmailedEdit.set(v.messageId, v.n);
+  }
   return rows.flatMap((r) => {
     const v = last.get(r.id);
     if (!v) return [];
-    return [{ id: r.id, title: v.title, poster: { id: r.posterId, name: r.poster }, postedAt: r.postedAt, editedAt: v.n > 1 ? v.savedAt : null, isNew: r.readN === null }];
+    const isNew = r.readN === null || r.readN < (lastEmailedEdit.get(r.id) ?? 0);
+    return [{ id: r.id, title: v.title, poster: { id: r.posterId, name: r.poster }, postedAt: r.postedAt, editedAt: v.n > 1 ? v.savedAt : null, isNew }];
   });
 }
 

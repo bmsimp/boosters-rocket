@@ -5,7 +5,7 @@ import { EditorContent, useEditor, useEditorState, type Editor, type JSONContent
 import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
 import { ActionOutcome, Notice } from "@/app/components/notice";
-import { Button, Field, List, ListRow, TextInput } from "@/app/components/ui";
+import { Button, Checkbox, Field, List, ListRow, TextInput } from "@/app/components/ui";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { checkBody, renderBody, safeHref, ALT_MAX, type MessageBody } from "@/lib/messages/body";
 import { fileSizeWords, MESSAGE_FILE_MAX_BYTES, MESSAGE_FILE_WORDS, MESSAGE_FILES_MAX, type MessageFileType } from "@/lib/messages/file-types";
@@ -63,10 +63,13 @@ async function uploadTo(href: string, file: File): Promise<{ ok: true; message: 
  * The form for a new message or an edit (spec section 4): a title, the body in the rich editor with its pictures, the
  * files attached, Preview (the message as a parent will see it, with how many families it goes to), and Post or Save.
  * Each file is uploaded as it is added and held until the save. Given only what it shows: for an edit, the message's
- * id and its current version's title, body and files.
+ * id and its current version's title, body and files; and, only while the club allows messages to be emailed, how many
+ * addresses it would go to (`emailTo`), with its box ticked: "Also email families" for a post, "Email families about
+ * this change" for an edit.
  */
-export function MessageForm({ families, edit }: {
+export function MessageForm({ families, emailTo, edit }: {
   families: number;
+  emailTo: number | null;
   edit?: { messageId: string; title: string; body: MessageBody; files: FormFile[] };
 }) {
   const router = useRouter();
@@ -77,6 +80,7 @@ export function MessageForm({ families, edit }: {
   const [panel, setPanel] = useState<"link" | "picture" | null>(null);
   const [saving, startSaving] = useTransition();
   const [uploading, setUploading] = useState(false);
+  const [email, setEmail] = useState(emailTo !== null);
   const outcomeRef = useRef<HTMLDivElement>(null);
 
   const editor = useEditor({
@@ -126,7 +130,7 @@ export function MessageForm({ families, edit }: {
 
   function save() {
     if (!editor || saving || uploading) return;
-    const draft = { title, body: editor.getJSON(), files: files.map((f) => f.id) };
+    const draft = { title, body: editor.getJSON(), files: files.map((f) => f.id), email: emailTo !== null && email };
     startSaving(async () => {
       if (edit) {
         const r = await safely(() => editMessageAction(edit.messageId, draft), failed);
@@ -138,7 +142,8 @@ export function MessageForm({ families, edit }: {
     });
   }
 
-  const reach = `This goes to ${families} ${families === 1 ? "family" : "families"}.`;
+  const emailing = emailTo !== null && email;
+  const reach = `This goes to ${families} ${families === 1 ? "family" : "families"}${emailing ? ` and is emailed to ${emailTo} ${emailTo === 1 ? "address" : "addresses"}` : ""}.`;
   return (
     <form className="stack message-form" onSubmit={(e) => { e.preventDefault(); save(); }}>
       <div hidden={preview !== null} className="stack">
@@ -173,6 +178,11 @@ export function MessageForm({ families, edit }: {
                 action={<Button size="sm" variant="quiet" onClick={() => void remove(f)}>Remove<span className="visually-hidden"> {f.name}</span></Button>} />
             ))}
           </List>
+        )}
+        {emailTo !== null && (
+          <Checkbox id="msg-email" label={edit ? "Email families about this change" : "Also email families"} checked={email} onChange={(e) => setEmail(e.target.checked)}
+            hint={edit ? "The email says the message was updated, and families see it as new again. Untick it for a small fix."
+              : "Each parent gets it once at the address they sign in with. Files and pictures stay in the portal; the email links to it."} />
         )}
       </div>
 

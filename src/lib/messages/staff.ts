@@ -1,12 +1,14 @@
 import { and, asc, count, desc, eq, inArray, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db, type Tx } from "@/lib/db/client";
-import { clubMessage, family, messageFile, messageVersion, messageVersionFile, staffUser } from "@/lib/db/schema";
+import { clubMessage, family, messageFile, messageMail, messageRead, messageVersion, messageVersionFile, staffUser } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { isUuid } from "@/lib/seasons/ids";
 import { checkBody, storedBody, type MessageBody } from "./body";
 import { isPicture, MESSAGE_FILES_MAX, type MessageFileType } from "./file-types";
 import { checkUpload } from "./files";
+import { queueMail } from "./mail";
+import { messagesEmailAllowed } from "@/lib/settings/messages";
 
 /**
  * Club messages for staff (spec sections 4, 7 and 9): the list, one message with its versions, a post, an edit that
@@ -16,6 +18,7 @@ import { checkUpload } from "./files";
  * an Admin's delete erases those, and the audit log keeps what it is given.
  */
 export const POST_PERMISSION = "Messages.Post.ReadWrite" as const;
+export const DELETE_PERMISSION = "Messages.Delete.ReadWrite" as const;
 export const TITLE_MAX = 120;
 
 type Fail = { ok: false; errors: string[] };
@@ -214,9 +217,10 @@ async function saveFiles(tx: Tx, versionId: string, messageId: string, ids: stri
 /**
  * Posts a message to every family (spec section 4): version 1 with its title, its body as checkBody() rebuilt it, and
  * the files the form holds, each held by the poster for a new message. Audited `message.post` with its version and
- * how many files, never its title. (Slice 4 adds its email.)
+ * how many files and how many addresses it is emailed to, never its title. With `email` true, and only while the club
+ * allows it (read in this transaction, whatever the form sent), its email is queued in the same transaction (./mail.ts).
  */
-export async function postMessage(o: Who & { title: unknown; body: unknown; files: unknown }): Promise<{ ok: true; message: string; id: string } | Fail> {
+export async function postMessage(o: Who & { title: unknown; body: unknown; files: unknown; email?: unknown }): Promise<{ ok: true; message: string; id: string } | Fail> {
   const title = checkTitle(o.title);
   if (!title.ok) return title;
   const list = checkFileList(o.files);
@@ -227,12 +231,14 @@ export async function postMessage(o: Who & { title: unknown; body: unknown; file
     if (files.length !== list.ids.length) return FILE_GONE;
     const body = checkBody(o.body, new Set(files.filter((f) => isPicture(f.type)).map((f) => f.id)));
     if (!body.ok) return { ok: false as const, errors: [body.error] };
+    const emailed = o.email === true && (await messagesEmailAllowed(tx));
     const [m] = await tx.insert(clubMessage).values({ postedBy: o.staffUserId }).returning({ id: clubMessage.id });
-    const [v] = await tx.insert(messageVersion).values({ messageId: m!.id, n: 1, title: title.title, body: body.body, emailed: false }).returning({ id: messageVersion.id });
+    const [v] = await tx.insert(messageVersion).values({ messageId: m!.id, n: 1, title: title.title, body: body.body, emailed }).returning({ id: messageVersion.id });
     await saveFiles(tx, v!.id, m!.id, list.ids);
+    const addresses = emailed ? await queueMail(tx, v!.id) : 0;
     await writeAudit({ actor: o.actor, action: "message.post", permission: POST_PERMISSION, targetType: "message", targetId: m!.id,
-      after: { version: 1, files: list.ids.length, emailed: false }, ip: o.ip }, tx);
-    return { ok: true as const, message: "Posted. Every family can read it in the portal.", id: m!.id };
+      after: { version: 1, files: list.ids.length, emailed, ...(emailed ? { addresses } : {}) }, ip: o.ip }, tx);
+    return { ok: true as const, message: `Posted. Every family can read it in the portal${emailed ? `, and it is being emailed to ${addressWords(addresses)}` : ""}.`, id: m!.id };
   });
 }
 
@@ -241,9 +247,11 @@ export async function postMessage(o: Who & { title: unknown; body: unknown; file
  * member whatever their permissions (an Admin's edit of someone else's message is refused and audited
  * `access.refused`). The files may be those of the current version and those the poster holds for this message. A
  * version is never changed: the earlier ones stay as they were. Audited `message.edit` with the version number and
- * whether it was emailed, never its title.
+ * whether it was emailed, never its title. With `email` true, and only while the club allows it, the new version is
+ * emailed as an update, queued in the same transaction, and the message is new again for every parent (./parent.ts); a
+ * quiet edit leaves read messages read.
  */
-export async function editMessage(o: Who & { messageId: unknown; title: unknown; body: unknown; files: unknown }): Promise<{ ok: true; message: string; n: number } | Fail> {
+export async function editMessage(o: Who & { messageId: unknown; title: unknown; body: unknown; files: unknown; email?: unknown }): Promise<{ ok: true; message: string; n: number } | Fail> {
   if (!isUuid(o.messageId)) return NOT_FROM_PAGE;
   const messageId = o.messageId;
   const title = checkTitle(o.title);
@@ -270,10 +278,44 @@ export async function editMessage(o: Who & { messageId: unknown; title: unknown;
       return { ok: false as const, errors: ["Nothing has changed since the last version, so nothing was saved."] };
     }
     const n = cur.n + 1;
-    const [v] = await tx.insert(messageVersion).values({ messageId, n, title: title.title, body: body.body, emailed: false }).returning({ id: messageVersion.id });
+    const emailed = o.email === true && (await messagesEmailAllowed(tx));
+    const [v] = await tx.insert(messageVersion).values({ messageId, n, title: title.title, body: body.body, emailed }).returning({ id: messageVersion.id });
     await saveFiles(tx, v!.id, messageId, list.ids);
+    const addresses = emailed ? await queueMail(tx, v!.id) : 0;
     await writeAudit({ actor: o.actor, action: "message.edit", permission: POST_PERMISSION, targetType: "message", targetId: messageId,
-      after: { version: n, files: list.ids.length, emailed: false }, ip: o.ip }, tx);
-    return { ok: true as const, message: "Saved. Families now see this version, and can still open the earlier ones.", n };
+      after: { version: n, files: list.ids.length, emailed, ...(emailed ? { addresses } : {}) }, ip: o.ip }, tx);
+    return { ok: true as const, n, message: emailed
+      ? `Saved. Families now see this version, marked new again, and it is being emailed to ${addressWords(addresses)} as an update.`
+      : "Saved. Families now see this version, and can still open the earlier ones." };
+  });
+}
+
+const addressWords = (n: number) => `${n} ${n === 1 ? "address" : "addresses"}`;
+
+/**
+ * An Admin's delete of a message (spec section 9), in one transaction: every version's content and their files' bytes
+ * erased (the versions and files themselves removed, and with them the mail rows, sent or still queued, so nothing more
+ * is sent, and every parent's read row), the message row kept with who deleted it and when, so the staff list can say
+ * so. Audited `message.delete` with the number of versions, files and emails not yet sent: never its title or any of
+ * its content, since a title can hold what had to be removed. No mail is sent. There is no undo.
+ */
+export async function deleteMessage(o: Who & { messageId: unknown }): Promise<{ ok: true; message: string } | Fail> {
+  if (!isUuid(o.messageId)) return NOT_FROM_PAGE;
+  const messageId = o.messageId;
+  return db.transaction(async (tx) => {
+    const [m] = await tx.select({ deletedAt: clubMessage.deletedAt }).from(clubMessage).where(eq(clubMessage.id, messageId)).for("update");
+    if (!m) return NOT_FROM_PAGE;
+    if (m.deletedAt) return { ok: false as const, errors: ["This message was already deleted."] };
+    const versions = await tx.select({ id: messageVersion.id }).from(messageVersion).where(eq(messageVersion.messageId, messageId));
+    const ids = versions.map((v) => v.id);
+    const [unsent] = ids.length ? await tx.select({ n: count() }).from(messageMail).where(and(inArray(messageMail.versionId, ids), eq(messageMail.status, "queued"))) : [{ n: 0 }];
+    // The versions go with their file lists and mail rows (on delete cascade); then the files, posted or held for an edit.
+    await tx.delete(messageVersion).where(eq(messageVersion.messageId, messageId));
+    const files = await tx.delete(messageFile).where(eq(messageFile.messageId, messageId)).returning({ id: messageFile.id });
+    await tx.delete(messageRead).where(eq(messageRead.messageId, messageId));
+    await tx.update(clubMessage).set({ deletedAt: new Date(), deletedBy: o.staffUserId }).where(eq(clubMessage.id, messageId));
+    await writeAudit({ actor: o.actor, action: "message.delete", permission: DELETE_PERMISSION, targetType: "message", targetId: messageId,
+      before: { versions: versions.length, files: files.length }, after: { unsentEmails: unsent?.n ?? 0 }, ip: o.ip }, tx);
+    return { ok: true as const, message: "Deleted. Families no longer see it, and no more of its email is sent." };
   });
 }

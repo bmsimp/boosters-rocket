@@ -206,7 +206,7 @@ async function appIdsOf(spec: ParentFamilySpec): Promise<string[]> {
  * families have signed up for (seedTwoFamilyVolunteering), whose sign-up ids are among their markers. Each parent has
  * a remembered device their session was made on, whose id is among their markers. Last, the app's
  * own records and links for both families (stage 1 of the app-owned families spec), as a roster read makes them. And
- * one club message, which B's parent has read and A's hasn't (seedTwoFamilyMessages).
+ * one club message, which B's parent has read and A's hasn't, and whose email failed for B's address (seedTwoFamilyMessages).
  */
 export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededParent }> {
   const a = await seedSignedInParent(FAMILY_A);
@@ -252,8 +252,8 @@ export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededPar
   a.markers.push(...(await appIdsOf(FAMILY_A)));
   b.markers.push(...(await appIdsOf(FAMILY_B)));
   // One club message, the same for every family, which B's parent has read and A's hasn't: read state is a person's own,
-  // and the id of B's read row is B's marker.
-  const messages = await seedTwoFamilyMessages(b.identity.parentId);
+  // and the id of B's read row is B's marker; so are the id and reason of the failed mail row for B's address (staff only).
+  const messages = await seedTwoFamilyMessages(b.identity.parentId, b.spec.parent.email);
   const shared = { messageId: messages.messageId, staffId: messages.staffId, title: messages.title };
   a.messages = { ...shared, ...messages.a }; a.markers.push(...messages.a.markers);
   b.messages = { ...shared, ...messages.b }; b.markers.push(...messages.b.markers);

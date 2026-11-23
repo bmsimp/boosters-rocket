@@ -1,4 +1,5 @@
 import { createElement as h, Fragment, type ReactNode } from "react";
+import { esc } from "@/lib/mail/messages";
 
 /**
  * A club message's body (spec section 6): the editor's document JSON, kept in `message_version.body` only as
@@ -291,4 +292,100 @@ function drawBlocks(blocks: BodyBlock[], o: RenderOptions, key: string): ReactNo
  */
 export function renderBody(body: MessageBody, o: RenderOptions): ReactNode {
   return h("div", { className: "msg-body" }, ...drawBlocks(body.content, o, "b"));
+}
+
+// --- mail --------------------------------------------------------------------------------------------------------
+
+/** What a picture becomes in a mail: a line pointing to the portal, since a mail carries no image and loads nothing. */
+export const MAIL_PICTURE_LINE = "There's a picture here: view it in the portal.";
+
+const MAIL_P = `<p style="margin:0 0 16px">`;
+const MAIL_HEADING: Record<2 | 3, string> = { 2: `<h2 style="margin:0 0 12px;font-size:18px">`, 3: `<h3 style="margin:0 0 12px;font-size:16px">` };
+
+/** A run of inline nodes in a mail: text with its marks, line breaks, and a link's words with its address after them when they differ. */
+function mailInline(nodes: BodyInline[] | undefined): { text: string; html: string } {
+  let text = "", html = "";
+  const list = nodes ?? [];
+  for (let i = 0; i < list.length; i++) {
+    const n = list[i]!;
+    if (n.type === "hardBreak") { text += "\n"; html += "<br>"; continue; }
+    const href = linkOf(n);
+    if (!href) {
+      text += n.text;
+      html += marked(n);
+      continue;
+    }
+    const run: Extract<BodyInline, { type: "text" }>[] = [];
+    let j = i;
+    while (j < list.length && linkOf(list[j]!) === href) run.push(list[j++] as Extract<BodyInline, { type: "text" }>);
+    const words = run.map((r) => r.text).join("");
+    const after = sameAddress(words, href) ? "" : ` (${shownAddress(href)})`;
+    text += `${words}${after}`;
+    html += `<a href="${esc(href)}">${run.map(marked).join("")}</a>${esc(after)}`;
+    i = j - 1;
+  }
+  return { text, html };
+}
+
+/** One piece of text in a mail's HTML, escaped, inside its marks' tags. */
+function marked(n: Extract<BodyInline, { type: "text" }>): string {
+  let s = esc(n.text);
+  for (const m of n.marks ?? []) {
+    if (m.type === "bold") s = `<strong>${s}</strong>`;
+    else if (m.type === "italic") s = `<em>${s}</em>`;
+    else if (m.type === "underline") s = `<u>${s}</u>`;
+  }
+  return s;
+}
+
+function mailBlocks(blocks: BodyBlock[], indent: string, inList = false): { text: string[]; html: string } {
+  const p = inList ? `<p style="margin:0 0 4px">` : MAIL_P;
+  const text: string[] = [];
+  let html = "";
+  for (const b of blocks) {
+    switch (b.type) {
+      case "paragraph": {
+        const r = mailInline(b.content);
+        if (!r.text.trim()) break;
+        text.push(r.text); html += `${p}${r.html}</p>`;
+        break;
+      }
+      case "heading": {
+        const r = mailInline(b.content);
+        if (!r.text.trim()) break;
+        text.push(r.text); html += `${MAIL_HEADING[b.attrs.level]}${r.html}</h${b.attrs.level}>`;
+        break;
+      }
+      case "bulletList":
+      case "orderedList": {
+        const start = b.type === "orderedList" ? b.attrs?.start ?? 1 : 0;
+        const items = b.content.map((li, k) => {
+          const inner = mailBlocks(li.content, `${indent}   `, true);
+          const lead = b.type === "orderedList" ? `${start + k}. ` : "- ";
+          // A nested list's lines come indented already; anything else after the item's first line lines up under its words.
+          const [first = "", ...rest] = inner.text;
+          const lines = [`${indent}${lead}${first.trimStart()}`, ...rest.map((t) => (t.startsWith(`${indent}   `) ? t : `${indent}   ${t}`))];
+          return { text: lines.join("\n"), html: `<li>${inner.html}</li>` };
+        });
+        text.push(items.map((x) => x.text).join("\n"));
+        const tag = b.type === "orderedList" ? "ol" : "ul";
+        html += `<${tag} style="margin:0 0 16px"${b.type === "orderedList" && start !== 1 ? ` start="${start}"` : ""}>${items.map((x) => x.html).join("")}</${tag}>`;
+        break;
+      }
+      case "image":
+        text.push(MAIL_PICTURE_LINE); html += `${p}<em>${esc(MAIL_PICTURE_LINE)}</em></p>`;
+        break;
+    }
+  }
+  return { text, html };
+}
+
+/**
+ * A checked body as a mail draws it (spec section 6): plain text, and HTML in which every piece of text and every
+ * attribute goes through the mail's esc(). Each picture is a line pointing to the portal: no image, nothing loaded.
+ * Never Tiptap's HTML output.
+ */
+export function bodyMail(body: MessageBody): { text: string; html: string } {
+  const r = mailBlocks(body.content, "");
+  return { text: r.text.join("\n\n"), html: r.html };
 }

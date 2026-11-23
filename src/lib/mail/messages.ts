@@ -2,7 +2,8 @@ import type { MailMessage } from "./types";
 
 export type Brand = { clubName: string; color: string };
 
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+/** Escapes text for HTML: every piece of text and every attribute a mail holds goes through it. */
+export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 const COLOR = /^#[0-9a-f]{6}$/i;
 
 /**
@@ -22,14 +23,19 @@ export const POWERED_BY = "Powered by Boosters Rocket";
 const POWERED_BY_HTML = `<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #e3e4e8;font-size:13px;color:#6b6b6b">`
   + `Powered by <span style="color:#1e1b4b;font-weight:bold">Boosters Rocket</span></p>`;
 
-/** Simple HTML: a colored bar with the club name, then paragraphs, then the "Powered by" line. No images, no remote content. */
-function html(b: Brand, paragraphs: Line[], big?: string): string {
+/** The frame of every mail: a colored bar with the club name, the mail's own HTML, then the "Powered by" line. */
+function frame(b: Brand, inner: string): string {
   const color = COLOR.test(b.color) ? b.color : "#1e1b4b";
-  const body = paragraphs.map((p) => (typeof p === "string" ? `${PARAGRAPH}${esc(p)}</p>` : `${PARAGRAPH}<a href="${esc(p.link)}">${esc(p.link)}</a></p>`)).join("");
-  const code = big ? `<p style="margin:0 0 16px;font-size:32px;letter-spacing:6px;font-weight:bold">${esc(big)}</p>` : "";
   return `<!doctype html><html><body style="margin:0;font-family:Arial,Helvetica,sans-serif;color:#1a1a1a">`
     + `<div style="background:${color};color:#ffffff;padding:16px 24px;font-size:18px;font-weight:bold">${esc(b.clubName)}</div>`
-    + `<div style="padding:24px">${code}${body}${POWERED_BY_HTML}</div></body></html>`;
+    + `<div style="padding:24px">${inner}${POWERED_BY_HTML}</div></body></html>`;
+}
+const lineHtml = (p: Line) => (typeof p === "string" ? `${PARAGRAPH}${esc(p)}</p>` : `${PARAGRAPH}<a href="${esc(p.link)}">${esc(p.link)}</a></p>`);
+
+/** Simple HTML: a colored bar with the club name, then paragraphs, then the "Powered by" line. No images, no remote content. */
+function html(b: Brand, paragraphs: Line[], big?: string): string {
+  const code = big ? `<p style="margin:0 0 16px;font-size:32px;letter-spacing:6px;font-weight:bold">${esc(big)}</p>` : "";
+  return frame(b, `${code}${paragraphs.map(lineHtml).join("")}`);
 }
 const text = (lines: Line[]) => `${lines.map((l) => (typeof l === "string" ? l : l.link)).join("\n\n")}\n\n-- \n${POWERED_BY}\n`;
 
@@ -383,6 +389,32 @@ export function requirementDueMessage(b: Brand, to: string, o: { dueWords: strin
     "If you've taken care of this in the last day or so, thank you, and you can ignore this email.",
   ];
   return { to, subject: one ? `Due ${o.dueWords}: ${o.items[0]!.title}` : `Due ${o.dueWords}: ${o.items.length} things for the club`, text: text(lines), html: html(b, lines) };
+}
+
+/* ---- Club messages (docs/superpowers/specs/2026-11-23-club-messages-design.md, section 8). The same mail goes to every
+   parent's sign-in address: it names no family and no person but the staff member who posted it. ---- */
+
+/** A message's body as bodyMail() drew it (src/lib/messages/body.ts): plain text, and HTML with every piece of text escaped. */
+export type ClubMessageBody = { text: string; html: string };
+
+/**
+ * A club message, or an edit of one (`update`), to one parent's sign-in address: who posted it, its title, its body
+ * with each picture as a line pointing to the portal, its files' names (never the files: nothing is attached and
+ * nothing is loaded from the portal), and the message's address in the portal alone on its line (`link`: APP_URL and
+ * /messages/<id>, which brings a parent who must sign in back to it).
+ */
+export function clubMessageMail(b: Brand, to: string, o: { poster: string; title: string; update: boolean; body: ClubMessageBody; files: string[]; link: string }): MailMessage {
+  const lead = `${o.poster} ${o.update ? "updated a message" : "posted a message"} for the families of ${b.clubName}.`;
+  const open = o.update ? "Read it, and its earlier versions, in the portal:" : "Read it in the portal:";
+  const download = "Open the message in the portal to download them.";
+  const textParts = [lead, o.title, ...(o.body.text ? [o.body.text] : []),
+    ...(o.files.length ? [`Files with this message:\n${o.files.map((f) => `- ${f}`).join("\n")}\n${download}`] : []), open, o.link];
+  const filesHtml = o.files.length
+    ? `${PARAGRAPH}Files with this message:</p><ul style="margin:0 0 16px">${o.files.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>${PARAGRAPH}${download}</p>`
+    : "";
+  const inner = `${PARAGRAPH}${esc(lead)}</p><h1 style="margin:0 0 16px;font-size:22px">${esc(o.title)}</h1>${o.body.html}${filesHtml}`
+    + `${lineHtml(open)}${lineHtml({ link: o.link })}`;
+  return { to, subject: o.update ? `Updated: ${o.title}` : o.title, text: `${textParts.join("\n\n")}\n\n-- \n${POWERED_BY}\n`, html: frame(b, inner) };
 }
 
 export function testMessage(b: Brand, to: string): MailMessage {

@@ -180,7 +180,8 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/accounting/ended-links", names: "all", why: "the links an unlink ended whose customer is still in the books: it reads any family's, student's and guardian row's history and the roster cache (stage 4's slice M3b2)" },
   { module: "@/lib/quickbooks/switch", names: "all", why: "the switch page counts what a change of company ends and keeps: every family's links, records, requests and buy-outs (stage 4's slice M8)" },
   { module: "@/lib/parents/contact-take-in", names: "all", why: "the take-in of contact details reads every person, guardian row, family and cached customer at once (stage 3's slice 11a)" },
-  { module: "@/lib/messages/staff", names: "all", why: "club messages for staff: every message, staff members' held files, posts and edits (club messages, slice 2), and in slice 4 every parent's address" },
+  { module: "@/lib/messages/staff", names: "all", why: "club messages for staff: every message, staff members' held files, posts, edits and an Admin's delete (club messages, slices 2 and 4)" },
+  { module: "@/lib/messages/mail", names: "all", why: "club messages' mail: it reads every parent's sign-in address to queue a message's email, and its results list other families' failed addresses (club messages, slice 4)" },
 ];
 
 describe("every page guards itself", () => {
