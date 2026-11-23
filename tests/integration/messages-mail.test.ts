@@ -263,6 +263,72 @@ describe("the worker's mail", () => {
   });
 });
 
+describe("an edit and the email still queued for an earlier version", () => {
+  const edit = async (id: string, words: string, email: boolean) => {
+    asStaff(coach);
+    const r = await editMessageAction(id, { title: "Spring schedule, changed", body: doc(para(words)), files: [], email });
+    if (!r.ok) throw new Error(r.errors.join(" "));
+  };
+  const toB = () => mail.outbox.filter((m) => m.to === b.spec.parent.email);
+
+  it("a quiet edit moves it onto the new version, sent as an ordinary first email with what the message now says", async () => {
+    await allowEmail(true);
+    const id = await post({ body: doc(para("Old words")) });
+    mail.refuse.add(b.spec.parent.email);
+    await sendMessageMail();
+    expect(mail.outbox).toHaveLength(3);
+    await edit(id, "New words", false);
+    const [v1, v2] = await db.select({ id: messageVersion.id }).from(messageVersion).where(eq(messageVersion.messageId, id)).orderBy(asc(messageVersion.n));
+    const byVersion = await db.select({ versionId: messageMail.versionId, address: messageMail.address, status: messageMail.status, tries: messageMail.tries }).from(messageMail);
+    expect(byVersion.filter((r) => r.versionId === v2!.id)).toEqual([{ versionId: v2!.id, address: b.spec.parent.email, status: "queued", tries: 1 }]);
+    expect(byVersion.filter((r) => r.versionId === v1!.id).map((r) => r.status)).toEqual(["sent", "sent", "sent"]);
+    mail.refuse.clear();
+    await sendMessageMail();
+    expect(toB()).toHaveLength(1);
+    expect(toB()[0]!.subject).toBe("Spring schedule, changed");
+    expect(toB()[0]!.text).toContain("Casey Coach posted a message");
+    expect(toB()[0]!.text).toContain("New words");
+    expect(toB()[0]!.text).not.toContain("Old words");
+    expect(mail.outbox).toHaveLength(4);
+    // Staff see it under the version it went with.
+    asStaff(coach);
+    const page = await renderPage(StaffMessagePage, { params: { id } });
+    expect(page).toContain("Version 2: Emailed 1");
+    expect(page).toContain("Version 1: Emailed 3");
+  });
+
+  it("an emailed edit drops it: those addresses get the edit's email alone, one for the edit, and nothing of the old version", async () => {
+    await allowEmail(true);
+    const id = await post({ body: doc(para("Old words")) });
+    mail.refuse.add(b.spec.parent.email);
+    await sendMessageMail();
+    await edit(id, "New words", true);
+    const queued = await db.select({ versionId: messageMail.versionId, address: messageMail.address }).from(messageMail).where(eq(messageMail.status, "queued"));
+    const [, v2] = await db.select({ id: messageVersion.id }).from(messageVersion).where(eq(messageVersion.messageId, id)).orderBy(asc(messageVersion.n));
+    expect(queued.map((r) => r.versionId)).toEqual(everyone.map(() => v2!.id));
+    mail.refuse.clear();
+    await sendMessageMail();
+    await sendMessageMail();
+    expect(toB()).toHaveLength(1);
+    expect(toB()[0]!.subject).toBe("Updated: Spring schedule, changed");
+    expect(toB()[0]!.text).toContain("New words");
+    expect(mail.outbox).toHaveLength(3 + 4);
+    expect(mail.outbox.filter((m) => m.text.includes("Old words"))).toHaveLength(3);
+  });
+
+  it("the worker drops, unsent, any queued email whose version is no longer the message's newest", async () => {
+    await allowEmail(true);
+    const id = await post({ email: false });
+    await edit(id, "New words", false);
+    const [v1] = await db.select({ id: messageVersion.id }).from(messageVersion).where(eq(messageVersion.messageId, id)).orderBy(asc(messageVersion.n));
+    // A row the edit's transaction didn't see, written straight to the queue.
+    await db.insert(messageMail).values({ versionId: v1!.id, address: a.spec.parent.email });
+    expect(await sendMessageMail()).toEqual({ sent: 0, failed: 0, retrying: 0 });
+    expect(mail.outbox).toEqual([]);
+    expect(await db.select().from(messageMail)).toEqual([]);
+  });
+});
+
 describe("an emailed edit and new", () => {
   it("makes the message new again for a parent who read it, and a quiet edit doesn't", async () => {
     await allowEmail(true);

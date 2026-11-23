@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, exists, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, exists, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { clubMessage, guardian, messageFile, messageMail, messageVersion, messageVersionFile, parent, staffUser } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
@@ -69,15 +69,41 @@ export async function queueMail(tx: Tx, versionId: string): Promise<number> {
   return addresses.length;
 }
 
+/**
+ * In an edit's own transaction, after its new version is written: what becomes of the email still queued for the
+ * message's earlier versions, which would otherwise send content the message no longer has. An emailed edit drops it,
+ * since the edit queues every address again: each gets this edit's email alone. A quiet edit moves it onto the new
+ * version: those addresses never got anything, so they get the message as it now is, as an ordinary first email (an
+ * unemailed version's mail is never an update: mailOf()). An address is kept once. Returns how many rows it dropped
+ * and moved.
+ */
+export async function carryUnsentMail(tx: Tx, messageId: string, versionId: string, emailed: boolean): Promise<{ dropped: number; moved: number }> {
+  const unsent = await tx.select({ id: messageMail.id, address: messageMail.address }).from(messageMail)
+    .innerJoin(messageVersion, eq(messageVersion.id, messageMail.versionId))
+    .where(and(eq(messageVersion.messageId, messageId), ne(messageMail.versionId, versionId), eq(messageMail.status, "queued")))
+    .orderBy(asc(messageMail.createdAt), asc(messageMail.id)).for("update", { of: messageMail });
+  if (!unsent.length) return { dropped: 0, moved: 0 };
+  const seen = new Set<string>(), keep: string[] = [], drop: string[] = [];
+  for (const r of unsent) {
+    if (emailed || seen.has(r.address)) drop.push(r.id); else { seen.add(r.address); keep.push(r.id); }
+  }
+  for (let i = 0; i < drop.length; i += 1000) await tx.delete(messageMail).where(inArray(messageMail.id, drop.slice(i, i + 1000)));
+  for (let i = 0; i < keep.length; i += 1000) await tx.update(messageMail).set({ versionId }).where(inArray(messageMail.id, keep.slice(i, i + 1000)));
+  return { dropped: drop.length, moved: keep.length };
+}
+
 // --- results -----------------------------------------------------------------------------------------------------
 
 export type MailCounts = { sent: number; failed: number; queued: number };
 export type VersionMail = MailCounts & { versionId: string; n: number; failures: { address: string; reason: string }[] };
 
-/** One message's mail, per emailed version, newest first: delivered, failed and waiting, and each failed address with its reason. */
+/** A version that has mail: emailed, or holding email a quiet edit moved onto it (carryUnsentMail()). */
+const hasMail = () => exists(db.select({ id: messageMail.id }).from(messageMail).where(eq(messageMail.versionId, messageVersion.id)));
+
+/** One message's mail, per version that has any, newest first: delivered, failed and waiting, and each failed address with its reason. */
 export async function mailResults(messageId: string): Promise<VersionMail[]> {
   const versions = await db.select({ id: messageVersion.id, n: messageVersion.n }).from(messageVersion)
-    .where(and(eq(messageVersion.messageId, messageId), eq(messageVersion.emailed, true))).orderBy(desc(messageVersion.n));
+    .where(and(eq(messageVersion.messageId, messageId), hasMail())).orderBy(desc(messageVersion.n));
   if (!versions.length) return [];
   const rows = await db.select({ versionId: messageMail.versionId, status: messageMail.status, n: count() }).from(messageMail)
     .where(inArray(messageMail.versionId, versions.map((v) => v.id))).groupBy(messageMail.versionId, messageMail.status);
@@ -93,10 +119,10 @@ const countsOf = (rows: { status: "queued" | "sent" | "failed"; n: number }[]): 
   sent: rows.find((r) => r.status === "sent")?.n ?? 0, failed: rows.find((r) => r.status === "failed")?.n ?? 0, queued: rows.find((r) => r.status === "queued")?.n ?? 0,
 });
 
-/** For the staff list: each message's latest emailed version's counts. A message never emailed has none. */
+/** For the staff list: the counts of each message's latest version that has mail. A message never emailed has none. */
 export async function latestMailCounts(): Promise<Map<string, MailCounts>> {
   const latest = db.select({ messageId: messageVersion.messageId, maxN: sql<number>`max(${messageVersion.n})`.as("max_n") }).from(messageVersion)
-    .where(eq(messageVersion.emailed, true)).groupBy(messageVersion.messageId).as("latest");
+    .where(hasMail()).groupBy(messageVersion.messageId).as("latest");
   const rows = await db.select({ messageId: messageVersion.messageId, status: messageMail.status, n: count() }).from(messageVersion)
     .innerJoin(latest, and(eq(latest.messageId, messageVersion.messageId), eq(latest.maxN, messageVersion.n)))
     .innerJoin(messageMail, eq(messageMail.versionId, messageVersion.id))
@@ -115,12 +141,20 @@ export function mailWords(c: MailCounts): string {
 
 // --- the worker ----------------------------------------------------------------------------------------------------
 
-/** What one email says, read once per version in a wake: null when its message was deleted (its versions are gone). */
+/**
+ * What one email says, read once per version in a wake: null when its message was deleted (its versions are gone), and
+ * "stale" when the version is no longer the message's newest (an edit moves or drops such email in its own
+ * transaction, carryUnsentMail(); this is the worker's own check). An update only for an emailed edit: email a quiet
+ * edit moved onto its version goes to addresses that never got the message.
+ */
 async function mailOf(versionId: string) {
-  const [v] = await db.select({ id: messageVersion.id, n: messageVersion.n, title: messageVersion.title, body: messageVersion.body, messageId: clubMessage.id, poster: staffUser.name, deletedAt: clubMessage.deletedAt })
+  const [v] = await db.select({ id: messageVersion.id, n: messageVersion.n, emailed: messageVersion.emailed, title: messageVersion.title, body: messageVersion.body,
+    messageId: clubMessage.id, poster: staffUser.name, deletedAt: clubMessage.deletedAt })
     .from(messageVersion).innerJoin(clubMessage, eq(clubMessage.id, messageVersion.messageId)).innerJoin(staffUser, eq(staffUser.id, clubMessage.postedBy))
     .where(eq(messageVersion.id, versionId));
   if (!v || v.deletedAt) return null;
+  const [newest] = await db.select({ n: messageVersion.n }).from(messageVersion).where(eq(messageVersion.messageId, v.messageId)).orderBy(desc(messageVersion.n)).limit(1);
+  if (newest && v.n < newest.n) return "stale" as const;
   const files = await db.select({ id: messageFile.id, name: messageFile.name, type: messageFile.type }).from(messageVersionFile)
     .innerJoin(messageFile, eq(messageFile.id, messageVersionFile.fileId)).where(eq(messageVersionFile.versionId, versionId)).orderBy(asc(messageVersionFile.position));
   const body = storedBody(v.body, files.filter((f) => isPicture(f.type)).map((f) => f.id));
@@ -128,7 +162,7 @@ async function mailOf(versionId: string) {
   const walk = (blocks: typeof body.content) => { for (const b of blocks) { if (b.type === "image") inBody.add(b.attrs.attachment); else if (b.type === "bulletList" || b.type === "orderedList") for (const li of b.content) walk(li.content); } };
   walk(body.content);
   return {
-    update: v.n > 1, poster: v.poster, title: v.title, body: bodyMail(body),
+    update: v.n > 1 && v.emailed, poster: v.poster, title: v.title, body: bodyMail(body),
     // The files a parent downloads: every file of the version but the pictures already shown, as lines, in the body.
     files: files.filter((f) => !inBody.has(f.id)).map((f) => f.name),
     link: `${env.APP_URL.replace(/\/+$/, "")}/messages/${v.messageId}`,
@@ -182,6 +216,7 @@ export async function sendMessageMail(now: Date = new Date()): Promise<{ sent: n
       if (!mails.has(row.versionId)) mails.set(row.versionId, await mailOf(row.versionId));
       const m = mails.get(row.versionId);
       if (!m) continue; // its message was deleted: the delete drops its rows
+      if (m === "stale") { await db.delete(messageMail).where(and(eq(messageMail.id, id), eq(messageMail.status, "queued"))); continue; }
       const out = await sendMail(clubMessageMail(brand, row.address, m), { purpose: m.update ? "club_message_update" : "club_message", actor: ACTOR });
       if (out.ok) {
         await db.update(messageMail).set({ status: "sent", sentAt: new Date(), reason: null, nextTryAt: null }).where(eq(messageMail.id, id));

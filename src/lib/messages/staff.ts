@@ -7,7 +7,7 @@ import { isUuid } from "@/lib/seasons/ids";
 import { checkBody, storedBody, type MessageBody } from "./body";
 import { isPicture, MESSAGE_FILES_MAX, type MessageFileType } from "./file-types";
 import { checkUpload } from "./files";
-import { queueMail } from "./mail";
+import { carryUnsentMail, queueMail } from "./mail";
 import { messagesEmailAllowed } from "@/lib/settings/messages";
 
 /**
@@ -281,6 +281,8 @@ export async function editMessage(o: Who & { messageId: unknown; title: unknown;
     const emailed = o.email === true && (await messagesEmailAllowed(tx));
     const [v] = await tx.insert(messageVersion).values({ messageId, n, title: title.title, body: body.body, emailed }).returning({ id: messageVersion.id });
     await saveFiles(tx, v!.id, messageId, list.ids);
+    // Email still queued for an earlier version never sends what the message no longer says: dropped, or moved onto this one.
+    await carryUnsentMail(tx, messageId, v!.id, emailed);
     const addresses = emailed ? await queueMail(tx, v!.id) : 0;
     await writeAudit({ actor: o.actor, action: "message.edit", permission: POST_PERMISSION, targetType: "message", targetId: messageId,
       after: { version: n, files: list.ids.length, emailed, ...(emailed ? { addresses } : {}) }, ip: o.ip }, tx);
