@@ -31,11 +31,19 @@ const NO_FRAMING = "frame-ancestors 'none'";
 /** The addresses of the pages a set-up or reset link opens (src/app/sign-in/set-up/[token], reset/[token]). */
 const LINK_PAGES = ["/sign-in/set-up/:token", "/sign-in/reset/:token"];
 
+/** The largest body a request may send: a message's file of 10 MB with room for the form around it. */
+const UPLOAD_BODY_LIMIT = "11mb";
+
 const nextConfig: NextConfig = {
   // The Docker image sets NEXT_OUTPUT=standalone; local `pnpm start` and CI e2e keep the default output.
   ...(process.env.NEXT_OUTPUT === "standalone" ? { output: "standalone" as const } : {}),
   poweredByHeader: false,
   env: { BR_BUILD_VERSION: buildVersion() },
+  // A club message's file is uploaded through a staff action, up to 10 MB (src/lib/messages/file-types.ts), so an
+  // action's body may be 11 MB, the multipart wrapping included, in place of the 1 MB default; the proxy, which buffers
+  // a body before an action reads it, is given the same. The limit is for every action: Next.js reads the whole body
+  // before any action's own checks run (tests/unit/pwa-static.test.ts pins it).
+  experimental: { serverActions: { bodySizeLimit: UPLOAD_BODY_LIMIT }, proxyClientMaxBodySize: UPLOAD_BODY_LIMIT },
   async headers() {
     return [
       {

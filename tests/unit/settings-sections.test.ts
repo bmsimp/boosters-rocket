@@ -86,7 +86,7 @@ describe("the staff menu", () => {
   it("groups an Admin's entries, with Settings as the one entry for everything that sets the portal up", () => {
     expect(shape(staffMenu(ADMIN))).toEqual([
       "Home",
-      "Families: Roster, Parents, Accounting links",
+      "Families: Roster, Parents, Accounting links, Messages",
       "Season: Seasons, Progress, Signed forms, Volunteering, Volunteer credit",
       "Money: Balances, Reconciliation",
       "Settings",
@@ -152,7 +152,7 @@ describe("the staff tab bar on a phone", () => {
 
   it("is current on its hub and every page of its group, Settings on every settings page, Home only on the staff home", () => {
     const tabs = staffTabs(ADMIN);
-    expect(tabs.find((t) => t.key === "families")!.owns).toEqual(["/staff/families", "/staff/roster", "/staff/parents", "/staff/links"]);
+    expect(tabs.find((t) => t.key === "families")!.owns).toEqual(["/staff/families", "/staff/roster", "/staff/parents", "/staff/links", "/staff/messages"]);
     expect(tabs.find((t) => t.key === "settings")!.owns).toEqual(["/staff/settings"]);
     expect(tabs.find((t) => t.key === "home")).toMatchObject({ owns: ["/staff"], exact: true });
     expect(groupLinks(ADMIN, "Money").map((l) => l.href)).toEqual(["/staff/balances", "/staff/reconciliation"]);

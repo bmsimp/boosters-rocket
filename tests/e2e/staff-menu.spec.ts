@@ -6,7 +6,7 @@ import { staffSessionCookie } from "./staff-session";
 // here and not in vitest (tests/integration/staff-menu.test.ts checks who sees what).
 const TOP = ["Home", "Families", "Season", "Money", "Settings"];
 const GROUPS: Record<string, string[]> = {
-  Families: ["Roster", "Parents", "Accounting links"],
+  Families: ["Roster", "Parents", "Accounting links", "Messages"],
   Season: ["Seasons", "Progress", "Signed forms", "Volunteering", "Volunteer credit"],
   Money: ["Balances", "Reconciliation"],
 };

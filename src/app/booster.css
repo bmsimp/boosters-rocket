@@ -884,6 +884,34 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 }
 /* ---- End of Forms ---- */
 
+/* ---- Messages: a club message's body as families and staff read it, and the staff editor. Keep new rules for them inside this block. ---- */
+.msg-body { display: grid; gap: var(--s3); max-width: 68ch; overflow-wrap: anywhere; }
+.msg-body h3 { font-size: var(--text-lg); }
+.msg-body h4 { font-size: var(--text-md); }
+.msg-body ul, .msg-body ol { padding-left: 1.4em; display: grid; gap: var(--s1); }
+.msg-body li > * + * { margin-top: var(--s1); }
+.msg-body a { color: var(--club-text); }
+.msg-link-address { color: var(--ink-2); font-size: var(--text-sm); }
+.msg-picture { display: block; max-width: 100%; height: auto; border-radius: var(--radius-control); }
+.message-title { font-size: var(--text-lg); overflow-wrap: anywhere; }
+.message-view > .list { margin-top: var(--s2); }
+/* The editor: its buttons in a row that wraps, its writing area a field's edge, at least a few lines tall. */
+.editor-tools { display: flex; flex-wrap: wrap; gap: var(--s1); }
+.editor-tools .btn[aria-pressed="true"] { background: var(--club-tint); color: var(--club-text); }
+.editor-panel { padding: var(--s3); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-muted); }
+.editor .editor-area { min-height: 12rem; padding: var(--s3); border: 1px solid var(--border-strong); border-radius: var(--radius-control); background: var(--surface);
+  display: grid; gap: var(--s3); align-content: start; overflow-wrap: anywhere; }
+.editor .editor-area:focus-visible { outline: var(--ring) solid var(--focus); outline-offset: 1px; border-color: var(--focus); }
+.editor .editor-area h2 { font-size: var(--text-lg); }
+.editor .editor-area h3 { font-size: var(--text-md); }
+.editor .editor-area ul, .editor .editor-area ol { padding-left: 1.4em; }
+.editor .editor-area a { color: var(--club-text); }
+.editor .editor-area img { max-width: 100%; height: auto; border-radius: var(--radius-control); }
+.editor .editor-area img.ProseMirror-selectednode { outline: var(--ring) solid var(--focus); }
+.file-input { font: inherit; font-size: var(--text-sm); min-height: 44px; }
+.message-preview .message-view { padding: var(--s4); border: 1px solid var(--border); border-radius: var(--radius); }
+/* ---- End of Messages ---- */
+
 /* ---- Staff pages: the staff home, the staff lists and forms, setup. Keep new rules for the staff pages inside this block. ---- */
 .steps-list { display: grid; gap: var(--s3); padding-left: 1.4em; max-width: 68ch; }
 .steps-list li { padding-left: var(--s1); }

@@ -49,7 +49,7 @@ describe("the staff menu", () => {
     await asAdmin();
     expect(await entries()).toEqual([
       "Home",
-      "Families: Roster, Parents, Accounting links",
+      "Families: Roster, Parents, Accounting links, Messages",
       "Season: Seasons, Progress, Signed forms, Volunteering, Volunteer credit",
       "Money: Balances, Reconciliation",
       "Settings",
@@ -135,6 +135,17 @@ describe("the staff menu", () => {
     await resetDb();
     await staffWith("Roster.Read");
     expect(await menu()).not.toContain(LINKS);
+  });
+
+  it("shows Messages, in Families, only to someone who may post messages", async () => {
+    await staffWith("Messages.Post.ReadWrite");
+    expect(await entries()).toEqual(["Home", "Families: Messages"]);
+    const hub = await renderPage(FamiliesHub);
+    expect([...hub.matchAll(/<a class="list-link" href="([^"]+)"/g)].map((m) => m[1])).toEqual(["/staff/messages"]);
+    expect(hub).toContain("News posted to every family, read in the portal.");
+    await resetDb();
+    await staffWith("Roster.Read", "Parents.ReadWrite");
+    expect(await menu()).not.toContain('href="/staff/messages"');
   });
 
   it("shows Volunteer credit only to someone who may change credit, even without the events", async () => {

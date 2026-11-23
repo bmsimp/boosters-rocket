@@ -107,6 +107,10 @@ describe("response headers (next.config.ts)", () => {
     // Nothing else replaces the rule for every answer.
     expect(all.map((r) => r.source)).toEqual(["/:path*", "/sw.js", "/sign-in/set-up/:token", "/sign-in/reset/:token"]);
   });
+  it("lets an action's body be 11 MB, a message's 10 MB file with its form, and no more, through the proxy too", () => {
+    expect(nextConfig.experimental?.serverActions?.bodySizeLimit).toBe("11mb");
+    expect(nextConfig.experimental?.proxyClientMaxBodySize).toBe("11mb");
+  });
   it("does not say what the server is built with, and sends /favicon.ico to the club's icon", async () => {
     expect(nextConfig.poweredByHeader).toBe(false);
     expect(await nextConfig.rewrites!()).toEqual([{ source: "/favicon.ico", destination: "/icons/favicon.png" }]);
