@@ -756,7 +756,8 @@ p.errors, .sign-out .errors { padding-left: 0; }
 @media (min-width: 760px) {
   main.wrap.home { grid-template-areas: none; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
   .home > *, .home-lists > *, .home-side > * { grid-area: auto; }
-  .home > .home-head, .home > p, .home > .passkey-offer { grid-column: 1 / -1; }
+  .home > .home-head, .home > p, .home > .passkey-offer, .home > .home-messages { grid-column: 1 / -1; }
+  .home > section.home-messages { max-width: 760px; }
   .home > .passkey-offer { max-width: 760px; }
   .home > section:only-of-type { grid-column: 1 / -1; max-width: 760px; }
   .home > .home-lists { grid-column: 1; }

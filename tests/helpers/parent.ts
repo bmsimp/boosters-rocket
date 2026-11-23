@@ -14,6 +14,7 @@ import { seedTwoFamilyEmailChanges, type FamilyEmailChange } from "./email-chang
 import { seedTwoFamilyBuyouts, type FamilyBuyout } from "./buyouts";
 import { recordOfCustomer, syncAppRecords } from "./app-records";
 import { seedDevice, seedPassword } from "./signin-links";
+import { seedTwoFamilyMessages, type FamilyMessages } from "./messages";
 
 /** The password proveRecently() gives a person who has none: the door helper's (DOOR_PASSWORD, tests/helpers/parent-door.ts). */
 export const PROVEN_PASSWORD = "the parents' long test password";
@@ -57,6 +58,8 @@ export type SeededParent = {
   emailChange?: FamilyEmailChange;
   /** With seedTwoFamilies(): this family's volunteer requirement with a buy-out, A's invoiced and B's paid (tests/helpers/buyouts.ts). */
   buyout?: FamilyBuyout;
+  /** With seedTwoFamilies(): the club's one message, read by B's parent and not by A's (tests/helpers/messages.ts). */
+  messages?: FamilyMessages & { messageId: string; staffId: string; title: string };
 };
 
 /**
@@ -202,7 +205,8 @@ async function appIdsOf(spec: ParentFamilySpec): Promise<string[]> {
  * (seedTwoFamilyForms): a request in every state, and one form asked of it alone. And one volunteer shift that both
  * families have signed up for (seedTwoFamilyVolunteering), whose sign-up ids are among their markers. Each parent has
  * a remembered device their session was made on, whose id is among their markers. Last, the app's
- * own records and links for both families (stage 1 of the app-owned families spec), as a roster read makes them.
+ * own records and links for both families (stage 1 of the app-owned families spec), as a roster read makes them. And
+ * one club message, which B's parent has read and A's hasn't (seedTwoFamilyMessages).
  */
 export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededParent }> {
   const a = await seedSignedInParent(FAMILY_A);
@@ -247,6 +251,12 @@ export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededPar
   await syncAppRecords();
   a.markers.push(...(await appIdsOf(FAMILY_A)));
   b.markers.push(...(await appIdsOf(FAMILY_B)));
+  // One club message, the same for every family, which B's parent has read and A's hasn't: read state is a person's own,
+  // and the id of B's read row is B's marker.
+  const messages = await seedTwoFamilyMessages(b.identity.parentId);
+  const shared = { messageId: messages.messageId, staffId: messages.staffId, title: messages.title };
+  a.messages = { ...shared, ...messages.a }; a.markers.push(...messages.a.markers);
+  b.messages = { ...shared, ...messages.b }; b.markers.push(...messages.b.markers);
   return { a, b };
 }
 
