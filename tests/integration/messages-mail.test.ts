@@ -52,15 +52,14 @@ const allowEmail = (on: boolean) => db.insert(setting).values({ key: MESSAGES_SE
   .onConflictDoUpdate({ target: setting.key, set: { value: { emailAllowed: on } } });
 const rows = () => db.select({ address: messageMail.address, status: messageMail.status, tries: messageMail.tries, reason: messageMail.reason }).from(messageMail).orderBy(asc(messageMail.address));
 
-function uploadRequest(name: string, bytes: Uint8Array, listed: string[] = []): Request {
+function uploadRequest(name: string, bytes: Uint8Array): Request {
   const q = new URLSearchParams({ name });
-  for (const id of listed) q.append("listed", id);
   const headers = new Headers({ "content-type": "application/octet-stream", origin: new URL(env.APP_URL).origin, "content-length": String(bytes.byteLength) });
   return new Request(`http://localhost/staff/messages/files?${q}`, { method: "POST", headers, body: bytes as Uint8Array<ArrayBuffer>, duplex: "half" } as RequestInit);
 }
-async function uploaded(name: string, bytes: Uint8Array, listed: string[] = []): Promise<string> {
+async function uploaded(name: string, bytes: Uint8Array): Promise<string> {
   asStaff(coach);
-  const r = await (await uploadRoute(uploadRequest(name, bytes, listed))).json() as { ok: true; file: { id: string } } | { ok: false; errors: string[] };
+  const r = await (await uploadRoute(uploadRequest(name, bytes))).json() as { ok: true; file: { id: string } } | { ok: false; errors: string[] };
   if (!r.ok) throw new Error(r.errors.join(" "));
   return r.file.id;
 }
@@ -142,7 +141,7 @@ describe("the worker's mail", () => {
   it("sends each address its email once, with the title, the poster, the body and the portal's address, no file and nothing loaded", async () => {
     await allowEmail(true);
     const pic = await uploaded("team.jpg", JPEG);
-    const pdf = await uploaded("Schedule <v2>.pdf", PDF, [pic]);
+    const pdf = await uploaded("Schedule <v2>.pdf", PDF);
     asStaff(coach);
     const id = await post({ title: "Spring <schedule>", body: doc(para("<script>alert(1)</script>"), { type: "image", attrs: { attachment: pic, alt: "Team" } }), files: [pic, pdf] });
     expect(await runDueJobs()).toMatchObject({ ran: expect.arrayContaining([{ job: "messages.mail", ok: true }]) });

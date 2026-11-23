@@ -21,8 +21,8 @@ const tooBig = (name: string) => fail(413, `${name} is over 10 MB. Make it small
 /**
  * One file a message's form adds (spec section 7), here and not in a server action so that no action's body may be
  * larger than Next.js's 1 MB default (the before-sign-in actions among them). The body is the file's bytes alone; the
- * query string carries `name` (the file's name), `message` (the message's id for an edit, absent for a new one) and
- * `listed` (each id the form already lists, repeated).
+ * query string carries `name` (the file's name) and `message` (the message's id for an edit, absent for a new one).
+ * How many files the staff member already holds is counted by uploadFile(), never taken from the browser.
  *
  * A route handler has no guard wrapper, so, first: the staff session and Messages.Post.ReadWrite, refused with the same
  * words whatever the reason (a refused permission audited `access.refused`, as staffAction does); then the request must
@@ -43,8 +43,7 @@ export async function POST(req: Request): Promise<Response> {
 
   const url = new URL(req.url);
   const rawName = url.searchParams.get("name"), message = url.searchParams.get("message");
-  const listed = url.searchParams.getAll("listed");
-  if (rawName === null || rawName.length > 1000 || listed.length > 100 || (message !== null && !isUuid(message))) return fail(400, NOT_FROM_PAGE);
+  if (rawName === null || rawName.length > 1000 || (message !== null && !isUuid(message))) return fail(400, NOT_FROM_PAGE);
   const name = keptName(rawName);
 
   const length = Number(req.headers.get("content-length") ?? NaN);
@@ -54,7 +53,7 @@ export async function POST(req: Request): Promise<Response> {
   if (bytes === "over") return tooBig(name);
   if (bytes === "short") return fail(400, NOT_FROM_PAGE);
 
-  const r = await uploadFile({ staffUserId: who.staffUserId, actor: { door: "staff", id: who.staffUserId, label: who.email }, ip, messageId: message, name: rawName, bytes, listed });
+  const r = await uploadFile({ staffUserId: who.staffUserId, actor: { door: "staff", id: who.staffUserId, label: who.email }, ip, messageId: message, name: rawName, bytes });
   return answer(r.ok ? 200 : 400, r);
 }
 

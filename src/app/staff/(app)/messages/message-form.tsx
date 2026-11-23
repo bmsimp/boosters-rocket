@@ -98,7 +98,6 @@ export function MessageForm({ families, emailTo, edit }: {
     if (file.size > MESSAGE_FILE_MAX_BYTES) { say({ ok: false, errors: [`${file.name.slice(0, 200)} is over 10 MB. Make it smaller, or share it another way.`] }); return null; }
     const q = new URLSearchParams({ name: file.name });
     if (edit) q.set("message", edit.messageId);
-    for (const f of files) q.append("listed", f.id);
     const r = await safely(() => uploadTo(`${STAFF_UPLOAD_HREF}?${q}`, file), failed);
     if (!r.ok) { say(r); return null; }
     const added: FormFile = { ...r.file, held: true };

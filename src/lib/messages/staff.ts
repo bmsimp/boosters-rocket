@@ -1,11 +1,11 @@
-import { and, asc, count, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db, type Tx } from "@/lib/db/client";
 import { clubMessage, family, messageFile, messageMail, messageRead, messageVersion, messageVersionFile, staffUser } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { isUuid } from "@/lib/seasons/ids";
 import { checkBody, storedBody, type MessageBody } from "./body";
-import { isPicture, MESSAGE_FILES_MAX, type MessageFileType } from "./file-types";
+import { isPicture, MESSAGE_FILES_MAX, MESSAGE_HELD_MAX_BYTES, type MessageFileType } from "./file-types";
 import { checkUpload } from "./files";
 import { carryUnsentMail, queueMail } from "./mail";
 import { messagesEmailAllowed } from "@/lib/settings/messages";
@@ -27,6 +27,7 @@ type Who = { staffUserId: string; actor: Actor; ip: string | null };
 const NOT_FROM_PAGE: Fail = { ok: false, errors: ["That didn't go through. Reload the page and try again."] };
 const FILE_GONE: Fail = { ok: false, errors: ["One of the files is no longer here: a file not posted within a day is removed. Add it again, then save."] };
 const TOO_MANY: Fail = { ok: false, errors: [`A message can hold at most ${MESSAGE_FILES_MAX} files, its pictures included. Remove one to add another.`] };
+const HELD_TOO_MUCH: Fail = { ok: false, errors: ["Your files not yet posted come to more than 100 MB. Post your message, or remove some files, then add this one. Files not posted within a day are removed."] };
 const NOT_POSTER: Fail = { ok: false, errors: ["Only the person who posted a message can edit it."] };
 const DELETED: Fail = { ok: false, errors: ["This message was deleted, so it can't be changed."] };
 
@@ -152,28 +153,28 @@ async function currentVersion(tx: Tx, messageId: string) {
 
 /**
  * Keeps an uploaded file, held against the staff member until their post or edit saves it (spec section 7): at most
- * 10 MB, of an allowed type by its bytes, and only while the form lists fewer than MESSAGE_FILES_MAX files. For an edit
- * (`messageId`), only the message's poster may upload, to a message that isn't deleted. Audited `message.file.upload`
- * with its type and size, never its name.
+ * 10 MB, of an allowed type by its bytes. The limits are counted here, from what the database holds, never from what
+ * the browser says its form lists: fewer than MESSAGE_FILES_MAX files held by this staff member for this message (for
+ * a new message, every file they hold for no message yet), and at most MESSAGE_HELD_MAX_BYTES held by them in all,
+ * counted under a lock of theirs so two uploads at once can't both pass. For an edit (`messageId`), only the message's
+ * poster may upload, to a message that isn't deleted. Audited `message.file.upload` with its type and size, never its
+ * name.
  */
-export async function uploadFile(o: Who & { messageId: string | null; name: string; bytes: Uint8Array; listed: unknown }):
+export async function uploadFile(o: Who & { messageId: string | null; name: string; bytes: Uint8Array }):
   Promise<{ ok: true; message: string; file: StaffFile } | Fail> {
-  const list = checkFileList(Array.isArray(o.listed) ? o.listed.slice(0, 100) : o.listed);
-  if (!list.ok) return list;
   const checked = checkUpload(o.name, o.bytes);
   if (!checked.ok) return { ok: false, errors: [checked.error] };
   return db.transaction(async (tx) => {
-    let current: string[] = [];
     if (o.messageId !== null) {
       const own = await ownMessage(tx, o.messageId, o.staffUserId);
       if (!own.ok) return own;
-      current = (await currentVersion(tx, o.messageId)).files.map((f) => f.id);
     }
-    // The files the form lists that are truly its own: held by this person for this message, or in its current version.
-    const held = list.ids.length ? await tx.select({ id: messageFile.id }).from(messageFile).where(and(inArray(messageFile.id, list.ids),
-      eq(messageFile.heldBy, o.staffUserId), o.messageId === null ? isNull(messageFile.messageId) : eq(messageFile.messageId, o.messageId))) : [];
-    const listed = new Set([...held.map((f) => f.id), ...current.filter((id) => list.ids.includes(id))]);
-    if (listed.size >= MESSAGE_FILES_MAX) return TOO_MANY;
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`booster.message_held:${o.staffUserId}`}))`);
+    const [forThis] = await tx.select({ n: count() }).from(messageFile).where(and(eq(messageFile.heldBy, o.staffUserId),
+      o.messageId === null ? isNull(messageFile.messageId) : eq(messageFile.messageId, o.messageId)));
+    if ((forThis?.n ?? 0) >= MESSAGE_FILES_MAX) return TOO_MANY;
+    const [inAll] = await tx.select({ bytes: sql<string>`coalesce(sum(${messageFile.size}), 0)` }).from(messageFile).where(eq(messageFile.heldBy, o.staffUserId));
+    if (Number(inAll?.bytes ?? 0) + o.bytes.byteLength > MESSAGE_HELD_MAX_BYTES) return HELD_TOO_MUCH;
     const [f] = await tx.insert(messageFile).values({ messageId: o.messageId, heldBy: o.staffUserId, name: checked.name, type: checked.type, size: o.bytes.byteLength, bytes: Buffer.from(o.bytes) })
       .returning({ id: messageFile.id, name: messageFile.name, type: messageFile.type, size: messageFile.size });
     await writeAudit({ actor: o.actor, action: "message.file.upload", permission: POST_PERMISSION, targetType: "message_file", targetId: f!.id,

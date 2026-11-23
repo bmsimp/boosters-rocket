@@ -8,6 +8,8 @@ export type MessageFileType = (typeof MESSAGE_FILE_TYPES)[number];
 export const MESSAGE_FILE_MAX_BYTES = 10 * 1024 * 1024;
 /** At most this many files in one version of a message, its pictures in the body included. */
 export const MESSAGE_FILES_MAX = 10;
+/** The most one staff member may hold at once, in files uploaded and not yet posted, across every form of theirs: 100 MB. */
+export const MESSAGE_HELD_MAX_BYTES = 100 * 1024 * 1024;
 
 /** The pictures, which may sit in the body and are sent inline; every other type is sent as an attachment. */
 export const PICTURE_TYPES: readonly MessageFileType[] = ["jpeg", "png", "gif", "webp"];

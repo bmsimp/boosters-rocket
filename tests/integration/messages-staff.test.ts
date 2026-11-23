@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { asParent, asRefusedStaff, asStaff, pageOutcome, renderPage, signedOut } from "../helpers/signed-in";
 
-import { asc, eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, clubMessage, messageFile, messageVersion, messageVersionFile, role, roleAssignment, roleRule } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
@@ -84,7 +85,7 @@ describe("posting a message", () => {
   it("posts version 1 with its pictures and files, which belong to it once saved, audited without its title or a file's name", async () => {
     asStaff(coach);
     const pic = await uploaded("team.jpg", JPEG);
-    const pdf = await uploaded("Schedule FINAL.pdf", PDF, { listed: [pic] });
+    const pdf = await uploaded("Schedule FINAL.pdf", PDF);
     const id = await postAsCoach("Spring schedule", doc(para("Here it is."), picture(pic)), [pic, pdf]);
 
     const [m] = await db.select().from(clubMessage).where(eq(clubMessage.id, id));
@@ -211,15 +212,41 @@ describe("uploading a file", () => {
     expect(await audits("message.file.upload")).toHaveLength(0);
   });
 
-  it("refuses an eleventh file for the form, and a post that lists eleven", async () => {
+  it("refuses an eleventh file held for a message, counted on the server whatever the browser says it lists, and a post that lists eleven", async () => {
     asStaff(coach);
     const ids: string[] = [];
-    for (let i = 0; i < 10; i++) ids.push(await uploaded(`f${i}.pdf`, PDF, { listed: ids }));
-    expect(await upload("f10.pdf", PDF, { listed: ids })).toMatchObject({ ok: false, errors: [expect.stringContaining("at most 10 files")] });
-    // Another staff member's ids, or made-up ones, in the list don't count toward it.
-    const extra = await uploaded("extra.pdf", PDF, { listed: [] });
-    expect(await postMessageAction({ title: "T", body: doc(), files: [...ids, extra] })).toMatchObject({ ok: false, errors: [expect.stringContaining("at most 10 files")] });
-    expect((await postMessageAction({ title: "T", body: doc(), files: ids })).ok).toBe(true);
+    for (let i = 0; i < 10; i++) ids.push(await uploaded(`f${i}.pdf`, PDF, { listed: [] }));
+    expect(await upload("f10.pdf", PDF, { listed: [] })).toMatchObject({ ok: false, errors: [expect.stringContaining("at most 10 files")] });
+    expect(await upload("f10.pdf", PDF)).toMatchObject({ ok: false, errors: [expect.stringContaining("at most 10 files")] });
+    expect(await db.select().from(messageFile)).toHaveLength(10);
+    // Another staff member's held file is theirs, and counts for them alone.
+    asStaff(admin);
+    await uploaded("theirs.pdf", PDF);
+    asStaff(coach);
+    expect(await postMessageAction({ title: "T", body: doc(), files: [...ids, randomUUID()] })).toMatchObject({ ok: false, errors: [expect.stringContaining("at most 10 files")] });
+    const id = await postAsCoach("T", doc(), ids);
+    // Posted, they are held no longer: the form, and an edit of the message, may hold ten again.
+    for (let i = 0; i < 10; i++) await uploaded(`e${i}.pdf`, PDF, { message: id });
+    expect(await upload("e10.pdf", PDF, { message: id })).toMatchObject({ ok: false, errors: [expect.stringContaining("at most 10 files")] });
+    expect(await upload("n0.pdf", PDF)).toMatchObject({ ok: true });
+  });
+
+  it("refuses a file that takes what one staff member holds unposted over 100 MB in all, across their messages", async () => {
+    asStaff(coach);
+    const id = await postAsCoach("T", doc(), []);
+    // Nine held files of 10 MB for an edit and one for a new message: 100 MB, the most one person may hold.
+    const big = (messageId: string | null) => ({ messageId, heldBy: coach.id, name: "big.pdf", type: "pdf" as const, size: MESSAGE_FILE_MAX_BYTES, bytes: Buffer.from(PDF) });
+    await db.insert(messageFile).values([...Array.from({ length: 9 }, () => big(id)), big(null)]);
+    expect(await upload("one more.pdf", PDF)).toEqual({ ok: false, errors: [expect.stringContaining("more than 100 MB")] });
+    expect(await audits("message.file.upload")).toHaveLength(0);
+    // Another staff member's held files are theirs: they don't count.
+    asStaff(admin);
+    expect(await upload("admin.pdf", PDF)).toMatchObject({ ok: true });
+    // Removing one makes room.
+    asStaff(coach);
+    const [one] = await db.select({ id: messageFile.id }).from(messageFile).where(and(eq(messageFile.heldBy, coach.id), isNull(messageFile.messageId)));
+    expect(await removeHeldFileAction(one!.id)).toMatchObject({ ok: true });
+    expect(await upload("one more.pdf", PDF)).toMatchObject({ ok: true });
   });
 
   it("removes a held file of the form's own, audited, and leaves another's and a posted one", async () => {
@@ -241,10 +268,10 @@ describe("uploading a file", () => {
 describe("editing a message", () => {
   it("saves the poster's edit as version 2 and leaves version 1 as it was, a kept file the same row and a dropped one with version 1", async () => {
     asStaff(coach);
-    const keep = await uploaded("keep.pdf", PDF), drop = await uploaded("drop.docx", DOCX, { listed: [keep] });
+    const keep = await uploaded("keep.pdf", PDF), drop = await uploaded("drop.docx", DOCX);
     const id = await postAsCoach("Old title", doc(para("Old words")), [keep, drop]);
     const [v1before] = await db.select().from(messageVersion).where(eq(messageVersion.messageId, id));
-    const added = await uploaded("new.png", PNG, { message: id, listed: [keep, drop] });
+    const added = await uploaded("new.png", PNG, { message: id });
     const [heldForEdit] = await db.select().from(messageFile).where(eq(messageFile.id, added));
     expect(heldForEdit).toMatchObject({ heldBy: coach.id, messageId: id });
 
