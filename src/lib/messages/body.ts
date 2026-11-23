@@ -211,15 +211,6 @@ export function storedBody(json: unknown, pictures: Iterable<string>): MessageBo
   return r.ok ? r.body : EMPTY_BODY;
 }
 
-/** Whether a checked body has nothing in it: no text and no picture. */
-export function isEmptyBody(body: MessageBody): boolean {
-  const empty = (blocks: BodyBlock[]): boolean => blocks.every((b) =>
-    b.type === "image" ? false
-      : b.type === "bulletList" || b.type === "orderedList" ? b.content.every((i) => empty(i.content))
-        : !(b.content ?? []).some((n) => n.type === "text" && n.text.trim()));
-  return empty(body.content);
-}
-
 // --- drawing ---------------------------------------------------------------------------------------------------
 
 export type RenderOptions = {

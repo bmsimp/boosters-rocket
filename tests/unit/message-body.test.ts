@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { BODY_MAX_TEXT, bodyMail, checkBody, EMPTY_BODY, isEmptyBody, MAIL_PICTURE_LINE, renderBody, storedBody, type MessageBody } from "@/lib/messages/body";
+import * as bodyModule from "@/lib/messages/body";
+import { BODY_MAX_TEXT, bodyMail, checkBody, EMPTY_BODY, MAIL_PICTURE_LINE, renderBody, storedBody, type MessageBody } from "@/lib/messages/body";
 
 /** A club message's body is checked against an allowlist and drawn by our own code (spec sections 6 and 13). */
 const PIC = "8b7c2a4e-1f3d-4c5b-9a6e-0d1c2b3a4f5e", OTHER = "11111111-2222-4333-8444-555555555555";
@@ -112,8 +113,9 @@ describe("checkBody()", () => {
   it("drops control characters and empty text, and gives an empty body the editor's empty paragraph", () => {
     expect(kept(doc(p(t("a\u0000b\u0007c"), t(""))))).toMatchObject({ body: doc(p(t("abc"))) });
     expect(kept(doc()).body).toEqual(EMPTY_BODY);
-    expect(isEmptyBody(kept(doc(p(t("  ")))).body)).toBe(true);
-    expect(isEmptyBody(kept(doc({ type: "image", attrs: { attachment: PIC } })).body)).toBe(false);
+    // An empty body is kept as it is: a message may be its title alone, so nothing asks whether a body is empty.
+    expect(kept(doc(p(t("  "))))).toMatchObject({ ok: true });
+    expect("isEmptyBody" in bodyModule).toBe(false);
   });
 
   it("checks a stored body again on the way out, drawing nothing of one that no longer passes", () => {
