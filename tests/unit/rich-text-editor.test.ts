@@ -5,6 +5,8 @@ import { getSchema } from "@tiptap/react";
 import { RichTextEditor } from "@/app/components/rich-text-editor";
 import { extensionsFor, fromBody, toBody } from "@/app/components/rich-text-editor/rich-text-editor";
 import { checkBody } from "@/lib/messages/body";
+import { EditorState } from "@tiptap/pm/state";
+import { clearUploadedAlt, uploadedName } from "@/app/components/rich-text-editor/uploaded-alt";
 
 /**
  * The shared rich text editor (src/app/components/rich-text-editor/, a thin copy of Tiptap's Simple Editor template)
@@ -46,6 +48,27 @@ describe("RichTextEditor", () => {
     expect(checkBody({ ...body, content: body.content!.slice(0, 2) }, new Set([ID]))).toMatchObject({ ok: true, pictures: [ID] });
     expect(fromBody({ type: "doc", content: [{ type: "image", attrs: { attachment: ID, alt: "Team" } }] }, href))
       .toEqual({ type: "doc", content: [{ type: "image", attrs: { src: href(ID), alt: "Team" } }] });
+  });
+
+  it("starts a new picture's description empty, not as its file's name, and keeps one typed afterwards", () => {
+    const schema = getSchema(extensionsFor({}));
+    const uploaded = new Map<string, string>();
+    let state = EditorState.create({ schema, plugins: [clearUploadedAlt(uploaded)] });
+    const name = uploadedName(new File([new Uint8Array(1)], "IMG_2041.jpg"));
+    expect(name).toBe("IMG_2041");
+    // The upload box inserts the template's Image with the file's name as its alt and title, as the template does.
+    uploaded.set(href(ID), name);
+    const insert = (alt: string) => state.apply(state.tr.insert(0, schema.nodes.image!.create({ src: href(ID), alt, title: alt })));
+    state = insert(name);
+    const picture = () => { let n: { alt: unknown; title: unknown } | null = null; state.doc.descendants((x) => { if (x.type.name === "image") n = { alt: x.attrs.alt, title: x.attrs.title }; }); return n; };
+    expect(picture()).toEqual({ alt: null, title: null });
+    expect(uploaded.size).toBe(0);
+    expect(toBody(state.doc.toJSON(), idOf).content!.find((n) => n.type === "image")).toEqual({ type: "image", attrs: { attachment: ID, alt: null } });
+    // Typed afterwards, even as the file's name, a description stays.
+    let pos = -1;
+    state.doc.descendants((x, p) => { if (x.type.name === "image") pos = p; });
+    state = state.apply(state.tr.setNodeMarkup(pos, undefined, { src: href(ID), alt: "IMG_2041", title: null }));
+    expect(picture()).toEqual({ alt: "IMG_2041", title: null });
   });
 
   it("draws a labelled frame around the template's toolbar, named Formatting", () => {

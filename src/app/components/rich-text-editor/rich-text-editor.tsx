@@ -31,6 +31,7 @@ import "./rich-text-editor.scss";
 
 import { safeHref } from "@/lib/messages/body";
 import { PictureDescription } from "./picture-description";
+import { UploadedAlt, uploadedName } from "./uploaded-alt";
 
 /*
  * The rich text editor: a thin copy of the Simple Editor template's simple-editor.tsx (Tiptap's MIT template, kept
@@ -65,7 +66,7 @@ export type RichTextPictures = {
  * `src` and `alt`) while it is in the editor; toBody() turns it into body.ts's `{ attachment, alt }`.
  * tests/unit/rich-text-editor.test.ts holds the schema to body.ts.
  */
-export const extensionsFor = (o: { upload?: UploadFunction; onError?: (error: Error) => void; accept?: string }) => [
+export const extensionsFor = (o: { upload?: UploadFunction; onError?: (error: Error) => void; accept?: string; uploaded?: Map<string, string> }) => [
   StarterKit.configure({
     blockquote: false, code: false, codeBlock: false, horizontalRule: false, strike: false,
     heading: { levels: [2, 3] },
@@ -79,6 +80,8 @@ export const extensionsFor = (o: { upload?: UploadFunction; onError?: (error: Er
   Selection,
   // The upload node's own size check runs before the upload; the form's upload checks the size in its own words.
   ImageUploadNode.configure({ accept: o.accept ?? "image/*", maxSize: Number.MAX_SAFE_INTEGER, limit: 1, upload: o.upload, onError: o.onError }),
+  // A new picture's description starts empty, not as its file's name (uploaded-alt.ts).
+  UploadedAlt.configure({ uploaded: o.uploaded ?? new Map() }),
 ];
 
 type Node = JSONContent;
@@ -110,10 +113,12 @@ export function fromBody(body: JSONContent, fileHref: (id: string) => string): J
 }
 
 /** An upload through the form's latest pictures: its file's id, as the address the template's Image is drawn from. */
-async function uploadVia(latest: { current: RichTextPictures | undefined }, file: File): Promise<string> {
+async function uploadVia(latest: { current: RichTextPictures | undefined }, uploaded: Map<string, string>, file: File): Promise<string> {
   const p = latest.current;
   if (!p) throw new Error("This editor doesn't take pictures.");
-  return p.fileHref(await p.upload(file));
+  const href = p.fileHref(await p.upload(file));
+  uploaded.set(href, uploadedName(file));
+  return href;
 }
 
 /** For an editor without pictures: no address is one of its files. */
@@ -186,8 +191,12 @@ export function RichTextEditor({ id, label, hint, initial, pictures, ref }: {
   const hasPictures = pictures !== undefined;
   const accept = pictures?.accept;
   // The upload and onError read the ref only when an upload happens, never while drawing.
-  // eslint-disable-next-line react-hooks/refs, react-hooks/exhaustive-deps
-  const extensions = useMemo(() => extensionsFor({ accept, upload: hasPictures ? (file) => uploadVia(latest, file) : undefined, onError: hasPictures ? (error) => latest.current?.onError(error) : undefined }), []);
+  /* eslint-disable react-hooks/refs, react-hooks/exhaustive-deps */
+  const extensions = useMemo(() => {
+    const uploaded = new Map<string, string>();
+    return extensionsFor({ accept, uploaded, upload: hasPictures ? (file) => uploadVia(latest, uploaded, file) : undefined, onError: hasPictures ? (error) => latest.current?.onError(error) : undefined });
+  }, []);
+  /* eslint-enable react-hooks/refs, react-hooks/exhaustive-deps */
   const editor = useEditor({
     immediatelyRender: false,
     editorProps: {
