@@ -78,11 +78,15 @@ test("staff post a message with its email, a parent reads it and its poster's pr
   await expect(staff).toHaveURL(/\/staff\/messages\/new$/);
   await editorOf(staff).click();
   await staff.keyboard.type("The bus leaves the school at 3:15.");
-  // The toolbar's buttons work on what is written, and say when they are on.
+  // The template's toolbar works on what is written: its list menu, and the tools it keeps (none body.ts refuses).
   await staff.keyboard.press("Enter");
-  const bullets = staff.getByRole("button", { name: "Bulleted list", exact: true });
-  await bullets.click();
-  await expect(bullets).toHaveAttribute("aria-pressed", "true");
+  const toolbar = staff.getByRole("toolbar", { name: "Formatting" });
+  for (const gone of ["Strike", "Code", "Blockquote", "Highlight", "Superscript", "Subscript", "Align left"]) {
+    await expect(toolbar.getByRole("button", { name: gone, exact: true })).toHaveCount(0);
+  }
+  await toolbar.getByRole("button", { name: "List options" }).click();
+  await expect(staff.getByRole("menuitem", { name: /Task List/ })).toHaveCount(0);
+  await staff.getByRole("menuitem", { name: /Bullet List/ }).click();
   await staff.keyboard.type("Bring water.");
   const box = staff.getByRole("checkbox", { name: "Also email families" });
   await expect(box).toBeChecked();
