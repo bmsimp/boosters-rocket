@@ -408,6 +408,7 @@ details.how[open] > summary .how-caret { transform: rotate(90deg); }
   background-position: calc(100% - 20px) 52%, calc(100% - 15px) 52%; background-size: 5px 5px; background-repeat: no-repeat; } /* never wider than its column, however long an option is */
 .field textarea { resize: vertical; }
 .field input:disabled, .field textarea:disabled, .field select:disabled { background-color: var(--surface-muted); border-color: var(--border); color: var(--ink-2); cursor: not-allowed; }
+.file-input { font: inherit; font-size: var(--text-sm); min-height: 44px; } /* a file field: the browser's own button, at our size */
 .copy-row { display: flex; gap: var(--s2); }
 .copy-row input { flex: 1; min-width: 0; }
 .copy-row .btn { flex: none; }
@@ -589,6 +590,41 @@ html:not(:has(nav.tabs:not(.staff-tabs))) main.wrap.single > .page-head .page-ba
 .powered-by-color .pb-ember { fill: var(--br-ember); } .powered-by-color .pb-flame { fill: var(--br-flame); }
 footer.wrap .powered-by { color: var(--badge-ink); } /* not the footer's club-colored links */
 .signin-foot { max-width: 440px; margin: var(--s5) auto 0; padding: 0 var(--cell); display: flex; justify-content: center; }
+
+/* --- Rich text editor (src/app/components/rich-text-editor/; RichTextEditor): the look of Tiptap's Simple Editor
+   template, in our tokens. One frame with a field's edge: the toolbar on top (groups of 44px icon buttons with a
+   hairline between them, wrapping on a phone, staying in view while a long message scrolls), a panel under it for a
+   link's or a picture's fields, then the writing area, at least a few lines tall. A button that is on wears the club's
+   tint and text color; the one with the focus, and the writing area, the club's ring. --- */
+.rte { border: 1px solid var(--border-strong); border-radius: var(--radius-control); background: var(--surface); min-width: 0; }
+.rte:hover { border-color: var(--ink-2); }
+.rte:has(.rte-area:focus-visible) { outline: var(--ring) solid var(--focus); outline-offset: 1px; border-color: var(--focus); }
+.rte-toolbar { position: sticky; top: 0; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1) 0;
+  padding: var(--s1); border-bottom: 1px solid var(--border); background: var(--surface);
+  border-radius: calc(var(--radius-control) - 1px) calc(var(--radius-control) - 1px) 0 0; }
+.rte-group { display: flex; align-items: center; gap: 2px; padding: 0 var(--s1); }
+.rte-group + .rte-group { border-left: 1px solid var(--border); }
+.rte-tool { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; flex: none; padding: 0;
+  border: 0; border-radius: var(--radius-control); background: transparent; color: var(--ink-2); cursor: pointer;
+  transition: background-color var(--dur-fast) ease-out, color var(--dur-fast) ease-out; }
+.rte-tool:hover { background-color: var(--surface-muted); color: var(--ink); }
+.rte-tool[data-on="true"] { background-color: var(--club-tint); color: var(--club-text); }
+.rte-tool[aria-disabled="true"] { color: var(--ink-3); background-color: transparent; cursor: default; }
+.rte-tool:focus-visible { outline: var(--ring) solid var(--focus); outline-offset: -2px; }
+.rte-icon { width: 1.125rem; height: 1.125rem; flex: none; }
+.rte-panel { padding: var(--s3); border-bottom: 1px solid var(--border); background: var(--surface-muted); }
+.rte-content .rte-area { min-height: 12rem; padding: var(--s3) var(--s4) var(--s4); display: grid; gap: var(--s3); align-content: start;
+  color: var(--ink); line-height: 1.6; overflow-wrap: anywhere; outline: none; }
+.rte-area h2 { font-size: var(--text-lg); font-weight: 600; line-height: 1.35; }
+.rte-area h3 { font-size: var(--text-md); font-weight: 600; line-height: 1.4; }
+.rte-area h2:not(:first-child), .rte-area h3:not(:first-child) { margin-top: var(--s2); }
+.rte-area ul, .rte-area ol { padding-left: 1.4em; display: grid; gap: var(--s1); }
+.rte-area li > * + * { margin-top: var(--s1); }
+.rte-area li::marker { color: var(--ink-2); }
+.rte-area a { color: var(--club-text); text-decoration: underline; text-underline-offset: 2px; }
+.rte-area img { display: block; max-width: 100%; height: auto; border-radius: var(--radius-control); }
+.rte-area img.ProseMirror-selectednode { outline: var(--ring) solid var(--focus); outline-offset: 2px; }
+.rte-area ::selection { background: var(--club-tint); }
 
 /* --- Section label: a small quiet heading over a list, the way the lists on Home are named. --- */
 .section-label { font-size: var(--text-sm); font-weight: 500; color: var(--ink-2); letter-spacing: 0; margin-bottom: var(--s2); }
@@ -909,7 +945,6 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 .editor .editor-area a { color: var(--club-text); }
 .editor .editor-area img { max-width: 100%; height: auto; border-radius: var(--radius-control); }
 .editor .editor-area img.ProseMirror-selectednode { outline: var(--ring) solid var(--focus); }
-.file-input { font: inherit; font-size: var(--text-sm); min-height: 44px; }
 .message-preview .message-view { padding: var(--s4); border: 1px solid var(--border); border-radius: var(--radius); }
 /* ---- End of Messages ---- */
 
@@ -1200,6 +1235,8 @@ main.wrap.single > .page-head + p { margin-top: var(--s4); }
   .checks input[type="radio"]::after { background: Highlight; }
   .checks input:disabled::before { border-color: GrayText; }
   .btn:disabled, .btn[aria-disabled="true"], .field :disabled { border-style: dashed; color: GrayText; }
+  .rte-tool[data-on="true"] { forced-color-adjust: none; background: Highlight; color: HighlightText; } /* on, where the tint is dropped */
+  .rte-tool[aria-disabled="true"] { color: GrayText; }
   .club-preview { forced-color-adjust: none; }
   details:not(.how) > summary::before { forced-color-adjust: none; background: CanvasText; } /* the caret's mask fill, which the system palette would otherwise drop */
   :focus-visible { outline-color: Highlight; }
