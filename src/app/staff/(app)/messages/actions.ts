@@ -1,8 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { staffAction } from "@/lib/guards";
-import { MESSAGE_FILE_MAX_BYTES } from "@/lib/messages/file-types";
-import { editMessage, postMessage, removeHeldFile, uploadFile, type StaffFile } from "@/lib/messages/staff";
+import { editMessage, postMessage, removeHeldFile } from "@/lib/messages/staff";
 import { isUuid } from "@/lib/seasons/ids";
 
 type Fail = { ok: false; errors: string[] };
@@ -34,22 +33,6 @@ export const editMessageAction = staffAction("Messages.Post.ReadWrite", async (c
   revalidatePath("/staff/messages");
   revalidatePath(`/staff/messages/${messageId}`);
   return { ok: true, message: r.message };
-});
-
-/**
- * One file the form adds: a FormData with `file`, `message` (the message's id for an edit, empty for a new one) and
- * `listed` (each id the form already lists). The size is checked before a byte is read.
- */
-export const uploadMessageFileAction = staffAction("Messages.Post.ReadWrite", async (ctx, form: unknown): Promise<{ ok: true; message: string; file: StaffFile } | Fail> => {
-  if (!(form instanceof FormData)) return NOT_FROM_PAGE;
-  const file = form.get("file"), message = form.get("message");
-  if (!(file instanceof File) || (message !== null && typeof message !== "string")) return NOT_FROM_PAGE;
-  const messageId = message ? message : null;
-  if (messageId !== null && !isUuid(messageId)) return NOT_FROM_PAGE;
-  if (file.size > MESSAGE_FILE_MAX_BYTES) return { ok: false, errors: [`${file.name.slice(0, 200)} is over 10 MB. Make it smaller, or share it another way.`] };
-  const listed = form.getAll("listed");
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  return uploadFile({ staffUserId: ctx.staffUserId, actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, ip: ctx.ip, messageId, name: file.name, bytes, listed });
 });
 
 /** Removes a file the form holds and hasn't saved: the session's own, never one a version lists. */

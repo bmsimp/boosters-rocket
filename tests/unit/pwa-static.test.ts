@@ -107,9 +107,11 @@ describe("response headers (next.config.ts)", () => {
     // Nothing else replaces the rule for every answer.
     expect(all.map((r) => r.source)).toEqual(["/:path*", "/sw.js", "/sign-in/set-up/:token", "/sign-in/reset/:token"]);
   });
-  it("lets an action's body be 11 MB, a message's 10 MB file with its form, and no more, through the proxy too", () => {
-    expect(nextConfig.experimental?.serverActions?.bodySizeLimit).toBe("11mb");
-    expect(nextConfig.experimental?.proxyClientMaxBodySize).toBe("11mb");
+  it("keeps Next.js's own body limits: 1 MB for every action, the pages before sign-in's included, and 10 MB through the proxy", () => {
+    // A message's file of up to 10 MB is its bytes alone, sent to a staff route handler that checks the session first
+    // (src/app/staff/(app)/messages/files/route.ts), never through an action: raising an action's limit raises it for all.
+    expect(nextConfig.experimental?.serverActions?.bodySizeLimit).toBeUndefined();
+    expect(nextConfig.experimental?.proxyClientMaxBodySize).toBeUndefined();
   });
   it("does not say what the server is built with, and sends /favicon.ico to the club's icon", async () => {
     expect(nextConfig.poweredByHeader).toBe(false);

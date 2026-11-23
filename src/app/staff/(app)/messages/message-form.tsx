@@ -8,9 +8,9 @@ import { ActionOutcome, Notice } from "@/app/components/notice";
 import { Button, Field, List, ListRow, TextInput } from "@/app/components/ui";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { checkBody, renderBody, safeHref, ALT_MAX, type MessageBody } from "@/lib/messages/body";
-import { fileSizeWords, MESSAGE_FILE_WORDS, MESSAGE_FILES_MAX, type MessageFileType } from "@/lib/messages/file-types";
-import { editMessageAction, postMessageAction, removeHeldFileAction, uploadMessageFileAction } from "./actions";
-import { staffFileHref } from "./paths";
+import { fileSizeWords, MESSAGE_FILE_MAX_BYTES, MESSAGE_FILE_WORDS, MESSAGE_FILES_MAX, type MessageFileType } from "@/lib/messages/file-types";
+import { editMessageAction, postMessageAction, removeHeldFileAction } from "./actions";
+import { STAFF_UPLOAD_HREF, staffFileHref } from "./paths";
 
 type Done = { ok: true; message: string } | { ok: false; errors: string[] };
 const failed = { ok: false as const, errors: [ACTION_FAILED] };
@@ -49,6 +49,17 @@ const EXTENSIONS = [
 ];
 
 /**
+ * Sends one file's bytes to the staff upload route, which answers as an action does: the file kept, or why not. An
+ * answer that isn't that shape (a proxy's error page, say) throws, and safely() turns it into the usual sentence.
+ */
+async function uploadTo(href: string, file: File): Promise<{ ok: true; message: string; file: Omit<FormFile, "held"> } | { ok: false; errors: string[] }> {
+  const res = await fetch(href, { method: "POST", body: file, credentials: "same-origin", cache: "no-store", headers: { "content-type": "application/octet-stream" } });
+  const r: unknown = await res.json();
+  if (typeof r !== "object" || r === null || !("ok" in r)) throw new Error("not an answer");
+  return r as { ok: true; message: string; file: Omit<FormFile, "held"> } | { ok: false; errors: string[] };
+}
+
+/**
  * The form for a new message or an edit (spec section 4): a title, the body in the rich editor with its pictures, the
  * files attached, Preview (the message as a parent will see it, with how many families it goes to), and Post or Save.
  * Each file is uploaded as it is added and held until the save. Given only what it shows: for an edit, the message's
@@ -80,11 +91,11 @@ export function MessageForm({ families, edit }: {
 
   async function upload(file: File): Promise<FormFile | null> {
     if (files.length >= MESSAGE_FILES_MAX) { say({ ok: false, errors: [`A message can hold at most ${MESSAGE_FILES_MAX} files, its pictures included. Remove one to add another.`] }); return null; }
-    const form = new FormData();
-    form.set("file", file);
-    form.set("message", edit?.messageId ?? "");
-    for (const f of files) form.append("listed", f.id);
-    const r = await safely(() => uploadMessageFileAction(form), failed);
+    if (file.size > MESSAGE_FILE_MAX_BYTES) { say({ ok: false, errors: [`${file.name.slice(0, 200)} is over 10 MB. Make it smaller, or share it another way.`] }); return null; }
+    const q = new URLSearchParams({ name: file.name });
+    if (edit) q.set("message", edit.messageId);
+    for (const f of files) q.append("listed", f.id);
+    const r = await safely(() => uploadTo(`${STAFF_UPLOAD_HREF}?${q}`, file), failed);
     if (!r.ok) { say(r); return null; }
     const added: FormFile = { ...r.file, held: true };
     setFiles((fs) => [...fs, added]);

@@ -6,15 +6,17 @@ import { db } from "@/lib/db/client";
 import { auditLog, clubMessage, messageFile, messageVersion, messageVersionFile, role, roleAssignment, roleRule } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
 import { MESSAGE_FILE_MAX_BYTES } from "@/lib/messages/file-types";
-import { editMessageAction, postMessageAction, removeHeldFileAction, uploadMessageFileAction } from "@/app/staff/(app)/messages/actions";
+import { editMessageAction, postMessageAction, removeHeldFileAction } from "@/app/staff/(app)/messages/actions";
 import { GET as fileRoute } from "@/app/staff/(app)/messages/files/[id]/route";
+import { POST as uploadRoute } from "@/app/staff/(app)/messages/files/route";
+import { env } from "@/env";
 import MessagesPage from "@/app/staff/(app)/messages/page";
 import NewMessagePage from "@/app/staff/(app)/messages/new/page";
 import MessagePage from "@/app/staff/(app)/messages/[id]/page";
 import EditMessagePage from "@/app/staff/(app)/messages/[id]/edit/page";
 import { resetDb, seedStaff } from "../helpers/db";
 import { seedSignedInParent } from "../helpers/parent";
-import { EXE, JPEG, PDF, pdfOfSize, PNG, DOCX } from "../helpers/message-files";
+import { EXE, JPEG, PDF, pdfOfSize, PNG, DOCX, SVG } from "../helpers/message-files";
 
 /**
  * Club messages, slice 2 (docs/superpowers/specs/2026-11-23-club-messages-design.md, sections 4, 6, 7 and 9): staff who
@@ -33,15 +35,28 @@ async function staffWith(email: string, name: string, ...patterns: string[]): Pr
   return s;
 }
 
-/** Uploads a file through the form's action as the signed-in staff member. */
-async function upload(name: string, bytes: Uint8Array, o: { message?: string; listed?: string[] } = {}) {
-  const form = new FormData();
-  form.set("file", new File([bytes as Uint8Array<ArrayBuffer>], name));
-  form.set("message", o.message ?? "");
-  for (const id of o.listed ?? []) form.append("listed", id);
-  return uploadMessageFileAction(form);
+type UploadOpts = { message?: string; listed?: string[]; origin?: string | null; length?: string | null; body?: BodyInit };
+/** The request the form sends: the file's bytes, its name and the form's state in the query string, from the portal's own page. */
+function uploadRequest(name: string, bytes: Uint8Array, o: UploadOpts = {}): Request {
+  const q = new URLSearchParams({ name });
+  if (o.message !== undefined) q.set("message", o.message);
+  for (const id of o.listed ?? []) q.append("listed", id);
+  const headers = new Headers({ "content-type": "application/octet-stream" });
+  const origin = o.origin === undefined ? new URL(env.APP_URL).origin : o.origin;
+  if (origin !== null) headers.set("origin", origin);
+  const length = o.length === undefined ? String(bytes.byteLength) : o.length;
+  if (length !== null) headers.set("content-length", length);
+  return new Request(`http://localhost/staff/messages/files?${q}`, { method: "POST", headers, body: o.body ?? (bytes as Uint8Array<ArrayBuffer>), duplex: "half" } as RequestInit);
 }
-async function uploaded(name: string, bytes: Uint8Array, o: { message?: string; listed?: string[] } = {}): Promise<string> {
+/** Uploads a file through the staff upload route as the signed-in staff member; its status and its JSON answer. */
+async function uploadAnswer(name: string, bytes: Uint8Array, o: UploadOpts = {}) {
+  const res = await uploadRoute(uploadRequest(name, bytes, o));
+  return { status: res.status, headers: res.headers, body: await res.json() as { ok: true; message: string; file: { id: string } } | { ok: false; errors: string[] } };
+}
+async function upload(name: string, bytes: Uint8Array, o: UploadOpts = {}) {
+  return (await uploadAnswer(name, bytes, o)).body;
+}
+async function uploaded(name: string, bytes: Uint8Array, o: UploadOpts = {}): Promise<string> {
   const r = await upload(name, bytes, o);
   if (!r.ok) throw new Error(r.errors.join(" "));
   return r.file.id;
@@ -121,7 +136,7 @@ describe("posting a message", () => {
   it("is refused to staff who may not post, to a parent and to nobody", async () => {
     asStaff(await staffWith("roster@club.org", "Rory Roster", "Roster.Read"));
     await expect(postMessageAction({ title: "T", body: doc(), files: [] })).rejects.toBeInstanceOf(AccessDenied);
-    await expect(upload("a.pdf", PDF)).rejects.toBeInstanceOf(AccessDenied);
+    expect(await uploadAnswer("a.pdf", PDF)).toMatchObject({ status: 403, body: { ok: false } });
     asParent((await seedSignedInParent()).identity);
     await expect(postMessageAction({ title: "T", body: doc(), files: [] })).rejects.toBeInstanceOf(AccessDenied);
     signedOut();
@@ -131,15 +146,67 @@ describe("posting a message", () => {
 });
 
 describe("uploading a file", () => {
-  it("refuses a renamed program, a file over 10 MB and anything but a file, keeping nothing", async () => {
+  it("keeps a file sent to the upload route, held by its uploader, audited with its type and size, answered no-store", async () => {
     asStaff(coach);
-    expect(await upload("minutes.pdf", EXE)).toMatchObject({ ok: false, errors: [expect.stringContaining("minutes.pdf isn't a picture")] });
-    expect(await upload("huge.pdf", pdfOfSize(MESSAGE_FILE_MAX_BYTES + 1))).toEqual({ ok: false, errors: ["huge.pdf is over 10 MB. Make it smaller, or share it another way."] });
-    expect(await uploadMessageFileAction("not a form")).toMatchObject({ ok: false });
-    const noFile = new FormData();
-    noFile.set("file", "text");
-    expect(await uploadMessageFileAction(noFile)).toMatchObject({ ok: false });
+    const r = await uploadAnswer("Schedule.pdf", PDF);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("cache-control")).toBe("no-store");
+    expect(r.body).toMatchObject({ ok: true, message: "Added Schedule.pdf.", file: { name: "Schedule.pdf", type: "pdf", size: PDF.byteLength, picture: false } });
+    const [f] = await db.select().from(messageFile);
+    expect(f).toMatchObject({ heldBy: coach.id, messageId: null, type: "pdf", size: PDF.byteLength });
+    expect(new Uint8Array(f!.bytes)).toEqual(PDF);
+    expect(await audits("message.file.upload")).toMatchObject([{ actorId: coach.id, targetId: f!.id, after: { type: "pdf", size: PDF.byteLength, messageId: null } }]);
+  });
+
+  it("refuses nobody and staff without Messages.Post.ReadWrite in the same words, before the body is read, the second audited", async () => {
+    const refused = { status: 403, body: { ok: false, errors: ["That didn't go through. Please try again. If it keeps happening, sign out and back in."] } };
+    expect(await uploadAnswer("a.pdf", PDF)).toMatchObject(refused);
+    asRefusedStaff();
+    expect(await uploadAnswer("a.pdf", PDF)).toMatchObject(refused);
+    asParent((await seedSignedInParent()).identity);
+    expect(await uploadAnswer("a.pdf", PDF)).toMatchObject(refused);
+    const roster = await staffWith("roster@club.org", "Rory Roster", "Roster.Read");
+    asStaff(roster);
+    let pulled = false;
+    const watched = new ReadableStream<Uint8Array>({ pull(c) { pulled = true; c.enqueue(PDF); c.close(); } }, { highWaterMark: 0 });
+    expect(await uploadAnswer("a.pdf", PDF, { body: watched })).toMatchObject(refused);
+    expect(pulled).toBe(false);
+    expect(await audits("access.refused")).toMatchObject([{ actorId: roster.id, permission: "Messages.Post.ReadWrite" }]);
+    // A request from another site's page, or one that doesn't say where it came from, is refused as well.
+    asStaff(coach);
+    expect(await uploadAnswer("a.pdf", PDF, { origin: "https://elsewhere.example" })).toMatchObject(refused);
+    expect(await uploadAnswer("a.pdf", PDF, { origin: null })).toMatchObject(refused);
+    expect(await db.select().from(messageFile)).toHaveLength(0);
+  });
+
+  it("refuses a body over 10 MB by its length before reading it, one longer than it said, and one with no length", async () => {
+    asStaff(coach);
+    const over = (name: string) => [`${name} is over 10 MB. Make it smaller, or share it another way.`];
+    expect(await uploadAnswer("huge.pdf", pdfOfSize(MESSAGE_FILE_MAX_BYTES + 1))).toMatchObject({ status: 413, body: { ok: false, errors: over("huge.pdf") } });
+    // A length over the limit is refused without a byte of the body read: the stream is never pulled.
+    let pulled = false;
+    const never = new ReadableStream<Uint8Array>({ pull() { pulled = true; } }, { highWaterMark: 0 });
+    expect(await uploadAnswer("huge.pdf", PDF, { length: String(MESSAGE_FILE_MAX_BYTES + 1), body: never })).toMatchObject({ status: 413, body: { errors: over("huge.pdf") } });
+    expect(pulled).toBe(false);
+    // A body that says it is small and goes on is dropped as soon as it passes what it said.
+    let sent = 0;
+    const endless = new ReadableStream<Uint8Array>({ pull(c) { sent += 1; c.enqueue(new Uint8Array(1024 * 1024)); } });
+    expect(await uploadAnswer("sneaky.pdf", PDF, { length: String(2 * 1024 * 1024), body: endless })).toMatchObject({ status: 413, body: { errors: over("sneaky.pdf") } });
+    expect(sent).toBeLessThan(6);
+    const unsized = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(PDF); c.close(); } });
+    expect(await uploadAnswer("a.pdf", PDF, { length: null, body: unsized })).toMatchObject({ status: 411, body: { ok: false } });
+    expect(await db.select().from(messageFile)).toHaveLength(0);
+    expect(await audits("message.file.upload")).toHaveLength(0);
+  });
+
+  it("refuses a renamed program, an SVG, an empty file and a request not from the form, keeping nothing", async () => {
+    asStaff(coach);
+    expect(await uploadAnswer("minutes.pdf", EXE)).toMatchObject({ status: 400, body: { ok: false, errors: [expect.stringContaining("minutes.pdf isn't a picture")] } });
+    expect(await upload("logo.svg", SVG)).toMatchObject({ ok: false, errors: [expect.stringContaining("logo.svg isn't a picture")] });
+    expect(await upload("empty.pdf", new Uint8Array())).toEqual({ ok: false, errors: ["empty.pdf is empty."] });
     expect(await upload("a.pdf", PDF, { message: "not-an-id" })).toMatchObject({ ok: false });
+    const noName = await uploadRoute(new Request("http://localhost/staff/messages/files", { method: "POST", headers: { origin: new URL(env.APP_URL).origin, "content-length": String(PDF.byteLength) }, body: PDF as Uint8Array<ArrayBuffer> }));
+    expect(noName.status).toBe(400);
     expect(await db.select().from(messageFile)).toHaveLength(0);
     expect(await audits("message.file.upload")).toHaveLength(0);
   });
