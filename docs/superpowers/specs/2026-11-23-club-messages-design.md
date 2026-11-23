@@ -64,7 +64,9 @@ read, and may be emailed as an update. An Admin may delete a message outright.
   delivered". A deleted message stays in the list as "Deleted by <name> on <date>", with nothing of its content. A
   **New message** button for those who may post.
 - **New message** (`/staff/messages/new`): a title (required, up to 120 characters *(proposed)*), the body in the rich
-  editor, files, and, when the club allows email, "Also email families", ticked. **Preview** shows the message as a
+  editor (required: some words or a picture; files attached alone, or only spaces, don't count, and the post or edit is
+  refused with "Add a few words or a picture to the message." *(Owner's change, 2026-11-23: slice 2 let a message be
+  its title alone.)*), files, and, when the club allows email, "Also email families", ticked. **Preview** shows the message as a
   parent will see it, with "This goes to 87 families" and, when emailing, "and is emailed to 142 addresses". **Post**
   posts it.
 - **A message** (`/staff/messages/[id]`): the message as parents see it, its versions, and its mail results: delivered

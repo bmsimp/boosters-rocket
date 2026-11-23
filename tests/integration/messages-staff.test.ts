@@ -124,13 +124,40 @@ describe("posting a message", () => {
     expect(await audits("message.post")).toHaveLength(1);
   });
 
+  it("refuses a body with no words and no picture, whatever files it has, and takes a picture alone or words alone (the owner's change of 2026-11-23)", async () => {
+    asStaff(coach);
+    const none = { ok: false, errors: ["Add a few words or a picture to the message."] };
+    const pdf = await uploaded("a.pdf", PDF);
+    expect(await postMessageAction({ title: "T", body: doc(), files: [] })).toEqual(none);
+    expect(await postMessageAction({ title: "T", body: doc({ type: "paragraph" }), files: [] })).toEqual(none);
+    expect(await postMessageAction({ title: "T", body: doc(para("   "), para("	"), { type: "paragraph", content: [{ type: "hardBreak" }] }), files: [] })).toEqual(none);
+    expect(await postMessageAction({ title: "T", body: doc(), files: [pdf] })).toEqual(none);
+    expect(await audits("message.post")).toHaveLength(0);
+    // The PDF is still held for the form: a refused post saves nothing.
+    expect(await db.select({ heldBy: messageFile.heldBy }).from(messageFile).where(eq(messageFile.id, pdf))).toEqual([{ heldBy: coach.id }]);
+
+    const pic = await uploaded("team.png", PNG);
+    const pictureOnly = await postAsCoach("Team photo", doc(picture(pic)), [pic, pdf]);
+    const wordsOnly = await postAsCoach("Words", doc(para("Practice is on.")));
+    expect(await audits("message.post")).toHaveLength(2);
+
+    // An edit is held to the same: emptied of words and pictures it is refused, with its files or without.
+    for (const body of [doc(), doc(para("  ")), doc({ type: "bulletList", content: [{ type: "listItem", content: [para(" ")] }] })]) {
+      expect(await editMessageAction(pictureOnly, { title: "Team photo", body, files: [pic, pdf] })).toEqual(none);
+      expect(await editMessageAction(wordsOnly, { title: "Words", body, files: [] })).toEqual(none);
+    }
+    expect(await audits("message.edit")).toHaveLength(0);
+    expect((await editMessageAction(wordsOnly, { title: "Words", body: doc(para("Practice is off.")), files: [] })).ok).toBe(true);
+    expect((await editMessageAction(pictureOnly, { title: "Team photo", body: doc(picture(pic, "The whole team")), files: [pic] })).ok).toBe(true);
+  });
+
   it("refuses another staff member's held file, and a file already posted", async () => {
     asStaff(admin);
     const theirs = await uploaded("theirs.pdf", PDF);
     asStaff(coach);
     expect(await postMessageAction({ title: "T", body: doc(), files: [theirs] })).toMatchObject({ ok: false, errors: [expect.stringContaining("no longer here")] });
     const mine = await uploaded("mine.pdf", PDF);
-    await postAsCoach("First", doc(), [mine]);
+    await postAsCoach("First", doc(para("x")), [mine]);
     expect(await postMessageAction({ title: "Second", body: doc(), files: [mine] })).toMatchObject({ ok: false, errors: [expect.stringContaining("no longer here")] });
   });
 
@@ -224,7 +251,7 @@ describe("uploading a file", () => {
     await uploaded("theirs.pdf", PDF);
     asStaff(coach);
     expect(await postMessageAction({ title: "T", body: doc(), files: [...ids, randomUUID()] })).toMatchObject({ ok: false, errors: [expect.stringContaining("at most 10 files")] });
-    const id = await postAsCoach("T", doc(), ids);
+    const id = await postAsCoach("T", doc(para("x")), ids);
     // Posted, they are held no longer: the form, and an edit of the message, may hold ten again.
     for (let i = 0; i < 10; i++) await uploaded(`e${i}.pdf`, PDF, { message: id });
     expect(await upload("e10.pdf", PDF, { message: id })).toMatchObject({ ok: false, errors: [expect.stringContaining("at most 10 files")] });
@@ -233,7 +260,7 @@ describe("uploading a file", () => {
 
   it("refuses a file that takes what one staff member holds unposted over 100 MB in all, across their messages", async () => {
     asStaff(coach);
-    const id = await postAsCoach("T", doc(), []);
+    const id = await postAsCoach("T", doc(para("x")), []);
     // Nine held files of 10 MB for an edit and one for a new message: 100 MB, the most one person may hold.
     const big = (messageId: string | null) => ({ messageId, heldBy: coach.id, name: "big.pdf", type: "pdf" as const, size: MESSAGE_FILE_MAX_BYTES, bytes: Buffer.from(PDF) });
     await db.insert(messageFile).values([...Array.from({ length: 9 }, () => big(id)), big(null)]);
@@ -252,7 +279,7 @@ describe("uploading a file", () => {
   it("removes a held file of the form's own, audited, and leaves another's and a posted one", async () => {
     asStaff(coach);
     const held = await uploaded("held.pdf", PDF), posted = await uploaded("posted.pdf", PDF);
-    await postAsCoach("T", doc(), [posted]);
+    await postAsCoach("T", doc(para("x")), [posted]);
     asStaff(admin);
     const theirs = await uploaded("theirs.pdf", PDF);
     asStaff(coach);
@@ -307,7 +334,7 @@ describe("editing a message", () => {
     const a = await uploaded("a.pdf", PDF);
     const first = await postAsCoach("First", doc(para("x")), [a]);
     const b = await uploaded("b.pdf", PDF);
-    const second = await postAsCoach("Second", doc(), [b]);
+    const second = await postAsCoach("Second", doc(para("y")), [b]);
     expect(await editMessageAction(first, { title: "First", body: doc(para("x")), files: [a] })).toEqual({ ok: false, errors: ["Nothing has changed since the last version, so nothing was saved."] });
     expect(await editMessageAction(first, { title: "First", body: doc(para("x")), files: [a, b] })).toMatchObject({ ok: false, errors: [expect.stringContaining("no longer here")] });
     expect(await editMessageAction("00000000-0000-4000-8000-000000000000", { title: "T", body: doc(), files: [] })).toMatchObject({ ok: false });
@@ -324,7 +351,7 @@ describe("the staff pages", () => {
     const first = await postAsCoach("First news");
     await db.update(clubMessage).set({ postedAt: new Date(Date.now() - 86_400_000) }).where(eq(clubMessage.id, first));
     const second = await postAsCoach("Second news");
-    expect((await editMessageAction(first, { title: "First news, again", body: doc(), files: [] })).ok).toBe(true);
+    expect((await editMessageAction(first, { title: "First news, again", body: doc(para("Again.")), files: [] })).ok).toBe(true);
     const html = await renderPage(MessagesPage);
     expect(html.indexOf("Second news")).toBeLessThan(html.indexOf("First news, again"));
     expect(html).toContain(`href="/staff/messages/${second}"`);
@@ -403,7 +430,7 @@ describe("the staff file route", () => {
   it("redirects nobody to sign in and anyone refused to the refusal page, with no bytes", async () => {
     asStaff(coach);
     const pdf = await uploaded("a.pdf", PDF);
-    await postAsCoach("T", doc(), [pdf]);
+    await postAsCoach("T", doc(para("x")), [pdf]);
     signedOut();
     const out = await askFile(pdf);
     expect(out.status).toBe(307);
