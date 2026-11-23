@@ -108,14 +108,17 @@ No new tab: `PARENT_NAV` keeps its five.
 **The editor** is Tiptap, the one new dependency, named by this spec (the owner's yes to the design covers it). The
 packages, each pinned to one exact version with no range, all at the same release: `@tiptap/react`, `@tiptap/pm`,
 `@tiptap/starter-kit` and `@tiptap/extension-image`. The builder takes the newest 3.x release at least two weeks old
-when the slice starts and writes the version in the slice's report. The editor runs only in the staff form, a client
+when the slice starts and writes the version in the slice's report. *(Owner's change, 2026-11-23: also the packages the
+Simple Editor template imports, each pinned, listed in `src/app/components/tiptap/README.md`.)* The editor runs only in the staff form, a client
 component; parent pages and mail never load it.
 
 **What the editor offers:** paragraphs, headings (two levels), bold, italic, underline, bulleted and numbered lists,
-links, line breaks and pictures, with undo and redo. *(Owner's change, 2026-11-23: its toolbar and look are those of
-Tiptap's MIT "Simple Editor" template, brought in as code as one shared component, `RichTextEditor` in
-`src/app/components/rich-text-editor/`, restyled in the portal's tokens and kept to the allowlist below: the template's
-tools for anything else are left out. An email template's settings page is to use it too.)* Nothing else is accepted, whatever the browser sends: tables, code, colors, fonts,
+links, line breaks and pictures, with undo and redo. *(Owner's changes, 2026-11-23: the editor is Tiptap's MIT "Simple Editor"
+template, kept as its CLI copies it in `src/app/components/tiptap/` so later versions merge cleanly, with the packages
+it imports; one shared component of ours, `RichTextEditor` in `src/app/components/rich-text-editor/`, is a thin copy of
+its editor keeping only the tools for the allowlist below, its picture upload pointed at the form's route, a field for
+a picture's description, and a stylesheet mapping its look onto the portal's tokens. An email template's settings page
+is to use it too.)* Nothing else is accepted, whatever the browser sends: tables, code, colors, fonts,
 embeds and raw HTML are not.
 
 **Stored as JSON, checked on the server.** The body is Tiptap's document JSON, kept in a `jsonb` column. Every save goes

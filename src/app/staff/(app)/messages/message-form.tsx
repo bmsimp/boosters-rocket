@@ -8,7 +8,7 @@ import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { checkBody, hasContent, NO_BODY, type MessageBody } from "@/lib/messages/body";
 import { fileSizeWords, MESSAGE_FILE_MAX_BYTES, MESSAGE_FILE_WORDS, MESSAGE_FILES_MAX, type MessageFileType } from "@/lib/messages/file-types";
 import { editMessageAction, postMessageAction, removeHeldFileAction } from "./actions";
-import { STAFF_UPLOAD_HREF, staffFileHref } from "./paths";
+import { STAFF_UPLOAD_HREF, staffFileHref, staffFileIdOf } from "./paths";
 
 type Done = { ok: true; message: string } | { ok: false; errors: string[] };
 const failed = { ok: false as const, errors: [ACTION_FAILED] };
@@ -16,6 +16,8 @@ const failed = { ok: false as const, errors: [ACTION_FAILED] };
 export type FormFile = { id: string; name: string; type: MessageFileType; size: number; picture: boolean; held?: boolean };
 
 const PICTURE_ACCEPT = "image/jpeg,image/png,image/gif,image/webp";
+/** A file sent as a picture that is kept as an attachment instead: said as done, not as a refusal. */
+class KeptAsFile extends Error {}
 const FILE_ACCEPT = `${PICTURE_ACCEPT},application/pdf,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx`;
 
 /**
@@ -55,16 +57,23 @@ export function MessageForm({ families, emailTo, edit }: {
 
   const say = (d: Done) => { setOutcome(d); requestAnimationFrame(() => outcomeRef.current?.focus()); };
 
-  async function upload(file: File): Promise<FormFile | null> {
-    if (files.length >= MESSAGE_FILES_MAX) { say({ ok: false, errors: [`A message can hold at most ${MESSAGE_FILES_MAX} files, its pictures included. Remove one to add another.`] }); return null; }
-    if (file.size > MESSAGE_FILE_MAX_BYTES) { say({ ok: false, errors: [`${file.name.slice(0, 200)} is over 10 MB. Make it smaller, or share it another way.`] }); return null; }
+  /** Sends one file, checking the form's own limits first: the file kept, or the sentences saying why not. */
+  async function send(file: File): Promise<FormFile | string[]> {
+    if (files.length >= MESSAGE_FILES_MAX) return [`A message can hold at most ${MESSAGE_FILES_MAX} files, its pictures included. Remove one to add another.`];
+    if (file.size > MESSAGE_FILE_MAX_BYTES) return [`${file.name.slice(0, 200)} is over 10 MB. Make it smaller, or share it another way.`];
     const q = new URLSearchParams({ name: file.name });
     if (edit) q.set("message", edit.messageId);
     const r = await safely(() => uploadTo(`${STAFF_UPLOAD_HREF}?${q}`, file), failed);
-    if (!r.ok) { say(r); return null; }
+    if (!r.ok) return r.errors;
     const added: FormFile = { ...r.file, held: true };
     setFiles((fs) => [...fs, added]);
     return added;
+  }
+
+  async function upload(file: File): Promise<FormFile | null> {
+    const r = await send(file);
+    if (Array.isArray(r)) { say({ ok: false, errors: r }); return null; }
+    return r;
   }
 
   async function addFiles(list: FileList | null) {
@@ -75,16 +84,24 @@ export function MessageForm({ families, emailTo, edit }: {
     setUploading(false);
   }
 
-  /** A picture from the editor's picture panel: uploaded with the other files, and shown in the body if it is one. */
-  async function addPicture(file: File): Promise<{ insert: string } | { close: true } | null> {
+  /**
+   * A picture from the editor's upload box: uploaded with the other files, its id given back to be shown in the body.
+   * A refusal is thrown in the form's words, which the editor hands to onPictureError; so is a file that turned out not
+   * to be a picture, which is kept as an attachment.
+   */
+  async function uploadPicture(file: File): Promise<string> {
     setUploading(true);
     setOutcome(null);
-    const added = await upload(file);
-    setUploading(false);
-    if (!added) return null;
-    if (!added.picture) { say({ ok: true, message: `${added.name} isn't a picture, so it is attached below instead of shown in the message.` }); return { close: true }; }
-    return { insert: added.id };
+    try {
+      const r = await send(file);
+      if (Array.isArray(r)) throw new Error(r.join(" "));
+      if (!r.picture) throw new KeptAsFile(`${r.name} isn't a picture, so it is attached below instead of shown in the message.`);
+      return r.id;
+    } finally {
+      setUploading(false);
+    }
   }
+  const onPictureError = (e: Error) => say(e instanceof KeptAsFile ? { ok: true, message: e.message } : { ok: false, errors: [e.message] });
 
   async function remove(f: FormFile) {
     if (f.held) {
@@ -118,9 +135,9 @@ export function MessageForm({ families, emailTo, edit }: {
   return (
     <form className="stack message-form" onSubmit={(e) => { e.preventDefault(); save(); }}>
       <TextInput id="msg-title" label="Title" required maxLength={120} value={title} onChange={(e) => setTitle(e.target.value)} hint="Up to 120 characters." />
-      <RichTextEditor ref={bodyRef} id="msg-body" label="Message" hint="Some words or a picture. Headings, bold, italic, underline, lists, links and pictures."
+      <RichTextEditor ref={bodyRef} id="msg-body" label="Message" hint="Some words or a picture. Headings, bold, italic, underline, lists, links and pictures (select one to describe it)."
         initial={edit?.body ?? null}
-        pictures={{ fileHref: staffFileHref, add: (file) => addPicture(file), busy: uploading, accept: PICTURE_ACCEPT, hint: "JPEG, PNG, GIF or WebP, up to 10 MB." }} />
+        pictures={{ fileHref: staffFileHref, idOf: staffFileIdOf, upload: uploadPicture, onError: onPictureError, accept: PICTURE_ACCEPT }} />
       <Field id="msg-files" label="Files" hint={`PDF, Word, Excel, PowerPoint or pictures, up to 10 MB each and ${MESSAGE_FILES_MAX} in all, pictures in the message included.`}>
         {(aria) => <input type="file" multiple accept={FILE_ACCEPT} className="file-input" disabled={uploading} {...aria}
           onChange={async (e) => { const input = e.currentTarget; await addFiles(input.files); input.value = ""; }} />}
