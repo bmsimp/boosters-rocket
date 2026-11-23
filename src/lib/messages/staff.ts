@@ -4,7 +4,7 @@ import { db, type Tx } from "@/lib/db/client";
 import { clubMessage, family, messageFile, messageMail, messageRead, messageVersion, messageVersionFile, staffUser } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { isUuid } from "@/lib/seasons/ids";
-import { checkBody, storedBody, type MessageBody } from "./body";
+import { checkBody, hasContent, NO_BODY, storedBody, type MessageBody } from "./body";
 import { isPicture, MESSAGE_FILES_MAX, MESSAGE_HELD_MAX_BYTES, type MessageFileType } from "./file-types";
 import { checkUpload } from "./files";
 import { carryUnsentMail, queueMail } from "./mail";
@@ -216,10 +216,12 @@ async function saveFiles(tx: Tx, versionId: string, messageId: string, ids: stri
 }
 
 /**
- * Posts a message to every family (spec section 4): version 1 with its title, its body as checkBody() rebuilt it, and
- * the files the form holds, each held by the poster for a new message. Audited `message.post` with its version and
- * how many files and how many addresses it is emailed to, never its title. With `email` true, and only while the club
- * allows it (read in this transaction, whatever the form sent), its email is queued in the same transaction (./mail.ts).
+ * Posts a message to every family (spec section 4): version 1 with its title, its body as checkBody() rebuilt it (some
+ * words or a picture: a body with neither is refused, NO_BODY, however many files it has), and the files the form
+ * holds, each held by the poster for a new message. Audited `message.post` with its version and how many files and how
+ * many addresses it is emailed to, never its title. With `email` true, and only while the club allows it (read in this
+ * transaction, whatever the form sent), its email is queued in the same transaction (./mail.ts). An edit's body is
+ * held to the same.
  */
 export async function postMessage(o: Who & { title: unknown; body: unknown; files: unknown; email?: unknown }): Promise<{ ok: true; message: string; id: string } | Fail> {
   const title = checkTitle(o.title);
@@ -232,6 +234,7 @@ export async function postMessage(o: Who & { title: unknown; body: unknown; file
     if (files.length !== list.ids.length) return FILE_GONE;
     const body = checkBody(o.body, new Set(files.filter((f) => isPicture(f.type)).map((f) => f.id)));
     if (!body.ok) return { ok: false as const, errors: [body.error] };
+    if (!hasContent(body.body)) return { ok: false as const, errors: [NO_BODY] };
     const emailed = o.email === true && (await messagesEmailAllowed(tx));
     const [m] = await tx.insert(clubMessage).values({ postedBy: o.staffUserId }).returning({ id: clubMessage.id });
     const [v] = await tx.insert(messageVersion).values({ messageId: m!.id, n: 1, title: title.title, body: body.body, emailed }).returning({ id: messageVersion.id });
@@ -275,6 +278,7 @@ export async function editMessage(o: Who & { messageId: unknown; title: unknown;
     if (!list.ids.every((id) => allowed.has(id))) return FILE_GONE;
     const body = checkBody(o.body, new Set(list.ids.filter((id) => isPicture(allowed.get(id)!))));
     if (!body.ok) return { ok: false as const, errors: [body.error] };
+    if (!hasContent(body.body)) return { ok: false as const, errors: [NO_BODY] };
     if (title.title === cur.title && canonical(body.body) === canonical(cur.body) && list.ids.join() === cur.files.map((f) => f.id).join()) {
       return { ok: false as const, errors: ["Nothing has changed since the last version, so nothing was saved."] };
     }

@@ -4,7 +4,7 @@ import { esc } from "@/lib/mail/messages";
 /**
  * A club message's body (spec section 6): the editor's document JSON, kept in `message_version.body` only as
  * checkBody() rebuilt it from its allowlist, and drawn by renderBody() as React elements, never as HTML. Pure, with no
- * database import: the staff form's preview, the staff pages and (slice 3) the parent pages all read it.
+ * database import: the staff form, the staff pages and (slice 3) the parent pages all read it.
  */
 
 export type BodyMark = { type: "bold" } | { type: "italic" } | { type: "underline" } | { type: "link"; attrs: { href: string } };
@@ -200,6 +200,22 @@ export function checkBody(input: unknown, pictures: ReadonlySet<string>): BodyCh
     if (e instanceof Refused) return { ok: false, error: e.message };
     throw e;
   }
+}
+
+/** The answer to a post or an edit whose body has no words and no picture (the owner's change of 2026-11-23). */
+export const NO_BODY = "Add a few words or a picture to the message.";
+
+/**
+ * Whether a checked body says anything: some text that isn't only spaces, or a picture. Files attached to the message
+ * don't count; a post and an edit refuse a body without either (NO_BODY), and the form asks the same before it sends.
+ */
+export function hasContent(body: MessageBody): boolean {
+  const any = (blocks: BodyBlock[]): boolean => blocks.some((b) => {
+    if (b.type === "image") return true;
+    if (b.type === "bulletList" || b.type === "orderedList") return b.content.some((li) => any(li.content));
+    return (b.content ?? []).some((n) => n.type === "text" && /\S/.test(n.text));
+  });
+  return any(body.content);
 }
 
 /**

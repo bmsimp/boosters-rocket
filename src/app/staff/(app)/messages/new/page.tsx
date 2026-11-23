@@ -7,7 +7,7 @@ import { MessageForm } from "../message-form";
 export const metadata = { title: "New message" };
 export const dynamic = "force-dynamic";
 
-/** A new message to every family: its title, its body in the rich editor, its pictures and files, Preview and Post. */
+/** A new message to every family: its title, its body in the rich editor, its pictures and files, and Post. */
 export default async function NewMessagePage() {
   await requireStaffPage("Messages.Post.ReadWrite");
   const [families, emailTo] = await Promise.all([familiesReached(), emailReach()]);

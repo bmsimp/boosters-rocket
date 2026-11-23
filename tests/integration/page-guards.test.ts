@@ -385,7 +385,7 @@ function staffOnlyImportProblems(file: string, source = read(file)): string[] {
 const PARENT_CODE_ELSEWHERE = [
   "src/lib/parents/my-family.ts",
   "src/lib/parents/contact-edits.ts",
-  // A club message's body, checked and drawn: the staff form's preview and the parent pages (club messages, slice 3) read it.
+  // A club message's body, checked and drawn: the staff form and pages and the parent pages (club messages, slice 3) read it.
   "src/lib/messages/body.ts",
   // The club's messages for a parent, each read for the session's own parent: the list, one message, a profile, a file.
   "src/lib/messages/parent.ts",

@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import * as bodyModule from "@/lib/messages/body";
-import { BODY_MAX_TEXT, bodyMail, checkBody, EMPTY_BODY, MAIL_PICTURE_LINE, renderBody, storedBody, type MessageBody } from "@/lib/messages/body";
+import { BODY_MAX_TEXT, bodyMail, checkBody, EMPTY_BODY, hasContent, MAIL_PICTURE_LINE, NO_BODY, renderBody, storedBody, type MessageBody } from "@/lib/messages/body";
 
 /** A club message's body is checked against an allowlist and drawn by our own code (spec sections 6 and 13). */
 const PIC = "8b7c2a4e-1f3d-4c5b-9a6e-0d1c2b3a4f5e", OTHER = "11111111-2222-4333-8444-555555555555";
@@ -113,9 +112,21 @@ describe("checkBody()", () => {
   it("drops control characters and empty text, and gives an empty body the editor's empty paragraph", () => {
     expect(kept(doc(p(t("a\u0000b\u0007c"), t(""))))).toMatchObject({ body: doc(p(t("abc"))) });
     expect(kept(doc()).body).toEqual(EMPTY_BODY);
-    // An empty body is kept as it is: a message may be its title alone, so nothing asks whether a body is empty.
+    // checkBody() keeps an empty body as it is (a stored one is drawn so); a post or an edit asks hasContent() after it.
     expect(kept(doc(p(t("  "))))).toMatchObject({ ok: true });
-    expect("isEmptyBody" in bodyModule).toBe(false);
+  });
+
+  it("says a body has content only when it has words or a picture (the owner's change of 2026-11-23)", () => {
+    const has = (input: unknown) => hasContent(kept(input).body);
+    expect(has(doc())).toBe(false);
+    expect(has(doc(p()))).toBe(false);
+    expect(has(doc(p(t("  	 ")), p({ type: "hardBreak" }), { type: "heading", attrs: { level: 2 }, content: [t(" ")] }))).toBe(false);
+    expect(has(doc({ type: "bulletList", content: [{ type: "listItem", content: [p(t("   "))] }] }))).toBe(false);
+    expect(has(doc(p(t(" x "))))).toBe(true);
+    expect(has(doc({ type: "heading", attrs: { level: 3 }, content: [t("Times")] }))).toBe(true);
+    expect(has(doc({ type: "orderedList", content: [{ type: "listItem", content: [p(t("one"))] }] }))).toBe(true);
+    expect(has(doc({ type: "image", attrs: { attachment: PIC, alt: null } }))).toBe(true);
+    expect(NO_BODY).toBe("Add a few words or a picture to the message.");
   });
 
   it("checks a stored body again on the way out, drawing nothing of one that no longer passes", () => {

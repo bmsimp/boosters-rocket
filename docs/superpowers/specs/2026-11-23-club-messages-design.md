@@ -64,14 +64,16 @@ read, and may be emailed as an update. An Admin may delete a message outright.
   delivered". A deleted message stays in the list as "Deleted by <name> on <date>", with nothing of its content. A
   **New message** button for those who may post.
 - **New message** (`/staff/messages/new`): a title (required, up to 120 characters *(proposed)*), the body in the rich
-  editor, files, and, when the club allows email, "Also email families", ticked. **Preview** shows the message as a
-  parent will see it, with "This goes to 87 families" and, when emailing, "and is emailed to 142 addresses". **Post**
-  posts it.
+  editor (required: some words or a picture; files attached alone, or only spaces, don't count, and the post or edit is
+  refused with "Add a few words or a picture to the message." *(Owner's change, 2026-11-23: slice 2 let a message be
+  its title alone.)*), files, and, when the club allows email, "Also email families", ticked, with "Goes to 142 addresses" beside it,
+  and "This goes to 87 families" under the form. **Post** posts it. *(Owner's change, 2026-11-23: there is no
+  Preview, which showed the message as a parent would see it with those counts; the editor is what staff see.)*
 - **A message** (`/staff/messages/[id]`): the message as parents see it, its versions, and its mail results: delivered
   and failed counts per emailed version, with the failed addresses listed. **Edit** for its poster alone; **Delete**
   for an Admin alone, behind a confirm step that says no mail is sent and the content can't be brought back.
 - **Edit** (`/staff/messages/[id]/edit`): the same form, opened on the current version, with "Email families about this
-  change", ticked, when the club allows email. Saving adds a version. Anyone else who opens the address is refused.
+  change", ticked, and its "Goes to 142 addresses", when the club allows email. Saving adds a version. Anyone else who opens the address is refused.
 
 **Your account** (`/staff/account`) gains a card, "Contact email shown to families": the address parents see on the
 staff member's profile. It starts as their sign-in address; they may set another (a club mailbox such as
@@ -106,11 +108,17 @@ No new tab: `PARENT_NAV` keeps its five.
 **The editor** is Tiptap, the one new dependency, named by this spec (the owner's yes to the design covers it). The
 packages, each pinned to one exact version with no range, all at the same release: `@tiptap/react`, `@tiptap/pm`,
 `@tiptap/starter-kit` and `@tiptap/extension-image`. The builder takes the newest 3.x release at least two weeks old
-when the slice starts and writes the version in the slice's report. The editor runs only in the staff form, a client
+when the slice starts and writes the version in the slice's report. *(Owner's change, 2026-11-23: also the packages the
+Simple Editor template imports, each pinned, listed in `src/app/components/tiptap/README.md`.)* The editor runs only in the staff form, a client
 component; parent pages and mail never load it.
 
 **What the editor offers:** paragraphs, headings (two levels), bold, italic, underline, bulleted and numbered lists,
-links, line breaks and pictures. Nothing else is accepted, whatever the browser sends: tables, code, colors, fonts,
+links, line breaks and pictures, with undo and redo. *(Owner's changes, 2026-11-23: the editor is Tiptap's MIT "Simple Editor"
+template, kept as its CLI copies it in `src/app/components/tiptap/` so later versions merge cleanly, with the packages
+it imports; one shared component of ours, `RichTextEditor` in `src/app/components/rich-text-editor/`, is a thin copy of
+its editor keeping only the tools for the allowlist below, its picture upload pointed at the form's route, a field for
+a picture's description, and a stylesheet mapping its look onto the portal's tokens. An email template's settings page
+is to use it too.)* Nothing else is accepted, whatever the browser sends: tables, code, colors, fonts,
 embeds and raw HTML are not.
 
 **Stored as JSON, checked on the server.** The body is Tiptap's document JSON, kept in a `jsonb` column. Every save goes

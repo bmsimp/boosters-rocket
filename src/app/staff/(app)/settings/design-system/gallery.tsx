@@ -9,6 +9,7 @@ import {
 import { IntegrationLogo } from "../integration-logo";
 import { PoweredBy } from "@/app/components/powered-by";
 import { ChoiceSample, TakenChoiceSample } from "./gallery-choice";
+import { RichTextEditor } from "@/app/components/rich-text-editor";
 
 /**
  * The design system's living gallery: every primitive in every state, with what it is for and how to import it. Only
@@ -25,7 +26,7 @@ const MODES: { mode: Mode; label: string; theme: "light" | "dark"; contrast?: "m
 
 const SECTIONS = [
   ["tokens", "Tokens"], ["contrast", "Contrast"], ["button", "Button"], ["badge", "Badge"], ["card", "Card"], ["list", "List"],
-  ["page-header", "PageHeader"], ["section-label", "SectionLabel"], ["empty-state", "EmptyState"], ["how-this-works", "HowThisWorks"], ["stat", "Stat"], ["fields", "Fields"],
+  ["page-header", "PageHeader"], ["section-label", "SectionLabel"], ["empty-state", "EmptyState"], ["how-this-works", "HowThisWorks"], ["stat", "Stat"], ["fields", "Fields"], ["rich-text-editor", "RichTextEditor"],
   ["avatar", "Avatar"], ["step-indicator", "StepIndicator"], ["key-value", "KeyValue"], ["toolbar", "Toolbar"], ["data-table", "DataTable"],
   ["notice", "Notice"], ["state-words", "StateWords"], ["settings-rail", "Settings rail"], ["time-money", "Time and money"], ["frame", "Bar and tabs"], ["powered-by", "Powered by"], ["themes", "Display modes"],
 ] as const;
@@ -285,6 +286,15 @@ export function Gallery() {
         </div>
         <ChoiceSample />
           <TakenChoiceSample />
+      </Section>
+
+      <Section id="rich-text-editor" name="RichTextEditor" use="A body of rich text a person writes (a club message): its label and hint over a frame with the toolbar (undo and redo, two headings, two lists, bold, italic, underline, a link, and a picture where the form takes them) and the writing area. It offers only what src/lib/messages/body.ts keeps; the server checks what it sends. The form reads what was written through its ref. Tiptap, with the look of Tiptap's Simple Editor template. Not for a line of plain text: that is a TextInput or TextArea." importLine={`import { RichTextEditor, type RichTextHandle } from "@/app/components/rich-text-editor";`}>
+        <RichTextEditor id="ds-body" label="Message" hint="Some words or a picture. Headings, bold, italic, underline, lists, links and pictures."
+          initial={{ type: "doc", content: [
+            { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Sample practice news" }] },
+            { type: "paragraph", content: [{ type: "text", text: "Practice moves to " }, { type: "text", text: "Friday", marks: [{ type: "bold" }] }, { type: "text", text: " this week." }] },
+            { type: "bulletList", content: [{ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "Bring water" }] }] }] },
+          ] }} />
       </Section>
 
       <Section id="avatar" name="Avatar" use="A person's initials beside their name. The club bar's account control is one, with a 44px tap target." importLine={UI("Avatar")}>

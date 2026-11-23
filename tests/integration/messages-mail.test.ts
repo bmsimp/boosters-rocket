@@ -124,17 +124,23 @@ describe("queueing a message's email", () => {
     expect(JSON.stringify(audit)).not.toContain("family-a.example");
   });
 
-  it("shows the box only while the club allows it, ticked, and says how many addresses in the preview's words", async () => {
+  it("shows the box only while the club allows it, ticked, with how many addresses it goes to beside it", async () => {
     asStaff(coach);
-    expect(await renderPage(NewMessagePage)).not.toContain("Also email families");
+    const off = await renderPage(NewMessagePage);
+    expect(off).not.toContain("Also email families");
+    expect(off).not.toContain("Goes to");
     await allowEmail(true);
     const html = await renderPage(NewMessagePage);
     expect(html).toMatch(/<input type="checkbox" id="msg-email"[^>]*checked=""/);
     expect(html).toContain("Also email families");
-    expect(html).toContain("and is emailed to 4 addresses.");
+    expect(html).toContain("Goes to 4 addresses.");
+    // There is no Preview: the editor is what staff see.
+    expect(html).not.toContain("Preview");
     const id = await post();
     asStaff(coach);
-    expect(await renderPage(EditMessagePage, { params: { id } })).toContain("Email families about this change");
+    const edit = await renderPage(EditMessagePage, { params: { id } });
+    expect(edit).toContain("Email families about this change");
+    expect(edit).toContain("Goes to 4 addresses.");
   });
 });
 

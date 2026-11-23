@@ -23,7 +23,7 @@ const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22
 const SWITCH = "messages.email_allowed";
 
 let switchBefore: unknown;
-let made: string | null = null;
+let made: string[] = [];
 test.beforeAll(async () => {
   const [row] = await sql<{ value: unknown }[]>`SELECT value FROM setting WHERE key = ${SWITCH}`;
   switchBefore = row?.value;
@@ -31,8 +31,8 @@ test.beforeAll(async () => {
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
 });
 test.afterEach(async () => {
-  if (made) await removeMessage(made);
-  made = null;
+  for (const id of made) await removeMessage(id);
+  made = [];
 });
 test.afterAll(async () => {
   if (switchBefore === undefined) await sql`DELETE FROM setting WHERE key = ${SWITCH}`;
@@ -59,6 +59,25 @@ async function checked(page: Page, where: string) {
   expect(results.violations.flatMap((v) => v.nodes.map((n) => `${where} · ${n.target.join(" ")}: ${v.id} (${v.help})`))).toEqual([]);
 }
 
+/** A one-pixel PNG: a picture the upload route takes by its bytes. */
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+
+/**
+ * A picture added through the toolbar's image button (the template's upload box, its file sent to the staff upload
+ * route), then described in the field shown while it is selected. Its description starts empty, not as the file's name.
+ */
+async function addPicture(page: Page, alt: string) {
+  await page.getByRole("toolbar", { name: "Formatting" }).getByRole("button", { name: "Add image" }).click();
+  await page.locator(".tiptap-image-upload input[type=file]").setInputFiles({ name: "IMG_2041.png", mimeType: "image/png", buffer: PNG });
+  const picture = editorOf(page).locator("img");
+  await expect(picture).toHaveCount(1);
+  await picture.click();
+  const description = page.getByLabel("What the picture shows", { exact: true });
+  await expect(description).toHaveValue("");
+  await description.fill(alt);
+  await expect(page.getByRole("list", { name: "Files in this message" })).toContainText("IMG_2041.png");
+}
+
 /** The body editor, there once the form has drawn it in the browser: typing before then could be lost. */
 const editorOf = (page: Page) => page.getByRole("textbox", { name: "Message", exact: true });
 
@@ -72,20 +91,42 @@ test("staff post a message with its email, a parent reads it and its poster's pr
   expect((await staff.goto("/staff/messages/new"))?.status()).toBe(200);
   await expect(editorOf(staff)).toBeVisible();
   await staff.getByLabel("Title", { exact: true }).fill(title);
+  // A title alone isn't a message: the body needs some words or a picture.
+  await staff.getByRole("button", { name: "Post", exact: true }).click();
+  await expect(staff.getByText("Add a few words or a picture to the message.")).toBeVisible();
+  await expect(staff).toHaveURL(/\/staff\/messages\/new$/);
   await editorOf(staff).click();
   await staff.keyboard.type("The bus leaves the school at 3:15.");
+  // The template's toolbar works on what is written: its list menu, and the tools it keeps (none body.ts refuses).
+  await staff.keyboard.press("Enter");
+  const toolbar = staff.getByRole("toolbar", { name: "Formatting" });
+  for (const gone of ["Strike", "Code", "Blockquote", "Highlight", "Superscript", "Subscript", "Align left"]) {
+    await expect(toolbar.getByRole("button", { name: gone, exact: true })).toHaveCount(0);
+  }
+  await toolbar.getByRole("button", { name: "List options" }).click();
+  await expect(staff.getByRole("menuitem", { name: /Task List/ })).toHaveCount(0);
+  await staff.getByRole("menuitem", { name: /Bullet List/ }).click();
+  // The menu hands the focus back to the writing area as it closes: type once the list is there and it has the focus.
+  await expect(editorOf(staff).locator("li")).toHaveCount(1);
+  await expect(editorOf(staff)).toBeFocused();
+  await staff.keyboard.type("Bring water.");
+  // Out of the list, a picture, uploaded and described.
+  await staff.keyboard.press("Enter");
+  await staff.keyboard.press("Enter");
+  await addPicture(staff, "The team at the bus");
   const box = staff.getByRole("checkbox", { name: "Also email families" });
   await expect(box).toBeChecked();
+  // The editor is what staff see (no Preview): beside the box, how many addresses the email goes to.
+  await expect(staff.getByText(/^Goes to \d+ address(es)?\./)).toBeVisible();
+  await expect(staff.getByText(/^This goes to \d+ famil(y|ies)\.$/)).toBeVisible();
+  await expect(staff.getByRole("toolbar", { name: "Formatting" })).toBeVisible();
   await checked(staff, "/staff/messages/new");
-  await staff.getByRole("button", { name: "Preview" }).click();
-  await expect(staff.getByText(/This goes to \d+ famil(y|ies) and is emailed to \d+ address(es)?\./).first()).toBeVisible();
-  await expect(staff.locator(".message-preview")).toContainText("The bus leaves the school at 3:15.");
-  await checked(staff, "/staff/messages/new, previewing");
   await staff.getByRole("button", { name: "Post", exact: true }).click();
   await expect(staff).toHaveURL(/\/staff\/messages\/[0-9a-f-]{36}$/);
   const id = new URL(staff.url()).pathname.split("/").pop()!;
-  made = id;
+  made.push(id);
   await expect(staff.getByRole("heading", { level: 1 })).toHaveText(title);
+  await expect(staff.locator(".msg-body li").first()).toHaveText("Bring water.");
   // Its email is queued for every parent who can sign in, Zelda among them; staff see how far it has got.
   const [queued] = await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM message_mail m JOIN message_version v ON v.id = m.version_id
                                                WHERE v.message_id = ${id} AND m.address = 'zelda@example.com'`;
@@ -111,6 +152,12 @@ test("staff post a message with its email, a parent reads it and its poster's pr
   await expect(parent.locator("main")).toContainText("The bus leaves the school at 3:15.");
   await expect(parent.locator("main")).toContainText("Posted by E2E Admin");
   await expect(parent.locator("main")).not.toContainText("Edited");
+  // The picture, from the parent's file route, with the words its poster gave it.
+  const shown = parent.locator(".msg-body img");
+  await expect(shown).toHaveAttribute("alt", "The team at the bus");
+  await expect(shown).toHaveAttribute("src", /^\/messages\/files\/[0-9a-f-]{36}$/);
+  await shown.scrollIntoViewIfNeeded();
+  await expect.poll(() => shown.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0)).toBe(1);
   await checked(parent, "/messages/[id]");
   await parent.goto("/messages");
   await expect(parent.locator(".list-row").filter({ hasText: title })).not.toContainText("New");
@@ -173,6 +220,20 @@ test("staff post a message with its email, a parent reads it and its poster's pr
   expect((await parent.goto(`/messages/${id}`))?.status()).toBe(404);
   await parent.goto("/messages");
   await expect(parent.locator("main")).not.toContainText("Bus times for the away game");
+
+  // --- a message that is a picture alone posts, and families see it -------------------------------------------------
+  await staff.goto("/staff/messages/new");
+  await expect(editorOf(staff)).toBeVisible();
+  await staff.getByLabel("Title", { exact: true }).fill(`Team photo (${info.project.name})`);
+  await addPicture(staff, "The whole team");
+  await staff.getByRole("checkbox", { name: "Also email families" }).uncheck();
+  await staff.getByRole("button", { name: "Post", exact: true }).click();
+  await expect(staff).toHaveURL(/\/staff\/messages\/[0-9a-f-]{36}$/);
+  const photo = new URL(staff.url()).pathname.split("/").pop()!;
+  made.push(photo);
+  await expect(staff.locator(".msg-body img")).toHaveAttribute("alt", "The whole team");
+  await parent.goto(`/messages/${photo}`);
+  await expect(parent.locator(".msg-body img")).toHaveAttribute("alt", "The whole team");
 
   await staff.context().close();
   await parent.context().close();
