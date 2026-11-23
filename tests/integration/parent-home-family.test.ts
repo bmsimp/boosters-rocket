@@ -260,8 +260,9 @@ describe("Home", () => {
     const { a, b } = await seedTwoFamilies();
     asParent(a.identity);
     const html = await renderPage(ParentHome);
-    // The season ruler, then the sections in the order a phone shows them: To do, the students, the total owed, the details.
-    expect([...html.matchAll(/<section class="([^"]+)"/g)].map((m) => m[1])).toEqual(["season", "home-todo", "home-students", "box money", "box details-box"]);
+    // The season ruler, the club's messages (A hasn't read the one message seedTwoFamilies() posts), then the sections
+    // in the order a phone shows them: To do, the students, the total owed, the details.
+    expect([...html.matchAll(/<section class="([^"]+)"/g)].map((m) => m[1])).toEqual(["season", "box home-messages", "home-todo", "home-students", "box money", "box details-box"]);
     // The family's name stands once, as the page's heading (the Display link's label and the details hold the parent's own name).
     expect(html.split("Alderquist Family")).toHaveLength(2);
     // The open invoices are To do's first rows, each with a compact Pay: the soonest-due one primary, the others secondary.

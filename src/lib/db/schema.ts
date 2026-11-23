@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { pgTable, text, timestamp, boolean, uuid, jsonb, uniqueIndex, index, inet, bigserial, bigint, integer, check, date, time, customType } from "drizzle-orm/pg-core";
 import type { PgColumn, PgColumnBuilderBase, PgTableExtraConfigValue } from "drizzle-orm/pg-core";
 import type { AppFamilyId, AppStudentId } from "../families/ids";
+import { MESSAGE_FILE_TYPES } from "../messages/file-types";
 
 const created = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 const updated = () => timestamp("updated_at", { withTimezone: true }).notNull().defaultNow();
@@ -57,11 +58,16 @@ export const providerCertificate = pgTable("provider_certificate", {
   uniqueIndex("provider_certificate_one_active").on(t.providerKey).where(sql`status = 'active'`),
 ]);
 
-/** People who sign in through the staff door. */
+/**
+ * People who sign in through the staff door. `contact_email` (club messages, migration 0057) is the address parents see
+ * on the staff member's profile beside their messages, set by the staff member alone on Your account
+ * (src/lib/staff/contact-email.ts): null means their sign-in address. Stored trimmed and lower-cased.
+ */
 export const staffUser = pgTable("staff_user", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   email: text("email").notNull(), // stored trimmed + lower-cased
+  contactEmail: text("contact_email"),
   status: text("status", { enum: ["invited", "active", "disabled"] }).notNull().default("invited"),
   authUserId: text("auth_user_id"), // staff_auth_user.id once bound at first sign-in
   createdAt: created(),
@@ -1492,4 +1498,122 @@ export const parentAuthPasskey = pgTable("parent_auth_passkey", {
 }, (t) => [
   index("parent_auth_passkey_user_ix").on(t.userId),
   uniqueIndex("parent_auth_passkey_credential_id_uq").on(t.credentialID),
+]);
+
+// --- Club messages (docs/superpowers/specs/2026-11-23-club-messages-design.md, migration 0057) ---
+// A message's content is the same for every family; whether a parent has read it is that parent's alone, and the mail
+// rows hold every parent's address (staff only). None of these is keyed by a QuickBooks id: a change of company clears
+// nothing here. docs/agents/messages.md.
+
+/**
+ * A message staff posted to every family: who posted it and when. Its title, body and files are its versions'. Never
+ * deleted: an Admin's delete erases every version's content and files and stamps `deleted_at` and `deleted_by`, so the
+ * staff list can say who deleted it and when. Exported as `clubMessage`: `message` is a common local name (an HMAC's
+ * input, an action's answer) that tests/unit/audit-rows.test.ts would take for this table.
+ */
+export const clubMessage = pgTable("message", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  postedBy: uuid("posted_by").notNull().references(() => staffUser.id, { onDelete: "restrict" }),
+  postedAt: timestamp("posted_at", { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  deletedBy: uuid("deleted_by"), // staff_user.id of the Admin who deleted it
+}, (t) => [
+  index("message_posted_at_ix").on(t.postedAt),
+  index("message_posted_by_ix").on(t.postedBy),
+  check("message_deleted_by_with_at", sql`(${t.deletedBy} is null) = (${t.deletedAt} is null)`),
+]);
+
+/**
+ * One saved state of a message: version 1 is the post, each edit adds the next. A version is never changed. `body` is
+ * the editor's document JSON as checkBody() rebuilt it from its allowlist (src/lib/messages/body.ts, slice 2);
+ * `emailed` says whether this version was queued to be emailed to families.
+ */
+export const messageVersion = pgTable("message_version", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  messageId: uuid("message_id").notNull().references(() => clubMessage.id, { onDelete: "restrict" }),
+  n: integer("n").notNull(),
+  title: text("title").notNull(),
+  body: jsonb("body").notNull(),
+  savedAt: timestamp("saved_at", { withTimezone: true }).notNull().defaultNow(),
+  emailed: boolean("emailed").notNull().default(false),
+}, (t) => [
+  uniqueIndex("message_version_n_uq").on(t.messageId, t.n),
+  check("message_version_n_positive", sql`${t.n} >= 1`),
+  check("message_version_title_length", sql`char_length(${t.title}) between 1 and 120`),
+]);
+
+/**
+ * A picture or file uploaded for a message, its bytes in the database so the nightly backup carries it. While a staff
+ * member's form holds it before the post or edit saves, `held_by` names them (and `message_id` the message, for an
+ * edit, or null for a new one); the save clears `held_by` and the file belongs to the versions that list it
+ * (message_version_file). A held file over 24 hours old is removed by the daily clean-up. `name` is the original name,
+ * cut to 200 characters, shown only as text on a page; `type` is what the bytes are (src/lib/messages/file-types.ts).
+ */
+export const messageFile = pgTable("message_file", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  messageId: uuid("message_id").references(() => clubMessage.id, { onDelete: "restrict" }),
+  heldBy: uuid("held_by").references(() => staffUser.id, { onDelete: "restrict" }),
+  name: text("name").notNull(),
+  type: text("type", { enum: MESSAGE_FILE_TYPES }).notNull(),
+  size: integer("size").notNull(),
+  bytes: bytes("bytes").notNull(),
+  uploadedAt: timestamp("uploaded_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index("message_file_message_ix").on(t.messageId),
+  index("message_file_held_ix").on(t.heldBy),
+  check("message_file_held_or_posted", sql`${t.heldBy} is not null or ${t.messageId} is not null`),
+  check("message_file_name_length", sql`char_length(${t.name}) between 1 and 200`),
+  check("message_file_size", sql`${t.size} between 0 and 10485760`),
+]);
+
+/** Which files a version has, in order, its pictures in the body included. An edit that keeps a file points at the same row. */
+export const messageVersionFile = pgTable("message_version_file", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  versionId: uuid("version_id").notNull().references(() => messageVersion.id, { onDelete: "cascade" }),
+  fileId: uuid("file_id").notNull().references(() => messageFile.id, { onDelete: "restrict" }),
+  position: integer("position").notNull(),
+}, (t) => [
+  uniqueIndex("message_version_file_uq").on(t.versionId, t.fileId),
+  uniqueIndex("message_version_file_position_uq").on(t.versionId, t.position),
+  index("message_version_file_file_ix").on(t.fileId),
+]);
+
+/**
+ * That a parent has read a message, and which version: one row per message and parent, read and written only for the
+ * session's own parent (src/lib/messages/parent.ts, slice 3). Gone with the person.
+ */
+export const messageRead = pgTable("message_read", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  messageId: uuid("message_id").notNull().references(() => clubMessage.id, { onDelete: "cascade" }),
+  parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "cascade" }),
+  versionN: integer("version_n").notNull(),
+  readAt: timestamp("read_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("message_read_uq").on(t.messageId, t.parentId),
+  index("message_read_parent_ix").on(t.parentId),
+]);
+
+/**
+ * One email of one emailed version to one address (a parent's sign-in address, trimmed and lower-cased, once however
+ * many families it is in), queued in the post's or edit's transaction and sent by the worker (slice 4): staff only,
+ * since it holds every family's addresses. `reason` is short, with no secret. `tries` counts only the tries this
+ * address was refused; a failure of the mail itself counts none and puts the queue off (`next_try_at`, migration 0058).
+ * Rows of a version saved over 90 days ago are removed by the daily clean-up.
+ */
+export const messageMail = pgTable("message_mail", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  versionId: uuid("version_id").notNull().references(() => messageVersion.id, { onDelete: "cascade" }),
+  address: text("address").notNull(),
+  status: text("status", { enum: ["queued", "sent", "failed"] }).notNull().default("queued"),
+  tries: integer("tries").notNull().default(0),
+  reason: text("reason"),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  /** While the mail itself is failing (not this address), not tried before this time: 5, 15, then every 60 minutes. Null: due now. */
+  nextTryAt: timestamp("next_try_at", { withTimezone: true }),
+  createdAt: created(),
+}, (t) => [
+  uniqueIndex("message_mail_address_uq").on(t.versionId, t.address),
+  index("message_mail_queued_ix").on(t.status).where(sql`status = 'queued'`),
+  check("message_mail_address_lower", sql`${t.address} = lower(btrim(${t.address}))`),
+  check("message_mail_reason_length", sql`${t.reason} is null or char_length(${t.reason}) <= 200`),
 ]);

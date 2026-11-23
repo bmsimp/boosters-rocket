@@ -8,6 +8,7 @@ const ABOUT: Record<string, string> = {
   "/staff/roster": "Every family and member, their students and guardians, and what can be changed.",
   "/staff/parents": "Everyone who can sign in, or once could, and their families.",
   "/staff/links": "Which family is which customer in the books, and what differs between them.",
+  "/staff/messages": "News posted to every family, read in the portal.",
   "/staff/seasons": "The season's steps and what each asks of families.",
   "/staff/seasons/progress": "Where each family stands, and the ticks staff make.",
   "/staff/forms": "Who has signed each form, and the evidence.",

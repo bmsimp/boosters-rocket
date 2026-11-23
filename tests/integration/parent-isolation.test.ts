@@ -63,18 +63,29 @@ const PARAMS: Record<string, (family: SeededParent) => Record<string, string | s
   "/family/email/[token]": (family) => ({ token: family.emailChange!.token }),
   // The family's own volunteer requirement with a buy-out: its page shows the buy-out's state and amount, never the other's.
   "/volunteer/pay-instead/[requirementId]/[choice]": (family) => ({ requirementId: family.buyout!.requirementId, choice: family.buyout!.key }),
+  // The club's one message, the same for both families (club messages): what differs is whether this parent has read it.
+  "/messages/[id]": (family) => ({ id: family.messages!.messageId }),
+  // The profile of the staff member who posted it: their name, contact email and messages, the same for every family.
+  "/messages/from/[staffId]": (family) => ({ staffId: family.messages!.staffId }),
 };
 
 /** Pages that show nothing about the family, and why. Everything else must show at least one of its own family's markers. */
 const NO_FAMILY_DATA: Record<string, string> = {
   "/display": "Display settings kept on the device, and the sign-out button.",
+  // The club's messages are the same for every family; a parent's own read state (tests/integration/messages-parent.test.ts)
+  // shows as "New" and nothing more.
+  "/messages": "The club's messages, the same for every family, with New on those this parent hasn't opened.",
+  "/messages/[id]": "One club message, the same for every family.",
+  "/messages/from/[staffId]": "A staff member's name, contact email and messages, the same for every family.",
 };
 
 /** What a page must show its own family, beyond "something": the exact words. */
 const MUST_SHOW: Record<string, (family: SeededParent) => string[]> = {
   // The greeting, the roster, and what the family owes now (what it has paid is on the Payments page).
   // And the season ruler with the step the family is on, and what that step asks of it.
-  "/": (family) => [`${family.spec.family.name}</h1>`, ...rosterOf(family), ...moneyMarkers(family.spec, "open"), ...family.season!.home],
+  // And the club's messages: A hasn't read the one message (a card, with its title), B has (the quiet line alone).
+  "/": (family) => [`${family.spec.family.name}</h1>`, ...rosterOf(family), ...moneyMarkers(family.spec, "open"), ...family.season!.home, ...family.messages!.home],
+  "/messages": (family) => [family.messages!.title],
   "/family": (family) => rosterOf(family),
   // The family's name, every invoice's number and amount, the total, and the address behind the Pay button.
   "/payments": (family) => [family.spec.family.name, ...moneyMarkers(family.spec)],

@@ -122,6 +122,9 @@ const ROUTE_HANDLERS: Record<string, string> = {
   "src/app/icons/[name]/route.ts": "Public on purpose: the club's app icons, which a phone fetches before anyone signs in. It answers a fixed list of names with a picture of the club's short name on the club's color, and reads no family data (tests/integration/pwa-icons.test.ts).",
   "src/app/staff/(app)/settings/audit/export/route.ts": "A staff session with Audit.Log.Read, which only an Admin holds, checked in the handler before anything is read; anyone else is redirected with no rows. Each export is audited and sent no-store (tests/integration/audit-log.test.ts).",
   "src/app/(parent)/forms/[id]/signed/route.ts": "The parent session, checked first in the handler by requireParentPage() (signed out: to sign-in and back; refused: /refused). The request id is looked up within the session's app family (activeFamilyOf()) and its evidence by request, by that app family and by the roster's company, never an earlier company's (findMySignedPdf); an id that isn't a uuid, nobody's, another family's or one with no kept evidence all answer the same 404 with no bytes. Sent no-store with a fixed file name (tests/integration/signed-forms-downloads.test.ts).",
+  "src/app/(parent)/messages/files/[id]/route.ts": "A club message's picture or file for a parent: the parent session (a family chosen), checked first in the handler by parentLayoutCtx(); without one, a staff session among them, the same 404 as for anything else, with no bytes. Only a file a version of a message that isn't deleted lists (parentFile()); a held file, a deleted message's, an unknown id: that 404. No-store, nosniff, the type read from the bytes and a fixed file name (tests/integration/messages-parent.test.ts).",
+  "src/app/staff/(app)/messages/files/route.ts": "A message form's upload (POST): a staff session with Messages.Post.ReadWrite, checked in the handler before the body is read, anyone else refused in the same words; then the portal's own Origin; a Content-Length of at most 10 MB, the bytes counted as they arrive and dropped past it; then uploadFile()'s checks (the type by its bytes, the size, ten files), held by the uploader, audited. JSON, no-store (tests/integration/messages-staff.test.ts).",
+  "src/app/staff/(app)/messages/files/[id]/route.ts": "A staff session with Messages.Post.ReadWrite, checked in the handler before anything is read; anyone else is redirected with no bytes. A posted file of a message that isn't deleted, to anyone who may see messages; a held one to the staff member whose form holds it alone; anything else the same 404. No-store, nosniff, the type read from the bytes and a fixed file name (tests/integration/messages-staff.test.ts).",
   "src/app/staff/(app)/forms/evidence/[id]/[file]/route.ts": "A staff session with Forms.Signature.Read, checked in the handler before anything is read; anyone else is redirected with no bytes. Each download is audited (forms.evidence.download) before a byte is sent, no-store, with a fixed file name (tests/integration/signed-forms-downloads.test.ts).",
   "src/app/setup/certificates/[name]/route.ts": "downloadAccess(): the setup session while setup is open, or an Admin afterward; otherwise 404 (tests/integration/setup-certificates-route.test.ts).",
   "src/app/setup/finish/route.ts": "Setup open, the setup session cookie, and the named Admin signed in; otherwise a redirect that changes nothing (tests/integration/setup-finish.test.ts).",
@@ -177,6 +180,8 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/accounting/ended-links", names: "all", why: "the links an unlink ended whose customer is still in the books: it reads any family's, student's and guardian row's history and the roster cache (stage 4's slice M3b2)" },
   { module: "@/lib/quickbooks/switch", names: "all", why: "the switch page counts what a change of company ends and keeps: every family's links, records, requests and buy-outs (stage 4's slice M8)" },
   { module: "@/lib/parents/contact-take-in", names: "all", why: "the take-in of contact details reads every person, guardian row, family and cached customer at once (stage 3's slice 11a)" },
+  { module: "@/lib/messages/staff", names: "all", why: "club messages for staff: every message, staff members' held files, posts, edits and an Admin's delete (club messages, slices 2 and 4)" },
+  { module: "@/lib/messages/mail", names: "all", why: "club messages' mail: it reads every parent's sign-in address to queue a message's email, and its results list other families' failed addresses (club messages, slice 4)" },
 ];
 
 describe("every page guards itself", () => {
@@ -380,6 +385,10 @@ function staffOnlyImportProblems(file: string, source = read(file)): string[] {
 const PARENT_CODE_ELSEWHERE = [
   "src/lib/parents/my-family.ts",
   "src/lib/parents/contact-edits.ts",
+  // A club message's body, checked and drawn: the staff form's preview and the parent pages (club messages, slice 3) read it.
+  "src/lib/messages/body.ts",
+  // The club's messages for a parent, each read for the session's own parent: the list, one message, a profile, a file.
+  "src/lib/messages/parent.ts",
   // The queueing of a parent's change of their details, in the save's transaction, to be sent on by the worker (stage 3's slice 11b).
   "src/lib/parents/contact-queue.ts",
   "src/lib/parents/contact-fields.ts",

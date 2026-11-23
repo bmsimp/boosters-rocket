@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { staffSessionCookie } from "./staff-session";
 import { E2E_VOLUNTEER } from "./volunteer-seed";
+import { E2E_MESSAGE } from "./messages-seed";
 import { parentRoutes } from "./parent-routes";
 import { familyPages } from "./family-records";
 
@@ -34,6 +35,8 @@ const VISITS: Record<string, Visit[]> = {
   "/staff/volunteer/credit/[familyId]": [{ family: familyPages.credit, customer: "E2E-FAMILY" }],
   "/staff/forms/evidence/[id]": [{ from: "/staff/forms", links: ['a[href^="/staff/forms/evidence/"]'] }],
   "/staff/forms/requests/[id]": [{ from: "/staff/forms", links: ['a[href^="/staff/forms/requests/"]'] }],
+  "/staff/messages/[id]": [{ path: `/staff/messages/${E2E_MESSAGE.id}` }],
+  "/staff/messages/[id]/edit": [{ path: `/staff/messages/${E2E_MESSAGE.id}/edit` }],
   // A set-up page shows one step at a time: each step is a page of its own.
   "/staff/settings/parents/setup": ["signins", "welcome", "level"].map((step) => ({ path: `/staff/settings/parents/setup?step=${step}` })),
 };

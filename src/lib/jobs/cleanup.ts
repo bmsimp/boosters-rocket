@@ -1,6 +1,6 @@
-import { and, eq, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lt, notExists, notInArray, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { familyMoney, formReminderClaim, formReminderRound, jobRun, parent, parentAuthSession, parentAuthUser, parentAuthVerification, parentDevice, parentEmailChange, parentSigninToken, rateLimitEvent, requirementReminder, setting, signinCode, staffAuthSession, staffAuthVerification, writeQueue } from "@/lib/db/schema";
+import { familyMoney, formReminderClaim, formReminderRound, jobRun, messageFile, messageMail, messageVersion, messageVersionFile, parent, parentAuthSession, parentAuthUser, parentAuthVerification, parentDevice, parentEmailChange, parentSigninToken, rateLimitEvent, requirementReminder, setting, signinCode, staffAuthSession, staffAuthVerification, writeQueue } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { RATE_LIMITS, type RateLimitKind } from "@/lib/parents/rate-limit";
 import { CODE_TTL_MS, RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
@@ -13,6 +13,10 @@ export const JOB_HISTORY_DAYS = 90;
 export const REMINDER_CLAIM_DAYS = 365;
 /** A staff roster write that went through, or that staff gave up, is kept this long for the Reconciliation page's story. */
 export const FINISHED_WRITES_DAYS = 30;
+/** A picture or file uploaded for a message and never posted (still held by the staff member who uploaded it) is kept this long. */
+export const HELD_MESSAGE_FILE_HOURS = 24;
+/** The mail rows of a message's version (who it was emailed to, and what failed) are kept this long after the version was saved. */
+export const MESSAGE_MAIL_DAYS = 90;
 const CLEANUP_ACTOR: Actor = { door: "system", id: null, label: "worker" };
 /**
  * Settings whose feature is gone, so nothing reads, writes or expires them any more: their life ended with the feature,
@@ -26,6 +30,7 @@ export const RETIRED_SETTINGS: readonly string[] = [];
 export type CleanupCounts = {
   staffSessions: number; parentSessions: number; signinCodes: number; signinLinks: number; unfinishedAuthenticators: number; spentBackupCodes: number; rememberedDevices: number; rateLimitEvents: number;
   emailChanges: number; familyMoney: number; jobRuns: number; reminderClaims: number; writeQueue: number; verifications: number; retiredSettings: number;
+  heldMessageFiles: number; messageMail: number;
 };
 const WORDS: Record<keyof CleanupCounts, [string, string]> = {
   staffSessions: ["expired staff session", "expired staff sessions"], parentSessions: ["expired parent session", "expired parent sessions"],
@@ -41,6 +46,8 @@ const WORDS: Record<keyof CleanupCounts, [string, string]> = {
   writeQueue: ["finished change to QuickBooks", "finished changes to QuickBooks"],
   verifications: ["expired sign-in check", "expired sign-in checks"],
   retiredSettings: ["setting of a retired feature", "settings of retired features"],
+  heldMessageFiles: ["file uploaded for a message and never posted", "files uploaded for messages and never posted"],
+  messageMail: ["record of a message emailed over 90 days ago", "records of messages emailed over 90 days ago"],
 };
 
 /**
@@ -49,7 +56,8 @@ const WORDS: Record<keyof CleanupCounts, [string, string]> = {
  * whose rows expire gets its delete below and a boundary test.
  */
 export const CLEANED_TABLES = ["staff_auth_session", "parent_auth_session", "signin_code", "parent_signin_token", "parent_authenticator", "parent_backup_code", "parent_device", "rate_limit_event", "parent_email_change", "family_money", "job_run",
-  "form_reminder_claim", "form_reminder_round", "requirement_reminder", "write_queue", "staff_auth_verification", "parent_auth_verification"] as const;
+  "form_reminder_claim", "form_reminder_round", "requirement_reminder", "write_queue", "staff_auth_verification", "parent_auth_verification",
+  "message_file", "message_mail"] as const;
 export const KEPT_TABLES: Record<string, string> = {
   staff_auth_user: "Better Auth's staff accounts", staff_auth_account: "Better Auth's staff accounts",
   parent_auth_user: "Better Auth's parent accounts", parent_auth_account: "Better Auth's parent accounts",
@@ -78,6 +86,10 @@ export const KEPT_TABLES: Record<string, string> = {
   accounting_link: "each family, student and sign-in's link to its QuickBooks customer; a change of company moves every one to accounting_link_ended",
   accounting_link_ended: "the links an unlink or a change of company ended, kept for good for the audit page's record filter",
   audit_log: "append-only",
+  message: "club messages: what staff posted, kept, a deleted one's row too (its content erased) so the staff list says who deleted it",
+  message_version: "club messages: every saved state of a message, never changed; an Admin's delete erases them",
+  message_version_file: "club messages: which files each version has",
+  message_read: "club messages: which messages each parent has read, gone with the person",
 };
 
 export const removedInAll = (c: CleanupCounts): number => Object.values(c).reduce((a, b) => a + b, 0);
@@ -119,6 +131,10 @@ export function describeCleanup(c: CleanupCounts): string {
  *   A signed form's evidence is never deleted.
  * - Staff roster writes that went through or were given up more than FINISHED_WRITES_DAYS ago. Waiting and stuck ones
  *   stay until they finish.
+ * - A file uploaded for a message and never posted, still held by whoever uploaded it, older than
+ *   HELD_MESSAGE_FILE_HOURS: a post or an edit takes up only the files its form holds now. A posted file stays.
+ * - The mail rows of a message's version saved more than MESSAGE_MAIL_DAYS ago: staff read who a version was emailed
+ *   to, and what failed, while it is news. The message and its versions stay.
  * - Better Auth's verification rows of both doors (a staff sign-in's state while it is at Microsoft or Google) whose
  *   `expires_at` has passed: Better Auth refuses them already, and leaves them behind.
  *
@@ -200,7 +216,14 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
   const retiredSettings = RETIRED_SETTINGS.length === 0 ? 0
     : n(await tx.delete(setting).where(inArray(setting.key, [...RETIRED_SETTINGS])).returning({ key: setting.key }));
 
-  return { staffSessions, parentSessions, signinCodes, signinLinks, unfinishedAuthenticators, spentBackupCodes, rememberedDevices, rateLimitEvents, emailChanges, familyMoney: money, jobRuns, reminderClaims, writeQueue: writes, verifications, retiredSettings };
+  const heldMessageFiles = n(await tx.delete(messageFile).where(and(isNotNull(messageFile.heldBy),
+    lt(messageFile.uploadedAt, new Date(now.getTime() - HELD_MESSAGE_FILE_HOURS * 3_600_000)),
+    notExists(tx.select({ one: sql`1` }).from(messageVersionFile).where(eq(messageVersionFile.fileId, messageFile.id))))).returning({ id: messageFile.id }));
+  const mailGone = n(await tx.delete(messageMail).where(inArray(messageMail.versionId,
+    tx.select({ id: messageVersion.id }).from(messageVersion).where(lt(messageVersion.savedAt, new Date(now.getTime() - MESSAGE_MAIL_DAYS * 86_400_000)))))
+    .returning({ id: messageMail.id }));
+
+  return { staffSessions, parentSessions, signinCodes, signinLinks, unfinishedAuthenticators, spentBackupCodes, rememberedDevices, rateLimitEvents, emailChanges, familyMoney: money, jobRuns, reminderClaims, writeQueue: writes, verifications, retiredSettings, heldMessageFiles, messageMail: mailGone };
 }
 
 /**

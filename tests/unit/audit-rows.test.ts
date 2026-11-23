@@ -30,6 +30,8 @@ const NOT_AUDITED: Record<string, string> = {
   // The library's own rows past their life.
   "src/lib/jobs/cleanup.ts#sweepExpiredChallenges": "Better Auth's parent verification rows past their expiry (the passkey library's challenges, slice SI-7a), swept at every wake so a flood of challenges can't outlive five minutes; the library's rows, not the club's, counted in the worker's mark, and the daily clean-up's delete of the same rows is audited (cleanup.run)",
   "src/lib/parents/breach-mark.ts#markBreachCheck": "a cache: when the password breach service last answered or failed, with a short code, for the Health page; each password chosen is audited (parent.password.set, with whether it was checked)",
+  // A parent's own reading, which AGENTS.md says is never audited.
+  "src/lib/messages/parent.ts#markRead": "that a parent has read a club message, and which version, kept for their own Home card and New marks; a parent viewing what is theirs is not audited (club messages, spec section 10)",
   // Rows a page load makes so that something has an id: nothing is sent or signed.
   "src/lib/forms/my-forms.ts#loadMyForms": "a placeholder: the family's signature requests are made, not opened and with nothing sent, the first time its Forms page is read, so each has an id; the open that makes a document is audited (form.document.create)",
   // A session's own upkeep.

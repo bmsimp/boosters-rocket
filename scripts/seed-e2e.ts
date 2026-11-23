@@ -11,6 +11,7 @@ import { E2E_EMAIL, emailTokenHash } from "../tests/e2e/email-seed";
 import { E2E_SIGNIN, deviceTokenHash } from "../tests/e2e/signin-seed";
 import { hashPassword } from "better-auth/crypto";
 import { E2E_DETAILS } from "../tests/e2e/details-seed";
+import { E2E_MESSAGE } from "../tests/e2e/messages-seed";
 import { appRecordsFillStatements } from "../tests/helpers/app-records-fill";
 
 /**
@@ -86,7 +87,8 @@ async function main() {
 
   // An Admin with a live staff session, so the e2e run can open staff pages (tests/e2e/staff-session.ts makes the cookie).
   // resolveStaff finds the staff_user by auth_user_id and needs it active; the Admin role gives every permission.
-  const [staff] = await sql`INSERT INTO staff_user (email, name, status) VALUES ('e2e-admin@example.org', 'E2E Admin', 'active')
+  // Its id is fixed: it posts the club message below, and a parent opens its poster's profile by that id.
+  const [staff] = await sql`INSERT INTO staff_user (id, email, name, status) VALUES (${E2E_MESSAGE.posterId}, 'e2e-admin@example.org', 'E2E Admin', 'active')
           ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, status = 'active' RETURNING id`;
   const authUserId = "e2e-staff-auth-user";
   await sql`INSERT INTO staff_auth_user (id, name, email, email_verified) VALUES (${authUserId}, 'E2E Admin', 'e2e-admin@example.org', true) ON CONFLICT (id) DO NOTHING`;
@@ -94,6 +96,13 @@ async function main() {
   await sql`INSERT INTO role_assignment (role_id, staff_user_id) SELECT id, ${staff!.id} FROM role WHERE key = 'admin' ON CONFLICT DO NOTHING`;
   await sql`DELETE FROM staff_auth_session WHERE user_id = ${authUserId}`;
   await sql`INSERT INTO staff_auth_session (id, token, user_id, expires_at) VALUES ('e2e-staff-session', 'e2e-staff-session-token', ${authUserId}, now() + interval '7 days')`;
+
+  // A club message the Admin posted, so its staff pages open in the browser run (tests/e2e/staff-pages.spec.ts), and its
+  // parent pages, with the poster's profile (tests/e2e/parent-params.ts); its poster is the seeded Admin, who may edit
+  // it. The same for every family: no family's data.
+  await sql`INSERT INTO message (id, posted_by) VALUES (${E2E_MESSAGE.id}, ${staff!.id})`;
+  await sql`INSERT INTO message_version (message_id, n, title, body) VALUES (${E2E_MESSAGE.id}, 1, ${E2E_MESSAGE.title},
+          ${sql.json({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Practice is on Tuesdays and Thursdays at 4." }] }] })})`;
 
   // QuickBooks as if an Admin had connected a sandbox company. The tokens are made up and never used: nothing in the e2e run reaches Intuit.
   const box = createSecretBox({ current: process.env.SETTINGS_ENCRYPTION_KEY! });

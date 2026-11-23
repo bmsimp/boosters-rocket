@@ -15,6 +15,8 @@ import { LocalTime } from "../components/local-time";
 import { passkeyOfferFor } from "@/lib/parents/passkey-offer";
 import { PasskeyOffer } from "./passkey-offer";
 import { PageHeader } from "../components/ui/page-header";
+import { myMessagesSummary } from "@/lib/messages/parent";
+import { HomeMessages } from "./messages/message-parts";
 
 export const metadata = { title: "Home" };
 
@@ -29,7 +31,9 @@ export const metadata = { title: "Home" };
  * (the sign-in release, slice SI-8) is here, after the heading and before the lists: drawn only in a session made in
  * the last 10 minutes by a sign-in that proved the password and a second step, to a person who may add a passkey with
  * one tap and holds none, at most once a month on a device and not after their third "Not now" (passkeyOfferFor(),
- * src/lib/parents/passkey-offer.ts). It is given only APP_URL's origin.
+ * src/lib/parents/passkey-offer.ts). It is given only APP_URL's origin. Then the club's messages (club messages, spec
+ * section 5): a card while this parent has new ones, a quiet line once all are read, nothing when there are none, and
+ * nothing beside the not-set-up box, which stands alone.
  */
 export default async function ParentHome() {
   const ctx = await requireParentPage();
@@ -43,6 +47,7 @@ export default async function ParentHome() {
   // season is current. With none there is no ruler, and nothing in its place.
   const season = family ? await loadMySeason(ctx) : null;
   const step = currentStep(season);
+  const messages = family ? await myMessagesSummary(ctx.parentId) : null;
   if (!family) {
     const first = firstName(ctx.name);
     return (
@@ -66,6 +71,7 @@ export default async function ParentHome() {
         <PageHeader className="home-head" title={family.name}
           lede={meta.length > 0 ? meta.map((m, i) => <Fragment key={i}>{i > 0 && <span aria-hidden="true"> · </span>}{m}</Fragment>) : undefined} />
         {offer.offered && <PasskeyOffer portalOrigin={offer.portalOrigin} />}
+        {messages && <HomeMessages summary={messages} />}
         <div className="home-lists">
           <HomeToDo money={money} buyouts={buyouts} season={season} students={family.students} />
           <HomeStudents students={family.students} season={season} />

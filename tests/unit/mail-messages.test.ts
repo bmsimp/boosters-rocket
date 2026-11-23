@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { changeCodeMessage, signinCodeMessage, welcomeMessage, emailChangeConfirmMessage, emailChangeNoticeMessage, testMessage, signedFormCopyMessage, formReminderMessage, volunteerSignupMessage,
-  passwordSetupMessage, passwordResetMessage, choosePasswordMessage, passwordChangedMessage, signinResetMessage } from "@/lib/mail/messages";
+  passwordSetupMessage, passwordResetMessage, choosePasswordMessage, passwordChangedMessage, signinResetMessage, clubMessageMail } from "@/lib/mail/messages";
 
 const b = { clubName: "FZN <Band> Boosters", color: "#5b2a86" };
 /** A mail's own words: its text without the "Powered by" footer every mail ends with (tested on its own below). */
@@ -313,5 +313,32 @@ describe("mail messages", () => {
       expect(m.html).toContain("FZN &lt;Band&gt; Boosters");
       expect(m.html).not.toContain("<Band>");
     });
+  });
+});
+
+describe("a club message's mail", () => {
+  const link = "https://portal.example.org/messages/8b7c2a4e-1f3d-4c5b-9a6e-0d1c2b3a4f5e";
+  const body = { text: "Bring <water>.", html: "<p>Bring &lt;water&gt;.</p>" };
+  const post = clubMessageMail(b, "ana@example.com", { poster: "Casey <Coach>", title: "Practice & <moved>", update: false, body, files: ["schedule <v2>.pdf"], link });
+  it("is titled by the message, or 'Updated:' for an edit, and says who posted or updated it", () => {
+    expect(post.subject).toBe("Practice & <moved>");
+    expect(post.text).toContain("Casey <Coach> posted a message for the families of FZN <Band> Boosters.");
+    expect(post.html).toContain("Casey &lt;Coach&gt; posted a message");
+    expect(post.html).toContain("Practice &amp; &lt;moved&gt;");
+    const update = clubMessageMail(b, "ana@example.com", { poster: "Casey", title: "Practice", update: true, body, files: [], link });
+    expect(update.subject).toBe("Updated: Practice");
+    expect(update.text).toContain("Casey updated a message");
+  });
+  it("lists the files by name, attaches none, loads nothing, and ends with the message's address and the Powered by line", () => {
+    expect(post.attachments).toBeUndefined();
+    expect(post.text).toContain("- schedule <v2>.pdf\nOpen the message in the portal to download them.");
+    expect(post.html).toContain("<li>schedule &lt;v2&gt;.pdf</li>");
+    expect(post.html).not.toMatch(/<img\b|src=|<script|url\(/i);
+    expect(post.text).toContain(`\n\n${link}\n\n-- \nPowered by Boosters Rocket\n`);
+    expect(post.text.endsWith("\n\n-- \nPowered by Boosters Rocket\n")).toBe(true);
+    expect(post.html).toContain(`<a href="${link}">${link}</a>`);
+    expect(post.html).toMatch(/Powered by <span[^>]*>Boosters Rocket<\/span><\/p><\/div><\/body><\/html>$/);
+    // The body's HTML goes in as bodyMail() drew it, already escaped.
+    expect(post.html).toContain("<p>Bring &lt;water&gt;.</p>");
   });
 });
