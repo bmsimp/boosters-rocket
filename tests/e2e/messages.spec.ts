@@ -163,7 +163,9 @@ test("staff post a message with its email, a parent reads it and its poster's pr
   await expect(staff.getByText(/^Delete this message\?/)).toBeVisible();
   await checked(staff, "/staff/messages/[id], asking to delete");
   await staff.getByRole("button", { name: "Yes, delete it" }).click();
-  await expect(staff.getByText(/^Deleted by E2E Admin on/)).toBeVisible();
+  // The page is drawn again as the deleted message's: its line is a Notice, which starts with its tone's word ("Note").
+  await expect(staff.getByRole("heading", { level: 1 })).toHaveText("Deleted message");
+  await expect(staff.locator(".notice").filter({ hasText: /Deleted by E2E Admin on / })).toBeVisible();
   const [left] = await sql<{ versions: number; mail: number }[]>`SELECT
       (SELECT count(*)::int FROM message_version WHERE message_id = ${id}) AS versions,
       (SELECT count(*)::int FROM message_mail m JOIN message_version v ON v.id = m.version_id WHERE v.message_id = ${id}) AS mail`;
