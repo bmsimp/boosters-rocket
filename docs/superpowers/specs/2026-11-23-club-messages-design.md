@@ -143,9 +143,12 @@ through the existing `esc()`. Neither uses Tiptap's HTML output or `dangerouslyS
   sentence.
 - **Kept in Postgres** as `bytea` (the schema's `bytes` type), so the nightly backup and a restore carry them with no
   new volume. The original name is kept, cut to 200 characters, and shown only on the page as text.
-- **Uploaded before posting.** The form uploads each file through a staff action as it is added; it is held against
-  the staff member until the post or edit saves, then belongs to that version. Files held and never posted are removed
-  by the daily clean-up after 24 hours *(proposed)*.
+- **Uploaded before posting.** The form uploads each file to a staff route, `POST /staff/messages/files`, as it is
+  added; it is held against the staff member until the post or edit saves, then belongs to that version. Files held
+  and never posted are removed by the daily clean-up after 24 hours *(proposed)*. *(Lead's change, 2026-11-23: this
+  said "through a staff action". A server action's body limit is one setting for every action, the ones before sign-in
+  included, so slice 3 moved uploads to a route handler that checks the staff session, the permission, the origin and
+  the length itself, and `next.config.ts` keeps Next.js's default body limits.)*
 - **Served through guarded routes.** A parent's route `/messages/files/[id]` answers only to a signed-in parent, and
   only for a file of a version of a message that isn't deleted (earlier versions' files included); the staff route
   `/staff/messages/files/[id]` to staff who may see messages. Both send `cache-control: no-store`,
