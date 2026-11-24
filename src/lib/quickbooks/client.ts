@@ -1,14 +1,15 @@
 import { db } from "@/lib/db/client";
-import { qboConnection, type QboEnvironment } from "@/lib/db/schema";
+import { qboConnection, type QboEnvironment, type QboMode } from "@/lib/db/schema";
 import { secretBox, SecretBoxError } from "@/lib/crypto/secret-box";
 import { writeAudit } from "@/lib/audit/log";
 import { errorNeedsAdmin, failureWords, intuitTid, qboEndpoints, QboError, QBO_MINOR_VERSION } from "./endpoints";
 import { oauthEndpoints } from "./discovery";
+import { relayRefresh } from "./relay";
 
 const TIMEOUT_MS = 15_000;
 const REFRESH_EARLY_MS = 5 * 60_000;
 export const QBO_PAGE = 1000;
-export const QBO_AAD = { secret: "qbo:client-secret", access: "qbo:access-token", refresh: "qbo:refresh-token" } as const;
+export const QBO_AAD = { secret: "qbo:client-secret", access: "qbo:access-token", refresh: "qbo:refresh-token", relayKey: "qbo:relay-key" } as const;
 export const WORKER_ACTOR = { door: "system", id: null, label: "worker" } as const;
 
 export type TokenSet = { accessToken: string; refreshToken: string; accessExpiresAt: Date; refreshExpiresAt: Date };
@@ -26,11 +27,19 @@ export async function tokenRequest(form: Record<string, string>, app: QboApp, en
   } catch {
     throw new QboError("Couldn't reach Intuit.", "unreachable");
   }
-  const body = (await res.json().catch(() => ({}))) as { access_token?: unknown; refresh_token?: unknown; expires_in?: unknown; x_refresh_token_expires_in?: unknown; error?: unknown };
-  if (!res.ok || typeof body.access_token !== "string" || typeof body.refresh_token !== "string") {
-    const code = typeof body.error === "string" && /^[a-z_]{1,40}$/.test(body.error) ? body.error : `http_${res.status}`;
-    throw new QboError(code === "invalid_grant" ? "Intuit no longer accepts this connection. Connect QuickBooks again." : "Intuit refused the request.", code, intuitTid(res));
-  }
+  const body = (await res.json().catch(() => ({}))) as unknown;
+  const tokens = res.ok ? tokenSetFrom(body) : null;
+  if (!tokens) throw intuitRefusal(body, res.status, intuitTid(res));
+  return tokens;
+}
+
+/**
+ * A token answer in Intuit's form (from Intuit, or passed through by the relay) as a token set; null when it isn't one.
+ * The lifetimes are counted from now.
+ */
+export function tokenSetFrom(answer: unknown): TokenSet | null {
+  const body = (typeof answer === "object" && answer !== null ? answer : {}) as { access_token?: unknown; refresh_token?: unknown; expires_in?: unknown; x_refresh_token_expires_in?: unknown };
+  if (typeof body.access_token !== "string" || typeof body.refresh_token !== "string") return null;
   const seconds = (v: unknown, fallback: number) => (typeof v === "number" && v > 0 ? v : fallback);
   const now = Date.now();
   return {
@@ -38,6 +47,31 @@ export async function tokenRequest(form: Record<string, string>, app: QboApp, en
     accessExpiresAt: new Date(now + seconds(body.expires_in, 3600) * 1000),
     refreshExpiresAt: new Date(now + seconds(body.x_refresh_token_expires_in, 100 * 86_400) * 1000),
   };
+}
+
+/** Intuit's refusal of a token request: its error word when it is one (`invalid_grant`, ...), else the HTTP status. None of its text. */
+export function intuitRefusal(answer: unknown, status: number, tid: string | null): QboError {
+  const error = typeof answer === "object" && answer !== null ? (answer as { error?: unknown }).error : undefined;
+  const code = typeof error === "string" && /^[a-z_]{1,40}$/.test(error) ? error : `http_${status}`;
+  return new QboError(code === "invalid_grant" ? "Intuit no longer accepts this connection. Connect QuickBooks again." : "Intuit refused the request.", code, tid);
+}
+
+/**
+ * Which QuickBooks a mode's tokens are for: the club's own app's keys' `environment`, or the relay's own
+ * `relay_environment`, chosen with step 2's press. Each mode keeps its own, so a relay connect started and left never
+ * changes what the own app's keys are for. With the row's `token_mode` it is the environment of the tokens held.
+ */
+export function environmentOf(c: Pick<typeof qboConnection.$inferSelect, "environment" | "relayEnvironment">, mode: QboMode | null | undefined): QboEnvironment | null {
+  return mode === "relay" ? c.relayEnvironment : mode === "own_app" ? c.environment : null;
+}
+
+/**
+ * The club's own Intuit app's keys from the connection row, the secret opened; null when the row holds none (a club
+ * connecting through Boosters Rocket). Throws SecretBoxError when the secret can't be read with this server's key.
+ */
+export function ownAppOf(c: Pick<typeof qboConnection.$inferSelect, "clientId" | "clientSecretCiphertext" | "clientSecretKeyId">, box = secretBox()): QboApp | null {
+  if (!c.clientId || !c.clientSecretCiphertext || !c.clientSecretKeyId) return null;
+  return { clientId: c.clientId, clientSecret: box.open({ ciphertext: c.clientSecretCiphertext, keyId: c.clientSecretKeyId }, QBO_AAD.secret) };
 }
 
 /** The columns that hold a token set, sealed, with the refresh recorded and any earlier error cleared. */
@@ -87,16 +121,26 @@ export async function accessToken(o: { force?: boolean; noWait?: boolean } = {})
 function tokenUnderLock(o: { force?: boolean; noWait?: boolean }): Promise<Refreshed> {
   return db.transaction(async (tx): Promise<Refreshed> => {
     const [c] = await (o.noWait ? tx.select().from(qboConnection).for("update", { noWait: true }) : tx.select().from(qboConnection).for("update"));
-    if (!c?.realmId || !c.refreshTokenCiphertext || !c.refreshTokenKeyId) return { ok: false, error: new QboError("QuickBooks isn't connected.", "not_connected") };
+    const environment = c ? environmentOf(c, c.tokenMode) : null;
+    if (!c?.realmId || !c.refreshTokenCiphertext || !c.refreshTokenKeyId || !environment) return { ok: false, error: new QboError("QuickBooks isn't connected.", "not_connected") };
     try {
       const box = secretBox(); // inside the try: a server key that can't be used is recorded like any unreadable secret
       const saved = o.force ? null : savedToken(c);
-      if (saved) return { ok: true, access: { token: box.open(saved, QBO_AAD.access), realmId: c.realmId, environment: c.environment } };
-      const t = await tokenRequest(
-        { grant_type: "refresh_token", refresh_token: box.open({ ciphertext: c.refreshTokenCiphertext, keyId: c.refreshTokenKeyId }, QBO_AAD.refresh) },
-        { clientId: c.clientId, clientSecret: box.open({ ciphertext: c.clientSecretCiphertext, keyId: c.clientSecretKeyId }, QBO_AAD.secret) }, c.environment);
+      if (saved) return { ok: true, access: { token: box.open(saved, QBO_AAD.access), realmId: c.realmId, environment } };
+      const refreshToken = box.open({ ciphertext: c.refreshTokenCiphertext, keyId: c.refreshTokenKeyId }, QBO_AAD.refresh);
+      // Refreshed by the app that issued the tokens held (`token_mode`), never by the mode the next Connect uses: a club
+      // that chose the relay and hasn't connected through it yet keeps refreshing with its own app's keys. Through the
+      // relay the answer is Intuit's own, passed on, and its refusals are read as Intuit's (`invalid_grant`).
+      let t: TokenSet;
+      if (c.tokenMode === "relay") t = await relayRefresh(environment, refreshToken);
+      else {
+        const app = ownAppOf(c, box);
+        if (!app) throw new QboError("The saved QuickBooks keys can't be read with this server's encryption key. Connect QuickBooks again.", "unreadable");
+        t = await tokenRequest({ grant_type: "refresh_token", refresh_token: refreshToken }, app, environment);
+      }
+      // The new refresh token is stored before anything else is done with the answer: the old one is spent.
       await tx.update(qboConnection).set(sealTokens(t));
-      return { ok: true, access: { token: t.accessToken, realmId: c.realmId, environment: c.environment } };
+      return { ok: true, access: { token: t.accessToken, realmId: c.realmId, environment } };
     } catch (e) {
       const error = e instanceof QboError ? e
         : e instanceof SecretBoxError ? new QboError("The saved QuickBooks keys can't be read with this server's encryption key. Connect QuickBooks again.", "unreadable")
@@ -108,7 +152,8 @@ function tokenUnderLock(o: { force?: boolean; noWait?: boolean }): Promise<Refre
       await tx.update(qboConnection).set({ lastError, lastErrorAt: new Date(), updatedAt: new Date() });
       // Intuit's reference differs on every try, so it isn't what makes the error a new one.
       const withoutReference = (words: string | null) => words?.replace(/ Intuit reference: [A-Za-z0-9-]+\./, "") ?? null;
-      if (withoutReference(lastError) !== withoutReference(c.lastError)) await writeAudit({ actor: WORKER_ACTOR, action: "quickbooks.token_refresh.failed", targetType: "qbo_connection", targetId: "singleton", after: { code: error.code } }, tx);
+      if (withoutReference(lastError) !== withoutReference(c.lastError)) await writeAudit({ actor: WORKER_ACTOR,
+        action: c.tokenMode === "relay" ? "quickbooks.relay.token_refresh.failed" : "quickbooks.token_refresh.failed", targetType: "qbo_connection", targetId: "singleton", after: { code: error.code } }, tx);
       return { ok: false, error };
     }
   });
@@ -132,9 +177,10 @@ async function accessTokenForPage(force: boolean): Promise<Access> {
   if (!force) {
     const [c] = await db.select().from(qboConnection); // a plain read: no row lock
     const saved = c?.realmId && c.refreshTokenCiphertext ? savedToken(c) : null;
-    if (c?.realmId && saved) {
+    const environment = c ? environmentOf(c, c.tokenMode) : null;
+    if (c?.realmId && saved && environment) {
       // A key that can't be read is left to the refresh below, which records it.
-      try { return { token: secretBox().open(saved, QBO_AAD.access), realmId: c.realmId, environment: c.environment }; } catch (e) { if (!(e instanceof SecretBoxError)) throw e; }
+      try { return { token: secretBox().open(saved, QBO_AAD.access), realmId: c.realmId, environment }; } catch (e) { if (!(e instanceof SecretBoxError)) throw e; }
     }
   }
   if (!pageRefresh || (force && !pageRefresh.forced)) {

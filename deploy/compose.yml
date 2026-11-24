@@ -73,6 +73,8 @@ services:
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?Set SETTINGS_ENCRYPTION_KEY in deploy/.env}
       SETTINGS_ENCRYPTION_KEY_PREVIOUS: ${SETTINGS_ENCRYPTION_KEY_PREVIOUS:-}
       CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:?Set CLIENT_IP_HEADER in deploy/.env, the header your proxy sets}
+      # Boosters Rocket Connect's address; empty is its own, https://connect.boostersrocket.app.
+      QBO_RELAY_URL: ${QBO_RELAY_URL:-}
       # Server logs and psql output only: what parents read as due follows the club's zone set on the staff Club page.
       TZ: ${CLUB_TIME_ZONE}
     depends_on:

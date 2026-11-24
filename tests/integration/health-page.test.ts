@@ -12,7 +12,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, buyout, family, jobRun, parentAuthPasskey, qboConnection, qboCustomerType, role, roleAssignment, roleRule, setting, writeQueue } from "@/lib/db/schema";
+import { auditLog, buyout, family, jobRun, parentAuthPasskey, qboConnection, qboCustomerType, qboRelay, role, roleAssignment, roleRule, setting, writeQueue } from "@/lib/db/schema";
 import HealthPage from "@/app/staff/(app)/settings/health/page";
 import QuickBooksSettingsPage from "@/app/staff/(app)/settings/quickbooks/page";
 import QuickBooksSetupPage from "@/app/staff/(app)/settings/quickbooks/setup/page";
@@ -33,6 +33,7 @@ import { noteApiOk } from "@/lib/forms/settings";
 import { MONEY_JOB } from "@/lib/money/run-keys";
 import { DUE_REMINDERS_KEY } from "@/lib/seasons/due-reminders";
 import { BREACH_MARK, markBreachCheck, readBreachMark } from "@/lib/parents/breach-mark";
+import { readRelayMark, RELAY_MARK } from "@/lib/quickbooks/relay";
 import { removeOldAddressPasskeys } from "@/lib/parents/signin-reset";
 import { seedPasskey } from "../helpers/passkey";
 import { seedAuthenticator } from "../helpers/authenticator";
@@ -119,7 +120,7 @@ describe("the health page", () => {
     expect(line(lines, "worker").says).toBe("Waking every minute to run the scheduled jobs.");
     expect(Date.parse(at(line(lines, "worker"), "Last woke")!)).toBeGreaterThan(Date.now() - 60_000);
     expect(line(lines, "cleanup")).toMatchObject({ word: "Working", notes: ["Nothing to remove."] });
-    expect(line(lines, "quickbooks").says).toMatch(/^Connected to .+ \(an Intuit sandbox, not the club's real books\)\.$/);
+    expect(line(lines, "quickbooks").says).toMatch(/^Connected to .+ \(an Intuit sandbox, not the club's real books\), with the club's own Intuit app\.$/);
     expect(Date.parse(at(line(lines, "quickbooks"), "Last token refresh")!)).toBeGreaterThan(Date.now() - 60_000);
     expect(Date.parse(at(line(lines, "quickbooks"), "Last roster read")!)).toBeGreaterThan(Date.now() - 60_000);
     expect(line(lines, "mail")).toMatchObject({ word: "Working", says: "Tested and working, sending through Microsoft 365.", times: [{ label: "Last sent", at: ago(60_000) }, { label: "Last failure", at: null }] });
@@ -448,6 +449,56 @@ describe("the health page", () => {
     await seedParentSettings(SIGNINS_ON);
     expect((await removeOldAddressPasskeys(2, { actor: { door: "staff", id: null, label: "admin@club.org" }, ip: null })).ok).toBe(true);
     expect(await parents()).toMatchObject({ state: "ok", word: "On", notes: [], fix: null });
+  });
+
+  it("has a Boosters Rocket line only in relay mode, read from the relay's mark, and never calls the relay (slice 4)", async () => {
+    const relayLine = async () => (await healthReport(NOW)).find((l) => l.key === "quickbooks_relay");
+    // The club's own app, connected: no line, and the QuickBooks line says how it connects.
+    await seedConnected(stub);
+    expect(await relayLine()).toBeUndefined();
+    expect(line(await healthReport(NOW), "quickbooks").says).toMatch(/, with the club's own Intuit app\.$/);
+    // Relay chosen for the next Connect, the portal not registered: still no line. Its key made, no id: waiting.
+    await db.update(qboConnection).set({ connectMode: "relay" });
+    expect(await relayLine()).toBeUndefined();
+    await db.insert(qboRelay).values({ publicKey: "p".repeat(43), privateKeyCiphertext: "sealed", privateKeyKeyId: "00000000", keyMadeAt: NOW });
+    expect(await relayLine()).toMatchObject({ state: "off", word: "Waiting for the id", fix: { href: "/staff/settings/quickbooks" } });
+    expect((await relayLine())!.says).toContain("Until then the portal connects with the club's own Intuit app.");
+    // Registered, and the tokens held issued through it: the mode, the last renewal, and when the relay last answered.
+    await db.update(qboRelay).set({ portalId: "brp_test0portal0id01", portalIdSavedAt: NOW });
+    await db.update(qboConnection).set({ tokenMode: "relay", relayEnvironment: "sandbox", clientId: null, clientSecretCiphertext: null, clientSecretKeyId: null });
+    expect(line(await healthReport(NOW), "quickbooks").says).toMatch(/, through Boosters Rocket\.$/);
+    expect(await relayLine()).toMatchObject({ state: "off", word: "Not used yet", fix: null });
+    const keys = (await healthReport(NOW)).map((l) => l.key);
+    expect(keys.indexOf("quickbooks_relay")).toBe(keys.indexOf("quickbooks") + 1);
+    const t1 = ago(3_600_000), t2 = ago(60_000);
+    await put(RELAY_MARK, { lastOkAt: t1, lastFailAt: null, lastFailWord: null });
+    const ok = (await relayLine())!;
+    expect(ok).toMatchObject({ state: "ok", word: "Answering", notes: [], fix: null });
+    expect(ok.says).toMatch(/^The portal connects to QuickBooks through Boosters Rocket, at https?:\/\/\S+\. It answered/);
+    expect(at(ok, "Last answered")).toBe(t1);
+    expect(at(ok, "Last renewed through it")).not.toBeNull();
+    // A failure with no answer since: attention, with its fix and, for a refusal, the clock and the email.
+    const words: [string, string][] = [["unauthorized", "Check that the server's clock is right, then email support@boostersrocket.com."],
+      ["busy", "If this stays for more than a day, email support@boostersrocket.com."], ["unreachable", "The portal's server must be able to reach Boosters Rocket on the internet."],
+      ["relay_error", "The worker tries again at its next renewal."]];
+    for (const [word, note] of words) {
+      await put(RELAY_MARK, { lastOkAt: t1, lastFailAt: t2, lastFailWord: word });
+      const failing = (await relayLine())!;
+      expect(failing).toMatchObject({ state: "attention", word: "Needs attention", fix: { href: "/staff/settings/quickbooks", label: "Open QuickBooks settings" } });
+      expect(failing.notes.join(" ")).toContain(note);
+      expect(at(failing, "Last failed")).toBe(t2);
+    }
+    // An answer after the failure is the latest word again.
+    await put(RELAY_MARK, { lastOkAt: ago(1000), lastFailAt: t2, lastFailWord: "unreachable" });
+    expect(await relayLine()).toMatchObject({ state: "ok", word: "Answering" });
+    // The page read the mark only: nothing here ever reached a relay (none is running, and no signed call was made).
+    expect((await readRelayMark())?.lastOkAt).toBe(ago(1000));
+    // Not connected through the relay any more: the QuickBooks line says the portal is registered, not that keys are saved.
+    await db.update(qboConnection).set({ realmId: null, refreshTokenCiphertext: null, refreshTokenKeyId: null, accessTokenCiphertext: null, tokenMode: null });
+    const off = line(await healthReport(NOW), "quickbooks");
+    expect(off).toMatchObject({ state: "attention", word: "Not connected" });
+    expect(off.says).toBe("Not connected. The portal is registered with Boosters Rocket, but the portal can't read the roster or what families owe until an Admin connects.");
+    expect(await relayLine()).toMatchObject({ key: "quickbooks_relay", state: "ok" });
   });
 
   it("says how the password breach check stands: not used yet, working, and a failure the latest word, with why", async () => {

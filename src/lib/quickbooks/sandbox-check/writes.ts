@@ -5,7 +5,7 @@ import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getConnection } from "@/lib/quickbooks/connection";
 import { QboError } from "@/lib/quickbooks/endpoints";
 import {
-  isQboId, NO_TOKEN, qboCreateCustomer, qboCreateInvoice, qboMoveCustomer, qboRenameCustomer, qboSetCustomerActive, qboUpdateCustomerContact, qboUpdateCustomerEmail, qboVoidInvoice,
+  environmentOf, isQboId, NO_TOKEN, qboCreateCustomer, qboCreateInvoice, qboMoveCustomer, qboRenameCustomer, qboSetCustomerActive, qboUpdateCustomerContact, qboUpdateCustomerEmail, qboVoidInvoice,
   type CustomerContactChange,
 } from "@/lib/quickbooks/client";
 
@@ -30,7 +30,7 @@ const refused = (message: string, code: string) => new QboError(message, code);
 async function allowed(run: CheckRun, targets: Target[]): Promise<void> {
   const c = await getConnection();
   if (!c?.realmId || !c.refreshTokenCiphertext) throw refused("QuickBooks isn't connected.", "not_connected");
-  if (c.environment !== "sandbox") throw refused("The check changes nothing in a company that isn't an Intuit sandbox.", "not_sandbox");
+  if (environmentOf(c, c.tokenMode) !== "sandbox") throw refused("The check changes nothing in a company that isn't an Intuit sandbox.", "not_sandbox");
   if (c.realmId !== run.realmId) throw refused("A different QuickBooks company is connected.", "other_company");
   for (const t of targets) {
     if (!isQboId(t.qboId)) throw refused("That isn't a record the check made.", "not_mine");

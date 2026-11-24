@@ -175,6 +175,13 @@ refreshed_at
 
 ## 3. Connecting QuickBooks
 
+> **Since 2026-11-24** the portal can also connect through Boosters Rocket Connect, one Intuit app shared by every
+> registered portal, and that is the usual way for a new club: setup step 1 is "How to connect", and this section
+> describes the other choice, "Use our own Intuit app", which stays as it was. How the relay mode registers, connects,
+> renews, disconnects (with its shared-grant acknowledgement) and shows on Health is in
+> [2026-11-24-connect-through-boosters-rocket-design.md](2026-11-24-connect-through-boosters-rocket-design.md); where
+> the two differ for relay mode, that spec wins.
+
 ### The settings view
 
 **QuickBooks** in the staff menu (Admins only) opens a plain view of the current state:

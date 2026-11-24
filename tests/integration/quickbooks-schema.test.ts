@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { db } from "@/lib/db/client";
-import { qboConnection, qboCustomer, qboCustomerType, jobRun } from "@/lib/db/schema";
+import { qboConnection, qboCustomer, qboCustomerType, qboRelay, jobRun } from "@/lib/db/schema";
 import { resetDb } from "../helpers/db";
 
 describe("QuickBooks tables", () => {
@@ -43,5 +43,50 @@ describe("QuickBooks tables", () => {
     expect(await db.select().from(jobRun)).toHaveLength(0);
     const [run] = await db.insert(jobRun).values({ job: "roster.refresh", startedBy: "worker" }).returning();
     expect(run!.id).toBe(1); // identities start again
+  });
+});
+
+describe("the connection's modes and the relay's registration (0059)", () => {
+  beforeEach(resetDb);
+  const keys = { clientId: "id", clientSecretCiphertext: "c", clientSecretKeyId: "k" };
+
+  it("makes a new connection row a relay one, with no tokens' mode and no pending state's", async () => {
+    await db.insert(qboConnection).values({ environment: "sandbox" });
+    const [c] = await db.select().from(qboConnection);
+    expect([c!.connectMode, c!.tokenMode, c!.stateMode, c!.clientId]).toEqual(["relay", null, null, null]);
+  });
+
+  it("keeps the relay's environment in its own column, present while its tokens or a connect of its are", async () => {
+    await expect(db.insert(qboConnection).values({ connectMode: "relay", tokenMode: "relay" })).rejects.toMatchObject({ cause: { constraint_name: "qbo_connection_relay_environment" } });
+    await expect(db.insert(qboConnection).values({ connectMode: "relay", stateMode: "relay" })).rejects.toMatchObject({ cause: { constraint_name: "qbo_connection_relay_environment" } });
+    // A relay club has no own-app environment at all.
+    await db.insert(qboConnection).values({ connectMode: "relay", tokenMode: "relay", relayEnvironment: "production" });
+    const [c] = await db.select().from(qboConnection);
+    expect([c!.environment, c!.relayEnvironment]).toEqual([null, "production"]);
+  });
+
+  it("needs the club's own app's keys whenever either mode is own_app, and only then", async () => {
+    await expect(db.insert(qboConnection).values({ environment: "sandbox", connectMode: "own_app" })).rejects.toThrow();
+    await expect(db.insert(qboConnection).values({ environment: "sandbox", connectMode: "relay", tokenMode: "own_app" })).rejects.toThrow();
+    await expect(db.insert(qboConnection).values({ environment: "sandbox", connectMode: "own_app", clientId: "id", clientSecretCiphertext: "c" })).rejects.toThrow();
+    // The own app's keys need the environment they are for.
+    await expect(db.insert(qboConnection).values({ ...keys, connectMode: "own_app" })).rejects.toMatchObject({ cause: { constraint_name: "qbo_connection_own_app_keys" } });
+    await db.insert(qboConnection).values({ environment: "sandbox", relayEnvironment: "sandbox", connectMode: "relay", tokenMode: "relay" });
+    // Moving to the relay keeps the keys, so the club can move back.
+    await db.update(qboConnection).set({ ...keys, connectMode: "own_app", tokenMode: "own_app" });
+    await db.update(qboConnection).set({ connectMode: "relay", tokenMode: "relay" });
+    await expect(db.update(qboConnection).set({ connectMode: "own_app", clientId: null })).rejects.toThrow();
+    expect((await db.select().from(qboConnection))[0]!.clientId).toBe("id");
+  });
+
+  it("holds one registration at most, a public key as the relay registers it, and a portal id of the relay's form or none", async () => {
+    const reg = { publicKey: "gbltJgDOnRxjmYnR45vZLQksg_FU67qiHffLEm4zqcY", privateKeyCiphertext: "c", privateKeyKeyId: "k", keyMadeAt: new Date() };
+    await expect(db.insert(qboRelay).values({ ...reg, id: "other" })).rejects.toThrow();
+    for (const publicKey of ["short", `${reg.publicKey}A`, reg.publicKey.replace("g", "+")]) await expect(db.insert(qboRelay).values({ ...reg, publicKey }), publicKey).rejects.toThrow();
+    for (const portalId of ["brp_0123456789ABCDEF", "brp_0123456789abcde", "xyz_0123456789abcdef", " brp_0123456789abcdef"]) await expect(db.insert(qboRelay).values({ ...reg, portalId }), portalId).rejects.toThrow();
+    await db.insert(qboRelay).values(reg);
+    await expect(db.insert(qboRelay).values(reg)).rejects.toThrow();
+    await db.update(qboRelay).set({ portalId: "brp_0123456789abcdef" });
+    expect((await db.select().from(qboRelay))[0]!.portalId).toBe("brp_0123456789abcdef");
   });
 });

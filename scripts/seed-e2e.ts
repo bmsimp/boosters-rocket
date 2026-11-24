@@ -108,9 +108,10 @@ async function main() {
   const box = createSecretBox({ current: process.env.SETTINGS_ENCRYPTION_KEY! });
   const secret = box.seal("e2e-client-secret", "qbo:client-secret"), access = box.seal("e2e-access", "qbo:access-token"), refresh = box.seal("e2e-refresh", "qbo:refresh-token");
   await sql`DELETE FROM qbo_connection`;
-  await sql`INSERT INTO qbo_connection (environment, client_id, client_secret_ciphertext, client_secret_key_id, realm_id, company_name,
+  await sql`DELETE FROM qbo_relay`; // not registered with Boosters Rocket: the run connects with the club's own app's keys
+  await sql`INSERT INTO qbo_connection (environment, connect_mode, token_mode, client_id, client_secret_ciphertext, client_secret_key_id, realm_id, company_name,
             access_token_ciphertext, access_token_key_id, access_expires_at, refresh_token_ciphertext, refresh_token_key_id, refresh_expires_at, connected_at, last_token_refresh_at)
-          VALUES ('sandbox', 'e2e-client-id-1234567890', ${secret.ciphertext}, ${secret.keyId}, '9130000000000001', 'E2E Sandbox Company',
+          VALUES ('sandbox', 'own_app', 'own_app', 'e2e-client-id-1234567890', ${secret.ciphertext}, ${secret.keyId}, '9130000000000001', 'E2E Sandbox Company',
             ${access.ciphertext}, ${access.keyId}, now() + interval '5 years', ${refresh.ciphertext}, ${refresh.keyId}, now() + interval '5 years', now(), now())`;
   await sql`DELETE FROM qbo_customer_type`;
   await sql`DELETE FROM qbo_customer`;

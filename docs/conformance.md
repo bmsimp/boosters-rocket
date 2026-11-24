@@ -11,7 +11,8 @@ folder override it (`2026-11-10-parent-email-code-sign-in-design.md`, `2026-11-1
 alone, `docs/superpowers/specs/2026-11-18-app-owned-families-design.md` (section 4, "The mapping screen", open questions 1, 2
 and 13), as stage 4 builds it (since its slice M1); and, for signing in, the same spec's section 6 under "Signing in",
 the "Sign-in" entry of section 9, open questions 20 to 36, Appendix A under "Signing in" and Appendix C under "Signing
-in", as the sign-in release built them.
+in", as the sign-in release built them; and, for how the portal connects to QuickBooks,
+`docs/superpowers/specs/2026-11-24-connect-through-boosters-rocket-design.md` (rows 8.1.5 to 8.1.9, 14.7 and 14.9).
 
 One row per requirement. **Built** means code and a test that would fail without it. **Partly built** means code with
 no test, or a test that covers only part. **Missing** means no code. **Changed** and **Dropped** mean a later spec or the
@@ -27,7 +28,7 @@ QuickBooks, **Check the portal's requests** (`/staff/settings/quickbooks/check`,
 |---|---|---|---|---|---|
 | §2 In v1 | 9 | 0 | 0 | 1 | 0 |
 | §6 Roster management | 11 | 0 | 0 | 10 | 0 |
-| §8 Money | 25 | 0 | 0 | 0 | 0 |
+| §8 Money | 29 | 0 | 0 | 0 | 0 |
 | §9 Forms | 23 | 0 | 0 | 2 | 0 |
 | §10 Seasons | 17 | 1 | 0 | 0 | 0 |
 | §11 Volunteering | 26 | 0 | 0 | 0 | 0 |
@@ -37,7 +38,7 @@ QuickBooks, **Check the portal's requests** (`/staff/settings/quickbooks/check`,
 | Owner's decisions of 2026-11-14 | 5 | 0 | 0 | 0 | 0 |
 | App-owned families: the mapping screen | 20 | 0 | 1 | 0 | 0 |
 | App-owned families: signing in | 38 | 2 | 0 | 0 | 4 |
-| **All** | **202** | **7** | **1** | **15** | **4** |
+| **All** | **206** | **7** | **1** | **15** | **4** |
 
 Nothing the v1 spec asks for is missing outright. The one missing row is the app-owned families spec's, of its
 mapping screen: L.20, which a later slice of stage 4 builds (its row says why it waits). The four owner checks of signing in are
@@ -110,7 +111,11 @@ For a linked family, making someone inactive (and a parent's changes) go to Quic
 | 8.1.2 | Tokens encrypted at rest | | Built | `quickbooks-connection.test.ts` "stores sealed tokens and the company on a good return"; `tests/unit/secret-box.test.ts` |
 | 8.1.3 | Every refresh saves the new refresh token | | Built | `tests/integration/quickbooks-client.test.ts` "refreshes a token that is within 5 minutes of expiring, and saves the new refresh token", "two callers at once spend the refresh token once" |
 | 8.1.4 | The portal warns well before the inactivity expiry and the hard limit | QuickBooks spec §5, §8: the stated expiry is used; warned within 30 days | Built | `tests/integration/quickbooks-health.test.ts` "a connection that expires within 30 days" |
-| 8.1.5 | Each club registers its own Intuit app; a runbook walks it | | Built | `docs/runbooks/intuit.md`; `tests/unit/deploy-names-no-host.test.ts`. The assessment itself is an owner check |
+| 8.1.5 | Each club registers its own Intuit app; a runbook walks it | Connect through Boosters Rocket spec §2: the usual way (and a new club's default) is to connect through Boosters Rocket Connect, one Intuit app already approved, with the portal registered by email; the club's own app stays as the fallback, unchanged | Built | `src/lib/quickbooks/connection.ts` (`saveConnectMode()`), `src/lib/quickbooks/relay-registration.ts`; `docs/runbooks/intuit.md` ("Connect through Boosters Rocket", then parts 1 to 4); `tests/integration/quickbooks-registration.test.ts`; `tests/unit/deploy-names-no-host.test.ts`. Intuit's own assessment, for a club on its own app, is an owner check |
+| 8.1.6 | (added by the Connect through Boosters Rocket spec, §5 Connect) Through Boosters Rocket, a connect starts at the relay with a signed call, returns through `/api/quickbooks/relay/callback`, redeems server to server and stores through the same company and switch checks; a refused connect revokes nothing and asks the relay to forget; a move from the club's own app revokes the old grant after the store | | Built | `src/lib/quickbooks/connection.ts` (`finishConnect()`), `src/lib/quickbooks/relay.ts`, `src/app/api/quickbooks/relay/callback/route.ts`; `tests/integration/quickbooks-relay.test.ts` "a first connect starts at the relay", "another company than the one connected is other_company", "stores the relay's tokens first, then revokes the old grant" |
+| 8.1.7 | (added, §5 Refresh) Through Boosters Rocket, every refresh is signed and saves the new refresh token before it is used; `invalid_grant` needs an Admin, the relay's own failures don't | | Built | `src/lib/quickbooks/client.ts` (`tokenUnderLock()`); `quickbooks-relay.test.ts` "stores the relay's new refresh token before the token is used", "invalid_grant from the relay is Intuit's own"; `tests/integration/quickbooks-relay-client.test.ts` "gives each failure the spec's code", "gives up on a slow relay after 15 seconds" |
+| 8.1.8 | (added, §2 decision 5 and §5 Disconnect) Disconnecting through Boosters Rocket warns that other portals on the company may be disconnected too, and needs a ticked acknowledgement on the page and on the server, recorded in the audit row; the revoke goes through the relay with the company; the tokens are forgotten whatever it answers. The club's own app gets one line and no box | | Built | `src/lib/quickbooks/connection.ts` (`disconnect()`), `src/app/staff/(app)/settings/quickbooks/actions.ts` (`disconnectAction`), `forms.tsx` (`Disconnect`); `quickbooks-relay.test.ts` "without the acknowledgement", "with it, revokes through the relay with the company", "forgets the tokens whatever the relay answers", "the page warns and asks for the box"; `tests/e2e/quickbooks.spec.ts` "Disconnect through Boosters Rocket stays unusable until the box is ticked" |
+| 8.1.9 | (added, §4 and §7) The portal's private key never leaves the server: sealed at rest, in no view, prop, audit row or log; every signed call goes only to `QBO_RELAY_URL`, never follows a redirect and gives up after 15 seconds | | Built | `src/lib/quickbooks/relay-sign.ts`, `relay.ts`, `relay-address.ts`; `tests/unit/relay-sign.test.ts`; `quickbooks-registration.test.ts`; `quickbooks-relay-client.test.ts` "signs each call so the relay's checks accept it", "gives up on a slow relay after 15 seconds"; `tests/unit/quickbooks-writes.test.ts` |
 
 ### §8.2 What a parent sees
 
@@ -290,9 +295,9 @@ Each was read; the four marked "mutated" were also broken on purpose in this ste
 | 14.4 | Dependency updates automated; every release passes CI before `stable` moves | Security updates also need Dependabot's settings switched on in the repository (the owner's runbook, part 1 item 11) | Partly built | `.github/dependabot.yml`; `release.yml` builds and publishes only after its first job finds CI's green run on the release's commit (`tests/unit/release-workflow.test.ts`). Never run: owner check |
 | 14.5 | Backups of both databases with point-in-time restore | `scripts/backup.sh` nightly at `BACKUP_AT` club time, both databases or neither, newest 14 kept (no point-in-time restore on a plain host) | Changed | `backup-restore.test.ts` "backs up both databases into the folder in one run", "a backup that fails keeps nothing"; `backup-schedule.test.ts` |
 | 14.6 | Restore is a launch requirement, with a runbook carried out at least once | | Partly built | `scripts/restore.sh`, `docs/runbooks/restore.md`; `backup-restore.test.ts` "restores Documenso's backup, and everything in it is the same", "restores into a database that doesn't exist yet". Nobody has followed the runbook yet: owner check (the owner's runbook, part 1 item 7) |
-| 14.7 | The health page checks QuickBooks, Graph (now mail), Documenso API and webhook, and email | Email-code spec §6: mail sending instead of Graph; plus the worker, backups, money run, clean-up, sign-in addresses, and the password breach check, from what each ask marked | Built | `src/lib/health/report.ts`; `tests/integration/health-page.test.ts` (with "says how the password breach check stands"); `forms-staff.test.ts` "the Health page's line for forms"; `tests/e2e/ops.spec.ts` |
+| 14.7 | The health page checks QuickBooks, Graph (now mail), Documenso API and webhook, and email | Email-code spec §6: mail sending instead of Graph; plus the worker, backups, money run, clean-up, sign-in addresses, and the password breach check, from what each ask marked; and, by the Connect through Boosters Rocket spec §6, how QuickBooks connects and, in relay mode, a line for Boosters Rocket Connect from the mark its calls leave, never calling it | Built | `src/lib/health/report.ts`; `tests/integration/health-page.test.ts` (with "says how the password breach check stands" and "has a Boosters Rocket line only in relay mode"); `forms-staff.test.ts` "the Health page's line for forms"; `tests/e2e/ops.spec.ts` |
 | 14.8 | Runbook: first deployment | | Built | `docs/runbooks/first-install.md`; `tests/unit/runbooks.test.ts`, `deploy-names-no-host.test.ts` |
-| 14.9 | Runbook: Intuit app registration and assessment | | Built | `docs/runbooks/intuit.md`; same tests. Written without Intuit's screens (owner check) |
+| 14.9 | Runbook: Intuit app registration and assessment | Connect through Boosters Rocket spec §6: the runbook starts with registering the portal with Boosters Rocket; the club's own app and its assessment follow, as the fallback | Built | `docs/runbooks/intuit.md`; same tests. Written without Intuit's screens (owner check) |
 | 14.10 | Runbook: External ID tenant setup | Email-code spec §6: replaced by outgoing mail setup | Built | `docs/runbooks/mail.md`; `runbooks.test.ts` "sends the mail runbook's readers to the step numbers the page shows" |
 | 14.11 | Runbook: Documenso setup and signing certificate | | Built | `docs/runbooks/documenso.md`; `runbooks.test.ts` "keeps the signing certificate's copy before handing the file to Documenso's user" |
 | 14.12 | Runbooks: updates, restore | Also the move to a new major version of Postgres (16 to 18, 2026-11-17): a start that meets data not yet moved is refused, with what to do, and never makes an empty database; the move never writes to the old data, and coming forward again after going back first backs up what Postgres 18 holds | Built | `docs/runbooks/updates.md` ("Moving to a new major version of Postgres"), `restore.md`, `backups.md`; `scripts/move-postgres.sh`, `scripts/postgres-guard.sh`; `deploy-names-no-host.test.ts`, `tests/integration/postgres-move.test.ts`, `tests/unit/postgres-version.test.ts` |

@@ -1,9 +1,14 @@
 "use client";
 import { ActionOutcome, Notice } from "@/app/components/notice";
-import { startTransition, useActionState, useState } from "react";
+import { startTransition, useActionState, useState, type ReactNode } from "react";
+import { Button, Checkbox, ChoiceGroup, KeyValue, TextInput } from "@/app/components/ui";
+import { CopyField } from "@/app/components/sign-in-settings/copy-field";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import type { MembershipShape, TypeRow } from "@/lib/roster/shape";
 import type { ShapePreview } from "@/lib/roster/queries";
+import type { QboMode } from "@/lib/db/schema";
+import type { RelayCheck } from "@/lib/quickbooks/relay";
+import type { RelayStage } from "@/lib/quickbooks/connection";
 
 // These forms deliberately use no form `action`/`formAction`. React 19 calls the form's native reset() after
 // such an action, and a reset puts every control back to its mount-time value while component state keeps the
@@ -47,7 +52,7 @@ export function AppKeysForm({ configured, clientId: savedId, environment: savedE
         <label><input type="radio" name="environment" value="production" checked={environment === "production"} onChange={() => setEnvironment("production")} /> Production (the club&apos;s real books, with the app&apos;s Production keys)</label>
       </fieldset>
       {state && !state.ok && <Errors errors={state.errors} />}
-      {state?.ok && <Notice tone="done">Saved. <a href="/staff/settings/quickbooks/setup?step=connect">Next: sign in to Intuit</a></Notice>}
+      {state?.ok && <Notice tone="done">Saved. <a href="/staff/settings/quickbooks/setup?step=connect">Next: connect to QuickBooks</a></Notice>}
       <button type="button" className="btn" disabled={pending} onClick={() => startTransition(() => run({ clientId, clientSecret, environment }))}>{pending ? "Saving…" : "Save"}</button>
     </form>
   );
@@ -149,22 +154,217 @@ export function disconnectedNote(revoked: boolean): string {
   const kept = "The roster stays as it was last read, and is marked as no longer current.";
   return revoked ? `Disconnected. ${kept}` : `Disconnected here, but Intuit didn't confirm that it canceled the portal's access. ${kept}`;
 }
+/** What Disconnect says about other portals that hold the same grant (spec §3 and §5, Disconnect). */
+export const DISCONNECT_WORDS = {
+  relayWarning: "Every portal connected to this QuickBooks company through Boosters Rocket shares one connection. Disconnecting here may disconnect the others too, such as a trial copy of this portal.",
+  relayAck: "I understand that disconnecting may also disconnect any other portal connected to this company through Boosters Rocket.",
+  ownApp: "If another portal uses this same Intuit app's keys for this company, it is disconnected too.",
+} as const;
+
 /**
  * On the view, tucked inside a closed section so it isn't pressed by accident. It stays mounted when the page comes
  * back disconnected, so it can say so: the page renders it whether or not QuickBooks is connected. `warning`, when
- * given, is shown above the button while connected.
+ * given, is shown above the button while connected. `through` is which app issued the tokens held: through Boosters
+ * Rocket the Admin must tick the acknowledgement first (the button is aria-disabled until then, and the server refuses
+ * without it, and answers a page drawn for another app than the one holding the tokens now that it is out of date);
+ * with the club's own app, one line says what else it ends. Like the forms above, it sends from state with
+ * a `type="button"`, so no form reset can untick the box behind React's back.
  */
-export function Disconnect({ connected, disconnect, warning }: { connected: boolean; disconnect: () => Promise<Disconnected>; warning?: string }) {
-  const [state, run, pending] = useActionState(async () => safely(() => disconnect(), { ok: false as const, error: ACTION_FAILED }), null);
+export function Disconnect({ connected, disconnect, warning, through }: {
+  connected: boolean; disconnect: (f: FormData) => Promise<Disconnected>; warning?: string; through: QboMode | null;
+}) {
+  const relay = through === "relay";
+  const [ack, setAck] = useState(false);
+  const [state, run, pending] = useActionState(async (_: Disconnected | null, acknowledged: boolean) => {
+    // `drawnFor`: the app this page was drawn for, so the server can tell a page that showed no box from one that did.
+    const f = new FormData(); f.append("drawnFor", through ?? "none"); if (relay && acknowledged) f.append("ack", "yes");
+    return safely(() => disconnect(f), { ok: false as const, error: ACTION_FAILED });
+  }, null);
   if (!connected) return state?.ok ? <Notice tone="done">{disconnectedNote(state.revoked)}</Notice> : null;
+  const unusable = pending || (relay && !ack);
   return (
     <details className="more"><summary>Disconnect</summary>
-      <p>This asks Intuit to cancel the portal&apos;s access and deletes its copy of the connection. The Intuit app&apos;s keys and the last roster stay, and the roster is marked as no longer current.</p>
+      <p>{relay
+        ? "This asks Boosters Rocket to have Intuit cancel the portal's access, and deletes the portal's copy of the connection. The portal's registration with Boosters Rocket and the last roster stay, and the roster is marked as no longer current."
+        : "This asks Intuit to cancel the portal's access and deletes its copy of the connection. The Intuit app's keys and the last roster stay, and the roster is marked as no longer current."}</p>
+      {relay ? <Notice tone="warning">{DISCONNECT_WORDS.relayWarning}</Notice> : <p>{DISCONNECT_WORDS.ownApp}</p>}
       {warning && <Notice tone="warning">{warning}</Notice>}
-      <form action={run} className="stack">
+      <form onSubmit={noSubmit} className="stack">
+        {relay && <Checkbox id="qbo-disconnect-ack" name="ack" value="yes" label={DISCONNECT_WORDS.relayAck} checked={ack} onChange={(e) => setAck(e.target.checked)} />}
         {state && !state.ok && <Notice tone="problem">{state.error}</Notice>}
-        <button className="btn btn-line" disabled={pending}>{pending ? "Disconnecting…" : "Disconnect QuickBooks"}</button>
+        <p><Button variant="secondary" busy={pending} aria-disabled={unusable || undefined}
+          onClick={() => { if (!unusable) startTransition(() => run(ack)); }}>{pending ? "Disconnecting…" : "Disconnect QuickBooks"}</Button></p>
       </form>
     </details>
+  );
+}
+
+type Done = { ok: true; message: string } | { ok: false; errors: string[] };
+const failedDone: Done = { ok: false, errors: [ACTION_FAILED] };
+const MODES: { value: QboMode; label: string; hint: string }[] = [
+  { value: "relay", label: "Connect through Boosters Rocket", hint: "The usual way: register this portal once by email, then sign in to Intuit. The club needs no Intuit app of its own." },
+  { value: "own_app", label: "Use our own Intuit app", hint: "For a club that has registered an app with Intuit itself: its Client ID and secret go here." },
+];
+
+/**
+ * Step 1, "How to connect". The choice shows its own part of the step underneath (`relay` or `ownApp`) as soon as it is
+ * picked; saving it is one press. The club's own app is saved with its keys (saving them is the choice), so with none
+ * saved yet that choice has no press of its own. Leaving the relay while connected through it is refused here and on
+ * the server.
+ */
+export function ConnectModeForm({ saved, keysSaved, relayConnected, save, relay, ownApp }: {
+  saved: QboMode; keysSaved: boolean; relayConnected: boolean; save: (f: FormData) => Promise<Done>; relay: ReactNode; ownApp: ReactNode;
+}) {
+  const [mode, setMode] = useState<QboMode>(saved);
+  const [state, run, pending] = useActionState(async (_: Done | null, m: QboMode) => {
+    const f = new FormData(); f.append("mode", m);
+    return safely(() => save(f), failedDone);
+  }, null);
+  const blocked = mode === "own_app" && relayConnected;
+  const pressable = mode !== saved && !blocked && (mode === "relay" || keysSaved);
+  return (
+    <div className="stack">
+      <ChoiceGroup name="mode" legend="How the portal connects to QuickBooks" options={MODES} value={mode} onChange={(v) => setMode(v === "own_app" ? "own_app" : "relay")} cols={1} />
+      {mode !== saved && !blocked && !pressable && <Notice tone="info">Save the Intuit app&apos;s keys below to use the club&apos;s own app. Saving them saves this choice too.</Notice>}
+      {pressable && <p><Button busy={pending} onClick={() => { if (!pending) startTransition(() => run(mode)); }}>{pending ? "Saving…" : "Save this choice"}</Button></p>}
+      <ActionOutcome state={state} />
+      {blocked
+        ? <Notice tone="warning">QuickBooks is connected through Boosters Rocket. Disconnect first, from QuickBooks settings, then choose the club&apos;s own Intuit app. <a href="/staff/settings/quickbooks">QuickBooks settings</a></Notice>
+        : mode === "relay" ? relay : ownApp}
+    </div>
+  );
+}
+
+type PortalIdSaved = { ok: true; message: string; check: RelayCheck | null } | { ok: false; errors: string[] };
+type Checked = { ok: true; check: RelayCheck | null };
+const ENVIRONMENT_WORDS = { production: "to the club's real books", sandbox: "to Intuit sandbox (test) companies" } as const;
+
+/** Why the waiting stage offers no form: the registration can't change while a connect through the relay holds it. */
+export const REGISTRATION_HELD = "The portal id can't be saved while QuickBooks is connected, or being connected, through Boosters Rocket. Finish or end that first, then come back to this step.";
+
+/** The relay's answer to the check, in words. The registered name is the relay's text: a text child, never markup. */
+export function CheckAnswer({ check, again, checking }: { check: RelayCheck; again: () => void; checking: boolean }) {
+  if (check.answer === "registered") {
+    const may = check.environments.map((e) => ENVIRONMENT_WORDS[e]);
+    return <Notice tone="done">{`Registered as ${check.name}.`} {may.length ? `It may connect ${may.join(" and ")}.` : "Boosters Rocket hasn't allowed it to connect to any QuickBooks yet. Email support@boostersrocket.com."}</Notice>;
+  }
+  if (check.answer === "not_matching") {
+    return <Notice tone="problem">That portal id and this portal&apos;s key don&apos;t match what Boosters Rocket registered, or this server&apos;s clock is more than 5 minutes off. Check the id against Boosters Rocket&apos;s email, and if it is right, email support@boostersrocket.com. The id is saved as typed.</Notice>;
+  }
+  return (
+    <Notice tone="warning">Boosters Rocket couldn&apos;t be reached just now, so the registration wasn&apos;t checked. The portal id is saved.{" "}
+      <Button variant="secondary" size="sm" busy={checking} onClick={again}>{checking ? "Checking…" : "Check again"}</Button></Notice>
+  );
+}
+
+/**
+ * Registration with Boosters Rocket, the relay part of step 1, through its three stages: not registered yet, waiting
+ * for the id, ready to connect. One component across them, so the check's answer stays on the page when saving the id
+ * moves it on a stage. It is given only what it shows, all of it public: the portal's address, its public key and id.
+ * `mayChange` is false while connected, or being connected, through the relay: then neither the id nor the key may
+ * change (Disconnect first, or let the connect finish), and no stage offers a form to change them.
+ */
+export function RelayRegistration({ stage, address, addressFits, publicKey, portalId, mailto, mayChange, makeKey, saveId, check }: {
+  stage: RelayStage; address: string; addressFits: boolean; publicKey: string | null; portalId: string | null; mailto: string | null; mayChange: boolean;
+  makeKey: (f: FormData) => Promise<Done>; saveId: (f: FormData) => Promise<PortalIdSaved>; check: () => Promise<Checked>;
+}) {
+  const [typed, setTyped] = useState("");
+  const [answer, setAnswer] = useState<RelayCheck | null>(null);
+  const [made, runMake, making] = useActionState(async (_: Done | null, replace: boolean) => {
+    const f = new FormData(); if (replace) f.append("replace", "yes");
+    const r = await safely(() => makeKey(f), failedDone);
+    if (r.ok) setAnswer(null); // a new key: the last check was of the old one
+    return r;
+  }, null);
+  const [saved, runSave, saving] = useActionState(async (_: PortalIdSaved | null, id: string): Promise<PortalIdSaved> => {
+    const f = new FormData(); f.append("portalId", id);
+    const r = await safely<PortalIdSaved>(() => saveId(f), { ok: false, errors: [ACTION_FAILED] });
+    if (r.ok) { setTyped(""); setAnswer(r.check); }
+    return r;
+  }, null);
+  const [, runCheck, checking] = useActionState(async () => {
+    const r = await safely(check, { ok: true as const, check: { answer: "unreachable" as const } });
+    setAnswer(r.check);
+    return null;
+  }, null);
+  const again = () => { if (!checking) startTransition(() => runCheck()); };
+  const idForm = (label: string) => (
+    <form className="stack" onSubmit={(e) => { e.preventDefault(); if (!saving) startTransition(() => runSave(typed)); }}>
+      <TextInput id="relay-portal-id" name="portalId" label={label} hint="From Boosters Rocket's email: brp_ and 16 letters or digits." autoComplete="off" spellCheck={false}
+        value={typed} onChange={(e) => setTyped(e.target.value)} />
+      {saved && !saved.ok && <ActionOutcome state={saved} />}
+      <p><Button type="submit" busy={saving}>{saving ? "Saving…" : "Save the portal id"}</Button></p>
+    </form>
+  );
+  const copies = publicKey && (
+    <>
+      <CopyField label="This portal's address" value={address} />
+      <CopyField label="This portal's public key" value={publicKey} />
+    </>
+  );
+  const https = addressFits ? null
+    : <Notice tone="problem">Boosters Rocket can register only a portal with an https address, and this one is {address}. Whoever installed the portal sets its address (APP_URL). Once it starts with https, come back to this step.</Notice>;
+  return (
+    <section className="box-section stack" aria-labelledby="relay-stage-h">
+      <h3 id="relay-stage-h">{stage === "not_registered" ? "Not registered yet" : stage === "waiting" ? "Waiting for the id" : "Ready to connect"}</h3>
+      {stage === "not_registered" && (
+        <>
+          <p>Boosters Rocket connects the portal to QuickBooks once it knows this portal. First the portal makes its own key: a public half to send to Boosters Rocket, and a private half that never leaves this server.</p>
+          <ActionOutcome state={made} />
+          <p><Button busy={making} onClick={() => { if (!making) startTransition(() => runMake(false)); }}>{making ? "Making the key…" : "Make this portal's key"}</Button></p>
+        </>
+      )}
+      {stage === "waiting" && (
+        <>
+          {made?.ok && <ActionOutcome state={made} />}
+          <p>Email these to support@boostersrocket.com. Boosters Rocket registers the portal and emails you back its id.</p>
+          {copies}
+          {mailto && <p><a className="link-line" href={mailto}>Write the email</a></p>}
+          {https ?? (mayChange ? idForm("Portal id") : <Notice tone="info" live="none">{REGISTRATION_HELD}</Notice>)}
+        </>
+      )}
+      {stage === "ready" && (
+        <>
+          <p>The portal is registered with Boosters Rocket. Next, connect to QuickBooks in step 2.</p>
+          <KeyValue items={[{ key: "id", label: "Portal id", value: <code>{portalId}</code> }]} />
+          {copies}
+          {https}
+          {answer ? <CheckAnswer check={answer} again={again} checking={checking} />
+            : <p><Button variant="secondary" busy={checking} onClick={again}>{checking ? "Checking…" : "Check the registration"}</Button></p>}
+          {answer && answer.answer !== "unreachable" && <p><Button variant="quiet" busy={checking} onClick={again}>{checking ? "Checking…" : "Check again"}</Button></p>}
+          {!https && mayChange && <details className="more"><summary>Change the portal id</summary>{idForm("New portal id")}</details>}
+          {mayChange && (
+            <details className="more"><summary>Make a new key</summary>
+              <p>A new key replaces this one and clears the saved portal id. Boosters Rocket then registers the new public key and sends a new id before the portal can connect.</p>
+              {made && !made.ok && <ActionOutcome state={made} />}
+              <p><Button variant="secondary" busy={making} onClick={() => { if (!making) startTransition(() => runMake(true)); }}>{making ? "Making the key…" : "Make a new key"}</Button></p>
+            </details>
+          )}
+        </>
+      )}
+      {stage !== "ready" && answer && <CheckAnswer check={answer} again={again} checking={checking} />}
+    </section>
+  );
+}
+
+const ENVIRONMENTS: { value: "production" | "sandbox"; label: string; hint: string }[] = [
+  { value: "production", label: "The club's real books", hint: "The club's own QuickBooks Online company." },
+  { value: "sandbox", label: "An Intuit sandbox (test) company", hint: "One of the test companies Intuit gives a developer account, for trying the portal out." },
+];
+
+/**
+ * Step 2 through Boosters Rocket: which QuickBooks, then "Connect to QuickBooks", a plain form post that ends in a
+ * redirect to the relay. While connected, the other QuickBooks can't be chosen (the server refuses it too): connecting
+ * again renews the one connected. It is given only what it shows.
+ */
+export function RelayConnectForm({ environment, locked, begin }: { environment: "production" | "sandbox" | null; locked: boolean; begin: (f: FormData) => Promise<void> }) {
+  const [chosen, setChosen] = useState<"production" | "sandbox">(environment ?? "production");
+  const options = ENVIRONMENTS.map((o) => ({ ...o, disabled: locked && o.value !== environment }));
+  return (
+    <form action={begin} className="stack">
+      <ChoiceGroup name="environment" legend="Which QuickBooks" hint={locked ? "To connect the other, disconnect first, from QuickBooks settings." : undefined}
+        options={options} value={chosen} onChange={(v) => setChosen(v === "sandbox" ? "sandbox" : "production")} cols={1} />
+      <p><Button type="submit">Connect to QuickBooks</Button></p>
+    </form>
   );
 }

@@ -47,7 +47,7 @@ export const SETTINGS_ITEMS = [
   { key: "integrations", kind: "page", group: "Connections", title: "Integrations", keywords: ["connections", "services"],
     see: "Settings.QuickBooks.ReadWrite", change: null, href: "/staff/settings/integrations",
     owns: ["/staff/settings/integrations", "/staff/settings/quickbooks", "/staff/settings/forms", "/staff/settings/mail", "/staff/settings/sign-in"] },
-  { key: "quickbooks", kind: "integration", under: "integrations", group: "Connections", title: "QuickBooks Online", keywords: ["QuickBooks", "Intuit", "books", "accounting", "sandbox", "roster"],
+  { key: "quickbooks", kind: "integration", under: "integrations", group: "Connections", title: "QuickBooks Online", keywords: ["QuickBooks", "Intuit", "books", "accounting", "sandbox", "roster", "Boosters Rocket", "connect", "relay", "register"],
     see: "Settings.QuickBooks.ReadWrite", change: "Settings.QuickBooks.ReadWrite", href: "/staff/settings/quickbooks", owns: ["/staff/settings/quickbooks"] },
   { key: "forms", kind: "integration", under: "integrations", group: "Connections", title: "Documenso", keywords: ["Documenso", "forms", "signing", "webhook"],
     see: "Settings.Forms.ReadWrite", change: "Settings.Forms.ReadWrite", href: "/staff/settings/forms", owns: ["/staff/settings/forms"] },

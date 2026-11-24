@@ -41,6 +41,8 @@ const SITES: Record<string, string> = {
   "docs.documenso.com": "Documenso's own documentation",
   "caddyserver.com": "the proxy's own documentation (deploy/Caddyfile)",
   "smtp.office365.com": "Microsoft 365's SMTP server, for Documenso's account mail (mail.md)",
+  "connect.boostersrocket.app": "Boosters Rocket Connect, the relay QBO_RELAY_URL names when it is left unset (deploy/.env.example)",
+  "boostersrocket.com": "Boosters Rocket's support address, where a club emails its portal's key to register it (intuit.md, health-warnings.md)",
   "pwnedpasswords.com": "the password breach service the server must reach (health-warnings.md, Password breach check)",
 };
 const TLDS = "com|org|net|io|dev|app|co|us|uk|ca|au|de|eu|fr|nl|edu|gov|info|biz|me|xyz|site|online|tech|ai|cloud|club|school|team|tv|cc|ly|gg|in|link|page|run|host|systems|network";

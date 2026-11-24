@@ -1,7 +1,6 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { staffAction } from "@/lib/guards";
-import { getConnection } from "@/lib/quickbooks/connection";
 import { runSandboxCheck } from "@/lib/quickbooks/sandbox-check/run";
 import { checkReadiness, NOT_READY_WORDS } from "@/lib/quickbooks/sandbox-check/view";
 
@@ -17,7 +16,7 @@ type Result = { ok: true; message: string; attention?: true } | { ok: false; err
 export const runCheckAction = staffAction(P, async (ctx): Promise<Result> => {
   const ready = await checkReadiness();
   if (!ready.ok) return { ok: false, errors: [NOT_READY_WORDS[ready.reason]] };
-  const writes = (await getConnection())?.environment === "sandbox";
+  const writes = ready.environment === "sandbox";
   const r = await runSandboxCheck({ staffUserId: ctx.staffUserId, label: ctx.email, ip: ctx.ip, writes });
   revalidatePath("/staff/settings/quickbooks", "layout");
   revalidatePath("/staff/settings/health");

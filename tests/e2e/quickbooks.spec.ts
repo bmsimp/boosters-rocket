@@ -1,4 +1,5 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
 import postgres from "postgres";
 import { staffSessionCookie } from "./staff-session";
 import { familyIdOf, familyPages } from "./family-records";
@@ -7,7 +8,9 @@ const sql = postgres(process.env.DATABASE_URL!);
 test.afterAll(async () => { await sql.end(); });
 
 // This run never reaches Intuit: the app has no switch that points it elsewhere. The spec never selects
-// "Sign in to Intuit", "Save this shape", "Refresh now" or "Disconnect"; it only checks that they are there.
+// "Connect to QuickBooks", "Save this shape", "Refresh now" or "Disconnect"; it only checks that they are there.
+// Nor does it reach Boosters Rocket: the run's QBO_RELAY_URL (playwright.config.ts) names a port nothing listens on, so
+// the registration's check, the one call to it these tests cause, answers that the relay couldn't be reached.
 
 test.beforeEach(async ({ context }) => { await context.addCookies([staffSessionCookie()]); });
 
@@ -54,29 +57,30 @@ test("the switch page lists what a switch ends and keeps, and while connected sa
 test("step 1 keeps what was typed after a refusal and empties the secret after a save", async ({ page, baseURL }) => {
   await page.goto("/staff/settings/quickbooks/setup?step=app");
   await expect(page.getByLabel("Redirect address")).toHaveValue(`${baseURL}/api/quickbooks/callback`);
-  await expect(page.getByLabel("Client ID")).toHaveValue("e2e-client-id-1234567890");
+  await expect(page.getByRole("textbox", { name: "Client ID", exact: true })).toHaveValue("e2e-client-id-1234567890");
   await expect(page.getByLabel(/Client secret/)).toHaveValue("");
 
   // A Client ID the form refuses (it has spaces): the error shows and all three fields still hold what was typed.
-  await page.getByLabel("Client ID").fill("not a valid client id");
+  await page.getByRole("textbox", { name: "Client ID", exact: true }).fill("not a valid client id");
   await page.getByLabel(/Client secret/).fill("typed-secret-one");
   await page.getByRole("radio", { name: /^Production/ }).check();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText("Enter the Client ID from your Intuit app's Keys and credentials page.")).toBeVisible();
-  await expect(page.getByLabel("Client ID")).toHaveValue("not a valid client id");
+  await expect(page.getByRole("textbox", { name: "Client ID", exact: true })).toHaveValue("not a valid client id");
   await expect(page.getByLabel(/Client secret/)).toHaveValue("typed-secret-one");
   await expect(page.getByRole("radio", { name: /^Production/ })).toBeChecked();
   await expect(page.getByRole("radio", { name: /^Sandbox/ })).not.toBeChecked();
 
   // The seeded Client ID and environment again, and a new secret: saving while connected is allowed when only the
   // secret changes, and it reaches nothing outside the app. The secret field is empty afterward.
-  await page.getByLabel("Client ID").fill("e2e-client-id-1234567890");
+  await page.getByRole("textbox", { name: "Client ID", exact: true }).fill("e2e-client-id-1234567890");
   await page.getByRole("radio", { name: /^Sandbox/ }).check();
   await page.getByLabel(/Client secret/).fill("typed-secret-two");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText("Saved.")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Next: connect to QuickBooks" })).toHaveAttribute("href", "/staff/settings/quickbooks/setup?step=connect");
   await expect(page.getByLabel(/Client secret/)).toHaveValue("");
-  await expect(page.getByLabel("Client ID")).toHaveValue("e2e-client-id-1234567890");
+  await expect(page.getByRole("textbox", { name: "Client ID", exact: true })).toHaveValue("e2e-client-id-1234567890");
   await expect(page.getByRole("radio", { name: /^Sandbox/ })).toBeChecked();
 });
 
@@ -86,7 +90,7 @@ test("the three steps open in order, and a shape is previewed with the controls 
   await expect(page).toHaveURL(/\/staff\/settings\/quickbooks\/setup/);
 
   await page.goto("/staff/settings/quickbooks/setup?step=connect");
-  await expect(page.getByRole("button", { name: "Sign in to Intuit" })).toBeVisible(); // not selected: it would leave for Intuit
+  await expect(page.getByRole("button", { name: "Connect to QuickBooks" })).toBeVisible(); // not selected: it would leave for Intuit
 
   await page.goto("/staff/settings/quickbooks/setup?step=shape");
   await expect(page.getByRole("button", { name: "Save this shape" })).toBeVisible(); // not selected: saving reads QuickBooks
@@ -186,4 +190,127 @@ test("the roster and QuickBooks settings are refused without a staff session", a
   await page.goto("/staff/settings/quickbooks");
   await expect(page).toHaveURL(/\/staff\/sign-in/);
   await context.close();
+});
+
+// Connect through Boosters Rocket (docs/superpowers/specs/2026-11-24-connect-through-boosters-rocket-design.md, §8 "End
+// to end"). The seed connects with the club's own app, and every test here puts its mode, its registration, its
+// token_mode and the relay's mark back, whatever happens in it.
+const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22aa"];
+const E2E_PORTAL_ID = "brp_e2e0portal0id001";
+async function backToTheSeed() {
+  await sql`DELETE FROM qbo_relay`;
+  await sql`DELETE FROM setting WHERE key = 'health.mark.quickbooks_relay'`;
+  await sql`UPDATE qbo_connection SET connect_mode = 'own_app', token_mode = 'own_app', relay_environment = null, state_hash = null, state_staff_user_id = null, state_expires_at = null, state_mode = null`;
+}
+async function checked(page: Page, where: string) {
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), `${where} scrolls sideways`).toBe(false);
+  const results = await new AxeBuilder({ page }).withTags(AXE_TAGS).disableRules(["color-contrast"]).analyze();
+  expect(results.violations.flatMap((v) => v.nodes.map((n) => `${where} · ${n.target.join(" ")}: ${v.id} (${v.help})`))).toEqual([]);
+}
+
+test("an Admin chooses Boosters Rocket, makes the key, copies the address and key, and saves the id to reach Ready to connect", async ({ page, baseURL }) => {
+  try {
+    await page.goto("/staff/settings/quickbooks/setup?step=app");
+    await expect(page.getByRole("heading", { name: "Step 1: How to connect" })).toBeVisible();
+    const relay = page.getByRole("radio", { name: /^Connect through Boosters Rocket/ }), own = page.getByRole("radio", { name: /^Use our own Intuit app/ });
+    await expect(own).toBeChecked();
+    await expect(page.getByRole("heading", { name: "Your Intuit app" })).toBeVisible();
+    await checked(page, "step 1, the club's own app");
+
+    // Through Boosters Rocket: the registration shows under the choice before it is saved, and saving is one press.
+    await relay.check();
+    await expect(page.getByRole("heading", { name: "Not registered yet" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Your Intuit app" })).toHaveCount(0);
+    await page.getByRole("button", { name: "Save this choice" }).click();
+    await expect(page.getByRole("button", { name: "Save this choice" })).toHaveCount(0);
+    await expect(relay).toBeChecked();
+    await checked(page, "step 1, not registered yet");
+
+    // The key: made on the server, its public half shown with the portal's address, each with a Copy button.
+    await page.getByRole("button", { name: "Make this portal's key" }).click();
+    await expect(page.getByRole("heading", { name: "Waiting for the id" })).toBeVisible();
+    await expect(page.getByLabel("This portal's address")).toHaveValue(baseURL!);
+    await expect(page.getByLabel("This portal's public key")).toHaveValue(/^[A-Za-z0-9_-]{43}$/);
+    await expect(page.getByRole("button", { name: "Copy" })).toHaveCount(2);
+    await expect(page.getByRole("link", { name: "Write the email" })).toHaveAttribute("href", /^mailto:support@boostersrocket\.com\?/);
+    await expect(page.locator("body")).not.toContainText("PRIVATE KEY");
+    await checked(page, "step 1, waiting for the id");
+
+    // A bad id is refused and nothing moves on; the id Boosters Rocket sent back is saved, and the check can't reach it.
+    await page.getByLabel("Portal id").fill("not-an-id");
+    await page.getByRole("button", { name: "Save the portal id" }).click();
+    await expect(page.getByRole("heading", { name: "Waiting for the id" })).toBeVisible();
+    await page.getByLabel("Portal id").fill(E2E_PORTAL_ID);
+    await page.getByRole("button", { name: "Save the portal id" }).click();
+    await expect(page.getByRole("heading", { name: "Ready to connect" })).toBeVisible();
+    await expect(page.getByText(E2E_PORTAL_ID, { exact: true })).toBeVisible();
+    await expect(page.getByText(/Boosters Rocket couldn.t be reached just now, so the registration wasn.t checked\./)).toBeVisible();
+    await expect(page.locator("summary", { hasText: "Make a new key" })).toBeVisible(); // a closed section; never opened
+    await checked(page, "step 1, ready to connect");
+  } finally {
+    await backToTheSeed();
+  }
+});
+
+test("step 2 through Boosters Rocket asks which QuickBooks and shows QuickBooks' logo, black on light and white on dark", async ({ page }) => {
+  await sql`UPDATE qbo_connection SET connect_mode = 'relay'`;
+  try {
+    await page.goto("/staff/settings/quickbooks/setup?step=connect");
+    await expect(page.getByRole("heading", { level: 2, name: "Step 2: Connect to QuickBooks" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Which QuickBooks" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: /^The club's real books/ })).toBeVisible();
+    await expect(page.getByRole("radio", { name: /^An Intuit sandbox \(test\) company/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Connect to QuickBooks" })).toBeVisible(); // not selected: it would leave for Boosters Rocket
+    const black = page.locator(".qb-full-logo img.qb-on-light"), white = page.locator(".qb-full-logo img.qb-on-dark");
+    const theme = (t: string | null) => page.evaluate((v) => { if (v) document.documentElement.dataset.theme = v; else delete document.documentElement.dataset.theme; }, t);
+    await page.emulateMedia({ colorScheme: "light" }); await theme(null);
+    await expect(black).toBeVisible(); await expect(white).toBeHidden();
+    await checked(page, "step 2 through Boosters Rocket");
+    await page.emulateMedia({ colorScheme: "dark" });
+    await expect(white).toBeVisible(); await expect(black).toBeHidden();
+    // The portal's own theme wins over the device's, either way.
+    await theme("light");
+    await expect(black).toBeVisible(); await expect(white).toBeHidden();
+    await page.emulateMedia({ colorScheme: "light" }); await theme("dark");
+    await expect(white).toBeVisible(); await expect(black).toBeHidden();
+  } finally {
+    await backToTheSeed();
+  }
+});
+
+test("Disconnect through Boosters Rocket stays unusable until the box is ticked; the club's own app has one line and no box", async ({ page }) => {
+  // The club's own app first: one line, no box, and the button usable (never selected).
+  await page.goto("/staff/settings/quickbooks");
+  await page.getByText("Disconnect", { exact: true }).click();
+  await expect(page.getByText("If another portal uses this same Intuit app's keys for this company, it is disconnected too.")).toBeVisible();
+  await expect(page.getByRole("checkbox")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Disconnect QuickBooks" })).not.toHaveAttribute("aria-disabled", "true");
+
+  await sql`UPDATE qbo_connection SET connect_mode = 'relay', token_mode = 'relay', relay_environment = environment`;
+  try {
+    await page.goto("/staff/settings/quickbooks");
+    await expect(page.getByRole("region", { name: "Connection" }).getByText("Through Boosters Rocket", { exact: true })).toBeVisible();
+    await page.getByText("Disconnect", { exact: true }).click();
+    await expect(page.getByText("Every portal connected to this QuickBooks company through Boosters Rocket shares one connection. Disconnecting here may disconnect the others too, such as a trial copy of this portal.")).toBeVisible();
+    const ack = page.getByRole("checkbox", { name: "I understand that disconnecting may also disconnect any other portal connected to this company through Boosters Rocket." });
+    const press = page.getByRole("button", { name: "Disconnect QuickBooks" });
+    await expect(ack).not.toBeChecked();
+    await expect(press).toHaveAttribute("aria-disabled", "true");
+    await expect(press).not.toHaveAttribute("disabled", /.*/); // aria-disabled, never disabled, so it keeps the focus
+    await checked(page, "QuickBooks settings, Disconnect through Boosters Rocket");
+    await ack.check();
+    await expect(press).not.toHaveAttribute("aria-disabled", "true");
+    await ack.uncheck();
+    await expect(press).toHaveAttribute("aria-disabled", "true");
+    // Never selected: the run holds made-up tokens, and a disconnect would end the seed's connection.
+  } finally {
+    await backToTheSeed();
+  }
+});
+
+test("QuickBooks' own ball marks its row on Integrations and the QuickBooks page's head", async ({ page }) => {
+  await page.goto("/staff/settings/integrations");
+  await expect(page.locator('img[src="/integrations/quickbooks/qb-ball.svg"]').first()).toBeVisible();
+  await page.goto("/staff/settings/quickbooks");
+  await expect(page.locator('.integration-head img[src="/integrations/quickbooks/qb-ball.svg"]')).toBeVisible();
 });

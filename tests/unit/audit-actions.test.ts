@@ -29,7 +29,9 @@ describe("every audit action has words", () => {
 
   it("finds the actions in the source", () => {
     expect(written.size).toBeGreaterThan(60);
-    for (const known of ["parent.block", "roster.refresh", "parent.access.ended", "season.requirement.tick", "season.requirement.untick", "parent.details.save", "audit.export"]) {
+    for (const known of ["parent.block", "roster.refresh", "parent.access.ended", "season.requirement.tick", "season.requirement.untick", "parent.details.save", "audit.export",
+      // Connect through Boosters Rocket, slice 2: the mode, the portal's key and its id.
+      "settings.quickbooks.mode", "settings.quickbooks.relay.key_made", "settings.quickbooks.relay.portal_id"]) {
       expect([...written.keys()], known).toContain(known);
     }
   });

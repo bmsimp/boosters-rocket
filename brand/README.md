@@ -66,9 +66,18 @@ never recolored, cropped into something else or made larger than the tile. The f
 | `microsoft.svg` | The Microsoft logo (four squares), © Microsoft | Microsoft's "Sign in with Microsoft" branding guidelines, `ms-symbollockup_mssymbol_19.svg`, unchanged: https://learn.microsoft.com/en-us/entra/identity-platform/howto-add-branding-in-apps. Used for the Microsoft 365 mail row and the Microsoft staff sign-in row. |
 | `documenso.svg` | The Documenso mark, © Documenso | Documenso's public source repository (AGPL-3.0), `apps/remix/app/components/general/branding-logo-icon.tsx` at commit `80550e78b3e4852f87e9968e24b1984c427e4430` (https://github.com/documenso/documenso): its `<svg>` element and paths unchanged, written out as a file. Documenso publishes no brand kit; this is the mark its own app draws, one ink (`currentColor`), so the page fills it with its own ink, in light and dark. |
 | `google.svg` | The Google "G", © Google | Google's Sign in with Google branding guidelines, `signin-assets.zip`, the light square button without text (`Theme=Light, Show text=No, Shape=Square`), with the button's white tile and border taken out and the frame cut to the "G": https://developers.google.com/identity/branding-guidelines. |
+| `quickbooks/qb-ball.svg`, `quickbooks/qb-logo-black.png`, `quickbooks/qb-logo-white.png` | The QuickBooks ball and the full QuickBooks logo, © Intuit Inc. | Intuit's files, as the owner downloaded them from Intuit, unchanged: the ball is `sbseg-logo-qb-ball-50-50-gwp-wr-us.svg`; the full logo is 2345 x 600, black for a light page and white for a dark one. `quickbooks/TRADEMARK.txt` says whose they are. The ball is on the QuickBooks row of Integrations and the QuickBooks page's head; the full logo is for the connect step (Connect through Boosters Rocket's slice 3). |
 
-No official file is kept yet for **QuickBooks** (Intuit), so its row shows a plain text tile ("QB") in the page's own
-ink. Intuit's press logos are for editorial use only, and its marks for apps come with the Intuit developer program's
-brand guidelines. Replacing the tile with Intuit's file is a change to `IntegrationLogo`
-(`src/app/staff/(app)/settings/integration-logo.tsx`) and a row in this table. SMTP is not a vendor: its tile is a
-plain envelope drawn by the app.
+**QuickBooks' sizes.** Intuit publishes two rules, and the portal meets the stricter of each: design.intuit.com says
+the symbol is never drawn under 16px; the partner guidelines PDF says never under 26px, with clear space of half the
+symbol's height on every side. So the ball is drawn at 26px with 13px clear inside its tile's border (`.logo-qb` in
+`src/app/booster.css`, a 64 x 54 tile on a row and 54 x 54 on the page head, larger than the others), and the full
+logo, when it is drawn, at least 2rem tall with clear space of half its ball's height. Neither is recolored, cropped,
+outlined or put on a tile of color: the ball keeps its green and white in light and dark, and the full logo changes
+file with the theme. These numbers are the ones the spec recorded from Intuit's pages on 2026-11-24
+(`docs/superpowers/specs/2026-11-24-connect-through-boosters-rocket-design.md`, section 9); on 2026-11-24 the builder
+could not read them again (design.intuit.com redirects its QuickBooks pages to its home page for a reader without
+script, and Intuit's static developer docs answered 403), so check them against Intuit's current page before a
+release.
+
+SMTP is not a vendor: its tile is a plain envelope drawn by the app.

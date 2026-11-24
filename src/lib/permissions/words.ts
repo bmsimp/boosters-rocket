@@ -15,7 +15,7 @@ export const PERMISSION_WORDS: Record<Permission, string> = {
   "Admin.Health.Read": "See the Health page",
   "Settings.SignIn.ReadWrite": "Change how staff sign in",
   "Settings.Mail.ReadWrite": "Change outgoing mail",
-  "Settings.QuickBooks.ReadWrite": "Connect QuickBooks and choose the membership shape",
+  "Settings.QuickBooks.ReadWrite": "Connect QuickBooks, register the portal with Boosters Rocket, and choose the membership shape",
   "Settings.Forms.ReadWrite": "Connect the club's Documenso",
   "Roster.Read": "See the roster: families, students and parents",
   "Roster.Family.ReadWrite": "Add, rename, move and make inactive families, students and parents in QuickBooks, and give or end a guardian's sign-in for a family: add, remove and reinstate its guardians, and let them sign in again after the family, or one of its students, was made active again from the books; and change a family's phone and mailing address, where the books keep them on the family",

@@ -3,6 +3,8 @@
 The portal's connection to QuickBooks lasts as long as the worker keeps renewing it, and an Admin's sign-in to Intuit
 renews it for good. Sometimes it has to be made again: Intuit asks for it every so often, the person who connected it
 left, or the Intuit app's keys changed. This is done by an Admin, in the portal, under **Settings**, **QuickBooks**.
+The QuickBooks page's **How it connects** says whether the portal connects through Boosters Rocket or with the club's
+own Intuit app; the steps below are the same for both, but where they say otherwise.
 
 There are two different things here: reconnecting the same company, which changes nothing, and connecting a different
 one, which an Admin asks for first, on its own page, because it ends every family's link to the books.
@@ -15,13 +17,16 @@ signed forms and everything else stay as they are.
 1. Sign in as an Admin and open **Settings**, **QuickBooks**. The page says what is wrong, if anything ("The
    QuickBooks connection couldn't be refreshed", "expires within 30 days").
 2. Select **Change**.
-3. If the Intuit app's keys changed (a new client secret, or Production keys in place of Development), enter them in
-   step 1 and continue. Otherwise go straight to **Step 2: Sign in to Intuit**.
-4. Select **Sign in to Intuit**, sign in as an admin of the club's QuickBooks company, choose **the same company** and
-   approve. You come back to the portal.
+3. With the club's own Intuit app: if its keys changed (a new client secret, or Production keys in place of
+   Development), enter them in step 1 and continue. Through Boosters Rocket, step 1 should say **Ready to connect**; if
+   it doesn't, finish registering ([Intuit: Connect through Boosters Rocket](intuit.md#connect-through-boosters-rocket)).
+   Otherwise go straight to **Step 2: Connect to QuickBooks**.
+4. Select **Connect to QuickBooks**, sign in to Intuit as an admin of the club's QuickBooks company, choose **the same
+   company** and approve. You come back to the portal. Through Boosters Rocket, connecting again renews the same
+   connection: nothing is revoked.
 5. Step 3 shows the membership shape already chosen: leave it, or **Skip to step 3** and keep it.
 6. Open **Health**: **QuickBooks** says "Connected" with a new **Last token refresh** time, and within a few minutes a
-   new **Last roster read**.
+   new **Last roster read**. Through Boosters Rocket, the **Boosters Rocket Connect** line says it answered.
 
 ## Connecting a different company
 
@@ -38,6 +43,8 @@ picking the wrong company on Intuit's page changes nothing.
 
 1. Take a backup first: on the server, in `~/booster-rocket/deploy`, run `docker compose run --rm backup --now`.
 2. Sign in as an Admin and open **Settings**, **QuickBooks**. Open **Disconnect** and select **Disconnect QuickBooks**.
+   Through Boosters Rocket, tick the box first: every portal connected to the company through Boosters Rocket shares one
+   connection, so this may disconnect the others too, such as a trial copy of the portal.
 3. On the same page select **Connect a different company** (or **Change**, then **Connect a different company** in
    step 2). The page lists what a switch ends and keeps, with counts. Read it, check the box, and select
    **Switch companies: sign in to Intuit**.
@@ -63,7 +70,7 @@ connected now, and the section is headed "Ended by a change of QuickBooks compan
 
 What you see if it was refused:
 
-- After **Sign in to Intuit** with another company and no ask, the QuickBooks steps say "That is a different QuickBooks
+- After **Connect to QuickBooks** with another company and no ask, the QuickBooks steps say "That is a different QuickBooks
   company from the one the portal's families were read from, so nothing was connected and nothing was changed." To
   reconnect the club's company, start again and choose it in Intuit; to move to the other one, select **Connect a
   different company** first.

@@ -439,17 +439,32 @@ export const parentEmailChange = pgTable("parent_email_change", {
 ]);
 
 export type QboEnvironment = "sandbox" | "production";
+/** How the portal reaches Intuit: through Boosters Rocket Connect's one Intuit app, or with the club's own app's keys. */
+export type QboMode = "own_app" | "relay";
 
 /**
  * The club's QuickBooks connection (spec §2, §3): the Intuit app's keys and, once connected, the company and its tokens.
  * One row at most: the `qbo_connection_singleton` check allows no `id` but "singleton", and the primary key stops a second. The secret and both tokens are sealed (src/lib/crypto/secret-box.ts).
+ * Two modes (docs/superpowers/specs/2026-11-24-connect-through-boosters-rocket-design.md §4): `connect_mode` is what the
+ * next Connect does, `token_mode` which app issued the tokens held now (refresh and revoke follow it, never
+ * `connect_mode`). The app's keys are needed only for the club's own app: `qbo_connection_own_app_keys` holds them
+ * present whenever either mode is `own_app`; a relay club never has them, and a club that moved keeps them. Each mode
+ * has its own environment: `environment` the own app's, `relay_environment` the relay's (`qbo_connection_relay_environment`
+ * holds it present while tokens or a pending connect are the relay's).
  */
 export const qboConnection = pgTable("qbo_connection", {
   id: text("id").primaryKey().default("singleton"),
-  environment: text("environment", { enum: ["sandbox", "production"] }).notNull(),
-  clientId: text("client_id").notNull(),
-  clientSecretCiphertext: text("client_secret_ciphertext").notNull(),
-  clientSecretKeyId: text("client_secret_key_id").notNull(),
+  // Which QuickBooks the club's own Intuit app's keys are for, saved with them (null for a club that never saved any).
+  environment: text("environment", { enum: ["sandbox", "production"] }),
+  // Which QuickBooks the relay connects to, chosen with step 2's press: its own column, so a relay connect started and
+  // left never changes what the club's own app's keys are for (environmentOf() reads the one for a mode).
+  relayEnvironment: text("relay_environment", { enum: ["sandbox", "production"] }),
+  connectMode: text("connect_mode", { enum: ["own_app", "relay"] }).notNull().default("relay"),
+  tokenMode: text("token_mode", { enum: ["own_app", "relay"] }),   // null while disconnected; set with every store of tokens
+  stateMode: text("state_mode", { enum: ["own_app", "relay"] }),   // the mode a pending connect's state was made for
+  clientId: text("client_id"),
+  clientSecretCiphertext: text("client_secret_ciphertext"),
+  clientSecretKeyId: text("client_secret_key_id"),
   // A connect in progress: the state sent to Intuit (SHA-256), who started it, and when it stops being accepted.
   stateHash: text("state_hash"),
   stateStaffUserId: uuid("state_staff_user_id"),
@@ -469,7 +484,36 @@ export const qboConnection = pgTable("qbo_connection", {
   lastError: text("last_error"),                     // a fixed sentence and a short code, never a response body
   lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
   updatedAt: updated(),
-}, (t) => [check("qbo_connection_singleton", sql`${t.id} = 'singleton'`)]);
+}, (t) => [
+  check("qbo_connection_singleton", sql`${t.id} = 'singleton'`),
+  check("qbo_connection_own_app_keys", sql`(${t.connectMode} <> 'own_app' AND ${t.tokenMode} IS DISTINCT FROM 'own_app')
+    OR (${t.clientId} IS NOT NULL AND ${t.clientSecretCiphertext} IS NOT NULL AND ${t.clientSecretKeyId} IS NOT NULL AND ${t.environment} IS NOT NULL)`),
+  check("qbo_connection_relay_environment", sql`(${t.tokenMode} IS DISTINCT FROM 'relay' AND ${t.stateMode} IS DISTINCT FROM 'relay') OR ${t.relayEnvironment} IS NOT NULL`),
+]);
+
+/**
+ * The portal's registration with Boosters Rocket Connect (the relay): its Ed25519 key pair and the portal id the relay's
+ * owner sent back. One row at most, as `qbo_connection`. No row: not registered yet; a key and no id: waiting for the
+ * id; both: ready to connect. The private key (PKCS#8) is sealed under `qbo:relay-key` and is never shown, returned by a
+ * view, logged or audited; the public key is the base64url of its 32 raw bytes, as the relay registers it. Not keyed by
+ * a QuickBooks id, so a change of company clears nothing here.
+ */
+export const qboRelay = pgTable("qbo_relay", {
+  id: text("id").primaryKey().default("singleton"),
+  publicKey: text("public_key").notNull(),
+  privateKeyCiphertext: text("private_key_ciphertext").notNull(),
+  privateKeyKeyId: text("private_key_key_id").notNull(),
+  keyMadeAt: timestamp("key_made_at", { withTimezone: true }).notNull(),
+  keyMadeBy: uuid("key_made_by"),                    // staff_user.id
+  portalId: text("portal_id"),
+  portalIdSavedAt: timestamp("portal_id_saved_at", { withTimezone: true }),
+  portalIdSavedBy: uuid("portal_id_saved_by"),       // staff_user.id
+  updatedAt: updated(),
+}, (t) => [
+  check("qbo_relay_singleton", sql`${t.id} = 'singleton'`),
+  check("qbo_relay_public_key", sql`${t.publicKey} ~ '^[A-Za-z0-9_-]{43}$'`),
+  check("qbo_relay_portal_id", sql`${t.portalId} IS NULL OR ${t.portalId} ~ '^brp_[a-z0-9]{16}$'`),
+]);
 
 /** A reference copy of QuickBooks' customer types (spec §2). Replaced on every refresh. */
 export const qboCustomerType = pgTable("qbo_customer_type", {

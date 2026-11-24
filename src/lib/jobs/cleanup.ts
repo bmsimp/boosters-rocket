@@ -66,7 +66,7 @@ export const KEPT_TABLES: Record<string, string> = {
   auth_provider: "the staff sign-in set-up", provider_certificate: "the staff sign-in set-up, rotated by an Admin",
   staff_user: "staff accounts, removed by an Admin", role: "roles", role_rule: "roles", role_assignment: "roles",
   parent: "the people who sign in to the portal: the app's own records", guardian: "each person's membership of a family, open or closed: the app's own records",
-  qbo_connection: "the one QuickBooks connection", qbo_customer_type: "the roster cache, replaced by each refresh", qbo_customer: "the roster cache, replaced by each refresh",
+  qbo_connection: "the one QuickBooks connection", qbo_relay: "the portal's one registration with Boosters Rocket Connect, its key and id, replaced only when an Admin makes a new key; not keyed by a QuickBooks id, so a change of company keeps it", qbo_customer_type: "the roster cache, replaced by each refresh", qbo_customer: "the roster cache, replaced by each refresh",
   qbo_item: "QuickBooks' products and services, replaced each time staff read the list; emptied on a change of company",
   season: "seasons are history", season_step: "seasons are history", requirement: "seasons are history", requirement_cover: "seasons are history",
   requirement_progress: "ticks and waivers: a season's record",

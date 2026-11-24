@@ -4,13 +4,14 @@ import type { IntegrationRowKey } from "./statuses";
  * Each integration's mark, in a small tile before its name. The vendors' own marks are static files in
  * public/integrations/, as each vendor publishes them, drawn small and never recolored (brand/README.md names their
  * sources; they belong to their owners). Documenso's mark is one ink (`currentColor`, as Documenso draws it), so its
- * file is a mask filled with the page's ink, in light and dark alike. Where no official mark is kept (QuickBooks:
- * brand/README.md says why), a text tile stands in. SMTP is no vendor: a plain envelope in the page's ink. The name beside the tile says
- * what it is, so the tile is hidden from a screen reader.
+ * file is a mask filled with the page's ink, in light and dark alike. QuickBooks' ball keeps its green and white in both
+ * modes and is drawn at Intuit's smallest allowed size, 26px, with half its height clear on every side, so its tile
+ * (`logo-qb`) is larger than the others. SMTP is no vendor: a plain envelope in the page's ink. The name beside the
+ * tile says what it is, so the tile is hidden from a screen reader.
  */
-type Mark = { src: string } | { text: string } | { mail: true } | { ink: "documenso" };
+type Mark = { src: string; size?: number } | { text: string } | { mail: true } | { ink: "documenso" };
 const MARKS: Record<IntegrationRowKey, Mark> = {
-  quickbooks: { text: "QB" },
+  quickbooks: { src: "/integrations/quickbooks/qb-ball.svg", size: 26 },
   documenso: { ink: "documenso" },
   "mail-graph": { src: "/integrations/microsoft.svg" },
   "mail-smtp": { mail: true },
@@ -20,15 +21,33 @@ const MARKS: Record<IntegrationRowKey, Mark> = {
 
 export function IntegrationLogo({ of, size = "row" }: { of: IntegrationRowKey; size?: "row" | "head" }) {
   const m = MARKS[of];
-  // A 20px static SVG served as it is: next/image has nothing to optimize in it.
+  // A small static SVG served as it is: next/image has nothing to optimize in it.
   // eslint-disable-next-line @next/next/no-img-element
-  const img = "src" in m ? <img src={m.src} alt="" width={20} height={20} /> : null;
+  const img = "src" in m ? <img src={m.src} alt="" width={m.size ?? 20} height={m.size ?? 20} /> : null;
   return (
-    <span className={`logo-tile logo-${size}`} aria-hidden="true">
+    <span className={`logo-tile logo-${size}${of === "quickbooks" ? " logo-qb" : ""}`} aria-hidden="true">
       {img ??
         ("ink" in m ? <span className={`logo-ink logo-${m.ink}`} />
         : "text" in m ? <span className="logo-text" data-mark={m.text} />
         : <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"><rect x="2.5" y="4.5" width="15" height="11" rx="1.5" /><path d="M3 5.5l7 5.5 7-5.5" /></svg>)}
+    </span>
+  );
+}
+
+/**
+ * The full QuickBooks logo, for the connect step: Intuit's own files, unchanged, the black one on a light page and the
+ * white one on a dark one. Both are in the page and the stylesheet shows one, on the same selectors as the tokens
+ * (`data-theme` and the system's preference), which `<picture media>` couldn't see. Drawn 2rem tall with half its
+ * ball's height clear on every side (`.qb-full-logo` in booster.css; brand/README.md, "QuickBooks' sizes").
+ */
+export function QuickBooksFullLogo() {
+  return (
+    <span className="qb-full-logo">
+      {/* Intuit's 2345 x 600 files, served as they are. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img className="qb-on-light" src="/integrations/quickbooks/qb-logo-black.png" alt="QuickBooks" width={2345} height={600} />
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img className="qb-on-dark" src="/integrations/quickbooks/qb-logo-white.png" alt="QuickBooks" width={2345} height={600} />
     </span>
   );
 }

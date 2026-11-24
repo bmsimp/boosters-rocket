@@ -29,6 +29,11 @@ describe("every permission has words", () => {
     expect(PERMISSION_WORDS["Parents.ReadWrite"]).toBe("See every parent, change a parent's name, block or unblock a parent, and resend a welcome email; and see and change a parent's phone and mailing address (and see a family's, where the books keep them on the family)");
   });
 
+  it("says that Settings.QuickBooks.ReadWrite registers the portal with Boosters Rocket", () => {
+    // Connect through Boosters Rocket, slice 2: no new permission; the one that connects QuickBooks registers the portal.
+    expect(PERMISSION_WORDS["Settings.QuickBooks.ReadWrite"]).toBe("Connect QuickBooks, register the portal with Boosters Rocket, and choose the membership shape");
+  });
+
   it("has a linking permission an Admin holds and a custom role (a treasurer's) may be given, which brings the roster's view with it", () => {
     // Open question 1 of the app-owned families spec: "Link families to accounting", not Admin-only. Stage 3's slice 10
     // uses it for "Create a family from this" on Reconciliation, a Roster.Read page, so ticking it brings Roster.Read.
