@@ -4,7 +4,9 @@ import { auditLog, jobRun, requirement, season, seasonStep } from "@/lib/db/sche
 import { lastWake } from "@/lib/jobs/runner";
 import { CLEANUP_JOB } from "@/lib/jobs/cleanup";
 import { CHALLENGE_SWEEP_MARK, failedLast, readMark, WELCOME_MARK } from "@/lib/jobs/marks";
-import { connectionView } from "@/lib/quickbooks/connection";
+import { connectionView, type QboConnectionView } from "@/lib/quickbooks/connection";
+import { readRelayMark, type RelayFailWord, type RelayMark } from "@/lib/quickbooks/relay";
+import { qboRelayUrl } from "@/lib/quickbooks/relay-address";
 import { quickbooksProblems } from "@/lib/quickbooks/health";
 import { QUICKBOOKS_USE, QUICKBOOKS_WRITE_ACTION } from "@/lib/quickbooks/what-it-does";
 import { loadRosterPage } from "@/lib/roster/queries";
@@ -39,7 +41,7 @@ import { env } from "@/env";
 export type HealthState = "ok" | "attention" | "off";
 export type HealthLine = {
   key: "database" | "worker" | "cleanup" | "quickbooks" | "money" | "mail" | "forms" | "parents" | "due_reminders" | "backup" | "version"
-    | "buyout_check" | "volunteer_reminders" | "breach_check";
+    | "buyout_check" | "volunteer_reminders" | "breach_check" | "quickbooks_relay";
   title: string;
   /** "ok": working. "attention": something a person should look at. "off": not set up or switched off, which may be by choice. */
   state: HealthState;
@@ -87,6 +89,46 @@ export function breachCheckLine(mark: BreachMark | null): HealthLine {
   }
   return { ...base, state: "ok", word: "Working", notes: [],
     says: "Answering. Each password a parent chooses is checked against passwords known from data breaches, sending only the first five characters of a hash of it." };
+}
+
+/** What the Boosters Rocket line says when the relay's last answer was a failure, by the mark's fixed word. */
+const RELAY_FAILURE_WORDS: Record<RelayFailWord, { says: string; note: string }> = {
+  unauthorized: { says: "Boosters Rocket didn't accept the portal's last request, so the connection can't be renewed or changed through it.",
+    note: "Check that the server's clock is right, then email support@boostersrocket.com." },
+  busy: { says: "Boosters Rocket was busy at the portal's last request. The worker tries again at its next renewal.",
+    note: "If this stays for more than a day, email support@boostersrocket.com." },
+  unreachable: { says: "Boosters Rocket couldn't be reached at the portal's last request, so the connection can't be renewed until it can.",
+    note: "The portal's server must be able to reach Boosters Rocket on the internet. The worker tries again at its next renewal." },
+  relay_error: { says: "Boosters Rocket's answer to the portal's last request couldn't be read.",
+    note: "The worker tries again at its next renewal. If this stays, email support@boostersrocket.com." },
+};
+
+/**
+ * The line for Boosters Rocket Connect (spec §6, Health), shown only in relay mode: chosen for the next Connect with the
+ * portal registered, or tokens held that were issued through it. From what the portal marked at each signed call
+ * (RELAY_MARK, src/lib/quickbooks/relay.ts): this page never calls the relay. Attention when the last call failed with
+ * no answer since.
+ */
+export function quickbooksRelayLine(conn: Pick<QboConnectionView, "connectMode" | "tokenMode" | "relayStage" | "lastTokenRefreshAt">, mark: RelayMark | null, relayUrl: string): HealthLine | null {
+  const inUse = conn.tokenMode === "relay";
+  if (!inUse && (conn.connectMode !== "relay" || conn.relayStage === "not_registered")) return null;
+  const fix = { href: "/staff/settings/quickbooks", label: "Open QuickBooks settings" };
+  const mode = inUse ? `The portal connects to QuickBooks through Boosters Rocket, at ${relayUrl}.`
+    : conn.tokenMode === "own_app" ? `Chosen for the next Connect, at ${relayUrl}. Until then the portal connects with the club's own Intuit app.`
+      : `Chosen for connecting to QuickBooks, at ${relayUrl}.`;
+  const base = { key: "quickbooks_relay" as const, title: "Boosters Rocket Connect",
+    times: [{ label: "Last renewed through it", at: inUse ? conn.lastTokenRefreshAt : null }, { label: "Last answered", at: mark?.lastOkAt ?? null }, { label: "Last failed", at: mark?.lastFailAt ?? null }] };
+  const failing = Boolean(mark?.lastFailAt && (!mark.lastOkAt || mark.lastFailAt >= mark.lastOkAt));
+  if (failing && mark?.lastFailWord) {
+    const w = RELAY_FAILURE_WORDS[mark.lastFailWord];
+    return { ...base, state: "attention", word: "Needs attention", says: `${w.says} ${mode}`, notes: [w.note], fix };
+  }
+  if (conn.relayStage === "waiting" && !inUse) {
+    return { ...base, state: "off", word: "Waiting for the id", notes: [], fix,
+      says: `${mode} The portal's key is made, and it waits for the id Boosters Rocket emails back, to save in step 1 of the QuickBooks steps.` };
+  }
+  if (!mark?.lastOkAt) return { ...base, state: "off", word: "Not used yet", notes: [], fix: null, says: `${mode} The portal hasn't asked it anything yet.` };
+  return { ...base, state: "ok", word: "Answering", notes: [], fix: null, says: `${mode} It answered the portal's last request.` };
 }
 
 /** The clean-up line's words while the sweep of expired passkey challenges at every wake is failing (runner.ts). */
@@ -160,7 +202,8 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
   if (!conn.configured) {
     lines.push({ key: "quickbooks", title: "QuickBooks", state: "off", word: "Not set up", says: "Not set up. Families, students and what they owe come from QuickBooks, so parents see none of it yet.", times: [], notes: takeInNote, fix: qboFix });
   } else if (!conn.connected) {
-    lines.push({ key: "quickbooks", title: "QuickBooks", state: "attention", word: "Not connected", says: "Not connected. The Intuit app's keys are saved, but the portal can't read the roster or what families owe until an Admin connects.",
+    const ready = conn.connectMode === "relay" ? "The portal is registered with Boosters Rocket" : "The Intuit app's keys are saved";
+    lines.push({ key: "quickbooks", title: "QuickBooks", state: "attention", word: "Not connected", says: `Not connected. ${ready}, but the portal can't read the roster or what families owe until an Admin connects.`,
       times: rosterTimes, notes: [...queueNote, ...takeInNote, use], fix: qboFix });
   } else {
     // The check of the portal's own requests (src/lib/quickbooks/sandbox-check/): when it last ran, and whether every request answered as expected.
@@ -171,9 +214,12 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
       key: "quickbooks", title: "QuickBooks", state: attention ? "attention" : "ok", word: attention ? "Needs attention" : "Connected",
       times: [...rosterTimes, { label: "Requests last checked", at: checked?.at ?? null }],
       notes: [...problems.map((p) => p.text), ...queueNote, ...takeInNote, lastCheckWords(checked), use], fix: problems.length ? (problems.find((p) => p.fix)?.fix ?? qboFix) : writes.stuck || writes.refused ? queueFix : checkFix,
-      says: `Connected to ${conn.companyName ?? "a QuickBooks company"}${conn.environment === "sandbox" ? " (an Intuit sandbox, not the club's real books)" : ""}.`,
+      says: `Connected to ${conn.companyName ?? "a QuickBooks company"}${conn.environment === "sandbox" ? " (an Intuit sandbox, not the club's real books)" : ""}, ${conn.tokenMode === "relay" ? "through Boosters Rocket" : "with the club's own Intuit app"}.`,
     });
   }
+  // Boosters Rocket Connect, in relay mode only, from the mark its calls leave.
+  const relayLine = quickbooksRelayLine(conn, await readRelayMark(), qboRelayUrl());
+  if (relayLine) lines.push(relayLine);
 
   // The worker's daily read of every family's invoices (src/lib/money/sweep.ts), which the Balances page shows.
   const moneyTimes = [{ label: "Last finished", at: moneyRun.last?.ok ? moneyRun.last.finishedAt : null },
