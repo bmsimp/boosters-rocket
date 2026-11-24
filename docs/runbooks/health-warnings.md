@@ -36,8 +36,10 @@ installation with. `docker compose ps` shows what is running, and `docker compos
 ## QuickBooks
 
 - **"Not set up."** Nothing to fix until the club connects QuickBooks: [Intuit](intuit.md).
-- **"Not connected."** The app's keys are saved but the connection was ended. An Admin reconnects:
-  [reconnecting QuickBooks](quickbooks-reconnect.md#the-same-company).
+- **"Connected"** says how: "through Boosters Rocket" or "with the club's own Intuit app". Through Boosters Rocket, the
+  **Boosters Rocket Connect** line below says how the relay answers.
+- **"Not connected."** The portal is registered with Boosters Rocket, or the club's own Intuit app's keys are saved, but
+  the connection was ended. An Admin reconnects: [reconnecting QuickBooks](quickbooks-reconnect.md#the-same-company).
 - **"Needs attention"**, with one of these notes:
   - "The QuickBooks connection couldn't be refreshed" or "expires within 30 days": reconnect the same company.
   - "The last roster refresh failed": the note gives Intuit's reason. If it repeats, check that the Intuit app's keys
@@ -124,6 +126,42 @@ installation with. `docker compose ps` shows what is running, and `docker compos
   - "when it next wakes": the read is done; the copy runs within a minute, and the note goes.
   Meanwhile parents see no phone or address of theirs and can type their own on their Family page, which the copy
   never replaces. The note goes once the copy has run.
+
+## Boosters Rocket Connect
+
+Shown only when the portal connects through Boosters Rocket, or has chosen to from the next Connect. It says how the
+portal connects and at which address (`QBO_RELAY_URL`, `https://connect.boostersrocket.app` when it is unset), when the
+connection was last renewed through it, and when Boosters Rocket last answered and last failed. It is read from what the
+portal noted at each of its own requests (renewals, connects, the registration's check): opening Health asks Boosters
+Rocket nothing. The worker renews the connection at least once a day, so while connected it is never more than a day old.
+
+- **"Waiting for the id."** The portal's key is made and Boosters Rocket hasn't sent its id back yet, or it hasn't been
+  saved. Email the address and public key from step 1 to support@boostersrocket.com if nobody has, then paste the id in
+  ([Intuit: Connect through Boosters Rocket](intuit.md#connect-through-boosters-rocket)).
+- **"Not used yet."** Registered, and nothing has been asked of Boosters Rocket since its answers were first noted.
+  Normal until the first Connect.
+- **"Answering."** Its last answer was a success.
+- **"Needs attention"**, when the last request failed and none has worked since. Its note says what to do:
+  - "Boosters Rocket didn't accept the portal's last request": it refused the portal's signature. Most often the
+    server's clock is more than five minutes out: check it on the server (`date -u` against the real time), and set
+    the server to keep time if it doesn't. If the clock is right, the portal id or key may no longer be what Boosters
+    Rocket registered (a new key made, or the portal revoked): **Settings**, **QuickBooks**, **Change**, step 1, **Check
+    the registration**, then email support@boostersrocket.com.
+  - "Boosters Rocket was busy at the portal's last request": it limits how often one portal may ask. The worker tries
+    again at its next renewal; nothing to do unless it stays for more than a day.
+  - "Boosters Rocket couldn't be reached at the portal's last request": the server must be able to reach Boosters
+    Rocket's address over HTTPS. To try it from the portal's own container:
+
+    ```sh
+    docker compose exec app node -e "fetch('https://connect.boostersrocket.app/v1/portal/check',{method:'POST'}).then(r => console.log(r.status), e => console.log(e.cause?.code ?? e.message))"
+    ```
+
+    `401` means it can (an unsigned request is refused, as it should be). Anything else names what stopped it: look at
+    the server's firewall and its outgoing connections, then wait for the next renewal.
+  - "Boosters Rocket's answer to the portal's last request couldn't be read": the worker tries again; if it stays,
+    email support@boostersrocket.com.
+  While it fails, the QuickBooks line says the connection couldn't be refreshed. The connection stands until its
+  refresh token expires (about 100 days), so there is time; once Boosters Rocket answers, the next renewal clears both.
 
 ## Every family's invoices
 

@@ -167,7 +167,10 @@ APP_COMMIT="$(git rev-parse --short HEAD)" docker compose -f compose.yml -f comp
 
 ## 7. The rest of the set-up
 
-1. QuickBooks: [Intuit](intuit.md).
+1. QuickBooks: [Intuit](intuit.md). The usual way is through Boosters Rocket: register the portal by email
+   ([Connect through Boosters Rocket](intuit.md#connect-through-boosters-rocket)), which needs the portal's `APP_URL` to
+   start with `https://`, and leave `QBO_RELAY_URL` unset in `deploy/.env`. A club with an Intuit app of its own uses
+   parts 1 to 4 there instead.
 2. Forms: [Documenso, parts 2 to 4](documenso.md#2-the-first-documenso-account).
 3. Parent sign-ins: under **Settings**, **Parent sign-ins**, **Set up**, in its three steps: **1. Parent sign-ins**
    (switched on once outgoing mail works), **2. Welcome emails**, and **3. Sign-in level**. A club starts at

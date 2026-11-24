@@ -621,8 +621,17 @@ item 11, its 3 (Entra) item 17, its 5 (Adobe Reader's signature panel) item 12, 
 
 ## 5. Intuit's production assessment
 
-Intuit gives the Production keys, the ones that reach the club's real books, only after its assessment, and that can
-take weeks. Start it as early as you like; it doesn't wait for the parts above.
+A club that connects through Boosters Rocket (the usual way) has no assessment of its own: Boosters Rocket Connect's
+Intuit app is already approved for real books. Instead, register the portal:
+
+1. **Register the portal with Boosters Rocket** by [Intuit: Connect through Boosters Rocket](intuit.md#connect-through-boosters-rocket),
+   steps 1 to 3, on the installation families will use.
+   **Pass:** step 1 of the QuickBooks steps says **Ready to connect**, and **Check the registration** says "Registered
+   as" the club's name, allowed to connect to the club's real books. **If not:** check the id against Boosters Rocket's
+   email, check that the server's clock is right, then email support@boostersrocket.com.
+
+A club on its own Intuit app gets the Production keys, the ones that reach the club's real books, only after Intuit's
+assessment, and that can take weeks. Start it as early as you like; it doesn't wait for the parts above.
 
 1. **Walk [Intuit, part 3](intuit.md#3-the-production-assessment).** Its steps were written without seeing Intuit's
    screens.
@@ -632,12 +641,15 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
 
 ## 6. Connect the club's real books
 
-1. **Connect the real books** by [Intuit, part 4](intuit.md#4-connect-the-clubs-real-books), as the first company of
-   the installation families will use. That installation had best never have read a sandbox company's customers: if it
+1. **Connect the real books** as the first company of the installation families will use: through Boosters Rocket by
+   [Intuit: Connect through Boosters Rocket](intuit.md#connect-through-boosters-rocket), steps 4 to 6, choosing **The
+   club's real books**; with the club's own app by [Intuit, part 4](intuit.md#4-connect-the-clubs-real-books). That installation had best never have read a sandbox company's customers: if it
    has, the real books come in only as a switch, which ends every family's link to the books until each is linked
    again ([reconnecting QuickBooks, a different company](quickbooks-reconnect.md#connecting-a-different-company)). The
    proof-of-concept host stays on the sandbox; the club's installation is a fresh one ([first install](first-install.md)).
-   **Pass:** Health says QuickBooks is "Connected" to the club's company, with no word of a sandbox; Roster's counts
+   **Pass:** Health says QuickBooks is "Connected" to the club's company, with no word of a sandbox, and how it connects
+   (through Boosters Rocket, with its **Boosters Rocket Connect** line saying it answered, or with the club's own Intuit
+   app); Roster's counts
    line has the counts QuickBooks has. A fresh installation lists no families yet: a read of QuickBooks brings no
    customer into the portal's own families by itself. On **Accounting links**, **Customers with no family** lists the
    active family customers of the real books at the top level (under no other customer); a family that is inactive in

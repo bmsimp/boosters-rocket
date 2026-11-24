@@ -1,19 +1,62 @@
-# Intuit: registering the portal and its production assessment
+# Intuit: connecting QuickBooks, through Boosters Rocket or the club's own app
 
 The portal reads the club's families and invoices from QuickBooks Online, and writes back only what someone asks it to
 (a guardian's phone and mailing address, changed by the parent or by staff; the roster
 changes staff make; and the invoice for a volunteer buy-out, made when a guardian chooses to pay instead of
 volunteering and voided if they switch back before paying). A guardian's phone and mailing address are the portal's
-own, kept and changed there, and each change is sent on to their record in QuickBooks after it is saved. To
-do that it is registered with Intuit as an app of the club's own, and it connects to the club's company with that
-app's keys.
+own, kept and changed there, and each change is sent on to their record in QuickBooks after it is saved.
 
-Intuit gives an app two sets of keys. **Development** keys connect only to sandbox companies (test companies that hold
-no real books). **Production** keys connect to the club's real books, and Intuit gives them only after the app passes
-its production assessment. Start that early: it can take weeks.
+There are two ways for the portal to reach QuickBooks. Step 1 of the QuickBooks steps, **How to connect**, offers both:
+
+- **Connect through Boosters Rocket** (the usual way, and the one a new portal starts on): the portal connects through
+  Boosters Rocket Connect, one Intuit app that Intuit has already approved for real books. The club registers its portal
+  once, by email, and needs no Intuit app or assessment of its own. Start at
+  [Connect through Boosters Rocket](#connect-through-boosters-rocket).
+- **Use our own Intuit app**: the club registers an app with Intuit itself and passes Intuit's production assessment,
+  which can take weeks, before it can read its real books. Parts 1 to 4 below walk it. It is the fallback, and for a club
+  that prefers to hold its own app.
 
 Intuit's screens change. Where one doesn't match these steps, trust the screen; the developer site's own help is at
 https://developer.intuit.com.
+
+## Connect through Boosters Rocket
+
+Boosters Rocket Connect is at `https://connect.boostersrocket.app` unless whoever installed the portal set
+`QBO_RELAY_URL` in `deploy/.env` to another (a fork running its own). The QuickBooks page shows the address it uses.
+Its tokens travel only between the portal's server and Boosters Rocket's, never through a browser's address bar.
+
+1. **Register the portal.** As an Admin: **Settings**, **QuickBooks**, **Set up** (or **Change**). In step 1, **How to
+   connect**, keep **Connect through Boosters Rocket** chosen (a club moving from its own app chooses it and selects
+   **Save this choice**). The stage reads **Not registered yet**: select **Make this portal's key**. The private half of
+   the key never leaves the server.
+2. The stage reads **Waiting for the id**, with the portal's address and its public key, each with a Copy button. Select
+   **Write the email** (or copy both into an email of your own) and send them to support@boostersrocket.com. The
+   portal's address must start with `https://`; if it doesn't, the step says so and whoever installed the portal sets
+   `APP_URL`.
+3. Boosters Rocket registers the portal and emails back its id, `brp_` and 16 letters or digits. Paste it into
+   **Portal id** and select **Save the portal id**. The portal asks Boosters Rocket at once: "Registered as" the club's
+   name, with which QuickBooks it may connect, is right. If it says the id and the key don't match, check the id
+   against the email, then email support@boostersrocket.com. If Boosters Rocket couldn't be reached, select **Check
+   again** later. The stage reads **Ready to connect**.
+4. **Connect.** Open step 2. Under **Which QuickBooks**, choose **The club's real books**, or **An Intuit sandbox (test)
+   company** for a trial (a sandbox is best tried on the proof-of-concept host, as part 2 says). Select **Connect to
+   QuickBooks**. At Intuit, sign in as an admin of the club's company, choose it and approve Boosters Rocket Connect. You
+   come back to the portal at step 3.
+5. Choose the membership shape (**Layered** or **Flat**, as part 2 describes), **Preview**, check, **Save this shape**.
+6. Open **Health**: **QuickBooks** says "Connected" to the club's company "through Boosters Rocket", and the **Boosters
+   Rocket Connect** line says it answered.
+
+A club that connected with its own Intuit app moves over the same way: choose **Connect through Boosters Rocket**,
+register, and **Connect to QuickBooks** to the same company. That is not a change of company: nothing in the portal
+changes, and once the new connection is stored the portal asks Intuit to end the old app's access. If Intuit doesn't
+confirm, step 3 says so, and an admin of the company can disconnect the old app in QuickBooks' Apps list.
+
+**Disconnecting** through Boosters Rocket: every portal connected to one QuickBooks company through it shares one
+connection, so disconnecting one (say, a trial copy of the portal) may disconnect the others, the club's real portal
+included. **Disconnect** says so, and asks you to tick that you understand before **Disconnect QuickBooks** works.
+Going back to the club's own app from Boosters Rocket needs a Disconnect first.
+
+The rest of this runbook, parts 1 to 4, is for **Use our own Intuit app** only.
 
 ## 1. Register the app
 
@@ -44,9 +87,9 @@ behind ([reconnecting QuickBooks](quickbooks-reconnect.md#connecting-a-different
 2. In the sandbox, set the company up like the club's books: the customer types the club uses (for example Family,
    Student and Parent), with students and parents as sub-customers of a family, and a few invoices.
 3. In the portal, as an Admin: **Settings**, **QuickBooks**, **Set up**.
-4. Enter the Development **Client ID** and **Client secret**, choose **Sandbox**, **Save**, then **Next: sign in to
-   Intuit** in the note that appears.
-5. **Sign in to Intuit**, choose the sandbox company and **Connect**. You come back to the portal.
+4. In step 1, choose **Use our own Intuit app**. Enter the Development **Client ID** and **Client secret**, choose
+   **Sandbox**, **Save**, then **Next: sign in to Intuit** in the note that appears.
+5. **Connect to QuickBooks**, sign in to Intuit, choose the sandbox company and **Connect**. You come back to the portal.
 6. Choose the membership shape (**Layered** when families have students and parents under them; **Flat** when each
    member is a customer of their own) and the customer types, select **Preview**, check the counts and names, then
    **Save this shape**.
@@ -97,7 +140,8 @@ proof-of-concept host where you can, and install the club's own from [first inst
 
 1. In the portal: **Settings**, **QuickBooks**. With no keys saved yet the button is Set up; with Development keys saved
    from a try, and nothing ever connected, it is **Change**, and its steps open at step 1, where the keys go.
-2. Enter the Production keys, **Production**, sign in to Intuit with an account that can open the club's company,
-   choose it and **Connect**.
+2. Enter the Production keys, **Production**, then in step 2 **Connect to QuickBooks**, sign in to Intuit with an
+   account that can open the club's company, choose it and **Connect**.
 3. Choose the membership shape, **Preview**, check, **Save this shape**.
-4. Open **Health**: QuickBooks says "Connected" to the club's company, with no word of a sandbox.
+4. Open **Health**: QuickBooks says "Connected" to the club's company "with the club's own Intuit app", with no word of
+   a sandbox.
