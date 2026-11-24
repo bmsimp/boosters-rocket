@@ -366,6 +366,28 @@ describe("QuickBooks settings", () => {
     expect(html).not.toMatch(/<input(?![^>]*type="hidden")/);
   });
 
+  it("offers the move to Boosters Rocket, linked to step 1, only while connected with the club's own Intuit app", async () => {
+    const move = "You can move to Boosters Rocket&#x27;s connection";
+    const link = 'href="/staff/settings/quickbooks/setup?step=app">Move to Boosters Rocket</a>';
+    // Not connected: nothing to move.
+    expect(renderToStaticMarkup(await QuickBooksSettingsPage())).not.toContain(move);
+    await saveQboAppAction(form(keys));
+    expect(renderToStaticMarkup(await QuickBooksSettingsPage())).not.toContain(move);
+    // Connected with the club's own app: the notice, with its link straight to step 1.
+    await db.delete(qboConnection); await seedConnected(stub);
+    const own = renderToStaticMarkup(await QuickBooksSettingsPage());
+    expect(own).toContain(move);
+    expect(own).toContain("the club needs no Intuit app of its own");
+    expect(own).toContain(link);
+    // Step 1 is a plain link in setup's step list from any step, so a keyboard reaches it.
+    expect((await setupHtml("shape")).match(/<ol class="setup-progress">(.*?)<\/ol>/)![1]).toContain('<a href="/staff/settings/quickbooks/setup?step=app">1. How to connect</a>');
+    // Connected through Boosters Rocket: nothing to move to.
+    await db.update(qboConnection).set({ connectMode: "relay", tokenMode: "relay", relayEnvironment: "sandbox" });
+    const relay = renderToStaticMarkup(await QuickBooksSettingsPage());
+    expect(relay).not.toContain(move);
+    expect(relay).not.toContain(link);
+  });
+
   it("what the shape form sends is what preview counted and what save stores", async () => {
     await seedConnected(stub);
     await refreshRoster(worker);
