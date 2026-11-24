@@ -2,9 +2,9 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db/client";
-import { qboCustomerType } from "@/lib/db/schema";
+import { qboCustomerType, type QboEnvironment } from "@/lib/db/schema";
 import { staffAction, type StaffCtx } from "@/lib/guards";
-import { getConnection, parseQboAppForm, saveQboApp, beginConnect, beginSwitchConnect, disconnect, parseConnectMode, saveConnectMode } from "@/lib/quickbooks/connection";
+import { getConnection, parseQboAppForm, saveQboApp, beginConnect, beginSwitchConnect, disconnect, parseConnectMode, saveConnectMode, type StartRefusal } from "@/lib/quickbooks/connection";
 import { checkRegistration, makeRelayKey, parsePortalId, savePortalId } from "@/lib/quickbooks/relay-registration";
 import type { RelayCheck } from "@/lib/quickbooks/relay";
 import { parseShapeForm, saveShape, type TypeRow } from "@/lib/roster/shape";
@@ -82,10 +82,24 @@ export const checkRegistrationAction = staffAction(P, async (): Promise<{ ok: tr
   return { ok: true, check: await checkRegistration() };
 });
 
-/** A plain form action: it always ends in a redirect, to Intuit or back to step 1. */
-export const beginConnectAction = staffAction(P, async (ctx): Promise<void> => {
-  const r = await beginConnect(ctx.staffUserId);
-  redirect(r.ok ? r.url : `${SETUP}?step=app&error=keys`);
+/** Where a connect that couldn't start sends the Admin: step 1 when it isn't set up, else step 2 with the reason. */
+const notStarted = (reason: StartRefusal) => (reason === "not_configured" ? `${SETUP}?step=app&error=keys` : `${SETUP}?step=connect&error=${reason}`);
+
+/**
+ * A plain form action: it always ends in a redirect, to Intuit (or, through Boosters Rocket, to the relay's one-time
+ * address) or back to the steps. In relay mode it reads one field, `environment`, the QuickBooks chosen (sent once, one
+ * of the two; with none, the one saved, and with none saved the connect is refused); in own-app mode none, since the
+ * environment goes with the app's keys.
+ */
+export const beginConnectAction = staffAction(P, async (ctx, form?: unknown): Promise<void> => {
+  let environment: QboEnvironment | undefined;
+  if (((await getConnection())?.connectMode ?? "relay") === "relay" && form instanceof FormData && form.has("environment")) {
+    const chosen = only(form, "environment", 20);
+    if (chosen !== "production" && chosen !== "sandbox") redirect(`${SETUP}?step=connect&error=environment`);
+    environment = chosen;
+  }
+  const r = await beginConnect(ctx.staffUserId, { environment, op: op(ctx) });
+  redirect(r.ok ? r.url : notStarted(r.reason));
 });
 
 /**
@@ -97,7 +111,7 @@ export const switchConnectAction = staffAction(P, async (ctx, form: unknown): Pr
   const confirmed = form instanceof FormData && form.getAll("confirm").length === 1 && form.get("confirm") === "yes";
   if (!confirmed) redirect(`${SWITCH_PAGE}?error=confirm`);
   const r = await beginSwitchConnect(ctx.staffUserId, { actor: actor(ctx), ip: ctx.ip, permission: P });
-  redirect(r.ok ? r.url : `${SETUP}?step=app&error=keys`);
+  redirect(r.ok ? r.url : notStarted(r.reason));
 });
 
 export const disconnectAction = staffAction(P, async (ctx): Promise<{ ok: true; revoked: boolean } | { ok: false; error: string }> => {

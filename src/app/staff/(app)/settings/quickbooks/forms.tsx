@@ -317,3 +317,25 @@ export function RelayRegistration({ stage, address, addressFits, publicKey, port
     </section>
   );
 }
+
+const ENVIRONMENTS: { value: "production" | "sandbox"; label: string; hint: string }[] = [
+  { value: "production", label: "The club's real books", hint: "The club's own QuickBooks Online company." },
+  { value: "sandbox", label: "An Intuit sandbox (test) company", hint: "One of the test companies Intuit gives a developer account, for trying the portal out." },
+];
+
+/**
+ * Step 2 through Boosters Rocket: which QuickBooks, then "Connect to QuickBooks", a plain form post that ends in a
+ * redirect to the relay. While connected, the other QuickBooks can't be chosen (the server refuses it too): connecting
+ * again renews the one connected. It is given only what it shows.
+ */
+export function RelayConnectForm({ environment, locked, begin }: { environment: "production" | "sandbox" | null; locked: boolean; begin: (f: FormData) => Promise<void> }) {
+  const [chosen, setChosen] = useState<"production" | "sandbox">(environment ?? "production");
+  const options = ENVIRONMENTS.map((o) => ({ ...o, disabled: locked && o.value !== environment }));
+  return (
+    <form action={begin} className="stack">
+      <ChoiceGroup name="environment" legend="Which QuickBooks" hint={locked ? "To connect the other, disconnect first, from QuickBooks settings." : undefined}
+        options={options} value={chosen} onChange={(v) => setChosen(v === "sandbox" ? "sandbox" : "production")} cols={1} />
+      <p><Button type="submit">Connect to QuickBooks</Button></p>
+    </form>
+  );
+}

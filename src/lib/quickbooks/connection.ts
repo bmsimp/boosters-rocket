@@ -7,7 +7,8 @@ import { secretBox, SecretBoxError } from "@/lib/crypto/secret-box";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { errorNeedsAdmin, QboError, QBO_SCOPE } from "./endpoints";
 import { oauthEndpoints } from "./discovery";
-import { ownAppOf, QBO_AAD, qboGet, sealTokens, tokenRequest, type TokenSet } from "./client";
+import { ownAppOf, QBO_AAD, qboGet, sealTokens, tokenRequest, type QboApp, type TokenSet } from "./client";
+import { relayForget, relayRedeem, relayStart } from "./relay";
 import { clearRosterOfOtherCompany, dropSwitchAsk, getRosterSource, getSwitchRecord, setSwitchRecord, storedSwitchOf, SWITCH_KEY, type SwitchRecord } from "@/lib/roster/source";
 
 export type QboOp = { actor: Actor; ip: string | null; permission?: string };
@@ -19,7 +20,10 @@ export type QboAppDraft = { clientId: string; clientSecret: string | null; envir
  * the ask didn't hold: made for another sign-in to Intuit, by someone else, expired, spent, or made while the roster
  * named another company than it does now.
  */
-export type ConnectRefusal = "state" | "denied" | "other_company" | "roster_company" | "intuit" | "not_configured";
+export type ConnectRefusal = "state" | "denied" | "other_company" | "roster_company" | "intuit" | "not_configured"
+  // Through Boosters Rocket (spec §5, Connect): the redemption refused or late; the relay refused the portal, was busy,
+  // or couldn't be reached or read.
+  | "relay_code" | "relay_refused" | "relay_busy" | "relay_unreachable";
 export type QboConnectionView = {
   /**
    * Step 1 is done, or a connection is held: in own-app mode the Intuit app's keys are saved, in relay mode the portal
@@ -168,28 +172,85 @@ async function revokeAtIntuit(refreshToken: string, app: { clientId: string; cli
   }
 }
 
-type Begun = { ok: true; url: string } | { ok: false; reason: "not_configured" };
-const newState = (staffUserId: string) => {
+/**
+ * Why a connect couldn't start: not set up (own-app keys, or the relay registration), no QuickBooks chosen, the other
+ * one chosen while connected (`environment_locked`), or the relay's three (spec §5, Connect, 3), which are audited.
+ */
+export type StartRefusal = "not_configured" | "environment" | "environment_locked" | "relay_refused" | "relay_busy" | "relay_unreachable";
+type Begun = { ok: true; url: string } | { ok: false; reason: StartRefusal };
+type StateSet = { stateHash: string; stateStaffUserId: string; stateExpiresAt: Date; updatedAt: Date };
+const newState = (staffUserId: string): { state: string; set: StateSet } => {
   const state = randomBytes(32).toString("base64url");
   return { state, set: { stateHash: sha256(state), stateStaffUserId: staffUserId, stateExpiresAt: new Date(Date.now() + STATE_TTL_MS), updatedAt: new Date() } };
 };
 const intuitUrl = async (clientId: string, environment: QboEnvironment, state: string) =>
   `${(await oauthEndpoints(environment)).authorize}?${new URLSearchParams({ client_id: clientId, response_type: "code", scope: QBO_SCOPE, redirect_uri: qboRedirectUri(), state })}`;
 
+/** A relay failure (relay.ts's codes) as the reason a connect stops. */
+function relayReason(code: string): "relay_code" | "relay_refused" | "relay_busy" | "relay_unreachable" {
+  if (code === "relay_code") return "relay_code";
+  if (code === "relay_busy") return "relay_busy";
+  if (code === "relay_unreachable" || code === "relay_error") return "relay_unreachable";
+  return "relay_refused"; // relay_unauthorized, relay_refused, relay_not_registered, unreadable: the registration
+}
+
 /**
- * Starts a connect: a new single-use state for this Admin (replacing any earlier one) and the Intuit address to send
- * them to. Any ask to switch companies is dropped with the state it was made for, so this connect is a plain one: the
- * same company again, or a first one. A stored switch whose clear hasn't run yet is kept for the clear: signing in
- * again then renews the company it switched to (completeConnect()), and the next roster refresh still finishes it.
+ * Starts a connect, plain or a switch, in the mode the Admin chose (`connect_mode`): a new single-use state for this
+ * Admin (replacing any earlier one), made for that mode (`state_mode`), and the address to send them to. In own-app
+ * mode that is Intuit's, with the club's app's Client ID. In relay mode the row's environment is the one chosen with
+ * the press (refused while connected to the other), the row is made if the club has none yet, and, after the
+ * transaction (no row lock is held while the relay answers), the relay is asked for its one-time go address, signed:
+ * a refusal, a busy relay or none at all stops here, audited. `ask` writes a switch's ask in the state's transaction;
+ * without it any ask is dropped.
  */
-export async function beginConnect(staffUserId: string): Promise<Begun> {
+async function startConnect(staffUserId: string, o: { environment?: QboEnvironment; op?: QboOp }, ask: ((tx: Tx, set: StateSet) => Promise<void>) | null): Promise<Begun> {
   const { state, set } = newState(staffUserId);
-  const c = await db.transaction(async (tx) => {
-    const [row] = await tx.update(qboConnection).set(set).returning();
-    await dropSwitchAsk(tx);
-    return row;
+  const begun = await db.transaction(async (tx): Promise<{ ok: true; mode: QboMode; clientId: string | null; environment: QboEnvironment } | { ok: false; reason: StartRefusal }> => {
+    const [c] = await tx.select().from(qboConnection).for("update");
+    const mode = c?.connectMode ?? "relay";
+    let environment: QboEnvironment;
+    if (mode === "own_app") {
+      if (!c) return { ok: false, reason: "not_configured" };
+      await tx.update(qboConnection).set({ ...set, stateMode: "own_app" });
+      environment = c.environment;
+    } else {
+      const [r] = await tx.select({ portalId: qboRelay.portalId }).from(qboRelay);
+      if (!r?.portalId) return { ok: false, reason: "not_configured" };
+      const chosen = o.environment ?? c?.environment;
+      if (!chosen) return { ok: false, reason: "environment" };
+      if (c?.realmId && c.environment !== chosen) return { ok: false, reason: "environment_locked" };
+      environment = chosen;
+      if (c) await tx.update(qboConnection).set({ ...set, stateMode: "relay", environment });
+      else await tx.insert(qboConnection).values({ ...set, stateMode: "relay", environment, connectMode: "relay" });
+    }
+    if (ask) await ask(tx, set);
+    else await dropSwitchAsk(tx);
+    return { ok: true, mode, clientId: c?.clientId ?? null, environment };
   });
-  return c?.clientId ? { ok: true, url: await intuitUrl(c.clientId, c.environment, state) } : { ok: false, reason: "not_configured" };
+  if (!begun.ok) return begun;
+  if (begun.mode === "own_app") return begun.clientId ? { ok: true, url: await intuitUrl(begun.clientId, begun.environment, state) } : { ok: false, reason: "not_configured" };
+  try {
+    return { ok: true, url: await relayStart(begun.environment, state) };
+  } catch (e) {
+    if (!(e instanceof QboError)) throw e;
+    const why = relayReason(e.code), reason = why === "relay_code" ? "relay_refused" : why;
+    if (o.op) {
+      await writeAudit({ actor: o.op.actor, action: "quickbooks.relay.connect_refused", permission: o.op.permission, ...TARGET, ip: o.op.ip,
+        after: { reason, step: "start", code: e.code, environment: begun.environment } });
+    }
+    return { ok: false, reason };
+  }
+}
+
+/**
+ * Starts a connect: a new single-use state for this Admin and the address to send them to (startConnect()). In relay
+ * mode `environment` is the Admin's choice of QuickBooks, and `op` audits a refusal by the relay. Any ask to switch
+ * companies is dropped with the state it was made for, so this connect is a plain one: the same company again, or a
+ * first one. A stored switch whose clear hasn't run yet is kept for the clear: signing in again then renews the company
+ * it switched to (completeConnect()), and the next roster refresh still finishes it.
+ */
+export async function beginConnect(staffUserId: string, o: { environment?: QboEnvironment; op?: QboOp } = {}): Promise<Begun> {
+  return startConnect(staffUserId, o, null);
 }
 
 /**
@@ -197,20 +258,16 @@ export async function beginConnect(staffUserId: string): Promise<Begun> {
  * slice M8, the owner's choice 1): the state as beginConnect() writes it and, in the same transaction, the ask
  * (SWITCH_KEY: the state's hash and expiry, this Admin, and the roster's company as read now), audited. Only a connect
  * made with this state may then store a company other than the roster's (completeConnect()). While the roster names no
- * company there is nothing to switch from, and it starts a plain connect.
+ * company there is nothing to switch from, and it starts a plain connect. In relay mode it connects to the QuickBooks
+ * (real or sandbox) already saved.
  */
 export async function beginSwitchConnect(staffUserId: string, o: QboOp): Promise<Begun> {
-  const { state, set } = newState(staffUserId);
-  const c = await db.transaction(async (tx) => {
-    const [row] = await tx.update(qboConnection).set(set).returning();
-    if (!row) return undefined;
+  return startConnect(staffUserId, { op: o }, async (tx, set) => {
     const fromRealmId = await getRosterSource(tx);
-    if (fromRealmId === null) { await dropSwitchAsk(tx); return row; }
+    if (fromRealmId === null) { await dropSwitchAsk(tx); return; }
     await setSwitchRecord(tx, { asked: { stateHash: set.stateHash, staffUserId, expiresAt: set.stateExpiresAt.toISOString(), fromRealmId } });
     await writeAudit({ actor: o.actor, action: "quickbooks.switch.asked", permission: o.permission, ...TARGET, after: { fromRealmId }, ip: o.ip }, tx);
-    return row;
   });
-  return c?.clientId ? { ok: true, url: await intuitUrl(c.clientId, c.environment, state) } : { ok: false, reason: "not_configured" };
 }
 
 /**
@@ -234,35 +291,72 @@ async function sameRosterCompany(realmId: string, tx: Tx): Promise<boolean> {
   return source === null || source === realmId;
 }
 
-/** Finishes a connect when Intuit sends the Admin back (spec §3 Rules for the connection). */
-export async function completeConnect(
-  p: { code: string | null; state: string | null; realmId: string | null; error: string | null },
-  o: { staffUserId: string; actor: Actor; ip: string | null; permission?: string },
-): Promise<{ ok: true } | { ok: false; reason: ConnectRefusal }> {
+type ConnectOp = { staffUserId: string; actor: Actor; ip: string | null; permission?: string };
+type IntuitReturn = { code: string | null; state: string | null; realmId: string | null; error: string | null };
+type RelayReturn = { code: string | null; state: string | null; error: string | null };
+type Finished = { ok: true; oldGrantRevoked?: boolean } | { ok: false; reason: ConnectRefusal };
+
+/** Finishes a connect when Intuit sends the Admin back, with the club's own Intuit app (spec §3 Rules for the connection). */
+export async function completeConnect(p: IntuitReturn, o: ConnectOp): Promise<{ ok: true } | { ok: false; reason: ConnectRefusal }> {
+  const r = await finishConnect("own_app", p, o);
+  return r.ok ? { ok: true } : r;
+}
+
+/**
+ * Finishes a connect through Boosters Rocket when the relay sends the Admin back (spec §5, Connect, 5): the same steps
+ * as completeConnect(), but the return carries the relay's redemption code, not Intuit's, and no company: the tokens
+ * and the company come from redeeming the code, signed, server to server. `oldGrantRevoked` is said only after a move
+ * from the club's own app: whether Intuit confirmed it ended the old app's access.
+ */
+export async function completeRelayConnect(p: RelayReturn, o: ConnectOp): Promise<Finished> {
+  return finishConnect("relay", { ...p, realmId: null }, o);
+}
+
+type Claimed = { ok: true; switchFrom: string | null; environment: QboEnvironment; app: QboApp | null } | { ok: false; reason: ConnectRefusal };
+type OldGrant = { refreshToken: string; app: QboApp; environment: QboEnvironment } | null;
+type Stored = { kind: "stored" | "switched"; switchFrom: string | null; moved: boolean; old: OldGrant } | { kind: "state" | "other_company" | "roster_company" };
+
+/**
+ * The one finish of a connect, in either mode. Only step 2, turning the return into tokens, and what is done with
+ * tokens the portal doesn't keep, differ by mode; the state, the company and switch checks and the store are one.
+ */
+async function finishConnect(mode: QboMode, p: IntuitReturn, o: ConnectOp): Promise<Finished> {
+  const relay = mode === "relay";
   // `revoked` is recorded only when Intuit had issued tokens that the portal then didn't keep (see step 3).
-  const refuse = async (reason: ConnectRefusal, extra: { code?: string; revoked?: boolean } = {}) => {
-    await writeAudit({ actor: o.actor, action: "quickbooks.connect_refused", permission: o.permission, ...TARGET, after: { reason, ...extra }, ip: o.ip });
+  const refuse = async (reason: ConnectRefusal, extra: Record<string, unknown> = {}) => {
+    await writeAudit({ actor: o.actor, action: relay ? "quickbooks.relay.connect_refused" : "quickbooks.connect_refused", permission: o.permission, ...TARGET, after: { reason, ...extra }, ip: o.ip });
     return { ok: false as const, reason };
   };
-  // 1. Spend the state. It is cleared only when it matches, so a stray return can't cancel a connect in progress.
-  const claim = await db.transaction(async (tx): Promise<{ ok: true; switchFrom: string | null; clientId: string; clientSecret: string; environment: QboEnvironment } | { ok: false; reason: ConnectRefusal }> => {
+  // 1. Spend the state. It is cleared only when it matches, so a stray return can't cancel a connect in progress. It
+  // must have been made for this mode: a state made for the relay finishes only at the relay's callback, and the other
+  // way round.
+  const claim = await db.transaction(async (tx): Promise<Claimed> => {
     const [c] = await tx.select().from(qboConnection).for("update");
     if (!c) return { ok: false, reason: "not_configured" };
     const given = Buffer.from(sha256(p.state ?? ""), "hex"), kept = Buffer.from(c.stateHash ?? "", "hex");
     const good = Boolean(p.state) && kept.length === given.length && timingSafeEqual(given, kept)
-      && c.stateStaffUserId === o.staffUserId && c.stateExpiresAt !== null && c.stateExpiresAt.getTime() > Date.now();
+      && c.stateStaffUserId === o.staffUserId && c.stateExpiresAt !== null && c.stateExpiresAt.getTime() > Date.now() && c.stateMode === mode;
     if (!good) return { ok: false, reason: "state" };
     // The ask to switch companies, if any, is spent with the state it was made for (a stored switch is the clear's).
     const ask = await getSwitchRecord(tx);
-    await tx.update(qboConnection).set({ stateHash: null, stateStaffUserId: null, stateExpiresAt: null, updatedAt: new Date() });
+    await tx.update(qboConnection).set({ stateHash: null, stateStaffUserId: null, stateExpiresAt: null, stateMode: null, updatedAt: new Date() });
     if (ask && "asked" in ask) await dropSwitchAsk(tx);
+    if (relay) {
+      // The relay names its own failures: Intuit refused the code it was given (`intuit`), or the Admin said no.
+      if (p.error || !p.code) return { ok: false, reason: p.error === "intuit" ? "intuit" : "denied" };
+      // The company is known only once the code is redeemed. Here only whether the ask holds is decided, while it is
+      // still the one made with this state; the company checks are made under the row lock, when storing (step 3).
+      const rosterRealmId = await getRosterSource(tx);
+      const askFrom = askHolds(ask, { stateHash: c.stateHash, staffUserId: o.staffUserId, rosterRealmId }) ? rosterRealmId : null;
+      return { ok: true, switchFrom: askFrom, environment: c.environment, app: null };
+    }
     if (p.error || !p.code || !p.realmId || !/^\d{1,32}$/.test(p.realmId)) return { ok: false, reason: "denied" };
     if (c.realmId && c.realmId !== p.realmId) return { ok: false, reason: "other_company" };
     // The company the roster was read from, or another only against the ask: nothing is exchanged or stored otherwise.
     // One exception: signing in again to the company a stored switch moved to, while it is still connected and that
     // switch's clear hasn't run (step 3b threw, and no refresh has finished it), renews it, and the clear then runs.
     let switchFrom: string | null = null;
-    if (!(await sameRosterCompany(p.realmId!, tx))) {
+    if (!(await sameRosterCompany(p.realmId, tx))) {
       const rosterRealmId = await getRosterSource(tx);
       const renewing = c.realmId === p.realmId && storedSwitchOf(ask, rosterRealmId, p.realmId);
       if (!renewing && !askHolds(ask, { stateHash: c.stateHash, staffUserId: o.staffUserId, rosterRealmId })) return { ok: false, reason: "roster_company" };
@@ -270,60 +364,110 @@ export async function completeConnect(
     }
     try {
       const app = ownAppOf(c);
-      return app ? { ok: true, switchFrom, ...app, environment: c.environment } : { ok: false, reason: "not_configured" };
+      return app ? { ok: true, switchFrom, app, environment: c.environment } : { ok: false, reason: "not_configured" };
     } catch (e) {
       if (e instanceof SecretBoxError) return { ok: false, reason: "not_configured" };
       throw e;
     }
   });
   if (!claim.ok) return refuse(claim.reason);
-  // 2. Exchange the code. No row lock is held while Intuit answers.
-  let tokens: TokenSet;
-  try {
-    tokens = await tokenRequest({ grant_type: "authorization_code", code: p.code!, redirect_uri: qboRedirectUri() }, claim, claim.environment);
-  } catch (e) {
-    if (e instanceof QboError) return refuse("intuit", { code: e.code });
-    throw e;
+  // 2. Turn the return into tokens, with no row lock held while Intuit or the relay answers: Intuit's code exchanged
+  // with the club's app, or the relay's redemption code redeemed, signed (the answer must be for this attempt, its
+  // `portal_state` the state just spent, and this environment; its `realm_id` is the company).
+  let tokens: TokenSet, realmId: string;
+  if (relay) {
+    try {
+      const r = await relayRedeem(p.code!, { portalState: p.state!, environment: claim.environment });
+      tokens = r.tokens; realmId = r.realmId;
+    } catch (e) {
+      if (e instanceof QboError) return refuse(relayReason(e.code), { code: e.code });
+      throw e;
+    }
+  } else {
+    realmId = p.realmId!;
+    try {
+      tokens = await tokenRequest({ grant_type: "authorization_code", code: p.code!, redirect_uri: qboRedirectUri() }, claim.app!, claim.environment);
+    } catch (e) {
+      if (e instanceof QboError) return refuse("intuit", { code: e.code });
+      throw e;
+    }
   }
   // 3. Store the connection, unless another company got connected while Intuit was answering. From here until the
-  // row is saved the portal holds tokens Intuit issued: if it doesn't keep them, it asks Intuit to revoke them, so a
-  // refused connect leaves no grant standing. The revoke changes nothing about the refusal.
-  const revokeIssued = () => revokeAtIntuit(tokens.refreshToken, claim, claim.environment);
-  // When storing throws: Intuit's revoke can cancel the company's whole grant to the app, not just these tokens. So
-  // if the row still holds a connection to this company (the Admin was signing in again to renew it), nothing is
-  // revoked and that connection carries on. The row is read fresh; if even that fails, nothing is revoked. The
-  // failure is audited when it can be, and the original error always goes on to the caller.
+  // row is saved the portal holds tokens Intuit issued. Tokens of the club's own app that it doesn't keep, it asks
+  // Intuit to revoke, so a refused connect leaves no grant standing. Tokens issued through the relay are never revoked
+  // here: the relay's one app holds one grant per company, which another portal (a trial copy of this one) may be
+  // using. They are dropped, and the relay is asked to forget that this portal connected the company. Neither changes
+  // anything about the refusal.
+  const dropIssued = async (): Promise<Record<string, unknown>> => relay
+    ? { revoked: false, why: "shared_grant", forgotten: await relayForget(claim.environment, realmId) }
+    : { revoked: await revokeAtIntuit(tokens.refreshToken, claim.app!, claim.environment) };
+  // Whether the row still holds a connection to this company, read fresh (the Admin was signing in again to renew it):
+  // then nothing is revoked or forgotten, and that connection carries on.
+  const stillHeld = async () => { const now = await getConnection(); return now?.realmId === realmId && Boolean(now?.refreshTokenCiphertext); };
+  // When storing throws: Intuit's revoke can cancel the company's whole grant to the app, not just these tokens, and
+  // the relay's forget ends its record of the company. So neither is sent while the row still holds this company; if
+  // even the read fails, nothing is sent. The failure is audited when it can be, and the original error always goes on
+  // to the caller.
   const storeFailed = async (): Promise<void> => {
-    let revoked: boolean | undefined;
+    let dropped: Record<string, unknown> = relay ? { revoked: false, why: "shared_grant" } : {};
     try {
-      const now = await getConnection();
-      const stillConnected = now?.realmId === p.realmId && Boolean(now?.refreshTokenCiphertext);
-      if (!stillConnected) revoked = await revokeIssued();
-    } catch { /* can't tell what the portal holds: leave Intuit alone */ }
+      if (!(await stillHeld())) dropped = await dropIssued();
+    } catch { /* can't tell what the portal holds: leave Intuit and the relay alone */ }
     try {
-      await writeAudit({ actor: o.actor, action: "quickbooks.connect_refused", permission: o.permission, ...TARGET,
-        after: revoked === undefined ? { reason: "store_failed" } : { reason: "store_failed", revoked }, ip: o.ip });
+      await writeAudit({ actor: o.actor, action: relay ? "quickbooks.relay.connect_refused" : "quickbooks.connect_refused", permission: o.permission, ...TARGET, after: { reason: "store_failed", ...dropped }, ip: o.ip });
     } catch { /* the audit write must not replace the error that brought us here */ }
   };
-  const stored = await db.transaction(async (tx) => {
+  const stored = await db.transaction(async (tx): Promise<Stored> => {
     const [c] = await tx.select().from(qboConnection).for("update");
-    if (!c) return "other_company" as const;
-    // The tokens belong to the app and environment the code was exchanged under; the keys may have changed since.
-    if (c.clientId !== claim.clientId || c.environment !== claim.environment) return "state" as const;
-    if (c.realmId && c.realmId !== p.realmId) return "other_company" as const;
+    if (!c) return { kind: "other_company" };
+    // The tokens belong to the app and environment they were issued under; the keys or the mode may have changed since.
+    const sameApp = relay ? c.connectMode === "relay" : c.clientId === claim.app!.clientId;
+    if (!sameApp || c.environment !== claim.environment) return { kind: "state" };
+    if (c.realmId && c.realmId !== realmId) return { kind: "other_company" };
     // Checked again under the row lock: another company only for a switch from the company the ask was made against,
-    // still the roster's.
-    const switching = !(await sameRosterCompany(p.realmId!, tx));
-    if (switching && (claim.switchFrom === null || (await getRosterSource(tx)) !== claim.switchFrom)) return "roster_company" as const;
-    await tx.update(qboConnection).set({ realmId: p.realmId, connectedAt: new Date(), connectedBy: o.staffUserId, tokenMode: "own_app", ...sealTokens(tokens) });
+    // still the roster's. Through the relay the company is known only now, so the renewal of a stored switch's company
+    // (which step 1 allows for the club's own app) is decided here.
+    const switching = !(await sameRosterCompany(realmId, tx));
+    let switchFrom = claim.switchFrom;
+    if (switching && relay && switchFrom === null) {
+      const rosterRealmId = await getRosterSource(tx);
+      if (c.realmId === realmId && storedSwitchOf(await getSwitchRecord(tx), rosterRealmId, realmId)) switchFrom = rosterRealmId;
+    }
+    if (switching && (switchFrom === null || (await getRosterSource(tx)) !== switchFrom)) return { kind: "roster_company" };
+    // A move from the club's own app to the relay (the same company, connected with own-app tokens): the old refresh
+    // token is taken under this lock, to be revoked at Intuit with the old keys once the new tokens are stored. Renewing
+    // through the relay revokes nothing: the old tokens are of the same app and grant as the new.
+    const moved = relay && c.tokenMode === "own_app" && c.realmId === realmId;
+    let old: OldGrant = null;
+    if (moved && c.refreshTokenCiphertext && c.refreshTokenKeyId) {
+      try {
+        const box = secretBox(), app = ownAppOf(c, box);
+        if (app) old = { refreshToken: box.open({ ciphertext: c.refreshTokenCiphertext, keyId: c.refreshTokenKeyId }, QBO_AAD.refresh), app, environment: c.environment };
+      } catch (e) {
+        if (!(e instanceof SecretBoxError)) throw e; // unreadable here: the old grant can't be revoked from here
+      }
+    }
+    await tx.update(qboConnection).set({ realmId, connectedAt: new Date(), connectedBy: o.staffUserId, tokenMode: mode, ...sealTokens(tokens) });
     // The switch is recorded in the store's transaction, so a clear that doesn't run below is still run by the roster
     // refresh, for this switch alone; a connect that switches nothing leaves no record behind.
-    if (switching) await setSwitchRecord(tx, { stored: { fromRealmId: claim.switchFrom!, toRealmId: p.realmId!, staffUserId: o.staffUserId, at: new Date().toISOString() } });
+    if (switching) await setSwitchRecord(tx, { stored: { fromRealmId: switchFrom!, toRealmId: realmId, staffUserId: o.staffUserId, at: new Date().toISOString() } });
     else await tx.delete(setting).where(eq(setting.key, SWITCH_KEY));
-    return switching ? "switched" as const : "stored" as const;
+    return { kind: switching ? "switched" : "stored", switchFrom, moved, old };
   }).catch(async (e: unknown) => { await storeFailed(); throw e; });
-  if (stored !== "stored" && stored !== "switched") return refuse(stored, { revoked: await revokeIssued() });
-  const switched = stored === "switched";
+  if (stored.kind !== "stored" && stored.kind !== "switched") {
+    // Through the relay, the company is forgotten only while this portal doesn't hold it: forgetting a company still
+    // connected here would end the relay's record of that connection.
+    const keep = relay && (await stillHeld());
+    return refuse(stored.kind, keep ? { revoked: false, why: "shared_grant", forgotten: false } : await dropIssued());
+  }
+  const switched = stored.kind === "switched";
+  // 3a. After a move from the club's own app, its grant is revoked with its own keys, now the new tokens are stored. If
+  // Intuit doesn't confirm it, the old app's access may still stand in QuickBooks' Apps list, and the Admin is told so.
+  let oldGrantRevoked: boolean | undefined;
+  if (stored.moved) {
+    oldGrantRevoked = stored.old ? await revokeAtIntuit(stored.old.refreshToken, stored.old.app, stored.old.environment) : false;
+    await writeAudit({ actor: o.actor, action: "quickbooks.relay.old_grant_revoked", permission: o.permission, ...TARGET, after: { realmId, revoked: oldGrantRevoked }, ip: o.ip });
+  }
   // 3b. A company other than the one the cache was read from (a switch the ask allowed) clears what belonged to that one
   // before anything reads the new one (open question 16), and spends the recorded switch; the same company, or none,
   // clears nothing. Run after the row lock above is released, never inside it (see clearRosterOfOtherCompany). Should
@@ -331,7 +475,7 @@ export async function completeConnect(
   // the old company's records (connectedToAnotherCompany(), src/lib/families/links.ts), and the next roster refresh
   // (the callback's own, or the worker's) runs the clear for the recorded switch before it saves anything.
   try {
-    await clearRosterOfOtherCompany(p.realmId!, { actor: o.actor, ip: o.ip });
+    await clearRosterOfOtherCompany(realmId, { actor: o.actor, ip: o.ip });
   } catch (e) {
     if (!switched) throw e;
     // Audited, not logged (nothing here writes to the log), so the audit log says a switch's clear is still to run,
@@ -339,20 +483,26 @@ export async function completeConnect(
     const error = e instanceof Error ? e.name.slice(0, 40) : "unknown";
     try {
       await writeAudit({ actor: o.actor, action: "quickbooks.switch.clear_failed", permission: o.permission, ...TARGET,
-        after: { fromRealmId: claim.switchFrom, toRealmId: p.realmId, error }, ip: o.ip });
+        after: { fromRealmId: stored.switchFrom, toRealmId: realmId, error }, ip: o.ip });
     } catch { /* the connection stands whatever the audit write does */ }
   }
   // 4. The company's name, for people. The connection stands even if this read fails.
   let companyName: string | null = null;
   try {
-    const info = (await qboGet(`companyinfo/${encodeURIComponent(p.realmId!)}`)) as { CompanyInfo?: { CompanyName?: unknown } };
+    const info = (await qboGet(`companyinfo/${encodeURIComponent(realmId)}`)) as { CompanyInfo?: { CompanyName?: unknown } };
     if (typeof info.CompanyInfo?.CompanyName === "string") companyName = info.CompanyInfo.CompanyName.slice(0, 200);
   } catch (e) {
     if (!(e instanceof QboError)) throw e;
   }
   // Only while this company is still the connected one: a disconnect during the read must not get a name back.
-  await db.update(qboConnection).set({ companyName, updatedAt: new Date() }).where(eq(qboConnection.realmId, p.realmId!));
-  await writeAudit({ actor: o.actor, action: "quickbooks.connect", permission: o.permission, ...TARGET, after: { companyName, realmId: p.realmId, environment: claim.environment, ...(switched ? { switchedFrom: claim.switchFrom } : {}) }, ip: o.ip });
+  await db.update(qboConnection).set({ companyName, updatedAt: new Date() }).where(eq(qboConnection.realmId, realmId));
+  const switchedFrom = switched ? { switchedFrom: stored.switchFrom } : {};
+  if (relay) {
+    await writeAudit({ actor: o.actor, action: "quickbooks.relay.connect", permission: o.permission, ...TARGET, ip: o.ip,
+      after: { companyName, realmId, environment: claim.environment, movedFromOwnApp: stored.moved, ...switchedFrom } });
+    return oldGrantRevoked === undefined ? { ok: true } : { ok: true, oldGrantRevoked };
+  }
+  await writeAudit({ actor: o.actor, action: "quickbooks.connect", permission: o.permission, ...TARGET, after: { companyName, realmId, environment: claim.environment, ...switchedFrom }, ip: o.ip });
   return { ok: true };
 }
 
@@ -363,7 +513,9 @@ export async function disconnect(o: QboOp): Promise<{ ok: true; revoked: boolean
   let revoked = false;
   try {
     const box = secretBox();
-    const app = ownAppOf(c, box);
+    // Tokens issued through the relay are never revoked with the club's own keys, which didn't issue them (slice 4
+    // revokes them through the relay); until then the tokens are forgotten here and nothing is revoked.
+    const app = c.tokenMode === "relay" ? null : ownAppOf(c, box);
     const token = box.open({ ciphertext: c.refreshTokenCiphertext, keyId: c.refreshTokenKeyId }, QBO_AAD.refresh);
     revoked = app ? await revokeAtIntuit(token, app, c.environment) : false;
   } catch {

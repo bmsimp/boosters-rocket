@@ -163,9 +163,9 @@ describe("QuickBooks settings", () => {
     expect(await redirectOf(QuickBooksSetupPage({ searchParams: Promise.resolve({ step: "shape" }) }))).toBe("/staff/settings/quickbooks/setup?step=app");
     await saveQboAppAction(form(keys));
     expect(await redirectOf(QuickBooksSetupPage({ searchParams: Promise.resolve({ step: "shape" }) }))).toBe("/staff/settings/quickbooks/setup?step=connect");
-    expect(await setupHtml("connect")).toContain(">Sign in to Intuit</button>");
-    expect(await setupHtml()).toContain(">Sign in to Intuit</button>"); // no step asked for: the first one not done yet
-    expect(await setupHtml("app")).not.toContain(">Sign in to Intuit</button>");
+    expect(await setupHtml("connect")).toContain(">Connect to QuickBooks</button>");
+    expect(await setupHtml()).toContain(">Connect to QuickBooks</button>"); // no step asked for: the first one not done yet
+    expect(await setupHtml("app")).not.toContain(">Connect to QuickBooks</button>");
   });
 
   it("a connected site opens on step 3 and can go back to any step; a step that doesn't exist is treated as none asked for", async () => {

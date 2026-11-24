@@ -4,6 +4,7 @@ import { secretBox, SecretBoxError } from "@/lib/crypto/secret-box";
 import { writeAudit } from "@/lib/audit/log";
 import { errorNeedsAdmin, failureWords, intuitTid, qboEndpoints, QboError, QBO_MINOR_VERSION } from "./endpoints";
 import { oauthEndpoints } from "./discovery";
+import { relayRefresh } from "./relay";
 
 const TIMEOUT_MS = 15_000;
 const REFRESH_EARLY_MS = 5 * 60_000;
@@ -116,11 +117,18 @@ function tokenUnderLock(o: { force?: boolean; noWait?: boolean }): Promise<Refre
       const box = secretBox(); // inside the try: a server key that can't be used is recorded like any unreadable secret
       const saved = o.force ? null : savedToken(c);
       if (saved) return { ok: true, access: { token: box.open(saved, QBO_AAD.access), realmId: c.realmId, environment: c.environment } };
-      const app = ownAppOf(c, box);
-      if (!app) throw new QboError("The saved QuickBooks keys can't be read with this server's encryption key. Connect QuickBooks again.", "unreadable");
-      const t = await tokenRequest(
-        { grant_type: "refresh_token", refresh_token: box.open({ ciphertext: c.refreshTokenCiphertext, keyId: c.refreshTokenKeyId }, QBO_AAD.refresh) },
-        app, c.environment);
+      const refreshToken = box.open({ ciphertext: c.refreshTokenCiphertext, keyId: c.refreshTokenKeyId }, QBO_AAD.refresh);
+      // Refreshed by the app that issued the tokens held (`token_mode`), never by the mode the next Connect uses: a club
+      // that chose the relay and hasn't connected through it yet keeps refreshing with its own app's keys. Through the
+      // relay the answer is Intuit's own, passed on, and its refusals are read as Intuit's (`invalid_grant`).
+      let t: TokenSet;
+      if (c.tokenMode === "relay") t = await relayRefresh(c.environment, refreshToken);
+      else {
+        const app = ownAppOf(c, box);
+        if (!app) throw new QboError("The saved QuickBooks keys can't be read with this server's encryption key. Connect QuickBooks again.", "unreadable");
+        t = await tokenRequest({ grant_type: "refresh_token", refresh_token: refreshToken }, app, c.environment);
+      }
+      // The new refresh token is stored before anything else is done with the answer: the old one is spent.
       await tx.update(qboConnection).set(sealTokens(t));
       return { ok: true, access: { token: t.accessToken, realmId: c.realmId, environment: c.environment } };
     } catch (e) {
@@ -134,7 +142,8 @@ function tokenUnderLock(o: { force?: boolean; noWait?: boolean }): Promise<Refre
       await tx.update(qboConnection).set({ lastError, lastErrorAt: new Date(), updatedAt: new Date() });
       // Intuit's reference differs on every try, so it isn't what makes the error a new one.
       const withoutReference = (words: string | null) => words?.replace(/ Intuit reference: [A-Za-z0-9-]+\./, "") ?? null;
-      if (withoutReference(lastError) !== withoutReference(c.lastError)) await writeAudit({ actor: WORKER_ACTOR, action: "quickbooks.token_refresh.failed", targetType: "qbo_connection", targetId: "singleton", after: { code: error.code } }, tx);
+      if (withoutReference(lastError) !== withoutReference(c.lastError)) await writeAudit({ actor: WORKER_ACTOR,
+        action: c.tokenMode === "relay" ? "quickbooks.relay.token_refresh.failed" : "quickbooks.token_refresh.failed", targetType: "qbo_connection", targetId: "singleton", after: { code: error.code } }, tx);
       return { ok: false, error };
     }
   });

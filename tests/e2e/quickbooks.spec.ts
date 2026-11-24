@@ -7,7 +7,7 @@ const sql = postgres(process.env.DATABASE_URL!);
 test.afterAll(async () => { await sql.end(); });
 
 // This run never reaches Intuit: the app has no switch that points it elsewhere. The spec never selects
-// "Sign in to Intuit", "Save this shape", "Refresh now" or "Disconnect"; it only checks that they are there.
+// "Connect to QuickBooks", "Save this shape", "Refresh now" or "Disconnect"; it only checks that they are there.
 
 test.beforeEach(async ({ context }) => { await context.addCookies([staffSessionCookie()]); });
 
@@ -86,7 +86,7 @@ test("the three steps open in order, and a shape is previewed with the controls 
   await expect(page).toHaveURL(/\/staff\/settings\/quickbooks\/setup/);
 
   await page.goto("/staff/settings/quickbooks/setup?step=connect");
-  await expect(page.getByRole("button", { name: "Sign in to Intuit" })).toBeVisible(); // not selected: it would leave for Intuit
+  await expect(page.getByRole("button", { name: "Connect to QuickBooks" })).toBeVisible(); // not selected: it would leave for Intuit
 
   await page.goto("/staff/settings/quickbooks/setup?step=shape");
   await expect(page.getByRole("button", { name: "Save this shape" })).toBeVisible(); // not selected: saving reads QuickBooks

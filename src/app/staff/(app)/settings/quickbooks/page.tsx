@@ -38,8 +38,20 @@ export const dynamic = "force-dynamic";
  * line only when it needs attention, then two surfaces: Connection (what is set, and the roster's section: the
  * membership shape, the last read, the worker and the portal's requests) and the change, ending with Disconnect. What is set is shown plainly, with no inputs; changing anything opens the steps.
  */
-export default async function QuickBooksSettingsPage() {
+/**
+ * Boosters Rocket Connect sends a person here from QuickBooks' own Apps list (the relay's SPEC.md section 2, "Launch,
+ * Disconnect and Connect/Reconnect from QuickBooks"), with one of these. A fixed Notice for each; anything else is
+ * ignored, and nothing in the address is ever shown.
+ */
+const FROM_QUICKBOOKS: Record<string, string> = {
+  disconnected: "QuickBooks says the portal was disconnected there. Connect again to carry on.",
+  connect: "Connect QuickBooks from the steps below.",
+};
+
+export default async function QuickBooksSettingsPage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> } = {}) {
   const ctx = await requireStaffPage("Settings.QuickBooks.ReadWrite");
+  const intuit = (await searchParams)?.intuit;
+  const fromQuickBooks = typeof intuit === "string" && Object.hasOwn(FROM_QUICKBOOKS, intuit) ? FROM_QUICKBOOKS[intuit] : undefined;
   const [conn, page, wake, problems, settings, people, checked, source, row, lines] = await Promise.all([connectionView(), loadRosterPage(), lastWake(), quickbooksProblems(),
     getParentSettings(), peopleWithAccess(), lastCheck(), getRosterSource(), quickbooksRow(), can(ctx.effective, "Admin.Health.Read") ? healthLines() : []]);
   const when = (iso: string | null) => (iso ? <LocalTime iso={iso} /> : "Not yet");
@@ -48,6 +60,7 @@ export default async function QuickBooksSettingsPage() {
     <main className="wrap single">
       <IntegrationHead of="quickbooks" title="QuickBooks" status={row.status}
         lede={<>{row.does} Only Admins can change these settings, because they reach the club&apos;s books.</>} />
+      {fromQuickBooks && <Notice tone="info">{fromQuickBooks}</Notice>}
       {problems.length > 0 && <Notice tone="warning" title="Needs attention" titleId="qbo-problems-h"><ul className="notice-list">{problems.map((p) => <li key={p.kind}>{p.text}{p.fix && <> <a href={p.fix.href}>{p.fix.label}</a></>}</li>)}</ul></Notice>}
       <IntegrationHealth here="/staff/settings/quickbooks" line={lines.find((l) => l.key === "quickbooks")} />
 

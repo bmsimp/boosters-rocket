@@ -33,3 +33,21 @@ export function IntegrationLogo({ of, size = "row" }: { of: IntegrationRowKey; s
     </span>
   );
 }
+
+/**
+ * The full QuickBooks logo, for the connect step: Intuit's own files, unchanged, the black one on a light page and the
+ * white one on a dark one. Both are in the page and the stylesheet shows one, on the same selectors as the tokens
+ * (`data-theme` and the system's preference), which `<picture media>` couldn't see. Drawn 2rem tall with half its
+ * ball's height clear on every side (`.qb-full-logo` in booster.css; brand/README.md, "QuickBooks' sizes").
+ */
+export function QuickBooksFullLogo() {
+  return (
+    <span className="qb-full-logo">
+      {/* Intuit's 2345 x 600 files, served as they are. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img className="qb-on-light" src="/integrations/quickbooks/qb-logo-black.png" alt="QuickBooks" width={2345} height={600} />
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img className="qb-on-dark" src="/integrations/quickbooks/qb-logo-white.png" alt="QuickBooks" width={2345} height={600} />
+    </span>
+  );
+}
