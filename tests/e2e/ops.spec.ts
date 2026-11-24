@@ -31,6 +31,9 @@ test("the Health page tells an Admin what is working, in words, and that the add
   await expect(line("worker")).toContainText("Last woke: never");
   await expect(line("backup")).toContainText("No backup has been recorded.");
   await expect(line("mail")).toContainText("Outgoing mail");
+  // The seed connects with the club's own Intuit app: no Boosters Rocket line, and the QuickBooks line says how it connects.
+  await expect(line("quickbooks_relay")).toHaveCount(0);
+  await expect(line("quickbooks")).toContainText("with the club's own Intuit app");
   // The version was fixed into the build: the package version, with the commit when the build knew it.
   await expect(line("version")).toContainText(/Running \d+\.\d+\.\d+( \([0-9a-f]{7,12}\))?\./);
   await expect(page.getByText(`This portal's address is ${baseURL}.`)).toBeVisible();
@@ -40,6 +43,26 @@ test("the Health page tells an Admin what is working, in words, and that the add
   expect(overflow).toBe(false);
   const html = await page.content();
   for (const secret of [process.env.BETTER_AUTH_SECRET!, process.env.SETTINGS_ENCRYPTION_KEY!]) expect(html).not.toContain(secret);
+});
+
+test("the Health page's Boosters Rocket line shows only through the relay, from its mark, with the fix for a refusal", async ({ page, context }) => {
+  await context.addCookies([staffSessionCookie()]);
+  const failedAt = new Date().toISOString();
+  await sql`UPDATE qbo_connection SET connect_mode = 'relay', token_mode = 'relay'`;
+  await sql`INSERT INTO setting (key, value) VALUES ('health.mark.quickbooks_relay', ${sql.json({ lastOkAt: null, lastFailAt: failedAt, lastFailWord: "unauthorized" })})
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
+  try {
+    await page.goto("/staff/settings/health");
+    const relay = page.locator('li[data-health="quickbooks_relay"]');
+    await expect(relay).toContainText("Boosters Rocket Connect");
+    await expect(relay).toContainText("Needs attention");
+    await expect(relay).toContainText("Check that the server's clock is right, then email support@boostersrocket.com.");
+    await expect(relay.getByRole("link", { name: "Open QuickBooks settings" })).toBeVisible();
+    await expect(page.locator('li[data-health="quickbooks"]')).toContainText("through Boosters Rocket");
+  } finally {
+    await sql`DELETE FROM setting WHERE key = 'health.mark.quickbooks_relay'`;
+    await sql`UPDATE qbo_connection SET connect_mode = 'own_app', token_mode = 'own_app'`;
+  }
 });
 
 test("the Health page, the audit log and its export are refused without a staff session", async ({ browser }) => {
