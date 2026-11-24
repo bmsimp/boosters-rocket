@@ -6,7 +6,7 @@ vi.mock("@/lib/quickbooks/relay-address", () => ({ qboRelayUrl: () => relayBase.
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { qboRelay, setting } from "@/lib/db/schema";
-import { QboError } from "@/lib/quickbooks/endpoints";
+import { errorNeedsAdmin, failureWords, QboError } from "@/lib/quickbooks/endpoints";
 import { readRelayMark, relayForget, relayGoAddress, relayRedeem, relayRefresh, relayRevoke, relayStart, RELAY_MARK } from "@/lib/quickbooks/relay";
 import { importRelayKey, signedHeaders } from "@/lib/quickbooks/relay-sign";
 import { resetDb } from "../helpers/db";
@@ -178,6 +178,24 @@ describe("refresh", () => {
     expect((await mark())?.lastFailWord).toBe("unreachable"); // a 502 is marked as the code says, not as a bad answer
     stub.oddAnswer = { path: "/v1/token/refresh", body: { access_token: "only-half" } };
     expect(await code(relayRefresh("sandbox", "rt"))).toBe("relay_error");
+  });
+
+  it("reads the relay's own 400s as the relay's, not Intuit's, with words that say to email support", async () => {
+    await seedRelayRegistration(stub);
+    stub.refreshTokens.add("rt");
+    // The relay doesn't allow this environment for this portal.
+    stub.oddAnswer = { path: "/v1/token/refresh", status: 400, body: { error: "environment_not_allowed" } };
+    const e1 = await relayRefresh("production", "rt").catch((x: unknown) => x as QboError);
+    expect(e1).toMatchObject({ code: "relay_environment_not_allowed", message: "Boosters Rocket doesn't allow this portal to connect to this QuickBooks. Email support@boostersrocket.com." });
+    // The relay couldn't read the request.
+    stub.oddAnswer = { path: "/v1/token/refresh", status: 400, body: { error: "bad_request" } };
+    const e2 = await relayRefresh("sandbox", "rt").catch((x: unknown) => x as QboError);
+    expect(e2).toMatchObject({ code: "relay_bad_request", message: "Boosters Rocket couldn't read the portal's request. Email support@boostersrocket.com." });
+    // Neither is Intuit refusing the connection, so neither stops the worker for an Admin.
+    for (const e of [e1, e2]) expect(errorNeedsAdmin(failureWords(e as QboError))).toBe(false);
+    // The fake relay's own refusal of an environment, as the real one answers it.
+    stub.oddAnswer = null;
+    expect(await code(relayRefresh("staging" as "sandbox", "rt"))).toBe("relay_environment_not_allowed");
   });
 
   it("words invalid_grant as Intuit's own, for the Admin to connect again", async () => {

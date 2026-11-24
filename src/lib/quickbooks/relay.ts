@@ -65,6 +65,9 @@ const FAILURES = {
   relay_refused: "Boosters Rocket didn't start the connection. Check the portal id, then email support@boostersrocket.com.",
   relay_code: "That connection took too long to finish. Press Connect again.",
   relay_not_registered: "This portal isn't registered with Boosters Rocket yet.",
+  // The relay's own 400s, before it asks Intuit anything: not Intuit's refusal of the connection.
+  relay_environment_not_allowed: "Boosters Rocket doesn't allow this portal to connect to this QuickBooks. Email support@boostersrocket.com.",
+  relay_bad_request: "Boosters Rocket couldn't read the portal's request. Email support@boostersrocket.com.",
 } as const;
 export type RelayFailureCode = keyof typeof FAILURES;
 const failure = (code: RelayFailureCode) => new QboError(FAILURES[code], code);
@@ -176,12 +179,20 @@ export async function relayRedeem(code: string, expect: { portalState: string; e
 
 /**
  * A refresh through the relay, which adds its secret and passes Intuit's answer back: new tokens, or Intuit's own
- * refusal (`invalid_grant` and the like, a 400) as the portal reads Intuit's. The caller stores the new refresh token
+ * refusal (`invalid_grant` and the like, a 400) as the portal reads Intuit's. The relay's own 400s, an environment it
+ * doesn't allow this portal or a request it couldn't read, are the relay's (`relay_environment_not_allowed`,
+ * `relay_bad_request`), for support to look at, not for an Admin to connect again. The caller stores the new refresh token
  * before it does anything else with the answer.
  */
 export async function relayRefresh(environment: QboEnvironment, refreshToken: string): Promise<TokenSet> {
   const r = await signedPost(RELAY_PATHS.refresh, { environment, refresh_token: refreshToken });
-  if (r.status === 400) throw intuitRefusal(r.body, 400, null);
+  if (r.status === 400) {
+    // The relay refuses some requests itself, in words of its own; everything else in a 400 is Intuit's, passed on.
+    const own = field(r.body, "error");
+    if (own === "environment_not_allowed") throw failure("relay_environment_not_allowed");
+    if (own === "bad_request") throw failure("relay_bad_request");
+    throw intuitRefusal(r.body, 400, null);
+  }
   const tokens = tokenSetFrom(r.body);
   if (!tokens) throw failure("relay_error");
   return tokens;
