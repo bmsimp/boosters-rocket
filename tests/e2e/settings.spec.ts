@@ -73,7 +73,7 @@ test("the Integrations page groups the systems by kind, and each row opens its p
   await expect(page).toHaveURL(/\/staff\/settings\/integrations$/);
   await accounting.getByRole("link", { name: /^QuickBooks Online/ }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("QuickBooks");
-  await expect(page.getByRole("region", { name: "Connection" })).toContainText("E2E Sandbox Company");
+  await expect(page.getByRole("region", { name: "Connection", exact: true })).toContainText("E2E Sandbox Company");
   await noSidewaysScroll(page);
 });
 

@@ -22,7 +22,7 @@ test("an Admin sees what is set for QuickBooks, and no inputs on the view", asyn
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, E2E");
   await page.goto("/staff/settings/quickbooks");
   // The Connection card names the company. The seed keeps a stuck change, so the head and a Notice say it needs attention.
-  await expect(page.getByRole("region", { name: "Connection" }).getByText("E2E Sandbox Company", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Connection", exact: true }).getByText("E2E Sandbox Company", { exact: true })).toBeVisible();
   await expect(page.locator(".integration-head .status-dot")).toHaveText("Needs attention");
   await expect(page.locator("main")).toContainText("Health says needs attention.");
   await expect(page.getByText("Sandbox (an Intuit test company)")).toBeVisible();
@@ -289,7 +289,7 @@ test("Disconnect through Boosters Rocket stays unusable until the box is ticked;
   await sql`UPDATE qbo_connection SET connect_mode = 'relay', token_mode = 'relay', relay_environment = environment`;
   try {
     await page.goto("/staff/settings/quickbooks");
-    await expect(page.getByRole("region", { name: "Connection" }).getByText("Through Boosters Rocket", { exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Connection", exact: true }).getByText("Through Boosters Rocket", { exact: true })).toBeVisible();
     await page.getByText("Disconnect", { exact: true }).click();
     await expect(page.getByText("Every portal connected to this QuickBooks company through Boosters Rocket shares one connection. Disconnecting here may disconnect the others too, such as a trial copy of this portal.")).toBeVisible();
     const ack = page.getByRole("checkbox", { name: "I understand that disconnecting may also disconnect any other portal connected to this company through Boosters Rocket." });
