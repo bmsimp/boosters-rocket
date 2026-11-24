@@ -7,7 +7,7 @@ import { secretBox, SecretBoxError } from "@/lib/crypto/secret-box";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { errorNeedsAdmin, QboError, QBO_SCOPE } from "./endpoints";
 import { oauthEndpoints } from "./discovery";
-import { QBO_AAD, qboGet, sealTokens, tokenRequest, type TokenSet } from "./client";
+import { ownAppOf, QBO_AAD, qboGet, sealTokens, tokenRequest, type TokenSet } from "./client";
 import { clearRosterOfOtherCompany, dropSwitchAsk, getRosterSource, getSwitchRecord, setSwitchRecord, storedSwitchOf, SWITCH_KEY, type SwitchRecord } from "@/lib/roster/source";
 
 export type QboOp = { actor: Actor; ip: string | null; permission?: string };
@@ -35,7 +35,7 @@ const iso = (d: Date | null | undefined) => d?.toISOString() ?? null;
 const DISCONNECTED = {
   realmId: null, companyName: null, accessTokenCiphertext: null, accessTokenKeyId: null, accessExpiresAt: null, refreshTokenCiphertext: null,
   refreshTokenKeyId: null, refreshExpiresAt: null, connectedAt: null, connectedBy: null, lastTokenRefreshAt: null, lastError: null, lastErrorAt: null,
-  stateHash: null, stateStaffUserId: null, stateExpiresAt: null,
+  stateHash: null, stateStaffUserId: null, stateExpiresAt: null, tokenMode: null,
 } as const;
 
 export async function getConnection(tx?: Tx) {
@@ -85,7 +85,8 @@ export async function saveQboApp(d: QboAppDraft, o: QboOp): Promise<{ ok: true }
     // An ask to switch companies goes with the state it was made for.
     if (keysChanged) await dropSwitchAsk(tx);
     if (c) await tx.update(qboConnection).set({ clientId: d.clientId, environment: d.environment, ...secret, ...dropState, updatedAt: new Date() });
-    else await tx.insert(qboConnection).values({ clientId: d.clientId, environment: d.environment, clientSecretCiphertext: sealed!.ciphertext, clientSecretKeyId: sealed!.keyId });
+    // The keys of the club's own app: until the choice of mode is on the page, saving them is choosing that mode.
+    else await tx.insert(qboConnection).values({ clientId: d.clientId, environment: d.environment, clientSecretCiphertext: sealed!.ciphertext, clientSecretKeyId: sealed!.keyId, connectMode: "own_app" });
     await writeAudit({ actor: o.actor, action: "settings.quickbooks.save", permission: o.permission, ...TARGET, ip: o.ip,
       before: c ? { clientId: c.clientId, environment: c.environment } : null,
       after: { clientId: d.clientId, environment: d.environment, secretChanged: sealed !== null } }, tx);
@@ -130,7 +131,7 @@ export async function beginConnect(staffUserId: string): Promise<Begun> {
     await dropSwitchAsk(tx);
     return row;
   });
-  return c ? { ok: true, url: await intuitUrl(c.clientId, c.environment, state) } : { ok: false, reason: "not_configured" };
+  return c?.clientId ? { ok: true, url: await intuitUrl(c.clientId, c.environment, state) } : { ok: false, reason: "not_configured" };
 }
 
 /**
@@ -151,7 +152,7 @@ export async function beginSwitchConnect(staffUserId: string, o: QboOp): Promise
     await writeAudit({ actor: o.actor, action: "quickbooks.switch.asked", permission: o.permission, ...TARGET, after: { fromRealmId }, ip: o.ip }, tx);
     return row;
   });
-  return c ? { ok: true, url: await intuitUrl(c.clientId, c.environment, state) } : { ok: false, reason: "not_configured" };
+  return c?.clientId ? { ok: true, url: await intuitUrl(c.clientId, c.environment, state) } : { ok: false, reason: "not_configured" };
 }
 
 /**
@@ -210,7 +211,8 @@ export async function completeConnect(
       switchFrom = rosterRealmId;
     }
     try {
-      return { ok: true, switchFrom, clientId: c.clientId, environment: c.environment, clientSecret: secretBox().open({ ciphertext: c.clientSecretCiphertext, keyId: c.clientSecretKeyId }, QBO_AAD.secret) };
+      const app = ownAppOf(c);
+      return app ? { ok: true, switchFrom, ...app, environment: c.environment } : { ok: false, reason: "not_configured" };
     } catch (e) {
       if (e instanceof SecretBoxError) return { ok: false, reason: "not_configured" };
       throw e;
@@ -255,7 +257,7 @@ export async function completeConnect(
     // still the roster's.
     const switching = !(await sameRosterCompany(p.realmId!, tx));
     if (switching && (claim.switchFrom === null || (await getRosterSource(tx)) !== claim.switchFrom)) return "roster_company" as const;
-    await tx.update(qboConnection).set({ realmId: p.realmId, connectedAt: new Date(), connectedBy: o.staffUserId, ...sealTokens(tokens) });
+    await tx.update(qboConnection).set({ realmId: p.realmId, connectedAt: new Date(), connectedBy: o.staffUserId, tokenMode: "own_app", ...sealTokens(tokens) });
     // The switch is recorded in the store's transaction, so a clear that doesn't run below is still run by the roster
     // refresh, for this switch alone; a connect that switches nothing leaves no record behind.
     if (switching) await setSwitchRecord(tx, { stored: { fromRealmId: claim.switchFrom!, toRealmId: p.realmId!, staffUserId: o.staffUserId, at: new Date().toISOString() } });
@@ -303,9 +305,9 @@ export async function disconnect(o: QboOp): Promise<{ ok: true; revoked: boolean
   let revoked = false;
   try {
     const box = secretBox();
-    const clientSecret = box.open({ ciphertext: c.clientSecretCiphertext, keyId: c.clientSecretKeyId }, QBO_AAD.secret);
+    const app = ownAppOf(c, box);
     const token = box.open({ ciphertext: c.refreshTokenCiphertext, keyId: c.refreshTokenKeyId }, QBO_AAD.refresh);
-    revoked = await revokeAtIntuit(token, { clientId: c.clientId, clientSecret }, c.environment);
+    revoked = app ? await revokeAtIntuit(token, app, c.environment) : false;
   } catch {
     revoked = false; // the keys unreadable (Intuit unreachable is false already): the tokens are still deleted here
   }

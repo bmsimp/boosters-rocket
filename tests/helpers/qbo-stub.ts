@@ -424,7 +424,7 @@ export async function seedConnected(stub: QboStub, o: { realmId?: string; access
   stub.accessTokens.add("at-seed"); stub.refreshTokens.add("rt-seed");
   const now = Date.now();
   await db.insert(qboConnection).values({
-    environment: "sandbox", clientId: "stub-client-id", clientSecretCiphertext: secret.ciphertext, clientSecretKeyId: secret.keyId,
+    environment: "sandbox", connectMode: "own_app", tokenMode: "own_app", clientId: "stub-client-id", clientSecretCiphertext: secret.ciphertext, clientSecretKeyId: secret.keyId,
     realmId: o.realmId ?? "9130000000000001", companyName: stub.companyName,
     accessTokenCiphertext: access.ciphertext, accessTokenKeyId: access.keyId, accessExpiresAt: new Date(now + (o.accessExpiresInMs ?? 3_600_000)),
     refreshTokenCiphertext: refresh.ciphertext, refreshTokenKeyId: refresh.keyId, refreshExpiresAt: new Date(now + (o.refreshExpiresInMs ?? 100 * 86_400_000)),

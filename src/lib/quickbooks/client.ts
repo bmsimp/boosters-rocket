@@ -8,7 +8,7 @@ import { oauthEndpoints } from "./discovery";
 const TIMEOUT_MS = 15_000;
 const REFRESH_EARLY_MS = 5 * 60_000;
 export const QBO_PAGE = 1000;
-export const QBO_AAD = { secret: "qbo:client-secret", access: "qbo:access-token", refresh: "qbo:refresh-token" } as const;
+export const QBO_AAD = { secret: "qbo:client-secret", access: "qbo:access-token", refresh: "qbo:refresh-token", relayKey: "qbo:relay-key" } as const;
 export const WORKER_ACTOR = { door: "system", id: null, label: "worker" } as const;
 
 export type TokenSet = { accessToken: string; refreshToken: string; accessExpiresAt: Date; refreshExpiresAt: Date };
@@ -26,11 +26,19 @@ export async function tokenRequest(form: Record<string, string>, app: QboApp, en
   } catch {
     throw new QboError("Couldn't reach Intuit.", "unreachable");
   }
-  const body = (await res.json().catch(() => ({}))) as { access_token?: unknown; refresh_token?: unknown; expires_in?: unknown; x_refresh_token_expires_in?: unknown; error?: unknown };
-  if (!res.ok || typeof body.access_token !== "string" || typeof body.refresh_token !== "string") {
-    const code = typeof body.error === "string" && /^[a-z_]{1,40}$/.test(body.error) ? body.error : `http_${res.status}`;
-    throw new QboError(code === "invalid_grant" ? "Intuit no longer accepts this connection. Connect QuickBooks again." : "Intuit refused the request.", code, intuitTid(res));
-  }
+  const body = (await res.json().catch(() => ({}))) as unknown;
+  const tokens = res.ok ? tokenSetFrom(body) : null;
+  if (!tokens) throw intuitRefusal(body, res.status, intuitTid(res));
+  return tokens;
+}
+
+/**
+ * A token answer in Intuit's form (from Intuit, or passed through by the relay) as a token set; null when it isn't one.
+ * The lifetimes are counted from now.
+ */
+export function tokenSetFrom(answer: unknown): TokenSet | null {
+  const body = (typeof answer === "object" && answer !== null ? answer : {}) as { access_token?: unknown; refresh_token?: unknown; expires_in?: unknown; x_refresh_token_expires_in?: unknown };
+  if (typeof body.access_token !== "string" || typeof body.refresh_token !== "string") return null;
   const seconds = (v: unknown, fallback: number) => (typeof v === "number" && v > 0 ? v : fallback);
   const now = Date.now();
   return {
@@ -38,6 +46,22 @@ export async function tokenRequest(form: Record<string, string>, app: QboApp, en
     accessExpiresAt: new Date(now + seconds(body.expires_in, 3600) * 1000),
     refreshExpiresAt: new Date(now + seconds(body.x_refresh_token_expires_in, 100 * 86_400) * 1000),
   };
+}
+
+/** Intuit's refusal of a token request: its error word when it is one (`invalid_grant`, ...), else the HTTP status. None of its text. */
+export function intuitRefusal(answer: unknown, status: number, tid: string | null): QboError {
+  const error = typeof answer === "object" && answer !== null ? (answer as { error?: unknown }).error : undefined;
+  const code = typeof error === "string" && /^[a-z_]{1,40}$/.test(error) ? error : `http_${status}`;
+  return new QboError(code === "invalid_grant" ? "Intuit no longer accepts this connection. Connect QuickBooks again." : "Intuit refused the request.", code, tid);
+}
+
+/**
+ * The club's own Intuit app's keys from the connection row, the secret opened; null when the row holds none (a club
+ * connecting through Boosters Rocket). Throws SecretBoxError when the secret can't be read with this server's key.
+ */
+export function ownAppOf(c: Pick<typeof qboConnection.$inferSelect, "clientId" | "clientSecretCiphertext" | "clientSecretKeyId">, box = secretBox()): QboApp | null {
+  if (!c.clientId || !c.clientSecretCiphertext || !c.clientSecretKeyId) return null;
+  return { clientId: c.clientId, clientSecret: box.open({ ciphertext: c.clientSecretCiphertext, keyId: c.clientSecretKeyId }, QBO_AAD.secret) };
 }
 
 /** The columns that hold a token set, sealed, with the refresh recorded and any earlier error cleared. */
@@ -92,9 +116,11 @@ function tokenUnderLock(o: { force?: boolean; noWait?: boolean }): Promise<Refre
       const box = secretBox(); // inside the try: a server key that can't be used is recorded like any unreadable secret
       const saved = o.force ? null : savedToken(c);
       if (saved) return { ok: true, access: { token: box.open(saved, QBO_AAD.access), realmId: c.realmId, environment: c.environment } };
+      const app = ownAppOf(c, box);
+      if (!app) throw new QboError("The saved QuickBooks keys can't be read with this server's encryption key. Connect QuickBooks again.", "unreadable");
       const t = await tokenRequest(
         { grant_type: "refresh_token", refresh_token: box.open({ ciphertext: c.refreshTokenCiphertext, keyId: c.refreshTokenKeyId }, QBO_AAD.refresh) },
-        { clientId: c.clientId, clientSecret: box.open({ ciphertext: c.clientSecretCiphertext, keyId: c.clientSecretKeyId }, QBO_AAD.secret) }, c.environment);
+        app, c.environment);
       await tx.update(qboConnection).set(sealTokens(t));
       return { ok: true, access: { token: t.accessToken, realmId: c.realmId, environment: c.environment } };
     } catch (e) {
