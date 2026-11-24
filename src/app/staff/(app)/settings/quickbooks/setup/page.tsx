@@ -64,7 +64,7 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
           <ConnectModeForm saved={conn.connectMode} keysSaved={conn.clientId !== null} relayConnected={conn.tokenMode === "relay"} save={saveConnectModeAction}
             relay={<RelayRegistration stage={registration.stage} address={address} addressFits={addressFitsRelay(address)} publicKey={registration.publicKey}
               portalId={registration.portalId} mailto={registration.publicKey ? registrationMailto({ clubName: club.name, address, publicKey: registration.publicKey }) : null}
-              mayNewKey={conn.tokenMode !== "relay"} makeKey={makeRelayKeyAction} saveId={savePortalIdAction} check={checkRegistrationAction} />}
+              mayChange={conn.tokenMode !== "relay"} makeKey={makeRelayKeyAction} saveId={savePortalIdAction} check={checkRegistrationAction} />}
             ownApp={
               <section className="box-section stack" aria-labelledby="qbo-own-app-h"><h3 id="qbo-own-app-h">Your Intuit app</h3>
                 <p>The portal reaches QuickBooks through an app the club registers with Intuit. This tells the portal which app that is.</p>

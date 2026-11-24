@@ -216,6 +216,25 @@ describe("Registering the portal with Boosters Rocket", () => {
     expect((await connectionView()).relayStage).toBe("waiting");
   });
 
+  it("the portal id can't change while connected through the relay, which knows the connection by it; the same id changes nothing", async () => {
+    await makeAndRegister();
+    await savePortalIdAction(form({ portalId: TEST_PORTAL_ID }));
+    stub.calls.length = 0;
+    await db.insert(qboConnection).values({ environment: "sandbox", connectMode: "relay", tokenMode: "relay", realmId: "9130000000000001", refreshTokenCiphertext: "x", refreshTokenKeyId: "k" });
+    const before = await audits("settings.quickbooks.relay.portal_id");
+    expect(await savePortalIdAction(form({ portalId: OTHER_ID }))).toEqual({ ok: false, errors: [expect.stringContaining("Disconnect first")] });
+    expect((await relayRow())!.portalId).toBe(TEST_PORTAL_ID);
+    expect(await savePortalIdAction(form({ portalId: TEST_PORTAL_ID }))).toMatchObject({ ok: true, message: "Nothing changed." });
+    expect(await audits("settings.quickbooks.relay.portal_id")).toHaveLength(before.length);
+    const { html } = await setup();
+    expect(html).not.toContain("Change the portal id");
+    expect(html).not.toContain("Make a new key");
+    // Disconnected (no relay tokens held), it may change again.
+    await db.update(qboConnection).set({ tokenMode: null, realmId: null, refreshTokenCiphertext: null, refreshTokenKeyId: null });
+    expect(await savePortalIdAction(form({ portalId: OTHER_ID }))).toMatchObject({ ok: true, message: "The portal id is saved." });
+    expect((await relayRow())!.portalId).toBe(OTHER_ID);
+  });
+
   it("an http address on another host can't be registered: the stage says so and offers no id form", async () => {
     await makeRelayKeyAction(form({}));
     expect(addressFitsRelay("https://portal.club.org")).toBe(true);

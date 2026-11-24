@@ -61,7 +61,8 @@ export function registrationMailto(o: { clubName: string; address: string; publi
 
 /** Whether tokens issued through the relay are held now: then the key and the mode can't change (Disconnect first). */
 async function connectedThroughRelay(tx: Tx): Promise<boolean> {
-  const [c] = await tx.select({ tokenMode: qboConnection.tokenMode }).from(qboConnection);
+  // Locked, so a connect storing its tokens at the same moment waits for this change, or this for it.
+  const [c] = await tx.select({ tokenMode: qboConnection.tokenMode }).from(qboConnection).for("update");
   return c?.tokenMode === "relay";
 }
 
@@ -103,11 +104,21 @@ export function parsePortalId(raw: unknown): { ok: true; portalId: string } | { 
     : { ok: false, errors: ["Enter the portal id from Boosters Rocket's email: brp_ and 16 letters or digits, like brp_a1b2c3d4e5f6g7h8."] };
 }
 
-/** Saves the portal id, audited with before and after. Needs the key first: the id is the relay's name for that key. */
+/**
+ * Saves the portal id, audited with before and after. Needs the key first: the id is the relay's name for that key.
+ * Refused, as "Make a new key" is, while tokens issued through the relay are held: the relay keeps its record of the
+ * connection under the id that connected, so refresh and revoke under another id would no longer match it. The same id
+ * again changes nothing.
+ */
 export async function savePortalId(portalId: string, o: Op): Promise<Done> {
   return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('booster.qbo_relay'))`);
     const [r] = await tx.select().from(qboRelay).for("update");
     if (!r) return { ok: false as const, errors: ["Make this portal's key first."] };
+    if (r.portalId === portalId) return { ok: true as const, message: "Nothing changed." };
+    if (await connectedThroughRelay(tx)) {
+      return { ok: false as const, errors: ["QuickBooks is connected through Boosters Rocket under this portal id. Disconnect first, from QuickBooks settings, then change the id."] };
+    }
     const now = new Date();
     await tx.update(qboRelay).set({ portalId, portalIdSavedAt: now, portalIdSavedBy: o.staffUserId, updatedAt: now });
     await writeAudit({ actor: o.actor, action: "settings.quickbooks.relay.portal_id", permission: o.permission, ...TARGET, ip: o.ip,

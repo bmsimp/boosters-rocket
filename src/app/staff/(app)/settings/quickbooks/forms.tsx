@@ -233,9 +233,10 @@ export function CheckAnswer({ check, again, checking }: { check: RelayCheck; aga
  * Registration with Boosters Rocket, the relay part of step 1, through its three stages: not registered yet, waiting
  * for the id, ready to connect. One component across them, so the check's answer stays on the page when saving the id
  * moves it on a stage. It is given only what it shows, all of it public: the portal's address, its public key and id.
+ * `mayChange` is false while connected through the relay: then neither the id nor the key may change (Disconnect first).
  */
-export function RelayRegistration({ stage, address, addressFits, publicKey, portalId, mailto, mayNewKey, makeKey, saveId, check }: {
-  stage: RelayStage; address: string; addressFits: boolean; publicKey: string | null; portalId: string | null; mailto: string | null; mayNewKey: boolean;
+export function RelayRegistration({ stage, address, addressFits, publicKey, portalId, mailto, mayChange, makeKey, saveId, check }: {
+  stage: RelayStage; address: string; addressFits: boolean; publicKey: string | null; portalId: string | null; mailto: string | null; mayChange: boolean;
   makeKey: (f: FormData) => Promise<Done>; saveId: (f: FormData) => Promise<PortalIdSaved>; check: () => Promise<Checked>;
 }) {
   const [typed, setTyped] = useState("");
@@ -302,8 +303,8 @@ export function RelayRegistration({ stage, address, addressFits, publicKey, port
           {answer ? <CheckAnswer check={answer} again={again} checking={checking} />
             : <p><Button variant="secondary" busy={checking} onClick={again}>{checking ? "Checking…" : "Check the registration"}</Button></p>}
           {answer && answer.answer !== "unreachable" && <p><Button variant="quiet" busy={checking} onClick={again}>{checking ? "Checking…" : "Check again"}</Button></p>}
-          {!https && <details className="more"><summary>Change the portal id</summary>{idForm("New portal id")}</details>}
-          {mayNewKey && (
+          {!https && mayChange && <details className="more"><summary>Change the portal id</summary>{idForm("New portal id")}</details>}
+          {mayChange && (
             <details className="more"><summary>Make a new key</summary>
               <p>A new key replaces this one and clears the saved portal id. Boosters Rocket then registers the new public key and sends a new id before the portal can connect.</p>
               {made && !made.ok && <ActionOutcome state={made} />}
