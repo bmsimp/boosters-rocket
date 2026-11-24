@@ -68,6 +68,40 @@ Where the portal's half reads the relay's `SPEC.md` differently, or adds to it:
    revoking would end the shared grant, so the portal calls `POST /v1/connection/forget` instead, and the relay ends its
    record of which portal connected the company.
 
+## 2b. The lead's changes of 2026-11-24, after review
+
+The review of the four slices found these; the lead decided each, and the sections below say them in place.
+
+1. **The relay's environment has its own column** (section 4). `qbo_connection.environment` is what the club's own
+   Intuit app's keys are for, and becomes nullable with them; the relay's choice, made with step 2's press, is
+   `relay_environment`. A relay connect started and left (for the sandbox, say) never changes what the own app
+   connects to, and going back to the own app never inherits the relay's choice. Everything relay-side (start, the
+   stored connection's tokens, refresh, revoke, forget, Health) reads the relay's column, by `token_mode` for tokens
+   held. Migration 0059 was changed in place, since it hadn't merged.
+2. **The registration can't change under a connect.** While a connect through the relay is in progress (`state_mode`
+   `relay` and its state not expired), "Make a new key" and saving a portal id are refused: "A connect through
+   Boosters Rocket is in progress. Finish it, or wait N minutes, then try again.", and no stage offers the id form. The
+   store checks again under a lock of `qbo_relay`, taken before the connection row: a redemption signed under a portal
+   id or public key that is no longer the portal's is refused `state`, its tokens thrown away and nothing revoked. The
+   forget is sent under the id that redeemed them while the key is the same; after a new key nothing can sign for the
+   old registration, so no forget is sent, and the relay keeps its record until a later disconnect.
+3. **A relay 5xx is marked `unreachable`**, as its code `relay_unreachable` is (section 5, Refresh).
+4. **The relay's own 400s on refresh are the relay's.** `environment_not_allowed` and `bad_request` are read before
+   anything is read as Intuit's, as `relay_environment_not_allowed` ("Boosters Rocket doesn't allow this portal to
+   connect to this QuickBooks. Email support@boostersrocket.com.") and `relay_bad_request`; neither needs an Admin.
+5. **A stale page's Disconnect.** The form sends which app the page was drawn for (`drawnFor`). Through the relay, a
+   page drawn for another app, which showed no box, is answered "This page is out of date. Reload it and try again.",
+   changing nothing.
+6. **The registration's check.** A 401 says the id and the key don't match what Boosters Rocket registered, "or this
+   server's clock is more than 5 minutes off". A check's failures (its 401, 429 or no answer) don't change Health's
+   mark; only the real calls, connect, refresh, revoke and forget, do. A check the relay answers marks it as answering.
+7. **A redeem that fails after the relay's callback** (refused, late, or no answer) leaves the relay's record of the
+   connection standing until a later disconnect: the company is known only from the redemption, so the portal can't
+   name it in a forget.
+8. **A start refused with `relay_code`** (the relay answering start as it answers a spent code) is reported as
+   `relay_refused`, step 2's word for a start the relay wouldn't make.
+9. **Step 2 is "Connect to QuickBooks"** in either mode, and step 1's link "Next: connect to QuickBooks".
+
 ## 3. The lead's decisions
 
 - **The relay's address is an env setting, never a UI one.** `QBO_RELAY_URL` in `src/env.ts`, optional, default
@@ -122,7 +156,9 @@ of writing.)*
   - `state_mode` (nullable): the mode a pending connect's state was made for. Each callback accepts only its own.
   - `client_id`, `client_secret_ciphertext` and `client_secret_key_id` become nullable, with a check that they are set
     whenever `connect_mode` or `token_mode` is `own_app`. A relay club never has them; a club that moved keeps them, so it
-    can move back.
+    can move back. `environment`, which the keys are for, becomes nullable with them, under the same check (section 2b).
+  - `relay_environment` (nullable): the QuickBooks the relay connects to, chosen with step 2's press, set whenever
+    `token_mode` or `state_mode` is `relay` (`qbo_connection_relay_environment`).
 - **A mark**, the setting `health.mark.quickbooks_relay` *(proposed key)*: `lastOkAt`, `lastFailAt`, `lastFailWord`
   (a fixed word: `unauthorized`, `busy`, `unreachable`, `relay_error`). No token, code, body or id.
 - **Env:** `QBO_RELAY_URL` (section 3), in `deploy/.env.example` commented out with its default.
@@ -156,15 +192,15 @@ component, never in an audit row (rows name the public key's first 8 characters 
    nothing is connected through the relay, "Make a new key" (a `details` section, as Disconnect is).
 4. **Checking the registration.** Saving the portal id calls the signed `POST /v1/portal/check` (body `{}`), after the
    save's transaction. A 200 shows "Registered", with the name the relay holds (rendered as text) and the environments
-   it allows; a 401 says the id or the key doesn't match what Boosters Rocket registered, to check the id and email
-   support; no answer says the relay couldn't be reached and offers "Check again". The answer marks the relay like any
-   signed call. The check changes nothing in the portal's records: the id stays saved whatever it answers, and a wrong
+   it allows; a 401 says the id or the key doesn't match what Boosters Rocket registered, or the server's clock is more
+   than 5 minutes off, to check the id and email support; no answer says the relay couldn't be reached and offers
+   "Check again". An answer marks the relay as answering; a failure marks nothing (section 2b). The check changes nothing in the portal's records: the id stays saved whatever it answers, and a wrong
    one is still refused by the relay at Connect.
 
 ### Connect
 
 1. **Step 2, "Connect to QuickBooks"**, shows the full QuickBooks logo above the press. In relay mode it also asks which
-   QuickBooks: "The club's real books" or "An Intuit sandbox (test) company", saved to `qbo_connection.environment`
+   QuickBooks: "The club's real books" or "An Intuit sandbox (test) company", saved to `qbo_connection.relay_environment`
    with the press (changing it while connected is refused, as today). The press is "Connect to QuickBooks".
 2. `beginConnect()` (and `beginSwitchConnect()`, from the switch page, which already requires disconnecting first)
    branch on `connect_mode`. In relay mode they make the state exactly as today, with `state_mode` = `relay` and, for a
@@ -208,9 +244,10 @@ before anything else uses it. Errors keep today's shape, `QboError` with a short
 | The relay answers | Code | Only an Admin can fix it (`errorNeedsAdmin`) |
 | --- | --- | --- |
 | 400 with Intuit's word (`invalid_grant`, …) | that word | `invalid_grant`, as today |
+| 400 with the relay's own word (`environment_not_allowed`, `bad_request`) | `relay_environment_not_allowed`, `relay_bad_request` | no: email support |
 | 401 | `relay_unauthorized` | no: the clock, or the owner's registry; Health says which to check |
 | 429 | `relay_busy` | no |
-| 502, 5xx, no answer in 15 seconds | `relay_unreachable` | no |
+| 502, 5xx, no answer in 15 seconds | `relay_unreachable`, marked `unreachable` | no |
 
 A failure is audited `quickbooks.relay.token_refresh.failed` only when its words change, as today's
 `quickbooks.token_refresh.failed` is.
@@ -223,7 +260,8 @@ A failure is audited `quickbooks.relay.token_refresh.failed` only when its words
    disconnect any other portal connected to this company through Boosters Rocket." The button is `aria-disabled` until
    it is ticked.
 2. `disconnectAction` takes the form. In relay mode it refuses, changing nothing, unless `ack` is exactly one value,
-   "yes" ("Tick the box to say you understand, then try again."). In own-app mode it reads no field.
+   "yes" ("Tick the box to say you understand, then try again."), and first, unless `drawnFor`, the app the page was
+   drawn for, is `relay` ("This page is out of date. Reload it and try again."). In own-app mode it reads no field.
 3. `disconnect()` sends the signed `POST /v1/token/revoke` with `environment`, `token` (the refresh token) and
    `realm_id`, so the relay ends its record of the connection too; then forgets the tokens whatever the answer, as today.
    Audited `quickbooks.relay.disconnect` with `acknowledged: true`, `revoked` and the company; own-app keeps
