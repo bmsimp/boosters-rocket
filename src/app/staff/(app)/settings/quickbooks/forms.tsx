@@ -166,7 +166,8 @@ export const DISCONNECT_WORDS = {
  * back disconnected, so it can say so: the page renders it whether or not QuickBooks is connected. `warning`, when
  * given, is shown above the button while connected. `through` is which app issued the tokens held: through Boosters
  * Rocket the Admin must tick the acknowledgement first (the button is aria-disabled until then, and the server refuses
- * without it); with the club's own app, one line says what else it ends. Like the forms above, it sends from state with
+ * without it, and answers a page drawn for another app than the one holding the tokens now that it is out of date);
+ * with the club's own app, one line says what else it ends. Like the forms above, it sends from state with
  * a `type="button"`, so no form reset can untick the box behind React's back.
  */
 export function Disconnect({ connected, disconnect, warning, through }: {
@@ -175,7 +176,8 @@ export function Disconnect({ connected, disconnect, warning, through }: {
   const relay = through === "relay";
   const [ack, setAck] = useState(false);
   const [state, run, pending] = useActionState(async (_: Disconnected | null, acknowledged: boolean) => {
-    const f = new FormData(); if (relay && acknowledged) f.append("ack", "yes");
+    // `drawnFor`: the app this page was drawn for, so the server can tell a page that showed no box from one that did.
+    const f = new FormData(); f.append("drawnFor", through ?? "none"); if (relay && acknowledged) f.append("ack", "yes");
     return safely(() => disconnect(f), { ok: false as const, error: ACTION_FAILED });
   }, null);
   if (!connected) return state?.ok ? <Notice tone="done">{disconnectedNote(state.revoked)}</Notice> : null;

@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/lib/db/client";
 import { qboCustomerType, type QboEnvironment } from "@/lib/db/schema";
 import { staffAction, type StaffCtx } from "@/lib/guards";
-import { getConnection, parseQboAppForm, saveQboApp, beginConnect, beginSwitchConnect, disconnect, DISCONNECT_ACK_NEEDED, parseConnectMode, saveConnectMode, type StartRefusal } from "@/lib/quickbooks/connection";
+import { getConnection, parseQboAppForm, saveQboApp, beginConnect, beginSwitchConnect, disconnect, DISCONNECT_ACK_NEEDED, DISCONNECT_PAGE_STALE, parseConnectMode, saveConnectMode, type StartRefusal } from "@/lib/quickbooks/connection";
 import { checkRegistration, makeRelayKey, parsePortalId, savePortalId } from "@/lib/quickbooks/relay-registration";
 import type { RelayCheck } from "@/lib/quickbooks/relay";
 import { parseShapeForm, saveShape, type TypeRow } from "@/lib/roster/shape";
@@ -121,7 +121,10 @@ export const switchConnectAction = staffAction(P, async (ctx, form: unknown): Pr
  */
 export const disconnectAction = staffAction(P, async (ctx, form?: unknown): Promise<{ ok: true; revoked: boolean } | { ok: false; error: string }> => {
   const acknowledged = only(form, "ack", 3) === "yes";
-  const r = await disconnect({ actor: actor(ctx), ip: ctx.ip, permission: P, acknowledged });
+  // Which app the page was drawn for: through the relay, a page drawn for another never showed the box.
+  const drawnFor = only(form, "drawnFor", 10);
+  const r = await disconnect({ actor: actor(ctx), ip: ctx.ip, permission: P, acknowledged, drawnFor });
+  if (!r.ok && r.reason === "stale_page") return { ok: false, error: DISCONNECT_PAGE_STALE };
   if (!r.ok && r.reason === "not_acknowledged") return { ok: false, error: DISCONNECT_ACK_NEEDED };
   revalidatePath("/staff", "layout");
   // `revoked` is whether Intuit confirmed it canceled the portal's access; the connection is deleted here either way.

@@ -640,15 +640,22 @@ describe("disconnecting through Boosters Rocket", () => {
   };
   const page = async () => renderToStaticMarkup(await QuickBooksSettingsPage({ searchParams: Promise.resolve({}) }));
 
+  const TICK = "Tick the box to say you understand, then try again.", STALE = "This page is out of date. Reload it and try again.";
   it.each([
-    ["no field", form({})],
-    ["the box sent twice", form({ ack: ["yes", "yes"] })],
-    ["another value", form({ ack: "on" })],
-    ["nothing at all", undefined],
-  ])("without the acknowledgement (%s) changes nothing and sends nothing", async (_name, f) => {
+    ["no field", form({ drawnFor: "relay" }), TICK],
+    ["the box sent twice", form({ ack: ["yes", "yes"], drawnFor: "relay" }), TICK],
+    ["another value", form({ ack: "on", drawnFor: "relay" }), TICK],
+    // A page drawn while the club's own app held the tokens showed no box: it is out of date, whatever it sends.
+    ["a page drawn for the club's own app", form({ drawnFor: "own_app" }), STALE],
+    ["a page drawn for the own app, with the box sent anyway", form({ ack: "yes", drawnFor: "own_app" }), STALE],
+    ["a page drawn while nothing was connected", form({ ack: "yes", drawnFor: "none" }), STALE],
+    ["no page mode", form({ ack: "yes" }), STALE],
+    ["the page mode sent twice", form({ ack: "yes", drawnFor: ["relay", "relay"] }), STALE],
+    ["nothing at all", undefined, STALE],
+  ])("without the acknowledgement (%s) changes nothing and sends nothing", async (_name, f, words) => {
     await seedRelayConnected();
     const before = await row();
-    expect(await disconnectAction(f)).toEqual({ ok: false, error: "Tick the box to say you understand, then try again." });
+    expect(await disconnectAction(f)).toEqual({ ok: false, error: words });
     expect(await row()).toEqual(before);
     expect(relay.calls).toHaveLength(0);
     expect(qbo.calls).toHaveLength(0);
@@ -658,7 +665,7 @@ describe("disconnecting through Boosters Rocket", () => {
 
   it("with it, revokes through the relay with the company, forgets the tokens and audits the acknowledgement", async () => {
     await seedRelayConnected();
-    expect(await disconnectAction(form({ ack: "yes" }))).toEqual({ ok: true, revoked: true });
+    expect(await disconnectAction(form({ ack: "yes", drawnFor: "relay" }))).toEqual({ ok: true, revoked: true });
     expect(relayCalls("/v1/token/revoke").map((c) => [c.portal, c.status, c.body])).toEqual([[TEST_PORTAL_ID, 200, { environment: "sandbox", token: "relay-rt-held", realm_id: A }]]);
     expect(relay.revoked).toEqual(["relay-rt-held"]);
     expect(intuitRevokes()).toHaveLength(0); // never with the club's own keys
@@ -669,7 +676,7 @@ describe("disconnecting through Boosters Rocket", () => {
     expect(JSON.stringify(await db.select().from(auditLog))).not.toContain("relay-rt-held");
     // The registration stays: the portal can connect again.
     expect((await connectionView()).relayStage).toBe("ready");
-    expect(await disconnectAction(form({ ack: "yes" }))).toEqual({ ok: false, error: "QuickBooks isn't connected." });
+    expect(await disconnectAction(form({ ack: "yes", drawnFor: "relay" }))).toEqual({ ok: false, error: "QuickBooks isn't connected." });
   });
 
   it.each([
@@ -679,7 +686,7 @@ describe("disconnecting through Boosters Rocket", () => {
   ])("forgets the tokens whatever the relay answers: %s", async (_name, knob) => {
     await seedRelayConnected();
     knob();
-    expect(await disconnectAction(form({ ack: "yes" }))).toEqual({ ok: true, revoked: false });
+    expect(await disconnectAction(form({ ack: "yes", drawnFor: "relay" }))).toEqual({ ok: true, revoked: false });
     expect(await row()).toMatchObject({ realmId: null, tokenMode: null, refreshTokenCiphertext: null });
     expect((await audits("quickbooks.relay.disconnect")).map((a) => a.after)).toEqual([{ acknowledged: true, revoked: false, environment: "sandbox" }]);
   });

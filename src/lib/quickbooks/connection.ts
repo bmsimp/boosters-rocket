@@ -535,18 +535,23 @@ async function finishConnect(mode: QboMode, p: IntuitReturn, o: ConnectOp): Prom
  * through Boosters Rocket shares one grant, so disconnecting one may disconnect the others too.
  */
 export const DISCONNECT_ACK_NEEDED = "Tick the box to say you understand, then try again.";
+/** The answer to a Disconnect from a page drawn for another app than the one holding the tokens now, so with no box. */
+export const DISCONNECT_PAGE_STALE = "This page is out of date. Reload it and try again.";
 
 /**
  * Asks Intuit to revoke the tokens, then forgets them, whatever the answer. The keys, the registration and the cache stay
  * (spec §3). Tokens of the club's own app are revoked with its keys (`quickbooks.disconnect`); tokens issued through
  * Boosters Rocket are revoked through it, with the company so the relay ends its record of the connection too, and only
  * once the Admin has acknowledged that this may end other portals' connections to the company
- * (`quickbooks.relay.disconnect`, `acknowledged: true`). Without that it changes nothing and sends nothing.
+ * (`quickbooks.relay.disconnect`, `acknowledged: true`). Without that it changes nothing and sends nothing. `drawnFor`,
+ * from a page, is the app the page was drawn for (`token_mode` then): a page drawn for another than the relay never
+ * showed the box, so through the relay it is answered `stale_page` before anything else, changing nothing.
  */
-export async function disconnect(o: QboOp & { acknowledged?: boolean }): Promise<{ ok: true; revoked: boolean } | { ok: false; reason: "not_connected" | "not_acknowledged" }> {
+export async function disconnect(o: QboOp & { acknowledged?: boolean; drawnFor?: string | null }): Promise<{ ok: true; revoked: boolean } | { ok: false; reason: "not_connected" | "not_acknowledged" | "stale_page" }> {
   const c = await getConnection();
   if (!c?.realmId || !c.refreshTokenCiphertext || !c.refreshTokenKeyId) return { ok: false, reason: "not_connected" };
   const relay = c.tokenMode === "relay", environment = environmentOf(c, c.tokenMode);
+  if (relay && o.drawnFor !== undefined && o.drawnFor !== "relay") return { ok: false, reason: "stale_page" };
   if (relay && o.acknowledged !== true) return { ok: false, reason: "not_acknowledged" };
   let revoked = false;
   try {
