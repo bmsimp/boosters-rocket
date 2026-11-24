@@ -4,13 +4,14 @@ import type { IntegrationRowKey } from "./statuses";
  * Each integration's mark, in a small tile before its name. The vendors' own marks are static files in
  * public/integrations/, as each vendor publishes them, drawn small and never recolored (brand/README.md names their
  * sources; they belong to their owners). Documenso's mark is one ink (`currentColor`, as Documenso draws it), so its
- * file is a mask filled with the page's ink, in light and dark alike. Where no official mark is kept (QuickBooks:
- * brand/README.md says why), a text tile stands in. SMTP is no vendor: a plain envelope in the page's ink. The name beside the tile says
- * what it is, so the tile is hidden from a screen reader.
+ * file is a mask filled with the page's ink, in light and dark alike. QuickBooks' ball keeps its green and white in both
+ * modes and is drawn at Intuit's smallest allowed size, 26px, with half its height clear on every side, so its tile
+ * (`logo-qb`) is larger than the others. SMTP is no vendor: a plain envelope in the page's ink. The name beside the
+ * tile says what it is, so the tile is hidden from a screen reader.
  */
-type Mark = { src: string } | { text: string } | { mail: true } | { ink: "documenso" };
+type Mark = { src: string; size?: number } | { text: string } | { mail: true } | { ink: "documenso" };
 const MARKS: Record<IntegrationRowKey, Mark> = {
-  quickbooks: { text: "QB" },
+  quickbooks: { src: "/integrations/quickbooks/qb-ball.svg", size: 26 },
   documenso: { ink: "documenso" },
   "mail-graph": { src: "/integrations/microsoft.svg" },
   "mail-smtp": { mail: true },
@@ -20,11 +21,11 @@ const MARKS: Record<IntegrationRowKey, Mark> = {
 
 export function IntegrationLogo({ of, size = "row" }: { of: IntegrationRowKey; size?: "row" | "head" }) {
   const m = MARKS[of];
-  // A 20px static SVG served as it is: next/image has nothing to optimize in it.
+  // A small static SVG served as it is: next/image has nothing to optimize in it.
   // eslint-disable-next-line @next/next/no-img-element
-  const img = "src" in m ? <img src={m.src} alt="" width={20} height={20} /> : null;
+  const img = "src" in m ? <img src={m.src} alt="" width={m.size ?? 20} height={m.size ?? 20} /> : null;
   return (
-    <span className={`logo-tile logo-${size}`} aria-hidden="true">
+    <span className={`logo-tile logo-${size}${of === "quickbooks" ? " logo-qb" : ""}`} aria-hidden="true">
       {img ??
         ("ink" in m ? <span className={`logo-ink logo-${m.ink}`} />
         : "text" in m ? <span className="logo-text" data-mark={m.text} />

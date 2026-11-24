@@ -1054,6 +1054,11 @@ main.wrap.single > .page-head + p { margin-top: var(--s4); }
 .logo-text { font-size: var(--text-sm); font-weight: 700; letter-spacing: 0.02em; color: var(--ink); }
 .logo-text::before { content: attr(data-mark); } /* drawn, not text: the name beside the tile is the words */
 .logo-head { width: 48px; height: 40px; }
+/* QuickBooks' ball: Intuit's smallest allowed size (26px) and clear space of half its height (13px) on every side inside the 1px border, so its
+   tile is larger than the others (brand/README.md, "Other companies' marks"). */
+.logo-tile.logo-qb { width: 64px; height: 54px; }
+.logo-head.logo-qb { width: 54px; }
+.logo-tile.logo-qb img { width: 26px; height: 26px; }
 .logo-head img, .logo-head svg { width: 24px; height: 24px; }
 @media (max-width: 759.98px) { .logo-row { width: 48px; } }
 /* An integration's own page: the mark in its tile before the title's words, the status badge level with the title. */

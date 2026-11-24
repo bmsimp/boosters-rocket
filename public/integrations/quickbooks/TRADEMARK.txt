@@ -1,0 +1,3 @@
+QuickBooks, Intuit and these logos are trademarks of Intuit Inc. They are not covered by this repository's license (AGPL-3.0) or by TRADEMARKS.md, and are used only to name the system the portal connects to.
+
+The files are Intuit's, unchanged: qb-ball.svg is sbseg-logo-qb-ball-50-50-gwp-wr-us.svg; qb-logo-black.png and qb-logo-white.png are the full QuickBooks logo, 2345 x 600. brand/README.md says where each is drawn and at what size.
