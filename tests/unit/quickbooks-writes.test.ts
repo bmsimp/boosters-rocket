@@ -571,8 +571,12 @@ describe("what the portal writes to QuickBooks, and who may send each", () => {
   it("sends nothing but GET, except to Intuit's token and revoke endpoints and the one customer update", () => {
     const posts = sources.flatMap((s) => Array.from({ length: postsIn(s.text) }, () => s.file));
     // The token request, the customer update, the email update, the roster writes' sender and the invoice writes'
-    // sender in the client; the revoke in the connection.
-    expect(posts.sort()).toEqual([CLIENT, CLIENT, CLIENT, CLIENT, CLIENT, "src/lib/quickbooks/connection.ts"]);
+    // sender in the client; the revoke in the connection; the signed call to Boosters Rocket Connect, the relay
+    // (Connect through Boosters Rocket's slice 1), which reaches the relay's address alone and never QuickBooks' API.
+    expect(posts.sort()).toEqual([CLIENT, CLIENT, CLIENT, CLIENT, CLIENT, "src/lib/quickbooks/connection.ts", "src/lib/quickbooks/relay.ts"]);
+    const relay = sources.find((s) => s.file === "src/lib/quickbooks/relay.ts")!.text;
+    expect(fetchCalls(relay)).toHaveLength(1);
+    expect(fetchCalls(relay)[0]).toContain("`${qboRelayUrl()}${path}`");
     const methods = (text: string) => methodsIn(text).map((m) => m.is);
     expect(methods(bodyOf("tokenRequest"))).toEqual(["POST"]);
     expect(bodyOf("tokenRequest")).toContain("(await oauthEndpoints(environment)).token"); // Intuit's discovery document, or its checked fallback
