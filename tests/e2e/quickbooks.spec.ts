@@ -57,29 +57,29 @@ test("the switch page lists what a switch ends and keeps, and while connected sa
 test("step 1 keeps what was typed after a refusal and empties the secret after a save", async ({ page, baseURL }) => {
   await page.goto("/staff/settings/quickbooks/setup?step=app");
   await expect(page.getByLabel("Redirect address")).toHaveValue(`${baseURL}/api/quickbooks/callback`);
-  await expect(page.getByLabel("Client ID")).toHaveValue("e2e-client-id-1234567890");
+  await expect(page.getByRole("textbox", { name: "Client ID", exact: true })).toHaveValue("e2e-client-id-1234567890");
   await expect(page.getByLabel(/Client secret/)).toHaveValue("");
 
   // A Client ID the form refuses (it has spaces): the error shows and all three fields still hold what was typed.
-  await page.getByLabel("Client ID").fill("not a valid client id");
+  await page.getByRole("textbox", { name: "Client ID", exact: true }).fill("not a valid client id");
   await page.getByLabel(/Client secret/).fill("typed-secret-one");
   await page.getByRole("radio", { name: /^Production/ }).check();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText("Enter the Client ID from your Intuit app's Keys and credentials page.")).toBeVisible();
-  await expect(page.getByLabel("Client ID")).toHaveValue("not a valid client id");
+  await expect(page.getByRole("textbox", { name: "Client ID", exact: true })).toHaveValue("not a valid client id");
   await expect(page.getByLabel(/Client secret/)).toHaveValue("typed-secret-one");
   await expect(page.getByRole("radio", { name: /^Production/ })).toBeChecked();
   await expect(page.getByRole("radio", { name: /^Sandbox/ })).not.toBeChecked();
 
   // The seeded Client ID and environment again, and a new secret: saving while connected is allowed when only the
   // secret changes, and it reaches nothing outside the app. The secret field is empty afterward.
-  await page.getByLabel("Client ID").fill("e2e-client-id-1234567890");
+  await page.getByRole("textbox", { name: "Client ID", exact: true }).fill("e2e-client-id-1234567890");
   await page.getByRole("radio", { name: /^Sandbox/ }).check();
   await page.getByLabel(/Client secret/).fill("typed-secret-two");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText("Saved.")).toBeVisible();
   await expect(page.getByLabel(/Client secret/)).toHaveValue("");
-  await expect(page.getByLabel("Client ID")).toHaveValue("e2e-client-id-1234567890");
+  await expect(page.getByRole("textbox", { name: "Client ID", exact: true })).toHaveValue("e2e-client-id-1234567890");
   await expect(page.getByRole("radio", { name: /^Sandbox/ })).toBeChecked();
 });
 
@@ -244,7 +244,7 @@ test("an Admin chooses Boosters Rocket, makes the key, copies the address and ke
     await expect(page.getByRole("heading", { name: "Ready to connect" })).toBeVisible();
     await expect(page.getByText(E2E_PORTAL_ID, { exact: true })).toBeVisible();
     await expect(page.getByText(/Boosters Rocket couldn.t be reached just now, so the registration wasn.t checked\./)).toBeVisible();
-    await expect(page.getByText("Make a new key", { exact: true })).toBeVisible(); // a closed section; never opened
+    await expect(page.locator("summary", { hasText: "Make a new key" })).toBeVisible(); // a closed section; never opened
     await checked(page, "step 1, ready to connect");
   } finally {
     await backToTheSeed();
