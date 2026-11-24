@@ -30,6 +30,24 @@ const appUrl = z.string().trim().url().refine((v) => {
   } catch { return false; }
 }, { message: "APP_URL must be the portal's address and nothing more, like https://portal.yourclub.org (http or https, no path, no trailing text)" });
 
+/** Where Boosters Rocket Connect, the relay, lives when QBO_RELAY_URL is not set. */
+export const DEFAULT_QBO_RELAY_URL = "https://connect.boostersrocket.app";
+/**
+ * The relay's address (docs/superpowers/specs/2026-11-24-connect-through-boosters-rocket-design.md §3): set only by
+ * the installer, never on a page, since whoever it names is sent every refresh token the portal holds and every request
+ * its key signs. An origin only, https (http only for localhost, to test against a relay of one's own); kept as the
+ * bare origin, with no trailing slash.
+ */
+const relayUrl = z.preprocess((v) => (typeof v === "string" && v.trim() !== "" ? v.trim() : DEFAULT_QBO_RELAY_URL), z.string().refine((v) => {
+  try {
+    const u = new URL(v);
+    const local = u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "[::1]";
+    return (u.protocol === "https:" || (u.protocol === "http:" && local)) && u.username === "" && u.password === ""
+      && (u.pathname === "/" || u.pathname === "") && u.search === "" && u.hash === "" && !v.endsWith("?") && !v.endsWith("#");
+  } catch { return false; }
+}, { message: "QBO_RELAY_URL must be the relay's address and nothing more, like https://connect.boostersrocket.app (https; http only for localhost)" })
+  .transform((v) => new URL(v).origin));
+
 export const schema = z.object({
   DATABASE_URL: z.string().url(),
   APP_URL: appUrl,
@@ -37,6 +55,7 @@ export const schema = z.object({
   SETTINGS_ENCRYPTION_KEY: encryptionKey,
   SETTINGS_ENCRYPTION_KEY_PREVIOUS: z.preprocess((v) => (v === "" ? undefined : v), encryptionKey.optional()),
   CLIENT_IP_HEADER: clientIpHeader,
+  QBO_RELAY_URL: relayUrl,
 });
 
 export type Env = z.infer<typeof schema>;

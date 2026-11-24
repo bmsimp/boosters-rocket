@@ -47,3 +47,17 @@ describe("SETTINGS_ENCRYPTION_KEY", () => {
     expect(parseEnv({ ...base, SETTINGS_ENCRYPTION_KEY_PREVIOUS: "" }).SETTINGS_ENCRYPTION_KEY_PREVIOUS).toBeUndefined();
   });
 });
+
+describe("QBO_RELAY_URL", () => {
+  it("is Boosters Rocket Connect when it is not set or is left empty", () => {
+    expect(parseEnv(base).QBO_RELAY_URL).toBe("https://connect.boostersrocket.app");
+    expect(parseEnv({ ...base, QBO_RELAY_URL: "" }).QBO_RELAY_URL).toBe("https://connect.boostersrocket.app");
+    expect(parseEnv({ ...base, QBO_RELAY_URL: "  " }).QBO_RELAY_URL).toBe("https://connect.boostersrocket.app");
+  });
+  it.each([["https://relay.myfork.org", "https://relay.myfork.org"], ["https://relay.myfork.org/", "https://relay.myfork.org"], [" https://Relay.MyFork.org:8443 ", "https://relay.myfork.org:8443"],
+    ["http://localhost:8787", "http://localhost:8787"], ["http://127.0.0.1:8787/", "http://127.0.0.1:8787"]])(
+    "takes %j as the origin %j", (given, kept) => expect(parseEnv({ ...base, QBO_RELAY_URL: given }).QBO_RELAY_URL).toBe(kept));
+  it.each(["http://connect.boostersrocket.app", "http://relay.local:8787", "connect.boostersrocket.app", "https://connect.boostersrocket.app/v1", "https://connect.boostersrocket.app/?a=1",
+    "https://connect.boostersrocket.app/?", "https://connect.boostersrocket.app/#x", "https://user:pass@connect.boostersrocket.app", "ftp://connect.boostersrocket.app", "javascript:alert(1)"])(
+    "refuses %j: an https origin and nothing more", (given) => expect(() => parseEnv({ ...base, QBO_RELAY_URL: given })).toThrow(/QBO_RELAY_URL/));
+});
