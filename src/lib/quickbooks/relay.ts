@@ -93,7 +93,7 @@ async function relaySigner(as?: SignedAs): Promise<Signer> {
 /**
  * One signed POST. Answers the relay's status and JSON body for a 200 or a 400 (the call decides what a 400 means);
  * throws, after marking it, for no answer (`relay_unreachable`), a 401 (`relay_unauthorized`), a 429 (`relay_busy`)
- * and any other status (`relay_unreachable` for a 5xx, `relay_error` otherwise). The body is signed as the exact
+ * and any other status (`relay_unreachable` for a 5xx, marked `unreachable`; `relay_error` otherwise). The body is signed as the exact
  * bytes sent.
  */
 async function signedPost(path: string, payload: Record<string, unknown>, o: { as?: SignedAs } = {}): Promise<{ status: 200 | 400; body: unknown; signedAs: SignedAs }> {
@@ -122,8 +122,10 @@ async function signedPost(path: string, payload: Record<string, unknown>, o: { a
   await res.body?.cancel().catch(() => {});
   if (res.status === 401) { await markRelay({ ok: false, word: "unauthorized" }); throw failure("relay_unauthorized"); }
   if (res.status === 429) { await markRelay({ ok: false, word: "busy" }); throw failure("relay_busy"); }
-  await markRelay({ ok: false, word: "relay_error" });
-  throw failure(res.status >= 500 ? "relay_unreachable" : "relay_error");
+  // A 5xx is the relay down behind its edge, or failing to reach Intuit: unreachable, as the code says (spec §5, Refresh).
+  const unreachable = res.status >= 500;
+  await markRelay({ ok: false, word: unreachable ? "unreachable" : "relay_error" });
+  throw failure(unreachable ? "relay_unreachable" : "relay_error");
 }
 
 const field = (body: unknown, key: string): unknown => (typeof body === "object" && body !== null ? (body as Record<string, unknown>)[key] : undefined);

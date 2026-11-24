@@ -175,6 +175,7 @@ describe("refresh", () => {
     expect(await code(relayRefresh("sandbox", "rt"))).toBe("relay_busy");
     stub.failNext = 1;
     expect(await code(relayRefresh("sandbox", "rt"))).toBe("relay_unreachable");
+    expect((await mark())?.lastFailWord).toBe("unreachable"); // a 502 is marked as the code says, not as a bad answer
     stub.oddAnswer = { path: "/v1/token/refresh", body: { access_token: "only-half" } };
     expect(await code(relayRefresh("sandbox", "rt"))).toBe("relay_error");
   });
@@ -258,7 +259,7 @@ describe("forget", () => {
     expect(await relayForget("production", "not-a-company")).toBe(false);
     expect(stub.calls).toHaveLength(sent);
     expect(stub.forgotten).toEqual([]);
-    expect((await mark())?.lastFailWord).toBe("relay_error");
+    expect((await mark())?.lastFailWord).toBe("unreachable"); // the 502, the last failure
   });
 
   it("the fake relay answers an environment the portal may not use with environment_not_allowed, as the relay does", async () => {
@@ -275,7 +276,7 @@ describe("the relay's mark, for Health", () => {
     await relayRefresh("sandbox", "rt");
     const ok = await mark();
     expect(ok).toEqual({ lastOkAt: expect.any(String), lastFailAt: null, lastFailWord: null });
-    for (const [knob, word] of [["refuseNext", "unauthorized"], ["busyNext", "busy"], ["failNext", "relay_error"]] as const) {
+    for (const [knob, word] of [["refuseNext", "unauthorized"], ["busyNext", "busy"], ["failNext", "unreachable"]] as const) {
       stub[knob] = 1;
       await relayRefresh("sandbox", "rt").catch(() => {});
       const m = await mark();

@@ -590,7 +590,7 @@ describe("refreshing through Boosters Rocket", () => {
   it.each([
     ["a 401", () => { relay.refuseNext = 1; }, "relay_unauthorized", "unauthorized"],
     ["a 429", () => { relay.busyNext = 1; }, "relay_busy", "busy"],
-    ["a 502", () => { relay.failNext = 1; }, "relay_unreachable", "relay_error"],
+    ["a 502", () => { relay.failNext = 1; }, "relay_unreachable", "unreachable"],
   ])("%s doesn't need an Admin, keeps the refresh token, and marks the relay", async (_name, knob, code, word) => {
     await seedRelayConnected();
     knob();
