@@ -7,13 +7,13 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { qboRelay, setting } from "@/lib/db/schema";
 import { QboError } from "@/lib/quickbooks/endpoints";
-import { readRelayMark, relayGoAddress, relayRedeem, relayRefresh, relayRevoke, relayStart, RELAY_MARK } from "@/lib/quickbooks/relay";
+import { readRelayMark, relayForget, relayGoAddress, relayRedeem, relayRefresh, relayRevoke, relayStart, RELAY_MARK } from "@/lib/quickbooks/relay";
 import { importRelayKey, signedHeaders } from "@/lib/quickbooks/relay-sign";
 import { resetDb } from "../helpers/db";
 import { seedRelayRegistration, startRelayStub, TEST_PORTAL_ID, type RelayStub } from "../helpers/relay-stub";
 
 /**
- * The portal's four signed calls to Boosters Rocket Connect, against the fake relay (slice 1 of
+ * The portal's signed calls to Boosters Rocket Connect, against the fake relay (slices 1 and 3 of
  * docs/superpowers/plans/2026-11-24-connect-through-boosters-rocket.md): each one signed so the relay's own checks
  * accept it, the relay's answers read as untrusted, the error words of the spec's section 5 table, and the mark each
  * answer leaves for Health.
@@ -213,6 +213,41 @@ describe("revoke", () => {
     stub.failNext = 1;
     expect(await relayRevoke("sandbox", "rt", "9130000000000001")).toBe(false);
     expect(await relayRevoke("sandbox", "rt", "not-a-company")).toBe(false);
+  });
+});
+
+describe("forget", () => {
+  it("sends the environment and the company, and answers true for the relay's ok", async () => {
+    await seedRelayRegistration(stub);
+    expect(await relayForget("sandbox", "9130000000000001")).toBe(true);
+    expect(stub.calls.map((c) => [c.path, c.portal, c.status, c.body])).toEqual([["/v1/connection/forget", TEST_PORTAL_ID, 200, { environment: "sandbox", realm_id: "9130000000000001" }]]);
+    expect(stub.forgotten).toEqual(["sandbox:9130000000000001"]);
+    expect(stub.revoked).toEqual([]);
+  });
+
+  it("is best effort: a refusal, a busy relay, none at all or an odd answer is false, and it never throws", async () => {
+    await seedRelayRegistration(stub);
+    stub.refuseNext = 1;
+    expect(await relayForget("sandbox", "9130000000000001")).toBe(false);
+    stub.busyNext = 1;
+    expect(await relayForget("sandbox", "9130000000000001")).toBe(false);
+    stub.failNext = 1;
+    expect(await relayForget("sandbox", "9130000000000001")).toBe(false);
+    stub.oddAnswer = { path: "/v1/connection/forget", body: { status: "nope" } };
+    expect(await relayForget("sandbox", "9130000000000001")).toBe(false);
+    stub.oddAnswer = null;
+    // A company that isn't digits is never sent.
+    const sent = stub.calls.length;
+    expect(await relayForget("production", "not-a-company")).toBe(false);
+    expect(stub.calls).toHaveLength(sent);
+    expect(stub.forgotten).toEqual([]);
+    expect((await mark())?.lastFailWord).toBe("relay_error");
+  });
+
+  it("the fake relay answers an environment the portal may not use with environment_not_allowed, as the relay does", async () => {
+    await seedRelayRegistration(stub);
+    expect(await relayForget("staging" as "sandbox", "9130000000000001")).toBe(false);
+    expect(stub.calls.at(-1)).toMatchObject({ path: "/v1/connection/forget", status: 400 });
   });
 });
 

@@ -1,7 +1,7 @@
 // A fake Boosters Rocket Connect (the relay): an HTTP server on a free port that checks every signed request as the
 // relay does (bmsimp/boosters-rocket-connect, src/app.ts `authenticate`: the registered public key, the 5-minute clock
-// window, a spent nonce, the signature over the body's hash) and answers start, redeem, refresh, revoke and the
-// registration's check in the relay's shapes, keeping what it was sent. Set it as QBO_RELAY_URL by replacing the module that reads it:
+// window, a spent nonce, the signature over the body's hash) and answers start, redeem, refresh, revoke, forget and
+// the registration's check in the relay's shapes, keeping what it was sent. Set it as QBO_RELAY_URL by replacing the module that reads it:
 //
 //   const relayBase = vi.hoisted(() => ({ url: "" }));
 //   vi.mock("@/lib/quickbooks/relay-address", () => ({ qboRelayUrl: () => relayBase.url }));
@@ -32,6 +32,8 @@ export type RelayStub = {
   portals: Map<string, string>;
   /** Refresh tokens Intuit, behind the relay, accepts, once each; and the refresh tokens revoked. */
   refreshTokens: Set<string>; revoked: string[];
+  /** The connections a portal asked the relay to forget, as `environment:realmId`; Intuit is asked nothing for them. */
+  forgotten: string[];
   /** How far ahead of the portal's clock the relay's is: past 5 minutes, every signature is refused as stale. */
   clockAheadMs: number;
   refuseNext: number;               // answer this many signed requests, from the next one, 401 unauthorized
@@ -69,7 +71,7 @@ export async function startRelayStub(): Promise<RelayStub> {
   const nonces = new Set<string>();
   let issued = 0;
   const stub = {
-    base: "", calls: [] as RelayCall[], portals: new Map<string, string>(), refreshTokens: new Set<string>(), revoked: [] as string[],
+    base: "", calls: [] as RelayCall[], portals: new Map<string, string>(), refreshTokens: new Set<string>(), revoked: [] as string[], forgotten: [] as string[],
     clockAheadMs: 0, refuseNext: 0, busyNext: 0, failNext: 0, delayMs: 0, refreshError: null as string | null, rotateOnRefresh: true, revokeConfirmed: true,
     oddAnswer: null as { path: string; body: unknown } | null, checkName: CHECK_NAME, checkEnvironments: ["production", "sandbox"],
   } as RelayStub;
@@ -86,7 +88,7 @@ export async function startRelayStub(): Promise<RelayStub> {
       stub.calls.push(call);
       const answer = (status: number, body: unknown, refusal: string | null = null) => { call.status = status; call.refusal = refusal; send(res, status, body); };
       if (stub.delayMs) await new Promise((r) => setTimeout(r, stub.delayMs));
-      if (req.method !== "POST" || !["/v1/connect/start", "/v1/connect/redeem", "/v1/token/refresh", "/v1/token/revoke", "/v1/portal/check"].includes(path)) return answer(404, { error: "not_found" });
+      if (req.method !== "POST" || !["/v1/connect/start", "/v1/connect/redeem", "/v1/token/refresh", "/v1/token/revoke", "/v1/portal/check", "/v1/connection/forget"].includes(path)) return answer(404, { error: "not_found" });
       if (raw.length > MAX_BODY) return answer(413, { error: "too_large" });
       // The relay's checks, in its order; every refusal is the same 401.
       const id = h("x-brc-portal"), ts = h("x-brc-timestamp"), nonce = h("x-brc-nonce"), sig = h("x-brc-signature");
@@ -132,6 +134,12 @@ export async function startRelayStub(): Promise<RelayStub> {
           if (stub.rotateOnRefresh) { stub.refreshTokens.delete(given); stub.refreshTokens.add(t.refresh_token); } else t.refresh_token = given;
           return answer(200, t);
         }
+        case "/v1/connection/forget": {
+          if (!envOk) return answer(400, { error: "environment_not_allowed" });
+          if (typeof body.realm_id !== "string" || !/^\d{1,32}$/.test(body.realm_id)) return answer(400, { error: "bad_request" });
+          stub.forgotten.push(`${String(env)}:${body.realm_id}`);
+          return answer(200, { status: "ok" });
+        }
         default: {
           if (!envOk) return answer(400, { error: "environment_not_allowed" });
           if (typeof body.token !== "string" || body.token.length < 1) return answer(400, { error: "bad_request" });
@@ -151,7 +159,7 @@ export async function startRelayStub(): Promise<RelayStub> {
   };
   stub.reset = () => {
     grants.clear(); nonces.clear(); issued = 0;
-    stub.calls.length = 0; stub.portals.clear(); stub.refreshTokens.clear(); stub.revoked.length = 0;
+    stub.calls.length = 0; stub.portals.clear(); stub.refreshTokens.clear(); stub.revoked.length = 0; stub.forgotten.length = 0;
     stub.clockAheadMs = 0; stub.refuseNext = 0; stub.busyNext = 0; stub.failNext = 0; stub.delayMs = 0; stub.refreshError = null;
     stub.rotateOnRefresh = true; stub.revokeConfirmed = true; stub.oddAnswer = null; stub.checkName = CHECK_NAME; stub.checkEnvironments = ["production", "sandbox"];
   };

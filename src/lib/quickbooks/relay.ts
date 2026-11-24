@@ -1,10 +1,10 @@
 // The portal's signed calls to Boosters Rocket Connect, the relay (its SPEC.md sections 2 and 4; the portal's half is
 // docs/superpowers/specs/2026-11-24-connect-through-boosters-rocket-design.md): check the registration, start a connect,
-// redeem its return, refresh the tokens and revoke them. Every call is signed with the portal's own key (./relay-sign.ts), sent to
-// QBO_RELAY_URL only (./relay-address.ts), never follows a redirect and gives up after 15 seconds. The relay's answers
-// are untrusted: the go address must be the relay's own, the company is digits, the tokens are read as Intuit's are,
-// and nothing it says is kept or shown but a fixed word. Every answer, or the lack of one, is marked for Health
-// (RELAY_MARK): times and a fixed word, never a token, a code, a body or an id.
+// redeem its return, refresh the tokens, revoke them, and forget a connect the portal refused. Every call is signed with
+// the portal's own key (./relay-sign.ts), sent to QBO_RELAY_URL only (./relay-address.ts), never follows a redirect and
+// gives up after 15 seconds. The relay's answers are untrusted: the go address must be the relay's own, the company is
+// digits, the tokens are read as Intuit's are, and nothing it says is kept or shown but a fixed word. Every answer, or
+// the lack of one, is marked for Health (RELAY_MARK): times and a fixed word, never a token, a code, a body or an id.
 //
 // Staff and worker code only (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts): it opens the portal's
 // private key to sign, and carries the club's refresh token.
@@ -20,7 +20,7 @@ import { importRelayKey, signedHeaders } from "./relay-sign";
 const TIMEOUT_MS = 15_000;
 export const RELAY_PATHS = {
   start: "/v1/connect/start", redeem: "/v1/connect/redeem", refresh: "/v1/token/refresh", revoke: "/v1/token/revoke",
-  check: "/v1/portal/check",
+  check: "/v1/portal/check", forget: "/v1/connection/forget",
 } as const;
 const GO_PATH = "/v1/connect/go/";
 
@@ -184,6 +184,22 @@ export async function relayRevoke(environment: QboEnvironment, refreshToken: str
   try {
     const r = await signedPost(RELAY_PATHS.revoke, { environment, token: refreshToken, realm_id: realmId });
     return r.status === 200 && field(r.body, "revoked") === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A refused connect (another company, no switch asked for, a store that failed): asks the relay to end its record that
+ * this portal holds the company, without revoking anything at Intuit, since the grant may be another portal's too (the
+ * spec's section 3). The relay answers 200 `{"status":"ok"}` whether it had a record or not. Best effort: true only for
+ * that answer; it never throws.
+ */
+export async function relayForget(environment: QboEnvironment, realmId: string): Promise<boolean> {
+  if (!/^\d{1,32}$/.test(realmId)) return false;
+  try {
+    const r = await signedPost(RELAY_PATHS.forget, { environment, realm_id: realmId });
+    return r.status === 200 && field(r.body, "status") === "ok";
   } catch {
     return false;
   }
