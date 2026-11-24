@@ -163,7 +163,7 @@ component, never in an audit row (rows name the public key's first 8 characters 
 
 ### Connect
 
-1. **Step 2, "Sign in to Intuit"**, shows the full QuickBooks logo above the press. In relay mode it also asks which
+1. **Step 2, "Connect to QuickBooks"**, shows the full QuickBooks logo above the press. In relay mode it also asks which
    QuickBooks: "The club's real books" or "An Intuit sandbox (test) company", saved to `qbo_connection.environment`
    with the press (changing it while connected is refused, as today). The press is "Connect to QuickBooks".
 2. `beginConnect()` (and `beginSwitchConnect()`, from the switch page, which already requires disconnecting first)

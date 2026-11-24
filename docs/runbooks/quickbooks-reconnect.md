@@ -20,7 +20,7 @@ signed forms and everything else stay as they are.
 3. With the club's own Intuit app: if its keys changed (a new client secret, or Production keys in place of
    Development), enter them in step 1 and continue. Through Boosters Rocket, step 1 should say **Ready to connect**; if
    it doesn't, finish registering ([Intuit: Connect through Boosters Rocket](intuit.md#connect-through-boosters-rocket)).
-   Otherwise go straight to **Step 2: Sign in to Intuit**.
+   Otherwise go straight to **Step 2: Connect to QuickBooks**.
 4. Select **Connect to QuickBooks**, sign in to Intuit as an admin of the club's QuickBooks company, choose **the same
    company** and approve. You come back to the portal. Through Boosters Rocket, connecting again renews the same
    connection: nothing is revoked.

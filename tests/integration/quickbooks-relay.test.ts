@@ -504,6 +504,9 @@ describe("connecting through Boosters Rocket", () => {
   it("step 2 in relay mode asks which QuickBooks and shows the full logo, black and white, as text-free images", async () => {
     await seedRelayRegistration(relay);
     const html = await setupHtml({ step: "connect" });
+    expect(html).toContain('<h2 id="qbo-connect-h">Step 2: Connect to QuickBooks</h2>');
+    expect(html).toContain(">2. Connect to QuickBooks</a>");
+    expect(html).not.toContain("Sign in to Intuit");
     expect(html).toContain("<legend>Which QuickBooks</legend>");
     expect(html).toContain("The club&#x27;s real books");
     expect(html).toContain("An Intuit sandbox (test) company");

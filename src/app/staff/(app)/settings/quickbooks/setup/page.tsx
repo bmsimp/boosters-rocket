@@ -21,7 +21,7 @@ export const metadata = { title: "Set up QuickBooks" };
 export const dynamic = "force-dynamic";
 
 type Step = "app" | "connect" | "shape";
-const STEPS: { step: Step; label: string }[] = [{ step: "app", label: "1. How to connect" }, { step: "connect", label: "2. Sign in to Intuit" }, { step: "shape", label: "3. Membership shape" }];
+const STEPS: { step: Step; label: string }[] = [{ step: "app", label: "1. How to connect" }, { step: "connect", label: "2. Connect to QuickBooks" }, { step: "shape", label: "3. Membership shape" }];
 const SETUP = "/staff/settings/quickbooks/setup";
 /** Where customer types are made: in QuickBooks itself, never in the portal. */
 const MAKE_TYPES = "Customer types are made in QuickBooks, not here: in QuickBooks Online, open the gear menu, then All lists, then Customer types, and make one for each kind of customer the club has (for example Family, Student and Parent). Then give each customer its type on the customer's own page.";
@@ -98,7 +98,7 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
       )}
 
       {step === "connect" && (
-        <section className="box" aria-labelledby="qbo-connect-h"><h2 id="qbo-connect-h">Step 2: Sign in to Intuit</h2>
+        <section className="box" aria-labelledby="qbo-connect-h"><h2 id="qbo-connect-h">Step 2: Connect to QuickBooks</h2>
           <p>This sends you to Intuit to choose the club&apos;s QuickBooks company and approve access, then brings you back here. Sign in as someone who is an admin of that company. {QUICKBOOKS_USE.reads} {QUICKBOOKS_USE.writes}</p>
           {relay && <p>The portal connects through Boosters Rocket: Intuit asks you to approve Boosters Rocket Connect, then sends you back here.</p>}
           {conn.connected && <p className="hint">QuickBooks is connected to <b>{conn.companyName ?? "a company"}</b>. Connecting again renews the connection to the same company.</p>}

@@ -52,7 +52,7 @@ export function AppKeysForm({ configured, clientId: savedId, environment: savedE
         <label><input type="radio" name="environment" value="production" checked={environment === "production"} onChange={() => setEnvironment("production")} /> Production (the club&apos;s real books, with the app&apos;s Production keys)</label>
       </fieldset>
       {state && !state.ok && <Errors errors={state.errors} />}
-      {state?.ok && <Notice tone="done">Saved. <a href="/staff/settings/quickbooks/setup?step=connect">Next: sign in to Intuit</a></Notice>}
+      {state?.ok && <Notice tone="done">Saved. <a href="/staff/settings/quickbooks/setup?step=connect">Next: connect to QuickBooks</a></Notice>}
       <button type="button" className="btn" disabled={pending} onClick={() => startTransition(() => run({ clientId, clientSecret, environment }))}>{pending ? "Saving…" : "Save"}</button>
     </form>
   );
@@ -325,7 +325,7 @@ export function RelayRegistration({ stage, address, addressFits, publicKey, port
       )}
       {stage === "ready" && (
         <>
-          <p>The portal is registered with Boosters Rocket. Next, sign in to Intuit in step 2.</p>
+          <p>The portal is registered with Boosters Rocket. Next, connect to QuickBooks in step 2.</p>
           <KeyValue items={[{ key: "id", label: "Portal id", value: <code>{portalId}</code> }]} />
           {copies}
           {https}

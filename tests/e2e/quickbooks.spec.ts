@@ -78,6 +78,7 @@ test("step 1 keeps what was typed after a refusal and empties the secret after a
   await page.getByLabel(/Client secret/).fill("typed-secret-two");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText("Saved.")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Next: connect to QuickBooks" })).toHaveAttribute("href", "/staff/settings/quickbooks/setup?step=connect");
   await expect(page.getByLabel(/Client secret/)).toHaveValue("");
   await expect(page.getByRole("textbox", { name: "Client ID", exact: true })).toHaveValue("e2e-client-id-1234567890");
   await expect(page.getByRole("radio", { name: /^Sandbox/ })).toBeChecked();
@@ -255,6 +256,7 @@ test("step 2 through Boosters Rocket asks which QuickBooks and shows QuickBooks'
   await sql`UPDATE qbo_connection SET connect_mode = 'relay'`;
   try {
     await page.goto("/staff/settings/quickbooks/setup?step=connect");
+    await expect(page.getByRole("heading", { level: 2, name: "Step 2: Connect to QuickBooks" })).toBeVisible();
     await expect(page.getByRole("group", { name: "Which QuickBooks" })).toBeVisible();
     await expect(page.getByRole("radio", { name: /^The club's real books/ })).toBeVisible();
     await expect(page.getByRole("radio", { name: /^An Intuit sandbox \(test\) company/ })).toBeVisible();

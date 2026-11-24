@@ -88,7 +88,7 @@ behind ([reconnecting QuickBooks](quickbooks-reconnect.md#connecting-a-different
    Student and Parent), with students and parents as sub-customers of a family, and a few invoices.
 3. In the portal, as an Admin: **Settings**, **QuickBooks**, **Set up**.
 4. In step 1, choose **Use our own Intuit app**. Enter the Development **Client ID** and **Client secret**, choose
-   **Sandbox**, **Save**, then **Next: sign in to Intuit** in the note that appears.
+   **Sandbox**, **Save**, then **Next: connect to QuickBooks** in the note that appears.
 5. **Connect to QuickBooks**, sign in to Intuit, choose the sandbox company and **Connect**. You come back to the portal.
 6. Choose the membership shape (**Layered** when families have students and parents under them; **Flat** when each
    member is a customer of their own) and the customer types, select **Preview**, check the counts and names, then
