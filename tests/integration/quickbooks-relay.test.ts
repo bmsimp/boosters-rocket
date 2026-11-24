@@ -24,7 +24,7 @@ vi.mock("next/navigation", () => ({
 import { renderToStaticMarkup } from "react-dom/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, qboConnection, role, roleAssignment, roleRule, setting } from "@/lib/db/schema";
+import { auditLog, qboConnection, qboRelay, role, roleAssignment, roleRule, setting } from "@/lib/db/schema";
 import { secretBox } from "@/lib/crypto/secret-box";
 import { beginConnectAction, disconnectAction, saveConnectModeAction, switchConnectAction } from "@/app/staff/(app)/settings/quickbooks/actions";
 import QuickBooksSetupPage from "@/app/staff/(app)/settings/quickbooks/setup/page";
@@ -233,6 +233,42 @@ describe("connecting through Boosters Rocket", () => {
     expect(relay.forgotten).toEqual([`sandbox:${B}`]);
     expect(relayCalls("/v1/connection/forget").map((c) => c.body)).toEqual([{ environment: "sandbox", realm_id: B }]);
     expect((await audits("quickbooks.relay.connect_refused")).map((a) => a.after)).toEqual([{ reason: "other_company", revoked: false, why: "shared_grant", forgotten: true }]);
+  });
+
+  describe("a registration changed while the code was being redeemed", () => {
+    const OTHER_ID = "brp_another0portal01";
+
+    it("a new portal id: the tokens are thrown away, nothing revoked, and the forget is sent under the id that redeemed them", async () => {
+      await seedRelayRegistration(relay);
+      await press();
+      const state = sentState();
+      relay.portals.set(OTHER_ID, relay.portals.get(TEST_PORTAL_ID)!); // the same key, registered again under a new id
+      relay.beforeAnswer = { path: "/v1/connect/redeem", run: async () => { await db.update(qboRelay).set({ portalId: OTHER_ID }); } };
+      const res = await relayCallback(callbackUrl({ code: relay.grantFor(state, A), state }));
+      expect(where(res)).toBe("/staff/settings/quickbooks/setup?step=connect&error=state");
+      expect(await row()).toMatchObject({ realmId: null, tokenMode: null, refreshTokenCiphertext: null });
+      expect(relayCalls("/v1/token/revoke")).toHaveLength(0);
+      expect(intuitRevokes()).toHaveLength(0);
+      expect(relayCalls("/v1/connection/forget").map((c) => [c.portal, c.body])).toEqual([[TEST_PORTAL_ID, { environment: "sandbox", realm_id: A }]]);
+      expect((await audits("quickbooks.relay.connect_refused")).map((a) => a.after)).toEqual([{ reason: "state", revoked: false, why: "shared_grant", forgotten: true, registrationChanged: true }]);
+    });
+
+    it("a new key: the tokens are thrown away and nothing is sent, since nothing here can sign for the old key", async () => {
+      await seedRelayRegistration(relay);
+      await press();
+      const state = sentState();
+      const { newRelayKey } = await import("@/lib/quickbooks/relay-sign");
+      const key = await newRelayKey(), sealed = secretBox().seal(key.privateKeyPkcs8, "qbo:relay-key");
+      relay.beforeAnswer = { path: "/v1/connect/redeem", run: async () => {
+        await db.update(qboRelay).set({ publicKey: key.publicKey, privateKeyCiphertext: sealed.ciphertext, privateKeyKeyId: sealed.keyId });
+      } };
+      const res = await relayCallback(callbackUrl({ code: relay.grantFor(state, A), state }));
+      expect(where(res)).toBe("/staff/settings/quickbooks/setup?step=connect&error=state");
+      expect(await row()).toMatchObject({ realmId: null, tokenMode: null, refreshTokenCiphertext: null });
+      expect(relay.calls.map((c) => c.path)).toEqual(["/v1/connect/start", "/v1/connect/redeem"]);
+      expect(intuitRevokes()).toHaveLength(0);
+      expect((await audits("quickbooks.relay.connect_refused")).map((a) => a.after)).toEqual([{ reason: "state", revoked: false, why: "shared_grant", forgotten: false, registrationChanged: true }]);
+    });
   });
 
   it("another company than the roster's, with no switch asked for, is roster_company, and the relay forgets it", async () => {

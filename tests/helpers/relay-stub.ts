@@ -44,6 +44,8 @@ export type RelayStub = {
   rotateOnRefresh: boolean;         // a refresh answers a new refresh token (Intuit rotates it); false answers the same one
   revokeConfirmed: boolean;         // a revoke answers { revoked: true }
   oddAnswer: { path: string; body: unknown } | null; // answer a 200 with this body on this path, instead of the usual
+  /** Run this once, on the next request to this path that passes the checks, before answering it (what happens meanwhile). */
+  beforeAnswer: { path: string; run: () => Promise<void> } | null;
   /** What the registration's check answers: the name the portal was registered under, and the environments it may use. */
   checkName: string; checkEnvironments: string[];
   /** The redemption code the relay would put in the browser's return to the portal, for this state and company. */
@@ -73,7 +75,7 @@ export async function startRelayStub(): Promise<RelayStub> {
   const stub = {
     base: "", calls: [] as RelayCall[], portals: new Map<string, string>(), refreshTokens: new Set<string>(), revoked: [] as string[], forgotten: [] as string[],
     clockAheadMs: 0, refuseNext: 0, busyNext: 0, failNext: 0, delayMs: 0, refreshError: null as string | null, rotateOnRefresh: true, revokeConfirmed: true,
-    oddAnswer: null as { path: string; body: unknown } | null, checkName: CHECK_NAME, checkEnvironments: ["production", "sandbox"],
+    oddAnswer: null as { path: string; body: unknown } | null, beforeAnswer: null as { path: string; run: () => Promise<void> } | null, checkName: CHECK_NAME, checkEnvironments: ["production", "sandbox"],
   } as RelayStub;
   const tokens = () => { issued++; return { access_token: `relay-at-${issued}`, refresh_token: `relay-rt-${issued}`, token_type: "bearer", expires_in: 3600, x_refresh_token_expires_in: 8_640_000 }; };
 
@@ -106,6 +108,7 @@ export async function startRelayStub(): Promise<RelayStub> {
       let body: Record<string, unknown>;
       try { body = JSON.parse(raw) as Record<string, unknown>; } catch { return answer(400, { error: "bad_request" }); }
       call.body = body;
+      if (stub.beforeAnswer?.path === path) { const meanwhile = stub.beforeAnswer; stub.beforeAnswer = null; await meanwhile.run(); }
       if (stub.oddAnswer?.path === path) return answer(200, stub.oddAnswer.body);
       const env = body.environment;
       const envOk = env === "production" || env === "sandbox";
@@ -161,7 +164,7 @@ export async function startRelayStub(): Promise<RelayStub> {
     grants.clear(); nonces.clear(); issued = 0;
     stub.calls.length = 0; stub.portals.clear(); stub.refreshTokens.clear(); stub.revoked.length = 0; stub.forgotten.length = 0;
     stub.clockAheadMs = 0; stub.refuseNext = 0; stub.busyNext = 0; stub.failNext = 0; stub.delayMs = 0; stub.refreshError = null;
-    stub.rotateOnRefresh = true; stub.revokeConfirmed = true; stub.oddAnswer = null; stub.checkName = CHECK_NAME; stub.checkEnvironments = ["production", "sandbox"];
+    stub.rotateOnRefresh = true; stub.revokeConfirmed = true; stub.oddAnswer = null; stub.beforeAnswer = null; stub.checkName = CHECK_NAME; stub.checkEnvironments = ["production", "sandbox"];
   };
   stub.close = () => new Promise<void>((r) => server.close(() => r()));
   return stub;

@@ -59,17 +59,28 @@ export function registrationMailto(o: { clubName: string; address: string; publi
   return `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
-/** Whether tokens issued through the relay are held now: then the key and the mode can't change (Disconnect first). */
-async function connectedThroughRelay(tx: Tx): Promise<boolean> {
+/**
+ * Why the registration can't change just now, or null when it can: tokens issued through the relay are held
+ * (`connected`: Disconnect first), or a connect through the relay is in progress, its state not yet expired (the
+ * minutes until it is). A connect is signed by the id and key it started under, so neither changes under it.
+ */
+async function registrationHeld(tx: Tx, now = Date.now()): Promise<"connected" | { connectingMinutes: number } | null> {
   // Locked, so a connect storing its tokens at the same moment waits for this change, or this for it.
-  const [c] = await tx.select({ tokenMode: qboConnection.tokenMode }).from(qboConnection).for("update");
-  return c?.tokenMode === "relay";
+  const [c] = await tx.select({ tokenMode: qboConnection.tokenMode, stateMode: qboConnection.stateMode, stateExpiresAt: qboConnection.stateExpiresAt })
+    .from(qboConnection).for("update");
+  if (c?.tokenMode === "relay") return "connected";
+  const left = c?.stateMode === "relay" && c.stateExpiresAt ? c.stateExpiresAt.getTime() - now : 0;
+  return left > 0 ? { connectingMinutes: Math.ceil(left / 60_000) } : null;
 }
+
+/** The answer while a connect through the relay is in progress: its state expires within ten minutes. */
+export const connectInProgress = (minutes: number): string =>
+  `A connect through Boosters Rocket is in progress. Finish it, or wait ${minutes} ${minutes === 1 ? "minute" : "minutes"}, then try again.`;
 
 /**
  * Makes the portal's key pair and seals its private half (`qbo:relay-key`), in one transaction with its audit row. The
  * first key is made once: pressed again, it changes nothing. `replace` is "Make a new key", offered only while nothing
- * is connected through the relay and refused otherwise: it replaces both halves and clears the saved portal id, since
+ * is connected, or being connected, through the relay and refused otherwise: it replaces both halves and clears the saved portal id, since
  * the relay knows the portal by the old key until its owner registers the new one.
  */
 export async function makeRelayKey(o: Op, replace: boolean): Promise<Done> {
@@ -81,9 +92,11 @@ export async function makeRelayKey(o: Op, replace: boolean): Promise<Done> {
     const [r] = await tx.select().from(qboRelay).for("update");
     if (r && !replace) return { ok: true as const, message: "This portal's key is already made." };
     if (!r && replace) return { ok: false as const, errors: ["This portal has no key to replace yet. Make its key first."] };
-    if (r && (await connectedThroughRelay(tx))) {
+    const held = r ? await registrationHeld(tx) : null;
+    if (held === "connected") {
       return { ok: false as const, errors: ["QuickBooks is connected through Boosters Rocket with this key. Disconnect first, from QuickBooks settings, then make a new key."] };
     }
+    if (held) return { ok: false as const, errors: [connectInProgress(held.connectingMinutes)] };
     const values = {
       publicKey: key.publicKey, privateKeyCiphertext: sealed.ciphertext, privateKeyKeyId: sealed.keyId, keyMadeAt: now, keyMadeBy: o.staffUserId,
       portalId: null, portalIdSavedAt: null, portalIdSavedBy: null, updatedAt: now,
@@ -107,8 +120,9 @@ export function parsePortalId(raw: unknown): { ok: true; portalId: string } | { 
 /**
  * Saves the portal id, audited with before and after. Needs the key first: the id is the relay's name for that key.
  * Refused, as "Make a new key" is, while tokens issued through the relay are held: the relay keeps its record of the
- * connection under the id that connected, so refresh and revoke under another id would no longer match it. The same id
- * again changes nothing.
+ * connection under the id that connected, so refresh and revoke under another id would no longer match it. Refused too
+ * while a connect through the relay is in progress, which is redeemed under the id it started with. The same id again
+ * changes nothing.
  */
 export async function savePortalId(portalId: string, o: Op): Promise<Done> {
   return db.transaction(async (tx) => {
@@ -116,9 +130,11 @@ export async function savePortalId(portalId: string, o: Op): Promise<Done> {
     const [r] = await tx.select().from(qboRelay).for("update");
     if (!r) return { ok: false as const, errors: ["Make this portal's key first."] };
     if (r.portalId === portalId) return { ok: true as const, message: "Nothing changed." };
-    if (await connectedThroughRelay(tx)) {
+    const held = await registrationHeld(tx);
+    if (held === "connected") {
       return { ok: false as const, errors: ["QuickBooks is connected through Boosters Rocket under this portal id. Disconnect first, from QuickBooks settings, then change the id."] };
     }
+    if (held) return { ok: false as const, errors: [connectInProgress(held.connectingMinutes)] };
     const now = new Date();
     await tx.update(qboRelay).set({ portalId, portalIdSavedAt: now, portalIdSavedBy: o.staffUserId, updatedAt: now });
     await writeAudit({ actor: o.actor, action: "settings.quickbooks.relay.portal_id", permission: o.permission, ...TARGET, ip: o.ip,

@@ -69,14 +69,21 @@ const FAILURES = {
 export type RelayFailureCode = keyof typeof FAILURES;
 const failure = (code: RelayFailureCode) => new QboError(FAILURES[code], code);
 
-type Signer = { portalId: string; key: CryptoKey };
+/** The registration a call was signed under: the portal id and the public key (never the private half). */
+export type SignedAs = { portalId: string; publicKey: string };
+type Signer = SignedAs & { key: CryptoKey };
 
-/** The portal's id and its signing key, opened from qbo_relay. Refused when the portal isn't registered yet. */
-async function relaySigner(): Promise<Signer> {
+/**
+ * The portal's id and its signing key, opened from qbo_relay. Refused when the portal isn't registered yet. `as` signs
+ * under an earlier registration instead: its id, with the key held now, and only while that key is still the one it
+ * named (a new key can't sign for the old one).
+ */
+async function relaySigner(as?: SignedAs): Promise<Signer> {
   const [r] = await db.select().from(qboRelay);
-  if (!r?.portalId) throw failure("relay_not_registered");
+  if (!r?.portalId || (as && as.publicKey !== r.publicKey)) throw failure("relay_not_registered");
+  const portalId = as?.portalId ?? r.portalId;
   try {
-    return { portalId: r.portalId, key: await importRelayKey(secretBox().open({ ciphertext: r.privateKeyCiphertext, keyId: r.privateKeyKeyId }, QBO_AAD.relayKey)) };
+    return { portalId, publicKey: r.publicKey, key: await importRelayKey(secretBox().open({ ciphertext: r.privateKeyCiphertext, keyId: r.privateKeyKeyId }, QBO_AAD.relayKey)) };
   } catch (e) {
     if (e instanceof SecretBoxError) throw new QboError("The portal's Boosters Rocket key can't be read with this server's encryption key.", "unreadable");
     throw e;
@@ -89,8 +96,9 @@ async function relaySigner(): Promise<Signer> {
  * and any other status (`relay_unreachable` for a 5xx, `relay_error` otherwise). The body is signed as the exact
  * bytes sent.
  */
-async function signedPost(path: string, payload: Record<string, unknown>): Promise<{ status: 200 | 400; body: unknown }> {
-  const signer = await relaySigner();
+async function signedPost(path: string, payload: Record<string, unknown>, o: { as?: SignedAs } = {}): Promise<{ status: 200 | 400; body: unknown; signedAs: SignedAs }> {
+  const signer = await relaySigner(o.as);
+  const signedAs = { portalId: signer.portalId, publicKey: signer.publicKey };
   const body = JSON.stringify(payload);
   let res: Response;
   try {
@@ -109,7 +117,7 @@ async function signedPost(path: string, payload: Record<string, unknown>): Promi
       throw failure("relay_error");
     }
     await markRelay({ ok: true });
-    return { status: res.status, body: answer };
+    return { status: res.status, body: answer, signedAs };
   }
   await res.body?.cancel().catch(() => {});
   if (res.status === 401) { await markRelay({ ok: false, word: "unauthorized" }); throw failure("relay_unauthorized"); }
@@ -144,7 +152,8 @@ export async function relayStart(environment: QboEnvironment, portalState: strin
   return go;
 }
 
-export type Redeemed = { tokens: TokenSet; realmId: string; environment: QboEnvironment };
+/** `signedAs`: the registration the redemption was signed under, which the store checks is still the portal's. */
+export type Redeemed = { tokens: TokenSet; realmId: string; environment: QboEnvironment; signedAs: SignedAs };
 
 /**
  * Connect, the return: the tokens for a redemption code, once. The relay's answer must be for this attempt (its
@@ -160,7 +169,7 @@ export async function relayRedeem(code: string, expect: { portalState: string; e
   if (typeof realmId !== "string" || !/^\d{1,32}$/.test(realmId)) throw failure("relay_error");
   const tokens = tokenSetFrom(r.body);
   if (!tokens) throw failure("relay_error");
-  return { tokens, realmId, environment: expect.environment };
+  return { tokens, realmId, environment: expect.environment, signedAs: r.signedAs };
 }
 
 /**
@@ -193,12 +202,14 @@ export async function relayRevoke(environment: QboEnvironment, refreshToken: str
  * A refused connect (another company, no switch asked for, a store that failed): asks the relay to end its record that
  * this portal holds the company, without revoking anything at Intuit, since the grant may be another portal's too (the
  * spec's section 3). The relay answers 200 `{"status":"ok"}` whether it had a record or not. Best effort: true only for
- * that answer; it never throws.
+ * that answer; it never throws. `as` sends it under the registration that redeemed the connect, when the portal's has
+ * changed since: under its id, if this portal's key is still the one registered for it; with a new key nothing is sent,
+ * since nothing here can sign for the old one.
  */
-export async function relayForget(environment: QboEnvironment, realmId: string): Promise<boolean> {
+export async function relayForget(environment: QboEnvironment, realmId: string, as?: SignedAs): Promise<boolean> {
   if (!/^\d{1,32}$/.test(realmId)) return false;
   try {
-    const r = await signedPost(RELAY_PATHS.forget, { environment, realm_id: realmId });
+    const r = await signedPost(RELAY_PATHS.forget, { environment, realm_id: realmId }, { as });
     return r.status === 200 && field(r.body, "status") === "ok";
   } catch {
     return false;

@@ -8,7 +8,7 @@ import { writeAudit, type Actor } from "@/lib/audit/log";
 import { errorNeedsAdmin, QboError, QBO_SCOPE } from "./endpoints";
 import { oauthEndpoints } from "./discovery";
 import { environmentOf, ownAppOf, QBO_AAD, qboGet, sealTokens, tokenRequest, type QboApp, type TokenSet } from "./client";
-import { relayForget, relayRedeem, relayRevoke, relayStart } from "./relay";
+import { relayForget, relayRedeem, relayRevoke, relayStart, type SignedAs } from "./relay";
 import { clearRosterOfOtherCompany, dropSwitchAsk, getRosterSource, getSwitchRecord, setSwitchRecord, storedSwitchOf, SWITCH_KEY, type SwitchRecord } from "@/lib/roster/source";
 
 export type QboOp = { actor: Actor; ip: string | null; permission?: string };
@@ -33,7 +33,9 @@ export type QboConnectionView = {
   /** What the next Connect does; relay for a new club. `tokenMode`: which app issued the tokens held now, null while none. */
   connectMode: QboMode; tokenMode: QboMode | null;
   /** The registration with Boosters Rocket (relay-registration.ts). Never the key. */
-  relayStage: RelayStage; clientId: string | null;
+  relayStage: RelayStage;
+  /** A connect through the relay is in progress (its state not yet expired): the registration can't change under it. */
+  relayConnectPending: boolean; clientId: string | null;
   /**
    * Which QuickBooks: the tokens' while connected, otherwise the one the next Connect uses (the mode's own column).
    * `ownAppEnvironment`: what the club's own app's keys are for, whatever the mode, for the keys' form.
@@ -83,6 +85,7 @@ export async function connectionView(): Promise<QboConnectionView> {
   const stepOneDone = connectMode === "own_app" ? Boolean(c?.clientId) : relayStage === "ready";
   return {
     configured: connected || stepOneDone, connectMode, tokenMode: c?.tokenMode ?? null, relayStage, clientId: c?.clientId ?? null,
+    relayConnectPending: c?.stateMode === "relay" && c.stateExpiresAt !== null && c.stateExpiresAt.getTime() > Date.now(),
     environment: c ? environmentOf(c, connected ? c.tokenMode : connectMode) : null, ownAppEnvironment: c?.environment ?? null, connected,
     companyName: c?.companyName ?? null, connectedAt: iso(c?.connectedAt), lastTokenRefreshAt: iso(c?.lastTokenRefreshAt),
     refreshExpiresAt: iso(c?.refreshExpiresAt), lastError: c?.lastError ?? null, lastErrorAt: iso(c?.lastErrorAt), needsAdmin: errorNeedsAdmin(c?.lastError),
@@ -322,7 +325,8 @@ export async function completeRelayConnect(p: RelayReturn, o: ConnectOp): Promis
 
 type Claimed = { ok: true; switchFrom: string | null; environment: QboEnvironment; app: QboApp | null } | { ok: false; reason: ConnectRefusal };
 type OldGrant = { refreshToken: string; app: QboApp; environment: QboEnvironment } | null;
-type Stored = { kind: "stored" | "switched"; switchFrom: string | null; moved: boolean; old: OldGrant } | { kind: "state" | "other_company" | "roster_company" };
+type Stored = { kind: "stored" | "switched"; switchFrom: string | null; moved: boolean; old: OldGrant }
+  | { kind: "state" | "other_company" | "roster_company"; registrationChanged?: true };
 
 /**
  * The one finish of a connect, in either mode. Only step 2, turning the return into tokens, and what is done with
@@ -383,11 +387,11 @@ async function finishConnect(mode: QboMode, p: IntuitReturn, o: ConnectOp): Prom
   // 2. Turn the return into tokens, with no row lock held while Intuit or the relay answers: Intuit's code exchanged
   // with the club's app, or the relay's redemption code redeemed, signed (the answer must be for this attempt, its
   // `portal_state` the state just spent, and this environment; its `realm_id` is the company).
-  let tokens: TokenSet, realmId: string;
+  let tokens: TokenSet, realmId: string, signedAs: SignedAs | undefined;
   if (relay) {
     try {
       const r = await relayRedeem(p.code!, { portalState: p.state!, environment: claim.environment });
-      tokens = r.tokens; realmId = r.realmId;
+      tokens = r.tokens; realmId = r.realmId; signedAs = r.signedAs;
     } catch (e) {
       if (e instanceof QboError) return refuse(relayReason(e.code), { code: e.code });
       throw e;
@@ -408,7 +412,7 @@ async function finishConnect(mode: QboMode, p: IntuitReturn, o: ConnectOp): Prom
   // using. They are dropped, and the relay is asked to forget that this portal connected the company. Neither changes
   // anything about the refusal.
   const dropIssued = async (): Promise<Record<string, unknown>> => relay
-    ? { revoked: false, why: "shared_grant", forgotten: await relayForget(claim.environment, realmId) }
+    ? { revoked: false, why: "shared_grant", forgotten: await relayForget(claim.environment, realmId, signedAs) }
     : { revoked: await revokeAtIntuit(tokens.refreshToken, claim.app!, claim.environment) };
   // Whether the row still holds a connection to this company, read fresh (the Admin was signing in again to renew it):
   // then nothing is revoked or forgotten, and that connection carries on.
@@ -427,6 +431,13 @@ async function finishConnect(mode: QboMode, p: IntuitReturn, o: ConnectOp): Prom
     } catch { /* the audit write must not replace the error that brought us here */ }
   };
   const stored = await db.transaction(async (tx): Promise<Stored> => {
+    // Through the relay, the registration the code was redeemed under must still be the portal's: a new id or key since
+    // would leave tokens the relay knows under another registration. Locked first, before the connection row, in the
+    // order the registration's own changes take them (relay-registration.ts), so the two never wait on each other.
+    if (relay) {
+      const [reg] = await tx.select({ portalId: qboRelay.portalId, publicKey: qboRelay.publicKey }).from(qboRelay).for("update");
+      if (!reg || reg.portalId !== signedAs!.portalId || reg.publicKey !== signedAs!.publicKey) return { kind: "state", registrationChanged: true };
+    }
     const [c] = await tx.select().from(qboConnection).for("update");
     if (!c) return { kind: "other_company" };
     // The tokens belong to the app and environment they were issued under; the keys or the mode may have changed since.
@@ -466,8 +477,12 @@ async function finishConnect(mode: QboMode, p: IntuitReturn, o: ConnectOp): Prom
   if (stored.kind !== "stored" && stored.kind !== "switched") {
     // Through the relay, the company is forgotten only while this portal doesn't hold it: forgetting a company still
     // connected here would end the relay's record of that connection.
+    // A changed registration: the tokens are thrown away and nothing revoked; the forget is sent under the registration
+    // that redeemed them, which can still sign only when the key is unchanged (relayForget()).
+    const { kind } = stored, changed = "registrationChanged" in stored;
     const keep = relay && (await stillHeld());
-    return refuse(stored.kind, keep ? { revoked: false, why: "shared_grant", forgotten: false } : await dropIssued());
+    const dropped = keep ? { revoked: false, why: "shared_grant", forgotten: false } : await dropIssued();
+    return refuse(kind, changed ? { ...dropped, registrationChanged: true } : dropped);
   }
   const switched = stored.kind === "switched";
   // 3a. After a move from the club's own app, its grant is revoked with its own keys, now the new tokens are stored. If

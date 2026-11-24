@@ -216,6 +216,40 @@ describe("Registering the portal with Boosters Rocket", () => {
     expect((await connectionView()).relayStage).toBe("waiting");
   });
 
+  it("neither the id nor the key changes while a connect through the relay is in progress, and the page offers neither", async () => {
+    await makeAndRegister();
+    await savePortalIdAction(form({ portalId: TEST_PORTAL_ID }));
+    const old = (await relayRow())!;
+    const inProgress = expect.stringMatching(/^A connect through Boosters Rocket is in progress\. Finish it, or wait (10|9) minutes, then try again\.$/);
+    // A connect started through the relay, its state good for ten minutes more.
+    await db.insert(qboConnection).values({ relayEnvironment: "sandbox", connectMode: "relay", stateMode: "relay", stateHash: "a".repeat(64), stateStaffUserId: admin.id, stateExpiresAt: new Date(Date.now() + 10 * 60_000) });
+    expect(await connectionView()).toMatchObject({ relayConnectPending: true });
+    const before = (await db.select().from(auditLog)).length;
+    expect(await makeRelayKeyAction(form({ replace: "yes" }))).toEqual({ ok: false, errors: [inProgress] });
+    expect(await savePortalIdAction(form({ portalId: OTHER_ID }))).toEqual({ ok: false, errors: [inProgress] });
+    expect(await relayRow()).toMatchObject({ publicKey: old.publicKey, portalId: TEST_PORTAL_ID });
+    expect((await db.select().from(auditLog)).length).toBe(before);
+    const { html } = await setup();
+    expect(html).not.toContain("Change the portal id");
+    expect(html).not.toContain("Make a new key");
+    // The waiting stage, held the same way, offers no id form either: it says why.
+    await db.update(qboRelay).set({ portalId: null });
+    const waiting = (await setup()).html;
+    expect(waiting).toContain("Waiting for the id");
+    expect(waiting).not.toContain('name="portalId"');
+    expect(waiting).toContain("The portal id can&#x27;t be saved while QuickBooks is connected, or being connected, through Boosters Rocket.");
+    await db.update(qboRelay).set({ portalId: TEST_PORTAL_ID });
+    // One minute left says one minute.
+    await db.update(qboConnection).set({ stateExpiresAt: new Date(Date.now() + 30_000) });
+    expect(await savePortalIdAction(form({ portalId: OTHER_ID }))).toEqual({ ok: false, errors: ["A connect through Boosters Rocket is in progress. Finish it, or wait 1 minute, then try again."] });
+    // Expired (or an own-app connect's state), it may change again.
+    await db.update(qboConnection).set({ stateExpiresAt: new Date(Date.now() - 1000) });
+    expect(await connectionView()).toMatchObject({ relayConnectPending: false });
+    expect(await savePortalIdAction(form({ portalId: OTHER_ID }))).toMatchObject({ ok: true, message: "The portal id is saved." });
+    expect(await makeRelayKeyAction(form({ replace: "yes" }))).toMatchObject({ ok: true });
+    expect((await setup()).html).toContain('name="portalId"');
+  });
+
   it("the portal id can't change while connected through the relay, which knows the connection by it; the same id changes nothing", async () => {
     await makeAndRegister();
     await savePortalIdAction(form({ portalId: TEST_PORTAL_ID }));

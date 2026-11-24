@@ -237,6 +237,9 @@ type PortalIdSaved = { ok: true; message: string; check: RelayCheck | null } | {
 type Checked = { ok: true; check: RelayCheck | null };
 const ENVIRONMENT_WORDS = { production: "to the club's real books", sandbox: "to Intuit sandbox (test) companies" } as const;
 
+/** Why the waiting stage offers no form: the registration can't change while a connect through the relay holds it. */
+export const REGISTRATION_HELD = "The portal id can't be saved while QuickBooks is connected, or being connected, through Boosters Rocket. Finish or end that first, then come back to this step.";
+
 /** The relay's answer to the check, in words. The registered name is the relay's text: a text child, never markup. */
 export function CheckAnswer({ check, again, checking }: { check: RelayCheck; again: () => void; checking: boolean }) {
   if (check.answer === "registered") {
@@ -256,7 +259,8 @@ export function CheckAnswer({ check, again, checking }: { check: RelayCheck; aga
  * Registration with Boosters Rocket, the relay part of step 1, through its three stages: not registered yet, waiting
  * for the id, ready to connect. One component across them, so the check's answer stays on the page when saving the id
  * moves it on a stage. It is given only what it shows, all of it public: the portal's address, its public key and id.
- * `mayChange` is false while connected through the relay: then neither the id nor the key may change (Disconnect first).
+ * `mayChange` is false while connected, or being connected, through the relay: then neither the id nor the key may
+ * change (Disconnect first, or let the connect finish), and no stage offers a form to change them.
  */
 export function RelayRegistration({ stage, address, addressFits, publicKey, portalId, mailto, mayChange, makeKey, saveId, check }: {
   stage: RelayStage; address: string; addressFits: boolean; publicKey: string | null; portalId: string | null; mailto: string | null; mayChange: boolean;
@@ -314,7 +318,7 @@ export function RelayRegistration({ stage, address, addressFits, publicKey, port
           <p>Email these to support@boostersrocket.com. Boosters Rocket registers the portal and emails you back its id.</p>
           {copies}
           {mailto && <p><a className="link-line" href={mailto}>Write the email</a></p>}
-          {https ?? idForm("Portal id")}
+          {https ?? (mayChange ? idForm("Portal id") : <Notice tone="info" live="none">{REGISTRATION_HELD}</Notice>)}
         </>
       )}
       {stage === "ready" && (
