@@ -1,7 +1,7 @@
 // A fake Boosters Rocket Connect (the relay): an HTTP server on a free port that checks every signed request as the
 // relay does (bmsimp/boosters-rocket-connect, src/app.ts `authenticate`: the registered public key, the 5-minute clock
-// window, a spent nonce, the signature over the body's hash) and answers start, redeem, refresh and revoke in the
-// relay's shapes, keeping what it was sent. Set it as QBO_RELAY_URL by replacing the module that reads it:
+// window, a spent nonce, the signature over the body's hash) and answers start, redeem, refresh, revoke and the
+// registration's check in the relay's shapes, keeping what it was sent. Set it as QBO_RELAY_URL by replacing the module that reads it:
 //
 //   const relayBase = vi.hoisted(() => ({ url: "" }));
 //   vi.mock("@/lib/quickbooks/relay-address", () => ({ qboRelayUrl: () => relayBase.url }));
@@ -16,6 +16,8 @@ import { secretBox } from "@/lib/crypto/secret-box";
 import { canonical, newRelayKey } from "@/lib/quickbooks/relay-sign";
 
 export const TEST_PORTAL_ID = "brp_test0portal0id01";
+/** The name the fake relay says the portal was registered under, unless a test sets another. */
+export const CHECK_NAME = "Test Boosters";
 const CLOCK_SKEW_MS = 5 * 60_000;
 const MAX_BODY = 8 * 1024;
 
@@ -40,6 +42,8 @@ export type RelayStub = {
   rotateOnRefresh: boolean;         // a refresh answers a new refresh token (Intuit rotates it); false answers the same one
   revokeConfirmed: boolean;         // a revoke answers { revoked: true }
   oddAnswer: { path: string; body: unknown } | null; // answer a 200 with this body on this path, instead of the usual
+  /** What the registration's check answers: the name the portal was registered under, and the environments it may use. */
+  checkName: string; checkEnvironments: string[];
   /** The redemption code the relay would put in the browser's return to the portal, for this state and company. */
   grantFor(portalState: string, realmId: string, o?: { environment?: string; portalId?: string; expiresInMs?: number }): string;
   reset(): void; close(): Promise<void>;
@@ -67,7 +71,7 @@ export async function startRelayStub(): Promise<RelayStub> {
   const stub = {
     base: "", calls: [] as RelayCall[], portals: new Map<string, string>(), refreshTokens: new Set<string>(), revoked: [] as string[],
     clockAheadMs: 0, refuseNext: 0, busyNext: 0, failNext: 0, delayMs: 0, refreshError: null as string | null, rotateOnRefresh: true, revokeConfirmed: true,
-    oddAnswer: null as { path: string; body: unknown } | null,
+    oddAnswer: null as { path: string; body: unknown } | null, checkName: CHECK_NAME, checkEnvironments: ["production", "sandbox"],
   } as RelayStub;
   const tokens = () => { issued++; return { access_token: `relay-at-${issued}`, refresh_token: `relay-rt-${issued}`, token_type: "bearer", expires_in: 3600, x_refresh_token_expires_in: 8_640_000 }; };
 
@@ -82,7 +86,7 @@ export async function startRelayStub(): Promise<RelayStub> {
       stub.calls.push(call);
       const answer = (status: number, body: unknown, refusal: string | null = null) => { call.status = status; call.refusal = refusal; send(res, status, body); };
       if (stub.delayMs) await new Promise((r) => setTimeout(r, stub.delayMs));
-      if (req.method !== "POST" || !["/v1/connect/start", "/v1/connect/redeem", "/v1/token/refresh", "/v1/token/revoke"].includes(path)) return answer(404, { error: "not_found" });
+      if (req.method !== "POST" || !["/v1/connect/start", "/v1/connect/redeem", "/v1/token/refresh", "/v1/token/revoke", "/v1/portal/check"].includes(path)) return answer(404, { error: "not_found" });
       if (raw.length > MAX_BODY) return answer(413, { error: "too_large" });
       // The relay's checks, in its order; every refusal is the same 401.
       const id = h("x-brc-portal"), ts = h("x-brc-timestamp"), nonce = h("x-brc-nonce"), sig = h("x-brc-signature");
@@ -104,6 +108,7 @@ export async function startRelayStub(): Promise<RelayStub> {
       const env = body.environment;
       const envOk = env === "production" || env === "sandbox";
       switch (path) {
+        case "/v1/portal/check": return answer(200, { status: "ok", portal: { name: stub.checkName, environments: stub.checkEnvironments } });
         case "/v1/connect/start": {
           if (!envOk) return answer(400, { error: "environment_not_allowed" });
           if (typeof body.portal_state !== "string" || !/^[A-Za-z0-9_-]{16,200}$/.test(body.portal_state)) return answer(400, { error: "bad_request" });
@@ -148,7 +153,7 @@ export async function startRelayStub(): Promise<RelayStub> {
     grants.clear(); nonces.clear(); issued = 0;
     stub.calls.length = 0; stub.portals.clear(); stub.refreshTokens.clear(); stub.revoked.length = 0;
     stub.clockAheadMs = 0; stub.refuseNext = 0; stub.busyNext = 0; stub.failNext = 0; stub.delayMs = 0; stub.refreshError = null;
-    stub.rotateOnRefresh = true; stub.revokeConfirmed = true; stub.oddAnswer = null;
+    stub.rotateOnRefresh = true; stub.revokeConfirmed = true; stub.oddAnswer = null; stub.checkName = CHECK_NAME; stub.checkEnvironments = ["production", "sandbox"];
   };
   stub.close = () => new Promise<void>((r) => server.close(() => r()));
   return stub;

@@ -1,6 +1,6 @@
 // The portal's signed calls to Boosters Rocket Connect, the relay (its SPEC.md sections 2 and 4; the portal's half is
-// docs/superpowers/specs/2026-11-24-connect-through-boosters-rocket-design.md): start a connect, redeem its return,
-// refresh the tokens and revoke them. Every call is signed with the portal's own key (./relay-sign.ts), sent to
+// docs/superpowers/specs/2026-11-24-connect-through-boosters-rocket-design.md): check the registration, start a connect,
+// redeem its return, refresh the tokens and revoke them. Every call is signed with the portal's own key (./relay-sign.ts), sent to
 // QBO_RELAY_URL only (./relay-address.ts), never follows a redirect and gives up after 15 seconds. The relay's answers
 // are untrusted: the go address must be the relay's own, the company is digits, the tokens are read as Intuit's are,
 // and nothing it says is kept or shown but a fixed word. Every answer, or the lack of one, is marked for Health
@@ -20,6 +20,7 @@ import { importRelayKey, signedHeaders } from "./relay-sign";
 const TIMEOUT_MS = 15_000;
 export const RELAY_PATHS = {
   start: "/v1/connect/start", redeem: "/v1/connect/redeem", refresh: "/v1/token/refresh", revoke: "/v1/token/revoke",
+  check: "/v1/portal/check",
 } as const;
 const GO_PATH = "/v1/connect/go/";
 
@@ -186,4 +187,31 @@ export async function relayRevoke(environment: QboEnvironment, refreshToken: str
   } catch {
     return false;
   }
+}
+
+export type RelayCheck =
+  | { answer: "registered"; name: string; environments: QboEnvironment[] }
+  | { answer: "not_matching" }
+  | { answer: "unreachable" };
+
+/**
+ * Registration's check (spec section 5, "Checking the registration"): whether the relay knows this portal by the id
+ * saved and the key it signs with. A 200 is "registered", with the name the relay holds (text only, at most 200
+ * characters; shown as text and never kept) and the environments it allows (only the two it may name); a 401 is
+ * "not_matching" (the id or the key isn't what was registered, or the portal was revoked); anything else, a 429
+ * included, is "unreachable", to try again. It never throws for the relay's answer, and changes nothing but the mark.
+ */
+export async function relayCheck(): Promise<RelayCheck> {
+  let r: { status: 200 | 400; body: unknown };
+  try {
+    r = await signedPost(RELAY_PATHS.check, {});
+  } catch (e) {
+    if (e instanceof QboError && e.code === "relay_unauthorized") return { answer: "not_matching" };
+    if (e instanceof QboError) return { answer: "unreachable" };
+    throw e;
+  }
+  const portal = field(r.body, "portal"), name = field(portal, "name"), environments = field(portal, "environments");
+  if (r.status !== 200 || field(r.body, "status") !== "ok" || typeof name !== "string") return { answer: "unreachable" };
+  const allowed = Array.isArray(environments) ? (["production", "sandbox"] as const).filter((e) => environments.includes(e)) : [];
+  return { answer: "registered", name: name.trim().slice(0, 200), environments: allowed };
 }
