@@ -1,7 +1,7 @@
 # Connect through Boosters Rocket — design
 
-**Status:** the owner's decisions of 2026-11-23 and 2026-11-24, written up for his review before slice 1 starts.
-Nothing here is built yet; until it is, the code and `AGENTS.md` describe what is built.
+**Status:** the owner's decisions of 2026-11-23 and 2026-11-24, approved by him on 2026-11-24 with two relay endpoints
+added (section 2a). Until each slice is built, the code and `AGENTS.md` describe what is built.
 **Builds on:** `main` at `93d0b0b6`, and the relay, Boosters Rocket Connect (its own repository,
 `bmsimp/boosters-rocket-connect`), live at `https://connect.boostersrocket.app`. The relay's `SPEC.md` is the source of
 truth for the protocol: its section 2 (the flows), 4 (signing), 6 (Intuit facts) and 7 (the changes it asks of the
@@ -42,6 +42,32 @@ Intuit. Own-app mode stays, unchanged, as the fallback and for clubs that prefer
    token stored first and `invalid_grant` treated as Intuit's own; Health with the mode, the last refresh and whether
    the relay can be reached; audit actions for the relay's connect, refresh failure and revoke.
 
+## 2a. Approved on 2026-11-24
+
+- **Intuit's terms (the relay's question 6) are settled, not open.** The owner chose on 2026-11-22 to submit the
+  assessment without asking Intuit in writing, and Intuit approved the relay's production credentials.
+- **Two more signed relay endpoints**, being built in the relay, are used in the flows below:
+  - `POST /v1/portal/check`, body `{}`: answers 200 `{"status":"ok","portal":{"name":"…","environments":["production","sandbox"]}}`,
+    or 401 `unauthorized` like the other signed routes. Registration calls it once the portal id is saved, to show
+    "Registered" or to say the id or the key doesn't match (section 5, Registration).
+  - `POST /v1/connection/forget`, body `{"environment":"production"|"sandbox","realm_id":"…"}`: always answers 200
+    `{"status":"ok"}` and never calls Intuit. A refused relay connect calls it so the relay drops its record of the
+    connection without revoking the shared grant (section 3, section 5, Connect).
+
+### Against the relay's SPEC.md
+
+Where the portal's half reads the relay's `SPEC.md` differently, or adds to it:
+
+1. **Registration is by email** (SPEC section 2, "a form or an email"): the owner chose email (decision 3).
+2. **The relay's address is an env setting** (SPEC section 7, item 2, "relay settings"): not a page setting
+   (section 3).
+3. **The id and key can be checked before Connect** (SPEC section 7, item 3, which named only the four calls of the
+   flows): the portal also calls `POST /v1/portal/check`, so a wrong id or key shows at registration, not first at
+   Connect.
+4. **A refused connect forgets, it doesn't revoke** (SPEC section 7, item 4, which named refresh and revoke only):
+   revoking would end the shared grant, so the portal calls `POST /v1/connection/forget` instead, and the relay ends its
+   record of which portal connected the company.
+
 ## 3. The lead's decisions
 
 - **The relay's address is an env setting, never a UI one.** `QBO_RELAY_URL` in `src/env.ts`, optional, default
@@ -58,7 +84,9 @@ Intuit. Own-app mode stays, unchanged, as the fallback and for clubs that prefer
 - **A refused relay connect revokes nothing.** Today a connect refused after Intuit issued tokens (`other_company`,
   `roster_company`, a store that failed) revokes them. Through the relay that would revoke the relay app's grant to the
   company, which may be another portal's live connection: the trial and real portals of one club are exactly the case.
-  So in relay mode the tokens are dropped, not revoked, and the audit row says `revoked: false, why: "shared_grant"`.
+  So in relay mode the tokens are dropped, not revoked: the portal sends `POST /v1/connection/forget` with the
+  environment and the company, so the relay ends its record of this portal's connection, and the audit row says
+  `revoked: false, why: "shared_grant"` and whether the relay confirmed the forget.
 - **Leaving relay mode while connected through it needs Disconnect first.** Moving back to own-app would otherwise
   revoke the shared grant without the acknowledgement. Own-app to relay while connected is allowed (decision 2).
 - **Renewing through the relay revokes nothing.** Connecting again through the relay to the company already connected
@@ -125,9 +153,13 @@ component, never in an audit row (rows name the public key's first 8 characters 
    and saves (`settings.quickbooks.relay.portal_id`, audited with before and after). When `APP_URL` is http on a host
    that isn't `localhost`, the stage says the relay needs an https address and offers no form.
 3. **Ready to connect.** The address, the public key and the id shown as set, with "Change the portal id" and, while
-   nothing is connected through the relay, "Make a new key" (a `details` section, as Disconnect is). The relay has no
-   way to check an id before it is used: a wrong id or key shows as the relay's refusal at Connect, with words that say
-   to check the id and email support.
+   nothing is connected through the relay, "Make a new key" (a `details` section, as Disconnect is).
+4. **Checking the registration.** Saving the portal id calls the signed `POST /v1/portal/check` (body `{}`), after the
+   save's transaction. A 200 shows "Registered", with the name the relay holds (rendered as text) and the environments
+   it allows; a 401 says the id or the key doesn't match what Boosters Rocket registered, to check the id and email
+   support; no answer says the relay couldn't be reached and offers "Check again". The answer marks the relay like any
+   signed call. The check changes nothing in the portal's records: the id stays saved whatever it answers, and a wrong
+   one is still refused by the relay at Connect.
 
 ### Connect
 
@@ -154,7 +186,8 @@ component, never in an audit row (rows name the public key's first 8 characters 
      `relay_code` ("That connection took too long to finish. Press Connect again.");
    - step 3, storing, is unchanged: the same company and switch checks under the row lock, `sealTokens()`, the switch
      record, `token_mode` = `relay`. The other differences are the revoke rules of section 3: a refusal here drops the
-     tokens and revokes nothing;
+     tokens, revokes nothing and sends `POST /v1/connection/forget` with the environment and the refused company, after
+     the refusal's transaction;
    - **moving from own-app** (the row held own-app tokens for this company): the old refresh token is taken from the row
      under the same lock as the store, and after the store commits it is revoked at Intuit with the old keys
      (`revokeAtIntuit()`), audited `quickbooks.relay.old_grant_revoked` with `revoked`; if Intuit doesn't confirm, the
@@ -226,7 +259,7 @@ disconnected there. Connect again to carry on." / "Connect QuickBooks from the s
 - **`PERMISSION_WORDS`:** no new permission. The words of `Settings.QuickBooks.ReadWrite` become "Connect QuickBooks,
   register the portal with Boosters Rocket, and choose the membership shape" *(proposed)*.
 - **Modules:** `src/lib/quickbooks/relay-sign.ts` (the signer, the relay's `src/sign.ts` copied with its format, plus
-  key making and import), `src/lib/quickbooks/relay.ts` (the four signed calls, the mark, the address check),
+  key making and import), `src/lib/quickbooks/relay.ts` (the six signed calls, the mark, the address check),
   `src/lib/quickbooks/relay-registration.ts` (the stages, the key, the id). All are staff and worker code, imported by no
   parent page; `relay.ts` joins `STAFF_ONLY_IMPORTS` with the QuickBooks client.
 - **Health:** a new line, `quickbooks_relay`, shown only in relay mode: the mode, the last renewal, and when the relay
@@ -264,20 +297,21 @@ disconnected there. Connect again to carry on." / "Connect QuickBooks from the s
 
 - **A fake relay**, `tests/helpers/relay-stub.ts`: an HTTP server on a free port, set as `QBO_RELAY_URL` by replacing
   the module that reads it (as `qboEndpoints()` is replaced today). It checks every signed request as the relay does
-  (the registered public key, the clock window, a spent nonce, the body's hash) and answers start, redeem, refresh and
-  revoke, keeping what it was sent. Knobs: refuse the next call (401), Intuit's word on refresh (`invalid_grant`), a 502,
+  (the registered public key, the clock window, a spent nonce, the body's hash) and answers start, redeem, refresh,
+  revoke, check and forget, keeping what it was sent. Knobs: refuse the next call (401), Intuit's word on refresh (`invalid_grant`), a 502,
   a 429, a slow answer, a token rotated on refresh. `grantFor(state, realmId)` makes the redemption code the relay would
   have put in the browser's return, so a test can call the callback route with it.
 - **The signer** (unit): a fixed key, time, nonce and body give the signature the relay's own `signedHeaders()` gives
   (a vector made with the relay repository's `src/sign.ts`, kept in the test); a changed byte of the body fails the
   stub's check.
-- **Registration** (integration): the three stages; the key made once, sealed, its public half shown; the private key
+- **Registration** (integration): the three stages; the key made once, sealed, its public half shown; the check's
+  three answers (registered, not matching, unreachable) shown, the id kept whichever; the private key
   in no rendered HTML, client prop or audit row; a bad portal id refused; a new key clears the id; only
   `Settings.QuickBooks.ReadWrite` may do any of it (a custom role with everything grantable is refused); each audited.
 - **Connect** (integration, `tests/integration/quickbooks-relay.test.ts`, with the fake relay and `qbo-stub`): a first
   connect stores the tokens and `token_mode`; a wrong, used, expired or own-app state is refused and redeems nothing; a
   redemption whose `portal_state` or environment differs is refused; another company is `other_company` or
-  `roster_company` exactly as today, with no revoke sent; a switch through the relay with the ask works and clears; a
+  `roster_company` exactly as today, with no revoke sent and a forget for that company; a switch through the relay with the ask works and clears; a
   move from own-app stores first, then revokes the old grant at the Intuit stub with the old keys, and a failed store
   revokes nothing anywhere; renewing through the relay revokes nothing; a go address off the relay is refused.
 - **Refresh:** the new refresh token is in the row before the call returns; `invalid_grant` needs an Admin; 401, 429
@@ -326,8 +360,7 @@ locally before the one push; push and merge only on the owner's word.
 ## 11. Not in scope
 
 Self-service registration (the relay's question 2); a webhook; moving tokens between apps (Intuit doesn't allow it);
-the relay's own terms and privacy pages; the answer from Intuit on whether one app may hand tokens to portals each club
-runs (the relay's question 6), which the relay's design depends on and this one inherits.
+the relay's own terms and privacy pages. The relay's question 6, Intuit's written answer, is settled (section 2a).
 
 ## 12. Open questions
 

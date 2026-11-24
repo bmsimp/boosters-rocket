@@ -3,7 +3,7 @@
 The spec is [2026-11-24-connect-through-boosters-rocket-design.md](../specs/2026-11-24-connect-through-boosters-rocket-design.md);
 where this plan and the spec differ, the spec wins. The relay's protocol is its own `SPEC.md`
 (`bmsimp/boosters-rocket-connect`), sections 2, 4, 6 and 7, and its `src/sign.ts`. Four slices, one screen each, on one
-branch (`feature/connect-relay`) and one pull request (spec section 10). Each brief says what it builds and nothing
+branch (`feature/connect-through-boosters-rocket`) and one pull request (spec section 10). Each brief says what it builds and nothing
 else; each slice's report says what it left undone. Read `AGENTS.md`, `docs/agents/quickbooks-writes.md`,
 `docs/agents/app-records.md` ("A change of company"), `docs/agents/database.md`, `docs/agents/testing.md` and
 `docs/agents/tripwires.md` before writing code. Tests are written with the code.
@@ -42,14 +42,16 @@ through "Not registered yet", "Waiting for the id" and "Ready to connect".
 **Files and areas.** `src/lib/quickbooks/relay-registration.ts` (the stage, make the key, save the id, a new key) and
 the mode's save beside it; `connectionView()` gains the mode and the stage, never the key. The setup page's step 1
 (`src/app/staff/(app)/settings/quickbooks/setup/page.tsx`), its forms (`forms.tsx`) and three new actions in
-`actions.ts`. The Copy fields, the "Write the email" `mailto:` link, the http-address refusal. The QuickBooks page's
+`actions.ts`. The Copy fields, the "Write the email" `mailto:` link, the http-address refusal. The relay's `POST /v1/portal/check`
+(spec section 2a): its call in `relay.ts` and the fake relay's answer, made after the portal id is saved and on "Check
+again", showing "Registered" or that the id or key doesn't match. The QuickBooks page's
 Connection card says how it connects. The `quickbooks` item's keywords in `sections.ts`; the permission's new words.
 
 **Checklists.** New staff server action (three). Audit words in `ACTION_NAMES` (`settings.quickbooks.mode`,
 `settings.quickbooks.relay.key_made`, `settings.quickbooks.relay.portal_id`). `PERMISSION_WORDS`. Primitives only.
 
 **Tests.** Spec section 8, registration: each stage rendered; the private key in no HTML, client prop or audit row; a bad
-id refused; a new key clears the id; relay to own-app refused while connected through the relay; a custom role refused;
+id refused; the check's three answers (registered, not matching, unreachable), the id kept whichever; a new key clears the id; relay to own-app refused while connected through the relay; a custom role refused;
 each write audited with before and after. Extended: `settings-sections`, `permission-words`, `audit-actions`.
 
 **Done when.** As slice 1, plus `tests/integration/health-page.test.ts` unchanged and passing.
@@ -62,7 +64,8 @@ by connecting again, and the connection renews through the relay.
 **Files and areas.** Step 2 of the setup page: the full logo by theme, the environment choice in relay mode, "Connect to
 QuickBooks". `beginConnect()` and `beginSwitchConnect()` branching on `connect_mode`; `completeConnect()` refactored so
 only "turn the return into tokens" differs, the relay's redemption, the revoke rules of spec section 3, the move from
-own-app with the old grant revoked after the store. The new route `src/app/api/quickbooks/relay/callback/route.ts`.
+own-app with the old grant revoked after the store. The relay's `POST /v1/connection/forget` (spec section 2a): its
+call in `relay.ts` and the fake relay's answer, sent after a refused relay connect's transaction, in place of a revoke. The new route `src/app/api/quickbooks/relay/callback/route.ts`.
 `tokenUnderLock()`'s relay branch in `src/lib/quickbooks/client.ts`; `errorNeedsAdmin()` unchanged but for the table's
 codes. The setup page's refusal words for the relay's reasons. The QuickBooks page's `?intuit=` Notices.
 
