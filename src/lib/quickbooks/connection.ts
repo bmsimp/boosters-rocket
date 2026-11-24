@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { env } from "@/env";
 import { db, type Tx } from "@/lib/db/client";
-import { qboConnection, setting, type QboEnvironment } from "@/lib/db/schema";
+import { qboConnection, qboRelay, setting, type QboEnvironment, type QboMode } from "@/lib/db/schema";
 import { secretBox, SecretBoxError } from "@/lib/crypto/secret-box";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { errorNeedsAdmin, QboError, QBO_SCOPE } from "./endpoints";
@@ -21,11 +21,28 @@ export type QboAppDraft = { clientId: string; clientSecret: string | null; envir
  */
 export type ConnectRefusal = "state" | "denied" | "other_company" | "roster_company" | "intuit" | "not_configured";
 export type QboConnectionView = {
-  configured: boolean; clientId: string | null; environment: QboEnvironment | null; connected: boolean; companyName: string | null;
+  /**
+   * Step 1 is done, or a connection is held: in own-app mode the Intuit app's keys are saved, in relay mode the portal
+   * is registered (its key made and its id saved).
+   */
+  configured: boolean;
+  /** What the next Connect does; relay for a new club. `tokenMode`: which app issued the tokens held now, null while none. */
+  connectMode: QboMode; tokenMode: QboMode | null;
+  /** The registration with Boosters Rocket (relay-registration.ts). Never the key. */
+  relayStage: RelayStage; clientId: string | null; environment: QboEnvironment | null; connected: boolean; companyName: string | null;
   connectedAt: string | null; lastTokenRefreshAt: string | null; refreshExpiresAt: string | null; lastError: string | null; lastErrorAt: string | null;
   /** The recorded error can only be fixed by an Admin connecting again, so the worker stops trying (spec §4). */
   needsAdmin: boolean;
 };
+
+/**
+ * The registration with Boosters Rocket, read from qbo_relay (relay-registration.ts makes it): not registered yet (no
+ * key), waiting for the id (a key and no id), or ready to connect (both).
+ */
+export type RelayStage = "not_registered" | "waiting" | "ready";
+export function relayStageOf(r: { portalId: string | null } | null | undefined): RelayStage {
+  return !r ? "not_registered" : r.portalId ? "ready" : "waiting";
+}
 
 const STATE_TTL_MS = 10 * 60_000;
 const TIMEOUT_MS = 15_000;
@@ -49,11 +66,14 @@ export function qboRedirectUri(): string { return `${env.APP_URL.replace(/\/+$/,
 // Defined beside QboError so the client can ask it too (parent reads refuse at once) without importing this module.
 export { errorNeedsAdmin };
 
-/** What the settings pages may show: never the secret, a token or the company's ID. */
+/** What the settings pages may show: never the secret, a token, the company's ID or the portal's private key. */
 export async function connectionView(): Promise<QboConnectionView> {
-  const c = await getConnection();
+  const [c, [r]] = await Promise.all([getConnection(), db.select({ portalId: qboRelay.portalId }).from(qboRelay)]);
+  const connectMode = c?.connectMode ?? "relay", relayStage = relayStageOf(r);
+  const connected = Boolean(c?.realmId && c.refreshTokenCiphertext);
+  const stepOneDone = connectMode === "own_app" ? Boolean(c?.clientId) : relayStage === "ready";
   return {
-    configured: c !== null, clientId: c?.clientId ?? null, environment: c?.environment ?? null, connected: Boolean(c?.realmId && c.refreshTokenCiphertext),
+    configured: connected || stepOneDone, connectMode, tokenMode: c?.tokenMode ?? null, relayStage, clientId: c?.clientId ?? null, environment: c?.environment ?? null, connected,
     companyName: c?.companyName ?? null, connectedAt: iso(c?.connectedAt), lastTokenRefreshAt: iso(c?.lastTokenRefreshAt),
     refreshExpiresAt: iso(c?.refreshExpiresAt), lastError: c?.lastError ?? null, lastErrorAt: iso(c?.lastErrorAt), needsAdmin: errorNeedsAdmin(c?.lastError),
   };
@@ -73,10 +93,13 @@ export function parseQboAppForm(f: Record<string, string>, hasSecret: boolean): 
 export async function saveQboApp(d: QboAppDraft, o: QboOp): Promise<{ ok: true } | { ok: false; errors: string[] }> {
   return db.transaction(async (tx) => {
     const [c] = await tx.select().from(qboConnection).for("update");
+    // Saving the keys is choosing the club's own app (they are offered only under that choice): never while tokens
+    // issued through the relay are held, since moving back would revoke a grant other portals may share.
+    if (c?.tokenMode === "relay") return { ok: false as const, errors: [LEAVE_RELAY_FIRST] };
     if (c?.realmId && (c.clientId !== d.clientId || c.environment !== d.environment)) {
       return { ok: false as const, errors: ["Disconnect QuickBooks before changing the Client ID or the environment."] };
     }
-    if (!c && !d.clientSecret) return { ok: false as const, errors: ["Enter the Client secret from your Intuit app's Keys and credentials page."] };
+    if (!c?.clientSecretCiphertext && !d.clientSecret) return { ok: false as const, errors: ["Enter the Client secret from your Intuit app's Keys and credentials page."] };
     const sealed = d.clientSecret ? secretBox().seal(d.clientSecret, QBO_AAD.secret) : null;
     const secret = sealed ? { clientSecretCiphertext: sealed.ciphertext, clientSecretKeyId: sealed.keyId } : {};
     // A connect started under the old keys must not finish under the new ones.
@@ -84,13 +107,48 @@ export async function saveQboApp(d: QboAppDraft, o: QboOp): Promise<{ ok: true }
     const dropState = keysChanged ? { stateHash: null, stateStaffUserId: null, stateExpiresAt: null } : {};
     // An ask to switch companies goes with the state it was made for.
     if (keysChanged) await dropSwitchAsk(tx);
-    if (c) await tx.update(qboConnection).set({ clientId: d.clientId, environment: d.environment, ...secret, ...dropState, updatedAt: new Date() });
-    // The keys of the club's own app: until the choice of mode is on the page, saving them is choosing that mode.
+    if (c) await tx.update(qboConnection).set({ clientId: d.clientId, environment: d.environment, ...secret, ...dropState, connectMode: "own_app", updatedAt: new Date() });
     else await tx.insert(qboConnection).values({ clientId: d.clientId, environment: d.environment, clientSecretCiphertext: sealed!.ciphertext, clientSecretKeyId: sealed!.keyId, connectMode: "own_app" });
+    const modeBefore = c?.connectMode ?? "relay";
+    if (modeBefore !== "own_app") {
+      await writeAudit({ actor: o.actor, action: "settings.quickbooks.mode", permission: o.permission, ...TARGET, ip: o.ip,
+        before: { connectMode: modeBefore }, after: { connectMode: "own_app" } }, tx);
+    }
     await writeAudit({ actor: o.actor, action: "settings.quickbooks.save", permission: o.permission, ...TARGET, ip: o.ip,
       before: c ? { clientId: c.clientId, environment: c.environment } : null,
       after: { clientId: d.clientId, environment: d.environment, secretChanged: sealed !== null } }, tx);
     return { ok: true as const };
+  });
+}
+
+/** Leaving relay mode while connected through it: refused (spec §3), so the shared grant is never revoked unasked. */
+export const LEAVE_RELAY_FIRST = "QuickBooks is connected through Boosters Rocket. Disconnect first, from QuickBooks settings, then choose the club's own Intuit app.";
+const NEEDS_KEYS = "Save the Intuit app's keys below to use the club's own app. Saving them saves this choice too.";
+
+export function parseConnectMode(raw: unknown): QboMode | null {
+  return raw === "relay" || raw === "own_app" ? raw : null;
+}
+
+/**
+ * Saves how the portal connects (setup step 1, "How to connect"), audited with before and after
+ * (`settings.quickbooks.mode`). The same choice again changes nothing. Own-app to relay is always allowed: the own
+ * app's tokens keep refreshing until the Admin connects again (`token_mode`). Relay to own-app is refused while tokens
+ * issued through the relay are held, and needs the Intuit app's keys saved, which saveQboApp() does and so makes the
+ * choice itself. A connect started under the other mode doesn't finish under this one: its state is dropped, with any
+ * ask to switch companies made with it.
+ */
+export async function saveConnectMode(mode: QboMode, o: QboOp): Promise<{ ok: true; message: string } | { ok: false; errors: string[] }> {
+  return db.transaction(async (tx) => {
+    const [c] = await tx.select().from(qboConnection).for("update");
+    const before = c?.connectMode ?? "relay";
+    if (before === mode) return { ok: true as const, message: "Nothing changed." };
+    if (mode === "own_app" && c?.tokenMode === "relay") return { ok: false as const, errors: [LEAVE_RELAY_FIRST] };
+    if (mode === "own_app" && !c?.clientId) return { ok: false as const, errors: [NEEDS_KEYS] };
+    await tx.update(qboConnection).set({ connectMode: mode, stateHash: null, stateStaffUserId: null, stateExpiresAt: null, stateMode: null, updatedAt: new Date() });
+    await dropSwitchAsk(tx);
+    await writeAudit({ actor: o.actor, action: "settings.quickbooks.mode", permission: o.permission, ...TARGET, ip: o.ip,
+      before: { connectMode: before }, after: { connectMode: mode } }, tx);
+    return { ok: true as const, message: mode === "relay" ? "Saved. The portal connects through Boosters Rocket from the next Connect." : "Saved. The portal connects with the club's own Intuit app." };
   });
 }
 

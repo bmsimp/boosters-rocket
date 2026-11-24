@@ -29,6 +29,7 @@ const NOT_AUDITED: Record<string, string> = {
   "src/lib/jobs/marks.ts#markJob": "a cache: when the volunteer reminders, the buy-out check, the welcome emails and the sweep of expired passkey challenges last ran, and their counts, for the Health page; what they send or change is audited",
   // The library's own rows past their life.
   "src/lib/jobs/cleanup.ts#sweepExpiredChallenges": "Better Auth's parent verification rows past their expiry (the passkey library's challenges, slice SI-7a), swept at every wake so a flood of challenges can't outlive five minutes; the library's rows, not the club's, counted in the worker's mark, and the daily clean-up's delete of the same rows is audited (cleanup.run)",
+  "src/lib/quickbooks/relay.ts#markRelay": "a cache: when Boosters Rocket Connect last answered or failed, with a fixed word, for the Health page; it is written by every signed call, the registration's check (a read, audited nowhere, as Health's own reads are) included",
   "src/lib/parents/breach-mark.ts#markBreachCheck": "a cache: when the password breach service last answered or failed, with a short code, for the Health page; each password chosen is audited (parent.password.set, with whether it was checked)",
   // A parent's own reading, which AGENTS.md says is never audited.
   "src/lib/messages/parent.ts#markRead": "that a parent has read a club message, and which version, kept for their own Home card and New marks; a parent viewing what is theirs is not audited (club messages, spec section 10)",

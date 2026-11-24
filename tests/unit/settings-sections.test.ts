@@ -58,6 +58,13 @@ describe("the Settings items", () => {
     expect(WIDEST.permissions.has("Settings.Messages.ReadWrite")).toBe(false);
   });
 
+  it("finds QuickBooks by the words of connecting through Boosters Rocket, under its own permission", () => {
+    const qb = SETTINGS_ITEMS.find((s) => s.key === "quickbooks")!;
+    for (const k of ["Boosters Rocket", "connect", "relay", "register"]) expect(qb.keywords).toContain(k);
+    expect(qb.see).toBe("Settings.QuickBooks.ReadWrite");
+    expect(qb.change).toBe("Settings.QuickBooks.ReadWrite");
+  });
+
   it("guards Integrations with the QuickBooks permission, the same as holding any integration's, since all four are Admin only", () => {
     const integrations = SETTINGS_ITEMS.find((s) => s.key === "integrations")!;
     expect(integrations.see).toBe("Settings.QuickBooks.ReadWrite");
