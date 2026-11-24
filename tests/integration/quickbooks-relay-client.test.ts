@@ -193,6 +193,23 @@ describe("refresh", () => {
       expect(await code(relayRefresh("sandbox", "rt"))).toBe("relay_unreachable");
     } finally { relayBase.url = stub.base; }
   });
+
+  it("gives up on a slow relay after 15 seconds, as relay_unreachable, and marks it", async () => {
+    await seedRelayRegistration(stub);
+    // The relay answers after a second; the portal's 15-second limit is asked for, and kept to 50ms here, so the test
+    // waits for no real timer of 15 seconds and no fake timer that could hang the run.
+    stub.delayMs = 1000;
+    const real = AbortSignal.timeout.bind(AbortSignal);
+    const asked: number[] = [];
+    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms: number) => { asked.push(ms); return real(50); });
+    try {
+      const started = Date.now();
+      expect(await code(relayRefresh("sandbox", "rt"))).toBe("relay_unreachable");
+      expect(Date.now() - started).toBeLessThan(900);
+    } finally { spy.mockRestore(); stub.delayMs = 0; }
+    expect(asked).toEqual([15_000]);
+    expect(await mark()).toMatchObject({ lastFailWord: "unreachable", lastOkAt: null });
+  });
 });
 
 describe("revoke", () => {
