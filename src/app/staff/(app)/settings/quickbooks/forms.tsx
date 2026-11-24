@@ -1,7 +1,7 @@
 "use client";
 import { ActionOutcome, Notice } from "@/app/components/notice";
 import { startTransition, useActionState, useState, type ReactNode } from "react";
-import { Button, ChoiceGroup, KeyValue, TextInput } from "@/app/components/ui";
+import { Button, Checkbox, ChoiceGroup, KeyValue, TextInput } from "@/app/components/ui";
 import { CopyField } from "@/app/components/sign-in-settings/copy-field";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import type { MembershipShape, TypeRow } from "@/lib/roster/shape";
@@ -154,21 +154,44 @@ export function disconnectedNote(revoked: boolean): string {
   const kept = "The roster stays as it was last read, and is marked as no longer current.";
   return revoked ? `Disconnected. ${kept}` : `Disconnected here, but Intuit didn't confirm that it canceled the portal's access. ${kept}`;
 }
+/** What Disconnect says about other portals that hold the same grant (spec §3 and §5, Disconnect). */
+export const DISCONNECT_WORDS = {
+  relayWarning: "Every portal connected to this QuickBooks company through Boosters Rocket shares one connection. Disconnecting here may disconnect the others too, such as a trial copy of this portal.",
+  relayAck: "I understand that disconnecting may also disconnect any other portal connected to this company through Boosters Rocket.",
+  ownApp: "If another portal uses this same Intuit app's keys for this company, it is disconnected too.",
+} as const;
+
 /**
  * On the view, tucked inside a closed section so it isn't pressed by accident. It stays mounted when the page comes
  * back disconnected, so it can say so: the page renders it whether or not QuickBooks is connected. `warning`, when
- * given, is shown above the button while connected.
+ * given, is shown above the button while connected. `through` is which app issued the tokens held: through Boosters
+ * Rocket the Admin must tick the acknowledgement first (the button is aria-disabled until then, and the server refuses
+ * without it); with the club's own app, one line says what else it ends. Like the forms above, it sends from state with
+ * a `type="button"`, so no form reset can untick the box behind React's back.
  */
-export function Disconnect({ connected, disconnect, warning }: { connected: boolean; disconnect: () => Promise<Disconnected>; warning?: string }) {
-  const [state, run, pending] = useActionState(async () => safely(() => disconnect(), { ok: false as const, error: ACTION_FAILED }), null);
+export function Disconnect({ connected, disconnect, warning, through }: {
+  connected: boolean; disconnect: (f: FormData) => Promise<Disconnected>; warning?: string; through: QboMode | null;
+}) {
+  const relay = through === "relay";
+  const [ack, setAck] = useState(false);
+  const [state, run, pending] = useActionState(async (_: Disconnected | null, acknowledged: boolean) => {
+    const f = new FormData(); if (relay && acknowledged) f.append("ack", "yes");
+    return safely(() => disconnect(f), { ok: false as const, error: ACTION_FAILED });
+  }, null);
   if (!connected) return state?.ok ? <Notice tone="done">{disconnectedNote(state.revoked)}</Notice> : null;
+  const unusable = pending || (relay && !ack);
   return (
     <details className="more"><summary>Disconnect</summary>
-      <p>This asks Intuit to cancel the portal&apos;s access and deletes its copy of the connection. The Intuit app&apos;s keys and the last roster stay, and the roster is marked as no longer current.</p>
+      <p>{relay
+        ? "This asks Boosters Rocket to have Intuit cancel the portal's access, and deletes the portal's copy of the connection. The portal's registration with Boosters Rocket and the last roster stay, and the roster is marked as no longer current."
+        : "This asks Intuit to cancel the portal's access and deletes its copy of the connection. The Intuit app's keys and the last roster stay, and the roster is marked as no longer current."}</p>
+      {relay ? <Notice tone="warning">{DISCONNECT_WORDS.relayWarning}</Notice> : <p>{DISCONNECT_WORDS.ownApp}</p>}
       {warning && <Notice tone="warning">{warning}</Notice>}
-      <form action={run} className="stack">
+      <form onSubmit={noSubmit} className="stack">
+        {relay && <Checkbox id="qbo-disconnect-ack" name="ack" value="yes" label={DISCONNECT_WORDS.relayAck} checked={ack} onChange={(e) => setAck(e.target.checked)} />}
         {state && !state.ok && <Notice tone="problem">{state.error}</Notice>}
-        <button className="btn btn-line" disabled={pending}>{pending ? "Disconnecting…" : "Disconnect QuickBooks"}</button>
+        <p><Button variant="secondary" busy={pending} aria-disabled={unusable || undefined}
+          onClick={() => { if (!unusable) startTransition(() => run(ack)); }}>{pending ? "Disconnecting…" : "Disconnect QuickBooks"}</Button></p>
       </form>
     </details>
   );

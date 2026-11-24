@@ -26,7 +26,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, qboConnection, role, roleAssignment, roleRule, setting } from "@/lib/db/schema";
 import { secretBox } from "@/lib/crypto/secret-box";
-import { beginConnectAction, saveConnectModeAction, switchConnectAction } from "@/app/staff/(app)/settings/quickbooks/actions";
+import { beginConnectAction, disconnectAction, saveConnectModeAction, switchConnectAction } from "@/app/staff/(app)/settings/quickbooks/actions";
 import QuickBooksSetupPage from "@/app/staff/(app)/settings/quickbooks/setup/page";
 import QuickBooksSettingsPage from "@/app/staff/(app)/settings/quickbooks/page";
 import { GET as relayCallback } from "@/app/api/quickbooks/relay/callback/route";
@@ -559,5 +559,103 @@ describe("refreshing through Boosters Rocket", () => {
     expect(qbo.tokenCalls()[0]).toMatchObject({ auth: OWN_KEYS });
     expect(relay.calls).toHaveLength(0);
     expect(openRefresh(await row())).toBe("rt-1");
+  });
+});
+
+/**
+ * Disconnect through Boosters Rocket (slice 4; spec §5 "Disconnect", §8 "Disconnect"): every portal on one QuickBooks
+ * company through the relay shares one grant, so the Admin must acknowledge that disconnecting may end the others, on
+ * the page and on the server; the revoke goes through the relay with the company; the tokens are forgotten whatever it
+ * answers.
+ */
+describe("disconnecting through Boosters Rocket", () => {
+  let admin: Awaited<ReturnType<typeof seedStaff>>;
+  beforeEach(async () => {
+    await resetDb(); qbo.reset(); relay.reset();
+    await seedRelayRegistration(relay);
+    admin = await seedStaff({ email: "admin@club.org", name: "Admin Person", admin: true });
+    who.staff = { door: "staff", staffUserId: admin.id, name: admin.name, email: admin.email };
+  });
+  const seedRelayConnected = async () => {
+    const box = secretBox();
+    const access = box.seal("relay-at-held", "qbo:access-token"), refresh = box.seal("relay-rt-held", "qbo:refresh-token");
+    relay.refreshTokens.add("relay-rt-held");
+    await db.insert(qboConnection).values({ environment: "sandbox", connectMode: "relay", tokenMode: "relay", realmId: A, companyName: "Stub Boosters",
+      accessTokenCiphertext: access.ciphertext, accessTokenKeyId: access.keyId, accessExpiresAt: new Date(Date.now() + 3_600_000),
+      refreshTokenCiphertext: refresh.ciphertext, refreshTokenKeyId: refresh.keyId, refreshExpiresAt: new Date(Date.now() + 86_400_000), connectedAt: new Date() });
+  };
+  const page = async () => renderToStaticMarkup(await QuickBooksSettingsPage({ searchParams: Promise.resolve({}) }));
+
+  it.each([
+    ["no field", form({})],
+    ["the box sent twice", form({ ack: ["yes", "yes"] })],
+    ["another value", form({ ack: "on" })],
+    ["nothing at all", undefined],
+  ])("without the acknowledgement (%s) changes nothing and sends nothing", async (_name, f) => {
+    await seedRelayConnected();
+    const before = await row();
+    expect(await disconnectAction(f)).toEqual({ ok: false, error: "Tick the box to say you understand, then try again." });
+    expect(await row()).toEqual(before);
+    expect(relay.calls).toHaveLength(0);
+    expect(qbo.calls).toHaveLength(0);
+    expect(await audits("quickbooks.relay.disconnect")).toHaveLength(0);
+    expect(await audits("quickbooks.disconnect")).toHaveLength(0);
+  });
+
+  it("with it, revokes through the relay with the company, forgets the tokens and audits the acknowledgement", async () => {
+    await seedRelayConnected();
+    expect(await disconnectAction(form({ ack: "yes" }))).toEqual({ ok: true, revoked: true });
+    expect(relayCalls("/v1/token/revoke").map((c) => [c.portal, c.status, c.body])).toEqual([[TEST_PORTAL_ID, 200, { environment: "sandbox", token: "relay-rt-held", realm_id: A }]]);
+    expect(relay.revoked).toEqual(["relay-rt-held"]);
+    expect(intuitRevokes()).toHaveLength(0); // never with the club's own keys
+    expect(await row()).toMatchObject({ realmId: null, tokenMode: null, refreshTokenCiphertext: null, accessTokenCiphertext: null, connectMode: "relay", environment: "sandbox" });
+    expect(await audits("quickbooks.relay.disconnect")).toMatchObject([{ actorId: admin.id, permission: "Settings.QuickBooks.ReadWrite", ip: "203.0.113.44",
+      before: { companyName: "Stub Boosters", realmId: A }, after: { acknowledged: true, revoked: true, environment: "sandbox" } }]);
+    expect(await audits("quickbooks.disconnect")).toHaveLength(0);
+    expect(JSON.stringify(await db.select().from(auditLog))).not.toContain("relay-rt-held");
+    // The registration stays: the portal can connect again.
+    expect((await connectionView()).relayStage).toBe("ready");
+    expect(await disconnectAction(form({ ack: "yes" }))).toEqual({ ok: false, error: "QuickBooks isn't connected." });
+  });
+
+  it.each([
+    ["Intuit doesn't confirm", () => { relay.revokeConfirmed = false; }],
+    ["the relay refuses", () => { relay.refuseNext = 1; }],
+    ["the relay is down", () => { relay.failNext = 1; }],
+  ])("forgets the tokens whatever the relay answers: %s", async (_name, knob) => {
+    await seedRelayConnected();
+    knob();
+    expect(await disconnectAction(form({ ack: "yes" }))).toEqual({ ok: true, revoked: false });
+    expect(await row()).toMatchObject({ realmId: null, tokenMode: null, refreshTokenCiphertext: null });
+    expect((await audits("quickbooks.relay.disconnect")).map((a) => a.after)).toEqual([{ acknowledged: true, revoked: false, environment: "sandbox" }]);
+  });
+
+  it("the page warns and asks for the box through Boosters Rocket, and gives the club's own app one line and no box", async () => {
+    await seedRelayConnected();
+    const relayHtml = await page();
+    expect(relayHtml).toContain("Every portal connected to this QuickBooks company through Boosters Rocket shares one connection. Disconnecting here may disconnect the others too, such as a trial copy of this portal.");
+    expect(relayHtml).toMatch(/<input type="checkbox" id="qbo-disconnect-ack"[^>]*name="ack" value="yes"/);
+    expect(relayHtml).toContain("I understand that disconnecting may also disconnect any other portal connected to this company through Boosters Rocket.");
+    // Unusable until the box is ticked: aria-disabled, never disabled, which would drop the focus.
+    expect(relayHtml).toMatch(/<button type="button" class="btn btn-line" aria-disabled="true">Disconnect QuickBooks<\/button>/);
+    expect(relayHtml).not.toContain("If another portal uses this same Intuit app");
+
+    await db.delete(qboConnection);
+    await seedConnected(qbo, { realmId: A });
+    const own = await page();
+    expect(own).toContain("If another portal uses this same Intuit app&#x27;s keys for this company, it is disconnected too.");
+    expect(own).not.toContain("qbo-disconnect-ack");
+    expect(own).not.toContain("through Boosters Rocket shares one connection");
+    expect(own).toMatch(/<button type="button" class="btn btn-line">Disconnect QuickBooks<\/button>/);
+  });
+
+  it("the club's own app reads no field: it disconnects with or without the box, revoking with its own keys", async () => {
+    await db.delete(qboConnection);
+    await seedConnected(qbo, { realmId: A });
+    expect(await disconnectAction(form({ ack: ["no", "maybe"] }))).toEqual({ ok: true, revoked: true });
+    expect(intuitRevokes()).toHaveLength(1);
+    expect(relay.calls).toHaveLength(0);
+    expect((await audits("quickbooks.disconnect")).map((a) => a.after)).toEqual([{ revoked: true }]);
+    expect(await audits("quickbooks.relay.disconnect")).toHaveLength(0);
   });
 });

@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/lib/db/client";
 import { qboCustomerType, type QboEnvironment } from "@/lib/db/schema";
 import { staffAction, type StaffCtx } from "@/lib/guards";
-import { getConnection, parseQboAppForm, saveQboApp, beginConnect, beginSwitchConnect, disconnect, parseConnectMode, saveConnectMode, type StartRefusal } from "@/lib/quickbooks/connection";
+import { getConnection, parseQboAppForm, saveQboApp, beginConnect, beginSwitchConnect, disconnect, DISCONNECT_ACK_NEEDED, parseConnectMode, saveConnectMode, type StartRefusal } from "@/lib/quickbooks/connection";
 import { checkRegistration, makeRelayKey, parsePortalId, savePortalId } from "@/lib/quickbooks/relay-registration";
 import type { RelayCheck } from "@/lib/quickbooks/relay";
 import { parseShapeForm, saveShape, type TypeRow } from "@/lib/roster/shape";
@@ -114,8 +114,15 @@ export const switchConnectAction = staffAction(P, async (ctx, form: unknown): Pr
   redirect(r.ok ? r.url : notStarted(r.reason));
 });
 
-export const disconnectAction = staffAction(P, async (ctx): Promise<{ ok: true; revoked: boolean } | { ok: false; error: string }> => {
-  const r = await disconnect({ actor: actor(ctx), ip: ctx.ip, permission: P });
+/**
+ * Disconnect. Through Boosters Rocket it needs the Admin's acknowledgement that other portals connected to the company
+ * through it may be disconnected too: one field, `ack`, sent once as "yes"; anything else changes nothing and sends
+ * nothing (disconnect() decides, from the tokens held). With the club's own app it reads no field.
+ */
+export const disconnectAction = staffAction(P, async (ctx, form?: unknown): Promise<{ ok: true; revoked: boolean } | { ok: false; error: string }> => {
+  const acknowledged = only(form, "ack", 3) === "yes";
+  const r = await disconnect({ actor: actor(ctx), ip: ctx.ip, permission: P, acknowledged });
+  if (!r.ok && r.reason === "not_acknowledged") return { ok: false, error: DISCONNECT_ACK_NEEDED };
   revalidatePath("/staff", "layout");
   // `revoked` is whether Intuit confirmed it canceled the portal's access; the connection is deleted here either way.
   return r.ok ? { ok: true, revoked: r.revoked } : { ok: false, error: "QuickBooks isn't connected." };

@@ -98,7 +98,7 @@ export default async function QuickBooksSettingsPage({ searchParams }: { searchP
         {/* A first connect needs no switch: offered only while the roster names a company. */}
         {source !== null && <p>{SWITCH_WORDS.setupHint} <a className="link-line" href={SWITCH_PAGE}>{SWITCH_WORDS.setupLink}</a></p>}
         {/* Disconnect, last, as it is today: it stays in place after it is pressed, to say what it did. */}
-        <Disconnect connected={conn.connected} disconnect={disconnectAction} warning={warning} />
+        <Disconnect connected={conn.connected} disconnect={disconnectAction} warning={warning} through={conn.tokenMode} />
       </Card>
       <SupportLine />
     </main>

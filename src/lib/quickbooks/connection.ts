@@ -8,7 +8,7 @@ import { writeAudit, type Actor } from "@/lib/audit/log";
 import { errorNeedsAdmin, QboError, QBO_SCOPE } from "./endpoints";
 import { oauthEndpoints } from "./discovery";
 import { ownAppOf, QBO_AAD, qboGet, sealTokens, tokenRequest, type QboApp, type TokenSet } from "./client";
-import { relayForget, relayRedeem, relayStart } from "./relay";
+import { relayForget, relayRedeem, relayRevoke, relayStart } from "./relay";
 import { clearRosterOfOtherCompany, dropSwitchAsk, getRosterSource, getSwitchRecord, setSwitchRecord, storedSwitchOf, SWITCH_KEY, type SwitchRecord } from "@/lib/roster/source";
 
 export type QboOp = { actor: Actor; ip: string | null; permission?: string };
@@ -506,24 +506,40 @@ async function finishConnect(mode: QboMode, p: IntuitReturn, o: ConnectOp): Prom
   return { ok: true };
 }
 
-/** Asks Intuit to revoke the tokens, then forgets them. The keys and the cache stay (spec §3). */
-export async function disconnect(o: QboOp): Promise<{ ok: true; revoked: boolean } | { ok: false; reason: "not_connected" }> {
+/**
+ * The Admin's answer to the shared-grant warning (spec §5, Disconnect): every portal connected to a QuickBooks company
+ * through Boosters Rocket shares one grant, so disconnecting one may disconnect the others too.
+ */
+export const DISCONNECT_ACK_NEEDED = "Tick the box to say you understand, then try again.";
+
+/**
+ * Asks Intuit to revoke the tokens, then forgets them, whatever the answer. The keys, the registration and the cache stay
+ * (spec §3). Tokens of the club's own app are revoked with its keys (`quickbooks.disconnect`); tokens issued through
+ * Boosters Rocket are revoked through it, with the company so the relay ends its record of the connection too, and only
+ * once the Admin has acknowledged that this may end other portals' connections to the company
+ * (`quickbooks.relay.disconnect`, `acknowledged: true`). Without that it changes nothing and sends nothing.
+ */
+export async function disconnect(o: QboOp & { acknowledged?: boolean }): Promise<{ ok: true; revoked: boolean } | { ok: false; reason: "not_connected" | "not_acknowledged" }> {
   const c = await getConnection();
   if (!c?.realmId || !c.refreshTokenCiphertext || !c.refreshTokenKeyId) return { ok: false, reason: "not_connected" };
+  const relay = c.tokenMode === "relay";
+  if (relay && o.acknowledged !== true) return { ok: false, reason: "not_acknowledged" };
   let revoked = false;
   try {
     const box = secretBox();
-    // Tokens issued through the relay are never revoked with the club's own keys, which didn't issue them (slice 4
-    // revokes them through the relay); until then the tokens are forgotten here and nothing is revoked.
-    const app = c.tokenMode === "relay" ? null : ownAppOf(c, box);
     const token = box.open({ ciphertext: c.refreshTokenCiphertext, keyId: c.refreshTokenKeyId }, QBO_AAD.refresh);
-    revoked = app ? await revokeAtIntuit(token, app, c.environment) : false;
+    // Tokens issued through the relay are never revoked with the club's own keys, which didn't issue them.
+    const app = relay ? null : ownAppOf(c, box);
+    revoked = relay ? await relayRevoke(c.environment, token, c.realmId) : app ? await revokeAtIntuit(token, app, c.environment) : false;
   } catch {
-    revoked = false; // the keys unreadable (Intuit unreachable is false already): the tokens are still deleted here
+    revoked = false; // the keys unreadable (Intuit or the relay unreachable is false already): the tokens are still deleted here
   }
+  const before = { companyName: c.companyName, realmId: c.realmId };
   await db.transaction(async (tx) => {
     await tx.update(qboConnection).set({ ...DISCONNECTED, updatedAt: new Date() });
-    await writeAudit({ actor: o.actor, action: "quickbooks.disconnect", permission: o.permission, ...TARGET, before: { companyName: c.companyName, realmId: c.realmId }, after: { revoked }, ip: o.ip }, tx);
+    await writeAudit(relay
+      ? { actor: o.actor, action: "quickbooks.relay.disconnect", permission: o.permission, ...TARGET, before, after: { acknowledged: true, revoked, environment: c.environment }, ip: o.ip }
+      : { actor: o.actor, action: "quickbooks.disconnect", permission: o.permission, ...TARGET, before, after: { revoked }, ip: o.ip }, tx);
   });
   return { ok: true, revoked };
 }

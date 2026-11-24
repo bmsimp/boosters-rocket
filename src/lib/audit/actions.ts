@@ -147,6 +147,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "quickbooks.disconnect": "QuickBooks disconnected",
   "quickbooks.relay.connect": "QuickBooks connected through Boosters Rocket",
   "quickbooks.relay.connect_refused": "QuickBooks connection through Boosters Rocket refused",
+  "quickbooks.relay.disconnect": "QuickBooks disconnected through Boosters Rocket",
   "quickbooks.relay.old_grant_revoked": "The club's own Intuit app's access was asked to end, after moving to Boosters Rocket",
   "quickbooks.relay.token_refresh.failed": "QuickBooks connection through Boosters Rocket couldn't be renewed",
   "quickbooks.switch.asked": "An Admin said they mean to connect a different QuickBooks company, and was sent to Intuit",
