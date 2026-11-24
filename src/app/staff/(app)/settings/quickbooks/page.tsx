@@ -1,13 +1,13 @@
-import { Card, HowThisWorks, KeyValue, LinkButton, Notice } from "@/app/components/ui";
+import { Card, KeyValue, LinkButton, Notice } from "@/app/components/ui";
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { connectionView } from "@/lib/quickbooks/connection";
 import { quickbooksProblems } from "@/lib/quickbooks/health";
-import { QUICKBOOKS_USE } from "@/lib/quickbooks/what-it-does";
 import { loadRosterPage } from "@/lib/roster/queries";
 import { lastWake } from "@/lib/jobs/runner";
 import { LocalTime } from "@/app/components/local-time";
 import { Disconnect } from "./forms";
+import { QuickBooksUse } from "./what-it-does";
 import { disconnectAction } from "./actions";
 import { rosterCounts } from "./roster-counts";
 import { getParentSettings } from "@/lib/parents/settings";
@@ -43,6 +43,17 @@ export const dynamic = "force-dynamic";
  * Disconnect and Connect/Reconnect from QuickBooks"), with one of these. A fixed Notice for each; anything else is
  * ignored, and nothing in the address is ever shown.
  */
+/**
+ * The way in to Boosters Rocket's shared connection for a club connected with its own Intuit app: step 1 is where the
+ * choice is made, and a connected club's Change opens on step 3, so this links straight to it.
+ */
+const MOVE_TO_RELAY = {
+  title: "You can move to Boosters Rocket's connection",
+  body: "QuickBooks is connected with the club's own Intuit app. Boosters Rocket can hold the connection instead, so the club needs no Intuit app of its own. Everything keeps working as it is until the move is done.",
+  link: "Move to Boosters Rocket",
+  href: "/staff/settings/quickbooks/setup?step=app",
+} as const;
+
 const FROM_QUICKBOOKS: Record<string, string> = {
   disconnected: "QuickBooks says the portal was disconnected there. Connect again to carry on.",
   connect: "Connect QuickBooks from the steps below.",
@@ -61,12 +72,18 @@ export default async function QuickBooksSettingsPage({ searchParams }: { searchP
       <IntegrationHead of="quickbooks" title="QuickBooks" status={row.status}
         lede={<>{row.does} Only Admins can change these settings, because they reach the club&apos;s books.</>} />
       {fromQuickBooks && <Notice tone="info">{fromQuickBooks}</Notice>}
+      {/* Only for someone who may change these settings: the page's own guard says so today, and this keeps it so if that guard ever widens. */}
+      {conn.tokenMode === "own_app" && can(ctx.effective, "Settings.QuickBooks.ReadWrite") && (
+        <Notice tone="info" live="none" title={MOVE_TO_RELAY.title} titleId="qbo-move-h">
+          <p>{MOVE_TO_RELAY.body} <a href={MOVE_TO_RELAY.href}>{MOVE_TO_RELAY.link}</a></p>
+        </Notice>
+      )}
       {problems.length > 0 && <Notice tone="warning" title="Needs attention" titleId="qbo-problems-h"><ul className="notice-list">{problems.map((p) => <li key={p.kind}>{p.text}{p.fix && <> <a href={p.fix.href}>{p.fix.label}</a></>}</li>)}</ul></Notice>}
       <IntegrationHealth here="/staff/settings/quickbooks" line={lines.find((l) => l.key === "quickbooks")} />
 
       {conn.configured && (
         <Card title="Connection" titleId="qbo-conn-h">
-          <HowThisWorks summary="What the portal does with QuickBooks"><p>{QUICKBOOKS_USE.reads} {QUICKBOOKS_USE.writes} Each change is in the audit log.</p></HowThisWorks>
+          <QuickBooksUse />
           {/* The company's name is QuickBooks text: a text child, never markup. */}
           <KeyValue items={[
             { key: "company", label: "Company", value: conn.connected ? <b>{conn.companyName ?? "A QuickBooks company"}</b> : conn.connectMode === "relay" ? "None. The portal is registered with Boosters Rocket." : "None. The Intuit app's keys are saved." },

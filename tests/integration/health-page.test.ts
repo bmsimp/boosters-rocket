@@ -17,7 +17,7 @@ import HealthPage from "@/app/staff/(app)/settings/health/page";
 import QuickBooksSettingsPage from "@/app/staff/(app)/settings/quickbooks/page";
 import QuickBooksSetupPage from "@/app/staff/(app)/settings/quickbooks/setup/page";
 import { writeAudit } from "@/lib/audit/log";
-import { QUICKBOOKS_USE, QUICKBOOKS_WRITE_ACTION } from "@/lib/quickbooks/what-it-does";
+import { QUICKBOOKS_USE, QUICKBOOKS_USE_TEXT, QUICKBOOKS_WRITE_ACTION } from "@/lib/quickbooks/what-it-does";
 import { GET as liveness } from "@/app/api/health/route";
 import { healthReport, BACKUP_OLD_MS, MONEY_OLD_MS, SIGNIN_ADDRESS_LOOKBACK_MS, SWEEP_FAILED, WORKER_LATE_MS, type HealthLine } from "@/lib/health/report";
 import { env } from "@/env";
@@ -237,29 +237,38 @@ describe("the health page", () => {
     await admin();
     await seedConnected(stub);
     const connected = line(await healthReport(), "quickbooks");
-    expect(connected.notes).toContain(`${QUICKBOOKS_USE.reads} ${QUICKBOOKS_USE.writes}`);
+    expect(connected.notes).toContain(QUICKBOOKS_USE_TEXT);
     // No change has been made in QuickBooks here.
     expect(connected.times).toContainEqual({ label: "Last change made in QuickBooks", at: null });
     const health = await renderPage(HealthPage);
     const settings = await renderPage(QuickBooksSettingsPage);
     const setup = await renderPage(QuickBooksSetupPage, { searchParams: { step: "connect" } });
     const said = (words: string) => words.replaceAll("'", "&#x27;");
+    const items = QUICKBOOKS_USE.groups.flatMap((g) => g.items);
+    // Every detail on every page; the settings pages also give the summary in the open and each group's heading.
     for (const html of [health, settings, setup]) {
-      expect(html).toContain(said(QUICKBOOKS_USE.reads));
-      expect(html).toContain(said(QUICKBOOKS_USE.writes));
+      for (const item of items) expect(html).toContain(said(item));
       expect(html).not.toMatch(/changes nothing (there|in QuickBooks)|only reads/);
     }
-    expect(QUICKBOOKS_USE.reads).toMatch(/families and members.*what each family owes/);
-    expect(QUICKBOOKS_USE.writes).toMatch(/new families, students, parents and members.*inactive.*never deletes/);
+    for (const html of [settings, setup]) {
+      expect(html).toContain(said(QUICKBOOKS_USE.summary));
+      for (const g of QUICKBOOKS_USE.groups) expect(html).toContain(said(g.heading));
+    }
+    expect(QUICKBOOKS_USE.groups.map((g) => g.heading)).toEqual(["What it reads", "What it changes in QuickBooks, and only when someone asks", "What it never does", "Sandbox check"]);
+    const group = (key: string) => QUICKBOOKS_USE.groups.find((g) => g.key === key)!.items.join(" ");
+    expect(group("reads")).toMatch(/families and members.*what each family owes/);
+    expect(group("writes")).toMatch(/new families, students, parents and members.*inactive/);
+    expect(group("never")).toMatch(/never deletes anything.*never changes any other invoice.*never touches payments/);
+    expect(group("check")).toMatch(/Intuit sandbox company only.*“Boosters Rocket check”.*inactive at the end/);
     // A parent's change of sign-in email is the portal's own since stage 3's slice 11d, and since slice S11e it is sent
     // on to their records after the portal changes it, never over an address the portal didn't know there.
-    expect(QUICKBOOKS_USE.writes).toMatch(/the address a parent signs in with, in the email field of each record of theirs .*after the portal changes it, replacing only the address the portal knew there and never over an address it didn't know of/);
+    expect(group("writes")).toMatch(/The address a parent signs in with, in the email field of each record of theirs .*after the portal changes it, replacing only the address the portal knew there and never over an address it didn't know of/);
     // A guardian's phone and mailing address are the portal's own (stage 3's slice 11a), and sent on after the portal
     // saves a parent's change (slice 11b), never over details the portal didn't know of.
-    expect(QUICKBOOKS_USE.writes).toMatch(/phone and mailing address, on their own record.*after the portal saves a change a parent or staff make to them, and never over details QuickBooks holds that the portal didn't know of/);
-    expect(QUICKBOOKS_USE.reads).toMatch(/phone and mailing address are the portal's own: it takes them in once/);
+    expect(group("writes")).toMatch(/phone and mailing address, on their own record.*after the portal saves a change a parent or staff make to them, and never over details QuickBooks holds that the portal didn't know of/);
+    expect(group("reads")).toMatch(/phone and mailing address are the portal's own: it takes them in once/);
     // A buy-out invoice carries the chooser's sign-in address so it can be paid online, and nothing is emailed (2026-11-17).
-    expect(QUICKBOOKS_USE.writes).toMatch(/pay instead of volunteering.*sign-in email address as its bill-to address, so it can be paid online; nothing is emailed/);
+    expect(group("writes")).toMatch(/pay instead of volunteering.*sign-in email address as its bill-to address, so it can be paid online; nothing is emailed/);
     expect(health).toContain("Last change made in QuickBooks: never");
 
     // A parent's save, and a staff change to the roster, are audited under these actions (tests/integration/contact-edits.test.ts,
@@ -283,7 +292,7 @@ describe("the health page", () => {
     const off = line(await healthReport(), "quickbooks");
     expect(off.says).toMatch(/can't read the roster or what families owe until an Admin connects/);
     expect(off.says).not.toMatch(/email/);
-    expect(off.notes).toEqual([`${QUICKBOOKS_USE.reads} ${QUICKBOOKS_USE.writes}`]);
+    expect(off.notes).toEqual([QUICKBOOKS_USE_TEXT]);
   });
 
   it("says on the QuickBooks line, while the one-time copy of parents' phones and addresses hasn't run, what it waits for, and nothing once it has", async () => {
