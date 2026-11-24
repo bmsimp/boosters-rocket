@@ -56,11 +56,22 @@ describe("the connection's modes and the relay's registration (0059)", () => {
     expect([c!.connectMode, c!.tokenMode, c!.stateMode, c!.clientId]).toEqual(["relay", null, null, null]);
   });
 
+  it("keeps the relay's environment in its own column, present while its tokens or a connect of its are", async () => {
+    await expect(db.insert(qboConnection).values({ connectMode: "relay", tokenMode: "relay" })).rejects.toMatchObject({ cause: { constraint_name: "qbo_connection_relay_environment" } });
+    await expect(db.insert(qboConnection).values({ connectMode: "relay", stateMode: "relay" })).rejects.toMatchObject({ cause: { constraint_name: "qbo_connection_relay_environment" } });
+    // A relay club has no own-app environment at all.
+    await db.insert(qboConnection).values({ connectMode: "relay", tokenMode: "relay", relayEnvironment: "production" });
+    const [c] = await db.select().from(qboConnection);
+    expect([c!.environment, c!.relayEnvironment]).toEqual([null, "production"]);
+  });
+
   it("needs the club's own app's keys whenever either mode is own_app, and only then", async () => {
     await expect(db.insert(qboConnection).values({ environment: "sandbox", connectMode: "own_app" })).rejects.toThrow();
     await expect(db.insert(qboConnection).values({ environment: "sandbox", connectMode: "relay", tokenMode: "own_app" })).rejects.toThrow();
     await expect(db.insert(qboConnection).values({ environment: "sandbox", connectMode: "own_app", clientId: "id", clientSecretCiphertext: "c" })).rejects.toThrow();
-    await db.insert(qboConnection).values({ environment: "sandbox", connectMode: "relay", tokenMode: "relay" });
+    // The own app's keys need the environment they are for.
+    await expect(db.insert(qboConnection).values({ ...keys, connectMode: "own_app" })).rejects.toMatchObject({ cause: { constraint_name: "qbo_connection_own_app_keys" } });
+    await db.insert(qboConnection).values({ environment: "sandbox", relayEnvironment: "sandbox", connectMode: "relay", tokenMode: "relay" });
     // Moving to the relay keeps the keys, so the club can move back.
     await db.update(qboConnection).set({ ...keys, connectMode: "own_app", tokenMode: "own_app" });
     await db.update(qboConnection).set({ connectMode: "relay", tokenMode: "relay" });

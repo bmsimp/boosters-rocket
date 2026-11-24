@@ -412,7 +412,7 @@ function bodyProblems(constant: string): string[] {
 const ALL_WRITES = [WRITE, EMAIL_WRITE, ...ROSTER_WRITES, ...INVOICE_WRITE_FUNCTIONS];
 /** The guard every write of the check goes through first, and what it must refuse, written out. */
 const CHECK_GUARD = "async function allowed(run: CheckRun, targets: Target[]): Promise<void> {";
-const GUARD_REFUSES = [`if (c.environment !== "sandbox") throw`, "if (c.realmId !== run.realmId) throw",
+const GUARD_REFUSES = [`if (environmentOf(c, c.tokenMode) !== "sandbox") throw`, "if (c.realmId !== run.realmId) throw",
   "if (!row || row.runId !== (t.runId ?? run.id)) throw refused("];
 
 /**
@@ -805,13 +805,13 @@ describe("what the portal writes to QuickBooks, and who may send each", () => {
     it("refuses a company that isn't an Intuit sandbox in the action that starts it, and again in its guard", () => {
       // The action asks for the writes only for a sandbox connection; the guard reads the connection again before each one.
       const action = code(everything.find((s) => s.file === MAY_START_CHECK[1])!.text);
-      expect(action).toContain(`const writes = (await getConnection())?.environment === "sandbox";`);
+      expect(action).toContain(`const writes = ready.environment === "sandbox";`);
       expect(action).toContain("runSandboxCheck({ staffUserId: ctx.staffUserId, label: ctx.email, ip: ctx.ip, writes })");
       expect(action).toMatch(/export const runCheckAction = staffAction\(P, /);
       expect(action).toContain(`const P = "Settings.QuickBooks.ReadWrite" as const;`);
       const guard = code(writer).slice(code(writer).indexOf(CHECK_GUARD));
       expect(guard.indexOf("const c = await getConnection();")).toBeGreaterThan(0);
-      expect(guard.indexOf(`if (c.environment !== "sandbox") throw`)).toBeGreaterThan(guard.indexOf("const c = await getConnection();"));
+      expect(guard.indexOf(`if (environmentOf(c, c.tokenMode) !== "sandbox") throw`)).toBeGreaterThan(guard.indexOf("const c = await getConnection();"));
       const run = code(everything.find((s) => s.file === MAY_START_CHECK[0])!.text);
       expect(run).toContain(`ask.writes && ready.environment === "sandbox"`);
     });
@@ -835,7 +835,7 @@ describe("what the portal writes to QuickBooks, and who may send each", () => {
       const cut = writer.indexOf(CHECK_GUARD);
       const inGuard = (from: string, to: string) => writer.slice(0, cut) + writer.slice(cut).replace(from, to);
       const refused = [
-        inGuard(`if (c.environment !== "sandbox") throw`, `if (c.environment === "staging") throw`),
+        inGuard(`if (environmentOf(c, c.tokenMode) !== "sandbox") throw`, `if (environmentOf(c, c.tokenMode) === "staging") throw`),
         inGuard("if (c.realmId !== run.realmId) throw", "if (!c.realmId) throw"),
         inGuard("if (!row || row.runId !== (t.runId ?? run.id)) throw", "if (!row) throw"),
         writer.replace("  await allowed(run, [target]);\n  return qboUpdateCustomerContact(", "  return qboUpdateCustomerContact("),

@@ -48,7 +48,7 @@ test("the Health page tells an Admin what is working, in words, and that the add
 test("the Health page's Boosters Rocket line shows only through the relay, from its mark, with the fix for a refusal", async ({ page, context }) => {
   await context.addCookies([staffSessionCookie()]);
   const failedAt = new Date().toISOString();
-  await sql`UPDATE qbo_connection SET connect_mode = 'relay', token_mode = 'relay'`;
+  await sql`UPDATE qbo_connection SET connect_mode = 'relay', token_mode = 'relay', relay_environment = environment`;
   await sql`INSERT INTO setting (key, value) VALUES ('health.mark.quickbooks_relay', ${sql.json({ lastOkAt: null, lastFailAt: failedAt, lastFailWord: "unauthorized" })})
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
   try {
@@ -61,7 +61,7 @@ test("the Health page's Boosters Rocket line shows only through the relay, from 
     await expect(page.locator('li[data-health="quickbooks"]')).toContainText("through Boosters Rocket");
   } finally {
     await sql`DELETE FROM setting WHERE key = 'health.mark.quickbooks_relay'`;
-    await sql`UPDATE qbo_connection SET connect_mode = 'own_app', token_mode = 'own_app'`;
+    await sql`UPDATE qbo_connection SET connect_mode = 'own_app', token_mode = 'own_app', relay_environment = null`;
   }
 });
 

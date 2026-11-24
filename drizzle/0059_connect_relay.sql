@@ -14,16 +14,20 @@ CREATE TABLE "qbo_relay" (
 	CONSTRAINT "qbo_relay_portal_id" CHECK ("qbo_relay"."portal_id" IS NULL OR "qbo_relay"."portal_id" ~ '^brp_[a-z0-9]{16}$')
 );
 --> statement-breakpoint
+ALTER TABLE "qbo_connection" ALTER COLUMN "environment" DROP NOT NULL;--> statement-breakpoint
 ALTER TABLE "qbo_connection" ALTER COLUMN "client_id" DROP NOT NULL;--> statement-breakpoint
 ALTER TABLE "qbo_connection" ALTER COLUMN "client_secret_ciphertext" DROP NOT NULL;--> statement-breakpoint
 ALTER TABLE "qbo_connection" ALTER COLUMN "client_secret_key_id" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "qbo_connection" ADD COLUMN "relay_environment" text;--> statement-breakpoint
 ALTER TABLE "qbo_connection" ADD COLUMN "connect_mode" text DEFAULT 'relay' NOT NULL;--> statement-breakpoint
 ALTER TABLE "qbo_connection" ADD COLUMN "token_mode" text;--> statement-breakpoint
 ALTER TABLE "qbo_connection" ADD COLUMN "state_mode" text;--> statement-breakpoint
 -- A connection made before the relay is the club's own Intuit app's: it keeps connecting, refreshing and revoking with
 -- those keys (a new row defaults to the relay). A connect in progress across the upgrade was started with them too.
+-- Its environment stays the own app's; the relay's has its own column, empty until a relay connect chooses one.
 UPDATE "qbo_connection" SET "connect_mode" = 'own_app';--> statement-breakpoint
 UPDATE "qbo_connection" SET "token_mode" = 'own_app' WHERE "refresh_token_ciphertext" IS NOT NULL;--> statement-breakpoint
 UPDATE "qbo_connection" SET "state_mode" = 'own_app' WHERE "state_hash" IS NOT NULL;--> statement-breakpoint
 ALTER TABLE "qbo_connection" ADD CONSTRAINT "qbo_connection_own_app_keys" CHECK (("qbo_connection"."connect_mode" <> 'own_app' AND "qbo_connection"."token_mode" IS DISTINCT FROM 'own_app')
-    OR ("qbo_connection"."client_id" IS NOT NULL AND "qbo_connection"."client_secret_ciphertext" IS NOT NULL AND "qbo_connection"."client_secret_key_id" IS NOT NULL));
+    OR ("qbo_connection"."client_id" IS NOT NULL AND "qbo_connection"."client_secret_ciphertext" IS NOT NULL AND "qbo_connection"."client_secret_key_id" IS NOT NULL AND "qbo_connection"."environment" IS NOT NULL));--> statement-breakpoint
+ALTER TABLE "qbo_connection" ADD CONSTRAINT "qbo_connection_relay_environment" CHECK (("qbo_connection"."token_mode" IS DISTINCT FROM 'relay' AND "qbo_connection"."state_mode" IS DISTINCT FROM 'relay') OR "qbo_connection"."relay_environment" IS NOT NULL);

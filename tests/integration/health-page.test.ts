@@ -465,7 +465,7 @@ describe("the health page", () => {
     expect((await relayLine())!.says).toContain("Until then the portal connects with the club's own Intuit app.");
     // Registered, and the tokens held issued through it: the mode, the last renewal, and when the relay last answered.
     await db.update(qboRelay).set({ portalId: "brp_test0portal0id01", portalIdSavedAt: NOW });
-    await db.update(qboConnection).set({ tokenMode: "relay", clientId: null, clientSecretCiphertext: null, clientSecretKeyId: null });
+    await db.update(qboConnection).set({ tokenMode: "relay", relayEnvironment: "sandbox", clientId: null, clientSecretCiphertext: null, clientSecretKeyId: null });
     expect(line(await healthReport(NOW), "quickbooks").says).toMatch(/, through Boosters Rocket\.$/);
     expect(await relayLine()).toMatchObject({ state: "off", word: "Not used yet", fix: null });
     const keys = (await healthReport(NOW)).map((l) => l.key);

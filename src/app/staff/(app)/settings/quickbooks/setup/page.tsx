@@ -91,7 +91,7 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
                     <CopyField label="Redirect address" value={qboRedirectUri()} /></li>
                   <li>Copy the <b>Client ID</b> and <b>Client secret</b> from the app&apos;s <b>Keys and credentials</b> page into the form below, and choose sandbox or production to match.</li>
                 </ol>
-                <AppKeysForm configured={conn.clientId !== null} clientId={conn.clientId} environment={conn.environment} save={saveQboAppAction} />
+                <AppKeysForm configured={conn.clientId !== null} clientId={conn.clientId} environment={conn.ownAppEnvironment} save={saveQboAppAction} />
               </section>} />
           <p className="box-foot"><a className="link-line" href="/staff/settings/quickbooks">Back to QuickBooks settings</a></p>
         </section>

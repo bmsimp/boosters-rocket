@@ -99,7 +99,7 @@ describe("connecting through Boosters Rocket", () => {
     const start = relayCalls("/v1/connect/start");
     expect(start.map((c) => [c.portal, c.status, Object.keys(c.body!).sort()])).toEqual([[TEST_PORTAL_ID, 200, ["environment", "portal_state"]]]);
     expect(start[0]!.body!.environment).toBe("sandbox");
-    expect(await row()).toMatchObject({ connectMode: "relay", stateMode: "relay", environment: "sandbox", stateStaffUserId: admin.id, tokenMode: null });
+    expect(await row()).toMatchObject({ connectMode: "relay", stateMode: "relay", relayEnvironment: "sandbox", environment: null, stateStaffUserId: admin.id, tokenMode: null });
     expect((await row()).stateHash).not.toBe(sentState());
 
     const state = sentState(), code = relay.grantFor(state, A);
@@ -129,7 +129,7 @@ describe("connecting through Boosters Rocket", () => {
     await seedRelayRegistration(relay);
     expect(await db.select().from(qboConnection)).toHaveLength(0);
     await press("production");
-    expect(await row()).toMatchObject({ environment: "production", connectMode: "relay", stateMode: "relay", clientId: null });
+    expect(await row()).toMatchObject({ relayEnvironment: "production", environment: null, connectMode: "relay", stateMode: "relay", clientId: null });
     expect(relayCalls("/v1/connect/start")[0]!.body!.environment).toBe("production");
   });
 
@@ -282,6 +282,24 @@ describe("connecting through Boosters Rocket", () => {
     expect((await audits("quickbooks.relay.connect")).map((a) => (a.after as { movedFromOwnApp: boolean }).movedFromOwnApp)).toEqual([false, false]);
   });
 
+  it("a relay connect started for the sandbox and left never changes the QuickBooks the club's own app's keys are for", async () => {
+    const { saveQboApp } = await import("@/lib/quickbooks/connection");
+    await saveQboApp({ clientId: "ABclientid1234567890", clientSecret: "s3cret-value-1234567890", environment: "production" }, op);
+    await seedRelayRegistration(relay);
+    expect(await saveConnectModeAction(form({ mode: "relay" }))).toMatchObject({ ok: true });
+    expect(await press("sandbox")).toMatch(new RegExp(`^${relay.base}/v1/connect/go/`));
+    // The relay's choice is kept in its own column; the own app's stays as its keys were saved.
+    expect(await row()).toMatchObject({ environment: "production", relayEnvironment: "sandbox", stateMode: "relay" });
+    // Left unfinished, and back to the club's own app.
+    expect(await saveConnectModeAction(form({ mode: "own_app" }))).toMatchObject({ ok: true });
+    expect(await row()).toMatchObject({ connectMode: "own_app", environment: "production", stateMode: null });
+    expect(await connectionView()).toMatchObject({ connectMode: "own_app", environment: "production", ownAppEnvironment: "production" });
+    const html = await setupHtml({ step: "app" });
+    expect(html).toContain(`name="environment" checked="" value="production"`);
+    expect((await beginConnect(admin.id)).ok).toBe(true);
+    expect(await row()).toMatchObject({ environment: "production", stateMode: "own_app" });
+  });
+
   describe("moving from the club's own Intuit app", () => {
     beforeEach(async () => {
       await seedConnected(qbo, { realmId: A }); // own-app tokens (rt-seed) under the app's keys
@@ -377,7 +395,7 @@ describe("connecting through Boosters Rocket", () => {
       expect(relay.calls).toHaveLength(0);
       await connect(A);
       expect(await press("production")).toBe("/staff/settings/quickbooks/setup?step=connect&error=environment_locked");
-      expect((await row()).environment).toBe("sandbox");
+      expect((await row()).relayEnvironment).toBe("sandbox");
       // With no choice sent, the one saved.
       expect(await press(null)).toMatch(new RegExp(`^${relay.base}/v1/connect/go/`));
       expect(relayCalls("/v1/connect/start").at(-1)!.body!.environment).toBe("sandbox");
@@ -489,7 +507,7 @@ describe("refreshing through Boosters Rocket", () => {
     const box = secretBox();
     const access = box.seal("relay-at-old", "qbo:access-token"), refresh = box.seal("relay-rt-old", "qbo:refresh-token");
     relay.refreshTokens.add("relay-rt-old");
-    await db.insert(qboConnection).values({ environment: "sandbox", connectMode: "relay", tokenMode: "relay", realmId: A, companyName: "Stub Boosters",
+    await db.insert(qboConnection).values({ relayEnvironment: "sandbox", connectMode: "relay", tokenMode: "relay", realmId: A, companyName: "Stub Boosters",
       accessTokenCiphertext: access.ciphertext, accessTokenKeyId: access.keyId, accessExpiresAt: new Date(Date.now() - 1000),
       refreshTokenCiphertext: refresh.ciphertext, refreshTokenKeyId: refresh.keyId, refreshExpiresAt: new Date(Date.now() + 86_400_000), connectedAt: new Date() });
   };
@@ -580,7 +598,7 @@ describe("disconnecting through Boosters Rocket", () => {
     const box = secretBox();
     const access = box.seal("relay-at-held", "qbo:access-token"), refresh = box.seal("relay-rt-held", "qbo:refresh-token");
     relay.refreshTokens.add("relay-rt-held");
-    await db.insert(qboConnection).values({ environment: "sandbox", connectMode: "relay", tokenMode: "relay", realmId: A, companyName: "Stub Boosters",
+    await db.insert(qboConnection).values({ relayEnvironment: "sandbox", connectMode: "relay", tokenMode: "relay", realmId: A, companyName: "Stub Boosters",
       accessTokenCiphertext: access.ciphertext, accessTokenKeyId: access.keyId, accessExpiresAt: new Date(Date.now() + 3_600_000),
       refreshTokenCiphertext: refresh.ciphertext, refreshTokenKeyId: refresh.keyId, refreshExpiresAt: new Date(Date.now() + 86_400_000), connectedAt: new Date() });
   };
@@ -608,7 +626,7 @@ describe("disconnecting through Boosters Rocket", () => {
     expect(relayCalls("/v1/token/revoke").map((c) => [c.portal, c.status, c.body])).toEqual([[TEST_PORTAL_ID, 200, { environment: "sandbox", token: "relay-rt-held", realm_id: A }]]);
     expect(relay.revoked).toEqual(["relay-rt-held"]);
     expect(intuitRevokes()).toHaveLength(0); // never with the club's own keys
-    expect(await row()).toMatchObject({ realmId: null, tokenMode: null, refreshTokenCiphertext: null, accessTokenCiphertext: null, connectMode: "relay", environment: "sandbox" });
+    expect(await row()).toMatchObject({ realmId: null, tokenMode: null, refreshTokenCiphertext: null, accessTokenCiphertext: null, connectMode: "relay", relayEnvironment: "sandbox" });
     expect(await audits("quickbooks.relay.disconnect")).toMatchObject([{ actorId: admin.id, permission: "Settings.QuickBooks.ReadWrite", ip: "203.0.113.44",
       before: { companyName: "Stub Boosters", realmId: A }, after: { acknowledged: true, revoked: true, environment: "sandbox" } }]);
     expect(await audits("quickbooks.disconnect")).toHaveLength(0);

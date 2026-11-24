@@ -200,7 +200,7 @@ describe("Registering the portal with Boosters Rocket", () => {
     expect(await makeRelayKeyAction(form({ replace: ["yes", "yes"] }))).toMatchObject({ ok: false });
 
     // Connected through the relay: the key signs every refresh, so it stays, and the page doesn't offer a new one.
-    await db.insert(qboConnection).values({ environment: "sandbox", connectMode: "relay", tokenMode: "relay" });
+    await db.insert(qboConnection).values({ relayEnvironment: "sandbox", connectMode: "relay", tokenMode: "relay" });
     expect(await makeRelayKeyAction(form({ replace: "yes" }))).toMatchObject({ ok: false, errors: [expect.stringContaining("Disconnect first")] });
     expect((await relayRow())!.publicKey).toBe(old.publicKey);
     expect((await setup()).html).not.toContain("Make a new key");
@@ -220,7 +220,7 @@ describe("Registering the portal with Boosters Rocket", () => {
     await makeAndRegister();
     await savePortalIdAction(form({ portalId: TEST_PORTAL_ID }));
     stub.calls.length = 0;
-    await db.insert(qboConnection).values({ environment: "sandbox", connectMode: "relay", tokenMode: "relay", realmId: "9130000000000001", refreshTokenCiphertext: "x", refreshTokenKeyId: "k" });
+    await db.insert(qboConnection).values({ relayEnvironment: "sandbox", connectMode: "relay", tokenMode: "relay", realmId: "9130000000000001", refreshTokenCiphertext: "x", refreshTokenKeyId: "k" });
     const before = await audits("settings.quickbooks.relay.portal_id");
     expect(await savePortalIdAction(form({ portalId: OTHER_ID }))).toEqual({ ok: false, errors: [expect.stringContaining("Disconnect first")] });
     expect((await relayRow())!.portalId).toBe(TEST_PORTAL_ID);
@@ -308,7 +308,7 @@ describe("Registering the portal with Boosters Rocket", () => {
     it("refuses relay to own-app while connected through the relay, changing nothing", async () => {
       await saveQboAppAction(form(keys));
       await saveConnectModeAction(form({ mode: "relay" }));
-      await db.update(qboConnection).set({ tokenMode: "relay", realmId: "9130000000000001", refreshTokenCiphertext: "x", refreshTokenKeyId: "k" });
+      await db.update(qboConnection).set({ tokenMode: "relay", relayEnvironment: "sandbox", realmId: "9130000000000001", refreshTokenCiphertext: "x", refreshTokenKeyId: "k" });
       const before = await audits("settings.quickbooks.mode");
       expect(await saveConnectModeAction(form({ mode: "own_app" }))).toMatchObject({ ok: false, errors: [expect.stringContaining("Disconnect first")] });
       expect(await saveQboAppAction(form(keys))).toMatchObject({ ok: false, errors: [expect.stringContaining("Disconnect first")] });

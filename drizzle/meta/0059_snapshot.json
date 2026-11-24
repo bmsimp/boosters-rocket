@@ -1,5 +1,5 @@
 {
-  "id": "936060f8-8d00-468e-8615-cedcff66e799",
+  "id": "1481dace-8352-492c-92e9-f9fdff4df9bb",
   "prevId": "322b8119-128d-4f23-9e8f-5be014d6e32a",
   "version": "7",
   "dialect": "postgresql",
@@ -4007,7 +4007,13 @@
           "name": "environment",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "relay_environment": {
+          "name": "relay_environment",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "connect_mode": {
           "name": "connect_mode",
@@ -4162,7 +4168,11 @@
         },
         "qbo_connection_own_app_keys": {
           "name": "qbo_connection_own_app_keys",
-          "value": "(\"qbo_connection\".\"connect_mode\" <> 'own_app' AND \"qbo_connection\".\"token_mode\" IS DISTINCT FROM 'own_app')\n    OR (\"qbo_connection\".\"client_id\" IS NOT NULL AND \"qbo_connection\".\"client_secret_ciphertext\" IS NOT NULL AND \"qbo_connection\".\"client_secret_key_id\" IS NOT NULL)"
+          "value": "(\"qbo_connection\".\"connect_mode\" <> 'own_app' AND \"qbo_connection\".\"token_mode\" IS DISTINCT FROM 'own_app')\n    OR (\"qbo_connection\".\"client_id\" IS NOT NULL AND \"qbo_connection\".\"client_secret_ciphertext\" IS NOT NULL AND \"qbo_connection\".\"client_secret_key_id\" IS NOT NULL AND \"qbo_connection\".\"environment\" IS NOT NULL)"
+        },
+        "qbo_connection_relay_environment": {
+          "name": "qbo_connection_relay_environment",
+          "value": "(\"qbo_connection\".\"token_mode\" IS DISTINCT FROM 'relay' AND \"qbo_connection\".\"state_mode\" IS DISTINCT FROM 'relay') OR \"qbo_connection\".\"relay_environment\" IS NOT NULL"
         }
       },
       "isRLSEnabled": false

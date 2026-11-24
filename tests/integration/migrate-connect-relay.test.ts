@@ -11,7 +11,7 @@ import { dropScratchDatabase, makeScratchDatabase } from "../setup/worker-databa
 /**
  * Migration 0059 (Connect through Boosters Rocket's slice 1; found here by its tag, so a renumbering at a merge
  * doesn't break it): the table `qbo_relay`, and on `qbo_connection` the two modes and the pending state's, with the
- * Intuit app's keys nullable under a check. A connection made before it is the club's own app's: its modes are filled
+ * Intuit app's keys and their environment nullable under a check, and the relay's environment in its own column. A connection made before it is the club's own app's: its modes are filled
  * `own_app`, its tokens and any connect in progress too, and nothing else of the row changes. An empty database takes
  * it as well, and a row made after it defaults to the relay.
  */
@@ -74,6 +74,8 @@ describe("migration 0059: Connect through Boosters Rocket's data", { timeout: 60
     await migrateWith(HELD, path.resolve("drizzle"));
     expect(await oldRow()).toEqual(before);
     expect(await modes(HELD)).toEqual([{ connect_mode: "own_app", token_mode: "own_app", state_mode: "own_app" }]);
+    // The environment stays the own app's; the relay's own column is empty until a relay connect chooses one.
+    expect(await q(HELD, (pg) => pg`SELECT environment, relay_environment FROM qbo_connection`)).toEqual([{ environment: "production", relay_environment: null }]);
     expect(await q(HELD, (pg) => pg`SELECT count(*)::int AS n FROM qbo_relay`)).toEqual([{ n: 0 }]);
   });
 
@@ -85,8 +87,10 @@ describe("migration 0059: Connect through Boosters Rocket's data", { timeout: 60
 
   it("applies to an empty database, where a new row is the relay's and needs no keys", async () => {
     await migrateWith(EMPTY, path.resolve("drizzle"));
-    await q(EMPTY, (pg) => pg`INSERT INTO qbo_connection (environment) VALUES ('sandbox')`);
+    await q(EMPTY, (pg) => pg`INSERT INTO qbo_connection (relay_environment) VALUES ('sandbox')`);
     expect(await modes(EMPTY)).toEqual([{ connect_mode: "relay", token_mode: null, state_mode: null }]);
+    // Tokens issued through the relay need its environment.
+    await expect(q(EMPTY, (pg) => pg`UPDATE qbo_connection SET token_mode = 'relay', relay_environment = NULL`)).rejects.toThrow(/qbo_connection_relay_environment/);
     const columns = await q(EMPTY, (pg) => pg`SELECT column_name, is_nullable FROM information_schema.columns WHERE table_name = 'qbo_relay' ORDER BY ordinal_position`);
     expect(columns.map((c) => `${c.column_name as string}:${c.is_nullable as string}`)).toEqual([
       "id:NO", "public_key:NO", "private_key_ciphertext:NO", "private_key_key_id:NO", "key_made_at:NO", "key_made_by:YES",

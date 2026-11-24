@@ -199,7 +199,7 @@ const E2E_PORTAL_ID = "brp_e2e0portal0id001";
 async function backToTheSeed() {
   await sql`DELETE FROM qbo_relay`;
   await sql`DELETE FROM setting WHERE key = 'health.mark.quickbooks_relay'`;
-  await sql`UPDATE qbo_connection SET connect_mode = 'own_app', token_mode = 'own_app', state_hash = null, state_staff_user_id = null, state_expires_at = null, state_mode = null`;
+  await sql`UPDATE qbo_connection SET connect_mode = 'own_app', token_mode = 'own_app', relay_environment = null, state_hash = null, state_staff_user_id = null, state_expires_at = null, state_mode = null`;
 }
 async function checked(page: Page, where: string) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), `${where} scrolls sideways`).toBe(false);
@@ -284,7 +284,7 @@ test("Disconnect through Boosters Rocket stays unusable until the box is ticked;
   await expect(page.getByRole("checkbox")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Disconnect QuickBooks" })).not.toHaveAttribute("aria-disabled", "true");
 
-  await sql`UPDATE qbo_connection SET connect_mode = 'relay', token_mode = 'relay'`;
+  await sql`UPDATE qbo_connection SET connect_mode = 'relay', token_mode = 'relay', relay_environment = environment`;
   try {
     await page.goto("/staff/settings/quickbooks");
     await expect(page.getByRole("region", { name: "Connection" }).getByText("Through Boosters Rocket", { exact: true })).toBeVisible();

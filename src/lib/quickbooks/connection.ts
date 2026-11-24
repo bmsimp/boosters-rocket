@@ -7,7 +7,7 @@ import { secretBox, SecretBoxError } from "@/lib/crypto/secret-box";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { errorNeedsAdmin, QboError, QBO_SCOPE } from "./endpoints";
 import { oauthEndpoints } from "./discovery";
-import { ownAppOf, QBO_AAD, qboGet, sealTokens, tokenRequest, type QboApp, type TokenSet } from "./client";
+import { environmentOf, ownAppOf, QBO_AAD, qboGet, sealTokens, tokenRequest, type QboApp, type TokenSet } from "./client";
 import { relayForget, relayRedeem, relayRevoke, relayStart } from "./relay";
 import { clearRosterOfOtherCompany, dropSwitchAsk, getRosterSource, getSwitchRecord, setSwitchRecord, storedSwitchOf, SWITCH_KEY, type SwitchRecord } from "@/lib/roster/source";
 
@@ -33,7 +33,12 @@ export type QboConnectionView = {
   /** What the next Connect does; relay for a new club. `tokenMode`: which app issued the tokens held now, null while none. */
   connectMode: QboMode; tokenMode: QboMode | null;
   /** The registration with Boosters Rocket (relay-registration.ts). Never the key. */
-  relayStage: RelayStage; clientId: string | null; environment: QboEnvironment | null; connected: boolean; companyName: string | null;
+  relayStage: RelayStage; clientId: string | null;
+  /**
+   * Which QuickBooks: the tokens' while connected, otherwise the one the next Connect uses (the mode's own column).
+   * `ownAppEnvironment`: what the club's own app's keys are for, whatever the mode, for the keys' form.
+   */
+  environment: QboEnvironment | null; ownAppEnvironment: QboEnvironment | null; connected: boolean; companyName: string | null;
   connectedAt: string | null; lastTokenRefreshAt: string | null; refreshExpiresAt: string | null; lastError: string | null; lastErrorAt: string | null;
   /** The recorded error can only be fixed by an Admin connecting again, so the worker stops trying (spec §4). */
   needsAdmin: boolean;
@@ -77,7 +82,8 @@ export async function connectionView(): Promise<QboConnectionView> {
   const connected = Boolean(c?.realmId && c.refreshTokenCiphertext);
   const stepOneDone = connectMode === "own_app" ? Boolean(c?.clientId) : relayStage === "ready";
   return {
-    configured: connected || stepOneDone, connectMode, tokenMode: c?.tokenMode ?? null, relayStage, clientId: c?.clientId ?? null, environment: c?.environment ?? null, connected,
+    configured: connected || stepOneDone, connectMode, tokenMode: c?.tokenMode ?? null, relayStage, clientId: c?.clientId ?? null,
+    environment: c ? environmentOf(c, connected ? c.tokenMode : connectMode) : null, ownAppEnvironment: c?.environment ?? null, connected,
     companyName: c?.companyName ?? null, connectedAt: iso(c?.connectedAt), lastTokenRefreshAt: iso(c?.lastTokenRefreshAt),
     refreshExpiresAt: iso(c?.refreshExpiresAt), lastError: c?.lastError ?? null, lastErrorAt: iso(c?.lastErrorAt), needsAdmin: errorNeedsAdmin(c?.lastError),
   };
@@ -197,8 +203,8 @@ function relayReason(code: string): "relay_code" | "relay_refused" | "relay_busy
 /**
  * Starts a connect, plain or a switch, in the mode the Admin chose (`connect_mode`): a new single-use state for this
  * Admin (replacing any earlier one), made for that mode (`state_mode`), and the address to send them to. In own-app
- * mode that is Intuit's, with the club's app's Client ID. In relay mode the row's environment is the one chosen with
- * the press (refused while connected to the other), the row is made if the club has none yet, and, after the
+ * mode that is Intuit's, with the club's app's Client ID. In relay mode the relay's environment (`relay_environment`,
+ * never the own app's) is the one chosen with the press (refused while connected to the other), the row is made if the club has none yet, and, after the
  * transaction (no row lock is held while the relay answers), the relay is asked for its one-time go address, signed:
  * a refusal, a busy relay or none at all stops here, audited. `ask` writes a switch's ask in the state's transaction;
  * without it any ask is dropped.
@@ -210,18 +216,20 @@ async function startConnect(staffUserId: string, o: { environment?: QboEnvironme
     const mode = c?.connectMode ?? "relay";
     let environment: QboEnvironment;
     if (mode === "own_app") {
-      if (!c) return { ok: false, reason: "not_configured" };
+      if (!c?.environment) return { ok: false, reason: "not_configured" };
       await tx.update(qboConnection).set({ ...set, stateMode: "own_app" });
       environment = c.environment;
     } else {
       const [r] = await tx.select({ portalId: qboRelay.portalId }).from(qboRelay);
       if (!r?.portalId) return { ok: false, reason: "not_configured" };
-      const chosen = o.environment ?? c?.environment;
+      const chosen = o.environment ?? c?.relayEnvironment;
       if (!chosen) return { ok: false, reason: "environment" };
-      if (c?.realmId && c.environment !== chosen) return { ok: false, reason: "environment_locked" };
+      // While connected, only the QuickBooks the tokens held are for, whichever app issued them.
+      if (c?.realmId && environmentOf(c, c.tokenMode) !== chosen) return { ok: false, reason: "environment_locked" };
       environment = chosen;
-      if (c) await tx.update(qboConnection).set({ ...set, stateMode: "relay", environment });
-      else await tx.insert(qboConnection).values({ ...set, stateMode: "relay", environment, connectMode: "relay" });
+      // The relay's own column: the club's own app's keys keep the environment they were saved for.
+      if (c) await tx.update(qboConnection).set({ ...set, stateMode: "relay", relayEnvironment: environment });
+      else await tx.insert(qboConnection).values({ ...set, stateMode: "relay", relayEnvironment: environment, connectMode: "relay" });
     }
     if (ask) await ask(tx, set);
     else await dropSwitchAsk(tx);
@@ -348,7 +356,8 @@ async function finishConnect(mode: QboMode, p: IntuitReturn, o: ConnectOp): Prom
       // still the one made with this state; the company checks are made under the row lock, when storing (step 3).
       const rosterRealmId = await getRosterSource(tx);
       const askFrom = askHolds(ask, { stateHash: c.stateHash, staffUserId: o.staffUserId, rosterRealmId }) ? rosterRealmId : null;
-      return { ok: true, switchFrom: askFrom, environment: c.environment, app: null };
+      const environment = c.relayEnvironment;
+      return environment ? { ok: true, switchFrom: askFrom, environment, app: null } : { ok: false, reason: "state" };
     }
     if (p.error || !p.code || !p.realmId || !/^\d{1,32}$/.test(p.realmId)) return { ok: false, reason: "denied" };
     if (c.realmId && c.realmId !== p.realmId) return { ok: false, reason: "other_company" };
@@ -364,7 +373,7 @@ async function finishConnect(mode: QboMode, p: IntuitReturn, o: ConnectOp): Prom
     }
     try {
       const app = ownAppOf(c);
-      return app ? { ok: true, switchFrom, app, environment: c.environment } : { ok: false, reason: "not_configured" };
+      return app && c.environment ? { ok: true, switchFrom, app, environment: c.environment } : { ok: false, reason: "not_configured" };
     } catch (e) {
       if (e instanceof SecretBoxError) return { ok: false, reason: "not_configured" };
       throw e;
@@ -422,7 +431,7 @@ async function finishConnect(mode: QboMode, p: IntuitReturn, o: ConnectOp): Prom
     if (!c) return { kind: "other_company" };
     // The tokens belong to the app and environment they were issued under; the keys or the mode may have changed since.
     const sameApp = relay ? c.connectMode === "relay" : c.clientId === claim.app!.clientId;
-    if (!sameApp || c.environment !== claim.environment) return { kind: "state" };
+    if (!sameApp || environmentOf(c, mode) !== claim.environment) return { kind: "state" };
     if (c.realmId && c.realmId !== realmId) return { kind: "other_company" };
     // Checked again under the row lock: another company only for a switch from the company the ask was made against,
     // still the roster's. Through the relay the company is known only now, so the renewal of a stored switch's company
@@ -442,7 +451,7 @@ async function finishConnect(mode: QboMode, p: IntuitReturn, o: ConnectOp): Prom
     if (moved && c.refreshTokenCiphertext && c.refreshTokenKeyId) {
       try {
         const box = secretBox(), app = ownAppOf(c, box);
-        if (app) old = { refreshToken: box.open({ ciphertext: c.refreshTokenCiphertext, keyId: c.refreshTokenKeyId }, QBO_AAD.refresh), app, environment: c.environment };
+        if (app && c.environment) old = { refreshToken: box.open({ ciphertext: c.refreshTokenCiphertext, keyId: c.refreshTokenKeyId }, QBO_AAD.refresh), app, environment: c.environment };
       } catch (e) {
         if (!(e instanceof SecretBoxError)) throw e; // unreadable here: the old grant can't be revoked from here
       }
@@ -522,7 +531,7 @@ export const DISCONNECT_ACK_NEEDED = "Tick the box to say you understand, then t
 export async function disconnect(o: QboOp & { acknowledged?: boolean }): Promise<{ ok: true; revoked: boolean } | { ok: false; reason: "not_connected" | "not_acknowledged" }> {
   const c = await getConnection();
   if (!c?.realmId || !c.refreshTokenCiphertext || !c.refreshTokenKeyId) return { ok: false, reason: "not_connected" };
-  const relay = c.tokenMode === "relay";
+  const relay = c.tokenMode === "relay", environment = environmentOf(c, c.tokenMode);
   if (relay && o.acknowledged !== true) return { ok: false, reason: "not_acknowledged" };
   let revoked = false;
   try {
@@ -530,7 +539,7 @@ export async function disconnect(o: QboOp & { acknowledged?: boolean }): Promise
     const token = box.open({ ciphertext: c.refreshTokenCiphertext, keyId: c.refreshTokenKeyId }, QBO_AAD.refresh);
     // Tokens issued through the relay are never revoked with the club's own keys, which didn't issue them.
     const app = relay ? null : ownAppOf(c, box);
-    revoked = relay ? await relayRevoke(c.environment, token, c.realmId) : app ? await revokeAtIntuit(token, app, c.environment) : false;
+    revoked = !environment ? false : relay ? await relayRevoke(environment, token, c.realmId) : app ? await revokeAtIntuit(token, app, environment) : false;
   } catch {
     revoked = false; // the keys unreadable (Intuit or the relay unreachable is false already): the tokens are still deleted here
   }
@@ -538,7 +547,7 @@ export async function disconnect(o: QboOp & { acknowledged?: boolean }): Promise
   await db.transaction(async (tx) => {
     await tx.update(qboConnection).set({ ...DISCONNECTED, updatedAt: new Date() });
     await writeAudit(relay
-      ? { actor: o.actor, action: "quickbooks.relay.disconnect", permission: o.permission, ...TARGET, before, after: { acknowledged: true, revoked, environment: c.environment }, ip: o.ip }
+      ? { actor: o.actor, action: "quickbooks.relay.disconnect", permission: o.permission, ...TARGET, before, after: { acknowledged: true, revoked, environment }, ip: o.ip }
       : { actor: o.actor, action: "quickbooks.disconnect", permission: o.permission, ...TARGET, before, after: { revoked }, ip: o.ip }, tx);
   });
   return { ok: true, revoked };

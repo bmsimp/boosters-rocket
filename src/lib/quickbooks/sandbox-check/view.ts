@@ -4,6 +4,7 @@ import { qboCheckRecord, qboCheckRun, type CheckResult, type QboEnvironment } fr
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { errorNeedsAdmin } from "@/lib/quickbooks/endpoints";
 import { getConnection } from "@/lib/quickbooks/connection";
+import { environmentOf } from "@/lib/quickbooks/client";
 import { getRosterSource } from "@/lib/roster/source";
 import { untriedChanges } from "./expectations";
 
@@ -33,7 +34,8 @@ const DIGITS = "^[0-9]{1,19}$";
  */
 export async function checkReadiness(): Promise<Readiness> {
   const c = await getConnection();
-  if (!c?.realmId || !c.refreshTokenCiphertext) return { ok: false, reason: "not_connected" };
+  const environment = c ? environmentOf(c, c.tokenMode) : null;
+  if (!c?.realmId || !c.refreshTokenCiphertext || !environment) return { ok: false, reason: "not_connected" };
   if (errorNeedsAdmin(c.lastError)) return { ok: false, reason: "needs_admin" };
   if (!new RegExp(DIGITS).test(c.realmId)) return { ok: false, reason: "not_quickbooks" };
   if ((await getRosterSource()) === c.realmId) {
@@ -41,7 +43,7 @@ export async function checkReadiness(): Promise<Readiness> {
       or exists (select 1 from qbo_customer_type where qbo_id !~ ${DIGITS})) as odd`));
     if (odd?.odd) return { ok: false, reason: "not_quickbooks" };
   }
-  return { ok: true, realmId: c.realmId, environment: c.environment };
+  return { ok: true, realmId: c.realmId, environment };
 }
 
 export type RunView = {
@@ -66,7 +68,7 @@ export async function checkPageView(): Promise<CheckPageView> {
   const open = realmId === null ? [] : await db.select({ id: qboCheckRecord.id, kind: qboCheckRecord.kind, name: qboCheckRecord.name, tag: qboCheckRun.tag, lastCode: qboCheckRecord.lastCode })
     .from(qboCheckRecord).innerJoin(qboCheckRun, eq(qboCheckRecord.runId, qboCheckRun.id))
     .where(and(eq(qboCheckRecord.realmId, realmId), isNull(qboCheckRecord.closedAt), isNotNull(qboCheckRun.finishedAt))).orderBy(qboCheckRecord.createdAt);
-  return { readiness, environment: c?.environment ?? null, latest: runs[0] ?? null, earlier: runs.slice(1), open };
+  return { readiness, environment: c ? environmentOf(c, c.tokenMode) : null, latest: runs[0] ?? null, earlier: runs.slice(1), open };
 }
 
 export type LastCheck = { at: string; outcome: "passed" | "not_as_expected" | "incomplete" | "stopped" | "cut_off"; environment: QboEnvironment; writes: boolean; notAsExpected: number; notTried: number } | null;

@@ -448,11 +448,17 @@ export type QboMode = "own_app" | "relay";
  * Two modes (docs/superpowers/specs/2026-11-24-connect-through-boosters-rocket-design.md §4): `connect_mode` is what the
  * next Connect does, `token_mode` which app issued the tokens held now (refresh and revoke follow it, never
  * `connect_mode`). The app's keys are needed only for the club's own app: `qbo_connection_own_app_keys` holds them
- * present whenever either mode is `own_app`; a relay club never has them, and a club that moved keeps them.
+ * present whenever either mode is `own_app`; a relay club never has them, and a club that moved keeps them. Each mode
+ * has its own environment: `environment` the own app's, `relay_environment` the relay's (`qbo_connection_relay_environment`
+ * holds it present while tokens or a pending connect are the relay's).
  */
 export const qboConnection = pgTable("qbo_connection", {
   id: text("id").primaryKey().default("singleton"),
-  environment: text("environment", { enum: ["sandbox", "production"] }).notNull(),
+  // Which QuickBooks the club's own Intuit app's keys are for, saved with them (null for a club that never saved any).
+  environment: text("environment", { enum: ["sandbox", "production"] }),
+  // Which QuickBooks the relay connects to, chosen with step 2's press: its own column, so a relay connect started and
+  // left never changes what the club's own app's keys are for (environmentOf() reads the one for a mode).
+  relayEnvironment: text("relay_environment", { enum: ["sandbox", "production"] }),
   connectMode: text("connect_mode", { enum: ["own_app", "relay"] }).notNull().default("relay"),
   tokenMode: text("token_mode", { enum: ["own_app", "relay"] }),   // null while disconnected; set with every store of tokens
   stateMode: text("state_mode", { enum: ["own_app", "relay"] }),   // the mode a pending connect's state was made for
@@ -481,7 +487,8 @@ export const qboConnection = pgTable("qbo_connection", {
 }, (t) => [
   check("qbo_connection_singleton", sql`${t.id} = 'singleton'`),
   check("qbo_connection_own_app_keys", sql`(${t.connectMode} <> 'own_app' AND ${t.tokenMode} IS DISTINCT FROM 'own_app')
-    OR (${t.clientId} IS NOT NULL AND ${t.clientSecretCiphertext} IS NOT NULL AND ${t.clientSecretKeyId} IS NOT NULL)`),
+    OR (${t.clientId} IS NOT NULL AND ${t.clientSecretCiphertext} IS NOT NULL AND ${t.clientSecretKeyId} IS NOT NULL AND ${t.environment} IS NOT NULL)`),
+  check("qbo_connection_relay_environment", sql`(${t.tokenMode} IS DISTINCT FROM 'relay' AND ${t.stateMode} IS DISTINCT FROM 'relay') OR ${t.relayEnvironment} IS NOT NULL`),
 ]);
 
 /**
