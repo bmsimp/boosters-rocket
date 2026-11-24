@@ -4,11 +4,11 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
 import { connectionView, qboRedirectUri } from "@/lib/quickbooks/connection";
-import { QUICKBOOKS_USE } from "@/lib/quickbooks/what-it-does";
 import { loadRosterPage } from "@/lib/roster/queries";
 import { CopyField } from "@/app/components/sign-in-settings/copy-field";
 import { AppKeysForm, ConnectModeForm, RelayConnectForm, RelayRegistration, ShapeForm } from "../forms";
 import { QuickBooksFullLogo } from "../../integration-logo";
+import { QuickBooksUse } from "../what-it-does";
 import { saveQboAppAction, beginConnectAction, previewShapeAction, saveShapeAction, saveConnectModeAction, makeRelayKeyAction, savePortalIdAction, checkRegistrationAction } from "../actions";
 import { addressFitsRelay, portalAddress, registrationMailto, relayRegistrationView } from "@/lib/quickbooks/relay-registration";
 import { getClubSettings } from "@/lib/settings/club";
@@ -99,7 +99,8 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
 
       {step === "connect" && (
         <section className="box" aria-labelledby="qbo-connect-h"><h2 id="qbo-connect-h">Step 2: Connect to QuickBooks</h2>
-          <p>This sends you to Intuit to choose the club&apos;s QuickBooks company and approve access, then brings you back here. Sign in as someone who is an admin of that company. {QUICKBOOKS_USE.reads} {QUICKBOOKS_USE.writes}</p>
+          <p>This sends you to Intuit to choose the club&apos;s QuickBooks company and approve access, then brings you back here. Sign in as someone who is an admin of that company.</p>
+          <QuickBooksUse />
           {relay && <p>The portal connects through Boosters Rocket: Intuit asks you to approve Boosters Rocket Connect, then sends you back here.</p>}
           {conn.connected && <p className="hint">QuickBooks is connected to <b>{conn.companyName ?? "a company"}</b>. Connecting again renews the connection to the same company.</p>}
           {relay && conn.connected && conn.tokenMode === "own_app" && <Notice tone="info">The portal is connected with the club&apos;s own Intuit app now. Connecting through Boosters Rocket to the same company moves it over, then asks Intuit to end the old app&apos;s access.</Notice>}

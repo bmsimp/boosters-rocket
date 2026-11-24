@@ -28,7 +28,7 @@ Import from the index: `import { Card, List, ListRow, LinkButton } from "@/app/c
 | A few options that need explaining | `ChoiceGroup` (an option `disabled` when it can't be chosen now) | a dropdown of two |
 | Facts about one thing, label beside value | `KeyValue` | a two-column table |
 | Filters over a list or table | `Toolbar` | filters scattered above several cards |
-| A card's longer explanation, read once and then known | `HowThisWorks` (`summary` defaults to "How this works") | a wall of prose before the card's list or form; hiding what a reader must know before they press |
+| A card's longer explanation, read once and then known | `HowThisWorks` (`summary` defaults to "How this works"; a long one in groups, each a `<section>` with an `h3` over its list, as `QuickBooksUse` does) | a wall of prose before the card's list or form; hiding what a reader must know before they press |
 | Where something stands in a few steps | `StepIndicator` (the season ruler) | a progress bar with no words |
 | A person's initials | `Avatar` | an initial in a square |
 | The bottom tab bar on a phone | `ParentTabs` for a parent, `StaffTabs` for staff (`src/app/components/parent-tabs.tsx`, one `TabBar`, `.tabs`; the staff's `.staff-tabs` from `staffTabs()`), a group's hub `HubPage` with its way back `HubBack` (`src/app/staff/(app)/hub-page.tsx`, `hub-back.tsx`) | a Menu button; a copy of the tab bar's markup or styles; a layout rule keyed on `nav.tabs` that should hold for parents only (write `nav.tabs:not(.staff-tabs)`) |

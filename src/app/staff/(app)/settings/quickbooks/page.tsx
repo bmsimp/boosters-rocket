@@ -1,13 +1,13 @@
-import { Card, HowThisWorks, KeyValue, LinkButton, Notice } from "@/app/components/ui";
+import { Card, KeyValue, LinkButton, Notice } from "@/app/components/ui";
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { connectionView } from "@/lib/quickbooks/connection";
 import { quickbooksProblems } from "@/lib/quickbooks/health";
-import { QUICKBOOKS_USE } from "@/lib/quickbooks/what-it-does";
 import { loadRosterPage } from "@/lib/roster/queries";
 import { lastWake } from "@/lib/jobs/runner";
 import { LocalTime } from "@/app/components/local-time";
 import { Disconnect } from "./forms";
+import { QuickBooksUse } from "./what-it-does";
 import { disconnectAction } from "./actions";
 import { rosterCounts } from "./roster-counts";
 import { getParentSettings } from "@/lib/parents/settings";
@@ -66,7 +66,7 @@ export default async function QuickBooksSettingsPage({ searchParams }: { searchP
 
       {conn.configured && (
         <Card title="Connection" titleId="qbo-conn-h">
-          <HowThisWorks summary="What the portal does with QuickBooks"><p>{QUICKBOOKS_USE.reads} {QUICKBOOKS_USE.writes} Each change is in the audit log.</p></HowThisWorks>
+          <QuickBooksUse />
           {/* The company's name is QuickBooks text: a text child, never markup. */}
           <KeyValue items={[
             { key: "company", label: "Company", value: conn.connected ? <b>{conn.companyName ?? "A QuickBooks company"}</b> : conn.connectMode === "relay" ? "None. The portal is registered with Boosters Rocket." : "None. The Intuit app's keys are saved." },

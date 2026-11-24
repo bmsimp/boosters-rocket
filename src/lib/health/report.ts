@@ -8,7 +8,7 @@ import { connectionView, type QboConnectionView } from "@/lib/quickbooks/connect
 import { readRelayMark, type RelayFailWord, type RelayMark } from "@/lib/quickbooks/relay";
 import { qboRelayUrl } from "@/lib/quickbooks/relay-address";
 import { quickbooksProblems } from "@/lib/quickbooks/health";
-import { QUICKBOOKS_USE, QUICKBOOKS_WRITE_ACTION } from "@/lib/quickbooks/what-it-does";
+import { QUICKBOOKS_USE_TEXT, QUICKBOOKS_WRITE_ACTION } from "@/lib/quickbooks/what-it-does";
 import { loadRosterPage } from "@/lib/roster/queries";
 import { queueCounts } from "@/lib/roster/queue";
 import { mailFailing, mailSummary } from "@/lib/mail/settings";
@@ -187,7 +187,7 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
   const rosterTimes = [{ label: "Last token refresh", at: conn.lastTokenRefreshAt }, { label: "Last roster read", at: roster.lastOkAt },
     { label: "Last change made in QuickBooks", at: lastWrite?.at.toISOString() ?? null }];
   // What the portal reads and what it changes, in the words the QuickBooks settings page uses.
-  const use = `${QUICKBOOKS_USE.reads} ${QUICKBOOKS_USE.writes}`;
+  const use = QUICKBOOKS_USE_TEXT;
   const qboFix = { href: "/staff/settings/quickbooks", label: "Open QuickBooks settings" };
   // Changes QuickBooks hasn't taken yet (src/lib/roster/queue.ts), staff's and parents': a stuck one waits for a person.
   const queueNote: string[] = writes.waiting + writes.stuck === 0 ? [] : [`Changes waiting for QuickBooks (staff roster changes, parents' phones and mailing addresses, and volunteer buy-out invoices): ${writes.waiting} waiting to reach QuickBooks, ${writes.stuck} stuck${writes.stuck ? " and waiting for someone to try them again or give them up on the Reconciliation page" : ""}.`];
