@@ -96,12 +96,14 @@ async function relaySigner(as?: SignedAs): Promise<Signer> {
 /**
  * One signed POST. Answers the relay's status and JSON body for a 200 or a 400 (the call decides what a 400 means);
  * throws, after marking it, for no answer (`relay_unreachable`), a 401 (`relay_unauthorized`), a 429 (`relay_busy`)
- * and any other status (`relay_unreachable` for a 5xx, marked `unreachable`; `relay_error` otherwise). The body is signed as the exact
- * bytes sent.
+ * and any other status (`relay_unreachable` for a 5xx, marked `unreachable`; `relay_error` otherwise). The body is
+ * signed as the exact bytes sent. `markFailures: false` (the registration's check) marks only an answer: Health's mark
+ * says how the real calls (connect, refresh, revoke, forget) fare, which a check pressed by hand mustn't overwrite.
  */
-async function signedPost(path: string, payload: Record<string, unknown>, o: { as?: SignedAs } = {}): Promise<{ status: 200 | 400; body: unknown; signedAs: SignedAs }> {
+async function signedPost(path: string, payload: Record<string, unknown>, o: { as?: SignedAs; markFailures?: boolean } = {}): Promise<{ status: 200 | 400; body: unknown; signedAs: SignedAs }> {
   const signer = await relaySigner(o.as);
   const signedAs = { portalId: signer.portalId, publicKey: signer.publicKey };
+  const failed = async (word: RelayFailWord) => { if (o.markFailures !== false) await markRelay({ ok: false, word }); };
   const body = JSON.stringify(payload);
   let res: Response;
   try {
@@ -110,24 +112,24 @@ async function signedPost(path: string, payload: Record<string, unknown>, o: { a
       headers: { ...(await signedHeaders({ portalId: signer.portalId, privateKey: signer.key, verb: "POST", path, body })), accept: "application/json" },
     });
   } catch {
-    await markRelay({ ok: false, word: "unreachable" });
+    await failed("unreachable");
     throw failure("relay_unreachable");
   }
   if (res.status === 200 || res.status === 400) {
     let answer: unknown;
     try { answer = await res.json(); } catch {
-      await markRelay({ ok: false, word: "relay_error" });
+      await failed("relay_error");
       throw failure("relay_error");
     }
     await markRelay({ ok: true });
     return { status: res.status, body: answer, signedAs };
   }
   await res.body?.cancel().catch(() => {});
-  if (res.status === 401) { await markRelay({ ok: false, word: "unauthorized" }); throw failure("relay_unauthorized"); }
-  if (res.status === 429) { await markRelay({ ok: false, word: "busy" }); throw failure("relay_busy"); }
+  if (res.status === 401) { await failed("unauthorized"); throw failure("relay_unauthorized"); }
+  if (res.status === 429) { await failed("busy"); throw failure("relay_busy"); }
   // A 5xx is the relay down behind its edge, or failing to reach Intuit: unreachable, as the code says (spec §5, Refresh).
   const unreachable = res.status >= 500;
-  await markRelay({ ok: false, word: unreachable ? "unreachable" : "relay_error" });
+  await failed(unreachable ? "unreachable" : "relay_error");
   throw failure(unreachable ? "relay_unreachable" : "relay_error");
 }
 
@@ -239,12 +241,13 @@ export type RelayCheck =
  * saved and the key it signs with. A 200 is "registered", with the name the relay holds (text only, at most 200
  * characters; shown as text and never kept) and the environments it allows (only the two it may name); a 401 is
  * "not_matching" (the id or the key isn't what was registered, or the portal was revoked); anything else, a 429
- * included, is "unreachable", to try again. It never throws for the relay's answer, and changes nothing but the mark.
+ * included, is "unreachable", to try again. It never throws for the relay's answer, and changes nothing but the mark,
+ * and that only when the relay answers: its 401, 429 or silence leaves Health's mark to the real calls.
  */
 export async function relayCheck(): Promise<RelayCheck> {
   let r: { status: 200 | 400; body: unknown };
   try {
-    r = await signedPost(RELAY_PATHS.check, {});
+    r = await signedPost(RELAY_PATHS.check, {}, { markFailures: false });
   } catch (e) {
     if (e instanceof QboError && e.code === "relay_unauthorized") return { answer: "not_matching" };
     if (e instanceof QboError) return { answer: "unreachable" };

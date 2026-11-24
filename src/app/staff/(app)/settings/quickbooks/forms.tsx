@@ -249,7 +249,7 @@ export function CheckAnswer({ check, again, checking }: { check: RelayCheck; aga
     return <Notice tone="done">{`Registered as ${check.name}.`} {may.length ? `It may connect ${may.join(" and ")}.` : "Boosters Rocket hasn't allowed it to connect to any QuickBooks yet. Email support@boostersrocket.com."}</Notice>;
   }
   if (check.answer === "not_matching") {
-    return <Notice tone="problem">That portal id and this portal&apos;s key don&apos;t match what Boosters Rocket registered. Check the id against Boosters Rocket&apos;s email, and if it is right, email support@boostersrocket.com. The id is saved as typed.</Notice>;
+    return <Notice tone="problem">That portal id and this portal&apos;s key don&apos;t match what Boosters Rocket registered, or this server&apos;s clock is more than 5 minutes off. Check the id against Boosters Rocket&apos;s email, and if it is right, email support@boostersrocket.com. The id is saved as typed.</Notice>;
   }
   return (
     <Notice tone="warning">Boosters Rocket couldn&apos;t be reached just now, so the registration wasn&apos;t checked. The portal id is saved.{" "}

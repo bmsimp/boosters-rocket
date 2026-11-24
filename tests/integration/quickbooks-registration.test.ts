@@ -158,13 +158,17 @@ describe("Registering the portal with Boosters Rocket", () => {
     await makeAndRegister(OTHER_ID); // registered under another id: the relay doesn't know this one
     expect(await savePortalIdAction(form({ portalId: TEST_PORTAL_ID }))).toMatchObject({ ok: true, check: { answer: "not_matching" } });
     expect((await relayRow())!.portalId).toBe(TEST_PORTAL_ID);
-    expect((await readRelayMark())?.lastFailWord).toBe("unauthorized");
+    // A check isn't a connect, refresh, revoke or forget: its refusals leave Health's mark of the relay as it was.
+    expect(await readRelayMark()).toBeNull();
 
     stub.portals.set(TEST_PORTAL_ID, (await relayRow())!.publicKey);
     stub.failNext = 1;
     expect(await checkRegistrationAction()).toEqual({ ok: true, check: { answer: "unreachable" } });
     stub.busyNext = 1;
     expect(await checkRegistrationAction()).toEqual({ ok: true, check: { answer: "unreachable" } });
+    stub.refuseNext = 1;
+    expect(await checkRegistrationAction()).toEqual({ ok: true, check: { answer: "not_matching" } });
+    expect(await readRelayMark()).toBeNull();
     stub.oddAnswer = { path: "/v1/portal/check", body: { status: "ok", portal: { name: 42 } } };
     expect(await checkRegistrationAction()).toEqual({ ok: true, check: { answer: "unreachable" } });
     stub.oddAnswer = null;
@@ -172,6 +176,17 @@ describe("Registering the portal with Boosters Rocket", () => {
     stub.checkName = "<b>Lakeside</b> Boosters";
     expect(await checkRegistrationAction()).toEqual({ ok: true, check: { answer: "registered", name: "<b>Lakeside</b> Boosters", environments: ["production", "sandbox"] } });
     expect((await relayRow())!.portalId).toBe(TEST_PORTAL_ID);
+    // A check that holds says the relay answered.
+    expect(await readRelayMark()).toMatchObject({ lastOkAt: expect.any(String), lastFailAt: null, lastFailWord: null });
+    // A real call's failure is still marked, and a check's refusal after it changes nothing of it.
+    const { relayForget } = await import("@/lib/quickbooks/relay");
+    stub.busyNext = 1;
+    await relayForget("sandbox", "9130000000000001");
+    const marked = await readRelayMark();
+    expect(marked).toMatchObject({ lastFailWord: "busy" });
+    stub.refuseNext = 1;
+    await checkRegistrationAction();
+    expect(await readRelayMark()).toEqual(marked);
     // The check is a read: no audit row of its own.
     expect((await db.select().from(auditLog)).map((a) => a.action).sort()).toEqual(["settings.quickbooks.relay.key_made", "settings.quickbooks.relay.portal_id"]);
   });
@@ -180,7 +195,7 @@ describe("Registering the portal with Boosters Rocket", () => {
     const { CheckAnswer } = await import("@/app/staff/(app)/settings/quickbooks/forms");
     const draw = (check: Parameters<typeof CheckAnswer>[0]["check"]) => renderToStaticMarkup(CheckAnswer({ check, again: () => {}, checking: false }));
     expect(draw({ answer: "registered", name: "<b>Lakeside</b>", environments: ["production"] })).toContain("Registered as &lt;b&gt;Lakeside&lt;/b&gt;. It may connect to the club&#x27;s real books.");
-    expect(draw({ answer: "not_matching" })).toContain("That portal id and this portal&#x27;s key don&#x27;t match what Boosters Rocket registered.");
+    expect(draw({ answer: "not_matching" })).toContain("That portal id and this portal&#x27;s key don&#x27;t match what Boosters Rocket registered, or this server&#x27;s clock is more than 5 minutes off.");
     expect(draw({ answer: "unreachable" })).toContain("Boosters Rocket couldn&#x27;t be reached just now");
     expect(draw({ answer: "unreachable" })).toContain("Check again");
   });
