@@ -352,7 +352,7 @@ describe("QuickBooks settings", () => {
 
   it("the view shows what is set and holds no token, secret or company ID", async () => {
     // Not set up: the head says so, and the page offers the steps, with no Connection card restating it.
-    expect(renderToStaticMarkup(await QuickBooksSettingsPage())).toContain("Three steps: the Intuit app&#x27;s keys");
+    expect(renderToStaticMarkup(await QuickBooksSettingsPage())).toContain("Three steps: how the portal connects");
     expect(renderToStaticMarkup(await QuickBooksSettingsPage())).not.toContain('id="qbo-conn-h"');
     await seedConnected(stub);
     await refreshRoster(worker);

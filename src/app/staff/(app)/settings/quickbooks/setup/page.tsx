@@ -7,8 +7,10 @@ import { connectionView, qboRedirectUri } from "@/lib/quickbooks/connection";
 import { QUICKBOOKS_USE } from "@/lib/quickbooks/what-it-does";
 import { loadRosterPage } from "@/lib/roster/queries";
 import { CopyField } from "@/app/components/sign-in-settings/copy-field";
-import { AppKeysForm, ShapeForm } from "../forms";
-import { saveQboAppAction, beginConnectAction, previewShapeAction, saveShapeAction } from "../actions";
+import { AppKeysForm, ConnectModeForm, RelayRegistration, ShapeForm } from "../forms";
+import { saveQboAppAction, beginConnectAction, previewShapeAction, saveShapeAction, saveConnectModeAction, makeRelayKeyAction, savePortalIdAction, checkRegistrationAction } from "../actions";
+import { addressFitsRelay, portalAddress, registrationMailto, relayRegistrationView } from "@/lib/quickbooks/relay-registration";
+import { getClubSettings } from "@/lib/settings/club";
 import { getRosterSource } from "@/lib/roster/source";
 import { familiesToLinkAgain } from "@/lib/quickbooks/switch";
 import { can } from "@/lib/permissions/effective";
@@ -18,7 +20,7 @@ export const metadata = { title: "Set up QuickBooks" };
 export const dynamic = "force-dynamic";
 
 type Step = "app" | "connect" | "shape";
-const STEPS: { step: Step; label: string }[] = [{ step: "app", label: "1. Intuit app" }, { step: "connect", label: "2. Sign in to Intuit" }, { step: "shape", label: "3. Membership shape" }];
+const STEPS: { step: Step; label: string }[] = [{ step: "app", label: "1. How to connect" }, { step: "connect", label: "2. Sign in to Intuit" }, { step: "shape", label: "3. Membership shape" }];
 const SETUP = "/staff/settings/quickbooks/setup";
 /** Where customer types are made: in QuickBooks itself, never in the portal. */
 const MAKE_TYPES = "Customer types are made in QuickBooks, not here: in QuickBooks Online, open the gear menu, then All lists, then Customer types, and make one for each kind of customer the club has (for example Family, Student and Parent). Then give each customer its type on the customer's own page.";
@@ -38,7 +40,9 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
   const sp = await searchParams;
   const one = (k: string) => { const v = sp[k]; return typeof v === "string" ? v : Array.isArray(v) ? v[0] : undefined; };
   const mayLink = can(ctx.effective, "Accounting.Link.ReadWrite");
-  const [conn, page, source, toLink] = await Promise.all([connectionView(), loadRosterPage(), getRosterSource(), mayLink ? familiesToLinkAgain() : 0]);
+  const [conn, page, source, toLink, registration, club] = await Promise.all([connectionView(), loadRosterPage(), getRosterSource(), mayLink ? familiesToLinkAgain() : 0,
+    relayRegistrationView(), getClubSettings()]);
+  const address = portalAddress();
   // A step opens only when the one before it is done (spec §3). With no step asked for: the first one not done yet.
   const reachable: Step = !conn.configured ? "app" : !conn.connected ? "connect" : "shape";
   const order: Step[] = ["app", "connect", "shape"];
@@ -55,15 +59,23 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
       {error && <Notice tone="problem">{error}</Notice>}
 
       {step === "app" && (
-        <section className="box" aria-labelledby="qbo-app-h"><h2 id="qbo-app-h">Step 1: Your Intuit app</h2>
-          <p>The portal reaches QuickBooks through an app the club registers with Intuit. This step tells the portal which app that is. Nothing is sent to Intuit yet.</p>
-          <ol className="steps-list">
-            <li>Sign in at <a href="https://developer.intuit.com" target="_blank" rel="noreferrer">developer.intuit.com</a> and open the club&apos;s app (or create one for QuickBooks Online, with the Accounting scope).</li>
-            <li>In the app&apos;s <b>Settings</b>, open <b>Redirect URIs</b> and add this address exactly, on the tab for the keys you are going to use (Development for sandbox, Production for the real books):
-              <CopyField label="Redirect address" value={qboRedirectUri()} /></li>
-            <li>Copy the <b>Client ID</b> and <b>Client secret</b> from the app&apos;s <b>Keys and credentials</b> page into the form below, and choose sandbox or production to match.</li>
-          </ol>
-          <AppKeysForm configured={conn.configured} clientId={conn.clientId} environment={conn.environment} save={saveQboAppAction} />
+        <section className="box" aria-labelledby="qbo-app-h"><h2 id="qbo-app-h">Step 1: How to connect</h2>
+          <p>Choose how the portal reaches the club&apos;s QuickBooks. Nothing is sent to Intuit in this step.</p>
+          <ConnectModeForm saved={conn.connectMode} keysSaved={conn.clientId !== null} relayConnected={conn.tokenMode === "relay"} save={saveConnectModeAction}
+            relay={<RelayRegistration stage={registration.stage} address={address} addressFits={addressFitsRelay(address)} publicKey={registration.publicKey}
+              portalId={registration.portalId} mailto={registration.publicKey ? registrationMailto({ clubName: club.name, address, publicKey: registration.publicKey }) : null}
+              mayNewKey={conn.tokenMode !== "relay"} makeKey={makeRelayKeyAction} saveId={savePortalIdAction} check={checkRegistrationAction} />}
+            ownApp={
+              <section className="box-section stack" aria-labelledby="qbo-own-app-h"><h3 id="qbo-own-app-h">Your Intuit app</h3>
+                <p>The portal reaches QuickBooks through an app the club registers with Intuit. This tells the portal which app that is.</p>
+                <ol className="steps-list">
+                  <li>Sign in at <a href="https://developer.intuit.com" target="_blank" rel="noreferrer">developer.intuit.com</a> and open the club&apos;s app (or create one for QuickBooks Online, with the Accounting scope).</li>
+                  <li>In the app&apos;s <b>Settings</b>, open <b>Redirect URIs</b> and add this address exactly, on the tab for the keys you are going to use (Development for sandbox, Production for the real books):
+                    <CopyField label="Redirect address" value={qboRedirectUri()} /></li>
+                  <li>Copy the <b>Client ID</b> and <b>Client secret</b> from the app&apos;s <b>Keys and credentials</b> page into the form below, and choose sandbox or production to match.</li>
+                </ol>
+                <AppKeysForm configured={conn.clientId !== null} clientId={conn.clientId} environment={conn.environment} save={saveQboAppAction} />
+              </section>} />
           <p className="box-foot"><a className="link-line" href="/staff/settings/quickbooks">Back to QuickBooks settings</a></p>
         </section>
       )}

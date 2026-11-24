@@ -66,7 +66,7 @@ export const quickbooksRow = cache(async (): Promise<IntegrationRow> => {
     : problems.length || health?.state === "attention" ? { tone: "due", words: "Needs attention" }
     : { tone: "done", words: "Connected" };
   return { key: "quickbooks", item: "quickbooks", name: "QuickBooks Online", does: QB_DOES, status, href: "/staff/settings/quickbooks", expires: null,
-    badge: conn.configured && conn.environment !== "production" ? "Sandbox" : null };
+    badge: conn.configured && conn.environment === "sandbox" ? "Sandbox" : null };
 });
 
 export const documensoRow = cache(async (): Promise<IntegrationRow> => {
