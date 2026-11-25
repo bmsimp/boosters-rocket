@@ -117,3 +117,13 @@ jobs:
           pnpm db:migrate
           pnpm tsx scripts/seed-e2e.ts
           pnpm e2e "${specs[@]}"
+      - name: Screenshots
+        # The pictures a spec saved for people to look at (tests/e2e/screenshots.spec.ts), kept a week: the run's page,
+        # Artifacts, "screenshots". Nothing is uploaded when no spec saved any.
+        if: success() && hashFiles('test-results/screenshots/**') != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: screenshots
+          path: test-results/screenshots/
+          retention-days: 7
+          if-no-files-found: ignore
