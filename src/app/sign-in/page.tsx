@@ -1,3 +1,4 @@
+import { LinkButton } from "@/app/components/ui";
 import { getClubSettings } from "@/lib/settings/club";
 import { mailWorking } from "@/lib/mail/settings";
 import { getParentSettings, parentDoorClosed } from "@/lib/parents/settings";
@@ -31,7 +32,7 @@ export default async function ParentSignIn({ searchParams }: { searchParams?: Pr
         {/* The portal's own origin (APP_URL's, no secret), where passkeys work: reached at any other address, the form says so. */}
         {ready ? <PasswordSignIn next={next} portalOrigin={new URL(env.APP_URL).origin} /> : <p role="status">{SIGNIN_UNAVAILABLE}</p>}
         {/* A set-up link for a first password, or a reset link for a forgotten one (./password, slice SI-3a). */}
-        {ready && <p><a className="link-line" href="/sign-in/password">Set up or reset my password</a></p>}
+        {ready && <p><LinkButton plain variant="secondary" href="/sign-in/password">Set up or reset my password</LinkButton></p>}
         <p className="lede"><a className="link-line" href="/staff/sign-in">Board and staff sign in here</a></p>
         {/* How to put the portal on the home screen. It takes nothing from the server, and "Not now" puts it away on this device. */}
         <InstallHint />

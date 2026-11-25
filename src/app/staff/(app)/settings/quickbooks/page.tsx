@@ -75,10 +75,11 @@ export default async function QuickBooksSettingsPage({ searchParams }: { searchP
       {/* Only for someone who may change these settings: the page's own guard says so today, and this keeps it so if that guard ever widens. */}
       {conn.tokenMode === "own_app" && can(ctx.effective, "Settings.QuickBooks.ReadWrite") && (
         <Notice tone="info" live="none" title={MOVE_TO_RELAY.title} titleId="qbo-move-h">
-          <p>{MOVE_TO_RELAY.body} <a href={MOVE_TO_RELAY.href}>{MOVE_TO_RELAY.link}</a></p>
+          <p>{MOVE_TO_RELAY.body}</p>
+          <p className="box-foot"><LinkButton variant="secondary" href={MOVE_TO_RELAY.href}>{MOVE_TO_RELAY.link}</LinkButton></p>
         </Notice>
       )}
-      {problems.length > 0 && <Notice tone="warning" title="Needs attention" titleId="qbo-problems-h"><ul className="notice-list">{problems.map((p) => <li key={p.kind}>{p.text}{p.fix && <> <a href={p.fix.href}>{p.fix.label}</a></>}</li>)}</ul></Notice>}
+      {problems.length > 0 && <Notice tone="warning" title="Needs attention" titleId="qbo-problems-h"><ul className="notice-list">{problems.map((p) => <li key={p.kind}>{p.text}{p.fix && <> <LinkButton plain variant="secondary" size="sm" href={p.fix.href}>{p.fix.label}</LinkButton></>}</li>)}</ul></Notice>}
       <IntegrationHealth here="/staff/settings/quickbooks" line={lines.find((l) => l.key === "quickbooks")} />
 
       {conn.configured && (
@@ -102,7 +103,7 @@ export default async function QuickBooksSettingsPage({ searchParams }: { searchP
               { key: "read", label: "Last read from QuickBooks", value: <>{page.lastOkAt ? <LocalTime iso={page.lastOkAt} /> : "Not yet"}{page.lastRun && !page.lastRun.ok ? <> (the latest try failed: {page.lastRun.detail})</> : null}{!conn.connected && page.lastOkAt ? ". QuickBooks is disconnected, so the roster is no longer current." : null}</> },
               { key: "found", label: "What it found", value: rosterCounts(page.roster) || "Nothing to show until a shape is chosen." },
               { key: "worker", label: "Worker", value: wake ? <>Last checked in <LocalTime iso={wake} /></> : "Hasn't checked in yet." },
-              { key: "requests", label: "The portal's requests", value: <>{lastCheckWords(checked)}{checked ? <> (<LocalTime iso={checked.at} />)</> : null} <a href="/staff/settings/quickbooks/check">Check the portal&apos;s requests</a></> },
+              { key: "requests", label: "The portal's requests", value: <>{lastCheckWords(checked)}{checked ? <> (<LocalTime iso={checked.at} />)</> : null} <LinkButton plain variant="secondary" size="sm" href="/staff/settings/quickbooks/check">Check the portal&apos;s requests</LinkButton></> },
             ]} />
             {page.brokenTypes.length > 0 && <Notice tone="warning">This shape names a customer type QuickBooks no longer has. Choose the shape again.</Notice>}
           </section>
@@ -113,7 +114,8 @@ export default async function QuickBooksSettingsPage({ searchParams }: { searchP
         <p>{conn.configured ? "Open the steps to change how the portal connects, renew the connection or choose the shape again." : "Three steps: how the portal connects, signing in to Intuit, and the shape of your membership."}</p>
         <p className="settings-open"><LinkButton href="/staff/settings/quickbooks/setup" variant="primary">{conn.configured ? "Change" : "Set up"}</LinkButton></p>
         {/* A first connect needs no switch: offered only while the roster names a company. */}
-        {source !== null && <p>{SWITCH_WORDS.setupHint} <a className="link-line" href={SWITCH_PAGE}>{SWITCH_WORDS.setupLink}</a></p>}
+        {source !== null && <p>{SWITCH_WORDS.setupHint}</p>}
+        {source !== null && <p><LinkButton variant="secondary" href={SWITCH_PAGE}>{SWITCH_WORDS.setupLink}</LinkButton></p>}
         {/* Disconnect, last, as it is today: it stays in place after it is pressed, to say what it did. */}
         <Disconnect connected={conn.connected} disconnect={disconnectAction} warning={warning} through={conn.tokenMode} />
       </Card>

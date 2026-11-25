@@ -145,8 +145,8 @@ describe("the Parent sign-ins settings", () => {
     expect(html).toContain("3. Sign-in level");
     expect(html).toContain('href="/staff/settings/parents/setup?step=level"');
     expect(await setup("level")).toContain("Step 3: Sign-in level");
-    // Step 2 names step 3 first in its foot, as step 1 names step 2.
-    expect(await setup("welcome")).toContain('<p class="box-foot"><a class="link-line" href="/staff/settings/parents/setup?step=level">Next: sign-in level</a>');
+    // Step 2 names step 3 first in its foot, as step 1 names step 2: a button, the next step of the task.
+    expect(await setup("welcome")).toContain('<p class="box-foot"><a class="btn" href="/staff/settings/parents/setup?step=level">Next: sign-in level</a>');
     expect(html).not.toContain("Clean-up preview");
     // An old link to the preview lands on the first step.
     expect(await setup("preview")).toContain("Step 1: Parent sign-ins");

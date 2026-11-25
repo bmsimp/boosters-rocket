@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Card, HowThisWorks, Notice } from "@/app/components/ui";
+import { Card, HowThisWorks, LinkButton, Notice } from "@/app/components/ui";
 import { GUARDIAN_NAMED, IMPORT_MAX, type ImportProposal, type NotProposedGuardian, type ProposedFamily, type ProposedGuardian } from "@/lib/accounting/import-proposals";
 import { importKeys } from "@/lib/accounting/import-proposals";
 import { importStamp } from "@/lib/accounting/stamp";
@@ -90,7 +90,7 @@ export function ImportOffer({ proposable, mayChangeFamilies }: { proposable: num
   return (
     <>
       <p>{IMPORT_WORDS.offerLead(proposable)}</p>
-      <p className="link-line"><Link href={IMPORT_STEP}>{IMPORT_WORDS.offer}</Link></p>
+      <p><LinkButton variant="secondary" href={IMPORT_STEP}>{IMPORT_WORDS.offer}</LinkButton></p>
     </>
   );
 }

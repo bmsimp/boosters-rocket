@@ -123,7 +123,7 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
               while nothing is connected; the switch page stays a way in, and says to disconnect first while connected. */}
           {source !== null && <p>{SWITCH_WORDS.setupHint}</p>}
           {source !== null && <p><LinkButton variant="secondary" href={SWITCH_PAGE}>{SWITCH_WORDS.setupLink}</LinkButton></p>}
-          <p className="box-foot"><a href={`${SETUP}?step=app`}>Back to step 1</a>{conn.connected && <> · <a href={`${SETUP}?step=shape`}>Skip to step 3</a></>}</p>
+          <p className="box-foot"><LinkButton variant="secondary" href={`${SETUP}?step=app`}>Back to step 1</LinkButton>{conn.connected && <> <LinkButton variant="secondary" href={`${SETUP}?step=shape`}>Skip to step 3</LinkButton></>}</p>
         </section>
       )}
 
@@ -141,7 +141,7 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
                 ? <>QuickBooks has no customer types yet, so there is nothing to choose from. {MAKE_TYPES} Then open <Link href="/staff/roster">Roster</Link>, select <b>Refresh now</b>, and come back.</>
                 : <>The portal hasn&apos;t read any customer types from QuickBooks yet. Open <Link href="/staff/roster">Roster</Link> and select <b>Refresh now</b>, then come back. If QuickBooks has no customer types: {MAKE_TYPES}</>}</Notice>
             : <ShapeForm types={page.types} shape={page.shape} preview={previewShapeAction} save={saveShapeAction} />}
-          <p className="box-foot"><a className="link-line" href={`${SETUP}?step=connect`}>Back to step 2</a> · <a className="link-line" href="/staff/settings/quickbooks">Back to QuickBooks settings</a></p>
+          <p className="box-foot"><LinkButton variant="secondary" href={`${SETUP}?step=connect`}>Back to step 2</LinkButton> <a className="link-line" href="/staff/settings/quickbooks">Back to QuickBooks settings</a></p>
         </section>
       )}
     </main>

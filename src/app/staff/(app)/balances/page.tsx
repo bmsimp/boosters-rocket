@@ -63,7 +63,7 @@ export default async function BalancesPage({ searchParams }: { searchParams: Pro
 
       <Card title="Families" titleId="families-h">
         {balances.unlinked > 0 && <Notice tone="info" live="none">{balances.unlinked === 1 ? "1 family isn't" : `${balances.unlinked} families aren't`} linked to the books, so {balances.unlinked === 1 ? "it has" : "they have"} no figures here.
-          {" "}{mayLink ? <Link href="/staff/links">{balances.unlinked === 1 ? "Link it" : "Link them"} on Accounting links</Link> : `Someone who can link families links ${balances.unlinked === 1 ? "it" : "them"} on Accounting links.`}</Notice>}
+          {" "}{mayLink ? <LinkButton variant="secondary" size="sm" href="/staff/links">{balances.unlinked === 1 ? "Link it" : "Link them"} on Accounting links</LinkButton> : `Someone who can link families links ${balances.unlinked === 1 ? "it" : "them"} on Accounting links.`}</Notice>}
         <form method="get" action="/staff/balances">
           <Toolbar label="Filter the families">
             <TextInput id="balances-q" label="Find a family or a student" name="q" type="search" maxLength={SEARCH_MAX} defaultValue={search} />

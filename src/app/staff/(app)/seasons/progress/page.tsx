@@ -1,3 +1,4 @@
+import { LinkButton } from "@/app/components/ui";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
@@ -29,7 +30,8 @@ export default async function ProgressPage({ searchParams }: { searchParams: Pro
     <main className="wrap single">
       <h1 className="page-title">Season progress</h1>
       <p className="lede">Who has done what the season asks. Open a requirement to tick it off for a family or student, or to waive it.
-        {seesSetup && <> <Link href="/staff/seasons">Set up seasons</Link></>}</p>
+        </p>
+      {seesSetup && <p><LinkButton variant="secondary" href="/staff/seasons">Set up seasons</LinkButton></p>}
 
       {!overview && <Notice tone="info" live="none" title="No season yet" titleId="none-h"><p>Once a season is set up, its requirements are listed here.</p></Notice>}
 

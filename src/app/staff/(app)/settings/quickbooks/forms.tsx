@@ -1,7 +1,7 @@
 "use client";
 import { ActionOutcome, Notice } from "@/app/components/notice";
 import { startTransition, useActionState, useState, type ReactNode } from "react";
-import { Button, Checkbox, ChoiceGroup, KeyValue, TextInput } from "@/app/components/ui";
+import { Button, Checkbox, ChoiceGroup, KeyValue, LinkButton, TextInput } from "@/app/components/ui";
 import { CopyField } from "@/app/components/sign-in-settings/copy-field";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import type { MembershipShape, TypeRow } from "@/lib/roster/shape";
@@ -53,7 +53,7 @@ export function AppKeysForm({ configured, clientId: savedId, environment: savedE
         <label><input type="radio" name="environment" value="production" checked={environment === "production"} onChange={() => setEnvironment("production")} /> Production (the club&apos;s real books, with the app&apos;s Production keys)</label>
       </fieldset>
       {state && !state.ok && <Errors errors={state.errors} />}
-      {state?.ok && <Notice tone="done">Saved. <a href="/staff/settings/quickbooks/setup?step=connect">Next: connect to QuickBooks</a></Notice>}
+      {state?.ok && <Notice tone="done">Saved. <LinkButton plain href="/staff/settings/quickbooks/setup?step=connect">Next: connect to QuickBooks</LinkButton></Notice>}
       <button type="button" className="btn" disabled={pending} onClick={() => startTransition(() => run({ clientId, clientSecret, environment }))}>{pending ? "Saving…" : "Save"}</button>
     </form>
   );
@@ -230,7 +230,7 @@ export function ConnectModeForm({ saved, keysSaved, relayConnected, save, relay,
       {pressable && <p><Button busy={pending} onClick={() => { if (!pending) startTransition(() => run(mode)); }}>{pending ? "Saving…" : "Save this choice"}</Button></p>}
       <ActionOutcome state={state} />
       {blocked
-        ? <Notice tone="warning">QuickBooks is connected through Boosters Rocket. Disconnect first, from QuickBooks settings, then choose the club&apos;s own Intuit app. <a href="/staff/settings/quickbooks">QuickBooks settings</a></Notice>
+        ? <Notice tone="warning">QuickBooks is connected through Boosters Rocket. Disconnect first, from QuickBooks settings, then choose the club&apos;s own Intuit app. <LinkButton plain variant="secondary" size="sm" href="/staff/settings/quickbooks">QuickBooks settings</LinkButton></Notice>
         : mode === "relay" ? relay : ownApp}
     </div>
   );
@@ -320,7 +320,7 @@ export function RelayRegistration({ stage, address, addressFits, publicKey, port
           {made?.ok && <ActionOutcome state={made} />}
           <p>Email these to support@boostersrocket.com. Boosters Rocket registers the portal and emails you back its id.</p>
           {copies}
-          {mailto && <p><a className="link-line" href={mailto}>Write the email</a></p>}
+          {mailto && <p><LinkButton plain variant="secondary" href={mailto}>Write the email</LinkButton></p>}
           {https ?? (mayChange ? idForm("Portal id") : <Notice tone="info" live="none">{REGISTRATION_HELD}</Notice>)}
         </>
       )}

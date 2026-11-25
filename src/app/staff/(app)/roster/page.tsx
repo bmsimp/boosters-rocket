@@ -4,7 +4,7 @@ import { loadRosterPage, rosterFamilies } from "@/lib/roster/queries";
 import { connectedToAnotherCompany, linksOfCustomers } from "@/lib/families/links";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { rosterCounts } from "../settings/quickbooks/roster-counts";
-import { Button, Card, DataTable, Notice, PageHeader, StatusBadge, TextInput, Toolbar, type Column, type Tone } from "@/app/components/ui";
+import { Button, Card, DataTable, LinkButton, Notice, PageHeader, StatusBadge, TextInput, Toolbar, type Column, type Tone } from "@/app/components/ui";
 import { DisconnectedNotice, Freshness } from "./freshness";
 import { CreateBox, WhatChanges } from "./changes";
 import { familyPage } from "@/app/staff/(app)/family-pages";
@@ -43,7 +43,7 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
   const mayAdd = can(ctx.effective, "Roster.Family.ReadWrite") && !(await connectedToAnotherCompany());
   const goes = !can(ctx.effective, "Accounting.Link.ReadWrite") ? "no_permission" as const : page.connected ? "sends" as const : "not_connected" as const;
   const admin = can(ctx.effective, "Settings.QuickBooks.ReadWrite");
-  const settings = admin ? <> <a href="/staff/settings/quickbooks">Open QuickBooks settings</a></> : " An Admin can do that under QuickBooks.";
+  const settings = admin ? <> <LinkButton plain variant="secondary" size="sm" href="/staff/settings/quickbooks">Open QuickBooks settings</LinkButton></> : " An Admin can do that under QuickBooks.";
   const matches = (name: string) => !q || name.toLowerCase().includes(q); // a plain substring: nothing typed is a pattern
   const roster = page.lastOkAt ? page.roster : null; // a shape with no successful read has nothing real to list
   const unread = Boolean(page.roster && !page.lastOkAt);
