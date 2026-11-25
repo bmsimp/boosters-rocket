@@ -292,7 +292,8 @@ describe("connecting through Boosters Rocket", () => {
   it("a switch through the relay, asked for on the switch page, connects the other company and clears the old one's", async () => {
     await seedRelayRegistration(relay);
     await connect(A);
-    expect((await db.select().from(setting).where(eq(setting.key, "roster.source")))[0]?.value).toEqual({ realmId: A });
+    // The read records the company's name and which QuickBooks it is in, for step 2's question (the owner's finding of 2026-11-25).
+    expect((await db.select().from(setting).where(eq(setting.key, "roster.source")))[0]?.value).toEqual({ realmId: A, companyName: "Stub Boosters", environment: "sandbox" });
     await disconnectedKeepingEnvironment();
     const go = await redirectOf(switchConnectAction(form({ confirm: "yes", environment: "sandbox" })));
     expect(go).toMatch(new RegExp(`^${relay.base}/v1/connect/go/`));
@@ -365,6 +366,118 @@ describe("connecting through Boosters Rocket", () => {
     it("an unchecked box is still refused first, whatever QuickBooks is chosen", async () => {
       expect(await redirectOf(switchConnectAction(form({ environment: "production" })))).toBe(`${SWITCH}?error=confirm`);
       expect((await row()).relayEnvironment).toBe("sandbox");
+    });
+  });
+
+  // The owner's finding of 2026-11-25, step 2: pressing Connect with the real books chosen while the families came from a
+  // sandbox went all the way through Intuit to a refusal (`roster_company`). Step 2 now asks which company, up front.
+  describe("step 2 asks which company while the roster names one", () => {
+    const STEP2 = "/staff/settings/quickbooks/setup?step=connect";
+    const sameAs = (environment: string) => form({ company: "same", environment });
+    beforeEach(async () => {
+      await seedRelayRegistration(relay);
+      await connect(A); // the sandbox, saved; the roster read from it
+      await disconnectedKeepingEnvironment();
+    });
+
+    it("asks nothing on a first connect, when the roster names no company", async () => {
+      await db.delete(setting).where(eq(setting.key, "roster.source"));
+      const html = await setupHtml({ step: "connect" });
+      expect(html).not.toContain('name="company"');
+      expect(html).not.toContain('name="confirm"');
+      expect(html).toContain(">Connect to QuickBooks</button>");
+    });
+
+    it("names the company, as text, offers both, and shows no list until a different one is chosen", async () => {
+      const html = await setupHtml({ step: "connect" });
+      expect(html).toContain("<legend>Which company</legend>");
+      expect(html).toContain("The same company as before (Stub Boosters)");
+      expect(html).toContain("A different company");
+      expect(html).not.toContain(`disabled="" name="company"`);
+      expect(html).not.toContain("What a switch ends");
+      expect(html.match(/>Connect to QuickBooks<\/button>/g)).toHaveLength(1);
+      expect(html).toContain('class="btn btn-line" href="/staff/settings/quickbooks/switch">Connect a different company</a>');
+      expect(html).not.toContain(A);
+      await db.update(setting).set({ value: { realmId: A, companyName: "<b>Evil</b>", environment: "sandbox" } }).where(eq(setting.key, "roster.source"));
+      const evil = await setupHtml({ step: "connect" });
+      expect(evil).toContain("The same company as before (&lt;b&gt;Evil&lt;/b&gt;)");
+      expect(evil).not.toContain("<b>Evil</b>");
+    });
+
+    it("the same company: a reconnect that clears nothing", async () => {
+      expect(await redirectOf(beginConnectAction(sameAs("sandbox")))).toMatch(new RegExp(`^${relay.base}/v1/connect/go/`));
+      expect(await audits("quickbooks.switch.asked")).toEqual([]);
+      const state = sentState();
+      const res = await relayCallback(callbackUrl({ code: relay.grantFor(state, A), state }));
+      expect(where(res)).toBe("/staff/settings/quickbooks/setup?step=shape");
+      expect(await row()).toMatchObject({ realmId: A, tokenMode: "relay" });
+      expect(await audits("roster.cleared")).toEqual([]);
+    });
+
+    it("the same company that comes back another is still refused at the return, as before", async () => {
+      await redirectOf(beginConnectAction(sameAs("sandbox")));
+      const state = sentState();
+      const res = await relayCallback(callbackUrl({ code: relay.grantFor(state, B), state }));
+      expect(where(res)).toBe(`${STEP2}&error=roster_company`);
+      expect(await row()).toMatchObject({ realmId: null, tokenMode: null });
+      expect(await audits("roster.cleared")).toEqual([]);
+    });
+
+    it("a different company with the box checked goes through the switch, as the switch page's press does", async () => {
+      const go = await redirectOf(beginConnectAction(form({ company: "different", environment: "production", confirm: "yes" })));
+      expect(go).toMatch(new RegExp(`^${relay.base}/v1/connect/go/`));
+      expect(relayCalls("/v1/connect/start").at(-1)!.body!.environment).toBe("production");
+      expect(await audits("quickbooks.switch.asked")).toMatchObject([{ actorId: admin.id, permission: "Settings.QuickBooks.ReadWrite", after: { fromRealmId: A } }]);
+      const state = sentState();
+      const res = await relayCallback(callbackUrl({ code: relay.grantFor(state, B, { environment: "production" }), state }));
+      expect(where(res)).toBe("/staff/settings/quickbooks/setup?step=shape");
+      expect(await row()).toMatchObject({ realmId: B, relayEnvironment: "production" });
+      expect((await audits("quickbooks.relay.connect")).at(-1)!.after).toMatchObject({ realmId: B, switchedFrom: A });
+      expect(await audits("roster.cleared")).toHaveLength(1);
+    });
+
+    it("a different company without the box checked is refused before anything is sent to the relay", async () => {
+      const starts = relayCalls("/v1/connect/start").length, before = await row();
+      for (const bad of [form({ company: "different", environment: "production" }), form({ company: "different", environment: "production", confirm: "no" }),
+        form({ company: "different", environment: "production", confirm: ["yes", "yes"] })]) {
+        expect(await redirectOf(beginConnectAction(bad))).toBe(`${STEP2}&error=confirm`);
+      }
+      expect(relayCalls("/v1/connect/start")).toHaveLength(starts);
+      expect(await row()).toMatchObject({ relayEnvironment: "sandbox", stateHash: before.stateHash });
+      expect(await db.select().from(setting).where(eq(setting.key, SWITCH_KEY))).toHaveLength(0);
+      expect(await audits("quickbooks.switch.asked")).toEqual([]);
+      expect(await setupHtml({ step: "connect", error: "confirm" })).toContain("Check the box to say you understand what a switch ends, then try again.");
+      // A choice that isn't one of the two isn't from the page.
+      for (const bad of [form({ company: "other", environment: "sandbox" }), form({ company: ["same", "different"], environment: "sandbox" })]) {
+        expect(await redirectOf(beginConnectAction(bad))).toBe(`${STEP2}&error=company`);
+      }
+      expect(relayCalls("/v1/connect/start")).toHaveLength(starts);
+    });
+
+    it("the real books chosen while the families came from a sandbox make it a different company", async () => {
+      // Drawn with the real books saved: "the same company" can't be chosen, and one line says why.
+      await db.update(qboConnection).set({ relayEnvironment: "production" });
+      const html = await setupHtml({ step: "connect" });
+      expect(html).toContain(`disabled="" name="company" value="same"`);
+      expect(html).toMatch(/name="company" checked="" value="different"/);
+      expect(html).toContain("The families came from a sandbox company, so the club&#x27;s real books are a different company.");
+      expect(html).toContain("What a switch ends");
+      expect(html).toContain('name="confirm" value="yes"');
+      // The server refuses "the same company" for it, before anything is sent.
+      const starts = relayCalls("/v1/connect/start").length;
+      expect(await redirectOf(beginConnectAction(sameAs("production")))).toBe(`${STEP2}&error=environment_differs`);
+      expect(relayCalls("/v1/connect/start")).toHaveLength(starts);
+      expect(await setupHtml({ step: "connect", error: "environment_differs" })).toContain("The families came from the other QuickBooks, so that is a different company.");
+    });
+
+    it("says so when the roster's QuickBooks isn't known, and leaves both open", async () => {
+      await db.update(setting).set({ value: { realmId: A } }).where(eq(setting.key, "roster.source"));
+      await db.update(qboConnection).set({ relayEnvironment: "production" });
+      const html = await setupHtml({ step: "connect" });
+      expect(html).toContain("The same company as before</b>");
+      expect(html).toContain("The portal doesn&#x27;t know whether the families came from the club&#x27;s real books or a sandbox company");
+      expect(html).not.toContain(`disabled="" name="company"`);
+      expect(await redirectOf(beginConnectAction(sameAs("production")))).toMatch(new RegExp(`^${relay.base}/v1/connect/go/`));
     });
   });
 

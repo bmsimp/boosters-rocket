@@ -202,7 +202,7 @@ describe("QuickBooks settings", () => {
     await saveQboAppAction(form(keys));
     const html = await setupHtml("connect", "roster_company");
     expect(html).toContain("That is a different QuickBooks company from the one the portal&#x27;s families were read from, so nothing was connected and nothing was changed.");
-    expect(html).toContain("To move the portal to this other company, choose Connect a different company first: it lists what a switch ends and keeps.");
+    expect(html).toContain("To move the portal to this other company, choose A different company in step 2 first: it lists what a switch ends and keeps.");
   });
 
   it("step 2 offers Connect a different company only while the roster names a company", async () => {
@@ -283,6 +283,35 @@ describe("QuickBooks settings", () => {
     expect(await redirectOf(switchConnectAction(form({ confirm: "yes", realmId: "9130000000000002" })))).toContain(`${stub.base}/authorize?client_id=`);
     expect(await switchRow()).toMatchObject({ asked: { staffUserId: admin.id, fromRealmId: "9130000000000001" } });
     expect((await audits("quickbooks.switch.asked")).map((a) => [a.actorId, a.permission, a.ip])).toEqual([[admin.id, "Settings.QuickBooks.ReadWrite", "203.0.113.40"]]);
+  });
+
+  // The owner's finding of 2026-11-25, step 2, with the club's own Intuit app: step 2 asks which company while nothing is
+  // connected and the roster names one, and a different one goes through the switch from there.
+  it("with the club's own app, step 2 asks which company; the same one reconnects, a different one needs the box", async () => {
+    await seedConnected(stub);
+    await refreshRoster(worker);
+    await disconnectAction();
+    const html = await setupHtml("connect");
+    expect(html).toContain("<legend>Which company</legend>");
+    expect(html).toContain("The same company as before");
+    expect(html).not.toContain('name="environment"');
+    expect(html).not.toContain(`disabled="" name="company"`);
+    const back = "/staff/settings/quickbooks/setup?step=connect&error=confirm";
+    expect(await redirectOf(beginConnectAction(form({ company: "different" })))).toBe(back);
+    expect(await switchRow()).toBeNull();
+    expect((await db.select().from(qboConnection))[0]!.stateHash).toBeNull();
+    // The same company: a plain connect, no ask.
+    expect(await redirectOf(beginConnectAction(form({ company: "same" })))).toContain(`${stub.base}/authorize?client_id=`);
+    expect(await switchRow()).toBeNull();
+    // A different one, with the box: the switch's ask, as the switch page's press records it.
+    expect(await redirectOf(beginConnectAction(form({ company: "different", confirm: "yes" })))).toContain(`${stub.base}/authorize?client_id=`);
+    expect(await switchRow()).toMatchObject({ asked: { staffUserId: admin.id, fromRealmId: "9130000000000001" } });
+    // The club's app set to the other QuickBooks than the families came from: the same company can't be chosen.
+    await db.update(qboConnection).set({ environment: "production" });
+    const other = await setupHtml("connect");
+    expect(other).toContain(`disabled="" name="company" value="same"`);
+    expect(other).toContain("The families came from a sandbox company, and the club&#x27;s Intuit app is set to the real books, so this is a different company.");
+    expect(await redirectOf(beginConnectAction(form({ company: "same" })))).toBe("/staff/settings/quickbooks/setup?step=connect&error=environment_differs");
   });
 
   it("a switch through the callback lands on step 3, which sends staff to Accounting links", async () => {

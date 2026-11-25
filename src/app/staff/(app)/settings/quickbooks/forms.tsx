@@ -9,6 +9,7 @@ import type { ShapePreview } from "@/lib/roster/queries";
 import type { QboMode } from "@/lib/db/schema";
 import type { RelayCheck } from "@/lib/quickbooks/relay";
 import type { RelayStage } from "@/lib/quickbooks/connection";
+import { STEP2_WORDS, SWITCH_WORDS } from "./switch-words";
 
 // These forms deliberately use no form `action`/`formAction`. React 19 calls the form's native reset() after
 // such an action, and a reset puts every control back to its mount-time value while component state keeps the
@@ -356,25 +357,72 @@ const ENVIRONMENTS: { value: "production" | "sandbox"; label: string; hint: stri
  * "Which QuickBooks" through Boosters Rocket, sent as the form's `environment`: the club's real books or an Intuit
  * sandbox company, the saved one chosen first. Step 2's form and the switch page's (the owner's finding of 2026-11-25)
  * both draw it, inside their own plain form. While connected (`locked`), the other can't be chosen (the server refuses
- * it too): connecting again renews the one connected. It is given only what it shows.
+ * it too): connecting again renews the one connected. It is given only what it shows. Step 2 passes `value` and
+ * `onChange` to hold the choice itself, since its company question follows it.
  */
-export function WhichQuickBooks({ environment, locked = false }: { environment: "production" | "sandbox" | null; locked?: boolean }) {
-  const [chosen, setChosen] = useState<"production" | "sandbox">(environment ?? "production");
+export function WhichQuickBooks({ environment, locked = false, value, onChange }: {
+  environment: "production" | "sandbox" | null; locked?: boolean; value?: "production" | "sandbox"; onChange?: (v: "production" | "sandbox") => void;
+}) {
+  const [own, setOwn] = useState<"production" | "sandbox">(environment ?? "production");
+  const chosen = value ?? own;
   const options = ENVIRONMENTS.map((o) => ({ ...o, disabled: locked && o.value !== environment }));
   return (
     <ChoiceGroup name="environment" legend="Which QuickBooks" hint={locked ? "To connect the other, disconnect first, from QuickBooks settings." : undefined}
-      options={options} value={chosen} onChange={(v) => setChosen(v === "sandbox" ? "sandbox" : "production")} cols={1} />
+      options={options} value={chosen} onChange={(v) => { const e = v === "sandbox" ? "sandbox" : "production"; setOwn(e); onChange?.(e); }} cols={1} />
   );
 }
 
 /**
- * Step 2 through Boosters Rocket: which QuickBooks (WhichQuickBooks), then "Connect to QuickBooks", a plain form post
- * that ends in a redirect to the relay. It is given only what it shows.
+ * What step 2 asks while nothing is connected and the roster names a company (the owner's finding of 2026-11-25):
+ * whether this is that company again or a different one. `companyName` is QuickBooks text, drawn as text only;
+ * `rosterEnvironment` which QuickBooks the families were read from, null when no read recorded it; `ends` and `kept`
+ * the switch page's lists, in its words, shown once "A different company" is chosen.
  */
-export function RelayConnectForm({ environment, locked, begin }: { environment: "production" | "sandbox" | null; locked: boolean; begin: (f: FormData) => Promise<void> }) {
+export type CompanyQuestion = { companyName: string | null; rosterEnvironment: "production" | "sandbox" | null; ends: string[]; kept: string[] };
+
+/**
+ * Step 2's form, in either mode: through Boosters Rocket, which QuickBooks (WhichQuickBooks); with `question`, which
+ * company (CompanyQuestion), and for a different one the switch page's lists and its checkbox; then the one press,
+ * "Connect to QuickBooks", a plain form post that ends in a redirect (beginConnectAction, which checks all of it
+ * again). A QuickBooks other than the roster company's (chosen through Boosters Rocket, or the one the club's own app's
+ * keys are for, `ownAppEnvironment`) makes it a different company, and "the same company" can't be chosen. It is given
+ * only what it shows.
+ */
+export function ConnectForm({ relay, environment, locked, ownAppEnvironment, question, begin }: {
+  relay: boolean; environment: "production" | "sandbox" | null; locked: boolean; ownAppEnvironment: "production" | "sandbox" | null;
+  question: CompanyQuestion | null; begin: (f: FormData) => Promise<void>;
+}) {
+  const [chosenEnv, setChosenEnv] = useState<"production" | "sandbox">(environment ?? "production");
+  const [company, setCompany] = useState<"" | "same" | "different">("");
+  const connecting = relay ? chosenEnv : ownAppEnvironment;
+  const forced = question !== null && question.rosterEnvironment !== null && connecting !== null && connecting !== question.rosterEnvironment;
+  const effective = forced ? "different" : company;
+  const options = [
+    { value: "same", label: STEP2_WORDS.same(question?.companyName ?? null), hint: STEP2_WORDS.sameHint, disabled: forced },
+    { value: "different", label: STEP2_WORDS.different, hint: STEP2_WORDS.differentHint },
+  ];
   return (
     <form action={begin} className="stack">
-      <WhichQuickBooks environment={environment} locked={locked} />
+      {relay && <WhichQuickBooks environment={environment} locked={locked} value={chosenEnv} onChange={setChosenEnv} />}
+      {question && (
+        <>
+          <ChoiceGroup name="company" legend={STEP2_WORDS.legend} options={options} value={effective} onChange={(v) => setCompany(v === "same" ? "same" : "different")} cols={1} />
+          {forced && question.rosterEnvironment && connecting && <p>{STEP2_WORDS.forced(question.rosterEnvironment, connecting, relay)}</p>}
+          {question.rosterEnvironment === null && <p className="hint">{STEP2_WORDS.unknown}</p>}
+          {effective === "different" && (
+            <section className="stack" aria-labelledby="step2-ends-h">
+              <h3 id="step2-ends-h">{SWITCH_WORDS.endsTitle}</h3>
+              <ul className="notice-list">{question.ends.map((w) => <li key={w}>{w}</li>)}</ul>
+              <h3>{SWITCH_WORDS.keptTitle}</h3>
+              <ul className="notice-list">{question.kept.map((w) => <li key={w}>{w}</li>)}</ul>
+              <p>{SWITCH_WORDS.backup}</p>
+              <fieldset className="checks"><legend>Confirm</legend>
+                <label><input type="checkbox" name="confirm" value="yes" required /> {SWITCH_WORDS.confirm}</label>
+              </fieldset>
+            </section>
+          )}
+        </>
+      )}
       <p><Button type="submit">Connect to QuickBooks</Button></p>
     </form>
   );

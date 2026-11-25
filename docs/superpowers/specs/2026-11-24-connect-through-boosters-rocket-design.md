@@ -129,6 +129,43 @@ Tests: `tests/integration/quickbooks-relay.test.ts` "which QuickBooks a switch c
 press" (the own-app line), and `tests/e2e/quickbooks.spec.ts` "once disconnected, the switch page asks which QuickBooks
 through Boosters Rocket, and names the own app's", which never presses.
 
+## 2d. The owner's finding of 2026-11-25, step 2
+
+On the test server, in relay mode, the owner pressed Connect on step 2 with "The club's real books" chosen while the
+families had been read from a sandbox company. He went all the way through Intuit and was refused (`roster_company`):
+the way to a different company was a small "Connect a different company" link. Now step 2 never dead-ends after Intuit:
+
+1. **Step 2 asks which company**, in either mode, while nothing is connected and the roster names a company
+   (`getRosterCompany()`, `src/lib/roster/source.ts`): a `ChoiceGroup`, "Which company", of "The same company as before
+   (<company name>)" (a reconnect, nothing cleared) and "A different company". Nothing is chosen until the Admin
+   chooses. The name is QuickBooks text, drawn as text only; with none recorded the option is "The same company as
+   before". A first connect (the roster names no company) and a renewal while connected ask nothing, as before.
+2. **"A different company" shows the switch page's lists in place**: what a switch ends and keeps, with the same
+   counts (`switchPreview()`), the backup line, and the same checkbox. The press goes through `beginSwitchConnect()`
+   exactly as the switch page's does.
+3. **Which QuickBooks decides it when it can.** The roster's company's name and QuickBooks (`production` or `sandbox`)
+   are recorded with every roster read, beside its realm id in `roster.source` (`setRosterSource()`; a clear for a
+   change of company records the realm id alone until the next read). When the QuickBooks being connected (chosen
+   through Boosters Rocket, or the one the club's own app's keys are for) differs from the roster company's, "A
+   different company" is chosen, "the same company" can't be, and one line says why ("The families came from a sandbox
+   company, so the club's real books are a different company."). When the roster's QuickBooks isn't recorded (a read
+   before this change), one line says so and both stay open.
+4. **One primary button, "Connect to QuickBooks".** The switch page stays a way in, reached by a secondary button.
+5. **The server enforces it** (`beginConnectAction`): `company` is read once and must be `same` or `different`
+   (else `error=company`, nothing changed); `different` needs the checkbox (`confirm` = `yes`, once; else
+   `error=confirm`, before anything is sent to Intuit or the relay and with no ask recorded), and in relay mode an
+   `environment`; it is refused while connected (`other_company`). `same` is refused before anything is sent when the
+   QuickBooks chosen isn't the one recorded for the roster's company (`environment_differs`); a same-company press
+   that comes back from Intuit with another company is still refused at the return (`roster_company`), as before. A
+   press with no `company` (no question was asked) is a plain connect.
+
+Tests: `tests/integration/quickbooks-relay.test.ts` "step 2 asks which company while the roster names one" (no
+question on a first connect; the name as text; the same company reconnects and clears nothing; the same company that
+comes back another is refused at the return; a different company with the box goes through the switch; without the box
+it is refused before the relay is called; the real books chosen while the families came from a sandbox force a
+different company; an unknown QuickBooks leaves both open), and `tests/integration/settings-quickbooks.test.ts` "with
+the club's own app, step 2 asks which company".
+
 ## 3. The lead's decisions
 
 - **The relay's address is an env setting, never a UI one.** `QBO_RELAY_URL` in `src/env.ts`, optional, default
@@ -231,7 +268,9 @@ component, never in an audit row (rows name the public key's first 8 characters 
    with the press (changing it while connected is refused, as today). The press is "Connect to QuickBooks".
    The switch page (`/staff/settings/quickbooks/switch`) asks the same, with the same choice and words, the saved one
    chosen first, and saves it with its press as step 2 does; with the club's own app it says which QuickBooks the app's
-   keys are for and that step 1 changes it (section 2c, the owner's finding of 2026-11-25).
+   keys are for and that step 1 changes it (section 2c, the owner's finding of 2026-11-25). While nothing is
+   connected and the roster names a company, step 2 also asks which company, the same one or a different one, and a
+   different one goes through the switch from step 2 itself (section 2d).
 2. `beginConnect()` (and `beginSwitchConnect()`, from the switch page, which already requires disconnecting first)
    branch on `connect_mode`. In relay mode they make the state exactly as today, with `state_mode` = `relay` and, for a
    switch, the same ask; then send the signed `POST /v1/connect/start` with `environment` and `portal_state` (the

@@ -6,16 +6,17 @@ import { requireStaffPage } from "@/lib/guards";
 import { connectionView, qboRedirectUri } from "@/lib/quickbooks/connection";
 import { loadRosterPage } from "@/lib/roster/queries";
 import { CopyField } from "@/app/components/sign-in-settings/copy-field";
-import { AppKeysForm, ConnectModeForm, RelayConnectForm, RelayRegistration, ShapeForm } from "../forms";
+import { AppKeysForm, ConnectForm, ConnectModeForm, RelayRegistration, ShapeForm, type CompanyQuestion } from "../forms";
 import { QuickBooksFullLogo } from "../../integration-logo";
 import { QuickBooksUse } from "../what-it-does";
 import { saveQboAppAction, beginConnectAction, previewShapeAction, saveShapeAction, saveConnectModeAction, makeRelayKeyAction, savePortalIdAction, checkRegistrationAction } from "../actions";
 import { addressFitsRelay, portalAddress, registrationMailto, relayRegistrationView } from "@/lib/quickbooks/relay-registration";
 import { getClubSettings } from "@/lib/settings/club";
-import { getRosterSource } from "@/lib/roster/source";
-import { familiesToLinkAgain } from "@/lib/quickbooks/switch";
+import { getRosterCompany } from "@/lib/roster/source";
+import { familiesToLinkAgain, switchPreview } from "@/lib/quickbooks/switch";
 import { can } from "@/lib/permissions/effective";
-import { CHOOSE_QUICKBOOKS, LINKS_PAGE, relinkLine, ROSTER_COMPANY_REFUSED, SWITCH_PAGE, SWITCH_WORDS } from "../switch-words";
+import { CHOOSE_QUICKBOOKS, LINKS_PAGE, relinkLine, ROSTER_COMPANY_REFUSED, STEP2_WORDS, SWITCH_PAGE, SWITCH_WORDS } from "../switch-words";
+import { LinkButton } from "@/app/components/ui";
 
 export const metadata = { title: "Set up QuickBooks" };
 export const dynamic = "force-dynamic";
@@ -41,6 +42,10 @@ const REFUSED: Record<string, string> = {
   relay_busy: "Boosters Rocket is busy just now. Wait a minute, then press Connect to QuickBooks again.",
   relay_unreachable: "Boosters Rocket couldn't be reached, or its answer couldn't be read. Wait a few minutes, then press Connect to QuickBooks again.",
   relay_code: "That connection took too long to finish. Press Connect to QuickBooks again.",
+  // Step 2's company question (the owner's finding of 2026-11-25).
+  company: STEP2_WORDS.chooseCompany,
+  confirm: SWITCH_WORDS.notConfirmed,
+  environment_differs: STEP2_WORDS.environmentDiffers,
 };
 /** The same reasons, worded for a club connecting through Boosters Rocket, where they differ. */
 const REFUSED_RELAY: Record<string, string> = {
@@ -54,8 +59,9 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
   const sp = await searchParams;
   const one = (k: string) => { const v = sp[k]; return typeof v === "string" ? v : Array.isArray(v) ? v[0] : undefined; };
   const mayLink = can(ctx.effective, "Accounting.Link.ReadWrite");
-  const [conn, page, source, toLink, registration, club] = await Promise.all([connectionView(), loadRosterPage(), getRosterSource(), mayLink ? familiesToLinkAgain() : 0,
+  const [conn, page, rosterCompany, toLink, registration, club] = await Promise.all([connectionView(), loadRosterPage(), getRosterCompany(), mayLink ? familiesToLinkAgain() : 0,
     relayRegistrationView(), getClubSettings()]);
+  const source = rosterCompany;
   const address = portalAddress();
   // A step opens only when the one before it is done (spec §3). With no step asked for: the first one not done yet.
   const reachable: Step = !conn.configured ? "app" : !conn.connected ? "connect" : "shape";
@@ -63,6 +69,13 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
   const asked = order.find((s) => s === one("step"));
   if (asked && order.indexOf(asked) > order.indexOf(reachable)) redirect(`${SETUP}?step=${reachable}`);
   const step: Step = asked ?? reachable;
+  // Step 2 asks which company while nothing is connected and the roster names one (the owner's finding of 2026-11-25):
+  // the same one again, or a different one, with the switch page's lists, counted only when asked.
+  let question: CompanyQuestion | null = null;
+  if (step === "connect" && !conn.connected && rosterCompany !== null) {
+    const p = await switchPreview();
+    question = { companyName: rosterCompany.companyName, rosterEnvironment: rosterCompany.environment, ends: SWITCH_WORDS.ends(p), kept: SWITCH_WORDS.kept(p) };
+  }
   const key = one("error") ?? "";
   const relay = conn.connectMode === "relay";
   const error = relay && Object.hasOwn(REFUSED_RELAY, key) ? REFUSED_RELAY[key] : Object.hasOwn(REFUSED, key) ? REFUSED[key] : undefined;
@@ -105,11 +118,11 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
           {conn.connected && <p className="hint">QuickBooks is connected to <b>{conn.companyName ?? "a company"}</b>. Connecting again renews the connection to the same company.</p>}
           {relay && conn.connected && conn.tokenMode === "own_app" && <Notice tone="info">The portal is connected with the club&apos;s own Intuit app now. Connecting through Boosters Rocket to the same company moves it over, then asks Intuit to end the old app&apos;s access.</Notice>}
           <QuickBooksFullLogo />
-          {relay
-            ? <RelayConnectForm environment={conn.environment} locked={conn.connected} begin={beginConnectAction} />
-            : <form action={beginConnectAction}><button className="btn">Connect to QuickBooks</button></form>}
-          {/* A first connect needs no switch: offered only while the roster names a company. */}
-          {source !== null && <p>{SWITCH_WORDS.setupHint} <a className="link-line" href={SWITCH_PAGE}>{SWITCH_WORDS.setupLink}</a></p>}
+          <ConnectForm relay={relay} environment={conn.environment} locked={conn.connected} ownAppEnvironment={conn.ownAppEnvironment} question={question} begin={beginConnectAction} />
+          {/* A first connect needs no switch: offered only while the roster names a company. Step 2 asks the same
+              while nothing is connected; the switch page stays a way in, and says to disconnect first while connected. */}
+          {source !== null && <p>{SWITCH_WORDS.setupHint}</p>}
+          {source !== null && <p><LinkButton variant="secondary" href={SWITCH_PAGE}>{SWITCH_WORDS.setupLink}</LinkButton></p>}
           <p className="box-foot"><a href={`${SETUP}?step=app`}>Back to step 1</a>{conn.connected && <> · <a href={`${SETUP}?step=shape`}>Skip to step 3</a></>}</p>
         </section>
       )}

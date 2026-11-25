@@ -10,6 +10,7 @@ import type { RelayCheck } from "@/lib/quickbooks/relay";
 import { parseShapeForm, saveShape, type TypeRow } from "@/lib/roster/shape";
 import { previewShape, type ShapePreview } from "@/lib/roster/queries";
 import { refreshRoster } from "@/lib/roster/refresh";
+import { getRosterCompany } from "@/lib/roster/source";
 import { SWITCH_PAGE } from "./switch-words";
 
 const P = "Settings.QuickBooks.ReadWrite" as const;
@@ -86,17 +87,47 @@ export const checkRegistrationAction = staffAction(P, async (): Promise<{ ok: tr
 const notStarted = (reason: StartRefusal) => (reason === "not_configured" ? `${SETUP}?step=app&error=keys` : `${SETUP}?step=connect&error=${reason}`);
 
 /**
- * A plain form action: it always ends in a redirect, to Intuit (or, through Boosters Rocket, to the relay's one-time
- * address) or back to the steps. In relay mode it reads one field, `environment`, the QuickBooks chosen (sent once, one
- * of the two; with none, the one saved, and with none saved the connect is refused); in own-app mode none, since the
- * environment goes with the app's keys.
+ * Step 2's press, "Connect to QuickBooks": a plain form action that always ends in a redirect, to Intuit (or, through
+ * Boosters Rocket, to the relay's one-time address) or back to the steps. In relay mode it reads `environment`, the
+ * QuickBooks chosen (sent once, one of the two; with none, the one saved, and with none saved the connect is refused);
+ * in own-app mode none, since the environment goes with the app's keys.
+ *
+ * While nothing is connected and the roster names a company, step 2 asks which company this is (the owner's finding of
+ * 2026-11-25), sent as `company`, once:
+ * - "same": a reconnect, a plain connect (beginConnect()). Refused before anything is sent when the QuickBooks chosen
+ *   isn't the one the roster's company is in, as far as the last read recorded it (`environment_differs`); a company
+ *   other than the roster's coming back from Intuit is still refused at the return (`roster_company`), as before.
+ * - "different": the switch, exactly as the switch page's press: its checkbox `confirm` must be "yes" (else back to
+ *   step 2 with `error=confirm`, nothing recorded and nothing sent), and in relay mode `environment` must be sent; then
+ *   beginSwitchConnect().
+ * - anything else isn't from the page: back to step 2 (`error=company`), nothing changed.
+ * With no `company` (no question was asked: a first connect, or a renewal while connected) it is a plain connect.
  */
 export const beginConnectAction = staffAction(P, async (ctx, form?: unknown): Promise<void> => {
+  const c = await getConnection();
+  const relay = (c?.connectMode ?? "relay") === "relay";
   let environment: QboEnvironment | undefined;
-  if (((await getConnection())?.connectMode ?? "relay") === "relay" && form instanceof FormData && form.has("environment")) {
+  if (relay && form instanceof FormData && form.has("environment")) {
     const chosen = only(form, "environment", 20);
     if (chosen !== "production" && chosen !== "sandbox") redirect(`${SETUP}?step=connect&error=environment`);
     environment = chosen;
+  }
+  const asked = form instanceof FormData && form.has("company");
+  const company = asked ? only(form, "company", 20) : null;
+  if (asked && company !== "same" && company !== "different") redirect(`${SETUP}?step=connect&error=company`);
+  if (company === "different") {
+    // A switch is made only from nothing connected, as the switch page offers it.
+    if (c?.realmId) redirect(`${SETUP}?step=connect&error=other_company`);
+    const confirmed = form instanceof FormData && form.getAll("confirm").length === 1 && form.get("confirm") === "yes";
+    if (!confirmed) redirect(`${SETUP}?step=connect&error=confirm`);
+    if (relay && environment === undefined) redirect(`${SETUP}?step=connect&error=environment`);
+    const r = await beginSwitchConnect(ctx.staffUserId, { actor: actor(ctx), ip: ctx.ip, permission: P }, environment);
+    redirect(r.ok ? r.url : notStarted(r.reason));
+  }
+  if (company === "same") {
+    const roster = await getRosterCompany();
+    const connecting = relay ? environment ?? c?.relayEnvironment ?? null : c?.environment ?? null;
+    if (roster?.environment && connecting && roster.environment !== connecting) redirect(`${SETUP}?step=connect&error=environment_differs`);
   }
   const r = await beginConnect(ctx.staffUserId, { environment, op: op(ctx) });
   redirect(r.ok ? r.url : notStarted(r.reason));

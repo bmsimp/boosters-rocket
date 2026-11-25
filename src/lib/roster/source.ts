@@ -74,8 +74,26 @@ export async function getRosterSource(tx?: Tx): Promise<string | null> {
  */
 export const ofRosterCompany: SQL = sql`${writeQueue.realmId} = (select ${setting.value}->>'realmId' from ${setting} where ${setting.key} = ${SOURCE_KEY})`;
 
-export async function setRosterSource(tx: Tx, realmId: string): Promise<void> {
-  const value = { realmId };
+/**
+ * What step 2 of setup may say about the roster's company while nothing is connected (the owner's finding of
+ * 2026-11-25): its name, QuickBooks text shown as text only, and which QuickBooks it is (the real books or a sandbox),
+ * each as the last read of the roster saw them, or null when no read recorded them (a cache read before this was kept,
+ * or one cleared for a change of company and not read since). Never the company's ID.
+ */
+export type RosterCompany = { companyName: string | null; environment: "production" | "sandbox" | null };
+export async function getRosterCompany(tx?: Tx): Promise<RosterCompany | null> {
+  const [row] = await (tx ?? db).select().from(setting).where(eq(setting.key, SOURCE_KEY));
+  const v = row?.value as { realmId?: unknown; companyName?: unknown; environment?: unknown } | undefined;
+  if (typeof v?.realmId !== "string") return null;
+  return {
+    companyName: typeof v.companyName === "string" && v.companyName.length > 0 ? v.companyName : null,
+    environment: v.environment === "production" || v.environment === "sandbox" ? v.environment : null,
+  };
+}
+
+/** Records the company the cache was read from, and, from a read, its name and which QuickBooks it is (getRosterCompany()). */
+export async function setRosterSource(tx: Tx, realmId: string, about?: { companyName: string | null; environment: "production" | "sandbox" | null }): Promise<void> {
+  const value = { realmId, ...(about?.companyName ? { companyName: about.companyName } : {}), ...(about?.environment ? { environment: about.environment } : {}) };
   await tx.insert(setting).values({ key: SOURCE_KEY, value }).onConflictDoUpdate({ target: setting.key, set: { value, updatedAt: new Date() } });
 }
 
