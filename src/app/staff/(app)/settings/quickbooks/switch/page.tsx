@@ -3,6 +3,7 @@ import { Notice } from "@/app/components/notice";
 import { requireStaffPage } from "@/lib/guards";
 import { switchPreview } from "@/lib/quickbooks/switch";
 import { switchConnectAction } from "../actions";
+import { WhichQuickBooks } from "../forms";
 import { SWITCH_WORDS } from "../switch-words";
 
 export const metadata = { title: SWITCH_WORDS.title };
@@ -15,14 +16,17 @@ const SETUP = "/staff/settings/quickbooks/setup";
  * keeps, in counts, and the one press that sends an Admin to Intuit with an ask recorded (beginSwitchConnect()). A step
  * page, as the setup page is: no menu entry and no settings section. While QuickBooks is connected it says to
  * disconnect first and offers no press; while the roster names no company there is nothing to switch from, and it
- * sends the visitor to step 2. Not audited: it counts every family and names none.
+ * sends the visitor to step 2. Through Boosters Rocket the press is sent with the QuickBooks chosen here, the real books
+ * or a sandbox company, the saved one chosen first (the owner's finding of 2026-11-25); with the club's own Intuit app
+ * it says which one the app's keys are for and that step 1 changes it. Not audited: it counts every family and names none.
  */
 export default async function SwitchCompanyPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   await requireStaffPage("Settings.QuickBooks.ReadWrite");
   const sp = await searchParams;
   const p = await switchPreview();
   if (!p.rosterNamesCompany) redirect(`${SETUP}?step=connect`);
-  const notConfirmed = sp.error === "confirm";
+  const notConfirmed = sp.error === "confirm", noEnvironment = sp.error === "environment";
+  const relay = p.connectMode === "relay";
   return (
     <main className="wrap single">
       <p className="back-to-settings"><a href="/staff/settings/quickbooks">Back to QuickBooks settings</a></p>
@@ -44,6 +48,10 @@ export default async function SwitchCompanyPage({ searchParams }: { searchParams
           : (
             <form action={switchConnectAction} className="stack">
               {notConfirmed && <Notice tone="problem">{SWITCH_WORDS.notConfirmed}</Notice>}
+              {noEnvironment && relay && <Notice tone="problem">{SWITCH_WORDS.chooseEnvironment}</Notice>}
+              {relay
+                ? <WhichQuickBooks environment={p.environment} />
+                : <p>{SWITCH_WORDS.ownAppEnvironment(p.environment)} <a className="link-line" href={`${SETUP}?step=app`}>{SWITCH_WORDS.ownAppLink}</a></p>}
               <fieldset className="checks"><legend>Confirm</legend>
                 <label><input type="checkbox" name="confirm" value="yes" required /> {SWITCH_WORDS.confirm}</label>
               </fieldset>

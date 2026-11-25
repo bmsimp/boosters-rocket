@@ -260,6 +260,13 @@ describe("QuickBooks settings", () => {
     expect(html).toContain('<input type="checkbox" required="" name="confirm" value="yes"/> I understand that every family&#x27;s link to the books ends');
     expect(html).toContain(">Switch companies: sign in to Intuit</button>");
     expect(html).not.toContain("Check the box to say you understand");
+    // With the club's own Intuit app the QuickBooks is the keys', changed only in step 1 (the owner's finding of
+    // 2026-11-25): one line says which, and there is no choice to make here.
+    expect(html).toContain("The club&#x27;s Intuit app is set to sandbox, Intuit&#x27;s test companies. To connect the other, save the app&#x27;s Production keys in step 1.");
+    expect(html).toContain('href="/staff/settings/quickbooks/setup?step=app">Step 1: How to connect</a>');
+    expect(html).not.toContain('name="environment"');
+    await db.update(qboConnection).set({ environment: "production" });
+    expect(await switchHtml()).toContain("The club&#x27;s Intuit app is set to production, the club&#x27;s real books. To connect the other, save the app&#x27;s Development keys in step 1.");
     expect(await switchHtml("confirm")).toContain("Check the box to say you understand what a switch ends, then try again.");
   });
 

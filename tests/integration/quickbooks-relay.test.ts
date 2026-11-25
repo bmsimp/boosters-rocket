@@ -29,9 +29,10 @@ import { secretBox } from "@/lib/crypto/secret-box";
 import { beginConnectAction, disconnectAction, saveConnectModeAction, switchConnectAction } from "@/app/staff/(app)/settings/quickbooks/actions";
 import QuickBooksSetupPage from "@/app/staff/(app)/settings/quickbooks/setup/page";
 import QuickBooksSettingsPage from "@/app/staff/(app)/settings/quickbooks/page";
+import SwitchCompanyPage from "@/app/staff/(app)/settings/quickbooks/switch/page";
 import { GET as relayCallback } from "@/app/api/quickbooks/relay/callback/route";
 import { GET as intuitCallback } from "@/app/api/quickbooks/callback/route";
-import { beginConnect, completeConnect, completeRelayConnect, connectionView } from "@/lib/quickbooks/connection";
+import { beginConnect, beginSwitchConnect, completeConnect, completeRelayConnect, connectionView } from "@/lib/quickbooks/connection";
 import { accessToken } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { readRelayMark } from "@/lib/quickbooks/relay";
@@ -65,6 +66,9 @@ const openRefresh = (c: { refreshTokenCiphertext: string | null; refreshTokenKey
 const where = (res: Response) => { const u = new URL(res.headers.get("location")!); return u.pathname + u.search; };
 const callbackUrl = (q: Record<string, string>) => new Request(`http://localhost:3100/api/quickbooks/relay/callback?${new URLSearchParams(q)}`, { headers: { "cf-connecting-ip": "203.0.113.44" } });
 const setupHtml = async (q: Record<string, string>) => renderToStaticMarkup(await QuickBooksSetupPage({ searchParams: Promise.resolve(q) }));
+const switchHtml = async (q: Record<string, string> = {}) => renderToStaticMarkup(await SwitchCompanyPage({ searchParams: Promise.resolve(q) }));
+/** Disconnected, as the switch page requires, keeping the environment and the roster's company. */
+const disconnectedKeepingEnvironment = () => db.update(qboConnection).set({ realmId: null, refreshTokenCiphertext: null, refreshTokenKeyId: null, accessTokenCiphertext: null, accessTokenKeyId: null, tokenMode: null, companyName: null });
 
 describe("connecting through Boosters Rocket", () => {
   let admin: Awaited<ReturnType<typeof seedStaff>>;
@@ -289,9 +293,8 @@ describe("connecting through Boosters Rocket", () => {
     await seedRelayRegistration(relay);
     await connect(A);
     expect((await db.select().from(setting).where(eq(setting.key, "roster.source")))[0]?.value).toEqual({ realmId: A });
-    // Disconnected (as the switch page requires), keeping the environment.
-    await db.update(qboConnection).set({ realmId: null, refreshTokenCiphertext: null, refreshTokenKeyId: null, accessTokenCiphertext: null, accessTokenKeyId: null, tokenMode: null, companyName: null });
-    const go = await redirectOf(switchConnectAction(form({ confirm: "yes" })));
+    await disconnectedKeepingEnvironment();
+    const go = await redirectOf(switchConnectAction(form({ confirm: "yes", environment: "sandbox" })));
     expect(go).toMatch(new RegExp(`^${relay.base}/v1/connect/go/`));
     expect(await audits("quickbooks.switch.asked")).toMatchObject([{ after: { fromRealmId: A } }]);
     const state = sentState();
@@ -302,6 +305,67 @@ describe("connecting through Boosters Rocket", () => {
     // The clear ran and spent the switch: nothing of it is left.
     expect(await db.select().from(setting).where(eq(setting.key, SWITCH_KEY))).toHaveLength(0);
     expect(relay.forgotten).toEqual([]);
+  });
+
+  // The owner's finding of 2026-11-25: a switch through the relay silently reused the saved QuickBooks, so a move from a
+  // sandbox to the club's real books started a sandbox connect. The switch page now asks, as step 2 does.
+  describe("which QuickBooks a switch connects to", () => {
+    const SWITCH = "/staff/settings/quickbooks/switch";
+    beforeEach(async () => {
+      await seedRelayRegistration(relay);
+      await connect(A); // the sandbox, saved
+      await disconnectedKeepingEnvironment();
+    });
+
+    it("the switch page asks which QuickBooks, step 2's choice in step 2's words, the saved one chosen first", async () => {
+      const html = await switchHtml();
+      expect(html).toContain("<legend>Which QuickBooks</legend>");
+      expect(html).toContain("The club&#x27;s real books");
+      expect(html).toContain("An Intuit sandbox (test) company");
+      expect(html).toContain(`name="environment" checked="" value="sandbox"`);
+      expect(html).not.toContain(`name="environment" checked="" value="production"`);
+      expect(html).not.toContain("disconnect first, from QuickBooks settings."); // not locked: nothing is connected
+      expect(html).not.toContain("The club&#x27;s Intuit app is set to");
+      expect(await switchHtml({ error: "environment" })).toContain("Choose which QuickBooks to connect: the club&#x27;s real books or an Intuit sandbox (test) company.");
+    });
+
+    it("takes the real books while the sandbox is saved, saves it for this connect, and the ask still holds", async () => {
+      const go = await redirectOf(switchConnectAction(form({ confirm: "yes", environment: "production" })));
+      expect(go).toMatch(new RegExp(`^${relay.base}/v1/connect/go/`));
+      expect(relayCalls("/v1/connect/start").at(-1)!.body!.environment).toBe("production");
+      expect(await row()).toMatchObject({ relayEnvironment: "production", stateMode: "relay", stateStaffUserId: admin.id });
+      expect(await audits("quickbooks.switch.asked")).toMatchObject([{ actorId: admin.id, after: { fromRealmId: A } }]);
+      // The relay returns a grant for the real books' company; the ask lets it store another company, and the clear runs.
+      const state = sentState();
+      const res = await relayCallback(callbackUrl({ code: relay.grantFor(state, B, { environment: "production" }), state }));
+      expect(where(res)).toBe("/staff/settings/quickbooks/setup?step=shape");
+      expect(await row()).toMatchObject({ realmId: B, tokenMode: "relay", relayEnvironment: "production" });
+      expect((await audits("quickbooks.relay.connect")).at(-1)!.after).toMatchObject({ realmId: B, environment: "production", switchedFrom: A });
+      expect(await db.select().from(setting).where(eq(setting.key, SWITCH_KEY))).toHaveLength(0);
+      expect(await connectionView()).toMatchObject({ connected: true, environment: "production" });
+    });
+
+    it("refuses a choice missing, sent twice or not one of the two, back to the switch page, changing nothing", async () => {
+      const starts = relayCalls("/v1/connect/start").length, before = await row();
+      for (const bad of [form({ confirm: "yes" }), form({ confirm: "yes", environment: "staging" }), form({ confirm: "yes", environment: ["production", "sandbox"] }), form({ confirm: "yes", environment: "x".repeat(21) })]) {
+        expect(await redirectOf(switchConnectAction(bad))).toBe(`${SWITCH}?error=environment`);
+      }
+      expect(relayCalls("/v1/connect/start")).toHaveLength(starts);
+      expect(await row()).toMatchObject({ relayEnvironment: "sandbox", stateHash: before.stateHash, stateMode: before.stateMode });
+      expect(await db.select().from(setting).where(eq(setting.key, SWITCH_KEY))).toHaveLength(0);
+      expect(await audits("quickbooks.switch.asked")).toEqual([]);
+      // Called with a value that isn't one of the two, the start itself refuses it, as step 2's does.
+      expect(await beginSwitchConnect(admin.id, op, "staging" as never)).toEqual({ ok: false, reason: "environment" });
+      expect(await beginConnect(admin.id, { environment: "staging" as never, op })).toEqual({ ok: false, reason: "environment" });
+      expect(relayCalls("/v1/connect/start")).toHaveLength(starts);
+      expect((await row()).relayEnvironment).toBe("sandbox");
+      expect(await audits("quickbooks.switch.asked")).toEqual([]);
+    });
+
+    it("an unchecked box is still refused first, whatever QuickBooks is chosen", async () => {
+      expect(await redirectOf(switchConnectAction(form({ environment: "production" })))).toBe(`${SWITCH}?error=confirm`);
+      expect((await row()).relayEnvironment).toBe("sandbox");
+    });
   });
 
   it("renewing through the relay replaces the tokens and revokes nothing anywhere", async () => {

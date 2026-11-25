@@ -102,6 +102,33 @@ The review of the four slices found these; the lead decided each, and the sectio
    `relay_refused`, step 2's word for a start the relay wouldn't make.
 9. **Step 2 is "Connect to QuickBooks"** in either mode, and step 1's link "Next: connect to QuickBooks".
 
+## 2c. The owner's finding of 2026-11-25
+
+On the test server, in relay mode, the switch (from "Connect a different company" or the switch page) never asked which
+QuickBooks: `beginSwitchConnect()` reused the saved `relay_environment`, so moving from a sandbox to the club's real
+books started a sandbox connect. Now:
+
+1. **Through Boosters Rocket the switch page asks "Which QuickBooks"**, step 2's choice (`WhichQuickBooks` in
+   `forms.tsx`, which step 2's form draws too), in step 2's words ("The club's real books" / "An Intuit sandbox (test)
+   company"), the saved one chosen first, above the checkbox and the press. Nothing is connected while it is shown
+   (the page offers the press only once disconnected), so neither is locked.
+2. **The press sends it, and it is checked as step 2's is.** `switchConnectAction` reads one field, `environment`, sent
+   once and one of the two, else it goes back to the switch page (`?error=environment`, step 2's words) with nothing
+   changed and no ask recorded; `beginSwitchConnect()` takes it and `startConnect()` refuses a value that isn't one of
+   the two (`environment`), for `beginConnect()` too. It is saved to `relay_environment` for this connect, in the
+   state's transaction, exactly as step 2's press saves it; the ask is recorded as before and holds the same way.
+3. **With the club's own Intuit app there is no choice.** The environment is the one its keys were saved for, and
+   changing it is saving new keys in step 1. The switch page says so in one line ("The club's Intuit app is set to
+   sandbox, Intuit's test companies. To connect the other, save the app's Production keys in step 1.", or production
+   and the Development keys), linking to step 1; the press reads no field but the checkbox.
+4. **Step 2 already offers the choice whenever nothing is connected**; while connected it is locked to the connected
+   one ("To connect the other, disconnect first"), as before.
+
+Tests: `tests/integration/quickbooks-relay.test.ts` "which QuickBooks a switch connects to",
+`tests/integration/settings-quickbooks.test.ts` "once disconnected, the switch page asks for its checkbox and offers the
+press" (the own-app line), and `tests/e2e/quickbooks.spec.ts` "once disconnected, the switch page asks which QuickBooks
+through Boosters Rocket, and names the own app's", which never presses.
+
 ## 3. The lead's decisions
 
 - **The relay's address is an env setting, never a UI one.** `QBO_RELAY_URL` in `src/env.ts`, optional, default
@@ -202,6 +229,9 @@ component, never in an audit row (rows name the public key's first 8 characters 
 1. **Step 2, "Connect to QuickBooks"**, shows the full QuickBooks logo above the press. In relay mode it also asks which
    QuickBooks: "The club's real books" or "An Intuit sandbox (test) company", saved to `qbo_connection.relay_environment`
    with the press (changing it while connected is refused, as today). The press is "Connect to QuickBooks".
+   The switch page (`/staff/settings/quickbooks/switch`) asks the same, with the same choice and words, the saved one
+   chosen first, and saves it with its press as step 2 does; with the club's own app it says which QuickBooks the app's
+   keys are for and that step 1 changes it (section 2c, the owner's finding of 2026-11-25).
 2. `beginConnect()` (and `beginSwitchConnect()`, from the switch page, which already requires disconnecting first)
    branch on `connect_mode`. In relay mode they make the state exactly as today, with `state_mode` = `relay` and, for a
    switch, the same ask; then send the signed `POST /v1/connect/start` with `environment` and `portal_state` (the

@@ -55,6 +55,9 @@ export function relayStageOf(r: { portalId: string | null } | null | undefined):
   return !r ? "not_registered" : r.portalId ? "ready" : "waiting";
 }
 
+/** Whether a value, typed or not, is one of the two QuickBooks: the club's real books or an Intuit sandbox company. */
+export const isQboEnvironment = (v: unknown): v is QboEnvironment => v === "production" || v === "sandbox";
+
 const STATE_TTL_MS = 10 * 60_000;
 const TIMEOUT_MS = 15_000;
 const TARGET = { targetType: "qbo_connection", targetId: "singleton" } as const;
@@ -225,6 +228,8 @@ async function startConnect(staffUserId: string, o: { environment?: QboEnvironme
     } else {
       const [r] = await tx.select({ portalId: qboRelay.portalId }).from(qboRelay);
       if (!r?.portalId) return { ok: false, reason: "not_configured" };
+      // A choice sent with the press must be one of the two (it came from a form); with none, the one saved.
+      if (o.environment !== undefined && !isQboEnvironment(o.environment)) return { ok: false, reason: "environment" };
       const chosen = o.environment ?? c?.relayEnvironment;
       if (!chosen) return { ok: false, reason: "environment" };
       // While connected, only the QuickBooks the tokens held are for, whichever app issued them.
@@ -269,11 +274,14 @@ export async function beginConnect(staffUserId: string, o: { environment?: QboEn
  * slice M8, the owner's choice 1): the state as beginConnect() writes it and, in the same transaction, the ask
  * (SWITCH_KEY: the state's hash and expiry, this Admin, and the roster's company as read now), audited. Only a connect
  * made with this state may then store a company other than the roster's (completeConnect()). While the roster names no
- * company there is nothing to switch from, and it starts a plain connect. In relay mode it connects to the QuickBooks
- * (real or sandbox) already saved.
+ * company there is nothing to switch from, and it starts a plain connect. In relay mode `environment` is the QuickBooks
+ * (real or sandbox) the Admin chose on the switch page, checked and saved to `relay_environment` for this connect as
+ * step 2's press does (the owner's finding of 2026-11-25: a switch is often from a sandbox to the real books, so it
+ * never silently reuses the saved one); with none sent, the saved one. In own-app mode it is ignored: the environment
+ * is the one the club's Intuit app's keys were saved for.
  */
-export async function beginSwitchConnect(staffUserId: string, o: QboOp): Promise<Begun> {
-  return startConnect(staffUserId, { op: o }, async (tx, set) => {
+export async function beginSwitchConnect(staffUserId: string, o: QboOp, environment?: QboEnvironment): Promise<Begun> {
+  return startConnect(staffUserId, { environment, op: o }, async (tx, set) => {
     const fromRealmId = await getRosterSource(tx);
     if (fromRealmId === null) { await dropSwitchAsk(tx); return; }
     await setSwitchRecord(tx, { asked: { stateHash: set.stateHash, staffUserId, expiresAt: set.stateExpiresAt.toISOString(), fromRealmId } });

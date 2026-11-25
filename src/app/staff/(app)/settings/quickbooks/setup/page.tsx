@@ -15,7 +15,7 @@ import { getClubSettings } from "@/lib/settings/club";
 import { getRosterSource } from "@/lib/roster/source";
 import { familiesToLinkAgain } from "@/lib/quickbooks/switch";
 import { can } from "@/lib/permissions/effective";
-import { LINKS_PAGE, relinkLine, ROSTER_COMPANY_REFUSED, SWITCH_PAGE, SWITCH_WORDS } from "../switch-words";
+import { CHOOSE_QUICKBOOKS, LINKS_PAGE, relinkLine, ROSTER_COMPANY_REFUSED, SWITCH_PAGE, SWITCH_WORDS } from "../switch-words";
 
 export const metadata = { title: "Set up QuickBooks" };
 export const dynamic = "force-dynamic";
@@ -35,7 +35,7 @@ const REFUSED: Record<string, string> = {
   roster_company: ROSTER_COMPANY_REFUSED,
   intuit: "Intuit refused the request. Check the Client ID, the Client secret and the choice of sandbox or production in step 1, and that the redirect address is on the Intuit app.",
   // Through Boosters Rocket (spec §5, Connect).
-  environment: "Choose which QuickBooks to connect: the club's real books or an Intuit sandbox (test) company.",
+  environment: CHOOSE_QUICKBOOKS,
   environment_locked: "QuickBooks is connected to the other one. Disconnect first, from QuickBooks settings, to connect this one.",
   relay_refused: "Boosters Rocket didn't accept this portal's request. In step 1, select Check the registration; if the id and key are right, check that the server's clock is right, then email support@boostersrocket.com.",
   relay_busy: "Boosters Rocket is busy just now. Wait a minute, then press Connect to QuickBooks again.",

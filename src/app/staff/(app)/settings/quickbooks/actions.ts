@@ -103,15 +103,24 @@ export const beginConnectAction = staffAction(P, async (ctx, form?: unknown): Pr
 });
 
 /**
- * The switch page's press (stage 4's slice M8): a plain form action that always ends in a redirect. It reads nothing
- * from the form but its one checkbox, which must say "yes"; anything else goes back to the switch page to be checked.
- * Then a connect starts with an ask recorded (beginSwitchConnect()), so the company chosen at Intuit may be another.
+ * The switch page's press (stage 4's slice M8): a plain form action that always ends in a redirect. It reads its one
+ * checkbox, which must say "yes"; anything else goes back to the switch page to be checked. In relay mode it also reads
+ * `environment`, the QuickBooks chosen on the page (the owner's finding of 2026-11-25), which must be sent once and be
+ * one of the two, else it goes back to the switch page with nothing changed; in own-app mode no other field, since the
+ * environment goes with the app's keys. Then a connect starts with an ask recorded (beginSwitchConnect()), so the
+ * company chosen at Intuit may be another.
  */
 export const switchConnectAction = staffAction(P, async (ctx, form: unknown): Promise<void> => {
   const confirmed = form instanceof FormData && form.getAll("confirm").length === 1 && form.get("confirm") === "yes";
   if (!confirmed) redirect(`${SWITCH_PAGE}?error=confirm`);
-  const r = await beginSwitchConnect(ctx.staffUserId, { actor: actor(ctx), ip: ctx.ip, permission: P });
-  redirect(r.ok ? r.url : notStarted(r.reason));
+  let environment: QboEnvironment | undefined;
+  if (((await getConnection())?.connectMode ?? "relay") === "relay") {
+    const chosen = only(form, "environment", 20);
+    if (chosen !== "production" && chosen !== "sandbox") redirect(`${SWITCH_PAGE}?error=environment`);
+    environment = chosen;
+  }
+  const r = await beginSwitchConnect(ctx.staffUserId, { actor: actor(ctx), ip: ctx.ip, permission: P }, environment);
+  redirect(r.ok ? r.url : r.reason === "environment" ? `${SWITCH_PAGE}?error=environment` : notStarted(r.reason));
 });
 
 /**
