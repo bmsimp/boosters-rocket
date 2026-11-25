@@ -278,6 +278,35 @@ test("step 2 through Boosters Rocket asks which QuickBooks and shows QuickBooks'
   }
 });
 
+// The owner's finding of 2026-11-25: the switch asks which QuickBooks through Boosters Rocket, and with the club's own app
+// says which one its keys are for. The seed's connection is hidden (its company kept for the roster) and put back; the
+// press is never selected: it would leave for Boosters Rocket or Intuit.
+test("once disconnected, the switch page asks which QuickBooks through Boosters Rocket, and names the own app's", async ({ page }) => {
+  await sql`UPDATE qbo_connection SET realm_id = NULL`;
+  try {
+    await page.goto("/staff/settings/quickbooks/switch");
+    await expect(page.getByRole("button", { name: "Switch companies: sign in to Intuit" })).toBeVisible();
+    await expect(page.getByText("The club's Intuit app is set to sandbox, Intuit's test companies. To connect the other, save the app's Production keys in step 1.")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Step 1: How to connect" })).toHaveAttribute("href", "/staff/settings/quickbooks/setup?step=app");
+    await expect(page.getByRole("group", { name: "Which QuickBooks" })).toHaveCount(0);
+
+    await sql`UPDATE qbo_connection SET connect_mode = 'relay', relay_environment = 'sandbox'`;
+    await page.goto("/staff/settings/quickbooks/switch");
+    await expect(page.getByRole("group", { name: "Which QuickBooks" })).toBeVisible();
+    const real = page.getByRole("radio", { name: /^The club's real books/ }), sandbox = page.getByRole("radio", { name: /^An Intuit sandbox \(test\) company/ });
+    await expect(sandbox).toBeChecked();
+    await real.check();
+    await expect(real).toBeChecked();
+    await expect(sandbox).not.toBeChecked();
+    await expect(page.getByText("The club's Intuit app is set to")).toHaveCount(0);
+    await expect(page.getByRole("checkbox", { name: /^I understand that every family's link to the books ends/ })).toBeVisible();
+    await checked(page, "the switch page through Boosters Rocket");
+  } finally {
+    await sql`UPDATE qbo_connection SET realm_id = '9130000000000001'`;
+    await backToTheSeed();
+  }
+});
+
 test("Disconnect through Boosters Rocket stays unusable until the box is ticked; the club's own app has one line and no box", async ({ page }) => {
   // The club's own app first: one line, no box, and the button usable (never selected).
   await page.goto("/staff/settings/quickbooks");

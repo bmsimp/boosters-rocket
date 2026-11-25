@@ -4,7 +4,7 @@
 import "server-only";
 import { and, count, eq, inArray, isNotNull, notExists, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, buyout, family, guardian, student, writeQueue } from "@/lib/db/schema";
+import { accountingLink, buyout, family, guardian, student, writeQueue, type QboEnvironment, type QboMode } from "@/lib/db/schema";
 import { LIVE_STATES } from "@/lib/buyouts/rules";
 import { getRosterSource } from "@/lib/roster/source";
 import { connectionView } from "./connection";
@@ -14,6 +14,11 @@ export type SwitchPreview = {
   rosterNamesCompany: boolean;
   /** Whether QuickBooks is connected now: a switch starts with Disconnect. */
   connected: boolean;
+  /**
+   * How the next connect goes, and to which QuickBooks (connectionView()): through Boosters Rocket the switch page asks
+   * (the saved choice first, the owner's finding of 2026-11-25); with the club's own Intuit app it is what the keys are for.
+   */
+  connectMode: QboMode; environment: QboEnvironment | null;
   /** Ended by a switch: every link to the books, by kind. */
   links: { families: number; students: number; guardians: number };
   /** Requests still to be sent to the roster's company (waiting, stuck or kept refused), given up by a switch. */
@@ -42,7 +47,7 @@ export async function switchPreview(): Promise<SwitchPreview> {
   ]);
   const l = links[0];
   return {
-    rosterNamesCompany: source !== null, connected: conn.connected,
+    rosterNamesCompany: source !== null, connected: conn.connected, connectMode: conn.connectMode, environment: conn.environment,
     links: { families: Number(l?.families ?? 0), students: Number(l?.students ?? 0), guardians: Number(l?.guardians ?? 0) },
     waitingRequests: n(queued), unpaidBuyouts: n(unpaid), paidBuyouts: n(paid),
     kept: { families: n(families), students: n(students), guardians: n(guardians) },

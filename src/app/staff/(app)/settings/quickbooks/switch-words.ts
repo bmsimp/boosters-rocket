@@ -13,6 +13,9 @@ export type SwitchCounts = {
   kept: { families: number; students: number; guardians: number };
 };
 
+/** Step 2's and the switch page's words for a choice of QuickBooks missing or not one of the two. */
+export const CHOOSE_QUICKBOOKS = "Choose which QuickBooks to connect: the club's real books or an Intuit sandbox (test) company.";
+
 export const SWITCH_WORDS = {
   title: "Connect a different QuickBooks company",
   lede: "This moves the portal to another QuickBooks company, for example from a sandbox trial to the club's real books. "
@@ -40,6 +43,13 @@ export const SWITCH_WORDS = {
   confirm: "I understand that every family's link to the books ends, and that each family is linked to the new company again on Accounting links.",
   press: "Switch companies: sign in to Intuit",
   notConfirmed: "Check the box to say you understand what a switch ends, then try again.",
+  /** Through Boosters Rocket, a choice of QuickBooks missing or not one of the two (the words step 2 uses). */
+  chooseEnvironment: CHOOSE_QUICKBOOKS,
+  /** With the club's own Intuit app: the QuickBooks its keys are for, which only new keys in step 1 change. */
+  ownAppEnvironment: (e: "production" | "sandbox" | null) => e === null
+    ? "The club's Intuit app has no keys saved yet. Save them in step 1 first."
+    : `The club's Intuit app is set to ${e === "production" ? "production, the club's real books" : "sandbox, Intuit's test companies"}. To connect the other, save the app's ${e === "production" ? "Development" : "Production"} keys in step 1.`,
+  ownAppLink: "Step 1: How to connect",
   setupLink: "Connect a different company",
   setupHint: "Moving the portal to another QuickBooks company ends every family's link to the books.",
 } as const;

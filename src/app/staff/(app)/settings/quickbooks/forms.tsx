@@ -353,17 +353,28 @@ const ENVIRONMENTS: { value: "production" | "sandbox"; label: string; hint: stri
 ];
 
 /**
- * Step 2 through Boosters Rocket: which QuickBooks, then "Connect to QuickBooks", a plain form post that ends in a
- * redirect to the relay. While connected, the other QuickBooks can't be chosen (the server refuses it too): connecting
- * again renews the one connected. It is given only what it shows.
+ * "Which QuickBooks" through Boosters Rocket, sent as the form's `environment`: the club's real books or an Intuit
+ * sandbox company, the saved one chosen first. Step 2's form and the switch page's (the owner's finding of 2026-11-25)
+ * both draw it, inside their own plain form. While connected (`locked`), the other can't be chosen (the server refuses
+ * it too): connecting again renews the one connected. It is given only what it shows.
  */
-export function RelayConnectForm({ environment, locked, begin }: { environment: "production" | "sandbox" | null; locked: boolean; begin: (f: FormData) => Promise<void> }) {
+export function WhichQuickBooks({ environment, locked = false }: { environment: "production" | "sandbox" | null; locked?: boolean }) {
   const [chosen, setChosen] = useState<"production" | "sandbox">(environment ?? "production");
   const options = ENVIRONMENTS.map((o) => ({ ...o, disabled: locked && o.value !== environment }));
   return (
+    <ChoiceGroup name="environment" legend="Which QuickBooks" hint={locked ? "To connect the other, disconnect first, from QuickBooks settings." : undefined}
+      options={options} value={chosen} onChange={(v) => setChosen(v === "sandbox" ? "sandbox" : "production")} cols={1} />
+  );
+}
+
+/**
+ * Step 2 through Boosters Rocket: which QuickBooks (WhichQuickBooks), then "Connect to QuickBooks", a plain form post
+ * that ends in a redirect to the relay. It is given only what it shows.
+ */
+export function RelayConnectForm({ environment, locked, begin }: { environment: "production" | "sandbox" | null; locked: boolean; begin: (f: FormData) => Promise<void> }) {
+  return (
     <form action={begin} className="stack">
-      <ChoiceGroup name="environment" legend="Which QuickBooks" hint={locked ? "To connect the other, disconnect first, from QuickBooks settings." : undefined}
-        options={options} value={chosen} onChange={(v) => setChosen(v === "sandbox" ? "sandbox" : "production")} cols={1} />
+      <WhichQuickBooks environment={environment} locked={locked} />
       <p><Button type="submit">Connect to QuickBooks</Button></p>
     </form>
   );
