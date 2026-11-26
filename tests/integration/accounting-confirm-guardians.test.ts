@@ -196,8 +196,6 @@ describe("a family's Confirm links the guardian a match was on", () => {
     // The page says what the bulk press and a family's Confirm link of guardians; the Okafors have no student, and their row says both.
     const page = textOf(await renderPage(AccountingLinksPage));
     expect(page).toContain("to the customer on its row, with the students and guardians its row lists.");
-    expect(page).toContain("Where the books have Parent customers, it links each guardian whose sign-in address is in the email field of exactly one Parent customer under it,"
-      + " if that customer holds no other guardian's address and isn't linked or kept for anyone. This doesn't happen while a change for them waits on Reconciliation.");
     expect(await openingOf("The Okafors")).toContain("No student would be linked with it."
       + "Guardians linked with it, by the sign-in address their Parent customer's email field holds:Ike Okafor with Ike Okafor");
     stub.calls.length = 0;

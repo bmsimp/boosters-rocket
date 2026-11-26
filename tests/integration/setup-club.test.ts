@@ -9,6 +9,7 @@ vi.mock("next/navigation", () => ({
   notFound: () => { throw Object.assign(new Error("NEXT_NOT_FOUND"), { notFound: true }); },
   useRouter: () => ({ refresh: () => undefined, push: () => undefined }),
   usePathname: () => "/setup",
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 import { eq } from "drizzle-orm";

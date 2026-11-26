@@ -388,7 +388,7 @@ describe("who may press it, and the page", () => {
     const linker = await staffWith("linker@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
     asStaff(linker);
     const theirs = listOf(await renderPage(AccountingLinksPage));
-    // Neither the press nor its notice: How links are made, in the card, still names it for what it is.
+    // Neither the press nor its notice.
     expect(theirs).not.toContain("Send the app's for all (");
     expect(theirs).not.toContain("Send the app's for all sends only");
     // Oak made inactive in the portal, its customer active in the books: listed after the families, and so spoken of.

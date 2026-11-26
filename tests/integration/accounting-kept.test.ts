@@ -60,7 +60,8 @@ const ALSO_GONE = "It is also shown on Accounting links, in its family's row, as
 const ALSO_INACTIVE = "It is also shown on Accounting links, with its family under Inactive in the portal, active in the books: sent or given up on either page, it is settled on both.";
 const ALSO = "It is also shown on Accounting links";
 const REFUSED = "QuickBooks refused it: QuickBooks wouldn't take it.";
-const GIVE_UP = '<details class="more"><summary>Give up</summary><p class="hint">The portal keeps its own value, and QuickBooks keeps what it has.</p>';
+/** Give up, beside Take and Send, its button naming what it gives up for a screen reader as theirs do. */
+const GIVE_UP = (about: string) => `<div class="confirm"><button type="button" class="btn btn-line btn-sm">Give up on this change<span class="visually-hidden">: ${about}</span></button>`;
 
 let tag: string;
 let full: Awaited<ReturnType<typeof staffWith>>, reader: Awaited<ReturnType<typeof staffWith>>, linker: Awaited<ReturnType<typeof staffWith>>;
@@ -114,7 +115,7 @@ describe("shown beside its difference, and still on Reconciliation", () => {
     expect(list.split(RIVERA_WORDS)).toHaveLength(2);
     // In place of the queue's note, so not linked to Reconciliation for it, and Give up in the same row-actions as Take and Send.
     expect(list).not.toContain("See the change on Reconciliation");
-    expect(list).toContain(`Send the app's to QuickBooks<span class="visually-hidden">: Rivera Family's name</span></button>${GIVE_UP}`);
+    expect(list).toContain(`Send the app's to QuickBooks<span class="visually-hidden">: Rivera Family's name</span></button>${GIVE_UP("Rivera Family's name")}`);
     expect(list).toContain("Why? (kept in the audit log)");
     // No item id and no stamp is drawn: the presses are bound actions given only their words.
     expect(list).not.toContain(kept.id);
@@ -166,7 +167,7 @@ describe("shown beside its difference, and still on Reconciliation", () => {
     // Its Take of active leaves it standing, and says so in words true of both pages.
     expect(row.takes.find((t) => t.at === at)?.words).toContain(KEPT_OFF_STAYS);
     const list = await linksList();
-    expect(list).toContain(`Send the app's to QuickBooks<span class="visually-hidden">: Leo Rivera's active status</span></button>${GIVE_UP}`);
+    expect(list).toContain(`Send the app's to QuickBooks<span class="visually-hidden">: Leo Rivera's active status</span></button>${GIVE_UP("Leo Rivera's active status")}`);
     expect(list.split("Kept in the portal: Make the student Leo Rivera inactive.")).toHaveLength(2);
     expect(await writes(full)).toContain(ALSO_BESIDE);
     // Given up from the screen, it answers with a make-inactive's words, never a rename's.
@@ -296,7 +297,7 @@ describe("flat books: a member", () => {
     asStaff(full);
     const part = section(await renderPage(AccountingLinksPage), "links-inactive-h");
     expect(part).toContain("Kept in the portal: Make the member Rivera Household inactive.");
-    expect(part).toContain(`Send the app's to QuickBooks<span class="visually-hidden">: Rivera Family's active status</span></button>${GIVE_UP}`);
+    expect(part).toContain(`Send the app's to QuickBooks<span class="visually-hidden">: Rivera Family's active status</span></button>${GIVE_UP("Rivera Family's active status")}`);
     expect(await writes(full)).toContain(ALSO_INACTIVE);
   });
 });

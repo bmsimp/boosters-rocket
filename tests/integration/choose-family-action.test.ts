@@ -7,7 +7,7 @@ vi.mock("next/headers", () => ({
   headers: async () => new Headers({ cookie: state.cookie, "cf-connecting-ip": "203.0.113.31" }),
   cookies: async () => ({ get: () => undefined }),
 }));
-vi.mock("next/navigation", () => ({ redirect: (url: string) => { throw Object.assign(new Error("NEXT_REDIRECT"), { url }); } }));
+vi.mock("next/navigation", () => ({ redirect: (url: string) => { throw Object.assign(new Error("NEXT_REDIRECT"), { url }); }, usePathname: () => "/", useSearchParams: () => new URLSearchParams() }));
 
 import { db } from "@/lib/db/client";
 import { auditLog, parentAuthSession } from "@/lib/db/schema";

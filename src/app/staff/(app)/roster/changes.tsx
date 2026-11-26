@@ -6,7 +6,7 @@ import { NOT_HERE, shapeOperations, type RosterOperation } from "@/lib/roster/op
 import { waitingWords, type QueueView } from "@/lib/roster/queue";
 import { coverStamp, keptWordsFor } from "@/lib/roster/writes";
 import { LocalTime } from "@/app/components/local-time";
-import { Card, DataTable, HowThisWorks, Notice } from "@/app/components/ui";
+import { Card, DataTable, Drawer, Notice } from "@/app/components/ui";
 import type { Covered } from "@/lib/roster/writes";
 import { CreateAndLinkForm, DeactivateForm, FamilyInactiveForm, MemberForm, MoveForm, NameForm } from "./write-forms";
 import type { WriteResult } from "@/lib/roster/writes";
@@ -25,9 +25,9 @@ import { addStudentAction, addStudentHereAction, createAction, createAndLinkActi
  */
 
 /**
- * What can be changed here for this club, and why the rest can't, in words (src/lib/roster/operations.ts): one line,
- * and the rest under How this works. The roster page's alone: a family's page says what it needs in its own folds
- * (ChangesInQuickBooks below, Move a student, Add a guardian).
+ * What can be changed here for this club, and why the rest can't, in words (src/lib/roster/operations.ts): a line or
+ * two, in the open. The roster page's alone: a family's page says what it needs in its own cards (ChangesInQuickBooks
+ * below, Move a student, Add a guardian).
  */
 export function WhatChanges({ shape, canChange, unlinked = false }: { shape: MembershipShape; canChange: boolean; unlinked?: boolean }) {
   const { offered, notOffered } = shapeOperations(shape);
@@ -39,20 +39,10 @@ export function WhatChanges({ shape, canChange, unlinked = false }: { shape: Mem
   const list = can.length > 1 ? `${can.slice(0, -1).join(", ")} and ${can.at(-1)}` : can[0] ?? "";
   return (
     <Card title="Changing the roster" titleId="changes-h">
-      <p>{canChange ? <>From the portal you can {list}.</> : <>Staff who may change the roster can {list} from the portal.</>}</p>
-      <HowThisWorks>
-        {!canChange && <p>For a family linked to QuickBooks, a rename, a new student or a move of a student is saved in the portal first; making someone inactive is sent to QuickBooks first.</p>}
-        <ul>
-          {canChange && <li>A rename, new student or move of a linked family is saved here first, then sent. If QuickBooks refuses, it stays here and Reconciliation lists it.</li>}
-          {canChange && <li>Making someone inactive goes to QuickBooks first. The roster shows it once QuickBooks has it.</li>}
-          {unlinked ? <li>This family isn&apos;t linked to a customer in QuickBooks: a change to it is saved in the portal only.</li>
-            : <><li>A new family is saved here, and made in QuickBooks too if you can link families.</li><li>A family with no link is changed here only.</li></>}
-        </ul>
-        {notOffered.map((n) => <p key={n.why}>{n.why}</p>)}
-        {canChange && <p>A move: the student takes their completed forms, and unfinished ones start again. They give up places on shifts still to come. Earned credit stays with the old family. An unpaid buy-out invoice is voided, and a paid one is flagged for the club. Invoices follow once QuickBooks has the move.</p>}
-        {canChange && <p>A new guardian gets their own Parent customer under the family, with their name and sign-in address, unless one of that name is there already. It is renamed with them. When they&apos;re removed it is made inactive, but only if it has no balance the portal can read, owed or a credit.</p>}
-        <p>{NOT_HERE.contact}</p>
-      </HowThisWorks>
+      <p>{canChange ? <>From the portal you can {list}.</> : <>Staff who may change the roster can {list} from the portal.</>}{" "}
+        {unlinked ? "This family isn't linked to QuickBooks, so a change to it is saved here only."
+          : "A change to a linked family is saved here first, then sent to QuickBooks; making someone inactive goes to QuickBooks first."}</p>
+      {notOffered.map((n) => <p key={n.why} className="hint">{n.why}</p>)}
     </Card>
   );
 }
@@ -145,24 +135,24 @@ export function PortalChanges({ familyId, name, noun, unlinked, addStudents, stu
       <p>{unlinked ? `This ${noun} isn't linked to QuickBooks, so changes are saved here only.`
         : "These students aren't linked to QuickBooks, so changes to them are saved here only."}</p>
       {unlinked && (
-        <details className="more"><summary>Change the {noun} {name}</summary>
+        <Drawer param="change-here" label={`Change the ${noun} ${name}`} description="Saved in the portal only.">
           <NameForm field="New name" label="Rename" pendingLabel="Renaming…" initial={name} act={renameHereAction.bind(null, rosterTag, "family", familyId)} />
           <DeactivateForm label={`Make ${name} inactive`}
             warning={`This makes ${name} inactive${noun === "family" ? ", with its students" : ""}, and its guardians can no longer sign in. It can't be made active again, and its page goes away. Its season, forms and volunteering are kept. Nothing is sent to QuickBooks.`}
             act={deactivateHereAction.bind(null, rosterTag, "family", familyId)} />
-        </details>
+        </Drawer>
       )}
       {unlinked && addStudents && (
-        <details className="more"><summary>Add a student</summary>
+        <Drawer param="add-student-here" label="Add a student" description="Saved in the portal only.">
           <NameForm field="The student's name" label="Add the student" pendingLabel="Adding…" act={addStudentHereAction.bind(null, rosterTag, familyId)} />
-        </details>
+        </Drawer>
       )}
       {students.map((s) => (
-        <details key={s.id} className="more"><summary>Change the student {s.name}</summary>
+        <Drawer key={s.id} param="change-student-here" value={s.id} label={`Change the student ${s.name}`} description="Saved in the portal only.">
           <NameForm field="New name" label="Rename" pendingLabel="Renaming…" initial={s.name} act={renameHereAction.bind(null, rosterTag, "student", s.id)} />
           <DeactivateForm label={`Make ${s.name} inactive`} warning={`${s.name} is no longer counted in the family's season. Nothing is sent to QuickBooks: they aren't linked to a customer there.`}
             act={deactivateHereAction.bind(null, rosterTag, "student", s.id)} />
-        </details>
+        </Drawer>
       ))}
     </Card>
   );
@@ -221,7 +211,7 @@ function RecordChanges({ who, c, rename, deactivate, warning, edit, extra, follo
   const record = edit.records.get(c.qboId);
   if (edit.blocked.has(c.qboId)) return <Notice tone="info" live="none">A change to {c.displayName} is waiting to reach QuickBooks, so nothing else can be changed for now.</Notice>;
   return (
-    <details className="more"><summary>Change {who} {c.displayName}</summary>
+    <Drawer param="change" value={c.qboId} label={`Change ${who} ${c.displayName}`}>
       {rename && (record ? <NameForm field="New name" label="Rename" pendingLabel="Saving in the portal, then sending to QuickBooks…" initial={record.name}
         act={renameLinkedAction.bind(null, edit.rosterTag, record.kind, record.id)} />
         : <NameForm field="New name" label="Rename" pendingLabel="Renaming in QuickBooks…" initial={c.displayName} act={renameParentAction.bind(null, edit.rosterTag, c.qboId, version)} />)}
@@ -232,7 +222,7 @@ function RecordChanges({ who, c, rename, deactivate, warning, edit, extra, follo
       {deactivate && !c.active && follow && record && !(record.kind === "student" && edit.keptMoves?.has(c.qboId)) && <DeactivateForm label={`Make ${c.displayName} inactive in the portal`}
         warning={`QuickBooks already has ${c.displayName} inactive. This makes the portal's record match, and sends nothing.`}
         act={deactivateLinkedAction.bind(null, edit.rosterTag, record.kind, record.id)} />}
-    </details>
+    </Drawer>
   );
 }
 
@@ -273,22 +263,15 @@ export function MoveStudents({ students, families, refusedHere, rosterTag, act }
   if (students.length === 0) return null;
   return (
     <Card title="Move a student" titleId="move-students-h">
-      <p>A move is saved here first and takes effect at once, whatever QuickBooks does. For a linked student it&apos;s then sent to QuickBooks. Their invoices follow once QuickBooks has it.</p>
-      <HowThisWorks summary="What a move changes">
-        <ul>
-          <li>Completed forms go with the student, and unfinished ones start again in the new family.</li>
-          <li>Their places on shifts still to come are given up, and none counts for the new family.</li>
-          <li>Credit they earned stays with the old family.</li>
-          <li>An unpaid buy-out invoice is voided, and any other buy-out (a paid one, say) is flagged for the club.</li>
-          <li>Until QuickBooks has the move, the old family still sees their invoices and the new one doesn&apos;t.</li>
-          <li>If the club asks for an active student to sign in, moving a family&apos;s last one out keeps its guardians out until it has another.</li>
-        </ul>
-      </HowThisWorks>
+      <p>A move takes effect here at once, and a linked student&apos;s is then sent to QuickBooks; until QuickBooks has it, the old family still sees their invoices. Completed forms and earned credit stay where they are, unfinished forms start again, places on shifts still to come are given up, and an unpaid buy-out invoice is voided.</p>
+      <p className="hint">If the club asks for an active student to sign in, moving a family&apos;s last one out keeps its guardians out until it has another.</p>
       {refusedHere !== null ? <Notice tone="info" live="none">{refusedHere}</Notice>
         : families.length === 0 ? <Notice tone="info" live="none">No other family can take a student right now: there is none active, or each has a change waiting.</Notice> : students.map((s) => (
-        <details key={s.id} className="more"><summary>Move the student {s.name}</summary>
-          {s.blocked !== null ? <Notice tone="info" live="none">{s.blocked}</Notice> : <MoveForm families={families} act={act.bind(null, rosterTag, s.id)} />}
-        </details>
+        s.blocked !== null ? <Notice key={s.id} tone="info" live="none">{s.name}: {s.blocked}</Notice> : (
+          <Drawer key={s.id} param="move" value={s.id} label={`Move the student ${s.name}`}>
+            <MoveForm families={families} act={act.bind(null, rosterTag, s.id)} />
+          </Drawer>
+        )
       ))}
     </Card>
   );
@@ -314,10 +297,9 @@ export function FamilyChanges({ shape, family, edit, cover, inactiveRecords, lin
       <RecordChanges who="the family" c={f} rename={offered.has("rename_family")} deactivate={false} edit={edit} warning=""
         extra={offered.has("deactivate_family") && cover ? <FamilyInactive family={f} cover={cover} edit={edit} /> : null} />
       {f.active && offered.has("add_student") && (
-        <details className="more"><summary>Add a student</summary>
-          <p className="hint">The student is saved in the portal first, then made in QuickBooks under the family. If QuickBooks refuses, they stay in the portal and the Reconciliation page says why.</p>
+        <Drawer param="add-student" label="Add a student" description="They're saved in the portal first, then made in QuickBooks under the family. If QuickBooks refuses, Reconciliation says why.">
           <NameForm field="The student's name, as QuickBooks will show it" label="Add the student" pendingLabel="Saving in the portal, then making them in QuickBooks…" act={addStudentAction.bind(null, edit.rosterTag, edit.familyId)} />
-        </details>
+        </Drawer>
       )}
       {family.students.filter((s) => !inactiveRecords.has(s.qboId)).map((s) => (
         <RecordChanges key={s.qboId} who="the student" c={s} rename={offered.has("rename_student")} deactivate={offered.has("deactivate_student")} edit={edit} follow
@@ -338,17 +320,14 @@ export function FamilyChanges({ shape, family, edit, cover, inactiveRecords, lin
   );
 }
 
-/** What a family's or member's changes in QuickBooks do, folded under the card's title: the roster page says it in Changing the roster. */
+/** What a family's or member's changes in QuickBooks do, in a line or two: the roster page says it in Changing the roster. */
 function ChangesInQuickBooks({ shape }: { shape: MembershipShape }) {
   return (
-    <HowThisWorks>
-      <ul>
-        <li>A rename, new student or move of a linked family is saved here first, then sent. If QuickBooks refuses, it stays here and Reconciliation lists it.</li>
-        <li>Making someone inactive goes to QuickBooks first. The roster shows it once QuickBooks has it.</li>
-      </ul>
-      {shapeOperations(shape).notOffered.map((n) => <p key={n.why}>{n.why}</p>)}
-      <p>{NOT_HERE.contact}</p>
-    </HowThisWorks>
+    <>
+      <p>A rename, new student or move of a linked family is saved here first, then sent; if QuickBooks refuses, Reconciliation lists it. Making someone inactive goes to QuickBooks first.</p>
+      {shapeOperations(shape).notOffered.map((n) => <p key={n.why} className="hint">{n.why}</p>)}
+      <p className="hint">{NOT_HERE.contact}</p>
+    </>
   );
 }
 

@@ -7,6 +7,7 @@ import { CalendarDate } from "@/app/components/calendar-date";
 import { StateWords } from "@/app/components/state-words";
 import type { SaveOutcome } from "@/lib/auth/provider-fields";
 import type { SummaryView } from "./labels";
+import { Drawer } from "@/app/components/ui/sheet";
 
 export type CertificateActions = { replace: () => Promise<SaveOutcome>; discard: () => Promise<SaveOutcome> };
 
@@ -73,13 +74,10 @@ export function CertificatePanel({ fileName, summary, actions }: { fileName: str
       <div className="stack cert-panel">
         <p className="cert-done"><StateWords state="done" words="Done: Microsoft accepted this certificate" /></p>
         <p className="hint">Thumbprint <code>{active.thumbprintSha1}</code>, expires <CalendarDate iso={active.notAfter} />. Nothing more to do until it nears its expiry.</p>
-        <details className="more"><summary>Manage certificate</summary>
-          <div className="stack">
-            <p className="hint">Download it again to add it to another app registration by hand. Replace it before it expires: the one in use keeps working until the new one checks out.</p>
-            <DownloadLink fileName={fileName} />
-            {replace}
-          </div>
-        </details>
+        <Drawer param="certificate" label="Manage the certificate" description="Download it again to add it to another app registration by hand, or replace it before it expires: the one in use keeps working until the new one checks out.">
+          <DownloadLink fileName={fileName} />
+          {replace}
+        </Drawer>
       </div>
     );
   }

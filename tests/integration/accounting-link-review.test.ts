@@ -132,7 +132,7 @@ describe("Confirm this link", () => {
     asStaff(linker);
     const html = listOf(await renderPage(AccountingLinksPage));
     expect(rowNamed(html, "Oak Family")![3]).toMatch(/^LinkedConfirmed .+$/);
-    expect(rowNamed(html, "Oak Family")![4]).toMatch(/^Details: Oak FamilyConfirmed by linker, on this page or with “Create a family from this”, on .+?\./);
+    expect(rowNamed(html, "Oak Family")![4]).toMatch(/^Confirmed by linker, on this page or with “Create a family from this”, on .+?\./);
     expect(rowNamed(html, "Oak Family")![4]).not.toContain("Confirm this link");
     // A second press, with the page's old stamp, changes nothing.
     expect(await pressRow(oaks, row)).toEqual({ ok: false, errors: [LINK_COPY.reviewChanged] });

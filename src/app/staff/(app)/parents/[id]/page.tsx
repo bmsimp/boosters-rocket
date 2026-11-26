@@ -8,7 +8,7 @@ import { whoseDetails } from "@/lib/parents/my-family";
 import { getShape } from "@/lib/roster/shape";
 import { familyPagesStand } from "@/lib/roster/queries";
 import { getParentSettings, parentDoorClosed } from "@/lib/parents/settings";
-import { Card, DataTable, EmptyState, HowThisWorks, KeyValue, List, ListRow, LocalTime, Notice, PageHeader, StatusBadge } from "@/app/components/ui";
+import { Card, DataTable, EmptyState, KeyValue, List, ListRow, LocalTime, Notice, PageHeader, StatusBadge } from "@/app/components/ui";
 import { DetailsForm, NameForm, NoteAction, OneButton, ResetSigninForm } from "../forms";
 import { blockAction, unblockAction, resendWelcomeAction, renamePersonAction, resetSigninAction, savePersonDetailsAction } from "../actions";
 import { GuardianChange } from "../guardian-change";
@@ -81,13 +81,10 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
                 return <>{said}{mayCompare ? <Link className="link-line" href={`/staff/reconciliation?compare=${item}#writes-h`}>Compare the two<span className="visually-hidden"> for {f.familyName}</span></Link>
                   : <span className="when">Someone who may see the Reconciliation page can compare the two there.</span>}</>;
               } },
-              ...(changesGuardians ? [{ key: "change", header: "Change", quiet: true, cell: (f: PersonFamily) => <GuardianChange name={f.familyName} guardianId={f.guardianId} open={f.open} reinstatable={f.reinstatable} /> }] : []),
+              ...(changesGuardians ? [{ key: "change", header: "Change", quiet: true, cell: (f: PersonFamily) => <GuardianChange name={f.familyName} removeLabel={`Remove them from ${f.familyName}`} guardianId={f.guardianId} open={f.open} reinstatable={f.reinstatable} /> }] : []),
             ]} />
         )}
-        <p className="hint">Their name, sign-in email, phone and mailing address are the portal&apos;s own. A change made in QuickBooks doesn&apos;t change them. Add a guardian to a family from that family&apos;s page.</p>
-        <HowThisWorks>
-          <p>Each family they&apos;re in has its own Parent customer in QuickBooks, where the books have parents. A new name here is sent to each. Removing them makes theirs inactive only if it has no balance the portal can read, owed or a credit.</p>
-        </HowThisWorks>
+        <p className="hint">Their name, sign-in email, phone and mailing address are the portal&apos;s own: a new name here is sent to their Parent customer in each family, and removing them makes that customer inactive only if it has no balance. Add a guardian to a family from that family&apos;s page.</p>
       </Card>
 
       {/* How they sign in: its own card, or, for an Admin who may reset it, the top of Reset sign-in. */}

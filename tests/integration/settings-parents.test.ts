@@ -32,6 +32,7 @@ vi.mock("next/navigation", () => ({
   redirect: (url: string) => { throw Object.assign(new Error("NEXT_REDIRECT"), { url }); },
   notFound: () => { throw Object.assign(new Error("NEXT_NOT_FOUND"), { notFound: true }); },
   usePathname: () => "/staff",                                                  // the staff menu, rendered to check its entry
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 import { renderToStaticMarkup } from "react-dom/server";
@@ -209,7 +210,7 @@ describe("the Parent sign-ins settings", () => {
     expect(await setSigninsAction(false)).toEqual({ ok: true, message: "Parent sign-ins weren't on." });
     expect(await setWelcomeAction(true)).toEqual({ ok: false, errors: ["Switch parent sign-ins on first."] });
     await setSigninsAction(true);
-    expect(await setup("signins")).toContain("Every parent is signed out at once and nobody can sign in until this is switched on again. Welcome emails are switched off too. Nothing is deleted.");
+    expect(await setup("signins")).toContain("Every parent is signed out at once, and welcome emails stop too. Nothing is deleted.");
     await setWelcomeAction(true);
     await setSigninsAction(false);
     const off = await setup("signins");
@@ -292,8 +293,7 @@ describe("the Parent sign-ins settings", () => {
     await setSigninsAction(true);
     const html = renderToStaticMarkup(await QuickBooksSettingsPage());
     expect(html).toContain(warning);
-    expect(html.indexOf(warning)).toBeGreaterThan(html.indexOf("<summary>Disconnect</summary>"));
-    expect(html.indexOf(warning)).toBeLessThan(html.indexOf("Disconnect QuickBooks</button>"));
+        expect(html.indexOf(warning)).toBeLessThan(html.indexOf("Disconnect QuickBooks</button>"));
     await db.delete(qboConnection);
     expect(renderToStaticMarkup(await QuickBooksSettingsPage())).not.toContain("can sign in to the portal now");   // nothing to disconnect
   });
@@ -406,45 +406,45 @@ describe("the Parent sign-ins settings", () => {
       expect(html).toContain("The club is at Standard: a password, and on a phone or computer the portal doesn't know yet, a code we email, or the guardian's own passkey or authenticator app.");
       expect(html).toContain("<dt>Can sign in</dt><dd>1 person</dd><dt>Have a passkey</dt><dd>0</dd><dt>Have an authenticator app</dt><dd>0</dd><dt>Have neither</dt><dd>1</dd>");
       expect(html).toContain("Strict asks every guardian for a passkey or an authenticator app each time they sign in, and an emailed code never signs anyone in. Switch once most guardians have one.");
-      expect(html).toContain("<summary>Switch to Strict</summary>");
-      expect(html).toContain("Switching to Strict signs out the 1 guardian who has neither a passkey nor an authenticator app. The next time they sign in, their password takes them to add one before they see their family's page. If they've forgotten their password, they'll need you to reset their sign-in from their page on Parents.");
+      expect(html).toContain(">Switch to Strict</button>");
+      expect(html).toContain("This signs out the 1 guardian with neither a passkey nor an authenticator app. They add one after their password next time; if they've forgotten it, reset their sign-in from their page on Parents.");
       expect(html).toContain(">Switch to Strict</button>");
       expect(html).not.toContain("Switch back to Standard");
       const sam = await seedSam();
       html = await stepThree();
       expect(html).toContain("<dt>Can sign in</dt><dd>2 people</dd>");
-      expect(html).toContain("Switching to Strict signs out the 2 guardians who have neither a passkey nor an authenticator app. The next time they sign in, their password takes them to add one before they see their family's page. Anyone who has forgotten their password will need you to reset their sign-in from their page on Parents.");
+      expect(html).toContain("This signs out the 2 guardians with neither a passkey nor an authenticator app. They add one after their password next time; if they've forgotten it, reset their sign-in from their page on Parents.");
       await seedPasskey(ana.id); await seedAuthenticator(ana.id); await seedAuthenticator(sam.id);
       html = await stepThree();
       expect(html).toContain("<dt>Can sign in</dt><dd>2 people</dd><dt>Have a passkey</dt><dd>1</dd><dt>Have an authenticator app</dt><dd>2</dd><dt>Have neither</dt><dd>0</dd>");
-      expect(html).toContain("Switching to Strict signs nobody out: every guardian who can sign in has a passkey or an authenticator app.");
+      expect(html).toContain("This signs nobody out: every guardian who can sign in has a passkey or an authenticator app.");
       expect(html).toContain('<a class="link-line" href="/staff/settings/parents">Back to Parent sign-ins</a>');
     });
 
     it("step 3 with parent sign-ins off counts who could sign in once they are on, and its confirm signs nobody out, for 0, 1 and 2 with neither", async () => {
       const ana = await ready();
       expect((await getParentSettings()).signin).toBe(false);
-      const off = "Parent sign-ins are off, so switching to Strict signs nobody out. Once they are on, a guardian with neither a passkey nor an authenticator app adds one after their password, before they see their family's page.";
+      const off = "Parent sign-ins are off, so this signs nobody out. Once they're on, a guardian with neither a passkey nor an authenticator app adds one after their password.";
       let html = await stepThree();
       expect(html).toContain("<dt>Could sign in once sign-ins are on</dt><dd>1 person</dd><dt>Have a passkey</dt><dd>0</dd><dt>Have an authenticator app</dt><dd>0</dd><dt>Have neither</dt><dd>1</dd>");
       expect(html).not.toContain("<dt>Can sign in</dt>");
       expect(html).toContain(off);
-      expect(html).not.toContain("Switching to Strict signs out");
+      expect(html).not.toContain("This signs out");
       const sam = await seedSam();
       html = await stepThree();
       expect(html).toContain("<dt>Could sign in once sign-ins are on</dt><dd>2 people</dd>");
       expect(html).toContain(off);
-      expect(html).not.toContain("Switching to Strict signs out");
+      expect(html).not.toContain("This signs out");
       await seedPasskey(ana.id); await seedAuthenticator(sam.id);
       html = await stepThree();
       expect(html).toContain("<dt>Could sign in once sign-ins are on</dt><dd>2 people</dd><dt>Have a passkey</dt><dd>1</dd><dt>Have an authenticator app</dt><dd>1</dd><dt>Have neither</dt><dd>0</dd>");
-      expect(html).toContain("Parent sign-ins are off, so switching to Strict signs nobody out. Every guardian who could sign in once they are on has a passkey or an authenticator app.");
-      expect(html).not.toContain("Switching to Strict signs nobody out:");
+      expect(html).toContain("Parent sign-ins are off, so this signs nobody out, and every guardian who could sign in has a passkey or an authenticator app.");
+      expect(html).not.toContain("This signs nobody out:");
       // Switched on, every word is as it was.
       await setSigninsAction(true);
       html = await stepThree();
       expect(html).toContain("<dt>Can sign in</dt><dd>2 people</dd>");
-      expect(html).toContain("Switching to Strict signs nobody out: every guardian who can sign in has a passkey or an authenticator app.");
+      expect(html).toContain("This signs nobody out: every guardian who can sign in has a passkey or an authenticator app.");
       expect(html).not.toContain("Parent sign-ins are off");
     });
 
@@ -470,8 +470,8 @@ describe("the Parent sign-ins settings", () => {
       let html = await stepThree();
       expect(html).toContain("The club is at Strict: a password and a passkey or an authenticator app, every time. An emailed code never signs anyone in.");
       expect(html).toContain("<dt>Have neither</dt><dd>1</dd>");
-      expect(html).toContain("<summary>Switch back to Standard</summary>");
-      expect(html).toContain("Switching back to Standard lets guardians with no passkey or app sign in with their password and a code we email again. Nobody is signed out, and every passkey and app stays.");
+      expect(html).toContain(">Switch back to Standard</button>");
+      expect(html).toContain("Guardians with no passkey or app sign in with their password and an emailed code again. Nobody is signed out.");
       expect(html).toContain(">Switch back to Standard</button>");
       expect(html).not.toContain("Switch to Strict");
       expect(html).not.toContain("Switch once most guardians have one.");
@@ -479,8 +479,8 @@ describe("the Parent sign-ins settings", () => {
       html = await stepThree();
       expect(html).toContain(decoded(LEVEL_UNREADABLE));
       expect(html).toContain("<dt>Have neither</dt><dd>1</dd>");
-      expect(html).toContain("<summary>Switch to Strict</summary>");
-      expect(html).toContain("<summary>Switch back to Standard</summary>");
+      expect(html).toContain(">Switch to Strict</button>");
+      expect(html).toContain(">Switch back to Standard</button>");
       expect(html).not.toContain("The club is at");
     });
 
@@ -513,7 +513,7 @@ describe("the Parent sign-ins settings", () => {
       await seedParentSession(ana.authUserId); await seedParentSession(sam.authUserId);
       let page = await drawn();
       expect(page.html).toContain("<dt>Have neither</dt><dd>2</dd>");
-      expect(page.html).toContain("Switching to Strict signs out the 2 guardians who have neither");
+      expect(page.html).toContain("This signs out the 2 guardians with neither");
       const toStrict = page.presses.find((p) => p.label === "Switch to Strict");
       expect(toStrict).toBeDefined();
       expect(await toStrict!.act()).toEqual({ ok: true, message: "The club is at Strict. 2 guardians with neither a passkey nor an authenticator app were signed out." });

@@ -19,7 +19,10 @@ export { Avatar } from "./avatar";
 export { StepIndicator, type Step } from "./step-indicator";
 export { KeyValue, type KeyValueItem } from "./key-value";
 export { Toolbar } from "./toolbar";
-export { HowThisWorks } from "./how-this-works";
+export { Drawer, ConfirmDialog, Sheet, type Confirmed } from "./sheet";
+export { BulkSelect, useBulkSelection } from "./bulk-select";
+export { StepsChoice } from "./steps-choice";
+export { selectionPayload, type Selection } from "./selection";
 // The primitives that were here before this folder: use them as they are.
 export { DataTable, type Column, type RowGroup } from "../data-table";
 export { Notice, ActionOutcome, TONE_WORDS, type Tone as NoticeTone } from "../notice";

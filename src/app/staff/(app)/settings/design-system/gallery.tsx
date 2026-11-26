@@ -3,12 +3,13 @@ import { formatMoney } from "@/lib/money/cents";
 import { contrastRatio } from "@/lib/theme/contrast";
 import { MARK_PAIRS, PALETTE, TEXT_PAIRS, type Mode, type Token } from "@/lib/theme/palette";
 import {
-  ActionOutcome, Avatar, Badge, Button, CalendarDate, Card, Checkbox, DataTable, EmptyState, HowThisWorks, KeyValue, LinkButton, List, ListRow, ListSubRow, ListTotal, LocalTime,
+  ActionOutcome, Avatar, Badge, Button, CalendarDate, Card, Checkbox, DataTable, EmptyState, KeyValue, LinkButton, List, ListRow, ListSubRow, ListTotal, LocalTime,
   Notice, PageHeader, SectionLabel, Select, Stat, StateWords, StatusBadge, StatusDot, StatusIcon, StepIndicator, TextArea, TextInput, Toolbar, type Column,
 } from "@/app/components/ui";
 import { IntegrationLogo } from "../integration-logo";
 import { PoweredBy } from "@/app/components/powered-by";
 import { ChoiceSample, TakenChoiceSample } from "./gallery-choice";
+import { BulkSample, ConfirmSample, DrawerSample, StepsChoiceSample } from "./gallery-sheets";
 import { RichTextEditor } from "@/app/components/rich-text-editor";
 
 /**
@@ -26,7 +27,7 @@ const MODES: { mode: Mode; label: string; theme: "light" | "dark"; contrast?: "m
 
 const SECTIONS = [
   ["tokens", "Tokens"], ["contrast", "Contrast"], ["button", "Button"], ["badge", "Badge"], ["card", "Card"], ["list", "List"],
-  ["page-header", "PageHeader"], ["section-label", "SectionLabel"], ["empty-state", "EmptyState"], ["how-this-works", "HowThisWorks"], ["stat", "Stat"], ["fields", "Fields"], ["rich-text-editor", "RichTextEditor"],
+  ["page-header", "PageHeader"], ["section-label", "SectionLabel"], ["empty-state", "EmptyState"], ["drawer", "Drawer"], ["confirm-dialog", "ConfirmDialog"], ["steps-choice", "StepsChoice"], ["stat", "Stat"], ["fields", "Fields"], ["rich-text-editor", "RichTextEditor"],
   ["avatar", "Avatar"], ["step-indicator", "StepIndicator"], ["key-value", "KeyValue"], ["toolbar", "Toolbar"], ["data-table", "DataTable"],
   ["notice", "Notice"], ["state-words", "StateWords"], ["settings-rail", "Settings rail"], ["time-money", "Time and money"], ["frame", "Bar and tabs"], ["powered-by", "Powered by"], ["themes", "Display modes"],
 ] as const;
@@ -268,12 +269,16 @@ export function Gallery() {
         <EmptyState title="No volunteer events yet" action={<Button>Add an event</Button>}>When you add one, families see it on their Volunteer page.</EmptyState>
       </Section>
 
-      <Section id="how-this-works" name="HowThisWorks" use="A card's longer explanation, folded under one quiet 44px summary ('How this works', or words of its own) whose caret turns when open. What a reader must know before pressing stays outside it." importLine={UI("HowThisWorks")}>
-        <Card title="Move a student" titleId="ds-how-h" description="A move is saved here first and takes effect at once.">
-          <HowThisWorks summary="What a move changes">
-            <ul><li>Completed forms go with the student, and unfinished ones start again in the new family.</li><li>Credit they earned stays with the old family.</li></ul>
-          </HowThisWorks>
-        </Card>
+      <Section id="drawer" name="Drawer" use="A form behind a button: a repeated form on a row (Waive for…, Change the student…) or a secondary one on a page. The button says what the form does; it opens a side sheet with the form, which fills a phone's screen. It has its own address (?param=value): Back closes it, a refresh opens it again, and without JavaScript the button is a link to the page with the form drawn in it. The focus goes in, stays in, and comes back to the button; Esc and Close close it." importLine={UI("Drawer")}>
+        <DrawerSample />
+      </Section>
+
+      <Section id="confirm-dialog" name="ConfirmDialog" use="One press that needs a second look: a button with the action's words, then a small dialog with one sentence of what follows, an optional box to tick or a reason to type, and the action's own button beside Cancel (which has the focus first). Not for a form: that is a Drawer." importLine={UI("ConfirmDialog")}>
+        <ConfirmSample />
+      </Section>
+
+      <Section id="steps-choice" name="StepsChoice" use="Two ways to do one task, such as by hand or with a script: the choice in the open, and only the chosen way's steps under it." importLine={UI("StepsChoice")}>
+        <StepsChoiceSample />
       </Section>
 
       <Section id="stat" name="Stat" use="One figure that matters on a staff page, with its label. Group a few in .stats. Not a hero number on a parent page: there the amount sits in its card." importLine={UI("Stat")}>
@@ -344,6 +349,9 @@ export function Gallery() {
       <Section id="data-table" name="DataTable" use="Many records with the same columns: the roster, Balances, the audit log. Numbers right-aligned in tabular figures; a quiet column for row actions. On a phone each row stacks, label beside value." importLine={UI("DataTable, type Column")}>
         <DataTable caption="Sample invoices" columns={invoiceColumns} rows={INVOICES} rowKey={(i) => i.id} />
         <DataTable caption="Grouped by family" columns={invoiceColumns} groups={[{ key: "g", heading: "Sample Family", rows: INVOICES.slice(0, 2) }]} rowKey={(i) => `g${i.id}`} />
+        <h3 className="table-head">Bulk select</h3>
+        <p className="ds-note">Inside BulkSelect, <code>select</code> puts a tick box on each row (&quot;Select&quot; and the row&apos;s name) and one in the header, mixed when some are ticked. A bar stays in view while any are: the count, read out as it changes, the actions, and Clear; with the page ticked and more rows matching, &quot;Select all M that match&quot;. On a phone the actions are one &quot;N selected · Actions&quot; button. A bulk action sends <code>selectionPayload()</code>, ids from the browser: the server checks every one again before it acts, and works out &quot;all that match&quot; from its own query. Its Drawer says first what would happen to each row, then what did.</p>
+        <BulkSample />
       </Section>
 
       <Section id="notice" name="Notice and ActionOutcome" use="A status that stands apart: information, needs attention, done, a problem. ActionOutcome shows what a server action answered. A problem is announced as an alert, the rest as a status. An answer that replaces the form that was pressed takes the focus: give it a ref (and Notice tabIndex={-1})." importLine={UI("Notice, ActionOutcome")}>

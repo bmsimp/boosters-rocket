@@ -6,6 +6,7 @@ import { actionName } from "@/lib/audit/actions";
 import { auditActions, auditPage, filtersQuery, hasFilters, parseAuditFilters, parseCursor, recordText } from "@/lib/audit/query";
 import { DataTable } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
+import { Drawer } from "@/app/components/ui";
 import { AuditFilterForm } from "./filter-form";
 
 import { SettingsHeader } from "../back-to-settings";
@@ -38,8 +39,13 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
             { key: "when", header: "When", sorted: "descending", cell: (r) => <LocalTime iso={r.at.toISOString()} /> },
             { key: "what", header: "What happened", rowHeader: true, cell: (r) => {
               const details = formatAuditDetails(r.before, r.after);
-              return (<>{actionName(r.action) ?? r.action}<span className="when"><code>{r.action}</code></span>
-                {details ? <details className="when"><summary>Details</summary><code>{details}</code></details> : null}</>);
+              const name = actionName(r.action) ?? r.action;
+              // The details on one short line under the words, cut where it runs out; all of them in a Drawer.
+              return (<>{name}<span className="when"><code>{r.action}</code></span>
+                {details ? <><span className="audit-more">{details}</span>
+                  <Drawer param="details" value={String(r.id)} variant="quiet" size="sm" title={`Details: ${name}`}
+                    label={<>Show the details<span className="visually-hidden"> of {name}, <LocalTime iso={r.at.toISOString()} /></span></>}>
+                    <code className="audit-full">{details}</code></Drawer></> : null}</>);
             } },
             { key: "who", header: "Who", cell: (r) => <>{r.actorLabel ?? "system"}<span className="when">{r.door}{r.ip ? ` · ${r.ip}` : ""}</span></> },
             { key: "record", header: "Record", cell: (r) => (r.targetType

@@ -1,7 +1,7 @@
 import type { MailSummary } from "@/lib/mail/settings";
 import { StateWords } from "@/app/components/state-words";
 import { MailSaveForm, MailTestForm } from "./mail-card";
-import { MicrosoftMailSetup, SmtpHelp } from "./mail-steps";
+import { MicrosoftMailSetup } from "./mail-steps";
 
 type SaveResult = { ok: true } | { ok: false; errors: string[] };
 type TestResult = { ok: true } | { ok: false; error: string };
@@ -35,7 +35,6 @@ export async function MailGuide({ summary, save, test }: { summary: MailSummary;
       )}
       <section className="box" aria-labelledby="mail-save-h"><h2 id="mail-save-h">Step {n("mail-save-h")}: Choose how the portal sends</h2>
         <MailSaveForm summary={summary} save={save} testStep={n("mail-test-h")} />
-        <SmtpHelp />
       </section>
       <section className="box" aria-labelledby="mail-test-h"><h2 id="mail-test-h">Step {n("mail-test-h")}: Send a test email</h2>
         <MailTestForm summary={summary} test={test} saveStep={n("mail-save-h")} />

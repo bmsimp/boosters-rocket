@@ -1,4 +1,4 @@
-import { test, expect, type Locator, type Page } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import postgres from "postgres";
 import { parentSessionCookie } from "./parent-session";
 import { staffSessionCookie } from "./staff-session";
@@ -47,10 +47,6 @@ test.afterAll(async () => { await tidy(); await sql.end(); });
 test.beforeEach(async ({ context }) => { await context.addCookies([staffSessionCookie()]); });
 
 const box = (page: Page, name: string | RegExp) => page.getByRole("region", { name });
-/** Opens a disclosure by its summary, unless it is open already (a step with nothing in it starts with its form open). */
-async function opened(details: Locator) {
-  if (!(await details.evaluate((d) => (d as HTMLDetailsElement).open))) await details.locator("summary").first().click();
-}
 
 test("a staff member's session: the roster, a season, volunteering, forms, money and the club's records", async ({ page, context }) => {
   test.setTimeout(180_000);
@@ -107,9 +103,10 @@ test("a staff member's session: the roster, a season, volunteering, forms, money
     await expect(row).toContainText("Hasn't chosen a password yet");
     await noSidewaysScroll(page);
     await shot(page, "s04b-guardian-added");
-    await row.locator("summary").click();
-    await row.getByLabel("Why? (staff only)").fill("Walk e2e: added by the walk");
-    await row.getByRole("button", { name: "Remove", exact: true }).click();
+    await row.getByRole("button", { name: `Remove ${GUARDIAN.name} from this family` }).click();
+    const ask = page.getByRole("dialog", { name: `Remove ${GUARDIAN.name} from this family?` });
+    await ask.getByLabel("Why? (staff only)").fill("Walk e2e: added by the walk");
+    await ask.getByRole("button", { name: "Remove", exact: true }).click();
     await expect(signins.getByRole("row").filter({ hasText: GUARDIAN.email })).toContainText("Can't sign in: removed by staff");
     // The answer outlives the swap of Remove for Reinstate, and the focus, whose button went, is on it.
     await expect(signins.getByRole("row").filter({ hasText: GUARDIAN.email }).getByRole("status")).toContainText("Removed. They can't sign in to this family any more");
@@ -132,11 +129,16 @@ test("a staff member's session: the roster, a season, volunteering, forms, money
     const step = box(page, "1. Walk step");
     await expect(step).toBeVisible();
     for (const [kind, title] of [["Checklist item", "Walk checklist"], ["Form", "Walk form"], ["Payment", "Walk payment"], ["Volunteering", "Walk volunteering"]] as const) {
-      await opened(step.locator("details", { has: page.getByText("Add a requirement to Walk step") }));
-      await step.getByLabel("Kind").selectOption({ label: kind });
-      await step.getByLabel("What it is, in your club's words").fill(title);
-      if (kind === "Volunteering") await step.getByLabel("How much").fill("2");
-      await step.getByRole("button", { name: "Add requirement" }).click();
+      // The form is in a Drawer: it stays open after a save, so the new line is looked for behind it, then Esc closes it.
+      await step.getByRole("link", { name: "Add a requirement to Walk step" }).click();
+      const drawer = page.getByRole("dialog", { name: "Add a requirement to Walk step" });
+      await drawer.getByLabel("Kind").selectOption({ label: kind });
+      await drawer.getByLabel("What it is, in your club's words").fill(title);
+      if (kind === "Volunteering") await drawer.getByLabel("How much").fill("2");
+      await drawer.getByRole("button", { name: "Add requirement" }).click();
+      await expect(page.getByRole("link", { name: title, includeHidden: true })).toBeAttached();
+      await page.keyboard.press("Escape");
+      await expect(drawer).toBeHidden();
       await expect(step.getByRole("link", { name: title })).toBeVisible();
     }
     await expect(step).toContainText(/Walk checklist\s*Checklist item/);
@@ -151,9 +153,12 @@ test("a staff member's session: the roster, a season, volunteering, forms, money
     await staffMenuTo(page, "Season", "Progress");
     await page.getByRole("link", { name: "Banquet RSVP" }).click();
     const row = page.locator(".progress-rows tbody tr").filter({ hasText: "Quetzalcoatl Family" });
-    await row.getByText("Waive for Quetzalcoatl Family").click();
-    await row.getByLabel(/^Why\?/).fill(WAIVER);
-    await row.getByRole("button", { name: "Waive", exact: true }).click();
+    await expect(row.getByRole("link", { name: "Waive for Quetzalcoatl Family" })).toBeVisible();
+    const progress = page.url(); // the requirement's page, once it is drawn
+    await row.getByRole("link", { name: "Waive for Quetzalcoatl Family" }).click();
+    const waive = page.getByRole("dialog", { name: "Waive for Quetzalcoatl Family" });
+    await waive.getByLabel(/^Why\?/).fill(WAIVER);
+    await waive.getByRole("button", { name: "Waive", exact: true }).click();
     // Drawn again from what was saved (the reason typed is in the text box until then, so it can't be the sign).
     await expect(row.getByRole("button", { name: "Remove waiver" })).toBeVisible();
     await expect(row.locator(".when")).toContainText(WAIVER);
@@ -164,10 +169,9 @@ test("a staff member's session: the roster, a season, volunteering, forms, money
     const wrap = page.getByRole("region", { name: "4. Wrap-up" });
     await expect(wrap).toContainText(/Banquet RSVP\s*Waived/);
     await expect(page.locator("body")).not.toContainText(WAIVER);
-    await page.goBack();
-    await page.reload();
+    await page.goto(progress);
     await row.getByRole("button", { name: "Remove waiver" }).click();
-    await expect(row.getByText("Waive for Quetzalcoatl Family")).toBeVisible();
+    await expect(row.getByRole("link", { name: "Waive for Quetzalcoatl Family" })).toBeVisible();
   });
 
   await test.step("runs a volunteer event: a shift, its sign-up list and its check-in sheet", async () => {
@@ -212,9 +216,10 @@ test("a staff member's session: the roster, a season, volunteering, forms, money
     await expect(credit).toBeVisible();
     await noSidewaysScroll(page);
     await shot(page, "s09-credit");
-    await credit.getByText("Remove this credit").click();
-    await credit.getByLabel(/^Why it's being removed/).fill("Walk e2e: entered by mistake");
-    await credit.getByRole("button", { name: "Remove it" }).click();
+    await credit.getByRole("button", { name: "Remove this credit" }).click();
+    const ask = page.getByRole("dialog", { name: "Remove this credit?" });
+    await ask.getByLabel(/^Why it's being removed/).fill("Walk e2e: entered by mistake");
+    await ask.getByRole("button", { name: "Remove the credit" }).click();
     await expect(page.getByRole("region", { name: "Removed credit" }).getByRole("row").filter({ hasText: NOTE })).toContainText("Removed");
   });
 

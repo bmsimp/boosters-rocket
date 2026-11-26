@@ -9,7 +9,7 @@ import { describeRequirement, getSeasonSetup } from "@/lib/seasons/setup";
 import { rosterListsNoStudents } from "@/lib/seasons/subjects";
 import { CalendarDate } from "@/app/components/calendar-date";
 import { Notice } from "@/app/components/notice";
-import { HowThisWorks } from "@/app/components/ui";
+import { Drawer } from "@/app/components/ui";
 import { StateWords } from "@/app/components/state-words";
 import { OneButton, RequirementForm, StepForm, TextAction, type KindChoice } from "../forms";
 import {
@@ -60,7 +60,7 @@ export default async function SeasonPage({ params }: { params: Promise<{ id: str
         <p>{dated
           ? "By date: the first step that hasn't ended."
           : "No step has a date, so each family is on the first step that not everyone in it has finished. Give any step a date and the whole club moves through the steps by date instead."}</p>
-        {dated && <HowThisWorks><p>A step ends when its end date has passed or, if it has none, when a later step starts or ends. A step that follows one with no end date needs a start date to be marked in its turn. Dates follow the club&apos;s time zone, set under Club.</p></HowThisWorks>}
+        {dated && <p className="hint">A step ends when its end date passes or, with none, when a later step starts or ends, so a step after one with no end date needs a start date. Dates follow the club&apos;s time zone, set under Club.</p>}
         {outOfOrder.length > 0 && (
           <Notice tone="warning">
             The dates are out of order: {outOfOrder.length === 1 ? <>{outOfOrder[0]} starts or ends</> : <>{outOfOrder.join(", ")} each start or end</>} before an earlier step.
@@ -89,17 +89,19 @@ export default async function SeasonPage({ params }: { params: Promise<{ id: str
           )}
           {canChange && (
             <>
-              <details className="more"><summary>Add a requirement to {step.name}</summary>
-                <RequirementForm kinds={kinds} perStudent={perStudent} add={addRequirementAction.bind(null, step.id)} />
-              </details>
-              <details className="more"><summary>Change, move or remove {step.name}</summary>
-                <StepForm initial={{ name: step.name, startsOn: step.startsOn, endsOn: step.endsOn }} save={updateStepAction.bind(null, step.id)} />
-                <div className="row-actions">
-                  {i > 0 && <OneButton label="Move earlier" pendingLabel="Moving…" act={moveStepAction.bind(null, step.id, "earlier")} />}
-                  {i < season.steps.length - 1 && <OneButton label="Move later" pendingLabel="Moving…" act={moveStepAction.bind(null, step.id, "later")} />}
-                  <OneButton label="Remove this step" pendingLabel="Removing…" act={removeStepAction.bind(null, step.id)} />
-                </div>
-              </details>
+              <div className="row-actions">
+                <Drawer param="add-requirement" value={step.id} label={`Add a requirement to ${step.name}`}>
+                  <RequirementForm kinds={kinds} perStudent={perStudent} add={addRequirementAction.bind(null, step.id)} />
+                </Drawer>
+                <Drawer param="step" value={step.id} label={`Change or remove ${step.name}`}>
+                  <StepForm initial={{ name: step.name, startsOn: step.startsOn, endsOn: step.endsOn }} save={updateStepAction.bind(null, step.id)} />
+                  <div className="row-actions">
+                    {i > 0 && <OneButton label="Move earlier" pendingLabel="Moving…" act={moveStepAction.bind(null, step.id, "earlier")} />}
+                    {i < season.steps.length - 1 && <OneButton label="Move later" pendingLabel="Moving…" act={moveStepAction.bind(null, step.id, "later")} />}
+                    <OneButton label="Remove this step" pendingLabel="Removing…" act={removeStepAction.bind(null, step.id)} />
+                  </div>
+                </Drawer>
+              </div>
             </>
           )}
         </section>

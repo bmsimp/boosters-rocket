@@ -108,27 +108,6 @@ export function CutoffForm({ initial, save }: { initial: number; save: (hours: s
   );
 }
 
-/** One button that asks first: removing someone's place, or making a new check-in code. */
-export function ConfirmButton({ label, question, yes, act }: { label: string; question: string; yes: string; act: () => Promise<Done> }) {
-  const [asking, setAsking] = useState(false);
-  const [state, run, pending] = useActionState(async () => safely(() => act(), failed), null);
-  if (state?.ok) return <Outcome state={state} />;
-  return (
-    <div className="stack">
-      {!asking ? <div className="row-actions"><button type="button" className="btn btn-line" onClick={() => setAsking(true)}>{label}</button></div> : (
-        <>
-          <p>{question}</p>
-          <div className="row-actions">
-            <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Working…" : yes}</button>
-            <button type="button" className="btn btn-line" disabled={pending} onClick={() => setAsking(false)}>Keep it</button>
-          </div>
-        </>
-      )}
-      <Outcome state={state} />
-    </div>
-  );
-}
-
 export type OutsideRequirement = { id: string; label: string; unit: "shifts" | "hours"; appliesTo: "family" | "student" };
 export type OutsideFields = { requirementId: string; who: string; amount: string; note: string };
 

@@ -3,7 +3,8 @@ import postgres from "postgres";
 import { staffSessionCookie } from "./staff-session";
 
 /**
- * Pictures for the owner to look at, not a check of pixels: the QuickBooks settings page, step 2 of setup asking which
+ * Pictures for the owner to look at, not a check of pixels: the QuickBooks settings page and its Disconnect asking first, a
+ * Drawer and a ConfirmDialog on the design-system gallery, step 2 of setup asking which
  * company with "A different company" chosen (the owner's finding of 2026-11-25), and the switch page, at each project's
  * width (390 and 1440). Each is saved under test-results/screenshots/, which the focused run uploads as the artifact
  * "screenshots" (.github/workflows/focused.yml). The seed's connection is hidden for step 2 and the switch page, its
@@ -37,4 +38,23 @@ test("the QuickBooks pages, for the owner to look at", async ({ page }, info) =>
     await sql`UPDATE setting SET value = ${sql.json({ realmId: REALM })} WHERE key = 'roster.source'`;
     await sql`UPDATE qbo_connection SET realm_id = ${REALM}`;
   }
+});
+
+test("a Drawer and a ConfirmDialog, for the owner to look at", async ({ page }, info) => {
+  await page.goto("/staff/settings/design-system?ds-drawer=1");
+  const drawer = page.getByRole("dialog", { name: "Change the event" });
+  await expect(drawer).toBeVisible();
+  await drawer.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished))); // slid all the way in, not caught mid-slide
+  await page.screenshot({ path: `test-results/screenshots/drawer-${info.project.name}.png` });
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Disconnect QuickBooks" }).click();
+  await expect(page.getByRole("dialog", { name: "Disconnect QuickBooks?" })).toBeVisible();
+  await page.screenshot({ path: `test-results/screenshots/confirm-dialog-${info.project.name}.png` });
+});
+
+test("QuickBooks settings' Disconnect, asking first, for the owner to look at", async ({ page }, info) => {
+  await page.goto("/staff/settings/quickbooks");
+  await page.getByRole("button", { name: "Disconnect QuickBooks" }).click();
+  await expect(page.getByRole("dialog", { name: "Disconnect QuickBooks?" })).toBeVisible();
+  await page.screenshot({ path: `test-results/screenshots/quickbooks-disconnect-${info.project.name}.png` });
 });

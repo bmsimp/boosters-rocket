@@ -750,6 +750,6 @@ describe("a change QuickBooks refused that the portal kept (stage 3's slice 9e)"
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     const html = sectionOf(await renderPage(RosterEntryPage, { params: { id: await idOf("10") } }), "family-changes-h");
     expect(html).toContain('value="Leo R. Rivera"');
-    expect(html).toContain("The student is saved in the portal first, then made in QuickBooks under the family.");
+    expect(html).toContain("They&#x27;re saved in the portal first, then made in QuickBooks under the family.");
   });
 });

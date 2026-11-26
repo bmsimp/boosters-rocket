@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Card, HowThisWorks, LinkButton, Notice } from "@/app/components/ui";
+import { Card, LinkButton, Notice } from "@/app/components/ui";
 import { GUARDIAN_NAMED, IMPORT_MAX, type ImportProposal, type NotProposedGuardian, type ProposedFamily, type ProposedGuardian } from "@/lib/accounting/import-proposals";
 import { importKeys } from "@/lib/accounting/import-proposals";
 import { importStamp } from "@/lib/accounting/stamp";
@@ -32,11 +32,8 @@ export const IMPORT_WORDS = {
       : "Welcome emails are off, so nobody is mailed now: each person added who has never been welcomed is welcomed, with a link to set up their sign-in, once an Admin switches welcome emails on.",
     "A family you untick stays in the list of customers with no family, to make later, here or with “Create a family from this”.",
   ],
-  /** The rest of the intro, behind How this works. */
-  introMore: [
-    "Nothing is sent to QuickBooks. Families, students and people the portal has already are never changed: a person whose address the portal knows is added as they are, with their name as it is.",
-    "Each family is made linked to its customer, and each student to theirs, confirmed by you. Each guardian is then added as on a family's page, and where the books have Parent customers, linked to their own.",
-  ],
+  /** The rest of the intro, in a hint under it. */
+  introMore: "Nothing is sent to QuickBooks, and families, students and people the portal has already are never changed. Each family and student is made linked to its customer, and each guardian is added as on a family's page.",
   aimed: (n: number) => `${plural(n, "customer listed here isn't", "customers listed here aren't")} proposed, as this page suggests ${n === 1 ? "it" : "each"} for, or lists ${n === 1 ? "it" : "each"} as a possible customer of, a family the portal has: ${n === 1 ? "it is" : "they are"} linked on this page instead.`,
   pastCap: (n: number) => `${plural(n, "more customer isn't", "more customers aren't")} proposed yet, as up to ${IMPORT_MAX} are proposed at a time: ${n === 1 ? "it is" : "they are"} proposed here once these are made.`,
   legend: "Families to make",
@@ -114,7 +111,7 @@ export function ImportReview({ review, mayChangeFamilies, tag }: { review: { pro
     return (
       <div className="stack">
         {IMPORT_WORDS.intro(welcomes).map((w) => <p key={w}>{w}</p>)}
-        <HowThisWorks>{IMPORT_WORDS.introMore.map((w) => <p key={w}>{w}</p>)}</HowThisWorks>
+        <p className="hint">{IMPORT_WORDS.introMore}</p>
         <p>{GUARDIAN_NAMED[proposal.from]}</p>
         <ImportForm ids={proposal.families.map((f) => f.customerId)} act={saveImportAction.bind(null, tag, stamp)}>
           <fieldset className="checks"><legend>{IMPORT_WORDS.legend}</legend>

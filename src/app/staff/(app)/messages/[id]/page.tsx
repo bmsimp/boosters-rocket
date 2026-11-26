@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
  * delete (an Admin), behind its confirm step. Not audited: a message is the same for every family, and the failed
  * addresses are a list across families, like the roster's.
  */
-export default async function StaffMessagePage({ params }: { params: Promise<{ id: string }> }) {
+export default async function StaffMessagePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireStaffPage("Messages.Post.ReadWrite");
   const { id } = await params;
   const m = await staffMessage(id);
@@ -32,6 +32,9 @@ export default async function StaffMessagePage({ params }: { params: Promise<{ i
     );
   }
   const [current, ...earlier] = m.versions;
+  // ?version=N reads an earlier version, found among this message's own; anything else reads the current one.
+  const asked = ((await searchParams) ?? {}).version;
+  const shown = earlier.find((v) => typeof asked === "string" && String(v.n) === asked) ?? null;
   const isPoster = m.postedBy.id === ctx.staffUserId;
   const mail = await mailResults(m.id);
   const mayDelete = can(ctx.effective, "Messages.Delete.ReadWrite");
@@ -40,21 +43,26 @@ export default async function StaffMessagePage({ params }: { params: Promise<{ i
       <PageHeader title={current!.title} back={back}
         lede={<>Posted by {m.postedBy.name} · <LocalTime iso={m.postedAt.toISOString()} dateOnly />{earlier.length > 0 && <> · Edited <LocalTime iso={current!.savedAt.toISOString()} dateOnly /></>}</>}
         actions={isPoster ? <LinkButton variant="secondary" href={`/staff/messages/${m.id}/edit`}>Edit</LinkButton> : undefined} />
-      <Card>
-        <VersionView version={current!} filesLabel="Files" />
-        {!isPoster && <p className="hint">Only {m.postedBy.name}, who posted it, can edit it.</p>}
-      </Card>
+      {shown ? (
+        <Card title={`Version ${shown.n}`} titleId="version-h" description={<>Saved <LocalTime iso={shown.savedAt.toISOString()} dateOnly />, before it was edited. <a className="link-line" href={`/staff/messages/${m.id}`}>Read the current version</a></>}>
+          <h3 className="message-title">{shown.title}</h3>
+          <VersionView version={shown} filesLabel={`Files of version ${shown.n}`} />
+        </Card>
+      ) : (
+        <Card>
+          <VersionView version={current!} filesLabel="Files" />
+          {!isPoster && <p className="hint">Only {m.postedBy.name}, who posted it, can edit it.</p>}
+        </Card>
+      )}
       {earlier.length > 0 && (
         <Card title="Earlier versions" titleId="earlier-h" description="Families can open each of these too.">
-          {earlier.map((v) => (
-            <details key={v.id} className="more">
-              <summary>Version {v.n} · <LocalTime iso={v.savedAt.toISOString()} dateOnly /></summary>
-              <div className="stack">
-                <h3 className="message-title">{v.title}</h3>
-                <VersionView version={v} filesLabel={`Files of version ${v.n}`} />
-              </div>
-            </details>
-          ))}
+          <ul className="version-list">
+            {earlier.map((v) => (
+              <li key={v.id}>{shown?.n === v.n
+                ? <span aria-current="page">Version {v.n} · <LocalTime iso={v.savedAt.toISOString()} dateOnly /> (shown)</span>
+                : <a className="link-line" href={`/staff/messages/${m.id}?version=${v.n}`}>Version {v.n} · <LocalTime iso={v.savedAt.toISOString()} dateOnly /></a>}</li>
+            ))}
+          </ul>
         </Card>
       )}
       {mail.length > 0 && (

@@ -183,8 +183,8 @@ test("staff see the season's set-up: its steps, what each asks, and every kind o
   const uniforms = page.getByRole("region", { name: "2. Uniforms" });
   await expect(uniforms).toContainText("Percussion truck crew sign-offChecklist item · Required · Each student · A chosen list of 1");
   // Only a kind that can be met today can be added (checklist items and forms); the others are listed and can't be picked.
-  await uniforms.getByText("Add a requirement to Uniforms").click();
-  const kinds = uniforms.getByLabel("Kind").locator("option");
+  await uniforms.getByRole("link", { name: "Add a requirement to Uniforms" }).click();
+  const kinds = page.getByRole("dialog", { name: "Add a requirement to Uniforms" }).getByLabel("Kind").locator("option");
   await expect(kinds).toHaveText(["Checklist item", "Form", "Payment", "Volunteering"]);
   expect(await kinds.evaluateAll((all) => all.map((o) => (o as HTMLOptionElement).disabled))).toEqual([false, false, false, false]);
   await noSidewaysScroll(page);

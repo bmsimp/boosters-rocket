@@ -3,6 +3,7 @@ import { getFormsConfig } from "@/lib/forms/settings";
 import { SUBJECT_LABEL, guardianLabel } from "@/lib/forms/template";
 import { LocalTime } from "@/app/components/local-time";
 import { Notice } from "@/app/components/notice";
+import { Drawer } from "@/app/components/ui";
 import { attachFormTemplateAction } from "./form-actions";
 import { FormTemplateForm } from "./form-template-form";
 
@@ -32,17 +33,15 @@ export async function FormTemplateBox({ requirementId, appliesTo, canChange }: {
       <p className="hint">Have the club&apos;s lawyer read the form&apos;s words before families sign it. The portal checks the template&apos;s fields, not what it says, and gives no legal advice.</p>
       {!ready && <Notice tone="info">Forms aren&apos;t set up yet. An Admin connects the club&apos;s Documenso under <a href="/staff/settings/forms">Forms settings</a>; then a template can be attached.</Notice>}
       {canChange && ready && (
-        // Folded like the page's other forms, and left to the browser to open and close: drawn again after a
-        // template is attached, it stays open, with what the action said still on the screen.
-        <details className="more"><summary>{setting ? "Attach another template, or change who signs" : "Attach a template"}</summary>
-          <p className="hint">Make the form as a Documenso template first, with: one or two signers;
-            {appliesTo === "student" ? <> a text field labelled <b>{SUBJECT_LABEL.student}</b> for the first signer;</> : <> if the family is named on it, a text field labelled <b>{SUBJECT_LABEL.family}</b> for the first signer;</>}
-            {" "}a text field labelled <b>{guardianLabel(1)}</b> for the first signer (<b>{guardianLabel(2)}</b> for the second); and a signature field for each.
-            Set every name field to Read only, or a signer could change a name.</p>
+        // In a Drawer: drawn again after a template is attached, it stays open, with what the action said on the screen.
+        <Drawer param="template" label={setting ? "Change the template or signers" : "Attach a template"}
+          description={setting ? "Signed forms stay as they are; unsigned ones use the new template next time a guardian opens them." : undefined}>
+          <p className="hint">In Documenso, give the template one or two signers and a signature field for each. Give the first signer
+            read-only text fields labelled {appliesTo === "student" ? <><b>{SUBJECT_LABEL.student}</b> and </> : <><b>{SUBJECT_LABEL.family}</b> (if the family is named on it) and </>}
+            <b>{guardianLabel(1)}</b>, and a second signer one labelled <b>{guardianLabel(2)}</b>.</p>
           {choices === null && <p className="hint">Documenso&apos;s templates couldn&apos;t be listed just now. Paste the address of the template&apos;s page instead.</p>}
           <FormTemplateForm choices={choices} current={setting?.templateId ?? null} signers={setting?.signers ?? "any"} save={attachFormTemplateAction.bind(null, requirementId)} />
-          {setting && <p className="hint">Signed forms stay as they are. Unsigned ones use the new template next time a guardian opens them.</p>}
-        </details>
+        </Drawer>
       )}
     </section>
   );

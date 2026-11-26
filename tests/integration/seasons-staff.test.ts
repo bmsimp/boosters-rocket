@@ -832,9 +832,9 @@ describe("the season page says how the current step is found, and when the dates
     const fall = await seedSeason({ name: "Fall 2027", steps: [{ name: "Join" }, { name: "Forms", endsOn: "2027-09-30" }, { name: "Volunteer", endsOn: "2027-10-31" }] });
     const text = textOf(await renderPage(SeasonSetupPage, { params: { id: fall.seasonId } }));
     expect(text).toContain("By date: the first step that hasn't ended.");
-    // The rest of the rule is behind How this works, still on the page.
-    expect(text).toContain("A step ends when its end date has passed or, if it has none, when a later step starts or ends. "
-      + "A step that follows one with no end date needs a start date to be marked in its turn.");
+    // The rest of the rule, in the open in two sentences.
+    expect(text).toContain("A step ends when its end date passes or, with none, when a later step starts or ends, so a step after one with no end date needs a start date. "
+      + "Dates follow the club's time zone, set under Club.");
     expect(text).not.toContain("out of order");
   });
 

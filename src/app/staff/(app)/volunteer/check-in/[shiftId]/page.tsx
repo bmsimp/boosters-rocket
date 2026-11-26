@@ -6,7 +6,7 @@ import { isUuid } from "@/lib/seasons/ids";
 import { checkInAddress } from "@/lib/volunteer/check-in";
 import { checkInSheet } from "@/lib/volunteer/staff-credit";
 import { renewCheckInCodeAction } from "../../actions";
-import { ConfirmButton } from "../../forms";
+import { ConfirmDialog } from "@/app/components/ui";
 import { QrCode } from "../../qr-code";
 
 export const metadata = { title: "Check-in code" };
@@ -37,7 +37,7 @@ export default async function CheckInSheetPage({ params }: { params: Promise<{ s
       </section>
       <section className="box checkin-tools" aria-labelledby="tools-h"><h2 id="tools-h">This code</h2>
         <p>Print this page, or show it on a screen at the event. If the code has been shared where it shouldn&apos;t be, make a new one: the old one stops working at once, and credit already earned stays.</p>
-        <ConfirmButton label="Make a new code" question="Make a new code? The one already printed or shown will stop working." yes="Yes, make a new code" act={renewCheckInCodeAction.bind(null, sheet.shiftId)} />
+        <ConfirmDialog label="Make a new code" variant="secondary" busyLabel="Making a new code…" consequence="The code already printed or shown stops working." act={renewCheckInCodeAction.bind(null, sheet.shiftId)} />
         <p className="help"><Link className="link-line" href={`/staff/volunteer/${sheet.eventId}`}>Back to the event</Link></p>
       </section>
     </main>

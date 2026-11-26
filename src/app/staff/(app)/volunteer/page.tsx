@@ -5,6 +5,7 @@ import { listEvents, type EventSummary } from "@/lib/volunteer/setup";
 import { getVolunteerSettings } from "@/lib/volunteer/settings";
 import { dateWords } from "@/lib/volunteer/clock";
 import { DataTable } from "@/app/components/data-table";
+import { Drawer } from "@/app/components/ui";
 import { createEventAction, saveCutoffAction } from "./actions";
 import { CutoffForm, EventForm } from "./forms";
 
@@ -53,7 +54,7 @@ export default async function VolunteerEventsPage() {
 
       <section className="box" aria-labelledby="cutoff-h"><h2 id="cutoff-h">Cancelling</h2>
         <p>Guardians can cancel a sign-up up to {cutoffHours} {cutoffHours === 1 ? "hour" : "hours"} before the shift. After that, they&apos;re asked to contact the event&apos;s contact.</p>
-        {canChange && <details className="more"><summary>Change the cut-off</summary><CutoffForm initial={cutoffHours} save={saveCutoffAction} /></details>}
+        {canChange && <div className="row-actions"><Drawer param="cutoff" label="Change the cut-off"><CutoffForm initial={cutoffHours} save={saveCutoffAction} /></Drawer></div>}
       </section>
 
       {past.length > 0 && (

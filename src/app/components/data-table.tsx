@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { HeaderCheck, RowCheck } from "./ui/bulk-select";
 
 /**
  * The table primitive (DESIGN.md, Tables): a real table at laptop widths, with a caption and header cells that have a
@@ -34,11 +35,17 @@ type Props<R> = {
   columns: Column<R>[];
   rowKey: (row: R) => string;
   className?: string;
+  /**
+   * Bulk select (inside BulkSelect, src/app/components/ui/bulk-select.tsx): a tick box first in every row, labelled
+   * "Select" and these words (the row's name), and one in the header. The row's id is its rowKey.
+   */
+  select?: { label: (row: R) => string };
 } & ({ rows: R[]; groups?: never } | { groups: RowGroup<R>[]; rows?: never });
 
-function Row<R>({ row, columns }: { row: R; columns: Column<R>[] }) {
+function Row<R>({ row, columns, check }: { row: R; columns: Column<R>[]; check?: ReactNode }) {
   return (
     <tr role="row">
+      {check && <td role="cell" className="t-check">{check}</td>}
       {columns.map((c) => {
         const className = [c.numeric ? "t-num" : "", c.quiet ? "t-quiet" : ""].filter(Boolean).join(" ") || undefined;
         const label = c.rowHeader || c.quiet ? null : <span className="t-label" aria-hidden="true">{c.header}</span>;
@@ -50,23 +57,25 @@ function Row<R>({ row, columns }: { row: R; columns: Column<R>[] }) {
   );
 }
 
-export function DataTable<R>({ caption, captionHidden = false, columns, rowKey, className, rows, groups }: Props<R>) {
+export function DataTable<R>({ caption, captionHidden = false, columns, rowKey, className, rows, groups, select }: Props<R>) {
+  const check = (r: R) => (select ? <RowCheck id={rowKey(r)} label={`Select ${select.label(r)}`} /> : undefined);
+  const span = columns.length + (select ? 1 : 0);
   return (
     <table role="table" className={["table", className].filter(Boolean).join(" ")}>
       <caption className={captionHidden ? "visually-hidden" : undefined}>{caption}</caption>
       <thead role="rowgroup">
-        <tr role="row">{columns.map((c) => (
+        <tr role="row">{select && <th role="columnheader" scope="col" className="t-check"><HeaderCheck /></th>}{columns.map((c) => (
           <th key={c.key} role="columnheader" scope="col" aria-sort={c.sorted} className={c.numeric ? "t-num" : undefined}>
             {c.quiet ? <span className="visually-hidden">{c.header}</span> : c.header}
           </th>))}</tr>
       </thead>
       {groups ? groups.map((g) => (
         <tbody role="rowgroup" key={g.key}>
-          <tr role="row" className="t-group"><th role="rowheader" scope="rowgroup" colSpan={columns.length}>{g.heading}</th></tr>
-          {g.rows.map((r) => <Row key={rowKey(r)} row={r} columns={columns} />)}
+          <tr role="row" className="t-group"><th role="rowheader" scope="rowgroup" colSpan={span}>{g.heading}</th></tr>
+          {g.rows.map((r) => <Row key={rowKey(r)} row={r} columns={columns} check={check(r)} />)}
         </tbody>
       )) : (
-        <tbody role="rowgroup">{rows.map((r) => <Row key={rowKey(r)} row={r} columns={columns} />)}</tbody>
+        <tbody role="rowgroup">{rows.map((r) => <Row key={rowKey(r)} row={r} columns={columns} check={check(r)} />)}</tbody>
       )}
     </table>
   );

@@ -9,7 +9,7 @@ import {
   saveSetupMailAction, sendSetupTestMailAction, saveSetupClubAction,
 } from "./actions";
 import { ClubForm, type ClubValues } from "@/app/components/club-settings/club-form";
-import { MicrosoftStaffSteps, GoogleStaffSteps, ScriptOption } from "./instructions";
+import { MicrosoftAppSteps, GoogleStaffSteps } from "./instructions";
 import { SetupStaffSignIn, SetupStaffSignOut } from "./setup-buttons";
 import { FirstAdminForm } from "./admin-email-form";
 
@@ -41,8 +41,7 @@ export function StaffStep({ n, appUrl, byKey, error }: { n: number; appUrl: stri
       <p className="lede">Board members and directors sign in with Microsoft, Google, or both. Set up at least one.</p>
       {error === "staff_first" && <Notice tone="problem">Save at least one staff sign-in first.</Notice>}
       <section className="box" aria-labelledby="ms-h"><h2 id="ms-h">{PROVIDER_LABELS["staff-microsoft"]}</h2>
-        <MicrosoftStaffSteps appUrl={appUrl} />
-        <ScriptOption script="New-BoosterRocketStaffApp.ps1" example="./New-BoosterRocketStaffApp.ps1 -TenantId <your tenant ID or domain>" />
+        <MicrosoftAppSteps appUrl={appUrl} script="New-BoosterRocketStaffApp.ps1" example="./New-BoosterRocketStaffApp.ps1 -TenantId <your tenant ID or domain>" />
         <ProviderForm providerKey="staff-microsoft" summary={view(byKey["staff-microsoft"])} action={saveSetupProviderAction.bind(null, "staff-microsoft")}
           certificateActions={certificateActions("staff-microsoft")} />
       </section>

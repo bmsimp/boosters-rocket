@@ -20,6 +20,9 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => { throw Object.assign(new Error("NEXT_REDIRECT"), { url }); },
   notFound: () => { throw Object.assign(new Error("NEXT_NOT_FOUND"), { notFound: true }); },
+  // A Drawer (src/app/components/ui/sheet.tsx) reads the page's address: drawn closed here.
+  usePathname: () => "/staff/roster",
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 import { renderToStaticMarkup } from "react-dom/server";
@@ -609,7 +612,7 @@ describe("staff manage a family's guardians", () => {
       const sam = await seedParent({ name: "Sam Shared", email: "sam@example.com" });
       await seedGuardian({ parentId: sam.id, familyQboId: "10", status: "disabled", disabledReason: "removed", statusBeforeDisable: "invited" });
       await seedCache(ALL);
-      const controls = ['Remove<span class="visually-hidden"> Ana Rivera</span>', "Reinstate Sam Shared", "Add a guardian", "Email address they sign in with"];
+      const controls = ["Remove Ana Rivera from this family", "Reinstate Sam Shared", "Add a guardian", "Email address they sign in with"];
       const link = `href="/staff/parents/${ana.id}"`;
       const box = signinsBox(await familyPage("10"));
       for (const shown of [...controls, link, "Can&#x27;t sign in: removed by staff"]) expect(box).toContain(shown);
@@ -637,7 +640,7 @@ describe("staff manage a family's guardians", () => {
       const [, inChen] = await rowsOf(ana.id);
       await removeGuardian(inChen!.id, "Not hers.", staffOp);
       const html = await personPage(ana.id);
-      expect(familiesBox(html)).toContain('Remove<span class="visually-hidden"> Rivera Family</span>');
+      expect(familiesBox(html)).toContain("Remove them from Rivera Family");
       expect(familiesBox(html)).toContain("Reinstate Chen Family");
       expect(html).toContain('id="pn-h">Name</h2>');
       expect(html).toContain('value="Ana Rivera"');

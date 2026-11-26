@@ -99,12 +99,13 @@ test("in a reopened setup, Replace certificate makes a new pending certificate b
     await page.getByLabel("Setup code").fill(code);
     await page.getByRole("button", { name: "Unlock" }).click();
     const ms = page.getByRole("region", { name: "Staff sign-in with Microsoft" });
-    // A certificate in use with nothing waiting is done: Download and Replace are tucked under Manage certificate.
+    // A certificate in use with nothing waiting is done: Download and Replace are in the Drawer "Manage the certificate" opens.
     await expect(ms.getByText("Done: Microsoft accepted this certificate")).toBeVisible();
     await expect(ms.getByText(g.thumbprintSha1)).toBeVisible();
     await expect(ms.getByRole("button", { name: "Replace certificate" })).toBeHidden();
-    await ms.getByText("Manage certificate").click();
-    await ms.getByRole("button", { name: "Replace certificate" }).click();
+    await ms.getByRole("link", { name: "Manage the certificate" }).click();
+    const manage = page.getByRole("dialog", { name: "Manage the certificate" });
+    await manage.getByRole("button", { name: "Replace certificate" }).click();
     await expect(ms.getByText(/Replacement ready to add/)).toBeVisible();
     const pending = await sql`SELECT thumbprint_sha1 FROM provider_certificate WHERE provider_key = 'staff-microsoft' AND status = 'pending'`;
     expect(pending).toHaveLength(1);
@@ -115,8 +116,9 @@ test("in a reopened setup, Replace certificate makes a new pending certificate b
     page.once("dialog", (d) => d.accept());
     await ms.getByRole("button", { name: "Discard replacement" }).click();
     await expect(ms.getByText("Done: Microsoft accepted this certificate")).toBeVisible();
-    await ms.getByText("Manage certificate").click();
-    await expect(ms.getByRole("button", { name: "Replace certificate" })).toBeVisible();
+    // The Drawer's address is still the page's, so it may be open again already.
+    if (!(await manage.isVisible())) await ms.getByRole("link", { name: "Manage the certificate" }).click();
+    await expect(manage.getByRole("button", { name: "Replace certificate" })).toBeVisible();
     const left = await sql`SELECT status, private_key_ciphertext FROM provider_certificate WHERE provider_key = 'staff-microsoft' ORDER BY created_at`;
     expect(left.map((r) => r.status).sort()).toEqual(["active", "retired"]);
     expect(left.find((r) => r.status === "retired")!.private_key_ciphertext).toBeNull();

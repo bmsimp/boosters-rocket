@@ -734,7 +734,6 @@ describe("the page", () => {
     expect(part).toContain(OAK_SENT);
     // The props are only words and bound actions: no stamp is drawn into the page.
     for (const s of [...view.rows.flatMap((r) => [...r.sends, ...r.takes]), ...view.inactive.flatMap((r) => (r.take ? [r.take] : []))]) expect(whole).not.toContain(s.stamp);
-    expect(whole).toContain("Send the app&#x27;s to QuickBooks (for someone who may also change families) puts the portal&#x27;s value in the books.");
     for (const s of view.inactive.flatMap((r) => (r.send ? [r.send] : []))) expect(whole).not.toContain(s.stamp);
 
     // A reader without Roster.Family.ReadWrite: the Takes as before, no Send and none of its sentences.

@@ -26,17 +26,19 @@ test.describe("staff", () => {
     await page.goto(await familyPages.roster("E2E-10"));
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Rivera Family");
     const changes = page.getByRole("region", { name: "Change in QuickBooks" });
-    await changes.getByText("Add a student").click();
-    await changes.getByLabel("The student's name, as QuickBooks will show it").fill("Leo Rivera");
-    await changes.getByRole("button", { name: "Add the student" }).click();
-    const alert = changes.getByRole("alert").first();
+    // The form is in a Drawer, opened by its button and named by it.
+    await changes.getByRole("link", { name: "Add a student" }).click();
+    const drawer = page.getByRole("dialog", { name: "Add a student" });
+    await drawer.getByLabel("The student's name, as QuickBooks will show it").fill("Leo Rivera");
+    await drawer.getByRole("button", { name: "Add the student" }).click();
+    const alert = drawer.getByRole("alert").first();
     await expect(alert).toContainText("“Leo Rivera” is already a name in QuickBooks");
-    const offer = changes.getByRole("button", { name: "Use “Leo Rivera (2)”" });
+    const offer = drawer.getByRole("button", { name: "Use “Leo Rivera (2)”" });
     await expect(offer).toBeVisible();
     await noSidewaysScroll(page);
     await offer.click();
     // Saved in the portal first (stage 3's slice 9e); the client refuses the send for its ids, and the refusal is kept.
-    await expect(changes.getByText("Leo Rivera (2) is added to Rivera Family in the portal, but they aren't in QuickBooks", { exact: false })).toBeVisible();
+    await expect(drawer.getByText("Leo Rivera (2) is added to Rivera Family in the portal, but they aren't in QuickBooks", { exact: false })).toBeVisible();
     const kept = await sql`SELECT after FROM audit_log WHERE id > ${since} AND action = 'roster.write.kept_refused'`;
     expect(kept.map((r) => r.after)).toEqual([{ op: "create", role: "student", code: "bad_id", state: "refused" }]);
     const [{ n: after }] = await sql`SELECT count(*)::int AS n FROM qbo_customer` as unknown as [{ n: number }];
