@@ -13,6 +13,7 @@ vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => { throw Object.assign(new Error("NEXT_REDIRECT"), { url }); },
   notFound: () => { throw Object.assign(new Error("NEXT_NOT_FOUND"), { notFound: true }); },
+  usePathname: () => "/", useSearchParams: () => new URLSearchParams(),
 }));
 
 import { renderToStaticMarkup } from "react-dom/server";
@@ -148,8 +149,8 @@ describe("Registering the portal with Boosters Rocket", () => {
     expect(html).toContain("Ready to connect");
     expect(html).toContain(`<code>${TEST_PORTAL_ID}</code>`);
     expect(html).toContain("Check the registration");
-    expect(html).toContain("<summary>Change the portal id</summary>");
-    expect(html).toContain("<summary>Make a new key</summary>");
+    expect(html).toContain(">Change the portal id</a>");
+    expect(html).toContain(">Replace this portal&#x27;s key</button>");
     // Step 1 is done, so step 2 opens.
     expect(await setup("connect")).toBeTruthy();
   });
@@ -218,7 +219,7 @@ describe("Registering the portal with Boosters Rocket", () => {
     await db.insert(qboConnection).values({ relayEnvironment: "sandbox", connectMode: "relay", tokenMode: "relay" });
     expect(await makeRelayKeyAction(form({ replace: "yes" }))).toMatchObject({ ok: false, errors: [expect.stringContaining("Disconnect first")] });
     expect((await relayRow())!.publicKey).toBe(old.publicKey);
-    expect((await setup()).html).not.toContain("Make a new key");
+    expect((await setup()).html).not.toContain("Replace this portal");
     await db.delete(qboConnection);
 
     expect(await makeRelayKeyAction(form({ replace: "yes" }))).toMatchObject({ ok: true });
@@ -246,7 +247,7 @@ describe("Registering the portal with Boosters Rocket", () => {
     expect((await db.select().from(auditLog)).length).toBe(before);
     const { html } = await setup();
     expect(html).not.toContain("Change the portal id");
-    expect(html).not.toContain("Make a new key");
+    expect(html).not.toContain("Replace this portal");
     // The waiting stage, held the same way, offers no id form either: it says why.
     await db.update(qboRelay).set({ portalId: null });
     const waiting = (await setup()).html;
@@ -277,7 +278,7 @@ describe("Registering the portal with Boosters Rocket", () => {
     expect(await audits("settings.quickbooks.relay.portal_id")).toHaveLength(before.length);
     const { html } = await setup();
     expect(html).not.toContain("Change the portal id");
-    expect(html).not.toContain("Make a new key");
+    expect(html).not.toContain("Replace this portal");
     // Disconnected (no relay tokens held), it may change again.
     await db.update(qboConnection).set({ tokenMode: null, realmId: null, refreshTokenCiphertext: null, refreshTokenKeyId: null });
     expect(await savePortalIdAction(form({ portalId: OTHER_ID }))).toMatchObject({ ok: true, message: "The portal id is saved." });

@@ -17,6 +17,7 @@ vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => { throw Object.assign(new Error("NEXT_REDIRECT"), { url }); },
   notFound: () => { throw Object.assign(new Error("NEXT_NOT_FOUND"), { notFound: true }); },
+  usePathname: () => "/", useSearchParams: () => new URLSearchParams(),
 }));
 
 import { renderToStaticMarkup } from "react-dom/server";

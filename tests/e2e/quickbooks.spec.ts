@@ -30,7 +30,7 @@ test("an Admin sees what is set for QuickBooks, and no inputs on the view", asyn
   await expect(page.getByText("6 families, 4 students, 5 parents; 1 customer outside the portal")).toBeVisible();
   await expect(page.locator("main input:not([type=hidden])")).toHaveCount(0);
   await expect(page.locator("body")).not.toContainText("9130000000000001");
-  await expect(page.getByText("Disconnect", { exact: true })).toBeVisible(); // the closed section's summary; never opened
+  await expect(page.getByRole("button", { name: "Disconnect QuickBooks" })).toBeVisible(); // it asks again first; never pressed here
 });
 
 // Stage 4's slice M8: the page an Admin says on, first, that they mean to connect a different company. The seed is
@@ -245,7 +245,8 @@ test("an Admin chooses Boosters Rocket, makes the key, copies the address and ke
     await expect(page.getByRole("heading", { name: "Ready to connect" })).toBeVisible();
     await expect(page.getByText(E2E_PORTAL_ID, { exact: true })).toBeVisible();
     await expect(page.getByText(/Boosters Rocket couldn.t be reached just now, so the registration wasn.t checked\./)).toBeVisible();
-    await expect(page.locator("summary", { hasText: "Make a new key" })).toBeVisible(); // a closed section; never opened
+    await expect(page.getByRole("button", { name: "Replace this portal's key" })).toBeVisible(); // it asks again first; never pressed here
+    await expect(page.getByRole("link", { name: "Change the portal id" })).toHaveCount(0); // the run's address is http
     await checked(page, "step 1, ready to connect");
   } finally {
     await backToTheSeed();
@@ -341,21 +342,30 @@ test("once disconnected, step 2 asks which company, and a different one shows wh
 });
 
 test("Disconnect through Boosters Rocket stays unusable until the box is ticked; the club's own app has one line and no box", async ({ page }) => {
-  // The club's own app first: one line, no box, and the button usable (never selected).
+  // The club's own app first: one line by the button, no box in its dialog, and its press usable (never selected).
   await page.goto("/staff/settings/quickbooks");
-  await page.getByText("Disconnect", { exact: true }).click();
-  await expect(page.getByText("If another portal uses this same Intuit app's keys for this company, it is disconnected too.")).toBeVisible();
-  await expect(page.getByRole("checkbox")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Disconnect QuickBooks" })).not.toHaveAttribute("aria-disabled", "true");
+  await expect(page.getByText("Another portal using this same Intuit app for this company is disconnected too.")).toBeVisible();
+  const opener = page.getByRole("button", { name: "Disconnect QuickBooks" });
+  await opener.click();
+  let dialog = page.getByRole("dialog", { name: "Disconnect QuickBooks?" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("The portal stops reading QuickBooks. The last roster stays, marked as no longer current.")).toBeVisible();
+  await expect(dialog.getByRole("checkbox")).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Disconnect QuickBooks" })).not.toHaveAttribute("aria-disabled", "true");
+  await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(opener).toBeFocused();
 
   await sql`UPDATE qbo_connection SET connect_mode = 'relay', token_mode = 'relay', relay_environment = environment`;
   try {
     await page.goto("/staff/settings/quickbooks");
     await expect(page.getByRole("region", { name: "Connection", exact: true }).getByText("Through Boosters Rocket", { exact: true })).toBeVisible();
-    await page.getByText("Disconnect", { exact: true }).click();
-    await expect(page.getByText("Every portal connected to this QuickBooks company through Boosters Rocket shares one connection. Disconnecting here may disconnect the others too, such as a trial copy of this portal.")).toBeVisible();
-    const ack = page.getByRole("checkbox", { name: "I understand that disconnecting may also disconnect any other portal connected to this company through Boosters Rocket." });
-    const press = page.getByRole("button", { name: "Disconnect QuickBooks" });
+    await expect(page.getByText("Other portals connected to this QuickBooks company through Boosters Rocket may be disconnected too, such as a trial copy of this portal.")).toBeVisible();
+    await page.getByRole("button", { name: "Disconnect QuickBooks" }).click();
+    dialog = page.getByRole("dialog", { name: "Disconnect QuickBooks?" });
+    const ack = dialog.getByRole("checkbox", { name: "I understand other portals on this company through Boosters Rocket may be disconnected too." });
+    const press = dialog.getByRole("button", { name: "Disconnect QuickBooks" });
     await expect(ack).not.toBeChecked();
     await expect(press).toHaveAttribute("aria-disabled", "true");
     await expect(press).not.toHaveAttribute("disabled", /.*/); // aria-disabled, never disabled, so it keeps the focus

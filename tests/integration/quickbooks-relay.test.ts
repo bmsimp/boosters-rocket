@@ -19,6 +19,7 @@ vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => { throw Object.assign(new Error("NEXT_REDIRECT"), { url }); },
   notFound: () => { throw Object.assign(new Error("NEXT_NOT_FOUND"), { notFound: true }); },
+  usePathname: () => "/", useSearchParams: () => new URLSearchParams(),
 }));
 
 import { renderToStaticMarkup } from "react-dom/server";
@@ -876,20 +877,22 @@ describe("disconnecting through Boosters Rocket", () => {
   it("the page warns and asks for the box through Boosters Rocket, and gives the club's own app one line and no box", async () => {
     await seedRelayConnected();
     const relayHtml = await page();
-    expect(relayHtml).toContain("Every portal connected to this QuickBooks company through Boosters Rocket shares one connection. Disconnecting here may disconnect the others too, such as a trial copy of this portal.");
-    expect(relayHtml).toMatch(/<input type="checkbox" id="qbo-disconnect-ack"[^>]*name="ack" value="yes"/);
-    expect(relayHtml).toContain("I understand that disconnecting may also disconnect any other portal connected to this company through Boosters Rocket.");
-    // Unusable until the box is ticked: aria-disabled, never disabled, which would drop the focus.
-    expect(relayHtml).toMatch(/<button type="button" class="btn btn-line" aria-disabled="true">Disconnect QuickBooks<\/button>/);
-    expect(relayHtml).not.toContain("If another portal uses this same Intuit app");
+    expect(relayHtml).toContain("Other portals connected to this QuickBooks company through Boosters Rocket may be disconnected too, such as a trial copy of this portal.");
+    // The dialog's box, drawn with the page and opened by the button.
+    expect(relayHtml).toContain("I understand other portals on this company through Boosters Rocket may be disconnected too.");
+    expect(relayHtml).toMatch(/<input type="checkbox" id="[^"]+"[^>]*>I understand other portals/);
+    // The dialog's own press is unusable until the box is ticked: aria-disabled, never disabled, which would drop the focus.
+    expect(relayHtml).toMatch(/<button type="button" class="btn btn-danger" aria-disabled="true">Disconnect QuickBooks<\/button>/);
+    expect(relayHtml).not.toContain("Another portal using this same Intuit app");
 
     await db.delete(qboConnection);
     await seedConnected(qbo, { realmId: A });
     const own = await page();
-    expect(own).toContain("If another portal uses this same Intuit app&#x27;s keys for this company, it is disconnected too.");
-    expect(own).not.toContain("qbo-disconnect-ack");
-    expect(own).not.toContain("through Boosters Rocket shares one connection");
-    expect(own).toMatch(/<button type="button" class="btn btn-line">Disconnect QuickBooks<\/button>/);
+    expect(own).toContain("Another portal using this same Intuit app for this company is disconnected too.");
+    expect(own).not.toContain("I understand other portals");
+    expect(own).not.toContain("through Boosters Rocket may be disconnected");
+    expect(own).not.toMatch(/aria-disabled="true">Disconnect QuickBooks/);
+    expect(own).toMatch(/<button type="button" class="btn btn-danger">Disconnect QuickBooks<\/button>/);
   });
 
   it("the club's own app reads no field: it disconnects with or without the box, revoking with its own keys", async () => {

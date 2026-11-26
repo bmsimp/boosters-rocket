@@ -1,7 +1,7 @@
 "use client";
 import { ActionOutcome, Notice } from "@/app/components/notice";
 import { startTransition, useActionState, useState, type ReactNode } from "react";
-import { Button, Checkbox, ChoiceGroup, KeyValue, LinkButton, TextInput } from "@/app/components/ui";
+import { Button, ChoiceGroup, ConfirmDialog, Drawer, KeyValue, LinkButton, TextInput, type Confirmed } from "@/app/components/ui";
 import { CopyField } from "@/app/components/sign-in-settings/copy-field";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import type { MembershipShape, TypeRow } from "@/lib/roster/shape";
@@ -157,46 +157,42 @@ export function disconnectedNote(revoked: boolean): string {
 }
 /** What Disconnect says about other portals that hold the same grant (spec §3 and §5, Disconnect). */
 export const DISCONNECT_WORDS = {
-  relayWarning: "Every portal connected to this QuickBooks company through Boosters Rocket shares one connection. Disconnecting here may disconnect the others too, such as a trial copy of this portal.",
-  relayAck: "I understand that disconnecting may also disconnect any other portal connected to this company through Boosters Rocket.",
-  ownApp: "If another portal uses this same Intuit app's keys for this company, it is disconnected too.",
+  relayWarning: "Other portals connected to this QuickBooks company through Boosters Rocket may be disconnected too, such as a trial copy of this portal.",
+  relayAck: "I understand other portals on this company through Boosters Rocket may be disconnected too.",
+  ownApp: "Another portal using this same Intuit app for this company is disconnected too.",
+  consequence: "The portal stops reading QuickBooks. The last roster stays, marked as no longer current.",
 } as const;
 
 /**
- * On the view, tucked inside a closed section so it isn't pressed by accident. It stays mounted when the page comes
- * back disconnected, so it can say so: the page renders it whether or not QuickBooks is connected. `warning`, when
- * given, is shown above the button while connected. `through` is which app issued the tokens held: through Boosters
- * Rocket the Admin must tick the acknowledgement first (the button is aria-disabled until then, and the server refuses
- * without it, and answers a page drawn for another app than the one holding the tokens now that it is out of date);
- * with the club's own app, one line says what else it ends. Like the forms above, it sends from state with
- * a `type="button"`, so no form reset can untick the box behind React's back.
+ * On the view: what a disconnect ends, in one sentence by the button, and the button, which asks again in a
+ * ConfirmDialog. It stays mounted when the page comes back disconnected, so it can say so: the page renders it whether
+ * or not QuickBooks is connected. `warning`, when given, is shown above the button while connected. `through` is which
+ * app issued the tokens held: through Boosters Rocket the Admin must tick the acknowledgement in the dialog first (its
+ * button is aria-disabled until then, and the server refuses without it, and answers a page drawn for another app than
+ * the one holding the tokens now that it is out of date); with the club's own app, one line says what else it ends.
  */
 export function Disconnect({ connected, disconnect, warning, through }: {
   connected: boolean; disconnect: (f: FormData) => Promise<Disconnected>; warning?: string; through: QboMode | null;
 }) {
   const relay = through === "relay";
-  const [ack, setAck] = useState(false);
-  const [state, run, pending] = useActionState(async (_: Disconnected | null, acknowledged: boolean) => {
+  const [done, setDone] = useState<boolean | null>(null); // revoked, once a disconnect went through
+  if (!connected) return done !== null ? <Notice tone="done">{disconnectedNote(done)}</Notice> : null;
+  const act = async (): Promise<Confirmed> => {
     // `drawnFor`: the app this page was drawn for, so the server can tell a page that showed no box from one that did.
-    const f = new FormData(); f.append("drawnFor", through ?? "none"); if (relay && acknowledged) f.append("ack", "yes");
-    return safely(() => disconnect(f), { ok: false as const, error: ACTION_FAILED });
-  }, null);
-  if (!connected) return state?.ok ? <Notice tone="done">{disconnectedNote(state.revoked)}</Notice> : null;
-  const unusable = pending || (relay && !ack);
+    // Through the relay the dialog's press is usable only once its box is ticked, so a press is the acknowledgement.
+    const f = new FormData(); f.append("drawnFor", through ?? "none"); if (relay) f.append("ack", "yes");
+    const r = await disconnect(f);
+    if (!r.ok) return { ok: false, errors: [r.error] };
+    setDone(r.revoked);
+    return { ok: true, message: disconnectedNote(r.revoked) };
+  };
   return (
-    <details className="more"><summary>Disconnect</summary>
-      <p>{relay
-        ? "This asks Boosters Rocket to have Intuit cancel the portal's access, and deletes the portal's copy of the connection. The portal's registration with Boosters Rocket and the last roster stay, and the roster is marked as no longer current."
-        : "This asks Intuit to cancel the portal's access and deletes its copy of the connection. The Intuit app's keys and the last roster stay, and the roster is marked as no longer current."}</p>
-      {relay ? <Notice tone="warning">{DISCONNECT_WORDS.relayWarning}</Notice> : <p>{DISCONNECT_WORDS.ownApp}</p>}
-      {warning && <Notice tone="warning">{warning}</Notice>}
-      <form onSubmit={noSubmit} className="stack">
-        {relay && <Checkbox id="qbo-disconnect-ack" name="ack" value="yes" label={DISCONNECT_WORDS.relayAck} checked={ack} onChange={(e) => setAck(e.target.checked)} />}
-        {state && !state.ok && <Notice tone="problem">{state.error}</Notice>}
-        <p><Button variant="secondary" busy={pending} aria-disabled={unusable || undefined}
-          onClick={() => { if (!unusable) startTransition(() => run(ack)); }}>{pending ? "Disconnecting…" : "Disconnect QuickBooks"}</Button></p>
-      </form>
-    </details>
+    <div className="stack">
+      {warning && <Notice tone="warning" live="none">{warning}</Notice>}
+      <p>{relay ? DISCONNECT_WORDS.relayWarning : DISCONNECT_WORDS.ownApp}</p>
+      <ConfirmDialog label="Disconnect QuickBooks" busyLabel="Disconnecting…" consequence={DISCONNECT_WORDS.consequence}
+        check={relay ? DISCONNECT_WORDS.relayAck : undefined} act={act} />
+    </div>
   );
 }
 
@@ -333,13 +329,13 @@ export function RelayRegistration({ stage, address, addressFits, publicKey, port
           {answer ? <CheckAnswer check={answer} again={again} checking={checking} />
             : <p><Button variant="secondary" busy={checking} onClick={again}>{checking ? "Checking…" : "Check the registration"}</Button></p>}
           {answer && answer.answer !== "unreachable" && <p><Button variant="quiet" busy={checking} onClick={again}>{checking ? "Checking…" : "Check again"}</Button></p>}
-          {!https && mayChange && <details className="more"><summary>Change the portal id</summary>{idForm("New portal id")}</details>}
           {mayChange && (
-            <details className="more"><summary>Make a new key</summary>
-              <p>A new key replaces this one and clears the saved portal id. Boosters Rocket then registers the new public key and sends a new id before the portal can connect.</p>
-              {made && !made.ok && <ActionOutcome state={made} />}
-              <p><Button variant="secondary" busy={making} onClick={() => { if (!making) startTransition(() => runMake(true)); }}>{making ? "Making the key…" : "Make a new key"}</Button></p>
-            </details>
+            <div className="row-actions">
+              {!https && <Drawer param="portal-id" label="Change the portal id" description="Use the new id from Boosters Rocket's email.">{idForm("New portal id")}</Drawer>}
+              <ConfirmDialog label="Replace this portal's key" variant="secondary" busyLabel="Making the key…"
+                consequence="The saved portal id is cleared, so you'll need to register again before the portal can connect."
+                act={async () => { const f = new FormData(); f.append("replace", "yes"); const r = await makeKey(f); if (r.ok) setAnswer(null); return r; }} />
+            </div>
           )}
         </>
       )}
