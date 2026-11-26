@@ -368,7 +368,7 @@ dialog.sheet-confirm:modal { inset: 0; margin: auto; width: min(28rem, calc(100%
 dialog.sheet[open]:not(:modal) { position: static; display: block; width: auto; border: 1px solid var(--border); border-radius: var(--radius); margin-block: var(--s3); }
 .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); padding: var(--s3) var(--s4); border-bottom: 1px solid var(--border); }
 .sheet-head h2 { font-size: var(--text-lg); line-height: 1.35; overflow-wrap: anywhere; }
-.sheet-close { flex: none; margin-inline-end: calc(-1 * var(--s2)); }
+.sheet-close { flex: none; }
 .sheet-body { flex: 1; overflow: auto; display: grid; gap: var(--s3); align-content: start; padding: var(--s4); }
 .sheet-body > * { margin: 0; min-width: 0; }
 .sheet-desc { color: var(--ink-2); }

@@ -377,7 +377,7 @@ dialog.sheet-confirm:modal { inset: 0; margin: auto; width: min(28rem, calc(100%
 dialog.sheet[open]:not(:modal) { position: static; display: block; width: auto; border: 1px solid var(--border); border-radius: var(--radius); margin-block: var(--s3); }
 .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); padding: var(--s3) var(--s4); border-bottom: 1px solid var(--border); }
 .sheet-head h2 { font-size: var(--text-lg); line-height: 1.35; overflow-wrap: anywhere; }
-.sheet-close { flex: none; margin-inline-end: calc(-1 * var(--s2)); }
+.sheet-close { flex: none; }
 .sheet-body { flex: 1; overflow: auto; display: grid; gap: var(--s3); align-content: start; padding: var(--s4); }
 .sheet-body > * { margin: 0; min-width: 0; }
 .sheet-desc { color: var(--ink-2); }
@@ -939,7 +939,7 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 .cert-panel code { word-break: break-all; }
 .cert-done { margin-top: var(--s2); }
 /* The audit log: a row's details on a short line under its words, and a long code or record id breaks where it must. */
-.audit-table .audit-more { display: block; font-size: var(--text-sm); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40ch; }
+.audit-table .audit-more { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow: hidden; overflow-wrap: anywhere; font-size: var(--text-sm); color: var(--ink-2); }
 .audit-table code, .audit-full { overflow-wrap: anywhere; font-size: var(--text-sm); }
 .audit-full { display: block; white-space: pre-wrap; }
 /* A heading over one of several tables in a box. */
