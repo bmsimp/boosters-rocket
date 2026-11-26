@@ -40,8 +40,12 @@ test("a Drawer: its own address, the focus in and back, Esc and Back close it, a
   const box = (await drawer.boundingBox())!;
   const view = page.viewportSize()!;
   if (info.project.name === "phone") {
+    // Covers the whole screen, from its left edge, and nothing in it runs past the right.
+    expect(Math.round(box.x)).toBe(0);
+    expect(Math.round(box.y)).toBe(0);
     expect(Math.round(box.width)).toBe(view.width);
     expect(Math.round(box.height)).toBe(view.height);
+    expect(await drawer.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   } else {
     expect(Math.round(box.x + box.width)).toBe(view.width);
     expect(box.width).toBeLessThan(view.width / 2);

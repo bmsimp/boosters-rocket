@@ -42,7 +42,9 @@ test("the QuickBooks pages, for the owner to look at", async ({ page }, info) =>
 
 test("a Drawer and a ConfirmDialog, for the owner to look at", async ({ page }, info) => {
   await page.goto("/staff/settings/design-system?ds-drawer=1");
-  await expect(page.getByRole("dialog", { name: "Change the event" })).toBeVisible();
+  const drawer = page.getByRole("dialog", { name: "Change the event" });
+  await expect(drawer).toBeVisible();
+  await drawer.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished))); // slid all the way in, not caught mid-slide
   await page.screenshot({ path: `test-results/screenshots/drawer-${info.project.name}.png` });
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Disconnect QuickBooks" }).click();
