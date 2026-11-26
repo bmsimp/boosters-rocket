@@ -150,7 +150,7 @@ the way to a different company was a small "Connect a different company" link. N
    different company" is chosen, "the same company" can't be, and one line says why ("The families came from a sandbox
    company, so the club's real books are a different company."). When the roster's QuickBooks isn't recorded (a read
    before this change), one line says so and both stay open.
-4. **One primary button, "Connect to QuickBooks".** The switch page stays a way in, reached by a secondary button.
+4. **One primary button, "Connect to QuickBooks".** While the question is shown it covers the switch, so step 2 draws no separate "Connect a different company" button nor its sentence (the owner's word on PR 103); when it isn't (connected, renewing), the switch page stays a way in, reached by a secondary button, as it is from QuickBooks settings.
 5. **The server enforces it** (`beginConnectAction`): `company` is read once and must be `same` or `different`
    (else `error=company`, nothing changed); `different` needs the checkbox (`confirm` = `yes`, once; else
    `error=confirm`, before anything is sent to Intuit or the relay and with no ask recorded), and in relay mode an

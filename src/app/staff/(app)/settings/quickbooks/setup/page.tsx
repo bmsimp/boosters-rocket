@@ -119,10 +119,11 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
           {relay && conn.connected && conn.tokenMode === "own_app" && <Notice tone="info">The portal is connected with the club&apos;s own Intuit app now. Connecting through Boosters Rocket to the same company moves it over, then asks Intuit to end the old app&apos;s access.</Notice>}
           <QuickBooksFullLogo />
           <ConnectForm relay={relay} environment={conn.environment} locked={conn.connected} ownAppEnvironment={conn.ownAppEnvironment} question={question} begin={beginConnectAction} />
-          {/* A first connect needs no switch: offered only while the roster names a company. Step 2 asks the same
-              while nothing is connected; the switch page stays a way in, and says to disconnect first while connected. */}
-          {source !== null && <p>{SWITCH_WORDS.setupHint}</p>}
-          {source !== null && <p><LinkButton variant="secondary" href={SWITCH_PAGE}>{SWITCH_WORDS.setupLink}</LinkButton></p>}
+          {/* A first connect needs no switch: offered only while the roster names a company. While step 2 asks which
+              company, the question covers it (the owner's word on PR 103); otherwise (connected, renewing) the switch
+              page stays a way in, and says to disconnect first. */}
+          {source !== null && question === null && <p>{SWITCH_WORDS.setupHint}</p>}
+          {source !== null && question === null && <p><LinkButton variant="secondary" href={SWITCH_PAGE}>{SWITCH_WORDS.setupLink}</LinkButton></p>}
           <p className="box-foot"><LinkButton variant="secondary" href={`${SETUP}?step=app`}>Back to step 1</LinkButton>{conn.connected && <> <LinkButton variant="secondary" href={`${SETUP}?step=shape`}>Skip to step 3</LinkButton></>}</p>
         </section>
       )}

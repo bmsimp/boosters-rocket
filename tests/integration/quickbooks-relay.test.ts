@@ -396,7 +396,9 @@ describe("connecting through Boosters Rocket", () => {
       expect(html).not.toContain(`disabled="" name="company"`);
       expect(html).not.toContain("What a switch ends");
       expect(html.match(/>Connect to QuickBooks<\/button>/g)).toHaveLength(1);
-      expect(html).toContain('class="btn btn-line" href="/staff/settings/quickbooks/switch">Connect a different company</a>');
+      // The question covers the switch, so its separate button and sentence aren't drawn beside it.
+      expect(html).not.toContain('href="/staff/settings/quickbooks/switch"');
+      expect(html).not.toContain("Moving the portal to another QuickBooks company ends every family");
       expect(html).not.toContain(A);
       await db.update(setting).set({ value: { realmId: A, companyName: "<b>Evil</b>", environment: "sandbox" } }).where(eq(setting.key, "roster.source"));
       const evil = await setupHtml({ step: "connect" });
