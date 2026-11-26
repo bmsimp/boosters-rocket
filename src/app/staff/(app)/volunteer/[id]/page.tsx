@@ -1,4 +1,4 @@
-import { LinkButton } from "@/app/components/ui";
+import { ConfirmDialog, Drawer, LinkButton } from "@/app/components/ui";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
@@ -9,10 +9,10 @@ import { getEventSetup, volunteerRequirementChoices, type StaffSignup } from "@/
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { LocalTime } from "@/app/components/local-time";
 import { DataTable } from "@/app/components/data-table";
-import { OneButton, TextAction } from "../../seasons/forms";
+import { OneButton } from "../../seasons/forms";
 import { addShiftAction, cancelEventAction, cancelShiftAction, copyEventAction, removeSignupAction, updateEventAction, updateShiftAction } from "../actions";
 import { addCheckInAction, removeCreditAction } from "../credit/actions";
-import { ConfirmButton, CopyForm, EventForm, ShiftForm } from "../forms";
+import { CopyForm, EventForm, ShiftForm } from "../forms";
 
 export const metadata = { title: "Volunteer event" };
 export const dynamic = "force-dynamic";
@@ -48,10 +48,10 @@ export default async function VolunteerEventPage({ params }: { params: Promise<{
           {event.description && <><dt>About</dt><dd className="volunteer-about">{event.description}</dd></>}
         </dl>
         {canChange && (
-          <details className="more"><summary>Change the event</summary>
+          <div className="row-actions"><Drawer param="event" label="Change the event">
             <EventForm initial={{ name: event.name, onDate: event.onDate, location: event.location, description: event.description, contactName: event.contactName, contactEmail: event.contactEmail ?? "" }}
               save={updateEventAction.bind(null, event.id)} label="Save event" />
-          </details>
+          </Drawer></div>
         )}
       </section>
 
@@ -75,30 +75,30 @@ export default async function VolunteerEventPage({ params }: { params: Promise<{
               ...(canCredit || canPrint ? [{ key: "do", header: "What you can do", quiet: true, cell: (x: StaffSignup) => (
                 <>
                   {canCredit && x.checkIn && (
-                    <details className="more"><summary>Remove this check-in</summary>
-                      <TextAction field="Why it's being removed (only staff see this)" label="Remove the check-in" pendingLabel="Removing…" maxLength={500} multiline
-                        act={removeCreditAction.bind(null, x.checkIn.creditId, rosterTag)} />
-                    </details>
+                    <ConfirmDialog label="Remove this check-in" size="sm" title={`Remove the check-in of ${x.fillerName}?`} confirmLabel="Remove the check-in" busyLabel="Removing…"
+                      consequence="The credit it earned stops counting. Only staff see your reason."
+                      reason={{ label: "Why it's being removed (only staff see this)", maxLength: 500 }}
+                      act={removeCreditAction.bind(null, x.checkIn.creditId, rosterTag)} />
                   )}
                   {canCredit && !x.checkIn && s.started && !s.cancelled && !event.cancelled && (
                     <OneButton label={`Check in ${x.fillerName}`} pendingLabel="Checking in…" act={addCheckInAction.bind(null, x.id, rosterTag)} />
                   )}
                   {canPrint && !x.checkIn && (
-                    <details className="more"><summary>Take {x.fillerName} off this shift</summary>
-                      <ConfirmButton label="Remove this sign-up" question={`Remove ${x.fillerName} from this shift? The place is freed${s.ended ? "" : ", and the guardian who signed up is emailed"}.`}
-                        yes="Yes, remove it" act={removeSignupAction.bind(null, x.id)} />
-                    </details>
+                    <ConfirmDialog label={`Take ${x.fillerName} off this shift`} size="sm" busyLabel="Removing…"
+                      consequence={`The place is freed${s.ended ? "" : ", and the guardian who signed up is emailed"}.`}
+                      act={removeSignupAction.bind(null, x.id)} />
                   )}
                 </>) }] : []),
             ]} />
           )}
           {canChange && !s.cancelled && (
-            <details className="more"><summary>Change or cancel this shift</summary>
+            <div className="row-actions"><Drawer param="shift" value={s.id} label="Change or cancel this shift">
               <ShiftForm initial={{ startsAt: s.startsAt, endsAt: s.endsAt, places: s.places, role: s.role ?? "", requirementIds: s.requirementIds }} requirements={options}
                 save={updateShiftAction.bind(null, s.id)} label="Save shift" />
-              <ConfirmButton label="Cancel this shift" question="Cancel this shift? Everyone signed up for it is emailed, and its places are no longer offered. This can't be undone."
-                yes="Yes, cancel the shift" act={cancelShiftAction.bind(null, s.id)} />
-            </details>
+              <ConfirmDialog label="Cancel this shift" busyLabel="Cancelling…"
+                consequence="Everyone signed up for it is emailed, and its places are no longer offered. This can't be undone."
+                act={cancelShiftAction.bind(null, s.id)} />
+            </Drawer></div>
           )}
         </section>
       ))}
@@ -110,8 +110,9 @@ export default async function VolunteerEventPage({ params }: { params: Promise<{
           </section>
           <section className="box" aria-labelledby="cancel-h"><h2 id="cancel-h">Cancel the event</h2>
             <p>Everyone signed up for its shifts is emailed. The event stays here, marked cancelled.</p>
-            <ConfirmButton label="Cancel this event" question="Cancel the whole event? Everyone signed up for any of its shifts is emailed. This can't be undone."
-              yes="Yes, cancel the event" act={cancelEventAction.bind(null, event.id)} />
+            <ConfirmDialog label="Cancel this event" busyLabel="Cancelling…"
+              consequence="Everyone signed up for any of its shifts is emailed. This can't be undone."
+              act={cancelEventAction.bind(null, event.id)} />
           </section>
         </>
       )}

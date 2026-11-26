@@ -9,11 +9,19 @@ import { LocalTime } from "../../../components/local-time";
 import { StateWords } from "../../../components/state-words";
 import { DataTable } from "../../../components/data-table";
 import { Notice } from "../../../components/notice";
+import { Drawer } from "../../../components/ui";
 import { remindFamilyAction, remindFormAction, saveScheduleAction } from "./actions";
 import { RemindButton, ScheduleForm } from "./forms";
 
 export const metadata = { title: "Signed forms" };
 export const dynamic = "force-dynamic";
+
+/** A form's reminder schedule in words: "Reminders: 7 and 1 days before, then weekly", or "Reminders: none". */
+function scheduleWords(r: MatrixForm["reminders"]): string {
+  const days = [...(r?.before ?? [])].sort((a, b) => b - a);
+  const parts = [days.length ? `${days.join(", ").replace(/, (\d+)$/, " and $1")} ${days.length === 1 && days[0] === 1 ? "day" : "days"} before` : "", r?.weeklyAfter ? "weekly after" : ""].filter(Boolean);
+  return `Reminders: ${parts.length ? parts.join(", then ") : "none"}`;
+}
 
 /** "12 of 40 signed, 2 waived", in words. */
 const tally = (c: MatrixForm["counts"]) => (c.needed + c.waived === 0 ? "Asked of nobody on the roster" : `${c.signed} of ${c.needed} signed${c.waived ? `, ${c.waived} waived` : ""}`);
@@ -75,9 +83,10 @@ export default async function SignedFormsPage({ searchParams }: { searchParams: 
                 ...(writes ? [{ key: "remind", header: "Reminders", quiet: true, cell: (f: MatrixForm) => (f.setting ? (
                   <>
                     <RemindButton label="Remind now" run={remindFormAction.bind(null, f.id)} />
-                    <details className="more"><summary>Reminder schedule{f.reminders ? "" : ": none"}</summary>
+                    <span className="when">{scheduleWords(f.reminders)}</span>
+                    <Drawer param="reminders" value={f.id} label="Change the reminder schedule" size="sm" title={`Reminder schedule for ${f.title}`}>
                       <ScheduleForm before={f.reminders?.before ?? []} weeklyAfter={f.reminders?.weeklyAfter ?? false} hasDueDate={f.dueOn !== null} save={saveScheduleAction.bind(null, f.id)} />
-                    </details>
+                    </Drawer>
                   </>) : null) }] : []),
               ]} />
             )}

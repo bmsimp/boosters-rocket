@@ -210,8 +210,8 @@ describe("attaching a template to a form requirement", () => {
     asStaff(setter);
     const change = await page();
     expect(change).toMatch(/<option value="envelope_[a-f0-9]+"[^>]*>Medical release 2027<\/option>/);
-    expect(textOf(change)).toContain("a text field labelled Student name for the first signer");
-    expect(textOf(change)).toContain("Set every name field to Read only");
+    expect(textOf(change)).toContain("Give the first signer read-only text fields labelled Student name and Guardian 1 name , and a second signer one labelled Guardian 2 name");
+    expect(change).toContain(">Attach a template</a>"); // the Drawer's button; its form is drawn inside the dialog
     expect(stub.apiCalls().map((c) => c.path)).toEqual(["/api/v2/envelope"]);
     // Documenso unreachable: the address is pasted instead.
     stub.drop = true;
@@ -239,7 +239,8 @@ describe("attaching a template to a form requirement", () => {
       before: { title: "Medical release", form: null }, after: { title: "Medical release", form: { templateId: template.id, templateUpdatedAt: template.updatedAt, signerRoles: 2, signers: "every" } } });
     const text = textOf(await page());
     expect(text).toContain("Template Medical release 2027 Who signs Every guardian who has a sign-in, up to two");
-    expect(text).toContain("Attach another template, or change who signs");
+    expect(text).toContain("Change the template or signers");
+    expect(text).toContain("Signed forms stay as they are; unsigned ones use the new template next time a guardian opens them.");
 
     // Attached again with one signer: the audit row holds what it was before.
     const single = stub.addTemplate({ title: "One signer", signers: 1 });

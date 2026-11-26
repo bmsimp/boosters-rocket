@@ -9,6 +9,7 @@ import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { listItems, itemsReadAt, requirementItem } from "@/lib/money/items";
 import { CalendarDate } from "@/app/components/calendar-date";
 import { LocalTime } from "@/app/components/local-time";
+import { Drawer } from "@/app/components/ui";
 import { dateWords, shiftTimeWords } from "@/lib/volunteer/clock";
 import { shiftsCountingToward } from "@/lib/volunteer/setup";
 import { CoverageForm, OneButton, RequirementForm } from "../../../forms";
@@ -86,11 +87,11 @@ export default async function RequirementPage({ params }: { params: Promise<{ id
             <li key={String(c.id)}><div><span className="what">{c.name}</span>{r.appliesTo === "student" && <span className="when">{c.familyName}</span>}</div></li>))}</ul>
         )}
         {canChange && (
-          <details className="more"><summary>Change who it is asked of</summary>
+          <div className="row-actions"><Drawer param="coverage" label="Change who it is asked of">
             <CoverageForm covers={r.covers} chosen={[...chosen].filter((id) => onRoster.has(id))} noun={noun}
               candidates={candidates.map((c) => ({ id: String(c.id), label: r.appliesTo === "student" ? `${c.name} (${c.familyName})` : c.name }))}
               save={setCoverageAction.bind(null, r.id, rosterTag)} />
-          </details>)}
+          </Drawer></div>)}
       </section>
 
       {r.kind === "volunteer" && (

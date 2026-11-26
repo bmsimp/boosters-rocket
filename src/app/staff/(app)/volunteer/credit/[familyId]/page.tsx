@@ -9,7 +9,7 @@ import { CalendarDate } from "@/app/components/calendar-date";
 import { LocalTime } from "@/app/components/local-time";
 import { DataTable, type Column } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
-import { TextAction } from "../../../seasons/forms";
+import { ConfirmDialog } from "@/app/components/ui";
 import { OutsideCreditForm } from "../../forms";
 import { addOutsideCreditAction, removeCreditAction } from "../actions";
 
@@ -35,9 +35,9 @@ function CreditTable({ caption, credits, remove }: { caption: string; credits: S
         {c.note && <span className="t-line">Note (staff only): {c.note}</span>}
       </>) },
     ...(remove ? [{ key: "do", header: "What you can do", quiet: true, cell: (c: StaffCreditLine) => (
-      <details className="more"><summary>Remove this credit</summary>
-        <TextAction field="Why it's being removed (only staff see this)" label="Remove it" pendingLabel="Removing…" maxLength={500} multiline act={remove(c.id)} />
-      </details>) }] : []),
+      <ConfirmDialog label="Remove this credit" size="sm" confirmLabel="Remove the credit" busyLabel="Removing…"
+        consequence="It stops counting toward what the club asks. Only staff see your reason."
+        reason={{ label: "Why it's being removed (only staff see this)", maxLength: 500 }} act={remove(c.id)} />) }] : []),
   ];
   return <DataTable caption={caption} captionHidden columns={columns} rows={credits} rowKey={(c) => c.id} />;
 }

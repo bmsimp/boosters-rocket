@@ -11,6 +11,7 @@ import { LocalTime } from "@/app/components/local-time";
 import { StateWords } from "@/app/components/state-words";
 import { DataTable, type Column } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
+import { Drawer } from "@/app/components/ui";
 import { familyProgressPage } from "@/app/staff/(app)/family-pages";
 import { OneButton, TextAction } from "../../forms";
 import { removeWaiverAction, setTicksAction, waiveAction } from "../../actions";
@@ -80,9 +81,10 @@ export default async function RequirementProgressPage({ params, searchParams }: 
                   : <OneButton label="Tick" pendingLabel="Ticking…" act={setTicksAction.bind(null, r.id, rosterTag, [String(row.id)], true)} />)}
                 {row.waivedAt
                   ? <OneButton label="Remove waiver" pendingLabel="Removing…" act={removeWaiverAction.bind(null, r.id, rosterTag, String(row.id))} />
-                  : <details className="more"><summary>Waive for {row.name}</summary>
+                  : <Drawer param="waive" value={String(row.id)} label={`Waive for ${row.name}`} size="sm"
+                      description="The family reads only “Waived”, never your reason.">
                       <TextAction field="Why? (kept in the audit log; the family doesn't see it)" label="Waive" pendingLabel="Waiving…" maxLength={500} multiline act={waiveAction.bind(null, r.id, rosterTag, String(row.id))} />
-                    </details>}
+                    </Drawer>}
               </div>) } satisfies Column<ProgressRow>] : []),
           ]} />}
       </section>
