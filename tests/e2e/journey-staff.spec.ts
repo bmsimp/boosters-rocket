@@ -152,8 +152,9 @@ test("a staff member's session: the roster, a season, volunteering, forms, money
   await test.step("waives a requirement for one family; the parent reads Waived and never the reason; then the waiver is removed", async () => {
     await staffMenuTo(page, "Season", "Progress");
     await page.getByRole("link", { name: "Banquet RSVP" }).click();
-    const progress = page.url();
     const row = page.locator(".progress-rows tbody tr").filter({ hasText: "Quetzalcoatl Family" });
+    await expect(row.getByRole("link", { name: "Waive for Quetzalcoatl Family" })).toBeVisible();
+    const progress = page.url(); // the requirement's page, once it is drawn
     await row.getByRole("link", { name: "Waive for Quetzalcoatl Family" }).click();
     const waive = page.getByRole("dialog", { name: "Waive for Quetzalcoatl Family" });
     await waive.getByLabel(/^Why\?/).fill(WAIVER);

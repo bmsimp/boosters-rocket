@@ -246,7 +246,7 @@ test("an Admin chooses Boosters Rocket, makes the key, copies the address and ke
     await expect(page.getByText(E2E_PORTAL_ID, { exact: true })).toBeVisible();
     await expect(page.getByText(/Boosters Rocket couldn.t be reached just now, so the registration wasn.t checked\./)).toBeVisible();
     await expect(page.getByRole("button", { name: "Replace this portal's key" })).toBeVisible(); // it asks again first; never pressed here
-    await expect(page.getByRole("link", { name: "Change the portal id" })).toHaveCount(0); // the run's address is http
+    await expect(page.getByRole("link", { name: "Change the portal id" })).toBeVisible(); // a Drawer; never opened here
     await checked(page, "step 1, ready to connect");
   } finally {
     await backToTheSeed();

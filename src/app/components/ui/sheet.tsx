@@ -1,5 +1,5 @@
 "use client";
-import { startTransition, useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { startTransition, useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Button, buttonClass, type ButtonSize, type ButtonVariant } from "./button";
 import { cx } from "./cx";
@@ -20,6 +20,7 @@ import { ACTION_FAILED, safely } from "../action-error";
 
 /** How many dialogs are open: the page keeps still while any is. */
 let openCount = 0;
+const FOCUSABLE = "a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
 function holdScroll(on: boolean) {
   openCount = Math.max(0, openCount + (on ? 1 : -1));
   document.documentElement.classList.toggle("sheet-open", openCount > 0);
@@ -70,10 +71,21 @@ export function Sheet({ open, onClose, title, description, kind = "drawer", clos
   useEffect(() => () => { if (held.current) { held.current = false; holdScroll(false); } }, []);
 
   const close = (e?: MouseEvent) => { e?.preventDefault(); closeRef.current(); };
+  // Tab from the last control goes round to the first, and Shift+Tab from the first to the last, so the focus never
+  // leaves an open dialog for the browser's own bar (which a modal <dialog> alone allows).
+  const keepFocusIn = (e: KeyboardEvent<HTMLDialogElement>) => {
+    if (e.key !== "Tab" || e.defaultPrevented || !ref.current?.matches(":modal")) return;
+    if ((e.target as HTMLElement).closest("dialog") !== ref.current) return; // a dialog opened from this one keeps its own
+    const stops = [...ref.current.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => !el.closest("dialog:not([open])") && el.getClientRects().length > 0);
+    if (stops.length === 0) return;
+    const first = stops[0]!, last = stops[stops.length - 1]!;
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  };
   return (
     <dialog ref={ref} open={drawnOpen || undefined} className={cx("sheet", kind === "confirm" ? "sheet-confirm" : "sheet-drawer")}
       aria-labelledby={titleId} aria-describedby={description ? descId : undefined}
-      onCancel={(e) => { e.preventDefault(); closeRef.current(); }}>
+      onCancel={(e) => { e.preventDefault(); closeRef.current(); }} onKeyDown={keepFocusIn}>
       <div className="sheet-head">
         <h2 id={titleId}>{title}</h2>
         {kind === "drawer" && (closeHref !== undefined
