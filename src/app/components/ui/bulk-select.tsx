@@ -3,7 +3,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import { Button } from "./button";
 import { Sheet } from "./sheet";
 import {
-  NOTHING, headerState, isSelected, offersAllMatching, selectAllMatching, selectRange, selectedCount, toggle, togglePage, type Selection,
+  NOTHING, headerState, isSelected, offersAllMatching, selectAllMatching, selectRange, selectedCount, toggle, togglePage, untick, type Selection,
 } from "./selection";
 
 /**
@@ -19,6 +19,8 @@ import {
 type Bulk = {
   selection: Selection; pageIds: readonly string[]; total: number; count: number;
   toggleRow: (id: string, range: boolean) => void; togglePage: () => void; clear: () => void;
+  /** Unticks these rows, leaving every other as it is: after a bulk press, the ones it did. */
+  untick: (ids: readonly string[]) => void;
 };
 const BulkContext = createContext<Bulk | null>(null);
 
@@ -44,6 +46,7 @@ export function BulkSelect({ pageIds, total, noun, actions, children }: {
     },
     togglePage: () => setSelection((s) => togglePage(s, pageIds)),
     clear: () => { setSelection(NOTHING); setMenu(false); },
+    untick: (ids) => setSelection((s) => untick(s, ids)),
   };
   const words = `${count} ${count === 1 ? noun.one : noun.many} selected`;
   return (
@@ -86,6 +89,7 @@ export function HeaderCheck({ label = "Select every row on this page" }: { label
   const ref = useRef<HTMLInputElement>(null);
   const state = headerState(b.selection, b.pageIds);
   useEffect(() => { if (ref.current) ref.current.indeterminate = state === "some"; }, [state]);
+  if (b.pageIds.length === 0) return null; // no row on the page can be ticked
   return (
     <span className="checks bulk-check"><label><input ref={ref} type="checkbox" checked={state === "all"} aria-checked={state === "some" ? "mixed" : state === "all"}
       onChange={b.togglePage} /><span className="visually-hidden">{label}</span></label></span>

@@ -1,20 +1,21 @@
 import Link from "next/link";
 import { requireStaffAlso, requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
-import { BULK_MAX, filterLinkRows, filtersOf, givenUpCustomersOf, loadAccountingLinks, REVIEW_LEFT_WORDS, SEND_ALL_MAX, statusCounts, type BulkOffer, type ConfirmStep, type GuardianSendOffer, type GuardianShown, type InactiveRow, type KeptOffer, KEPT_ASK, KEPT_GONE, KEPT_GONE_ASK, type LinkMade, type LinkOffer, type LinkRow, type LinkStatus, type LinksState, type LinksView, type OwnLink, type ReviewOffer, type SendAllOffer, type SendOffer, type TakeOffer, type UnlinkOffer } from "@/lib/accounting/mapping";
+import { filterLinkRows, filtersOf, givenUpCustomersOf, loadAccountingLinks, REVIEW_LEFT_WORDS, SEND_ALL_MAX, statusCounts, type ConfirmStep, type GuardianSendOffer, type GuardianShown, type InactiveRow, type KeptOffer, KEPT_ASK, KEPT_GONE, KEPT_GONE_ASK, type LinkMade, type LinkOffer, type LinkRow, type LinkStatus, type LinksState, type LinksView, type OwnLink, type ReviewOffer, type SendAllOffer, type SendOffer, type TakeOffer, type UnlinkOffer } from "@/lib/accounting/mapping";
 import { differenceKinds, differenceWords, guardianDifferenceNext, noteSentence, type Difference } from "@/lib/accounting/differences";
 import { NOT_A_FAMILY_WORDS, parseLinksFilter, searchMatches, SEARCH_MAX, STATUS_KEYS, STATUS_WORDS, type LinksFilter, type StatusKey } from "@/lib/accounting/status";
 import type { Holder } from "@/lib/accounting/match";
 import type { Proposals } from "@/lib/accounting/proposals";
 import { recordNameWords } from "@/lib/families/words";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
-import { Button, Card, DataTable, EmptyState, LinkButton, LocalTime, Notice, PageHeader, Select, StatusBadge, TextInput, Toolbar, type Column, type Tone } from "@/app/components/ui";
+import { Button, BulkResults, BulkSelect, Card, DataTable, EmptyState, LinkButton, LocalTime, Notice, PageHeader, Select, StatusBadge, TextInput, Toolbar, type Column, type Tone } from "@/app/components/ui";
 import { familyPage } from "@/app/staff/(app)/family-pages";
-import { confirmAllAction, confirmLinkAction, leaveUnlinkedAction, linkGuardianAction, reviewLinkAction, sendAllAction, sendDifferenceAction, takeDifferenceAction, undoLeaveUnlinkedAction, unlinkAction, unlinkGuardianAction } from "./actions";
+import { confirmLinkAction, leaveUnlinkedAction, linkGuardianAction, linkSuggestedManyAction, reviewLinkAction, sendAllAction, sendDifferenceAction, takeDifferenceAction, undoLeaveUnlinkedAction, unlinkAction, unlinkGuardianAction } from "./actions";
 import { GuardianLinkPress, LinkAnswers, LinkAnswersShown, LinkGiveUp, LinkPress } from "./link-press";
 import { giveUpAction } from "../roster/write-actions";
 import { CustomersWithNoFamily } from "./no-family";
 import { ImportOffer, ImportReview } from "./import-review";
+import { LinkSuggestedBulk, type SuggestedPick } from "./bulk-presses";
 
 export const metadata = { title: "Accounting links" };
 export const dynamic = "force-dynamic";
@@ -385,35 +386,6 @@ function UnlinkShown({ unlink }: { unlink: UnlinkOffer }) {
 }
 
 /**
- * Confirm all exact email matches (slice M3a2): for the Suggested rows the filter shows now, in the `listed` state, a
- * press bound to the filter as parsed, the count, the roster tag and the stamp sealing those rows, and nothing else;
- * with more than BULK_MAX, no press but a notice to narrow the list. A Suggested row a press would refuse whatever
- * happened meanwhile (the family's own create waiting or stuck on the queue) isn't counted, and a notice says so.
- */
-function BulkPress({ bulk, filter, tag }: { bulk: BulkOffer; filter: LinksFilter; tag: string }) {
-  const held = bulk.waiting === 0 ? null : (
-    <Notice tone="info" live="none">{bulk.waiting === 1 ? "1 Suggested row isn't" : `${bulk.waiting} Suggested rows aren't`} included: {bulk.waiting === 1 ? "it is" : "each is"} waiting to be made in the books,
-      or is linked to another company&apos;s customer. Each row&apos;s Confirm says which.</Notice>
-  );
-  if (bulk.count === 0) return held;
-  if (bulk.stamp === null) {
-    return <>{held}<Notice tone="info" live="none">This list shows {bulk.count} Suggested rows. Up to {BULK_MAX} can be confirmed at once, so narrow the list with the search first.</Notice></>;
-  }
-  return (
-    <div className="stack">
-      {held}
-      <p>Links each of the {plural(bulk.count, "Suggested family", "Suggested families")} shown to the customer on its row, with the students and guardians its row lists.
-        If the list changes before you press, nothing is linked and it&apos;s shown again. Nothing is sent to the books.</p>
-      <p>Guardians then see their customer&apos;s open invoices and Pay links (and those of students and parents under it) next time they open Home or Payments. Unlink from the books undoes a link, but they may have seen the invoices by then, so look the rows over first.</p>
-      <div className="row-actions">
-        <LinkPress label={`Confirm all exact email matches (${bulk.count})`} busy="Linking…" about="Confirm all exact email matches"
-          act={confirmAllAction.bind(null, filter.status ?? "", filter.q, bulk.count, tag, bulk.stamp)} />
-      </div>
-    </div>
-  );
-}
-
-/**
  * Send the app's for all (slice M5b): for the names and students' families the filter shows now, in the `listed` state,
  * for a reader who may change families, a press bound to the filter as parsed, the count, the roster tag and the stamp
  * sealing those sends, and nothing else; with more than SEND_ALL_MAX, no press but a notice to narrow the list. What it
@@ -453,6 +425,28 @@ function SendAllPress({ offer, filter, tag }: { offer: SendAllOffer; filter: Lin
 
 function ConfirmPress({ familyId, about, offer, tag }: { familyId: string; about: string; offer: LinkOffer; tag: string }) {
   return <LinkPress label="Confirm" busy="Linking…" about={about} act={confirmLinkAction.bind(null, familyId, offer.customerId, offer.chosen, tag, offer.stamp)} />;
+}
+
+/** A Suggested row the bulk press can take: its customer filled in and its own Confirm offered (listed only). */
+const pickOf = (r: LinkRow): SuggestedPick | null => (r.status.key !== "suggested" || r.confirm === null || r.customer === null ? null
+  : { familyId: String(r.familyId), family: r.name, customer: r.customer.name, customerId: r.confirm.customerId, stamp: r.confirm.stamp });
+
+/**
+ * The Families list, with a box on each Suggested row it shows for the bulk Link to their suggested families (src/lib/bulk.ts),
+ * bound to the roster tag: each row ticked is linked by its own Confirm's write, in its own transaction. The page lists
+ * every row its filter matches, so ticking the header ticks every Suggested row that matches. With none, no boxes.
+ */
+function FamiliesTable({ rows, columns, caption, tag }: { rows: LinkRow[]; columns: Column<LinkRow>[]; caption: string; tag: string }) {
+  const picks = rows.map(pickOf).filter((p): p is SuggestedPick => p !== null);
+  const table = (select: boolean) => <DataTable caption={caption} columns={columns} rows={rows} rowKey={(r) => String(r.familyId)}
+    select={select ? { label: (r) => r.name, when: (r) => pickOf(r) !== null } : undefined} />;
+  if (picks.length === 0) return table(false);
+  return (
+    <BulkSelect pageIds={picks.map((p) => p.familyId)} noun={{ one: "family", many: "families" }}
+      actions={<LinkSuggestedBulk rows={picks} act={linkSuggestedManyAction.bind(null, tag)} />}>
+      {table(true)}
+    </BulkSelect>
+  );
 }
 
 /** How the customer on the confirm step was chosen, in words. */
@@ -516,7 +510,7 @@ function PickPart({ view, familyId, customerId, cq, tag, made }: { view: LinksVi
  * own, with a status on each row, a filter by status and a search. Since slice M3a a family with no link is linked here
  * (Confirm its suggestion or a candidate, or Pick a different customer), or left unlinked, and nothing is sent to the
  * books; each press is audited, in its own transaction (src/lib/accounting/link-writes.ts). Since slice M3a2 the
- * Suggested rows the filter shows are confirmed in one press (Confirm all exact email matches), and a carried-over link
+ * Suggested rows ticked are linked in one press (Link to their suggested families), and a carried-over link
  * is confirmed as reviewed in its row (Confirm this link). Since slice M3b a linked family is unlinked in its row (Unlink
  * from the books), and linked again with the presses above. Since slice M3c a guardian of a linked family is linked to
  * a Parent customer under it in the row's opening (Link this guardian), and one guardian's link ended alone (Unlink
@@ -546,8 +540,6 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
   // A carried-over family with differences is found under two filters (filtersOf()), so the counts overlap by this many.
   const overlap = view.rows.filter((r) => filtersOf(r).length > 1).length;
   const rows = filterLinkRows(view.rows, filter);
-  // Confirm all exact email matches, over the Suggested rows this filter shows, by the press's own rule (suggestedRowsShown()).
-  const bulk = view.bulk(filter);
   // Send the app's for all (slice M5b), over the sends this filter shows, by the press's own rule (sendAllShown()), for a reader who may change families.
   const sendAll = maySend ? view.sendAll(filter) : null;
   const filtered = filter.status !== null || filter.q !== "";
@@ -572,7 +564,7 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
   ];
   return (
     <main className="wrap single">
-      <LinkAnswers>
+      <LinkAnswers><BulkResults>
         <PageHeader title="Accounting links" lede={<>Each family in the portal, beside the customer in the books it&apos;s linked to or looks like.
           Only three things here send anything to the books: Send the app&apos;s to QuickBooks, Send the app&apos;s for all, and a student&apos;s move taken from the books, which voids an unpaid volunteer buy-out invoice of theirs there.</>} />
         <LinkAnswersShown />
@@ -605,17 +597,16 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
           </form>
           {overlap > 0 && <p>{overlap === 1 ? "1 family whose link was carried over has differences, so it is counted under both Carried over and Linked, with differences."
             : `${overlap} families whose links were carried over have differences, so each is counted under both Carried over and Linked, with differences.`}</p>}
-          {bulk !== null && <BulkPress bulk={bulk} filter={filter} tag={tag} />}
           {sendAll !== null && <SendAllPress offer={sendAll} filter={filter} tag={tag} />}
           {filter.tooLong && <Notice tone="warning" live="none">That search was too long, so nothing was searched for. Try a shorter part of a name or an address, up to {SEARCH_MAX} characters.</Notice>}
           {view.rows.length === 0 ? <EmptyState title="The portal has no active families yet." />
             : rows.length === 0 ? <Notice tone="info">No family matches that.</Notice>
-            : <DataTable caption={filtered ? `${plural(rows.length, "family", "families")} of ${view.rows.length} shown` : `Every family, by name: ${plural(rows.length, "family", "families")}`}
-                columns={columns} rows={rows} rowKey={(r) => String(r.familyId)} />}
+            : <FamiliesTable rows={rows} columns={columns} tag={tag}
+                caption={filtered ? `${plural(rows.length, "family", "families")} of ${view.rows.length} shown` : `Every family, by name: ${plural(rows.length, "family", "families")}`} />}
         </Card>
 
         {view.inactive.length > 0 && <InactivePart rows={view.inactive} tag={tag} familyPages={view.familyPages} maySend={maySend} />}
-      </LinkAnswers>
+      </BulkResults></LinkAnswers>
     </main>
   );
 }

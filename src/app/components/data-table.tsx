@@ -37,9 +37,10 @@ type Props<R> = {
   className?: string;
   /**
    * Bulk select (inside BulkSelect, src/app/components/ui/bulk-select.tsx): a tick box first in every row, labelled
-   * "Select" and these words (the row's name), and one in the header. The row's id is its rowKey.
+   * "Select" and these words (the row's name), and one in the header. The row's id is its rowKey. `when`: only the rows
+   * a bulk action can take get a box (the rest an empty cell); BulkSelect's `pageIds` are then those rows alone.
    */
-  select?: { label: (row: R) => string };
+  select?: { label: (row: R) => string; when?: (row: R) => boolean };
 } & ({ rows: R[]; groups?: never } | { groups: RowGroup<R>[]; rows?: never });
 
 function Row<R>({ row, columns, check }: { row: R; columns: Column<R>[]; check?: ReactNode }) {
@@ -58,7 +59,7 @@ function Row<R>({ row, columns, check }: { row: R; columns: Column<R>[]; check?:
 }
 
 export function DataTable<R>({ caption, captionHidden = false, columns, rowKey, className, rows, groups, select }: Props<R>) {
-  const check = (r: R) => (select ? <RowCheck id={rowKey(r)} label={`Select ${select.label(r)}`} /> : undefined);
+  const check = (r: R) => (!select ? undefined : select.when && !select.when(r) ? <span /> : <RowCheck id={rowKey(r)} label={`Select ${select.label(r)}`} />);
   const span = columns.length + (select ? 1 : 0);
   return (
     <table role="table" className={["table", className].filter(Boolean).join(" ")}>

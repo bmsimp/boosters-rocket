@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Card, Notice } from "@/app/components/ui";
 import type { CustomerAim, LinksState, LinksView } from "@/lib/accounting/mapping";
 import { handful, type NoFamilyCustomer } from "@/lib/roster/no-family";
-import { familyFromCustomerAction } from "./actions";
+import { familiesFromCustomersAction, familyFromCustomerAction } from "./actions";
 import { NoFamilyRows, type NoFamilyRow } from "./no-family-list";
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -111,7 +111,7 @@ export function CustomersWithNoFamily({ view, mayChangeFamilies, children }: { v
     <Card title={<>Customers with no family{rows.length ? ` (${rows.length})` : ""}</>} titleId={NO_FAMILY_H}>
       <p>{list !== null && list.length > 0 ? `${NO_FAMILY_WORDS.count(list.length)} ` : ""}{NO_FAMILY_WORDS.lead(mayChangeFamilies)}</p>
       <p className="hint">{NO_FAMILY_WORDS.more}</p>
-      {view.state !== "listed" || list === null ? <Notice tone="warning" live="none">{WHY_NONE[view.state === "listed" ? "no_shape" : view.state]}</Notice> : <NoFamilyRows rows={rows} none={NO_FAMILY_WORDS.none} />}
+      {view.state !== "listed" || list === null ? <Notice tone="warning" live="none">{WHY_NONE[view.state === "listed" ? "no_shape" : view.state]}</Notice> : <NoFamilyRows rows={rows} none={NO_FAMILY_WORDS.none} bulk={familiesFromCustomersAction} />}
       {children}
     </Card>
   );

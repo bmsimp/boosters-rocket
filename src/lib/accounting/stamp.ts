@@ -30,18 +30,6 @@ const sealed = (domain: string, values: unknown[]) => createHmac("sha256", env.B
 const same = (want: string, got: string) => { const w = Buffer.from(want), g = Buffer.from(got); return g.length === w.length && timingSafeEqual(g, w); };
 
 /**
- * Confirm all exact email matches (slice M3a2): the filter as the page parsed it (its status key or none, and its
- * search text), how many rows it showed, and every one of them (bulkKeys(): `<family id>=<customer id>|<its pairs>`,
- * sorted), sealed in a domain of its own, so a row's stamp is never a bulk stamp nor the other way round. The press
- * works the rows out again under the roster lock and they must seal to the same stamp.
- */
-export function bulkStamp(filter: { status: string | null; q: string }, count: number, rows: readonly string[]): string {
-  return sealed("accounting-bulk", [filter.status, filter.q, count, [...rows].sort()]);
-}
-export const bulkStampHolds = (filter: { status: string | null; q: string }, count: number, rows: readonly string[], stamp: string): boolean =>
-  same(bulkStamp(filter, count, rows), stamp);
-
-/**
  * Confirm this link, for a carried-over link (slice M3a2): the family's app id, its family link's id, the customer, and
  * the ids of the student links the press confirms with it (sorted), sealed in a domain of their own.
  */

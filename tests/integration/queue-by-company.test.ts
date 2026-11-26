@@ -505,7 +505,7 @@ describe("the accounting links screen and its presses", () => {
     expect((r as { message: string }).message).not.toMatch(/of (their|guardians') details/);
   });
 
-  it("Confirm all exact email matches leaves out no family for an earlier company's create (familyCreatesFiled())", async () => {
+  it("the accounting links screen counts no family's create of an earlier company as filed (familyCreatesFiled())", async () => {
     const empty = await familyCreatesFiled();
     for (const state of ["waiting", "stuck"] as const) await old(FAMILY_CREATE("Rivera Family"), { familyId: rivera, state });
     expect(await familyCreatesFiled()).toEqual(empty);

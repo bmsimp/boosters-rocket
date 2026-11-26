@@ -1,9 +1,10 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { requireStaffActionAlso, staffAction, type StaffCtx } from "@/lib/guards";
-import { confirmAllSuggested, customerAimedAt, leaveUnlinked, LINK_COPY, linkFamilyToCustomer, reviewCarriedOver, sendAllDifferences, undoLeaveUnlinked, unlinkFamily, type LinkDone } from "@/lib/accounting/link-writes";
-import { familyFromCustomer, NO_FAMILY_COPY } from "@/lib/roster/no-family";
-import { BULK_MAX, IMPORT_MAX } from "@/lib/accounting/mapping";
+import { customerAimedAt, leaveUnlinked, LINK_COPY, linkFamilyToCustomer, linkSuggestedEach, reviewCarriedOver, sendAllDifferences, undoLeaveUnlinked, unlinkFamily, type LinkDone } from "@/lib/accounting/link-writes";
+import { familiesFromCustomers, familyFromCustomer, NO_FAMILY_COPY } from "@/lib/roster/no-family";
+import { ASK_MAX, bulkWords, idsFrom, type BulkDone } from "@/lib/bulk";
+import { IMPORT_MAX } from "@/lib/accounting/mapping";
 import { IMPORT_COPY, saveImport } from "@/lib/accounting/import-writes";
 import { isStatusKey, SEARCH_MAX } from "@/lib/accounting/status";
 import { isChosen, isGuardianChosen } from "@/lib/accounting/stamp";
@@ -15,7 +16,7 @@ import { sendToBooks, takeFromBooks, type SendAsk } from "@/lib/roster/writes";
 
 // The accounting links screen's presses (stage 4's slice M3a; src/lib/accounting/link-writes.ts): Confirm (a Suggested
 // row's customer, a Several possible row's candidate, or one picked from the customers no family is linked to), Leave
-// unlinked and Undo; since slice M3a2, Confirm all exact email matches and Confirm this link (a carried-over link
+// unlinked and Undo; since slice M3a2, Confirm this link (a carried-over link
 // confirmed as reviewed); since slice M3b, Unlink from the books; since slice M3c, Link this guardian and Unlink this
 // guardian (src/lib/accounting/guardian-links.ts); since slice M4a, Take QuickBooks' into the app; since slice M6,
 // "Create a family from this" (moved here from Reconciliation) and Make these families, the reviewed import. Each needs the
@@ -29,6 +30,8 @@ const NOT_FROM_PAGE: LinkDone = { ok: false, errors: [LINK_COPY.notFromPage] };
 const NO_FAMILY_NOT_FROM_PAGE: LinkDone = { ok: false, errors: [NO_FAMILY_COPY.notFromPage] };
 const str = (v: unknown, max: number): v is string => typeof v === "string" && v.length > 0 && v.length <= max;
 const ID_MAX = 64, TAG_MAX = 64, STAMP_MAX = 64;
+// A customer id of the books as a page sends one: digits (the library checks isQboId() again).
+const digits = (v: unknown): v is string => typeof v === "string" && /^\d{1,19}$/.test(v);
 const op = (ctx: StaffCtx) => ({ actor: { door: "staff" as const, id: ctx.staffUserId, label: ctx.email }, ip: ctx.ip, permission: P, staffUserId: ctx.staffUserId });
 const again = () => revalidatePath("/staff/links");
 
@@ -55,21 +58,6 @@ export const undoLeaveUnlinkedAction = staffAction(P, async (ctx: StaffCtx, fami
   if (!str(familyId, ID_MAX) || !str(rosterTag, TAG_MAX)) return NOT_FROM_PAGE;
   const r = await undoLeaveUnlinked(familyId, rosterTag, op(ctx));
   again();
-  return r;
-});
-
-/**
- * Confirm all exact email matches (slice M3a2): the filter as the page parsed it (its status key, "" for none, and its
- * search), how many Suggested rows it showed, the roster tag and the stamp sealing those rows. No family, customer or
- * student comes from the browser: the library works the rows out again under the roster lock.
- */
-export const confirmAllAction = staffAction(P, async (ctx: StaffCtx, status: string, q: string, count: number, rosterTag: string, stamp: string): Promise<LinkDone> => {
-  await requireStaffActionAlso(ctx, "Roster.Read");
-  if (typeof status !== "string" || !(status === "" || isStatusKey(status)) || typeof q !== "string" || q.length > SEARCH_MAX || typeof count !== "number" || !Number.isInteger(count)
-    || count < 1 || count > BULK_MAX || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return NOT_FROM_PAGE;
-  const r = await confirmAllSuggested({ status, q, count, stamp }, rosterTag, op(ctx));
-  if (r.ok) revalidatePath("/", "layout");
-  else again();
   return r;
 });
 
@@ -229,4 +217,39 @@ export const sendAllAction = staffAction(P, async (ctx: StaffCtx, status: string
   if (r.ok) revalidatePath("/", "layout");
   else again();
   return r;
+});
+
+/**
+ * Link to their suggested families, the bulk press on the Families list's selection (src/lib/bulk.ts): the roster tag,
+ * then for each row ticked its family's app id, its suggested customer and the row's own stamp, as the row's Confirm
+ * binds them. The same permissions as Confirm, checked first; every argument checked here for its type and size, and
+ * every row again in the library by Confirm's own write (linkSuggestedEach()), each in its own transaction.
+ */
+export const linkSuggestedManyAction = staffAction(P, async (ctx: StaffCtx, rosterTag: string, asks: { familyId: string; customerId: string; stamp: string }[]): Promise<BulkDone> => {
+  await requireStaffActionAlso(ctx, "Roster.Read");
+  if (!str(rosterTag, TAG_MAX) || !Array.isArray(asks) || asks.length === 0 || asks.length > ASK_MAX
+    || !asks.every((a) => typeof a === "object" && a !== null && isUuid(a.familyId) && digits(a.customerId) && str(a.stamp, STAMP_MAX))) return NOT_FROM_PAGE;
+  // Each family once, as it was first sent.
+  const ids = idsFrom(asks.map((a) => a.familyId), () => true)!;
+  const once = ids.map((id) => asks.find((a) => a.familyId === id)!).map((a) => ({ familyId: a.familyId, customerId: a.customerId, stamp: a.stamp }));
+  const r = await linkSuggestedEach(once, rosterTag, op(ctx));
+  // A link changes the family's page, the Families pages, Balances and every staff page that lists families.
+  if (r.rows.some((x) => x.outcome === "done")) revalidatePath("/", "layout");
+  else again();
+  return { ok: true, message: bulkWords(r, "linked"), ...r };
+});
+
+/**
+ * Create families, the bulk "Create a family from this" on the selection of the customers no family is linked to: the
+ * customer ids ticked, checked here for their type, count and digits, each made a family by the single press's own
+ * function (familiesFromCustomers()), in its own transaction. The same permissions as the single press.
+ */
+export const familiesFromCustomersAction = staffAction(P, async (ctx: StaffCtx, customerIds: string[]): Promise<BulkDone> => {
+  if (!can(ctx.effective, "Roster.Read")) return NO_FAMILY_NOT_FROM_PAGE;
+  const ids = idsFrom(customerIds, digits);
+  if (ids === null) return NO_FAMILY_NOT_FROM_PAGE;
+  const r = await familiesFromCustomers(ids, { ...op(ctx), mayChangeFamilies: can(ctx.effective, "Roster.Family.ReadWrite") }, customerAimedAt);
+  if (r.rows.some((x) => x.outcome === "done")) revalidatePath("/", "layout");
+  else again();
+  return { ok: true, message: bulkWords(r, r.rows.filter((x) => x.outcome === "done").length === 1 ? "family made" : "families made"), ...r };
 });

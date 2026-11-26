@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { IMPORT_MAX, importAddresses, importKeys, proposeImport, type ImportInput, type ImportPerson, type ProposedFamily } from "@/lib/accounting/import-proposals";
-import { bulkStamp, importStamp, importStampHolds, sendAllStamp } from "@/lib/accounting/stamp";
+import { importStamp, importStampHolds, sendAllStamp } from "@/lib/accounting/stamp";
 import { buildRoster, type Cust } from "@/lib/roster/model";
 import type { MembershipShape } from "@/lib/roster/shape";
 
@@ -160,8 +160,7 @@ describe("the import's stamp", () => {
     expect(importStampHolds(k, stamp)).toBe(true);
     expect(importStampHolds(k, `${stamp}x`)).toBe(false);
     expect(importStampHolds(k, "")).toBe(false);
-    // Neither the bulk confirm's stamp nor Send the app's for all's is ever the import's, of the same values.
-    expect(stamp).not.toBe(bulkStamp({ status: null, q: "" }, k.length, k));
+    // Send the app's for all's stamp is never the import's, of the same values.
     expect(stamp).not.toBe(sendAllStamp({ status: null, q: "" }, k.length, k));
   });
 

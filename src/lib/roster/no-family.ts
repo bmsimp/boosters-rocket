@@ -9,6 +9,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { qboCustomer, writeQueue, type RosterWrite } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
+import { eachRow, type RowDone } from "@/lib/bulk";
 import { connectedToAnotherCompany, familyLinkedTo, linksOfCustomers } from "@/lib/families/links";
 import { importRecordsFromRoster } from "@/lib/families/roster-import";
 import { isQboId } from "@/lib/quickbooks/client";
@@ -224,4 +225,17 @@ export async function familyFromCustomer(customerId: string, o: { actor: Actor; 
     if (e instanceof HasFamilyAlready || isSecondFamilyLink(e)) return no(NO_FAMILY_COPY.already);
     throw e;
   }
+}
+
+/**
+ * Create families, the bulk "Create a family from this" on the selection of the customers no family is linked to
+ * (src/lib/bulk.ts): each customer id ticked, made a family by the single press's own function (familyFromCustomer()),
+ * each in its own transaction under the roster lock with its own `accounting.family.from_customer` row, so one refused
+ * never undoes another: a customer with a family already, no longer offered, or aimed at a family the portal has is a
+ * row skipped with the single press's words. The books named no company, connected to another or with no shape skip
+ * the rest untried. At most PRESS_MAX rows; the rest are handed back.
+ */
+export async function familiesFromCustomers(customerIds: readonly string[], o: Parameters<typeof familyFromCustomer>[1], aimedAt: AimedAtFinder): Promise<{ rows: RowDone[]; left: string[] }> {
+  const stops = new Set<string>([NO_FAMILY_COPY.no_company, NO_FAMILY_COPY.other_company, NO_FAMILY_COPY.no_shape]);
+  return eachRow(customerIds, (id) => id, (id) => familyFromCustomer(id, o, aimedAt), { stop: (errors) => errors.some((e) => stops.has(e)) });
 }

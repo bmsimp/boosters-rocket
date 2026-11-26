@@ -700,9 +700,9 @@ assessment, and that can take weeks. Start it as early as you like; it doesn't w
    whom you can link in the row's opening with **Link this guardian** where a Parent customer under it is free for them
    and no change for them or that customer is waiting, stuck or kept on Reconciliation. Its money is read at its next page load. A Several possible or No match family takes **Pick a different customer**, from the customers no family
    is linked to, with the same confirm step; **Leave unlinked** keeps a family with no customer in the books yet out
-   of the suggestions until you undo it. With several Suggested rows, **Confirm all exact email matches** above the list
-   links every Suggested row the filter shows, its count on the button, each as its own **Confirm** would; narrow the
-   list with the status or the search first to link fewer. A link carried over from the roster (on an installation
+   of the suggestions until you undo it. With several Suggested rows, tick them (the header box ticks every Suggested row
+   shown) and press **Link N to their suggested families**: its Drawer lists each customer and its family, then says
+   what happened to each, each linked as its own **Confirm** would, up to 200 at a time. A link carried over from the roster (on an installation
    that had families before) offers **Confirm this link** in its row, which records it as checked by you. A linked family's row
    offers **Unlink from the books**: unlink a test family you linked, and its row reads Suggested or No match again,
    its guardians' Home and Payments say the club hasn't connected their payments yet, and Balances counts it in one

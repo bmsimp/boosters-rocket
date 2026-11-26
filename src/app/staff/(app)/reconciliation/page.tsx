@@ -14,7 +14,10 @@ import { Notice } from "@/app/components/notice";
 import { LinkGiveUp } from "../links/link-press";
 import { WorthALook } from "../balances/worth-a-look";
 import { OneButton } from "../seasons/forms";
-import { giveUpAction, linkMadeStudentAction, sendPortalValueAction, tryAgainAction } from "../roster/write-actions";
+import { giveUpAction, giveUpManyAction, linkMadeStudentAction, sendPortalValueAction, tryAgainAction, tryAgainManyAction } from "../roster/write-actions";
+import { BulkSelect } from "@/app/components/ui/bulk-select";
+import { BulkResults } from "@/app/components/ui/bulk-action";
+import { GiveUpBulk, TryAgainBulk, type QueuePick } from "./bulk-presses";
 import { CONTACT_AWAITS_READ, CONTACT_NOT_OFFERED, EMAIL_NOT_OFFERED, EMAIL_TOO_LONG, GUARDIAN_RENAME_TAKEN, GUARDIAN_TAKEN_NAME, guardianOf, keptRefusalWords, NAME_UNUSABLE, keptWordsFor, portalValueStamp,
   TAKEN_NAME_KEPT } from "@/lib/roster/writes";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
@@ -76,7 +79,17 @@ function Writes({ items, caption, canChange, mayLink }: { items: QueueView[]; ca
         <LinkGiveUp about={i.words} act={giveUpAction.bind(null, i.id)} />
       </div>) }] : []),
   ];
-  return <DataTable caption={caption} captionHidden columns={columns} rows={items} rowKey={(i) => i.id} />;
+  const table = <DataTable caption={caption} captionHidden columns={columns} rows={items} rowKey={(i) => i.id} select={canChange ? { label: (i) => i.words } : undefined} />;
+  if (!canChange) return table;
+  // Try again and Give up on many (src/lib/bulk.ts): each change ticked goes through the row's own press, in its own transaction.
+  const picks: QueuePick[] = items.map((i) => ({ id: i.id, words: i.words,
+    again: isFamilyCreateItem(i.write) && !mayLink ? "skipped, as trying it again takes the permission to link families to accounting" : "tried again within a minute" }));
+  return (
+    <BulkSelect pageIds={items.map((i) => i.id)} noun={{ one: "change", many: "changes" }}
+      actions={<><TryAgainBulk rows={picks} act={tryAgainManyAction} /><GiveUpBulk rows={picks} act={giveUpManyAction} /></>}>
+      {table}
+    </BulkSelect>
+  );
 }
 
 /** Why a refused rename or move isn't offered "Send the portal's value", by what the cache shows (QueueView.notOffered). */
@@ -175,7 +188,16 @@ function Refused({ items, canChange, compared, mayCompare, onLinks, linking }: {
         </div>);
     } }] : []),
   ];
-  return <DataTable caption="Changes that didn't go through, kept in the portal" captionHidden columns={columns} rows={items} rowKey={(i) => i.id} />;
+  const table = <DataTable caption="Changes that didn't go through, kept in the portal" captionHidden columns={columns} rows={items} rowKey={(i) => i.id}
+    select={canChange ? { label: (i) => i.words } : undefined} />;
+  if (!canChange) return table;
+  // Give up on many (src/lib/bulk.ts): a change kept in the portal is never tried again, so it offers no Try again.
+  return (
+    <BulkSelect pageIds={items.map((i) => i.id)} noun={{ one: "change", many: "changes" }}
+      actions={<GiveUpBulk rows={items.map((i) => ({ id: i.id, words: i.words, again: "" }))} act={giveUpManyAction} />}>
+      {table}
+    </BulkSelect>
+  );
 }
 
 /**
@@ -290,7 +312,7 @@ export default async function ReconciliationPage({ searchParams }: { searchParam
   const withPage = !roster.roster ? [] : roster.roster.kind === "flat" ? roster.roster.members.map((m) => m.qboId) : roster.roster.families.map((f) => f.customer.qboId);
   const pageOf = (await linksOfCustomers({ families: withPage, students: [] })).familyOfCustomer;
   return (
-    <main className="wrap single">
+    <main className="wrap single"><BulkResults>
       <h1 className="page-title">Reconciliation</h1>
       <p className="lede">Where the portal and QuickBooks don&apos;t agree yet, and what needs someone to look at it.</p>
 
@@ -341,6 +363,6 @@ export default async function ReconciliationPage({ searchParams }: { searchParam
           )}
         </section>
       )}
-    </main>
+    </BulkResults></main>
   );
 }
