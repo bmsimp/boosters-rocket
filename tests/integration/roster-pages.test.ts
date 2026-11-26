@@ -18,6 +18,9 @@ vi.mock("next/cache", () => ({ revalidatePath: () => { revalidated.count += 1; }
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => { throw Object.assign(new Error("NEXT_REDIRECT"), { url }); },
   notFound: () => { throw Object.assign(new Error("NEXT_NOT_FOUND"), { notFound: true }); },
+  // A Drawer (src/app/components/ui/sheet.tsx) reads the page's address: drawn closed here.
+  usePathname: () => "/staff/roster",
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 import { renderToStaticMarkup } from "react-dom/server";

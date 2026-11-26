@@ -26,7 +26,7 @@ import { moveAction, saveFamilyDetailsAction } from "../write-actions";
 import { offers } from "@/lib/roster/operations";
 import { placeWords } from "@/lib/roster/place";
 import type { Cust, Family } from "@/lib/roster/model";
-import { Card, DataTable, EmptyState, HowThisWorks, KeyValue, List, ListRow, LocalTime, Notice, PageHeader, StatusBadge, type Column, type Tone } from "@/app/components/ui";
+import { Card, DataTable, EmptyState, KeyValue, List, ListRow, LocalTime, Notice, PageHeader, StatusBadge, type Column, type Tone } from "@/app/components/ui";
 import { accessTone } from "@/app/staff/(app)/parents/access-state";
 import { familyBalancePage, familyBuyoutsPage, familyCreditPage, familyProgressPage } from "@/app/staff/(app)/family-pages";
 
@@ -98,7 +98,7 @@ function SignIns({ familyId, signins, links, changes, addable, inQuickBooks }: {
     { key: "words", header: "Sign-in", cell: (s) => <StatusBadge tone={accessTone(s.kind, s.hasPassword)}>{s.words}</StatusBadge> },
     // Where QuickBooks stands for the guardian's own Parent customer (stage 3's slice 9h), in words.
     { key: "quickbooks", header: "In QuickBooks", cell: (s) => inQuickBooks.get(s.guardianId) ?? "Nothing in QuickBooks for this membership." },
-    ...(changes ? [{ key: "change", header: "Change", quiet: true, cell: (s: FamilySignin) => <GuardianChange name={s.name} guardianId={s.guardianId} open={s.open} reinstatable={s.reinstatable} /> }] : []),
+    ...(changes ? [{ key: "change", header: "Change", quiet: true, cell: (s: FamilySignin) => <GuardianChange name={s.name} removeLabel={`Remove ${s.name} from this family`} guardianId={s.guardianId} open={s.open} reinstatable={s.reinstatable} /> }] : []),
   ];
   return (
     <Card title="Portal sign-ins" titleId="entry-signins-h" description={<>The family&apos;s guardians in the portal, and whether each can sign in.</>}>
@@ -110,11 +110,7 @@ function SignIns({ familyId, signins, links, changes, addable, inQuickBooks }: {
           <h3 className="table-head">Add a guardian</h3>
           {addable !== null ? <Notice tone="info" live="none">{addable}</Notice> : (
             <>
-              <p>They sign in with this address and a password they choose from an emailed link.</p>
-              <HowThisWorks>
-                <p>The link is the welcome email, or Resend welcome email on their page, or &ldquo;Set up or reset my password&rdquo; on the sign-in page. If someone in the portal already has this address, you&apos;re asked whether it&apos;s the same person first. One address is one person, who can be a guardian in several families.</p>
-                <p>Where the books have parents and this family is linked, the guardian gets their own Parent customer under the family, with their name and this address, unless QuickBooks already has a customer of that name here. It is renamed with them. When they&apos;re removed it is made inactive, but only if it has no balance the portal can read, owed or a credit.</p>
-              </HowThisWorks>
+              <p>They sign in with this address and a password they choose from the welcome email, and where the books have parents they get their own Parent customer under the family. If someone in the portal already has this address, you&apos;re asked first whether it&apos;s the same person.</p>
               <AddGuardianForm act={addGuardianAction.bind(null, String(familyId))} />
             </>
           )}

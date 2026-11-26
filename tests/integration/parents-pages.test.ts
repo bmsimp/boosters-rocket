@@ -14,6 +14,7 @@ vi.mock("next/cache", () => ({ revalidatePath: () => { revalidated.count += 1; }
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => { throw Object.assign(new Error("NEXT_REDIRECT"), { url }); },
   notFound: () => { throw Object.assign(new Error("NEXT_NOT_FOUND"), { notFound: true }); },
+  usePathname: () => "/", useSearchParams: () => new URLSearchParams(), // a Drawer's address
 }));
 
 import { renderToStaticMarkup } from "react-dom/server";
@@ -201,7 +202,7 @@ describe("the staff pages for parents", () => {
     expect(details).toContain("value=\"12 Heron Lane\"");
     expect(details).toContain("value=\"Austin\"");
     expect(details).toContain("Save details");
-    expect(html).toContain("Their name, sign-in email, phone and mailing address are the portal&#x27;s own.");
+    expect(html).toContain("Their name, sign-in email, phone and mailing address are the portal&#x27;s own:");
     expect(await audits("parent.read")).toHaveLength(1);
     // Never on the list page.
     expect(await parentsPage()).not.toContain("555-0123");

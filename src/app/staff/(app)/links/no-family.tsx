@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Card, HowThisWorks, Notice } from "@/app/components/ui";
+import { Card, Notice } from "@/app/components/ui";
 import type { CustomerAim, LinksState, LinksView } from "@/lib/accounting/mapping";
 import { handful, type NoFamilyCustomer } from "@/lib/roster/no-family";
 import { familyFromCustomerAction } from "./actions";
@@ -20,7 +20,7 @@ export const NO_FAMILY_WORDS = {
   lead: (mayChangeFamilies: boolean) => "One added in QuickBooks since the portal's families were set up, say."
     + " “Create a family from this” makes the family and its students here, linked, so its invoices show to its guardians."
     + ` It adds no guardian: ${mayChangeFamilies ? "do that" : "someone who may change families does that"} on the family's page. Nothing is sent to QuickBooks.`,
-  /** The rest of the rule, behind How this works. */
+  /** The rest of the rule, under the lead. */
   more: "Inactive family customers aren't offered. A customer a waiting or stuck change on Reconciliation would match is left out until that change goes through or is given up."
     + " A customer this page suggests or lists for a family isn't made a family here: its row says where to link it.",
   none: "Nothing: every active family customer is linked to a family, or is about to be.",
@@ -110,7 +110,7 @@ export function CustomersWithNoFamily({ view, mayChangeFamilies, children }: { v
   return (
     <Card title={<>Customers with no family{rows.length ? ` (${rows.length})` : ""}</>} titleId={NO_FAMILY_H}>
       <p>{list !== null && list.length > 0 ? `${NO_FAMILY_WORDS.count(list.length)} ` : ""}{NO_FAMILY_WORDS.lead(mayChangeFamilies)}</p>
-      <HowThisWorks><p>{NO_FAMILY_WORDS.more}</p></HowThisWorks>
+      <p className="hint">{NO_FAMILY_WORDS.more}</p>
       {view.state !== "listed" || list === null ? <Notice tone="warning" live="none">{WHY_NONE[view.state === "listed" ? "no_shape" : view.state]}</Notice> : <NoFamilyRows rows={rows} none={NO_FAMILY_WORDS.none} />}
       {children}
     </Card>

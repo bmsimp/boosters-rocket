@@ -1,10 +1,10 @@
 "use client";
-import { createContext, useContext, useId, useRef, useState, useTransition, type ReactNode } from "react";
+import { createContext, useContext, useRef, useState, useTransition, type ReactNode } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { ActionOutcome } from "@/app/components/notice";
 import { ChoiceGroup } from "@/app/components/choice-group";
 import { Button } from "@/app/components/ui/button";
-import { TextArea } from "@/app/components/ui/field";
+import { ConfirmDialog } from "@/app/components/ui/sheet";
 
 // The accounting links screen's presses (stage 4's slice M3a): each a button bound to its server action, and what it
 // answered. A press re-reads the page, and a family linked or left unlinked changes its row (its button may go), so
@@ -81,19 +81,11 @@ export function GuardianLinkPress({ name, who, about, options, suggested }: { na
  */
 export function LinkGiveUp({ about, act }: { about: string; act: (note: string) => Promise<Done> }) {
   const { add } = useContext(Answers);
-  const id = useId();
-  const [text, setText] = useState("");
-  const [pending, start] = useTransition();
-  const press = () => {
-    if (pending) return;
-    start(async () => { const r = await safely(() => act(text), failed); if (r.ok) setText(""); add(r.ok ? r : { ok: false, errors: r.errors.map((e) => `${about}: ${e}`) }); });
-  };
+  // A refusal is said in the dialog; a give-up that went through is kept above the list, as the row's change leaves it.
   return (
-    <div className="stack">
-      <TextArea id={`${id}-why`} label="Why? (kept in the audit log)" rows={2} maxLength={500} value={text} onChange={(e) => setText(e.target.value)} />
-      <Button variant="secondary" busy={pending} onClick={press}>
-        {pending ? "Giving up…" : "Give up"}<span className="visually-hidden">: {about}</span>
-      </Button>
-    </div>
+    <ConfirmDialog label="Give up on this change" context={about} answerHere={false} title={`Give up on this change: ${about}?`} variant="secondary" size="sm" busyLabel="Giving up…"
+      consequence="The portal keeps its own value, and QuickBooks keeps what it has."
+      reason={{ label: "Why? (kept in the audit log)", maxLength: 500 }}
+      act={async (note) => { const r = await safely(() => act(note ?? ""), failed); if (r.ok) add(r); return r; }} />
   );
 }

@@ -517,7 +517,7 @@ describe("the pages", () => {
     expect(part).not.toMatch(/Chen Family|Oak Family/);
     // The families' own list doesn't count it, and draws no press for it.
     expect(sectionOf(whole, "links-list-h")).not.toContain("Rivera Family's active status");
-    expect(whole).toContain("These are listed after the families. Taking the books&#x27; value makes one active again");
+    expect(whole).toContain("Taking the books&#x27; value makes the family active again here");
     // Since slice M5a the lede names the presses that send anything to the books, Send among them, and since slice M5b Send the app's for all.
     expect(whole).toContain("Only three things here send anything to the books: Send the app&#x27;s to QuickBooks, Send the app&#x27;s for all, and a student&#x27;s move taken from the books, which voids an unpaid volunteer buy-out invoice of theirs there.");
     // Taken: Rivera is a row again, and Leo's press is on it.

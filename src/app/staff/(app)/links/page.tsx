@@ -8,7 +8,7 @@ import type { Holder } from "@/lib/accounting/match";
 import type { Proposals } from "@/lib/accounting/proposals";
 import { recordNameWords } from "@/lib/families/words";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
-import { Button, Card, DataTable, EmptyState, HowThisWorks, LinkButton, LocalTime, Notice, PageHeader, Select, StatusBadge, TextInput, Toolbar, type Column, type Tone } from "@/app/components/ui";
+import { Button, Card, DataTable, EmptyState, LinkButton, LocalTime, Notice, PageHeader, Select, StatusBadge, TextInput, Toolbar, type Column, type Tone } from "@/app/components/ui";
 import { familyPage } from "@/app/staff/(app)/family-pages";
 import { confirmAllAction, confirmLinkAction, leaveUnlinkedAction, linkGuardianAction, reviewLinkAction, sendAllAction, sendDifferenceAction, takeDifferenceAction, undoLeaveUnlinkedAction, unlinkAction, unlinkGuardianAction } from "./actions";
 import { GuardianLinkPress, LinkAnswers, LinkAnswersShown, LinkGiveUp, LinkPress } from "./link-press";
@@ -205,10 +205,7 @@ function DifferenceLine({ d, take, note, send, sendNote, kept, tag }: { d: Diffe
  */
 function GiveUpPress({ kept, about }: { kept: KeptOffer; about: string }) {
   return (
-    <details className="more"><summary>Give up</summary>
-      <p className="hint">The portal keeps its own value, and QuickBooks keeps what it has.</p>
-      <LinkGiveUp about={about} act={giveUpAction.bind(null, kept.itemId)} />
-    </details>
+    <LinkGiveUp about={about} act={giveUpAction.bind(null, kept.itemId)} />
   );
 }
 
@@ -313,11 +310,11 @@ const LINK_GUARDIANS_EFFECT = "From then on, a guardian linked with it has their
 /** The address of the chooser for a family, or of its confirm step for a customer. */
 const pickHref = (familyId: string, customerId?: string) => `/staff/links?pick=${encodeURIComponent(familyId)}${customerId ? `&customer=${encodeURIComponent(customerId)}` : ""}#${PICK}`;
 
-/** The row's opening: the family's active students and its open guardians, each with their own link, then its differences, then what can be done. */
+/** The row's details, in the open: the family's active students and its open guardians, each with their own link, then its differences, then what can be done. */
 function Opening({ row, tag, guardianLinks, maySend }: { row: LinkRow; tag: string; guardianLinks: boolean; maySend: boolean }) {
   const id = String(row.familyId);
   return (
-    <details className="more"><summary>Details<span className="visually-hidden">: {row.name}</span></summary>
+    <div className="stack">
       <p><StatusDetail status={row.status} row={row} /></p>
       <p>{row.students.length === 0 ? "No active students." : "Students:"}</p>
       {row.students.length > 0 && <ul>{row.students.map((s) => <li key={String(s.id)}>{s.name}: {ownLinkWords(s.link)}</li>)}</ul>}
@@ -346,7 +343,7 @@ function Opening({ row, tag, guardianLinks, maySend }: { row: LinkRow; tag: stri
           {row.offers.undo && <LinkPress label="Undo Left unlinked" busy="Undoing…" about={row.name} act={undoLeaveUnlinkedAction.bind(null, id, tag)} />}
         </div>
       )}
-    </details>
+    </div>
   );
 }
 
@@ -594,55 +591,7 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
           description={<>Link a family this page suggests a customer for here, with Confirm.
             &ldquo;Create a family from this&rdquo; is refused for such a customer, or for one QuickBooks made for a change that was given up.
             &ldquo;Create in QuickBooks and link&rdquo; would make a second customer in the books. It isn&apos;t offered for a family unlinked while its customer is still there.</>}>
-          <HowThisWorks summary="How links are made">
-            <h3>Linking</h3>
-            <ul>
-              <li>A customer is suggested only when a guardian&apos;s sign-in address is exactly on a customer no family is linked to: in its email field, or on a parent record under it.</li>
-              <li>A name never suggests one. Nor does a customer another family has.</li>
-              <li>A blocked guardian&apos;s address is never matched.</li>
-              <li>A family the portal has is linked here: Confirm its suggestion, or one of its possible customers, or pick a different customer from those no family is linked to.</li>
-              <li>Confirming sends nothing to the books. It also links each student whose name is on exactly one student on each side.</li>
-              <li>Where the books have Parent customers, it links each guardian whose sign-in address is in the email field of exactly one Parent customer under it, if that customer holds no other guardian&apos;s address and isn&apos;t linked or kept for anyone. This doesn&apos;t happen while a change for them waits on Reconciliation.</li>
-              <li>Students left over show among the row&apos;s differences. An inactive student customer is only counted.</li>
-              <li>Leave unlinked keeps a family out of the suggestions until someone undoes it.</li>
-            </ul>
-            <h3>Many at once</h3>
-            <ul>
-              <li>Confirm all exact email matches links every Suggested row shown, up to {BULK_MAX}.</li>
-              <li>Confirm this link marks a carried-over link as checked by you.</li>
-            </ul>
-            <h3>Unlinking</h3>
-            <ul>
-              <li>Unlink from the books ends the family&apos;s link and its students&apos; and guardians&apos; links, and sends nothing. To change customer, unlink, then link again.</li>
-            </ul>
-            <h3>Guardians</h3>
-            <ul>
-              <li>A guardian&apos;s own link to a Parent customer is made or ended in the family&apos;s row.</li>
-              <li>A Parent customer several guardians share is nobody&apos;s, so nothing is sent for it until only one is left on it.</li>
-              <li>A removed guardian&apos;s Parent customer is offered to nobody else.</li>
-            </ul>
-            <h3>Differences</h3>
-            <ul>
-              <li>For each linked family, the portal compares names, active or inactive, each student&apos;s family, and records only one side has.
-                It compares against its last read of the books{view.readAt ? <> (<LocalTime iso={view.readAt} />)</> : ", though it hasn't read them yet"}.</li>
-              <li>A carried-over family with differences is counted under both Carried over and Linked, with differences.</li>
-              <li>Take QuickBooks&apos; into the app changes only the portal&apos;s records.</li>
-              <li>Send the app&apos;s to QuickBooks (for someone who may also change families) puts the portal&apos;s value in the books. A make-inactive reads the balance first and sends nothing while there is any.</li>
-              <li>Send the app&apos;s for all queues every name and student&apos;s family shown, up to {SEND_ALL_MAX}, sent within a few minutes. It skips each make-inactive (send those on their rows), and anything that must wait for another change from the same press (press again).</li>
-              <li>Every other difference is only shown.</li>
-            </ul>
-            <h3>Inactive here, active in the books</h3>
-            <ul>
-              <li>These are listed after the families. Taking the books&apos; value makes one active again, but its guardians sign in only once someone who may change families lets them in on its page.</li>
-              <li>Or make it inactive in the books, everyone under it first.</li>
-            </ul>
-            <h3>Making new</h3>
-            <ul>
-              <li>&ldquo;Create a family from this&rdquo; (under Customers with no family) makes a portal family from a customer.</li>
-              <li>&ldquo;Create in QuickBooks and link&rdquo; (on a family&apos;s page) makes a customer for a family with none.</li>
-              <li>Adding a family on the Roster makes one too, when someone who can link families adds it while the books are connected.</li>
-            </ul>
-          </HowThisWorks>
+          <p className="hint">A customer is suggested only when the sign-in address of a guardian who can sign in is exactly on a customer no family has, never by a name. Confirming and unlinking send nothing to the books, and the differences are against the portal&apos;s last read of them{view.readAt ? <> (<LocalTime iso={view.readAt} />)</> : ", though it hasn't read them yet"}.</p>
           <form method="get" action="/staff/links" role="search">
             <Toolbar label="Filter the families">
               <Select id="links-status" label="Status" name="status" defaultValue={filter.status ?? ""}>

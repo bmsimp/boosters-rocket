@@ -4,6 +4,7 @@ import { startTransition, useActionState, useEffect, useId, useRef, useState } f
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { ActionOutcome, Notice } from "@/app/components/notice";
 import { Button } from "@/app/components/ui/button";
+import { ConfirmDialog } from "@/app/components/ui/sheet";
 import { Checkbox, TextArea, TextInput } from "@/app/components/ui/field";
 import { CONTACT_FIELDS, type ContactForm, type ContactValues } from "@/lib/parents/contact-fields";
 
@@ -77,32 +78,27 @@ export function OneButton({ label, pendingLabel, act }: { label: string; pending
  * (the row's key is its guardian row's id), so the answer stays on the page when the action's refresh swaps Remove for
  * Reinstate or back, and the focus, whose button is gone, moves to that answer.
  */
-export function GuardianChangeControls({ name, open, reinstatable, remove, reinstate }: {
-  name: string; open: boolean; reinstatable: boolean; remove: (note: string) => Promise<Done>; reinstate: () => Promise<Done>;
+export function GuardianChangeControls({ name, removeLabel, open, reinstatable, remove, reinstate }: {
+  name: string; removeLabel: string; open: boolean; reinstatable: boolean; remove: (note: string) => Promise<Done>; reinstate: () => Promise<Done>;
 }) {
-  const id = useId();
-  const [note, setNote] = useState("");
-  const [state, run, pending] = useActionState(async (_: Done | null, what: "remove" | "reinstate") => {
-    const r = await safely(() => (what === "remove" ? remove(note) : reinstate()), failed);
-    if (r.ok) setNote("");
-    return r;
-  }, null);
+  const [removed, setRemoved] = useState<Done | null>(null);
+  const [state, run, pending] = useActionState(async () => safely(reinstate, failed), null);
+  const answer = state ?? removed;
   const said = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (state?.ok) said.current?.focus(); }, [state]);
-  if (!state && !open && !reinstatable) return null;
+  // Once the row's change is drawn (Remove's button gone with its dialog), the focus is put on the answer.
+  useEffect(() => { if (answer?.ok) said.current?.focus(); }, [answer, open]);
+  if (!answer && !open && !reinstatable) return null;
   return (
     <div className="stack row-change">
-      {state ? <ActionOutcome state={state} ref={said} /> : null}
+      {/* A remove's answer is kept here, so it outlives the dialog, which goes when the row can no longer be removed. */}
+      {answer ? <ActionOutcome state={answer} ref={said} /> : null}
       {open ? (
-        <details className="more"><summary>Remove<span className="visually-hidden"> {name}</span></summary>
-          <p>They can&apos;t sign in to this family any more, and are signed out of it at once, whatever the family owes. Forms still waiting for their signature start again.</p>
-          <form onSubmit={noSubmit} className="stack">
-            <TextArea id={`${id}-note`} label="Why? (staff only)" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
-            <Button variant="danger" disabled={pending} onClick={() => startTransition(() => run("remove"))}>{pending ? "Removing…" : "Remove"}</Button>
-          </form>
-        </details>
+        <ConfirmDialog label={removeLabel} confirmLabel="Remove" busyLabel="Removing…" size="sm" answerHere={false}
+          consequence="They can't sign in to this family any more and are signed out of it at once, and forms waiting for their signature start again."
+          reason={{ label: "Why? (staff only)", maxLength: 500 }}
+          act={async (note) => { const r = await safely(() => remove(note ?? ""), failed); if (r.ok) setRemoved(r); return r; }} />
       ) : reinstatable ? (
-        <form action={() => run("reinstate")} className="stack">
+        <form action={() => run()} className="stack">
           <Button type="submit" variant="secondary" disabled={pending}>{pending ? "Reinstating…" : `Reinstate ${name}`}</Button>
         </form>
       ) : null}

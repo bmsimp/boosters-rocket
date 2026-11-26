@@ -11,9 +11,9 @@ import { customersWithNoFamily, handful } from "@/lib/roster/no-family";
 import { LocalTime } from "@/app/components/local-time";
 import { DataTable, type Column } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
-import { HowThisWorks } from "@/app/components/ui";
+import { LinkGiveUp } from "../links/link-press";
 import { WorthALook } from "../balances/worth-a-look";
-import { OneButton, TextAction } from "../seasons/forms";
+import { OneButton } from "../seasons/forms";
 import { giveUpAction, linkMadeStudentAction, sendPortalValueAction, tryAgainAction } from "../roster/write-actions";
 import { CONTACT_AWAITS_READ, CONTACT_NOT_OFFERED, EMAIL_NOT_OFFERED, EMAIL_TOO_LONG, GUARDIAN_RENAME_TAKEN, GUARDIAN_TAKEN_NAME, guardianOf, keptRefusalWords, NAME_UNUSABLE, keptWordsFor, portalValueStamp,
   TAKEN_NAME_KEPT } from "@/lib/roster/writes";
@@ -73,9 +73,7 @@ function Writes({ items, caption, canChange, mayLink }: { items: QueueView[]; ca
         {/* A family's create makes its customer and links it: only for staff who may link families to accounting (tryAgainNow()). */}
         {isFamilyCreateItem(i.write) && !mayLink ? <Notice tone="info" live="none">{TRY_AGAIN_NEEDS_LINKING}</Notice>
           : <OneButton label="Try again now" pendingLabel="Asking…" act={tryAgainAction.bind(null, i.id)} />}
-        <details className="more"><summary>Give up</summary>
-          <TextAction field="Why? (kept in the audit log)" label="Give up" pendingLabel="Giving up…" maxLength={500} multiline act={giveUpAction.bind(null, i.id)} />
-        </details>
+        <LinkGiveUp about={i.words} act={giveUpAction.bind(null, i.id)} />
       </div>) }] : []),
   ];
   return <DataTable caption={caption} captionHidden columns={columns} rows={items} rowKey={(i) => i.id} />;
@@ -173,10 +171,7 @@ function Refused({ items, canChange, compared, mayCompare, onLinks, linking }: {
           {instead === null
             ? <OneButton label="Send the portal's value" pendingLabel="Reading QuickBooks, then sending…" act={sendPortalValueAction.bind(null, i.id, shown, portalValueStamp(i.id, shown))} />
             : <Notice tone="info" live="none">{instead}</Notice>}
-          <details className="more"><summary>Give up</summary>
-            <p className="hint">The portal keeps its own value, and QuickBooks keeps what it has.</p>
-            <TextAction field="Why? (kept in the audit log)" label="Give up" pendingLabel="Giving up…" maxLength={500} multiline act={giveUpAction.bind(null, i.id)} />
-          </details>
+          <LinkGiveUp about={i.words} act={giveUpAction.bind(null, i.id)} />
         </div>);
     } }] : []),
   ];
@@ -307,12 +302,7 @@ export default async function ReconciliationPage({ searchParams }: { searchParam
               <li>Stuck: waits for you. Try again, or give it up and make the change in QuickBooks.</li>
               <li>Waiting: the worker tries again by itself, at longer and longer gaps.</li>
             </ul>
-            <HowThisWorks>
-              <p>A staff member&apos;s change to a guardian&apos;s phone or mailing address is tried at once. A parent&apos;s, and a new sign-in email, go at the worker&apos;s next wake.
-                Before trying again, the worker checks a fresh copy of the roster, so nothing is made twice or overwritten.
-                A change QuickBooks took that the portal couldn&apos;t finish waits here until it does.
-                A phone, mailing address or sign-in email is never sent over details QuickBooks has that the portal didn&apos;t know of. It is kept here instead.</p>
-            </HowThisWorks>
+            <p className="hint">Before trying again, the worker reads a fresh copy of the roster, so nothing is made twice or overwritten. A phone, mailing address or sign-in email is never sent over details QuickBooks has that the portal didn&apos;t know of: it is kept here instead.</p>
             {refused.length > 0 && <><h3 className="table-head">Not in QuickBooks, kept in the portal ({refused.length})</h3><Refused items={refused} canChange={canChange} compared={compared} mayCompare={mayCompare} onLinks={onLinks} linking={linking} /></>}
             {stuck.length > 0 && <><h3 className="table-head">Stuck ({stuck.length})</h3><Writes items={stuck} caption="Stuck changes" canChange={canChange} mayLink={linking} /></>}
             {waiting.length > 0 && <><h3 className="table-head">Waiting ({waiting.length})</h3><Writes items={waiting} caption="Changes waiting" canChange={canChange} mayLink={linking} /></>}
