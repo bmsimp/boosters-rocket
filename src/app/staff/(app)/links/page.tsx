@@ -336,7 +336,7 @@ function Opening({ row, tag, guardianLinks, maySend }: { row: LinkRow; tag: stri
       {row.confirm !== null && row.customer !== null && <><p>Confirming links it to &ldquo;{row.customer.name}&rdquo;. Nothing is sent to the books.</p><ProposalsShown proposals={row.confirm.proposals} /><p>{LINK_EFFECT}</p>{guardianLinks && <p>{LINK_GUARDIANS_EFFECT}</p>}</>}
       {row.review !== null && <ReviewShown review={row.review} />}
       {row.unlink !== null && <UnlinkShown unlink={row.unlink} />}
-      {row.offers.pick && <p className="link-line"><Link href={pickHref(id)}>Pick a different customer<span className="visually-hidden">: {row.name}</span></Link></p>}
+      {row.offers.pick && <p><LinkButton variant="secondary" size="sm" href={pickHref(id)}>Pick a different customer<span className="visually-hidden">: {row.name}</span></LinkButton></p>}
       {(row.confirm !== null || row.review !== null || row.unlink !== null || row.offers.leave || row.offers.undo) && (
         <div className="row-actions">
           {row.confirm !== null && <ConfirmPress familyId={id} about={row.name} offer={row.confirm} tag={tag} />}

@@ -1,3 +1,4 @@
+import { Button, LinkButton } from "@/app/components/ui";
 import { redirect } from "next/navigation";
 import { Notice } from "@/app/components/notice";
 import { requireStaffPage } from "@/lib/guards";
@@ -44,21 +45,22 @@ export default async function SwitchCompanyPage({ searchParams }: { searchParams
       <section className="box" aria-labelledby="switch-start-h"><h2 id="switch-start-h">{SWITCH_WORDS.backupTitle}</h2>
         <p>{SWITCH_WORDS.backup}</p>
         {p.connected
-          ? <Notice tone="warning">{SWITCH_WORDS.disconnectFirst} <a href="/staff/settings/quickbooks">QuickBooks settings</a></Notice>
+          ? <Notice tone="warning">{SWITCH_WORDS.disconnectFirst} <LinkButton variant="secondary" size="sm" href="/staff/settings/quickbooks">QuickBooks settings</LinkButton></Notice>
           : (
             <form action={switchConnectAction} className="stack">
               {notConfirmed && <Notice tone="problem">{SWITCH_WORDS.notConfirmed}</Notice>}
               {noEnvironment && relay && <Notice tone="problem">{SWITCH_WORDS.chooseEnvironment}</Notice>}
               {relay
                 ? <WhichQuickBooks environment={p.environment} />
-                : <p>{SWITCH_WORDS.ownAppEnvironment(p.environment)} <a className="link-line" href={`${SETUP}?step=app`}>{SWITCH_WORDS.ownAppLink}</a></p>}
+                : <><p>{SWITCH_WORDS.ownAppEnvironment(p.environment)}</p>
+                  <p><LinkButton variant="secondary" href={`${SETUP}?step=app`}>{SWITCH_WORDS.ownAppLink}</LinkButton></p></>}
               <fieldset className="checks"><legend>Confirm</legend>
                 <label><input type="checkbox" name="confirm" value="yes" required /> {SWITCH_WORDS.confirm}</label>
               </fieldset>
-              <button className="btn">{SWITCH_WORDS.press}</button>
+              <Button type="submit">{SWITCH_WORDS.press}</Button>
             </form>
           )}
-        <p className="box-foot"><a className="link-line" href={`${SETUP}?step=connect`}>Back to step 2</a></p>
+        <p className="box-foot"><LinkButton variant="secondary" href={`${SETUP}?step=connect`}>Back to step 2</LinkButton></p>
       </section>
     </main>
   );

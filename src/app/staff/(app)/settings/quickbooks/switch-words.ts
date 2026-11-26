@@ -54,9 +54,29 @@ export const SWITCH_WORDS = {
   setupHint: "Moving the portal to another QuickBooks company ends every family's link to the books.",
 } as const;
 
+const BOOKS = { production: "the club's real books", sandbox: "a sandbox company" } as const;
+
+/** Step 2's question while nothing is connected and the roster names a company (the owner's finding of 2026-11-25). */
+export const STEP2_WORDS = {
+  legend: "Which company",
+  /** The name is QuickBooks text: it goes into a text node only. */
+  same: (name: string | null) => (name ? `The same company as before (${name})` : "The same company as before"),
+  sameHint: "Reconnects the company the families were read from. Nothing is cleared.",
+  different: "A different company",
+  differentHint: "Moves the portal to another QuickBooks company. Read what that ends and keeps before you press.",
+  /** Why "the same company" can't be chosen: the QuickBooks being connected isn't the one the families came from. */
+  forced: (roster: "production" | "sandbox", connecting: "production" | "sandbox", relay: boolean) => relay
+    ? `The families came from ${BOOKS[roster]}, so ${connecting === "production" ? "the club's real books are" : "a sandbox company is"} a different company.`
+    : `The families came from ${BOOKS[roster]}, and the club's Intuit app is set to ${connecting === "production" ? "the real books" : "a sandbox company"}, so this is a different company.`,
+  unknown: "The portal doesn't know whether the families came from the club's real books or a sandbox company, so both choices are open. Choose the one you mean.",
+  /** Refusals of step 2's press. */
+  chooseCompany: "Choose whether this is the same QuickBooks company as before or a different one, then press Connect to QuickBooks again.",
+  environmentDiffers: "The families came from the other QuickBooks, so that is a different company. Choose A different company to move the portal to it, or choose the QuickBooks the families came from.",
+} as const;
+
 /** The setup page's words for a different company refused with no ask (`roster_company`). */
 export const ROSTER_COMPANY_REFUSED = "That is a different QuickBooks company from the one the portal's families were read from, so nothing was connected and nothing was changed. "
-  + "To reconnect the club's company, start again and choose it in Intuit. To move the portal to this other company, choose Connect a different company first: it lists what a switch ends and keeps.";
+  + "To reconnect the club's company, start again and choose it in Intuit. To move the portal to this other company, choose A different company in step 2 first: it lists what a switch ends and keeps.";
 
 /** The settings view's warning beside Disconnect, while people can sign in. */
 export const disconnectWarning = (people: number) =>

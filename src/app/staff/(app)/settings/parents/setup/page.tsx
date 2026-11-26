@@ -1,3 +1,4 @@
+import { LinkButton } from "@/app/components/ui";
 import { Notice } from "@/app/components/notice";
 import { requireStaffPage } from "@/lib/guards";
 import { factorCounts, LEVEL_UNREADABLE, missingForSignins, signinCounts, type FactorCounts } from "@/lib/parents/switches";
@@ -82,7 +83,7 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
               <SwitchButton label="Switch parent sign-ins on" pendingLabel="Switching on…" act={setSigninsAction.bind(null, true)} />
             </>
           )}
-          <p className="box-foot"><a className="link-line" href={`${SETUP}?step=welcome`}>Next: welcome emails</a> · <a className="link-line" href="/staff/settings/parents">Back to Parent sign-ins</a></p>
+          <p className="box-foot"><LinkButton href={`${SETUP}?step=welcome`}>Next: welcome emails</LinkButton> <a className="link-line" href="/staff/settings/parents">Back to Parent sign-ins</a></p>
         </section>
       )}
 
@@ -99,7 +100,7 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
           {settings.welcome ? <SwitchButton quiet label="Switch welcome emails off" pendingLabel="Switching off…" act={setWelcomeAction.bind(null, false)} />
             : !settings.signin ? <Notice tone="info">Switch parent sign-ins on first (step 1).</Notice>
             : <SwitchButton label="Switch welcome emails on" pendingLabel="Switching on…" act={setWelcomeAction.bind(null, true)} />}
-          <p className="box-foot"><a className="link-line" href={`${SETUP}?step=level`}>Next: sign-in level</a> · <a className="link-line" href="/staff/settings/parents">Back to Parent sign-ins</a></p>
+          <p className="box-foot"><LinkButton href={`${SETUP}?step=level`}>Next: sign-in level</LinkButton> <a className="link-line" href="/staff/settings/parents">Back to Parent sign-ins</a></p>
         </section>
       )}
 

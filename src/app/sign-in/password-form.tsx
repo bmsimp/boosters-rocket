@@ -1,4 +1,5 @@
 "use client";
+import { LinkButton } from "@/app/components/ui";
 import { useActionState, useEffect, useRef } from "react";
 import { safely } from "@/app/components/action-error";
 import { PASSWORD_COPY } from "@/lib/parents/password-copy";
@@ -34,7 +35,7 @@ export function PasswordLinkBody({ token, purpose, usable }: { token: string; pu
       <>
         <h1 className="page-title">{PASSWORD_COPY.linkNoGoodTitle}</h1>
         <p role="status">{PASSWORD_COPY.linkNoGood}</p>
-        <p><a className="link-line" href="/sign-in">Go to sign in</a></p>
+        <p><LinkButton plain href="/sign-in">Go to sign in</LinkButton></p>
       </>
     );
   }
@@ -66,7 +67,7 @@ function PasswordSet({ message, next }: { message: string; next: string | null }
   return (
     <>
       <p ref={line} role="status" tabIndex={-1} className="paid-up"><Tick />{message}</p>
-      <p>{next ? <a className="link-line" href={next}>{PASSWORD_COPY.continueIn}</a> : <a className="link-line" href="/sign-in">Go to sign in</a>}</p>
+      <p>{next ? <LinkButton plain href={next}>{PASSWORD_COPY.continueIn}</LinkButton> : <LinkButton plain href="/sign-in">Go to sign in</LinkButton>}</p>
     </>
   );
 }

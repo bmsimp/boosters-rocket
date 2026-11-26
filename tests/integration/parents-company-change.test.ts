@@ -180,7 +180,7 @@ describe("connecting a different QuickBooks company touches no sign-in", () => {
     expect(await signinRows()).toEqual(before);
     expect(await audits("parent.access.cleared")).toEqual([]);
     expect(await audits("roster.cleared")).toHaveLength(1);
-    expect((await db.select().from(setting).where(eq(setting.key, "roster.source")))[0]!.value).toEqual({ realmId: "2222" });
+    expect((await db.select().from(setting).where(eq(setting.key, "roster.source")))[0]!.value).toMatchObject({ realmId: "2222" });
     expect(await audits("roster.refresh")).toHaveLength(1);
   });
 

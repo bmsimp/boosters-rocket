@@ -307,6 +307,39 @@ test("once disconnected, the switch page asks which QuickBooks through Boosters 
   }
 });
 
+// The owner's finding of 2026-11-25, step 2: step 2 asks which company while nothing is connected and the roster names
+// one, and shows what a switch ends and keeps in place for a different one. The seed's connection is hidden (its company
+// kept for the roster) and put back; Connect to QuickBooks is never selected: it would leave for Intuit.
+test("once disconnected, step 2 asks which company, and a different one shows what a switch ends and its box", async ({ page }) => {
+  await sql`UPDATE qbo_connection SET realm_id = NULL`;
+  try {
+    await sql`UPDATE setting SET value = ${sql.json({ realmId: "9130000000000001", companyName: "E2E Sandbox Company", environment: "sandbox" })} WHERE key = 'roster.source'`;
+    await page.goto("/staff/settings/quickbooks/setup?step=connect");
+    const same = page.getByRole("radio", { name: /^The same company as before \(E2E Sandbox Company\)/ }), other = page.getByRole("radio", { name: /^A different company/ });
+    await expect(page.getByRole("group", { name: "Which company" })).toBeVisible();
+    await expect(same).toBeEnabled();
+    await expect(page.getByRole("heading", { name: "What a switch ends" })).toHaveCount(0);
+    await other.check();
+    await expect(page.getByRole("heading", { name: "What a switch ends" })).toBeVisible();
+    await expect(page.getByRole("checkbox", { name: /^I understand that every family's link to the books ends/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Connect to QuickBooks" })).toHaveCount(1);
+    // The question covers the switch: its separate button isn't drawn beside it.
+    await expect(page.getByRole("link", { name: "Connect a different company", exact: true })).toHaveCount(0);
+    await checked(page, "step 2's company question");
+
+    // The club's app is set to the sandbox; families read from the real books make it a different company.
+    await sql`UPDATE setting SET value = ${sql.json({ realmId: "9130000000000001", companyName: "E2E Sandbox Company", environment: "production" })} WHERE key = 'roster.source'`;
+    await page.goto("/staff/settings/quickbooks/setup?step=connect");
+    await expect(same).toBeDisabled();
+    await expect(other).toBeChecked();
+    await expect(page.getByText("The families came from the club's real books, and the club's Intuit app is set to a sandbox company, so this is a different company.")).toBeVisible();
+    await expect(page.locator("body")).not.toContainText("9130000000000001");
+  } finally {
+    await sql`UPDATE setting SET value = ${sql.json({ realmId: "9130000000000001" })} WHERE key = 'roster.source'`;
+    await sql`UPDATE qbo_connection SET realm_id = '9130000000000001'`;
+  }
+});
+
 test("Disconnect through Boosters Rocket stays unusable until the box is ticked; the club's own app has one line and no box", async ({ page }) => {
   // The club's own app first: one line, no box, and the button usable (never selected).
   await page.goto("/staff/settings/quickbooks");

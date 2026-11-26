@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Notice, PageHeader, StatusDot } from "@/app/components/ui";
+import { LinkButton, Notice, PageHeader, StatusDot } from "@/app/components/ui";
 import type { HealthLine } from "@/lib/health/report";
 import { IntegrationLogo } from "./integration-logo";
 import type { IntegrationRowKey, Status } from "./statuses";
@@ -28,7 +28,7 @@ export function IntegrationHealth({ line, here }: { line: HealthLine | undefined
   const fix = line.fix && line.fix.href !== here ? line.fix : null;
   return (
     <Notice tone="warning" live="none">
-      Health says {line.word.toLowerCase()}.{fix ? <> <a href={fix.href}>{fix.label}</a>.</> : null} Its full line is on the <a href="/staff/settings/health">Health</a> page.
+      Health says {line.word.toLowerCase()}.{fix ? <> <LinkButton plain variant="secondary" size="sm" href={fix.href}>{fix.label}</LinkButton></> : null} Its full line is on the <a href="/staff/settings/health">Health</a> page.
     </Notice>
   );
 }

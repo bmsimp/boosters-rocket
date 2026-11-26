@@ -154,6 +154,21 @@ export function Gallery() {
           <Button size="sm" variant="secondary">Small secondary</Button>
         </div>
         <p className="ds-note">Hover lays a light wash over the fill (secondary: the muted ground). Focus is the club&apos;s ring, 2px (3px in high contrast), drawn here on the sample. A long label wraps inside the button: <Button variant="secondary">See every payment the family has made this season</Button></p>
+        <div className="ds-pair">
+          <div>
+            <h3>Do: a button for anything that starts, changes or moves a task on</h3>
+            <div className="ds-samples">
+              <LinkButton plain href="#ds-button">Next: connect to QuickBooks</LinkButton>
+              <LinkButton plain variant="secondary" href="#ds-button">Connect a different company</LinkButton>
+            </div>
+            <p className="ds-note">Button submits a form; LinkButton goes to an action or the next step. Primary for the one thing the step is for, secondary for the others.</p>
+          </div>
+          <div>
+            <h3>Don&apos;t: an underlined link for an action or a step</h3>
+            <p><a className="link-line" href="#ds-button">Skip to step 3</a> · <a className="link-line" href="#ds-button">Connect a different company</a></p>
+            <p className="ds-note">A plain link is only for reading more, help, going back to where you came from (&ldquo;Back to Roster&rdquo;), or a record&apos;s own page in a list or table. Alone on its line it takes <code>.link-line</code>.</p>
+          </div>
+        </div>
       </Section>
 
       <Section id="badge" name="Badge and StatusBadge" use="A short label on a tint (a role, a count), or a state with its icon and words. Never color alone: the words say it." importLine={UI("Badge, StatusBadge, StatusIcon")}>

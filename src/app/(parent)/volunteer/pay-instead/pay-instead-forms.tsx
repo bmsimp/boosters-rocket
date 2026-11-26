@@ -1,4 +1,5 @@
 "use client";
+import { LinkButton } from "@/app/components/ui";
 import Link from "next/link";
 import { startTransition, useActionState, useEffect, useRef, useState } from "react";
 import { ACTION_FAILED, safely } from "../../../components/action-error";
@@ -19,7 +20,7 @@ const failed: Result = { ok: false, errors: [ACTION_FAILED] };
 function Outcome({ state }: { state: Result | null }) {
   if (!state) return null;
   return state.ok
-    ? <div role="status" className="volunteer-done"><p>{state.message}</p><p className="buyout-next"><Link href="/payments">Go to Payments</Link> · <Link href="/volunteer">Back to Volunteer</Link></p></div>
+    ? <div role="status" className="volunteer-done"><p>{state.message}</p><p className="buyout-next"><LinkButton href="/payments">Go to Payments</LinkButton> <Link className="link-line" href="/volunteer">Back to Volunteer</Link></p></div>
     : <ActionOutcome state={state} />;
 }
 

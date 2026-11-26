@@ -3,7 +3,7 @@ import { db } from "@/lib/db/client";
 import { jobRun, qboCustomer, qboCustomerType } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getConnection } from "@/lib/quickbooks/connection";
-import { qboQueryAll, qboCustomerTypes } from "@/lib/quickbooks/client";
+import { environmentOf, qboQueryAll, qboCustomerTypes } from "@/lib/quickbooks/client";
 import { failureWords, QboError } from "@/lib/quickbooks/endpoints";
 import { billingAddressOf } from "@/lib/parents/contact-fields";
 import { noteAddressesKept } from "@/lib/parents/contact-take-in";
@@ -142,7 +142,7 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
     }
     // From here to the save, anything that throws ends in a recorded failed run, not a rolled-back one the worker would
     // retry every minute. A savepoint, so even a database error here leaves the transaction able to record it.
-    let prepared: { typeRows: TypeRowIn[]; customerRows: CustomerRowIn[] } | "company_changed";
+    let prepared: { typeRows: TypeRowIn[]; customerRows: CustomerRowIn[]; about: { companyName: string | null; environment: "production" | "sandbox" | null } } | "company_changed";
     try {
       prepared = await tx.transaction(async (sp) => {
         const now = new Date();
@@ -155,13 +155,13 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
         // Each page re-reads the connection, so a disconnect and a connect to another company mid-read would mix companies.
         const still = await getConnection(sp);
         if (!still?.realmId || !still.refreshTokenCiphertext || still.realmId !== realmId) return "company_changed" as const;
-        return { typeRows, customerRows };
+        return { typeRows, customerRows, about: { companyName: still.companyName, environment: environmentOf(still, still.tokenMode) } };
       });
     } catch {
       return fail("The roster couldn't be read. (unexpected)", "unexpected");
     }
     if (prepared === "company_changed") return fail("The QuickBooks company changed during the read. (company_changed)", "company_changed");
-    const { typeRows, customerRows } = prepared;
+    const { typeRows, customerRows, about } = prepared;
     try {
       // A savepoint: a failure here undoes the cache changes, and the failed run can still be recorded.
       await tx.transaction(async (sp) => {
@@ -177,7 +177,7 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
         await sp.delete(qboCustomer);
         for (let i = 0; i < typeRows.length; i += CHUNK) await sp.insert(qboCustomerType).values(typeRows.slice(i, i + CHUNK)).onConflictDoNothing();
         for (let i = 0; i < rows.length; i += CHUNK) await sp.insert(qboCustomer).values(rows.slice(i, i + CHUNK)).onConflictDoNothing();
-        await setRosterSource(sp, realmId);
+        await setRosterSource(sp, realmId, about);
         // The cache holds the billing addresses this build keeps (none where it was just cleared): the take-in of
         // contact details waits for such a read, not for any successful one (src/lib/parents/contact-take-in.ts).
         if (!cleared) await noteAddressesKept(sp, run!.startedAt);

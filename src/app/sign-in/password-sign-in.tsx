@@ -1,4 +1,5 @@
 "use client";
+import { LinkButton } from "@/app/components/ui";
 import { useEffect, useRef, useState } from "react";
 import { APP_ASKED, APP_CODE_LABEL, APP_REJECTED, APP_STEP_ENDED, APP_STEP_OVER, CODE_SENT, CODE_REJECTED, CODE_STEP_ENDED, PASSWORD_REJECTED, SIGNIN_LEDE, TOO_MANY_TRIES, signinFailure,
   PASSKEY_ASKED, PASSKEY_BUTTON, PASSKEY_CANCELLED, PASSKEY_EXPLAINED, PASSKEY_ONLY, PASSKEY_OR_APP, PASSKEY_OR_BACKUP, BACKUP_CODE_LABEL, BACKUP_REJECTED, PASSKEY_REJECTED, PASSKEY_STEP_ENDED, PASSKEY_UNSUPPORTED, PASSKEY_USE,
@@ -168,7 +169,7 @@ export function PasswordSignIn({ next, portalOrigin }: { next: string | null; po
   const shown = problem && (
     <div role="alert">
       <p className="errors">{problem.words}</p>
-      {problem.passwordLink && <p><a className="link-line" href="/sign-in/password">Set up or reset my password</a></p>}
+      {problem.passwordLink && <p><LinkButton plain variant="secondary" href="/sign-in/password">Set up or reset my password</LinkButton></p>}
     </div>
   );
 

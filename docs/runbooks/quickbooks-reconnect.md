@@ -38,19 +38,21 @@ customer there, what each family was last seen to owe, every request still waiti
 volunteer buy-out, the product or service chosen for each payment and buy-out requirement, and the membership shape.
 Paid buy-outs keep counting.
 
-The portal refuses a different company unless an Admin has said, on the switch page, that they mean to connect one:
-picking the wrong company on Intuit's page changes nothing.
+The portal refuses a different company unless an Admin has said, in step 2 of setup or on the switch page, that they
+mean to connect one: picking the wrong company on Intuit's page changes nothing.
 
 1. Take a backup first: on the server, in `~/booster-rocket/deploy`, run `docker compose run --rm backup --now`.
 2. Sign in as an Admin and open **Settings**, **QuickBooks**. Open **Disconnect** and select **Disconnect QuickBooks**.
    Through Boosters Rocket, tick the box first: every portal connected to the company through Boosters Rocket shares one
    connection, so this may disconnect the others too, such as a trial copy of the portal.
-3. On the same page select **Connect a different company** (or **Change**, then **Connect a different company** in
-   step 2). The page lists what a switch ends and keeps, with counts. Read it. Through Boosters Rocket, choose
+3. On the same page select **Change**, which opens step 2, **Connect to QuickBooks**. Through Boosters Rocket, choose
    **Which QuickBooks** the new company is in: **The club's real books**, or **An Intuit sandbox (test) company** (the
    one connected last is chosen first, so change it when moving from a sandbox to the real books). With the club's own
-   Intuit app the page says which one the app's keys are for; to connect the other, save the app's other keys in
-   step 1 first. Check the box, and select **Switch companies: sign in to Intuit**.
+   Intuit app the QuickBooks is the one the app's keys are for; to connect the other, save the app's other keys in
+   step 1 first. Under **Which company**, choose **A different company** (when the QuickBooks chosen isn't the one the
+   families came from, it is chosen for you and the page says why). The page lists what a switch ends and keeps, with
+   counts. Read it, check the box, and select **Connect to QuickBooks**. (The **Connect a different company** button
+   opens the same lists on a page of their own, whose button is **Switch companies: sign in to Intuit**.)
 4. At Intuit, sign in as an admin of the new company, choose **the new company** and approve. You come back to the
    portal at step 3. The ask lasts as long as that sign-in does (10 minutes): if Intuit takes longer, start again from
    step 3.

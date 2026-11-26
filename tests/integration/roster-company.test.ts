@@ -37,7 +37,9 @@ const A = "9130000000000001", B = "9130000000000002", C = "9130000000000003";
 const worker = { startedBy: "worker", actor: { door: "system" as const, id: null, label: "worker" }, ip: null };
 const audits = async (action: string) => (await db.select().from(auditLog)).filter((r) => r.action === action);
 const rosterRuns = async () => db.select().from(jobRun).where(eq(jobRun.job, ROSTER_JOB));
-const source = async () => (await db.select().from(setting).where(eq(setting.key, "roster.source")))[0]?.value ?? null;
+const sourceRow = async () => (await db.select().from(setting).where(eq(setting.key, "roster.source")))[0]?.value as { realmId: string } | undefined;
+/** The company the cache was read from (its name and QuickBooks are checked once, below). */
+const source = async () => { const v = await sourceRow(); return v ? { realmId: v.realmId } : null; };
 const switchRow = async () => (await db.select().from(setting).where(eq(setting.key, "quickbooks.switch")))[0]?.value ?? null;
 const setSwitchRow = async (value: unknown) => {
   await db.insert(setting).values({ key: "quickbooks.switch", value }).onConflictDoUpdate({ target: setting.key, set: { value } });
@@ -73,6 +75,8 @@ describe("the roster belongs to the connected company", () => {
 
   it("a refresh records which company the cache came from", async () => {
     expect(await source()).toEqual({ realmId: A });
+    // With the company's name and which QuickBooks it is in, for step 2's question (the owner's finding of 2026-11-25).
+    expect(await sourceRow()).toMatchObject({ realmId: A, environment: "sandbox" });
   });
 
   // Stage 4's slice M8 (the owner's choice 1): another company is connected only after an Admin asks on the switch page.
