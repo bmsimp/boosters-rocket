@@ -369,10 +369,12 @@ describe("the staff pages", () => {
     expect(mine).toContain("Waivers due Friday");
     expect(mine).toContain("Posted by Casey Coach");
     expect(mine).toContain("Earlier versions");
-    expect(mine).toContain("Version 1");
-    expect(mine).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
-    expect(mine).not.toContain("<script>alert");
+    expect(mine).toContain(`<a class="link-line" href="/staff/messages/${id}?version=1">Version 1 · `);
     expect(mine).toContain(`href="/staff/messages/files/${pdf}"`);
+    const v1 = await renderPage(MessagePage, { params: { id }, searchParams: { version: "1" } });
+    expect(v1).toContain("<h2 id=\"version-h\">Version 1</h2>");
+    expect(v1).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(v1).not.toContain("<script>alert");
     expect(mine).toContain(`href="/staff/messages/${id}/edit"`);
     asStaff(admin);
     const theirs = await renderPage(MessagePage, { params: { id } });

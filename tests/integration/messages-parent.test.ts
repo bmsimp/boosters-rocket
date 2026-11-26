@@ -112,12 +112,24 @@ describe("a message's page", () => {
     expect(html).toContain(`href="/messages/from/${coach.id}">Casey Coach</a>`);
     expect(html).toContain("Edited");
     expect(html).toContain("Earlier versions");
-    expect(html).toContain("Version 1");
+    // Each earlier version is a link to its own view, on this page's own address.
+    expect(html).toContain(`<a class="link-line" href="/messages/${id}?version=1">Version 1 · `);
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
     expect(html).not.toContain("<script>alert(1)");
-    expect(html).toContain(`href="/messages/files/${oldPdf}"`);
     expect(html).toContain(`href="/messages/files/${pic}"`);
-    expect(html).toContain("Old schedule.pdf");
+    expect(html).not.toContain("Old schedule.pdf");
+    const v1 = await renderPage(MessagePage, { params: { id }, searchParams: { version: "1" } });
+    expect(v1).toContain("<h2 id=\"version-h\">Version 1</h2>");
+    expect(v1).toContain(`<h3 class="message-title">Practice moved</h3>`);
+    expect(v1).toContain(`href="/messages/files/${oldPdf}"`);
+    expect(v1).toContain("Old schedule.pdf");
+    expect(v1).toContain(`<a class="link-line" href="/messages/${id}">Read the current version</a>`);
+    // A version that isn't one of this message's earlier ones reads the current one.
+    for (const version of ["2", "9", "x", ""]) {
+      const other = await renderPage(MessagePage, { params: { id }, searchParams: { version } });
+      expect(other).not.toContain("Old schedule.pdf");
+      expect(other).toContain(`href="/messages/files/${pic}"`);
+    }
   });
 
   it("says nothing of an edit for a message with one version", async () => {

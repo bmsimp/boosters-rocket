@@ -198,8 +198,10 @@ test("staff post a message with its email, a parent reads it and its poster's pr
   await expect(parent.locator("main")).toContainText("The bus now leaves the school at 2:45.");
   await expect(parent.locator("main")).toContainText("Edited");
   await expect(parent.getByRole("heading", { name: "Earlier versions" })).toBeVisible();
-  const earlier = parent.locator("details").filter({ hasText: "Version 1" });
-  await earlier.locator("summary").click();
+  await parent.getByRole("link", { name: /^Version 1 · / }).click();
+  await expect(parent).toHaveURL(new RegExp(`/messages/${id}\\?version=1$`));
+  const earlier = parent.locator("main");
+  await expect(earlier.getByRole("heading", { name: "Version 1", exact: true })).toBeVisible();
   await expect(earlier.getByRole("heading", { name: title, exact: true })).toBeVisible();
   await expect(earlier).toContainText("The bus leaves the school at 3:15.");
   await checked(parent, "/messages/[id], edited");
