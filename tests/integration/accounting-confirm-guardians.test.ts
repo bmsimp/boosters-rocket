@@ -15,13 +15,13 @@ import { db } from "@/lib/db/client";
 import { accountingLink, accountingLinkEnded, auditLog, family, guardian, parent, student, writeQueue } from "@/lib/db/schema";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
 import { loadAccountingLinks, type LinkRow, type LinksView } from "@/lib/accounting/mapping";
-import { bulkConfirmedWords, confirmAllSuggested, confirmedWords, LINK_COPY, leaveUnlinked, linkFamilyToCustomer } from "@/lib/accounting/link-writes";
+import { confirmedWords, LINK_COPY, leaveUnlinked, linkFamilyToCustomer, linkSuggestedEach } from "@/lib/accounting/link-writes";
 import { pairKeys } from "@/lib/accounting/proposals";
 import { linkStamp } from "@/lib/accounting/stamp";
 import { renamePerson } from "@/lib/parents/people";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { addFamily, changeInPortal, guardianStandings, SENDING_LOCK } from "@/lib/roster/writes";
-import { confirmAllAction, confirmLinkAction } from "@/app/staff/(app)/links/actions";
+import { confirmLinkAction, linkSuggestedManyAction } from "@/app/staff/(app)/links/actions";
 import AccountingLinksPage from "@/app/staff/(app)/links/page";
 import { resetDb, seedParent } from "../helpers/db";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
@@ -33,8 +33,8 @@ import { rowNamed } from "../helpers/table";
  * The Parent customer a match was on, linked with the family (stage 4's slice M3c2 of the app-owned families spec;
  * section 4, "A match on a parent record suggests the family above it, and the parent record is linked under it"; open
  * question 3, "Each student and parent link proposed under the family is shown in the row and confirmed with it";
- * src/lib/accounting/proposals.ts, proposeGuardians(), and link-writes.ts, linkIn()): a family's Confirm and Confirm all
- * exact email matches link each guardian row paired by its sign-in address alone, one to one, with the Parent customer
+ * src/lib/accounting/proposals.ts, proposeGuardians(), and link-writes.ts, linkIn()): a family's Confirm, alone or as a
+ * row of Link to their suggested families, links each guardian row paired by its sign-in address alone, one to one, with the Parent customer
  * under the chosen customer whose email field holds it, send nothing and queue nothing. The company is fznCompany()'s
  * (Family 1, Parent 2, Student 3; the Rivera 10 and Chen 20 families carried over), with each test's customers read
  * after it by a roster read, which makes no record. Everything is seeded before a press: no helper that runs the whole
@@ -96,8 +96,11 @@ const everything = async () => ({
   guardians: await db.select().from(guardian).orderBy(asc(guardian.id)),
   people: await db.select().from(parent).orderBy(asc(parent.id)),
   queue: await db.select().from(writeQueue).orderBy(asc(writeQueue.id)),
-  audits: (await db.select({ id: auditLog.id }).from(auditLog).where(sql`${auditLog.action} in ('accounting.link.confirm', 'accounting.link.bulk')`)).length,
+  audits: (await db.select({ id: auditLog.id }).from(auditLog).where(sql`${auditLog.action} = 'accounting.link.confirm'`)).length,
 });
+/** Link to their suggested families as the Families list sends it: each Suggested row's family, its customer and its stamp. */
+const asksOf = (view: Awaited<ReturnType<typeof loadAccountingLinks>>) => view.rows.filter((r) => r.status.key === "suggested" && r.confirm !== null)
+  .map((r) => ({ familyId: String(r.familyId), customerId: r.confirm!.customerId, stamp: r.confirm!.stamp }));
 /** An advisory lock held by another session until released, as a send in progress holds a record's "being sent" lock. */
 async function holdLock(first: number, id: string) {
   let release!: () => void, locked!: () => void;
@@ -182,7 +185,7 @@ describe("a family's Confirm links the guardian a match was on", () => {
     expect((await db.select().from(writeQueue)).map((i) => i.request)).toEqual([expect.objectContaining({ op: "rename", role: "parent", qboId: "74", name: "Asha R. Patel", guardianId: asha.id })]);
   });
 
-  it("links each family's guardian through Confirm all exact email matches, as each row's Confirm would", async () => {
+  it("links each family's guardian through Link to their suggested families, as each row's Confirm would", async () => {
     await readAgain(...PATELS, ...OKAFORS);
     const patels = await unlinkedFamily("The Patels");
     const okafors = await unlinkedFamily("The Okafors");
@@ -190,28 +193,22 @@ describe("a family's Confirm links the guardian a match was on", () => {
     const ike = await rowIn(okafors, "Ike Okafor", "ike@example.com");
     const view = await loadAccountingLinks();
     expect(rowOf(view, "The Okafors").confirm!.proposals.guardians).toEqual([{ guardianId: ike.id, who: "Ike Okafor", customerQboId: "82", customerName: "Ike Okafor" }]);
-    const bulk = view.bulk({ status: null, q: "" })!;
-    expect(bulk.count).toBe(2);
+    const asks = asksOf(view);
+    expect(asks).toHaveLength(2);
     asStaff(linker);
-    // The page says what the bulk press and a family's Confirm link of guardians; the Okafors have no student, and their row says both.
-    const page = textOf(await renderPage(AccountingLinksPage));
-    expect(page).toContain("to the customer on its row, with the students and guardians its row lists.");
+    // A family's Confirm says what it links of guardians; the Okafors have no student, and their row says both.
     expect(await openingOf("The Okafors")).toContain("No student would be linked with it."
       + "Guardians linked with it, by the sign-in address their Parent customer's email field holds:Ike Okafor with Ike Okafor");
     stub.calls.length = 0;
-    const r = await confirmAllAction("", "", bulk.count, tag, bulk.stamp!);
-    // Asha Jr 71, a student customer under the Patel Family with no record in the portal, is left (a difference).
-    expect(r).toEqual({ ok: true, message: bulkConfirmedWords({ families: ["The Okafors", "The Patels"], students: 0, recordsLeft: 0, activeCustomersLeft: 1, inactiveCustomersLeft: 0,
-      keptMoves: 0, guardians: { linked: 2, held: 0 } }) });
-    expect(r.ok && r.message).toContain("2 guardians linked with them in all, each to the Parent customer under their family's customer whose email field holds their sign-in address.");
+    const r = await linkSuggestedManyAction(tag, asks);
+    expect(r).toMatchObject({ ok: true, message: "2 linked.", rows: [{ outcome: "done" }, { outcome: "done" }] });
     expect(stub.apiCalls()).toEqual([]);
     expect(await db.select().from(writeQueue)).toEqual([]);
     expect(await linkOfRow(asha.id)).toMatchObject({ customerId: "74", origin: "confirmed", linkedBy: linker.id, syncedToken: "7" });
     expect(await linkOfRow(ike.id)).toMatchObject({ customerId: "82", origin: "confirmed", linkedBy: linker.id, syncedToken: "3" });
-    const [press] = await auditsOf("accounting.link.bulk");
     for (const [familyId, rowId, customer] of [[patels, asha.id, "74"], [okafors, ike.id, "82"]] as const) {
       const [audit] = (await auditsOf("accounting.link.confirm")).filter((a) => a.targetId === String(familyId));
-      expect(audit!.after).toMatchObject({ bulk: (press!.after as { pressId: string }).pressId, guardiansLinked: [{ guardianId: rowId, customerQboId: customer }], guardiansHeld: [] });
+      expect(audit!.after).toMatchObject({ chosen: "suggested", guardiansLinked: [{ guardianId: rowId, customerQboId: customer }], guardiansHeld: [] });
     }
   });
 
@@ -306,10 +303,10 @@ describe("who is never paired", () => {
     expect(before).toHaveLength(4);
     const familyLinks = (await db.select().from(accountingLink).where(isNotNull(accountingLink.familyId))).length;
     stub.calls.length = 0;
-    const bulk = view.bulk({ status: null, q: "" })!;
-    expect(bulk.count).toBe(cases.length);
-    const r = await confirmAllSuggested({ status: "", q: "", count: bulk.count, stamp: bulk.stamp! }, tag, linkOp());
-    expect(r).toMatchObject({ ok: true, message: expect.stringContaining("No guardian was linked with them.") });
+    const asks = asksOf(view);
+    expect(asks).toHaveLength(cases.length);
+    const r = await linkSuggestedEach(asks, tag, linkOp());
+    expect(r.rows.every((x) => x.outcome === "done")).toBe(true);
     expect(await guardianLinks()).toEqual(before);
     expect(await db.select().from(accountingLink).where(isNotNull(accountingLink.familyId))).toHaveLength(familyLinks + cases.length);
     expect(stub.apiCalls()).toEqual([]);
@@ -447,7 +444,7 @@ describe("what the write queue holds back", () => {
   });
 });
 
-describe("what the write queue holds back, through the bulk press", () => {
+describe("what the write queue holds back, through Link to their suggested families", () => {
   connected();
   it("links one family's paired guardian and holds the other family's back, the families and students linked, and says so", async () => {
     await readAgain(...PATELS, qc("300", "Kept Family", "1"), qc("301", "Kay Kept", "2", { ...under("300"), ...mail("kay@example.com") }), qc("302", "Kit Kept", "3", under("300")));
@@ -457,21 +454,18 @@ describe("what the write queue holds back, through the bulk press", () => {
     const kay = await rowIn(kept, "Kay Kept", "kay@example.com");
     await seedQueued({ op: "contact", role: "parent", qboId: "301", syncToken: "0", change: { phone: "555-0102" }, was: { phone: "555-0101" }, guardianId: kay.id }, { state: "refused", code: "validation", familyQboId: null, familyId: kept });
     const queue = await db.select().from(writeQueue).orderBy(asc(writeQueue.id));
-    const bulk = (await loadAccountingLinks()).bulk({ status: null, q: "" })!;
-    expect(bulk.count).toBe(2);
+    const asks = asksOf(await loadAccountingLinks());
+    expect(asks).toHaveLength(2);
     stub.calls.length = 0;
-    const r = await confirmAllSuggested({ status: "", q: "", count: bulk.count, stamp: bulk.stamp! }, tag, linkOp());
-    expect(r).toMatchObject({ ok: true, message: expect.stringContaining("1 guardian linked with them in all, each to the Parent customer under their family's customer whose email field holds their sign-in address."
-      + " A guardian whose sign-in address a Parent customer under them holds wasn't linked, as a change for that guardian or for that Parent customer is waiting, stuck or kept on the Reconciliation page.") });
+    const r = await linkSuggestedEach(asks, tag, linkOp());
+    expect(r.rows.map((x) => x.outcome)).toEqual(["done", "done"]);
     expect(await linkOfRow(asha.id)).toMatchObject({ customerId: "74", origin: "confirmed" });
     expect(await linkOfRow(kay.id)).toBeUndefined();
     expect((await db.select().from(accountingLink).where(eq(accountingLink.familyId, kept)))[0]).toMatchObject({ customerId: "300", origin: "confirmed" });
     expect((await db.select().from(accountingLink).where(eq(accountingLink.studentId, await studentNamed(kept, "Kit Kept"))))[0]).toMatchObject({ customerId: "302" });
-    const [press] = await auditsOf("accounting.link.bulk");
-    const pressId = (press!.after as { pressId: string }).pressId;
     const confirms = await auditsOf("accounting.link.confirm");
-    expect(confirms.find((a) => a.targetId === String(patels))!.after).toMatchObject({ bulk: pressId, guardiansLinked: [{ guardianId: asha.id, customerQboId: "74" }], guardiansHeld: [] });
-    expect(confirms.find((a) => a.targetId === String(kept))!.after).toMatchObject({ bulk: pressId, guardiansLinked: [], guardiansHeld: [kay.id] });
+    expect(confirms.find((a) => a.targetId === String(patels))!.after).toMatchObject({ guardiansLinked: [{ guardianId: asha.id, customerQboId: "74" }], guardiansHeld: [] });
+    expect(confirms.find((a) => a.targetId === String(kept))!.after).toMatchObject({ guardiansLinked: [], guardiansHeld: [kay.id] });
     expect(await db.select().from(writeQueue).orderBy(asc(writeQueue.id))).toEqual(queue);
     expect(stub.apiCalls()).toEqual([]);
   });
@@ -494,31 +488,31 @@ describe("the stamp and the lock", () => {
     stub.calls.length = 0;
   });
 
-  it("refuses a press whose pairs an item made since the page holds back, single and bulk, keeping nothing", async () => {
+  it("refuses a press whose pairs an item made since the page holds back, alone and as a row of the bulk press, keeping nothing", async () => {
     const view = await loadAccountingLinks();
     const row = rowOf(view, "The Patels");
-    const bulk = view.bulk({ status: null, q: "" })!;
+    const asks = asksOf(view);
     expect(row.confirm!.proposals.guardians).toHaveLength(1);
     await seedQueued({ op: "contact", role: "parent", qboId: "74", syncToken: "0", change: { phone: "555-0102" }, was: { phone: "555-0101" }, guardianId: asha.id }, { state: "waiting", familyQboId: null, familyId: patels });
     const before = await everything();
     expect(await linkFamilyToCustomer({ familyId: String(patels), customerId: "70", chosen: "suggested", stamp: row.confirm!.stamp }, tag, linkOp()))
       .toEqual({ ok: false, errors: [LINK_COPY.rowChanged] });
-    expect(await confirmAllSuggested({ status: "", q: "", count: bulk.count, stamp: bulk.stamp! }, tag, linkOp())).toEqual({ ok: false, errors: [LINK_COPY.listChanged] });
+    expect((await linkSuggestedEach(asks, tag, linkOp())).rows).toEqual([{ id: String(patels), outcome: "skipped", why: expect.stringContaining("This family's row has changed since the page was drawn") }]);
     expect(await everything()).toEqual(before);
     expect(stub.apiCalls()).toEqual([]);
   });
 
-  it("refuses while the row's \"being sent\" lock is held in another connection, in words of its own, single and bulk, keeping nothing", async () => {
+  it("refuses while the row's \"being sent\" lock is held in another connection, in words of its own, alone and as a row of the bulk press, keeping nothing", async () => {
     const view = await loadAccountingLinks();
     const row = rowOf(view, "The Patels");
-    const bulk = view.bulk({ status: null, q: "" })!;
+    const asks = asksOf(view);
     const before = await everything();
     const release = await holdLock(SENDING_LOCK, asha.id);
     try {
       expect(await linkFamilyToCustomer({ familyId: String(patels), customerId: "70", chosen: "suggested", stamp: row.confirm!.stamp }, tag, linkOp()))
         .toEqual({ ok: false, errors: [LINK_COPY.guardianSending] });
-      expect(await confirmAllSuggested({ status: "", q: "", count: bulk.count, stamp: bulk.stamp! }, tag, linkOp()))
-        .toEqual({ ok: false, errors: [LINK_COPY.bulkGuardianSending("The Patels")] });
+      expect((await linkSuggestedEach(asks, tag, linkOp())).rows)
+        .toEqual([{ id: String(patels), outcome: "skipped", why: LINK_COPY.guardianSending.replace(" The row is shown again as it is now.", "") }]);
     } finally {
       await release();
     }

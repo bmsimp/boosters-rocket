@@ -1,10 +1,10 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { requireStaffActionAlso, staffAction, type StaffCtx } from "@/lib/guards";
-import { confirmAllSuggested, customerAimedAt, leaveUnlinked, LINK_COPY, linkFamilyToCustomer, linkSuggestedEach, reviewCarriedOver, sendAllDifferences, undoLeaveUnlinked, unlinkFamily, type LinkDone } from "@/lib/accounting/link-writes";
+import { customerAimedAt, leaveUnlinked, LINK_COPY, linkFamilyToCustomer, linkSuggestedEach, reviewCarriedOver, sendAllDifferences, undoLeaveUnlinked, unlinkFamily, type LinkDone } from "@/lib/accounting/link-writes";
 import { familiesFromCustomers, familyFromCustomer, NO_FAMILY_COPY } from "@/lib/roster/no-family";
 import { ASK_MAX, bulkWords, idsFrom, type BulkDone } from "@/lib/bulk";
-import { BULK_MAX, IMPORT_MAX } from "@/lib/accounting/mapping";
+import { IMPORT_MAX } from "@/lib/accounting/mapping";
 import { IMPORT_COPY, saveImport } from "@/lib/accounting/import-writes";
 import { isStatusKey, SEARCH_MAX } from "@/lib/accounting/status";
 import { isChosen, isGuardianChosen } from "@/lib/accounting/stamp";
@@ -16,7 +16,7 @@ import { sendToBooks, takeFromBooks, type SendAsk } from "@/lib/roster/writes";
 
 // The accounting links screen's presses (stage 4's slice M3a; src/lib/accounting/link-writes.ts): Confirm (a Suggested
 // row's customer, a Several possible row's candidate, or one picked from the customers no family is linked to), Leave
-// unlinked and Undo; since slice M3a2, Confirm all exact email matches and Confirm this link (a carried-over link
+// unlinked and Undo; since slice M3a2, Confirm this link (a carried-over link
 // confirmed as reviewed); since slice M3b, Unlink from the books; since slice M3c, Link this guardian and Unlink this
 // guardian (src/lib/accounting/guardian-links.ts); since slice M4a, Take QuickBooks' into the app; since slice M6,
 // "Create a family from this" (moved here from Reconciliation) and Make these families, the reviewed import. Each needs the
@@ -58,21 +58,6 @@ export const undoLeaveUnlinkedAction = staffAction(P, async (ctx: StaffCtx, fami
   if (!str(familyId, ID_MAX) || !str(rosterTag, TAG_MAX)) return NOT_FROM_PAGE;
   const r = await undoLeaveUnlinked(familyId, rosterTag, op(ctx));
   again();
-  return r;
-});
-
-/**
- * Confirm all exact email matches (slice M3a2): the filter as the page parsed it (its status key, "" for none, and its
- * search), how many Suggested rows it showed, the roster tag and the stamp sealing those rows. No family, customer or
- * student comes from the browser: the library works the rows out again under the roster lock.
- */
-export const confirmAllAction = staffAction(P, async (ctx: StaffCtx, status: string, q: string, count: number, rosterTag: string, stamp: string): Promise<LinkDone> => {
-  await requireStaffActionAlso(ctx, "Roster.Read");
-  if (typeof status !== "string" || !(status === "" || isStatusKey(status)) || typeof q !== "string" || q.length > SEARCH_MAX || typeof count !== "number" || !Number.isInteger(count)
-    || count < 1 || count > BULK_MAX || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return NOT_FROM_PAGE;
-  const r = await confirmAllSuggested({ status, q, count, stamp }, rosterTag, op(ctx));
-  if (r.ok) revalidatePath("/", "layout");
-  else again();
   return r;
 });
 

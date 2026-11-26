@@ -11,7 +11,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "accounting.difference.send_all": "Send the app's for all on the accounting links screen: every name and student's family the list showed queued for the books at once, with how many were passed over: each difference has its own row",
   "accounting.import.save": "Families made in the portal from customers no family was linked to, reviewed by staff and saved in one press, with how many: each family has its own row, and nothing was sent to the books",
   "accounting.import.guardian_failed": "A guardian of a family the reviewed import had just made could not be added; staff were told so, and the guardian is added on the family's page",
-  "accounting.link.bulk": "Families linked by staff in one press of Confirm all exact email matches, with how many: each family's link has its own row, and nothing was sent to the books",
+  "accounting.link.bulk": "Families linked by staff in one press of Confirm all exact email matches (a press since replaced by Link to their suggested families), with how many: each family's link has its own row, and nothing was sent to the books",
   "accounting.link.carried_over": "The portal's own families and students made from the roster, each linked to its QuickBooks customer, with counts",
   "accounting.link.confirm": "A family linked by staff to a customer in the books, with the students and guardians paired with it, or a link carried over from the roster confirmed by staff as checked: nothing was sent to the books",
   "accounting.link.guardian": "A guardian linked by staff to a Parent customer in the books under their family: nothing was sent to the books",

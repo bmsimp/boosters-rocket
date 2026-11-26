@@ -15,7 +15,7 @@ import { accountingLink, accountingLinkEnded, auditLog, family, familyMoney, gua
 import type { AppFamilyId } from "@/lib/families/ids";
 import { AccessDenied } from "@/lib/guards";
 import { loadAccountingLinks, type LinkRow, type LinksView } from "@/lib/accounting/mapping";
-import { confirmAllSuggested, customerAimedAt, leaveUnlinked, LINK_COPY, linkFamilyToCustomer, unlinkedWords, unlinkFamily } from "@/lib/accounting/link-writes";
+import { customerAimedAt, linkSuggestedEach, leaveUnlinked, LINK_COPY, linkFamilyToCustomer, unlinkedWords, unlinkFamily } from "@/lib/accounting/link-writes";
 import { writeAudit } from "@/lib/audit/log";
 import { auditPage, parseAuditFilters } from "@/lib/audit/query";
 import { runWriteQueue } from "@/lib/roster/queue";
@@ -510,14 +510,13 @@ describe("a relink: an unlink, then a link as Confirm or Pick a different custom
     expect(await db.select().from(accountingLinkEnded).where(eq(accountingLinkEnded.familyId, chen))).toMatchObject([{ customerId: "20" }]);
   });
 
-  it("by Confirm all exact email matches: the bulk press links the unlinked family again, as M3a links it", async () => {
+  it("by Link to their suggested families: the bulk press links the unlinked family again, as M3a links it", async () => {
     const before = await linksOfFamily(rivera);
     expect(await unlinkRow("Rivera Family")).toMatchObject({ ok: true });
     const view = await loadAccountingLinks();
     expect(rowOf(view, "Rivera Family").status.key).toBe("suggested");
-    const offer = view.bulk({ status: null, q: "" });
-    expect(offer).toMatchObject({ count: 1, stamp: expect.any(String) });
-    expect(await confirmAllSuggested({ status: "", q: "", count: offer!.count, stamp: offer!.stamp }, tag, linkOp())).toMatchObject({ ok: true });
+    const confirm = rowOf(view, "Rivera Family").confirm!;
+    expect((await linkSuggestedEach([{ familyId: String(rivera), customerId: confirm.customerId, stamp: confirm.stamp }], tag, linkOp())).rows).toEqual([{ id: String(rivera), outcome: "done" }]);
     const [familyLink] = await db.select().from(accountingLink).where(eq(accountingLink.familyId, rivera));
     expect(familyLink).toMatchObject({ customerId: "10", origin: "confirmed", linkedBy: linker.id });
     expect(before.map((l) => l.id)).not.toContain(familyLink!.id);
