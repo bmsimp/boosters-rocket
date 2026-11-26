@@ -323,7 +323,7 @@ test("once disconnected, step 2 asks which company, and a different one shows wh
     await expect(page.getByRole("heading", { name: "What a switch ends" })).toBeVisible();
     await expect(page.getByRole("checkbox", { name: /^I understand that every family's link to the books ends/ })).toBeVisible();
     await expect(page.getByRole("button", { name: "Connect to QuickBooks" })).toHaveCount(1);
-    await expect(page.getByRole("link", { name: "Connect a different company", exact: true })).toHaveClass(/btn/);
+    await expect(page.getByRole("link", { name: "Connect a different company", exact: true })).toHaveClass(/\bbtn\b/);
     await checked(page, "step 2's company question");
 
     // The club's app is set to the sandbox; families read from the real books make it a different company.

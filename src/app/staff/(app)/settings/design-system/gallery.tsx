@@ -165,7 +165,7 @@ export function Gallery() {
           </div>
           <div>
             <h3>Don&apos;t: an underlined link for an action or a step</h3>
-            <p><a href="#ds-button">Skip to step 3</a> · <a href="#ds-button">Connect a different company</a></p>
+            <p><a className="link-line" href="#ds-button">Skip to step 3</a> · <a className="link-line" href="#ds-button">Connect a different company</a></p>
             <p className="ds-note">A plain link is only for reading more, help, going back to where you came from (&ldquo;Back to Roster&rdquo;), or a record&apos;s own page in a list or table. Alone on its line it takes <code>.link-line</code>.</p>
           </div>
         </div>
