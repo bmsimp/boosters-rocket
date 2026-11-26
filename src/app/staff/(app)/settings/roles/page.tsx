@@ -16,10 +16,10 @@ export default async function RolesPage() {
   return (
     <main className="wrap single roles-page">
       <SettingsHeader effective={ctx.effective} title="Roles" lede="A role is a set of things staff may do. Tick what each role lets its people do, then save. A person can hold more than one role, and gets everything their roles give." />
-      <details className="more roles-admin-only"><summary>What only an Admin can do</summary>
-        <p>The Admin role holds everything. These are kept for Admins alone, so no other role can be given them. The audit log is one, because its rows hold notes staff write about parents.</p>
+      <section className="box roles-admin-only" aria-labelledby="admin-only-h"><h2 id="admin-only-h">What only an Admin can do</h2>
+        <p>No other role can be given these. The audit log is one, as its rows hold staff notes about parents.</p>
         <ul>{ADMIN_ONLY_WORDS.map((w) => <li key={w}>{w}</li>)}</ul>
-      </details>
+      </section>
       {roles.map((r) => (
         <section className="box" key={r.id} aria-labelledby={`role-${r.id}`}>
           <h2 id={`role-${r.id}`}>{r.name}</h2>

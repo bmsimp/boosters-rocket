@@ -1,4 +1,4 @@
-import { LinkButton } from "@/app/components/ui";
+import { ConfirmDialog, LinkButton } from "@/app/components/ui";
 import { Notice } from "@/app/components/notice";
 import { requireStaffPage } from "@/lib/guards";
 import { factorCounts, LEVEL_UNREADABLE, missingForSignins, signinCounts, type FactorCounts } from "@/lib/parents/switches";
@@ -25,12 +25,12 @@ const n = (count: number, one: string, many: string) => `${count} ${count === 1 
  */
 function strictConfirm(neither: number, signinOn: boolean): string {
   if (!signinOn) {
-    if (neither === 0) return "Parent sign-ins are off, so switching to Strict signs nobody out. Every guardian who could sign in once they are on has a passkey or an authenticator app.";
-    return "Parent sign-ins are off, so switching to Strict signs nobody out. Once they are on, a guardian with neither a passkey nor an authenticator app adds one after their password, before they see their family's page.";
+    if (neither === 0) return "Parent sign-ins are off, so this signs nobody out, and every guardian who could sign in has a passkey or an authenticator app.";
+    return "Parent sign-ins are off, so this signs nobody out. Once they're on, a guardian with neither a passkey nor an authenticator app adds one after their password.";
   }
-  if (neither === 0) return "Switching to Strict signs nobody out: every guardian who can sign in has a passkey or an authenticator app.";
-  if (neither === 1) return "Switching to Strict signs out the 1 guardian who has neither a passkey nor an authenticator app. The next time they sign in, their password takes them to add one before they see their family's page. If they've forgotten their password, they'll need you to reset their sign-in from their page on Parents.";
-  return `Switching to Strict signs out the ${neither} guardians who have neither a passkey nor an authenticator app. The next time they sign in, their password takes them to add one before they see their family's page. Anyone who has forgotten their password will need you to reset their sign-in from their page on Parents.`;
+  if (neither === 0) return "This signs nobody out: every guardian who can sign in has a passkey or an authenticator app.";
+  const who = neither === 1 ? "the 1 guardian" : `the ${neither} guardians`;
+  return `This signs out ${who} with neither a passkey nor an authenticator app. They add one after their password next time; if they've forgotten it, reset their sign-in from their page on Parents.`;
 }
 
 /** The counts step 3 shows: who can sign in (with sign-ins off, who could once they are on), and with what second step of their own. */
@@ -70,10 +70,8 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
           {settings.signin ? (
             <>
               <Notice tone="done" live="none">Parent sign-ins are on. {n(counts.people, "person", "people")} can sign in, to {n(counts.families, "family", "families")}.</Notice>
-              <details><summary>Switch parent sign-ins off</summary>
-                <p>Every parent is signed out at once and nobody can sign in until this is switched on again. Welcome emails are switched off too. Nothing is deleted.</p>
-                <SwitchButton quiet label="Switch parent sign-ins off" pendingLabel="Switching off…" act={setSigninsAction.bind(null, false)} />
-              </details>
+              <ConfirmDialog label="Switch parent sign-ins off" busyLabel="Switching off…"
+                consequence="Every parent is signed out at once, and welcome emails stop too. Nothing is deleted." act={setSigninsAction.bind(null, false)} />
             </>
           ) : missing.length > 0 ? (
             <Notice tone="warning">Not yet:<ul className="notice-list">{missing.map((m) => <li key={m}>{m}</li>)}</ul></Notice>
@@ -111,18 +109,18 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
           {level === null && <Notice tone="warning">{LEVEL_UNREADABLE}</Notice>}
           <FactorDetails c={factors} signinOn={settings.signin} />
           {level === "standard" && <p>Strict asks every guardian for a passkey or an authenticator app each time they sign in, and an emailed code never signs anyone in. Switch once most guardians have one.</p>}
-          {level !== "strict" && (
-            <details><summary>Switch to Strict</summary>
-              <Notice tone="warning" live="none">{strictConfirm(factors.neither, settings.signin)}</Notice>
-              <SwitchButton label="Switch to Strict" pendingLabel="Switching…" act={setLevelAction.bind(null, "strict", factors.neither)} />
-            </details>
-          )}
-          {level !== "standard" && (
-            <details><summary>Switch back to Standard</summary>
-              <p>Switching back to Standard lets guardians with no passkey or app sign in with their password and a code we email again. Nobody is signed out, and every passkey and app stays.</p>
-              <SwitchButton quiet label="Switch back to Standard" pendingLabel="Switching…" act={setLevelAction.bind(null, "standard", null)} />
-            </details>
-          )}
+          {level !== "strict" && <p>{strictConfirm(factors.neither, settings.signin)}</p>}
+          <div className="row-actions">
+            {level !== "strict" && (
+              <ConfirmDialog label="Switch to Strict" variant="primary" busyLabel="Switching…" consequence={strictConfirm(factors.neither, settings.signin)}
+                act={setLevelAction.bind(null, "strict", factors.neither)} />
+            )}
+            {level !== "standard" && (
+              <ConfirmDialog label="Switch back to Standard" variant="secondary" busyLabel="Switching…"
+                consequence="Guardians with no passkey or app sign in with their password and an emailed code again. Nobody is signed out."
+                act={setLevelAction.bind(null, "standard", null)} />
+            )}
+          </div>
           <p className="box-foot"><a className="link-line" href="/staff/settings/parents">Back to Parent sign-ins</a></p>
         </section>
       )}

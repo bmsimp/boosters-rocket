@@ -38,6 +38,7 @@ export function MailSaveForm({ summary, save, testStep }: { summary: MailSummary
         </label>
       ) : (
         <>
+          <p className="hint">Use the settings your mail provider gives for sending from an app, often with an app password. Mail reaches inboxes reliably only when the From address&apos;s domain has your provider&apos;s SPF and DKIM records.</p>
           <label className="field"><span>Host</span><input name="host" required autoComplete="off" spellCheck={false} defaultValue={smtp?.host ?? ""} placeholder="smtp.example.org" /></label>
           <label className="field"><span>Port</span><input name="port" inputMode="numeric" required defaultValue={smtp?.port ?? 587} /></label>
           <label className="field"><span>Security</span>

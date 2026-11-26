@@ -4,7 +4,7 @@ const state = vi.hoisted(() => ({ setup: true, sent: 0 }));
 vi.mock("@/lib/setup/session", () => ({ hasSetupSession: async () => state.setup, startSetupSession: async () => {}, SETUP_COOKIE: "br_setup" }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ "cf-connecting-ip": "203.0.113.40" }), cookies: async () => ({ get: () => undefined }) }));
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
-vi.mock("next/navigation", () => ({ redirect: (url: string) => { throw Object.assign(new Error("NEXT_REDIRECT"), { url }); } }));
+vi.mock("next/navigation", () => ({ redirect: (url: string) => { throw Object.assign(new Error("NEXT_REDIRECT"), { url }); }, usePathname: () => "/", useSearchParams: () => new URLSearchParams() }));
 vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", buildSender: async () => async () => { state.sent++; } }));
 
 import SetupPage from "@/app/setup/page";

@@ -1,4 +1,5 @@
 import { CopyField } from "@/app/components/sign-in-settings/copy-field";
+import { StepsChoice } from "@/app/components/ui";
 
 const ENTRA_APPS = "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade";
 const ext = { target: "_blank", rel: "noreferrer" } as const;
@@ -28,15 +29,22 @@ export function GoogleStaffSteps({ appUrl }: { appUrl: string }) {
   );
 }
 
-export function ScriptOption({ script, example }: { script: string; example: string }) {
+/**
+ * Microsoft staff sign-in's app, made one of two ways, chosen in the open: by hand (MicrosoftStaffSteps) or with the
+ * PowerShell script, which does the same steps and prints the values for the form.
+ */
+export function MicrosoftAppSteps({ appUrl, script, example }: { appUrl: string; script: string; example: string }) {
   return (
-    <details className="box">
-      <summary>Use the PowerShell script instead</summary>
-      <p>The script signs you in with the normal Microsoft sign-in page in your browser, does the steps for you, adds Boosters Rocket&apos;s certificate to the app, and prints the values to enter below. It needs PowerShell 7 and the Microsoft Graph module (<code>Install-Module Microsoft.Graph.Authentication</code>). With <code>-SetUpMail</code> it also needs the Exchange Online module (<code>Install-Module ExchangeOnlineManagement</code>).</p>
-      <p><a className="btn btn-line" href={`/setup/scripts/${script}`} download>Download {script}</a></p>
-      <p>On Windows, unblock the downloaded file first:</p>
-      <CopyField label="Unblock" value={`Unblock-File .\\${script}`} />
-      <CopyField label="Then run" value={example} />
-    </details>
+    <StepsChoice name="ms-app-way" legend="How to make the app" options={[
+      { value: "hand", label: "By hand", hint: "In the Microsoft Entra admin center.", steps: <MicrosoftStaffSteps appUrl={appUrl} /> },
+      { value: "script", label: "With the PowerShell script", hint: "It does the steps for you and prints the values to enter below.", steps: (
+        <div className="stack">
+          <p>It needs PowerShell 7 and the Microsoft Graph module (<code>Install-Module Microsoft.Graph.Authentication</code>); with <code>-SetUpMail</code>, the Exchange Online module too (<code>Install-Module ExchangeOnlineManagement</code>).</p>
+          <p><a className="btn btn-line" href={`/setup/scripts/${script}`} download>Download {script}</a></p>
+          <CopyField label="On Windows, unblock it first" value={`Unblock-File .\\${script}`} />
+          <CopyField label="Then run" value={example} />
+        </div>
+      ) },
+    ]} />
   );
 }
