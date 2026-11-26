@@ -6,6 +6,7 @@ import { and, asc, desc, eq, inArray, isNull, lte, ne, or, sql } from "drizzle-o
 import { db, type Tx } from "@/lib/db/client";
 import { buyout, family, guardian, jobRun, parent, qboCustomer, setting, student, writeQueue, type QueuedWrite, type RosterWrite } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
+import { eachRow, type RowDone } from "@/lib/bulk";
 import { getConnection } from "@/lib/quickbooks/connection";
 import { WORKER_ACTOR } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
@@ -864,6 +865,10 @@ export async function tryAgainNow(id: string, o: QueueOp & { mayLink?: boolean }
   });
 }
 
+/** Why a give-up's note is refused, or null: it says why, in at most NOTE_MAX characters. */
+const noteRefused = (note: string): string | null => (!note ? "Say why, in a few words. The note is kept in the audit log."
+  : note.length > NOTE_MAX ? `The note is too long (${NOTE_MAX} characters at most).` : null);
+
 /** What staff are told when "Give up" waited for the roster lock past its wait (a roster read holding it): nothing was changed. */
 export const GIVE_UP_BUSY = "The roster is being brought up to date from QuickBooks just now, so nothing was given up. Try again in a moment.";
 
@@ -876,8 +881,8 @@ export const GIVE_UP_BUSY = "The roster is being brought up to date from QuickBo
  */
 export async function giveUp(id: string, rawNote: string, o: QueueOp): Promise<Done> {
   const note = rawNote.trim();
-  if (!note) return { ok: false, errors: ["Say why, in a few words. The note is kept in the audit log."] };
-  if (note.length > NOTE_MAX) return { ok: false, errors: [`The note is too long (${NOTE_MAX} characters at most).`] };
+  const bad = noteRefused(note);
+  if (bad !== null) return { ok: false, errors: [bad] };
   try {
     return await db.transaction(async (tx) => {
       await tx.execute(sql`set local lock_timeout = '10s'`);
@@ -890,6 +895,30 @@ export async function giveUp(id: string, rawNote: string, o: QueueOp): Promise<D
     throw e;
   }
 }
+/**
+ * Try again for many, Reconciliation's bulk press on its selection (src/lib/bulk.ts): each change ticked asked for by
+ * "Try again now"'s own function (tryAgainNow()), in its own transaction with its own `roster.write.again` row, so one
+ * refused never undoes another: a change kept in the portal (never tried again by the worker), one gone through or given
+ * up, a family's create for someone who may not link families, one being sent now, each a row skipped with the single
+ * press's words. At most PRESS_MAX rows; the rest are handed back.
+ */
+export async function tryAgainEach(ids: readonly string[], o: QueueOp & { mayLink?: boolean }): Promise<{ rows: RowDone[]; left: string[] }> {
+  return eachRow(ids, (id) => id, (id) => tryAgainNow(id, o));
+}
+
+/**
+ * Give up on many, Reconciliation's bulk press on its selection, with one note for them all (checked once here, as
+ * giveUp() checks it): each change ticked given up by "Give up"'s own function (giveUp()), in its own transaction with
+ * its own `roster.write.given_up` row and the same note, so one refused never undoes another. The roster lock busy past
+ * its wait (GIVE_UP_BUSY) skips the rest untried, as each would wait as long again. At most PRESS_MAX rows.
+ */
+export async function giveUpEach(ids: readonly string[], rawNote: string, o: QueueOp): Promise<{ ok: false; errors: string[] } | { ok: true; rows: RowDone[]; left: string[] }> {
+  const note = rawNote.trim();
+  const bad = noteRefused(note);
+  if (bad !== null) return { ok: false, errors: [bad] };
+  return { ok: true, ...(await eachRow(ids, (id) => id, (id) => giveUp(id, note, o), { stop: (errors) => errors.includes(GIVE_UP_BUSY) })) };
+}
+
 /** Postgres could not take a lock within its wait (lock_not_available). Drizzle wraps the driver's error, so its cause is read too. */
 function lockTimedOut(e: unknown): boolean {
   const code = (v: unknown) => (typeof v === "object" && v !== null ? (v as { code?: unknown }).code : undefined);

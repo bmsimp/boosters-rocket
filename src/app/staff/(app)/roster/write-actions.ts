@@ -4,7 +4,8 @@ import { staffAction, type StaffCtx } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { addFamily, addStudentToLinked, askFamilyInactive, askRosterWrite, changeInPortal, contactSavedWords, createInQuickBooksAndLink, deactivateLinked, linkStudentMadeAfterGivingUp, moveStudent, renameLinked, SAVED_LEASE_MS, sendContactSaved, sendPortalValue, STAFF_DETAILS_COPY,
   type PortalChange, type WriteAsk, type WriteResult } from "@/lib/roster/writes";
-import { giveUp, tryAgainNow, NOTE_MAX } from "@/lib/roster/queue";
+import { giveUp, giveUpEach, tryAgainEach, tryAgainNow, NOTE_MAX } from "@/lib/roster/queue";
+import { bulkWords, idsFrom, type BulkDone } from "@/lib/bulk";
 import { NAME_MAX } from "@/lib/roster/names";
 import { getShape } from "@/lib/roster/shape";
 import { familyRecordAt } from "@/lib/families/address";
@@ -215,6 +216,19 @@ export const tryAgainAction = staffAction(P, async (ctx, itemId: string): Promis
 });
 
 /**
+ * Try again for many, Reconciliation's bulk press on its selection (src/lib/bulk.ts): the change ids ticked, checked here
+ * for their type, count and format, each asked for by "Try again now"'s own function (tryAgainEach()), in its own
+ * transaction. The same permissions as "Try again now".
+ */
+export const tryAgainManyAction = staffAction(P, async (ctx, itemIds: string[]): Promise<BulkDone> => {
+  const ids = canRead(ctx) ? idsFrom(itemIds, uuid) : null;
+  if (ids === null) return NOT_FROM_PAGE;
+  const r = await tryAgainEach(ids, { ...op(ctx), mayLink: mayLink(ctx) });
+  if (r.rows.some((x) => x.outcome === "done")) revalidatePath("/staff", "layout");
+  return { ok: true, message: bulkWords(r, "asked to be tried again"), ...r };
+});
+
+/**
  * "Link the student to it": a student's given-up create that QuickBooks made all the same, linked to that customer
  * (linkStudentMadeAfterGivingUp()). Linking takes the linking permission as well, checked here with the page's Roster.Read.
  */
@@ -242,4 +256,18 @@ export const giveUpAction = staffAction(P, async (ctx, itemId: string, note: str
   const r = await giveUp(itemId, note, op(ctx));
   if (r.ok) revalidatePath("/staff", "layout");
   return r;
+});
+
+/**
+ * Give up on many, Reconciliation's bulk press on its selection, with one note for them all: the change ids ticked,
+ * checked here for their type, count and format, and the note, each given up by "Give up"'s own function
+ * (giveUpEach()), in its own transaction with the same note. The same permissions as "Give up".
+ */
+export const giveUpManyAction = staffAction(P, async (ctx, itemIds: string[], note: string): Promise<BulkDone> => {
+  const ids = canRead(ctx) && str(note, NOTE_MAX * 4) ? idsFrom(itemIds, uuid) : null;
+  if (ids === null) return NOT_FROM_PAGE;
+  const r = await giveUpEach(ids, note, op(ctx));
+  if (!r.ok) return r;
+  if (r.rows.some((x) => x.outcome === "done")) revalidatePath("/staff", "layout");
+  return { ok: true, message: bulkWords(r, "given up"), rows: r.rows, left: r.left };
 });
