@@ -8,13 +8,14 @@ import type { Holder } from "@/lib/accounting/match";
 import type { Proposals } from "@/lib/accounting/proposals";
 import { recordNameWords } from "@/lib/families/words";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
-import { Button, Card, DataTable, EmptyState, LinkButton, LocalTime, Notice, PageHeader, Select, StatusBadge, TextInput, Toolbar, type Column, type Tone } from "@/app/components/ui";
+import { Button, BulkResults, BulkSelect, Card, DataTable, EmptyState, LinkButton, LocalTime, Notice, PageHeader, Select, StatusBadge, TextInput, Toolbar, type Column, type Tone } from "@/app/components/ui";
 import { familyPage } from "@/app/staff/(app)/family-pages";
-import { confirmAllAction, confirmLinkAction, leaveUnlinkedAction, linkGuardianAction, reviewLinkAction, sendAllAction, sendDifferenceAction, takeDifferenceAction, undoLeaveUnlinkedAction, unlinkAction, unlinkGuardianAction } from "./actions";
+import { confirmAllAction, confirmLinkAction, leaveUnlinkedAction, linkGuardianAction, linkSuggestedManyAction, reviewLinkAction, sendAllAction, sendDifferenceAction, takeDifferenceAction, undoLeaveUnlinkedAction, unlinkAction, unlinkGuardianAction } from "./actions";
 import { GuardianLinkPress, LinkAnswers, LinkAnswersShown, LinkGiveUp, LinkPress } from "./link-press";
 import { giveUpAction } from "../roster/write-actions";
 import { CustomersWithNoFamily } from "./no-family";
 import { ImportOffer, ImportReview } from "./import-review";
+import { LinkSuggestedBulk, type SuggestedPick } from "./bulk-presses";
 
 export const metadata = { title: "Accounting links" };
 export const dynamic = "force-dynamic";
@@ -455,6 +456,28 @@ function ConfirmPress({ familyId, about, offer, tag }: { familyId: string; about
   return <LinkPress label="Confirm" busy="Linking…" about={about} act={confirmLinkAction.bind(null, familyId, offer.customerId, offer.chosen, tag, offer.stamp)} />;
 }
 
+/** A Suggested row the bulk press can take: its customer filled in and its own Confirm offered (listed only). */
+const pickOf = (r: LinkRow): SuggestedPick | null => (r.status.key !== "suggested" || r.confirm === null || r.customer === null ? null
+  : { familyId: String(r.familyId), family: r.name, customer: r.customer.name, customerId: r.confirm.customerId, stamp: r.confirm.stamp });
+
+/**
+ * The Families list, with a box on each Suggested row it shows for the bulk Link to their suggested families (src/lib/bulk.ts),
+ * bound to the roster tag: each row ticked is linked by its own Confirm's write, in its own transaction. The page lists
+ * every row its filter matches, so ticking the header ticks every Suggested row that matches. With none, no boxes.
+ */
+function FamiliesTable({ rows, columns, caption, tag }: { rows: LinkRow[]; columns: Column<LinkRow>[]; caption: string; tag: string }) {
+  const picks = rows.map(pickOf).filter((p): p is SuggestedPick => p !== null);
+  const table = (select: boolean) => <DataTable caption={caption} columns={columns} rows={rows} rowKey={(r) => String(r.familyId)}
+    select={select ? { label: (r) => r.name, when: (r) => pickOf(r) !== null } : undefined} />;
+  if (picks.length === 0) return table(false);
+  return (
+    <BulkSelect pageIds={picks.map((p) => p.familyId)} noun={{ one: "family", many: "families" }}
+      actions={<LinkSuggestedBulk rows={picks} act={linkSuggestedManyAction.bind(null, tag)} />}>
+      {table(true)}
+    </BulkSelect>
+  );
+}
+
 /** How the customer on the confirm step was chosen, in words. */
 const CHOSEN_WORDS = { suggested: "It is this family's suggestion.", several: "It is one of the customers that hold a guardian's sign-in address.", picked: "You picked it from the customers no family is linked to." } as const;
 
@@ -572,7 +595,7 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
   ];
   return (
     <main className="wrap single">
-      <LinkAnswers>
+      <LinkAnswers><BulkResults>
         <PageHeader title="Accounting links" lede={<>Each family in the portal, beside the customer in the books it&apos;s linked to or looks like.
           Only three things here send anything to the books: Send the app&apos;s to QuickBooks, Send the app&apos;s for all, and a student&apos;s move taken from the books, which voids an unpaid volunteer buy-out invoice of theirs there.</>} />
         <LinkAnswersShown />
@@ -610,12 +633,12 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
           {filter.tooLong && <Notice tone="warning" live="none">That search was too long, so nothing was searched for. Try a shorter part of a name or an address, up to {SEARCH_MAX} characters.</Notice>}
           {view.rows.length === 0 ? <EmptyState title="The portal has no active families yet." />
             : rows.length === 0 ? <Notice tone="info">No family matches that.</Notice>
-            : <DataTable caption={filtered ? `${plural(rows.length, "family", "families")} of ${view.rows.length} shown` : `Every family, by name: ${plural(rows.length, "family", "families")}`}
-                columns={columns} rows={rows} rowKey={(r) => String(r.familyId)} />}
+            : <FamiliesTable rows={rows} columns={columns} tag={tag}
+                caption={filtered ? `${plural(rows.length, "family", "families")} of ${view.rows.length} shown` : `Every family, by name: ${plural(rows.length, "family", "families")}`} />}
         </Card>
 
         {view.inactive.length > 0 && <InactivePart rows={view.inactive} tag={tag} familyPages={view.familyPages} maySend={maySend} />}
-      </LinkAnswers>
+      </BulkResults></LinkAnswers>
     </main>
   );
 }

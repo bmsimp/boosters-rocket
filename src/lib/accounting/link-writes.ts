@@ -22,6 +22,7 @@ import { and, asc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { accountingLink, accountingLinkEnded, buyout, family, guardian, requirement, student, writeQueue } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
+import { eachRow, type RowDone } from "@/lib/bulk";
 import { asAppFamilyId, QUICKBOOKS, type AppFamilyId } from "@/lib/families/ids";
 import { clearLeftUnlinked } from "@/lib/families/left-unlinked";
 import { recordNameWords } from "@/lib/families/words";
@@ -223,6 +224,26 @@ export async function linkFamilyToCustomer(raw: { familyId: unknown; customerId:
     if (which !== null && GUARDIAN_UQ.has(which)) return no(LINK_COPY.rowChanged);
     throw e;
   }
+}
+
+/** A row the bulk Link to their suggested families sends: the family's app id, its suggested customer and the row's own stamp. */
+export type SuggestedAsk = { familyId: string; customerId: string; stamp: string };
+/** A refusal's words without the sentences that speak of the row drawn again (a bulk press's Drawer says what happened to each row). */
+const reasonOf = (errors: string[]) => errors.join(" ").replaceAll(` ${AGAIN}`, "").replace(/ Look it over, then press again\.$/, "").trim();
+
+/**
+ * Link to their suggested families, the bulk press on the Families list's selection (src/lib/bulk.ts): for each row
+ * ticked, its family, the customer its row suggested and the row's own stamp, exactly as the row's Confirm sends them,
+ * linked by that Confirm's own write (linkFamilyToCustomer() with `suggested`), each in its own transaction with its
+ * own `accounting.link.confirm` row, so one refused never undoes another. Every check is the single press's: a family
+ * linked already, gone, whose own create waits, a customer taken or no longer in the pool, a suggestion or a student
+ * pair changed since the page, each a row skipped with the refusal's words. A roster read from another company since
+ * the page, or the books no longer `listed`, skips the rest untried. At most PRESS_MAX rows; the rest are handed back.
+ */
+export async function linkSuggestedEach(asks: readonly SuggestedAsk[], rosterTag: string, o: LinkOp): Promise<{ rows: RowDone[]; left: string[] }> {
+  const stops = new Set<string>([ROSTER_MOVED, LINK_COPY.no_company, LINK_COPY.other_company, LINK_COPY.no_shape]);
+  return eachRow(asks, (a) => a.familyId, (a) => linkFamilyToCustomer({ familyId: a.familyId, customerId: a.customerId, chosen: "suggested", stamp: a.stamp }, rosterTag, o),
+    { why: reasonOf, stop: (errors) => errors.some((e) => stops.has(e)) });
 }
 
 /**
