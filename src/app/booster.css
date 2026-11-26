@@ -930,7 +930,7 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 .cert-panel code { word-break: break-all; }
 .cert-done { margin-top: var(--s2); }
 /* The audit log: a row's details on a short line under its words, and a long code or record id breaks where it must. */
-.audit-table .audit-more { display: block; font-size: var(--text-sm); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40ch; }
+.audit-table .audit-more { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow: hidden; overflow-wrap: anywhere; font-size: var(--text-sm); color: var(--ink-2); }
 .audit-table code, .audit-full { overflow-wrap: anywhere; font-size: var(--text-sm); }
 .audit-full { display: block; white-space: pre-wrap; }
 /* A heading over one of several tables in a box. */

@@ -36,6 +36,7 @@ test("a Drawer: its own address, the focus in and back, Esc and Back close it, a
   for (let i = 0; i < 8; i++) { await page.keyboard.press("Tab"); expect(await focusInside(page), `Tab ${i + 1} stays in the drawer`).toBe(true); }
   expect(await behindFocusable(page, "#ds-button button")).toBe(false);
   await expect(page.locator("html")).toHaveClass(/sheet-open/);
+  await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== "running")); // slid all the way in
   const box = (await drawer.boundingBox())!;
   const view = page.viewportSize()!;
   if (info.project.name === "phone") {
