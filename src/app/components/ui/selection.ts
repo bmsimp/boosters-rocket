@@ -24,6 +24,15 @@ export function toggle(sel: Selection, id: string): Selection {
   return { ...sel, ids: on ? withId(sel.ids, id) : without(sel.ids, id) };
 }
 
+/** Unticks these rows (after a bulk press, the ones it did), leaving every other as it is. */
+export function untick(sel: Selection, ids: readonly string[]): Selection {
+  if (ids.length === 0) return sel;
+  if (sel.allMatching) return { ...sel, except: new Set([...sel.except, ...ids]) };
+  const left = new Set(sel.ids);
+  for (const id of ids) left.delete(id);
+  return { ...sel, ids: left };
+}
+
 /** The header box: ticks every row on the page, or, when they all are already, unticks them (and leaves "all that match"). */
 export function togglePage(sel: Selection, pageIds: readonly string[]): Selection {
   if (headerState(sel, pageIds) === "all") return NOTHING;

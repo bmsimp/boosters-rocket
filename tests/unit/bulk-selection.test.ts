@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  NOTHING, headerState, isSelected, offersAllMatching, selectAllMatching, selectRange, selectedCount, selectionPayload, toggle, togglePage,
+  NOTHING, headerState, isSelected, offersAllMatching, selectAllMatching, selectRange, selectedCount, selectionPayload, toggle, togglePage, untick,
 } from "@/app/components/ui/selection";
 
 const PAGE = ["a", "b", "c", "d"];
@@ -58,5 +58,14 @@ describe("bulk selection", () => {
     const on = selectRange(off, PAGE, "d", "c");
     expect(PAGE.map((id) => isSelected(on, id))).toEqual([true, false, true, true]);
     expect(selectRange(NOTHING, PAGE, "zz", "b")).toEqual(toggle(NOTHING, "b"));
+  });
+
+  it("unticks the rows a bulk press did, leaving every other as it is, of the ids ticked or of all that match", () => {
+    const s = untick(togglePage(NOTHING, PAGE), ["b", "d"]);
+    expect(PAGE.map((id) => isSelected(s, id))).toEqual([true, false, true, false]);
+    expect(untick(s, [])).toBe(s);
+    const all = untick(selectAllMatching(), ["a"]);
+    expect(selectedCount(all, 10)).toBe(9);
+    expect(isSelected(all, "a")).toBe(false);
   });
 });
