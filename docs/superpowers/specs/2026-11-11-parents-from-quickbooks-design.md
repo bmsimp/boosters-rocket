@@ -505,4 +505,4 @@ fixed.
 - **The same check is written in several places.** "This link is open", "this link is from the previous
   company" and the comparison of QuickBooks IDs as numbers each appear in several files, and the code calls one
   thing a guardian, a link and a sign-in. A tidy-up is owed; behavior is not affected.
-- **Two wording slips** are in `docs/ui-backlog.md` (step 2 of the set-up steps; step 1 while sign-ins are on).
+- **Two wording slips** were in `docs/ui-backlog.md` (step 2 of the set-up steps; step 1 while sign-ins are on), both fixed on 2026-11-16.

@@ -319,12 +319,10 @@ owner's list (`docs/runbooks/before-the-first-family.md`).
   overlapping text at larger text size, every contrast pair passing in light, dark, both high-contrast sets and in the
   gold club color, every control named.
 
-### For later (in `docs/ui-backlog.md` once the owner of that file adds them)
+### For later
 
-- A form's page is titled "Form" and a shift's "Sign up for a shift", which is what a screen reader hears on arriving:
-  naming the form or the event would say more.
-- A parent page reached by a link starts the focus at the top; a "Skip to the page" link or moving the focus to the
-  page's heading would save keyboard users the club bar's six stops on every page.
+A form's page is named for its form and every club bar starts with "Skip to the page" (both 2026-11-17). A shift's page
+is still titled "Sign up for a shift": it is in `docs/ui-backlog.md`.
 
 ### Owner's checks
 
