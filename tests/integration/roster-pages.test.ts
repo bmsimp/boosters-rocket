@@ -344,7 +344,7 @@ describe("the roster pages", () => {
     const admin = await seedStaff({ email: "admin@club.org", name: "Admin Person", admin: true });
     who.staff = { door: "staff", staffUserId: admin.id, name: admin.name, email: admin.email };
     for (const html of [await list(), await entry("10")]) {
-      expect(html).toContain('<a class="btn btn-line btn-sm" href="/staff/settings/quickbooks">Open QuickBooks settings</a>');
+      expect(html).toContain('<a class="btn btn-tonal btn-sm" href="/staff/settings/quickbooks">Open QuickBooks settings</a>');
       expect(html).not.toContain("An Admin can reconnect it");
     }
   });

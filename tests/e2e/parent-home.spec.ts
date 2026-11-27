@@ -7,10 +7,10 @@ import { PARENT_NAV } from "../../src/app/components/parent-nav";
 
 // Signed in as the seeded parent (scripts/seed-e2e.ts): Zelda, with the Quetzalcoatl family chosen and a second family
 // she could switch to. Nothing here changes the session or the roster, so both passes of the run find them as seeded.
-// The run has a phone pass and a desktop pass (playwright.config.ts): the tabs lead on a phone, the top nav at 760px and wider.
+// The run has a phone pass and a desktop pass (playwright.config.ts): the tabs lead on a phone, the top nav at 840px and wider.
 const STUDENTS = ["Xochitl Quetzalcoatl", "Yaretzi Quetzalcoatl"];
 const NOT_FOUND = "We can't find that page";
-const isPhone = (page: Page) => (page.viewportSize()?.width ?? 0) < 760;
+const isPhone = (page: Page) => (page.viewportSize()?.width ?? 0) < 840;
 const mainNav = (page: Page) => page.locator(isPhone(page) ? "nav.tabs" : "nav.top-nav");
 const noSidewaysScroll = async (page: Page) =>
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), `${page.url()} scrolls sideways`).toBe(false);
@@ -30,7 +30,7 @@ test("Home is headed with the family's name and shows what is to do, its student
   await expect(todo.locator(".invoice-row")).toHaveCount(2);
   const pay = todo.getByRole("link", { name: "Pay $85.00, invoice QZ-1041 for Xochitl Quetzalcoatl" });
   await expect(pay).toHaveAttribute("href", /^https:\/\/connect\.intuit\.com\//);
-  expect((await pay.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  expect((await pay.boundingBox())!.height).toBeGreaterThanOrEqual(48);
   await expect(todo).not.toContainText("QZ-1017"); // what was paid is on the Payments page
 
   // The total is said once, with where and when it is from, and the way to the Payments page.
@@ -54,7 +54,7 @@ test("Home is headed with the family's name and shows what is to do, its student
   // No placeholder, nothing that has no data yet, and nothing of her second family.
   await expect(page.getByRole("main")).not.toContainText(/will show here|grade|Wolfgang|Second Family/i);
 
-  // On a phone the sections stack in one column: To do, the students, the total, the details. At 760px and wider the
+  // On a phone the sections stack in one column: To do, the students, the total, the details. At 840px and wider the
   // lists fill the left column and the total and the details the right, so no column stands empty.
   const head = (await page.locator(".home-head").boundingBox())!;
   const boxes = await sections.evaluateAll((all) => all.map((s) => { const r = s.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top }; }));
@@ -137,7 +137,7 @@ test("the tab bar has one column for each tab, across the whole screen", async (
     expect(box.width).toBeCloseTo(width / PARENT_NAV.length, 0);
     expect(box.left).toBeCloseTo((i * width) / PARENT_NAV.length, 0);
     expect(box.top).toBe(boxes[0]!.top);
-    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(48);
   });
 });
 
@@ -155,7 +155,7 @@ test("five tabs fit a 360px-wide phone: every label inside its own column, nothi
   for (const t of tabs) {
     expect(t.text.left).toBeGreaterThanOrEqual(t.box.left - 0.5);
     expect(t.text.right).toBeLessThanOrEqual(t.box.right + 0.5);
-    expect(t.box.height).toBeGreaterThanOrEqual(44);
+    expect(t.box.height).toBeGreaterThanOrEqual(48);
   }
   await noSidewaysScroll(page);
 });
@@ -184,7 +184,7 @@ test("the account control is marked as current on the Display page, and the Swit
   await expect(account).not.toHaveAttribute("aria-current", /.*/);
   const line = page.locator(".switch-family");
   await expect(line).toHaveText("Viewing Quetzalcoatl Family. Switch family");
-  expect((await line.getByRole("link", { name: "Switch family" }).boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  expect((await line.getByRole("link", { name: "Switch family" }).boundingBox())!.height).toBeGreaterThanOrEqual(48);
   await account.click();
   await expect(page).toHaveURL(/\/display$/);
   await expect(account).toHaveAttribute("aria-current", "page");

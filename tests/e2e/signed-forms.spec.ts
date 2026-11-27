@@ -58,7 +58,7 @@ test("a parent downloads their own family's signed form, and nobody else's", asy
   await page.goto("/forms");
   const family = page.getByRole("region", { name: "Your family" });
   const link = family.getByRole("link", { name: /Download/ });
-  expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(48);
   const [download] = await Promise.all([page.waitForEvent("download"), link.click()]);
   expect(download.suggestedFilename()).toBe("signed-form.pdf");
   expect(sha(await readFile((await download.path())!))).toBe(sha(E2E_SIGNED_PDF));

@@ -42,7 +42,7 @@ test("a parent sees this season's forms for the family and each student, with ea
 
   // The way to the signed form is big enough to tap, and its page says it is signed. No signing frame: it is finished.
   const open = family.getByRole("link", { name: /Open/ });
-  expect((await open.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  expect((await open.boundingBox())!.height).toBeGreaterThanOrEqual(48);
   await open.click();
   await expect(page).toHaveURL(new RegExp(`/forms/${OWN_FORM}$`));
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Travel consent");

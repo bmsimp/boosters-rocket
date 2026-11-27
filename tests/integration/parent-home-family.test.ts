@@ -262,7 +262,7 @@ describe("Home", () => {
     const html = await renderPage(ParentHome);
     // The season ruler, the club's messages (A hasn't read the one message seedTwoFamilies() posts), then the sections
     // in the order a phone shows them: To do, the students, the total owed, the details.
-    expect([...html.matchAll(/<section class="([^"]+)"/g)].map((m) => m[1])).toEqual(["season", "box home-messages", "home-todo", "home-students", "box money", "box details-box"]);
+    expect([...html.matchAll(/<section class="([^"]+)"/g)].map((m) => m[1])).toEqual(["season", "box box-tonal home-messages", "home-todo", "home-students", "box money", "box details-box"]);
     // The family's name stands once, as the page's heading (the Display link's label and the details hold the parent's own name).
     expect(html.split("Alderquist Family")).toHaveLength(2);
     // The open invoices are To do's first rows, each with a compact Pay: the soonest-due one primary, the others secondary.
@@ -277,7 +277,7 @@ describe("Home", () => {
     expect(html).toMatch(/Owed now\. From QuickBooks, as of <time/);
     // What was paid is on the Payments page, which the box leads to.
     expect(html).not.toContain("INV-ALDERQUIST-7103");
-    expect(html).toContain(`<a class="btn btn-line" href="/payments">See your payments</a>`);
+    expect(html).toContain(`<a class="btn btn-outlined" href="/payments">See your payments</a>`);
     for (const marker of b.markers) expect(html).not.toContain(marker);
     expect(await db.select().from(auditLog)).toEqual([]);
   });
@@ -413,7 +413,7 @@ describe("Home", () => {
     const html = await renderPage(ParentHome);
     expect(html).toContain(`<span class="list-title">Hugo Handmade</span>`);
     expect(html).toContain(`<dt>Name</dt><dd>Hester Handmade</dd><dt>Email</dt><dd>hester@handmade.example</dd><dt>Phone</dt><dd class="num">512-555-0111</dd></dl>`);
-    expect(html).toContain(`<a class="btn btn-line" href="/family/details">Update my details</a>`);
+    expect(html).toContain(`<a class="btn btn-outlined" href="/family/details">Update my details</a>`);
     // With no phone set, none is shown.
     await db.update(parent).set({ phone: null }).where(eq(parent.id, p.identity.parentId));
     expect(await renderPage(ParentHome)).toContain("<dt>Name</dt><dd>Hester Handmade</dd><dt>Email</dt><dd>hester@handmade.example</dd></dl>");
@@ -535,7 +535,7 @@ describe("Family", () => {
     expect(html).toContain("Your families");
     expect(html).toContain("a guardian in 2 families.");
     expect(html).toContain("looking at Alderquist Family now.");
-    expect(html).toContain(`<a class="btn btn-line" href="/choose-family">Switch family</a>`);
+    expect(html).toContain(`<a class="btn btn-outlined" href="/choose-family">Switch family</a>`);
     for (const page of [html, await renderPage(ParentHome), await renderPage(ParentLayout, { children: createElement("main", null, "the page") })]) {
       expect(page).not.toMatch(/Cedarholm|Cosima|CEDAR-/);
     }

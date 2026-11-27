@@ -882,7 +882,7 @@ describe("disconnecting through Boosters Rocket", () => {
     expect(relayHtml).toContain("I understand other portals on this company through Boosters Rocket may be disconnected too.");
     expect(relayHtml).toMatch(/<input type="checkbox" id="[^"]+"[^>]*>I understand other portals/);
     // The dialog's own press is unusable until the box is ticked: aria-disabled, never disabled, which would drop the focus.
-    expect(relayHtml).toMatch(/<button type="button" class="btn btn-danger" aria-disabled="true">Disconnect QuickBooks<\/button>/);
+    expect(relayHtml).toMatch(/<button type="button" class="btn btn-danger-filled" aria-disabled="true">Disconnect QuickBooks<\/button>/);
     expect(relayHtml).not.toContain("Another portal using this same Intuit app");
 
     await db.delete(qboConnection);

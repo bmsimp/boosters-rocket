@@ -30,7 +30,7 @@ afterAll(() => stub.close());
 beforeEach(async () => { await resetDb(); stub.reset(); });
 
 const [R_FAMILY, R_PARENT] = [RIVERA.family.qboId, RIVERA.parent.qboId];
-const LINK = `<a class="btn btn-line" href="/family/details">Update my details</a>`;
+const LINK = `<a class="btn btn-outlined" href="/family/details">Update my details</a>`;
 const audits = () => db.select().from(auditLog).orderBy(asc(auditLog.id));
 const field = (name: string, value: string) => new RegExp(`<input [^>]*name="${name}" value="${value}"/>`);
 
@@ -48,7 +48,7 @@ describe("the page where a parent changes their phone and address", () => {
     expect(html).toContain(`<dt>Name</dt><dd>${RIVERA.parent.name}</dd><dt>Email</dt><dd>${RIVERA.parent.email}</dd></dl>`);
     // Their sign-in email is theirs to change too (tests/integration/email-change.test.ts), from its own page.
     expect(html).toContain("You can change your sign-in email below. To change your name, ask the club.");
-    expect(html).toContain(`<a class="btn btn-line" href="/family/email">Change my sign-in email</a>`);
+    expect(html).toContain(`<a class="btn btn-outlined" href="/family/email">Change my sign-in email</a>`);
     expect(html).toMatch(field("phone", RIVERA.parent.phone));
     expect(html).toMatch(field("line1", "12 Heron Lane"));
     expect(html).toMatch(field("line2", ""));
@@ -59,7 +59,7 @@ describe("the page where a parent changes their phone and address", () => {
     for (const { name, label, max } of CONTACT_FIELDS) { expect(html).toContain(`<label class="field-label" for="contact-${name}">${label}`); expect(html).toContain(`maxLength="${max}"`); }
     expect(html).toContain("Address line 2 (optional)");
     expect(html).toContain(">Save my details</button>");
-    expect(html).toContain(`<a class="btn btn-line" href="/family">Back to Family</a>`);
+    expect(html).toContain(`<a class="btn btn-outlined" href="/family">Back to Family</a>`);
     expect(html).not.toContain("512-555-0777"); // the cache's number
     // Whose details they are stays on the server: no id is in the page, and nothing of the other family.
     expect([...html.matchAll(/<input [^>]*>/g)].map((m) => /name="([^"]*)"/.exec(m[0])?.[1])).toEqual(CONTACT_FIELDS.map((f) => f.name));

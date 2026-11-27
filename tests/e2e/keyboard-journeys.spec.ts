@@ -32,7 +32,7 @@ const sql = postgres(process.env.DATABASE_URL!);
 let sink: MailSink;
 
 test.describe.configure({ mode: "serial" });
-test.skip(({ viewport }) => (viewport?.width ?? 0) < 760, "walked once, at a laptop's width: parent-a11y.spec.ts walks Tab at a phone's");
+test.skip(({ viewport }) => (viewport?.width ?? 0) < 840, "walked once, at a laptop's width: parent-a11y.spec.ts walks Tab at a phone's");
 test.beforeAll(async () => {
   const [seeded] = await sql`SELECT value FROM setting WHERE key = 'mail'`;
   expect((seeded?.value as { port?: number } | undefined)?.port, "the mail port in the seeded settings; seed again with this run's E2E_MAIL_PORT").toBe(e2eMailPort());
@@ -201,7 +201,7 @@ test("a parent's journeys by keyboard alone: sign in, Home to Payments, a form, 
     await expect(skip).toBeFocused();
     // Drawn while it has the focus: a tap target on the screen, with its ring.
     const box = (await skip.boundingBox())!;
-    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(48);
     expect(box.y).toBeGreaterThanOrEqual(0);
     expect((await page.evaluate(focusStop))!.problems).toEqual([]);
     await page.keyboard.press("Enter");

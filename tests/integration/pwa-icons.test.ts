@@ -189,9 +189,9 @@ describe("the manifest route", () => {
 
   it("is built on each request, from the club's settings as they are now", async () => {
     expect(manifestDynamic).toBe("force-dynamic");
-    expect(await manifest()).toMatchObject({ name: "Boosters Rocket", short_name: "BR", theme_color: "#ffffff", background_color: "#f7f7f8" });
+    expect(await manifest()).toMatchObject({ name: "Boosters Rocket", short_name: "BR", theme_color: "#f7f9fd", background_color: "#eceef2" });
     await saveClub(CLUB);
-    expect(await manifest()).toMatchObject({ name: "FZN Band Boosters", short_name: "FZN", theme_color: "#ffffff", background_color: "#f7f7f8", start_url: "/", scope: "/", id: "/" });
+    expect(await manifest()).toMatchObject({ name: "FZN Band Boosters", short_name: "FZN", theme_color: "#f7f9fd", background_color: "#eceef2", start_url: "/", scope: "/", id: "/" });
     await saveClub({ ...CLUB, name: "FZN Boosters" });
     expect((await manifest()).short_name).toBe("FZN Boosters");
   });

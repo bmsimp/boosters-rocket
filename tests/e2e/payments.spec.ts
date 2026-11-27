@@ -65,7 +65,7 @@ test("Pay is a plain link to QuickBooks' payment page: one per invoice that has 
   expect(await pay.getAttribute("target")).toBeNull();
   expect(await pay.getAttribute("aria-disabled")).toBeNull();
   const box = (await pay.boundingBox())!;
-  expect(box.height).toBeGreaterThanOrEqual(44); // a tap target
+  expect(box.height).toBeGreaterThanOrEqual(48); // a tap target
   // The link is never followed here: the run reaches nothing outside this machine.
 });
 
@@ -82,7 +82,7 @@ test("the page fits the screen at this width, and the amounts line up", async ({
   expect(Math.abs(amount.x + amount.width - (otherAmount.x + otherAmount.width))).toBeLessThanOrEqual(1);
   expect(Math.abs(amount.x + amount.width - (total.x + total.width))).toBeLessThanOrEqual(1);
   const pay = (await page.locator("a.pay").boundingBox())!, row = (await soon.boundingBox())!;
-  if (width < 760) {
+  if (width < 840) {
     // Phone: a compact Pay under its invoice's amount, at the row's right edge, the invoice's words keeping the rest.
     expect(pay.y).toBeGreaterThan(amount.y + amount.height - 1);
     expect(Math.abs(pay.x + pay.width - (amount.x + amount.width))).toBeLessThanOrEqual(1);

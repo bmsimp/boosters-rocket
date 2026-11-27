@@ -173,7 +173,7 @@ test("offline, a page load shows the offline page, and Try again brings the page
     await expect(page).toHaveTitle("You're offline");
     const again = page.getByRole("link", { name: "Try again" });
     await expect(again).toBeVisible();
-    expect((await again.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect((await again.boundingBox())!.height).toBeGreaterThanOrEqual(48);
     await again.click(); // still offline: the same page again, not the browser's error
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("You're offline");
     await page.goto("/no-such-page?x=1"); // any address at all
@@ -301,7 +301,7 @@ test.describe("the install hint on the Display page", () => {
     });
     const install = page.locator(".install-hint").getByRole("button", { name: "Install" });
     await expect(install).toBeVisible();
-    expect((await install.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect((await install.boundingBox())!.height).toBeGreaterThanOrEqual(48);
     await expect(page.locator(".install-hint").getByRole("button", { name: "Not now" })).toHaveCount(0);
     await install.click();
     await expect.poll(() => page.evaluate(() => (window as unknown as { prompted?: number }).prompted)).toBe(1);
@@ -368,7 +368,7 @@ test.describe("the install hint on the sign-in page", () => {
     await expect(hint(page)).not.toContainText(/E2E|Zelda|Quetzalcoatl/);
 
     const notNow = hint(page).getByRole("button", { name: "Not now" });
-    expect((await notNow.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect((await notNow.boundingBox())!.height).toBeGreaterThanOrEqual(48);
     await notNow.click();
     await expect(hint(page)).toHaveCount(0);
     await expect(page.getByLabel("Email")).toBeVisible(); // the form is as it was
@@ -400,7 +400,7 @@ test.describe("the install hint on the sign-in page", () => {
     await expect(hint(page).getByRole("button", { name: "Not now" })).toBeVisible();
     // Two buttons side by side, not the form's full-width ones.
     const [a, b] = [(await install.boundingBox())!, (await hint(page).getByRole("button", { name: "Not now" }).boundingBox())!];
-    expect(a.height).toBeGreaterThanOrEqual(44);
+    expect(a.height).toBeGreaterThanOrEqual(48);
     expect(Math.abs(a.y - b.y)).toBeLessThanOrEqual(1);
     await install.click();
     await expect.poll(() => page.evaluate(() => (window as unknown as { prompted?: number }).prompted)).toBe(1);

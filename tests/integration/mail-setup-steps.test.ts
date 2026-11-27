@@ -38,7 +38,7 @@ describe("the Microsoft 365 mail steps", () => {
     const out = await html();
     expect(out).toContain(`-TenantId ${TENANT} -SetUpMail -Mailbox webmaster@example.org`);
     expect(out).toContain("Done: Microsoft 365 lets the portal send as <b>webmaster@example.org</b>.");
-    expect(out).toMatch(/<a id="drawer-m365-mail-1" class="btn btn-line" href="[^"]*m365-mail=1">Set up the mailbox again<\/a>/);
+    expect(out).toMatch(/<a id="drawer-m365-mail-1" class="btn btn-outlined" href="[^"]*m365-mail=1">Set up the mailbox again<\/a>/);
     expect(out.indexOf("<dialog")).toBeLessThan(out.indexOf("-SetUpMail -Mailbox"));
   });
 

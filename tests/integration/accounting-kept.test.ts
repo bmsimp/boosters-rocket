@@ -61,7 +61,7 @@ const ALSO_INACTIVE = "It is also shown on Accounting links, with its family und
 const ALSO = "It is also shown on Accounting links";
 const REFUSED = "QuickBooks refused it: QuickBooks wouldn't take it.";
 /** Give up, beside Take and Send, its button naming what it gives up for a screen reader as theirs do. */
-const GIVE_UP = (about: string) => `<div class="confirm"><button type="button" class="btn btn-line btn-sm">Give up on this change<span class="visually-hidden">: ${about}</span></button>`;
+const GIVE_UP = (about: string) => `<div class="confirm"><button type="button" class="btn btn-tonal btn-sm">Give up on this change<span class="visually-hidden">: ${about}</span></button>`;
 
 let tag: string;
 let full: Awaited<ReturnType<typeof staffWith>>, reader: Awaited<ReturnType<typeof staffWith>>, linker: Awaited<ReturnType<typeof staffWith>>;
