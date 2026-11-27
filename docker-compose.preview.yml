@@ -1,4 +1,4 @@
-# One pull request's preview: its branch of the portal on the e2e seed's test data, at https://pr-<n>.<preview domain>
+# One pull request's preview: its branch of the portal on the e2e seed's test data, at https://pr-<n>-br.<domain>
 # (docs/superpowers/specs/2026-11-27-pr-previews-design.md). scripts/poc/preview.sh is the only thing that runs this
 # file, as the compose project booster-rocket-pr-<n>: it builds the branch's image, resets the preview's own database,
 # seeds it and starts the rest. This file, the proxy and the door always come from the site's checkout (main), never

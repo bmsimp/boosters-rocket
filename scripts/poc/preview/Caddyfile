@@ -1,5 +1,5 @@
 # The previews' proxy (docker-compose.preview-edge.yml). Plain http on port 8080, reached only by the tunnel connector
-# on the edge network; the tunnel ends https. A request goes to the preview its host names, pr-<n>.<PREVIEW_DOMAIN>,
+# on the edge network; the tunnel ends https. A request goes to the preview its host names, pr-<n>-br.<PREVIEW_DOMAIN>,
 # whose containers are booster-rocket-pr-<n>-*. Caddy's own documentation: https://caddyserver.com/docs/caddyfile
 {
 	auto_https off
@@ -18,7 +18,7 @@
 	# Only a host of the one shape names a preview; its number is all that reaches an upstream's name.
 	@preview {
 		header_regexp gate {$PREVIEW_GATE_HEADER} .+
-		header_regexp pr Host ^pr-([1-9][0-9]{0,5})\.{$PREVIEW_DOMAIN}$
+		header_regexp pr Host ^pr-([1-9][0-9]{0,5})-br\.{$PREVIEW_DOMAIN}$
 	}
 	handle @preview {
 		handle /__preview/mail* {
@@ -31,6 +31,7 @@
 			reverse_proxy booster-rocket-pr-{re.pr.1}-app:3000
 		}
 	}
+	# Any other name the tunnel's catch-all preview route sends here (none should have DNS) gets nothing.
 	handle @gated {
 		respond "There is no preview at this address." 404
 	}

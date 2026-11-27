@@ -1,6 +1,6 @@
 name: booster-rocket-preview
 # The previews' one way in (docs/superpowers/specs/2026-11-27-pr-previews-design.md): a proxy the tunnel connector
-# reaches at http://booster-rocket-preview-proxy:8080 on the edge network, for every https://pr-<n>.<preview domain>.
+# reaches at http://booster-rocket-preview-proxy:8080 on the edge network, for every https://pr-<n>-br.<domain>.
 # It answers only requests that carry the access gate's header (PREVIEW_GATE_HEADER) and a host of that shape, and
 # sends each to its own preview's containers (scripts/poc/preview/Caddyfile). preview.sh joins it to each preview's
 # internal network when the preview starts and takes it off when it stops; it runs no branch's code. Started by

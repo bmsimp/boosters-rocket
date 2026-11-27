@@ -100,7 +100,7 @@ describe("the previews' compose files", () => {
   it("answer only what came through the access gate, at a host of the one shape", () => {
     const caddy = read("scripts/poc/preview/Caddyfile");
     expect(caddy).toMatch(/@gated header_regexp gate \{\$PREVIEW_GATE_HEADER\} \.\+/);
-    expect(caddy).toContain("header_regexp pr Host ^pr-([1-9][0-9]{0,5})\\.{$PREVIEW_DOMAIN}$");
+    expect(caddy).toContain("header_regexp pr Host ^pr-([1-9][0-9]{0,5})-br\\.{$PREVIEW_DOMAIN}$");
     // Every upstream is named by the host's number alone.
     const upstreams = [...caddy.matchAll(/reverse_proxy (\S+)/g)].map((m) => m[1]!);
     expect(upstreams.length).toBe(3);
@@ -145,20 +145,28 @@ describe("preview.sh", { timeout: 30_000 }, () => {
     base: { repo: { full_name: "club/portal" } },
     head: { repo: head ? { full_name: head } : null, ref: "feature/x", sha: "a".repeat(40) },
   }));
-  const init = () => expect(run("init", "previews.example.net", "Cf-Access-Jwt-Assertion", "owner-login").status).toBe(0);
+  const init = () => {
+    expect(run("init", "example.org", "Cf-Access-Jwt-Assertion", "owner-login").status).toBe(0);
+    // The Cloudflare settings the owner fills in by hand.
+    const filled = readFileSync(envFile(), "utf8").replace(/^(CF_[A-Z_]+)=$/gm, "$1=test-value");
+    writeFileSync(envFile(), filled);
+  };
 
   it("init writes the shared settings, names the repository from the checkout, and changes nothing of the site's", () => {
     init();
     const env = readFileSync(envFile(), "utf8").split("\n");
-    for (const line of ["PREVIEW_DOMAIN=previews.example.net", "PREVIEW_GATE_HEADER=Cf-Access-Jwt-Assertion", "PREVIEW_REPO=club/portal", "PREVIEW_OWNER=owner-login", "PREVIEW_MAX=2"]) {
+    for (const line of ["PREVIEW_DOMAIN=example.org", "PREVIEW_GATE_HEADER=Cf-Access-Jwt-Assertion", "PREVIEW_REPO=club/portal", "PREVIEW_OWNER=owner-login", "PREVIEW_MAX=2"]) {
       expect(env).toContain(line);
     }
     expect(calls()).toContain("docker network create --internal booster-rocket-preview-edge");
     expect(read(path.join(dir, ".env.poc"))).toContain("DB_PASSWORD=site-db");
   });
 
-  it("init refuses the site's own domain, a missing argument, or a domain that isn't one", () => {
-    for (const args of [["example.org", "X-Gate", "o"], ["previews.example.net", "X-Gate"], ["https://previews.example.net", "X-Gate", "o"], ["previews", "X-Gate", "o"]]) {
+  it("init refuses a site named like a preview, a missing argument, or a domain that isn't one", () => {
+    writeFileSync(path.join(dir, ".env.poc"), "APP_URL=https://pr-1-br.example.org\n");
+    expect(run("init", "example.org", "X-Gate", "o").status, "the site at a preview's name").toBe(2);
+    writeFileSync(path.join(dir, ".env.poc"), "APP_URL=https://portal.example.org\n");
+    for (const args of [["example.org", "X-Gate"], ["https://example.org", "X-Gate", "o"], ["previews", "X-Gate", "o"]]) {
       const r = run("init", ...args);
       expect(r.status, args.join(" ")).toBe(2);
       expect(existsSync(envFile()), args.join(" ")).toBe(false);
@@ -177,6 +185,18 @@ describe("preview.sh", { timeout: 30_000 }, () => {
       expect(r.stderr, head).toContain("comes from a fork");
     }
     expect(calls()).not.toMatch(/git [^\n]*fetch|compose .*build|volume rm/);
+  });
+
+  it("makes a preview's Access application before its DNS name, removes them the other way round, and only its own", () => {
+    const body = (name: string) => { const at = script.indexOf(`${name}() {`); return script.slice(at, script.indexOf("\n}\n", at)); };
+    const open = body("open_gate"), close = body("close_gate");
+    expect(open.indexOf('access/apps"')).toBeGreaterThan(-1);
+    expect(open.indexOf('access/apps"')).toBeLessThan(open.indexOf('dns_records"'));
+    expect(close.indexOf("dns_records/$id")).toBeLessThan(close.indexOf("access/apps/$id"));
+    expect(script).toContain('PR_HOST="pr-$PREVIEW_PR-br.$(setting PREVIEW_DOMAIN)"');
+    expect(script.indexOf("fetch_pr; open_gate")).toBeLessThan(script.indexOf("compose build app"));
+    // Every id it acts on is found by this preview's own host name.
+    expect([...script.matchAll(/select\(\.(?:domain|name) == \$host\)/g)].length).toBe(2);
   });
 
   it("fetches the branch itself, never the pull request's ref a fork writes", () => {
