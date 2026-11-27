@@ -1123,6 +1123,68 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 main.wrap.single > .page-head + p { margin-top: var(--s4); }
 .box > ul:not([class]) { padding-left: 1.25em; margin-top: var(--s2); display: grid; gap: var(--s1); max-width: 70ch; }
 .box h3.table-head:first-child { margin-top: 0; }
+/* Accounting links (the redesign of 2026-11-27): one compact row per family, its match (the record's name and its
+   status label), Show details, at most one main press; the row's expansion compares the two records side by side, each
+   item marked in words with an icon (the owner's one exception to "no fold-outs": a button-driven row expansion). */
+.links-connected { display: inline-flex; align-items: center; gap: var(--s3); padding: var(--s2) var(--s4) var(--s2) var(--s2); border-radius: var(--shape-l); background: var(--card); font: var(--body-m); }
+.links-connected b { display: block; font: var(--title-s); }
+.links-connected span { color: var(--on-surface-variant); }
+.links-match { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s2); }
+.links-who { font-weight: 500; }
+.links-acts-cell { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--s2); }
+/* From 840px the actions column takes its longest pair (Show details and Settle N differences) on one line, so every
+   row keeps its two buttons side by side at one height; the family and match columns share what is left. */
+@media (min-width: 840px) {
+  .links-table td.t-quiet { width: 1%; white-space: nowrap; }
+  .links-table .links-acts-cell { flex-wrap: nowrap; }
+  .links-table .t-quiet .btn { white-space: nowrap; max-width: none; }
+  .links-table td.t-quiet dialog { white-space: normal; } /* the Review drawer drawn in the cell wraps as any sheet does */
+  .links-table td.t-quiet dialog .btn { white-space: normal; }
+}
+.links-toggle { --btn-fg: var(--on-surface-variant); font: var(--label-m); }
+.links-toggle svg { width: 20px; height: 20px; transition: transform var(--spring-fast-dur) var(--spring-fast); }
+.links-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+.table tr.t-more:has(> td > .links-more[hidden]) { display: none; }
+.table tr.t-more > td { border-top: 0; padding-top: 0; padding-bottom: var(--s4); height: auto; }
+@media (hover: hover) { .table tbody tr.t-more:hover > * { background: var(--card); } }
+.table tbody tr:has(.bulk-check input:checked) + tr.t-more > * { background: var(--secondary-container); color: var(--on-secondary-container); }
+/* A ticked row is in the secondary container, as a tonal button is: there the button takes the card's fill, so it still reads as one. */
+.links-table tbody tr:has(.bulk-check input:checked) .btn-tonal { --btn-bg: var(--card); --btn-fg: var(--on-surface); }
+.links-more { display: grid; gap: var(--s2); }
+.links-cmp { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
+.links-cmp > section { background: var(--surface); border-radius: var(--shape-l); padding: var(--s3) var(--s4) var(--s4); min-width: 0; }
+.links-cmp h4 { font: var(--title-s); color: var(--on-surface-variant); margin-bottom: var(--s2); }
+.links-cmp-name { font: var(--title-m); margin-bottom: var(--s2); }
+.links-cmp dl { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: var(--s2) var(--s3); font: var(--body-m); }
+.links-cmp dt { color: var(--on-surface-variant); }
+.links-cmp dd { min-width: 0; overflow-wrap: anywhere; }
+.links-cmp dd > div + div { margin-top: var(--s1); }
+.links-mark { display: inline-flex; align-items: center; gap: var(--s1); margin-left: 6px; padding: 0 6px; border-radius: var(--shape-xs); font: var(--label-m); vertical-align: 1px; white-space: nowrap; }
+.links-mark svg { width: 12px; height: 12px; flex: none; }
+.links-mark-matched { background: var(--done-container); color: var(--done); --mark-ink: var(--done-container); }
+.links-mark-differs { background: var(--due-container); color: var(--due); }
+.links-mark-only_books { background: var(--neutral-container); color: var(--on-surface-variant); }
+.links-more-foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--s3); font: var(--body-m); color: var(--on-surface-variant); }
+.links-act { display: grid; gap: 2px; justify-items: start; }
+.links-say { font: var(--body-m); color: var(--on-surface-variant); }
+.sheet-foot:has(> .links-act) { display: grid; gap: var(--s3); }
+ul.links-acts { display: grid; gap: var(--s2); padding: 0; list-style: none; }
+ul.links-acts li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s2); }
+@media (max-width: 839.98px) {
+  /* On a phone each family is a tile of M3 Expressive's segmented list: its name, its match, the main press, Show
+     details under them; the details stack, "In the portal" over "In your books". */
+  .links-table tbody { display: grid; gap: 2px; }
+  .links-table tbody tr { background: var(--surface); border-top: 0; border-radius: var(--shape-xs); }
+  .links-table tbody tr:first-child { border-top-left-radius: var(--shape-l-inc); border-top-right-radius: var(--shape-l-inc); }
+  .links-table tbody tr:last-child, .links-table tbody tr:nth-last-child(2):has(+ tr.t-more:has(.links-more[hidden])) { border-bottom-left-radius: var(--shape-l-inc); border-bottom-right-radius: var(--shape-l-inc); }
+  .links-table tbody tr.t-more { margin-top: -2px; padding-top: 0; }
+  .links-table td { display: block; }
+  .links-table .t-label { display: none; }
+  .links-table .links-acts-cell { justify-content: flex-start; }
+  .links-table .links-toggle { margin-left: -12px; }
+  .links-cmp { grid-template-columns: 1fr; gap: var(--s2); }
+  .links-cmp dl { grid-template-columns: 5.5rem minmax(0, 1fr); }
+}
 /* ---- End of Staff pages ---- */
 
 /* ---- Settings and the staff menu: the Settings page and every settings page, the roles checklist, the Staff page and

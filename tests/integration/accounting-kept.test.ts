@@ -115,7 +115,7 @@ describe("shown beside its difference, and still on Reconciliation", () => {
     expect(list.split(RIVERA_WORDS)).toHaveLength(2);
     // In place of the queue's note, so not linked to Reconciliation for it, and Give up in the same row-actions as Take and Send.
     expect(list).not.toContain("See the change on Reconciliation");
-    expect(list).toContain(`Send the app's to QuickBooks<span class="visually-hidden">: Rivera Family's name</span></button>${GIVE_UP("Rivera Family's name")}`);
+    expect(list).toContain(`Send the portal's value to the books<span class="visually-hidden">: Rivera Family's name</span></button>${GIVE_UP("Rivera Family's name")}`);
     expect(list).toContain("Why? (kept in the audit log)");
     // No item id and no stamp is drawn: the presses are bound actions given only their words.
     expect(list).not.toContain(kept.id);
@@ -167,7 +167,7 @@ describe("shown beside its difference, and still on Reconciliation", () => {
     // Its Take of active leaves it standing, and says so in words true of both pages.
     expect(row.takes.find((t) => t.at === at)?.words).toContain(KEPT_OFF_STAYS);
     const list = await linksList();
-    expect(list).toContain(`Send the app's to QuickBooks<span class="visually-hidden">: Leo Rivera's active status</span></button>${GIVE_UP("Leo Rivera's active status")}`);
+    expect(list).toContain(`Send the portal's value to the books<span class="visually-hidden">: Leo Rivera's active status</span></button>${GIVE_UP("Leo Rivera's active status")}`);
     expect(list.split("Kept in the portal: Make the student Leo Rivera inactive.")).toHaveLength(2);
     expect(await writes(full)).toContain(ALSO_BESIDE);
     // Given up from the screen, it answers with a make-inactive's words, never a rename's.
@@ -187,7 +187,7 @@ describe("shown beside its difference, and still on Reconciliation", () => {
     asStaff(full);
     const html = await renderPage(AccountingLinksPage);
     expect(section(html, "links-list-h").split(kept!.words)).toHaveLength(2);
-    expect(decode(rowNamed(html, "Chen Family")![4]!)).not.toContain(kept!.words);
+    expect(decode(rowNamed(html, "Chen Family")![2]!)).not.toContain(kept!.words);
   });
 
   it("a linker who may not change families: the kept change's words, who settles it, and no press of theirs", async () => {
@@ -211,13 +211,13 @@ describe("shown beside its difference, and still on Reconciliation", () => {
     expect(row.differences).toEqual([]);
     expect(row.sends).toEqual([]);
     expect(row.kept).toEqual([{ at: null, itemId: kept.id, words: RIVERA_WORDS, giveUp: true }]);
-    const opening = decode(rowNamed(await (async () => { asStaff(full); return renderPage(AccountingLinksPage); })(), "Rivera Family")![4]!);
-    expect(opening).toContain(`Changes kept in the portal that the roster's copy of QuickBooks has already:${RIVERA_WORDS} ${KEPT_GONE}Give up`);
-    expect(opening).not.toContain("Send the app's to QuickBooks");
+    const opening = decode(rowNamed(await (async () => { asStaff(full); return renderPage(AccountingLinksPage); })(), "Rivera Family")![2]!);
+    expect(opening).toContain(`Changes kept in the portal that the roster's copy of the books has already:${RIVERA_WORDS} ${KEPT_GONE}Give up`);
+    expect(opening).not.toContain("Send the portal's value to the books");
     expect(await writes(full)).toContain(ALSO_GONE);
     // A linker who may not give it up is told who does, and where.
     asStaff(linker);
-    const theirs = decode(rowNamed(await renderPage(AccountingLinksPage), "Rivera Family")![4]!);
+    const theirs = decode(rowNamed(await renderPage(AccountingLinksPage), "Rivera Family")![2]!);
     expect(theirs).toContain(`${RIVERA_WORDS} ${KEPT_GONE_ASK}`);
     expect(theirs).not.toContain("Give up");
   });
@@ -248,9 +248,9 @@ describe("shown beside its difference, and still on Reconciliation", () => {
     expect(rowOf(view, "Chen Family").kept.map((k) => k.itemId)).toEqual([theirs.id]);
     asStaff(full);
     const html = await renderPage(AccountingLinksPage);
-    expect(decode(rowNamed(html, "Rivera Family")![4]!)).toContain("Rename the family “Rivera Old”");
-    expect(decode(rowNamed(html, "Rivera Family")![4]!)).not.toContain("Chen Old");
-    expect(decode(rowNamed(html, "Chen Family")![4]!)).not.toContain("Rivera Old");
+    expect(decode(rowNamed(html, "Rivera Family")![2]!)).toContain("Rename the family “Rivera Old”");
+    expect(decode(rowNamed(html, "Rivera Family")![2]!)).not.toContain("Chen Old");
+    expect(decode(rowNamed(html, "Chen Family")![2]!)).not.toContain("Rivera Old");
   });
 
   it("reads as many times with kept items as with the same items waiting: no query of its own", async () => {
@@ -297,7 +297,7 @@ describe("flat books: a member", () => {
     asStaff(full);
     const part = section(await renderPage(AccountingLinksPage), "links-inactive-h");
     expect(part).toContain("Kept in the portal: Make the member Rivera Household inactive.");
-    expect(part).toContain(`Send the app's to QuickBooks<span class="visually-hidden">: Rivera Family's active status</span></button>${GIVE_UP("Rivera Family's active status")}`);
+    expect(part).toContain(`Send the portal's value to the books<span class="visually-hidden">: Rivera Family's active status</span></button>${GIVE_UP("Rivera Family's active status")}`);
     expect(await writes(full)).toContain(ALSO_INACTIVE);
   });
 });

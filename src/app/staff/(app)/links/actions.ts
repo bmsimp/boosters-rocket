@@ -9,6 +9,7 @@ import { IMPORT_COPY, saveImport } from "@/lib/accounting/import-writes";
 import { isStatusKey, SEARCH_MAX } from "@/lib/accounting/status";
 import { isChosen, isGuardianChosen } from "@/lib/accounting/stamp";
 import { linkGuardian, unlinkGuardian, type GuardianLinkDone } from "@/lib/accounting/guardian-links";
+import { DETAILS_GONE, loadLinkDetails, type LinkDetails } from "@/lib/accounting/link-details";
 import { can } from "@/lib/permissions/effective";
 import { isUuid } from "@/lib/seasons/ids";
 import { familyPage } from "@/app/staff/(app)/family-pages";
@@ -43,6 +44,21 @@ export const confirmLinkAction = staffAction(P, async (ctx: StaffCtx, familyId: 
   if (r.ok) revalidatePath("/", "layout");
   else again();
   return r;
+});
+
+/** What Show details answers: the one family's comparison, or one sentence for an id the screen doesn't list now. */
+export type DetailsDone = { ok: true; message: string; details: LinkDetails } | { ok: false; errors: string[] };
+
+/**
+ * Show details (the links redesign of 2026-11-27): the family's app id, and nothing else. A read of one family's
+ * contact details, so the library audits it before answering; an id that isn't a family the screen lists gets the one
+ * refusal, with nothing read of it.
+ */
+export const linkDetailsAction = staffAction(P, async (ctx: StaffCtx, familyId: string): Promise<DetailsDone> => {
+  await requireStaffActionAlso(ctx, "Roster.Read");
+  if (!str(familyId, ID_MAX)) return { ok: false, errors: [DETAILS_GONE] };
+  const details = await loadLinkDetails(familyId, { actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, ip: ctx.ip, permission: P });
+  return details === null ? { ok: false, errors: [DETAILS_GONE] } : { ok: true, message: "", details };
 });
 
 export const leaveUnlinkedAction = staffAction(P, async (ctx: StaffCtx, familyId: string, rosterTag: string): Promise<LinkDone> => {

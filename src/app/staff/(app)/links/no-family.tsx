@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Card, Notice } from "@/app/components/ui";
 import type { CustomerAim, LinksState, LinksView } from "@/lib/accounting/mapping";
+import { capitalized, type AccountingWords } from "@/lib/accounting/words";
 import { handful, type NoFamilyCustomer } from "@/lib/roster/no-family";
 import { familiesFromCustomersAction, familyFromCustomerAction } from "./actions";
 import { NoFamilyRows, type NoFamilyRow } from "./no-family-list";
@@ -12,18 +13,14 @@ export const NO_FAMILY_H = "no-family-h";
 
 /**
  * The words of the part for the customers no family is linked to (slice M6, the lead's decision 4: every sentence the
- * owner may change, in one place). `lead` opens the part, for every reader of the screen.
+ * owner may change, in one place), in the provider's own nouns (src/lib/accounting/words.ts). `lead` opens the part, for
+ * every reader of the screen.
  */
 export const NO_FAMILY_WORDS = {
-  /** How many there are, first in the part (the screen's count before slice M6), when there is at least one. */
-  count: (n: number) => `${plural(n, "active customer the books list as a family at the top level, under no other customer, has", "active customers the books list as a family at the top level, under no other customer, have")} no family in the portal.`,
-  lead: (mayChangeFamilies: boolean) => "One added in QuickBooks since the portal's families were set up, say."
-    + " “Create a family from this” makes the family and its students here, linked, so its invoices show to its guardians."
-    + ` It adds no guardian: ${mayChangeFamilies ? "do that" : "someone who may change families does that"} on the family's page. Nothing is sent to QuickBooks.`,
-  /** The rest of the rule, under the lead. */
-  more: "Inactive family customers aren't offered. A customer a waiting or stuck change on Reconciliation would match is left out until that change goes through or is given up."
-    + " A customer this page suggests or lists for a family isn't made a family here: its row says where to link it.",
-  none: "Nothing: every active family customer is linked to a family, or is about to be.",
+  title: (w: AccountingWords) => `${capitalized(w.customerNounPlural)} with no family`,
+  lead: (mayChangeFamilies: boolean) => "Records in your books that no family here is linked to yet."
+    + ` Create a family makes it here, linked, with its students but no guardians (${mayChangeFamilies ? "add them" : "someone who may change families adds them"} on its page), and sends nothing to the books.`,
+  none: "Nothing: every active family in the books is linked to a family, or is about to be.",
   aimedMakes: "Nothing: link it to its family instead.",
   /**
    * Said on Reconciliation, to a holder of the linking permission, in place of the list that was there until this slice
@@ -33,11 +30,11 @@ export const NO_FAMILY_WORDS = {
 } as const;
 
 /** Why nothing can be listed, in words. */
-const WHY_NONE: Record<Exclude<LinksState, "listed">, string> = {
-  no_company: "The portal hasn't read the club's QuickBooks yet, so there are no customers to list.",
-  other_company: "QuickBooks is connected to a different company than the one the roster was read from, so no customer is listed here. An Admin can see why under Settings, QuickBooks.",
-  no_shape: "The membership shape isn't chosen, or names a customer type QuickBooks no longer has, so the portal can't tell which customers are families. An Admin can choose it under Settings, QuickBooks.",
-};
+const whyNone = (w: AccountingWords): Record<Exclude<LinksState, "listed">, string> => ({
+  no_company: `The portal hasn't read the books yet, so there are no ${w.customerNounPlural} to list.`,
+  other_company: `${w.name} is connected to a different company than the one the roster was read from, so nothing is listed here. An Admin can see why under Settings, ${w.name}.`,
+  no_shape: `The membership shape isn't chosen, or names a ${w.customerNoun} type the books no longer have, so the portal can't tell which are families. An Admin can choose it under Settings, ${w.name}.`,
+});
 
 /** What pressing the button makes, for one customer: the row's own words, since there is no second confirmation. */
 function whatItMakes(c: { students: number; inactiveStudents: number; studentsWithRecord: number }): string {
@@ -62,13 +59,18 @@ export function aimShown(customerId: string, aim: CustomerAim): NonNullable<NoFa
   const one = aim.families.length === 1;
   if (aim.why === "given_up") {
     const f = aim.families[0];
-    const said = `QuickBooks made it for ${f.name}.`;
+    const said = `The books made it for ${f.name}.`;
     if (aim.pickable) return { words: said, href: pickStep(String(f.id), customerId), label: "Pick it for that family" };
     // That family's row is Suggested for another customer, so it offers no Pick until it is left unlinked.
     return { words: `${said} To pick it, leave that family unlinked first.`,
       href: "/staff/links?status=suggested", label: "See that family's row" };
   }
-  if (aim.why === "suggested") return { words: `Suggested for ${names}.`, href: "/staff/links?status=suggested", label: "Link it in the Suggested rows" };
+  // A customer is suggested for one family only (the matcher's rule): its button shows that family's row, searched by its name.
+  if (aim.why === "suggested") {
+    const name = aim.families[0]!.name;
+    return { words: `Suggested for ${names}.`, label: "Show its family's row",
+      href: name.length <= 100 ? `/staff/links?status=suggested&q=${encodeURIComponent(name)}` : "/staff/links?status=suggested" };
+  }
   return { words: `A possible customer of ${names}.`,
     href: one ? pickStep(String(aim.families[0]!.id), customerId) : "/staff/links?status=several", label: one ? "Look at it for that family" : "See them in the Several possible rows" };
 }
@@ -99,18 +101,17 @@ export function noFamilyRows(customers: readonly NoFamilyCustomer[], aims: Reado
  * nothing else. Names are QuickBooks text, and a family's name the portal's own, shown as text only. `children`: what
  * the part offers after the list (the import's offer, slice M6).
  */
-export function CustomersWithNoFamily({ view, mayChangeFamilies, children }: { view: Pick<LinksView, "state" | "noFamilyList" | "aims">; mayChangeFamilies: boolean; children?: ReactNode }) {
+export function CustomersWithNoFamily({ view, mayChangeFamilies, words, children }: { view: Pick<LinksView, "state" | "noFamilyList" | "aims">; mayChangeFamilies: boolean; words: AccountingWords; children?: ReactNode }) {
   const list = view.noFamilyList;
   const rows = list === null ? [] : noFamilyRows(list, view.aims);
-  // With none to list (and so nothing to offer), the part is one line, so the families' table comes up the page.
+  const title = NO_FAMILY_WORDS.title(words);
+  // With none to list (and so nothing to offer), the part is one line, so the next part comes up the page.
   if (view.state === "listed" && list !== null && rows.length === 0) {
-    return <Notice tone="done" live="none" title="Customers with no family" titleId={NO_FAMILY_H} className="notice-inline">{NO_FAMILY_WORDS.none}</Notice>;
+    return <Notice tone="done" live="none" title={title} titleId={NO_FAMILY_H} className="notice-inline">{NO_FAMILY_WORDS.none}</Notice>;
   }
   return (
-    <Card title={<>Customers with no family{rows.length ? ` (${rows.length})` : ""}</>} titleId={NO_FAMILY_H}>
-      <p>{list !== null && list.length > 0 ? `${NO_FAMILY_WORDS.count(list.length)} ` : ""}{NO_FAMILY_WORDS.lead(mayChangeFamilies)}</p>
-      <p className="hint">{NO_FAMILY_WORDS.more}</p>
-      {view.state !== "listed" || list === null ? <Notice tone="warning" live="none">{WHY_NONE[view.state === "listed" ? "no_shape" : view.state]}</Notice> : <NoFamilyRows rows={rows} none={NO_FAMILY_WORDS.none} bulk={familiesFromCustomersAction} />}
+    <Card title={<>{title}{rows.length ? ` (${rows.length})` : ""}</>} titleId={NO_FAMILY_H} description={NO_FAMILY_WORDS.lead(mayChangeFamilies)}>
+      {view.state !== "listed" || list === null ? <Notice tone="warning" live="none">{whyNone(words)[view.state === "listed" ? "no_shape" : view.state]}</Notice> : <NoFamilyRows rows={rows} none={NO_FAMILY_WORDS.none} bulk={familiesFromCustomersAction} />}
       {children}
     </Card>
   );

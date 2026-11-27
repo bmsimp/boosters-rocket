@@ -297,7 +297,7 @@ describe("Send the app's for all", () => {
     expect(offer).toMatchObject({ count: SEND_ALL_MAX + 1, stamp: null });
     asStaff(sender);
     const list = listOf(await renderPage(AccountingLinksPage));
-    expect(list).not.toContain("Send the app's for all (");
+    expect(list).not.toContain("Send the portal's values for all (");
     expect(list).toContain(`This list shows ${SEND_ALL_MAX + 1} names and students' families to send. Up to ${SEND_ALL_MAX} can be sent at once, so narrow the list with the search or a status first.`);
     expect(await pressWith({ count: SEND_ALL_MAX + 1, stamp: "s".repeat(22) })).toEqual({ ok: false, errors: [SEND_ALL_COPY.overCap] });
     expect(await sendAllAction("", "", SEND_ALL_MAX + 1, tag, "s".repeat(22))).toEqual({ ok: false, errors: [SEND_ALL_COPY.overCap] });
@@ -308,7 +308,7 @@ describe("Send the app's for all", () => {
     const atCap = await offerFor();
     expect(atCap.count).toBe(SEND_ALL_MAX);
     expect(atCap.stamp).not.toBeNull();
-    expect(listOf(await renderPage(AccountingLinksPage))).toContain(`Send the app's for all (${SEND_ALL_MAX})`);
+    expect(listOf(await renderPage(AccountingLinksPage))).toContain(`Send the portal's values for all (${SEND_ALL_MAX})`);
     expect(await pressWith(atCap)).toMatchObject({ ok: true });
     expect((await items()).filter((q) => q.state === "waiting")).toHaveLength(SEND_ALL_MAX);
     expect(writes()).toEqual([]);
@@ -368,29 +368,31 @@ describe("who may press it, and the page", () => {
     asStaff(sender);
     const whole = await renderPage(AccountingLinksPage);
     const list = listOf(whole);
-    expect(list).toContain(`Send the app's for all (4)<span class="visually-hidden">: Send the app's for all</span>`);
-    expect(list).toContain("It skips 1 make-inactive: each reads a balance first, so send it on its row.");
-    expect(list).toContain("It passes over 1 difference whose customer QuickBooks has inactive: the portal sends nothing there, and never makes a customer active.");
+    expect(list).toContain(`Send the portal's values for all (4)<span class="visually-hidden">: Send the portal's values for all</span>`);
+    expect(list).toContain("It skips 1 make-inactive: each reads a balance first, so send it from its family's Review.");
+    expect(list).toContain("It passes over 1 difference whose record the books have inactive: the portal sends nothing there, and never makes a record active.");
     // No inactive family is listed, so none is spoken of.
     expect(list).not.toContain("The inactive families listed after the families");
     expect(whole).not.toContain(offer.stamp!);
     // Every prop each press is handed is words or its bound action: no stamp, offer, seal or id goes to the browser as a prop.
     expect(pressProps.seen.length).toBeGreaterThan(0);
+    // Since the redesign of 2026-11-27 a press may also be handed its look (variant, size): words too.
     for (const p of pressProps.seen) {
-      expect(Object.keys(p).sort()).toEqual(["about", "act", "busy", "label"]);
+      expect(Object.keys(p).filter((k) => k !== "variant" && k !== "size").sort()).toEqual(["about", "act", "busy", "label"]);
       for (const k of ["about", "busy", "label"] as const) expect(typeof p[k]).toBe("string");
+      for (const k of ["variant", "size"] as const) expect(["string", "undefined"]).toContain(typeof p[k]);
       expect(typeof p.act).toBe("function");
     }
-    expect(pressProps.seen.some((p) => p.label === "Send the app's for all (4)")).toBe(true);
-    expect(whole).toContain("Only three things here send anything to the books: Send the app&#x27;s to QuickBooks, Send the app&#x27;s for all, and a student&#x27;s move taken from the books");
+    expect(pressProps.seen.some((p) => p.label === "Send the portal's values for all (4)")).toBe(true);
+    expect(whole).toContain("Linking sends nothing to the books.");
     // A search narrows it, by the list's own rule.
-    expect(listOf(await renderPage(AccountingLinksPage, { searchParams: { q: "oak" } }))).toContain("Send the app's for all (1)");
+    expect(listOf(await renderPage(AccountingLinksPage, { searchParams: { q: "oak" } }))).toContain("Send the portal's values for all (1)");
     const linker = await staffWith("linker@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
     asStaff(linker);
     const theirs = listOf(await renderPage(AccountingLinksPage));
     // Neither the press nor its notice.
-    expect(theirs).not.toContain("Send the app's for all (");
-    expect(theirs).not.toContain("Send the app's for all sends only");
+    expect(theirs).not.toContain("Send the portal's values for all (");
+    expect(theirs).not.toContain("Send the portal's values for all sends only");
     // Oak made inactive in the portal, its customer active in the books: listed after the families, and so spoken of.
     await db.update(student).set({ active: false }).where(eq(student.familyId, oak));
     await db.update(family).set({ active: false }).where(eq(family.id, oak));

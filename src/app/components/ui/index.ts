@@ -19,7 +19,7 @@ export { Avatar } from "./avatar";
 export { StepIndicator, type Step } from "./step-indicator";
 export { KeyValue, type KeyValueItem } from "./key-value";
 export { Toolbar } from "./toolbar";
-export { Drawer, ConfirmDialog, Sheet, type Confirmed } from "./sheet";
+export { Drawer, DrawerLink, ConfirmDialog, Sheet, type Confirmed } from "./sheet";
 export { BulkSelect, useBulkSelection } from "./bulk-select";
 export { BulkAction, BulkResults, type BulkAnswer } from "./bulk-action";
 export { StepsChoice } from "./steps-choice";

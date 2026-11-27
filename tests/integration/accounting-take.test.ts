@@ -39,7 +39,7 @@ import { auditsOf, connectRoster, seedAnaRivera, seedQueued, staffWith, WORKER }
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 
 /**
- * Take QuickBooks' into the app (stage 4's slice M4a of the app-owned families spec; section 5, "Differences"; open
+ * Take the books' value (stage 4's slice M4a of the app-owned families spec; section 5, "Differences"; open
  * questions 1, 12 and 14; takeFromBooks() in src/lib/roster/writes.ts, the press takeDifferenceAction()): on Accounting
  * links, a name, a record the books have inactive and the family a student is under are taken into the portal's own
  * record, sending nothing to QuickBooks, each audited `accounting.difference.take`. The company is fznCompany()'s
@@ -462,7 +462,7 @@ describe("the page", () => {
     const whole = await renderPage(AccountingLinksPage);
     const at = whole.indexOf('id="links-list-h"');
     const list = whole.slice(at, whole.indexOf("</section>", at)).replaceAll("&#x27;", "'").replaceAll("<!-- -->", "");
-    const presses = [...list.matchAll(/Take QuickBooks' into the app<span class="visually-hidden">: ([^<]*)<\/span>/g)].map((m) => m[1]).sort();
+    const presses = [...list.matchAll(/Take the books' value<span class="visually-hidden">: ([^<]*)<\/span>/g)].map((m) => m[1]).sort();
     expect(presses).toEqual(["Rivera Family's name", "Zoe Rivera's active status"]);
     // Since slice M4b, Zoe's record, inactive here and active in the books, is taken as active, alone (the students rule is off: no hold).
     expect(list).toContain("Makes Zoe Rivera active in the portal, as the books have them. Nothing is sent to the books.");
@@ -474,7 +474,8 @@ describe("the page", () => {
     expect(list).toContain("Ash Oak is still active in the books, so the family can't be taken as inactive until they are made inactive there or moved.");
     // Nothing for Chen's waiting rename, Max at the top, Kim with no record, Mei Chen's Parent customer.
     expect(list).not.toMatch(/Chen Family's name<\/span>|Max Rivera's family<\/span>|Kim Rivera<\/span>/);
-    expect(whole).toContain("and a student&#x27;s move taken from the books, which voids an unpaid volunteer buy-out invoice of theirs there.");
+    // Since the redesign of 2026-11-27 the lede says only that linking sends nothing; a move's own words say what it does there.
+    expect(whole).toContain("Linking sends nothing to the books.");
   });
 
   it("draws a move's press and a record's inactive press with their words when nothing on the queue stands in the way", async () => {
@@ -488,7 +489,7 @@ describe("the page", () => {
     const whole = await renderPage(AccountingLinksPage);
     const at = whole.indexOf('id="links-list-h"');
     const list = whole.slice(at, whole.indexOf("</section>", at)).replaceAll("&#x27;", "'").replaceAll("<!-- -->", "");
-    const presses = [...list.matchAll(/Take QuickBooks' into the app<span class="visually-hidden">: ([^<]*)<\/span>/g)].map((m) => m[1]).sort();
+    const presses = [...list.matchAll(/Take the books' value<span class="visually-hidden">: ([^<]*)<\/span>/g)].map((m) => m[1]).sort();
     expect(presses).toEqual(["Leo Rivera's family", "Leo Rivera's family", "Oak Family's active status"]);
     expect(list).toContain("Moves Leo Rivera to Chen Family in the portal, where the books have them, as a move made on the family's page does:");
     expect(list).toContain("Makes Oak Family inactive in the portal, as the books have it. Its guardians can't sign in to the family then. Nothing is sent to the books.");

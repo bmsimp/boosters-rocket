@@ -151,7 +151,7 @@ describe("a rename of a guardian's Parent customer", () => {
     let riveras = rowOf(await view(), "Rivera Family");
     expect(riveras.differences).toEqual([{ kind: "guardian_name", guardianId: row.id, who: "Ana Lopez", portal: "Ana Lopez", books: "Ana Rivera", queue: waiting }]);
     await noPressAtGuardians(riveras);
-    expect((await cellsOf("Rivera Family"))[4]).toContain(`Ana Lopez's name on their Parent customer. In the portal: “Ana Lopez”. In the books: “Ana Rivera”. ${waiting.words}${waiting.words.endsWith(".") ? "" : "."} See the change on Reconciliation. ${NAME_NEXT}`);
+    expect((await cellsOf("Rivera Family"))[2]).toContain(`Ana Lopez's name on their Parent customer. In the portal: “Ana Lopez”. In the books: “Ana Rivera”. ${waiting.words}${waiting.words.endsWith(".") ? "" : "."} See the change on Reconciliation. ${NAME_NEXT}`);
 
     // Stuck, as later failed tries leave it; then given up.
     await db.update(writeQueue).set({ state: "stuck", nextTryAt: null }).where(eq(writeQueue.id, item!.id));
@@ -167,11 +167,13 @@ describe("a rename of a guardian's Parent customer", () => {
     await noPressAtGuardians(riveras, { guardianSends: ["guardian_name"], sendNotes: [] });
     expect(guardianDifferenceNext(riveras.differences[0]!)).toBe(NAME_NEXT);
     const cells = await cellsOf("Rivera Family");
-    expect(cells[4]).toContain("1 difference with the books: guardians' Parent customers.");
-    expect(cells[4]).toContain(`Ana Lopez's name on their Parent customer. In the portal: “Ana Lopez”. In the books: “Ana Rivera”. ${NAME_NEXT}`);
-    expect(cells[4]).not.toContain("See the change on Reconciliation");
-    expect(cells[4]).not.toContain("Take QuickBooks' into the app");
-    expect(cells[4]).toContain("Send the app's to QuickBooks");
+    // The row's label counts the difference, and its main press opens the Review drawer that settles it.
+    expect(cells[1]).toContain("Linked, 1 differs");
+    expect(cells[2]).toContain("Settle 1 difference: Rivera Family");
+    expect(cells[2]).toContain(`Ana Lopez's name on their Parent customer. In the portal: “Ana Lopez”. In the books: “Ana Rivera”. ${NAME_NEXT}`);
+    expect(cells[2]).not.toContain("See the change on Reconciliation");
+    expect(cells[2]).not.toContain("Take the books' value");
+    expect(cells[2]).toContain("Send the portal's value to the books");
   });
 
   it("kept refused: the difference carries the kept change's words, with Reconciliation linked", async () => {
@@ -186,7 +188,7 @@ describe("a rename of a guardian's Parent customer", () => {
     expect(riveras.differences).toEqual([{ kind: "guardian_name", guardianId: row.id, who: "Mei Chen", portal: "Mei Chen", books: "Ana Rivera", queue: kept }]);
     // Since slice M3c4: Mei Chen 21 holds the name, so no Send, and its sentence in place (changed on purpose).
     await noPressAtGuardians(riveras, { guardianSends: [], sendNotes: [sendGuardianNameTakenNote("Mei Chen")] });
-    expect((await cellsOf("Rivera Family"))[4]).toContain(`Mei Chen's name on their Parent customer. In the portal: “Mei Chen”. In the books: “Ana Rivera”. ${kept.words}${kept.words.endsWith(".") ? "" : "."} See the change on Reconciliation. ${NAME_NEXT}`);
+    expect((await cellsOf("Rivera Family"))[2]).toContain(`Mei Chen's name on their Parent customer. In the portal: “Mei Chen”. In the books: “Ana Rivera”. ${kept.words}${kept.words.endsWith(".") ? "" : "."} See the change on Reconciliation. ${NAME_NEXT}`);
     // Given up, it stays a difference, with no note.
     expect(await giveUp(item!.id, "Leaving it.", asGiver())).toEqual({ ok: true, message: RENAME_GIVEN_UP });
     expect(rowOf(await view(), "Rivera Family").differences).toEqual([expect.objectContaining({ kind: "guardian_name", queue: null })]);
@@ -215,7 +217,7 @@ describe("a removed guardian's Parent customer left active", () => {
     // Since slice M3c4 the kept make-inactive's place is taken by a Send, which closes it once QuickBooks has it inactive (changed on purpose).
     await noPressAtGuardians(riveras, { guardianSends: ["guardian_inactive"], sendNotes: [] });
     expect(riveras.guardianSends[0]!.words.at(-1)).toBe("The make-inactive kept on the Reconciliation page is closed once QuickBooks has the customer inactive, as this takes its place.");
-    expect((await cellsOf("Rivera Family"))[4]).toContain(`Whether Ana Rivera is this family's guardian. In the portal: Removed from this family. In the books: Their Parent customer is active. ${kept.words}${kept.words.endsWith(".") ? "" : "."} See the change on Reconciliation. ${REMOVED_NEXT}`);
+    expect((await cellsOf("Rivera Family"))[2]).toContain(`Whether Ana Rivera is this family's guardian. In the portal: Removed from this family. In the books: Their Parent customer is active. ${kept.words}${kept.words.endsWith(".") ? "" : "."} See the change on Reconciliation. ${REMOVED_NEXT}`);
 
     expect(await giveUp(item!.id, "Settled by hand.", asGiver())).toEqual({ ok: true, message: DEACTIVATE_GIVEN_UP });
     expect(stub.customers.find((c) => c.Id === "11")).toMatchObject({ Active: true });
@@ -225,10 +227,12 @@ describe("a removed guardian's Parent customer left active", () => {
     await noPressAtGuardians(riveras, { guardianSends: ["guardian_inactive"], sendNotes: [] });
     expect(riveras.guardianSends[0]!.words).toHaveLength(1);
     const cells = await cellsOf("Rivera Family");
-    expect(cells[4]).toContain("1 difference with the books: guardians' Parent customers.");
-    expect(cells[4]).toContain(`Whether Ana Rivera is this family's guardian. In the portal: Removed from this family. In the books: Their Parent customer is active. ${REMOVED_NEXT}`);
+    // The row's label counts the difference, and its main press opens the Review drawer that settles it.
+    expect(cells[1]).toContain("Linked, 1 differs");
+    expect(cells[2]).toContain("Settle 1 difference: Rivera Family");
+    expect(cells[2]).toContain(`Whether Ana Rivera is this family's guardian. In the portal: Removed from this family. In the books: Their Parent customer is active. ${REMOVED_NEXT}`);
     // Still listed among the removed guardians, as slice M3c draws them.
-    expect(cells[4]).toContain("Removed guardians:Ana Rivera: linked to Ana Rivera, active in the books");
+    expect(cells[2]).toContain("Removed guardians:Ana Rivera: linked to Ana Rivera, active in the books");
   });
 
   it("kept for a balance, then stuck and given up: the given-up words say QuickBooks may have it, and the difference stays", async () => {
@@ -259,7 +263,7 @@ describe("a guardian's own Parent customer the books have inactive", () => {
     const riveras = rowOf(await view(), "Rivera Family");
     expect(riveras.differences).toEqual([{ kind: "guardian_active", guardianId: row.id, who: "Ana Rivera", portalOpen: true, queue: null }]);
     await noPressAtGuardians(riveras);
-    expect((await cellsOf("Rivera Family"))[4]).toContain(`Whether Ana Rivera is this family's guardian. In the portal: A guardian of this family. In the books: Their Parent customer is inactive. ${INACTIVE_NEXT}`);
+    expect((await cellsOf("Rivera Family"))[2]).toContain(`Whether Ana Rivera is this family's guardian. In the portal: A guardian of this family. In the books: Their Parent customer is inactive. ${INACTIVE_NEXT}`);
   });
 });
 

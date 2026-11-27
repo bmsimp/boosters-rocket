@@ -30,10 +30,10 @@ export const IMPORT_WORDS = {
     welcomes
       ? "Welcome emails are on, so everyone added who hasn't been welcomed gets one, a few at a time."
       : "Welcome emails are off, so nobody is mailed now: each person added who has never been welcomed is welcomed, with a link to set up their sign-in, once an Admin switches welcome emails on.",
-    "A family you untick stays in the list of customers with no family, to make later, here or with “Create a family from this”.",
+    "A family you untick stays in the list of records with no family, to make later, here or with “Create a family”.",
   ],
   /** The rest of the intro, in a hint under it. */
-  introMore: "Nothing is sent to QuickBooks, and families, students and people the portal has already are never changed. Each family and student is made linked to its customer, and each guardian is added as on a family's page.",
+  introMore: "Nothing is sent to the books, and families, students and people the portal has already are never changed. Each family and student is made linked to its customer, and each guardian is added as on a family's page.",
   aimed: (n: number) => `${plural(n, "customer listed here isn't", "customers listed here aren't")} proposed, as this page suggests ${n === 1 ? "it" : "each"} for, or lists ${n === 1 ? "it" : "each"} as a possible customer of, a family the portal has: ${n === 1 ? "it is" : "they are"} linked on this page instead.`,
   pastCap: (n: number) => `${plural(n, "more customer isn't", "more customers aren't")} proposed yet, as up to ${IMPORT_MAX} are proposed at a time: ${n === 1 ? "it is" : "they are"} proposed here once these are made.`,
   legend: "Families to make",

@@ -715,22 +715,22 @@ describe("the page", () => {
     asStaff(sender);
     const whole = await renderPage(AccountingLinksPage);
     const list = listOf(whole);
-    expect(pressed(list, "Send the app's to QuickBooks")).toEqual(["Leo Rivera's family", "Leo Rivera's family", "Leo Rivera's name", "Zoe Rivera's active status"]);
+    expect(pressed(list, "Send the portal's value to the books")).toEqual(["Leo Rivera's family", "Leo Rivera's family", "Leo Rivera's name", "Zoe Rivera's active status"]);
     // Beside the Take it pairs with, in the same row-actions.
-    expect(list).toContain(`Take QuickBooks' into the app<span class="visually-hidden">: Leo Rivera's name</span></button><button type="button" class="btn btn-outlined">Send the app's to QuickBooks<span class="visually-hidden">: Leo Rivera's name</span></button></div>`);
+    expect(list).toContain(`Take the books' value<span class="visually-hidden">: Leo Rivera's name</span></button><button type="button" class="btn btn-outlined">Send the portal's value to the books<span class="visually-hidden">: Leo Rivera's name</span></button></div>`);
     expect(list).toContain("Sends “Leo Rivera” to the books as Leo Rivera's name, in place of “Leo M. Rivera” there. The books' name is replaced.");
     // The family's name another customer holds, Chen inactive in the books, and nothing for Max (not a student customer
     // now), Mei Chen's Parent customer or the Chens' own active status.
     expect(list).toContain(HELD_ELSEWHERE);
     expect(list).toContain(NEVER_ACTIVE);
-    expect(list).not.toMatch(/Send the app's to QuickBooks<span class="visually-hidden">: (Rivera Family's name|Max Rivera's family|Chen Family's active status|Kim Rivera)/);
+    expect(list).not.toMatch(/Send the portal's value to the books<span class="visually-hidden">: (Rivera Family's name|Max Rivera's family|Chen Family's active status|Kim Rivera)/);
     expect(rowOf(view, "Rivera Family").sends.map((x) => x.at)).not.toContain(rowOf(view, "Rivera Family").differences.findIndex((d) => d.kind === "student_customer"));
     // Oak, inactive here and active in the books, a layered family with nobody under it in the books: its Take, and
     // since slice M5b its Send, beside it.
     const part = partOf(whole);
     const OAK_SENT = "Makes “Oak Family” inactive in the books, as the portal has it, in place of active there.";
-    expect(pressed(part, "Take QuickBooks' into the app")).toEqual(["Oak Family's active status"]);
-    expect(pressed(part, "Send the app's to QuickBooks")).toEqual(["Oak Family's active status"]);
+    expect(pressed(part, "Take the books' value")).toEqual(["Oak Family's active status"]);
+    expect(pressed(part, "Send the portal's value to the books")).toEqual(["Oak Family's active status"]);
     expect(part).toContain(OAK_SENT);
     // The props are only words and bound actions: no stamp is drawn into the page.
     for (const s of [...view.rows.flatMap((r) => [...r.sends, ...r.takes]), ...view.inactive.flatMap((r) => (r.take ? [r.take] : []))]) expect(whole).not.toContain(s.stamp);
@@ -740,12 +740,12 @@ describe("the page", () => {
     const linker = await staffWith("linker@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
     asStaff(linker);
     const theirs = await renderPage(AccountingLinksPage);
-    expect(pressed(listOf(theirs), "Send the app's to QuickBooks")).toEqual([]);
-    expect(pressed(listOf(theirs), "Take QuickBooks' into the app")).toEqual(pressed(list, "Take QuickBooks' into the app"));
+    expect(pressed(listOf(theirs), "Send the portal's value to the books")).toEqual([]);
+    expect(pressed(listOf(theirs), "Take the books' value")).toEqual(pressed(list, "Take the books' value"));
     expect(listOf(theirs)).not.toContain(HELD_ELSEWHERE);
     expect(listOf(theirs)).not.toContain(NEVER_ACTIVE);
     expect(partOf(theirs)).not.toContain(OAK_SENT);
-    expect(pressed(partOf(theirs), "Send the app's to QuickBooks")).toEqual([]);
+    expect(pressed(partOf(theirs), "Send the portal's value to the books")).toEqual([]);
     expect(listOf(theirs)).not.toContain(QUEUE_IN_THE_WAY_OF_SEND);
     // Drawing the page sends and queues nothing.
     expect(posts()).toEqual([]);
@@ -770,7 +770,7 @@ describe("a layered family inactive in the portal, made inactive in the books wi
   const offerNow = async () => (await loadAccountingLinks()).inactive.find((r) => r.name === "Rivera Family")!;
   const familyRuns = () => auditsOf("roster.family.deactivate");
   const COVER = "Makes Rivera Family's customer inactive in the books, as the portal has it, in place of active there, and with it everyone active under it, as QuickBooks asks: “Ana Rivera”, “Leo Rivera”, “Zoe Rivera” and “Rivera Family”, one at a time in that order, deepest first and the family last.";
-  const AGAIN = "Rivera Family is still active in QuickBooks. Press “Send the app's to QuickBooks” on its row on Accounting links again to carry on with whoever is still active.";
+  const AGAIN = "Rivera Family is still active in QuickBooks. Press “Send the portal's value to the books” on its row on Accounting links again to carry on with whoever is still active.";
 
   it("offered with whom it covers in words, and sent: one make-inactive each, deepest first and the family last, one family row and one send row, the records as they were", async () => {
     // A make-inactive of Leo's customer kept on Reconciliation: closed once QuickBooks has it inactive.

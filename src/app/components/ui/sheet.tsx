@@ -129,15 +129,24 @@ const mounted = new Map<string, number>();
  * page with the form drawn in it. The form is drawn on the server either way, so it is its own server action with
  * every check it had. `label` says what the form does ("Waive for Sam Rivera"); the title is the label unless given.
  */
-export function Drawer({ param, value = "1", label, title, description, variant = "outlined", size, triggerClassName, children }: {
+export function Drawer({ param, value = "1", label, title, description, variant = "outlined", size, triggerClassName, trigger = true, alsoClear = [], footer, children }: {
   param: string; value?: string; label: ReactNode; title?: ReactNode; description?: ReactNode;
-  variant?: ButtonVariant; size?: ButtonSize; triggerClassName?: string; children: ReactNode;
+  variant?: ButtonVariant; size?: ButtonSize; triggerClassName?: string;
+  /** False when the Drawer is opened only from elsewhere: a `DrawerLink`, or a link to its address. */
+  trigger?: boolean;
+  /** Other parts of the address that belong to this Drawer (a search inside it), taken out with its own on close. */
+  alsoClear?: string[];
+  /** Buttons along the sheet's foot, at 56px: the Drawer's main press and the one beside it. */
+  footer?: ReactNode;
+  children: ReactNode;
 }) {
   const search = useSearchParams();
   const pathname = usePathname();
   const open = search?.get(param) === value;
   const href = withParam(search, param, value, pathname);
-  const closeHref = withParam(search, param, null, pathname);
+  const cleared = new URLSearchParams(search ? search.toString() : "");
+  for (const p of alsoClear) cleared.delete(p);
+  const closeHref = withParam(cleared, param, null, pathname);
   const key = `${param}=${value}`;
   const triggerId = `drawer-${param}-${value}`.replace(/[^A-Za-z0-9_-]/g, "_");
   const onOpen = (e: MouseEvent) => {
@@ -170,10 +179,31 @@ export function Drawer({ param, value = "1", label, title, description, variant 
   }, [param, value, key]);
   return (
     <>
-      <a id={triggerId} className={buttonClass(variant, size, triggerClassName)} href={href} onClick={onOpen}>{label}</a>
-      <Sheet open={open} onClose={onClose} title={title ?? label} description={description} closeHref={closeHref} returnFocusId={triggerId}>{children}</Sheet>
+      {trigger && <a id={triggerId} className={buttonClass(variant, size, triggerClassName)} href={href} onClick={onOpen}>{label}</a>}
+      <Sheet open={open} onClose={onClose} title={title ?? label} description={description} closeHref={closeHref} returnFocusId={trigger ? triggerId : undefined}
+        footer={footer}>{children}</Sheet>
     </>
   );
+}
+
+/**
+ * A second way into a Drawer drawn elsewhere on the page (one with `trigger={false}`, or beside its own button): a
+ * link to the page's address with `?param=value`, pushed without a load as the Drawer's own button is, so Back and its
+ * Close behave the same.
+ */
+export function DrawerLink({ param, value, variant = "outlined", size, className, children }: {
+  param: string; value: string; variant?: ButtonVariant; size?: ButtonSize; className?: string; children: ReactNode;
+}) {
+  const search = useSearchParams();
+  const pathname = usePathname();
+  const href = withParam(search, param, value, pathname);
+  const onOpen = (e: MouseEvent) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+    e.preventDefault();
+    pushedBy = `${param}=${value}`;
+    window.history.pushState(null, "", href);
+  };
+  return <a className={buttonClass(variant, size, className)} href={href} onClick={onOpen}>{children}</a>;
 }
 
 export type Confirmed = { ok: true; message: string } | { ok: false; errors: string[] };

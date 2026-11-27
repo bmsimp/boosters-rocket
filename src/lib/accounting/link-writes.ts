@@ -536,8 +536,8 @@ export function unlinkedWords(s: { family: string; customer: string | null; stud
   if (s.details.held > 0) parts.push(s.details.held === 1 ? "A guardian's change of their details that is stuck or kept stays on the Reconciliation page, where it can be given up: nothing is sent from it while the family has no link."
     : `${s.details.held} changes of guardians' details that are stuck or kept stay on the Reconciliation page, where they can be given up: nothing is sent from them while the family has no link.`);
   parts.push(s.customer === null ? "Nothing was sent to the books." : "Nothing was sent to the books, and the customer stays there as it is.");
-  parts.push("Its row on this page now shows what the page suggests for it: link it again there, with Confirm, or with Pick a different customer once the row offers it (a Suggested row offers it once it is left unlinked).");
-  if (s.listedWithNoFamily) parts.push("This page now lists the customer under Customers with no family, where “Create a family from this” would make a second family, unless this page suggests it for a family.");
+  parts.push("Its row on this page now shows what the page suggests for it: link it again there, with Confirm link, or with Pick a customer once the row offers it (a Suggested row offers it once it is left unlinked).");
+  if (s.listedWithNoFamily) parts.push("This page now lists the customer under Customers with no family, where “Create a family” would make a second family, unless this page suggests it for a family.");
   return parts.join(" ");
 }
 
