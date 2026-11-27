@@ -85,7 +85,9 @@ test("the page fits the screen at this width, and the amounts line up", async ({
   if (width < 840) {
     // Phone: a compact Pay under its invoice's amount, at the row's right edge, the invoice's words keeping the rest.
     expect(pay.y).toBeGreaterThan(amount.y + amount.height - 1);
-    expect(Math.abs(pay.x + pay.width - (amount.x + amount.width))).toBeLessThanOrEqual(1);
+    // The Pay's drawn fill ends there: its box reaches past it by the clear edge of its 48px target (border-right).
+    const edge = await page.locator("a.pay").evaluate((e) => parseFloat(getComputedStyle(e).borderRightWidth));
+    expect(Math.abs(pay.x + pay.width - edge - (amount.x + amount.width))).toBeLessThanOrEqual(1);
     expect(pay.width).toBeLessThan(row.width / 2);
   } else {
     // Desktop: text | Pay | amount, on one line, the Pay compact.
