@@ -86,6 +86,7 @@ test("a Drawer and a ConfirmDialog, for the owner to look at", async ({ page }, 
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Disconnect QuickBooks" }).click();
   await expect(page.getByRole("dialog", { name: "Disconnect QuickBooks?" })).toBeVisible();
+  await settle(page); // sprung all the way in, not caught mid-fade
   await page.screenshot({ path: `test-results/screenshots/confirm-dialog-${info.project.name}.png` });
 });
 
@@ -93,6 +94,7 @@ test("QuickBooks settings' Disconnect, asking first, for the owner to look at", 
   await page.goto("/staff/settings/quickbooks");
   await page.getByRole("button", { name: "Disconnect QuickBooks" }).click();
   await expect(page.getByRole("dialog", { name: "Disconnect QuickBooks?" })).toBeVisible();
+  await settle(page); // sprung all the way in, not caught mid-fade
   await page.screenshot({ path: `test-results/screenshots/quickbooks-disconnect-${info.project.name}.png` });
 });
 
