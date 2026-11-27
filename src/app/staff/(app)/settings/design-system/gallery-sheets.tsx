@@ -16,6 +16,19 @@ export function DrawerSample() {
   );
 }
 
+/** The same Drawer with `dock`: from 1600px wide a pane beside the page at the same address, below it the side sheet. */
+export function DockedDrawerSample() {
+  return (
+    <Drawer param="ds-dock" label="Change the shift" dock description="Families see the new time at once.">
+      <form className="stack" onSubmit={(e) => e.preventDefault()}>
+        <TextInput id="ds-dock-name" label="Shift name" defaultValue="Sample snack stand" autoComplete="off" />
+        <TextInput id="ds-dock-time" label="Starts at" type="time" defaultValue="17:30" />
+        <p><Button type="submit">Save the shift</Button></p>
+      </form>
+    </Drawer>
+  );
+}
+
 export function ConfirmSample() {
   return (
     <div className="ds-samples">
