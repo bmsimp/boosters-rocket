@@ -280,6 +280,9 @@ components:
 
 # Design System: Boosters Rocket
 
+> **Superseded (2026-11-26).** This file describes the calm, Linear-like look the portal had before the owner moved it to Material Design 3 Expressive. The look as shipped is `src/app/booster.css`, the primitives in `src/app/components/ui/`, their index `docs/agents/ui.md` (with the owner's decisions D1 to D8) and the gallery at `/staff/settings/design-system`; the owner's taste is `docs/agents/owner-taste.md`. Where this file disagrees with them, they win. It is kept until it is rewritten from the shipped look.
+
+
 The stylesheet (`src/app/booster.css`) is what the browser reads and is the source of every value here; `src/lib/theme/palette.ts` mirrors its fixed colors and `tests/unit/design-tokens.test.ts` holds the two together and measures every pair. The components are the primitives in `src/app/components/ui/` (import from `@/app/components/ui`), indexed in `docs/agents/ui.md` and drawn in every state in the living gallery (`/staff/settings/design-system`, and its static twin `design/system/gallery.html`). Parent Home (`src/app/(parent)/page.tsx`) is the reference surface.
 
 ## Overview
