@@ -22,6 +22,7 @@ Boosters Rocket is an open-source, self-hosted parent portal for booster clubs: 
 **How work is done**
 - One screen-sized slice at a time, from a short brief. Tests are written with the code. No long plans with code in them.
 - Do the slice in the brief and nothing else. Say in your report what you left undone, and anything that surprised you.
+- From finished slice to open pull request with green CI: `.claude/skills/ship-pr/SKILL.md` (`/ship-pr`). It never merges or deploys.
 
 ### Area documents
 
