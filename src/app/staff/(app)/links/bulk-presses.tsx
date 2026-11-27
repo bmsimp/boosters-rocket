@@ -17,7 +17,7 @@ export function LinkSuggestedBulk({ rows, act }: { rows: SuggestedPick[]; act: (
     <BulkAction rows={shown} cap={PRESS_MAX}
       label={(n) => (n === 1 ? "Link 1 to its suggested family" : `Link ${n} to their suggested families`)}
       confirmLabel={(n) => `Link ${n} ${n === 1 ? "customer" : "customers"}`} busyLabel="Linking…" done="Linked"
-      description="Each family's guardians then see its customer's open invoices and Pay links. Nothing is sent to QuickBooks."
+      description="Each family's guardians then see that record's invoices, so check each is the right household. Nothing is sent to the books."
       act={(ids: string[]) => act(ids.map((id) => byId.get(id)!).map((r) => ({ familyId: r.familyId, customerId: r.customerId, stamp: r.stamp })))} />
   );
 }
@@ -31,7 +31,7 @@ export function CreateFamiliesBulk({ rows, act }: { rows: NoFamilyPick[]; act: (
     <BulkAction rows={shown} cap={PRESS_MAX}
       label={(n) => (n === 1 ? "Create 1 family" : `Create ${n} families`)}
       confirmLabel={(n) => (n === 1 ? "Create 1 family" : `Create ${n} families`)} busyLabel="Making the families…" done="Made a family, linked"
-      description="Each customer becomes a family here, linked, with its students. Nobody can sign in for one until its guardians are added."
+      description="Each record becomes a family here, linked, with its students. Nobody can sign in for one until its guardians are added."
       act={act} />
   );
 }

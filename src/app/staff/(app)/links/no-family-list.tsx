@@ -37,14 +37,13 @@ export function NoFamilyRows({ rows, none, bulk }: { rows: NoFamilyRow[]; none: 
   // meant for a family the portal has; each row ticked is made by that press's own function, in its own transaction.
   const picks = rows.filter((r) => r.act !== null).map((r) => ({ id: r.key, name: r.name, makes: r.makes }));
   const table = (
-    <DataTable caption="Customers with no family" captionHidden rowKey={(r) => r.key} rows={rows}
+    <DataTable caption="With no family" captionHidden rowKey={(r) => r.key} rows={rows}
       select={picks.length > 0 ? { label: (r) => r.name, when: (r) => r.act !== null } : undefined}
       columns={[
-        { key: "name", header: "Customer", rowHeader: true, cell: (r) => r.name },
-        { key: "students", header: "Students under it", cell: (r) => r.students },
-        { key: "makes", header: "What it makes", cell: (r) => r.makes },
-        { key: "do", header: "What you can do", quiet: true, cell: (r) => (r.aim !== null || r.act === null
-          ? <>{r.aim?.words}{r.aim && <div className="row-actions"><LinkButton variant="tonal" size="sm" href={r.aim.href}>{r.aim.label}<span className="visually-hidden">: {r.name}</span></LinkButton></div>}</>
+        { key: "name", header: "In your books", rowHeader: true, cell: (r) => <>{r.name}<span className="when">Students under it: {r.students}</span></> },
+        { key: "makes", header: "What it makes", cell: (r) => (r.aim !== null ? r.aim.words : r.makes) },
+        { key: "do", header: "Actions", quiet: true, cell: (r) => (r.aim !== null || r.act === null
+          ? r.aim && <div className="row-actions"><LinkButton variant="tonal" size="sm" href={r.aim.href}>{r.aim.label}<span className="visually-hidden">: {r.name}</span></LinkButton></div>
           : <MakeFamily name={r.name} act={r.act} onDone={(d) => onDone(r.name, d)} />) },
       ]} />
   );
@@ -63,7 +62,7 @@ function MakeFamily({ name, act, onDone }: { name: string; act: () => Promise<Do
   return (
     <div className="row-actions">
       <Button variant="tonal" size="sm" busy={pending} onClick={press}>
-        {pending ? "Making the family…" : "Create a family from this"}<span className="visually-hidden">: {name}</span>
+        {pending ? "Making the family…" : "Create a family"}<span className="visually-hidden">: {name}</span>
       </Button>
     </div>
   );
