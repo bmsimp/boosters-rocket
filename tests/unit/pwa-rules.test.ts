@@ -207,8 +207,8 @@ describe("the manifest", () => {
   it("is one app for the whole portal, opened standalone at the root", () => {
     expect(m).toMatchObject({ id: "/", start_url: "/", scope: "/", display: "standalone" });
   });
-  it("takes its colors from the look, not the club: the bar's white surface, and the page's ground for the splash", () => {
-    expect(m).toMatchObject({ theme_color: "#ffffff", background_color: "#f7f7f8" });
+  it("takes its colors from the look, not the club: the bar's surface, and the page's ground for the splash", () => {
+    expect(m).toMatchObject({ theme_color: "#f7f9fd", background_color: "#eceef2" });
   });
   it("lists the 192 and 512 icons for any use and as maskable, by versioned address", () => {
     const v = iconVersion(club);

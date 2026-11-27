@@ -7,7 +7,7 @@ import { PALETTE } from "@/lib/theme/palette";
  * The web app manifest for this club: what a phone needs to put the portal on its home screen. One app for the whole
  * portal, parents and staff alike. Every address is a path: whoever installs the portal chooses its hostname, and the
  * browser reads these against the address it fetched the manifest from. The colors are the look's, not the club's:
- * the theme color is the top bar's white surface and the splash the page's ground, so an installed app opens and sits
+ * the theme color is the top bar's surface and the splash the page's ground, so an installed app opens and sits
  * in the same calm frame as the page (the club's color is on its icon).
  */
 export function buildManifest(club: { name: string; shortName: string; color: string }): MetadataRoute.Manifest {

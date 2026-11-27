@@ -12,8 +12,8 @@
 <meta name="robots" content="noindex">
 <title>You're offline</title>
 <style>
-  :root { color-scheme: light dark; --ground: #f7f7f8; --surface: #ffffff; --border: #e3e4e8; --ink: #18191d; --ink-2: #5c606a; }
-  @media (prefers-color-scheme: dark) { :root { --ground: #0f1012; --surface: #16181c; --border: #2a2d33; --ink: #ececee; --ink-2: #a2a6ae; } }
+  :root { color-scheme: light dark; --ground: #eceef2; --surface: #ffffff; --border: transparent; --ink: #1a1c1e; --ink-2: #42474e; }
+  @media (prefers-color-scheme: dark) { :root { --ground: #111316; --surface: #1e2022; --border: transparent; --ink: #e0e3e6; --ink-2: #c1c7cf; } }
   @media (prefers-contrast: more) { :root { --ground: #ffffff; --border: #18191d; --ink: #000000; --ink-2: #2b2e34; } }
   @media (prefers-contrast: more) and (prefers-color-scheme: dark) { :root { --ground: #000000; --surface: #000000; --border: #ececee; --ink: #ffffff; --ink-2: #e2e4e8; } }
   * { box-sizing: border-box; margin: 0; }
@@ -24,16 +24,16 @@
     color: var(--ink); background-color: var(--ground);
     font: 400 1rem/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; /* the portal's own fallback stack: its font can't be loaded offline */
   }
-  main { width: 100%; max-width: 420px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 24px; }
+  main { width: 100%; max-width: 420px; background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 24px; }
   svg { width: 28px; height: 28px; display: block; color: var(--ink-2); }
-  h1 { font-size: 1.25rem; font-weight: 600; line-height: 1.3; margin-top: 12px; }
+  h1 { font-size: 1.5rem; font-weight: 600; line-height: 1.3; margin-top: 12px; }
   p { margin-top: 6px; color: var(--ink-2); }
   a.btn {
-    display: flex; align-items: center; justify-content: center; min-height: 44px; margin-top: 20px; padding: 0 16px;
-    border: 1px solid var(--ink); border-radius: 6px; background: var(--ink); color: var(--surface); font-weight: 500; text-decoration: none;
+    display: flex; align-items: center; justify-content: center; min-height: 56px; margin-top: 20px; padding: 0 24px;
+    border: 1px solid var(--ink); border-radius: 999px; background: var(--ink); color: var(--surface); font-weight: 600; text-decoration: none;
   }
   a.btn:hover { opacity: 0.88; }
-  a.btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  a.btn:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
   @media (forced-colors: active) { main, a.btn { border-color: CanvasText; } }
 </style>
 </head>
