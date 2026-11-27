@@ -407,7 +407,7 @@ describe("the answer's words", () => {
   });
   it("offers Pick a different customer only once the row offers it, as a Suggested row offers it once left unlinked", () => {
     expect(unlinkedWords({ ...base, customer: "Ash Family" }))
-      .toContain("link it again there, with Confirm, or with Pick a different customer once the row offers it (a Suggested row offers it once it is left unlinked).");
+      .toContain("link it again there, with Confirm link, or with Pick a customer once the row offers it (a Suggested row offers it once it is left unlinked).");
   });
 });
 

@@ -131,9 +131,9 @@ describe("Confirm this link", () => {
     // The page says who confirmed it and when, in words true of a review.
     asStaff(linker);
     const html = listOf(await renderPage(AccountingLinksPage));
-    expect(rowNamed(html, "Oak Family")![3]).toMatch(/^LinkedConfirmed .+$/);
-    expect(rowNamed(html, "Oak Family")![4]).toMatch(/^Confirmed by linker, on this page or with “Create a family from this”, on .+?\./);
-    expect(rowNamed(html, "Oak Family")![4]).not.toContain("Confirm this link");
+    expect(rowNamed(html, "Oak Family")![1]).toBe("Oak FamilyLinked");
+    expect(rowNamed(html, "Oak Family")![2]).toMatch(/Confirmed by linker, on this page or with “Create a family”, on .+?\./);
+    expect(rowNamed(html, "Oak Family")![2]).not.toContain("Confirm this link");
     // A second press, with the page's old stamp, changes nothing.
     expect(await pressRow(oaks, row)).toEqual({ ok: false, errors: [LINK_COPY.reviewChanged] });
     expect(await auditsOf("accounting.link.confirm")).toHaveLength(1);
@@ -160,7 +160,7 @@ describe("Confirm this link", () => {
         { studentId: tara, name: "Tara Patel", why: "gone" }, { studentId: uma, name: "Uma Patel", why: "elsewhere" }] });
     // The opening says each reason in its own words, never that a gone or retyped customer is under another customer.
     asStaff(linker);
-    const opening = rowNamed(listOf(await renderPage(AccountingLinksPage)), "Patel Family")![4]!.replaceAll("&#x27;", "'");
+    const opening = rowNamed(listOf(await renderPage(AccountingLinksPage)), "Patel Family")![2]!.replaceAll("&#x27;", "'");
     expect(opening).toContain("Tara Patel (its customer isn't in the books' copy now)");
     expect(opening).toContain("Uma Patel (its customer isn't a student customer directly under this one in the books now)");
     expect(opening).not.toContain("under another customer in the books");
@@ -184,10 +184,10 @@ describe("Confirm this link", () => {
     await syncAppRecords();
     asStaff(linker);
     const html = listOf(await renderPage(AccountingLinksPage));
-    const opening = rowNamed(html, "<b>Patel</b> Family")![4]!;
-    expect(opening).toContain("Confirm this link marks it as checked by you.");
-    expect(opening).toContain("Confirmed with it, each carried over to a student customer directly under this customer:Asha Patel");
-    expect(opening).toContain("Confirm this link: <b>Patel</b> Family");
+    const opening = rowNamed(html, "<b>Patel</b> Family")![2]!;
+    // The row's main press, and the Review drawer's, with its one sentence naming the student link it confirms.
+    expect(opening).toContain("Show details: <b>Patel</b> FamilyConfirm this link: <b>Patel</b> Family");
+    expect(opening).toContain("Confirm this link: <b>Patel</b> FamilyMarks it as checked by you, with Asha Patel's link. Nothing is sent.");
     expect(html).not.toContain("<b>Patel</b>");
     expect(html).toContain("&lt;b&gt;Patel&lt;/b&gt; Family");
   });
