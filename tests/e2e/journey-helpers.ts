@@ -47,20 +47,20 @@ export async function codeFor(sql: postgres.Sql, sink: MailSink, email: string):
 }
 
 /**
- * Opens one group of the staff menu and follows one of its entries, as a person would: on a phone, the group's tab in
- * the bottom tab bar, then the entry on its hub (Home and Settings are tabs of their own).
+ * Opens one group of the staff menu and follows one of its entries, as a person would: under 1200px, the group's tab in
+ * the bottom tab bar, then the entry on its hub (Home and Settings are tabs of their own); from 1200px, the entry in the
+ * rail, where every group's pages are always in the open.
  */
 export async function staffMenuTo(page: Page, group: string | null, entry: string): Promise<void> {
-  if ((page.viewportSize()?.width ?? 0) < 760) {
+  if ((page.viewportSize()?.width ?? 0) < 1200) {
     const tabs = page.locator("nav.tabs.staff-tabs");
     if (!group) { await tabs.getByRole("link", { name: entry, exact: true }).click(); return; }
     await tabs.getByRole("link", { name: group, exact: true }).click();
     await page.locator("main").getByRole("link", { name: new RegExp(`^${entry}`) }).first().click();
     return;
   }
-  const nav = page.locator("header.bar nav.top-nav");
-  if (group) await nav.getByRole("button", { name: new RegExp(`^${group}`) }).click();
-  await nav.getByRole("link", { name: entry, exact: true }).click();
+  const rail = page.locator("nav.staff-rail");
+  await (group ? rail.getByRole("group", { name: group }) : rail).getByRole("link", { name: entry, exact: true }).click();
 }
 
 /** From Settings, opens one item of its rail (on a phone the rail is the first screen of Settings). */

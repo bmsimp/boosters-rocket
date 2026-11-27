@@ -37,7 +37,7 @@ export function EventForm({ initial, save, label }: { initial?: EventFields; sav
       <label className="field"><span>Their email (optional)</span><input type="email" maxLength={254} value={f.contactEmail} onChange={set("contactEmail")} /></label>
       {initial && <p className="hint">A new date or place is emailed to everyone signed up for the event&apos;s shifts.</p>}
       <Outcome state={state} />
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : label}</button>
+      <button type="button" className="btn btn-outlined" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : label}</button>
     </form>
   );
 }
@@ -71,7 +71,7 @@ export function ShiftForm({ initial, requirements, save, label }: { initial?: Sh
       </fieldset>
       {initial && <p className="hint">A new start or end is emailed to everyone signed up for this shift.</p>}
       <Outcome state={state} />
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : label}</button>
+      <button type="button" className="btn btn-outlined" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : label}</button>
     </form>
   );
 }
@@ -89,7 +89,7 @@ export function CopyForm({ copy }: { copy: (onDate: string) => Promise<Done> }) 
     <form onSubmit={noSubmit} className="stack">
       <label className="field"><span>Date of the copy</span><input type="date" value={onDate} onChange={(e) => setOnDate(e.target.value)} /></label>
       <Outcome state={state} />
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Copying…" : "Copy this event"}</button>
+      <button type="button" className="btn btn-outlined" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Copying…" : "Copy this event"}</button>
     </form>
   );
 }
@@ -103,7 +103,7 @@ export function CutoffForm({ initial, save }: { initial: number; save: (hours: s
     <form onSubmit={noSubmit} className="stack">
       <label className="field"><span>Hours before a shift</span><input type="number" min={0} max={720} step={1} value={hours} onChange={(e) => setHours(e.target.value)} /></label>
       <Outcome state={state} />
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : "Save the cut-off"}</button>
+      <button type="button" className="btn btn-outlined" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : "Save the cut-off"}</button>
     </form>
   );
 }
@@ -141,7 +141,7 @@ export function OutsideCreditForm({ requirements, students, save }: { requiremen
         <input inputMode="decimal" maxLength={7} value={amount} onChange={(e) => setAmount(e.target.value)} /></label>
       <label className="field"><span>What was done (only staff see this)</span><textarea rows={3} maxLength={1000} value={note} onChange={(e) => setNote(e.target.value)} /></label>
       <Outcome state={state} />
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : "Add credit"}</button>
+      <button type="button" className="btn btn-outlined" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : "Add credit"}</button>
     </form>
   );
 }

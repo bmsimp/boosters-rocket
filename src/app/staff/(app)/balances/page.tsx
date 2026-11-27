@@ -63,14 +63,14 @@ export default async function BalancesPage({ searchParams }: { searchParams: Pro
 
       <Card title="Families" titleId="families-h">
         {balances.unlinked > 0 && <Notice tone="info" live="none">{balances.unlinked === 1 ? "1 family isn't" : `${balances.unlinked} families aren't`} linked to the books, so {balances.unlinked === 1 ? "it has" : "they have"} no figures here.
-          {" "}{mayLink ? <LinkButton variant="secondary" size="sm" href="/staff/links">{balances.unlinked === 1 ? "Link it" : "Link them"} on Accounting links</LinkButton> : `Someone who can link families links ${balances.unlinked === 1 ? "it" : "them"} on Accounting links.`}</Notice>}
+          {" "}{mayLink ? <LinkButton variant="tonal" size="sm" href="/staff/links">{balances.unlinked === 1 ? "Link it" : "Link them"} on Accounting links</LinkButton> : `Someone who can link families links ${balances.unlinked === 1 ? "it" : "them"} on Accounting links.`}</Notice>}
         <form method="get" action="/staff/balances">
           <Toolbar label="Filter the families">
             <TextInput id="balances-q" label="Find a family or a student" name="q" type="search" maxLength={SEARCH_MAX} defaultValue={search} />
             <fieldset className="checks"><legend>Which families</legend>
               <Checkbox id="balances-owing" name="owing" value="1" defaultChecked={owing} label=" Only families that owe something" /></fieldset>
-            <Button type="submit" variant="secondary">Show</Button>
-            {filtered && <LinkButton variant="quiet" href="/staff/balances">Show every family</LinkButton>}
+            <Button type="submit" variant="outlined">Show</Button>
+            {filtered && <LinkButton variant="text" href="/staff/balances">Show every family</LinkButton>}
           </Toolbar>
         </form>
         {!balances.roster ? <Notice tone="warning">The roster can&apos;t be shown right now. The Roster page says why.</Notice>

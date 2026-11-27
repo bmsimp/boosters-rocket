@@ -19,7 +19,7 @@ import { enrollingSession, makeStrictParent, removeStrictParent, storeLevel } fr
  * features, so a page's own state is checked in every mode without loading it again.
  *
  * It fails on: the page scrolling sideways, text clipped by its box or drawn over other text, a tap target under
- * 44 by 44 (a link inside a sentence excepted), and everything axe-core finds for WCAG 2.0, 2.1 and 2.2 A and AA
+ * 48 by 48 (a link inside a sentence excepted), and everything axe-core finds for WCAG 2.0, 2.1 and 2.2 A and AA
  * (which includes every control and image without an accessible name). Color contrast is checked in every mode but
  * forced colors, where the system draws the colors. A Tab walk through the page (KEYBOARD_WALKS) fails a stop with
  * no visible focus ring, or one left under the phone's tab bar. Each failure names the page, the width, the mode and
@@ -181,7 +181,7 @@ test("every page under src/app/sign-in is opened here", () => {
   expect(missing, "A page a visitor reaches before signing in is checked here: add it to BEFORE_SIGN_IN, labelled with its route.").toEqual([]);
 });
 
-test.skip(({ viewport }) => (viewport?.width ?? 0) < 760, "one pass, in the desktop project, at its own widths: the phone project would repeat it");
+test.skip(({ viewport }) => (viewport?.width ?? 0) < 840, "one pass, in the desktop project, at its own widths: the phone project would repeat it");
 test.describe.configure({ timeout: 120_000 });
 let putProofBack: () => Promise<void> = async () => undefined;
 test.afterAll(async () => { await removeZeldaLinks(sql); await removeZeldaSecondSteps(sql); await clearZeldaCounts(sql); await putProofBack();

@@ -11,7 +11,7 @@ test.afterAll(async () => { await sql.end(); });
 // Wrap-up). The Quetzalcoatl family has done Join; in Uniforms, Xochitl is ticked off for the fitting and Yaretzi is
 // not, so the family is on step 2. The staff test ticks Yaretzi and unticks her again, so both passes of the run (and a
 // run that stopped halfway) start from the same place.
-const isPhone = (page: Page) => (page.viewportSize()?.width ?? 0) < 760;
+const isPhone = (page: Page) => (page.viewportSize()?.width ?? 0) < 840;
 const noSidewaysScroll = async (page: Page) =>
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), `${page.url()} scrolls sideways`).toBe(false);
 const FITTING = "Uniform fitting attended";
@@ -55,10 +55,12 @@ test("Home shows the season ruler for the current season, and each student's pro
   await expect(ruler.locator("[aria-current]")).toHaveCount(1);
   // Season asks nothing of the family, but it is still ahead: only a step behind the current one is ticked.
   await expect(ruler.locator("ol.sets > li.done")).toHaveCount(1);
-  // The current step's segment of the track is the club's color; the others are not.
+  // The current step's segment of the track is the club's primary (its scheme's, from the seeded #5b2a86); the others are not.
   const fill = (i: number) => cells.nth(i).locator(".track").evaluate((el) => getComputedStyle(el).backgroundColor);
-  expect(await fill(1)).toBe("rgb(91, 42, 134)");
-  expect(await fill(2)).not.toBe("rgb(91, 42, 134)");
+  const primary = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--primary").trim());
+  const asRgb = (hex: string) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(", ")})`;
+  expect(await fill(1)).toBe(asRgb(primary));
+  expect(await fill(2)).not.toBe(asRgb(primary));
   // A dot for each student on the current step: Xochitl finished, Yaretzi still on it. Decoration, hidden from a screen reader.
   const dots = cells.nth(1).locator(".on-set i");
   await expect(dots).toHaveText(["X", "Y"]);
@@ -82,7 +84,7 @@ test("Home shows the season ruler for the current season, and each student's pro
   await expect(yaretzi.locator("> .list-main .list-status")).toHaveText("1 thing left to do in Uniforms");
   await expect(yaretzi.locator(".list-sub > li").first()).toHaveText(`${FITTING}Not done yet`);
   // Every state is words with an icon, never a color alone.
-  await expect(yaretzi.locator("> .status-icon")).toBeVisible();
+  await expect(yaretzi.locator("> .status-lead .status-icon")).toBeVisible();
   await expect(yaretzi.locator(".list-sub .state svg").first()).toBeVisible();
   // What is still to do is in To do too.
   await expect(page.getByRole("region", { name: "To do" })).toContainText(`${FITTING}Not done yet`);
@@ -92,7 +94,7 @@ test("Home shows the season ruler for the current season, and each student's pro
 
   // The link is big enough to tap, and leads to the Season page: every step, with the family's progress.
   const link = ruler.getByRole("link", { name: "See the whole season" });
-  expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(48);
   await link.click();
   await expect(page).toHaveURL(/\/season$/);
   await expect(page).toHaveTitle(/^Season · /);

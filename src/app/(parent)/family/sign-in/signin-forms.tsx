@@ -188,7 +188,7 @@ export function AskAgain({ email, proved, lede, section, children, passkey = fal
         <p ref={stepLine} role="status" tabIndex={-1}>{COPY.passkeyAsked}</p>
         {passkeyPress}
         {errors && <Errors errors={errors} />}
-        <Button variant="secondary" onClick={startAgain}>{COPY.startAgain}</Button>
+        <Button variant="outlined" onClick={startAgain}>{COPY.startAgain}</Button>
       </div>
     );
   }
@@ -208,7 +208,7 @@ export function AskAgain({ email, proved, lede, section, children, passkey = fal
       {errors && <Errors errors={errors} />}
       <div className="row-actions">
         <Button type="submit" busy={busy}>{busy ? COPY.checking : COPY.confirm}</Button>
-        <Button variant="secondary" onClick={startAgain}>{COPY.startAgain}</Button>
+        <Button variant="outlined" onClick={startAgain}>{COPY.startAgain}</Button>
       </div>
     </form>
   );
@@ -270,7 +270,7 @@ export function SignOutEverywhereForm({ then, next, signIn }: { then: string; ne
       <p>{COPY.everywhereLede}</p>
       <p>{then}</p>
       {result && !result.ok && <Errors errors={result.errors} />}
-      <Button type="submit" variant="secondary" busy={busy}>{busy ? COPY.everywhereBusy : COPY.everywhereButton}</Button>
+      <Button type="submit" variant="outlined" busy={busy}>{busy ? COPY.everywhereBusy : COPY.everywhereButton}</Button>
     </form>
   );
 }
@@ -376,7 +376,7 @@ export function RememberedDevices({ devices, proved, canAsk, cantAsk, email, app
               <ListRow key={d.id} data-device={d.id} title={<>{COPY.lastUsed} <LocalTime iso={d.lastUsedAt} /></>}
                 meta={[d.thisOne && <strong key="this">{COPY.thisDevice}</strong>, <span key="first">{COPY.firstRemembered} <LocalTime iso={d.createdAt} /></span>]}
                 action={canForget && (
-                  <Button size="sm" variant="secondary" busy={busy === d.id} aria-disabled={busy !== null || undefined} onClick={() => void forget("one", d.id)}>
+                  <Button size="sm" variant="tonal" busy={busy === d.id} aria-disabled={busy !== null || undefined} onClick={() => void forget("one", d.id)}>
                     {busy === d.id ? COPY.forgetBusy : d.thisOne ? COPY.forgetDevice : COPY.forgetOne}
                     {!d.thisOne && (
                       <span className="visually-hidden">
@@ -392,7 +392,7 @@ export function RememberedDevices({ devices, proved, canAsk, cantAsk, email, app
       )}
       {listed.some((d) => d.thisOne) && <p className="help">{words.forgetHere}</p>}
       {canForget && others.length > 0 && listed.length > 1 && (
-        <Button variant="secondary" busy={busy === "others"} aria-disabled={busy !== null || undefined}
+        <Button variant="outlined" busy={busy === "others"} aria-disabled={busy !== null || undefined}
           onClick={() => void forget("others")}>{busy === "others" ? COPY.forgetBusy : knowsThisOne ? COPY.forgetOthers : COPY.forgetAll}</Button>
       )}
       {!canForget && listed.length > 0 && (canAsk

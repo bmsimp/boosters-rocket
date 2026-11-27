@@ -17,7 +17,7 @@ export function VersionView({ version, filesLabel }: { version: StaffVersion; fi
         <List label={filesLabel}>
           {listed.map((f) => (
             <ListRow key={f.id} title={f.name} meta={[f.picture ? "Picture" : MESSAGE_FILE_WORDS[f.type], fileSizeWords(f.size)]}
-              action={<LinkButton plain size="sm" variant="secondary" href={staffFileHref(f.id)}>{f.picture ? "Open" : "Download"}<span className="visually-hidden"> {f.name}</span></LinkButton>} />
+              action={<LinkButton plain size="sm" variant="tonal" href={staffFileHref(f.id)}>{f.picture ? "Open" : "Download"}<span className="visually-hidden"> {f.name}</span></LinkButton>} />
           ))}
         </List>
       )}

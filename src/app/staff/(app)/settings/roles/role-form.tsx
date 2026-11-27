@@ -74,14 +74,14 @@ export function DeleteRole({ role }: { role: Pick<RoleView, "id" | "name" | "mem
   const [asking, setAsking] = useState(false);
   const [state, run, pending] = useActionState(async () => safely(() => deleteRoleAction(role.id), failed), null);
   const held = role.members === 0 ? "Nobody holds it." : `${role.members} ${role.members === 1 ? "person holds" : "people hold"} it and will lose what it lets them do.`;
-  if (!asking) return <p><button type="button" className="btn btn-line" onClick={() => setAsking(true)}>Delete role</button></p>;
+  if (!asking) return <p><button type="button" className="btn btn-outlined" onClick={() => setAsking(true)}>Delete role</button></p>;
   return (
     <div className="stack role-delete" role="group" aria-labelledby={`del-${role.id}`}>
       <p id={`del-${role.id}`}><b>Delete {role.name}?</b> {held} Their other roles stay as they are.</p>
       <Outcome state={state} />
       <div className="row-actions">
         <button type="button" className="btn" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Deleting…" : "Yes, delete it"}</button>
-        <button type="button" className="btn btn-line" disabled={pending} onClick={() => setAsking(false)}>Keep it</button>
+        <button type="button" className="btn btn-outlined" disabled={pending} onClick={() => setAsking(false)}>Keep it</button>
       </div>
     </div>
   );

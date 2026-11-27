@@ -134,7 +134,8 @@ describe("the safe-area rules sit in one block at the end of the stylesheet", ()
     ["the gutters clear a notch on either side", ".wrap { padding-left: max(var(--cell), env(safe-area-inset-left)); padding-right: max(var(--cell), env(safe-area-inset-right)); }"],
     ["the club bar clears the top", ".bar { padding-top: env(safe-area-inset-top); }"],
     ["the tab bar clears the home indicator and both sides", ".tabs { padding-bottom: env(safe-area-inset-bottom); padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }"],
-    ["on a wide screen the body still clears the home indicator", "@media (min-width: 760px) { body { padding-bottom: env(safe-area-inset-bottom); } }"],
+    ["on a wide screen the body still clears the home indicator (staff keep their tab bar's room until 1200px)", "@media (min-width: 840px) { body:not(:has(> nav.staff-tabs)) { padding-bottom: env(safe-area-inset-bottom); } }"],
+    ["and from 1200px, where the rail takes the staff tab bar's place", "@media (min-width: 1200px) { body { padding-bottom: env(safe-area-inset-bottom); } }"],
     ["a page with no tab bar keeps no room for one, and still clears the home indicator", "body:not(:has(> nav.tabs)) { padding-bottom: env(safe-area-inset-bottom); }"],
   ])("%s", (_what, rule) => {
     expect(block).toContain(rule);

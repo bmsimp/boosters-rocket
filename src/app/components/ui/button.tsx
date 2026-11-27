@@ -2,14 +2,20 @@ import type { AnchorHTMLAttributes, ButtonHTMLAttributes, ReactNode, Ref } from 
 import Link from "next/link";
 import { cx } from "./cx";
 
-export type ButtonVariant = "primary" | "secondary" | "quiet" | "danger" | "club";
-export type ButtonSize = "md" | "sm";
+/**
+ * M3 Expressive's common buttons (docs/agents/ui.md): filled (the club's primary, one per area), tonal (the secondary
+ * container: a row's or a second action), outlined (a secondary action standing alone), text (the least: Cancel, Clear),
+ * danger (removes or ends something: outlined in the late color) and danger-filled (that action inside its ConfirmDialog).
+ */
+export type ButtonVariant = "filled" | "tonal" | "outlined" | "text" | "danger" | "danger-filled";
+/** sm and md are M3's small (40px drawn in a 48px target; sm with less padding), lg its medium (56px: a page's main button). */
+export type ButtonSize = "sm" | "md" | "lg";
 
-const VARIANT: Record<ButtonVariant, string | null> = { primary: null, secondary: "btn-line", quiet: "btn-quiet", danger: "btn-danger", club: "btn-club" };
+const VARIANT: Record<ButtonVariant, string | null> = { filled: null, tonal: "btn-tonal", outlined: "btn-outlined", text: "btn-text", danger: "btn-danger", "danger-filled": "btn-danger-filled" };
 
-/** The class a button of this variant and size wears: "btn", "btn btn-line", "btn btn-quiet btn-sm" and so on. */
-export const buttonClass = (variant: ButtonVariant = "primary", size: ButtonSize = "md", className?: string) =>
-  cx("btn", VARIANT[variant], size === "sm" && "btn-sm", className);
+/** The class a button of this variant and size wears: "btn", "btn btn-outlined", "btn btn-text btn-sm" and so on. */
+export const buttonClass = (variant: ButtonVariant = "filled", size: ButtonSize = "md", className?: string) =>
+  cx("btn", VARIANT[variant], size === "sm" && "btn-sm", size === "lg" && "btn-lg", className);
 
 type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "className" | "children"> & {
   variant?: ButtonVariant; size?: ButtonSize; className?: string; children: ReactNode;
@@ -19,7 +25,7 @@ type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "className" | "
   ref?: Ref<HTMLButtonElement>;
 };
 
-/** A button: primary (the club's fill, one per area), secondary, quiet (words), danger (removes or ends something), or club (tinted). */
+/** A button: filled (the club's primary, one per area), tonal, outlined, text, danger or danger-filled. */
 export function Button({ variant, size, className, busy = false, children, type = "button", "aria-disabled": ariaDisabled, ...rest }: ButtonProps) {
   return (
     <button type={type} className={buttonClass(variant, size, className)} aria-disabled={busy || ariaDisabled || undefined} {...rest}>

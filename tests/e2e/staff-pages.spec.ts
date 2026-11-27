@@ -9,7 +9,7 @@ import { familyPages } from "./family-records";
 // disk (src/app/staff/(app)), so a new one fails here until it has a way in below. Each must fit its width without the
 // page scrolling sideways (a wide table scrolls inside its own region, or stacks), every control on it must have a name
 // a screen reader can say, and every link that stands alone on its line, every table's link and every disclosure's
-// summary must be a 44px tap target (AGENTS.md, UI: .link-line). Pages whose address holds an id the seed doesn't fix
+// summary must be a 48px tap target (AGENTS.md, UI: .link-line). Pages whose address holds an id the seed doesn't fix
 // are reached by the first link to one, from the page that lists them; a family's pages, addressed by the app's own
 // family record, by that record's id read from the seed (./family-records.ts). Nothing here changes data.
 /**
@@ -68,7 +68,7 @@ async function open(page: Page, visit: Visit): Promise<string> {
 }
 
 /**
- * The tap targets on the page that are under 44px tall: a table's links, every summary, and every link that stands
+ * The tap targets on the page that are under 48px tall: a table's links, every summary, and every link that stands
  * alone on its line, which is one not inside a sentence (the words of the block it sits in are its own words alone).
  * Runs in the browser: self-contained.
  */
@@ -96,7 +96,7 @@ function shortTargets(main: Element) {
     const h = e.getBoundingClientRect().height;
     if (h === 0 || hidden(e)) continue;
     const kind = e.tagName === "SUMMARY" ? "summary" : e.closest(".table") ? "table link" : alone(e) ? "lone link" : null;
-    if (kind && h < 44) found.push({ what: `${kind} "${(e.textContent ?? "").trim().replace(/\s+/g, " ").slice(0, 50)}"`, h: Math.round(h) });
+    if (kind && h < 48) found.push({ what: `${kind} "${(e.textContent ?? "").trim().replace(/\s+/g, " ").slice(0, 50)}"`, h: Math.round(h) });
   }
   return found;
 }
@@ -114,8 +114,8 @@ test("the lone-link measure finds a short lone link, and leaves a link in a sent
   await page.setContent(`<!doctype html><html lang="en"><body style="font:16px/1.4 sans-serif"><main>
     <p><a href="/a">A link alone</a></p>
     <p>A sentence with <a href="/b">a link</a> inside it.</p>
-    <p><a href="/c" style="display:inline-flex;align-items:center;min-height:44px">A link line</a></p>
-    <p><a href="/d">One of a line of links</a> · <a href="/e" style="display:inline-flex;min-height:44px">Another</a></p>
+    <p><a href="/c" style="display:inline-flex;align-items:center;min-height:48px">A link line</a></p>
+    <p><a href="/d">One of a line of links</a> · <a href="/e" style="display:inline-flex;min-height:48px">Another</a></p>
     <details><summary>Short summary</summary></details>
   </main></body></html>`);
   const found = await page.locator("main").evaluate(shortTargets);
@@ -138,7 +138,7 @@ for (const width of [390, 1280]) {
       if (sideways > 0) problems.push(`${where} scrolls sideways by ${sideways}px`);
       const tree = await page.locator("body").ariaSnapshot();
       for (const line of tree.split("\n").filter((l) => UNNAMED.test(l))) problems.push(`${where} has a control with no accessible name: ${line.trim()}`);
-      for (const s of await page.locator("main").evaluate(shortTargets)) problems.push(`${where}: the ${s.what} is ${s.h}px tall, under 44`);
+      for (const s of await page.locator("main").evaluate(shortTargets)) problems.push(`${where}: the ${s.what} is ${s.h}px tall, under 48`);
     }
     expect(problems, `at ${width}px:\n${problems.join("\n")}`).toEqual([]);
     await context.close();

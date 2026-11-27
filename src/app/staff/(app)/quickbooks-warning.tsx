@@ -8,8 +8,8 @@ export async function QuickBooksWarning() {
   if (!problems.length) return null;
   return (
     <Notice tone="warning" title="QuickBooks needs attention" titleId="qbo-warn-h">
-      <ul className="notice-list">{problems.map((p) => <li key={p.kind}>{p.text}{p.fix && <> <LinkButton plain variant="secondary" size="sm" href={p.fix.href}>{p.fix.label}</LinkButton></>}</li>)}</ul>
-      <p className="box-foot"><LinkButton plain variant="secondary" href="/staff/settings/quickbooks">Open QuickBooks settings</LinkButton></p>
+      <ul className="notice-list">{problems.map((p) => <li key={p.kind}>{p.text}{p.fix && <> <LinkButton plain variant="tonal" size="sm" href={p.fix.href}>{p.fix.label}</LinkButton></>}</li>)}</ul>
+      <p className="box-foot"><LinkButton plain variant="outlined" href="/staff/settings/quickbooks">Open QuickBooks settings</LinkButton></p>
     </Notice>
   );
 }

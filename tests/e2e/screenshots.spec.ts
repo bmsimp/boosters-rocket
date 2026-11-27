@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import postgres from "postgres";
 import { staffSessionCookie } from "./staff-session";
+import { parentSessionCookie } from "./parent-session";
 import { BULK, seedBulk } from "./bulk-seed";
 
 /**
@@ -11,6 +12,10 @@ import { BULK, seedBulk } from "./bulk-seed";
  * "screenshots" (.github/workflows/focused.yml). The seed's connection is hidden for step 2 and the switch page, its
  * company kept for the roster, and put back; no press is ever selected. And a bulk action's Drawer on Accounting links
  * (Link to their suggested families, before its press), on data tests/e2e/bulk-seed.ts adds and takes away.
+ *
+ * And the Material 3 Expressive review set (the owner's of 2026-11-26): the parent's Home on a phone, the staff Home (the
+ * rail) and Settings › QuickBooks (the list pane) on a desktop, each in light and in dark; Accounting links with a row
+ * ticked (the floating toolbar) and its bulk sheet open, at both widths.
  */
 const sql = postgres(process.env.DATABASE_URL!);
 test.afterAll(async () => { await sql.end(); });
@@ -18,6 +23,38 @@ test.beforeEach(async ({ context }) => { await context.addCookies([staffSessionC
 
 const REALM = "9130000000000001";
 const shot = (name: string, project: string) => ({ path: `test-results/screenshots/${name}-${project}.png`, fullPage: true });
+const SCHEMES = ["light", "dark"] as const;
+/** Every animation on the page that ends run to its end (a spring caught midway is not the look). */
+const settle = (page: import("@playwright/test").Page) => page.evaluate(() => Promise.all(document.getAnimations()
+  .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity) // a busy spinner turns for ever
+  .map((a) => a.finished.catch(() => undefined))));
+
+test("the parent's Home on a phone, light and dark, for the owner to look at", async ({ page, context }, info) => {
+  test.skip(info.project.name !== "phone", "the phone's picture");
+  await context.addCookies([parentSessionCookie()]);
+  for (const scheme of SCHEMES) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.goto("/");
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await settle(page);
+    await page.screenshot(shot(`parent-home-${scheme}`, info.project.name));
+  }
+});
+
+test("the staff Home and Settings › QuickBooks on a desktop, light and dark, for the owner to look at", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop", "the desktop's pictures: the rail and the list pane");
+  for (const scheme of SCHEMES) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.goto("/staff");
+    await expect(page.locator("nav.staff-rail")).toBeVisible();
+    await settle(page);
+    await page.screenshot(shot(`staff-home-${scheme}`, info.project.name));
+    await page.goto("/staff/settings/quickbooks");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("QuickBooks");
+    await settle(page);
+    await page.screenshot(shot(`quickbooks-settings-${scheme}`, info.project.name));
+  }
+});
 
 test("the QuickBooks pages, for the owner to look at", async ({ page }, info) => {
   await page.goto("/staff/settings/quickbooks");
@@ -51,6 +88,7 @@ test("a Drawer and a ConfirmDialog, for the owner to look at", async ({ page }, 
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Disconnect QuickBooks" }).click();
   await expect(page.getByRole("dialog", { name: "Disconnect QuickBooks?" })).toBeVisible();
+  await settle(page); // sprung all the way in, not caught mid-fade
   await page.screenshot({ path: `test-results/screenshots/confirm-dialog-${info.project.name}.png` });
 });
 
@@ -58,6 +96,7 @@ test("QuickBooks settings' Disconnect, asking first, for the owner to look at", 
   await page.goto("/staff/settings/quickbooks");
   await page.getByRole("button", { name: "Disconnect QuickBooks" }).click();
   await expect(page.getByRole("dialog", { name: "Disconnect QuickBooks?" })).toBeVisible();
+  await settle(page); // sprung all the way in, not caught mid-fade
   await page.screenshot({ path: `test-results/screenshots/quickbooks-disconnect-${info.project.name}.png` });
 });
 
@@ -67,6 +106,8 @@ test("a bulk action's Drawer on Accounting links, for the owner to look at", asy
     await page.goto("/staff/links");
     const families = page.getByRole("region", { name: "Families" });
     await families.getByRole("checkbox", { name: `Select ${BULK.family}` }).check();
+    await settle(page);
+    await page.screenshot({ path: `test-results/screenshots/links-ticked-${info.project.name}.png` });
     const label = "Link 1 to its suggested family";
     if (info.project.name === "phone") {
       await families.getByRole("button", { name: "1 selected · Actions" }).click();

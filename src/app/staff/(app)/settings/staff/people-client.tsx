@@ -41,7 +41,7 @@ export function NameEdit({ id, name }: { id?: string; name: string }) {
   if (!editing) {
     return (
       <div className="staff-name-edit">
-        <button type="button" className="btn btn-quiet" onClick={() => { setValue(name); setEditing(true); }}>{self ? "Change my name" : "Change name"}<span className="visually-hidden">{self ? "" : ` for ${name}`}</span></button>
+        <button type="button" className="btn btn-text" onClick={() => { setValue(name); setEditing(true); }}>{self ? "Change my name" : "Change name"}<span className="visually-hidden">{self ? "" : ` for ${name}`}</span></button>
         {state?.ok && <Notice tone="done">Name saved.</Notice>}
       </div>
     );
@@ -52,8 +52,8 @@ export function NameEdit({ id, name }: { id?: string; name: string }) {
         <input value={value} onChange={(e) => setValue(e.target.value)} required maxLength={100} autoComplete={self ? "name" : "off"} /></label>
       {state && !state.ok && <ActionOutcome state={state} />}
       <div className="row-actions">
-        <button className="btn btn-line" disabled={pending}>{pending ? "Saving…" : "Save name"}</button>
-        <button type="button" className="btn btn-quiet" disabled={pending} onClick={() => setEditing(false)}>Cancel</button>
+        <button className="btn btn-outlined" disabled={pending}>{pending ? "Saving…" : "Save name"}</button>
+        <button type="button" className="btn btn-text" disabled={pending} onClick={() => setEditing(false)}>Cancel</button>
       </div>
     </form>
   );
@@ -88,11 +88,11 @@ export function PersonRow({ person, roles, canEdit, self }: { person: Person; ro
       {canEdit
         ? <form className="staff-roles" action={(f) => run(() => setStaffRolesAction(person.id, f), "Roles saved.")}>
             <RoleChecklist key={heldKey} roles={roles} initial={person.roles.map((r) => r.id)} legend={`Roles for ${person.name}`} idPrefix={person.id} />
-            <button className="btn btn-line" disabled={pending}>Save roles<span className="visually-hidden"> for {person.name}</span></button>
+            <button className="btn btn-outlined" disabled={pending}>Save roles<span className="visually-hidden"> for {person.name}</span></button>
           </form>
         : <p>{person.roles.map((r) => r.name).join(", ") || "No roles"}</p>}
       {canEdit && <div>
-        <button type="button" className="btn btn-quiet" disabled={pending}
+        <button type="button" className="btn btn-text" disabled={pending}
           onClick={() => run(() => setStaffStatusAction(person.id, disabled ? "active" : "disabled"), disabled ? "Sign-in turned back on." : "Sign-in turned off.")}>
           {disabled ? "Turn sign-in back on" : "Turn off sign-in"}<span className="visually-hidden"> for {person.name}</span></button>
       </div>}

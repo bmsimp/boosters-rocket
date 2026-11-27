@@ -43,7 +43,7 @@ test("the manifest answers as a manifest, built from the club's settings, with n
   const manifest = await res.json();
   expect(manifest).toMatchObject({
     name: CLUB.name, short_name: CLUB.name, id: "/", start_url: "/", scope: "/", display: "standalone",
-    theme_color: "#ffffff", background_color: "#f7f7f8", // the look's surface and ground, not the club's color
+    theme_color: "#f7f9fd", background_color: "#eceef2", // the look's surface and ground, not the club's color
   });
   expect(manifest.icons.map((i: { sizes: string; purpose: string }) => `${i.sizes} ${i.purpose}`))
     .toEqual(["192x192 any", "512x512 any", "192x192 maskable", "512x512 maskable"]);
@@ -78,10 +78,10 @@ test("the head of the sign-in page carries what a phone needs to install the por
   await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute("href", /^\/icons\/apple-touch-icon\.png\?v=[0-9a-f]{12}$/);
   await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute("sizes", "180x180");
   await expect(page.locator('link[rel="icon"]').first()).toHaveAttribute("href", /^\/icons\/favicon\.png\?v=[0-9a-f]{12}$/);
-  // The browser's bar matches the portal's white top bar in light and its dark surface in dark (src/lib/theme/palette.ts);
+  // The browser's bar matches the portal's top bar in light and its dark surface in dark (src/lib/theme/palette.ts);
   // the club's color stays the manifest's, for the installed app's splash.
-  await expect(page.locator('meta[name="theme-color"][media="(prefers-color-scheme: light)"]')).toHaveAttribute("content", "#ffffff");
-  await expect(page.locator('meta[name="theme-color"][media="(prefers-color-scheme: dark)"]')).toHaveAttribute("content", "#16181c");
+  await expect(page.locator('meta[name="theme-color"][media="(prefers-color-scheme: light)"]')).toHaveAttribute("content", "#f7f9fd");
+  await expect(page.locator('meta[name="theme-color"][media="(prefers-color-scheme: dark)"]')).toHaveAttribute("content", "#111316");
   await expect(page.locator('meta[name="color-scheme"]')).toHaveAttribute("content", "light dark");
   const viewport = await page.locator('meta[name="viewport"]').getAttribute("content");
   expect(viewport).toContain("width=device-width");
@@ -173,7 +173,7 @@ test("offline, a page load shows the offline page, and Try again brings the page
     await expect(page).toHaveTitle("You're offline");
     const again = page.getByRole("link", { name: "Try again" });
     await expect(again).toBeVisible();
-    expect((await again.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect((await again.boundingBox())!.height).toBeGreaterThanOrEqual(48);
     await again.click(); // still offline: the same page again, not the browser's error
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("You're offline");
     await page.goto("/no-such-page?x=1"); // any address at all
@@ -301,7 +301,7 @@ test.describe("the install hint on the Display page", () => {
     });
     const install = page.locator(".install-hint").getByRole("button", { name: "Install" });
     await expect(install).toBeVisible();
-    expect((await install.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect((await install.boundingBox())!.height).toBeGreaterThanOrEqual(48);
     await expect(page.locator(".install-hint").getByRole("button", { name: "Not now" })).toHaveCount(0);
     await install.click();
     await expect.poll(() => page.evaluate(() => (window as unknown as { prompted?: number }).prompted)).toBe(1);
@@ -368,7 +368,7 @@ test.describe("the install hint on the sign-in page", () => {
     await expect(hint(page)).not.toContainText(/E2E|Zelda|Quetzalcoatl/);
 
     const notNow = hint(page).getByRole("button", { name: "Not now" });
-    expect((await notNow.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect((await notNow.boundingBox())!.height).toBeGreaterThanOrEqual(48);
     await notNow.click();
     await expect(hint(page)).toHaveCount(0);
     await expect(page.getByLabel("Email")).toBeVisible(); // the form is as it was
@@ -400,7 +400,7 @@ test.describe("the install hint on the sign-in page", () => {
     await expect(hint(page).getByRole("button", { name: "Not now" })).toBeVisible();
     // Two buttons side by side, not the form's full-width ones.
     const [a, b] = [(await install.boundingBox())!, (await hint(page).getByRole("button", { name: "Not now" }).boundingBox())!];
-    expect(a.height).toBeGreaterThanOrEqual(44);
+    expect(a.height).toBeGreaterThanOrEqual(48);
     expect(Math.abs(a.y - b.y)).toBeLessThanOrEqual(1);
     await install.click();
     await expect.poll(() => page.evaluate(() => (window as unknown as { prompted?: number }).prompted)).toBe(1);

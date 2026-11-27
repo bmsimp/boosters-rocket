@@ -106,7 +106,7 @@ const aCode = (parentId: string) => db.insert(signinCode).values({ parentId, cod
 const queued = async () => (await db.select().from(writeQueue)).map((i) => ({ state: i.state, sent: i.sent, target: i.targetQboId, familyId: i.familyId, request: i.request }))
   .sort((a, b) => String(a.target).localeCompare(String(b.target)));
 const DONE = (email: string) => ({ ok: true, message: EMAIL_COPY.done(email), signedOut: true });
-const OFFER = `<a class="btn btn-line" href="/family/email">Change my sign-in email</a>`;
+const OFFER = `<a class="btn btn-outlined" href="/family/email">Change my sign-in email</a>`;
 
 describe("asking for the change", () => {
   it("stores the request, mails a link to the new address and a notice to the old, and changes nothing else", async () => {

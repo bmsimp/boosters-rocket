@@ -49,7 +49,7 @@ export default async function FamilyEmailPage() {
             )}
         </Card>
       ) : (
-        <Card title="Ask the club" titleId="ask-h" actions={<LinkButton plain variant="secondary" href="/family">Back to Family</LinkButton>}>
+        <Card title="Ask the club" titleId="ask-h" actions={<LinkButton plain variant="outlined" href="/family">Back to Family</LinkButton>}>
           <p className="help">{EMAIL_COPY.askTheClub}{club.treasurerEmail
             ? <> You can email the treasurer at <a href={`mailto:${club.treasurerEmail}`}>{club.treasurerEmail}</a>.</> : null}</p>
         </Card>

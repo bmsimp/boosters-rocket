@@ -87,7 +87,7 @@ export function ImportOffer({ proposable, mayChangeFamilies }: { proposable: num
   return (
     <>
       <p>{IMPORT_WORDS.offerLead(proposable)}</p>
-      <p><LinkButton variant="secondary" href={IMPORT_STEP}>{IMPORT_WORDS.offer}</LinkButton></p>
+      <p><LinkButton variant="outlined" href={IMPORT_STEP}>{IMPORT_WORDS.offer}</LinkButton></p>
     </>
   );
 }

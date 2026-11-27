@@ -24,15 +24,16 @@ async function staffWith(...patterns: string[]) {
   asStaff(s);
 }
 const asAdmin = async () => asStaff(await seedStaff({ email: "admin@club.org", name: "Ada Admin", admin: true }));
-/** The desktop menu: the `<nav class="top-nav">` of the bar, groups and their hidden panels included. */
-const menu = async () => /<nav class="top-nav"[^>]*>(.*?)<\/nav>/.exec(await renderPage(StaffLayout))![1]!;
+/** The desktop menu: the rail (`<nav class="staff-rail">`), every group's pages in the open under its heading. */
+const menu = async () => /<nav class="staff-rail"[^>]*>(.*?)<\/nav>/.exec(await renderPage(StaffLayout))![1]!;
 /** The menu's entries in words: "Home", "Settings", or "Families: Roster, Parents". */
 async function entries(): Promise<string[]> {
   const nav = await menu();
   const out: string[] = [];
-  for (const m of nav.matchAll(/<div class="nav-group"[^>]*><button[^>]*>([^<]*).*?<\/button><div[^>]*>(.*?)<\/div><\/div>|<a\b[^>]*>([^<]*)<\/a>/g)) {
+  const label = /<a\b[^>]*>(?:<svg.*?<\/svg>)?([^<]*)<\/a>/g;
+  for (const m of nav.matchAll(/<div role="group"[^>]*><span[^>]*class="rail-heading"[^>]*>([^<]*)<\/span>(.*?)<\/div>|<a\b[^>]*>(?:<svg.*?<\/svg>)?([^<]*)<\/a>/g)) {
     if (m[3] !== undefined) out.push(m[3]);
-    else out.push(`${m[1]}: ${[...m[2]!.matchAll(/<a\b[^>]*>([^<]*)<\/a>/g)].map((a) => a[1]).join(", ")}`);
+    else out.push(`${m[1]}: ${[...m[2]!.matchAll(label)].map((a) => a[1]).join(", ")}`);
   }
   return out;
 }
@@ -56,17 +57,14 @@ describe("the staff menu", () => {
     ]);
   });
 
-  it("draws each group as a closed button that says what it controls, its links hidden until it opens", async () => {
+  it("draws each group with its name over its pages, always open, with nothing to open or close", async () => {
     await asAdmin();
     const nav = await menu();
-    const buttons = [...nav.matchAll(/<button\b([^>]*)>/g)].map((b) => b[1]!);
-    expect(buttons).toHaveLength(3);
-    for (const b of buttons) {
-      expect(b).toContain('type="button"');
-      expect(b).toContain('aria-expanded="false"');
-      const controls = /aria-controls="([^"]+)"/.exec(b)![1];
-      expect(nav).toContain(`<div id="${controls}" class="nav-panel" hidden="">`);
-    }
+    // Each group is named by its label (role="group", aria-labelledby), its pages drawn under it.
+    for (const m of nav.matchAll(/<div role="group" aria-labelledby="([^"]+)"[^>]*><span id="([^"]+)" class="rail-heading"/g)) expect(m[1]).toBe(m[2]);
+    expect([...nav.matchAll(/<span[^>]*class="rail-heading"[^>]*>([^<]*)<\/span>/g)].map((h) => h[1])).toEqual(["Families", "Season", "Money"]);
+    // Nothing to open or close: no button, no disclosure, nothing hidden.
+    expect(nav).not.toMatch(/<button|aria-expanded|hidden=""|<details/);
   });
 
   it("no longer lists the settings pages one by one, so Parents and Parent sign-ins are not side by side", async () => {
@@ -192,10 +190,6 @@ describe("the staff menu", () => {
       expect(await current(path), path).toEqual(["/staff/settings"]);
     }
     atPath("/staff/volunteer/credit");
-    const groups = [...(await menu()).matchAll(/<button\b[^>]*class="([^"]*)"[^>]*>([^<]*)/g)].map((b) => [b[2], b[1]]);
-    expect(groups).toEqual([["Families", "nav-group-button"], ["Season", "nav-group-button here"], ["Money", "nav-group-button"]]);
-    expect(await menu()).toContain('aria-label="Season, current section"');
-    expect(await menu()).not.toContain('aria-label="Families, current section"');
   });
 });
 

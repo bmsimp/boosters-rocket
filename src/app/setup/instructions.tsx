@@ -40,7 +40,7 @@ export function MicrosoftAppSteps({ appUrl, script, example }: { appUrl: string;
       { value: "script", label: "With the PowerShell script", hint: "It does the steps for you and prints the values to enter below.", steps: (
         <div className="stack">
           <p>It needs PowerShell 7 and the Microsoft Graph module (<code>Install-Module Microsoft.Graph.Authentication</code>); with <code>-SetUpMail</code>, the Exchange Online module too (<code>Install-Module ExchangeOnlineManagement</code>).</p>
-          <p><a className="btn btn-line" href={`/setup/scripts/${script}`} download>Download {script}</a></p>
+          <p><a className="btn btn-outlined" href={`/setup/scripts/${script}`} download>Download {script}</a></p>
           <CopyField label="On Windows, unblock it first" value={`Unblock-File .\\${script}`} />
           <CopyField label="Then run" value={example} />
         </div>

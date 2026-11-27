@@ -56,7 +56,7 @@ export default async function ParentsPage({ searchParams }: { searchParams: Prom
         <form method="get" role="search">
           <Toolbar label="Search the parents">
             <TextInput id="parents-q" label="Find a person by name or email" name="q" type="search" defaultValue={typed} autoComplete="off" />
-            <Button type="submit" variant="secondary">Find</Button>
+            <Button type="submit" variant="outlined">Find</Button>
           </Toolbar>
         </form>
         {people.length === 0 ? (typed ? <Notice tone="info">Nobody matches.</Notice> : <EmptyState title="Nobody yet." />) : <People people={people} typed={typed} />}

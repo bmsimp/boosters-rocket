@@ -20,7 +20,7 @@ export function NewEmailForm() {
       {/* Busy is aria-disabled, not disabled: a disabled button drops the focus, and the keyboard's place with it. */}
       <div className="row-actions">
         <Button type="submit" busy={pending}>{pending ? "Sending…" : "Send me a link"}</Button>
-        <LinkButton plain variant="secondary" href="/family">Back to Family</LinkButton>
+        <LinkButton plain variant="outlined" href="/family">Back to Family</LinkButton>
       </div>
     </form>
   );
@@ -39,7 +39,7 @@ export function ConfirmEmailForm({ token }: { token: string }) {
       <ActionOutcome state={result} />
       <div className="row-actions">
         <Button type="submit" busy={pending}>{pending ? "Changing…" : "Yes, use this address"}</Button>
-        <LinkButton plain variant="secondary" href="/family">Not now</LinkButton>
+        <LinkButton plain variant="outlined" href="/family">Not now</LinkButton>
       </div>
     </form>
   );

@@ -52,7 +52,7 @@ export function InvoiceRows({ f, today, buyouts, dates = "one" }: { f: MoneyFigu
   return f.open.map((invoice) => {
     const amount = formatMoney(invoice.balanceCents, invoice.currency);
     const filled = invoice.qboId === first;
-    const variant = filled ? "primary" : "secondary";
+    const variant = filled ? "filled" : "tonal";
     const buyout = buyoutTitleOf(buyouts, invoice);
     const tone = dueTone(invoice.dueDate, today);
     const dated = invoice.date && <span className="when">Invoice date <CalendarDate iso={invoice.date} /></span>;
@@ -93,7 +93,7 @@ export function HomeTotal({ money, buyouts }: { money: FamilyMoney; buyouts?: My
   const unpayable = f.open.some((i) => i.payLink === null);
   return (
     <Card className="money" title="Total owed" titleId="money-h" headActions={total !== null && <span className="amt num">{total}</span>}
-      actions={<LinkButton variant="secondary" href="/payments">See your payments</LinkButton>}>
+      actions={<LinkButton variant="outlined" href="/payments">See your payments</LinkButton>}>
       <p className="asof">{f.open.length ? "Owed now." : "Nothing owed."} From QuickBooks, as of <LocalTime iso={f.asOf} />.</p>
       {total === null && <p className="help">These invoices are in more than one currency, so there is no single total.</p>}
       {f.open.length > 0 ? (
@@ -151,7 +151,7 @@ export function MoneySection({ money, more = false, buyouts, title }: { money: F
   return (
     <Card className="money" title={title ?? money.familyName ?? "What you owe"} titleId="money-h"
       headActions={total !== null && <span className="amt num">{total}</span>}
-      actions={more && !money.notConnected && <LinkButton variant="secondary" href="/payments">See your payments</LinkButton>}>
+      actions={more && !money.notConnected && <LinkButton variant="outlined" href="/payments">See your payments</LinkButton>}>
       {money.figures
         ? <Figures f={money.figures} today={money.today} buyouts={buyouts} />
         : money.notConnected

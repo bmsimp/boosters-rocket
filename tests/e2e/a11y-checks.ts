@@ -1,6 +1,6 @@
 /**
  * What tests/e2e/parent-a11y.spec.ts measures in the page itself, beside axe-core: sideways scrolling, text clipped by
- * its box, text drawn over other text, and tap targets under 44 by 44 CSS pixels. Each finding names the element by a
+ * its box, text drawn over other text, and tap targets under 48 by 48 CSS pixels. Each finding names the element by a
  * short CSS path and the start of its text.
  *
  * `layoutProblems` runs inside the browser (page.evaluate sends its source), so it must stay self-contained: no imports,
@@ -8,8 +8,8 @@
  */
 export type LayoutProblem = { element: string; problem: string };
 
-/** The smallest tap target, in CSS pixels, on every side (PRODUCT.md and DESIGN.md: 44px, more than WCAG 2.5.8's 24). */
-export const MIN_TARGET = 44;
+/** The smallest tap target, in CSS pixels, on every side (PRODUCT.md and docs/agents/ui.md: M3's 48px, more than WCAG 2.5.8's 24). */
+export const MIN_TARGET = 48;
 
 export function layoutProblems(minTarget: number): LayoutProblem[] {
   const problems: LayoutProblem[] = [];

@@ -215,7 +215,7 @@ describe("QuickBooks settings", () => {
     // Connected (step 2 renews): no company question, so the switch's button and its sentence are the way in.
     const connected = await setupHtml("connect");
     expect(connected).not.toContain('name="company"');
-    expect(connected).toContain('class="btn btn-line" href="/staff/settings/quickbooks/switch">Connect a different company</a>');
+    expect(connected).toContain('class="btn btn-outlined" href="/staff/settings/quickbooks/switch">Connect a different company</a>');
     expect(connected).toContain("Moving the portal to another QuickBooks company ends every family&#x27;s link to the books.");
     // Disconnected, the question is asked, and covers it: neither is drawn.
     await disconnectAction();

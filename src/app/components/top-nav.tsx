@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
+import { Fragment, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { MenuEntry, MenuLink } from "@/app/staff/(app)/staff-menu";
@@ -45,54 +45,59 @@ export function AccountLink({ href, initials, label }: { href: string; initials:
 const currentKey = (l: MenuLink): string => l.section ?? l.href;
 /** What marks each entry current: its section where it has one (Settings), else its address. */
 const hrefsOf = (menu: MenuEntry[]) => menu.flatMap((m) => (m.kind === "link" ? [currentKey(m)] : m.links.map(currentKey)));
-const groupId = (i: number) => `staff-menu-${i}`;
+
+/** Each page's icon in the rail, by address: line icons in the tab bar's style. A page with none is drawn without one. */
+const RAIL_ICONS: Record<string, ReactNode> = {
+  "/staff": <path d="M3 11l9-7 9 7v9h-6v-6H9v6H3z" />,
+  "/staff/roster": <><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M8 8h8M8 12h8M8 16h5" /></>,
+  "/staff/parents": <><circle cx="9" cy="8" r="3" /><circle cx="17" cy="9" r="2.5" /><path d="M3 20c0-3 3-5 6-5s6 2 6 5M15 15c3 0 6 1.5 6 4" /></>,
+  "/staff/links": <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />,
+  "/staff/messages": <path d="M4 5h16v11H8l-4 4z" />,
+  "/staff/seasons": <><rect x="3.5" y="5" width="17" height="15" rx="2" /><path d="M3.5 10h17M8 3v4M16 3v4" /></>,
+  "/staff/seasons/progress": <path d="M5 12.5l4.5 4.5L19 7.5" />,
+  "/staff/forms": <><path d="M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" /><path d="M14 3v5h5M9 13h6M9 17h4" /></>,
+  "/staff/volunteer": <path d="M12 20s-8-4.6-8-10.2A4.3 4.3 0 0 1 12 7.4a4.3 4.3 0 0 1 8 2.4C20 15.4 12 20 12 20z" />,
+  "/staff/volunteer/credit": <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></>,
+  "/staff/balances": <path d="M12 3v18M17 7.5c0-1.9-2.2-3-5-3s-5 1.1-5 3 2.2 2.7 5 3.2 5 1.4 5 3.3-2.2 3-5 3-5-1.1-5-3" />,
+  "/staff/reconciliation": <><rect x="3" y="6" width="18" height="12" rx="2" /><path d="M3 10h18M7 15h3" /></>,
+  settings: <><circle cx="12" cy="12" r="3" /><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7" /></>,
+};
+
+function RailLink({ link, current, icon }: { link: MenuLink; current: string | null; icon?: ReactNode }) {
+  return (
+    <Link href={link.href} aria-current={currentKey(link) === current ? "page" : undefined}>
+      {icon && <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{icon}</svg>}
+      {link.label}
+    </Link>
+  );
+}
 
 /**
- * The staff menu at 760px and wider: Home, Settings and the other single entries as links, and each group as a button
- * that opens its links below it (a disclosure: aria-expanded says whether it is open). Nothing opens on hover. A group
- * closes when one of its links is chosen, on Escape (focus goes back to its button), when focus is tabbed out of it, and
- * when the pointer goes down anywhere outside the menu. One group is open at a time. The group that holds the page the
- * person is on is marked, and the link itself carries aria-current. Closed groups' links are in the page but hidden.
+ * The staff menu from 1200px wide: M3's expanded navigation rail, always open (the owner's D5 of 2026-11-26). Home,
+ * then each group's label (a name for its group, not a heading of the page) with every one of its pages under it, then Settings: nothing collapses and nothing opens on
+ * hover. The page the person is on carries aria-current (the longer address where two match). Below 1200px the rail is
+ * not drawn: the staff tab bar and the group hubs hold the menu.
  */
-export function StaffNav({ menu }: { menu: MenuEntry[] }) {
+export function StaffRail({ menu }: { menu: MenuEntry[] }) {
   const path = usePathname();
   const current = currentHref(path, hrefsOf(menu));
-  const [open, setOpen] = useState<number | null>(null);
-  const navRef = useRef<HTMLElement>(null);
-  const buttons = useRef<(HTMLButtonElement | null)[]>([]);
-  useEffect(() => {
-    if (open === null) return;
-    const away = (ev: PointerEvent) => { if (!navRef.current?.contains(ev.target as Node)) setOpen(null); };
-    document.addEventListener("pointerdown", away);
-    return () => document.removeEventListener("pointerdown", away);
-  }, [open]);
-  const onKey = (i: number) => (ev: KeyboardEvent) => {
-    if (ev.key === "Escape" && open === i) { ev.preventDefault(); setOpen(null); buttons.current[i]?.focus(); }
-  };
-  // Only a focus that lands somewhere else closes the group: a click on a link in it, in a browser that doesn't focus
-  // links on click, blurs with nowhere to go, and must not close the group before the click arrives.
-  const onBlur = (i: number) => (ev: FocusEvent<HTMLDivElement>) => {
-    const to = ev.relatedTarget as Node | null;
-    if (to && !ev.currentTarget.contains(to) && open === i) setOpen(null);
-  };
   return (
-    <nav className="top-nav" aria-label="Main" ref={navRef}>
+    <nav className="staff-rail" aria-label="Main">
       {menu.map((m, i) => {
-        if (m.kind === "link") return <Link key={m.href} href={m.href} aria-current={currentKey(m) === current ? "page" : undefined}>{m.label}</Link>;
-        const here = m.links.some((l) => currentKey(l) === current);
-        const isOpen = open === i;
+        if (m.kind === "link") {
+          const settings = m.label === "Settings";
+          return (
+            <Fragment key={m.href}>
+              {settings && i > 0 && <hr className="rail-rule" />}
+              <RailLink link={m} current={current} icon={RAIL_ICONS[settings ? "settings" : m.href]} />
+            </Fragment>
+          );
+        }
+        const headingId = `staff-rail-${i}`;
         return (
-          <div key={m.label} className="nav-group" onKeyDown={onKey(i)} onBlur={onBlur(i)}>
-            <button type="button" ref={(b) => { buttons.current[i] = b; }} className={here ? "nav-group-button here" : "nav-group-button"}
-              aria-expanded={isOpen} aria-controls={groupId(i)} aria-label={here ? `${m.label}, current section` : undefined} onClick={() => setOpen(isOpen ? null : i)}>
-              {m.label}
-              <svg className="nav-caret" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="2" /></svg>
-            </button>
-            <div id={groupId(i)} className="nav-panel" hidden={!isOpen}>
-              {m.links.map((l) => (
-                <Link key={l.href} href={l.href} aria-current={currentKey(l) === current ? "page" : undefined} onClick={() => setOpen(null)}>{l.label}</Link>
-              ))}
-            </div>
+          <div key={m.label} role="group" aria-labelledby={headingId} className="rail-section">
+            <span id={headingId} className="rail-heading">{m.label}</span>
+            {m.links.map((l) => <RailLink key={l.href} link={l} current={current} icon={RAIL_ICONS[l.href]} />)}
           </div>
         );
       })}

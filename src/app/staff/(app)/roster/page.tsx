@@ -43,7 +43,7 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
   const mayAdd = can(ctx.effective, "Roster.Family.ReadWrite") && !(await connectedToAnotherCompany());
   const goes = !can(ctx.effective, "Accounting.Link.ReadWrite") ? "no_permission" as const : page.connected ? "sends" as const : "not_connected" as const;
   const admin = can(ctx.effective, "Settings.QuickBooks.ReadWrite");
-  const settings = admin ? <> <LinkButton plain variant="secondary" size="sm" href="/staff/settings/quickbooks">Open QuickBooks settings</LinkButton></> : " An Admin can do that under QuickBooks.";
+  const settings = admin ? <> <LinkButton plain variant="tonal" size="sm" href="/staff/settings/quickbooks">Open QuickBooks settings</LinkButton></> : " An Admin can do that under QuickBooks.";
   const matches = (name: string) => !q || name.toLowerCase().includes(q); // a plain substring: nothing typed is a pattern
   const roster = page.lastOkAt ? page.roster : null; // a shape with no successful read has nothing real to list
   const unread = Boolean(page.roster && !page.lastOkAt);
@@ -94,7 +94,7 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
           <form method="get" role="search">
             <Toolbar label="Search the roster">
               <TextInput id="roster-q" label={`Find a ${noun}`} name="q" type="search" defaultValue={typed} autoComplete="off" />
-              <Button type="submit" variant="secondary">Find</Button>
+              <Button type="submit" variant="outlined">Find</Button>
             </Toolbar>
           </form>
           {rows.length === 0

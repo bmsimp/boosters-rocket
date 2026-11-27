@@ -97,7 +97,7 @@ export function PasskeyOffer({ portalOrigin }: { portalOrigin: string }) {
             <button type="button" className="btn" aria-disabled={busy !== null || undefined} onClick={() => void turnOn()}>
               {busy === "on" ? WORDS.turnOnBusy : WORDS.turnOn}
             </button>
-            <button type="button" className="btn btn-line" aria-disabled={busy !== null || undefined} onClick={() => void notNow()}>{WORDS.notNow}</button>
+            <button type="button" className="btn btn-outlined" aria-disabled={busy !== null || undefined} onClick={() => void notNow()}>{WORDS.notNow}</button>
           </div>
           {errors && (
             <div ref={refused} tabIndex={-1}>

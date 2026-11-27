@@ -17,7 +17,7 @@ function ActionButton({ label, busy, action, confirmText }: { label: string; bus
   return (
     <form action={run} onSubmit={confirmText ? (e) => { if (!confirm(confirmText)) e.preventDefault(); } : undefined}>
       {state && !state.ok && <ActionOutcome state={state} />}
-      <button className="btn btn-line" disabled={pending}>{pending ? busy : label}</button>
+      <button className="btn btn-outlined" disabled={pending}>{pending ? busy : label}</button>
     </form>
   );
 }
@@ -46,7 +46,7 @@ function DownloadLink({ fileName }: { fileName: string }) {
   };
   return (
     <>
-      <p><a className="btn btn-line" href={href} download onClick={download}>Download certificate (.cer)</a></p>
+      <p><a className="btn btn-outlined" href={href} download onClick={download}>Download certificate (.cer)</a></p>
       {failed && <Notice tone="problem">The certificate didn&apos;t download. Reload the page and try again.</Notice>}
     </>
   );

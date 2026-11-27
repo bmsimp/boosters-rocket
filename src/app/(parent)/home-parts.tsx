@@ -42,9 +42,9 @@ function askedNow(season: MySeason | null, students: MyStudent[] | null): { key:
 function LineAction({ line, who }: { line: Line; who: string | null }) {
   const named = <span className="visually-hidden">: {line.title}{who ? `, ${who}` : ""}</span>;
   if (line.kind === "form" && line.words !== STATE_WORDS.notReady) {
-    return <LinkButton plain size="sm" variant="secondary" href="/forms">{line.words === STATE_WORDS.notSigned ? "Sign" : "Open"}{named}</LinkButton>;
+    return <LinkButton plain size="sm" variant="tonal" href="/forms">{line.words === STATE_WORDS.notSigned ? "Sign" : "Open"}{named}</LinkButton>;
   }
-  if (line.kind === "volunteer") return <LinkButton plain size="sm" variant="secondary" href="/volunteer">Open{named}</LinkButton>;
+  if (line.kind === "volunteer") return <LinkButton plain size="sm" variant="tonal" href="/volunteer">Open{named}</LinkButton>;
   return null;
 }
 

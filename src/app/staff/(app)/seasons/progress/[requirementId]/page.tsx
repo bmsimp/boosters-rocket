@@ -57,7 +57,7 @@ export default async function RequirementProgressPage({ params, searchParams }: 
         {counts.asked > 0 && (
           <form method="get" role="search" className="stack">
             <label className="field"><span>Find by name</span><input name="q" type="search" defaultValue={typed} autoComplete="off" /></label>
-            <button className="btn btn-line">Find</button>
+            <button className="btn btn-outlined">Find</button>
           </form>
         )}
         {canChange && ticked && shown.length > 0 && (

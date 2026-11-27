@@ -109,7 +109,7 @@ describe("the Payments page", () => {
     const [first, second] = pays(html);
     expect(first).toContain('class="btn btn-sm pay"');
     expect(first).toContain('aria-label="Pay $40.50, invoice INV-2 for Rafferty Riverquill"');
-    expect(second).toContain('class="btn btn-line btn-sm pay"');
+    expect(second).toContain('class="btn btn-tonal btn-sm pay"');
     expect(second).toContain('href="https://connect.intuit.com/t/one"');
     expect(html).toContain("Each invoice opens on QuickBooks&#x27; secure payment page.");
     expect(html).toContain('<span class="list-title">Invoice INV-3, Rosalind Riverquill</span>');
@@ -486,7 +486,7 @@ describe("the money box for Home", () => {
     expect(html).toMatch(/^<section class="box money" aria-labelledby="money-h"><div class="card-head"><div><h2 id="money-h">Alderquist Family<\/h2>/);
     for (const mine of moneyMarkers(FAMILY_A).filter((m) => !m.includes("7103") && m !== "$7,173.11")) expect(html).toContain(mine);
     expect(html).not.toMatch(/INV-ALDERQUIST-7103|\$7,173\.11|Paid in the last/); // the paid list is on the Payments page
-    expect(html).toMatch(/<a class="btn btn-line" href="\/payments">See your payments<\/a>/);
+    expect(html).toMatch(/<a class="btn btn-outlined" href="\/payments">See your payments<\/a>/);
     const theirs = b.markers.filter((m) => html.toLowerCase().includes(m.toLowerCase()));
     expect(theirs).toEqual([]);
   });

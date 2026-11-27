@@ -37,7 +37,7 @@ test("a parent's visit: sign in by password and emailed code, read and do what t
   await sql`DELETE FROM signin_code`;
   await sql`DELETE FROM rate_limit_event`;
   sink.messages.length = 0;
-  const phone = (page.viewportSize()?.width ?? 0) < 760;
+  const phone = (page.viewportSize()?.width ?? 0) < 840;
   /** A parent tab: the tab bar at the foot of a phone, the club bar's links on a laptop. */
   const tab = (name: string) => (phone ? page.locator("nav.tabs") : page.locator("header.bar")).getByRole("link", { name, exact: true });
 

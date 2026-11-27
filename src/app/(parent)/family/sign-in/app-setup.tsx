@@ -11,7 +11,7 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
   };
   return (
     <div className="stack">
-      <Button variant="secondary" onClick={() => void copy()}>{label}</Button>
+      <Button variant="outlined" onClick={() => void copy()}>{label}</Button>
       <p role="status" className="help">{state === "copied" ? COPY.copied : state === "failed" ? COPY.copyFailed : ""}</p>
     </div>
   );

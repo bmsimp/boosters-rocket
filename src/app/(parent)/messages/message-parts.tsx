@@ -37,7 +37,7 @@ export function ParentVersionView({ version, filesLabel }: { version: ParentVers
         <List label={filesLabel}>
           {version.files.map((f) => (
             <ListRow key={f.id} title={f.name} meta={[f.picture ? "Picture" : MESSAGE_FILE_WORDS[f.type], fileSizeWords(f.size)]}
-              action={<LinkButton plain size="sm" variant="secondary" href={parentFileHref(f.id)}>{f.picture ? "Open" : "Download"}<span className="visually-hidden"> {f.name}</span></LinkButton>} />
+              action={<LinkButton plain size="sm" variant="tonal" href={parentFileHref(f.id)}>{f.picture ? "Open" : "Download"}<span className="visually-hidden"> {f.name}</span></LinkButton>} />
           ))}
         </List>
       )}
@@ -54,9 +54,9 @@ export function HomeMessages({ summary }: { summary: { total: number; fresh: num
   if (summary.fresh === 0 || !summary.newest) return <p className="home-messages"><Link className="link-line" href="/messages">Messages</Link></p>;
   const heading = summary.fresh === 1 ? "1 new message from the club" : `${summary.fresh} new messages from the club`;
   return (
-    <Card className="home-messages" title={heading} titleId="home-messages-h"
-      actions={<LinkButton variant="secondary" href="/messages">{summary.fresh === 1 ? "Read it in Messages" : "Read them in Messages"}</LinkButton>}>
-      <p><Link href={`/messages/${summary.newest.id}`}>{summary.newest.title}</Link></p>
+    <Card tonal className="home-messages" title={heading} titleId="home-messages-h"
+      actions={<LinkButton href="/messages">{summary.fresh === 1 ? "Read it in Messages" : "Read them in Messages"}</LinkButton>}>
+      <p><Link className="link-line" href={`/messages/${summary.newest.id}`}>{summary.newest.title}</Link></p>
     </Card>
   );
 }

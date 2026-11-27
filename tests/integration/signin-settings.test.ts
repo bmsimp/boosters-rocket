@@ -125,7 +125,7 @@ describe("the page", () => {
   it("is linked from the Family page's Your account box", async () => {
     const a = await seedSignedInParent(FAMILY_A);
     asParent(a.identity);
-    expect(await renderPage(FamilyPage)).toContain(`<a class="btn btn-line" href="/family/sign-in">Sign-in settings</a>`);
+    expect(await renderPage(FamilyPage)).toContain(`<a class="btn btn-outlined" href="/family/sign-in">Sign-in settings</a>`);
   });
 
   it("with a password and a proof just now: the change form, and nothing of the session, the person or the password", async () => {

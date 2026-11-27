@@ -59,8 +59,8 @@ export function InstallHint({ permanent = false }: { permanent?: boolean }) {
       <p>It opens with one tap, like any other app. There&apos;s nothing to download from a store.</p>
       {view === "install" && (
         <div className="row-actions install-actions">
-          <button type="button" className="btn btn-line" onClick={() => { void openInstallPrompt(); }}>Install</button>
-          {!permanent && <button type="button" className="btn btn-line" onClick={dismiss}>Not now</button>}
+          <button type="button" className="btn btn-outlined" onClick={() => { void openInstallPrompt(); }}>Install</button>
+          {!permanent && <button type="button" className="btn btn-outlined" onClick={dismiss}>Not now</button>}
         </div>
       )}
       {(view === "ios" || view === "ios-in-app") && (
@@ -80,7 +80,7 @@ export function InstallHint({ permanent = false }: { permanent?: boolean }) {
           )}
           {!permanent && (
             <div className="row-actions install-actions">
-              <button type="button" className="btn btn-line" onClick={dismiss}>Not now</button>
+              <button type="button" className="btn btn-outlined" onClick={dismiss}>Not now</button>
             </div>
           )}
         </>

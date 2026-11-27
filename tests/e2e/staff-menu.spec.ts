@@ -1,119 +1,74 @@
 import { test, expect, type Page } from "@playwright/test";
 import { staffSessionCookie } from "./staff-session";
 
-// The seeded staff member is an Admin, who has every menu entry there is. The menu is grouped: Home, three groups behind
-// buttons, and Settings as one entry (Staff, Roles, the audit log, Health and the design system are under it). Layout and the keyboard are things only a browser can show, so they are checked
-// here and not in vitest (tests/integration/staff-menu.test.ts checks who sees what).
-const TOP = ["Home", "Families", "Season", "Money", "Settings"];
+// The seeded staff member is an Admin, who has every menu entry there is. The menu is grouped: Home, three groups, and
+// Settings as one entry (Staff, Roles, the audit log, Health and the design system are under it). From 1200px it is
+// M3's expanded navigation rail (the owner's D5 of 2026-11-26): every group's pages under its heading, always open, no
+// collapse. Below 1200px the staff tab bar and the group hubs are the menu. Layout and the keyboard are things only a
+// browser can show, so they are checked here and not in vitest (tests/integration/staff-menu.test.ts checks who sees what).
 const GROUPS: Record<string, string[]> = {
   Families: ["Roster", "Parents", "Accounting links", "Messages"],
   Season: ["Seasons", "Progress", "Signed forms", "Volunteering", "Volunteer credit"],
   Money: ["Balances", "Reconciliation"],
 };
-const nav = (page: Page) => page.locator("header.bar nav.top-nav");
-/** The menu's own entries, in order: the links and group buttons of the bar, not the links inside a group. */
-const topEntries = (page: Page) => nav(page).locator(":scope > a, :scope > .nav-group > button");
-const group = (page: Page, name: string) => nav(page).getByRole("button", { name: new RegExp(`^${name}`) });
+const rail = (page: Page) => page.locator("nav.staff-rail");
+const ALL = ["Home", ...Object.values(GROUPS).flat(), "Settings"];
 
-for (const width of [760, 900, 1032, 1440]) {
-  test(`an Admin's grouped menu fits the club bar at ${width}px, and each group opens inside the page`, async ({ browser }) => {
+for (const width of [1200, 1440]) {
+  test(`at ${width}px an Admin's menu is the rail: every group's pages in the open under its heading`, async ({ browser }) => {
     const context = await browser.newContext({ viewport: { width, height: 900 } });
     await context.addCookies([staffSessionCookie()]);
     const page = await context.newPage();
     await page.goto("/staff/settings/health");
-    await expect(nav(page)).toBeVisible();
-    // Health is a settings page: Settings is the current entry, and no group is.
-    await expect(topEntries(page)).toHaveText(TOP.map((t) => new RegExp(`^${t}`)));
-    await expect(page.locator("header.bar .club")).toBeVisible();
+    await expect(rail(page)).toBeVisible();
+    await expect(rail(page).getByRole("link")).toHaveText(ALL);
+    for (const [name, links] of Object.entries(GROUPS)) {
+      const g = rail(page).getByRole("group", { name });
+      await expect(g.locator(".rail-heading")).toHaveText(name);
+      await expect(g.getByRole("link")).toHaveText(links);
+      for (const l of links) await expect(g.getByRole("link", { name: l, exact: true })).toBeVisible();
+    }
+    // Nothing collapses, nothing is a disclosure, and the bar holds no menu of its own.
+    await expect(rail(page).locator("[aria-expanded], button, details")).toHaveCount(0);
+    await expect(page.locator("header.bar nav")).toHaveCount(0);
+    // Health is a settings page: Settings is the one current entry.
+    await expect(rail(page).locator('a[aria-current="page"]')).toHaveText(["Settings"]);
+    await expect(page.locator("nav.tabs.staff-tabs")).toBeHidden();
 
     const measured = await page.evaluate(() => {
-      const box = (el: Element) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, height: r.height, width: r.width }; };
-      const bar = document.querySelector("header.bar")!, wrap = bar.querySelector(".wrap")!;
-      return {
-        bar: box(bar), wrap: box(wrap), club: box(bar.querySelector(".club")!), account: box(bar.querySelector(".account")!),
-        entries: [...bar.querySelectorAll("nav.top-nav > a, nav.top-nav > .nav-group > button")].map((a) => ({ name: a.textContent ?? "", ...box(a) })),
-        scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth,
-      };
+      const box = (el: Element) => el.getBoundingClientRect().toJSON() as DOMRect;
+      const r = document.querySelector("nav.staff-rail")!, main = document.querySelector("main")!;
+      return { rail: box(r), main: box(main), links: [...r.querySelectorAll("a")].map((a) => ({ name: a.textContent ?? "", ...box(a) })),
+        scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth };
     });
     expect(measured.scrollWidth, "the page scrolls sideways").toBeLessThanOrEqual(measured.clientWidth);
-    for (const e of measured.entries) {
-      expect(e.left, `${e.name} starts left of the bar's column`).toBeGreaterThanOrEqual(measured.wrap.left - 1);
-      expect(e.right, `${e.name} runs past the bar's column`).toBeLessThanOrEqual(measured.wrap.right + 1);
-      expect(e.top, `${e.name} sticks out above the bar`).toBeGreaterThanOrEqual(measured.bar.top - 1);
-      expect(e.bottom, `${e.name} hangs below the bar`).toBeLessThanOrEqual(measured.bar.bottom + 1);
-      expect(e.height, `${e.name} is at least a tap target tall`).toBeGreaterThanOrEqual(44);
-      expect(e.height, `${e.name} broke onto a second line`).toBeLessThan(60);
+    expect(measured.rail.right, "the rail runs into the page").toBeLessThanOrEqual(measured.main.left + 1);
+    for (const l of measured.links) {
+      expect(l.height, `${l.name} is at least a 48px target`).toBeGreaterThanOrEqual(48);
+      expect(l.left, `${l.name} starts inside the rail`).toBeGreaterThanOrEqual(measured.rail.left - 1);
+      expect(l.right, `${l.name} runs past the rail`).toBeLessThanOrEqual(measured.rail.right + 1);
     }
-    for (const [i, a] of measured.entries.entries()) {
-      for (const b of measured.entries.slice(i + 1)) {
-        const apart = a.right <= b.left + 1 || b.right <= a.left + 1 || a.bottom <= b.top + 1 || b.bottom <= a.top + 1;
-        expect(apart, `${a.name} and ${b.name} overlap`).toBe(true);
-      }
-    }
-    expect(measured.club.width, "the club's name was squeezed out").toBeGreaterThan(60);
-    expect(measured.account.right).toBeLessThanOrEqual(measured.wrap.right + 1);
-    // With so few entries the bar is the one row it is for parents, wherever the club's name leaves room.
-    // The row is 56px; the bar under it draws a 1px hairline (the bar's bottom border).
-    if (width >= 900) expect(measured.wrap.height).toBe(56);
-
-    // Each group opens below the bar with its links, inside the page, and one at a time.
-    for (const [name, links] of Object.entries(GROUPS)) {
-      await group(page, name).click();
-      await expect(group(page, name)).toHaveAttribute("aria-expanded", "true");
-      const panel = page.locator(`#${await group(page, name).getAttribute("aria-controls")}`);
-      await expect(panel.getByRole("link")).toHaveText(links);
-      const r = (await panel.boundingBox())!;
-      expect(r.x, `${name}'s links start off the page`).toBeGreaterThanOrEqual(0);
-      expect(r.x + r.width, `${name}'s links run off the page`).toBeLessThanOrEqual(width);
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), `${name} open makes the page scroll sideways`).toBe(true);
-      await expect(nav(page).locator(".nav-panel:not([hidden])")).toHaveCount(1);
-    }
-    // Health, the page this is, is under Settings, which is current; no group says it holds the page.
-    await group(page, "Money").click();
-    await expect(group(page, "Money")).toHaveAttribute("aria-expanded", "false");
-    await expect(nav(page).locator(":scope > a", { hasText: "Settings" })).toHaveAttribute("aria-current", "page");
-    for (const name of Object.keys(GROUPS)) await expect(group(page, name)).not.toHaveAccessibleName(/current section/);
-    await group(page, "Money").click();
-    // A press outside the menu closes it.
-    await page.locator("main").click({ position: { x: 5, y: 5 } });
-    await expect(nav(page).locator(".nav-panel:not([hidden])")).toHaveCount(0);
     await context.close();
   });
 }
 
-test("the grouped menu works with the keyboard alone: a group is a button, Escape closes it and gives focus back", async ({ browser }) => {
+test("the rail works with the keyboard alone: each page is one Tab stop, in order, and Enter goes there", async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await context.addCookies([staffSessionCookie()]);
   const page = await context.newPage();
   await page.goto("/staff");
-  const families = group(page, "Families");
-  await families.focus();
-  await expect(families).toHaveAttribute("aria-expanded", "false");
-  await page.keyboard.press("Enter");
-  await expect(families).toHaveAttribute("aria-expanded", "true");
-  await page.keyboard.press("Tab");
-  await expect(nav(page).getByRole("link", { name: "Roster" })).toBeFocused();
-  await page.keyboard.press("Escape");
-  await expect(families).toHaveAttribute("aria-expanded", "false");
-  await expect(families).toBeFocused();
-  // Space opens it too, and tabbing on past its last link closes it: one Tab per link of the group, and one more.
-  await page.keyboard.press("Space");
-  await expect(families).toHaveAttribute("aria-expanded", "true");
-  for (let i = 0; i <= GROUPS.Families!.length; i++) await page.keyboard.press("Tab");
-  await expect(group(page, "Season")).toBeFocused();
-  await expect(families).toHaveAttribute("aria-expanded", "false");
-  // Hovering opens nothing.
-  await group(page, "Money").hover();
-  await expect(group(page, "Money")).toHaveAttribute("aria-expanded", "false");
-  // Enter on a link inside a group goes there.
-  await group(page, "Season").focus();
-  await page.keyboard.press("Enter");
-  await page.keyboard.press("Tab"); await page.keyboard.press("Tab");
-  await expect(nav(page).getByRole("link", { name: "Progress" })).toBeFocused();
+  await rail(page).getByRole("link", { name: "Home", exact: true }).focus();
+  for (const name of ALL.slice(1, 4)) {
+    await page.keyboard.press("Tab");
+    await expect(rail(page).getByRole("link", { name, exact: true })).toBeFocused();
+  }
+  // Hovering opens nothing and moves nothing.
+  await rail(page).getByRole("link", { name: "Balances" }).hover();
+  await expect(rail(page).getByRole("link")).toHaveText(ALL);
+  await rail(page).getByRole("link", { name: "Progress" }).focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/staff\/seasons\/progress$/);
-  await expect(group(page, "Season")).toHaveAccessibleName(/Season, current section/);
-  await expect(group(page, "Season")).toHaveAttribute("aria-expanded", "false");
+  await expect(rail(page).locator('a[aria-current="page"]')).toHaveText(["Progress"]);
   await context.close();
 });
 
@@ -122,28 +77,45 @@ test("on a Progress page only Progress is marked current, though its address sit
   await context.addCookies([staffSessionCookie()]);
   const page = await context.newPage();
   await page.goto("/staff/seasons/progress");
-  await expect(page.locator('header.bar nav.top-nav a[aria-current="page"]')).toHaveText(["Progress"]);
+  await expect(rail(page).locator('a[aria-current="page"]')).toHaveText(["Progress"]);
   await page.goto("/staff/seasons");
-  await expect(nav(page).locator('a[aria-current="page"]')).toHaveCount(1);
-  await expect(nav(page).locator('a[aria-current="page"]')).toHaveAttribute("href", "/staff/seasons");
+  await expect(rail(page).locator('a[aria-current="page"]')).toHaveCount(1);
+  await expect(rail(page).locator('a[aria-current="page"]')).toHaveAttribute("href", "/staff/seasons");
   await context.close();
 });
+
+for (const width of [900, 1032]) {
+  test(`at ${width}px, under 1200, the tab bar and the hubs are the menu and the rail is not drawn`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width, height: 900 } });
+    await context.addCookies([staffSessionCookie()]);
+    const page = await context.newPage();
+    await page.goto("/staff/roster");
+    await expect(rail(page)).toBeHidden();
+    const tabs = page.locator("nav.tabs.staff-tabs");
+    await expect(tabs).toBeVisible();
+    await expect(tabs.getByRole("link")).toHaveText(["Home", "Families", "Season", "Money", "Settings"]);
+    await expect(tabs.getByRole("link", { name: "Families" })).toHaveAttribute("aria-current", "page");
+    await expect(page.locator("p.hub-back").getByRole("link", { name: "Families" })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await context.close();
+  });
+}
 
 test("on a phone the menu is a bottom tab bar: Home, each group, Settings; a group's tab opens its hub, and its pages lead back to it", async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   await context.addCookies([staffSessionCookie()]);
   const page = await context.newPage();
   await page.goto("/staff");
-  await expect(nav(page)).toBeHidden();
+  await expect(rail(page)).toBeHidden();
   // The bar keeps the club and the initials only: no Menu button.
   await expect(page.getByRole("button", { name: "Menu" })).toHaveCount(0);
-  expect(await page.locator("header.bar .wrap").evaluate((el) => el.getBoundingClientRect().height)).toBe(56); // the one row, above the hairline
+  expect(await page.locator("header.bar .wrap").evaluate((el) => el.getBoundingClientRect().height)).toBe(64); // M3's small top app bar, one row
   const tabs = page.locator("nav.tabs.staff-tabs");
   await expect(tabs.getByRole("link")).toHaveText(["Home", "Families", "Season", "Money", "Settings"]);
   await expect(tabs.getByRole("link", { name: "Home" })).toHaveAttribute("aria-current", "page");
-  // Every tab is a 44px target or more, inside the screen, and the page above it clears the bar.
+  // Every tab is a 48px target or more, inside the screen, and the page above it clears the bar.
   for (const box of await tabs.getByRole("link").evaluateAll((all) => all.map((a) => a.getBoundingClientRect().toJSON() as DOMRect))) {
-    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(48);
     expect(box.right).toBeLessThanOrEqual(390);
   }
   expect(await page.evaluate(() => parseFloat(getComputedStyle(document.body).paddingBottom))).toBeGreaterThanOrEqual(64);
@@ -171,7 +143,7 @@ test("on a phone the menu is a bottom tab bar: Home, each group, Settings; a gro
   await context.close();
 });
 
-test("at 760px and wider the staff tab bar is hidden and the hub's way back is not drawn", async ({ browser }) => {
+test("at 1200px and wider the staff tab bar is hidden and the hub's way back is not drawn", async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await context.addCookies([staffSessionCookie()]);
   const page = await context.newPage();

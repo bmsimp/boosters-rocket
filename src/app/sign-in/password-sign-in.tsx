@@ -169,7 +169,7 @@ export function PasswordSignIn({ next, portalOrigin }: { next: string | null; po
   const shown = problem && (
     <div role="alert">
       <p className="errors">{problem.words}</p>
-      {problem.passwordLink && <p><LinkButton plain variant="secondary" href="/sign-in/password">Set up or reset my password</LinkButton></p>}
+      {problem.passwordLink && <p><LinkButton plain variant="outlined" href="/sign-in/password">Set up or reset my password</LinkButton></p>}
     </div>
   );
 
@@ -192,7 +192,7 @@ export function PasswordSignIn({ next, portalOrigin }: { next: string | null; po
       <div className="stack">
         <p className="help" id="passkey-words">{PASSKEY_EXPLAINED}</p>
         {passkeys === "here" ? (
-          <button type="button" className="btn btn-line" aria-describedby="passkey-words" aria-disabled={busy || undefined}
+          <button type="button" className="btn btn-outlined" aria-describedby="passkey-words" aria-disabled={busy || undefined}
             onClick={() => { if (!busy) void signInWithPasskey(); }}>{PASSKEY_BUTTON}</button>
         ) : <p className="help">{passkeys === "elsewhere" ? passkeyElsewhere(portalOrigin) : PASSKEY_UNSUPPORTED}</p>}
       </div>
@@ -216,11 +216,11 @@ export function PasswordSignIn({ next, portalOrigin }: { next: string | null; po
               <input name="code" aria-describedby="passkey-step-words" inputMode="text" autoCapitalize="characters" autoCorrect="off" spellCheck={false}
                 autoComplete="one-time-code" maxLength={20} required value={code} onChange={(e) => setCode(e.target.value)} />
             </label>
-            <button className="btn btn-line" aria-disabled={busy || undefined}>{busy ? "Checking…" : "Confirm"}</button>
+            <button className="btn btn-outlined" aria-disabled={busy || undefined}>{busy ? "Checking…" : "Confirm"}</button>
           </form>
         )}
         {shown}
-        <button type="button" className="btn btn-line" onClick={startAgain}>Start again</button>
+        <button type="button" className="btn btn-outlined" onClick={startAgain}>Start again</button>
       </div>
     );
   }
@@ -235,7 +235,7 @@ export function PasswordSignIn({ next, portalOrigin }: { next: string | null; po
         </label>
         {shown}
         <button className="btn" aria-disabled={busy || undefined}>{busy ? "Checking…" : "Confirm"}</button>
-        <button type="button" className="btn btn-line" onClick={startAgain}>Start again</button>
+        <button type="button" className="btn btn-outlined" onClick={startAgain}>Start again</button>
       </form>
     );
   }
@@ -248,10 +248,10 @@ export function PasswordSignIn({ next, portalOrigin }: { next: string | null; po
       {shown}
       <button className="btn" aria-disabled={busy || undefined}>{busy ? "Checking…" : "Sign in"}</button>
       <div className="stack">
-        <button type="button" className="btn btn-line" disabled={busy || wait > 0 || lastMinute} onClick={() => void resend()}>
+        <button type="button" className="btn btn-outlined" disabled={busy || wait > 0 || lastMinute} onClick={() => void resend()}>
           {wait > 0 ? `Resend code (${wait} s)` : "Resend code"}
         </button>
-        <button type="button" className="btn btn-line" onClick={startAgain}>Start again</button>
+        <button type="button" className="btn btn-outlined" onClick={startAgain}>Start again</button>
       </div>
     </form>
   );

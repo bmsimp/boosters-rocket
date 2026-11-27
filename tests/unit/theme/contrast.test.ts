@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { normalizeHex, contrastRatio, deriveClubTokens, clubCssVars } from "@/lib/theme/contrast";
-
-const PAPER_L = "#ffffff", PAPER_D = "#16181c", PAPER_DHC = "#000000";
+import { contrastRatio, inkOn, normalizeHex } from "@/lib/theme/contrast";
+import { clubScheme } from "@/lib/theme/scheme";
 
 describe("normalizeHex", () => {
   it.each([["#5B2A86", "#5b2a86"], ["5b2a86", "#5b2a86"], ["#FFF", "#ffffff"], [" #abc ", "#aabbcc"]])("%j → %j", (i, o) => expect(normalizeHex(i)).toBe(o));
@@ -15,31 +14,18 @@ describe("contrastRatio", () => {
   });
 });
 
-describe("deriveClubTokens", () => {
-  it.each(["#5b2a86", "#f2c200", "#003366", "#e0f7fa", "#ff0000", "#000000", "#ffffff"])("holds every contrast floor for %s", (hex) => {
-    const t = deriveClubTokens(hex);
-    expect(t.club).toBe(hex);
-    expect(contrastRatio(t.clubOn, t.club)).toBeGreaterThanOrEqual(4.5);
-    expect(contrastRatio(t.textL, PAPER_L)).toBeGreaterThanOrEqual(4.5);
-    expect(contrastRatio(t.textD, PAPER_D)).toBeGreaterThanOrEqual(4.5);
-    expect(contrastRatio(t.textLhc, PAPER_L)).toBeGreaterThanOrEqual(7);
-    expect(contrastRatio(t.textDhc, PAPER_DHC)).toBeGreaterThanOrEqual(7);
-    expect(contrastRatio(t.textL, t.tintL)).toBeGreaterThanOrEqual(4.5);
-    expect(contrastRatio(t.textD, t.tintD)).toBeGreaterThanOrEqual(4.5);
+describe("inkOn (the logo tile's and app icon's ink)", () => {
+  it("is white on a dark club color and near-black on a light one", () => {
+    expect(inkOn("#5b2a86")).toBe("#ffffff");
+    expect(inkOn("#f2c200")).toBe("#14161a");
   });
-  it("keeps a club color that already passes on white (FZN purple)", () => {
-    expect(deriveClubTokens("#5b2a86").textL).toBe("#5b2a86");
-    expect(deriveClubTokens("#5b2a86").clubOn).toBe("#ffffff");
-  });
-  it("uses dark ink on a light club color (gold)", () => {
-    expect(deriveClubTokens("#f2c200").clubOn).toBe("#14161a");
-  });
+});
+
+describe("clubScheme", () => {
   it("throws on invalid input", () => {
-    expect(() => deriveClubTokens("red")).toThrow(/color/i);
+    expect(() => clubScheme("red")).toThrow(/color/i);
   });
-  it("produces CSS variables containing only hex values", () => {
-    const vars = clubCssVars(deriveClubTokens("#f2c200"));
-    expect(Object.keys(vars)).toEqual(["--club-l", "--club-on-l", "--club-d", "--club-on-d", "--club-text-l", "--club-text-d", "--club-text-lhc", "--club-text-dhc", "--club-tint-l", "--club-tint-d"]);
-    for (const v of Object.values(vars)) expect(v).toMatch(/^#[0-9a-f]{6}$/);
+  it("keeps the club's exact color as its seed, for the logo tile alone", () => {
+    expect(clubScheme("#5B2A86").seed).toBe("#5b2a86");
   });
 });

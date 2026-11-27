@@ -48,8 +48,8 @@ function MemberTypes({ id, types, type, setType }: { id: string; types: { qboId:
 }
 
 /** One name and a button: a new family or member, a new student, or a new name for someone. A free name offered is used with one press. */
-export function NameForm({ field, label, pendingLabel, initial = "", act, variant = "secondary" }: { field: string; label: string; pendingLabel: string; initial?: string;
-  act: (name: string) => Promise<WriteResult>; variant?: "primary" | "secondary" }) {
+export function NameForm({ field, label, pendingLabel, initial = "", act, variant = "outlined" }: { field: string; label: string; pendingLabel: string; initial?: string;
+  act: (name: string) => Promise<WriteResult>; variant?: "filled" | "outlined" }) {
   const id = useId();
   const [name, setName] = useState(initial);
   const [state, run, pending] = useActionState(async (_: WriteResult | null, asked: string) => {
@@ -86,7 +86,7 @@ export function MemberForm({ types, act, pendingLabel }: { types: { qboId: strin
       <TextInput id={`${id}-name`} label="The member's name" maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />
       {types.length > 1 && <MemberTypes id={`${id}-type`} types={types} type={type} setType={setType} />}
       <Outcome state={state} pending={pending} onOffer={(offer) => { setName(offer); send(offer); }} />
-      <Button variant="secondary" disabled={pending} onClick={() => send(name)}>{pending ? pendingLabel : "Add the member"}</Button>
+      <Button variant="outlined" disabled={pending} onClick={() => send(name)}>{pending ? pendingLabel : "Add the member"}</Button>
     </form>
   );
 }
@@ -104,7 +104,7 @@ export function CreateAndLinkForm({ types, act }: { types: { qboId: string; name
     <form onSubmit={noSubmit} className="stack">
       {types.length > 1 && <MemberTypes id={`${id}-type`} types={types} type={type} setType={setType} />}
       <Outcome state={state} pending={pending} />
-      <Button variant="secondary" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Making it in QuickBooks…" : "Create in QuickBooks and link"}</Button>
+      <Button variant="outlined" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Making it in QuickBooks…" : "Create in QuickBooks and link"}</Button>
     </form>
   );
 }
@@ -121,7 +121,7 @@ export function MoveForm({ families, act }: { families: { id: string; name: stri
         {families.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
       </Select>
       <Outcome state={state} pending={pending} />
-      <Button variant="secondary" disabled={pending || to === ""} onClick={() => startTransition(() => run())}>{pending ? "Moving them in the portal…" : "Move"}</Button>
+      <Button variant="outlined" disabled={pending || to === ""} onClick={() => startTransition(() => run())}>{pending ? "Moving them in the portal…" : "Move"}</Button>
     </form>
   );
 }
@@ -138,7 +138,7 @@ export function FamilyInactiveForm({ familyName, names, act }: { familyName: str
   const label = `Make ${familyName} inactive`;
   return (
     <form onSubmit={noSubmit} className="stack">
-      {!sure ? <Button variant="secondary" onClick={() => setSure(true)}>{label}</Button> : (
+      {!sure ? <Button variant="outlined" onClick={() => setSure(true)}>{label}</Button> : (
         <>
           {names.length ? (
             <>
@@ -150,7 +150,7 @@ export function FamilyInactiveForm({ familyName, names, act }: { familyName: str
           <Outcome state={state} pending={pending} />
           <div className="row-actions">
             <Button variant="danger" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Making them inactive…" : names.length ? "Yes, make them all inactive" : "Yes, make it inactive"}</Button>
-            <Button variant="quiet" disabled={pending} onClick={() => setSure(false)}>Keep it active</Button>
+            <Button variant="text" disabled={pending} onClick={() => setSure(false)}>Keep it active</Button>
           </div>
         </>
       )}
@@ -164,13 +164,13 @@ export function DeactivateForm({ label, warning, act }: { label: string; warning
   const [state, run, pending] = useActionState(async () => safely(() => act(), failed), null);
   return (
     <form onSubmit={noSubmit} className="stack">
-      {!sure ? <Button variant="secondary" onClick={() => setSure(true)}>{label}</Button> : (
+      {!sure ? <Button variant="outlined" onClick={() => setSure(true)}>{label}</Button> : (
         <>
           <p>{warning}</p>
           <Outcome state={state} pending={pending} />
           <div className="row-actions">
             <Button variant="danger" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Making it inactive…" : "Yes, make it inactive"}</Button>
-            <Button variant="quiet" disabled={pending} onClick={() => setSure(false)}>Keep it active</Button>
+            <Button variant="text" disabled={pending} onClick={() => setSure(false)}>Keep it active</Button>
           </div>
         </>
       )}

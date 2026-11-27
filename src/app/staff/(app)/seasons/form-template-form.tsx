@@ -35,7 +35,7 @@ export function FormTemplateForm({ choices, current, signers: savedSigners, save
       <ChoiceGroup name="signers" legend="Who must sign" value={signers} onChange={(v) => setSigners(v === "every" ? "every" : "any")} cols={1}
         options={[{ value: "any", label: "Any one guardian" }, { value: "every", label: "Every guardian who has a sign-in", hint: "Up to the template's signers." }]} />
       <ActionOutcome state={state} />
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Checking the template…" : current ? "Check and attach again" : "Check and attach"}</button>
+      <button type="button" className="btn btn-outlined" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Checking the template…" : current ? "Check and attach again" : "Check and attach"}</button>
     </form>
   );
 }

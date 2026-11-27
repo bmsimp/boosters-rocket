@@ -20,7 +20,7 @@ export function RemindButton({ label, run }: { label: string; run: () => Promise
   const [state, act, pending] = useActionState(async () => safely(run, failed), null);
   return (
     <div className="one-button">
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => act())}>{pending ? "Sending…" : label}</button>
+      <button type="button" className="btn btn-outlined" disabled={pending} onClick={() => startTransition(() => act())}>{pending ? "Sending…" : label}</button>
       <Outcome state={state} />
     </div>
   );
@@ -43,7 +43,7 @@ export function ScheduleForm({ before, weeklyAfter, hasDueDate, save }: { before
       </fieldset>
       <p className="hint">{hasDueDate ? "Reminders go at 9 in the morning, club time, once parent sign-ins and welcome emails are both switched on." : "This form has no due date, so scheduled reminders won't go until it has one. Set it on the season's page."}</p>
       <Outcome state={state} />
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => act())}>{pending ? "Saving…" : "Save reminders"}</button>
+      <button type="button" className="btn btn-outlined" disabled={pending} onClick={() => startTransition(() => act())}>{pending ? "Saving…" : "Save reminders"}</button>
     </form>
   );
 }
@@ -59,7 +59,7 @@ export function StartAgainForm({ reasons, run }: { reasons: { value: string; lab
       <label className="field"><span>A note for staff (optional; families never see it)</span><textarea rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>
       <p className="hint">The document in Documenso is withdrawn, and the family reads only that the form is ready to sign again.</p>
       <Outcome state={state} />
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => act())}>{pending ? "Starting again…" : "Start again"}</button>
+      <button type="button" className="btn btn-outlined" disabled={pending} onClick={() => startTransition(() => act())}>{pending ? "Starting again…" : "Start again"}</button>
     </form>
   );
 }

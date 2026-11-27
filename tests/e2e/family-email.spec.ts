@@ -20,7 +20,7 @@ const NEW = "zelda.moved@e2e-moving.example";
 let sink: MailSink;
 let saved: { setting: unknown[]; strongAt: Date | null };
 
-const isPhone = (page: Page) => (page.viewportSize()?.width ?? 0) < 760;
+const isPhone = (page: Page) => (page.viewportSize()?.width ?? 0) < 840;
 const noSidewaysScroll = async (page: Page) =>
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), `${page.url()} scrolls sideways`).toBe(false);
 /** A message as the sink got it, its quoted-printable line breaks joined again. */
@@ -36,7 +36,7 @@ test.beforeAll(async () => {
 test.afterAll(async () => { await sink.close(); await sql.end(); });
 
 test.describe("a parent changes their sign-in email", () => {
-  test.skip(({ viewport }) => (viewport?.width ?? 0) >= 760, "asked and confirmed at phone width; the desktop pass would only do it again");
+  test.skip(({ viewport }) => (viewport?.width ?? 0) >= 840, "asked and confirmed at phone width; the desktop pass would only do it again");
 
   test.beforeAll(async () => {
     saved = {
@@ -76,7 +76,7 @@ test.describe("a parent changes their sign-in email", () => {
     await page.goto("/family");
     const account = page.getByRole("region", { name: "Your account" });
     const offer = account.getByRole("link", { name: "Change my sign-in email" });
-    expect((await offer.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect((await offer.boundingBox())!.height).toBeGreaterThanOrEqual(48);
     await offer.click();
 
     await expect(page).toHaveURL(/\/family\/email$/);
@@ -85,7 +85,7 @@ test.describe("a parent changes their sign-in email", () => {
     await page.getByRole("textbox", { name: "New email" }).fill(` ${NEW.toUpperCase()} `);
     await noSidewaysScroll(page);
     const send = page.getByRole("button", { name: "Send me a link" });
-    expect((await send.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect((await send.boundingBox())!.height).toBeGreaterThanOrEqual(48);
     await send.click();
     await expect(page.getByRole("main").getByRole("status")).toHaveText(`Done We've sent a link to ${NEW}. Open it within 24 hours to finish the change. Until then, keep signing in with the address you use now.`);
 
@@ -109,7 +109,7 @@ test.describe("a parent changes their sign-in email", () => {
 
     // Saying yes: refused, because another person signs in with the address, in words that never say why.
     const yes = page.getByRole("button", { name: "Yes, use this address" });
-    expect((await yes.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect((await yes.boundingBox())!.height).toBeGreaterThanOrEqual(48);
     await yes.click();
     await expect(page.getByRole("main").getByRole("alert")).toHaveText("Problem That change can't be made here, so nothing was changed. Please ask the club to change your sign-in email.");
     const [refusal] = await sql`SELECT after FROM audit_log WHERE action = 'parent.email.save.failed' ORDER BY id DESC LIMIT 1`;

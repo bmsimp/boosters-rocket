@@ -10,7 +10,7 @@ const sql = postgres(process.env.DATABASE_URL!);
 // and a save changes the portal alone, sending nothing to QuickBooks (tests/integration/contact-edits.test.ts proves
 // that against a stub). The save here changes her details, so each test that saves puts the seeded ones back after
 // it, and both passes of the run find the seed as it was.
-const isPhone = (page: Page) => (page.viewportSize()?.width ?? 0) < 760;
+const isPhone = (page: Page) => (page.viewportSize()?.width ?? 0) < 840;
 const mainNav = (page: Page) => page.locator(isPhone(page) ? "nav.tabs" : "nav.top-nav");
 const noSidewaysScroll = async (page: Page) =>
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), `${page.url()} scrolls sideways`).toBe(false);
@@ -57,7 +57,7 @@ test.describe("signed in", () => {
     await expect(details).toContainText("You can change your phone, mailing address and sign-in email below. To change your name, ask the club.");
     await expect(details.locator("dd")).toHaveText(["Zelda Quetzalcoatl", E2E_DETAILS.phone]);
     const link = details.getByRole("link", { name: "Update my details" });
-    expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(48);
     await link.click();
 
     await expect(page).toHaveURL(/\/family\/details$/);
@@ -84,7 +84,7 @@ test.describe("signed in", () => {
     await noSidewaysScroll(page);
 
     const back = edit.getByRole("link", { name: "Back to Family" });
-    expect((await back.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect((await back.boundingBox())!.height).toBeGreaterThanOrEqual(48);
     await back.click();
     await expect(page).toHaveURL(/\/family$/);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");

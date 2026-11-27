@@ -42,7 +42,7 @@ export function DetailsBox({ who, treasurerEmail, ownEmail = false, showEmail = 
   showEmail?: boolean }) {
   return (
     <Card className="details-box" title="Your details" titleId="det-h" description="How the club reaches you"
-      actions={who.edits && <LinkButton plain variant="secondary" href="/family/details">Update my details</LinkButton>}>
+      actions={who.edits && <LinkButton plain variant="outlined" href="/family/details">Update my details</LinkButton>}>
       <KeyValue items={[
         { key: "name", label: "Name", value: who.name },
         showEmail && who.email ? { key: "email", label: "Email", value: who.email } : null,

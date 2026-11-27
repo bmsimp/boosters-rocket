@@ -28,7 +28,7 @@ export function IntegrationHealth({ line, here }: { line: HealthLine | undefined
   const fix = line.fix && line.fix.href !== here ? line.fix : null;
   return (
     <Notice tone="warning" live="none">
-      Health says {line.word.toLowerCase()}.{fix ? <> <LinkButton plain variant="secondary" size="sm" href={fix.href}>{fix.label}</LinkButton></> : null} Its full line is on the <a href="/staff/settings/health">Health</a> page.
+      Health says {line.word.toLowerCase()}.{fix ? <> <LinkButton plain variant="tonal" size="sm" href={fix.href}>{fix.label}</LinkButton></> : null} Its full line is on the <a href="/staff/settings/health">Health</a> page.
     </Notice>
   );
 }

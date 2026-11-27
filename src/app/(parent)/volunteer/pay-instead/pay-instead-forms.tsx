@@ -65,10 +65,10 @@ export function SwitchBack({ act }: { act: () => Promise<Result> }) {
   if (state?.ok) return say ? null : <Outcome state={state} />;
   return (
     <div className="row-actions volunteer-cancel">
-      {!asking ? <Button ref={ask} variant="secondary" onClick={() => toggle(true)}>Volunteer instead</Button> : (
+      {!asking ? <Button ref={ask} variant="outlined" onClick={() => toggle(true)}>Volunteer instead</Button> : (
         <div className="row-actions" role="group" aria-label="Volunteer instead?">
           <Button variant="danger" busy={pending} onClick={press}>{pending ? "Cancelling the invoice…" : "Yes, cancel the invoice"}</Button>
-          <Button ref={keep} variant="quiet" aria-disabled={pending || undefined} onClick={() => { if (!pending) toggle(false); }}>Keep paying instead</Button>
+          <Button ref={keep} variant="text" aria-disabled={pending || undefined} onClick={() => { if (!pending) toggle(false); }}>Keep paying instead</Button>
         </div>
       )}
       <Outcome state={state} />

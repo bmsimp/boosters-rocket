@@ -81,8 +81,8 @@ describe("staff names", () => {
     const html = await renderPage(PeoplePage);
     expect(html).not.toContain("<details");
     expect(html).toContain("<legend>Roles for Ben Okafor</legend>");
-    expect(html).toMatch(/<button class="btn btn-line"[^>]*>Save roles<span class="visually-hidden"> for Ben Okafor/);
-    expect(html).toMatch(/<button type="button" class="btn btn-quiet"[^>]*>Turn off sign-in/);
+    expect(html).toMatch(/<button class="btn btn-outlined"[^>]*>Save roles<span class="visually-hidden"> for Ben Okafor/);
+    expect(html).toMatch(/<button type="button" class="btn btn-text"[^>]*>Turn off sign-in/);
     expect(html).toContain("Change my name");
     expect(html).toContain("Change name<span class=\"visually-hidden\"> for Ben Okafor");
   });

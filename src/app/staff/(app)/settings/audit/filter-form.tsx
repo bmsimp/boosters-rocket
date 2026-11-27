@@ -52,7 +52,7 @@ export function AuditFilterForm({ values, actions }: { values: AuditFilterValues
       <label className="field"><span>The record it was done to (an id, or a kind like parent)</span><input name="record" type="search" defaultValue={values.record} autoComplete="off" placeholder="Any record" /></label>
       <label className="field"><span>From this day</span><input key={`from-${fromDay}`} name="from" type="date" defaultValue={fromDay} /></label>
       <label className="field"><span>To this day</span><input key={`to-${toDay}`} name="to" type="date" defaultValue={toDay} /></label>
-      <div className="row-actions"><button className="btn btn-line">Show</button></div>
+      <div className="row-actions"><button className="btn btn-outlined">Show</button></div>
     </form>
   );
 }

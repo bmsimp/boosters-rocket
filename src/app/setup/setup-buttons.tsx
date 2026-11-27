@@ -20,5 +20,5 @@ export function SetupStaffSignIn({ provider, label }: { provider: "microsoft" | 
 
 export function SetupStaffSignOut() {
   const router = useRouter();
-  return <button type="button" className="btn btn-line" onClick={async () => { await staffAuthClient.signOut(); router.push("/setup?step=admin"); router.refresh(); }}>Sign out and try again</button>;
+  return <button type="button" className="btn btn-outlined" onClick={async () => { await staffAuthClient.signOut(); router.push("/setup?step=admin"); router.refresh(); }}>Sign out and try again</button>;
 }

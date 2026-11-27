@@ -142,7 +142,7 @@ export function ShapeForm({ types, shape, preview, save }: {
       {saved && !saved.ok && <Errors errors={saved.errors} />}
       {saved?.ok && <Notice tone="done">Saved. {saved.refreshed ? "The roster was read again with this shape." : "The roster couldn't be read again just now; it will be on the next refresh."} <a href="/staff/settings/quickbooks">Back to QuickBooks settings</a></Notice>}
       <div className="row-actions">
-        <button type="button" className="btn btn-line" disabled={previewing || saving} onClick={() => startTransition(() => runPreview(choice))}>{previewing ? "Counting…" : "Preview"}</button>
+        <button type="button" className="btn btn-outlined" disabled={previewing || saving} onClick={() => startTransition(() => runPreview(choice))}>{previewing ? "Counting…" : "Preview"}</button>
         <button type="button" className="btn" disabled={previewing || saving} onClick={() => startTransition(() => runSave(choice))}>{saving ? "Saving…" : "Save this shape"}</button>
       </div>
     </form>
@@ -226,7 +226,7 @@ export function ConnectModeForm({ saved, keysSaved, relayConnected, save, relay,
       {pressable && <p><Button busy={pending} onClick={() => { if (!pending) startTransition(() => run(mode)); }}>{pending ? "Saving…" : "Save this choice"}</Button></p>}
       <ActionOutcome state={state} />
       {blocked
-        ? <Notice tone="warning">QuickBooks is connected through Boosters Rocket. Disconnect first, from QuickBooks settings, then choose the club&apos;s own Intuit app. <LinkButton plain variant="secondary" size="sm" href="/staff/settings/quickbooks">QuickBooks settings</LinkButton></Notice>
+        ? <Notice tone="warning">QuickBooks is connected through Boosters Rocket. Disconnect first, from QuickBooks settings, then choose the club&apos;s own Intuit app. <LinkButton plain variant="tonal" size="sm" href="/staff/settings/quickbooks">QuickBooks settings</LinkButton></Notice>
         : mode === "relay" ? relay : ownApp}
     </div>
   );
@@ -250,7 +250,7 @@ export function CheckAnswer({ check, again, checking }: { check: RelayCheck; aga
   }
   return (
     <Notice tone="warning">Boosters Rocket couldn&apos;t be reached just now, so the registration wasn&apos;t checked. The portal id is saved.{" "}
-      <Button variant="secondary" size="sm" busy={checking} onClick={again}>{checking ? "Checking…" : "Check again"}</Button></Notice>
+      <Button variant="tonal" size="sm" busy={checking} onClick={again}>{checking ? "Checking…" : "Check again"}</Button></Notice>
   );
 }
 
@@ -316,7 +316,7 @@ export function RelayRegistration({ stage, address, addressFits, publicKey, port
           {made?.ok && <ActionOutcome state={made} />}
           <p>Email these to support@boostersrocket.com. Boosters Rocket registers the portal and emails you back its id.</p>
           {copies}
-          {mailto && <p><LinkButton plain variant="secondary" href={mailto}>Write the email</LinkButton></p>}
+          {mailto && <p><LinkButton plain variant="outlined" href={mailto}>Write the email</LinkButton></p>}
           {https ?? (mayChange ? idForm("Portal id") : <Notice tone="info" live="none">{REGISTRATION_HELD}</Notice>)}
         </>
       )}
@@ -327,12 +327,12 @@ export function RelayRegistration({ stage, address, addressFits, publicKey, port
           {copies}
           {https}
           {answer ? <CheckAnswer check={answer} again={again} checking={checking} />
-            : <p><Button variant="secondary" busy={checking} onClick={again}>{checking ? "Checking…" : "Check the registration"}</Button></p>}
-          {answer && answer.answer !== "unreachable" && <p><Button variant="quiet" busy={checking} onClick={again}>{checking ? "Checking…" : "Check again"}</Button></p>}
+            : <p><Button variant="outlined" busy={checking} onClick={again}>{checking ? "Checking…" : "Check the registration"}</Button></p>}
+          {answer && answer.answer !== "unreachable" && <p><Button variant="text" busy={checking} onClick={again}>{checking ? "Checking…" : "Check again"}</Button></p>}
           {mayChange && (
             <div className="row-actions">
               {!https && <Drawer param="portal-id" label="Change the portal id" description="Use the new id from Boosters Rocket's email.">{idForm("New portal id")}</Drawer>}
-              <ConfirmDialog label="Replace this portal's key" variant="secondary" busyLabel="Making the key…"
+              <ConfirmDialog label="Replace this portal's key" variant="outlined" busyLabel="Making the key…"
                 consequence="The saved portal id is cleared, so you'll need to register again before the portal can connect."
                 act={async () => { const f = new FormData(); f.append("replace", "yes"); const r = await makeKey(f); if (r.ok) setAnswer(null); return r; }} />
             </div>

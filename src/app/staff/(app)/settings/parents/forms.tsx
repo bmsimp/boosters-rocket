@@ -17,7 +17,7 @@ export function SwitchButton({ label, pendingLabel, quiet, act }: { label: strin
   return (
     <form action={run} className="stack">
       <Outcome state={state} />
-      <button className={quiet ? "btn btn-line" : "btn"} disabled={pending}>{pending ? pendingLabel : label}</button>
+      <button className={quiet ? "btn btn-outlined" : "btn"} disabled={pending}>{pending ? pendingLabel : label}</button>
     </form>
   );
 }

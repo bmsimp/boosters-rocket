@@ -10,13 +10,19 @@ import { ACTION_FAILED, safely } from "../action-error";
 /**
  * The portal's dialogs, on the native <dialog> and showModal(): the browser makes the page behind inert, keeps the focus
  * inside, and closes on Esc (the `cancel` event, which is sent to the caller's close instead). Two sizes: a Drawer, a
- * side sheet that fills a phone's screen and slides in from the right on a wider one, for a form; and ConfirmDialog,
- * small and centered, for one press that needs a second look. While one is open the page doesn't scroll.
+ * M3 modal side sheet that fills a phone's screen and slides in from the right from 600px, for a form; and
+ * ConfirmDialog, M3's basic dialog, small and centered, for one press that needs a second look. While one is open the
+ * page doesn't scroll.
  *
  * A dialog drawn open on the server (a Drawer whose address was loaded) keeps that first `open` for good: React never
  * touches the attribute again, so the effect alone opens and closes it, and without JavaScript it is a plain open
  * <dialog> in the page, drawn as part of it.
  */
+
+/** A side sheet's close, an M3 icon button: the cross, named "Close" in words a screen reader reads. */
+const CLOSE = <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg><span className="visually-hidden">Close</span></>;
+/** A destructive dialog's icon. */
+const ALERT = <svg className="sheet-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true"><path d="M12 3.5 21.5 20h-19z" /><path d="M12 10v4.5M12 17.5v.01" strokeLinecap="round" /></svg>;
 
 /** How many dialogs are open: the page keeps still while any is. */
 let openCount = 0;
@@ -39,10 +45,12 @@ export type SheetProps = {
   returnFocusId?: string;
   /** Buttons along the dialog's foot (ConfirmDialog's two). */
   footer?: ReactNode;
+  /** A dialog's icon, centered over its title (a destructive ConfirmDialog's alert). */
+  icon?: ReactNode;
   children?: ReactNode;
 };
 
-export function Sheet({ open, onClose, title, description, kind = "drawer", closeHref, returnFocusId, footer, children }: SheetProps) {
+export function Sheet({ open, onClose, title, description, kind = "drawer", closeHref, returnFocusId, footer, icon, children }: SheetProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId(), descId = useId();
   const [drawnOpen] = useState(open); // the server's answer, kept as it was (see above)
@@ -87,10 +95,11 @@ export function Sheet({ open, onClose, title, description, kind = "drawer", clos
       aria-labelledby={titleId} aria-describedby={description ? descId : undefined}
       onCancel={(e) => { e.preventDefault(); closeRef.current(); }} onKeyDown={keepFocusIn}>
       <div className="sheet-head">
+        {icon}
         <h2 id={titleId}>{title}</h2>
         {kind === "drawer" && (closeHref !== undefined
-          ? <a className={buttonClass("quiet", "sm", "sheet-close")} href={closeHref} onClick={close}>Close</a>
-          : <Button variant="quiet" size="sm" className="sheet-close" onClick={() => close()}>Close</Button>)}
+          ? <a className="icon-btn sheet-close" href={closeHref} onClick={close}>{CLOSE}</a>
+          : <button type="button" className="icon-btn sheet-close" onClick={() => close()}>{CLOSE}</button>)}
       </div>
       <div className="sheet-body">
         {description && <p id={descId} className="sheet-desc">{description}</p>}
@@ -120,7 +129,7 @@ const mounted = new Map<string, number>();
  * page with the form drawn in it. The form is drawn on the server either way, so it is its own server action with
  * every check it had. `label` says what the form does ("Waive for Sam Rivera"); the title is the label unless given.
  */
-export function Drawer({ param, value = "1", label, title, description, variant = "secondary", size, triggerClassName, children }: {
+export function Drawer({ param, value = "1", label, title, description, variant = "outlined", size, triggerClassName, children }: {
   param: string; value?: string; label: ReactNode; title?: ReactNode; description?: ReactNode;
   variant?: ButtonVariant; size?: ButtonSize; triggerClassName?: string; children: ReactNode;
 }) {
@@ -170,9 +179,10 @@ export function Drawer({ param, value = "1", label, title, description, variant 
 export type Confirmed = { ok: true; message: string } | { ok: false; errors: string[] };
 
 /**
- * One press that needs a second look (Disconnect QuickBooks, Remove this credit): a button that opens a small dialog
- * with one sentence of what follows, an optional box that must be ticked, and two buttons, the action's own words and
- * Cancel (which takes the focus first). The answer of a press that went through is shown beside the button, and of
+ * One press that needs a second look (Disconnect QuickBooks, Remove this credit): a button that opens M3's basic dialog
+ * with one sentence of what follows, an optional box that must be ticked, and two buttons at its end: Cancel, a text
+ * button that takes the focus first, and the action in its own words (filled; in the late color for a destructive one,
+ * with the alert icon over the title). The answer of a press that went through is shown beside the button, and of
  * one that didn't, in the dialog. `act` is the server action, called with no argument (or, with `reason`, the words
  * typed): the box gates the press here, and an action that needs it on the server too is wrapped by its caller.
  */
@@ -211,10 +221,10 @@ export function ConfirmDialog({ label, context, title, consequence, check, reaso
     <div className="confirm">
       <Button variant={variant} size={size} onClick={() => { setAnswer(null); setOpen(true); }}>{label}{context && <span className="visually-hidden">: {context}</span>}</Button>
       {answerHere && answer?.ok && <ActionOutcome state={answer} />}
-      <Sheet open={open} kind="confirm" title={title ?? `${label}?`} onClose={() => { if (!pending) setOpen(false); }} footer={
+      <Sheet open={open} kind="confirm" title={title ?? `${label}?`} icon={variant === "danger" ? ALERT : undefined} onClose={() => { if (!pending) setOpen(false); }} footer={
         <>
-          <Button variant={variant === "danger" ? "danger" : "primary"} busy={pending} aria-disabled={unusable || undefined} onClick={press}>{pending ? busyLabel : (confirmLabel ?? label)}</Button>
-          <Button variant="secondary" data-autofocus onClick={() => { if (!pending) setOpen(false); }}>Cancel</Button>
+          <Button variant="text" data-autofocus onClick={() => { if (!pending) setOpen(false); }}>Cancel</Button>
+          <Button variant={variant === "danger" ? "danger-filled" : "filled"} busy={pending} aria-disabled={unusable || undefined} onClick={press}>{pending ? busyLabel : (confirmLabel ?? label)}</Button>
         </>
       }>
         <p>{consequence}</p>

@@ -38,7 +38,7 @@ test("a parent opens a buy-out, sees the amount and what will happen, confirms, 
   await noSidewaysScroll(page);
   const confirm = page.getByRole("button", { name: "Confirm: invoice me $25.00" });
   const box = await confirm.boundingBox();
-  expect(box!.height, "a tap target at least 44px tall").toBeGreaterThanOrEqual(44);
+  expect(box!.height, "a tap target at least 48px tall").toBeGreaterThanOrEqual(48);
 
   await confirm.click();
   await expect(cost.getByRole("alert")).toHaveText("Problem Sorry, the club's invoice couldn't be set up, so nothing has been billed. Please ask the club about paying instead.");

@@ -45,7 +45,7 @@ export default async function SwitchCompanyPage({ searchParams }: { searchParams
       <section className="box" aria-labelledby="switch-start-h"><h2 id="switch-start-h">{SWITCH_WORDS.backupTitle}</h2>
         <p>{SWITCH_WORDS.backup}</p>
         {p.connected
-          ? <Notice tone="warning">{SWITCH_WORDS.disconnectFirst} <LinkButton variant="secondary" size="sm" href="/staff/settings/quickbooks">QuickBooks settings</LinkButton></Notice>
+          ? <Notice tone="warning">{SWITCH_WORDS.disconnectFirst} <LinkButton variant="tonal" size="sm" href="/staff/settings/quickbooks">QuickBooks settings</LinkButton></Notice>
           : (
             <form action={switchConnectAction} className="stack">
               {notConfirmed && <Notice tone="problem">{SWITCH_WORDS.notConfirmed}</Notice>}
@@ -53,14 +53,14 @@ export default async function SwitchCompanyPage({ searchParams }: { searchParams
               {relay
                 ? <WhichQuickBooks environment={p.environment} />
                 : <><p>{SWITCH_WORDS.ownAppEnvironment(p.environment)}</p>
-                  <p><LinkButton variant="secondary" href={`${SETUP}?step=app`}>{SWITCH_WORDS.ownAppLink}</LinkButton></p></>}
+                  <p><LinkButton variant="outlined" href={`${SETUP}?step=app`}>{SWITCH_WORDS.ownAppLink}</LinkButton></p></>}
               <fieldset className="checks"><legend>Confirm</legend>
                 <label><input type="checkbox" name="confirm" value="yes" required /> {SWITCH_WORDS.confirm}</label>
               </fieldset>
               <Button type="submit">{SWITCH_WORDS.press}</Button>
             </form>
           )}
-        <p className="box-foot"><LinkButton variant="secondary" href={`${SETUP}?step=connect`}>Back to step 2</LinkButton></p>
+        <p className="box-foot"><LinkButton variant="outlined" href={`${SETUP}?step=connect`}>Back to step 2</LinkButton></p>
       </section>
     </main>
   );

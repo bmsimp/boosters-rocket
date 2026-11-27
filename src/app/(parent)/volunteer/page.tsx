@@ -70,8 +70,8 @@ export default async function VolunteerPage() {
             {payInstead.map((b) => (
               <ListRow key={`${b.requirementId}-${b.key}`} title={b.title} meta={[b.who, b.standing]}
                 detail={b.buyout === null && b.quote.ok
-                  ? <LinkButton size="sm" variant="secondary" className="pay" href={`/volunteer/pay-instead/${b.requirementId}/${b.key}`}>Pay instead of volunteering ({formatMoney(b.quote.amountCents)})<span className="visually-hidden">: {b.title}, {b.who}</span></LinkButton>
-                  : <LinkButton size="sm" variant="secondary" className="pay" href={`/volunteer/pay-instead/${b.requirementId}/${b.key}`}>See your buy-out<span className="visually-hidden">: {b.title}, {b.who}</span></LinkButton>} />
+                  ? <LinkButton size="sm" variant="tonal" className="pay" href={`/volunteer/pay-instead/${b.requirementId}/${b.key}`}>Pay instead of volunteering ({formatMoney(b.quote.amountCents)})<span className="visually-hidden">: {b.title}, {b.who}</span></LinkButton>
+                  : <LinkButton size="sm" variant="tonal" className="pay" href={`/volunteer/pay-instead/${b.requirementId}/${b.key}`}>See your buy-out<span className="visually-hidden">: {b.title}, {b.who}</span></LinkButton>} />
             ))}
           </List>
         </Card>
@@ -126,7 +126,7 @@ export default async function VolunteerPage() {
               <ListRow key={s.id} title={<>{s.timeWords}{s.role ? `, ${s.role}` : ""}</>}
                 status={s.state === "open" ? undefined : { tone: "neutral", words: s.state === "full" ? "Full" : "Started" }}
                 meta={<span className="num">{placesWords(s)}</span>}
-                action={s.state === "open" && <LinkButton size="sm" variant="secondary" className="pay" href={`/volunteer/shifts/${s.id}`}>Sign up<span className="visually-hidden"> for {s.timeWords}{s.role ? `, ${s.role}` : ""}</span></LinkButton>} />
+                action={s.state === "open" && <LinkButton size="sm" variant="tonal" className="pay" href={`/volunteer/shifts/${s.id}`}>Sign up<span className="visually-hidden"> for {s.timeWords}{s.role ? `, ${s.role}` : ""}</span></LinkButton>} />
             ))}
           </List>
         </Card>

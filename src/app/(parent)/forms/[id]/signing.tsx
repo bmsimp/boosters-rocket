@@ -37,7 +37,7 @@ function ActButton({ label, pendingLabel, act, primary = true }: { label: string
   };
   return (
     <div className="one-button">
-      <button type="button" className={primary ? "btn" : "btn btn-line"} aria-disabled={pending || undefined} onClick={press}>{pending ? pendingLabel : label}</button>
+      <button type="button" className={primary ? "btn" : "btn btn-outlined"} aria-disabled={pending || undefined} onClick={press}>{pending ? pendingLabel : label}</button>
       <Outcome result={result} />
     </div>
   );
@@ -81,7 +81,7 @@ export function FinishingNote({ requestId }: { requestId: string }) {
   }, [tries, ask]);
   return (
     <div className="one-button">
-      {tries >= WAITS_MS.length && <button type="button" className="btn btn-line" onClick={() => { void ask(); }}>Check again</button>}
+      {tries >= WAITS_MS.length && <button type="button" className="btn btn-outlined" onClick={() => { void ask(); }}>Check again</button>}
       <Outcome result={result} />
     </div>
   );
@@ -132,7 +132,7 @@ export function SigningFrame({ requestId, frameUrl, origin, title }: { requestId
       <iframe ref={frame} src={frameUrl} title={`Sign: ${title}`} />
       <p className="help">This page updates by itself once you&apos;ve signed. If it doesn&apos;t, press the button below.</p>
       <div className="one-button">
-        <button type="button" className="btn btn-line" aria-disabled={checking || undefined} onClick={() => { if (!checking) void check(); }}>{checking ? "Checking…" : "Check whether it's signed"}</button>
+        <button type="button" className="btn btn-outlined" aria-disabled={checking || undefined} onClick={() => { if (!checking) void check(); }}>{checking ? "Checking…" : "Check whether it's signed"}</button>
         <Outcome result={result} />
       </div>
     </div>

@@ -12,7 +12,7 @@ export function RefreshButton({ refresh }: { refresh: () => Promise<Result> }) {
     <form action={run} className="stack">
       {state && !state.ok && <Notice tone="problem">{state.error}</Notice>}
       {state?.ok && <Notice tone="done">{state.message}</Notice>}
-      <Button type="submit" variant="secondary" disabled={pending}>{pending ? "Reading QuickBooks…" : "Refresh now"}</Button>
+      <Button type="submit" variant="outlined" disabled={pending}>{pending ? "Reading QuickBooks…" : "Refresh now"}</Button>
     </form>
   );
 }

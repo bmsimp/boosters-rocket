@@ -44,7 +44,7 @@ export default async function SignInSettingsPage() {
         lede={me.hasPassword && !me.provedRecently ? <>{COPY.lede} {words.askAgainForPassword}</> : COPY.lede} />
       <SignInSettingsFrame>
         {/* No id in the link: the page takes whose address it is from the session. */}
-        <Card title={COPY.howTitle} titleId="how-h" actions={me.canChangeEmail && <LinkButton variant="secondary" href="/family/email">{COPY.changeEmail}</LinkButton>}>
+        <Card title={COPY.howTitle} titleId="how-h" actions={me.canChangeEmail && <LinkButton variant="outlined" href="/family/email">{COPY.changeEmail}</LinkButton>}>
           <KeyValue items={[
             { key: "email", label: COPY.email, value: me.email },
             { key: "password", label: COPY.password, value: me.hasPassword ? COPY.passwordChosen : COPY.passwordNotChosen },

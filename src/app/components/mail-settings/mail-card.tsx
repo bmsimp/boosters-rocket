@@ -72,7 +72,7 @@ export function MailTestForm({ summary, test, saveStep }: { summary: MailSummary
       <label className="field"><span>Send a test email to</span><input name="to" type="email" required autoComplete="email" /></label>
       {tested && !tested.ok && <Notice tone="problem">{tested.error}</Notice>}
       {tested?.ok && <Notice tone="done">Test email sent. Check that it arrived, and look in the spam folder too.</Notice>}
-      <button className="btn btn-line" disabled={testing}>{testing ? "Sending…" : "Send test email"}</button>
+      <button className="btn btn-outlined" disabled={testing}>{testing ? "Sending…" : "Send test email"}</button>
     </form>
   );
 }

@@ -28,7 +28,7 @@ export function OneButton({ label, pendingLabel, act, goTo, primary = false }: {
   }, null);
   return (
     <form action={run} className="one-button">
-      <button className={primary ? "btn" : "btn btn-line"} disabled={pending}>{pending ? pendingLabel : label}</button>
+      <button className={primary ? "btn" : "btn btn-outlined"} disabled={pending}>{pending ? pendingLabel : label}</button>
       <Outcome state={state} />
     </form>
   );
@@ -50,7 +50,7 @@ export function TextAction({ field, label, pendingLabel, initial = "", maxLength
         {multiline ? <textarea rows={2} maxLength={maxLength} value={text} onChange={(e) => setText(e.target.value)} />
           : <input maxLength={maxLength} value={text} onChange={(e) => setText(e.target.value)} />}</label>
       <Outcome state={state} />
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? pendingLabel : label}</button>
+      <button type="button" className="btn btn-outlined" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? pendingLabel : label}</button>
     </form>
   );
 }
@@ -75,8 +75,8 @@ export function NewSeasonForm({ lastName, create }: { lastName: string | null; c
       <Outcome state={state} />
       <div className="row-actions">
         {lastName !== null && <button type="button" className="btn" disabled={pending} onClick={go("last")}>Copy {lastName}</button>}
-        <button type="button" className={lastName === null ? "btn" : "btn btn-line"} disabled={pending} onClick={go("template")}>Start from the template</button>
-        <button type="button" className="btn btn-line" disabled={pending} onClick={go("empty")}>Start with no steps</button>
+        <button type="button" className={lastName === null ? "btn" : "btn btn-outlined"} disabled={pending} onClick={go("template")}>Start from the template</button>
+        <button type="button" className="btn btn-outlined" disabled={pending} onClick={go("empty")}>Start with no steps</button>
       </div>
     </form>
   );
@@ -94,7 +94,7 @@ export function StepForm({ initial, save }: { initial: { name: string; startsOn:
       <label className="field"><span>Starts on (optional)</span><input type="date" value={startsOn} onChange={(e) => setStartsOn(e.target.value)} /></label>
       <label className="field"><span>Ends on (optional)</span><input type="date" value={endsOn} onChange={(e) => setEndsOn(e.target.value)} /></label>
       <Outcome state={state} />
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : "Save step"}</button>
+      <button type="button" className="btn btn-outlined" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : "Save step"}</button>
     </form>
   );
 }
@@ -151,7 +151,7 @@ export function RequirementForm({ kinds, kind, initial, perStudent = true, add, 
       )}
       <label className="field"><span>Due date (optional)</span><input type="date" value={dueOn} onChange={(e) => setDueOn(e.target.value)} /></label>
       <Outcome state={state} />
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : add ? "Add requirement" : "Save requirement"}</button>
+      <button type="button" className="btn btn-outlined" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : add ? "Add requirement" : "Save requirement"}</button>
     </form>
   );
 }
@@ -177,7 +177,7 @@ export function CoverageForm({ covers, chosen, candidates, noun, save }: {
         </fieldset>
       )}
       <Outcome state={state} />
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : "Save who it is asked of"}</button>
+      <button type="button" className="btn btn-outlined" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : "Save who it is asked of"}</button>
     </form>
   );
 }

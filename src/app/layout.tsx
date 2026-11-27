@@ -2,7 +2,8 @@ import { cache } from "react";
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { getClubSettings, DEFAULT_COLOR } from "@/lib/settings/club";
-import { deriveClubTokens, clubCssVars, normalizeHex } from "@/lib/theme/contrast";
+import { normalizeHex } from "@/lib/theme/contrast";
+import { clubCssVars, clubScheme } from "@/lib/theme/scheme";
 import { THEME_COLOR } from "@/lib/theme/palette";
 import { appLabel } from "@/lib/pwa/label";
 import { ICONS, iconHref, iconVersion, type IconName } from "@/lib/pwa/icons";
@@ -39,8 +40,8 @@ export async function generateMetadata(): Promise<Metadata> {
  */
 export const viewport: Viewport = {
   width: "device-width", initialScale: 1, viewportFit: "cover", colorScheme: "light dark",
-  // The browser's own bar matches the portal's top bar: its white surface in light, the dark surface in dark. The club's
-  // color is an accent inside the page, not the frame around it (it stays the installed app's splash, src/lib/pwa/manifest.ts).
+  // The browser's own bar matches the portal's top bar: its surface in light and in dark. The club's color is
+  // inside the page, not the frame around it (it stays the installed app's splash, src/lib/pwa/manifest.ts).
   themeColor: [{ media: "(prefers-color-scheme: light)", color: THEME_COLOR.light }, { media: "(prefers-color-scheme: dark)", color: THEME_COLOR.dark }],
 };
 export const dynamic = "force-dynamic";
@@ -48,9 +49,9 @@ export const dynamic = "force-dynamic";
 /** A bad stored color must never take every page down: fall back to the default. */
 function safeVars(color: string) {
   try {
-    return clubCssVars(deriveClubTokens(normalizeHex(color) ?? DEFAULT_COLOR));
+    return clubCssVars(clubScheme(normalizeHex(color) ?? DEFAULT_COLOR));
   } catch {
-    return clubCssVars(deriveClubTokens(DEFAULT_COLOR));
+    return clubCssVars(clubScheme(DEFAULT_COLOR));
   }
 }
 

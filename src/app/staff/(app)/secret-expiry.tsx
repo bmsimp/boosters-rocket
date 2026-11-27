@@ -21,7 +21,7 @@ export async function SecretExpiryWarning() {
             ? "the saved secret can't be read with this server's encryption key. Enter it again."
             : <>the client secret expires <CalendarDate iso={i.expiresAt!.toISOString()} />. Create a new one and save it.</>)}</li>
       ))}</ul>
-      <p className="box-foot"><LinkButton plain variant="secondary" href="/staff/settings/sign-in">Open sign-in settings</LinkButton></p>
+      <p className="box-foot"><LinkButton plain variant="outlined" href="/staff/settings/sign-in">Open sign-in settings</LinkButton></p>
     </Notice>
   );
 }
