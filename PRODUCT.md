@@ -89,8 +89,9 @@ themselves.
   and accessible whatever logo and colors a club supplies.
 - Voice: a warm, plain-spoken neighbor. Short sentences and everyday words. Never scolding or
   alarming about money ("You have 2 forms left for Maya", not "Action required: overdue").
-- Look: on 2026-11-21 the owner chose the familiar category standard (calm and organized, in the
-  manner of Linear) over a distinctive themed world. Keep the product familiar and calm.
+- Look: on 2026-11-26 the owner chose Material Design 3 in its Expressive style (bolder type, more
+  color from the club's own, rounder shapes, spring motion), replacing the calm, Linear-like look
+  of 2026-11-21. Expressive never at the cost of readability (`docs/agents/owner-taste.md`).
 
 ## Evidence on Hand
 
