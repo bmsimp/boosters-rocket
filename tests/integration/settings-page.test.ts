@@ -97,7 +97,7 @@ describe("the Settings rail", () => {
 describe("the Overview", () => {
   beforeEach(resetDb);
 
-  it("lists what needs attention, each a row that leads to it, an integration by its own name", async () => {
+  it("names what needs attention in a notice, each a link to it, an integration by its own name", async () => {
     await asAdmin();
     // Nobody can sign in as staff: one row, not one for each provider.
     await seedProvider("staff-google", { clientId: "x.apps.googleusercontent.com" }, "google-secret", new Date(Date.now() - 86_400_000));
@@ -106,13 +106,13 @@ describe("the Overview", () => {
     expect(rows).toEqual(expect.arrayContaining(["club", "sign-in"]));
     expect(rows).not.toContain("integrations");
     expect(rows).not.toContain("staff-google");
-    expect(textOf(html)).toContain("Staff sign-in Nobody can sign in");
+    expect(textOf(html)).toContain("Staff sign-in: Nobody can sign in");
     // Microsoft works, so Google's expired secret is its own row.
     await seedProvider("staff-microsoft", { tenantId: "t", clientId: "c" }, "unused");
     html = await renderPage(SettingsPage);
     rows = [...html.matchAll(/data-attention="([^"]+)"/g)].map((m) => m[1]);
     expect(html).toContain('href="/staff/settings/sign-in#staff-google"');
-    expect(textOf(html)).toContain("Google Expired");
+    expect(textOf(html)).toContain("Google: Expired");
     expect(html).not.toContain("<input");
   });
 
