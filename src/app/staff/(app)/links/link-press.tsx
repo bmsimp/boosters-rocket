@@ -72,16 +72,16 @@ export function GuardianLinkPress({ name, who, about, options, suggested }: { na
   const press = () => {
     if (pending) return;
     const o = options.find((x) => x.value === chosen);
-    if (o === undefined) { add({ ok: false, errors: [`${about}: Choose which Parent customer is ${who}'s first. Nothing was linked.`] }); return; }
+    if (o === undefined) { add({ ok: false, errors: [`${about}: Choose which parent record is ${who}'s first. Nothing was linked.`] }); return; }
     start(async () => { const r = await safely(() => o.act(), failed); add(r.ok ? r : { ok: false, errors: r.errors.map((e) => `${about}: ${e}`) }); });
   };
   return (
     <div className="stack">
-      <ChoiceGroup name={name} legend={`Which Parent customer is ${who}'s`} cols={1} value={chosen} onChange={setChosen}
+      <ChoiceGroup name={name} legend={`Which parent record is ${who}'s`} cols={1} value={chosen} onChange={setChosen}
         options={options.map((o) => ({ value: o.value, label: o.label, hint: o.hint }))} />
       <div className="row-actions">
         <Button variant="outlined" busy={pending} onClick={press}>
-          {pending ? "Linking…" : `Link ${who} to this Parent customer`}<span className="visually-hidden">: {about}</span>
+          {pending ? "Linking…" : `Link ${who} to this parent record`}<span className="visually-hidden">: {about}</span>
         </Button>
       </div>
     </div>
