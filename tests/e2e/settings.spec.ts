@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { staffSessionCookie } from "./staff-session";
 
-const isPhone = (page: Page) => (page.viewportSize()?.width ?? 0) < 760;
+const isPhone = (page: Page) => (page.viewportSize()?.width ?? 0) < 840;
 const noSidewaysScroll = async (page: Page) =>
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), "the page scrolls sideways").toBe(true);
 
@@ -14,7 +14,7 @@ test("an Admin opens Settings from the menu, follows an item of the rail to its 
   if (isPhone(page)) {
     await page.locator("nav.tabs.staff-tabs").getByRole("link", { name: "Settings" }).click();
   } else {
-    await page.locator("header.bar nav.top-nav").getByRole("link", { name: "Settings" }).click();
+    await page.locator("nav.staff-rail").getByRole("link", { name: "Settings", exact: true }).click();
   }
   await expect(page).toHaveURL(/\/staff\/settings$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Settings");
@@ -39,7 +39,7 @@ test("an Admin opens Settings from the menu, follows an item of the rail to its 
   if (isPhone(page)) await page.locator("main").getByRole("link", { name: "Settings", exact: true }).click();
   else await expect(page.locator("main").getByRole("link", { name: "Settings", exact: true })).toBeHidden(); // the rail is the way on a desktop
   if (isPhone(page)) await expect(page).toHaveURL(/\/staff\/settings$/);
-  if (!isPhone(page)) await expect(page.locator('header.bar nav.top-nav a[aria-current="page"]')).toHaveText(["Settings"]);
+  if (!isPhone(page)) await expect(page.locator('nav.staff-rail a[aria-current="page"]')).toHaveText(["Settings"]);
 });
 
 test("Find a setting filters the rail in the browser: a keyword finds an integration, Enter opens the first, Escape clears", async ({ page }) => {
