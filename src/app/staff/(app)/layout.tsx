@@ -3,7 +3,7 @@ import { getClubSettings } from "@/lib/settings/club";
 import { ClubBar, PageStart, initials } from "../../components/club-bar";
 import { PoweredBy } from "../../components/powered-by";
 import { StaffTabs } from "../../components/parent-tabs";
-import { StaffRail } from "../../components/top-nav";
+import { CompactRail, StaffRail } from "../../components/top-nav";
 import { GROUP_HUBS, staffMenu, staffTabs } from "./staff-menu";
 import { HubBack } from "./hub-back";
 
@@ -16,9 +16,11 @@ export default async function StaffLayout({ children }: { children: React.ReactN
     <>
       <ClubBar name={club.name} shortName={club.shortName} staff
         account={{ href: "/staff/account", initials: initials(ctx.name), label: `${initials(ctx.name)}: Your account and display settings, signed in as ${ctx.name}` }} />
-      {/* From 1200px the rail beside the page, in a pane (D5); below it, the page alone and the tab bar. */}
+      {/* From 1200px the rail beside the page, in a pane (D5): the expanded rail, or the compact one on a page with a list
+          pane of its own (booster.css picks by the page's shape); below it, the page alone and the tab bar. */}
       <div className="staff-frame">
         <StaffRail menu={menu} />
+        <CompactRail menu={menu} />
         <div className="staff-pane">
           <PageStart />
           <HubBack hubs={hubs} />

@@ -39,7 +39,8 @@ test("an Admin opens Settings from the menu, follows an item of the rail to its 
   if (isPhone(page)) await page.locator("main").getByRole("link", { name: "Settings", exact: true }).click();
   else await expect(page.locator("main").getByRole("link", { name: "Settings", exact: true })).toBeHidden(); // the rail is the way on a desktop
   if (isPhone(page)) await expect(page).toHaveURL(/\/staff\/settings$/);
-  if (!isPhone(page)) await expect(page.locator('nav.staff-rail a[aria-current="page"]')).toHaveText(["Settings"]);
+  // Beside the settings list the staff menu is the compact rail from 1200px (the expanded one between 840 and 1200 is not drawn).
+  if ((page.viewportSize()?.width ?? 0) >= 1200) await expect(page.locator('nav.compact-rail a[aria-current="page"]')).toHaveText(["Settings"]);
 });
 
 test("Find a setting filters the rail in the browser: a keyword finds an integration, Enter opens the first, Escape clears", async ({ page }) => {

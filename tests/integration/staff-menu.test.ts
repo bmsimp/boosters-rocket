@@ -193,6 +193,34 @@ describe("the staff menu", () => {
   });
 });
 
+describe("the compact rail, beside a page with a list pane of its own", () => {
+  beforeEach(resetDb);
+  /** The compact rail's destinations, as "label href", and the current one ("*" after it). The stylesheet shows it only on such a page. */
+  const compact = async (path = "/staff/settings") => {
+    atPath(path);
+    const nav = /<nav class="compact-rail" aria-label="Main">(.*?)<\/nav>/.exec(await renderPage(StaffLayout))?.[1] ?? "";
+    return [...nav.matchAll(/<a ([^>]*)>.*?<span class="compact-label">([^<]*)<\/span><\/a>/g)]
+      .map((m) => `${m[2]} ${/href="([^"]+)"/.exec(m[1]!)![1]}${m[1]!.includes('aria-current="page"') ? " *" : ""}`);
+  };
+
+  it("holds an Admin's five destinations, each group leading to its first page, with nothing to open or close", async () => {
+    await asAdmin();
+    expect(await compact("/staff/settings/health")).toEqual(["Home /staff", "Families /staff/roster", "Season /staff/seasons", "Money /staff/balances", "Settings /staff/settings *"]);
+    const nav = /<nav class="compact-rail"[^>]*>(.*?)<\/nav>/.exec(await renderPage(StaffLayout))![1]!;
+    expect(nav).not.toMatch(/<button|aria-expanded|hidden=""|<details/);
+  });
+
+  it("marks the destination that holds the page, and leads a group to the first page this person may open", async () => {
+    await asAdmin();
+    expect(await compact("/staff/seasons/progress")).toContain("Season /staff/seasons *");
+    expect(await compact("/staff/links")).toContain("Families /staff/roster *");
+    expect(await compact("/staff")).toContain("Home /staff *");
+    await resetDb();
+    await staffWith("Season.Progress.Read", "Settings.Club.Read");
+    expect(await compact()).toEqual(["Home /staff", "Season /staff/seasons/progress", "Settings /staff/settings *"]);
+  });
+});
+
 describe("the phone's tab bar and the group hubs", () => {
   beforeEach(resetDb);
   /** The tab bar's links, as "label href". */

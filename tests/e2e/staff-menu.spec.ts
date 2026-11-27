@@ -13,14 +13,67 @@ const GROUPS: Record<string, string[]> = {
 };
 const rail = (page: Page) => page.locator("nav.staff-rail");
 const ALL = ["Home", ...Object.values(GROUPS).flat(), "Settings"];
+const compactRail = (page: Page) => page.locator("nav.compact-rail");
+const FIVE = ["Home", "Families", "Season", "Money", "Settings"];
+
+// A page with a list pane of its own (Settings) has M3's compact rail instead (the owner's approval of 2026-11-27):
+// five destinations, each icon on its pill with its label under it, a group opening its first page, where the
+// expanded rail is back. The settings list docks beside it, 24px from the page, and the page starts at its pane's edge.
+for (const width of [1440, 2560]) {
+  test(`at ${width}px a page with a list pane has the compact rail: five destinations, the list docked beside it`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width, height: 1000 } });
+    await context.addCookies([staffSessionCookie()]);
+    const page = await context.newPage();
+    await page.goto("/staff/settings/health");
+    await expect(rail(page)).toBeHidden();
+    await expect(compactRail(page)).toBeVisible();
+    await expect(compactRail(page).getByRole("link")).toHaveText(FIVE);
+    await expect(compactRail(page).locator('a[aria-current="page"]')).toHaveText(["Settings"]);
+    await expect(compactRail(page).locator("[aria-expanded], button, details")).toHaveCount(0);
+    const m = await page.evaluate(() => {
+      const box = (el: Element) => el.getBoundingClientRect().toJSON() as DOMRect;
+      const r = document.querySelector("nav.compact-rail")!;
+      return { rail: box(r), list: box(document.querySelector("nav.list-pane")!), main: box(document.querySelector("main")!),
+        links: [...r.querySelectorAll("a")].map((a) => ({ name: a.textContent ?? "", ...box(a) })), title: box(document.querySelector("main h1")!),
+        scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth };
+    });
+    expect(m.scrollWidth, "the page scrolls sideways").toBeLessThanOrEqual(m.clientWidth);
+    expect(m.rail.width, "the compact rail is narrow").toBeLessThanOrEqual(100);
+    expect(m.list.left, "the list docks beside the rail").toBeGreaterThanOrEqual(m.rail.right - 1);
+    expect(Math.round(m.main.left - m.list.right), "M3's 24px pane spacer").toBe(24);
+    expect(m.title.left - m.main.left, "the page starts at its pane's edge, with no centered column").toBeLessThanOrEqual(48);
+    for (const l of m.links) expect(l.height, `${l.name} is at least a 48px target`).toBeGreaterThanOrEqual(48);
+    // A group opens its first page, where the expanded rail is back.
+    await compactRail(page).getByRole("link", { name: "Families" }).click();
+    await expect(page).toHaveURL(/\/staff\/roster$/);
+    await expect(rail(page)).toBeVisible();
+    await expect(compactRail(page)).toBeHidden();
+    await context.close();
+  });
+}
+
+test("at 2560px a page with no list pane keeps the expanded rail, its page starting at the pane's edge", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 2560, height: 1200 } });
+  await context.addCookies([staffSessionCookie()]);
+  const page = await context.newPage();
+  await page.goto("/staff");
+  await expect(rail(page)).toBeVisible();
+  await expect(compactRail(page)).toBeHidden();
+  const m = await page.evaluate(() => ({ pane: document.querySelector(".staff-pane")!.getBoundingClientRect().left, title: document.querySelector("main h1")!.getBoundingClientRect().left,
+    scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
+  expect(m.scrollWidth).toBeLessThanOrEqual(m.clientWidth);
+  expect(m.title - m.pane, "no centered column").toBeLessThanOrEqual(48);
+  await context.close();
+});
 
 for (const width of [1200, 1440]) {
   test(`at ${width}px an Admin's menu is the rail: every group's pages in the open under its heading`, async ({ browser }) => {
     const context = await browser.newContext({ viewport: { width, height: 900 } });
     await context.addCookies([staffSessionCookie()]);
     const page = await context.newPage();
-    await page.goto("/staff/settings/health");
+    await page.goto("/staff/roster");
     await expect(rail(page)).toBeVisible();
+    await expect(compactRail(page)).toBeHidden();
     await expect(rail(page).getByRole("link")).toHaveText(ALL);
     for (const [name, links] of Object.entries(GROUPS)) {
       const g = rail(page).getByRole("group", { name });
@@ -31,8 +84,7 @@ for (const width of [1200, 1440]) {
     // Nothing collapses, nothing is a disclosure, and the bar holds no menu of its own.
     await expect(rail(page).locator("[aria-expanded], button, details")).toHaveCount(0);
     await expect(page.locator("header.bar nav")).toHaveCount(0);
-    // Health is a settings page: Settings is the one current entry.
-    await expect(rail(page).locator('a[aria-current="page"]')).toHaveText(["Settings"]);
+    await expect(rail(page).locator('a[aria-current="page"]')).toHaveText(["Roster"]);
     await expect(page.locator("nav.tabs.staff-tabs")).toBeHidden();
 
     const measured = await page.evaluate(() => {

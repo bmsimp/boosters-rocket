@@ -209,12 +209,30 @@ footer a { color: var(--primary); }
 @media (min-width: 1200px) {
   .staff-frame { display: grid; grid-template-columns: 17rem minmax(0, 1fr); align-items: start; }
   .staff-rail { display: grid; position: sticky; top: 0; max-height: 100vh; overflow-y: auto; }
-  .staff-pane { --card: var(--surface-container-low); background: var(--surface); border-radius: var(--shape-xl) var(--shape-xl) 0 0;
+  .staff-frame { --pane: var(--surface); }
+  [data-theme="dark"] .staff-frame { --pane: var(--surface-container-lowest); }
+  .staff-pane { --card: var(--surface-container-low); background: var(--pane); border-radius: var(--shape-xl) var(--shape-xl) 0 0;
     margin-right: var(--s6); min-height: calc(100vh - 64px); min-width: 0; padding-bottom: var(--s4); }
-  [data-theme="dark"] .staff-pane { --card: var(--surface-container-low); background: var(--surface-container-lowest); }
-  .staff-pane .wrap { max-width: 1240px; }
 }
-@media (min-width: 1200px) and (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .staff-pane { background: var(--surface-container-lowest); } }
+@media (min-width: 1200px) and (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .staff-frame { --pane: var(--surface-container-lowest); } }
+
+/* -- Wide screens (the owner's approval of 2026-11-27). From 1200px a staff page starts at its pane's left edge and
+   uses the width, with no centered column: prose keeps its 70ch measure (above), a grid or a table stretches up to
+   1920px, and a single card that holds no table stops at 1280px. A page with a list pane of its own (`.list-pane`:
+   Settings' list) has M3's compact rail instead of the expanded one, and the list docks beside it as its own pane,
+   24px (M3's pane spacer) from the page's. Decided by the page's shape (`:has()`), never by a list of addresses. -- */
+.compact-rail { display: none; }
+@media (min-width: 1200px) {
+  .staff-pane .wrap { max-width: none; margin-inline: 0; padding-inline: var(--s6); }
+  .staff-pane main.wrap { max-width: calc(1920px + 2 * var(--s6)); }
+  .staff-pane main.wrap.single > :is(.box, .notice):not(:has(.table)) { max-width: 1280px; }
+  .staff-frame:has(.list-pane) { grid-template-columns: 5.5rem minmax(0, 1fr); }
+  .staff-frame:has(.list-pane) > .staff-rail { display: none; }
+  .staff-frame:has(.list-pane) > .compact-rail { display: grid; position: sticky; top: 0; max-height: 100vh; overflow-y: auto; }
+  /* The pane holding a list pane and its page is no surface of its own: each of the two is one. */
+  :root .staff-frame:has(.list-pane) > .staff-pane { background: none; border-radius: 0; margin-right: var(--s5); }
+}
+/* -- End of wide screens -- */
 
 /* ===== 4. Components, A to Z ===== */
 
@@ -449,6 +467,13 @@ dialog.sheet-confirm:modal { inset: 0; margin: auto; width: min(35rem, calc(100%
 @keyframes sheet-in { from { transform: translateX(100%); } }
 @keyframes dialog-in { from { transform: scale(0.9); opacity: 0; } }
 dialog.sheet[open]:not(:modal) { position: static; display: block; width: auto; border-radius: var(--shape-l-inc); margin-block: var(--s3); }
+/* A Drawer that docks (Drawer's dock), from 1600px: open, it is a pane at the window's right, under the bar, and the
+   staff page makes room beside it, so both stay usable. Below 1600px it is the modal side sheet above. */
+@media (min-width: 1600px) {
+  dialog.sheet-dock[open]:not(:modal) { position: fixed; z-index: 5; top: calc(64px + var(--s2)); right: var(--s5); bottom: var(--s4); width: 34rem;
+    display: flex; flex-direction: column; margin: 0; border-radius: var(--shape-xl); box-shadow: none; }
+  .staff-frame:has(dialog.sheet-dock[open]:not(:modal)) > .staff-pane { margin-right: calc(34rem + 2 * var(--s5)); }
+}
 .sheet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s3); padding: var(--s5) var(--s3) var(--s2) var(--s5); }
 .sheet-head h2 { font: var(--headline-s); padding-top: 6px; overflow-wrap: anywhere; }
 .sheet-close { flex: none; }
@@ -643,6 +668,18 @@ div.checks > .hint { margin-top: -8px; padding-left: calc(var(--target) - 15px);
 .staff-rail a[aria-current="page"] { background: var(--secondary-container); color: var(--on-secondary-container); font-weight: 700; }
 .staff-rail a svg { width: 24px; height: 24px; flex: none; }
 .rail-rule { border: 0; border-top: 1px solid var(--outline-variant); margin: var(--s3) var(--s4); }
+/* The compact rail (CompactRail, a page with a list pane, from 1200px): M3's collapsed navigation rail. Each
+   destination 64px tall, its icon on a 56 by 32 pill, its label always under it; the current one's pill in the
+   secondary container and its label bold. */
+.compact-rail { align-content: start; gap: var(--s1); padding: var(--s1) var(--s1) var(--s5); }
+.compact-rail a { display: flex; flex-direction: column; align-items: center; gap: var(--s1); min-height: 64px; padding: var(--s1) 0 6px;
+  color: var(--on-surface-variant); text-decoration: none; text-align: center; border-radius: var(--shape-l); }
+.compact-pill { display: grid; place-items: center; width: 56px; height: 32px; border-radius: var(--shape-full); transition: background-color var(--effects-dur) var(--effects); }
+.compact-pill svg { width: 24px; height: 24px; }
+.compact-label { font: var(--label-m); font-weight: 500; max-width: 5rem; overflow-wrap: anywhere; }
+.compact-rail a:hover .compact-pill { background: color-mix(in srgb, var(--on-surface-variant) var(--sl-hover), transparent); }
+.compact-rail a[aria-current="page"] .compact-pill { background: var(--secondary-container); color: var(--on-secondary-container); }
+.compact-rail a[aria-current="page"] .compact-label { color: var(--on-surface); font-weight: 700; }
 
 /* --- Notice (src/app/components/notice.tsx): ours (M3's banner went with Material 2; a snackbar never answers an
    action). A status that stands apart from the text around it, on its tone's container with no edge and 16px corners.
@@ -1107,9 +1144,11 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 .ds-roles { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: var(--s2); }
 .ds-frame-rail { display: grid; grid-template-columns: minmax(0, 17rem) minmax(0, 1fr); align-items: start; padding-top: var(--s2); }
 .ds-frame .staff-rail.ds-show { display: grid; }
+.ds-frame .compact-rail.ds-show { display: grid; }
+.ds-frame-compact { grid-template-columns: 5.5rem minmax(0, 1fr); }
 .ds-pane { background: var(--surface); border-radius: var(--shape-xl) var(--shape-xl) 0 0; padding: var(--s5); min-height: 16rem; margin-right: var(--s4); }
 .ds-pane .page-title { margin-top: 0; }
-@media (max-width: 599.98px) { .ds-frame-rail { grid-template-columns: 1fr; } .ds-pane { margin: 0 var(--s3); } }
+@media (max-width: 599.98px) { .ds-frame-rail:not(.ds-frame-compact) { grid-template-columns: 1fr; } .ds-pane { margin: 0 var(--s3); } }
 .ds-frame { border: 1px solid var(--outline-variant); border-radius: var(--shape-l); overflow: hidden; margin-top: var(--s4); background: var(--ground); }
 .ds-frame .bar .wrap { max-width: none; }
 .ds-frame .top-nav.ds-show { display: flex; }
@@ -1132,6 +1171,13 @@ main.wrap.single > .page-head + p { margin-top: var(--s4); }
    phone the list is drawn only at /staff/settings, as the first screen, each group a segmented list, and each item
    opens as its own page with the way back above its title. */
 .settings-layout { max-width: 1240px; margin: 0 auto; padding: 0 var(--cell); }
+/* From 1200px the list docks beside the compact rail as its own pane, and the page is the other (wide screens, section 3). */
+@media (min-width: 1200px) {
+  .settings-layout { max-width: none; margin: 0; padding: 0; }
+  .settings-layout > .list-pane, .settings-layout > main.wrap { background: var(--pane); border-radius: var(--shape-xl) var(--shape-xl) 0 0; min-height: calc(100vh - 64px); }
+  .settings-layout > .list-pane { padding-inline: var(--s4); }
+  .settings-layout > main.wrap { padding-inline: var(--s6); }
+}
 .settings-layout > main.wrap { max-width: none; margin: 0; padding-left: 0; padding-right: 0; }
 .settings-rail { padding-top: var(--s5); }
 .rail-title { font: var(--headline-l); letter-spacing: -0.02em; margin: 0 0 var(--s4); }
@@ -1169,7 +1215,7 @@ main.wrap.single > .page-head + p { margin-top: var(--s4); }
   /* A settings page's way back to Settings is for phones: here its line keeps its room, so every title is level with the rail's. */
   .settings-head .page-back { visibility: hidden; }
 }
-@media (min-width: 1200px) { .settings-layout { grid-template-columns: 288px minmax(0, 1fr); gap: var(--s6); } .rail-title { font: var(--headline-m); } }
+@media (min-width: 1200px) { .settings-layout { grid-template-columns: 18rem minmax(0, 1fr); gap: var(--s5); } .rail-title { font: var(--headline-m); } }
 @media (max-width: 839.98px) {
   .settings-rail:not(.is-root) { display: none; }
   .settings-rail.is-root { padding-top: var(--s4); }
@@ -1184,6 +1230,25 @@ main.wrap.single > .page-head + p { margin-top: var(--s4); }
 }
 /* The Overview, and the Integrations page: each kind of system, its rule, and its rows. */
 .settings-overview > .notice, .settings-overview > .box { margin-top: var(--s5); }
+/* The Overview's status cards, one an area: one column, 2 across from 840px, 4 from 1600px, the grid at most 1920px.
+   Each card's button sits at its foot, level across a row. */
+.overview-cards { display: grid; gap: var(--s5); margin-top: var(--s5); max-width: 1920px; }
+@media (min-width: 840px) { .overview-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1600px) { .overview-cards { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.overview-cards > .box { display: flex; flex-direction: column; gap: var(--s3); margin: 0; min-width: 0; }
+.overview-cards > .box > * { margin: 0; }
+.overview-cards > .box > .box-foot { margin-top: auto; padding-top: var(--s2); }
+.overview-systems { list-style: none; padding: 0; display: grid; gap: var(--s2); }
+.overview-systems li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--s1) var(--s3); }
+.overview-swatch { display: inline-block; width: 14px; height: 14px; border-radius: var(--shape-xs); background: var(--seed); vertical-align: -2px; margin-right: 6px; }
+/* A settings page with several cards (QuickBooks, Outgoing mail, Documenso, Staff sign-in) lays them out in columns
+   from 1600px, in reading order, one column a card; below, they stack. */
+.settings-columns > .box { margin-top: var(--s4); }
+@media (min-width: 1200px) and (max-width: 1599.98px) { .settings-columns > .box { max-width: 1280px; } }
+@media (min-width: 1600px) {
+  .settings-columns { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--s5); align-items: start; margin-top: var(--s4); max-width: 1920px; }
+  .settings-columns > .box { margin-top: 0; }
+}
 .integration-kind { margin-top: var(--s5); }
 .integration-kind + .integration-kind { padding-top: var(--s5); border-top: 1px solid var(--outline-variant); }
 .integration-kind h2 { font-size: var(--text-lg); line-height: 1.35; }

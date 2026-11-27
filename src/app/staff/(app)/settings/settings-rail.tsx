@@ -45,7 +45,7 @@ export function SettingsRail({ groups, extras, overview }: { groups: RailGroup[]
   };
 
   return (
-    <nav className={root ? "settings-rail is-root" : "settings-rail"} aria-label="Settings">
+    <nav className={root ? "settings-rail is-root list-pane" : "settings-rail list-pane"} aria-label="Settings">
       {root ? <h1 className="rail-title">Settings</h1> : <p className="rail-title">Settings</p>}
       <div className="rail-find" role="search">
         <label htmlFor={`${id}-find`} className="visually-hidden">Find a setting</label>

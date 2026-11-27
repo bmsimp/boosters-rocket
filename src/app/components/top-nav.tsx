@@ -104,3 +104,40 @@ export function StaffRail({ menu }: { menu: MenuEntry[] }) {
     </nav>
   );
 }
+
+/** Each group's icon on the compact rail: the icon of the page it stands for most (Parents, Seasons, Balances). */
+const GROUP_ICONS: Record<string, string> = { Families: "/staff/parents", Season: "/staff/seasons", Money: "/staff/balances" };
+
+/** One destination of the compact rail: Home, a group (leading to its first page) or Settings, and what marks it current. */
+type Destination = { key: string; label: string; href: string; icon: ReactNode; owns: string[] };
+
+/** The compact rail's destinations for one menu: one for each entry, a group's leading to its first page. */
+export function compactDestinations(menu: MenuEntry[]): Destination[] {
+  return menu.map((m): Destination => m.kind === "link"
+    ? { key: m.label, label: m.label, href: m.href, icon: RAIL_ICONS[m.label === "Settings" ? "settings" : m.href], owns: [currentKey(m)] }
+    : { key: m.label, label: m.label, href: m.links[0]!.href, icon: RAIL_ICONS[GROUP_ICONS[m.label] ?? ""], owns: m.links.map(currentKey) });
+}
+
+/**
+ * The staff menu from 1200px on a page with a list pane of its own (Settings' list): M3's collapsed navigation rail,
+ * one destination for Home, each group and Settings, the icon on its pill and the label always under it, with no
+ * collapse button (the owner's decision of 2026-11-27). A group opens its first page, where the expanded rail is back.
+ * The layout draws both rails; booster.css shows this one only where the page holds a list pane (`:has(.list-pane)`),
+ * so the page's own shape decides, not a list of addresses. The current destination is the one holding the current page.
+ */
+export function CompactRail({ menu }: { menu: MenuEntry[] }) {
+  const path = usePathname();
+  const current = currentHref(path, hrefsOf(menu));
+  return (
+    <nav className="compact-rail" aria-label="Main">
+      {compactDestinations(menu).map((d) => (
+        <Link key={d.key} href={d.href} aria-current={current !== null && d.owns.includes(current) ? "page" : undefined}>
+          <span className="compact-pill" aria-hidden="true">
+            {d.icon && <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{d.icon}</svg>}
+          </span>
+          <span className="compact-label">{d.label}</span>
+        </Link>
+      ))}
+    </nav>
+  );
+}

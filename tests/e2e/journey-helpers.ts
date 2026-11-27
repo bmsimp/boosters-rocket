@@ -60,6 +60,14 @@ export async function staffMenuTo(page: Page, group: string | null, entry: strin
     return;
   }
   const rail = page.locator("nav.staff-rail");
+  // Beside a list pane (Settings) the menu is the compact rail: a group's destination opens its first page, whose
+  // expanded rail then leads to the entry.
+  const compact = page.locator("nav.compact-rail");
+  if (await compact.isVisible()) {
+    await compact.getByRole("link", { name: group ?? entry, exact: true }).click();
+    if (!group) return;
+    await expect(rail).toBeVisible();
+  }
   await (group ? rail.getByRole("group", { name: group }) : rail).getByRole("link", { name: entry, exact: true }).click();
 }
 
