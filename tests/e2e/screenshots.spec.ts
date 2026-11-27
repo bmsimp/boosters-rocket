@@ -24,8 +24,10 @@ test.beforeEach(async ({ context }) => { await context.addCookies([staffSessionC
 const REALM = "9130000000000001";
 const shot = (name: string, project: string) => ({ path: `test-results/screenshots/${name}-${project}.png`, fullPage: true });
 const SCHEMES = ["light", "dark"] as const;
-/** Every animation on the page run to its end (a spring caught midway is not the look). */
-const settle = (page: import("@playwright/test").Page) => page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))));
+/** Every animation on the page that ends run to its end (a spring caught midway is not the look). */
+const settle = (page: import("@playwright/test").Page) => page.evaluate(() => Promise.all(document.getAnimations()
+  .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity) // a busy spinner turns for ever
+  .map((a) => a.finished.catch(() => undefined))));
 
 test("the parent's Home on a phone, light and dark, for the owner to look at", async ({ page, context }, info) => {
   test.skip(info.project.name !== "phone", "the phone's picture");
