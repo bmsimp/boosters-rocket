@@ -136,9 +136,13 @@ Plain English, short, no jargon (`owner-taste.md`, rule 10). Say first if anythi
 
 A builder stops at section 8. **Never run `gh pr merge`, never push to `main`, never deploy, never touch linuxdev's live containers or database.** Brian's go-ahead is for one PR or one deploy at a time; it is never standing.
 
+`.claude/settings.json` backs this up for every session in the repository. Its `deny` list blocks outright: pushes to `main`, force-pushes, `--amend` and `--no-verify`, `gh repo delete`, `gh secret`, `gh variable set`/`delete`, recursive force-deletes (`rm -rf` in any spelling, `Remove-Item -Recurse`), Docker volume removal and prunes, `docker compose down -v`, and on linuxdev `docker volume` and `docker compose … down`. Its `ask` list makes Claude Code pop up a prompt for Brian each time: `gh pr merge`, and `ssh linuxdev` with `deploy`, `docker rm`, `DROP`, `drop` or `dropdb`. A builder running unattended can't answer the prompt, so it is still stopped. These rules match command text, not intent; they catch mistakes and are no reason to try a workaround.
+
+`main` is branch-protected on GitHub: every change reaches it through a pull request whose `test` and `image` checks pass, admins included, and no one can force-push to it. A direct push to `main` fails whatever the local rules say.
+
 ### Lead only, after Brian says "merge"
 
-`gh pr merge <number> --merge` (a merge commit: never squash, never rebase), then remove the slice's worktree (`orca worktree rm --worktree path:<path> --json`) and its branch once it is clean.
+`gh pr merge <number> --merge` (a merge commit: never squash, never rebase); Claude Code asks Brian to confirm it in a pop-up. It goes through only when the PR's `test` and `image` checks are green. Then remove the slice's worktree (`orca worktree rm --worktree path:<path> --json`) and its branch once it is clean.
 
 ### Lead only, after Brian separately says "deploy"
 
@@ -158,7 +162,7 @@ A builder stops at section 8. **Never run `gh pr merge`, never push to `main`, n
    ssh linuxdev 'tail -n 5 ~/booster-rocket-deploy.log'   # repeat until deploy-exit- appears
    ```
 
-   This is `ssh linuxdev 'cd ~/booster-rocket && bash scripts/poc/deploy.sh'`, run so it survives the connection.
+   This is `ssh linuxdev 'cd ~/booster-rocket && bash scripts/poc/deploy.sh'`, run so it survives the connection. Claude Code asks Brian to confirm it in a pop-up, as it does any `ssh linuxdev` command with `docker rm` or `DROP`.
 4. Success: `Deployed <short commit>.` then `deploy-exit-0`; `ssh linuxdev 'docker ps --filter name=booster-rocket'` shows the app `(healthy)` and the worker up. Any other exit code: its meaning is in `docs/runbooks/poc-linuxdev.md`, section 8. Report it to Brian; don't retry blind.
 5. Going back is Brian's call: `scripts/poc/deploy.sh --rollback` doesn't undo migrations; restoring the dump from step 2 is in `docs/runbooks/poc-linuxdev.md`, section 4, "Upgrading a site that already finished setup", step 5.
 
