@@ -4,11 +4,11 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: as
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, clubMessage, family, familyMoney, jobRun, messageFile, messageMail, messageVersion, messageVersionFile, parentAuthenticator, parentAuthSession, parentBackupCode, parentAuthVerification, parentDevice, parentEmailChange, parentSigninToken, rateLimitEvent, setting, signinCode, staffAuthSession, staffAuthUser, staffAuthVerification, writeQueue } from "@/lib/db/schema";
+import { accountingLink, auditLog, backupRequest, clubMessage, family, familyMoney, jobRun, messageFile, messageMail, messageVersion, messageVersionFile, parentAuthenticator, parentAuthSession, parentBackupCode, parentAuthVerification, parentDevice, parentEmailChange, parentSigninToken, rateLimitEvent, setting, signinCode, staffAuthSession, staffAuthUser, staffAuthVerification, writeQueue } from "@/lib/db/schema";
 import * as schema from "@/lib/db/schema";
 import { getTableName, is } from "drizzle-orm";
 import { PgTable } from "drizzle-orm/pg-core";
-import { cleanUp, runCleanup, describeCleanup, sweepExpiredChallenges, CHALLENGE_SWEEP_JOB, CLEANED_TABLES, KEPT_TABLES, CLEANUP_JOB, RETIRED_SETTINGS, FINISHED_WRITES_DAYS, HELD_MESSAGE_FILE_HOURS, JOB_HISTORY_DAYS, MESSAGE_MAIL_DAYS, REMINDER_CLAIM_DAYS, type CleanupCounts } from "@/lib/jobs/cleanup";
+import { cleanUp, runCleanup, describeCleanup, sweepExpiredChallenges, CHALLENGE_SWEEP_JOB, CLEANED_TABLES, KEPT_TABLES, CLEANUP_JOB, RETIRED_SETTINGS, FINISHED_WRITES_DAYS, HELD_MESSAGE_FILE_HOURS, JOB_HISTORY_DAYS, MESSAGE_MAIL_DAYS, BACKUP_REQUEST_DAYS, REMINDER_CLAIM_DAYS, type CleanupCounts } from "@/lib/jobs/cleanup";
 import { CHALLENGE_SWEEP_MARK, markJob, readMark } from "@/lib/jobs/marks";
 import { runDueJobs } from "@/lib/jobs/runner";
 import { RATE_LIMITS } from "@/lib/parents/rate-limit";
@@ -28,7 +28,7 @@ const MONEY_COMPANY = "4620000000000001";
 const NOW = new Date("2026-11-15T12:00:00.000Z");
 const at = (ms: number) => new Date(NOW.getTime() + ms);
 const SEC = 1000, DAY = 86_400_000;
-const NOTHING: CleanupCounts = { staffSessions: 0, parentSessions: 0, signinCodes: 0, signinLinks: 0, unfinishedAuthenticators: 0, spentBackupCodes: 0, rememberedDevices: 0, rateLimitEvents: 0, emailChanges: 0, familyMoney: 0, jobRuns: 0, reminderClaims: 0, writeQueue: 0, verifications: 0, retiredSettings: 0, heldMessageFiles: 0, messageMail: 0 };
+const NOTHING: CleanupCounts = { staffSessions: 0, parentSessions: 0, signinCodes: 0, signinLinks: 0, unfinishedAuthenticators: 0, spentBackupCodes: 0, rememberedDevices: 0, rateLimitEvents: 0, emailChanges: 0, familyMoney: 0, jobRuns: 0, reminderClaims: 0, writeQueue: 0, verifications: 0, retiredSettings: 0, heldMessageFiles: 0, messageMail: 0, backupRequests: 0 };
 const clean = (now = NOW) => db.transaction((tx) => cleanUp(tx, now));
 
 async function staffSession(id: string, expiresAt: Date) {
@@ -349,6 +349,18 @@ describe("the daily clean-up deletes only what is past use", () => {
     expect(describeCleanup({ ...NOTHING, messageMail: 1 })).toBe("Removed 1 record of a message emailed over 90 days ago.");
   });
 
+  it("requests to the backup service: one finished over 90 days ago goes, one a second inside and one not finished stay", async () => {
+    const D = BACKUP_REQUEST_DAYS * DAY;
+    await db.insert(backupRequest).values([
+      { kind: "backup", requestedAt: at(-D - 5 * SEC), finishedAt: at(-D - SEC), outcome: "ok", words: "Backed up." },
+      { kind: "download", requestedAt: at(-D - 5 * SEC), finishedAt: at(-D + SEC), outcome: "ok", words: "Ready to download." },
+      { kind: "restore", requestedAt: at(-400 * DAY) },
+    ]);
+    expect(await clean()).toEqual({ ...NOTHING, backupRequests: 1 });
+    expect((await db.select({ kind: backupRequest.kind }).from(backupRequest)).map((r) => r.kind).sort()).toEqual(["download", "restore"]);
+    expect(describeCleanup({ ...NOTHING, backupRequests: 1 })).toBe("Removed 1 request to the backup service finished over 90 days ago.");
+  });
+
   it("never touches the audit log, however old", async () => {
     await db.insert(auditLog).values({ at: at(-3650 * DAY), door: "system", action: "signin" });
     expect(await clean()).toEqual(NOTHING);
@@ -420,7 +432,7 @@ describe("a run of the clean-up", () => {
   it("says what it removed in plain words", () => {
     expect(describeCleanup(NOTHING)).toBe("Nothing to remove.");
     expect(describeCleanup({ ...NOTHING, staffSessions: 1 })).toBe("Removed 1 expired staff session.");
-    expect(describeCleanup({ staffSessions: 2, parentSessions: 1, signinCodes: 3, signinLinks: 0, unfinishedAuthenticators: 0, spentBackupCodes: 0, rememberedDevices: 0, rateLimitEvents: 4, emailChanges: 1, familyMoney: 1, jobRuns: 5, reminderClaims: 0, writeQueue: 0, verifications: 0, retiredSettings: 0, heldMessageFiles: 0, messageMail: 0 }))
+    expect(describeCleanup({ staffSessions: 2, parentSessions: 1, signinCodes: 3, signinLinks: 0, unfinishedAuthenticators: 0, spentBackupCodes: 0, rememberedDevices: 0, rateLimitEvents: 4, emailChanges: 1, familyMoney: 1, jobRuns: 5, reminderClaims: 0, writeQueue: 0, verifications: 0, retiredSettings: 0, heldMessageFiles: 0, messageMail: 0, backupRequests: 0 }))
       .toBe("Removed 2 expired staff sessions, 1 expired parent session, 3 sign-in codes, 4 rate-limit records, 1 expired email change, 1 set of figures for a family no longer in the roster and 5 old job records.");
     expect(describeCleanup({ ...NOTHING, reminderClaims: 3 })).toBe("Removed 3 reminder records older than a year.");
   });

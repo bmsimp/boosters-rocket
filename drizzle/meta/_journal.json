@@ -421,6 +421,13 @@
       "when": 1795542650814,
       "tag": "0059_connect_relay",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1795803496545,
+      "tag": "0060_in_app_backups",
+      "breakpoints": true
     }
   ]
 }

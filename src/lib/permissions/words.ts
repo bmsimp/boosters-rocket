@@ -36,6 +36,7 @@ export const PERMISSION_WORDS: Record<Permission, string> = {
   "Messages.Post.ReadWrite": "Post messages to every family, edit your own, and see every message with who it was emailed to",
   "Messages.Delete.ReadWrite": "Delete any message for good, with every earlier version and its files",
   "Settings.Messages.ReadWrite": "Allow messages to be emailed to families, or stop it",
+  "Admin.Backups.ReadWrite": "See backups, make one, download one, restore one, and set up off-site copies",
 };
 
 /** The areas of the checklist, in the order the Roles page shows them. Each grantable permission is in exactly one. */
