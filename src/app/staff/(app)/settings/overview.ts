@@ -5,6 +5,9 @@ import { signinCounts } from "@/lib/parents/switches";
 import { messageCounts } from "@/lib/messages/staff";
 import { auditCountSince, newestAuditAt } from "@/lib/audit/query";
 import { messagesEmailAllowed } from "@/lib/settings/messages";
+import { backupRows } from "@/lib/backups/status";
+import { readOffsite } from "@/lib/backups/offsite";
+import { lastBackup } from "@/lib/health/backup";
 import { SETTINGS_ITEMS, type PageKey, type SettingsItem } from "./sections";
 import { healthLines, RAIL_STATUS, systemStatuses, type Status } from "./statuses";
 
@@ -81,6 +84,14 @@ const FACTS: Partial<Record<PageKey, (items: readonly SettingsItem[]) => Promise
       { key: "checks", label: "Checks working", text: `${lines.filter((l) => l.state === "ok").length} of ${lines.length}` },
       ...lines.filter((l) => l.state === "attention").slice(0, 2).map((l): Fact => ({ key: `line-${l.key}`, label: l.title, text: l.word })),
       backedUp ? { key: "backup", label: "Last backup", at: backedUp } : { key: "backup", label: "Last backup", text: "None recorded" },
+    ];
+  },
+  async backups() {
+    const [last, rows, offsite] = await Promise.all([lastBackup(), backupRows(), readOffsite()]);
+    return [
+      last ? { key: "last", label: "Last backup", at: last.at } : { key: "last", label: "Last backup", text: "None yet" },
+      { key: "kept", label: "On the server", text: n(rows.length, "backup", "backups") },
+      { key: "offsite", label: "Off-site copies", text: offsite ? "On" : "Off" },
     ];
   },
 };

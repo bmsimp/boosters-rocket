@@ -56,6 +56,9 @@ export const schema = z.object({
   SETTINGS_ENCRYPTION_KEY_PREVIOUS: z.preprocess((v) => (v === "" ? undefined : v), encryptionKey.optional()),
   CLIENT_IP_HEADER: clientIpHeader,
   QBO_RELAY_URL: relayUrl,
+  // The folder the backup service shares with the app, for a backup downloaded or copied off-site
+  // (deploy/compose.yml's volume backup-outbox; docs/superpowers/specs/2026-11-28-in-app-backups-design.md).
+  BACKUP_OUTBOX: z.preprocess((v) => (typeof v === "string" && v.trim() !== "" ? v.trim() : "/backup-outbox"), z.string().regex(/^(\/|[A-Za-z]:[\\/])/,"BACKUP_OUTBOX must be a folder's full path")),
 });
 
 export type Env = z.infer<typeof schema>;
