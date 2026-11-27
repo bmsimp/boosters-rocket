@@ -61,12 +61,12 @@ export default async function BackupsPage() {
       )}
       {preparing && <Notice tone="info">Preparing your download…</Notice>}
 
-      <Card title="Last backup" titleId="backups-last-h">
+      <Card title="Latest" titleId="backups-last-h">
         <KeyValue items={[
           { key: "last", label: "Last backup", value: v.last ? <LocalTime iso={v.last.at} /> : "None yet" },
           newest && { key: "size", label: "Size", value: sizeWords(newest.portalBytes + (newest.documensoBytes ?? 0)), numeric: true },
           v.beat?.freeBytes != null && { key: "free", label: "Free space on the server", value: sizeWords(v.beat.freeBytes), numeric: true },
-          { key: "next", label: "Next backup", value: v.beat?.nextAt ? <LocalTime iso={v.beat.nextAt} /> : v.schedule.at === "off" ? "Not on a schedule" : "Not known yet" },
+          { key: "next", label: "Next backup", value: v.beat?.nextAt ? clubTime(v.beat.nextAt, v.beat.zone) : v.schedule.at === "off" ? "Not on a schedule" : "Not known yet" },
         ]} />
         {backingUp && <Notice tone="info">Backing up, started <LocalTime iso={backingUp.claimedAt ?? backingUp.requestedAt} />.</Notice>}
         {failedLast && <Notice tone="problem">The last backup failed. {failedLast.words}</Notice>}
@@ -118,6 +118,19 @@ export default async function BackupsPage() {
       </Card>
     </main>
   );
+}
+
+/**
+ * The next backup in the club's time, the zone the backup service read its schedule in (the Club setting, else the
+ * server's), so it reads the same as "Every night at 3:00 AM" whatever the viewer's own zone (operations.md, the club's
+ * date).
+ */
+function clubTime(iso: string, zone: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-US", { timeZone: zone, dateStyle: "medium", timeStyle: "short" }).format(new Date(iso));
+  } catch {
+    return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", dateStyle: "medium", timeStyle: "short" }).format(new Date(iso));
+  }
 }
 
 function lastCopy(rows: BackupRow[]) {

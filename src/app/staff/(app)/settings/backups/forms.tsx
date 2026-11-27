@@ -56,7 +56,7 @@ export function ScheduleForm({ at, keep, save }: { at: string; keep: number; sav
 /** A row's two presses: Download, and Restore this backup, each behind its ConfirmDialog. */
 export function RowActions({ iso, restorable, download, restore }: { iso: string; restorable: boolean; download: () => Promise<Done>; restore: (() => Promise<Done>) | null }) {
   return (
-    <div className="row-actions">
+    <div className="row-actions backup-actions">
       <ConfirmDialog label="Download" context={iso} variant="tonal" size="sm" title="Download this backup?" confirmLabel="Prepare the download" busyLabel="Asking…"
         consequence="This file holds every family's records. Keep it private, and delete it when you're done." act={download} />
       {restore && restorable && (
