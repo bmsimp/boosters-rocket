@@ -31,7 +31,7 @@ async function entries(): Promise<string[]> {
   const nav = await menu();
   const out: string[] = [];
   const label = /<a\b[^>]*>(?:<svg.*?<\/svg>)?([^<]*)<\/a>/g;
-  for (const m of nav.matchAll(/<div role="group"[^>]*><h2[^>]*>([^<]*)<\/h2>(.*?)<\/div>|<a\b[^>]*>(?:<svg.*?<\/svg>)?([^<]*)<\/a>/g)) {
+  for (const m of nav.matchAll(/<div role="group"[^>]*><span[^>]*class="rail-heading"[^>]*>([^<]*)<\/span>(.*?)<\/div>|<a\b[^>]*>(?:<svg.*?<\/svg>)?([^<]*)<\/a>/g)) {
     if (m[3] !== undefined) out.push(m[3]);
     else out.push(`${m[1]}: ${[...m[2]!.matchAll(label)].map((a) => a[1]).join(", ")}`);
   }
@@ -57,12 +57,12 @@ describe("the staff menu", () => {
     ]);
   });
 
-  it("draws each group as a heading over its pages, always open, with nothing to open or close", async () => {
+  it("draws each group with its name over its pages, always open, with nothing to open or close", async () => {
     await asAdmin();
     const nav = await menu();
-    // Each group is named by its heading (role="group", aria-labelledby), its pages drawn under it.
-    for (const m of nav.matchAll(/<div role="group" aria-labelledby="([^"]+)"[^>]*><h2 id="([^"]+)"/g)) expect(m[1]).toBe(m[2]);
-    expect([...nav.matchAll(/<h2[^>]*>([^<]*)<\/h2>/g)].map((h) => h[1])).toEqual(["Families", "Season", "Money"]);
+    // Each group is named by its label (role="group", aria-labelledby), its pages drawn under it.
+    for (const m of nav.matchAll(/<div role="group" aria-labelledby="([^"]+)"[^>]*><span id="([^"]+)" class="rail-heading"/g)) expect(m[1]).toBe(m[2]);
+    expect([...nav.matchAll(/<span[^>]*class="rail-heading"[^>]*>([^<]*)<\/span>/g)].map((h) => h[1])).toEqual(["Families", "Season", "Money"]);
     // Nothing to open or close: no button, no disclosure, nothing hidden.
     expect(nav).not.toMatch(/<button|aria-expanded|hidden=""|<details/);
   });
