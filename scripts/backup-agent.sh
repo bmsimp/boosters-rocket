@@ -241,7 +241,7 @@ To bring a backup back on a server, follow docs/runbooks/restore.md.
 EOT
   files=("booster-rocket-$s.dump")
   [ -f "$DIR/documenso-$s.dump" ] && files+=("documenso-$s.dump")
-  if ! tar -cf "$part" -C "$DIR" "${files[@]}" -C "$note" KEEP-THESE-TOO.txt 2>/dev/null; then
+  if ! tar --force-local -cf "$part" -C "$DIR" "${files[@]}" -C "$note" KEEP-THESE-TOO.txt 2>/dev/null; then
     rm -rf "$note" "$part"; return 1
   fi
   rm -rf "$note"
@@ -342,14 +342,19 @@ SQL
     return
   fi
   # The swap: every connection to the live database is ended as it is dropped, and the loaded one takes its name.
-  server "drop database \"$BR_DB_NAME\" with (force)" >/dev/null \
-    && server "alter database \"${BR_DB_NAME}_restoring\" rename to \"$BR_DB_NAME\"" >/dev/null || {
-      say "Backup request $id (restore): the portal's database couldn't be swapped. Its backup from $fresh is in $DIR."
-      return
-    }
+  if ! server "drop database \"$BR_DB_NAME\" with (force)" >/dev/null; then
+    drop_staging
+    finish "$BR_DB_NAME" "$id" failed "The live database couldn't be replaced, so nothing was put back. The backup made just before is in the list." "{\"backupMadeFirst\": \"$fresh\"}"
+    return
+  fi
+  if ! server "alter database \"${BR_DB_NAME}_restoring\" rename to \"$BR_DB_NAME\"" >/dev/null; then
+    say "Backup request $id (restore): the restored database couldn't take its name; it is in ${BR_DB_NAME}_restoring. The backup from $fresh is in $DIR."
+    return
+  fi
   if [ -n "$with_doc" ]; then
-    server "drop database \"$DOC_DB\" with (force)" >/dev/null && server "alter database \"${DOC_DB}_restoring\" rename to \"$DOC_DB\"" >/dev/null \
-      || say "Backup request $id (restore): Documenso's database couldn't be swapped; it is in ${DOC_DB}_restoring."
+    if ! { server "drop database \"$DOC_DB\" with (force)" >/dev/null && server "alter database \"${DOC_DB}_restoring\" rename to \"$DOC_DB\"" >/dev/null; }; then
+      say "Backup request $id (restore): Documenso's database couldn't be swapped; the backup's is in ${DOC_DB}_restoring."
+    fi
   fi
   # Into the restored database: the audit row, this request finished, the backup just made as the last one, and
   # every request it held from before marked as not done.

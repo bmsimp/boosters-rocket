@@ -108,7 +108,7 @@ export function adminDatabaseUrl(runUrl?: string): string {
  * scratch databases of these purposes that its tests made and left behind, and leaves alone one of the same name that
  * it did not make.
  */
-export const SCRATCH_PURPOSES = ["migrate_script", "migrate_parents", "migrate_seasons", "migrate_shifts", "migrate_forms", "migrate_buyouts", "migrate_money", "migrate_queue", "migrate_session", "migrate_guardian", "migrate_synced", "migrate_moves", "migrate_contact", "migrate_unlinked", "migrate_retired", "migrate_ended", "migrate_held", "migrate_origin", "migrate_bare", "migrate_kept", "migrate_member", "migrate_columns", "migrate_upgrade", "migrate_refused", "migrate_relay", "migrate_relay_empty", "restore", "workers"] as const;
+export const SCRATCH_PURPOSES = ["migrate_script", "migrate_parents", "migrate_seasons", "migrate_shifts", "migrate_forms", "migrate_buyouts", "migrate_money", "migrate_queue", "migrate_session", "migrate_guardian", "migrate_synced", "migrate_moves", "migrate_contact", "migrate_unlinked", "migrate_retired", "migrate_ended", "migrate_held", "migrate_origin", "migrate_bare", "migrate_kept", "migrate_member", "migrate_columns", "migrate_upgrade", "migrate_refused", "migrate_relay", "migrate_relay_empty", "restore", "agent", "agent_doc", "workers"] as const;
 export type ScratchPurpose = (typeof SCRATCH_PURPOSES)[number];
 
 /**
