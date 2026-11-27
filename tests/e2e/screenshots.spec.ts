@@ -138,11 +138,11 @@ test("the large-screen layout, at 1440 and 2560, for the owner to look at", asyn
     await page.goto(address);
     await ready(page);
     await settle(page);
-    await page.screenshot({ path: `test-results/screenshots/${name}-${width}.png`, fullPage: true });
+    await page.screenshot({ path: `test-results/screenshots/${name}-${width}.png`, fullPage: !name.startsWith("drawer") });
     await context.close();
   };
   const overview = async (page: import("@playwright/test").Page) => {
-    await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
     await expect(page.locator("nav.compact-rail")).toBeVisible();
   };
   await at(1440, "/staff/settings", "settings-overview", overview);

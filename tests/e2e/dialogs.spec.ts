@@ -90,7 +90,7 @@ test("a Drawer with dock: from 1600px a pane beside the page at the same address
     await expect(pane).toBeVisible();
     const modal = await pane.evaluate((el) => el.matches(":modal"));
     expect(modal, `at ${width}px`).toBe(width < 1600);
-    expect(await behindFocusable(page, "#ds-button button"), `the page behind at ${width}px`).toBe(width >= 1600);
+    expect(await behindFocusable(page, "#drawer-ds-dock-1"), `the page behind at ${width}px`).toBe(width >= 1600);
     if (width >= 1600) {
       await expect(page.locator("html")).not.toHaveClass(/sheet-open/);
       const [box, beside] = [(await pane.boundingBox())!, await page.evaluate(() => document.querySelector(".staff-pane")!.getBoundingClientRect().right)];

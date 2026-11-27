@@ -470,9 +470,9 @@ dialog.sheet[open]:not(:modal) { position: static; display: block; width: auto; 
 /* A Drawer that docks (Drawer's dock), from 1600px: open, it is a pane at the window's right, under the bar, and the
    staff page makes room beside it, so both stay usable. Below 1600px it is the modal side sheet above. */
 @media (min-width: 1600px) {
-  dialog.sheet-dock[open]:not(:modal) { position: fixed; z-index: 5; top: calc(64px + var(--s2)); right: var(--s5); bottom: var(--s4); width: 34rem;
+  dialog.sheet-dock[open]:not(:modal) { position: fixed; z-index: 5; top: calc(64px + var(--s2)); right: var(--s5); bottom: var(--s4); left: auto; width: 34rem;
     display: flex; flex-direction: column; margin: 0; border-radius: var(--shape-xl); box-shadow: none; }
-  .staff-frame:has(dialog.sheet-dock[open]:not(:modal)) > .staff-pane { margin-right: calc(34rem + 2 * var(--s5)); }
+  .staff-frame:has(dialog.sheet-dock[open]) > .staff-pane { margin-right: calc(34rem + 2 * var(--s5)); }
 }
 .sheet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s3); padding: var(--s5) var(--s3) var(--s2) var(--s5); }
 .sheet-head h2 { font: var(--headline-s); padding-top: 6px; overflow-wrap: anywhere; }
@@ -1176,7 +1176,7 @@ main.wrap.single > .page-head + p { margin-top: var(--s4); }
   .settings-layout { max-width: none; margin: 0; padding: 0; }
   .settings-layout > .list-pane, .settings-layout > main.wrap { background: var(--pane); border-radius: var(--shape-xl) var(--shape-xl) 0 0; min-height: calc(100vh - 64px); }
   .settings-layout > .list-pane { padding-inline: var(--s4); }
-  .settings-layout > main.wrap { padding-inline: var(--s6); }
+  .settings-layout > main.wrap.single { padding-inline: var(--s6); }
 }
 .settings-layout > main.wrap { max-width: none; margin: 0; padding-left: 0; padding-right: 0; }
 .settings-rail { padding-top: var(--s5); }
