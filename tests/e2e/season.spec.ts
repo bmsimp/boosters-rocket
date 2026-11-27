@@ -55,10 +55,12 @@ test("Home shows the season ruler for the current season, and each student's pro
   await expect(ruler.locator("[aria-current]")).toHaveCount(1);
   // Season asks nothing of the family, but it is still ahead: only a step behind the current one is ticked.
   await expect(ruler.locator("ol.sets > li.done")).toHaveCount(1);
-  // The current step's segment of the track is the club's color; the others are not.
+  // The current step's segment of the track is the club's primary (its scheme's, from the seeded #5b2a86); the others are not.
   const fill = (i: number) => cells.nth(i).locator(".track").evaluate((el) => getComputedStyle(el).backgroundColor);
-  expect(await fill(1)).toBe("rgb(91, 42, 134)");
-  expect(await fill(2)).not.toBe("rgb(91, 42, 134)");
+  const primary = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--primary").trim());
+  const asRgb = (hex: string) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(", ")})`;
+  expect(await fill(1)).toBe(asRgb(primary));
+  expect(await fill(2)).not.toBe(asRgb(primary));
   // A dot for each student on the current step: Xochitl finished, Yaretzi still on it. Decoration, hidden from a screen reader.
   const dots = cells.nth(1).locator(".on-set i");
   await expect(dots).toHaveText(["X", "Y"]);

@@ -24,7 +24,7 @@ for (const width of [1200, 1440]) {
     await expect(rail(page).getByRole("link")).toHaveText(ALL);
     for (const [name, links] of Object.entries(GROUPS)) {
       const g = rail(page).getByRole("group", { name });
-      await expect(g.getByRole("heading", { name })).toBeVisible();
+      await expect(g.locator(".rail-heading")).toHaveText(name);
       await expect(g.getByRole("link")).toHaveText(links);
       for (const l of links) await expect(g.getByRole("link", { name: l, exact: true })).toBeVisible();
     }

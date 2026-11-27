@@ -171,7 +171,7 @@ export function Gallery() {
           <Button variant="outlined">See your payments</Button>
           <Button variant="text">Not now</Button>
           <Button variant="danger">Remove guardian</Button>
-          <Button variant="danger-filled">Disconnect QuickBooks</Button>
+          <Button variant="danger-filled">Remove this credit</Button>
           <LinkButton plain href="#ds-button">Pay<Arrow /></LinkButton>
         </div>
         <div className="ds-samples">

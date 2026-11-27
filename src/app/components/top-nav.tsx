@@ -74,7 +74,7 @@ function RailLink({ link, current, icon }: { link: MenuLink; current: string | n
 
 /**
  * The staff menu from 1200px wide: M3's expanded navigation rail, always open (the owner's D5 of 2026-11-26). Home,
- * then each group's heading with every one of its pages under it, then Settings: nothing collapses and nothing opens on
+ * then each group's label (a name for its group, not a heading of the page) with every one of its pages under it, then Settings: nothing collapses and nothing opens on
  * hover. The page the person is on carries aria-current (the longer address where two match). Below 1200px the rail is
  * not drawn: the staff tab bar and the group hubs hold the menu.
  */
@@ -96,7 +96,7 @@ export function StaffRail({ menu }: { menu: MenuEntry[] }) {
         const headingId = `staff-rail-${i}`;
         return (
           <div key={m.label} role="group" aria-labelledby={headingId} className="rail-section">
-            <h2 id={headingId} className="rail-heading">{m.label}</h2>
+            <span id={headingId} className="rail-heading">{m.label}</span>
             {m.links.map((l) => <RailLink key={l.href} link={l} current={current} icon={RAIL_ICONS[l.href]} />)}
           </div>
         );

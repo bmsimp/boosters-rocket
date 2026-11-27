@@ -164,7 +164,7 @@ body {
   min-height: 100vh;
   color: var(--on-surface);
   background-color: var(--ground);
-  font: var(--body-l);
+  font: 400 1rem/1.5 var(--font); /* body-large, its line height unitless so a larger size below keeps its own proportion */
   -webkit-font-smoothing: antialiased;
   padding-bottom: 88px;
 }
@@ -222,9 +222,9 @@ footer a { color: var(--primary); }
    it on the club's primary container. --- */
 .account { margin-left: auto; width: var(--target); height: var(--target); border-radius: var(--shape-full); flex: none;
   display: grid; place-items: center; text-decoration: none; font: var(--label-l); color: var(--on-primary-container);
-  background: radial-gradient(circle closest-side, var(--primary-container) 0 calc(100% - 4px), transparent calc(100% - 3.5px));
+  border: 4px solid transparent; background-clip: padding-box; background-color: var(--primary-container); outline-offset: -2px; /* a 40px disc inside the 48px target */
   transition: background-color var(--effects-dur) var(--effects); }
-.account:hover { background: radial-gradient(circle closest-side, color-mix(in srgb, var(--on-primary-container) var(--sl-hover), var(--primary-container)) 0 calc(100% - 4px), transparent calc(100% - 3.5px)); }
+.account:hover { background-color: color-mix(in srgb, var(--on-primary-container) var(--sl-hover), var(--primary-container)); }
 .account[aria-current="page"] { box-shadow: inset 0 0 0 2px var(--primary); } /* its page (Display, the account page) is open */
 .avatar { display: inline-grid; place-items: center; flex: none; width: 2.5rem; height: 2.5rem; border-radius: var(--shape-full);
   background: var(--surface-container-highest); color: var(--on-surface); font: var(--label-l); line-height: 1; }
@@ -260,21 +260,21 @@ footer a { color: var(--primary); }
 /* --- Buttons: M3 Expressive's common buttons. Filled (primary, one per area), tonal (secondary container), outlined,
    text, and danger (outlined in the late color on a page, filled in its ConfirmDialog). Fully round; the corner
    squares off a little while pressed, on a spring. Small (the default, in rows, forms and toolbars) is drawn 40px tall
-   inside a 48px target: the element is 48 tall, with a 4px clear edge above and below its fill (border-block,
-   background-clip), so every measure of the target is the element's own box. Medium (`btn-lg`: a page's main button,
-   sheet and dialog footers) is drawn 56px. The focus ring (::after) hugs the fill, 2px clear of it. Busy and
+   inside a 48px target: the element is 48 tall, with a 4px clear edge all round its fill (a transparent border and
+   background-clip), so every measure of the target is the element's own box; its inline margins of -4px keep the fill
+   where a 40px button would stand. Medium (`btn-lg`: a page's main button, sheet and dialog footers) is drawn 56px with
+   no clear edge. The focus ring is the element's outline, offset back into the clear edge so it sits 2px off the fill. Busy and
    disabled share one look; a parent page's busy button is aria-disabled. --- */
 .btn { --btn-bg: var(--primary); --btn-fg: var(--on-primary); --btn-r: var(--shape-full); --btn-press-r: var(--shape-s);
   position: relative; display: inline-flex; align-items: center; justify-content: center; gap: var(--s2);
-  min-height: var(--target); min-width: var(--target); padding: 0 var(--s4); border: 0 solid transparent; border-block-width: 4px; background-clip: padding-box;
+  min-height: var(--target); min-width: var(--target); padding: 0 var(--s4); border: 4px solid transparent; margin-inline: -4px; background-clip: padding-box; outline-offset: -2px;
   border-radius: var(--btn-r); background-color: var(--btn-bg); color: var(--btn-fg); font: var(--label-l);
   text-align: center; text-decoration: none; white-space: normal;
   transition: border-radius var(--spring-fast-dur) var(--spring-fast), background-color var(--effects-dur) var(--effects), color var(--effects-dur) var(--effects); }
 /* the state layer mixed into the fill, not laid over it: a solid color, so its contrast can be measured */
 .btn:hover { background-color: color-mix(in srgb, var(--btn-fg) var(--sl-hover), var(--btn-bg)); }
 .btn:active { --btn-r: var(--btn-press-r); background-color: color-mix(in srgb, var(--btn-fg) var(--sl-press), var(--btn-bg)); }
-.btn:focus-visible { outline: none; }
-.btn:focus-visible::after { content: ""; position: absolute; inset: -5px; border: var(--ring) solid var(--focus); border-radius: calc(var(--btn-r) + 5px); pointer-events: none; }
+.btn:focus-visible { outline: var(--ring) solid var(--focus); outline-offset: -2px; }
 .btn svg { width: 18px; height: 18px; flex: none; }
 .btn-tonal { --btn-bg: var(--secondary-container); --btn-fg: var(--on-secondary-container); }
 .btn-outlined { --btn-bg: transparent; --btn-fg: var(--on-surface-variant); box-shadow: inset 0 0 0 1px var(--outline-variant); }
@@ -284,7 +284,8 @@ footer a { color: var(--primary); }
 .btn-outlined:hover, .btn-text:hover, .btn-danger:hover { background-color: color-mix(in srgb, var(--btn-fg) var(--sl-hover), transparent); }
 .btn-outlined:active, .btn-text:active, .btn-danger:active { background-color: color-mix(in srgb, var(--btn-fg) var(--sl-press), transparent); }
 .btn-sm { padding: 0 var(--s3); }
-.btn-lg { --btn-press-r: var(--shape-l); min-height: 56px; padding: 0 var(--s5); border-block-width: 0; font: var(--title-m); }
+.btn-lg:focus-visible, .sheet-foot .btn:focus-visible, .page-actions .btn:focus-visible, .toolbar > .btn:focus-visible, .toolbar > .toolbar-end > .btn:focus-visible { outline-offset: 2px; }
+.btn-lg { --btn-press-r: var(--shape-l); min-height: 56px; padding: 0 var(--s5); border-width: 0; margin-inline: 0; outline-offset: 2px; font: var(--title-m); }
 .btn-lg svg { width: 20px; height: 20px; }
 .btn[aria-disabled="true"], .btn:disabled, .btn:disabled:hover, .btn[aria-disabled="true"]:hover {
   background-color: color-mix(in srgb, var(--on-surface) 10%, transparent); box-shadow: none; color: color-mix(in srgb, var(--on-surface) 62%, var(--card)); cursor: not-allowed; }
@@ -379,9 +380,9 @@ footer a { color: var(--primary); }
   border-top: 0; padding-top: var(--s2); padding-bottom: var(--s2); vertical-align: middle; overflow-wrap: normal; }
 .table tbody th[scope="row"] { font: var(--title-s); font-weight: 600; }
 .table .t-num { text-align: right; font-variant-numeric: tabular-nums lining-nums; white-space: nowrap; }
-/* A figure, a date or a time never breaks across lines (a row's buttons keep their words whole too, below): the columns of words give way instead.
+/* A figure, a date or a time never breaks across lines: the columns of words give way instead.
    Only a stacked row on a phone too narrow for one lets a badge, a time or a row's button wrap (below). */
-.table time, .table .t-quiet .btn { white-space: nowrap; }
+.table time { white-space: nowrap; }
 .table .t-label { display: none; }
 .table .t-group th { padding-top: var(--s3); padding-bottom: var(--s2); font: var(--title-s); background: var(--surface-container-high); }
 .table .t-group th > span { overflow-wrap: break-word; }
@@ -390,7 +391,10 @@ footer a { color: var(--primary); }
 .table th .state { margin-top: 2px; font-size: var(--text-sm); }
 .table .t-quiet .row-actions, .table .t-quiet .one-button { justify-content: flex-end; justify-items: end; }
 .table .row-actions { grid-column: auto; }
-.table .t-quiet .btn { white-space: nowrap; } /* a row's button keeps its words on one line; the columns of words give way instead */
+/* A row's button keeps its words on one line where the table has room, and wraps them (balanced) where the rail and a
+   long name leave it none, so the table never runs past its card. */
+.table .t-quiet .btn { white-space: nowrap; }
+@media (max-width: 1599.98px) { .table .t-quiet .btn { white-space: normal; text-wrap: balance; max-width: 16rem; } }
 /* A row's Remove (or Reinstate) is its own action at the row's end, on the row's first line. */
 .table .row-change { margin-top: 0; justify-items: end; }
 .table a:not(.btn):not(.matrix-link) { display: inline-flex; align-items: center; min-height: var(--target); margin: -12px 0; color: var(--primary); font-weight: 600; } /* a 48px tap target, sized from the line, without a taller row */
@@ -452,7 +456,7 @@ dialog.sheet[open]:not(:modal) { position: static; display: block; width: auto; 
 .sheet-body > * { margin: 0; min-width: 0; }
 .sheet-desc { color: var(--on-surface-variant); }
 .sheet-foot { display: flex; flex-wrap: wrap; gap: var(--s2); padding: var(--s4) var(--s5) var(--s5); }
-.sheet-foot .btn { --btn-press-r: var(--shape-l); min-height: 56px; padding: 0 var(--s5); border-block-width: 0; font: var(--title-m); }
+.sheet-foot .btn { --btn-press-r: var(--shape-l); min-height: 56px; padding: 0 var(--s5); border-width: 0; margin-inline: 0; outline-offset: 2px; font: var(--title-m); }
 /* The dialog: its icon and title centered, the words under them, the actions at the end (Cancel, a text button, first). */
 .sheet-confirm .sheet-head { flex-direction: column; align-items: center; text-align: center; padding: var(--s5) var(--s5) var(--s4); gap: var(--s4); }
 .sheet-confirm .sheet-head h2 { padding-top: 0; }
@@ -631,7 +635,7 @@ div.checks > .hint { margin-top: -8px; padding-left: calc(var(--target) - 15px);
 .top-nav a:hover { background: color-mix(in srgb, var(--on-surface-variant) var(--sl-hover), transparent); }
 .top-nav a[aria-current="page"] { color: var(--on-secondary-container); background: var(--secondary-container); font-weight: 700; }
 .staff-rail { align-content: start; gap: 2px; padding: var(--s2) var(--s3) var(--s5); }
-.rail-heading { font: var(--title-s); color: var(--on-surface-variant); padding: var(--s4) var(--s4) 6px; }
+.rail-heading { display: block; font: var(--title-s); color: var(--on-surface-variant); padding: var(--s4) var(--s4) 6px; }
 .staff-rail a { display: flex; align-items: center; gap: var(--s3); min-height: 56px; padding: 0 var(--s4); border-radius: var(--shape-full);
   color: var(--on-surface-variant); text-decoration: none; font: var(--label-l); font-weight: 500; transition: background-color var(--effects-dur) var(--effects); }
 .staff-rail a:hover { background: color-mix(in srgb, var(--on-surface-variant) var(--sl-hover), transparent); }
@@ -672,7 +676,7 @@ main.wrap.single > .notice { margin-top: var(--s5); }
 .page-head > div:first-child { min-width: 0; flex: 1 1 20rem; }
 .page-head .page-title { margin-top: 0; }
 .page-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
-.page-actions .btn { --btn-press-r: var(--shape-l); min-height: 56px; padding: 0 var(--s5); border-block-width: 0; font: var(--title-m); }
+.page-actions .btn { --btn-press-r: var(--shape-l); min-height: 56px; padding: 0 var(--s5); border-width: 0; margin-inline: 0; outline-offset: 2px; font: var(--title-m); }
 .page-back { margin-bottom: var(--s1); }
 .page-back a, .back-to-settings a { display: inline-flex; align-items: center; gap: 4px; min-height: var(--target); color: var(--on-surface-variant); font: var(--label-l); text-decoration: none; }
 .page-back a:hover, .back-to-settings a:hover { color: var(--on-surface); text-decoration: underline; }
@@ -818,7 +822,7 @@ p.errors, .sign-out .errors { padding-left: 0; }
 /* --- Toolbar: a row of filters over what they scope, wrapping on a phone. --- */
 .toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s3) var(--s4); }
 .toolbar > .field { flex: 1 1 12rem; max-width: 28rem; }
-.toolbar > .btn, .toolbar > .toolbar-end > .btn { --btn-press-r: var(--shape-l); min-height: 56px; padding: 0 var(--s5); border-block-width: 0; }
+.toolbar > .btn, .toolbar > .toolbar-end > .btn { --btn-press-r: var(--shape-l); min-height: 56px; padding: 0 var(--s5); border-width: 0; margin-inline: 0; outline-offset: 2px; }
 /* A group of tick boxes among the fields: its legend sits where a field's label does, 6px over the control, so
    the labels and the controls of the row line up. */
 .toolbar > fieldset.checks > legend { float: left; width: 100%; margin-bottom: 6px; }
@@ -1040,6 +1044,9 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 /* The audit log: a row's details on a short line under its words, and a long code or record id breaks where it must. */
 .audit-table .audit-more { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow: hidden; overflow-wrap: anywhere; font-size: var(--text-sm); color: var(--on-surface-variant); }
 .audit-table code, .audit-full { overflow-wrap: anywhere; font-size: var(--text-sm); }
+/* Beside the rail at 1280px a record's id and a time give way too, so the log never runs past its card. */
+.audit-table a:not(.btn) { overflow-wrap: anywhere; min-width: 0; }
+.audit-table time { white-space: normal; }
 .audit-full { display: block; white-space: pre-wrap; }
 /* A heading over one of several tables in a box. */
 .box h3.table-head { font-size: var(--text-md); font-weight: 600; margin-top: var(--s5); }
@@ -1084,7 +1091,7 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 .ds-tone { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-sm); color: var(--on-surface-variant); }
 .btn.ds-hover { background-color: color-mix(in srgb, var(--btn-fg) var(--sl-hover), var(--btn-bg)); }
 .ds-focus:not(.btn) { outline: var(--ring) solid var(--focus); outline-offset: 2px; }
-.btn.ds-focus::after { content: ""; position: absolute; inset: -5px; border: var(--ring) solid var(--focus); border-radius: calc(var(--btn-r) + 5px); pointer-events: none; }
+.btn.ds-focus { outline: var(--ring) solid var(--focus); outline-offset: -2px; }
 .ds-shapes { display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: var(--s3); margin-top: var(--s3); }
 .ds-shape { display: grid; gap: 2px; font-size: var(--text-xs); color: var(--on-surface-variant); }
 .ds-shape::before { content: ""; height: 3.5rem; margin-bottom: var(--s1); border-radius: var(--r); background: var(--secondary-container); }

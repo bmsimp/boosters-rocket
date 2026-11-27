@@ -43,7 +43,7 @@ test("the manifest answers as a manifest, built from the club's settings, with n
   const manifest = await res.json();
   expect(manifest).toMatchObject({
     name: CLUB.name, short_name: CLUB.name, id: "/", start_url: "/", scope: "/", display: "standalone",
-    theme_color: "#ffffff", background_color: "#f7f7f8", // the look's surface and ground, not the club's color
+    theme_color: "#f7f9fd", background_color: "#eceef2", // the look's surface and ground, not the club's color
   });
   expect(manifest.icons.map((i: { sizes: string; purpose: string }) => `${i.sizes} ${i.purpose}`))
     .toEqual(["192x192 any", "512x512 any", "192x192 maskable", "512x512 maskable"]);
@@ -78,10 +78,10 @@ test("the head of the sign-in page carries what a phone needs to install the por
   await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute("href", /^\/icons\/apple-touch-icon\.png\?v=[0-9a-f]{12}$/);
   await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute("sizes", "180x180");
   await expect(page.locator('link[rel="icon"]').first()).toHaveAttribute("href", /^\/icons\/favicon\.png\?v=[0-9a-f]{12}$/);
-  // The browser's bar matches the portal's white top bar in light and its dark surface in dark (src/lib/theme/palette.ts);
+  // The browser's bar matches the portal's top bar in light and its dark surface in dark (src/lib/theme/palette.ts);
   // the club's color stays the manifest's, for the installed app's splash.
-  await expect(page.locator('meta[name="theme-color"][media="(prefers-color-scheme: light)"]')).toHaveAttribute("content", "#ffffff");
-  await expect(page.locator('meta[name="theme-color"][media="(prefers-color-scheme: dark)"]')).toHaveAttribute("content", "#16181c");
+  await expect(page.locator('meta[name="theme-color"][media="(prefers-color-scheme: light)"]')).toHaveAttribute("content", "#f7f9fd");
+  await expect(page.locator('meta[name="theme-color"][media="(prefers-color-scheme: dark)"]')).toHaveAttribute("content", "#111316");
   await expect(page.locator('meta[name="color-scheme"]')).toHaveAttribute("content", "light dark");
   const viewport = await page.locator('meta[name="viewport"]').getAttribute("content");
   expect(viewport).toContain("width=device-width");

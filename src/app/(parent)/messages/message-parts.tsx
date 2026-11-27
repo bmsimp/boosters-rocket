@@ -56,7 +56,7 @@ export function HomeMessages({ summary }: { summary: { total: number; fresh: num
   return (
     <Card tonal className="home-messages" title={heading} titleId="home-messages-h"
       actions={<LinkButton href="/messages">{summary.fresh === 1 ? "Read it in Messages" : "Read them in Messages"}</LinkButton>}>
-      <p><Link href={`/messages/${summary.newest.id}`}>{summary.newest.title}</Link></p>
+      <p><Link className="link-line" href={`/messages/${summary.newest.id}`}>{summary.newest.title}</Link></p>
     </Card>
   );
 }
