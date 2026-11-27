@@ -79,7 +79,7 @@ export function layoutProblems(minTarget: number): LayoutProblem[] {
   }
 
   // 2. Text clipped by its box: a line that reaches outside an element that hides what overflows it. A name cut short
-  // on purpose, with an ellipsis or a line clamp the design asks for (DESIGN.md: the club name, the step labels), is
+  // on purpose, with an ellipsis or a line clamp the design asks for (the club name, the step labels), is
   // not clipped: the reader sees that it goes on. A box that scrolls is not clipping either.
   const clipped = new Set<Element>();
   for (const run of runs) {

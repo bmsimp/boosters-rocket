@@ -1,7 +1,7 @@
 import { StatusIcon } from "./ui/status-icon";
 
 /**
- * A state line (DESIGN.md): an icon and the state in words, so the color only confirms what the words say. Done is a
+ * A state line (docs/agents/ui.md): an icon and the state in words, so the color only confirms what the words say. Done is a
  * tick, still to do the status icon's due mark (the product's one to-do mark), waived a struck circle in the secondary
  * ink. For parent and staff pages alike.
  */

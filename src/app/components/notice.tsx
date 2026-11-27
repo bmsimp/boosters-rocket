@@ -2,7 +2,7 @@ import type { ReactNode, Ref } from "react";
 import type { Tone as StatusTone } from "./ui/tone";
 
 /**
- * The notice primitive (DESIGN.md, Notices): a status that stands apart from the text around it. Four tones, each with
+ * The notice primitive (docs/agents/ui.md): a status that stands apart from the text around it. Four tones, each with
  * its own word and icon, so the color only repeats what they say: information, something that needs attention, done,
  * and a problem (something that didn't go through). A notice with a title is a section with its own heading, and its
  * word is then read out but not drawn, as the heading says it. No hooks: server pages and client forms both use it.

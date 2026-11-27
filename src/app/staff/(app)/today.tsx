@@ -8,7 +8,7 @@ const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : 
 type Item = { key: string; words: string; detail: string; href: string; link: string; tone?: Tone };
 
 /**
- * What needs doing today on the staff home (staff home, DESIGN.md): one line for each thing waiting, as a count in words
+ * What needs doing today on the staff home: one line for each thing waiting, as a count in words
  * with the way to it: a row of a List each, its due ring, its count as the title, what it means under it, and its link
  * as the row's compact action. Each kind is read only for staff who hold its permission, and only counts are read. With nothing
  * waiting the box says so in one calm line.

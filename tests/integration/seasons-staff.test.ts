@@ -651,7 +651,7 @@ describe("one family's season, for staff", () => {
     const html = await renderPage(FamilyProgressPage, { params: { familyId: await F("10") } });
     const text = textOf(html);
     expect(text).toContain("Rivera Family Where this family stands in Fall 2026, the current season.");
-    // Each step is a table with a heading row for the family and for each student (DESIGN.md, Tables: groups).
+    // Each step is a table with a heading row for the family and for each student.
     expect(text).toContain("1. Join Done What Join asks of the family and of each student Requirement Required Where it stands Due The family Handbook read Required Done No due date");
     expect(text).toContain("2. Uniforms Note The step this family is on. 1 thing left to do");
     expect(text).toContain("Leo Rivera Uniform fitting attended Required Done No due date");

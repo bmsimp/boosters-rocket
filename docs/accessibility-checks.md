@@ -84,7 +84,7 @@ the hand walk below was made on the code door before it and has not been made ag
 - Home's order: the club bar's links (Home, Forms, Payments, Volunteer, Family), the account link, Switch family,
   See the whole season, the Pay link, See your payments, Update my details. At 360 wide the bar has only the account
   link and the tabs come last, where they sit on the screen. Every stop has a ring in every mode; inside the club bar
-  the ring is `club-on`, as DESIGN.md says.
+  the ring is `club-on`, as the stylesheet draws it.
 - Payments' Pay link is named "Pay $85.00, invoice QZ-1041 for Xochitl Quetzalcoatl", opens Intuit's page in the same
   tab, and has `rel="noopener noreferrer"`. After following a tab or nav link, the focus stays on that link (Next.js
   keeps the frame) and Next.js's route announcer reads the new page's title.
@@ -93,7 +93,7 @@ the hand walk below was made on the code door before it and has not been made ag
   Name; axe-core's `label-content-name-mismatch` on every parent page). Its name now starts with the initials:
   "ZQ: Your account and display settings, Zelda Quetzalcoatl".
 - The Pay button that is paused while the figures are not current could not be reached with the seed (its figures are
-  fresh); its words are in DESIGN.md and its markup is `aria-disabled` with the reason in its name.
+  fresh); its words are `NotCurrentNote`'s (`src/app/(parent)/money-box.tsx`) and its markup is `aria-disabled` with the reason in its name.
 
 ### 3. Opening a form, agreeing, and reaching the signing frame (`/forms`, `/forms/[id]`)
 

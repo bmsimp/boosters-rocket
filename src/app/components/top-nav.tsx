@@ -35,7 +35,7 @@ export function TopNav({ nav }: { nav: NavItem[] }) {
   );
 }
 
-/** The account control in the club bar: initials that lead to the Display page, marked current while that page is open (DESIGN.md). */
+/** The account control in the club bar: initials that lead to the Display page, marked current while that page is open. */
 export function AccountLink({ href, initials, label }: { href: string; initials: string; label: string }) {
   const path = usePathname();
   return <Link className="account" href={href} aria-label={label} aria-current={isCurrent(path, href) ? "page" : undefined}>{initials}</Link>;

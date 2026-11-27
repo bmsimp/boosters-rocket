@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { HeaderCheck, RowCheck } from "./ui/bulk-select";
 
 /**
- * The table primitive (DESIGN.md, Tables): a real table at laptop widths, with a caption and header cells that have a
+ * The table primitive (docs/agents/ui.md): a real table at laptop widths, with a caption and header cells that have a
  * scope, and on a phone each row stacked as a small ruled block, every cell under the label of its column. The
  * stacking is CSS only, and CSS that changes how a table displays can take its table semantics away in some browsers,
  * so every element carries its role (table, rowgroup, row, columnheader, rowheader, cell) and a screen reader still
