@@ -34,7 +34,7 @@ export default async function SettingsPage() {
       {attention.length === 0 ? <Notice tone="done">Everything that is set up is working.</Notice> : (
         <Notice tone="warning" title="Needs attention" titleId="settings-attention-h">
           <ul className="notice-list">
-            {attention.map((a) => <li key={a.key}><a href={a.href} data-attention={a.key}>{`${a.title}: ${a.status.words}`}</a></li>)}
+            {attention.map((a) => <li key={a.key}><a className="link-line" href={a.href} data-attention={a.key}>{`${a.title}: ${a.status.words}`}</a></li>)}
           </ul>
         </Notice>
       )}
