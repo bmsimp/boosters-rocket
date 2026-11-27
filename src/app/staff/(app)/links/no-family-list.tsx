@@ -1,10 +1,9 @@
 "use client";
-import Link from "next/link";
 import { useTransition } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { DataTable } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
-import { Button } from "@/app/components/ui/button";
+import { Button, LinkButton } from "@/app/components/ui/button";
 import { BulkSelect } from "@/app/components/ui/bulk-select";
 import type { BulkAnswer } from "@/app/components/ui/bulk-action";
 import { CreateFamiliesBulk } from "./bulk-presses";
@@ -45,7 +44,7 @@ export function NoFamilyRows({ rows, none, bulk }: { rows: NoFamilyRow[]; none: 
         { key: "students", header: "Students under it", cell: (r) => r.students },
         { key: "makes", header: "What it makes", cell: (r) => r.makes },
         { key: "do", header: "What you can do", quiet: true, cell: (r) => (r.aim !== null || r.act === null
-          ? <>{r.aim?.words}{r.aim && <> <Link href={r.aim.href}>{r.aim.label}<span className="visually-hidden">: {r.name}</span></Link></>}</>
+          ? <>{r.aim?.words}{r.aim && <div className="row-actions"><LinkButton variant="tonal" size="sm" href={r.aim.href}>{r.aim.label}<span className="visually-hidden">: {r.name}</span></LinkButton></div>}</>
           : <MakeFamily name={r.name} act={r.act} onDone={(d) => onDone(r.name, d)} />) },
       ]} />
   );

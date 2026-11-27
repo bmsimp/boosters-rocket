@@ -418,9 +418,7 @@ describe("what the write queue holds back", () => {
     }
     asStaff(linker);
     expect(await openingOf("Kept Family")).toContain("Not linked with it, though their Parent customer's email field holds their sign-in address:"
-      + "Kay Kept with Kay Kept: a change for them or for their Parent customer is waiting, stuck or kept on the Reconciliation page, so they aren't linked with it."
-      + " Once it has gone through or been given up there, they can be linked in the opening of the family's row on this page, with Link this guardian,"
-      + " if the family is linked by then and that Parent customer is still free for them.");
+      + "Kay Kept with Kay Kept: link them on the row once their change on Reconciliation is done.");
 
     for (const [familyId, customerId, name] of [[kept, "300", "Kept Family"], [stuck, "310", "Stuck Family"], [waiting, "320", "Waiting Family"]] as const) {
       const r = await linkFamilyToCustomer({ familyId: String(familyId), customerId, chosen: "suggested", stamp: rowOf(view, name).confirm!.stamp }, tag, linkOp());

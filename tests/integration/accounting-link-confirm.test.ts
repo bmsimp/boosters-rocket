@@ -54,9 +54,7 @@ const qc = (Id: string, DisplayName: string, typeId: string | null, extra: Recor
 const under = (id: string) => ({ ParentRef: { value: id }, Job: true });
 const mail = (address: string) => ({ PrimaryEmailAddr: { Address: address } });
 /** What the links page says beside every Confirm (src/app/staff/(app)/links/page.tsx), as the text of the page reads it. */
-const LINK_EFFECT = "Once linked, the family's guardians see this customer's open invoices and Pay links (and those of students and parents directly under it) next time they open Home or Payments, and a pay-instead choice bills it. Unlink from the books undoes it, but they may have seen the invoices by then, so check it's the right household.";
-/** What it says beside every Confirm since slice M3c2, where the books have a parent type (fznCompany()'s Parent, 2). */
-const LINK_GUARDIANS_EFFECT = "From then on, a guardian linked with it has their rename, removal and changes of phone, mailing address or sign-in email sent to that Parent customer, while it's theirs alone. Linking sends nothing, and what the portal holds now isn't sent.";
+const LINK_EFFECT = "Its guardians will see this customer's invoices, so check it's the right household.";
 /** Customers added in QuickBooks, then read by a roster read (which makes no record of them). */
 async function readAgain(...customers: ReturnType<typeof qc>[]) {
   stub.customers.push(...customers);
@@ -630,9 +628,9 @@ describe("who may press, and the page", () => {
     let html = await renderPage(AccountingLinksPage);
     expect(rowNamed(list(html), "The Patels")![4]).toBe("A guardian's sign-in address matches: asha@example.com, on this customer.Students:Asha Patel: no link of its ownMia Patel: no link of its ownravi patel: no link of its own"
       + "Guardians:Asha Patel (asha@example.com): no link of its own"
-      + "Confirming links it to “Patel Family”. Nothing is sent to the books.Students linked with it, by name:Asha Patel with Asha Patelravi patel with Ravi Patel (inactive in the books)"
+      + "Confirm links it to “Patel Family”. " + LINK_EFFECT + "Students linked with it, by name:Asha Patel with Asha Patelravi patel with Ravi Patel (inactive in the books)"
       + "Left with no link, of the portal's students:Mia PatelLeft with no record in the portal, of the student customers under it in the books:Dev Patel"
-      + "Students left aren't linked by this press. Once the family is linked, they show with its row among its differences." + LINK_EFFECT + LINK_GUARDIANS_EFFECT + "Confirm: The PatelsLeave unlinked: The Patels");
+      + "Students left show among the row's differences once it's linked.Confirm: The PatelsLeave unlinked: The Patels");
     expect(withoutIds(list(html))).toContain('href="/staff/links?pick=<id>#links-pick-h"');
     expect(pick(html)).toBeNull();
 
@@ -652,8 +650,8 @@ describe("who may press, and the page", () => {
     expect(part).toContain("This page also suggests this customer for, or lists it as a possible customer of, The Patels.");
     expect(part).toContain("Left with no record in the portal, of the student customers under it in the books:");
     expect(part).toContain("Confirm<span class=\"visually-hidden\">: The Quiets</span>");
-    // What the link does on the parents' side, and how it is removed again; Patel Family has no Parent customer under it.
-    expect(part).toContain(`<p>${LINK_EFFECT.replaceAll("'", "&#x27;")}</p><p>${LINK_GUARDIANS_EFFECT.replaceAll("'", "&#x27;")}</p>`);
+    // What the link does on the parents' side, then Confirm; Patel Family has no Parent customer under it.
+    expect(part).toContain(`<p>${LINK_EFFECT.replaceAll("'", "&#x27;")}</p><div class="row-actions">`);
     expect(part).not.toContain("own records in the books aren&#x27;t linked");
     expect(part).toContain("<p>The books hold no Parent customers directly under it.</p>");
     // Refused as plain notices: a family not on the list, a Suggested row (no pick), a customer not in the pool.

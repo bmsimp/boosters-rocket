@@ -24,7 +24,7 @@ export const NO_FAMILY_WORDS = {
   more: "Inactive family customers aren't offered. A customer a waiting or stuck change on Reconciliation would match is left out until that change goes through or is given up."
     + " A customer this page suggests or lists for a family isn't made a family here: its row says where to link it.",
   none: "Nothing: every active family customer is linked to a family, or is about to be.",
-  aimedMakes: "Nothing here: it is linked to a family on this page.",
+  aimedMakes: "Nothing: link it to its family instead.",
   /**
    * Said on Reconciliation, to a holder of the linking permission, in place of the list that was there until this slice
    * (stage 3's slice 10): how many there are, while there are any, beside a link to this part.
@@ -42,9 +42,9 @@ const WHY_NONE: Record<Exclude<LinksState, "listed">, string> = {
 /** What pressing the button makes, for one customer: the row's own words, since there is no second confirmation. */
 function whatItMakes(c: { students: number; inactiveStudents: number; studentsWithRecord: number }): string {
   const fresh = c.students - c.studentsWithRecord;
-  const parts = [fresh === 0 ? "A family, linked to this customer." : `A family, linked to this customer, with ${plural(fresh, "student", "students")}, each linked to their own.`];
-  if (c.inactiveStudents > 0) parts.push(`${plural(c.inactiveStudents, "student is", "students are")} inactive in QuickBooks and stay${c.inactiveStudents === 1 ? "s" : ""} inactive here.`);
-  if (c.studentsWithRecord > 0) parts.push(`${plural(c.studentsWithRecord, "student already has", "students already have")} a record in the portal, left as ${c.studentsWithRecord === 1 ? "it is" : "they are"}.`);
+  const parts = [fresh === 0 ? "A linked family." : `A linked family with ${plural(fresh, "student", "students")}.`];
+  if (c.inactiveStudents > 0) parts.push(`${plural(c.inactiveStudents, "student stays", "students stay")} inactive.`);
+  if (c.studentsWithRecord > 0) parts.push(`${plural(c.studentsWithRecord, "student is", "students are")} in the portal already.`);
   return parts.join(" ");
 }
 
@@ -60,17 +60,16 @@ const pickStep = (familyId: string, customerId: string) => (/^\d{1,20}$/.test(cu
 export function aimShown(customerId: string, aim: CustomerAim): NonNullable<NoFamilyRow["aim"]> {
   const names = handful(aim.families.map((f) => f.name));
   const one = aim.families.length === 1;
-  const has = one ? "a family the portal has already" : "families the portal has already";
   if (aim.why === "given_up") {
     const f = aim.families[0];
-    const said = `The portal saved ${f.name} first, and QuickBooks made this customer for it before making it was given up, so it isn't made a family here.`;
+    const said = `QuickBooks made it for ${f.name}.`;
     if (aim.pickable) return { words: said, href: pickStep(String(f.id), customerId), label: "Pick it for that family" };
     // That family's row is Suggested for another customer, so it offers no Pick until it is left unlinked.
-    return { words: `${said} This page suggests another customer for that family: confirm that one if it is the family's, or, if this one is, leave the family unlinked first, then pick this one for it.`,
+    return { words: `${said} To pick it, leave that family unlinked first.`,
       href: "/staff/links?status=suggested", label: "See that family's row" };
   }
-  if (aim.why === "suggested") return { words: `This page suggests it for ${names}, ${has}, so it isn't made a family here.`, href: "/staff/links?status=suggested", label: "Link it in the Suggested rows" };
-  return { words: `This page lists it as a possible customer of ${names}, ${has}, so it isn't made a family here.`,
+  if (aim.why === "suggested") return { words: `Suggested for ${names}.`, href: "/staff/links?status=suggested", label: "Link it in the Suggested rows" };
+  return { words: `A possible customer of ${names}.`,
     href: one ? pickStep(String(aim.families[0]!.id), customerId) : "/staff/links?status=several", label: one ? "Look at it for that family" : "See them in the Several possible rows" };
 }
 
