@@ -73,11 +73,13 @@
   --target: 48px;
   --ring: 3px;                  /* the focus ring, 3px always, 2px clear of what it rings (D8) */
   /* Motion. Springs for things that move (a button's corner, sheets, the dialog, the tab pill, the bulk bar), drawn as
-     linear() curves; color and opacity on M3's standard easing, never bouncing. Text never moves. */
-  --spring-fast: linear(0, 0.071, 0.236, 0.437, 0.634, 0.802, 0.931, 1.018, 1.07, 1.092, 1.093, 1.082, 1.064, 1.045, 1.028, 1.013, 1.003, 0.996, 0.992, 0.991, 0.991, 0.993, 0.995, 0.996, 1);
-  --spring-fast-dur: 350ms;
-  --spring-default: linear(0, 0.047, 0.156, 0.293, 0.433, 0.564, 0.678, 0.773, 0.848, 0.905, 0.946, 0.975, 0.994, 1.006, 1.012, 1.015, 1.015, 1.014, 1.012, 1.01, 1.008, 1.006, 1.004, 1.003, 1);
-  --spring-default-dur: 420ms;
+     linear() curves sampled from M3 Expressive's spring tokens (fast spatial: stiffness 800, damping 0.6; default spatial:
+     380, 0.8; material-components-android, motion tokens), each lasting until it settles within 0.1%. Color and opacity
+     on M3's standard easing, never bouncing. Text never moves. */
+  --spring-fast: linear(0, 0.067, 0.223, 0.416, 0.608, 0.776, 0.908, 1.001, 1.059, 1.088, 1.095, 1.087, 1.072, 1.054, 1.036, 1.02, 1.008, 0.999, 0.994, 0.992, 0.991, 0.992, 0.993, 0.995, 0.997, 0.998, 0.999, 1, 1.001, 1.001, 1);
+  --spring-fast-dur: 420ms;
+  --spring-default: linear(0, 0.04, 0.137, 0.26, 0.391, 0.516, 0.628, 0.725, 0.804, 0.867, 0.916, 0.951, 0.977, 0.994, 1.005, 1.011, 1.014, 1.015, 1.014, 1.013, 1.011, 1.009, 1.007, 1.006, 1.004, 1.003, 1.002, 1.001, 1.001, 1, 1);
+  --spring-default-dur: 476ms;
   --effects: cubic-bezier(0.2, 0, 0, 1); --effects-dur: 150ms;
   /* M3's state layers: the content color washed over the container */
   --sl-hover: 8%; --sl-press: 10%;
@@ -475,7 +477,7 @@ dialog.sheet[open]:not(:modal) { position: static; display: block; width: auto; 
 .table .t-check { width: 56px; }
 .bulk-check label { display: inline-flex; align-items: center; justify-content: center; min-width: var(--target); min-height: var(--target); margin: -12px 0 -12px -12px; }
 .bulk-bar { position: sticky; bottom: var(--s4); z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3);
-  width: fit-content; max-width: 100%; margin: var(--s4) auto 0; padding: var(--s1) var(--s2) var(--s1) var(--s5); border-radius: var(--shape-xl);
+  width: fit-content; max-width: 100%; min-height: 64px; margin: var(--s4) auto 0; padding: var(--s1) var(--s2) var(--s1) var(--s5); border-radius: var(--shape-xl);
   background: var(--primary-container); color: var(--on-primary-container); box-shadow: var(--shadow-3);
   animation: bar-in var(--spring-default-dur) var(--spring-default) both; }
 @keyframes bar-in { from { transform: translateY(24px) scale(0.96); opacity: 0; } }
