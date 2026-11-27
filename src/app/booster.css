@@ -64,11 +64,13 @@
   --target: 48px;
   --ring: 3px;                  /* the focus ring, 3px always, 2px clear of what it rings (D8) */
   /* Motion. Springs for things that move (a button's corner, sheets, the dialog, the tab pill, the bulk bar), drawn as
-     linear() curves; color and opacity on M3's standard easing, never bouncing. Text never moves. */
-  --spring-fast: linear(0, 0.071, 0.236, 0.437, 0.634, 0.802, 0.931, 1.018, 1.07, 1.092, 1.093, 1.082, 1.064, 1.045, 1.028, 1.013, 1.003, 0.996, 0.992, 0.991, 0.991, 0.993, 0.995, 0.996, 1);
-  --spring-fast-dur: 350ms;
-  --spring-default: linear(0, 0.047, 0.156, 0.293, 0.433, 0.564, 0.678, 0.773, 0.848, 0.905, 0.946, 0.975, 0.994, 1.006, 1.012, 1.015, 1.015, 1.014, 1.012, 1.01, 1.008, 1.006, 1.004, 1.003, 1);
-  --spring-default-dur: 420ms;
+     linear() curves sampled from M3 Expressive's spring tokens (fast spatial: stiffness 800, damping 0.6; default spatial:
+     380, 0.8; material-components-android, motion tokens), each lasting until it settles within 0.1%. Color and opacity
+     on M3's standard easing, never bouncing. Text never moves. */
+  --spring-fast: linear(0, 0.067, 0.223, 0.416, 0.608, 0.776, 0.908, 1.001, 1.059, 1.088, 1.095, 1.087, 1.072, 1.054, 1.036, 1.02, 1.008, 0.999, 0.994, 0.992, 0.991, 0.992, 0.993, 0.995, 0.997, 0.998, 0.999, 1, 1.001, 1.001, 1);
+  --spring-fast-dur: 420ms;
+  --spring-default: linear(0, 0.04, 0.137, 0.26, 0.391, 0.516, 0.628, 0.725, 0.804, 0.867, 0.916, 0.951, 0.977, 0.994, 1.005, 1.011, 1.014, 1.015, 1.014, 1.013, 1.011, 1.009, 1.007, 1.006, 1.004, 1.003, 1.002, 1.001, 1.001, 1, 1);
+  --spring-default-dur: 476ms;
   --effects: cubic-bezier(0.2, 0, 0, 1); --effects-dur: 150ms;
   /* M3's state layers: the content color washed over the container */
   --sl-hover: 8%; --sl-press: 10%;
@@ -369,7 +371,7 @@ footer a { color: var(--primary); }
    their roles, so the stacked rows still read as a table. --- */
 .table { width: calc(100% + 2 * var(--box-pad, 0px)); margin: var(--s3) calc(-1 * var(--box-pad, 0px)) 0; border-collapse: collapse; font: var(--body-m); }
 .table caption { caption-side: top; text-align: left; color: var(--on-surface-variant); font: var(--body-m); padding: 0 var(--box-pad, 0px) var(--s2); }
-.table th, .table td { text-align: left; vertical-align: middle; padding: var(--s3) var(--s3); border-top: 1px solid var(--outline-variant); overflow-wrap: break-word; }
+.table th, .table td { text-align: left; vertical-align: middle; padding: var(--s2) var(--s3); border-top: 1px solid var(--outline-variant); overflow-wrap: break-word; }
 .table tbody td, .table tbody th { height: 56px; }
 .table th:first-child, .table td:first-child { padding-left: var(--box-pad, 0px); }
 .table th:last-child, .table td:last-child { padding-right: var(--box-pad, 0px); }
@@ -466,7 +468,7 @@ dialog.sheet[open]:not(:modal) { position: static; display: block; width: auto; 
 .table .t-check { width: 56px; }
 .bulk-check label { display: inline-flex; align-items: center; justify-content: center; min-width: var(--target); min-height: var(--target); margin: -12px 0 -12px -12px; }
 .bulk-bar { position: sticky; bottom: var(--s4); z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3);
-  width: fit-content; max-width: 100%; margin: var(--s4) auto 0; padding: var(--s1) var(--s2) var(--s1) var(--s5); border-radius: var(--shape-xl);
+  width: fit-content; max-width: 100%; min-height: 64px; margin: var(--s4) auto 0; padding: var(--s1) var(--s2) var(--s1) var(--s5); border-radius: var(--shape-xl);
   background: var(--primary-container); color: var(--on-primary-container); box-shadow: var(--shadow-3);
   animation: bar-in var(--spring-default-dur) var(--spring-default) both; }
 @keyframes bar-in { from { transform: translateY(24px) scale(0.96); opacity: 0; } }
@@ -479,6 +481,9 @@ dialog.sheet[open]:not(:modal) { position: static; display: block; width: auto; 
 @media (max-width: 839.98px) {
   .bulk-actions { display: none; }
   .bulk-menu { display: inline-flex; }
+  /* On a phone the toolbar spans the width: the count on its own line, then the one Actions button and Clear. */
+  .bulk-bar { width: 100%; padding: var(--s2) var(--s2) var(--s1) var(--s5); border-radius: var(--shape-xl); }
+  .bulk-count { flex-basis: 100%; padding-top: var(--s1); }
   .table td.t-check { display: block; }
 }
 
@@ -541,6 +546,8 @@ fieldset.checks { border: 0; padding: 0; min-width: 0; }
 .checks label:hover input:not(:disabled) { background: color-mix(in srgb, var(--on-surface) var(--sl-hover), transparent); }
 .checks input:focus-visible { outline: var(--ring) solid var(--focus); outline-offset: -6px; } /* a ring 2px clear of the mark */
 .checks > p, .checks .hint { margin-top: var(--s1); }
+/* A lone tick box's hint (Checkbox's hint) lines up with its words, tucked under them. */
+div.checks > .hint { margin-top: -8px; padding-left: calc(var(--target) - 15px); }
 .checks input:disabled { cursor: not-allowed; }
 .checks input:disabled::before { border-color: color-mix(in srgb, var(--on-surface) 38%, transparent); }
 .checks label:has(input:disabled) { color: var(--on-surface-variant); }
@@ -1055,7 +1062,8 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
    would; the frame sample shows the bar and the tabs in place instead of fixed to the screen. */
 .ds-page > .page-head { margin-top: var(--s5); }
 .ds-section { margin-top: var(--s6); padding-top: var(--s6); border-top: 1px solid var(--outline-variant); scroll-margin-top: var(--s4); }
-.ds-section > h2 { font-size: var(--text-lg); }
+.ds-section > h2 { font: var(--headline-s); }
+.ds-section h3.table-head { font: var(--title-m); margin-top: var(--s5); }
 .ds-use { color: var(--on-surface-variant); margin-top: 2px; max-width: 72ch; }
 .ds-import { display: block; margin-top: var(--s2); padding: var(--s2) var(--s3); border-radius: var(--shape-m); background: var(--surface-container-high);
   border: 1px solid var(--outline-variant); font-size: var(--text-sm); overflow-wrap: anywhere; }
@@ -1072,17 +1080,27 @@ main.wrap.signin { display: block; padding-top: var(--s7); } /* beat the two-col
 .ds-toc { display: flex; flex-wrap: wrap; gap: 0 var(--s4); margin-top: var(--s3); list-style: none; padding: 0; font-size: var(--text-sm); }
 .ds-toc a { display: inline-flex; align-items: center; min-height: var(--target); color: var(--primary); }
 .ds-type { display: grid; gap: var(--s2); margin-top: var(--s3); }
-.ds-type .t-2xl { font-size: var(--text-2xl); font-weight: 600; letter-spacing: -0.025em; line-height: 1.15; }
-.ds-type .t-xl { font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.018em; }
-.ds-type .t-lg { font-size: var(--text-lg); font-weight: 600; }
-.ds-type .t-control { font-size: var(--text-control); font-weight: 500; }
-.ds-type .t-md { font-size: var(--text-md); }
-.ds-type .t-sm { font-size: var(--text-sm); color: var(--on-surface-variant); }
-.ds-type .t-xs { font-size: var(--text-xs); color: var(--on-surface-variant); }
 .ds-tone { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-sm); color: var(--on-surface-variant); }
 .btn.ds-hover { background-color: color-mix(in srgb, var(--btn-fg) var(--sl-hover), var(--btn-bg)); }
-.btn-line.ds-hover { background-color: var(--surface-container-high); }
-.ds-focus { outline: var(--ring) solid var(--focus); outline-offset: 2px; }
+.ds-focus:not(.btn) { outline: var(--ring) solid var(--focus); outline-offset: 2px; }
+.btn.ds-focus::after { content: ""; position: absolute; inset: -5px; border: var(--ring) solid var(--focus); border-radius: calc(var(--btn-r) + 5px); pointer-events: none; }
+.ds-shapes { display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: var(--s3); margin-top: var(--s3); }
+.ds-shape { display: grid; gap: 2px; font-size: var(--text-xs); color: var(--on-surface-variant); }
+.ds-shape::before { content: ""; height: 3.5rem; margin-bottom: var(--s1); border-radius: var(--r); background: var(--secondary-container); }
+.ds-shape b { color: var(--on-surface); font-weight: 600; }
+.ds-float { display: inline-flex; align-items: center; min-height: var(--target); padding: 0 var(--s5); border-radius: var(--shape-full); background: var(--primary-container);
+  color: var(--on-primary-container); box-shadow: var(--shadow-3); font: var(--title-m); }
+.ds-seed .toolbar { align-items: flex-end; }
+.ds-seed-dot { width: 16px; height: 16px; flex: none; border-radius: var(--shape-full); background: var(--swatch); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--on-surface) 24%, transparent); }
+.ds-scheme-sample { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.ds-pill { display: inline-flex; align-items: center; min-height: 32px; padding: 0 var(--s4); border-radius: var(--shape-full); background: var(--secondary-container);
+  color: var(--on-secondary-container); font: var(--label-l); font-weight: 700; }
+.ds-roles { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: var(--s2); }
+.ds-frame-rail { display: grid; grid-template-columns: minmax(0, 17rem) minmax(0, 1fr); align-items: start; padding-top: var(--s2); }
+.ds-frame .staff-rail.ds-show { display: grid; }
+.ds-pane { background: var(--surface); border-radius: var(--shape-xl) var(--shape-xl) 0 0; padding: var(--s5); min-height: 16rem; margin-right: var(--s4); }
+.ds-pane .page-title { margin-top: 0; }
+@media (max-width: 599.98px) { .ds-frame-rail { grid-template-columns: 1fr; } .ds-pane { margin: 0 var(--s3); } }
 .ds-frame { border: 1px solid var(--outline-variant); border-radius: var(--shape-l); overflow: hidden; margin-top: var(--s4); background: var(--ground); }
 .ds-frame .bar .wrap { max-width: none; }
 .ds-frame .top-nav.ds-show { display: flex; }
