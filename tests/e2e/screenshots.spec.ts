@@ -123,3 +123,31 @@ test("a bulk action's Drawer on Accounting links, for the owner to look at", asy
     await drop();
   }
 });
+
+/**
+ * The large-screen layout (the owner's approval of 2026-11-27): the Settings Overview's status cards at 1440 (two
+ * across beside the compact rail and the list) and 2560 (four across), QuickBooks at 2560 (its cards in columns), and a
+ * page with no list pane at 2560 (the expanded rail, the page starting at its pane's edge), in light.
+ */
+test("the large-screen layout, at 1440 and 2560, for the owner to look at", async ({ browser }, info) => {
+  test.skip(info.project.name !== "desktop", "the desktop's pictures");
+  const at = async (width: number, address: string, name: string, ready: (page: import("@playwright/test").Page) => Promise<void>) => {
+    const context = await browser.newContext({ viewport: { width, height: width >= 2000 ? 1300 : 900 }, colorScheme: "light" });
+    await context.addCookies([staffSessionCookie()]);
+    const page = await context.newPage();
+    await page.goto(address);
+    await ready(page);
+    await settle(page);
+    await page.screenshot({ path: `test-results/screenshots/${name}-${width}.png`, fullPage: true });
+    await context.close();
+  };
+  const overview = async (page: import("@playwright/test").Page) => {
+    await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+    await expect(page.locator("nav.compact-rail")).toBeVisible();
+  };
+  await at(1440, "/staff/settings", "settings-overview", overview);
+  await at(2560, "/staff/settings", "settings-overview", overview);
+  await at(2560, "/staff/settings/quickbooks", "quickbooks-settings", async (page) => { await expect(page.getByRole("heading", { level: 1 })).toHaveText("QuickBooks"); });
+  await at(2560, "/staff/roster", "roster", async (page) => { await expect(page.locator("nav.staff-rail")).toBeVisible(); });
+  await at(2560, "/staff/settings/design-system?ds-dock=1", "drawer-docked", async (page) => { await expect(page.getByRole("dialog", { name: "Change the shift" })).toBeVisible(); });
+});
