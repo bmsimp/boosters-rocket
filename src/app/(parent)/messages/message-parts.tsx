@@ -54,8 +54,8 @@ export function HomeMessages({ summary }: { summary: { total: number; fresh: num
   if (summary.fresh === 0 || !summary.newest) return <p className="home-messages"><Link className="link-line" href="/messages">Messages</Link></p>;
   const heading = summary.fresh === 1 ? "1 new message from the club" : `${summary.fresh} new messages from the club`;
   return (
-    <Card className="home-messages" title={heading} titleId="home-messages-h"
-      actions={<LinkButton variant="outlined" href="/messages">{summary.fresh === 1 ? "Read it in Messages" : "Read them in Messages"}</LinkButton>}>
+    <Card tonal className="home-messages" title={heading} titleId="home-messages-h"
+      actions={<LinkButton href="/messages">{summary.fresh === 1 ? "Read it in Messages" : "Read them in Messages"}</LinkButton>}>
       <p><Link href={`/messages/${summary.newest.id}`}>{summary.newest.title}</Link></p>
     </Card>
   );
