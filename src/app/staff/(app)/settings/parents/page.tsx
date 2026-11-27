@@ -19,7 +19,7 @@ const n = (count: number, one: string, many: string) => `${count} ${count === 1 
 const LEVEL_WORDS: Record<SigninLevel | "unknown", string> = {
   standard: "Standard: a password, and on a phone or computer the portal doesn't know yet, a code we email, or the guardian's own passkey or authenticator app",
   strict: "Strict: a password and a passkey or an authenticator app, every time. An emailed code never signs anyone in.",
-  unknown: "Not known: the saved sign-in settings can't be read. Choose Standard or Strict under Change, step 3.",
+  unknown: "Not known: the saved sign-in settings can't be read. Choose Standard or Strict under Configure, step 3.",
 };
 
 /** What is set, shown plainly, with no inputs (the pattern the QuickBooks page set). Switching anything opens the steps. */
@@ -48,8 +48,11 @@ export default async function ParentSettingsPage() {
         {!s.signin && (missing.length > 0
           ? <Notice tone="warning" live="none">Before sign-ins can be switched on:<ul className="notice-list">{missing.map((m) => <li key={m}>{m}</li>)}</ul></Notice>
           : <Notice tone="info" live="none">Everything sign-ins need is ready: outgoing mail works.</Notice>)}
-        {/* "Change" too while the level can't be read (slice SI-10b): the level's words send the Admin there by that name. */}
-        <p><a className="btn" href="/staff/settings/parents/setup">{s.signin || level === null ? "Change" : "Set up"}</a></p>
+        {/* Configure, whatever the state (the owner's of 2026-11-27): the sentence says the state, the button opens the steps. */}
+        <p>{level === null ? "The sign-in level can't be read. Configure to choose Standard or Strict."
+          : !s.signin ? "Off. Configure to switch parent sign-ins on."
+          : "On. Configure to switch sign-ins or welcome emails, or to change the sign-in level."}</p>
+        <p><a className="btn" href="/staff/settings/parents/setup">Configure</a></p>
       </section>
 
       {/* Passkeys made at an address other than the portal's now (the sign-in release, slice SI-9b): they no longer

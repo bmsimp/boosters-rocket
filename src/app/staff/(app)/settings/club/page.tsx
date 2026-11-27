@@ -30,7 +30,12 @@ export default async function ClubSettingsPage() {
           <dt>Treasurer email</dt><dd>{club.treasurerEmail ?? "None"}</dd>
           <dt>Time zone</dt><dd>{club.timeZone.replaceAll("_", " ")}. It decides which day it is for a step&apos;s dates and a due date.</dd>
         </dl>
-        {canChange ? <p className="settings-open"><a className="btn" href="/staff/settings/club/edit">Change</a></p>
+        {canChange ? <>
+          <p>{!saved ? "Not set yet. Configure the club's name, color and time zone."
+            : !club.storedColorValid ? "The saved color isn't valid. Configure to pick one."
+            : "Set. Configure to change the club's name, color, treasurer email or time zone."}</p>
+          <p className="settings-open"><a className="btn" href="/staff/settings/club/edit">Configure</a></p>
+        </>
           : <p className="hint">Only someone who may change club settings can change these.</p>}
       </section>
     </main>

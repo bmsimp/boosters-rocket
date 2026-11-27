@@ -172,7 +172,7 @@ APP_COMMIT="$(git rev-parse --short HEAD)" docker compose -f compose.yml -f comp
    start with `https://`, and leave `QBO_RELAY_URL` unset in `deploy/.env`. A club with an Intuit app of its own uses
    parts 1 to 4 there instead.
 2. Forms: [Documenso, parts 2 to 4](documenso.md#2-the-first-documenso-account).
-3. Parent sign-ins: under **Settings**, **Parent sign-ins**, **Set up**, in its three steps: **1. Parent sign-ins**
+3. Parent sign-ins: under **Settings**, **Parent sign-ins**, **Configure**, in its three steps: **1. Parent sign-ins**
    (switched on once outgoing mail works), **2. Welcome emails**, and **3. Sign-in level**. A club starts at
    Standard: a password, and on a phone or computer the portal doesn't know yet, a code emailed to the guardian, or
    their own passkey or authenticator app. Strict, which asks every guardian for a passkey or an authenticator app,

@@ -30,7 +30,7 @@ test("an Admin opens Settings from the menu, follows an item of the rail to its 
   await expect(page.locator("main input, main select")).toHaveCount(0); // a plain view: the form is on its own page
   if (isPhone(page)) await expect(rail(page)).toBeHidden(); // each item is its own page on a phone
   else await expect(rail(page).getByRole("link", { name: /^Club/ })).toHaveAttribute("aria-current", "page");
-  await page.getByRole("link", { name: "Change", exact: true }).click();
+  await page.getByRole("link", { name: "Configure", exact: true }).click();
   await expect(page).toHaveURL(/\/staff\/settings\/club\/edit$/);
   await expect(page.getByLabel("Club name")).toHaveValue("E2E Boosters");
   await expect(page.locator(".club-preview")).toBeVisible();
