@@ -3,6 +3,7 @@ import postgres from "postgres";
 import { staffSessionCookie } from "./staff-session";
 import { parentSessionCookie } from "./parent-session";
 import { BULK, seedBulk } from "./bulk-seed";
+import { LINKS, seedLinks } from "./links-seed";
 
 /**
  * Pictures for the owner to look at, not a check of pixels: the QuickBooks settings page and its Disconnect asking first, a
@@ -16,6 +17,9 @@ import { BULK, seedBulk } from "./bulk-seed";
  * And the Material 3 Expressive review set (the owner's of 2026-11-26): the parent's Home on a phone, the staff Home (the
  * rail) and Settings › QuickBooks (the list pane) on a desktop, each in light and in dark; Accounting links with a row
  * ticked (the floating toolbar) and its bulk sheet open, at both widths.
+ *
+ * And the Accounting links redesign (the owner's approval of 2026-11-27): the list with one row's details open and two
+ * rows ticked, and a family's Review drawer, at both widths (390: the phone's list and its full-screen drawer).
  */
 const sql = postgres(process.env.DATABASE_URL!);
 test.afterAll(async () => { await sql.end(); });
@@ -119,6 +123,28 @@ test("a bulk action's Drawer on Accounting links, for the owner to look at", asy
     await expect(drawer).toContainText(`“${BULK.linkName}” to ${BULK.family}`);
     await drawer.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
     await page.screenshot({ path: `test-results/screenshots/bulk-link-drawer-${info.project.name}.png` });
+  } finally {
+    await drop();
+  }
+});
+
+test("Accounting links with a row's details open and two rows ticked, and a Review drawer, for the owner to look at", async ({ page }, info) => {
+  const { drop } = await seedLinks(sql);
+  try {
+    await page.goto("/staff/links");
+    const families = page.getByRole("region", { name: "Families" });
+    await families.getByRole("checkbox", { name: `Select ${LINKS.family}` }).check();
+    await families.getByRole("checkbox", { name: `Select ${LINKS.other}` }).check();
+    await families.getByRole("button", { name: new RegExp(`^Show details\\s*:\\s*${LINKS.family}$`) }).click();
+    const panel = page.getByRole("region", { name: `Details: ${LINKS.family}` });
+    await expect(panel.getByRole("region", { name: "In your books" })).toContainText(LINKS.booksPhone);
+    await settle(page);
+    await page.screenshot(shot("links-details-ticked", info.project.name));
+    await panel.getByRole("link", { name: `Review ${LINKS.family}` }).click();
+    const review = page.getByRole("dialog", { name: `Review ${LINKS.family}` });
+    await expect(review).toBeVisible();
+    await review.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+    await page.screenshot({ path: `test-results/screenshots/links-review-drawer-${info.project.name}.png` });
   } finally {
     await drop();
   }

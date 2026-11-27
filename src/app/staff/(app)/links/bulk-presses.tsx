@@ -16,7 +16,7 @@ export function LinkSuggestedBulk({ rows, act }: { rows: SuggestedPick[]; act: (
   return (
     <BulkAction rows={shown} cap={PRESS_MAX}
       label={(n) => (n === 1 ? "Link 1 to its suggested family" : `Link ${n} to their suggested families`)}
-      confirmLabel={(n) => `Link ${n} ${n === 1 ? "customer" : "customers"}`} busyLabel="Linking…" done="Linked"
+      confirmLabel={(n) => `Link ${n} ${n === 1 ? "family" : "families"}`} busyLabel="Linking…" done="Linked"
       description="Each family's guardians then see that record's invoices, so check each is the right household. Nothing is sent to the books."
       act={(ids: string[]) => act(ids.map((id) => byId.get(id)!).map((r) => ({ familyId: r.familyId, customerId: r.customerId, stamp: r.stamp })))} />
   );

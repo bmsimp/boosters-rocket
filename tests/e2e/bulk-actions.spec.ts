@@ -51,9 +51,9 @@ test("Accounting links: link a Suggested family, and create a family from a cust
     await families.getByRole("checkbox", { name: `Select ${BULK.family}` }).check();
     let drawer = await openAction(page, families.locator(".bulk"), phone, 1, "family", "Link 1 to its suggested family");
     await expect(drawer).toContainText(`“${BULK.linkName}” to ${BULK.family}`);
-    await expect(drawer).toContainText("Nothing is sent to QuickBooks.");
+    await expect(drawer).toContainText("Nothing is sent to the books.");
     await checked(page, "Link to their suggested families, before");
-    await drawer.getByRole("button", { name: "Link 1 customer" }).click();
+    await drawer.getByRole("button", { name: "Link 1 family" }).click();
     let results = page.getByRole("dialog", { name: "Link 1 to its suggested family" });
     await expect(results.getByText("1 linked.")).toBeVisible();
     await expect(results).toContainText(`${BULK.family}: Linked`);
