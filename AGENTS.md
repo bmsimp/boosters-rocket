@@ -22,6 +22,7 @@ Boosters Rocket is an open-source, self-hosted parent portal for booster clubs: 
 **How work is done**
 - One screen-sized slice at a time, from a short brief. Tests are written with the code. No long plans with code in them.
 - Do the slice in the brief and nothing else. Say in your report what you left undone, and anything that surprised you.
+- A PR that touches a screen or copy runs the design-review agent (`.claude/agents/design-review.md`) on itself and fixes its findings before it asks the owner; its verdict and any findings left go in the PR body.
 
 ### Area documents
 
