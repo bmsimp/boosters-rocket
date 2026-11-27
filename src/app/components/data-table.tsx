@@ -1,5 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 import { HeaderCheck, RowCheck } from "./ui/bulk-select";
+import { CurrentRow } from "./ui/current-row";
 
 /**
  * The table primitive (docs/agents/ui.md): a real table at laptop widths, with a caption and header cells that have a
@@ -47,11 +48,16 @@ type Props<R> = {
    * (`aria-expanded`, `aria-controls`). The row is drawn only while what it holds isn't `hidden`.
    */
   expand?: (row: R) => ReactNode;
+  /**
+   * The row a Drawer is open about: while the address's `param` (one of `params`) is the row's `value`, the row carries
+   * `aria-current="true"` and is drawn as a ticked row is (Accounting links' Review and Pick drawers, docked or modal).
+   */
+  current?: { params: readonly string[]; value: (row: R) => string };
 } & ({ rows: R[]; groups?: never } | { groups: RowGroup<R>[]; rows?: never });
 
-function Row<R>({ row, columns, check }: { row: R; columns: Column<R>[]; check?: ReactNode }) {
-  return (
-    <tr role="row">
+function Row<R>({ row, columns, check, current }: { row: R; columns: Column<R>[]; check?: ReactNode; current?: Props<R>["current"] }) {
+  const cells = (
+    <>
       {check && <td role="cell" className="t-check">{check}</td>}
       {columns.map((c) => {
         const className = [c.numeric ? "t-num" : "", c.quiet ? "t-quiet" : ""].filter(Boolean).join(" ") || undefined;
@@ -60,15 +66,16 @@ function Row<R>({ row, columns, check }: { row: R; columns: Column<R>[]; check?:
           ? <th key={c.key} role="rowheader" scope="row" className={className}>{c.cell(row)}</th>
           : <td key={c.key} role="cell" className={className}>{label}<div className="t-value">{c.cell(row)}</div></td>;
       })}
-    </tr>
+    </>
   );
+  return current ? <CurrentRow params={current.params} value={current.value(row)}>{cells}</CurrentRow> : <tr role="row">{cells}</tr>;
 }
 
-export function DataTable<R>({ caption, captionHidden = false, columns, rowKey, className, rows, groups, select, expand }: Props<R>) {
+export function DataTable<R>({ caption, captionHidden = false, columns, rowKey, className, rows, groups, select, expand, current }: Props<R>) {
   const check = (r: R) => (!select ? undefined : select.when && !select.when(r) ? <span /> : <RowCheck id={rowKey(r)} label={`Select ${select.label(r)}`} />);
   const span = columns.length + (select ? 1 : 0);
-  const one = (r: R) => (expand === undefined ? <Row key={rowKey(r)} row={r} columns={columns} check={check(r)} />
-    : <Fragment key={rowKey(r)}><Row row={r} columns={columns} check={check(r)} /><tr role="row" className="t-more"><td role="cell" colSpan={span}>{expand(r)}</td></tr></Fragment>);
+  const one = (r: R) => (expand === undefined ? <Row key={rowKey(r)} row={r} columns={columns} check={check(r)} current={current} />
+    : <Fragment key={rowKey(r)}><Row row={r} columns={columns} check={check(r)} current={current} /><tr role="row" className="t-more"><td role="cell" colSpan={span}>{expand(r)}</td></tr></Fragment>);
   return (
     <table role="table" className={["table", className].filter(Boolean).join(" ")}>
       <caption className={captionHidden ? "visually-hidden" : undefined}>{caption}</caption>

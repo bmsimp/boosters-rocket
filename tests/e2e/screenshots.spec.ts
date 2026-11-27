@@ -190,3 +190,31 @@ test("Accounting links with a row's details open and two rows ticked, and a Revi
     await drop();
   }
 });
+
+/**
+ * The row of an open Review drawer, marked current as a ticked row is (2026-11-28), as the person sees it: at 390 (the
+ * drawer fills the phone's screen), at 1440 (the modal sheet over the table, the row under the scrim) and at 2560
+ * (docked beside the table), in light and in dark, for the design review (.claude/agents/design-review.md).
+ */
+test("Accounting links' current row while a Review drawer is open, at 390, 1440 and 2560, light and dark, for the owner to look at", async ({ browser }, info) => {
+  const widths = info.project.name === "phone" ? [390] : [1440, 2560];
+  const { drop } = await seedLinks(sql);
+  try {
+    const [rivera] = await sql`SELECT family_id FROM accounting_link WHERE customer_id = 'E2E-10' AND family_id IS NOT NULL`;
+    for (const width of widths) {
+      for (const scheme of SCHEMES) {
+        const context = await browser.newContext({ viewport: { width, height: width >= 2000 ? 1300 : 900 }, colorScheme: scheme, ...(width === 390 ? { isMobile: true, hasTouch: true } : {}) });
+        await context.addCookies([staffSessionCookie()]);
+        const page = await context.newPage();
+        await page.goto(`/staff/links?review=${rivera!.family_id}`);
+        await expect(page.getByRole("dialog", { name: "Review Rivera Family" })).toBeVisible();
+        await expect(page.locator('tr[aria-current="true"]')).toHaveCount(1);
+        await settle(page);
+        await page.screenshot({ path: `test-results/screenshots/links-current-row-${scheme}-${width}.png` });
+        await context.close();
+      }
+    }
+  } finally {
+    await drop();
+  }
+});
