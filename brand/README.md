@@ -25,7 +25,7 @@ logo files and their exports. It lives at `brand/` in the repo.
 - **Tokens.** `tokens.css` and `tokens.json` are the brand's source values, not the app's stylesheet. The app's tokens
   live in `src/app/booster.css` (mirrored in `src/lib/theme/palette.ts` and measured by
   `tests/unit/design-tokens.test.ts`), with sizes in rem: the kit's px scale is not imported. The status colors and the
-  badge ink there are the kit's, checked against the app's own grounds (`DESIGN.md`, Colors).
+  badge ink there are the kit's, checked against the app's own grounds.
 - **The badge.** The footer's "Powered by Boosters Rocket" (`src/app/components/powered-by.tsx`) is the kit's outlined
   `powered-by-mono.svg` and `powered-by-color-light.svg`, inlined so its inks come from the app's tokens (one ink,
   `--badge-ink`; in color, the `--br-*` tokens, which follow the display mode). Its coordinates are rounded to two

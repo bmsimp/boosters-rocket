@@ -185,7 +185,7 @@ describe("Confirm this link", () => {
     asStaff(linker);
     const html = listOf(await renderPage(AccountingLinksPage));
     const opening = rowNamed(html, "<b>Patel</b> Family")![4]!;
-    expect(opening).toContain("Confirm this link records it as checked by you, so it no longer reads as carried over. Nothing is sent to the books.");
+    expect(opening).toContain("Confirm this link marks it as checked by you.");
     expect(opening).toContain("Confirmed with it, each carried over to a student customer directly under this customer:Asha Patel");
     expect(opening).toContain("Confirm this link: <b>Patel</b> Family");
     expect(html).not.toContain("<b>Patel</b>");

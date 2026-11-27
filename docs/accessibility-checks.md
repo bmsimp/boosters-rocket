@@ -84,7 +84,7 @@ the hand walk below was made on the code door before it and has not been made ag
 - Home's order: the club bar's links (Home, Forms, Payments, Volunteer, Family), the account link, Switch family,
   See the whole season, the Pay link, See your payments, Update my details. At 360 wide the bar has only the account
   link and the tabs come last, where they sit on the screen. Every stop has a ring in every mode; inside the club bar
-  the ring is `club-on`, as DESIGN.md says.
+  the ring is `club-on`, as the stylesheet draws it.
 - Payments' Pay link is named "Pay $85.00, invoice QZ-1041 for Xochitl Quetzalcoatl", opens Intuit's page in the same
   tab, and has `rel="noopener noreferrer"`. After following a tab or nav link, the focus stays on that link (Next.js
   keeps the frame) and Next.js's route announcer reads the new page's title.
@@ -93,7 +93,7 @@ the hand walk below was made on the code door before it and has not been made ag
   Name; axe-core's `label-content-name-mismatch` on every parent page). Its name now starts with the initials:
   "ZQ: Your account and display settings, Zelda Quetzalcoatl".
 - The Pay button that is paused while the figures are not current could not be reached with the seed (its figures are
-  fresh); its words are in DESIGN.md and its markup is `aria-disabled` with the reason in its name.
+  fresh); its words are `NotCurrentNote`'s (`src/app/(parent)/money-box.tsx`) and its markup is `aria-disabled` with the reason in its name.
 
 ### 3. Opening a form, agreeing, and reaching the signing frame (`/forms`, `/forms/[id]`)
 
@@ -319,12 +319,10 @@ owner's list (`docs/runbooks/before-the-first-family.md`).
   overlapping text at larger text size, every contrast pair passing in light, dark, both high-contrast sets and in the
   gold club color, every control named.
 
-### For later (in `docs/ui-backlog.md` once the owner of that file adds them)
+### For later
 
-- A form's page is titled "Form" and a shift's "Sign up for a shift", which is what a screen reader hears on arriving:
-  naming the form or the event would say more.
-- A parent page reached by a link starts the focus at the top; a "Skip to the page" link or moving the focus to the
-  page's heading would save keyboard users the club bar's six stops on every page.
+A form's page is named for its form and every club bar starts with "Skip to the page" (both 2026-11-17). A shift's page
+is still titled "Sign up for a shift": it is in `docs/ui-backlog.md`.
 
 ### Owner's checks
 

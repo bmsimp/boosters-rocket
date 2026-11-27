@@ -1,6 +1,6 @@
 # QuickBooks connection and roster — design
 
-**Status:** approved by the owner on 2026-11-11; implemented by plan 2026-11-11-quickbooks-connection-and-roster.md, and proved against an Intuit sandbox company on the proof of concept on 2026-11-11 and 12 (its runbook, checks 10 to 17). The portal now also writes to QuickBooks, as the roadmap's steps 3, 5 and 6 describe.
+**Status:** approved by the owner on 2026-11-11; implemented by plan `2026-11-11-quickbooks-connection-and-roster.md` (removed on 2026-11-26 once built; in git history), and proved against an Intuit sandbox company on the proof of concept on 2026-11-11 and 12 (its runbook, checks 10 to 17). The portal now also writes to QuickBooks, as the roadmap's steps 3, 5 and 6 describe.
 **Changed since** (2026-11-19, stage 3 slice 9c of `2026-11-18-app-owned-families-design.md`): the roster cache is no longer
 the club's families. The portal's own family and student records stand alone: a roster refresh stores the customer list and
 changes no record or sign-in, follows no student moved in QuickBooks, and a customer renamed, moved, made inactive, added or

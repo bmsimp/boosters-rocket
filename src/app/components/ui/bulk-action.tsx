@@ -21,6 +21,9 @@ type Shown = {
 };
 const Results = createContext<((s: Shown) => void) | null>(null);
 
+/** A press in a sheet's foot is filled, M3's 56px: a danger one in the late color, as ConfirmDialog's. */
+const pressVariant = (v: ButtonVariant): ButtonVariant => (v === "danger" || v === "danger-filled" ? "danger-filled" : "filled");
+
 /**
  * Holds what a bulk press did, row by row, in its own Drawer, drawn at the page's level: a press re-reads the page, and
  * its rows (its list, the whole part when it was the last) may go, taking their BulkSelect and its action with them.
@@ -52,7 +55,12 @@ function ResultsSheet({ shown, onClose, onNext }: { shown: Shown | null; onClose
   };
   const tried = s?.answer;
   return (
-    <Sheet open={s !== null} onClose={() => { if (!pending) { setRefused(null); onClose(); } }} title={s?.title ?? ""}>
+    <Sheet open={s !== null} onClose={() => { if (!pending) { setRefused(null); onClose(); } }} title={s?.title ?? ""} footer={s && tried && (
+      <>
+        {tried.left.length > 0 && <Button variant={pressVariant(s.variant)} busy={pending} onClick={more}>{pending ? s.busyLabel : `Do the next ${Math.min(tried.left.length, s.cap)}`}</Button>}
+        <Button variant="text" onClick={() => { if (!pending) { setRefused(null); onClose(); } }}>Done</Button>
+      </>
+    )}>
       {s && tried && (
         <div className="stack">
           <Notice tone={tried.rows.every((x) => x.outcome === "done") && tried.left.length === 0 ? "done" : "warning"}>{tried.message}</Notice>
@@ -61,10 +69,6 @@ function ResultsSheet({ shown, onClose, onNext }: { shown: Shown | null; onClose
           ))}</ul>
           {tried.rows.some((x) => x.outcome !== "done") && <p>The rows skipped are still ticked.</p>}
           {refused && !refused.ok && <ActionOutcome state={refused} />}
-          <p className="row-actions">
-            {tried.left.length > 0 && <Button variant={s.variant} busy={pending} onClick={more}>{pending ? s.busyLabel : `Do the next ${Math.min(tried.left.length, s.cap)}`}</Button>}
-            <Button variant="outlined" onClick={() => { if (!pending) { setRefused(null); onClose(); } }}>Done</Button>
-          </p>
         </div>
       )}
     </Sheet>
@@ -137,7 +141,12 @@ export function BulkAction({ rows, label, confirmLabel, busyLabel = "Working…"
   return (
     <>
       <Button variant={variant === "danger" ? "danger" : "tonal"} size="sm" onClick={() => { setRefused(null); setTitleN(n); setOpen(true); }} aria-disabled={n === 0 || undefined}>{label(n)}</Button>
-      <Sheet open={open} onClose={close} title={label(titleN)} description={description}>
+      <Sheet open={open} onClose={close} title={label(titleN)} description={description} footer={n > 0 && (
+        <>
+          <Button variant={pressVariant(variant)} busy={pending} onClick={send}>{pending ? busyLabel : confirmLabel(Math.min(n, cap))}</Button>
+          <Button variant="text" onClick={close}>Cancel</Button>
+        </>
+      )}>
         <div className="stack">
           {n === 0 ? <Notice tone="info" live="none">None of the rows ticked can be taken by this. Tick the rows it offers a box for.</Notice> : (
             <>
@@ -145,10 +154,6 @@ export function BulkAction({ rows, label, confirmLabel, busyLabel = "Working…"
               <ul>{chosen.slice(0, cap).map((id) => <li key={id}>{rows.get(id)!.line}</li>)}</ul>
               {reason && <TextArea id={noteId} label={reason.label} rows={2} maxLength={reason.maxLength} value={note} onChange={(e) => setNote(e.target.value)} />}
               {refused && !refused.ok && <ActionOutcome state={refused} />}
-              <p className="row-actions">
-                <Button variant={variant} busy={pending} onClick={send}>{pending ? busyLabel : confirmLabel(Math.min(n, cap))}</Button>
-                <Button variant="outlined" onClick={close}>Cancel</Button>
-              </p>
             </>
           )}
         </div>

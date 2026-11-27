@@ -78,7 +78,7 @@ test("the page fits the screen at this width, and the amounts line up", async ({
   const [late, soon] = [page.locator(".money .list-row").nth(0), page.locator(".money .list-row").nth(1)];
   const amount = (await soon.locator(".list-amount").boundingBox())!, otherAmount = (await late.locator(".list-amount").boundingBox())!;
   const total = (await page.locator(".money .list-total .list-amount").boundingBox())!;
-  // One right-aligned column of figures that sums to the total (DESIGN.md, Money lines).
+  // One right-aligned column of figures that sums to the total.
   expect(Math.abs(amount.x + amount.width - (otherAmount.x + otherAmount.width))).toBeLessThanOrEqual(1);
   expect(Math.abs(amount.x + amount.width - (total.x + total.width))).toBeLessThanOrEqual(1);
   const pay = (await page.locator("a.pay").boundingBox())!, row = (await soon.boundingBox())!;

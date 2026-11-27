@@ -1,6 +1,6 @@
 # Parent sign-in with portal email codes — design
 
-**Status:** approved in conversation on 2026-11-10 and built by plan `2026-11-10-parent-email-code-sign-in.md`; a parent signed in with an emailed code on the proof of concept on 2026-11-10 (its runbook, check 4). Sessions last 90 days, renewed by use, since the owner's decision of 2026-11-14 (the roadmap).
+**Status:** approved in conversation on 2026-11-10 and built by plan `2026-11-10-parent-email-code-sign-in.md` (removed on 2026-11-26 once built; in git history); a parent signed in with an emailed code on the proof of concept on 2026-11-10 (its runbook, check 4). Sessions last 90 days, renewed by use, since the owner's decision of 2026-11-14 (the roadmap).
 **Revises:** the v1 design (`2026-11-06-booster-rocket-v1-design.md`), sections 4, 5.1, 5.2, 6.1,
 6.2, 7, 12, 14 and 15, as listed in "Changes to the v1 design" below. It also replaces the Parent step
 in first-run setup (`2026-11-08-first-run-setup-design.md`) and the parent half of certificate

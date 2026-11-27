@@ -1,5 +1,5 @@
 /**
- * How a due date is said (DESIGN.md, Money lines): in words first, with the color only confirming them. Pure. "Today"
+ * How a due date is said: in words first, with the color only confirming them. Pure. "Today"
  * is the club's own date, clubToday() in src/lib/settings/club.ts, for an invoice (src/app/(parent)/due-line.tsx) as
  * for a season requirement (src/app/(parent)/season-parts.tsx): never the server's date, and never the viewer's, so
  * every parent of a club reads the same words on the same day.

@@ -1,6 +1,6 @@
 # Parents from QuickBooks — design
 
-**Status:** approved by the owner on 2026-11-11; implemented by plan `2026-11-11-parents-from-quickbooks.md`;
+**Status:** approved by the owner on 2026-11-11; implemented by plan `2026-11-11-parents-from-quickbooks.md` (removed on 2026-11-26 once built; in git history);
 merged and deployed to the linuxdev proof of concept on 2026-11-12 (commit `82e4639`). Parent sign-ins are still
 switched off there, and the runbook's checks 18-25 have not been run (docs/runbooks/before-the-first-family.md, part 1).
 **Changed since:** step 5 of the roadmap changes its "What staff cannot do here": staff now create, rename, move and make inactive in QuickBooks from the roster pages.
@@ -505,4 +505,4 @@ fixed.
 - **The same check is written in several places.** "This link is open", "this link is from the previous
   company" and the comparison of QuickBooks IDs as numbers each appear in several files, and the code calls one
   thing a guardian, a link and a sign-in. A tidy-up is owed; behavior is not affected.
-- **Two wording slips** are in `docs/ui-backlog.md` (step 2 of the set-up steps; step 1 while sign-ins are on).
+- **Two wording slips** were in `docs/ui-backlog.md` (step 2 of the set-up steps; step 1 while sign-ins are on), both fixed on 2026-11-16.

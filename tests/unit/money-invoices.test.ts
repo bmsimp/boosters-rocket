@@ -95,7 +95,7 @@ describe("QuickBooks' invoices as a parent sees them", () => {
   });
 });
 
-describe("a due date is said in words (DESIGN.md, Money lines)", () => {
+describe("a due date is said in words", () => {
   it.each([
     ["2026-11-15", "soon", "Due", ", today"],
     ["2026-11-16", "soon", "Due", ", tomorrow"],

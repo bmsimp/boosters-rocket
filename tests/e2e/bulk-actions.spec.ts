@@ -67,7 +67,7 @@ test("Accounting links: link a Suggested family, and create a family from a cust
     const noFamily = page.getByRole("region", { name: /^Customers with no family/ });
     await noFamily.getByRole("checkbox", { name: `Select ${BULK.makeName}` }).check();
     drawer = await openAction(page, noFamily.locator(".bulk"), phone, 1, "customer", "Create 1 family");
-    await expect(drawer).toContainText(`${BULK.makeName}: A family, linked to this customer.`);
+    await expect(drawer).toContainText(`${BULK.makeName}: A linked family.`);
     await checked(page, "Create families, before");
     await drawer.getByRole("button", { name: "Create 1 family" }).click();
     results = page.getByRole("dialog", { name: "Create 1 family" });

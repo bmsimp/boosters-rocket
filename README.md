@@ -110,7 +110,7 @@ The runbooks, written for a club volunteer:
 installation, made with `docker-compose.poc.yml` and the scripts in `scripts/poc/`.
 
 For whoever works on the portal: `AGENTS.md` holds the rules every change follows,
-`PRODUCT.md` and `DESIGN.md` say who it is for and how it looks, and `docs/ui-backlog.md` lists
+`PRODUCT.md` says who it is for, `docs/agents/ui.md` and `docs/agents/owner-taste.md` how it looks, and `docs/ui-backlog.md` lists
 the interface problems still open.
 
 ## The brand

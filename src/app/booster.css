@@ -480,7 +480,7 @@ dialog.sheet[open]:not(:modal) { position: static; display: block; width: auto; 
 .bulk-count { font: var(--title-m); margin-inline-end: auto; }
 .bulk-all { flex-basis: 100%; font: var(--body-m); }
 .bulk-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
-.bulk-bar .btn-text { --btn-fg: var(--on-primary-container); }
+.bulk-bar .btn-text:not(dialog .btn) { --btn-fg: var(--on-primary-container); }
 .bulk-actions .btn:not(.btn-danger):not(dialog .btn) { --btn-bg: var(--primary); --btn-fg: var(--on-primary); } /* the toolbar's action is its filled button */
 .bulk-menu { display: none; }
 @media (max-width: 839.98px) {

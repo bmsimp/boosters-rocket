@@ -93,7 +93,7 @@ On 2026-11-16 it ended `SIGNED` at both 390 and 1440.
 
 The owner's design check flagged three side-tab accents in `src/app/booster.css`: the Notice primitive's 8px colored
 rule down its left edge (and its forced-colors twin) and the roles page's patterns warning (a 4px amber rule). They
-were redesigned in DESIGN.md's own language (`6bd1f18`, `56ff422`): every notice is ruled evenly all round in 2px ink,
+were redesigned in the design system of the day (DESIGN.md, since retired; `6bd1f18`, `56ff422`): every notice is ruled evenly all round in 2px ink,
 like every box, and its tone is carried by what it says: a 28px icon cell filled with the tone's ink, the icon drawn in
 paper, and the word in the tone's ink. Under forced colors the cell is drawn in system colors with an edge. The
 patterns warning is now a needs-attention Notice. Checked at 390 and 1440 on the staff home, Health, Reconciliation,

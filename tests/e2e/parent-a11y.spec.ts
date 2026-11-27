@@ -46,7 +46,7 @@ const MODES: Mode[] = [
   { name: "larger text", attrs: { theme: "light", text: "larger" } },
   { name: "forced colors", attrs: { theme: "light" }, forcedColors: true },
 ];
-/** DESIGN.md's gold demo: a light club color, where white on the fill fails and the app must derive darker text. */
+/** The gold demo: a light club color, where white on the fill fails and the app must derive darker text. */
 const GOLD = "#f2c200";
 const GOLD_MODES: Mode[] = [
   { name: "gold club, light", attrs: { theme: "light" } },
@@ -328,7 +328,7 @@ async function findProblems(page: Page, where: string, mode: Mode): Promise<stri
 
   // Contrast. axe can't tell what is behind words drawn straight on the chart paper, because the paper's grid is a
   // background image, nor behind the season ruler's cells, whose yard-line ticks are a pseudo-element. Both are 1-2px
-  // decoration that no word sits on (DESIGN.md: the grid is "decoration only", and gone in high contrast), so they are
+  // decoration that no word sits on (the grid is decoration only, and gone in high contrast), so they are
   // taken away while contrast is measured, and every word is measured against the paper or fill it is really on.
   // Anything axe still can't measure is a finding: a new kind of background has to be measured, not skipped.
   await page.evaluate((css) => {

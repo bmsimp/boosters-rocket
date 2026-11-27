@@ -228,7 +228,7 @@ describe("a removed guardian's Parent customer left active", () => {
     expect(cells[4]).toContain("1 difference with the books: guardians' Parent customers.");
     expect(cells[4]).toContain(`Whether Ana Rivera is this family's guardian. In the portal: Removed from this family. In the books: Their Parent customer is active. ${REMOVED_NEXT}`);
     // Still listed among the removed guardians, as slice M3c draws them.
-    expect(cells[4]).toContain("Removed guardians, with their own Parent customers in the books:Ana Rivera: linked to Ana Rivera, active in the books");
+    expect(cells[4]).toContain("Removed guardians:Ana Rivera: linked to Ana Rivera, active in the books");
   });
 
   it("kept for a balance, then stuck and given up: the given-up words say QuickBooks may have it, and the difference stays", async () => {
