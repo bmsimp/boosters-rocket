@@ -543,8 +543,9 @@ fieldset.checks { border: 0; padding: 0; min-width: 0; }
 .checks input[type="checkbox"]:indeterminate::before { background: var(--primary); border-color: var(--primary); }
 .checks input[type="checkbox"]:indeterminate::after { visibility: visible; width: 10px; height: 0; border-width: 0 0 2px; transform: none; }
 .checks input[type="radio"]:checked::before { border-color: var(--primary); }
-.checks label:hover input:not(:disabled) { background: color-mix(in srgb, var(--on-surface) var(--sl-hover), transparent); }
-.checks input:focus-visible { outline: var(--ring) solid var(--focus); outline-offset: -6px; } /* a ring 2px clear of the mark */
+/* M3's 40px state layer, a circle at the middle of the 48px target, and the focus ring drawn round it. */
+.checks label:hover input:not(:disabled) { background: radial-gradient(circle closest-side, color-mix(in srgb, var(--on-surface) var(--sl-hover), transparent) 0 20px, transparent 20.5px); }
+.checks input:focus-visible { outline: var(--ring) solid var(--focus); outline-offset: -4px; background: radial-gradient(circle closest-side, color-mix(in srgb, var(--on-surface) 10%, transparent) 0 20px, transparent 20.5px); }
 .checks > p, .checks .hint { margin-top: var(--s1); }
 /* A lone tick box's hint (Checkbox's hint) lines up with its words, tucked under them. */
 div.checks > .hint { margin-top: -8px; padding-left: calc(var(--target) - 15px); }
