@@ -35,6 +35,7 @@ describe("Postgres's version", () => {
     const named = [
       imageOf(service(read("docker-compose.yml"), "db")),
       imageOf(service(read("docker-compose.poc.yml"), "db")),
+      imageOf(service(read("docker-compose.preview.yml"), "db")),
       imageOf(service(deploy, "db")),
       imageOf(service(deploy, "backup")),
       /services:\s+postgres:\s+image:\s*(\S+)/.exec(read(".github/workflows/ci.yml"))?.[1] ?? "",

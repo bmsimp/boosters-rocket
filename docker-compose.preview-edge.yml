@@ -1,0 +1,29 @@
+name: booster-rocket-preview
+# The previews' one way in (docs/superpowers/specs/2026-11-27-pr-previews-design.md): a proxy the tunnel connector
+# reaches at http://booster-rocket-preview-proxy:8080 on the edge network, for every https://pr-<n>.<preview domain>.
+# It answers only requests that carry the access gate's header (PREVIEW_GATE_HEADER) and a host of that shape, and
+# sends each to its own preview's containers (scripts/poc/preview/Caddyfile). preview.sh joins it to each preview's
+# internal network when the preview starts and takes it off when it stops; it runs no branch's code. Started by
+# `preview.sh init`, from the site's checkout, with the shared .env.preview.
+
+services:
+  proxy:
+    image: caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+    container_name: booster-rocket-preview-proxy
+    restart: unless-stopped
+    environment:
+      PREVIEW_GATE_HEADER: ${PREVIEW_GATE_HEADER:?PREVIEW_GATE_HEADER is required in .env.preview}
+      PREVIEW_DOMAIN: ${PREVIEW_DOMAIN:?PREVIEW_DOMAIN is required in .env.preview}
+    volumes:
+      - ./scripts/poc/preview/Caddyfile:/etc/caddy/Caddyfile:ro
+    networks: [edge]
+    mem_limit: 96m
+    cpus: 0.5
+    pids_limit: 100
+
+networks:
+  # Made once by `preview.sh init` with --internal, so the tunnel connector can join it and stay joined while
+  # previews come and go. preview.sh refuses to start one if it is not internal.
+  edge:
+    name: booster-rocket-preview-edge
+    external: true

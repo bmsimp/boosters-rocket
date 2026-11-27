@@ -1,0 +1,43 @@
+# The previews' proxy (docker-compose.preview-edge.yml). Plain http on port 8080, reached only by the tunnel connector
+# on the edge network; the tunnel ends https. A request goes to the preview its host names, pr-<n>.<PREVIEW_DOMAIN>,
+# whose containers are booster-rocket-pr-<n>-*. Caddy's own documentation: https://caddyserver.com/docs/caddyfile
+{
+	auto_https off
+	# No admin endpoint: the configuration is this file, read when the container starts.
+	admin off
+	servers {
+		# Keep the X-Forwarded-* headers the tunnel connector sends (it is on a private address), as the site gets them.
+		trusted_proxies static private_ranges
+	}
+}
+
+:8080 {
+	# The access gate in front of the tunnel adds this header to every request it lets through. A request without it
+	# did not come through the gate (the gate was left off, or turned off), and gets nothing but a refusal.
+	@gated header_regexp gate {$PREVIEW_GATE_HEADER} .+
+	# Only a host of the one shape names a preview; its number is all that reaches an upstream's name.
+	@preview {
+		header_regexp gate {$PREVIEW_GATE_HEADER} .+
+		header_regexp pr Host ^pr-([1-9][0-9]{0,5})\.{$PREVIEW_DOMAIN}$
+	}
+	handle @preview {
+		handle /__preview/mail* {
+			reverse_proxy booster-rocket-pr-{re.pr.1}-app:8025
+		}
+		handle /__preview* {
+			reverse_proxy booster-rocket-pr-{re.pr.1}-door:8080
+		}
+		handle {
+			reverse_proxy booster-rocket-pr-{re.pr.1}-app:3000
+		}
+	}
+	handle @gated {
+		respond "There is no preview at this address." 404
+	}
+	handle {
+		respond "This preview is private." 403
+	}
+	handle_errors {
+		respond "This preview isn't running. It may have been taken down when its pull request closed." 502
+	}
+}

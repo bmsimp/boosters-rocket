@@ -1,0 +1,11 @@
+# Every five minutes (booster-rocket-preview-poll.service). Not installed.
+[Unit]
+Description=Poll for pull request previews every five minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+Persistent=false
+
+[Install]
+WantedBy=timers.target
