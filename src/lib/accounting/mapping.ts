@@ -290,6 +290,8 @@ export type LinkRow = {
   addresses: string[];
   /** The linked customer as the cache holds it, or the one suggested; null for none. */
   customer: CustomerShown | null;
+  /** That customer's id (the linked one's, even where the cache doesn't hold it, or the suggested one's); null for none. Only the row's details read it, on the server. */
+  customerId: string | null;
   status: LinkStatus;
   students: { id: AppStudentId; name: string; link: OwnLink }[];
   /** Its open guardians; `blocked`: the person is blocked, so they can't sign in and their address isn't matched. */
@@ -907,7 +909,7 @@ function linkRowsOf(b: LinkBasics, queue: readonly QueueView[], o: { studentsRul
     const key = String(f.id);
     const link = linkOfFamily.get(key);
     const base = {
-      familyId: f.id, name: familyName.get(key)!, addresses: addressesOf.get(key) ?? [],
+      familyId: f.id, name: familyName.get(key)!, addresses: addressesOf.get(key) ?? [], customerId: link?.customerId ?? null,
       students: (activeStudentsOf.get(key) ?? []).map((s) => ({ id: s.id, name: recordNameWords(s.name, "student"), customerId: studentTie(familyTie(link?.customerId), customerOfStudent.get(String(s.id))) }))
         .sort(byRosterOrder).map((s) => ({ id: s.id, name: s.name, link: own(customerOfStudent.get(String(s.id))) })),
       guardians: (guardiansOf.get(key) ?? []).map((g): GuardianShown => {
@@ -957,7 +959,7 @@ function linkRowsOf(b: LinkBasics, queue: readonly QueueView[], o: { studentsRul
     const s = suggestions?.get(key);
     if (s === undefined) return { ...base, customer: null, status: { key: "not_checked" } };
     if (s.kind === "suggested") {
-      return { ...base, customer: shown(s.candidate), status: { key: "suggested", holders: s.candidate.holders },
+      return { ...base, customer: shown(s.candidate), customerId: s.candidate.customerId, status: { key: "suggested", holders: s.candidate.holders },
         confirm: b.offerFor(key, s.candidate.customerId, "suggested"), offers: { leave: true, pick: false, undo: false } };
     }
     if (s.kind === "several") {

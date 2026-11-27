@@ -3,7 +3,7 @@ import { createContext, useContext, useRef, useState, useTransition, type ReactN
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { ActionOutcome } from "@/app/components/notice";
 import { ChoiceGroup } from "@/app/components/choice-group";
-import { Button } from "@/app/components/ui/button";
+import { Button, type ButtonSize, type ButtonVariant } from "@/app/components/ui/button";
 import { ConfirmDialog } from "@/app/components/ui/sheet";
 
 // The accounting links screen's presses (stage 4's slice M3a): each a button bound to its server action, and what it
@@ -33,15 +33,29 @@ export function LinkAnswersShown() {
 }
 
 /** One press: its words, its words while busy, whom it is about (read out, not drawn) and the bound action. */
-export function LinkPress({ label, busy, about, act }: { label: string; busy: string; about: string; act: () => Promise<Done> }) {
+export function LinkPress({ label, busy, about, act, variant = "outlined", size }: { label: string; busy: string; about: string; act: () => Promise<Done>; variant?: ButtonVariant; size?: ButtonSize }) {
   const { add } = useContext(Answers);
   const [pending, start] = useTransition();
   // A refusal is said with the family it is about (an answer that went through names it itself), so answers are told apart.
   const press = () => { if (!pending) start(async () => { const r = await safely(() => act(), failed); add(r.ok ? r : { ok: false, errors: r.errors.map((e) => `${about}: ${e}`) }); }); };
   return (
-    <Button variant="outlined" busy={pending} onClick={press}>
+    <Button variant={variant} size={size} busy={pending} onClick={press}>
       {pending ? busy : label}<span className="visually-hidden">: {about}</span>
     </Button>
+  );
+}
+
+/**
+ * Unlink from the books (slice M3b), asking first: the family's links end and its guardians stop seeing its invoices,
+ * said once in the dialog (`consequence`). Its answer is kept above the list with every other press's, as the row's
+ * status changes with it.
+ */
+export function LinkUnlink({ about, consequence, act }: { about: string; consequence: string; act: () => Promise<Done> }) {
+  const { add } = useContext(Answers);
+  return (
+    <ConfirmDialog label="Unlink from the books" context={about} answerHere={false} title={`Unlink ${about} from the books?`} busyLabel="Unlinking…"
+      consequence={consequence}
+      act={async () => { const r = await safely(() => act(), failed); if (r.ok) add(r); return r; }} />
   );
 }
 
@@ -58,16 +72,16 @@ export function GuardianLinkPress({ name, who, about, options, suggested }: { na
   const press = () => {
     if (pending) return;
     const o = options.find((x) => x.value === chosen);
-    if (o === undefined) { add({ ok: false, errors: [`${about}: Choose which Parent customer is ${who}'s first. Nothing was linked.`] }); return; }
+    if (o === undefined) { add({ ok: false, errors: [`${about}: Choose which parent record is ${who}'s first. Nothing was linked.`] }); return; }
     start(async () => { const r = await safely(() => o.act(), failed); add(r.ok ? r : { ok: false, errors: r.errors.map((e) => `${about}: ${e}`) }); });
   };
   return (
     <div className="stack">
-      <ChoiceGroup name={name} legend={`Which Parent customer is ${who}'s`} cols={1} value={chosen} onChange={setChosen}
+      <ChoiceGroup name={name} legend={`Which parent record is ${who}'s`} cols={1} value={chosen} onChange={setChosen}
         options={options.map((o) => ({ value: o.value, label: o.label, hint: o.hint }))} />
       <div className="row-actions">
         <Button variant="outlined" busy={pending} onClick={press}>
-          {pending ? "Linking…" : `Link ${who} to this Parent customer`}<span className="visually-hidden">: {about}</span>
+          {pending ? "Linking…" : `Link ${who} to this parent record`}<span className="visually-hidden">: {about}</span>
         </Button>
       </div>
     </div>
@@ -84,7 +98,7 @@ export function LinkGiveUp({ about, act }: { about: string; act: (note: string) 
   // A refusal is said in the dialog; a give-up that went through is kept above the list, as the row's change leaves it.
   return (
     <ConfirmDialog label="Give up on this change" context={about} answerHere={false} title={`Give up on this change: ${about}?`} variant="tonal" size="sm" busyLabel="Giving up…"
-      consequence="The portal keeps its own value, and QuickBooks keeps what it has."
+      consequence="The portal keeps its own value, and the books keep what they have."
       reason={{ label: "Why? (kept in the audit log)", maxLength: 500 }}
       act={async (note) => { const r = await safely(() => act(note ?? ""), failed); if (r.ok) add(r); return r; }} />
   );

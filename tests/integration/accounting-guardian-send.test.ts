@@ -388,15 +388,15 @@ describe("the offers on Accounting links", () => {
     // Drawn for a holder of the three permissions, each beside its words; none for a reader who may not change families.
     asStaff(sender);
     const list = listOf(await renderPage(AccountingLinksPage));
-    expect(pressed(list, "Send the app's to QuickBooks")).toEqual(["Ana Rivera's name on their Parent customer", "Bea Rivera's Parent customer's active status"]);
-    expect(pressed(list, "Take QuickBooks' into the app")).toEqual([]);
+    expect(pressed(list, "Send the portal's value to the books")).toEqual(["Ana Rivera's name on their Parent customer", "Bea Rivera's Parent customer's active status"]);
+    expect(pressed(list, "Take the books' value")).toEqual([]);
     expect(list).toContain(r.guardianSends[0]!.words[0]);
     expect(list).toContain(guardianDifferenceNext(r.differences[0]!)!);
     for (const s of r.guardianSends) expect(list).not.toContain(s.stamp);
     const linker = await staffWith("linker@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
     asStaff(linker);
     const theirs = listOf(await renderPage(AccountingLinksPage));
-    expect(pressed(theirs, "Send the app's to QuickBooks")).toEqual([]);
+    expect(pressed(theirs, "Send the portal's value to the books")).toEqual([]);
     expect(theirs).not.toContain(r.guardianSends[0]!.words[0]);
     expect(posts()).toEqual([]);
     expect(await items()).toEqual([]);
@@ -466,7 +466,7 @@ describe("the offers on Accounting links", () => {
     expect([...r.guardianSends, ...r.sends, ...r.sendNotes, ...r.takes, ...r.takeNotes]).toEqual([]);
     asStaff(sender);
     const list = listOf(await renderPage(AccountingLinksPage));
-    expect(pressed(list, "Send the app's to QuickBooks")).toEqual([]);
+    expect(pressed(list, "Send the portal's value to the books")).toEqual([]);
     expect(list).toContain(guardianDifferenceNext(r.differences[0]!)!);
   });
 });
@@ -481,7 +481,7 @@ describe("Send the app's for all", () => {
     asStaff(sender);
     const without = listOf(await renderPage(AccountingLinksPage));
     expect(without).toContain("It skips 1 make-inactive");
-    expect(without).not.toContain("A guardian's Parent customer is sent from its own row.");
+    expect(without).not.toContain("A guardian's parent record is sent from its family's Review.");
     await db.update(student).set({ active: true }).where(eq(student.id, leo));
     changeInBooks("10", { DisplayName: "Rivera Household" });
     changeInBooks("11", { DisplayName: "Ana R. Lopez" });
@@ -494,7 +494,7 @@ describe("Send the app's for all", () => {
     const all = view.sendAll({ status: null, q: "" })!;
     expect(all).toMatchObject({ count: 1, later: 0, passedOver: { inactive: 0, booksInactive: 0 }, guardians: 1 });
     asStaff(sender);
-    expect((await renderPage(AccountingLinksPage)).replaceAll("&#x27;", "'")).toContain("A guardian's Parent customer is sent from its own row.");
+    expect((await renderPage(AccountingLinksPage)).replaceAll("&#x27;", "'")).toContain("A guardian's parent record is sent from its family's Review.");
     expect(await sendAllDifferences({ status: "", q: "", count: all.count, stamp: all.stamp }, tag, sendOp())).toMatchObject({ ok: true });
     expect((await items()).map((q) => [q.request.op, "role" in q.request ? q.request.role : null, q.familyId])).toEqual([["rename", "family", rivera]]);
     expect((await items()).filter((q) => "guardianId" in q.request)).toEqual([]);

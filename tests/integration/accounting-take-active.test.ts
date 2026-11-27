@@ -36,7 +36,7 @@ import { auditsOf, connectRoster, seedAnaRivera, seedQueued, staffWith, WORKER }
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 
 /**
- * Take QuickBooks' into the app, making a record active again (stage 4's slice M4b of the app-owned families spec;
+ * Take the books' value, making a record active again (stage 4's slice M4b of the app-owned families spec;
  * section 5, "Differences"; open question 12: the only way a record becomes active again; takeFromBooks() with `active`
  * in src/lib/roster/writes.ts): an inactive student record of an active family whose customer the books have active
  * under the family's, on the family's row, and an inactive linked family the books have active, in the screen's own
@@ -487,7 +487,7 @@ describe("the pages", () => {
     const at = html.indexOf(`id="${id}"`);
     return at < 0 ? "" : html.slice(at, html.indexOf("</section>", at)).replaceAll("&#x27;", "'");
   };
-  const pressesIn = (part: string) => [...part.matchAll(/Take QuickBooks' into the app<span class="visually-hidden">: ([^<]*)<\/span>/g)].map((m) => m[1]).sort();
+  const pressesIn = (part: string) => [...part.matchAll(/Take the books' value<span class="visually-hidden">: ([^<]*)<\/span>/g)].map((m) => m[1]).sort();
 
   it("Accounting links: the inactive list with its press and words, none for a customer inactive in the books or not held, and a student's press on its row", async () => {
     // Oak Family (80) imported before anything is changed in the portal.
@@ -509,7 +509,7 @@ describe("the pages", () => {
     await riveraInactiveHere();
     const whole = await renderPage(AccountingLinksPage);
     const part = sectionOf(whole, "links-inactive-h");
-    expect(part).toContain("Inactive in the portal, active in the books");
+    expect(part).toContain("Inactive here, active in your books (1)");
     expect(pressesIn(part)).toEqual(["Rivera Family's active status"]);
     expect(part).toContain("Makes Rivera Family active in the portal, as the books have it alone: its students stay inactive in the portal");
     expect(part).toContain(HELD("Rivera Family"));
@@ -517,9 +517,9 @@ describe("the pages", () => {
     expect(part).not.toMatch(/Chen Family|Oak Family/);
     // The families' own list doesn't count it, and draws no press for it.
     expect(sectionOf(whole, "links-list-h")).not.toContain("Rivera Family's active status");
-    expect(whole).toContain("Taking the books&#x27; value makes the family active again here");
-    // Since slice M5a the lede names the presses that send anything to the books, Send among them, and since slice M5b Send the app's for all.
-    expect(whole).toContain("Only three things here send anything to the books: Send the app&#x27;s to QuickBooks, Send the app&#x27;s for all, and a student&#x27;s move taken from the books, which voids an unpaid volunteer buy-out invoice of theirs there.");
+    expect(whole).toContain("Taking the books&#x27; value makes the family active here again and sends nothing.");
+    // Since the redesign of 2026-11-27 the lede says linking sends nothing; each Send says what it sends beside itself.
+    expect(whole).toContain("Linking sends nothing to the books.");
     // Taken: Rivera is a row again, and Leo's press is on it.
     expect(await press((await inactiveOf("Rivera Family")).take!)).toMatchObject({ ok: true });
     const again = await renderPage(AccountingLinksPage);

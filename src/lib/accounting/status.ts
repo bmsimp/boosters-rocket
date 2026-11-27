@@ -12,8 +12,8 @@ export const isStatusKey = (s: unknown): s is StatusKey => typeof s === "string"
 
 /** A status in words: what the row and the filter say. */
 export const STATUS_WORDS: Record<StatusKey, string> = {
-  suggested: "Suggested", several: "Several possible", no_match: "No match", left_unlinked: "Left unlinked", carried_over: "Carried over", linked: "Linked",
-  with_differences: "Linked, with differences", not_a_family: "Not a family now", customer_gone: "Customer gone", not_checked: "Not checked",
+  suggested: "Suggested by email", several: "Several possible", no_match: "No match", left_unlinked: "Left unlinked", carried_over: "Carried over", linked: "Linked",
+  with_differences: "Linked, with differences", not_a_family: "Not a family now", customer_gone: "Gone from your books", not_checked: "Not checked",
 };
 
 /** Why a linked customer isn't a family now, by the rule of the customers that may be suggested (noFamilyPool()). */

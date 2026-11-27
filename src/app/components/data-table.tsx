@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { HeaderCheck, RowCheck } from "./ui/bulk-select";
 
 /**
@@ -41,6 +41,12 @@ type Props<R> = {
    * a bulk action can take get a box (the rest an empty cell); BulkSelect's `pageIds` are then those rows alone.
    */
   select?: { label: (row: R) => string; when?: (row: R) => boolean };
+  /**
+   * A row's expansion (the owner's one exception to "no fold-outs", 2026-11-27: two records compared side by side): a
+   * second row under each, its one cell the table's full width, holding what a button in the row shows and hides
+   * (`aria-expanded`, `aria-controls`). The row is drawn only while what it holds isn't `hidden`.
+   */
+  expand?: (row: R) => ReactNode;
 } & ({ rows: R[]; groups?: never } | { groups: RowGroup<R>[]; rows?: never });
 
 function Row<R>({ row, columns, check }: { row: R; columns: Column<R>[]; check?: ReactNode }) {
@@ -58,9 +64,11 @@ function Row<R>({ row, columns, check }: { row: R; columns: Column<R>[]; check?:
   );
 }
 
-export function DataTable<R>({ caption, captionHidden = false, columns, rowKey, className, rows, groups, select }: Props<R>) {
+export function DataTable<R>({ caption, captionHidden = false, columns, rowKey, className, rows, groups, select, expand }: Props<R>) {
   const check = (r: R) => (!select ? undefined : select.when && !select.when(r) ? <span /> : <RowCheck id={rowKey(r)} label={`Select ${select.label(r)}`} />);
   const span = columns.length + (select ? 1 : 0);
+  const one = (r: R) => (expand === undefined ? <Row key={rowKey(r)} row={r} columns={columns} check={check(r)} />
+    : <Fragment key={rowKey(r)}><Row row={r} columns={columns} check={check(r)} /><tr role="row" className="t-more"><td role="cell" colSpan={span}>{expand(r)}</td></tr></Fragment>);
   return (
     <table role="table" className={["table", className].filter(Boolean).join(" ")}>
       <caption className={captionHidden ? "visually-hidden" : undefined}>{caption}</caption>
@@ -73,10 +81,10 @@ export function DataTable<R>({ caption, captionHidden = false, columns, rowKey, 
       {groups ? groups.map((g) => (
         <tbody role="rowgroup" key={g.key}>
           <tr role="row" className="t-group"><th role="rowheader" scope="rowgroup" colSpan={span}>{g.heading}</th></tr>
-          {g.rows.map((r) => <Row key={rowKey(r)} row={r} columns={columns} check={check(r)} />)}
+          {g.rows.map(one)}
         </tbody>
       )) : (
-        <tbody role="rowgroup">{rows.map((r) => <Row key={rowKey(r)} row={r} columns={columns} check={check(r)} />)}</tbody>
+        <tbody role="rowgroup">{rows.map(one)}</tbody>
       )}
     </table>
   );

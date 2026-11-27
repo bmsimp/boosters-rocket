@@ -1390,7 +1390,7 @@ type FamilyAsk = { from: "page" } | { from: "difference"; report: (ran: FamilyRa
 /** The press a stopped family action says to press again, and what it says of the family still active, by who asked. */
 const FAMILY_AGAIN: Record<FamilyFrom, { press: (name: string) => string; still: string }> = {
   page: { press: (name) => `“Make ${name} inactive”`, still: "is still active." },
-  difference: { press: () => "“Send the app's to QuickBooks” on its row on Accounting links", still: "is still active in QuickBooks." },
+  difference: { press: () => "“Send the portal's value to the books” on its row on Accounting links", still: "is still active in QuickBooks." },
 };
 
 /**
@@ -1753,7 +1753,7 @@ const LINKED_ALREADY = "This family is linked to QuickBooks already, so nothing 
  */
 export const ENDED_HELD = (name: string, customer: string, offered: boolean) =>
   `${name} was linked to “${customer}” in QuickBooks until it was unlinked, and “${customer}” is still there, so making it again would make a second customer for the same household. Nothing was made.${offered
-    ? " To link the two again, someone who can link families does it on the Accounting links page: with Confirm on its row, or with Pick a different customer once the row offers it (a Suggested row offers it once it is left unlinked)."
+    ? " To link the two again, someone who can link families does it on the Accounting links page: with Confirm link on its row, or with Pick a customer once the row offers it (a Suggested row offers it once it is left unlinked)."
     : ` The Accounting links page can't offer “${customer}” for it until it is sorted out in QuickBooks, where it may be inactive, under another customer or of another type; once it is, someone who can link families links the two there.`}`;
 /**
  * A student left out of "Create in QuickBooks and link" (slice M3b2): linked to a customer the books still hold until
@@ -4295,7 +4295,7 @@ export const heldWords = (familyWords: string) => `${familyWords}'s guardians ca
  * links (which closes it by replaceRefused() once QuickBooks has the customer inactive), Reconciliation's Send the
  * portal's value, and Give up (on Reconciliation always, and beside its difference where keptOnLinksOf() shows it).
  */
-export const KEPT_OFF_STAYS = "A make-inactive of its customer kept in the portal stays, as the portal's earlier change: Send the app's to QuickBooks, which closes it once QuickBooks has the customer inactive, Send the portal's value on the Reconciliation page, or Give up settles it.";
+export const KEPT_OFF_STAYS = "A make-inactive of its customer kept in the portal stays, as the portal's earlier change: Send the portal's value to the books, which closes it once QuickBooks has the customer inactive, Send the portal's value on the Reconciliation page, or Give up settles it.";
 const isOrAre = (names: readonly string[]) => (names.length === 1 ? "is" : "are");
 
 /**

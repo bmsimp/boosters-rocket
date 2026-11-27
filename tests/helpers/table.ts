@@ -6,10 +6,10 @@
 
 const textOf = (cell: string) => cell.replace(/<span class="t-label"[^>]*>[\s\S]*?<\/span>/, "").replace(/<[^>]+>/g, "").replaceAll("&#x27;", "'").replaceAll("&quot;", '"').replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
 
-/** Every body row of every table in the markup, as the words of its cells. Group heading rows are left out. */
+/** Every body row of every table in the markup, as the words of its cells. Group heading rows, and a row's expansion (`t-more`), are left out. */
 export function tableRows(html: string): string[][] {
   return [...html.matchAll(/<tr role="row"(?: class="([^"]*)")?>([\s\S]*?)<\/tr>/g)]
-    .filter((m) => !(m[1] ?? "").includes("t-group") && !m[2]!.includes('role="columnheader"'))
+    .filter((m) => !(m[1] ?? "").includes("t-group") && !(m[1] ?? "").includes("t-more") && !m[2]!.includes('role="columnheader"'))
     .map((m) => [...m[2]!.matchAll(/<(th|td)\b([^>]*)>([\s\S]*?)<\/\1>/g)].filter((c) => !c[2]!.includes('class="t-check"')).map((c) => textOf(c[3]!)));
 }
 

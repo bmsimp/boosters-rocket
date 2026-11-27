@@ -231,7 +231,7 @@ function MadeAfterGivingUp({ items, linking, canChange, rosterTag, aims }: { ite
     const stop = "if it isn't wanted, make it inactive in QuickBooks.";
     // Aimed at nobody: the family saved first is inactive or linked already (or nothing can be suggested now), so it is brought in.
     if (aim === undefined) {
-      return `A ${m.role} customer that no ${m.role} in the portal is linked to. ${linking ? "Bring it in with “Create a family from this” under Customers with no family on Accounting links"
+      return `A ${m.role} customer that no ${m.role} in the portal is linked to. ${linking ? "Bring it in with “Create a family” under Customers with no family on Accounting links"
         : "Someone who can link families can bring it in from Customers with no family on Accounting links"}, then make the ${m.role} the portal saved first inactive on its page; ${stop}`;
     }
     const ours = aim.why === "given_up" && m.familyId !== null && String(aim.families[0].id) === String(m.familyId);

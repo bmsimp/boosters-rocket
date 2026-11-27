@@ -14,6 +14,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "accounting.link.bulk": "Families linked by staff in one press of Confirm all exact email matches (a press since replaced by Link to their suggested families), with how many: each family's link has its own row, and nothing was sent to the books",
   "accounting.link.carried_over": "The portal's own families and students made from the roster, each linked to its QuickBooks customer, with counts",
   "accounting.link.confirm": "A family linked by staff to a customer in the books, with the students and guardians paired with it, or a link carried over from the roster confirmed by staff as checked: nothing was sent to the books",
+  "accounting.link.details.read": "A family's details opened by staff on the accounting links screen, beside its record in the books: its guardians' sign-in addresses and phones, its students, and the books' name, email, phone and the records under it",
   "accounting.link.guardian": "A guardian linked by staff to a Parent customer in the books under their family: nothing was sent to the books",
   "accounting.link.guardian.remove": "A guardian's link to a Parent customer ended by staff, the guardian's access and the customer left as they were: nothing was sent to the books",
   "accounting.link.leave_unlinked": "A family left unlinked by staff on the accounting links screen, so no customer in the books is suggested for it",

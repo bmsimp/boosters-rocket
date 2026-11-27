@@ -139,9 +139,9 @@ describe("the review", () => {
     asStaff(linker);
     const html = await renderPage(AccountingLinksPage, { searchParams: { import: "1" } });
     const part = html.slice(html.indexOf('id="import-h"'), html.indexOf("</section>", html.indexOf('id="import-h"'))).replaceAll("&#x27;", "'").replaceAll("<!-- -->", "");
-    expect(part).toContain("Nothing is sent to QuickBooks, and families, students and people the portal has already are never changed");
+    expect(part).toContain("Nothing is sent to the books, and families, students and people the portal has already are never changed");
     expect(part).toContain("Welcome emails are off, so nobody is mailed now");
-    expect(part).toContain("A family you untick stays in the list of customers with no family");
+    expect(part).toContain("A family you untick stays in the list of records with no family");
     expect(part).toContain('type="checkbox" checked=""');
     expect(part).toContain("Make these families (2)");
     expect(part).toContain("Raj in the portal (raj@example.com), whom the portal has already, a guardian of Rivera Family now, added with their name as it is, linked to the Parent customer “Raj Patel”.");

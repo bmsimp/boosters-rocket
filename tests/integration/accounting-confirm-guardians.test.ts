@@ -114,7 +114,7 @@ async function holdLock(first: number, id: string) {
 const openingOf = async (name: string) => {
   const html = await renderPage(AccountingLinksPage);
   const at = html.indexOf('id="links-list-h"');
-  return rowNamed(html.slice(at, html.indexOf("</section>", at)), name)![4]!;
+  return rowNamed(html.slice(at, html.indexOf("</section>", at)), name)![2]!;
 };
 
 /** A page's text: tags and React's text markers gone, apostrophes and quotes as written. */
@@ -149,7 +149,7 @@ describe("a family's Confirm links the guardian a match was on", () => {
     asStaff(linker);
     const opening = await openingOf("The Patels");
     expect(opening).toContain("Students linked with it, by name:Asha Jr with Asha Jr"
-      + "Guardians linked with it, by the sign-in address their Parent customer's email field holds:Asha Patel with A. Patel");
+      + "Guardians linked with it, by the sign-in email on their parent record:Asha Patel with A. Patel");
     expect(opening).not.toContain("Raj Patel with");
 
     const guardiansBefore = await db.select().from(guardian).orderBy(asc(guardian.id));
@@ -198,7 +198,7 @@ describe("a family's Confirm links the guardian a match was on", () => {
     asStaff(linker);
     // A family's Confirm says what it links of guardians; the Okafors have no student, and their row says both.
     expect(await openingOf("The Okafors")).toContain("No student would be linked with it."
-      + "Guardians linked with it, by the sign-in address their Parent customer's email field holds:Ike Okafor with Ike Okafor");
+      + "Guardians linked with it, by the sign-in email on their parent record:Ike Okafor with Ike Okafor");
     stub.calls.length = 0;
     const r = await linkSuggestedManyAction(tag, asks);
     expect(r).toMatchObject({ ok: true, message: "2 linked.", rows: [{ outcome: "done" }, { outcome: "done" }] });
@@ -236,9 +236,11 @@ describe("a family's Confirm links the guardian a match was on", () => {
     // The confirm step lists them, after the students: the Lees have none, on either side, and it says both.
     asStaff(linker);
     const html = await renderPage(AccountingLinksPage, { searchParams: { pick: String(lees), customer: "90" } });
-    const at = html.indexOf('id="links-pick-h"');
-    expect(textOf(html.slice(at, html.indexOf("</section>", at)))).toContain("No student would be linked with it."
-      + "Guardians linked with it, by the sign-in address their Parent customer's email field holds:Jo Lee with Jo LeeKim Lee with Kim Lee");
+    // The Pick drawer, drawn open by its address.
+    const at = html.indexOf("Pick a customer for The Lees");
+    expect(at).toBeGreaterThan(-1);
+    expect(textOf(html.slice(at, html.indexOf("</dialog>", at)))).toContain("No student would be linked with it."
+      + "Guardians linked with it, by the sign-in email on their parent record:Jo Lee with Jo LeeKim Lee with Kim Lee");
     stub.calls.length = 0;
     for (const [familyId, customerId, offer] of [[lees, "90", several.offer], [kos, "97", picked.offer]] as const) {
       expect(await linkFamilyToCustomer({ familyId: String(familyId), customerId, chosen: offer.chosen, stamp: offer.stamp }, tag, linkOp())).toMatchObject({ ok: true });
@@ -417,8 +419,8 @@ describe("what the write queue holds back", () => {
       expect(rowOf(view, name).confirm!.proposals, name).toMatchObject({ guardians: [], guardiansHeld: [{ guardianId: rowId, customerName }] });
     }
     asStaff(linker);
-    expect(await openingOf("Kept Family")).toContain("Not linked with it, though their Parent customer's email field holds their sign-in address:"
-      + "Kay Kept with Kay Kept: link them on the row once their change on Reconciliation is done.");
+    expect(await openingOf("Kept Family")).toContain("Not linked with it, though their parent record holds their sign-in email:"
+      + "Kay Kept with Kay Kept: link them once their change on Reconciliation is done.");
 
     for (const [familyId, customerId, name] of [[kept, "300", "Kept Family"], [stuck, "310", "Stuck Family"], [waiting, "320", "Waiting Family"]] as const) {
       const r = await linkFamilyToCustomer({ familyId: String(familyId), customerId, chosen: "suggested", stamp: rowOf(view, name).confirm!.stamp }, tag, linkOp());

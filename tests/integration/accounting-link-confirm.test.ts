@@ -54,7 +54,9 @@ const qc = (Id: string, DisplayName: string, typeId: string | null, extra: Recor
 const under = (id: string) => ({ ParentRef: { value: id }, Job: true });
 const mail = (address: string) => ({ PrimaryEmailAddr: { Address: address } });
 /** What the links page says beside every Confirm (src/app/staff/(app)/links/page.tsx), as the text of the page reads it. */
-const LINK_EFFECT = "Its guardians will see this customer's invoices, so check it's the right household.";
+const LINK_EFFECT = (customer: string) => `Its guardians will see ${customer}'s invoices, so check it's the right household.`;
+/** The family's Pick drawer (?pick=), from its heading to its end; null when none is drawn. */
+const pickDrawer = (html: string) => { const m = /<h2 id="[^"]*">Pick a customer/.exec(html); return m === null ? null : html.slice(m.index, html.indexOf("</dialog>", m.index)).replaceAll("<!-- -->", ""); };
 /** Customers added in QuickBooks, then read by a roster read (which makes no record of them). */
 async function readAgain(...customers: ReturnType<typeof qc>[]) {
   stub.customers.push(...customers);
@@ -311,11 +313,12 @@ describe("Leave unlinked, and Undo", () => {
     const html = await renderPage(AccountingLinksPage);
     expect(html).toContain('<option value="left_unlinked">Left unlinked (3)</option>');
     const list = html.slice(html.indexOf('id="links-list-h"'));
-    // The status cell: the badge and who and when, in short; the whole sentence opens the row's Details.
-    expect(rowNamed(list, "The Quiets")![3]).toMatch(/^Left unlinkedBy linker, .+$/);
-    expect(rowNamed(list, "The Quiets")![4]).toMatch(/^Left unlinked by linker, on .+\. No customer is suggested for it until someone undoes this or links it\.No active students\.No guardians\.Pick a different customer: The QuietsUndo Left unlinked: The Quiets$/);
+    // The match cell: the label alone (no record); the row has no main press, and its Review drawer says who and when, with Pick and Undo.
+    expect(rowNamed(list, "The Quiets")![1]).toBe("Left unlinked");
+    expect(rowNamed(list, "The Quiets")![2]).toMatch(/^Show details: The QuietsReview The QuietsCloseLeft unlinkedLeft unlinked by linker, on .+\.Note A family is suggested only when a guardian's sign-in email is exactly on a customer, never by a name\. Confirming sends nothing to the books\.Pick a customer: The QuietsLink it to a customer no family has\.Undo Left unlinked: The QuietsSuggestions come back for it\.$/);
     const filtered = await renderPage(AccountingLinksPage, { searchParams: { status: "left_unlinked" } });
-    expect(tableRows(filtered.slice(filtered.indexOf('id="links-list-h"'))).map((r) => r[0])).toEqual(["Ada's Family", "The Patels", "The Quiets"]);
+    const at = filtered.indexOf('id="links-list-h"');
+    expect(tableRows(filtered.slice(at, filtered.indexOf("</section>", at))).map((r) => r[0])).toEqual(["Ada's Family", "The Patels", "The Quiets"]);
 
     // Undo: the mark goes, and the family is suggested again.
     expect(await undoLeaveUnlinked(String(patels), tag, linkOp())).toEqual({ ok: true, message: "The Patels is no longer left unlinked: this page suggests a customer for it again where one matches." });
@@ -624,20 +627,25 @@ describe("who may press, and the page", () => {
     const quiet = await unlinkedFamily("The Quiets");
     asStaff(linker);
     const list = (html: string) => { const at = html.indexOf('id="links-list-h"'); return html.slice(at, html.indexOf("</section>", at)); };
-    const pick = (html: string) => { const at = html.indexOf('id="links-pick-h"'); return at < 0 ? null : html.slice(at, html.indexOf("</section>", at)); };
+    const pick = pickDrawer;
     let html = await renderPage(AccountingLinksPage);
-    expect(rowNamed(list(html), "The Patels")![4]).toBe("A guardian's sign-in address matches: asha@example.com, on this customer.Students:Asha Patel: no link of its ownMia Patel: no link of its ownravi patel: no link of its own"
-      + "Guardians:Asha Patel (asha@example.com): no link of its own"
-      + "Confirm links it to “Patel Family”. " + LINK_EFFECT + "Students linked with it, by name:Asha Patel with Asha Patelravi patel with Ravi Patel (inactive in the books)"
-      + "Left with no link, of the portal's students:Mia PatelLeft with no record in the portal, of the student customers under it in the books:Dev Patel"
-      + "Students left show among the row's differences once it's linked.Confirm: The PatelsLeave unlinked: The Patels");
-    expect(withoutIds(list(html))).toContain('href="/staff/links?pick=<id>#links-pick-h"');
+    // The row: its match, then Show details, Confirm link, and its Review drawer: why, the rule, the proposals, Confirm link and Leave unlinked, each with its sentence.
+    expect(rowNamed(list(html), "The Patels")![1]).toBe("Patel FamilySuggested by email");
+    expect(rowNamed(list(html), "The Patels")![2]).toBe("Show details: The PatelsConfirm link: The PatelsReview The PatelsClosePatel FamilySuggested by email"
+      + "A guardian's sign-in email is on it: asha@example.com, on this record."
+      + "Note A family is suggested only when a guardian's sign-in email is exactly on a customer, never by a name. Confirming sends nothing to the books."
+      + "Students linked with it, by name:Asha Patel with Asha Patelravi patel with Ravi Patel (inactive in the books)"
+      + "Left with no link, of the portal's students:Mia PatelLeft with no record in the portal, of the students under it in the books:Dev Patel"
+      + "Confirm link: The Patels" + LINK_EFFECT("Patel Family") + "Leave unlinked: The PatelsNothing is suggested for it again until someone undoes this or links it.");
+    // A Suggested row offers no Pick, and no Pick drawer is drawn without its address.
+    expect(rowNamed(list(html), "The Patels")![2]).not.toContain("Pick a customer");
+    expect(withoutIds(list(html))).toContain('href="/staff/links?pick=<id>"');
     expect(pick(html)).toBeNull();
 
     // The chooser: the pool by name with its email field, searchable; the books' text as text.
     html = await renderPage(AccountingLinksPage, { searchParams: { pick: String(quiet) } });
     let part = pick(html)!;
-    expect(part).toContain("A customer for The Quiets");
+    expect(part).toContain("Pick a customer for The Quiets");
     expect(tableRows(part).map((r) => r[0]).sort()).toEqual(["<b>Bold</b> Familybold@example.com", "Patel Familyasha@example.com"]);
     expect(part).toContain("&lt;b&gt;Bold&lt;/b&gt; Family");
     expect(part).not.toContain("<b>Bold</b>");
@@ -646,23 +654,20 @@ describe("who may press, and the page", () => {
     // The confirm step: the family, the customer, how it was chosen, the proposals, the other family it is suggested for, and Confirm.
     part = pick(await renderPage(AccountingLinksPage, { searchParams: { pick: String(quiet), customer: "70" } }))!;
     expect(part).toContain("Link The Quiets to “Patel Family”?");
-    expect(part).toContain("You picked it from the customers no family is linked to. Its email field in the books: asha@example.com.");
+    expect(part).toContain("You picked it from the customers no family is linked to. Its email in the books: asha@example.com.");
     expect(part).toContain("This page also suggests this customer for, or lists it as a possible customer of, The Patels.");
-    expect(part).toContain("Left with no record in the portal, of the student customers under it in the books:");
-    expect(part).toContain("Confirm<span class=\"visually-hidden\">: The Quiets</span>");
-    // What the link does on the parents' side, then Confirm; Patel Family has no Parent customer under it.
-    expect(part).toContain(`<p>${LINK_EFFECT.replaceAll("'", "&#x27;")}</p><div class="row-actions">`);
+    expect(part).toContain("Left with no record in the portal, of the students under it in the books:");
+    // Confirm link, in the drawer's foot, then what the link does on the parents' side; Patel Family has no parent record under it.
+    expect(part).toContain(`Confirm link<span class="visually-hidden">: The Quiets</span></button><p class="links-say">${LINK_EFFECT("Patel Family").replaceAll("'", "&#x27;")}</p>`);
     expect(part).not.toContain("own records in the books aren&#x27;t linked");
-    expect(part).toContain("<p>The books hold no Parent customers directly under it.</p>");
+    expect(part).toContain("<p>The books hold no parent records directly under it.</p>");
     // Refused as plain notices: a family not on the list, a Suggested row (no pick), a customer not in the pool.
     expect(await renderPage(AccountingLinksPage, { searchParams: { pick: "00000000-0000-4000-8000-000000000999" } })).toContain("That family isn&#x27;t one a customer can be picked for here now");
     expect(await renderPage(AccountingLinksPage, { searchParams: { pick: String(patels) } })).toContain("That family isn&#x27;t one a customer can be picked for here now");
     expect(pick(await renderPage(AccountingLinksPage, { searchParams: { pick: String(quiet), customer: "20" } }))).toContain("That customer isn&#x27;t one with no family in the portal now");
-    // The words of the screen, each true now.
-    // Since slice M5a the lede says which presses send anything to the books (Send the app's to QuickBooks, since slice
-    // M5b Send the app's for all, and a student's move taken from the books, for its buy-out void): "Nothing here is sent
-    // to the books." was no longer true.
-    expect(html).toContain("Only three things here send anything to the books: Send the app&#x27;s to QuickBooks, Send the app&#x27;s for all, and a student&#x27;s move taken from the books, which voids an unpaid volunteer buy-out invoice of theirs there.");
+    // The words of the screen, each true now: linking sends nothing (the Send presses and a move taken from the books
+    // say what they send beside themselves), and "Nothing here is sent to the books." is never said.
+    expect(html).toContain("Link each family to its customer in your books. Linking sends nothing to the books.");
     expect(html).not.toContain("Nothing here is sent to the books.");
     expect(await auditsOf("accounting.link.confirm")).toEqual([]);
   });
@@ -673,11 +678,10 @@ describe("who may press, and the page", () => {
     const quiet = await unlinkedFamily("The Quiets");
     asStaff(linker);
     const html = await renderPage(AccountingLinksPage, { searchParams: { pick: String(quiet), customer: "70" } });
-    const at = html.indexOf('id="links-pick-h"');
-    const part = html.slice(at, html.indexOf("</section>", at));
-    expect(part).toContain("<p>Parent customers the books hold directly under it:</p><ul><li>Kiran &lt;i&gt;Patel&lt;/i&gt;</li><li>Old Patel (inactive in the books)</li></ul>");
+    const part = pickDrawer(html)!;
+    expect(part).toContain("<p>Parent records the books hold directly under it:</p><ul><li>Kiran &lt;i&gt;Patel&lt;/i&gt;</li><li>Old Patel (inactive in the books)</li></ul>");
     expect(part).not.toContain("Asha Patel Sr");
-    expect(part).not.toContain("no Parent customers");
+    expect(part).not.toContain("no parent records");
     expect((await loadAccountingLinks()).step(String(quiet), "70")).toMatchObject({ ok: true,
       parents: [{ qboId: "74", name: "Kiran <i>Patel</i>", active: true }, { qboId: "76", name: "Old Patel", active: false }] });
   });
@@ -692,21 +696,23 @@ describe("who may press, and the page", () => {
     await seedQueued({ op: "create", role: "family", name: "Quiet Family", typeQboId: "1", familyQboId: null, email: null }, { familyId: quiet, sent: true, state: "given_up", lastTriedAt: new Date() });
     asStaff(linker);
     const list = (html: string) => { const at = html.indexOf('id="links-list-h"'); return html.slice(at, html.indexOf("</section>", at)); };
-    const pick = (html: string) => { const at = html.indexOf('id="links-pick-h"'); return at < 0 ? null : html.slice(at, html.indexOf("</section>", at)).replaceAll("<!-- -->", ""); };
+    const pick = pickDrawer;
     const html = await renderPage(AccountingLinksPage);
-    const opening = rowNamed(list(html), "The Patels")![4]!;
-    expect(opening).toContain("Possible customers:Patel Family (asha@example.com) Look at it before linking: Patel FamilyPatel Household (ravi@example.com) Look at it before linking: Patel Household");
-    expect(opening).not.toContain("Confirm: The Patels");
+    expect(rowNamed(list(html), "The Patels")![1]).toBe("2 possible");
+    const opening = rowNamed(list(html), "The Patels")![2]!;
+    expect(opening).toMatch(/^Show details: The PatelsPick a customer: The Patels/);
+    expect(opening).toContain("Possible customers:Patel Family (asha@example.com)Look at it before linking: Patel FamilyPatel Household (ravi@example.com)Look at it before linking: Patel Household");
+    expect(opening).not.toContain("Confirm link: The Patels");
     expect(opening).toContain("Leave unlinked: The Patels");
-    expect(list(html)).toContain(`href="/staff/links?pick=${String(patels)}&amp;customer=70#links-pick-h"`);
-    expect(list(html)).toContain(`href="/staff/links?pick=${String(patels)}&amp;customer=75#links-pick-h"`);
+    expect(list(html)).toContain(`href="/staff/links?pick=${String(patels)}&amp;customer=70"`);
+    expect(list(html)).toContain(`href="/staff/links?pick=${String(patels)}&amp;customer=75"`);
     // A candidate's confirm step says how it was chosen and holds Confirm.
     const candidate = pick(await renderPage(AccountingLinksPage, { searchParams: { pick: String(patels), customer: "75" } }))!;
     expect(candidate).toContain("Link The Patels to “Patel Household”?");
-    expect(candidate).toContain("Confirm<span class=\"visually-hidden\">: The Patels</span>");
+    expect(candidate).toContain("Confirm link<span class=\"visually-hidden\">: The Patels</span>");
     // The Quiets' chooser says what their given-up create left, and lists that customer in the pool.
     const chooser = pick(await renderPage(AccountingLinksPage, { searchParams: { pick: String(quiet) } }))!;
-    expect(chooser).toContain("Making this family in the books was given up after a try the books may have taken, and they have the customer “Quiet Family” from it, with no family linked to it. If it is this family, picking it ties the two together.");
+    expect(chooser).toContain("Making this family in the books was given up after a try the books may have taken, and they have “Quiet Family” from it, with no family linked to it. If it is this family, picking it ties the two together.");
     expect(tableRows(chooser).map((r) => r[0]).sort()).toEqual(["Patel Familyasha@example.com", "Patel Householdravi@example.com", "Quiet FamilyNo email address"]);
     // The Patels' chooser says nothing of it: the create was filed under The Quiets.
     expect(pick(await renderPage(AccountingLinksPage, { searchParams: { pick: String(patels) } }))).not.toContain("was given up");

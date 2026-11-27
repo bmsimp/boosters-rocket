@@ -189,7 +189,7 @@ describe("\"Create in QuickBooks and link\" after an unlink: no second customer 
     const queued = (await db.select().from(writeQueue)).length;
     const r = await press(rivera);
     expect(r).toEqual({ changed: false, result: { ok: false, errors: [ENDED_HELD("Rivera Family", "Rivera Family", true)] } });
-    expect(r.result.ok ? "" : r.result.errors[0]).toContain("on the Accounting links page: with Confirm on its row");
+    expect(r.result.ok ? "" : r.result.errors[0]).toContain("on the Accounting links page: with Confirm link on its row");
     expect(r.result.ok ? "" : r.result.errors[0]).not.toContain("(2)");
     expect(stub.apiCalls()).toEqual([]);
     expect(await db.select().from(writeQueue)).toHaveLength(queued);
