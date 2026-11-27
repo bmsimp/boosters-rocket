@@ -96,13 +96,15 @@ describe("what the runbooks tell an Admin to do with QuickBooks", () => {
     }
   });
 
-  it("names the button a disconnected company shows, Change: Disconnect keeps the app's keys", () => {
-    expect(read("src/app/staff/(app)/settings/quickbooks/page.tsx")).toContain(`conn.configured ? "Change" : "Set up"`);
+  it("names the button a disconnected company shows, Configure, the same in every state: Disconnect keeps the app's keys", () => {
+    const page = read("src/app/staff/(app)/settings/quickbooks/page.tsx");
+    expect(page).toContain(`variant="filled">Configure</LinkButton>`);
+    expect(page).not.toMatch(/"Set up"|"Change"/);
     const intuit = section(read("docs/runbooks/intuit.md"), "4. Connect the club's real books");
     const reconnect = section(read("docs/runbooks/quickbooks-reconnect.md"), "Connecting a different company");
     for (const steps of [intuit, reconnect]) {
-      expect(steps).not.toMatch(/\*\*Set up\*\*/);
-      expect(steps).toMatch(/\*\*Change\*\*/);
+      expect(steps).not.toMatch(/\*\*Set up\*\*|\*\*Change\*\*/);
+      expect(steps).toMatch(/\*\*Configure\*\*/);
     }
   });
 });

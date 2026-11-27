@@ -237,7 +237,7 @@ What the page can't do is walk the portal's own screens. Do these in the sandbox
 
 Use an iPhone (Safari, and the portal added to the home screen) and an Android phone (Chrome, and the portal installed
 from Chrome), on the proof-of-concept host, signed in as a test parent. First set the club's time zone (Settings,
-Club, **Change**): until it is set the portal uses UTC, so dates and shift times turn over at the wrong hour.
+Club, **Configure**): until it is set the portal uses UTC, so dates and shift times turn over at the wrong hour.
 
 1. **Install it on the iPhone:** in Safari, Share, **Add to Home Screen**.
    **Pass:** the icon is the club's short name on the club's color, and the label under it is the club's name (12
@@ -271,7 +271,7 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
    **If not:** note what showed instead.
 10. **No install box inside the app.** In the installed app, open Display.
     **Pass:** no "Add the portal to your home screen" box. **If not:** a screenshot.
-11. **A new icon.** Change the club's color or short name (Settings, Club, **Change**), then install again.
+11. **A new icon.** Change the club's color or short name (Settings, Club, **Configure**), then install again.
     **Pass:** the new icon, and the browser tab's icon, show the change. **If not:** note which kept the old one.
 12. **The sign-in pages on a phone:** `/sign-in` and `/staff/sign-in`.
     **Pass:** the club bar shows on both; under the parent form the install box offers itself, and **Not now** keeps it
@@ -458,7 +458,7 @@ it to Strict and check 43 back; where a check says what happens at Strict too, i
     entry from it won't work; a page that lost the codes can make new ones with **Make new backup codes**).
 42. **Switching to Strict.** On a test host, with three test parents who can sign in: one with a passkey, one with an
     authenticator app, and one with neither, signed in on a phone. As an Admin, open **Settings**, **Parent sign-ins**,
-    **Change**, step 3, **Sign-in level**, read the counts, open **Switch to Strict** and press it. Then, on the phone,
+    **Configure**, step 3, **Sign-in level**, read the counts, open **Switch to Strict** and press it. Then, on the phone,
     open any page. Sign in there as that parent with their password, add a passkey on **One more step** (on the iPhone
     in Safari and in the installed app, and on Android in Chrome), tick "I've saved my backup codes somewhere safe" and
     press **Continue**. Then, as the parent with the app, sign in on a computer the portal remembers for them.
@@ -540,7 +540,7 @@ The proof-of-concept host has no Documenso. Forms need a full installation from 
    proxy's, and Health's parent sign-ins line doesn't warn about addresses. **If not:** find the header the proxy really
    sets, put it in `CLIENT_IP_HEADER` in `deploy/.env`, and `docker compose up -d app`.
 4. **Staff sign-in for real.** Sign in once with the club's Microsoft (Entra) or Google staff sign-in.
-   **Pass:** you reach the staff home. On Settings, Staff sign-in, **Change**, a Microsoft certificate reads "Done:
+   **Pass:** you reach the staff home. On Settings, Staff sign-in, **Configure**, a Microsoft certificate reads "Done:
    Microsoft accepted this certificate", and **Download certificate (.cer)** saves the file and then shows its
    thumbprint without a reload. The staff script (`New-BoosterRocketStaffApp.ps1`) ends by saying to finish "in the
    portal: on the setup page, or under Settings". **If not:** a screenshot of the page.
@@ -732,8 +732,8 @@ assessment, and that can take weeks. Start it as early as you like; it doesn't w
    with the email address each signs in with, and add any that are missing on the family's page (part 6, step 3).
    **Pass:** **Parents** lists each of their guardians, and Settings, Parent sign-ins counts them among those who could
    sign in.
-2. **Switch parent sign-ins on, and leave welcome emails off:** Settings, Parent sign-ins, **Set up** (or
-   **Change**), step 1, **Switch parent sign-ins on**.
+2. **Switch parent sign-ins on, and leave welcome emails off:** Settings, Parent sign-ins, **Configure**,
+   step 1, **Switch parent sign-ins on**.
    **Pass:** the step says "Parent sign-ins are on." No email goes to anyone: every guardian the portal holds could now
    sign in, but only those you tell will know to. Scheduled reminders stay off while welcome emails are off;
    don't press **Remind now** on Signed forms during the pilot: it emails every guardian still to sign that form.

@@ -46,7 +46,7 @@ test("an Admin switches parent sign-ins on (and finds them on the second time)",
   await expect(details.locator("dt", { hasText: "Who can sign in" }).locator("xpath=following-sibling::dd[1]")).toHaveText("2 people, to 3 families");
   await expect(details.locator("dt", { hasText: "Welcome emails" }).locator("xpath=following-sibling::dd[1]")).toHaveText("Off: nobody is emailed");
   await expect(details.locator("dt", { hasText: "Waiting for staff" })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Change", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Configure", exact: true })).toBeVisible();
   await expect(page.locator("main input:not([type=hidden]), main textarea, main select")).toHaveCount(0);
   const [row] = await sql`SELECT value FROM setting WHERE key = 'parents.settings'`;
   expect(row!.value).toMatchObject({ signin: true, welcome: false });

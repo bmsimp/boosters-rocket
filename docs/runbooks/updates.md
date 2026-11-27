@@ -184,7 +184,7 @@ gone, and parents sign in with a code the portal emails them again, as they did.
 sign-in level either, so the club comes forward at Standard. Coming forward again is this update once more: parents
 need a password again, so press **Email a set-up link to everyone who can sign in and hasn't chosen a password** as in
 [the update that brings password sign-in](#the-update-that-brings-password-sign-in), and if the club was at Strict,
-open **Settings**, **Parent sign-ins**, **Change**, step 3, **Sign-in level**, and switch to Strict again.
+open **Settings**, **Parent sign-ins**, **Configure**, step 3, **Sign-in level**, and switch to Strict again.
 
 ## Documenso and the other images
 

@@ -377,9 +377,9 @@ describe("the Parent sign-ins settings", () => {
       // A stored value that can't be read, naming no level.
       await db.update(setting).set({ value: { signin: true, level: "relaxed" } }).where(eq(setting.key, PARENTS_KEY));
       const unknown = decoded(await view());
-      expect(unknown).toContain("<dt>Sign-in level</dt><dd>Not known: the saved sign-in settings can't be read. Choose Standard or Strict under Change, step 3.</dd>");
+      expect(unknown).toContain("<dt>Sign-in level</dt><dd>Not known: the saved sign-in settings can't be read. Choose Standard or Strict under Configure, step 3.</dd>");
       // The press those words name is drawn by that name, though the value read is the closed state (sign-ins off).
-      expect(unknown).toContain(`<a class="btn" href="/staff/settings/parents/setup">Change</a>`);
+      expect(unknown).toContain(`<a class="btn" href="/staff/settings/parents/setup">Configure</a>`);
       expect(unknown).not.toContain(">Set up</a>");
     });
 

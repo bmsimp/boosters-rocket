@@ -321,7 +321,7 @@ function ReviewDrawer({ row, tag, maySend, w }: { row: LinkRow; tag: string; may
   }
   return (
     <Drawer param="review" value={id} trigger={settle} label={<>Settle {plural(row.differences.length, "difference", "differences")}<span className="visually-hidden">: {row.name}</span></>}
-      variant="tonal" size="sm" title={`Review ${row.name}`} footer={foot.length > 0 ? foot : undefined}>
+      variant="tonal" size="sm" title={`Review ${row.name}`} footer={foot.length > 0 ? foot : undefined} dock>
       <LinkAnswersShown />
       <Match row={row} />
       <p className="sheet-desc"><StatusDetail status={row.status} row={row} w={w} /></p>
@@ -435,7 +435,7 @@ const chosenWords = (w: AccountingWords) => ({ suggested: "It is this family's s
 function PickDrawer({ view, familyId, customerId, cq, tag, made, w }: { view: LinksView; familyId: string; customerId: string | null; cq: string; tag: string; made: { queueId: string; name: string }[]; w: AccountingWords }) {
   const row = view.rows.find((r) => String(r.familyId) === familyId.toLowerCase());
   const drawer = (title: string, body: ReactNode, footer?: ReactNode) => (
-    <Drawer param="pick" value={familyId} trigger={false} label={title} alsoClear={["customer", "cq"]} footer={footer}>{body}</Drawer>
+    <Drawer param="pick" value={familyId} trigger={false} label={title} alsoClear={["customer", "cq"]} footer={footer} dock>{body}</Drawer>
   );
   if (row === undefined || !row.offers.pick || view.pool === null) {
     return drawer(`Pick a ${w.customerNoun}`, <Notice tone="info" live="none">That family isn&apos;t one a {w.customerNoun} can be picked for here now, so nothing is shown for it.</Notice>);

@@ -444,6 +444,12 @@ export async function newestAuditAt(): Promise<Date | null> {
   return row?.at ?? null;
 }
 
+/** How many rows were written since a time: the Settings Overview's audit log card. */
+export async function auditCountSince(since: Date): Promise<number> {
+  const [row] = await db.select({ n: count() }).from(auditLog).where(gte(auditLog.at, since));
+  return row?.n ?? 0;
+}
+
 /** The actions the log holds, for the filter's list. */
 export async function auditActions(): Promise<string[]> {
   return (await db.selectDistinct({ action: auditLog.action }).from(auditLog).orderBy(asc(auditLog.action)).limit(500)).map((r) => r.action);

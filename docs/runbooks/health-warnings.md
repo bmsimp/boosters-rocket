@@ -57,7 +57,7 @@ installation with. `docker compose ps` shows what is running, and `docker compos
     families came from, and no Admin asked to switch to it: it was stored before the portal refused that, or by hand.
     The portal reads another company only after a switch asked for on the switch page, and asks QuickBooks nothing
     meanwhile; the roster and every family's records stay as they were. **Settings**, **QuickBooks**, open
-    **Disconnect**, **Disconnect QuickBooks**, then **Change** and connect the first company again ([Reconnecting
+    **Disconnect**, **Disconnect QuickBooks**, then **Configure** and connect the first company again ([Reconnecting
     QuickBooks: The same company](quickbooks-reconnect.md#the-same-company)), or, to move to the other company, switch
     ([Connecting a different company](quickbooks-reconnect.md#connecting-a-different-company)).
   - "QuickBooks no longer offers customer types on this company's plan, so the membership shape can't be read. ..."
@@ -68,10 +68,10 @@ installation with. `docker compose ps` shows what is running, and `docker compos
     customers are a family's. Nothing is cleared: the roster, the shape and every family's records stay as they were
     last read, and parents see their figures as last read. Turn customer types back on in QuickBooks (or move the
     company to a plan that has them), then press **Refresh** on the Roster page; if QuickBooks gave the types new IDs,
-    **Settings**, **QuickBooks**, **Change**, step 3: choose the shape again.
+    **Settings**, **QuickBooks**, **Configure**, step 3: choose the shape again.
   - "The roster hasn't been refreshed from QuickBooks in more than 2 days": the worker isn't running (see Worker).
   - "The membership shape names a customer type QuickBooks no longer has": someone renamed or removed a customer type in
-    QuickBooks. **Settings**, **QuickBooks**, **Change**, step 3: choose the shape again.
+    QuickBooks. **Settings**, **QuickBooks**, **Configure**, step 3: choose the shape again.
   - "Changes waiting for QuickBooks (staff roster changes, parents' phones and mailing addresses, and volunteer buy-out
     invoices): N waiting to reach QuickBooks": changes staff made, a guardian's new phone or mailing address (a parent's
     sent on at the worker's next wake; a staff member's tried at once, and otherwise left for the worker about a
@@ -118,7 +118,7 @@ installation with. `docker compose ps` shows what is running, and `docker compos
   The note says what the copy waits for, and the rest of this line says why:
   - "once an Admin connects QuickBooks", "once an Admin connects QuickBooks again" or "once QuickBooks is connected to
     the company the roster was read from": mend the connection as the entries above say.
-  - "once the membership shape names only customer types QuickBooks has": **Settings**, **QuickBooks**, **Change**,
+  - "once the membership shape names only customer types QuickBooks has": **Settings**, **QuickBooks**, **Configure**,
     step 3: choose the shape again. The copy waits for the roster read made under the shape saved, which saving it
     starts.
   - "after the worker's next successful read of the roster": the worker reads it at once and then once an hour until
@@ -145,7 +145,7 @@ Rocket nothing. The worker renews the connection at least once a day, so while c
   - "Boosters Rocket didn't accept the portal's last request": it refused the portal's signature. Most often the
     server's clock is more than five minutes out: check it on the server (`date -u` against the real time), and set
     the server to keep time if it doesn't. If the clock is right, the portal id or key may no longer be what Boosters
-    Rocket registered (a new key made, or the portal revoked): **Settings**, **QuickBooks**, **Change**, step 1, **Check
+    Rocket registered (a new key made, or the portal revoked): **Settings**, **QuickBooks**, **Configure**, step 1, **Check
     the registration**, then email support@boostersrocket.com.
   - "Boosters Rocket was busy at the portal's last request": it limits how often one portal may ask. The worker tries
     again at its next renewal; nothing to do unless it stays for more than a day.
@@ -213,7 +213,7 @@ The emails the worker sends the day before each volunteer shift, and 14 and 3 da
 ## Forms (Documenso)
 
 - **"Not set up."** Parents read that forms aren't ready; nothing else is affected. [Documenso](documenso.md).
-- **"Not checked."** Saved, but no call has worked yet: **Settings**, **Forms (Documenso)**, **Change**, **Check the
+- **"Not checked."** Saved, but no call has worked yet: **Settings**, **Forms (Documenso)**, **Configure**, **Check the
   connection**.
 - **"The last call to Documenso failed."** Parents can't open a form to sign. The note gives the reason in words:
   - "couldn't be reached" or "took too long": `docker compose ps` (is `documenso` `healthy`?), then

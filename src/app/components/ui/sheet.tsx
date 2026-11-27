@@ -47,10 +47,29 @@ export type SheetProps = {
   footer?: ReactNode;
   /** A dialog's icon, centered over its title (a destructive ConfirmDialog's alert). */
   icon?: ReactNode;
+  /** A Drawer that docks from 1600px: there a pane beside the page, not a modal (see Drawer's `dock`). */
+  dock?: boolean;
   children?: ReactNode;
 };
 
-export function Sheet({ open, onClose, title, description, kind = "drawer", closeHref, returnFocusId, footer, icon, children }: SheetProps) {
+/** Where a docking Drawer is a pane beside the page instead of a modal side sheet: M3's extra-large window. */
+export const DOCK_MEDIA = "(min-width: 1600px)";
+
+/** Whether the window is wide enough to dock, kept current as it is resized; false on the server and for `off`. */
+function useDocks(on: boolean): boolean {
+  const [wide, setWide] = useState(false);
+  useEffect(() => {
+    if (!on || typeof window.matchMedia !== "function") return;
+    const m = window.matchMedia(DOCK_MEDIA);
+    const read = () => setWide(m.matches);
+    read();
+    m.addEventListener("change", read);
+    return () => m.removeEventListener("change", read);
+  }, [on]);
+  return on && wide;
+}
+
+export function Sheet({ open, onClose, title, description, kind = "drawer", closeHref, returnFocusId, footer, icon, dock = false, children }: SheetProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId(), descId = useId();
   const [drawnOpen] = useState(open); // the server's answer, kept as it was (see above)
@@ -58,30 +77,42 @@ export function Sheet({ open, onClose, title, description, kind = "drawer", clos
   const held = useRef(false); // whether this dialog holds the page still, so an unmount while open lets it go
   const closeRef = useRef(onClose);
   useEffect(() => { closeRef.current = onClose; });
+  const docked = useDocks(dock && kind === "drawer");
 
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
     const modal = d.matches(":modal");
-    if (open && !modal) {
+    if (open && docked) {
+      // Docked: a pane beside the page, which stays usable. A modal one (the window just grew) is opened again as a pane.
+      if (held.current) { held.current = false; holdScroll(false); }
+      if (modal) d.close();
+      if (!d.open) {
+        if (!modal) back.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        d.show();
+        (d.querySelector<HTMLElement>("[data-autofocus]") ?? d.querySelector<HTMLElement>(".sheet-close"))?.focus();
+      }
+    } else if (open && !modal) {
       back.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       if (d.open) d.close(); // drawn open in the page: open it again as a dialog
       d.showModal();
       if (!held.current) { held.current = true; holdScroll(true); }
       d.querySelector<HTMLElement>("[data-autofocus]")?.focus();
-    } else if (!open && modal) {
+    } else if (!open && (modal || (docked && d.open))) {
       d.close();
       if (held.current) { held.current = false; holdScroll(false); }
       const to = (returnFocusId && document.getElementById(returnFocusId)) || back.current;
       if (to?.isConnected) to.focus();
     }
-  }, [open, returnFocusId]);
+  }, [open, returnFocusId, docked]);
   useEffect(() => () => { if (held.current) { held.current = false; holdScroll(false); } }, []);
 
   const close = (e?: MouseEvent) => { e?.preventDefault(); closeRef.current(); };
   // Tab from the last control goes round to the first, and Shift+Tab from the first to the last, so the focus never
   // leaves an open dialog for the browser's own bar (which a modal <dialog> alone allows).
   const keepFocusIn = (e: KeyboardEvent<HTMLDialogElement>) => {
+    // A docked pane isn't modal, so the browser sends no cancel for Esc: it closes it here, as Esc closes the sheet.
+    if (e.key === "Escape" && docked && !e.defaultPrevented && ref.current?.open && !ref.current.matches(":modal")) { e.preventDefault(); closeRef.current(); return; }
     if (e.key !== "Tab" || e.defaultPrevented || !ref.current?.matches(":modal")) return;
     if ((e.target as HTMLElement).closest("dialog") !== ref.current) return; // a dialog opened from this one keeps its own
     const stops = [...ref.current.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => !el.closest("dialog:not([open])") && el.getClientRects().length > 0);
@@ -91,7 +122,7 @@ export function Sheet({ open, onClose, title, description, kind = "drawer", clos
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   };
   return (
-    <dialog ref={ref} open={drawnOpen || undefined} className={cx("sheet", kind === "confirm" ? "sheet-confirm" : "sheet-drawer")}
+    <dialog ref={ref} open={drawnOpen || undefined} className={cx("sheet", kind === "confirm" ? "sheet-confirm" : "sheet-drawer", dock && kind === "drawer" && "sheet-dock")}
       aria-labelledby={titleId} aria-describedby={description ? descId : undefined}
       onCancel={(e) => { e.preventDefault(); closeRef.current(); }} onKeyDown={keepFocusIn}>
       <div className="sheet-head">
@@ -128,8 +159,12 @@ const mounted = new Map<string, number>();
  * it. The address is the Drawer's: Back closes it, a refresh opens it again, and without JavaScript the link loads the
  * page with the form drawn in it. The form is drawn on the server either way, so it is its own server action with
  * every check it had. `label` says what the form does ("Waive for Sam Rivera"); the title is the label unless given.
+ *
+ * `dock`: from 1600px wide (M3's extra-large window) the open Drawer is a pane docked beside the page, at the same
+ * address, and the page beside it stays usable (its content makes room); below 1600px it is the modal side sheet. Its
+ * Close, Esc and Back close it either way.
  */
-export function Drawer({ param, value = "1", label, title, description, variant = "outlined", size, triggerClassName, trigger = true, alsoClear = [], footer, children }: {
+export function Drawer({ param, value = "1", label, title, description, variant = "outlined", size, triggerClassName, trigger = true, alsoClear = [], footer, dock = false, children }: {
   param: string; value?: string; label: ReactNode; title?: ReactNode; description?: ReactNode;
   variant?: ButtonVariant; size?: ButtonSize; triggerClassName?: string;
   /** False when the Drawer is opened only from elsewhere: a `DrawerLink`, or a link to its address. */
@@ -138,6 +173,8 @@ export function Drawer({ param, value = "1", label, title, description, variant 
   alsoClear?: string[];
   /** Buttons along the sheet's foot, at 56px: the Drawer's main press and the one beside it. */
   footer?: ReactNode;
+  /** From 1600px a pane docked beside the page at the same address, instead of the modal side sheet. */
+  dock?: boolean;
   children: ReactNode;
 }) {
   const search = useSearchParams();
@@ -181,7 +218,7 @@ export function Drawer({ param, value = "1", label, title, description, variant 
     <>
       {trigger && <a id={triggerId} className={buttonClass(variant, size, triggerClassName)} href={href} onClick={onOpen}>{label}</a>}
       <Sheet open={open} onClose={onClose} title={title ?? label} description={description} closeHref={closeHref} returnFocusId={trigger ? triggerId : undefined}
-        footer={footer}>{children}</Sheet>
+        footer={footer} dock={dock}>{children}</Sheet>
     </>
   );
 }

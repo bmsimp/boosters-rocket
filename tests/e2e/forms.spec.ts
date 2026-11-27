@@ -85,11 +85,11 @@ test("an Admin finds Forms settings not set up, with the webhook address on the 
   const res = await page.goto("/staff/settings/forms");
   expect(res?.status()).toBe(200);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Documenso");
-  // Not set up: the head says so, there is no Connection card to say it again, and Set up says what it means for parents.
+  // Not set up: the head says so, there is no Connection card to say it again, and Configure says what it means for parents.
   await expect(page.getByRole("region", { name: "Connection", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("region", { name: "Set up", exact: true })).toContainText("Until forms are set up, parents read that forms aren't ready");
+  await expect(page.getByRole("region", { name: "Configure", exact: true })).toContainText("Not connected yet, so parents read that forms aren't ready");
   // The steps are on their own page, opened from the plain view.
-  await page.getByRole("region", { name: "Set up", exact: true }).getByRole("link", { name: "Set up" }).click();
+  await page.getByRole("region", { name: "Configure", exact: true }).getByRole("link", { name: "Configure" }).click();
   await expect(page).toHaveURL(/\/staff\/settings\/forms\/setup$/);
   await expect(page.getByLabel("Webhook URL")).toHaveValue(`${baseURL}/api/documenso/webhook`);
   // Checking a connection that isn't saved calls nothing and says what to do first.

@@ -25,6 +25,9 @@ export default async function FormsSettingsPage() {
       <IntegrationHead of="documenso" title="Documenso" status={row.status}
         lede={<>Parents sign the club&apos;s forms inside the portal, in a Documenso the club runs itself. This page connects the two. Only Admins can change it, because the API token can read every signed form.</>} />
 
+      <IntegrationHealth here="/staff/settings/forms" line={lines.find((l) => l.key === "forms")} />
+
+      <div className="settings-columns">
       {summary.origin !== null && (
       <Card title="Connection" titleId="forms-conn-h">
         {(
@@ -39,12 +42,15 @@ export default async function FormsSettingsPage() {
       </Card>
       )}
 
-      <IntegrationHealth here="/staff/settings/forms" line={lines.find((l) => l.key === "forms")} />
-
-      <Card title={summary.origin === null ? "Set up" : "Change"} titleId="forms-change-h">
-        <p>{summary.origin === null ? "Until forms are set up, parents read that forms aren't ready, and nothing else changes for them. Four steps: Documenso's address and an API token, a check, the webhook, and a template for each form." : "Open the steps to change the address or the API token, check the connection again, or make a new webhook secret."}</p>
-        <p className="settings-open"><LinkButton href="/staff/settings/forms/setup" variant="filled">{summary.origin === null ? "Set up" : "Change"}</LinkButton></p>
+      <Card title="Configure" titleId="forms-change-h">
+        <p>{summary.origin === null ? "Not connected yet, so parents read that forms aren't ready. Configure how the portal reaches Documenso."
+          : row.status.tone === "done" ? "Connected and working. Configure to change the address or the API token, check the connection again, or make a new webhook secret."
+          : !summary.tokenReadable ? "The API token can't be read. Configure to enter it again."
+          : failing ? "The last call to Documenso failed. Configure to check the connection again."
+          : "Not checked yet. Configure to check the connection."}</p>
+        <p className="settings-open"><LinkButton href="/staff/settings/forms/setup" variant="filled">Configure</LinkButton></p>
       </Card>
+      </div>
     </main>
   );
 }

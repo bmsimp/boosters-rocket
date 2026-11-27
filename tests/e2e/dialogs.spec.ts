@@ -76,6 +76,41 @@ test("a Drawer: its own address, the focus in and back, Esc and Back close it, a
   expect(await behindFocusable(page, "#ds-button button")).toBe(false);
 });
 
+test("a Drawer with dock: from 1600px a pane beside the page at the same address, the page usable; below, the modal sheet", async ({ browser }, info) => {
+  test.skip(info.project.name === "phone", "a phone is under 1600px: there it is the sheet the test above checks");
+  for (const width of [1440, 1700]) {
+    const context = await browser.newContext({ viewport: { width, height: 900 } });
+    await context.addCookies([staffSessionCookie()]);
+    const page = await context.newPage();
+    await page.goto(GALLERY);
+    const opener = page.getByRole("link", { name: "Change the shift" });
+    await opener.click();
+    await expect(page).toHaveURL(/[?&]ds-dock=1/);
+    const pane = page.getByRole("dialog", { name: "Change the shift" });
+    await expect(pane).toBeVisible();
+    const modal = await pane.evaluate((el) => el.matches(":modal"));
+    expect(modal, `at ${width}px`).toBe(width < 1600);
+    expect(await behindFocusable(page, "#drawer-ds-dock-1"), `the page behind at ${width}px`).toBe(width >= 1600);
+    if (width >= 1600) {
+      await expect(page.locator("html")).not.toHaveClass(/sheet-open/);
+      const [box, beside] = [(await pane.boundingBox())!, await page.evaluate(() => document.querySelector(".staff-pane")!.getBoundingClientRect().right)];
+      expect(beside, "the page makes room beside the pane").toBeLessThanOrEqual(box.x);
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+      await checked(page, "a docked Drawer, open");
+      await pane.getByLabel("Shift name").focus();
+    }
+    await page.keyboard.press("Escape");
+    await expect(pane).toBeHidden();
+    await expect(page).not.toHaveURL(/ds-dock=/);
+    await expect(opener).toBeFocused();
+    // Its address opens it again, docked or as the sheet.
+    await page.goto(`${GALLERY}?ds-dock=1`);
+    await expect(pane).toBeVisible();
+    expect(await pane.evaluate((el) => el.matches(":modal"))).toBe(width < 1600);
+    await context.close();
+  }
+});
+
 test("a ConfirmDialog: Cancel first, its press unusable until the box is ticked, Esc closes it and the focus comes back", async ({ page }, info) => {
   await page.goto(GALLERY);
   const opener = page.getByRole("button", { name: "Disconnect QuickBooks" });

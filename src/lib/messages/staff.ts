@@ -103,6 +103,12 @@ export async function familiesReached(): Promise<number> {
   return r?.n ?? 0;
 }
 
+/** How many messages are posted and not deleted, and when the newest was: the Settings Overview's Messages card. */
+export async function messageCounts(): Promise<{ posted: number; latestAt: Date | null }> {
+  const [r] = await db.select({ n: count(), at: sql<Date | null>`max(${clubMessage.postedAt})` }).from(clubMessage).where(isNull(clubMessage.deletedAt));
+  return { posted: r?.n ?? 0, latestAt: r?.at ? new Date(r.at) : null };
+}
+
 /**
  * A file for the staff file route: a posted file of a message that isn't deleted, for anyone who may see messages, or
  * a held one for the staff member whose form holds it alone. Null for anything else.

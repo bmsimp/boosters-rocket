@@ -27,6 +27,9 @@ export default async function MailSettingsPage() {
       <IntegrationHead of={c?.method === "smtp" ? "mail-smtp" : "mail-graph"} title="Outgoing mail"
         status={!c ? status : rows.find((r) => r.key === (c.method === "smtp" ? "mail-smtp" : "mail-graph"))!.status}
         lede={<>How the portal sends sign-in codes, password links and welcome emails. Only Admins can change this, because whoever controls outgoing mail can read parents&apos; sign-in codes and the links that set their passwords.</>} />
+      <IntegrationHealth here="/staff/settings/mail" line={lines.find((l) => l.key === "mail")} />
+
+      <div className="settings-columns">
       {c && (
       <Card title="What is set" titleId="mail-h">
         {/* The head's badge says whether it works; a problem's reason is said here. */}
@@ -43,12 +46,14 @@ export default async function MailSettingsPage() {
       </Card>
       )}
 
-      <IntegrationHealth here="/staff/settings/mail" line={lines.find((l) => l.key === "mail")} />
-
-      <Card title={c ? "Change" : "Set up"} titleId="mail-change-h">
-        <p>{c ? "Open the steps to change how mail is sent, or send a test email." : "Until mail is set up, parents can't sign in. Choose how the portal sends mail, then send a test email."}</p>
-        <p className="settings-open"><LinkButton href="/staff/settings/mail/setup" variant="filled">{c ? (attention ? "Open the steps" : "Change") : "Set up"}</LinkButton></p>
+      <Card title="Configure" titleId="mail-change-h">
+        <p>{!c ? "Not set up yet, so parents can't sign in. Configure how the portal sends mail."
+          : attention?.kind === "failing" ? "The last email failed. Configure to change how mail is sent, or send a test email."
+          : attention?.kind === "not_tested" ? "Not tested since it changed. Configure to send a test email."
+          : "Working. Configure to change how mail is sent, or send a test email."}</p>
+        <p className="settings-open"><LinkButton href="/staff/settings/mail/setup" variant="filled">Configure</LinkButton></p>
       </Card>
+      </div>
     </main>
   );
 }

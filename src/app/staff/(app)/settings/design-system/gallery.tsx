@@ -9,7 +9,7 @@ import {
 import { IntegrationLogo } from "../integration-logo";
 import { PoweredBy } from "@/app/components/powered-by";
 import { ChoiceSample, TakenChoiceSample } from "./gallery-choice";
-import { BulkSample, ConfirmSample, DrawerSample, StepsChoiceSample } from "./gallery-sheets";
+import { BulkSample, ConfirmSample, DockedDrawerSample, DrawerSample, StepsChoiceSample } from "./gallery-sheets";
 import { SeedSample } from "./gallery-seed";
 import { RichTextEditor } from "@/app/components/rich-text-editor";
 
@@ -306,8 +306,8 @@ export function Gallery() {
         <EmptyState title="No volunteer events yet" action={<Button>Add an event</Button>}>When you add one, families see it on their Volunteer page.</EmptyState>
       </Section>
 
-      <Section id="drawer" name="Drawer" use="A form behind a button: a repeated form on a row (Waive for…, Change the student…) or a secondary one on a page. The button says what the form does; it opens M3's modal side sheet from 600px wide (a full-screen sheet on a phone), with a close icon button and 56px buttons at its foot. It has its own address (?param=value): Back closes it, a refresh opens it again, and without JavaScript the button is a link to the page with the form drawn in it. The focus goes in, stays in, and comes back to the button; Esc and Close close it." importLine={UI("Drawer")}>
-        <DrawerSample />
+      <Section id="drawer" name="Drawer" use="A form behind a button: a repeated form on a row (Waive for…, Change the student…) or a secondary one on a page. The button says what the form does; it opens M3's modal side sheet from 600px wide (a full-screen sheet on a phone), with a close icon button and 56px buttons at its foot. It has its own address (?param=value): Back closes it, a refresh opens it again, and without JavaScript the button is a link to the page with the form drawn in it. The focus goes in, stays in, and comes back to the button; Esc and Close close it. With dock, from 1600px wide it is a pane docked beside the page at the same address instead, the page making room and staying usable (a table and the chosen row's detail); below 1600px it is the side sheet." importLine={UI("Drawer")}>
+        <div className="ds-samples"><DrawerSample /><DockedDrawerSample /></div>
       </Section>
 
       <Section id="confirm-dialog" name="ConfirmDialog" use="One press that needs a second look: a button with the action's words, then M3's basic dialog (28px corners, a centered title, the alert icon for a destructive one) with one sentence of what follows, an optional box to tick or a reason to type, and at its end Cancel, a text button that has the focus first, then the action's own button, filled. Not for a form: that is a Drawer." importLine={UI("ConfirmDialog")}>
@@ -425,7 +425,7 @@ export function Gallery() {
         <div className="ds-samples"><LocalTime iso="2026-11-21T19:14:00Z" /><CalendarDate iso="2026-11-22" /><span className="num">{formatMoney(18500)}</span></div>
       </Section>
 
-      <Section id="frame" name="Club bar, rail and tabs" use="The frame every page sits in. ClubBar is M3's small top app bar, 64px: the club's logo tile in its exact color, its name, and the account. A parent's places are links in the bar from 840px (the current one on M3's pill) and M3's navigation bar at the foot below that, labels always shown. Staff have the expanded navigation rail from 1200px, always open, every group's pages under its heading, and below 1200px the same navigation bar with Home, the groups and Settings. The current place is the secondary container and bold, never the color alone. Drawn here as samples." importLine={`import { ClubBar } from "@/app/components/club-bar";  import { StaffRail } from "@/app/components/top-nav";`}>
+      <Section id="frame" name="Club bar, rail and tabs" use="The frame every page sits in. ClubBar is M3's small top app bar, 64px: the club's logo tile in its exact color, its name, and the account. A parent's places are links in the bar from 840px (the current one on M3's pill) and M3's navigation bar at the foot below that, labels always shown. Staff have the expanded navigation rail from 1200px, always open, every group's pages under its heading; on a page with a list pane of its own (Settings) it is M3's compact rail instead, Home, the groups and Settings, each icon on its pill with its label under it, a group opening its first page; and below 1200px the same navigation bar with Home, the groups and Settings. The current place is the secondary container and bold, never the color alone. Drawn here as samples." importLine={`import { ClubBar } from "@/app/components/club-bar";  import { StaffRail } from "@/app/components/top-nav";`}>
         <div className="ds-frame">
           <div className="bar"><div className="wrap">
             <span className="monogram" aria-hidden="true">SB</span><span className="club">Sample Boosters</span>
@@ -454,6 +454,19 @@ export function Gallery() {
             <a href="#ds-frame"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4" /></svg>Settings</a>
           </nav>
           <div className="ds-pane"><p className="page-title">Roster</p><p className="lede">The page sits in a pane beside the rail, with extra-large top corners.</p></div>
+        </div>
+        <div className="ds-frame ds-frame-rail ds-frame-compact">
+          <nav className="compact-rail ds-show" aria-label="Sample compact rail">
+            {([["Home", <path key="h" d="M3 11l9-7 9 7v9h-6v-6H9v6H3z" />, false], ["Families", <path key="f" d="M3 20c0-3 3-5 6-5s6 2 6 5M15 15c3 0 6 1.5 6 4M12 8a3 3 0 1 1-6 0 3 3 0 0 1 6 0" />, false],
+              ["Money", <path key="m" d="M12 3v18M17 7.5c0-1.9-2.2-3-5-3s-5 1.1-5 3 2.2 2.7 5 3.2 5 1.4 5 3.3-2.2 3-5 3-5-1.1-5-3" />, false],
+              ["Settings", <path key="s" d="M12 9a3 3 0 1 1 0 6 3 3 0 0 1 0-6zM12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4" />, true]] as const).map(([name, icon, on]) => (
+              <a key={name} href="#ds-frame" aria-current={on ? "page" : undefined}>
+                <span className="compact-pill" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">{icon}</svg></span>
+                <span className="compact-label">{name}</span>
+              </a>
+            ))}
+          </nav>
+          <div className="ds-pane"><p className="page-title">Settings</p><p className="lede">On a page with a list pane of its own, the list docks beside the compact rail, 24px from the page.</p></div>
         </div>
       </Section>
       <Section id="powered-by" name="Powered by" use="The product's credit, the club leading everywhere else (brand/BRAND.md). One ink in the footer of every portal page, parent and staff; in the product's colors under the sign-in form. A link to boostersrocket.com whose name says so. No club setting removes it; never put the product's indigo or flame anywhere else in the portal." importLine={`import { PoweredBy } from "@/app/components/powered-by";`}>

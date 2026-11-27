@@ -2,7 +2,7 @@ import { Card, KeyValue, LinkButton, Notice } from "@/app/components/ui";
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { connectionView } from "@/lib/quickbooks/connection";
-import { quickbooksProblems } from "@/lib/quickbooks/health";
+import { quickbooksProblems, type QboProblem } from "@/lib/quickbooks/health";
 import { loadRosterPage } from "@/lib/roster/queries";
 import { lastWake } from "@/lib/jobs/runner";
 import { LocalTime } from "@/app/components/local-time";
@@ -35,8 +35,9 @@ export const dynamic = "force-dynamic";
 
 /**
  * QuickBooks, an integration's page (the Settings spec, "Integration pages"): its head with the status, its Health
- * line only when it needs attention, then two surfaces: Connection (what is set, and the roster's section: the
- * membership shape, the last read, the worker and the portal's requests) and the change, ending with Disconnect. What is set is shown plainly, with no inputs; changing anything opens the steps.
+ * line only when it needs attention, then three cards: Connection (what is set), Roster (the membership shape, the last
+ * read, the worker and the portal's requests) and Configure, ending with Disconnect; side by side from 1600px. What is
+ * set is shown plainly, with no inputs; Configure opens the steps, whatever the state.
  */
 /**
  * Boosters Rocket Connect sends a person here from QuickBooks' own Apps list (the relay's SPEC.md section 2, "Launch,
@@ -53,6 +54,25 @@ const MOVE_TO_RELAY = {
   link: "Move to Boosters Rocket",
   href: "/staff/settings/quickbooks/setup?step=app",
 } as const;
+
+/** What needs attention, in a few words, for the Configure card (the Notice above it says it in full). */
+const PROBLEM_WORDS: Record<QboProblem["kind"], string> = {
+  token_failed: "The connection couldn't be renewed.",
+  expiring: "The connection expires within 30 days.",
+  roster_failed: "The last roster refresh failed.",
+  no_customer_types: "The membership shape needs choosing again.",
+  shape_broken: "The membership shape needs choosing again.",
+  roster_old: "The roster hasn't been read from QuickBooks in over 2 days.",
+};
+
+/** The Configure card's words: what the state is, and what Configure does from it. */
+function configureWords(conn: { configured: boolean; connected: boolean }, problems: QboProblem[], due: boolean): string {
+  if (!conn.configured) return "Not connected yet. Configure how the portal reaches your books.";
+  if (!conn.connected) return "Not connected. Configure to connect the portal to your books again.";
+  if (problems[0]) return `${PROBLEM_WORDS[problems[0].kind]} Configure to change how it connects, renew the connection or choose the shape again.`;
+  if (due) return "Health says the connection needs attention. Configure to change how it connects, renew the connection or choose the shape again.";
+  return "Connected and working. Configure to change how it connects, renew the connection or choose the shape again.";
+}
 
 const FROM_QUICKBOOKS: Record<string, string> = {
   disconnected: "QuickBooks says the portal was disconnected there. Connect again to carry on.",
@@ -82,6 +102,8 @@ export default async function QuickBooksSettingsPage({ searchParams }: { searchP
       {problems.length > 0 && <Notice tone="warning" title="Needs attention" titleId="qbo-problems-h"><ul className="notice-list">{problems.map((p) => <li key={p.kind}>{p.text}{p.fix && <> <LinkButton plain variant="tonal" size="sm" href={p.fix.href}>{p.fix.label}</LinkButton></>}</li>)}</ul></Notice>}
       <IntegrationHealth here="/staff/settings/quickbooks" line={lines.find((l) => l.key === "quickbooks")} />
 
+      {/* From 1600px the cards stand side by side in reading order: Connection, Roster, then Configure with Disconnect last. */}
+      <div className="settings-columns">
       {conn.configured && (
         <Card title="Connection" titleId="qbo-conn-h">
           <QuickBooksUse />
@@ -96,8 +118,10 @@ export default async function QuickBooksSettingsPage({ searchParams }: { searchP
             conn.connected && { key: "renewed", label: "Last renewed", value: when(conn.lastTokenRefreshAt) },
             conn.connected && { key: "expires", label: "Expires", value: <>{when(conn.refreshExpiresAt)} unless it is renewed first. The worker renews it every day.</> },
           ]} />
-          <section className="box-section" aria-labelledby="qbo-roster-h">
-            <h3 id="qbo-roster-h">Roster</h3>
+        </Card>
+      )}
+      {conn.configured && (
+        <Card title="Roster" titleId="qbo-roster-h">
             <KeyValue items={[
               { key: "shape", label: "Membership shape", value: page.shapeWords ?? "Not chosen yet." },
               { key: "read", label: "Last read from QuickBooks", value: <>{page.lastOkAt ? <LocalTime iso={page.lastOkAt} /> : "Not yet"}{page.lastRun && !page.lastRun.ok ? <> (the latest try failed: {page.lastRun.detail})</> : null}{!conn.connected && page.lastOkAt ? ". QuickBooks is disconnected, so the roster is no longer current." : null}</> },
@@ -106,19 +130,19 @@ export default async function QuickBooksSettingsPage({ searchParams }: { searchP
               { key: "requests", label: "The portal's requests", value: <>{lastCheckWords(checked)}{checked ? <> (<LocalTime iso={checked.at} />)</> : null} <LinkButton plain variant="tonal" size="sm" href="/staff/settings/quickbooks/check">Check the portal&apos;s requests</LinkButton></> },
             ]} />
             {page.brokenTypes.length > 0 && <Notice tone="warning">This shape names a customer type QuickBooks no longer has. Choose the shape again.</Notice>}
-          </section>
         </Card>
       )}
 
-      <Card title={conn.configured ? "Change" : "Set up"} titleId="qbo-change-h">
-        <p>{conn.configured ? "Open the steps to change how the portal connects, renew the connection or choose the shape again." : "Three steps: how the portal connects, signing in to Intuit, and the shape of your membership."}</p>
-        <p className="settings-open"><LinkButton href="/staff/settings/quickbooks/setup" variant="filled">{conn.configured ? "Change" : "Set up"}</LinkButton></p>
+      <Card title="Configure" titleId="qbo-change-h">
+        <p>{configureWords(conn, problems, row.status.tone === "due")}</p>
+        <p className="settings-open"><LinkButton href="/staff/settings/quickbooks/setup" variant="filled">Configure</LinkButton></p>
         {/* A first connect needs no switch: offered only while the roster names a company. */}
         {source !== null && <p>{SWITCH_WORDS.setupHint}</p>}
         {source !== null && <p><LinkButton variant="outlined" href={SWITCH_PAGE}>{SWITCH_WORDS.setupLink}</LinkButton></p>}
         {/* Disconnect, last, as it is today: it stays in place after it is pressed, to say what it did. */}
         <Disconnect connected={conn.connected} disconnect={disconnectAction} warning={warning} through={conn.tokenMode} />
       </Card>
+      </div>
       <SupportLine />
     </main>
   );

@@ -36,6 +36,7 @@ export default async function SignInSettingsPage() {
       <IntegrationHead title="Staff sign-in" status={systemStatus(rows)}
         lede="How board members and directors sign in: with Microsoft, Google, or both. Only Admins can change this." />
       {seesMailWarning(ctx.effective) && <MailWarning canFix={can(ctx.effective, "Settings.Mail.ReadWrite")} />}
+      <div className="settings-columns">
       {PROVIDER_KEYS.map((key) => {
         const s = summaries.find((x) => x.key === key);
         const st = state(key, s);
@@ -53,10 +54,11 @@ export default async function SignInSettingsPage() {
                 key === "staff-google" ? { key: "secret", label: "Client secret", value: <>Saved <LocalTime iso={s.credentialUpdatedAt.toISOString()} />{s.expiresAt && <>, expires <CalendarDate iso={s.expiresAt.toISOString()} /></>}</> } : null,
               ]} />
             )}
-            <p className="settings-open"><LinkButton href="/staff/settings/sign-in/setup" variant="outlined">{s ? "Change" : "Set up"}<span className="visually-hidden"> {PROVIDER_LABELS[key]}</span></LinkButton></p>
+            <p className="settings-open"><LinkButton href="/staff/settings/sign-in/setup" variant="outlined">Configure<span className="visually-hidden"> {PROVIDER_LABELS[key]}</span></LinkButton></p>
           </Card>
         );
       })}
+      </div>
       {!working && <Notice tone="warning">Nobody can sign in as staff until one of these works.</Notice>}
     </main>
   );

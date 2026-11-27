@@ -16,7 +16,7 @@ signed forms and everything else stay as they are.
 
 1. Sign in as an Admin and open **Settings**, **QuickBooks**. The page says what is wrong, if anything ("The
    QuickBooks connection couldn't be refreshed", "expires within 30 days").
-2. Select **Change**.
+2. Select **Configure**.
 3. With the club's own Intuit app: if its keys changed (a new client secret, or Production keys in place of
    Development), enter them in step 1 and continue. Through Boosters Rocket, step 1 should say **Ready to connect**; if
    it doesn't, finish registering ([Intuit: Connect through Boosters Rocket](intuit.md#connect-through-boosters-rocket)).
@@ -45,7 +45,7 @@ mean to connect one: picking the wrong company on Intuit's page changes nothing.
 2. Sign in as an Admin and open **Settings**, **QuickBooks**. Open **Disconnect** and select **Disconnect QuickBooks**.
    Through Boosters Rocket, tick the box first: every portal connected to the company through Boosters Rocket shares one
    connection, so this may disconnect the others too, such as a trial copy of the portal.
-3. On the same page select **Change**, which opens step 2, **Connect to QuickBooks**. Through Boosters Rocket, choose
+3. On the same page select **Configure**, which opens step 2, **Connect to QuickBooks**. Through Boosters Rocket, choose
    **Which QuickBooks** the new company is in: **The club's real books**, or **An Intuit sandbox (test) company** (the
    one connected last is chosen first, so change it when moving from a sandbox to the real books). With the club's own
    Intuit app the QuickBooks is the one the app's keys are for; to connect the other, save the app's other keys in
