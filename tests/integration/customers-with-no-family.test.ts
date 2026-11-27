@@ -522,9 +522,9 @@ describe("a customer meant for a family the portal has (stage 4's slice M3a2)", 
     const list = section(await renderPage(AccountingLinksPage), "no-family-h");
     // Its "What it makes" cell says where it is linked, never what the press it isn't offered would make; its button goes there.
     expect(rowNamed(list, "<b>Patel</b> Family")![1]).toBe("Suggested for The Patels.");
-    expect(rowNamed(list, "<b>Patel</b> Family")![2]).toBe("Link it in the Suggested rows: <b>Patel</b> Family");
+    expect(rowNamed(list, "<b>Patel</b> Family")![2]).toBe("Show its family's row: <b>Patel</b> Family");
     expect(rowNamed(list, "Plain Family")![1]).toBe("A linked family.");
-    expect(list).toContain('href="/staff/links?status=suggested"');
+    expect(list).toContain('href="/staff/links?status=suggested&amp;q=The%20Patels"');
     expect(list).toContain("&lt;b&gt;Patel&lt;/b&gt; Family");
     expect(list).not.toContain("<b>Patel</b>");
     expect(rowNamed(list, "Okafor Household")!.slice(1)).toEqual(["A possible customer of The Okafors.", "Look at it for that family: Okafor Household"]);

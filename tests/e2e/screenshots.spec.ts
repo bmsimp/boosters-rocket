@@ -140,6 +140,12 @@ test("Accounting links with a row's details open and two rows ticked, and a Revi
     await expect(panel.getByRole("region", { name: "In your books" })).toContainText(LINKS.booksPhone);
     await settle(page);
     await page.screenshot(shot("links-details-ticked", info.project.name));
+    if (info.project.name === "desktop") {
+      await page.setViewportSize({ width: 1280, height: 1000 });
+      await settle(page);
+      await page.screenshot(shot("links-details-ticked-1280", info.project.name));
+      await page.setViewportSize({ width: 1440, height: 1000 });
+    }
     await panel.getByRole("link", { name: `Review ${LINKS.family}` }).click();
     const review = page.getByRole("dialog", { name: `Review ${LINKS.family}` });
     await expect(review).toBeVisible();

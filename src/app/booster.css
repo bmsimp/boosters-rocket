@@ -1132,6 +1132,15 @@ main.wrap.single > .page-head + p { margin-top: var(--s4); }
 .links-match { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s2); }
 .links-who { font-weight: 500; }
 .links-acts-cell { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--s2); }
+/* From 840px the actions column takes its longest pair (Show details and Settle N differences) on one line, so every
+   row keeps its two buttons side by side at one height; the family and match columns share what is left. */
+@media (min-width: 840px) {
+  .links-table td.t-quiet { width: 1%; white-space: nowrap; }
+  .links-table .links-acts-cell { flex-wrap: nowrap; }
+  .links-table .t-quiet .btn { white-space: nowrap; max-width: none; }
+  .links-table td.t-quiet dialog { white-space: normal; } /* the Review drawer drawn in the cell wraps as any sheet does */
+  .links-table td.t-quiet dialog .btn { white-space: normal; }
+}
 .links-toggle { --btn-fg: var(--on-surface-variant); font: var(--label-m); }
 .links-toggle svg { width: 20px; height: 20px; transition: transform var(--spring-fast-dur) var(--spring-fast); }
 .links-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }

@@ -25,7 +25,7 @@ const noSidewaysScroll = async (page: Page) =>
 const about = (words: string, who: string) => new RegExp(`^${words}\\s*:\\s*${who}$`);
 const settled = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))));
 
-test("the list, Show details, the Review and Pick drawers, and Unlink asking first", async ({ page }) => {
+test("the list, Show details, the Review and Pick drawers, and Unlink asking first", async ({ page }, info) => {
   const { drop } = await seedLinks(sql);
   try {
     await page.goto("/staff/links");
@@ -38,6 +38,19 @@ test("the list, Show details, the Review and Pick drawers, and Unlink asking fir
     expect(await page.content()).not.toContain(LINKS.phone);
     await checked(page, "the list");
     await noSidewaysScroll(page);
+    if (info.project.name === "desktop") {
+      // Every row keeps Show details and its main press side by side, Settle N differences the longest, beside the rail too.
+      for (const width of [1440, 1280]) {
+        await page.setViewportSize({ width, height: 1000 });
+        const offLine = await families.locator(".links-acts-cell").evaluateAll((cells) => cells.filter((c) => {
+          const tops = [...c.querySelectorAll(":scope > .btn")].map((b) => Math.round(b.getBoundingClientRect().top));
+          return new Set(tops).size > 1;
+        }).length);
+        expect(offLine, `rows whose buttons wrap at ${width}`).toBe(0);
+        await noSidewaysScroll(page);
+      }
+      await page.setViewportSize({ width: 1440, height: 1000 });
+    }
 
     // Show details opens the row in place, loads that family's comparison, and writes one audit row for it.
     const before = (await sql`SELECT count(*)::int AS n FROM audit_log WHERE action = 'accounting.link.details.read'`)[0]!.n as number;

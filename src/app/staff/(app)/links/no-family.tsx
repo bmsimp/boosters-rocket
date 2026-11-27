@@ -65,7 +65,12 @@ export function aimShown(customerId: string, aim: CustomerAim): NonNullable<NoFa
     return { words: `${said} To pick it, leave that family unlinked first.`,
       href: "/staff/links?status=suggested", label: "See that family's row" };
   }
-  if (aim.why === "suggested") return { words: `Suggested for ${names}.`, href: "/staff/links?status=suggested", label: "Link it in the Suggested rows" };
+  // A customer is suggested for one family only (the matcher's rule): its button shows that family's row, searched by its name.
+  if (aim.why === "suggested") {
+    const name = aim.families[0]!.name;
+    return { words: `Suggested for ${names}.`, label: "Show its family's row",
+      href: name.length <= 100 ? `/staff/links?status=suggested&q=${encodeURIComponent(name)}` : "/staff/links?status=suggested" };
+  }
   return { words: `A possible customer of ${names}.`,
     href: one ? pickStep(String(aim.families[0]!.id), customerId) : "/staff/links?status=several", label: one ? "Look at it for that family" : "See them in the Several possible rows" };
 }
