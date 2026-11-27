@@ -1,6 +1,6 @@
 # Club messages
 
-What this covers: messages staff post to every family, their versions, files, read state and mail, the club's email switch and a staff member's contact email. The spec is `docs/superpowers/specs/2026-11-23-club-messages-design.md`, built in the slices of `docs/superpowers/plans/2026-11-23-club-messages.md`; until a slice ships, this document describes what is built. The rules of `AGENTS.md` still apply.
+What this covers: messages staff post to every family, their versions, files, read state and mail, the club's email switch and a staff member's contact email. The spec is `docs/superpowers/specs/2026-11-23-club-messages-design.md`, built in four slices, all shipped (the slice plan was removed on 2026-11-26 and is in git history); this document describes what is built. The rules of `AGENTS.md` still apply.
 
 ## What is built (slice 1, foundations)
 
