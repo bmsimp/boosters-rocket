@@ -39,7 +39,7 @@ export function LinkPress({ label, busy, about, act }: { label: string; busy: st
   // A refusal is said with the family it is about (an answer that went through names it itself), so answers are told apart.
   const press = () => { if (!pending) start(async () => { const r = await safely(() => act(), failed); add(r.ok ? r : { ok: false, errors: r.errors.map((e) => `${about}: ${e}`) }); }); };
   return (
-    <Button variant="secondary" busy={pending} onClick={press}>
+    <Button variant="outlined" busy={pending} onClick={press}>
       {pending ? busy : label}<span className="visually-hidden">: {about}</span>
     </Button>
   );
@@ -66,7 +66,7 @@ export function GuardianLinkPress({ name, who, about, options, suggested }: { na
       <ChoiceGroup name={name} legend={`Which Parent customer is ${who}'s`} cols={1} value={chosen} onChange={setChosen}
         options={options.map((o) => ({ value: o.value, label: o.label, hint: o.hint }))} />
       <div className="row-actions">
-        <Button variant="secondary" busy={pending} onClick={press}>
+        <Button variant="outlined" busy={pending} onClick={press}>
           {pending ? "Linking…" : `Link ${who} to this Parent customer`}<span className="visually-hidden">: {about}</span>
         </Button>
       </div>
@@ -83,7 +83,7 @@ export function LinkGiveUp({ about, act }: { about: string; act: (note: string) 
   const { add } = useContext(Answers);
   // A refusal is said in the dialog; a give-up that went through is kept above the list, as the row's change leaves it.
   return (
-    <ConfirmDialog label="Give up on this change" context={about} answerHere={false} title={`Give up on this change: ${about}?`} variant="secondary" size="sm" busyLabel="Giving up…"
+    <ConfirmDialog label="Give up on this change" context={about} answerHere={false} title={`Give up on this change: ${about}?`} variant="tonal" size="sm" busyLabel="Giving up…"
       consequence="The portal keeps its own value, and QuickBooks keeps what it has."
       reason={{ label: "Why? (kept in the audit log)", maxLength: 500 }}
       act={async (note) => { const r = await safely(() => act(note ?? ""), failed); if (r.ok) add(r); return r; }} />

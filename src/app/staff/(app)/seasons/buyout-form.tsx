@@ -30,8 +30,8 @@ export function BuyoutForm({ per, price, chosen, items, offered, save }: {
         </select></label>
       <ActionOutcome state={state} />
       <div className="row-actions">
-        <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run(false))}>{pending ? "Saving…" : offered ? "Save the buy-out" : "Offer a buy-out"}</button>
-        {offered && <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run(true))}>Switch it off</button>}
+        <button type="button" className="btn btn-outlined" disabled={pending} onClick={() => startTransition(() => run(false))}>{pending ? "Saving…" : offered ? "Save the buy-out" : "Offer a buy-out"}</button>
+        {offered && <button type="button" className="btn btn-outlined" disabled={pending} onClick={() => startTransition(() => run(true))}>Switch it off</button>}
       </div>
     </form>
   );

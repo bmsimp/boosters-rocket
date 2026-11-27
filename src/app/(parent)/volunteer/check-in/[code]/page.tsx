@@ -57,7 +57,7 @@ export default async function CheckInPage({ params }: { params: Promise<{ code: 
                     {p.corrected && <p className="help">The club has updated this check-in. If something isn&apos;t right, please talk to {view.contact}.</p>}
                     {!p.checkedIn && !p.corrected && view.state === "open" && (
                       <CheckInButton label={p.who === "You" ? "Check me in" : `Check in ${p.who}`} act={checkInAction.bind(null, code, p.signupId)}
-                        variant={waiting.length > 1 ? "secondary" : "primary"} />
+                        variant={waiting.length > 1 ? "tonal" : "filled"} />
                     )}
                   </>} />
               ))}

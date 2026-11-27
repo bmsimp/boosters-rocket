@@ -28,7 +28,7 @@ export default async function FamilyDetailsPage() {
       ) : (
         <>
           {/* No id in the link: the page takes whose address it is from the session. */}
-          <Card title="You" titleId="who-h" actions={ownEmail && <LinkButton variant="secondary" href="/family/email">Change my sign-in email</LinkButton>}>
+          <Card title="You" titleId="who-h" actions={ownEmail && <LinkButton variant="outlined" href="/family/email">Change my sign-in email</LinkButton>}>
             <KeyValue items={[{ key: "name", label: "Name", value: view.me.name }, { key: "email", label: "Email", value: view.me.email }]} />
             {ownEmail ? (
               <p className="help">You can change your sign-in email below. To change your name, <AskTheClub treasurerEmail={club.treasurerEmail} />.</p>

@@ -63,7 +63,7 @@ function MakeFamily({ name, act, onDone }: { name: string; act: () => Promise<Do
   const press = () => { if (!pending) start(async () => onDone(await safely(() => act(), failed))); };
   return (
     <div className="row-actions">
-      <Button variant="secondary" size="sm" busy={pending} onClick={press}>
+      <Button variant="tonal" size="sm" busy={pending} onClick={press}>
         {pending ? "Making the family…" : "Create a family from this"}<span className="visually-hidden">: {name}</span>
       </Button>
     </div>

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { DEFAULT_COLOR } from "@/lib/settings/club";
-import { deriveClubTokens, normalizeHex } from "@/lib/theme/contrast";
+import { inkOn, normalizeHex } from "@/lib/theme/contrast";
 import { iconText } from "./icon-text";
 
 /**
@@ -30,7 +30,7 @@ export type IconArt = { kind: "monogram"; text: string; background: string; fore
 
 export function iconArt(club: Club): IconArt {
   const background = normalizeHex(club.color) ?? DEFAULT_COLOR;
-  const foreground = deriveClubTokens(background).clubOn; // white or near-black, whichever reads on the club's color
+  const foreground = inkOn(background); // white or near-black, whichever reads on the club's exact color
   const text = iconText(club.shortName);
   return text ? { kind: "monogram", text, background, foreground } : { kind: "plain", background, foreground };
 }

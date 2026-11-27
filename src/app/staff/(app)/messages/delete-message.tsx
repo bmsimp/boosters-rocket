@@ -33,7 +33,7 @@ export function DeleteMessage({ messageId }: { messageId: string }) {
       <p>Delete this message? Families stop seeing it at once, along with every earlier version and its files. No email is sent about it, and any of its email not yet sent is dropped. It can&apos;t be brought back.</p>
       <div className="row-actions">
         <Button variant="danger" busy={pending} onClick={del}>Yes, delete it</Button>
-        <Button variant="secondary" aria-disabled={pending || undefined} onClick={() => { if (!pending) setAsking(false); }}>Keep it</Button>
+        <Button variant="outlined" aria-disabled={pending || undefined} onClick={() => { if (!pending) setAsking(false); }}>Keep it</Button>
       </div>
       {outcome && <ActionOutcome state={outcome} />}
     </div>

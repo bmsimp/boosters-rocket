@@ -4,13 +4,13 @@ import { cx } from "./cx";
 import { StatusIcon } from "./status-icon";
 import type { Tone } from "./tone";
 
-/** A bordered list of like rows (To do, Students, Payments). Inside a Card it runs to the card's edges. */
+/** M3 Expressive's segmented list of like rows (To do, Students, Payments): each row its own tile, 2px apart, the group rounded at its ends. */
 export function List({ label, className, children }: { label?: string; className?: string; children: ReactNode }) {
   return <ul className={cx("list", className)} aria-label={label}>{children}</ul>;
 }
 
 /**
- * One row of a List: a leading status (its icon, and its words at the start of the meta line), the title, a meta
+ * One row of a List: a leading status (its icon in a 40px circle of its tone's container, and its words at the start of the meta line), the title, a meta
  * line, then an amount and an action at the end. The action is a compact Button or LinkButton (size "sm"). A status
  * with no words of its own draws only its icon, for a row whose meta line already says the state (an invoice's due
  * line). `meta` may be a list of parts, each drawn with a dot between it and the next, the empty ones left out.
@@ -39,7 +39,7 @@ export function ListRow({ status, title, meta, amount, action, trail, sub, detai
   const body = (
     <>
       {logo !== undefined && <span className="list-logo">{logo}</span>}
-      {status && <StatusIcon tone={status.tone} />}
+      {status && <span className={`status-lead tone-${status.tone}`} aria-hidden="true"><StatusIcon tone={status.tone} /></span>}
       <div className="list-main">
         <span className="list-title">{title}</span>
         {(words || parts.length > 0) && (
@@ -75,8 +75,8 @@ export function ListSubRow({ title, meta, className }: { title: ReactNode; meta?
 }
 
 /**
- * The total under a List of amounts (Payments' open invoices): its label and the sum, on the muted surface, right after
- * the list. A list followed by one draws each row's amount last, after its action, so the figures make one column with
+ * The total under a List of amounts (Payments' open invoices): its label and the sum, the group's last segment, right
+ * after the list. A list followed by one draws each row's amount last, after its action, so the figures make one column with
  * the total.
  */
 export function ListTotal({ label, amount, className }: { label: ReactNode; amount: ReactNode; className?: string }) {

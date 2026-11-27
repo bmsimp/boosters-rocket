@@ -41,7 +41,7 @@ export async function TodayBox({ writes, forms, shifts }: { writes: boolean; for
       {items.length === 0 ? <StateWords state="done" words="Nothing needs doing today." /> : (
         <List>{items.map((i) => (
           <ListRow key={i.key} data-today={i.key} status={{ tone: i.tone ?? "due" }} title={i.words} meta={i.detail}
-            action={<LinkButton variant="secondary" size="sm" href={i.href}>{i.link}</LinkButton>} />))}</List>
+            action={<LinkButton variant="tonal" size="sm" href={i.href}>{i.link}</LinkButton>} />))}</List>
       )}
     </Card>
   );

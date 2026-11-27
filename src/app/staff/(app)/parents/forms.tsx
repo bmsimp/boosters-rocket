@@ -20,8 +20,8 @@ function Outcome({ state }: { state: Done | null }) {
 }
 
 /** A text field and one button: used to block a person (`variant="danger"`: it takes their sign-in away). */
-export function NoteAction({ label, field, pendingLabel, act, variant = "secondary" }: { label: string; field: string; pendingLabel: string; act: (text: string) => Promise<Done>;
-  variant?: "secondary" | "danger" }) {
+export function NoteAction({ label, field, pendingLabel, act, variant = "outlined" }: { label: string; field: string; pendingLabel: string; act: (text: string) => Promise<Done>;
+  variant?: "outlined" | "danger" }) {
   const id = useId();
   const [text, setText] = useState("");
   const [state, run, pending] = useActionState(async () => safely(() => act(text), failed), null);
@@ -68,7 +68,7 @@ export function OneButton({ label, pendingLabel, act }: { label: string; pending
   return (
     <form action={run} className="stack">
       <Outcome state={state} />
-      <Button type="submit" variant="secondary" disabled={pending}>{pending ? pendingLabel : label}</Button>
+      <Button type="submit" variant="outlined" disabled={pending}>{pending ? pendingLabel : label}</Button>
     </form>
   );
 }
@@ -99,7 +99,7 @@ export function GuardianChangeControls({ name, removeLabel, open, reinstatable, 
           act={async (note) => { const r = await safely(() => remove(note ?? ""), failed); if (r.ok) setRemoved(r); return r; }} />
       ) : reinstatable ? (
         <form action={() => run()} className="stack">
-          <Button type="submit" variant="secondary" disabled={pending}>{pending ? "Reinstating…" : `Reinstate ${name}`}</Button>
+          <Button type="submit" variant="outlined" disabled={pending}>{pending ? "Reinstating…" : `Reinstate ${name}`}</Button>
         </form>
       ) : null}
     </div>
@@ -136,7 +136,7 @@ export function AddGuardianForm({ act }: { act: (name: string, email: string, sa
       {question ? (asking ? <Notice tone="warning">{question.errors[0]}</Notice> : null) : <Outcome state={state} />}
       {/* One primary at a time: while the portal asks whether it is the same person, "Yes, add them" is it. */}
       {asking ? <Button disabled={pending} onClick={() => startTransition(() => run(true))}>{pending ? "Adding…" : "Yes, add them"}</Button> : null}
-      <Button variant={asking ? "secondary" : "primary"} disabled={pending} onClick={() => startTransition(() => run(false))}>{pending ? "Adding…" : "Add guardian"}</Button>
+      <Button variant={asking ? "outlined" : "filled"} disabled={pending} onClick={() => startTransition(() => run(false))}>{pending ? "Adding…" : "Add guardian"}</Button>
     </form>
   );
 }
@@ -150,7 +150,7 @@ export function NameForm({ name: current, act }: { name: string; act: (name: str
     <form onSubmit={noSubmit} className="stack">
       <TextInput id={`${id}-name`} label="Name" maxLength={100} autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} />
       <Outcome state={state} />
-      <Button variant="secondary" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : "Save name"}</Button>
+      <Button variant="outlined" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : "Save name"}</Button>
     </form>
   );
 }
@@ -185,7 +185,7 @@ export function DetailsForm({ initial, act }: { initial: ContactForm; act: (sent
       {state?.ok && state.compare.map((c) => (
         <Link key={c} className="link-line" href={`/staff/reconciliation?compare=${c}#writes-h`}>Compare the two on the Reconciliation page</Link>
       ))}
-      <Button variant="secondary" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving, then sending to QuickBooks…" : "Save details"}</Button>
+      <Button variant="outlined" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving, then sending to QuickBooks…" : "Save details"}</Button>
     </form>
   );
 }

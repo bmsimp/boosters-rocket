@@ -111,7 +111,7 @@ export function CreateBox({ shape, rosterTag, memberTypes, goes }: { shape: Memb
   return (
     <Card title="Make a family" titleId="create-h">
       <p>{addGoesWords(goes, "family", "family type")} Add its students and guardians from the family&apos;s page once it is saved.</p>
-      <NameForm field="The family's name" label="Make the family" variant="primary" pendingLabel={pendingLabel} act={createAction.bind(null, rosterTag, "family")} />
+      <NameForm field="The family's name" label="Make the family" variant="filled" pendingLabel={pendingLabel} act={createAction.bind(null, rosterTag, "family")} />
     </Card>
   );
 }

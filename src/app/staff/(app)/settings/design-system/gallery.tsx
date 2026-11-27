@@ -77,11 +77,12 @@ const invoiceColumns: Column<Invoice>[] = [
   { key: "due", header: "Due", cell: (i) => <CalendarDate iso={i.due} /> },
   { key: "state", header: "State", cell: (i) => <StatusBadge tone={i.state === "Paid" ? "done" : "due"}>{i.state}</StatusBadge> },
   { key: "amount", header: "Amount", numeric: true, sorted: "descending", cell: (i) => formatMoney(i.cents) },
-  { key: "open", header: "Actions", quiet: true, cell: () => <LinkButton plain variant="secondary" size="sm" href="#ds-data-table">Open</LinkButton> },
+  { key: "open", header: "Actions", quiet: true, cell: () => <LinkButton plain variant="tonal" size="sm" href="#ds-data-table">Open</LinkButton> },
 ];
 
-const SWATCHES = ["ground", "surface", "surface-muted", "border", "border-control", "border-strong", "ink", "ink-2", "ink-3",
-  "done", "done-soft", "due", "due-soft", "late", "late-soft", "info", "info-soft", "neutral-soft", "badge-ink"] as const;
+const SWATCHES = ["ground", "surface", "card", "surface-container-lowest", "surface-container-low", "surface-container", "surface-container-high", "surface-container-highest",
+  "on-surface", "on-surface-variant", "outline", "outline-variant",
+  "done", "done-container", "due", "due-container", "late", "late-container", "info", "info-container", "neutral-container", "badge-ink"] as const;
 
 /** A small piece of Home, drawn again in each display mode. */
 function MiniHome({ id }: { id: string }) {
@@ -139,28 +140,28 @@ export function Gallery() {
       <Section id="button" name="Button and LinkButton" use="Button does something; LinkButton goes somewhere. One primary (the club's fill) per area; secondary for the others; quiet for a small action in a sentence or a row; danger for removing or ending. Every button is 44px tall. Busy is aria-disabled with a spinner, never disabled, on parent pages." importLine={UI("Button, LinkButton")}>
         <div className="ds-samples">
           <Button>Save my details</Button>
-          <Button variant="secondary">Cancel</Button>
-          <Button variant="quiet">Not now</Button>
+          <Button variant="outlined">Cancel</Button>
+          <Button variant="text">Not now</Button>
           <Button variant="danger">Remove guardian</Button>
-          <Button variant="club">Add a passkey</Button>
+          <Button variant="tonal">Add a passkey</Button>
           <LinkButton plain href="#ds-button">Pay<Arrow /></LinkButton>
         </div>
         <div className="ds-samples">
           <Button className="ds-hover">Hover</Button>
-          <Button variant="secondary" className="ds-hover">Hover</Button>
+          <Button variant="outlined" className="ds-hover">Hover</Button>
           <Button className="ds-focus">Focus</Button>
           <Button busy>Saving…</Button>
-          <Button variant="secondary" disabled>Disabled</Button>
+          <Button variant="outlined" disabled>Disabled</Button>
           <Button size="sm">Small</Button>
-          <Button size="sm" variant="secondary">Small secondary</Button>
+          <Button size="sm" variant="tonal">Small secondary</Button>
         </div>
-        <p className="ds-note">Hover lays a light wash over the fill (secondary: the muted ground). Focus is the club&apos;s ring, 2px (3px in high contrast), drawn here on the sample. A long label wraps inside the button: <Button variant="secondary">See every payment the family has made this season</Button></p>
+        <p className="ds-note">Hover lays a light wash over the fill (secondary: the muted ground). Focus is the club&apos;s ring, 2px (3px in high contrast), drawn here on the sample. A long label wraps inside the button: <Button variant="outlined">See every payment the family has made this season</Button></p>
         <div className="ds-pair">
           <div>
             <h3>Do: a button for anything that starts, changes or moves a task on</h3>
             <div className="ds-samples">
               <LinkButton plain href="#ds-button">Next: connect to QuickBooks</LinkButton>
-              <LinkButton plain variant="secondary" href="#ds-button">Connect a different company</LinkButton>
+              <LinkButton plain variant="outlined" href="#ds-button">Connect a different company</LinkButton>
             </div>
             <p className="ds-note">Button submits a form; LinkButton goes to an action or the next step. Primary for the one thing the step is for, secondary for the others.</p>
           </div>
@@ -189,10 +190,10 @@ export function Gallery() {
 
       <Section id="card" name="Card" use="A titled region of a page: what a family owes, its students, a setting. Its title names the region for screen readers. Actions sit at the foot, or beside the title with headActions. Never a card inside a card." importLine={UI("Card")}>
         <div className="ds-pair">
-          <Card title="Sample Family" titleId="ds-card-a" description="A quiet line under the title" actions={<LinkButton variant="secondary" plain href="#ds-card">See your payments</LinkButton>}>
+          <Card title="Sample Family" titleId="ds-card-a" description="A quiet line under the title" actions={<LinkButton variant="outlined" plain href="#ds-card">See your payments</LinkButton>}>
             <p className="help">The card&apos;s content: words, a List, a DataTable or a form.</p>
           </Card>
-          <Card title="A much longer title that has to wrap onto a second line on a phone" titleId="ds-card-b" headActions={<Button size="sm" variant="secondary">Edit</Button>}>
+          <Card title="A much longer title that has to wrap onto a second line on a phone" titleId="ds-card-b" headActions={<Button size="sm" variant="tonal">Edit</Button>}>
             <p className="help">With headActions the action sits beside the title and wraps under it when there is no room.</p>
           </Card>
         </div>
@@ -205,7 +206,7 @@ export function Gallery() {
             <List>
               <ListRow status={{ tone: "due", words: "2 of 3 left" }} title="Sign Sam's forms" meta="Due Nov 15" action={<LinkButton plain size="sm" href="#ds-list">Sign</LinkButton>} />
               <ListRow status={{ tone: "late", words: "Was due Oct 30" }} title="Sample trip deposit, Alex" amount={formatMoney(10000)} action={<LinkButton plain size="sm" href="#ds-list">Pay</LinkButton>} />
-              <ListRow status={{ tone: "due", words: "Due Nov 22" }} title="Sample uniform fee with a long name that wraps onto a second line, Sam Sample" amount={formatMoney(8500)} action={<LinkButton plain size="sm" variant="secondary" href="#ds-list">Pay</LinkButton>} />
+              <ListRow status={{ tone: "due", words: "Due Nov 22" }} title="Sample uniform fee with a long name that wraps onto a second line, Sam Sample" amount={formatMoney(8500)} action={<LinkButton plain size="sm" variant="tonal" href="#ds-list">Pay</LinkButton>} />
               <ListRow status={{ tone: "done", words: "All signed" }} title="Alex Sample" meta="Flute · Grade 10" />
               <ListRow status={{ tone: "neutral", words: "Not started" }} title="Volunteer shift" />
             </List>
@@ -234,10 +235,10 @@ export function Gallery() {
             <SectionLabel level={3}>A row with a detail under it, and a pair of actions</SectionLabel>
             <List>
               <ListRow title={<strong>Sample passkey</strong>} meta={["Added Oct 1, 2026", "Last used Nov 20, 2026"]}
-                action={<><Button size="sm" variant="quiet">Rename</Button><Button size="sm" variant="danger">Remove</Button></>}
+                action={<><Button size="sm" variant="text">Rename</Button><Button size="sm" variant="danger">Remove</Button></>}
                 detail={<p className="help">Removing your last passkey means we ask for the emailed code again.</p>} />
               <ListRow title="Pancake breakfast, Griddle" meta={["Saturday, 7:00 am to 9:00 am", "You're doing this one"]}
-                detail={<><span className="state">Signed up</span><Button size="sm" variant="secondary">Cancel my sign-up</Button></>} />
+                detail={<><span className="state">Signed up</span><Button size="sm" variant="tonal">Cancel my sign-up</Button></>} />
             </List>
           </div>
           <div>
@@ -257,7 +258,7 @@ export function Gallery() {
 
       <Section id="page-header" name="PageHeader" use="The top of every page: the way back when there is one, the h1, one quiet line, and the page's own actions." importLine={UI("PageHeader")}>
         <div className="ds-samples stacked">
-          <PageHeader sample back={{ href: "#ds-page-header", label: "Back to Roster" }} title="Sample Family" lede="2 students · 1 guardian · as of 2:14 pm" actions={<><Button variant="secondary">Rename</Button><Button>Add a student</Button></>} />
+          <PageHeader sample back={{ href: "#ds-page-header", label: "Back to Roster" }} title="Sample Family" lede="2 students · 1 guardian · as of 2:14 pm" actions={<><Button variant="outlined">Rename</Button><Button>Add a student</Button></>} />
         </div>
       </Section>
 
@@ -340,7 +341,7 @@ export function Gallery() {
       </Section>
 
       <Section id="toolbar" name="Toolbar" use="Filters over the table or list they scope, actions at the end. It wraps on a phone." importLine={UI("Toolbar, TextInput, Select")}>
-        <Toolbar label="Filter invoices" end={<Button variant="secondary">Clear</Button>}>
+        <Toolbar label="Filter invoices" end={<Button variant="outlined">Clear</Button>}>
           <TextInput id="ds-search" label="Search" type="search" placeholder="A name or invoice" autoComplete="off" />
           <Select id="ds-state" label="State" defaultValue="open"><option value="open">Open</option><option value="paid">Paid</option></Select>
         </Toolbar>

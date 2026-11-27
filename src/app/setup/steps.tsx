@@ -63,7 +63,7 @@ export function MailStep({ n, summary, error }: { n: number; summary: MailSummar
       <MailGuide summary={summary} save={saveSetupMailAction} test={sendSetupTestMailAction} />
       <div className="stack">
         <form action={goToStepAction.bind(null, "admin")}><button className="btn" disabled={!summary.working}>Next: first Admin</button></form>
-        <form action={goToStepAction.bind(null, "staff")}><button className="btn btn-line">Back to staff sign-in</button></form>
+        <form action={goToStepAction.bind(null, "staff")}><button className="btn btn-outlined">Back to staff sign-in</button></form>
       </div>
     </>
   );
@@ -94,7 +94,7 @@ export function AdminStep({ n, adminEmail, adminName, byKey, error, signinFailed
         </div>}
         {message && <><Notice tone="problem">{message}</Notice><SetupStaffSignOut /></>}
       </section>
-      <form action={goToStepAction.bind(null, "mail")}><button className="btn btn-line">Back to outgoing mail</button></form>
+      <form action={goToStepAction.bind(null, "mail")}><button className="btn btn-outlined">Back to outgoing mail</button></form>
     </>
   );
 }

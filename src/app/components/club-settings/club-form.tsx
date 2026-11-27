@@ -2,23 +2,25 @@
 import { ActionOutcome, Notice } from "@/app/components/notice";
 import { startTransition, useActionState, useState, type CSSProperties } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
-import { clubCssVars, deriveClubTokens, normalizeHex } from "@/lib/theme/contrast";
+import { normalizeHex } from "@/lib/theme/contrast";
+import { clubCssVars, clubScheme } from "@/lib/theme/scheme";
 
 export type ClubValues = { name: string; shortName: string; color: string; timeZone: string; treasurerEmail?: string };
 type Done = { ok: true; message?: string } | { ok: false; errors: string[] };
 const failed: Done = { ok: false, errors: [ACTION_FAILED] };
 
-/** The club bar as it will look in the color picked: its text color worked out by the same rule as the real bar. */
+/** The club bar as it will look in the color picked: the logo tile in the color itself, and a button and the current tab in the scheme it makes, by the same rule as the real pages. */
 function Preview({ name, shortName, color }: { name: string; shortName: string; color: string }) {
   const hex = normalizeHex(color);
   if (!hex) return null;
-  const style = clubCssVars(deriveClubTokens(hex)) as CSSProperties;
+  const style = clubCssVars(clubScheme(hex)) as CSSProperties;
   return (
     <div className="stack">
       <div className="club-preview" style={style} aria-hidden="true">
         <span className="monogram">{shortName || "?"}</span><span className="club">{name || "Your club"}</span>
+        <span className="club-preview-pill">Home</span><span className="club-preview-button">Pay</span>
       </div>
-      <p className="hint">The bar at the top of every page, in this color. Whatever color you pick, the portal works out the text colors so every page stays easy to read, by day and at night.</p>
+      <p className="hint">Your logo tile in this color, and the buttons and tabs it gives. Whatever color you pick, the portal works out the shades so every page stays easy to read, by day and at night.</p>
     </div>
   );
 }

@@ -146,7 +146,7 @@ export function MessageForm({ families, emailTo, edit }: {
         <List label="Files in this message">
           {files.map((f) => (
             <ListRow key={f.id} title={f.name} meta={[f.picture ? "Picture" : MESSAGE_FILE_WORDS[f.type], fileSizeWords(f.size)]}
-              action={<Button size="sm" variant="quiet" onClick={() => void remove(f)}>Remove<span className="visually-hidden"> {f.name}</span></Button>} />
+              action={<Button size="sm" variant="text" onClick={() => void remove(f)}>Remove<span className="visually-hidden"> {f.name}</span></Button>} />
           ))}
         </List>
       )}

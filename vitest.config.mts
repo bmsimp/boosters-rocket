@@ -23,6 +23,9 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // The color library's 0.4.0 imports a few of its own files without the .js ending, which Node's ESM loader refuses
+    // (Next's bundler and tsx accept it): vite transforms it instead, as it would the app's own code.
+    server: { deps: { inline: ["@material/material-color-utilities"] } },
     globalSetup: ["tests/setup/global-setup.ts"],
     // Hooks reset the database and close servers; on a loaded machine that has taken longer than the 10-second default.
     hookTimeout: 30_000,

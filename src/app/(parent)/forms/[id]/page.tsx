@@ -102,7 +102,7 @@ export default async function FormPage({ params }: { params: Promise<{ id: strin
             <p className="help">Thank you! There&apos;s nothing more to do for this form.</p>
             {parts > 0 ? (
               <div className="box-foot">{Array.from({ length: parts }, (_, i) => (
-                <a key={i} className="btn btn-line" href={`/forms/${form.row.id}/signed${i === 0 ? "" : `?part=${i + 1}`}`} download="signed-form.pdf">
+                <a key={i} className="btn btn-outlined" href={`/forms/${form.row.id}/signed${i === 0 ? "" : `?part=${i + 1}`}`} download="signed-form.pdf">
                   Download the signed form{parts > 1 ? ` (part ${i + 1})` : ""}
                 </a>))}
               </div>
@@ -123,7 +123,7 @@ export default async function FormPage({ params }: { params: Promise<{ id: strin
         {step.kind === "unavailable" && (
           <>
             <p className="help" role="status">We can&apos;t show this form right now. Nothing is lost. Please try again in a few minutes.</p>
-            <div className="box-foot"><a className="btn btn-line" href={`/forms/${form.row.id}`}>Try again</a></div>
+            <div className="box-foot"><a className="btn btn-outlined" href={`/forms/${form.row.id}`}>Try again</a></div>
           </>
         )}
 

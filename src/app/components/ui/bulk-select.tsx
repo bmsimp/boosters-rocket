@@ -57,12 +57,12 @@ export function BulkSelect({ pageIds, total, noun, actions, children }: {
           <p className="bulk-count" aria-live="polite">{count > 0 ? words : ""}</p>
           {offersAllMatching(selection, pageIds, all) && (
             <p className="bulk-all">All {pageIds.length} on this page are selected.{" "}
-              <Button variant="quiet" size="sm" onClick={() => setSelection(selectAllMatching())}>Select all {all} that match</Button></p>
+              <Button variant="text" size="sm" onClick={() => setSelection(selectAllMatching())}>Select all {all} that match</Button></p>
           )}
           {selection.allMatching && <p className="bulk-all">All {all} that match are selected.</p>}
           <div className="bulk-actions">{actions}</div>
-          <Button variant="secondary" size="sm" className="bulk-menu" onClick={() => setMenu(true)}>{count} selected · Actions</Button>
-          <Button variant="quiet" size="sm" onClick={bulk.clear}>Clear</Button>
+          <Button variant="tonal" size="sm" className="bulk-menu" onClick={() => setMenu(true)}>{count} selected · Actions</Button>
+          <Button variant="text" size="sm" onClick={bulk.clear}>Clear</Button>
         </div>
         <Sheet open={menu && count > 0} onClose={() => setMenu(false)} title={words}>
           <div className="stack">{actions}</div>

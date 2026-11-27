@@ -159,7 +159,7 @@ function AppOn({ app, email, proved, strict, busy, answered, newCodes, turnOff, 
       {answered}
       <AskAgain email={email} proved={proved} section={COPY.appTitle} passkey={passkey} portalOrigin={portalOrigin}>
         <div className="stack">
-          <Button variant="secondary" busy={busy === "codes"} aria-disabled={busy !== null || undefined} onClick={() => void newCodes()}>
+          <Button variant="outlined" busy={busy === "codes"} aria-disabled={busy !== null || undefined} onClick={() => void newCodes()}>
             {busy === "codes" ? COPY.newCodesBusy : COPY.newCodes}
           </Button>
           {/* Under Strict the app stays while it is the only second step; beside a passkey (slice SI-7b) it can go. */}

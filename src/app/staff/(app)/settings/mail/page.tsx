@@ -47,7 +47,7 @@ export default async function MailSettingsPage() {
 
       <Card title={c ? "Change" : "Set up"} titleId="mail-change-h">
         <p>{c ? "Open the steps to change how mail is sent, or send a test email." : "Until mail is set up, parents can't sign in. Choose how the portal sends mail, then send a test email."}</p>
-        <p className="settings-open"><LinkButton href="/staff/settings/mail/setup" variant="primary">{c ? (attention ? "Open the steps" : "Change") : "Set up"}</LinkButton></p>
+        <p className="settings-open"><LinkButton href="/staff/settings/mail/setup" variant="filled">{c ? (attention ? "Open the steps" : "Change") : "Set up"}</LinkButton></p>
       </Card>
     </main>
   );

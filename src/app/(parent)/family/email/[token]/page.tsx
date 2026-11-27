@@ -29,7 +29,7 @@ export default async function ConfirmEmailPage({ params }: { params: Promise<{ t
         </Card>
       ) : (
         <Card title={view.state === "ask_club" ? "Ask the club" : "This link can't be used"} titleId="confirm-h"
-          actions={<LinkButton plain variant="secondary" href="/family">Back to Family</LinkButton>}>
+          actions={<LinkButton plain variant="outlined" href="/family">Back to Family</LinkButton>}>
           <p className="help">{view.state === "ask_club" ? EMAIL_COPY.askTheClub : EMAIL_COPY.linkNoGood}</p>
         </Card>
       )}

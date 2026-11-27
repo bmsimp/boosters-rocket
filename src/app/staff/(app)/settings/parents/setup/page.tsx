@@ -112,11 +112,11 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
           {level !== "strict" && <p>{strictConfirm(factors.neither, settings.signin)}</p>}
           <div className="row-actions">
             {level !== "strict" && (
-              <ConfirmDialog label="Switch to Strict" variant="primary" busyLabel="Switching…" consequence={strictConfirm(factors.neither, settings.signin)}
+              <ConfirmDialog label="Switch to Strict" variant="filled" busyLabel="Switching…" consequence={strictConfirm(factors.neither, settings.signin)}
                 act={setLevelAction.bind(null, "strict", factors.neither)} />
             )}
             {level !== "standard" && (
-              <ConfirmDialog label="Switch back to Standard" variant="secondary" busyLabel="Switching…"
+              <ConfirmDialog label="Switch back to Standard" variant="outlined" busyLabel="Switching…"
                 consequence="Guardians with no passkey or app sign in with their password and an emailed code again. Nobody is signed out."
                 act={setLevelAction.bind(null, "standard", null)} />
             )}

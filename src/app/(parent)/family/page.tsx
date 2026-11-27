@@ -30,15 +30,15 @@ export default async function FamilyPage() {
       ) : <NotSetUpBox treasurerEmail={club.treasurerEmail} />}
       {ctx.families.length > 1 && (
         // Only the family being viewed is named here; the chooser lists the others.
-        <Card title="Your families" titleId="fams-h" actions={<LinkButton plain variant="secondary" href="/choose-family">Switch family</LinkButton>}>
+        <Card title="Your families" titleId="fams-h" actions={<LinkButton plain variant="outlined" href="/choose-family">Switch family</LinkButton>}>
           <p>You&apos;re a guardian in {ctx.families.length} families.{family ? <> You&apos;re looking at {family.name} now.</> : null}</p>
         </Card>
       )}
       {/* No id in either link: each page takes whose sign-in it is from the session. */}
       <Card title="Your account" titleId="acct-h" description="How you sign in to the portal"
         actions={<>
-          <LinkButton variant="secondary" href="/family/sign-in">Sign-in settings</LinkButton>
-          {ownEmail && <LinkButton variant="secondary" href="/family/email">Change my sign-in email</LinkButton>}
+          <LinkButton variant="outlined" href="/family/sign-in">Sign-in settings</LinkButton>
+          {ownEmail && <LinkButton variant="outlined" href="/family/email">Change my sign-in email</LinkButton>}
         </>}>
         {/* The sign-in email is shown here, once on the page, beside how it is used; the name only when Your details isn't shown. */}
         <KeyValue items={[!family && { key: "name", label: "Name", value: ctx.name }, { key: "email", label: "Email", value: ctx.email }]} />

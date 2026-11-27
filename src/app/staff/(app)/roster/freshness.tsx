@@ -6,7 +6,7 @@ import { refreshRosterAction } from "./actions";
 
 /** Who can fix a QuickBooks problem: an Admin gets the link, everyone else is told who to ask. */
 function WhoCanFix({ admin }: { admin: boolean }) {
-  return admin ? <> <LinkButton plain variant="secondary" size="sm" href="/staff/settings/quickbooks">Open QuickBooks settings</LinkButton></> : <> An Admin can reconnect it under QuickBooks.</>;
+  return admin ? <> <LinkButton plain variant="tonal" size="sm" href="/staff/settings/quickbooks">Open QuickBooks settings</LinkButton></> : <> An Admin can reconnect it under QuickBooks.</>;
 }
 
 /** Shown on every roster page once a roster exists and QuickBooks has been disconnected (spec §3 Disconnect). */

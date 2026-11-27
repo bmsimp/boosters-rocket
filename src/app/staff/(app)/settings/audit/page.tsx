@@ -43,7 +43,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
               // The details on one short line under the words, cut where it runs out; all of them in a Drawer.
               return (<>{name}<span className="when"><code>{r.action}</code></span>
                 {details ? <><span className="audit-more">{details}</span>
-                  <Drawer param="details" value={String(r.id)} variant="quiet" size="sm" title={`Details: ${name}`}
+                  <Drawer param="details" value={String(r.id)} variant="text" size="sm" title={`Details: ${name}`}
                     label={<>Show the details<span className="visually-hidden"> of {name}, <LocalTime iso={r.at.toISOString()} /></span></>}>
                     <code className="audit-full">{details}</code></Drawer></> : null}</>);
             } },
@@ -54,10 +54,10 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
           ]} />
         )}
         <div className="row-actions box-foot">
-          {page.newer !== null && <Link className="btn btn-line" href={`/staff/settings/audit${filtersQuery(filters, { after: page.newer })}`}>Newer</Link>}
-          {page.older !== null && <Link className="btn btn-line" href={`/staff/settings/audit${filtersQuery(filters, { before: page.older })}`}>Older</Link>}
+          {page.newer !== null && <Link className="btn btn-outlined" href={`/staff/settings/audit${filtersQuery(filters, { after: page.newer })}`}>Newer</Link>}
+          {page.older !== null && <Link className="btn btn-outlined" href={`/staff/settings/audit${filtersQuery(filters, { before: page.older })}`}>Older</Link>}
           {/* A plain link, not a Link: it is a file to download, and it must never be fetched ahead of a click (each export is audited). */}
-          {page.total > 0 && <a className="btn btn-line" href={`/staff/settings/audit/export${filtersQuery(filters)}`} download>Export {filtered ? `these ${rowsWord(page.total)}` : `all ${rowsWord(page.total)}`} (CSV)</a>}
+          {page.total > 0 && <a className="btn btn-outlined" href={`/staff/settings/audit/export${filtersQuery(filters)}`} download>Export {filtered ? `these ${rowsWord(page.total)}` : `all ${rowsWord(page.total)}`} (CSV)</a>}
         </div>
       </section>
     </main>

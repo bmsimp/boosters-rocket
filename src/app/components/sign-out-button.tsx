@@ -20,7 +20,7 @@ export function SignOutButton({ door }: { door: "staff" | "parent" }) {
   };
   return (
     <div className="sign-out">
-      <button type="button" className="btn btn-line" onClick={go} disabled={busy}>{busy ? "Signing out…" : "Sign out"}</button>
+      <button type="button" className="btn btn-outlined" onClick={go} disabled={busy}>{busy ? "Signing out…" : "Sign out"}</button>
       {/* Staff pages answer in notices (DESIGN.md); the parent pages keep their own error line. */}
       {failed && (door === "staff" ? <Notice tone="problem">We couldn&apos;t sign you out just then. Please try again.</Notice>
         : <p role="alert" className="errors">We couldn&apos;t sign you out just then. Please try again.</p>)}

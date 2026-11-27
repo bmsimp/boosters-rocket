@@ -30,7 +30,7 @@ export function PaymentItemForm({ items, chosen, save }: {
           {items.map((i) => <option key={i.qboId} value={i.qboId}>{i.label}</option>)}
         </select></label>
       <Outcome state={state} />
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : "Save product or service"}</button>
+      <button type="button" className="btn btn-outlined" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : "Save product or service"}</button>
     </form>
   );
 }

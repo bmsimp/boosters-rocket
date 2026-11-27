@@ -18,7 +18,7 @@ export function SignInButton({ provider, label, primary }: { provider: "microsof
   };
   return (
     <>
-      <button type="button" className={primary ? "btn" : "btn btn-line"} onClick={go}>{label}</button>
+      <button type="button" className={primary ? "btn" : "btn btn-outlined"} onClick={go}>{label}</button>
       {failed && <Notice tone="problem">{FAILED}</Notice>}
     </>
   );

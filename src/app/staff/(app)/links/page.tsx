@@ -334,7 +334,7 @@ function Opening({ row, tag, guardianLinks, maySend }: { row: LinkRow; tag: stri
       {row.confirm !== null && row.customer !== null && <><p>Confirming links it to &ldquo;{row.customer.name}&rdquo;. Nothing is sent to the books.</p><ProposalsShown proposals={row.confirm.proposals} /><p>{LINK_EFFECT}</p>{guardianLinks && <p>{LINK_GUARDIANS_EFFECT}</p>}</>}
       {row.review !== null && <ReviewShown review={row.review} />}
       {row.unlink !== null && <UnlinkShown unlink={row.unlink} />}
-      {row.offers.pick && <p><LinkButton variant="secondary" size="sm" href={pickHref(id)}>Pick a different customer<span className="visually-hidden">: {row.name}</span></LinkButton></p>}
+      {row.offers.pick && <p><LinkButton variant="tonal" size="sm" href={pickHref(id)}>Pick a different customer<span className="visually-hidden">: {row.name}</span></LinkButton></p>}
       {(row.confirm !== null || row.review !== null || row.unlink !== null || row.offers.leave || row.offers.undo) && (
         <div className="row-actions">
           {row.confirm !== null && <ConfirmPress familyId={id} about={row.name} offer={row.confirm} tag={tag} />}
@@ -492,7 +492,7 @@ function PickPart({ view, familyId, customerId, cq, tag, made }: { view: LinksVi
       <form method="get" action="/staff/links" role="search">
         <input type="hidden" name="pick" value={id} />
         <Toolbar label="Search the customers with no family"
-          end={<><Button type="submit" variant="secondary">Search</Button><LinkButton variant="quiet" href="/staff/links">Close</LinkButton></>}>
+          end={<><Button type="submit" variant="outlined">Search</Button><LinkButton variant="text" href="/staff/links">Close</LinkButton></>}>
           <TextInput id="links-cq" label="Customer name or email address" name="cq" type="search" maxLength={SEARCH_MAX} defaultValue={cq} autoComplete="off" />
         </Toolbar>
       </form>
@@ -591,8 +591,8 @@ export default async function AccountingLinksPage({ searchParams }: { searchPara
                 {STATUS_KEYS.map((k) => <option key={k} value={k}>{STATUS_WORDS[k]} ({counts[k]})</option>)}
               </Select>
               <TextInput id="links-q" label="Family name or email address" name="q" type="search" maxLength={SEARCH_MAX} defaultValue={filter.q} autoComplete="off" />
-              <Button type="submit" variant="secondary">Show</Button>
-              {filtered && <LinkButton variant="quiet" href="/staff/links">Show every family</LinkButton>}
+              <Button type="submit" variant="outlined">Show</Button>
+              {filtered && <LinkButton variant="text" href="/staff/links">Show every family</LinkButton>}
             </Toolbar>
           </form>
           {overlap > 0 && <p>{overlap === 1 ? "1 family whose link was carried over has differences, so it is counted under both Carried over and Linked, with differences."

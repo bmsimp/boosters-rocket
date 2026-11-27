@@ -42,7 +42,7 @@ export default async function StaffMessagePage({ params, searchParams }: { param
     <main className="wrap single">
       <PageHeader title={current!.title} back={back}
         lede={<>Posted by {m.postedBy.name} · <LocalTime iso={m.postedAt.toISOString()} dateOnly />{earlier.length > 0 && <> · Edited <LocalTime iso={current!.savedAt.toISOString()} dateOnly /></>}</>}
-        actions={isPoster ? <LinkButton variant="secondary" href={`/staff/messages/${m.id}/edit`}>Edit</LinkButton> : undefined} />
+        actions={isPoster ? <LinkButton variant="outlined" href={`/staff/messages/${m.id}/edit`}>Edit</LinkButton> : undefined} />
       {shown ? (
         <Card title={`Version ${shown.n}`} titleId="version-h" description={<>Saved <LocalTime iso={shown.savedAt.toISOString()} dateOnly />, before it was edited. <a className="link-line" href={`/staff/messages/${m.id}`}>Read the current version</a></>}>
           <h3 className="message-title">{shown.title}</h3>

@@ -55,7 +55,7 @@ export function DetailsEditor({ initial }: { initial: ContactForm }) {
       {/* Busy is aria-disabled, not disabled: a disabled button drops the focus, and the keyboard's place with it. */}
       <div className="row-actions">
         <Button type="submit" busy={pending}>{pending ? "Saving…" : "Save my details"}</Button>
-        <LinkButton plain variant="secondary" href="/family">Back to Family</LinkButton>
+        <LinkButton plain variant="outlined" href="/family">Back to Family</LinkButton>
       </div>
     </form>
   );

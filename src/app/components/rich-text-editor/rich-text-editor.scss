@@ -23,60 +23,60 @@ html:root { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 
 /* ---- 2. Its palette, on our tokens ---- */
 html:root {
-  --white: var(--surface);
-  --black: var(--ink);
+  --white: var(--card);
+  --black: var(--on-surface);
   --transparent: transparent;
 
-  --tt-gray-light-a-50: transparent; --tt-gray-light-a-100: var(--surface-muted); --tt-gray-light-a-200: var(--border);
-  --tt-gray-light-a-300: var(--border-control); --tt-gray-light-a-400: var(--ink-3); --tt-gray-light-a-500: var(--ink-2);
-  --tt-gray-light-a-600: var(--ink-2); --tt-gray-light-a-700: var(--ink); --tt-gray-light-a-800: var(--ink); --tt-gray-light-a-900: var(--ink);
-  --tt-gray-light-50: var(--surface-muted); --tt-gray-light-100: var(--surface-muted); --tt-gray-light-200: var(--surface-muted);
-  --tt-gray-light-300: var(--border-control); --tt-gray-light-400: var(--ink-3); --tt-gray-light-500: var(--ink-2);
-  --tt-gray-light-600: var(--ink-2); --tt-gray-light-700: var(--ink); --tt-gray-light-800: var(--ink); --tt-gray-light-900: var(--ink);
+  --tt-gray-light-a-50: transparent; --tt-gray-light-a-100: var(--surface-container-high); --tt-gray-light-a-200: var(--outline-variant);
+  --tt-gray-light-a-300: var(--outline-variant); --tt-gray-light-a-400: var(--outline); --tt-gray-light-a-500: var(--on-surface-variant);
+  --tt-gray-light-a-600: var(--on-surface-variant); --tt-gray-light-a-700: var(--on-surface); --tt-gray-light-a-800: var(--on-surface); --tt-gray-light-a-900: var(--on-surface);
+  --tt-gray-light-50: var(--surface-container-high); --tt-gray-light-100: var(--surface-container-high); --tt-gray-light-200: var(--surface-container-high);
+  --tt-gray-light-300: var(--outline-variant); --tt-gray-light-400: var(--outline); --tt-gray-light-500: var(--on-surface-variant);
+  --tt-gray-light-600: var(--on-surface-variant); --tt-gray-light-700: var(--on-surface); --tt-gray-light-800: var(--on-surface); --tt-gray-light-900: var(--on-surface);
   /* the dark grays only draw on the inverted tooltip (its shortcut keys): the surface's ink */
-  --tt-gray-dark-a-300: var(--surface); --tt-gray-dark-a-400: var(--surface); --tt-gray-dark-a-600: var(--surface);
+  --tt-gray-dark-a-300: var(--card); --tt-gray-dark-a-400: var(--card); --tt-gray-dark-a-600: var(--card);
 
-  --tt-brand-color-50: var(--club-tint); --tt-brand-color-100: var(--club-tint); --tt-brand-color-200: var(--club-tint);
-  --tt-brand-color-300: var(--club-text); --tt-brand-color-400: var(--club-text); --tt-brand-color-500: var(--club-text);
-  --tt-brand-color-600: var(--club-text); --tt-brand-color-700: var(--club-text); --tt-brand-color-800: var(--club-text);
-  --tt-brand-color-900: var(--club-text); --tt-brand-color-950: var(--club-text);
-  --tt-color-red-base: var(--late); --tt-color-red-dec-1: var(--late); --tt-color-red-inc-5: var(--late-soft); --tt-color-red-inc-4: var(--late-soft);
+  --tt-brand-color-50: var(--secondary-container); --tt-brand-color-100: var(--secondary-container); --tt-brand-color-200: var(--secondary-container);
+  --tt-brand-color-300: var(--primary); --tt-brand-color-400: var(--primary); --tt-brand-color-500: var(--primary);
+  --tt-brand-color-600: var(--primary); --tt-brand-color-700: var(--primary); --tt-brand-color-800: var(--primary);
+  --tt-brand-color-900: var(--primary); --tt-brand-color-950: var(--primary);
+  --tt-color-red-base: var(--late); --tt-color-red-dec-1: var(--late); --tt-color-red-inc-5: var(--late-container); --tt-color-red-inc-4: var(--late-container);
 
-  --tt-bg-color: var(--surface);
-  --tt-border-color: var(--border);
-  --tt-border-color-tint: var(--border);
-  --tt-sidebar-bg-color: var(--surface-muted);
-  --tt-scrollbar-color: var(--border-control);
-  --tt-cursor-color: var(--ink);
-  --tt-selection-color: var(--club-tint);
-  --tt-card-bg-color: var(--surface-raised);
-  --tt-card-border-color: var(--border);
-  --tt-shadow-elevated-md: var(--shadow-menu);
+  --tt-bg-color: var(--card);
+  --tt-border-color: var(--outline-variant);
+  --tt-border-color-tint: var(--outline-variant);
+  --tt-sidebar-bg-color: var(--surface-container-high);
+  --tt-scrollbar-color: var(--outline-variant);
+  --tt-cursor-color: var(--on-surface);
+  --tt-selection-color: var(--secondary-container);
+  --tt-card-bg-color: var(--surface-container-high);
+  --tt-card-border-color: var(--outline-variant);
+  --tt-shadow-elevated-md: var(--shadow-3);
 
-  --tt-radius-xxs: var(--radius-badge); --tt-radius-xs: var(--radius-badge); --tt-radius-sm: var(--radius-control);
-  --tt-radius-md: var(--radius-control); --tt-radius-lg: var(--radius-control); --tt-radius-xl: var(--radius);
-  --tt-transition-duration-short: var(--dur-fast); --tt-transition-duration-default: var(--dur-fast);
-  --tt-transition-easing-default: var(--ease);
+  --tt-radius-xxs: var(--shape-s); --tt-radius-xs: var(--shape-s); --tt-radius-sm: var(--shape-m);
+  --tt-radius-md: var(--shape-m); --tt-radius-lg: var(--shape-m); --tt-radius-xl: var(--shape-l);
+  --tt-transition-duration-short: var(--effects-dur); --tt-transition-duration-default: var(--effects-dur);
+  --tt-transition-easing-default: var(--spring-default);
 
-  --tt-dropdown-menu-bg-color: var(--surface-raised);
-  --tt-dropdown-menu-text-color: var(--ink);
-  --tt-dropdown-menu-label-color: var(--ink-2);
-  --tiptap-card-bg-color: var(--surface-raised);
-  --tiptap-card-border-color: var(--border);
-  --tt-input-placeholder: var(--ink-2);
-  --tt-input-border: var(--border-strong);
+  --tt-dropdown-menu-bg-color: var(--surface-container-high);
+  --tt-dropdown-menu-text-color: var(--on-surface);
+  --tt-dropdown-menu-label-color: var(--on-surface-variant);
+  --tiptap-card-bg-color: var(--surface-container-high);
+  --tiptap-card-border-color: var(--outline-variant);
+  --tt-input-placeholder: var(--on-surface-variant);
+  --tt-input-border: var(--outline);
   --tt-input-border-focus: var(--focus);
-  --tt-toolbar-bg-color: var(--surface);
-  --tt-toolbar-border-color: var(--border);
-  --tiptap-image-upload-subtext-color: var(--ink-2);
-  --tiptap-image-upload-icon-color: var(--club-on);
-  --tiptap-image-upload-icon-bg: var(--club);
+  --tt-toolbar-bg-color: var(--card);
+  --tt-toolbar-border-color: var(--outline-variant);
+  --tiptap-image-upload-subtext-color: var(--on-surface-variant);
+  --tiptap-image-upload-icon-color: var(--on-primary);
+  --tiptap-image-upload-icon-bg: var(--primary);
 }
 
 /* ---- 3. Its components, at our sizes ---- */
 .tiptap-button.tiptap-button {
   height: auto; min-height: 44px; min-width: 44px; padding: var(--s2) var(--s3);
-  font-family: var(--font); font-size: var(--text-sm); border-radius: var(--radius-control);
+  font-family: var(--font); font-size: var(--text-sm); border-radius: var(--shape-m);
 }
 .tiptap-button.tiptap-button:has(> svg):not(:has(> :not(svg))) { padding: 0; }
 .tiptap-button.tiptap-button .tiptap-button-icon { width: 1.125rem; height: 1.125rem; }
@@ -85,21 +85,21 @@ html:root {
 }
 /* A tool that is on, or whose menu is open: the club's tint and text color. */
 .tiptap-button.tiptap-button[data-active-state="on"]:not([disabled]),
-.tiptap-button.tiptap-button[data-state="open"]:not([disabled]) { background-color: var(--club-tint); color: var(--club-text); }
+.tiptap-button.tiptap-button[data-state="open"]:not([disabled]) { background-color: var(--secondary-container); color: var(--primary); }
 .tiptap-button.tiptap-button[data-active-state="on"]:not([disabled]) .tiptap-button-icon,
-.tiptap-button.tiptap-button[data-state="open"]:not([disabled]) .tiptap-button-icon { color: var(--club-text); }
+.tiptap-button.tiptap-button[data-state="open"]:not([disabled]) .tiptap-button-icon { color: var(--primary); }
 .tiptap-button.tiptap-button .tiptap-button-text { line-height: 1.4; }
 
 .tiptap-badge.tiptap-badge { font-family: var(--font); font-size: var(--text-xs); height: auto; min-height: 1.5rem; }
 .tiptap-tooltip.tiptap-tooltip { font-family: var(--font); font-size: var(--text-xs); }
 
 .tiptap-dropdown-menu-content.tiptap-dropdown-menu-content, .tiptap-popover.tiptap-popover {
-  border: 1px solid var(--border); border-radius: var(--radius); font-family: var(--font);
+  border: 1px solid var(--outline-variant); border-radius: var(--shape-l); font-family: var(--font);
 }
-.tiptap-card.tiptap-card { border-radius: var(--radius); font-family: var(--font); }
+.tiptap-card.tiptap-card { border-radius: var(--shape-l); font-family: var(--font); }
 
 .tiptap-input.tiptap-input {
-  height: auto; min-height: 44px; padding: var(--s2) var(--s3); font-family: var(--font); font-size: var(--text-md); color: var(--ink);
+  height: auto; min-height: 44px; padding: var(--s2) var(--s3); font-family: var(--font); font-size: var(--text-md); color: var(--on-surface);
 }
 .tiptap-input.tiptap-input:focus-visible { outline: var(--ring) solid var(--focus); outline-offset: 1px; }
 
@@ -107,30 +107,30 @@ html:root {
 .tiptap-image-upload.tiptap-image-upload * { font-size: max(var(--text-xs), 1em); }
 
 /* ---- 4. The frame, the toolbar in it, and the writing area ---- */
-.rte { border: 1px solid var(--border-strong); border-radius: var(--radius-control); background: var(--surface); min-width: 0; }
-.rte:hover { border-color: var(--ink-2); }
+.rte { border: 1px solid var(--outline); border-radius: var(--shape-m); background: var(--card); min-width: 0; }
+.rte:hover { border-color: var(--on-surface-variant); }
 .rte:has(.tiptap.ProseMirror:focus-visible) { outline: var(--ring) solid var(--focus); outline-offset: 1px; border-color: var(--focus); }
 /* The toolbar stays at the frame's top on every width (the template floats it over the keyboard on a phone, which a
    form with other fields can't have), wrapping rather than scrolling sideways. */
 .rte .tiptap-toolbar.tiptap-toolbar[data-variant="fixed"] {
   position: sticky; top: 0; bottom: auto; z-index: 1; height: auto; min-height: 0; flex-wrap: wrap; gap: var(--s1);
-  padding: var(--s1); overflow: visible; border-top: 0; border-bottom: 1px solid var(--border);
-  border-radius: calc(var(--radius-control) - 1px) calc(var(--radius-control) - 1px) 0 0;
+  padding: var(--s1); overflow: visible; border-top: 0; border-bottom: 1px solid var(--outline-variant);
+  border-radius: calc(var(--shape-m) - 1px) calc(var(--shape-m) - 1px) 0 0;
 }
 .rte .tiptap-toolbar.tiptap-toolbar .tiptap-toolbar-group { flex: none; flex-wrap: wrap; }
 .rte .tiptap.ProseMirror {
-  min-height: 12rem; padding: var(--s3) var(--s4) var(--s4); color: var(--ink); font-family: var(--font); font-size: var(--text-md);
+  min-height: 12rem; padding: var(--s3) var(--s4) var(--s4); color: var(--on-surface); font-family: var(--font); font-size: var(--text-md);
   line-height: 1.6; overflow-wrap: anywhere;
 }
 .rte .tiptap.ProseMirror p:not(:first-child) { margin-top: var(--s3); }
 .rte .tiptap.ProseMirror h2 { font-size: var(--text-lg); font-weight: 600; margin-top: var(--s5); }
 .rte .tiptap.ProseMirror h3 { font-size: var(--text-md); font-weight: 600; margin-top: var(--s4); }
 .rte .tiptap.ProseMirror > h2:first-child, .rte .tiptap.ProseMirror > h3:first-child { margin-top: 0; }
-.rte .tiptap.ProseMirror a { color: var(--club-text); }
-.rte .tiptap.ProseMirror > img:not([data-type="emoji"] img) { margin: var(--s3) 0; border-radius: var(--radius-control); }
+.rte .tiptap.ProseMirror a { color: var(--primary); }
+.rte .tiptap.ProseMirror > img:not([data-type="emoji"] img) { margin: var(--s3) 0; border-radius: var(--shape-m); }
 .rte .tiptap.ProseMirror img.ProseMirror-selectednode { outline: var(--ring) solid var(--focus); outline-offset: 2px; }
 /* The selected picture's description, between the toolbar and the writing area. */
-.rte-picture { padding: var(--s3); border-bottom: 1px solid var(--border); background: var(--surface-muted); }
+.rte-picture { padding: var(--s3); border-bottom: 1px solid var(--outline-variant); background: var(--surface-container-high); }
 
 @media (forced-colors: active) {
   .tiptap-button.tiptap-button[data-active-state="on"]:not([disabled]),

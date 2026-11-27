@@ -12,13 +12,13 @@ import { compile } from "sass";
 import { sheets } from "./design-gallery-sheets";
 import { Gallery } from "../src/app/staff/(app)/settings/design-system/gallery";
 import { PoweredBy } from "../src/app/components/powered-by";
-import { clubCssVars, deriveClubTokens } from "../src/lib/theme/contrast";
+import { clubCssVars, clubScheme } from "../src/lib/theme/scheme";
 
 /** DEFAULT_COLOR in src/lib/settings/club.ts, which is not imported: that module opens the database. */
 const DEFAULT_COLOR = "#1e1b4b";
 
 const css = [readFileSync("src/app/booster.css", "utf8"), ...sheets.map((f) => compile(f, { style: "expanded", quietDeps: true }).css)].join("\n");
-const vars = Object.entries(clubCssVars(deriveClubTokens(DEFAULT_COLOR))).map(([k, v]) => `${k}: ${v}`).join("; ");
+const vars = Object.entries(clubCssVars(clubScheme(DEFAULT_COLOR))).map(([k, v]) => `${k}: ${v}`).join("; ");
 const body = renderToStaticMarkup(
   <>
     <header className="bar">

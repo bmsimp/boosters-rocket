@@ -42,7 +42,7 @@ export function CheckConnection({ check }: { check: () => Promise<Done> }) {
   const [state, run, pending] = useActionState(async () => safely(() => check(), failed), null);
   return (
     <form action={run} className="one-button">
-      <button className="btn btn-line" disabled={pending}>{pending ? "Checking…" : "Check the connection"}</button>
+      <button className="btn btn-outlined" disabled={pending}>{pending ? "Checking…" : "Check the connection"}</button>
       <Outcome state={state} />
     </form>
   );
@@ -57,7 +57,7 @@ export function WebhookSetup({ address, secretSaved, make }: { address: string; 
       <CopyField label="Webhook URL" value={address} />
       {state?.ok && <CopyField label="Secret (shown this once)" value={state.secret} />}
       <form action={run} className="one-button">
-        <button className="btn btn-line" disabled={pending}>{pending ? "Making…" : secretSaved || state?.ok ? "Make a new secret" : "Make the secret"}</button>
+        <button className="btn btn-outlined" disabled={pending}>{pending ? "Making…" : secretSaved || state?.ok ? "Make a new secret" : "Make the secret"}</button>
         {state && (<ActionOutcome state={state} />)}
       </form>
       {secretSaved && !state?.ok && <p className="hint">A secret is saved. It can&apos;t be shown again: if Documenso doesn&apos;t have it, make a new one and paste that in. The old one stops working at once.</p>}

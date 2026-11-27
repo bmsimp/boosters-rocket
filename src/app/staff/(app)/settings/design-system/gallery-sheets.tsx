@@ -64,7 +64,7 @@ function SampleReminder() {
   };
   return (
     <>
-      <Button variant="secondary" size="sm" onClick={() => { setResults(null); setOpen(true); }}>Send a reminder</Button>
+      <Button variant="tonal" size="sm" onClick={() => { setResults(null); setOpen(true); }}>Send a reminder</Button>
       <Sheet open={open} onClose={() => setOpen(false)} title={`Send a reminder to ${b.count} ${b.count === 1 ? "family" : "families"}`}
         description="A sample: nothing is sent.">
         {results === null ? (
@@ -77,7 +77,7 @@ function SampleReminder() {
           <>
             <Notice tone={results.every((r) => r.ok) ? "done" : "warning"}>{results.filter((r) => r.ok).length} sent, {results.filter((r) => !r.ok).length} not sent.</Notice>
             <ul>{results.map((r) => <li key={r.name}>{r.name}: {r.ok ? "Sent" : `Not sent. ${r.why}.`}</li>)}</ul>
-            <p><Button variant="secondary" onClick={() => { setOpen(false); b.clear(); }}>Done</Button></p>
+            <p><Button variant="outlined" onClick={() => { setOpen(false); b.clear(); }}>Done</Button></p>
           </>
         )}
       </Sheet>

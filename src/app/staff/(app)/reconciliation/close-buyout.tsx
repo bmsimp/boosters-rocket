@@ -15,7 +15,7 @@ export function CloseBuyout({ what, act }: { what: string; act: (note: string) =
   const [note, setNote] = useState("");
   const [state, run, pending] = useActionState(async () => safely(() => act(note), failed), null);
   if (state?.ok) return <ActionOutcome state={state} />;
-  if (!asking) return <div className="row-actions"><button type="button" className="btn btn-line" onClick={() => setAsking(true)}>Close this buy-out</button></div>;
+  if (!asking) return <div className="row-actions"><button type="button" className="btn btn-outlined" onClick={() => setAsking(true)}>Close this buy-out</button></div>;
   return (
     <form className="stack" onSubmit={(e) => e.preventDefault()}>
       <p>{what} Nothing is sent to QuickBooks.</p>
@@ -23,8 +23,8 @@ export function CloseBuyout({ what, act }: { what: string; act: (note: string) =
         <textarea rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>
       {state && <ActionOutcome state={state} />}
       <div className="row-actions">
-        <button type="button" className="btn btn-line" aria-disabled={pending} onClick={() => { if (!pending) startTransition(() => run()); }}>{pending ? "Closing…" : "Close it"}</button>
-        <button type="button" className="btn btn-line" onClick={() => setAsking(false)}>Keep it</button>
+        <button type="button" className="btn btn-outlined" aria-disabled={pending} onClick={() => { if (!pending) startTransition(() => run()); }}>{pending ? "Closing…" : "Close it"}</button>
+        <button type="button" className="btn btn-outlined" onClick={() => setAsking(false)}>Keep it</button>
       </div>
     </form>
   );

@@ -43,7 +43,7 @@ export default async function FormsSettingsPage() {
 
       <Card title={summary.origin === null ? "Set up" : "Change"} titleId="forms-change-h">
         <p>{summary.origin === null ? "Until forms are set up, parents read that forms aren't ready, and nothing else changes for them. Four steps: Documenso's address and an API token, a check, the webhook, and a template for each form." : "Open the steps to change the address or the API token, check the connection again, or make a new webhook secret."}</p>
-        <p className="settings-open"><LinkButton href="/staff/settings/forms/setup" variant="primary">{summary.origin === null ? "Set up" : "Change"}</LinkButton></p>
+        <p className="settings-open"><LinkButton href="/staff/settings/forms/setup" variant="filled">{summary.origin === null ? "Set up" : "Change"}</LinkButton></p>
       </Card>
     </main>
   );

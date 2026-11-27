@@ -23,8 +23,8 @@ export function ContactEmailForm({ shown, own, signIn }: { shown: string; own: b
         hint="Your sign-in address, or another you'd rather families write to, such as a club mailbox." />
       {state && <ActionOutcome state={state} />}
       <div className="row-actions">
-        <Button type="submit" variant="secondary" busy={pending}>Save contact email</Button>
-        {own && <Button variant="quiet" busy={pending} onClick={() => { if (pending) return; setValue(signIn); press(null); }}>Use my sign-in address</Button>}
+        <Button type="submit" variant="outlined" busy={pending}>Save contact email</Button>
+        {own && <Button variant="text" busy={pending} onClick={() => { if (pending) return; setValue(signIn); press(null); }}>Use my sign-in address</Button>}
       </div>
     </form>
   );

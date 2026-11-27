@@ -15,7 +15,7 @@ export function FirstAdminForm({ initialName, initialEmail, action }: {
       {state && "error" in state && <Notice tone="problem">{state.error}</Notice>}
       {/* The save answered in words: the sign-in buttons appear under it, which alone said nothing (docs/walkthrough.md). */}
       {state && "saved" in state && <Notice tone="done">{state.saved}</Notice>}
-      <button className="btn btn-line" disabled={pending}>Save name and email</button>
+      <button className="btn btn-outlined" disabled={pending}>Save name and email</button>
     </form>
   );
 }

@@ -134,7 +134,7 @@ export function PasskeyBox({ email, passkeys, proved, hasPassword, strict, app, 
               ]}
               action={renaming !== k.id && (
                 <>
-                  <Button size="sm" variant="quiet" aria-disabled={busy !== null || undefined}
+                  <Button size="sm" variant="text" aria-disabled={busy !== null || undefined}
                     ref={(el: HTMLButtonElement | null) => { if (el) renameButtons.current.set(k.id, el); else renameButtons.current.delete(k.id); }}
                     onClick={() => { setNewName(k.name ?? ""); setRenaming(k.id); }}>{COPY.passkeyRename}<span className="visually-hidden"> {k.name ?? COPY.passkeyNoName}</span></Button>
                   {canChange && !(last && strict && !app) && (
@@ -152,7 +152,7 @@ export function PasskeyBox({ email, passkeys, proved, hasPassword, strict, app, 
                         onChange={(e) => setNewName(e.target.value)} />
                       <div className="row-actions">
                         <Button type="submit" busy={busy === `rename:${k.id}`} aria-disabled={busy !== null || undefined}>{busy === `rename:${k.id}` ? COPY.passkeyRenameBusy : COPY.passkeyRenameSave}</Button>
-                        <Button variant="secondary" onClick={() => { backTo.current = k.id; setRenaming(null); }}>{COPY.passkeyRenameCancel}</Button>
+                        <Button variant="outlined" onClick={() => { backTo.current = k.id; setRenaming(null); }}>{COPY.passkeyRenameCancel}</Button>
                       </div>
                     </form>
                   )}
@@ -172,7 +172,7 @@ export function PasskeyBox({ email, passkeys, proved, hasPassword, strict, app, 
       ) : (
         <div className="stack">
           {passkeys.length > 0 && !app && (
-            <Button variant="secondary" busy={busy === "codes"} aria-disabled={busy !== null || undefined} onClick={() => void newCodes()}>
+            <Button variant="outlined" busy={busy === "codes"} aria-disabled={busy !== null || undefined} onClick={() => void newCodes()}>
               {busy === "codes" ? COPY.newCodesBusy : COPY.newCodes}
             </Button>
           )}

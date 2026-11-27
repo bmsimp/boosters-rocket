@@ -80,10 +80,10 @@ export function CancelSignup({ label, act }: { label: string; act: () => Promise
   if (state?.ok) return say ? null : <Outcome state={state} />;
   return (
     <div className="row-actions volunteer-cancel">
-      {!asking ? <Button ref={ask} size="sm" variant="secondary" onClick={() => toggle(true)}>{label}</Button> : (
+      {!asking ? <Button ref={ask} size="sm" variant="tonal" onClick={() => toggle(true)}>{label}</Button> : (
         <div className="row-actions" role="group" aria-label={`${label}?`}>
           <Button size="sm" variant="danger" busy={pending} onClick={() => { if (!pending) startTransition(() => run()); }}>{pending ? "Cancelling…" : "Yes, cancel it"}</Button>
-          <Button ref={keep} size="sm" variant="quiet" aria-disabled={pending || undefined} onClick={() => { if (!pending) toggle(false); }}>Keep it</Button>
+          <Button ref={keep} size="sm" variant="text" aria-disabled={pending || undefined} onClick={() => { if (!pending) toggle(false); }}>Keep it</Button>
         </div>
       )}
       <Outcome state={state} />
@@ -96,7 +96,7 @@ export function CancelSignup({ label, act }: { label: string; act: () => Promise
  * and checks both again. The page is drawn again without this button once the person reads "Checked in", so the words
  * that say so go to the box's Announcer, which stays.
  */
-export function CheckInButton({ label, act, wide, variant = "primary" }: { label: string; act: () => Promise<Result>; wide?: boolean; variant?: "primary" | "secondary" }) {
+export function CheckInButton({ label, act, wide, variant = "filled" }: { label: string; act: () => Promise<Result>; wide?: boolean; variant?: "filled" | "tonal" }) {
   const say = useSay();
   const [state, run, pending] = useActionState(async () => {
     const r = await safely(() => act(), failed);
@@ -106,7 +106,7 @@ export function CheckInButton({ label, act, wide, variant = "primary" }: { label
   if (state?.ok) return say ? null : <Outcome state={state} />;
   return (
     <div className={wide ? "checkin-all" : "checkin-one"}>
-      <Button variant={wide ? "primary" : variant} className={wide ? "volunteer-confirm" : "pay"} busy={pending}
+      <Button variant={wide ? "filled" : variant} className={wide ? "volunteer-confirm" : "pay"} busy={pending}
         onClick={() => { if (!pending) startTransition(() => run()); }}>{pending ? "Checking in…" : label}</Button>
       <Outcome state={state} />
     </div>

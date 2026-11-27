@@ -37,7 +37,7 @@ export async function MicrosoftMailSetup({ summary }: { summary: MailSummary }) 
   const script = (
     <ol className="steps-list">
       <li><b>Download the script.</b> If an older copy is in your Downloads folder, delete it first.
-        <p><a className="btn btn-line" href={`/setup/scripts/${SCRIPT}`} download>Download {SCRIPT}</a></p></li>
+        <p><a className="btn btn-outlined" href={`/setup/scripts/${SCRIPT}`} download>Download {SCRIPT}</a></p></li>
       <li><b>Open PowerShell 7 in the folder it downloaded to and run these three commands,</b> one at a time. The first is only needed once on each PC.
         <CopyField label="1. Install what the script needs" value="Install-Module Microsoft.Graph.Authentication, ExchangeOnlineManagement -Scope CurrentUser" />
         <CopyField label="2. Let Windows run the downloaded file" value={"Unblock-File .\\" + SCRIPT} />

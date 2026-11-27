@@ -53,7 +53,7 @@ export default async function SignInSettingsPage() {
                 key === "staff-google" ? { key: "secret", label: "Client secret", value: <>Saved <LocalTime iso={s.credentialUpdatedAt.toISOString()} />{s.expiresAt && <>, expires <CalendarDate iso={s.expiresAt.toISOString()} /></>}</> } : null,
               ]} />
             )}
-            <p className="settings-open"><LinkButton href="/staff/settings/sign-in/setup" variant="secondary">{s ? "Change" : "Set up"}<span className="visually-hidden"> {PROVIDER_LABELS[key]}</span></LinkButton></p>
+            <p className="settings-open"><LinkButton href="/staff/settings/sign-in/setup" variant="outlined">{s ? "Change" : "Set up"}<span className="visually-hidden"> {PROVIDER_LABELS[key]}</span></LinkButton></p>
           </Card>
         );
       })}

@@ -63,7 +63,7 @@ function ResultsSheet({ shown, onClose, onNext }: { shown: Shown | null; onClose
           {refused && !refused.ok && <ActionOutcome state={refused} />}
           <p className="row-actions">
             {tried.left.length > 0 && <Button variant={s.variant} busy={pending} onClick={more}>{pending ? s.busyLabel : `Do the next ${Math.min(tried.left.length, s.cap)}`}</Button>}
-            <Button variant="secondary" onClick={() => { if (!pending) { setRefused(null); onClose(); } }}>Done</Button>
+            <Button variant="outlined" onClick={() => { if (!pending) { setRefused(null); onClose(); } }}>Done</Button>
           </p>
         </div>
       )}
@@ -79,7 +79,7 @@ function ResultsSheet({ shown, onClose, onNext }: { shown: Shown | null; onClose
  * stay ticked, and "Do the next N" sends the ones not tried yet. `act` is the server action, sent only the ids (and the
  * one note `reason` asks for): it checks every id again, and works each row through the single row's own press.
  */
-export function BulkAction({ rows, label, confirmLabel, busyLabel = "Working…", description, done, reason, variant = "primary", cap = 200, act }: {
+export function BulkAction({ rows, label, confirmLabel, busyLabel = "Working…", description, done, reason, variant = "filled", cap = 200, act }: {
   /** Each row a press can take, by its id: its name, and what the press would do to it, in the page's words. */
   rows: ReadonlyMap<string, { name: string; line: string }>;
   /** The bar's button and the Drawer's title, for this many rows: a verb and its object. */
@@ -136,7 +136,7 @@ export function BulkAction({ rows, label, confirmLabel, busyLabel = "Working…"
   const close = () => { if (!pending) { setOpen(false); setRefused(null); } };
   return (
     <>
-      <Button variant={variant === "danger" ? "danger" : "secondary"} size="sm" onClick={() => { setRefused(null); setTitleN(n); setOpen(true); }} aria-disabled={n === 0 || undefined}>{label(n)}</Button>
+      <Button variant={variant === "danger" ? "danger" : "tonal"} size="sm" onClick={() => { setRefused(null); setTitleN(n); setOpen(true); }} aria-disabled={n === 0 || undefined}>{label(n)}</Button>
       <Sheet open={open} onClose={close} title={label(titleN)} description={description}>
         <div className="stack">
           {n === 0 ? <Notice tone="info" live="none">None of the rows ticked can be taken by this. Tick the rows it offers a box for.</Notice> : (
@@ -147,7 +147,7 @@ export function BulkAction({ rows, label, confirmLabel, busyLabel = "Working…"
               {refused && !refused.ok && <ActionOutcome state={refused} />}
               <p className="row-actions">
                 <Button variant={variant} busy={pending} onClick={send}>{pending ? busyLabel : confirmLabel(Math.min(n, cap))}</Button>
-                <Button variant="secondary" onClick={close}>Cancel</Button>
+                <Button variant="outlined" onClick={close}>Cancel</Button>
               </p>
             </>
           )}

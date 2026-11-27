@@ -107,7 +107,7 @@ export default async function SignedFormsPage({ searchParams }: { searchParams: 
                     {FILTER_STATES.map((s) => <option key={s} value={s}>{CELL_WORDS[s]}</option>)}
                   </select></label>
                 <label className="field"><span>Family or student name</span><input name="q" type="search" maxLength={100} defaultValue={filter.search} /></label>
-                <div className="matrix-filter-go"><button type="submit" className="btn btn-line">Show</button>{filtered && <Link href="/staff/forms">Show everyone</Link>}</div>
+                <div className="matrix-filter-go"><button type="submit" className="btn btn-outlined">Show</button>{filtered && <Link href="/staff/forms">Show everyone</Link>}</div>
               </form>
 
               {matrix.families.length === 0 ? <Notice tone="info">{filtered ? "Nobody matches that." : "Nobody on the roster is asked for these forms."}</Notice> : (
