@@ -10,6 +10,7 @@ import { IntegrationLogo } from "../integration-logo";
 import { PoweredBy } from "@/app/components/powered-by";
 import { ChoiceSample, TakenChoiceSample } from "./gallery-choice";
 import { BulkSample, ConfirmSample, DrawerSample, StepsChoiceSample } from "./gallery-sheets";
+import { SeedSample } from "./gallery-seed";
 import { RichTextEditor } from "@/app/components/rich-text-editor";
 
 /**
@@ -26,10 +27,10 @@ const MODES: { mode: Mode; label: string; theme: "light" | "dark"; contrast?: "m
 ];
 
 const SECTIONS = [
-  ["tokens", "Tokens"], ["contrast", "Contrast"], ["button", "Button"], ["badge", "Badge"], ["card", "Card"], ["list", "List"],
+  ["tokens", "Tokens"], ["scheme", "Club scheme"], ["contrast", "Contrast"], ["button", "Button"], ["badge", "Badge"], ["card", "Card"], ["list", "List"],
   ["page-header", "PageHeader"], ["section-label", "SectionLabel"], ["empty-state", "EmptyState"], ["drawer", "Drawer"], ["confirm-dialog", "ConfirmDialog"], ["steps-choice", "StepsChoice"], ["stat", "Stat"], ["fields", "Fields"], ["rich-text-editor", "RichTextEditor"],
   ["avatar", "Avatar"], ["step-indicator", "StepIndicator"], ["key-value", "KeyValue"], ["toolbar", "Toolbar"], ["data-table", "DataTable"],
-  ["notice", "Notice"], ["state-words", "StateWords"], ["settings-rail", "Settings rail"], ["time-money", "Time and money"], ["frame", "Bar and tabs"], ["powered-by", "Powered by"], ["themes", "Display modes"],
+  ["notice", "Notice"], ["state-words", "StateWords"], ["settings-rail", "Settings list pane"], ["time-money", "Time and money"], ["frame", "Bar, rail and tabs"], ["powered-by", "Powered by"], ["themes", "Display modes"],
 ] as const;
 
 function Section({ id, name, use, importLine, children }: { id: string; name: string; use: ReactNode; importLine: string; children: ReactNode }) {
@@ -84,6 +85,22 @@ const SWATCHES = ["ground", "surface", "card", "surface-container-lowest", "surf
   "on-surface", "on-surface-variant", "outline", "outline-variant",
   "done", "done-container", "due", "due-container", "late", "late-container", "info", "info-container", "neutral-container", "badge-ink"] as const;
 
+const TYPE_ROLES = [
+  ["display-s", "2.25rem, 600: a staff page's title from 840px"],
+  ["headline-l", "2rem, 650: a page's title on a phone"],
+  ["headline-m", "1.75rem, 650: a stat"],
+  ["headline-s", "1.5rem, 600: a sheet's or dialog's title"],
+  ["title-l", "1.375rem, 600: a card's title, the club's name"],
+  ["title-m", "1rem, 600: a list row's title, a Medium button"],
+  ["title-s", "0.875rem, 600: table headers, section labels, the rail's groups"],
+  ["body-l", "1rem, 400: body text, the least a phone ever reads"],
+  ["body-m", "0.875rem, 400: a meta line, a card's quiet line, table cells"],
+  ["label-l", "0.875rem, 600: buttons, nav links, field labels"],
+  ["label-m", "0.8125rem, 600: status labels and tab labels, the floor (M3's 12px, raised)"],
+] as const;
+const SHAPES = ["xs 4px: fields", "s 8px: status labels, a pressed button", "m 12px: the logo tile", "l 16px: notices, a side sheet's edge, choice tiles",
+  "l-inc 20px: cards, a list's ends", "xl 28px: dialogs, the staff pane", "full: buttons, the tab pill, the bulk bar, avatars"] as const;
+
 /** A small piece of Home, drawn again in each display mode. */
 function MiniHome({ id }: { id: string }) {
   return (
@@ -112,50 +129,66 @@ export function Gallery() {
         <ul className="ds-toc">{SECTIONS.map(([id, name]) => <li key={id}><a href={`#ds-${id}`}>{name}</a></li>)}</ul>
       </nav>
 
-      <Section id="tokens" name="Tokens" use="The colors, type, spacing and corners every class is drawn with (src/app/booster.css, section 1). Use a token, never a hex color or a px font size. The club's color is an accent only: primary buttons, the current nav item, focus rings and the logo tile." importLine={`color: var(--ink-2); padding: var(--s3) var(--s4); border-radius: var(--radius);`}>
-        <h3 className="table-head">Color roles</h3>
+      <Section id="tokens" name="Tokens" use="Material 3 Expressive's tokens in src/app/booster.css, section 1: color roles, the type scale, the shape scale, elevation, motion and state layers. Use a token, never a hex color or a px font size. The surfaces, the text colors and the status colors are fixed, the same for every club; the club's color seeds the primary, secondary and tertiary roles (Club scheme, below)." importLine={`color: var(--on-surface-variant); padding: var(--s3) var(--s4); border-radius: var(--shape-l-inc); font: var(--title-m);`}>
+        <h3 className="table-head">Fixed color roles (light / dark)</h3>
         <div className="ds-swatches">
           {SWATCHES.map((t) => <span key={t} className="ds-swatch" style={{ ["--swatch" as string]: `var(--${t})` }}><b>--{t}</b>{PALETTE.light[t]} / {PALETTE.dark[t]}</span>)}
-          {(["club", "club-text", "club-tint"] as const).map((t) => <span key={t} className="ds-swatch" style={{ ["--swatch" as string]: `var(--${t})` }}><b>--{t}</b>The club&apos;s, set at runtime</span>)}
         </div>
-        <h3 className="table-head">Type scale</h3>
+        <h3 className="table-head">The club&apos;s roles (made from its color at runtime)</h3>
+        <div className="ds-swatches">
+          {(["primary", "on-primary", "primary-container", "on-primary-container", "secondary", "on-secondary", "secondary-container", "on-secondary-container",
+            "tertiary", "on-tertiary", "tertiary-container", "on-tertiary-container", "focus", "seed"] as const).map((t) => (
+            <span key={t} className="ds-swatch" style={{ ["--swatch" as string]: `var(--${t})` }}><b>--{t}</b>{t === "seed" ? "The exact color: the logo tile alone" : t === "focus" ? "The ring: primary, or on-surface" : "The club's, in this mode"}</span>
+          ))}
+        </div>
+        <h3 className="table-head">Type scale (M3, emphasized, in Inter)</h3>
         <div className="ds-type">
-          <p className="t-2xl">--text-2xl 2rem: an amount ($185.00)</p>
-          <p className="t-xl">--text-xl 1.5rem: a page title (1.75rem from 760px)</p>
-          <p className="t-lg">--text-lg 1.125rem: a card&apos;s title</p>
-          <p className="t-control">--text-control 0.9375rem: buttons, nav links, table cells, a card&apos;s quiet line</p>
-          <p className="t-md">--text-md 1rem: body text, the least a phone ever reads</p>
-          <p className="t-sm">--text-sm 0.875rem: a meta line, a label</p>
-          <p className="t-xs">--text-xs 0.8125rem: table headers and badges, the floor</p>
+          {TYPE_ROLES.map(([role, words]) => <p key={role} style={{ font: `var(--${role})` }}>--{role} {words}</p>)}
         </div>
-        <h3 className="table-head">Space and corners</h3>
-        <p className="ds-note">Space: --s1 4px, --s2 8px, --s3 12px, --s4 16px, --s5 24px, --s6 32px, --s7 48px; the page gutter --cell is 16px on a phone and 24px from 760px. Corners: --radius 8px (cards, lists, notices, menus), --radius-control 6px (buttons, fields), --radius-badge 4px, --radius-round only for avatars and status dots. One shadow, --shadow-menu, on menus. Motion: --dur-fast 120ms and --dur 200ms, nothing at all with reduced motion.</p>
-        <p className="ds-note">Focus: every ring is --ring (2px, 3px in high contrast) in --focus, the mode&apos;s own club text color. Weights: 400, 500, 600, and 700 only for the club logo tile.</p>
+        <h3 className="table-head">Shape</h3>
+        <div className="ds-shapes">
+          {SHAPES.map((sh) => { const name = sh.split(/[ :]/)[0]!; return <span key={sh} className="ds-shape" style={{ ["--r" as string]: `var(--shape-${name})` }}><b>--shape-{name}</b>{sh.slice(name.length + 1).replace(/^: /, "")}</span>; })}
+        </div>
+        <h3 className="table-head">Space, elevation, motion and states</h3>
+        <p className="ds-note">Space: --s1 4px, --s2 8px, --s3 12px, --s4 16px, --s5 24px, --s6 32px, --s7 48px (M3&apos;s 4px grid); the page gutter --cell is 16px compact and 24px from 600px. Breakpoints are M3&apos;s window classes: 600, 840 and 1200px.</p>
+        <p className="ds-note">Elevation is tone first: a card is a surface container on the page, with no shadow. Only what floats has one, --shadow-3: the bulk bar, dialogs, side sheets and menus.</p>
+        <div className="ds-samples"><span className="ds-float">--shadow-3: the floating bulk bar</span></div>
+        <p className="ds-note">Motion: springs for what moves (a button&apos;s corner on press, sheets and the dialog coming in, the tab pill, the bulk bar), --spring-fast and --spring-default; color and opacity on --effects over 150ms, never bouncing. Text never moves. With reduced motion nothing moves at all.</p>
+        <p className="ds-note">States: hover washes the content color over the container at 8% (--sl-hover), a press at 10% (--sl-press). Every control and lone link is at least --target, 48 by 48. Focus: every ring is --ring, 3px, in --focus (the club&apos;s primary, or on-surface where primary can&apos;t hold 3:1 off every surface), 2px clear of what it rings.</p>
       </Section>
 
-      <Section id="contrast" name="Contrast" use="Every text and ground pair the system draws, in every display mode, measured (src/lib/theme/palette.ts; tests/unit/design-tokens.test.ts fails when one falls under its floor). The club's color is derived per club to pass on every ground of its mode." importLine={`import { PALETTE, TEXT_PAIRS } from "@/lib/theme/palette";`}>
+      <Section id="scheme" name="Club scheme" use="How a club's color becomes its palette (src/lib/theme/scheme.ts, Google's material-color-utilities): primary keeps the color's own strength at M3's fixed tones, so its contrast is the same for every club; secondary is the same hue, quiet; tertiary is the hue turned about 60 degrees. Light, dark and both high-contrast modes are all made from it. Try a color: nothing is saved." importLine={`import { clubScheme, clubCssVars } from "@/lib/theme/scheme";`}>
+        <SeedSample />
+      </Section>
+      <Section id="contrast" name="Contrast" use="Every text and ground pair the system draws, in every display mode, measured (src/lib/theme/palette.ts; tests/unit/design-tokens.test.ts fails when one falls under its floor). Each club's own roles are checked for twelve sample colors in tests/unit/design-tokens.test.ts." importLine={`import { PALETTE, TEXT_PAIRS } from "@/lib/theme/palette";`}>
         <DataTable caption="Contrast ratios by display mode" columns={contrastColumns} rows={pairRows} rowKey={(r) => r.pair} />
       </Section>
 
-      <Section id="button" name="Button and LinkButton" use="Button does something; LinkButton goes somewhere. One primary (the club's fill) per area; secondary for the others; quiet for a small action in a sentence or a row; danger for removing or ending. Every button is 44px tall. Busy is aria-disabled with a spinner, never disabled, on parent pages." importLine={UI("Button, LinkButton")}>
+      <Section id="button" name="Button and LinkButton" use="Button does something; LinkButton goes somewhere. M3 Expressive's set: filled (the club's primary, one per area), tonal (a row's action, a second action), outlined (a secondary action standing alone), text (the least: Cancel, Clear, Not now), danger (removes or ends something, in the late color) and danger-filled (that action inside its ConfirmDialog). Fully round; the corner squares off a little while pressed. Small (sm, md) is drawn 40px tall inside a 48px target; lg is M3's medium, 56px, for a page's main button and sheet and dialog footers. Busy is aria-disabled with a spinner, never disabled, on parent pages." importLine={UI("Button, LinkButton")}>
         <div className="ds-samples">
           <Button>Save my details</Button>
-          <Button variant="outlined">Cancel</Button>
+          <Button variant="tonal">Add a passkey</Button>
+          <Button variant="outlined">See your payments</Button>
           <Button variant="text">Not now</Button>
           <Button variant="danger">Remove guardian</Button>
-          <Button variant="tonal">Add a passkey</Button>
+          <Button variant="danger-filled">Disconnect QuickBooks</Button>
           <LinkButton plain href="#ds-button">Pay<Arrow /></LinkButton>
         </div>
         <div className="ds-samples">
+          <Button size="sm">Small</Button>
+          <Button>Default</Button>
+          <Button size="lg">Medium, 56px</Button>
+          <Button size="lg" variant="tonal">Medium tonal</Button>
+        </div>
+        <div className="ds-samples">
           <Button className="ds-hover">Hover</Button>
+          <Button variant="tonal" className="ds-hover">Hover</Button>
           <Button variant="outlined" className="ds-hover">Hover</Button>
           <Button className="ds-focus">Focus</Button>
           <Button busy>Saving…</Button>
           <Button variant="outlined" disabled>Disabled</Button>
-          <Button size="sm">Small</Button>
-          <Button size="sm" variant="tonal">Small secondary</Button>
         </div>
-        <p className="ds-note">Hover lays a light wash over the fill (secondary: the muted ground). Focus is the club&apos;s ring, 2px (3px in high contrast), drawn here on the sample. A long label wraps inside the button: <Button variant="outlined">See every payment the family has made this season</Button></p>
+        <p className="ds-note">Hover washes the button&apos;s own ink over its fill at 8%, a press at 10%. Focus is the 3px ring, 2px clear of the fill, drawn here on the sample. A long label wraps inside the button: <Button variant="outlined">See every payment the family has made this season</Button></p>
         <div className="ds-pair">
           <div>
             <h3>Do: a button for anything that starts, changes or moves a task on</h3>
@@ -163,7 +196,7 @@ export function Gallery() {
               <LinkButton plain href="#ds-button">Next: connect to QuickBooks</LinkButton>
               <LinkButton plain variant="outlined" href="#ds-button">Connect a different company</LinkButton>
             </div>
-            <p className="ds-note">Button submits a form; LinkButton goes to an action or the next step. Primary for the one thing the step is for, secondary for the others.</p>
+            <p className="ds-note">Button submits a form; LinkButton goes to an action or the next step. Filled for the one thing the step is for, tonal or outlined for the others.</p>
           </div>
           <div>
             <h3>Don&apos;t: an underlined link for an action or a step</h3>
@@ -173,7 +206,7 @@ export function Gallery() {
         </div>
       </Section>
 
-      <Section id="badge" name="Badge and StatusBadge" use="A short label on a tint (a role, a count), or a state with its icon and words. Never color alone: the words say it." importLine={UI("Badge, StatusBadge, StatusIcon")}>
+      <Section id="badge" name="Badge and StatusBadge" use="A status label: a state's icon and words on its tone's container (StatusBadge), or a short label (a role, a count). 8px corners, never fully round, so it never looks like a button or a chip. Never color alone: the words say it." importLine={UI("Badge, StatusBadge, StatusIcon")}>
         <div className="ds-samples">
           <StatusBadge tone="done">Paid</StatusBadge>
           <StatusBadge tone="due">2 to sign</StatusBadge>
@@ -188,7 +221,7 @@ export function Gallery() {
         </div>
       </Section>
 
-      <Section id="card" name="Card" use="A titled region of a page: what a family owes, its students, a setting. Its title names the region for screen readers. Actions sit at the foot, or beside the title with headActions. Never a card inside a card." importLine={UI("Card")}>
+      <Section id="card" name="Card" use="A titled region of a page: what a family owes, its students, a setting. M3's filled card: its fill on the page's ground, 20px corners, no edge. Its title names the region for screen readers. Actions sit at the foot, or beside the title with headActions. tonal fills one region with the club's primary container (Home's new messages): at most one a page, never the money card. Never a card inside a card." importLine={UI("Card")}>
         <div className="ds-pair">
           <Card title="Sample Family" titleId="ds-card-a" description="A quiet line under the title" actions={<LinkButton variant="outlined" plain href="#ds-card">See your payments</LinkButton>}>
             <p className="help">The card&apos;s content: words, a List, a DataTable or a form.</p>
@@ -196,10 +229,13 @@ export function Gallery() {
           <Card title="A much longer title that has to wrap onto a second line on a phone" titleId="ds-card-b" headActions={<Button size="sm" variant="tonal">Edit</Button>}>
             <p className="help">With headActions the action sits beside the title and wraps under it when there is no room.</p>
           </Card>
+          <Card tonal title="1 new message from the club" titleId="ds-card-c" actions={<LinkButton plain href="#ds-card">Read it in Messages</LinkButton>}>
+            <p>A sample: the one region a page makes stand out.</p>
+          </Card>
         </div>
       </Section>
 
-      <Section id="list" name="List and ListRow" use="The core of the look: a bordered list of like rows, each a status icon with its words, a title, a meta line, then an amount or a compact action. Use it for To do, Students, Payments and any short list a person acts on; ListTotal under a list of amounts sums them. A long list of records with columns is a DataTable." importLine={UI("List, ListRow, ListSubRow, ListTotal, SectionLabel")}>
+      <Section id="list" name="List and ListRow" use="The core of the look: M3 Expressive's segmented list. Each row is its own tile, 2px apart, the group rounded at its ends; each a 40px status circle in its tone's container, its words, a title, a meta line, then an amount or a compact action. Use it for To do, Students, Payments and any short list a person acts on; ListTotal under a list of amounts sums them. A long list of records with columns is a DataTable." importLine={UI("List, ListRow, ListSubRow, ListTotal, SectionLabel")}>
         <div className="ds-samples stacked">
           <div>
             <SectionLabel level={3}>To do</SectionLabel>
@@ -270,15 +306,15 @@ export function Gallery() {
         <EmptyState title="No volunteer events yet" action={<Button>Add an event</Button>}>When you add one, families see it on their Volunteer page.</EmptyState>
       </Section>
 
-      <Section id="drawer" name="Drawer" use="A form behind a button: a repeated form on a row (Waive for…, Change the student…) or a secondary one on a page. The button says what the form does; it opens a side sheet with the form, which fills a phone's screen. It has its own address (?param=value): Back closes it, a refresh opens it again, and without JavaScript the button is a link to the page with the form drawn in it. The focus goes in, stays in, and comes back to the button; Esc and Close close it." importLine={UI("Drawer")}>
+      <Section id="drawer" name="Drawer" use="A form behind a button: a repeated form on a row (Waive for…, Change the student…) or a secondary one on a page. The button says what the form does; it opens M3's modal side sheet from 600px wide (a full-screen sheet on a phone), with a close icon button and 56px buttons at its foot. It has its own address (?param=value): Back closes it, a refresh opens it again, and without JavaScript the button is a link to the page with the form drawn in it. The focus goes in, stays in, and comes back to the button; Esc and Close close it." importLine={UI("Drawer")}>
         <DrawerSample />
       </Section>
 
-      <Section id="confirm-dialog" name="ConfirmDialog" use="One press that needs a second look: a button with the action's words, then a small dialog with one sentence of what follows, an optional box to tick or a reason to type, and the action's own button beside Cancel (which has the focus first). Not for a form: that is a Drawer." importLine={UI("ConfirmDialog")}>
+      <Section id="confirm-dialog" name="ConfirmDialog" use="One press that needs a second look: a button with the action's words, then M3's basic dialog (28px corners, a centered title, the alert icon for a destructive one) with one sentence of what follows, an optional box to tick or a reason to type, and at its end Cancel, a text button that has the focus first, then the action's own button, filled. Not for a form: that is a Drawer." importLine={UI("ConfirmDialog")}>
         <ConfirmSample />
       </Section>
 
-      <Section id="steps-choice" name="StepsChoice" use="Two ways to do one task, such as by hand or with a script: the choice in the open, and only the chosen way's steps under it." importLine={UI("StepsChoice")}>
+      <Section id="steps-choice" name="StepsChoice" use="Two ways to do one task, such as by hand or with a script: M3 Expressive's connected button group in the open (the chosen one round, in the secondary container), the chosen way's one line under it, and only its steps below." importLine={UI("StepsChoice")}>
         <StepsChoiceSample />
       </Section>
 
@@ -290,7 +326,7 @@ export function Gallery() {
         </div>
       </Section>
 
-      <Section id="fields" name="Fields" use="TextInput, TextArea, Select and Checkbox, each with its label, a hint and an error tied to the control with aria-describedby. ChoiceGroup for a few options that need explaining. The id comes from the page." importLine={UI("TextInput, TextArea, Select, Checkbox, ChoiceGroup")}>
+      <Section id="fields" name="Fields" use="TextInput, TextArea, Select and Checkbox, each with its label above it (never floating, never a placeholder), a hint and an error tied to the control with aria-describedby. Fields are M3's outlined field, 56px tall; tick boxes and radios are M3's, in a 48px target. ChoiceGroup for a few options that need explaining: a chosen tile turns the secondary container. The id comes from the page." importLine={UI("TextInput, TextArea, Select, Checkbox, ChoiceGroup")}>
         <div className="ds-pair">
           <div className="stack">
             <TextInput id="ds-name" label="Name" defaultValue="Alex Sample" autoComplete="off" />
@@ -306,7 +342,7 @@ export function Gallery() {
           </div>
         </div>
         <ChoiceSample />
-          <TakenChoiceSample />
+        <TakenChoiceSample />
       </Section>
 
       <Section id="rich-text-editor" name="RichTextEditor" use="A body of rich text a person writes (a club message): its label and hint over a frame with the toolbar (undo and redo, two headings, two lists, bold, italic, underline, a link, and a picture where the form takes them) and the writing area. It offers only what src/lib/messages/body.ts keeps; the server checks what it sends. The form reads what was written through its ref. Tiptap, with the look of Tiptap's Simple Editor template. Not for a line of plain text: that is a TextInput or TextArea." importLine={`import { RichTextEditor, type RichTextHandle } from "@/app/components/rich-text-editor";`}>
@@ -318,11 +354,11 @@ export function Gallery() {
           ] }} />
       </Section>
 
-      <Section id="avatar" name="Avatar" use="A person's initials beside their name. The club bar's account control is one, with a 44px tap target." importLine={UI("Avatar")}>
+      <Section id="avatar" name="Avatar" use="A person's initials beside their name. The club bar's account control is one: a 40px disc on the club's primary container in a 48px target." importLine={UI("Avatar")}>
         <div className="ds-samples"><Avatar initials="AS" /><Avatar initials="SS" club /><Avatar initials="RS" size="sm" /><span className="account" aria-hidden="true">AS</span></div>
       </Section>
 
-      <Section id="step-indicator" name="StepIndicator" use="Where something stands in a short sequence of steps: the season's steps on Home. Done steps are ticked, the current one is the club's color and named in words. Not a control." importLine={UI("StepIndicator")}>
+      <Section id="step-indicator" name="StepIndicator" use="Where something stands in a short sequence of steps: the season's steps on Home. Done steps are ticked, the current one is the club's primary and named in words. Not a control." importLine={UI("StepIndicator")}>
         <p className="season-title">Sample season · <b>Step 2 of 4: Uniforms</b></p>
         <StepIndicator steps={[
           { key: "a", label: "Join", done: true, words: ", done" },
@@ -340,22 +376,22 @@ export function Gallery() {
         ]} />
       </Section>
 
-      <Section id="toolbar" name="Toolbar" use="Filters over the table or list they scope, actions at the end. It wraps on a phone." importLine={UI("Toolbar, TextInput, Select")}>
+      <Section id="toolbar" name="Toolbar" use="Filters over the table or list they scope, actions at the end (56px, level with the fields). It wraps on a phone." importLine={UI("Toolbar, TextInput, Select")}>
         <Toolbar label="Filter invoices" end={<Button variant="outlined">Clear</Button>}>
           <TextInput id="ds-search" label="Search" type="search" placeholder="A name or invoice" autoComplete="off" />
           <Select id="ds-state" label="State" defaultValue="open"><option value="open">Open</option><option value="paid">Paid</option></Select>
         </Toolbar>
       </Section>
 
-      <Section id="data-table" name="DataTable" use="Many records with the same columns: the roster, Balances, the audit log. Numbers right-aligned in tabular figures; a quiet column for row actions. On a phone each row stacks, label beside value." importLine={UI("DataTable, type Column")}>
+      <Section id="data-table" name="DataTable" use="Many records with the same columns: the roster, Balances, the audit log. M3 has no data table, so this is ours on M3's tokens: title-small headers on the highest container, rows at least 56px with a hover layer, a ticked row in the secondary container. Numbers right-aligned in tabular figures; a quiet column for row actions. Below 840px each row stacks, label beside value." importLine={UI("DataTable, type Column")}>
         <DataTable caption="Sample invoices" columns={invoiceColumns} rows={INVOICES} rowKey={(i) => i.id} />
         <DataTable caption="Grouped by family" columns={invoiceColumns} groups={[{ key: "g", heading: "Sample Family", rows: INVOICES.slice(0, 2) }]} rowKey={(i) => `g${i.id}`} />
         <h3 className="table-head">Bulk select</h3>
-        <p className="ds-note">Inside BulkSelect, <code>select</code> puts a tick box on each row (&quot;Select&quot; and the row&apos;s name) and one in the header, mixed when some are ticked. A bar stays in view while any are: the count, read out as it changes, the actions, and Clear; with the page ticked and more rows matching, &quot;Select all M that match&quot;. On a phone the actions are one &quot;N selected · Actions&quot; button. A bulk action sends <code>selectionPayload()</code>, ids from the browser: the server checks every one again before it acts, and works out &quot;all that match&quot; from its own query. Its Drawer says first what would happen to each row, then what did.</p>
+        <p className="ds-note">Inside BulkSelect, <code>select</code> puts a tick box on each row (&quot;Select&quot; and the row&apos;s name) and one in the header, mixed when some are ticked. M3 Expressive&apos;s floating toolbar stays in view while any are, a raised pill on the club&apos;s primary container: the count, read out as it changes, the actions, and Clear; with the page ticked and more rows matching, &quot;Select all M that match&quot;. On a phone the actions are one &quot;N selected · Actions&quot; button. A bulk action sends <code>selectionPayload()</code>, ids from the browser: the server checks every one again before it acts, and works out &quot;all that match&quot; from its own query. Its Drawer says first what would happen to each row, then what did.</p>
         <BulkSample />
       </Section>
 
-      <Section id="notice" name="Notice and ActionOutcome" use="A status that stands apart: information, needs attention, done, a problem. ActionOutcome shows what a server action answered. A problem is announced as an alert, the rest as a status. An answer that replaces the form that was pressed takes the focus: give it a ref (and Notice tabIndex={-1})." importLine={UI("Notice, ActionOutcome")}>
+      <Section id="notice" name="Notice and ActionOutcome" use="A status that stands apart: information, needs attention, done, a problem, on its tone's container with its icon and bold word (ours: M3 has no banner, and a snackbar never answers an action). ActionOutcome shows what a server action answered, in place. A problem is announced as an alert, the rest as a status. An answer that replaces the form that was pressed takes the focus: give it a ref (and Notice tabIndex={-1})." importLine={UI("Notice, ActionOutcome")}>
         <div className="ds-samples stacked">
           <Notice tone="info">The figures are from QuickBooks, as of 2:14 pm.</Notice>
           <Notice tone="warning">Two families have no sign-in yet.</Notice>
@@ -371,8 +407,8 @@ export function Gallery() {
         <div className="ds-samples"><StatusDot tone="done" words="Connected" /><StatusDot tone="due" words="Needs attention" /><StatusDot tone="neutral" words="Not set up" /></div>
       </Section>
 
-      <Section id="settings-rail" name="Settings rail" use="Beside every settings page from 760px (SettingsRail, drawn by settings/layout.tsx): Find a setting, then sentence-case groups of items, each with its status. Drawn here as a sample, without its search." importLine={`import { SettingsRail } from "@/app/staff/(app)/settings/settings-rail";`}>
-        <div className="settings-rail ds-rail" aria-label="Sample settings rail" role="group">
+      <Section id="settings-rail" name="Settings list pane" use="M3's list-detail layout for Settings: the list pane beside every settings page from 840px (SettingsRail, drawn by settings/layout.tsx), Find a setting, then sentence-case groups of items, each with its status, the current one in the secondary container. On a phone it is Settings' first screen, each group a segmented list. Drawn here as a sample, without its search." importLine={`import { SettingsRail } from "@/app/staff/(app)/settings/settings-rail";`}>
+        <div className="settings-rail is-root ds-rail" aria-label="Sample settings rail" role="group">
           <p className="rail-title">Settings</p>
           {([["People and access", [["Staff", "done", "6 people", false], ["Roles", "done", "4 roles", true]]], ["Connections", [["Integrations", "due", "1 needs attention", false]]]] as const).map(([group, items]) => (
             <div key={group} className="rail-group">
@@ -389,7 +425,7 @@ export function Gallery() {
         <div className="ds-samples"><LocalTime iso="2026-11-21T19:14:00Z" /><CalendarDate iso="2026-11-22" /><span className="num">{formatMoney(18500)}</span></div>
       </Section>
 
-      <Section id="frame" name="Club bar and tabs" use="The frame every page sits in (ClubBar, ParentTabs): a white top bar with the club's logo tile, its name, the menu and the account; on a parent's phone, the tabs at the foot. The current place is the club's color and weight, never the color alone. Drawn here as samples." importLine={`import { ClubBar } from "@/app/components/club-bar";`}>
+      <Section id="frame" name="Club bar, rail and tabs" use="The frame every page sits in. ClubBar is M3's small top app bar, 64px: the club's logo tile in its exact color, its name, and the account. A parent's places are links in the bar from 840px (the current one on M3's pill) and M3's navigation bar at the foot below that, labels always shown. Staff have the expanded navigation rail from 1200px, always open, every group's pages under its heading, and below 1200px the same navigation bar with Home, the groups and Settings. The current place is the secondary container and bold, never the color alone. Drawn here as samples." importLine={`import { ClubBar } from "@/app/components/club-bar";  import { StaffRail } from "@/app/components/top-nav";`}>
         <div className="ds-frame">
           <div className="bar"><div className="wrap">
             <span className="monogram" aria-hidden="true">SB</span><span className="club">Sample Boosters</span>
@@ -402,8 +438,24 @@ export function Gallery() {
             <a href="#ds-frame"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="3" y="6" width="18" height="12" /><path d="M3 10h18M7 15h3" /></svg>Payments</a>
           </nav>
         </div>
+        <div className="ds-frame ds-frame-rail">
+          <nav className="staff-rail ds-show" aria-label="Sample staff rail">
+            <a href="#ds-frame"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 11l9-7 9 7v9h-6v-6H9v6H3z" /></svg>Home</a>
+            <div role="group" aria-labelledby="ds-rail-families">
+              <h4 id="ds-rail-families" className="rail-heading">Families</h4>
+              <a href="#ds-frame" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M8 8h8M8 12h8M8 16h5" /></svg>Roster</a>
+              <a href="#ds-frame"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M4 5h16v11H8l-4 4z" /></svg>Messages</a>
+            </div>
+            <div role="group" aria-labelledby="ds-rail-money">
+              <h4 id="ds-rail-money" className="rail-heading">Money</h4>
+              <a href="#ds-frame"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2" /><path d="M3 10h18M7 15h3" /></svg>Balances</a>
+            </div>
+            <hr className="rail-rule" />
+            <a href="#ds-frame"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4" /></svg>Settings</a>
+          </nav>
+          <div className="ds-pane"><p className="page-title">Roster</p><p className="lede">The page sits in a pane beside the rail, with extra-large top corners.</p></div>
+        </div>
       </Section>
-
       <Section id="powered-by" name="Powered by" use="The product's credit, the club leading everywhere else (brand/BRAND.md). One ink in the footer of every portal page, parent and staff; in the product's colors under the sign-in form. A link to boostersrocket.com whose name says so. No club setting removes it; never put the product's indigo or flame anywhere else in the portal." importLine={`import { PoweredBy } from "@/app/components/powered-by";`}>
         <div className="ds-pair">
           {MODES.map(({ mode, label, theme, contrast }) => (
