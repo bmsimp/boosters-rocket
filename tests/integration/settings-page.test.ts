@@ -49,7 +49,7 @@ describe("the Settings rail", () => {
     await asAdmin();
     await seedProvider("staff-google", { clientId: "x.apps.googleusercontent.com" }, "google-secret-do-not-show");
     const html = await layout();
-    expect(await titles()).toEqual(["Club", "Messages", "Staff", "Roles", "Parent sign-ins", "Integrations", "Audit log", "Health", "Design system"]);
+    expect(await titles()).toEqual(["Club", "Messages", "Staff", "Roles", "Parent sign-ins", "Integrations", "Audit log", "Health", "Backups", "Design system"]);
     for (const label of ["Club", "People and access", "Connections", "Administration"]) expect(html).toContain(`>${label}</p>`);
     // A new installation: the club isn't set, and the rail says so.
     expect(await rail()).toEqual(expect.arrayContaining(["Club: Not set yet", "Messages: Emailing off", "Staff: 1 person", "Design system: Samples only"]));
