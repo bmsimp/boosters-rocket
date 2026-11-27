@@ -119,3 +119,36 @@ test("the list, Show details, the Review and Pick drawers, and Unlink asking fir
     await drop();
   }
 });
+
+test("from 1600px the Review and Pick drawers dock beside the table at their own address; with none chosen the table takes the width", async ({ browser }, info) => {
+  test.skip(info.project.name === "phone", "a phone never docks");
+  const { drop } = await seedLinks(sql);
+  const context = await browser.newContext({ viewport: { width: 2560, height: 1300 } });
+  await context.addCookies([staffSessionCookie()]);
+  const page = await context.newPage();
+  try {
+    await page.goto("/staff/links");
+    const families = page.getByRole("region", { name: "Families" });
+    const wide = await families.evaluate((el) => el.getBoundingClientRect().right);
+    const [rivera] = await sql`SELECT family_id FROM accounting_link WHERE customer_id = 'E2E-10' AND family_id IS NOT NULL`;
+    await page.goto(`/staff/links?review=${rivera!.family_id}`);
+    const review = page.getByRole("dialog", { name: "Review Rivera Family" });
+    await expect(review).toBeVisible();
+    expect(await review.evaluate((el) => el.matches(":modal")), "docked, not modal").toBe(false);
+    await expect(page.locator("html")).not.toHaveClass(/sheet-open/);
+    const box = (await review.boundingBox())!;
+    const right = await families.evaluate((el) => el.getBoundingClientRect().right);
+    expect(right, "the table makes room beside the pane").toBeLessThanOrEqual(box.x);
+    expect(right, "and is narrower than with nothing chosen").toBeLessThan(wide);
+    await noSidewaysScroll(page);
+    await settled(page);
+    await checked(page, "the Review drawer, docked");
+    await review.getByRole("link", { name: "Close" }).click();
+    await expect(review).toBeHidden();
+    await expect(page).not.toHaveURL(/[?&]review=/);
+    expect(await families.evaluate((el) => el.getBoundingClientRect().right), "the table takes the width again").toBeCloseTo(wide, 0);
+  } finally {
+    await context.close();
+    await drop();
+  }
+});
