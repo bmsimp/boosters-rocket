@@ -25,7 +25,7 @@ Boosters Rocket Connect is at `https://connect.boostersrocket.app` unless whoeve
 `QBO_RELAY_URL` in `deploy/.env` to another (a fork running its own). The QuickBooks page shows the address it uses.
 Its tokens travel only between the portal's server and Boosters Rocket's, never through a browser's address bar.
 
-1. **Register the portal.** As an Admin: **Settings**, **QuickBooks**, **Set up** (or **Change**). In step 1, **How to
+1. **Register the portal.** As an Admin: **Settings**, **QuickBooks**, **Configure**. In step 1, **How to
    connect**, keep **Connect through Boosters Rocket** chosen (a club moving from its own app chooses it and selects
    **Save this choice**). The stage reads **Not registered yet**: select **Make this portal's key**. The private half of
    the key never leaves the server.
@@ -86,7 +86,7 @@ behind ([reconnecting QuickBooks](quickbooks-reconnect.md#connecting-a-different
 1. On the developer site, open **Sandbox** and create a sandbox company if there is none.
 2. In the sandbox, set the company up like the club's books: the customer types the club uses (for example Family,
    Student and Parent), with students and parents as sub-customers of a family, and a few invoices.
-3. In the portal, as an Admin: **Settings**, **QuickBooks**, **Set up**.
+3. In the portal, as an Admin: **Settings**, **QuickBooks**, **Configure**.
 4. In step 1, choose **Use our own Intuit app**. Enter the Development **Client ID** and **Client secret**, choose
    **Sandbox**, **Save**, then **Next: connect to QuickBooks** in the note that appears.
 5. **Connect to QuickBooks**, sign in to Intuit, choose the sandbox company and **Connect**. You come back to the portal.
@@ -138,8 +138,8 @@ and every family is then linked to the real books' customers again on Accounting
 isn't the one the portal's families were read from, and changes nothing. Keep the sandbox trial on the
 proof-of-concept host where you can, and install the club's own from [first install](first-install.md).
 
-1. In the portal: **Settings**, **QuickBooks**. With no keys saved yet the button is Set up; with Development keys saved
-   from a try, and nothing ever connected, it is **Change**, and its steps open at step 1, where the keys go.
+1. In the portal: **Settings**, **QuickBooks**. Whatever is saved, the button is **Configure**; with Development keys saved
+   from a try, and nothing ever connected, its steps open at step 1, where the keys go.
 2. Enter the Production keys, **Production**, then in step 2 **Connect to QuickBooks**, sign in to Intuit with an
    account that can open the club's company, choose it and **Connect**.
 3. Choose the membership shape, **Preview**, check, **Save this shape**.

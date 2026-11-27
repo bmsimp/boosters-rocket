@@ -19,7 +19,7 @@ lets it send as that mailbox and no other. It needs staff sign-in with Microsoft
 
 1. On a Windows computer with PowerShell 7, install the modules the script needs once:
    `Install-Module Microsoft.Graph.Authentication, ExchangeOnlineManagement -Scope CurrentUser`
-2. On the setup page's Step 3 (or **Settings**, **Outgoing mail**, **Set up** or **Change**), the first box, **Let
+2. On the setup page's Step 3 (or **Settings**, **Outgoing mail**, **Configure**), the first box, **Let
    Microsoft 365 send for the portal**, holds the numbered steps under **Microsoft 365: let the app send as one
    mailbox**. They have you download the script `New-BoosterRocketStaffApp.ps1`, unblock it
    (`Unblock-File .\New-BoosterRocketStaffApp.ps1`) and run it with `-SetUpMail -Mailbox <the club's mailbox>`, signed
@@ -36,7 +36,7 @@ lets it send as that mailbox and no other. It needs staff sign-in with Microsoft
 Any mail service that offers SMTP works. You need its server name, port, a username and password, and the address mail
 comes from. The mail service's own help pages give the first two.
 
-1. On the setup page's Step 3 (or **Settings**, **Outgoing mail**, **Set up** or **Change**), in **Choose how the
+1. On the setup page's Step 3 (or **Settings**, **Outgoing mail**, **Configure**), in **Choose how the
    portal sends**, choose **SMTP**.
 2. Enter the **Host** and **Port**, and choose **Security**: **STARTTLS** for port 587, **TLS** for port 465. The
    portal never sends without encryption.

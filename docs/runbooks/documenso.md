@@ -89,7 +89,7 @@ to an account by its email address, so only use a directory where nobody can cho
 
 1. In Documenso, signed in as the forms account, open the team's settings, **API Tokens**, and create a token that
    doesn't expire. Copy it.
-2. In the portal, as an Admin: **Settings**, **Forms (Documenso)**, **Set up**. In step 1, enter Documenso's address
+2. In the portal, as an Admin: **Settings**, **Forms (Documenso)**, **Configure**. In step 1, enter Documenso's address
    exactly as `DOCUMENSO_URL` in `deploy/.env` (same name, `https`, no port unless it has one) and paste the token.
    **Save**.
 3. Step 2, **Check the connection**. It asks Documenso whether it is healthy, then makes one call with the token.

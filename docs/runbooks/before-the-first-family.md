@@ -540,7 +540,7 @@ The proof-of-concept host has no Documenso. Forms need a full installation from 
    proxy's, and Health's parent sign-ins line doesn't warn about addresses. **If not:** find the header the proxy really
    sets, put it in `CLIENT_IP_HEADER` in `deploy/.env`, and `docker compose up -d app`.
 4. **Staff sign-in for real.** Sign in once with the club's Microsoft (Entra) or Google staff sign-in.
-   **Pass:** you reach the staff home. On Settings, Staff sign-in, **Change**, a Microsoft certificate reads "Done:
+   **Pass:** you reach the staff home. On Settings, Staff sign-in, **Configure**, a Microsoft certificate reads "Done:
    Microsoft accepted this certificate", and **Download certificate (.cer)** saves the file and then shows its
    thumbprint without a reload. The staff script (`New-BoosterRocketStaffApp.ps1`) ends by saying to finish "in the
    portal: on the setup page, or under Settings". **If not:** a screenshot of the page.

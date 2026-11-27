@@ -86,7 +86,7 @@ test("step 1 keeps what was typed after a refusal and empties the secret after a
 
 test("the three steps open in order, and a shape is previewed with the controls keeping the choice", async ({ page }) => {
   await page.goto("/staff/settings/quickbooks");
-  await page.getByRole("link", { name: "Change", exact: true }).click();
+  await page.getByRole("link", { name: "Configure", exact: true }).click();
   await expect(page).toHaveURL(/\/staff\/settings\/quickbooks\/setup/);
 
   await page.goto("/staff/settings/quickbooks/setup?step=connect");

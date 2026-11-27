@@ -69,7 +69,7 @@ describe("forms settings", () => {
   it("says forms aren't set up, gives the webhook address, and tells an Admin what to do in Documenso", async () => {
     asStaff(admin);
     // The head says "Not set up"; the page says it once more only where it says what that means for parents.
-    expect(textOf(await renderPage(FormsSettingsPage))).toContain("Until forms are set up, parents read that forms aren't ready, and nothing else changes for them.");
+    expect(textOf(await renderPage(FormsSettingsPage))).toContain("Not connected yet, so parents read that forms aren't ready. Configure how the portal reaches Documenso.");
     // The steps are on their own page (the pattern the QuickBooks page set).
     const text = textOf(await renderPage(FormsSetupPage));
     expect(text).toContain("Open the team's settings, then API Tokens . Create a token that doesn't expire");

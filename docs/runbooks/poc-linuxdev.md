@@ -10,7 +10,7 @@ trust the screen and note it in the Results table.
 
 **Since 2026-11-16 the staff menu is grouped, and every setting is under Settings.** Where this runbook says **Mail**,
 **Sign-in**, **QuickBooks** or **Parent sign-ins** "in the staff menu", open **Settings** in the staff menu, then that
-part's box (**Outgoing mail**, **Staff sign-in**, **QuickBooks**, **Parent sign-ins**) and its **Set up** or **Change**.
+part's box (**Outgoing mail**, **Staff sign-in**, **QuickBooks**, **Parent sign-ins**) and its **Set up** or **Change** (**Configure** for the three integrations).
 **Audit** is under **Admin**. The setup page now asks for the club first, so its steps are one later than written below:
 outgoing mail is Step 3 and the first Admin Step 4. The checks still to make before families use the portal, this
 host's among them, are in [before the first family](before-the-first-family.md).
@@ -283,7 +283,7 @@ section 3, because they use the staff app. Deploy this version (the one with the
    **Keys and credentials**.)
 2. In the sandbox company, make sure the customer types exist (**Sales** > **Customers** > **Customer types**): the
    band's are `Family`, `Parent`, `Student`, `School` and `Vendor`, with students and parents as sub-customers of a family.
-3. Sign in at `/staff/sign-in` and choose **QuickBooks** in the staff menu (Admins only), then **Set up**.
+3. Sign in at `/staff/sign-in` and choose **QuickBooks** in the staff menu (Admins only), then **Configure**.
 4. Step 1: enter the Development **Client ID** and **Client secret**, choose **Sandbox**, **Save**.
 5. Step 2: **Connect to QuickBooks**, sign in to Intuit, choose the sandbox company, **Connect**. You come back to step 3.
 6. Step 3: choose **Layered**, `Family` for the family, `Student` for the student, `Parent` for the parent,
