@@ -8,7 +8,7 @@ export function EmailPreview({ subject, html }: { subject: string; html: string 
   return (
     <div className="email-preview">
       <p className="email-preview-subject"><b>Subject:</b> {subject}</p>
-      <iframe title="The email, with sample values" sandbox="" srcDoc={html} />
+      <div className="email-preview-canvas" data-theme="light"><iframe title="The email, with sample values" sandbox="" srcDoc={html} /></div>
     </div>
   );
 }

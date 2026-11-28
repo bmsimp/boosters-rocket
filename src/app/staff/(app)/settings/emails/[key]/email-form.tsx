@@ -89,7 +89,7 @@ export function EmailForm({ emailKey, initial, brand, testTo, canChange }: {
           {fixedSubject
             ? <p className="hint"><b>Subject:</b> {preview.subject}. The portal writes this subject, since it carries the code.</p>
             : <TextInput id="email-subject" label="Subject" hint="Put a field in braces, such as {Club name}." required maxLength={200} value={subject} onChange={(ev) => setSubject(ev.target.value)} />}
-          <RichTextEditor id="email-body" label="Email" hint={`Type { or press Insert field to add a field. Gray blocks are written by the portal: move them, but they stay.${e.links ? "" : " Sign-in emails hold no links of their own."}`}
+          <RichTextEditor id="email-body" label="Email" hint="Type { or press Insert field to add a field. Blocks marked Fixed are written by the portal and can be moved, not removed."
             initial={initial.body} email={editing} onChange={setBody} />
           {!checked.ok && <Notice tone="warning" live="none">{checked.errors.length === 1 ? checked.errors[0] : <ul className="notice-list">{checked.errors.map((x) => <li key={x}>{x}</li>)}</ul>}</Notice>}
           {outcome && <ActionOutcome state={outcome} ref={outcomeRef} />}

@@ -263,7 +263,7 @@ const FORM_NAME: FieldDef = { id: "formName", label: "Form name", sample: "Medic
 type CopyData = { formTitle: string; forName: string; pdf: Buffer | null; link: string; parts?: number };
 export const formCopy: EmailDef<CopyData> = {
   key: "form_copy", group: "Forms", title: "Signed copy", sentWhen: "When everyone has signed a form.",
-  fields: [...COMMON, FORM_NAME, { id: "forName", label: "For", sample: "Maya Ortiz" }],
+  fields: [...COMMON, FORM_NAME, { id: "forName", label: "Who it's for", sample: "Maya Ortiz" }],
   values: (d, b) => ({ ...common(b), formName: d.formTitle, forName: d.forName }),
   fixed: [
     { id: "copy", label: "the signed copy: attached, or where to download it", render: (o) => lines([o.pdf ? "The signed form is attached to this email, for your own records."
@@ -282,7 +282,7 @@ type ReminderData = { formTitle: string; forNames: string[]; due: string | null;
 const namesOf = (n: string[]) => (n.length <= 1 ? n.join("") : `${n.slice(0, -1).join(", ")} and ${n.at(-1)}`);
 export const formReminder: EmailDef<ReminderData> = {
   key: "form_reminder", group: "Forms", title: "Please sign", sentWhen: "A reminder that a form still needs a signature.",
-  fields: [...COMMON, FORM_NAME, { id: "forNames", label: "For", sample: "Maya Ortiz" }, { id: "due", label: "Due date", sample: "Friday, September 4" }],
+  fields: [...COMMON, FORM_NAME, { id: "forNames", label: "Who it's for", sample: "Maya Ortiz" }, { id: "due", label: "Due date", sample: "Friday, September 4" }],
   values: (d, b) => ({ ...common(b), formName: d.formTitle, forNames: namesOf(d.forNames), due: d.due }),
   fixed: [
     { id: "due", label: "when it's due", render: (o) => lines(o.due ? [o.pastDue ? `It was due ${o.due}. It's not too late to sign it.` : `It's due ${o.due}.`] : []) },
@@ -511,10 +511,11 @@ export function renderEmail<D>(e: EmailDef<D>, b: Brand, to: string, d: D, words
 export const sampleEmail = (e: AnyEmail, b: Brand, to: string, words: { subject: string | null; body: TemplateDoc }): MailMessage =>
   renderEmail(e, b, to, e.sample(b), words);
 
-/** Each field's sample, with the club's own name, address and contact where the page knows them. */
+/** Each field's sample, with the club's own name, address and contact; one the club hasn't set says so, as the preview leaves its lines out. */
+export const NOT_SET = "Not set, so lines with it are left out";
 export function sampleValues(e: AnyEmail, b: Brand): FieldDef[] {
   const v = e.values(e.sample(b), b);
-  return e.fields.map((x) => ({ ...x, sample: v[x.id] ?? x.sample }));
+  return e.fields.map((x) => ({ ...x, sample: v[x.id] ?? NOT_SET }));
 }
 
 export type { Line };

@@ -153,12 +153,13 @@ html:root {
 }
 .rte-suggest[role="status"] { padding: var(--s3); }
 .rte-suggest-item {
-  display: grid; min-height: 44px; padding: var(--s1) var(--s3); border: 0; border-radius: var(--shape-m); background: transparent;
+  display: grid; min-height: var(--target); padding: var(--s1) var(--s3); border: 0; border-radius: var(--shape-m); background: transparent;
   color: inherit; font: inherit; text-align: start; cursor: pointer;
 }
 .rte-suggest-item[aria-selected="true"], .rte-suggest-item:hover { background: var(--secondary-container); }
 .rte-suggest-item small, .rte-field-sample { color: var(--on-surface-variant); font-size: var(--text-xs); }
-.tiptap-button.tiptap-button.rte-field-choice { justify-content: flex-start; gap: var(--s3); }
+.tiptap-button.tiptap-button.rte-field-choice { justify-content: flex-start; gap: var(--s3); min-height: var(--target); }
+.tiptap-button.tiptap-button.rte-insert-field { min-height: var(--target); }
 
 @media (forced-colors: active) {
   .tiptap-button.tiptap-button[data-active-state="on"]:not([disabled]),

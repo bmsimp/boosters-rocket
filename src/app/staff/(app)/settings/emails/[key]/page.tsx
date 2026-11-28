@@ -71,7 +71,7 @@ export default async function EmailPage({ params, searchParams }: { params: Prom
           )}
           {canChange && !isDefault && (
             <div className="box-foot">
-              <ConfirmDialog label="Use the default words" variant="outlined" consequence="The club's words for this email are replaced with the default. Earlier versions stay in this list."
+              <ConfirmDialog label="Use the default words" variant="outlined" consequence="The club's words are replaced with the default, and stay under Earlier versions."
                 act={defaultWordsAction.bind(null, e.key)} />
             </div>
           )}

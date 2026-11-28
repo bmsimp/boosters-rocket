@@ -16,7 +16,7 @@ export function InsertFieldMenu({ fields }: { fields: EmailField[] }) {
   return (
     <DropdownMenu modal={false} open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <Button type="button" variant="ghost" data-state={open ? "open" : "closed"} disabled={!editor} aria-label="Insert field" tooltip="Insert field">
+        <Button type="button" variant="ghost" className="rte-insert-field" data-state={open ? "open" : "closed"} disabled={!editor}>
           <span className="tiptap-button-text">Insert field</span>
           <ChevronDownIcon className="tiptap-button-dropdown-small" />
         </Button>

@@ -1425,6 +1425,8 @@ ul.links-acts li { display: flex; flex-wrap: wrap; align-items: center; justify-
 .email-preview { margin-top: var(--s3); border: 1px solid var(--outline-variant); border-radius: var(--shape-m); overflow: hidden; }
 .email-preview-subject { padding: var(--s3) var(--s4); background: var(--surface-container-high); color: var(--on-surface-variant); font: var(--body-m); overflow-wrap: anywhere; }
 .email-preview-subject b { color: var(--on-surface); font-weight: 600; }
+/* The canvas is the light scheme's, whatever the portal's mode: the mail sets no background of its own. */
+.email-preview-canvas { background: var(--surface-container-lowest); }
 .email-preview iframe { display: block; width: 100%; height: 34rem; border: 0; color-scheme: light; }
 
 /* ---- End of Settings and the staff menu ---- */

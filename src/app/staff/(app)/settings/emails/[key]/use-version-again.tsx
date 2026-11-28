@@ -7,7 +7,7 @@ import { versionAgainAction } from "../actions";
 
 type Done = { ok: true; message: string } | { ok: false; errors: string[] };
 
-/** "Use these words again": the earlier version shown saved as the email's next, then back to the current words. */
+/** "Use these words again": the earlier version shown saved as the email's next, its answer said here, the version list refreshed. */
 export function UseVersionAgain({ emailKey, n }: { emailKey: string; n: number }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -17,8 +17,9 @@ export function UseVersionAgain({ emailKey, n }: { emailKey: string; n: number }
     <>
       <Button variant="tonal" busy={pending} onClick={() => start(async () => {
         const r = await safely(() => versionAgainAction(emailKey, n), { ok: false as const, errors: [ACTION_FAILED] });
-        if (r.ok) router.push(`/staff/settings/emails/${emailKey}`);
-        else { setOutcome(r); requestAnimationFrame(() => ref.current?.focus()); }
+        setOutcome(r);
+        requestAnimationFrame(() => ref.current?.focus());
+        if (r.ok) router.refresh();
       })}>Use these words again</Button>
       {outcome && <ActionOutcome state={outcome} ref={ref} />}
     </>
