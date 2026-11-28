@@ -19,16 +19,21 @@ export type ContactSaved = { record: "contact"; of: DetailsOf; change: ContactDe
 export type EmailSaved = { record: "email"; parentId: string; from: string; to: string };
 export type DetailsEvent = ContactSaved | EmailSaved;
 
-/** Who saved, and how a staff member's save holds its items for the try it makes after the commit (QueueAs). */
-export type DetailsEventOp = { actor: Actor; ip: string | null; permission?: string; queueAs?: QueueAs };
+/** Who saved a person's or a family's details, and how a staff member's save holds its items for the try it makes after the commit (QueueAs). */
+export type ContactEventOp = { actor: Actor; ip: string | null; permission?: string; queueAs?: QueueAs };
+/** Who confirmed a change of sign-in email: the parent, with no permission and nothing held for a try. */
+export type EmailEventOp = { actor: Actor; ip: string | null };
+/** The options each event takes, and no others. */
+export type DetailsEventOp<E extends DetailsEvent> = E extends ContactSaved ? ContactEventOp : EmailEventOp;
 
 /** What an accounting plugin does with each event: queue its writes in `tx`, answering the new items' ids. */
-export type DetailsEvents = { [E in DetailsEvent as E["record"]]: (tx: Tx, event: E, o: DetailsEventOp) => Promise<string[]> };
+export type DetailsEvents = { [E in DetailsEvent as E["record"]]: (tx: Tx, event: E, o: DetailsEventOp<E>) => Promise<string[]> };
 
-/** The handler of the accounting system that is on. */
-const books: DetailsEvents = QUICKBOOKS_DETAILS_EVENTS;
+/** The handler of the accounting system that is on, read at each event. */
+const books = (): DetailsEvents => QUICKBOOKS_DETAILS_EVENTS;
 
 /** A person's or a family's details saved, inside the save's own transaction: the ids of what was queued to be sent on. */
-export async function detailsSaved(tx: Tx, event: DetailsEvent, o: DetailsEventOp): Promise<string[]> {
-  return event.record === "contact" ? books.contact(tx, event, o) : books.email(tx, event, o);
+export async function detailsSaved<E extends DetailsEvent>(tx: Tx, event: E, o: DetailsEventOp<E>): Promise<string[]> {
+  const e: DetailsEvent = event;
+  return e.record === "contact" ? books().contact(tx, e, o as ContactEventOp) : books().email(tx, e, o as EmailEventOp);
 }

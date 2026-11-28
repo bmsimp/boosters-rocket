@@ -23,10 +23,10 @@ export type GuardianEvent =
 /** What an accounting plugin does with a guardian's event: queue its writes in `tx`, answering each row's outcome. */
 export type GuardianEvents = { guardian: (tx: Tx, event: GuardianEvent, o: GuardianOp) => Promise<GuardianQueued[]> };
 
-/** The handler of the accounting system that is on. */
-const books: GuardianEvents = QUICKBOOKS_GUARDIAN_EVENTS;
+/** The handler of the accounting system that is on, read at each event. */
+const books = (): GuardianEvents => QUICKBOOKS_GUARDIAN_EVENTS;
 
 /** A guardian saved, inside the save's own transaction: what was queued for each row, for the try after the commit. */
 export async function guardianSaved(tx: Tx, event: GuardianEvent, o: GuardianOp): Promise<GuardianQueued[]> {
-  return books.guardian(tx, event, o);
+  return books().guardian(tx, event, o);
 }

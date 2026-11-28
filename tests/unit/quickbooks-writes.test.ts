@@ -146,6 +146,9 @@ const MAY_GUARDIAN_SEND = [ROSTER_WRITER, "src/lib/parents/guardians.ts", "src/l
 const MAY_GUARDIAN_QUEUE: Record<string, string[]> = { queueForGuardian: [ROSTER_WRITER] };
 const GUARDIAN_EVENT = "guardianSaved";
 const MAY_GUARDIAN_EVENT = ["src/lib/families/guardian-events.ts", "src/lib/parents/guardians.ts", "src/lib/parents/people.ts"];
+/** The same for a person's or a family's details (slice P6): the contact edits' save and the email change's confirmation. */
+const DETAILS_EVENT = "detailsSaved";
+const MAY_DETAILS_EVENT = ["src/lib/families/events.ts", CONTACT_EDITS, EMAIL_CHANGE];
 /**
  * A staff member's change of a guardian's phone and mailing address (stage 3's slice 11c): saved through the one save
  * (saveDetails()), then tried at once after its commit, through the module's own try of a change saved first. Named
@@ -699,6 +702,7 @@ describe("what the portal writes to QuickBooks, and who may send each", () => {
       expect(naming(SAVED_TRY), `${SAVED_TRY} sends a change saved first and settles its queue item. A new caller is a decision for a slice brief.`).toEqual([...MAY_SAVED_TRY].sort());
       for (const name of GUARDIAN_SENDS) expect(naming(name), `${name} queues or sends a guardian's Parent customer change. A new caller is a decision for a slice brief.`).toEqual([...(MAY_GUARDIAN_QUEUE[name] ?? MAY_GUARDIAN_SEND)].sort());
       expect(naming(GUARDIAN_EVENT), `${GUARDIAN_EVENT} queues a guardian's Parent customer change through QuickBooks' handler. A new caller is a decision for a slice brief.`).toEqual([...MAY_GUARDIAN_EVENT].sort());
+      expect(naming(DETAILS_EVENT), `${DETAILS_EVENT} queues a change of a person's or a family's details through QuickBooks' handler. A new caller is a decision for a slice brief.`).toEqual([...MAY_DETAILS_EVENT].sort());
       expect(naming(CONTACT_SEND), `${CONTACT_SEND} sends a staff member's change of a guardian's details at once. A new caller is a decision for a slice brief.`).toEqual([...MAY_CONTACT_SEND].sort());
     });
 

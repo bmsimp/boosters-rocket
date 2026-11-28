@@ -96,11 +96,23 @@ describe("a person's details: the event queues in the save's transaction, as the
     const nextTryAt = new Date(Date.now() + MIN);
     await db.transaction((tx) => detailsSaved(tx, a.contact, { actor: op.actor, ip: null, queueAs: { askedBy: op.staffUserId, nextTryAt } }));
     expect(await items()).toEqual([expect.objectContaining({ askedBy: op.staffUserId, nextTryAt })]);
+    const byEvent = await asked();
+    // The same save by today's queueing function, with the same QueueAs: the same row.
+    await db.delete(writeQueue);
+    const e = a.contact;
+    await db.transaction((tx) => queueContactChange(tx, e.of, { change: e.change, was: e.was, now: e.now }, { actor: op.actor, ip: null, queueAs: { askedBy: op.staffUserId, nextTryAt } }));
+    expect(await items()).toEqual([expect.objectContaining({ askedBy: op.staffUserId, nextTryAt })]);
+    expect(await asked()).toEqual(byEvent);
   });
 
   it("a sign-in email's event rolled back queues nothing; committed, it queues what queueEmailChange() queues", async () => {
     const a = await ana();
     const email: EmailSaved = { record: "email", parentId: a.ana.id, from: "ana@example.com", to: "ana.r@example.com" };
+    // An email event takes no permission and nothing held for a try: either is refused when it is written.
+    // @ts-expect-error QueueAs is a contact save's alone
+    void (() => detailsSaved({} as Tx, email, { actor: a.actor, ip: null, queueAs: { askedBy: "x", nextTryAt: new Date() } }));
+    // @ts-expect-error a permission is a contact save's alone
+    void (() => detailsSaved({} as Tx, email, { actor: a.actor, ip: null, permission: "Parents.ReadWrite" }));
     await rolledBack((tx) => detailsSaved(tx, email, { actor: a.actor, ip: null }));
     expect(await items()).toEqual([]);
     await db.transaction((tx) => detailsSaved(tx, email, { actor: a.actor, ip: null }));
