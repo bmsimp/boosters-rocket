@@ -1,9 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DataTable, type Column } from "@/app/components/data-table";
 import { ActionOutcome, Notice, NOTICE_STATUS_TONE, TONE_WORDS } from "@/app/components/notice";
 import { tableHeaders, tableRows } from "../helpers/table";
+
+/** The address the browser is at, which a current row reads (useSearchParams()). */
+const address = vi.hoisted(() => ({ search: new URLSearchParams() }));
+vi.mock("next/navigation", () => ({ useSearchParams: () => address.search, usePathname: () => "/staff/links" }));
 
 type Row = { id: string; name: string; owed: string };
 const COLUMNS: Column<Row>[] = [
@@ -50,6 +54,22 @@ describe("the table primitive", () => {
     expect(html.match(/<tbody role="rowgroup">/g)).toHaveLength(2);
     expect(html).toContain('<tr role="row" class="t-group"><th role="rowheader" scope="rowgroup" colSpan="3">Rivera Family</th></tr>');
     expect(tableRows(html)).toHaveLength(2); // the heading rows aren't body rows
+  });
+
+  it("marks the row an open Drawer is about as current, by either of its addresses, and no other row", () => {
+    const current = { params: ["review", "pick"], value: (r: Row) => r.id };
+    const currentRows = (html: string) => [...html.matchAll(/<tr role="row" aria-current="true"><th role="rowheader" scope="row">([^<]*)/g)].map((m) => m[1]);
+    address.search = new URLSearchParams("review=2");
+    expect(currentRows(table({ current }))).toEqual(["Chen Family"]);
+    address.search = new URLSearchParams("pick=1&customer=E2E-10");
+    expect(currentRows(table({ current }))).toEqual(["Rivera &lt;b&gt;Family&lt;/b&gt;"]);
+    address.search = new URLSearchParams("review=3");
+    expect(table({ current })).not.toContain("aria-current");
+    address.search = new URLSearchParams("other=2"); // another Drawer's address marks nothing
+    expect(table({ current })).not.toContain("aria-current");
+    address.search = new URLSearchParams("review=2");
+    expect(table()).not.toContain("aria-current"); // a table not asked for it never reads the address
+    address.search = new URLSearchParams();
   });
 });
 

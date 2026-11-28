@@ -44,11 +44,11 @@ describe("the Overview's status cards", () => {
   it("gives an Admin a card for each area but the design system, in the list pane's order, each leading to its page", async () => {
     await asAdmin();
     const all = await cards();
-    expect(all.map((c) => c.key)).toEqual(["club", "messages", "staff", "roles", "parents", "integrations", "audit", "health"]);
+    expect(all.map((c) => c.key)).toEqual(["club", "messages", "staff", "roles", "parents", "integrations", "audit", "health", "backups"]);
     expect(all.map((c) => `${c.button.words} ${c.button.href}`)).toEqual([
       "Open Club /staff/settings/club", "Open Messages /staff/settings/messages", "Open Staff /staff/settings/staff", "Open Roles /staff/settings/roles",
       "Open Parent sign-ins /staff/settings/parents", "Open Integrations /staff/settings/integrations", "Open the audit log /staff/settings/audit",
-      "Open Health /staff/settings/health",
+      "Open Health /staff/settings/health", "Open Backups /staff/settings/backups",
     ]);
   });
 

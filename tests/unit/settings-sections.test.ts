@@ -30,7 +30,7 @@ describe("the Settings items", () => {
     for (const g of SETTINGS_GROUPS) expect(g.slice(1), g).toBe(g.slice(1).toLowerCase());
     const order = railItems(ADMIN).map((s) => SETTINGS_GROUPS.indexOf(s.group));
     expect(order).toEqual([...order].sort((a, b) => a - b));
-    expect(rail(ADMIN)).toEqual(["club", "messages", "staff", "roles", "parents", "integrations", "audit", "health", "design-system"]);
+    expect(rail(ADMIN)).toEqual(["club", "messages", "staff", "roles", "parents", "integrations", "audit", "health", "backups", "design-system"]);
     expect(integrationItems(ADMIN).map((s) => s.key)).toEqual(["quickbooks", "forms", "mail", "sign-in"]);
   });
 

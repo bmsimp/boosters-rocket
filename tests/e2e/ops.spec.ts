@@ -24,12 +24,14 @@ test("the Health page tells an Admin what is working, in words, and that the add
   await page.goto("/staff/settings/health");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Health");
   const line = (key: string) => page.locator(`li[data-health="${key}"]`);
-  for (const key of ["database", "worker", "cleanup", "quickbooks", "money", "buyout_check", "mail", "volunteer_reminders", "forms", "parents", "breach_check", "due_reminders", "backup", "version"]) await expect(line(key)).toBeVisible();
+  for (const key of ["database", "worker", "cleanup", "quickbooks", "money", "buyout_check", "mail", "volunteer_reminders", "forms", "parents", "breach_check", "due_reminders", "backup", "backup_agent", "version"]) await expect(line(key)).toBeVisible();
   await expect(line("database")).toContainText("Working");
   // No worker runs beside the browser tests, and nothing has backed this database up: the page says so plainly.
   await expect(line("worker")).toContainText("Needs attention");
   await expect(line("worker")).toContainText("Last woke: never");
   await expect(line("backup")).toContainText("No backup has been recorded.");
+  // Nor does a backup service: its line says it hasn't answered.
+  await expect(line("backup_agent")).toContainText("Not answering");
   await expect(line("mail")).toContainText("Outgoing mail");
   // The seed connects with the club's own Intuit app: no Boosters Rocket line, and the QuickBooks line says how it connects.
   await expect(line("quickbooks_relay")).toHaveCount(0);

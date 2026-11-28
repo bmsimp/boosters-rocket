@@ -8,7 +8,8 @@ import { LINKS, seedLinks } from "./links-seed";
  * Accounting links (the redesign the owner approved on 2026-11-27), at each project's width (390 and 1440), with axe:
  * the compact list, Show details opening and closing its row in place (aria-expanded, the comparison loaded for that
  * family and audited), the family's Review drawer by its own address, the Pick drawer, and Unlink from the books
- * asking first. On data tests/e2e/links-seed.ts adds and takes away; no press that changes anything is made.
+ * asking first. While a family's Review or Pick drawer is open, its row is the current one (aria-current, drawn as a
+ * ticked row is), modal or docked. On data tests/e2e/links-seed.ts adds and takes away; no press that changes anything is made.
  */
 const sql = postgres(process.env.DATABASE_URL!);
 test.afterAll(async () => { await sql.end(); });
@@ -23,6 +24,8 @@ const noSidewaysScroll = async (page: Page) =>
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), `${page.url()} scrolls sideways`).toBe(false);
 /** A button's name: its words, then whom it is about, read from visually hidden text (a screen reader may put a space before the colon). */
 const about = (words: string, who: string) => new RegExp(`^${words}\\s*:\\s*${who}$`);
+/** The rows marked current: the one an open Drawer is about, and no other. */
+const currentRows = (page: Page) => page.getByRole("region", { name: "Families" }).locator('tr[aria-current="true"]');
 const settled = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))));
 
 test("the list, Show details, the Review and Pick drawers, and Unlink asking first", async ({ page }, info) => {
@@ -78,11 +81,14 @@ test("the list, Show details, the Review and Pick drawers, and Unlink asking fir
     await expect(review.getByRole("button", { name: about("Confirm link", LINKS.family) })).toBeVisible();
     await expect(review).toContainText("Its guardians will see Bulkley Family's invoices, so check it's the right household.");
     await expect(review.getByRole("button", { name: about("Leave unlinked", LINKS.family) })).toBeVisible();
+    await expect(currentRows(page)).toHaveCount(1);
+    await expect(currentRows(page).getByRole("rowheader")).toHaveText(LINKS.family);
     await settled(page);
     await checked(page, "the Review drawer");
     await page.keyboard.press("Escape");
     await expect(review).toBeHidden();
     await expect(page).not.toHaveURL(/[?&]review=/);
+    await expect(currentRows(page)).toHaveCount(0);
 
     // Hide details closes the row again.
     await hide.click();
@@ -95,10 +101,12 @@ test("the list, Show details, the Review and Pick drawers, and Unlink asking fir
     await expect(pick).toBeVisible();
     await expect(page).toHaveURL(/[?&]pick=/);
     await expect(pick.getByRole("searchbox", { name: "Customer name or email address" })).toBeVisible();
+    await expect(currentRows(page).getByRole("rowheader")).toHaveText(LINKS.nomatch);
     await settled(page);
     await checked(page, "the Pick drawer");
     await page.keyboard.press("Escape");
     await expect(pick).toBeHidden();
+    await expect(currentRows(page)).toHaveCount(0);
 
     // Unlink from the books asks first, in a ConfirmDialog, from a linked family's Review drawer; Cancel changes nothing.
     const [rivera] = await sql`SELECT family_id FROM accounting_link WHERE customer_id = 'E2E-10' AND family_id IS NOT NULL`;
@@ -141,11 +149,20 @@ test("from 1600px the Review and Pick drawers dock beside the table at their own
     expect(right, "the table makes room beside the pane").toBeLessThanOrEqual(box.x);
     expect(right, "and is narrower than with nothing chosen").toBeLessThan(wide);
     await noSidewaysScroll(page);
+    // The docked pane's family is the current row, drawn as a ticked row is, while the table beside it stays usable.
+    await expect(currentRows(page)).toHaveCount(1);
+    await expect(currentRows(page).getByRole("rowheader")).toHaveText("Rivera Family");
+    await families.getByRole("checkbox", { name: `Select ${LINKS.family}` }).check();
+    const fill = (name: string) => families.getByRole("rowheader", { name, exact: true }).evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(await fill("Rivera Family"), "the current row is filled as the ticked one is").toBe(await fill(LINKS.family));
+    expect(await fill("Rivera Family"), "and not as a plain row").not.toBe(await fill(LINKS.nomatch));
+    await families.getByRole("checkbox", { name: `Select ${LINKS.family}` }).uncheck();
     await settled(page);
     await checked(page, "the Review drawer, docked");
     await review.getByRole("link", { name: "Close" }).click();
     await expect(review).toBeHidden();
     await expect(page).not.toHaveURL(/[?&]review=/);
+    await expect(currentRows(page)).toHaveCount(0);
     expect(await families.evaluate((el) => el.getBoundingClientRect().right), "the table takes the width again").toBeCloseTo(wide, 0);
   } finally {
     await context.close();

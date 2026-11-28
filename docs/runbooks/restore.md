@@ -14,7 +14,21 @@ a backup ([updates](updates.md#going-back-to-postgres-16)).
 
 The commands run in `~/booster-rocket/deploy`; add the `-f` files and `--profile` you start the installation with.
 
-## Onto the same machine
+## From the portal
+
+For a backup on this server made by the version of the portal that is running (most of them: those made since the
+last update).
+
+1. Sign in as an Admin and open **Settings, Backups**.
+2. On the backup's row press **Restore this backup**, read what is lost, tick the box and confirm.
+3. The backup service first makes a backup of how things are now, then puts both databases back. The page says when
+   it is done; you may need to sign in again.
+4. Check, as in [After a restore](#after-a-restore) (step 4 is done for you).
+
+To undo it, put back the backup made just before, the same way. A backup made by another version of the portal says
+so on its row: bring it back with the steps below.
+
+## Onto the same machine, by hand
 
 1. Choose the backup: `ls -l /srv/booster-rocket/backups` (the time is in each name, in UTC). Use the
    `booster-rocket-` and `documenso-` files with the same time.
@@ -64,6 +78,6 @@ all of it has loaded.
    token or password that "can't be opened" or "can't be read".
 3. Open `<DOCUMENSO_URL>/api/health`: `"database"` and `"certificate"` both say `ok`. A certificate problem means the
    file or its passphrase isn't the one in `.env`.
-4. Take a backup now: `docker compose run --rm backup --now`. The restored database holds the backup time recorded
+4. Take a backup now: **Back up now** on Settings, Backups, or `docker compose run --rm backup --now`. The restored database holds the backup time recorded
    before it was dumped, so until this backup is made, starting a newer version is stopped by the migrate step's
    backup check ([updates](updates.md#when-the-start-stops-for-a-backup)).

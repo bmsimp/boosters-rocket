@@ -77,6 +77,11 @@ services:
       QBO_RELAY_URL: ${QBO_RELAY_URL:-}
       # Server logs and psql output only: what parents read as due follows the club's zone set on the staff Club page.
       TZ: ${CLUB_TIME_ZONE}
+      BACKUP_OUTBOX: /backup-outbox
+    volumes:
+      # Shared with the backup service: a backup asked for on Settings, Backups waits here for its download or its
+      # off-site copy, and is removed once sent. The app never sees BACKUP_DIR.
+      - backup-outbox:/backup-outbox
     depends_on:
       migrate: { condition: service_completed_successfully }
     # For a proxy of the club's own on this machine (a tunnel, a web server). Only this machine can reach it here.
@@ -165,17 +170,21 @@ services:
       - "127.0.0.1:${DOCUMENSO_LOCAL_PORT:-3001}:3000"
 
   backup:
-    # The nightly backup of both databases (scripts/backup-schedule.sh runs scripts/backup.sh), at BACKUP_AT club
-    # time, into BACKUP_DIR. Its lines are in: docker compose logs backup. It tells the portal, so the Health page's
-    # backup line stays current. One now: docker compose run --rm backup --now
+    # The backup service (scripts/backup-agent.sh): the nightly backup of both databases (scripts/backup.sh) at the
+    # time saved on Settings, Backups (BACKUP_AT club time until someone saves one), into BACKUP_DIR, and what that page
+    # asks for: back up now, a download, a restore, an off-site copy. Its lines are in: docker compose logs backup. It
+    # tells the portal, so the Health page's backup lines stay current. One now: docker compose run --rm backup --now
     image: postgres:18.7@sha256:2ea8630df176ad090ec92136dee850397c5af8781e4bcf2e4162593691c61bbc
     restart: unless-stopped
-    entrypoint: ["bash", "/opt/booster-rocket/scripts/backup-schedule.sh", "/backups"]
+    entrypoint: ["bash", "/opt/booster-rocket/scripts/backup-agent.sh", "/backups"]
     command: []
     environment:
       TZ: ${CLUB_TIME_ZONE}
       BR_BACKUP_AT: ${BACKUP_AT:-03:00}
       BR_BACKUP_KEEP: ${BACKUP_KEEP:-14}
+      # The folder shared with the app, given to the app's user (node, 1000).
+      BR_OUTBOX: /backup-outbox
+      BR_OUTBOX_OWNER: "1000:1000"
       # The tools in this container, over the network to the database, as Postgres's own administrator.
       BR_DB_CONTAINER: ""
       PGHOST: db
@@ -186,6 +195,7 @@ services:
     volumes:
       - ../scripts:/opt/booster-rocket/scripts:ro
       - ${BACKUP_DIR:?Set BACKUP_DIR in deploy/.env, the folder backups are written to}:/backups
+      - backup-outbox:/backup-outbox
     depends_on:
       db: { condition: service_healthy }
     # A backup under way is let finish when the service is stopped.
@@ -226,3 +236,5 @@ volumes:
   db-data:
   proxy-data:
   proxy-config:
+  # A backup on its way to a download or an off-site copy, for minutes: shared by the backup service and the app.
+  backup-outbox:

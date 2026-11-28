@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import postgres from "postgres";
+import { createHmac } from "node:crypto";
 import { staffSessionCookie } from "./staff-session";
 import { parentSessionCookie } from "./parent-session";
 import { BULK, seedBulk } from "./bulk-seed";
@@ -188,5 +189,99 @@ test("Accounting links with a row's details open and two rows ticked, and a Revi
     await page.screenshot({ path: `test-results/screenshots/links-review-drawer-${info.project.name}.png` });
   } finally {
     await drop();
+  }
+});
+
+/**
+ * The row of an open Review drawer, marked current as a ticked row is (2026-11-28), as the person sees it: at 390 (the
+ * drawer fills the phone's screen), at 1440 (the modal sheet over the table, the row under the scrim) and at 2560
+ * (docked beside the table), in light and in dark, for the design review (.claude/agents/design-review.md).
+ */
+test("Accounting links' current row while a Review drawer is open, at 390, 1440 and 2560, light and dark, for the owner to look at", async ({ browser }, info) => {
+  const widths = info.project.name === "phone" ? [390] : [1440, 2560];
+  const { drop } = await seedLinks(sql);
+  try {
+    const [rivera] = await sql`SELECT family_id FROM accounting_link WHERE customer_id = 'E2E-10' AND family_id IS NOT NULL`;
+    for (const width of widths) {
+      for (const scheme of SCHEMES) {
+        const context = await browser.newContext({ viewport: { width, height: width >= 2000 ? 1300 : 900 }, colorScheme: scheme, ...(width === 390 ? { isMobile: true, hasTouch: true } : {}) });
+        await context.addCookies([staffSessionCookie()]);
+        const page = await context.newPage();
+        await page.goto(`/staff/links?review=${rivera!.family_id}`);
+        await expect(page.getByRole("dialog", { name: "Review Rivera Family" })).toBeVisible();
+        await expect(page.locator('tr[aria-current="true"]')).toHaveCount(1);
+        await settle(page);
+        await page.screenshot({ path: `test-results/screenshots/links-current-row-${scheme}-${width}.png` });
+        await context.close();
+      }
+    }
+  } finally {
+    await drop();
+  }
+});
+
+/**
+ * Settings › Backups (in-app backups, PR 110), for the owner to look at before it merges: a few backups on the server
+ * with off-site copies off, a row's Restore this backup asking first, the off-site set-up Drawer, and what a staff member
+ * with the widest custom role gets (the page is Admin only: Admin.Backups.ReadWrite is both its see and its change, so
+ * there is no read-only view, and they are refused). The backup service is stood in for by the rows it writes: a fresh
+ * heartbeat, three backups of the running schema and the last good backup. All of it is taken away after.
+ */
+test("Settings › Backups, for the owner to look at", async ({ page, browser }, info) => {
+  const stamps = ["20261127T030000Z", "20261126T030000Z", "20261125T030000Z"];
+  const beat = () => sql`INSERT INTO setting (key, value) VALUES ('backup.agent', ${sql.json({ at: new Date().toISOString(), version: 1, freeBytes: 41 * 1024 ** 3, nextAt: "2026-11-28T09:00:00Z", schedule: "03:00", keep: 14, zone: "America/Chicago" })})
+    ON CONFLICT (key) DO UPDATE SET value = excluded.value`;
+  const m = (await sql<{ m: string }[]>`SELECT max(created_at)::text AS m FROM drizzle.__drizzle_migrations`)[0]!.m;
+  for (const [i, s] of stamps.entries()) {
+    await sql`INSERT INTO backup_file (backup_at, portal_bytes, documenso_bytes, schema_at) VALUES (${s}, ${3_200_000 + i * 40_000}, ${11_500_000 + i * 90_000}, ${m}) ON CONFLICT (backup_at) DO NOTHING`;
+  }
+  await sql`INSERT INTO setting (key, value) VALUES ('backup.last_success', ${sql.json({ at: "2026-11-27T03:00:00Z", file: `booster-rocket-${stamps[0]}.dump`, bytes: 3_200_000, documenso: { file: `documenso-${stamps[0]}.dump`, bytes: 11_500_000 } })})
+    ON CONFLICT (key) DO UPDATE SET value = excluded.value`;
+  const wideId = "e2e-backups-wide";
+  try {
+    await beat();
+    await page.goto("/staff/settings/backups");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Backups");
+    await expect(page.getByRole("button", { name: "Back up now" })).toBeVisible();
+    await settle(page);
+    await page.screenshot(shot("backups-list", info.project.name));
+
+    await page.getByRole("button", { name: /^Restore this backup/ }).first().click();
+    const restore = page.getByRole("dialog", { name: "Restore this backup?" });
+    await expect(restore).toContainText("is lost");
+    await settle(page);
+    await page.screenshot({ path: `test-results/screenshots/backups-restore-confirm-${info.project.name}.png` });
+    await page.keyboard.press("Escape");
+
+    await beat();
+    await page.goto("/staff/settings/backups?offsite=1");
+    const drawer = page.getByRole("dialog", { name: "Set up off-site copies" });
+    await expect(drawer).toBeVisible();
+    await drawer.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+    await page.screenshot({ path: `test-results/screenshots/backups-offsite-drawer-${info.project.name}.png` });
+
+    // A staff member whose role holds every permission a custom role can: the page is refused to them.
+    const [roleRow] = await sql`INSERT INTO role (key, name) VALUES ('e2e-backups-wide', 'Everything a role can have') RETURNING id`;
+    await sql`INSERT INTO role_rule (role_id, kind, pattern) VALUES (${roleRow!.id}, 'include', '*')`;
+    const [staff] = await sql`INSERT INTO staff_user (email, name, status, auth_user_id) VALUES ('e2e-wide@example.org', 'Wren Wide', 'active', ${wideId}) RETURNING id`;
+    await sql`INSERT INTO staff_auth_user (id, name, email, email_verified) VALUES (${wideId}, 'Wren Wide', 'e2e-wide@example.org', true)`;
+    await sql`INSERT INTO role_assignment (role_id, staff_user_id) VALUES (${roleRow!.id}, ${staff!.id})`;
+    await sql`INSERT INTO staff_auth_session (id, token, user_id, expires_at) VALUES (${wideId}, 'e2e-backups-wide-token', ${wideId}, now() + interval '1 hour')`;
+    const context = await browser.newContext({ viewport: page.viewportSize() ?? undefined });
+    const signature = createHmac("sha256", process.env.BETTER_AUTH_SECRET!).update("e2e-backups-wide-token").digest("base64");
+    await context.addCookies([{ ...staffSessionCookie(), value: encodeURIComponent(`e2e-backups-wide-token.${signature}`) }]);
+    const wide = await context.newPage();
+    await wide.goto("/staff/settings/backups");
+    await settle(wide);
+    await wide.screenshot(shot("backups-without-permission", info.project.name));
+    await context.close();
+  } finally {
+    await sql`DELETE FROM staff_auth_session WHERE id = ${wideId}`;
+    await sql`DELETE FROM role_assignment WHERE staff_user_id IN (SELECT id FROM staff_user WHERE auth_user_id = ${wideId})`;
+    await sql`DELETE FROM staff_user WHERE auth_user_id = ${wideId}`;
+    await sql`DELETE FROM staff_auth_user WHERE id = ${wideId}`;
+    await sql`DELETE FROM role WHERE key = 'e2e-backups-wide'`;
+    await sql`DELETE FROM backup_file WHERE backup_at IN ${sql(stamps)}`;
+    await sql`DELETE FROM setting WHERE key IN ('backup.agent', 'backup.last_success')`;
   }
 });

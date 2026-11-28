@@ -1661,3 +1661,49 @@ export const messageMail = pgTable("message_mail", {
   check("message_mail_address_lower", sql`${t.address} = lower(btrim(${t.address}))`),
   check("message_mail_reason_length", sql`${t.reason} is null or char_length(${t.reason}) <= 200`),
 ]);
+
+/**
+ * What staff asked the backup service to do (docs/superpowers/specs/2026-11-28-in-app-backups-design.md): back up now,
+ * prepare a download, restore a backup, or stage a backup for its off-site copy. The app writes a row, audited; the
+ * agent on the server (scripts/backup-agent.sh), which alone has the tools and the folder, claims it, does it and writes
+ * the outcome with one line of words (never a secret or a family's data). `backup_at` names a pair of files by their
+ * time; the agent checks it against the pairs it listed itself. `requested_by` is null for the agent's own nightly
+ * backup and its uploads. One unfinished request of each kind at a time. Rows finished over 90 days ago are cleaned.
+ */
+export const backupRequest = pgTable("backup_request", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  kind: text("kind", { enum: ["backup", "download", "restore", "upload"] }).notNull(),
+  backupAt: text("backup_at"),
+  requestedBy: text("requested_by"),
+  requestedLabel: text("requested_label"),
+  requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+  claimedAt: timestamp("claimed_at", { withTimezone: true }),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  outcome: text("outcome", { enum: ["ok", "failed", "refused"] }),
+  words: text("words"),
+  result: jsonb("result"),
+}, (t) => [
+  uniqueIndex("backup_request_unfinished_uq").on(t.kind).where(sql`finished_at is null`),
+  index("backup_request_requested_ix").on(t.requestedAt),
+  check("backup_request_backup_at_shape", sql`${t.backupAt} is null or ${t.backupAt} ~ '^[0-9]{8}T[0-9]{6}Z$'`),
+  check("backup_request_words_length", sql`${t.words} is null or char_length(${t.words}) <= 500`),
+  check("backup_request_finished_with_outcome", sql`(${t.finishedAt} is null) = (${t.outcome} is null)`),
+]);
+
+/**
+ * The backups on the server, as the agent last listed the folder: one row per pair of files with one time in their
+ * names. A mirror of the folder, rewritten by the agent at each look (a pair it no longer sees is deleted), kept by the
+ * clean-up. `schema_at` is the time of the last migration in the portal's dump (drizzle's `created_at`), so a restore
+ * can tell a backup made by another version of the portal. The off-site columns are the worker's, after an upload.
+ */
+export const backupFile = pgTable("backup_file", {
+  backupAt: text("backup_at").primaryKey(),
+  portalBytes: bigint("portal_bytes", { mode: "number" }).notNull(),
+  documensoBytes: bigint("documenso_bytes", { mode: "number" }),
+  schemaAt: bigint("schema_at", { mode: "number" }),
+  seenAt: timestamp("seen_at", { withTimezone: true }).notNull().defaultNow(),
+  offsiteAt: timestamp("offsite_at", { withTimezone: true }),
+  offsiteOutcome: text("offsite_outcome", { enum: ["ok", "failed"] }),
+}, (t) => [
+  check("backup_file_backup_at_shape", sql`${t.backupAt} ~ '^[0-9]{8}T[0-9]{6}Z$'`),
+]);

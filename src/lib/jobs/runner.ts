@@ -19,6 +19,9 @@ import { DUE_REMINDERS_JOB, sendDueReminders } from "@/lib/seasons/due-reminders
 import { WRITE_QUEUE_JOB, runWriteQueue } from "@/lib/roster/queue";
 import { BUYOUT_CHECK_JOB, checkBuyoutInvoices } from "@/lib/buyouts/daily-check";
 import { MESSAGES_MAIL_JOB, sendMessageMail } from "@/lib/messages/mail";
+import { sendOffsiteCopies } from "@/lib/backups/offsite";
+
+export const OFFSITE_JOB = "backups.offsite_copy";
 
 export const TOKEN_JOB = "quickbooks.token_refresh";
 export const WAKE_KEY = "worker.last_wake";
@@ -106,6 +109,14 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
     if (m.sent + m.failed + m.retrying > 0) ran.push({ job: MESSAGES_MAIL_JOB, ok: m.failed + m.retrying === 0 });
   } catch {
     ran.push({ job: MESSAGES_MAIL_JOB, ok: false });
+  }
+  // Off-site copies of backups (src/lib/backups/offsite.ts): one backup the backup service staged, encrypted and put in
+  // the club's storage, while off-site copies are on. Guarded the same way; in this wake's answer only when it tried one.
+  try {
+    const o = await sendOffsiteCopies();
+    if (o.sent + o.failed > 0) ran.push({ job: OFFSITE_JOB, ok: o.failed === 0 });
+  } catch {
+    ran.push({ job: OFFSITE_JOB, ok: false });
   }
   // A guardian's phone and mailing address taken into the portal, once, after the first successful roster read by this
   // build since migration 0044 (src/lib/parents/contact-take-in.ts). It reads the roster cache and asks QuickBooks nothing, so it

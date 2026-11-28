@@ -402,17 +402,22 @@ function MainAction({ row, tag, w }: { row: LinkRow; tag: string; w: AccountingW
   return null;
 }
 
+/** The drawers about one family (Review, Pick a customer): while one is open its family's row is the current one. */
+const DRAWER_PARAMS = ["review", "pick"] as const;
+
 /**
  * The Families list, with a box on each Suggested row it shows for the bulk Link to their suggested families (src/lib/bulk.ts),
  * bound to the roster tag: each row ticked is linked by its own Confirm's write, in its own transaction. The page lists
- * every row its filter matches, so ticking the header ticks every Suggested row that matches. With none, no boxes.
+ * every row its filter matches, so ticking the header ticks every Suggested row that matches. With none, no boxes. The
+ * row whose Review or Pick drawer is open is marked current (aria-current, drawn as a ticked row is).
  */
 function FamiliesTable({ rows, columns, caption, tag, w }: { rows: LinkRow[]; columns: Column<LinkRow>[]; caption: string; tag: string; w: AccountingWords }) {
   const picks = rows.map(pickOf).filter((p): p is SuggestedPick => p !== null);
   const nouns = { one: w.customerNoun, many: w.customerNounPlural };
   const table = (select: boolean) => <DataTable caption={caption} columns={columns} rows={rows} rowKey={(r) => String(r.familyId)} className="links-table"
     select={select ? { label: (r) => r.name, when: (r) => pickOf(r) !== null } : undefined}
-    expand={(r) => <DetailsPanel familyId={String(r.familyId)} family={r.name} review={hasReview(r)} nouns={nouns} />} />;
+    expand={(r) => <DetailsPanel familyId={String(r.familyId)} family={r.name} review={hasReview(r)} nouns={nouns} />}
+    current={{ params: DRAWER_PARAMS, value: (r) => String(r.familyId) }} />;
   if (picks.length === 0) return table(false);
   return (
     <BulkSelect pageIds={picks.map((p) => p.familyId)} noun={{ one: "family", many: "families" }}

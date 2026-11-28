@@ -1,4 +1,5 @@
-import { availableParallelism } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
+import path from "node:path";
 import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
 import { WORKERS_ENV, testWorkers } from "./tests/setup/workers.mjs";
@@ -37,6 +38,8 @@ export default defineConfig({
       BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret-32",
       SETTINGS_ENCRYPTION_KEY: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
       APP_URL: "http://localhost:3000",
+      // The folder the backup service shares with the app (deploy/compose.yml), here a temporary one.
+      BACKUP_OUTBOX: path.join(tmpdir(), "br-test-backup-outbox"),
     },
     ...(workers === 1
       ? { include: [...UNIT, ...INTEGRATION], fileParallelism: false }

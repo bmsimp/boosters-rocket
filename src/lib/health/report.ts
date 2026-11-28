@@ -27,6 +27,8 @@ import { lastCheck, lastCheckWords } from "@/lib/quickbooks/sandbox-check/view";
 import { lastDueReminders } from "@/lib/seasons/due-reminders";
 import { dateWords } from "@/lib/volunteer/clock";
 import { lastBackup } from "./backup";
+import { AGENT_LATE_MS, agentBeat, backupRows, sizeWords, type AgentBeat, type BackupRow } from "@/lib/backups/status";
+import { readOffsite } from "@/lib/backups/offsite";
 import { buyoutCheckLine, volunteerRemindersLine } from "./job-lines";
 import { BUILD_VERSION } from "./version";
 import { env } from "@/env";
@@ -41,7 +43,7 @@ import { env } from "@/env";
 export type HealthState = "ok" | "attention" | "off";
 export type HealthLine = {
   key: "database" | "worker" | "cleanup" | "quickbooks" | "money" | "mail" | "forms" | "parents" | "due_reminders" | "backup" | "version"
-    | "buyout_check" | "volunteer_reminders" | "breach_check" | "quickbooks_relay";
+    | "buyout_check" | "volunteer_reminders" | "breach_check" | "quickbooks_relay" | "backup_agent" | "backup_offsite";
   title: string;
   /** "ok": working. "attention": something a person should look at. "off": not set up or switched off, which may be by choice. */
   state: HealthState;
@@ -64,6 +66,42 @@ export const MONEY_OLD_MS = 48 * 3_600_000;
 
 /** Backups are meant to be nightly. Two days without one means a night was missed and nobody noticed. */
 export const BACKUP_OLD_MS = 48 * 3_600_000;
+
+/** Under this much free space where the backups are kept, the backup service's line asks for attention. */
+export const BACKUP_FREE_MIN = 2 * 1024 ** 3;
+const BACKUPS_FIX = { href: "/staff/settings/backups", label: "Open backups" };
+
+/**
+ * The backup service's line (docs/superpowers/specs/2026-11-28-in-app-backups-design.md, section 8): answering, or not
+ * since when, from the heartbeat the agent writes at each look; and the free space where the backups are kept.
+ */
+export function backupAgentLine(beat: AgentBeat | null, now: Date): HealthLine {
+  const base = { key: "backup_agent" as const, title: "Backup service", fix: BACKUPS_FIX, times: [{ label: "Last answered", at: beat?.at ?? null }] };
+  const free = beat?.freeBytes ?? null;
+  const notes = free !== null ? [`${sizeWords(free)} free where the backups are kept`] : [];
+  if (!beat) return { ...base, state: "attention", word: "Not answering", notes,
+    says: "The backup service on the server hasn't answered yet, so backups can't be managed in the portal. Update the installation, or check the backup service on the server." };
+  if (now.getTime() - Date.parse(beat.at) > AGENT_LATE_MS) return { ...base, state: "attention", word: "Not answering", notes,
+    says: "The backup service on the server has stopped answering, so backups can't be managed in the portal. Check it on the server." };
+  if (free !== null && free < BACKUP_FREE_MIN) return { ...base, state: "attention", word: "Low on space", notes,
+    says: "Less than 2 GB is free where the backups are kept. Free some space on the server, or keep fewer backups." };
+  return { ...base, state: "ok", word: "Answering", notes, says: "Answering. Backups are managed on Settings, Backups." };
+}
+
+/** Off-site copies' line, only while they are on: the last copy, warning when it failed or is over two days old. */
+export function backupOffsiteLine(on: boolean, rows: BackupRow[], now: Date): HealthLine | null {
+  if (!on) return null;
+  const copies = rows.filter((r) => r.offsite).sort((a, b) => b.offsite!.at.localeCompare(a.offsite!.at));
+  const lastOk = copies.find((r) => r.offsite!.ok)?.offsite!.at ?? null;
+  const latest = copies[0]?.offsite ?? null;
+  const base = { key: "backup_offsite" as const, title: "Off-site copies", fix: BACKUPS_FIX, notes: [], times: [{ label: "Last copy", at: lastOk }] };
+  if (latest && !latest.ok) return { ...base, state: "attention", word: "Needs attention",
+    says: "The last copy to off-site storage failed. Test the connection on Settings, Backups." };
+  if (!lastOk) return { ...base, state: "attention", word: "None yet", says: "On, but no backup has been copied off-site yet. The next backup is copied." };
+  if (now.getTime() - Date.parse(lastOk) > BACKUP_OLD_MS) return { ...base, state: "attention", word: "Needs attention",
+    says: "No backup has been copied off-site for more than 2 days. Check the backup lines above." };
+  return { ...base, state: "ok", word: "Copied", says: "Each backup is copied, encrypted, to the club's off-site storage." };
+}
 
 /** Why the breach check last couldn't answer, in words. */
 const BREACH_FAILURE_WORDS: Record<BreachNotChecked, string> = {
@@ -347,8 +385,8 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
         says: "On. From 9:00 club time, families are emailed 14 days and 3 days before a required payment or checklist item of theirs is due." });
 
   const backupAge = backup ? now.getTime() - Date.parse(backup.at) : null;
-  const backedUp: Verdict = backupAge === null ? { state: "attention", word: "None recorded", says: "No backup has been recorded. On the server, check that the backup service is running, or run scripts/backup.sh with a folder to keep backups in and set it to run every night." }
-    : backupAge > BACKUP_OLD_MS ? { state: "attention", word: "Needs attention", says: "The last backup is more than 2 days old. Check that the nightly backup on the server is still running." }
+  const backedUp: Verdict = backupAge === null ? { state: "attention", word: "None recorded", says: "No backup has been recorded. Make one with Back up now on Settings, Backups, or on the server check that the backup service is running." }
+    : backupAge > BACKUP_OLD_MS ? { state: "attention", word: "Needs attention", says: "The last backup is more than 2 days old. Check the backup service's line below, and the schedule on Settings, Backups." }
       : { state: "ok", word: "Recent", says: "Backed up. Keep the server's env file, and Documenso's signing certificate with its passphrase, with the backups: without the env file's encryption key, a backup can't bring back the QuickBooks connection or the sign-in settings." };
   // Whether Documenso's database was in it, as scripts/backup.sh recorded (a record from before it did says nothing).
   const documensoNote = !backup || backup.documenso === "unknown" ? []
@@ -358,9 +396,13 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
         : "Documenso's database wasn't part of this backup."]
       : [`Documenso's database too: ${backup.documenso.file}${backup.documenso.bytes !== null ? `, ${bytesWords(backup.documenso.bytes)}` : ""}`];
   lines.push({
-    key: "backup", title: "Last backup", ...backedUp, times: [{ label: "Last backup", at: backup?.at ?? null }], fix: null,
+    key: "backup", title: "Last backup", ...backedUp, times: [{ label: "Last backup", at: backup?.at ?? null }], fix: BACKUPS_FIX,
     notes: [...(backup?.file ? [`${backup.file}${backup.bytes !== null ? `, ${bytesWords(backup.bytes)}` : ""}`] : []), ...documensoNote],
   });
+  const [beat, offsite, rows] = await Promise.all([agentBeat(), readOffsite(), backupRows()]);
+  lines.push(backupAgentLine(beat, now));
+  const offsiteLine = backupOffsiteLine(offsite !== null, rows, now);
+  if (offsiteLine) lines.push(offsiteLine);
 
   lines.push({ key: "version", title: "Version", state: "ok", word: "", says: `Running ${BUILD_VERSION}.`, times: [], notes: [], fix: null });
   return lines;
