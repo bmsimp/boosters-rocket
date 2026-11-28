@@ -1,0 +1,193 @@
+# One pull request's preview: its branch of the portal on the e2e seed's test data, at https://pr-<n>-br.<domain>
+# (docs/superpowers/specs/2026-11-27-pr-previews-design.md). scripts/poc/preview.sh is the only thing that runs this
+# file, as the compose project booster-rocket-pr-<n>: it builds the branch's image, resets the preview's own database,
+# seeds it and starts the rest. This file, the proxy and the door always come from the site's checkout (main), never
+# from the branch: the branch supplies only its Dockerfile, its code and its seed.
+#
+# What keeps a preview off the real world: every service that runs the branch's code (app, worker, door, mailpit, seed)
+# is only on this preview's own network, made internal, which has no way out of the machine and holds no other
+# preview. No real mail can leave (the seed's mail settings point at mailpit, which never relays), and no call reaches
+# QuickBooks, the relay, Documenso or anything else outside. The shared proxy (docker-compose.preview-edge.yml) is
+# joined to this network by preview.sh, and is the only way in. No port is published on the host.
+#
+# The values come from the shared .env.preview and this preview's own pr.env (both --env-file) and from preview.sh:
+# PREVIEW_PR (the pull request's number), BR_PREVIEW_SRC (the branch's files), BR_PREVIEW_HOME (the previews' folder),
+# PREVIEW_REF and APP_COMMIT (what is running).
+
+services:
+  db:
+    # A database that is thrown away on every deploy: no guard, no backup, nothing moved into it. Its name ends in
+    # _test, the only kind scripts/seed-e2e.ts will empty and seed.
+    image: postgres:18
+    restart: unless-stopped
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=40"]
+    environment:
+      POSTGRES_DB: booster_preview_test
+      POSTGRES_USER: booster
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required in .env.preview}
+      TZ: America/Chicago
+    volumes:
+      - db:/var/lib/postgresql
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U booster -d booster_preview_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 200
+
+  app:
+    build:
+      context: ${BR_PREVIEW_SRC:?preview.sh sets BR_PREVIEW_SRC}
+      args:
+        APP_COMMIT: ${APP_COMMIT:-}
+    image: booster-rocket-preview-app:pr-${PREVIEW_PR:?preview.sh sets PREVIEW_PR}
+    container_name: booster-rocket-pr-${PREVIEW_PR}-app
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://booster:${DB_PASSWORD}@db:5432/booster_preview_test
+      APP_URL: ${APP_URL:?APP_URL is required in .env.preview}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required in .env.preview}
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?SETTINGS_ENCRYPTION_KEY is required in .env.preview}
+      # Nothing listens there: a relay call fails at once, as in the e2e run (playwright.config.ts).
+      QBO_RELAY_URL: http://127.0.0.1:9
+      # The seed's mail settings are SMTP over TLS to 127.0.0.1:2465, where mailpit listens (it shares this
+      # container's network). Its certificate is made by preview.sh and trusted here only.
+      NODE_EXTRA_CA_CERTS: /preview/mail-cert.pem
+      NODE_OPTIONS: --max-old-space-size=512
+      TZ: America/Chicago
+    volumes:
+      - ${BR_PREVIEW_HOME:?preview.sh sets BR_PREVIEW_HOME}/pr-${PREVIEW_PR}/mail-tls/cert.pem:/preview/mail-cert.pem:ro
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [internal]
+    mem_limit: 768m
+    cpus: 1.5
+    pids_limit: 300
+
+  mailpit:
+    # Catches every mail the preview sends; its pages are at /__preview/mail/. It relays nothing: no relay is set.
+    image: axllent/mailpit:v1@sha256:23a2ef85bc50853ab3093645d1d64679afd8887e89da5e48a88940c172591a4e
+    container_name: booster-rocket-pr-${PREVIEW_PR}-mailpit
+    restart: unless-stopped
+    network_mode: "service:app"
+    environment:
+      MP_SMTP_BIND_ADDR: 127.0.0.1:2465
+      MP_SMTP_TLS_CERT: /tls/cert.pem
+      MP_SMTP_TLS_KEY: /tls/key.pem
+      MP_SMTP_REQUIRE_TLS: "true"
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_UI_BIND_ADDR: 0.0.0.0:8025
+      MP_WEBROOT: __preview/mail
+      MP_MAX_MESSAGES: "500"
+      MP_DISABLE_VERSION_CHECK: "true"
+    volumes:
+      - ${BR_PREVIEW_HOME}/pr-${PREVIEW_PR}/mail-tls/cert.pem:/tls/cert.pem:ro
+      - ${BR_PREVIEW_HOME}/pr-${PREVIEW_PR}/mail-tls/key.pem:/tls/key.pem:ro
+    depends_on:
+      app: { condition: service_started }
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 100
+
+  worker:
+    # The same worker as the site's: it wakes the preview's app every minute. Its QuickBooks and Documenso jobs fail,
+    # having nowhere to go; its mail lands in mailpit.
+    image: booster-rocket-preview-app:pr-${PREVIEW_PR:?preview.sh sets PREVIEW_PR}
+    container_name: booster-rocket-pr-${PREVIEW_PR}-worker
+    restart: unless-stopped
+    environment:
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+      WORKER_APP_URL: http://booster-rocket-pr-${PREVIEW_PR}-app:3000
+      TZ: America/Chicago
+    command: ["node", "tools/scripts/worker.mjs"]
+    depends_on:
+      app: { condition: service_healthy }
+    networks: [internal]
+    healthcheck:
+      disable: true
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 100
+
+  door:
+    # The preview's front page (/__preview/): signs the visitor in as the seed's Admin or as its parent, Zelda, by
+    # setting the cookie for the session the seed made (scripts/poc/preview/door.mjs). Preview tooling, outside src/.
+    image: booster-rocket-preview-app:pr-${PREVIEW_PR:?preview.sh sets PREVIEW_PR}
+    container_name: booster-rocket-pr-${PREVIEW_PR}-door
+    restart: unless-stopped
+    user: node
+    environment:
+      APP_URL: ${APP_URL}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+      PREVIEW_REF: ${PREVIEW_REF:-}
+      APP_COMMIT: ${APP_COMMIT:-}
+    command: ["node", "/door/door.mjs"]
+    volumes:
+      - ./scripts/poc/preview/door.mjs:/door/door.mjs:ro
+    networks: [internal]
+    healthcheck:
+      disable: true
+    mem_limit: 96m
+    cpus: 0.25
+    pids_limit: 50
+
+  seed-install:
+    # Installs the branch's dependencies for the seed, into a volume of the preview's own. The one service that
+    # reaches the internet (the package registry), and it runs no code of the branch's but its install scripts.
+    profiles: ["tools"]
+    image: node:26-slim
+    working_dir: /src
+    environment:
+      CI: "true"
+    command: ["sh", "-c", "npm install -g --silent pnpm@12 && pnpm install --frozen-lockfile --store-dir /pnpm-store --config.package-import-method=copy"]
+    volumes:
+      - ${BR_PREVIEW_SRC}:/src
+      - node-modules:/src/node_modules
+      - pnpm-store:/pnpm-store
+    networks: [outside]
+    restart: "no"
+    mem_limit: 1536m
+    cpus: 2.0
+
+  seed:
+    # scripts/seed-e2e.ts from the branch: migrates the preview's database and fills it with the e2e test data. The
+    # branch's own checkout, read only, on the internal network only.
+    profiles: ["tools"]
+    image: node:26-slim
+    working_dir: /src
+    environment:
+      DATABASE_URL: postgresql://booster:${DB_PASSWORD}@db:5432/booster_preview_test
+      APP_URL: ${APP_URL}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY}
+      QBO_RELAY_URL: http://127.0.0.1:9
+    command: ["node_modules/.bin/tsx", "scripts/seed-e2e.ts"]
+    volumes:
+      - ${BR_PREVIEW_SRC}:/src:ro
+      - node-modules:/src/node_modules:ro
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [internal]
+    restart: "no"
+    mem_limit: 768m
+    cpus: 1.0
+
+volumes:
+  db:
+    name: booster-rocket-pr-${PREVIEW_PR}-db
+  node-modules:
+    name: booster-rocket-pr-${PREVIEW_PR}-node-modules
+  # Shared by every preview: only downloaded packages, which pnpm checks by their hashes.
+  pnpm-store:
+    name: booster-rocket-preview-pnpm-store
+
+networks:
+  internal:
+    name: booster-rocket-pr-${PREVIEW_PR}-internal
+    internal: true
+  # The one network with a way out, for seed-install alone.
+  outside:
+    name: booster-rocket-pr-${PREVIEW_PR}-outside

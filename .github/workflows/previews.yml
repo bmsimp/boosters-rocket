@@ -1,0 +1,77 @@
+name: previews
+# Pull request previews (docs/superpowers/specs/2026-11-27-pr-previews-design.md). This workflow never runs a pull
+# request's code and never reaches the test server: it checks out main, opens or closes a preview's gate in Cloudflare
+# (an Access application, then a DNS name) and puts on or takes off the label the test server polls for. The test
+# server builds a labeled pull request's branch itself, only when it is a branch of this repository.
+#
+# - The owner starts or stops one by hand: Actions > previews > Run workflow, on main, with the pull request's number.
+# - A labeled pull request's gate closes when it closes (pull_request_target: no checkout of its code, only main's).
+# - Every day, labeled pull requests that are closed or older than seven days come down, and stray gates close.
+#
+# The Cloudflare token lives in the environment "previews", which only main may use.
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Pull request number"
+        required: true
+        type: string
+      action:
+        description: "up starts or refreshes its preview; down takes it down"
+        required: true
+        type: choice
+        options: [up, down]
+        default: up
+  pull_request_target:
+    types: [closed]
+  schedule:
+    - cron: "23 7 * * *"
+
+permissions: {}
+
+# One run at a time for each pull request (and one sweep), so two pull requests closing together each get their run.
+concurrency:
+  group: previews-${{ inputs.pr || github.event.pull_request.number || 'sweep' }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    # By hand: only the owner, only from main. On a close: only a pull request that carries the label. Daily: always.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner)
+      || (github.event_name == 'pull_request_target' && contains(github.event.pull_request.labels.*.name, 'preview'))
+      || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    environment: previews
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # main's scripts, never the pull request's, whatever event started this.
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Open or close the gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          CF_TUNNEL_ID: ${{ secrets.CF_TUNNEL_ID }}
+          CF_ACCESS_POLICY_ID: ${{ secrets.CF_ACCESS_POLICY_ID }}
+          PREVIEW_DOMAIN: ${{ vars.PREVIEW_DOMAIN }}
+          EVENT: ${{ github.event_name }}
+          INPUT_PR: ${{ inputs.pr }}
+          INPUT_ACTION: ${{ inputs.action }}
+          CLOSED_PR: ${{ github.event.pull_request.number }}
+        run: |
+          case "$EVENT" in
+            workflow_dispatch) scripts/poc/preview/workflow.sh "$INPUT_ACTION" "$INPUT_PR" ;;
+            pull_request_target) scripts/poc/preview/workflow.sh down "$CLOSED_PR" ;;
+            schedule) scripts/poc/preview/workflow.sh sweep ;;
+          esac
