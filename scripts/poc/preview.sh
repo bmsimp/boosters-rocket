@@ -185,13 +185,21 @@ fetch_pr() {
   [ "$(git -C "$REPO_CLONE" rev-parse "refs/preview/pr-$PREVIEW_PR")" = "$PR_SHA" ] \
     || die 6 "$PR_BRANCH moved while it was fetched. Nothing was changed; run it again."
   local next="$PR_HOME/src.next"
-  rm -rf "$next"; mkdir -p "$next"
-  git -C "$REPO_CLONE" archive "$PR_SHA" | tar -x -C "$next"
+  rm -rf "$next"
+  # The build copies these files into the image as they are, and the app runs there as another user (node), so they
+  # must be readable by all: unpacked under umask 022, whatever umask this script runs with. The folder above stays
+  # private (make_pr_home).
+  ( umask 022; mkdir -p "$next"; git -C "$REPO_CLONE" archive "$PR_SHA" | tar -x --no-same-owner -C "$next" )
 }
 
 make_pr_home() {
+  # Private while it makes the secrets, then the umask it was given again: a umask left at 077 made the branch's files
+  # unreadable in the image (the app's "Cannot read package config: permission denied").
+  local old_umask
+  old_umask="$(umask)"
   umask 077
   mkdir -p "$PR_HOME/mail-tls"
+  chmod 700 "$PR_HOME"
   if [ ! -f "$PR_ENV" ]; then
     local tmp
     tmp="$(mktemp "$PR_HOME/pr.env.XXXXXX")"
@@ -217,6 +225,7 @@ make_pr_home() {
       -keyout "$PR_HOME/mail-tls/key.pem" -out "$PR_HOME/mail-tls/cert.pem" 2>/dev/null
     chmod 644 "$PR_HOME/mail-tls/key.pem" "$PR_HOME/mail-tls/cert.pem"
   fi
+  umask "$old_umask"
 }
 
 running() {

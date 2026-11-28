@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, readFileSync, chmodSync, mkdirSync, copyFileSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, chmodSync, mkdirSync, copyFileSync, existsSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
@@ -237,7 +237,8 @@ describe("preview.sh", { timeout: 30_000 }, () => {
       `  *" clone "*) mkdir -p "\${@: -1}/.git"; exit 0;;`,
       `  *" fetch "*) exit 0;;`,
       `  *" rev-parse refs/preview/"*) echo ${"a".repeat(40)}; exit 0;;`,
-      `  *" archive "*) tar -cf - -T /dev/null; exit 0;;`,
+      // The branch holds one file, package.json, as git keeps it: readable by all.
+      `  *" archive "*) d="$(mktemp -d)"; echo "{}" > "$d/package.json"; chmod 644 "$d/package.json"; tar -C "$d" -cf - package.json; exit 0;;`,
       `esac`,
       `exec "${slash(realGit)}" "$@"`,
     ].join("\n"));
@@ -319,6 +320,25 @@ describe("preview.sh", { timeout: 30_000 }, () => {
     expect(r.status).toBe(5);
     expect(existsSync(path.join(home, "pr-1", "current"))).toBe(true);
     expect(f.calls()).not.toContain("volume rm");
+  });
+
+  // The first real preview's app couldn't start: the branch's files were unpacked under the script's private umask
+  // (077), copied into the image as they were, and unreadable by the app's own user ("Cannot read package config
+  // /app/package.json: permission denied"). File modes mean nothing on Windows.
+  it.skipIf(!hasJq || process.platform === "win32")("unpacks the branch readable by all, even under a private umask, and keeps the preview's folder private", () => {
+    init();
+    f.github({ "pulls/7": pullAnswer("club/portal") });
+    const r = spawnSync("bash", ["-c", `umask 077; exec bash "${slash(path.join(dir, "scripts/poc/preview.sh"))}" up 7`], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${f.bin}${path.delimiter}${process.env.PATH}`, BR_DIR: dir, BR_PREVIEW_HOME: home, BR_HEALTH_TIMEOUT: "0" },
+    });
+    // The stand-in docker never reports healthy, so the run stops at the health wait, after the files are in place.
+    expect(r.status, r.stderr).toBe(4);
+    const mode = (p: string) => (statSync(p).mode & 0o777).toString(8);
+    expect(mode(path.join(home, "pr-7", "src", "package.json"))).toBe("644");
+    expect(mode(path.join(home, "pr-7", "src"))).toBe("755");
+    expect(mode(path.join(home, "pr-7"))).toBe("700");
+    expect(mode(path.join(home, "pr-7", "pr.env"))).toBe("600");
   });
 
   it.skipIf(!hasJq)("poll builds a labeled pull request's commit once: a build that failed isn't tried again until the branch moves", () => {
