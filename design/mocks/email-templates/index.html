@@ -1,0 +1,259 @@
+<!doctype html>
+<!-- A static mock for email templates (docs/superpowers/specs/2026-11-28-email-templates-design.md), with the real words.
+     It draws with the portal's own stylesheet, src/app/booster.css, and the default club color (Launch Indigo, the
+     same values design/system/gallery.html carries). Open it from a checkout. Not part of the app. -->
+<html lang="en" style="--seed: #1e1b4b; --on-seed: #ffffff; --primary-l: #5b598c; --on-primary-l: #ffffff; --primary-container-l: #e3dfff; --on-primary-container-l: #181445; --secondary-l: #5e5c71; --on-secondary-l: #ffffff; --secondary-container-l: #e3e0f9; --on-secondary-container-l: #1b1a2c; --tertiary-l: #7a5367; --on-tertiary-l: #ffffff; --tertiary-container-l: #ffd8e9; --on-tertiary-container-l: #2f1123; --focus-l: #5b598c; --primary-d: #c4c1fb; --on-primary-d: #2d2a5b; --primary-container-d: #444173; --on-primary-container-d: #e3dfff; --secondary-d: #c7c4dc; --on-secondary-d: #302e42; --secondary-container-d: #464559; --on-secondary-container-d: #e3e0f9; --tertiary-d: #eab9d1; --on-tertiary-d: #472638; --tertiary-container-d: #603b4f; --on-tertiary-container-d: #ffd8e9; --focus-d: #c4c1fb; --primary-lhc: #383666; --on-primary-lhc: #ffffff; --primary-container-lhc: #e3dfff; --on-primary-container-lhc: #000000; --secondary-lhc: #3b394d; --on-secondary-lhc: #ffffff; --secondary-container-lhc: #e3e0f9; --on-secondary-container-lhc: #000000; --tertiary-lhc: #543044; --on-tertiary-lhc: #ffffff; --tertiary-container-lhc: #ffd8e9; --on-tertiary-container-lhc: #000000; --focus-lhc: #383666; --primary-dhc: #e3dfff; --on-primary-dhc: #181445; --primary-container-dhc: #383666; --on-primary-container-dhc: #ffffff; --secondary-dhc: #e3e0f9; --on-secondary-dhc: #1b1a2c; --secondary-container-dhc: #3b394d; --on-secondary-container-dhc: #ffffff; --tertiary-dhc: #ffd8e9; --on-tertiary-dhc: #2f1123; --tertiary-container-dhc: #543044; --on-tertiary-container-dhc: #ffffff; --focus-dhc: #e3dfff">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Email templates mock</title>
+<link rel="stylesheet" href="../../../src/app/booster.css">
+<style>
+  /* The mock's own frame: captions, and stand-ins for what the app draws elsewhere. Everything else is booster.css. */
+  .mock-caption { font-size: var(--text-sm); color: var(--on-surface-variant); max-width: 760px; margin: var(--s6) auto 0; padding: 0 var(--s4); }
+  .mock-caption b { color: var(--on-surface); }
+  .mock-rule { border: 0; border-top: 2px dashed var(--outline-variant); max-width: 760px; margin: var(--s6) auto 0; }
+  main.mock-wide { max-width: 1440px; }
+  .mock-grid { display: grid; gap: var(--s4); margin-top: var(--s4); }
+  .mock-grid > * { min-width: 0; }
+  @media (min-width: 1200px) { .mock-grid { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); align-items: start; } }
+  .mock-col { display: grid; gap: var(--s4); align-content: start; }
+  .mock-col .box { margin: 0; }
+
+  /* Stand-in for RichTextEditor: the Simple Editor template's toolbar as rich-text-editor.scss draws it. */
+  .mock-rte { border: 1px solid var(--outline); border-radius: var(--shape-m); background: var(--card); }
+  .mock-tools { display: flex; flex-wrap: wrap; gap: var(--s1); padding: var(--s1); border-bottom: 1px solid var(--outline-variant); }
+  .mock-tools .sep { width: 1px; align-self: stretch; margin: var(--s2) var(--s1); background: var(--outline-variant); }
+  .mock-tool { min-width: 44px; min-height: 44px; padding: 0 var(--s2); border: 0; border-radius: var(--shape-m); background: transparent;
+    color: var(--on-surface-variant); font: var(--label-l); display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+  .mock-tool svg { width: 1.125rem; height: 1.125rem; }
+  .mock-tool[data-state="open"] { background: var(--secondary-container); color: var(--primary); }
+  .mock-doc { padding: var(--s3) var(--s4) var(--s4); font-size: var(--text-md); line-height: 1.6; color: var(--on-surface); overflow-wrap: anywhere; }
+  .mock-doc > * + * { margin-top: var(--s3); }
+  .mock-chip { display: inline-flex; align-items: center; padding: 0 8px; border-radius: var(--shape-s); background: var(--secondary-container);
+    color: var(--on-secondary-container); font-weight: 600; font-size: 0.9375rem; line-height: 1.6; white-space: nowrap; }
+  .mock-fixed { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px var(--s2); padding: var(--s2) var(--s3);
+    border-radius: var(--shape-m); background: var(--surface-container-high); color: var(--on-surface-variant); }
+  .mock-fixed svg { width: 18px; height: 18px; grid-row: span 2; margin-top: 3px; }
+  .mock-fixed b { font: var(--label-l); color: var(--on-surface); }
+  .mock-menu { margin: 0 var(--s1) var(--s1); padding: var(--s1); border: 1px solid var(--outline-variant); border-radius: var(--shape-l);
+    background: var(--surface-container-high); box-shadow: var(--shadow-3); max-width: 22rem; list-style: none; }
+  .mock-menu li { min-height: 44px; display: grid; align-content: center; padding: 0 var(--s3); border-radius: var(--shape-m); }
+  .mock-menu li:first-child { background: var(--secondary-container); }
+  .mock-menu li { grid-template-columns: auto 1fr; gap: var(--s3); align-items: baseline; }
+  .mock-menu small { color: var(--on-surface-variant); font-size: var(--text-xs); }
+
+  /* Stand-in for the preview: the mail's own HTML (frame() in src/lib/mail/messages.ts), drawn in a sandboxed frame in the app. */
+  .mock-mail { border: 1px solid var(--outline-variant); border-radius: var(--shape-m); overflow: hidden; background: #ffffff; color: #1a1a1a;
+    font-family: Arial, Helvetica, sans-serif; }
+  .mock-mail-head { padding: var(--s3) var(--s4); background: var(--surface-container-high); color: var(--on-surface); font-family: var(--font); }
+  .mock-mail-head p { font-size: var(--text-sm); color: var(--on-surface-variant); }
+  .mock-mail-head p b { color: var(--on-surface); font-weight: 600; }
+  .mock-mail-bar { background: #1e1b4b; color: #ffffff; padding: 16px 24px; font-size: 1.125rem; font-weight: bold; }
+  .mock-mail-body { padding: 24px; font-size: 1rem; line-height: 1.5; overflow-wrap: anywhere; }
+  .mock-mail-body p { margin: 0 0 16px; }
+  .mock-mail-body a { color: #1a4fbf; }
+  .mock-mail-foot { margin: 24px 0 0 !important; padding-top: 16px; border-top: 1px solid #e3e4e8; font-size: 0.8125rem; color: #6b6b6b; }
+  .mock-mail-foot span { color: #1e1b4b; font-weight: bold; }
+  .mock-fields { list-style: none; padding: 0; margin-top: var(--s3); display: grid; gap: var(--s2); }
+  .mock-fields li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s3); align-items: baseline; }
+  .mock-fields li .mock-chip { justify-self: start; }
+  .mock-fields li span:last-child { color: var(--on-surface-variant); overflow-wrap: anywhere; }
+  .mock-says { font: var(--body-m); color: var(--on-surface-variant); flex-basis: 100%; }
+</style>
+</head>
+<body>
+
+<p class="mock-caption"><b>Screen 1. Settings, Club, Emails.</b> Every email the portal sends, grouped by what it's about. Each row opens that email. From 840px the Settings list sits beside this page, as on every settings page. Here the club has changed one email.</p>
+<main class="wrap single">
+  <div class="page-head settings-head"><div><h1 class="page-title">Emails</h1><p class="lede">The words of each email the portal sends. Links, codes and the safety lines are always added by the portal.</p></div></div>
+
+  <section class="box" aria-labelledby="g-signin">
+    <h2 id="g-signin">Sign-in</h2>
+    <ul class="list" aria-labelledby="g-signin">
+      <li class="list-row is-link"><a class="list-link" href="#"><div class="list-main"><span class="list-title">Sign-in code</span><span class="list-meta">After the right password on a new device.</span></div><div class="list-trail"><span class="status-dot tone-neutral"><span class="dot" aria-hidden="true"></span>Default</span></div><svg class="list-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></a></li>
+      <li class="list-row is-link"><a class="list-link" href="#"><div class="list-main"><span class="list-title">Code to confirm a change</span><span class="list-meta">When a parent changes how they sign in.</span></div><div class="list-trail"><span class="status-dot tone-neutral"><span class="dot" aria-hidden="true"></span>Default</span></div><svg class="list-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></a></li>
+      <li class="list-row is-link"><a class="list-link" href="#"><div class="list-main"><span class="list-title">Welcome</span><span class="list-meta">When the club welcomes a parent to the portal.</span></div><div class="list-trail"><span class="status-dot tone-neutral"><span class="dot" aria-hidden="true"></span>Default</span></div><svg class="list-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></a></li>
+      <li class="list-row is-link"><a class="list-link" href="#"><div class="list-main"><span class="list-title">Choose your password</span><span class="list-meta">When an Admin sends a set-up link to a parent welcomed before.</span></div><div class="list-trail"><span class="status-dot tone-neutral"><span class="dot" aria-hidden="true"></span>Default</span></div><svg class="list-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></a></li>
+      <li class="list-row is-link"><a class="list-link" href="#"><div class="list-main"><span class="list-title">Set up your password</span><span class="list-meta">When a parent with no password asks for one.</span></div><div class="list-trail"><span class="status-dot tone-neutral"><span class="dot" aria-hidden="true"></span>Default</span></div><svg class="list-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></a></li>
+      <li class="list-row is-link"><a class="list-link" href="#"><div class="list-main"><span class="list-title">Reset your password</span><span class="list-meta">When a parent asks to reset their password.</span></div><div class="list-trail"><span class="status-dot tone-neutral"><span class="dot" aria-hidden="true"></span>Default</span></div><svg class="list-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></a></li>
+      <li class="list-row is-link"><a class="list-link" href="#"><div class="list-main"><span class="list-title">Sign-in was reset</span><span class="list-meta">When an Admin resets a parent&#x27;s sign-in.</span></div><div class="list-trail"><span class="status-dot tone-neutral"><span class="dot" aria-hidden="true"></span>Default</span></div><svg class="list-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></a></li>
+      <li class="list-row is-link"><a class="list-link" href="#"><div class="list-main"><span class="list-title">Password was changed</span><span class="list-meta">When a parent changes their password.</span></div><div class="list-trail"><span class="status-dot tone-neutral"><span class="dot" aria-hidden="true"></span>Default</span></div><svg class="list-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></a></li>
+      <li class="list-row is-link"><a class="list-link" href="#"><div class="list-main"><span class="list-title">Confirm your new email</span><span class="list-meta">To the new address, when a parent changes it.</span></div><div class="list-trail"><span class="status-dot tone-neutral"><span class="dot" aria-hidden="true"></span>Default</span></div><svg class="list-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></a></li>
+      <li class="list-row is-link"><a class="list-link" href="#"><div class="list-main"><span class="list-title">Your sign-in email</span><span class="list-meta">To the old address, when a parent changes it.</span></div><div class="list-trail"><span class="status-dot tone-neutral"><span class="dot" aria-hidden="true"></span>Default</span></div><svg class="list-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></a></li>
+    </ul>
+  </section>
+
+  <section class="box" aria-labelledby="g-forms">
+    <h2 id="g-forms">Forms</h2>
+    <ul class="list" aria-labelledby="g-forms">
+      <li class="list-row is-link"><a class="list-link" href="#screen-2"><div class="list-main"><span class="list-title">Please sign</span><span class="list-meta">A reminder that a form still needs a signature.</span></div><div class="list-trail"><span class="status-dot tone-done"><span class="dot" aria-hidden="true"></span>Club&#x27;s words</span></div><svg class="list-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></a></li>
+      <li class="list-row is-link"><a class="list-link" href="#"><div class="list-main"><span class="list-title">Signed copy</span><span class="list-meta">When everyone has signed a form.</span></div><div class="list-trail"><span class="status-dot tone-neutral"><span class="dot" aria-hidden="true"></span>Default</span></div><svg class="list-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></a></li>
+    </ul>
+  </section>
+
+  <section class="box" aria-labelledby="g-vol">
+    <h2 id="g-vol">Volunteering</h2>
+    <ul class="list" aria-labelledby="g-vol">
+      <li class="list-row is-link"><a class="list-link" href="#"><div class="list-main"><span class="list-title">Signed up</span><span class="list-meta">When a parent takes a shift.</span></div><div class="list-trail"><span class="status-dot tone-neutral"><span class="dot" aria-hidden="true"></span>Default</span></div><svg class="list-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></a></li>
+      <li class="list-row is-link"><a class="list-link" href="#"><div class="list-main"><span class="list-title">Shift changed</span><span class="list-meta">When staff change a shift&#x27;s time or place.</span></div><div class="list-trail"><span class="status-dot tone-neutral"><span class="dot" aria-hidden="true"></span>Default</span></div><svg class="list-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></a></li>
+      <li class="list-row is-link"><a class="list-link" href="#"><div class="list-main"><span class="list-title">Shift cancelled</span><span class="list-meta">When staff cancel a shift or an event.</span></div><div class="list-trail"><span class="status-dot tone-neutral"><span class="dot" aria-hidden="true"></span>Default</span></div><svg class="list-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></a></li>
+      <li class="list-row is-link"><a class="list-link" href="#"><div class="list-main"><span class="list-title">Place freed</span><span class="list-meta">When staff take someone off a shift.</span></div><div class="list-trail"><span class="status-dot tone-neutral"><span class="dot" aria-hidden="true"></span>Default</span></div><svg class="list-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></a></li>
+      <li class="list-row is-link"><a class="list-link" href="#"><div class="list-main"><span class="list-title">Shift tomorrow</span><span class="list-meta">The day before a shift.</span></div><div class="list-trail"><span class="status-dot tone-neutral"><span class="dot" aria-hidden="true"></span>Default</span></div><svg class="list-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></a></li>
+      <li class="list-row is-link"><a class="list-link" href="#"><div class="list-main"><span class="list-title">Volunteering due</span><span class="list-meta">Before a family&#x27;s volunteering is due.</span></div><div class="list-trail"><span class="status-dot tone-neutral"><span class="dot" aria-hidden="true"></span>Default</span></div><svg class="list-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></a></li>
+    </ul>
+  </section>
+
+  <section class="box" aria-labelledby="g-season">
+    <h2 id="g-season">Season and messages</h2>
+    <ul class="list" aria-labelledby="g-season">
+      <li class="list-row is-link"><a class="list-link" href="#"><div class="list-main"><span class="list-title">Something&#x27;s due</span><span class="list-meta">Before a payment or checklist item is due.</span></div><div class="list-trail"><span class="status-dot tone-neutral"><span class="dot" aria-hidden="true"></span>Default</span></div><svg class="list-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></a></li>
+      <li class="list-row is-link"><a class="list-link" href="#"><div class="list-main"><span class="list-title">Club message</span><span class="list-meta">When staff post or update a message and email families.</span></div><div class="list-trail"><span class="status-dot tone-neutral"><span class="dot" aria-hidden="true"></span>Default</span></div><svg class="list-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></a></li>
+    </ul>
+  </section>
+</main>
+
+<hr class="mock-rule">
+<p class="mock-caption" id="screen-2"><b>Screen 2. One email open: Please sign.</b> The club added one sentence (the last paragraph). Gray blocks are fixed: the portal writes them, and they can&#x27;t be edited or removed. The preview follows each keystroke, with sample values. On a phone the preview and fields come under the editor.</p>
+<main class="wrap single mock-wide">
+  <div class="page-head settings-head">
+    <div><p class="page-back"><a href="#">Emails</a></p><h1 class="page-title">Please sign</h1><p class="lede">Sent to a guardian when a form still needs their signature.</p></div>
+  </div>
+
+  <div class="mock-grid">
+    <div class="mock-col">
+      <section class="box" aria-labelledby="ed-h">
+        <h2 id="ed-h">Words</h2>
+        <form class="stack">
+          <div class="field">
+            <label class="field-label" for="subject">Subject</label>
+            <p class="field-hint" id="subject-hint">Put a field in braces, such as {Form name}.</p>
+            <input id="subject" type="text" aria-describedby="subject-hint" value="Please sign: {Form name}">
+          </div>
+          <div class="field">
+            <span class="field-label" id="body-label">Email</span>
+            <p class="field-hint">Type { or press Insert field to add a field.</p>
+            <div class="mock-rte" role="group" aria-labelledby="body-label">
+              <div class="mock-tools" role="toolbar" aria-label="Formatting">
+                <button class="mock-tool" type="button" aria-label="Undo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 010 10h-3"/></svg></button>
+                <button class="mock-tool" type="button" aria-label="Redo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 000 10h3"/></svg></button>
+                <span class="sep" aria-hidden="true"></span>
+                <button class="mock-tool" type="button" aria-label="Bold"><b>B</b></button>
+                <button class="mock-tool" type="button" aria-label="Italic"><i>I</i></button>
+                <button class="mock-tool" type="button" aria-label="Underline"><u>U</u></button>
+                <button class="mock-tool" type="button" aria-label="List"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1" fill="currentColor"/><circle cx="4.5" cy="12" r="1" fill="currentColor"/><circle cx="4.5" cy="18" r="1" fill="currentColor"/></svg></button>
+                <button class="mock-tool" type="button" aria-label="Link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M10 14a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1"/><path d="M14 10a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1"/></svg></button>
+                <span class="sep" aria-hidden="true"></span>
+                <button class="mock-tool" type="button" data-state="open" aria-expanded="true" aria-haspopup="menu">Insert field <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+              </div>
+              <ul class="mock-menu" role="menu" aria-label="Insert field">
+                <li role="menuitem">Form name <small>Medical release 2026</small></li>
+                <li role="menuitem">For <small>Maya Ortiz</small></li>
+                <li role="menuitem">Due date <small>Friday, September 4</small></li>
+                <li role="menuitem">Family name <small>The Ortiz family</small></li>
+                <li role="menuitem">Club name <small>Lakeside Band Boosters</small></li>
+                <li role="menuitem">Club contact <small>treasurer@lakesideband.org</small></li>
+              </ul>
+              <div class="mock-doc">
+                <p>A friendly reminder: <span class="mock-chip">Form name</span> for <span class="mock-chip">For</span> still needs your signature.</p>
+                <div class="mock-fixed"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="9" width="12" height="8" rx="2"/><path d="M7 9V6.5a3 3 0 016 0V9"/></svg><b>Fixed: when it&#x27;s due</b><span>It&#x27;s due Friday, September 4.</span></div>
+                <div class="mock-fixed"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="9" width="12" height="8" rx="2"/><path d="M7 9V6.5a3 3 0 016 0V9"/></svg><b>Fixed: the link to the form</b><span>You can read and sign it here: https://portal.lakesideband.org/forms</span></div>
+                <p>If you&#x27;ve signed it in the last day or so, thank you, and you can ignore this email.</p>
+                <p>Questions about the form? Write to <span class="mock-chip">Club contact</span> and we&#x27;ll help.</p>
+              </div>
+            </div>
+          </div>
+          <div class="box-foot">
+            <button class="btn btn-lg" type="button">Save the email</button>
+            <button class="btn btn-tonal" type="button">Send me a test</button>
+            <p class="mock-says">The test goes to treasurer@lakesideband.org, with the sample values. Saving changes the next reminder families get.</p>
+          </div>
+        </form>
+      </section>
+
+      <section class="box" aria-labelledby="ver-h">
+        <h2 id="ver-h">Earlier versions</h2>
+        <ul class="version-list">
+          <li><span aria-current="true">Version 2 (now): Dana Reyes, Nov 20</span></li>
+          <li><a class="link-line" href="#">Version 1: Dana Reyes, Nov 12</a></li>
+          <li><a class="link-line" href="#">The default words</a></li>
+        </ul>
+        <div class="box-foot">
+          <button class="btn btn-outlined" type="button">Use the default words</button>
+          <p class="mock-says">The club&#x27;s words are replaced with the default. Earlier versions stay in this list.</p>
+        </div>
+      </section>
+    </div>
+
+    <div class="mock-col">
+      <section class="box" aria-labelledby="pv-h">
+        <h2 id="pv-h">Preview</h2>
+        <p class="card-lede">As a family gets it, with sample values. Not saved yet.</p>
+        <div class="mock-mail" style="margin-top: var(--s3)">
+          <div class="mock-mail-head"><p><b>Subject:</b> Please sign: Medical release 2026</p><p><b>To:</b> a guardian who still needs to sign</p></div>
+          <div class="mock-mail-bar">Lakeside Band Boosters</div>
+          <div class="mock-mail-body">
+            <p>A friendly reminder: Medical release 2026 for Maya Ortiz still needs your signature.</p>
+            <p>It&#x27;s due Friday, September 4.</p>
+            <p>You can read and sign it here: <a href="#">https://portal.lakesideband.org/forms</a></p>
+            <p>If you&#x27;ve signed it in the last day or so, thank you, and you can ignore this email.</p>
+            <p>Questions about the form? Write to treasurer@lakesideband.org and we&#x27;ll help.</p>
+            <p class="mock-mail-foot">Powered by <span>Boosters Rocket</span></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="box" aria-labelledby="fl-h">
+        <h2 id="fl-h">Fields</h2>
+        <p class="card-lede">Filled in for each family. The preview uses these samples.</p>
+        <ul class="mock-fields">
+          <li><span class="mock-chip">Form name</span><span>Medical release 2026</span></li>
+          <li><span class="mock-chip">For</span><span>Maya Ortiz</span></li>
+          <li><span class="mock-chip">Due date</span><span>Friday, September 4</span></li>
+          <li><span class="mock-chip">Family name</span><span>The Ortiz family</span></li>
+          <li><span class="mock-chip">Club name</span><span>Lakeside Band Boosters</span></li>
+          <li><span class="mock-chip">Portal address</span><span>https://portal.lakesideband.org</span></li>
+          <li><span class="mock-chip">Club contact</span><span>treasurer@lakesideband.org</span></li>
+        </ul>
+      </section>
+    </div>
+  </div>
+</main>
+
+<hr class="mock-rule">
+<p class="mock-caption"><b>Screen 3. A sign-in email, for comparison: Reset your password.</b> Most of it is fixed. The Admin can change the opening sentence and the subject, and there is no link tool. Shown as the editor alone.</p>
+<main class="wrap single">
+  <section class="box" aria-labelledby="rs-h">
+    <h2 id="rs-h">Words</h2>
+    <div class="stack" style="margin-top: var(--s3)">
+      <div class="field">
+        <label class="field-label" for="rs-subject">Subject</label>
+        <input id="rs-subject" type="text" value="Reset your {Club name} password">
+      </div>
+      <div class="field">
+        <span class="field-label" id="rs-label">Email</span>
+        <div class="mock-rte" role="group" aria-labelledby="rs-label">
+          <div class="mock-tools" role="toolbar" aria-label="Formatting">
+            <button class="mock-tool" type="button" aria-label="Undo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 010 10h-3"/></svg></button>
+            <button class="mock-tool" type="button" aria-label="Redo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 000 10h3"/></svg></button>
+            <span class="sep" aria-hidden="true"></span>
+            <button class="mock-tool" type="button" aria-label="Bold"><b>B</b></button>
+            <button class="mock-tool" type="button" aria-label="Italic"><i>I</i></button>
+            <button class="mock-tool" type="button" aria-label="Underline"><u>U</u></button>
+            <span class="sep" aria-hidden="true"></span>
+            <button class="mock-tool" type="button" aria-haspopup="menu">Insert field <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+          </div>
+          <div class="mock-doc">
+            <p>We got a request to reset the password you use to sign in to <span class="mock-chip">Club name</span> with this email address.</p>
+            <div class="mock-fixed"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="9" width="12" height="8" rx="2"/><path d="M7 9V6.5a3 3 0 016 0V9"/></svg><b>Fixed: the reset link</b><span>To choose a new password, open this link: (the link). The link works once, for 1 hour. Until you use it, your password stays as it is.</span></div>
+            <div class="mock-fixed"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="9" width="12" height="8" rx="2"/><path d="M7 9V6.5a3 3 0 016 0V9"/></svg><b>Fixed: the safety lines</b><span>Lakeside Band Boosters will never ask you for your password, by email or by phone. Don&#x27;t share it with anyone. If you didn&#x27;t ask for this, you can ignore this email: nothing changes unless the link is used. If these emails keep coming, please tell the club.</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<footer class="wrap"><p class="mock-caption">Static mock, not part of the app. Every primitive here is from src/app/booster.css; the editor and the email are stand-ins for RichTextEditor and the mail&#x27;s own frame.</p></footer>
+</body>
+</html>
