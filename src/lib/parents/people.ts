@@ -5,7 +5,8 @@ import { and, asc, eq, isNull, ne } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { guardian, parent, parentAuthUser, parentEmailChange } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
-import { guardianChangeWaiting, guardianMaySend, guardianSentWords, queueForGuardian, sendGuardianSaved, whileGuardiansHeld, type GuardianQueued } from "@/lib/roster/writes";
+import { guardianChangeWaiting, guardianMaySend, guardianSentWords, sendGuardianSaved, whileGuardiansHeld, type GuardianQueued } from "@/lib/roster/writes";
+import { guardianSaved } from "@/lib/families/guardian-events";
 import { getParentSettings } from "./settings";
 import { endParentSessions, deleteUnusedSigninCodes, deleteUnusedSigninLinks, enterableGuardianRows, forgetDevices } from "./sessions";
 import { formsForGoneSigner } from "@/lib/forms/signer-gone";
@@ -74,7 +75,8 @@ const openRowsOf = (q: Pick<Tx, "select">, parentId: string) =>
  * Changes a person's name: `parent.name` and the sign-in account's name, which mirrors it, in one transaction under the
  * person's row, audited `parent.name.changed` with before and after (stage 3's slice 7b). The same name, once tidied,
  * changes and records nothing. Since stage 3's slice 9h the name follows to the Parent customer of each of their open
- * memberships that has one of its own (queueForGuardian()'s rename, src/lib/roster/writes.ts): in that transaction,
+ * memberships that has one of its own (the save's event, guardianSaved(), whose handler is queueForGuardian()'s rename,
+ * src/lib/roster/writes.ts): in that transaction,
  * after the person's row, the roster lock shared (at most ROSTER_WAIT_MS, else `busy`, nothing written), each such
  * customer's rename queued as a change saved first (and a create kept as a taken name made again under the new name,
  * only where the new name is free by the portal's knowledge), named in the audit row (`queueIds`); then, after the
@@ -125,7 +127,7 @@ async function saveName(parentId: string, name: string, o: StaffOp, held: string
     }
     await tx.update(parent).set({ name, updatedAt: new Date() }).where(eq(parent.id, p.id));
     await tx.update(parentAuthUser).set({ name, updatedAt: new Date() }).where(eq(parentAuthUser.parentId, p.id));
-    const queued = sends && now.length ? await queueForGuardian(tx, { op: "rename", rows: now, name, was: p.name, email: p.email }, o) : [];
+    const queued = sends && now.length ? await guardianSaved(tx, { record: "guardian", change: "renamed", rows: now, name, was: p.name, email: p.email }, o) : [];
     const queueIds = queued.flatMap((q) => (q.item ? [q.item.id] : []));
     await writeAudit({ actor: o.actor, action: "parent.name.changed", permission: o.permission, targetType: "parent", targetId: p.id,
       before: { name: p.name }, after: { name, ...(queueIds.length ? { queueIds } : {}) }, ip: o.ip }, tx);

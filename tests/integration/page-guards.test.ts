@@ -173,6 +173,7 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/families/roster-import", names: "all", why: "the import of the app's own records from the roster: it reads every family's customers, sign-ins and records (its one caller under src/ is src/lib/roster/no-family.ts, since stage 3's slice 10)" },
   { module: "@/lib/roster/no-family", names: "all", why: "the customers no family is linked to read every customer of the roster cache, and 'Create a family from this' makes a family of any of them" },
   { module: "@/lib/parents/guardians", names: "all", why: "staff add, remove and reinstate guardians: it gives any address a sign-in for any family" },
+  { module: "@/lib/families/guardian-events", names: "all", why: "a guardian's save's event (records.events, slice P6): its handler queues writes to the books for any guardian row of any family" },
   { module: "@/lib/parents/people", names: "all", why: "staff block and rename people: a rename starts sends to QuickBooks for each membership's Parent customer (stage 3's slice 9h)" },
   { module: "@/lib/parents/signin-reset", names: "all", why: "an Admin's reset of a parent's sign-in reads and removes any person's sign-in, and the staff home's line reads every recent reset (the sign-in release, slice SI-9a)" },
   { module: "@/lib/accounting/mapping", names: "all", why: "the accounting links screen reads every family's guardians' sign-in addresses and every customer of the roster cache (stage 4's slice M1)" },
@@ -399,6 +400,8 @@ const PARENT_CODE_ELSEWHERE = [
   "src/lib/messages/parent.ts",
   // The queueing of a parent's change of their details, in the save's transaction, to be sent on by the worker (stage 3's slice 11b).
   "src/lib/parents/contact-queue.ts",
+  // The save's event for a person's or a family's details (records.events, slice P6), whose handler is that queueing.
+  "src/lib/families/events.ts",
   "src/lib/parents/contact-fields.ts",
   "src/lib/parents/email-change.ts",
   "src/lib/parents/email-field.ts",
