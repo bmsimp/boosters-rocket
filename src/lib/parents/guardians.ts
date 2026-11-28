@@ -2,8 +2,9 @@
 // "Staff add a guardian to a family with a name and email"), the portal's own change first. Since stage 3's slice 9h a
 // guardian's own Parent customer follows, where the books have a parent type and the family is linked: its create on
 // an add or reinstate, its make-inactive (under the balance rule) on a removal, queued in the guardian's own
-// transaction and sent after it commits, under the row's "being sent" lock (src/lib/roster/writes.ts,
-// queueForGuardian(), sendGuardianSaved()); nothing QuickBooks says changes who may sign in. A family's email field in
+// transaction by the save's event (guardianSaved(), src/lib/families/guardian-events.ts: `records.events`, slice P6)
+// and sent after it commits, under the row's "being sent" lock (src/lib/roster/writes.ts, queueForGuardian(),
+// sendGuardianSaved()); nothing QuickBooks says changes who may sign in. A family's email field in
 // books with no parent type is S11d's. Staff
 // only: called from src/app/staff/(app)/parents/actions.ts behind `Roster.Family.ReadWrite` (the lead's choice: giving
 // an address a family's sign-in goes with the permission that changes a family); never from parent code, which may not
@@ -39,7 +40,8 @@ import { QUICKBOOKS, type AppFamilyId } from "@/lib/families/ids";
 import { recordNameWords } from "@/lib/families/words";
 import { getShape, ROSTER_LOCK } from "@/lib/roster/shape";
 import { getRosterSource, ofRosterCompany } from "@/lib/roster/source";
-import { blocksOthers, familyCreateWaiting, familySendingFree, guardianChangeWaiting, guardianCustomerLinked, guardianSentWords, queueForGuardian, recordSendingFree, sendGuardianSaved, whileGuardiansHeld, type GuardianQueued } from "@/lib/roster/writes";
+import { blocksOthers, familyCreateWaiting, familySendingFree, guardianChangeWaiting, guardianCustomerLinked, guardianSentWords, recordSendingFree, sendGuardianSaved, whileGuardiansHeld, type GuardianQueued } from "@/lib/roster/writes";
+import { guardianSaved } from "@/lib/families/guardian-events";
 import { closeMembership } from "./membership";
 import type { StaffOp } from "./people";
 import { GUARDIAN_COLS, guardianRowCounts, lockEmail, studentsRuleInForce, type GuardianRow } from "./sessions";
@@ -243,7 +245,7 @@ async function saveGuardian(familyId: AppFamilyId, name: string, email: string, 
         after: { name, email, familyId: String(familyId) } }, tx);
     }
     const who = p!;
-    const grant = (guardianId: string) => queueForGuardian(tx, { op: "grant", guardianId, familyId, name: who.name, email: who.email }, o);
+    const grant = (guardianId: string) => guardianSaved(tx, { record: "guardian", change: "opened", guardianId, familyId, name: who.name, email: who.email }, o);
     if (held) {
       if (await guardianChangeWaiting(tx, [held.id])) return { ok: false, reason: "qbo_pending" };
       await reopen(tx, held, who, familyId, fam.customer, o, { addedBy: "staff", ...said });
@@ -424,7 +426,7 @@ export async function removeGuardian(guardianId: string, rawNote: string, o: Sta
       if (!held) return { ok: false, reason: "not_found" };
       if (held.row.status === "disabled") return { ok: false, reason: "not_open" };
       const { sessionsEnded } = await closeMembership(tx, held.row, { reason: "removed", actor: o.actor, note, permission: o.permission, ip: o.ip });
-      const queued = await queueForGuardian(tx, { op: "remove", guardianId: held.row.id, familyId: held.row.familyId }, o);
+      const queued = await guardianSaved(tx, { record: "guardian", change: "closed", guardianId: held.row.id, familyId: held.row.familyId }, o);
       return { ok: true, sessionsEnded, queued, name: held.p.name };
     });
     if (!saved.ok) return saved;
@@ -467,7 +469,7 @@ export async function reinstateGuardian(guardianId: string, o: StaffOp, w: Waits
       if ("refusal" in fam) return { ok: false, reason: fam.refusal };
       if (await guardianChangeWaiting(tx, [row.id])) return { ok: false, reason: "qbo_pending" };
       await reopen(tx, row, p, row.familyId!, fam.customer, o);
-      return { ok: true, queued: await queueForGuardian(tx, { op: "grant", guardianId: row.id, familyId: row.familyId!, name: p.name, email: p.email }, o), name: p.name };
+      return { ok: true, queued: await guardianSaved(tx, { record: "guardian", change: "opened", guardianId: row.id, familyId: row.familyId!, name: p.name, email: p.email }, o), name: p.name };
     });
     if (!saved.ok) return saved;
     return { ok: true, quickbooks: guardianSentWords(await sendGuardianSaved(saved.queued, o, { hold, rosterWaitMs: w.rosterWaitMs }), "grant", saved.name) };
