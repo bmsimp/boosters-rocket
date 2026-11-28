@@ -46,6 +46,7 @@ beforeEach(() => {
       *"image inspect booster-rocket-app:previous"*) exit \${NO_PREVIOUS:-0};;
       *"image inspect booster-rocket-app:current"*) exit \${NO_CURRENT:-0};;
       *"up -d --no-deps --force-recreate worker"*) exit \${WORKER_FAIL:-0};;
+      *"up -d --no-deps --force-recreate backup"*) echo "backup folder \${BR_BACKUP_DIR:-unset}" >> "${log.replace(/\\/g, "/")}"; exit \${BACKUP_SERVICE_FAIL:-0};;
       *) exit 0;;
     esac`);
 });
@@ -72,6 +73,25 @@ describe("scripts/poc/deploy.sh", { timeout: 30_000 }, () => {
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("The worker didn't start. The site is up; check: docker logs booster-rocket-worker");
     expect(r.stdout).toContain("Deployed abc1234.");
+  });
+
+  it("starts the backup service after the worker, on the folder it backs up into, and never fails a deploy for it", () => {
+    const ok = run();
+    expect(ok.status).toBe(0);
+    const c = calls();
+    expect(c.indexOf("--force-recreate backup")).toBeGreaterThan(c.indexOf("--force-recreate worker"));
+    expect(c).toContain(`backup folder ${backups}`);
+    rmSync(log, { force: true });
+    const r = run([], { BACKUP_SERVICE_FAIL: "1" });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("The backup service didn't start. The site is up; check: docker logs booster-rocket-backup");
+    expect(r.stdout).toContain("Deployed abc1234.");
+  });
+
+  it("doesn't touch the backup service when the app never becomes healthy", () => {
+    const r = run([], { HEALTH: "unhealthy" });
+    expect(r.status).toBe(4);
+    expect(calls()).not.toContain("--force-recreate backup");
   });
 
   it("recreates the worker on a rollback too", () => {
