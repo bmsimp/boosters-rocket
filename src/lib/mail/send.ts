@@ -5,6 +5,8 @@ import { normalizeEmail } from "@/lib/setup/state";
 import { buildSender } from "./senders";
 import { getStoredMailConfig, patchMailStatus, MAIL_KEY } from "./settings";
 import { mailConfigHash } from "./config-hash";
+import { clubTemplates } from "./template-read";
+import { env } from "@/env";
 import { testMessage, type Brand } from "./messages";
 import { MailSendError, type MailMessage, type MailPurpose, type StoredMailConfig } from "./types";
 
@@ -12,9 +14,13 @@ import { MailSendError, type MailMessage, type MailPurpose, type StoredMailConfi
 export type SendOutcome = { ok: true } | { ok: false; error: string; recipientRefused?: true };
 const MAIL_ACTOR: Actor = { door: "system", id: null, label: "mail" };
 
+/**
+ * The club's side of a mail (Brand, src/lib/email-templates/frame.ts): its name and color, the portal's address and the treasurer's address
+ * for the templates' fields, and the club's own words for each email it changed (./template-read.ts).
+ */
 export async function currentBrand(): Promise<Brand> {
-  const c = await getClubSettings();
-  return { clubName: c.name, color: c.color };
+  const [c, templates] = await Promise.all([getClubSettings(), clubTemplates()]);
+  return { clubName: c.name, color: c.color, portal: env.APP_URL.replace(/\/+$/, ""), contact: c.treasurerEmail, templates };
 }
 
 async function deliver(stored: StoredMailConfig, m: MailMessage, o: { purpose: MailPurpose; actor?: Actor; ip?: string | null }): Promise<SendOutcome> {

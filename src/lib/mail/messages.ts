@@ -1,20 +1,20 @@
-import { frame, lineHtml, mailText, type Brand } from "./frame";
-import * as T from "./templates";
+import { frame, lineHtml, mailText, type Brand } from "@/lib/email-templates/frame";
+import * as T from "@/lib/email-templates/catalog";
 import {
   renderEmail,
   type ClubMessageBody, type EarlierLinkWords, type RequirementDueWords, type SetupLinkWords, type VolunteerDueWords, type VolunteerShiftWords, type VolunteerWho,
-} from "./templates";
+} from "@/lib/email-templates/catalog";
 import type { MailMessage } from "./types";
 
 /*
  * The mails the portal sends, one function each, as the senders call them. Since the email templates
- * (docs/superpowers/specs/2026-11-28-email-templates-design.md) each is drawn from its template in ./templates.ts: the
+ * (docs/superpowers/specs/2026-11-28-email-templates-design.md) each is drawn from its template in @/lib/email-templates/catalog.ts: the
  * club's own words where it saved some (`Brand.templates`, read by currentBrand()), else the default words, which are
  * the words each sent before, byte for byte (tests/unit/mail-templates.test.ts). The links, codes and safety lines are
  * the templates' fixed parts, written by the portal whatever the words around them.
  */
 
-export { esc, POWERED_BY, type Brand } from "./frame";
+export { esc, POWERED_BY, type Brand } from "@/lib/email-templates/frame";
 export type { ClubMessageBody, EarlierLinkWords, RequirementDueWords, SetupLinkWords, VolunteerDueWords, VolunteerShiftWords, VolunteerWho };
 
 

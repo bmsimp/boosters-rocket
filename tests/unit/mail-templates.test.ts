@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import * as now from "@/lib/mail/messages";
 import * as before from "../helpers/legacy-mail-messages";
-import { EMAILS, defaultTemplate, emailByKey, renderEmail, rulesOf, sampleEmail, wordsFor } from "@/lib/mail/templates";
-import { checkTemplate, type TemplateDoc } from "@/lib/mail/template-body";
+import { EMAILS, defaultTemplate, emailByKey, renderEmail, rulesOf, sampleEmail, wordsFor } from "@/lib/email-templates/catalog";
+import { checkTemplate, type TemplateDoc } from "@/lib/email-templates/body";
 
 /*
  * Email templates (docs/superpowers/specs/2026-11-28-email-templates-design.md), slice 1: an email the club never

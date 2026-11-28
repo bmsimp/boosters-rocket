@@ -1,6 +1,6 @@
 import { bigCode, esc, lineHtml, lines, mailHtml, mailText, PARAGRAPH, type Block, type Brand, type Line } from "./frame";
-import { checkTemplate, doc, field, fixedPart, para, renderBody, renderSubject, type TemplateDoc, type TemplateRules } from "./template-body";
-import type { MailAttachment, MailMessage } from "./types";
+import { checkTemplate, doc, field, fixedPart, para, renderBody, renderSubject, type TemplateDoc, type TemplateRules } from "./body";
+import type { MailAttachment, MailMessage } from "@/lib/mail/types";
 
 /*
  * Every email the portal sends to a family, as a template (docs/superpowers/specs/2026-11-28-email-templates-design.md):
@@ -475,7 +475,7 @@ export const emailByKey = (key: unknown): AnyEmail | null =>
   typeof key === "string" ? ((EMAILS as readonly unknown[]).find((e) => (e as AnyEmail).key === key) as AnyEmail | undefined) ?? null : null;
 
 /** What checkTemplate() needs of an email. */
-export const rulesOf = (e: Pick<AnyEmail, "fields" | "fixed" | "links" | "subject">): TemplateRules =>
+export const rulesOf = (e: { fields: readonly { id: string; label: string }[]; fixed: readonly { id: string; label: string }[]; links: boolean; subject: object }): TemplateRules =>
   ({ fields: e.fields, fixed: e.fixed, links: e.links, subjectFixed: "fixed" in e.subject });
 
 /** The email's default words, as a template: what "Use the default words" saves. */

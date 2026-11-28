@@ -1,11 +1,11 @@
-import type { MailMessage } from "./types";
-import type { ClubTemplates } from "./templates";
+import type { MailMessage } from "@/lib/mail/types";
+import type { ClubTemplates } from "./catalog";
 
 /**
  * The club's side of every mail: its name and color for the frame, and what the email templates read
  * (docs/superpowers/specs/2026-11-28-email-templates-design.md): the portal's address and the club's contact for the
  * fields of the same names, and the club's own words for each email it changed (`templates`). An email the club never
- * changed, or a caller that gives none, is sent with its default words. Pure: currentBrand() (./send.ts) reads it.
+ * changed, or a caller that gives none, is sent with its default words. Pure: currentBrand() (src/lib/mail/send.ts) reads it.
  */
 export type Brand = { clubName: string; color: string; portal?: string; contact?: string | null; templates?: ClubTemplates };
 

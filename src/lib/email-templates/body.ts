@@ -55,7 +55,6 @@ class Refused extends Error {}
 function refuse(why: string): never { throw new Refused(why); }
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 // Text a person typed: control characters but a tab are dropped (jsonb can't hold a NUL; a mail has no use for them).
-// eslint-disable-next-line no-control-regex
 const clean = (s: string) => s.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "");
 
 type State = { rules: TemplateRules; text: number; fixed: Map<string, number> };
