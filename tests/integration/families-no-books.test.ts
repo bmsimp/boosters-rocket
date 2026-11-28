@@ -194,8 +194,8 @@ describe("the Families pages with no books", () => {
     await addStudentHereAction("none", String(f.id), "Leo Rivera");
     await addGuardianAction(String(f.id), "Ana Rivera", "ana@example.com");
     const html = await entry(f.id);
-    expect(rowNamed(html, "Leo Rivera").slice(0, 2)).toEqual(["Leo Rivera", "Active"]);
-    expect(rowNamed(html, "Leo Rivera")[2]).toMatch(/^Change Leo Rivera/); // the row's own Drawer
+    expect(rowNamed(html, "Leo Rivera")!.slice(0, 2)).toEqual(["Leo Rivera", "Active"]);
+    expect(rowNamed(html, "Leo Rivera")![2]).toMatch(/^Change Leo Rivera/); // the row's own Drawer
     for (const words of ["Change the family", "Rename or make Rivera Family inactive", "Add a student", "Change Leo Rivera", "Portal sign-ins", "Ana Rivera", "Add a guardian"]) expect(html).toContain(words);
     expect(html).not.toMatch(/QuickBooks|the books|customer|invoice|buy-out/i);
     expect((await audits("roster.family.read")).map((r) => r.targetId)).toEqual([String(f.id)]);
