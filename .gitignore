@@ -55,3 +55,8 @@ next-env.d.ts
 # design tool scratch (mocks, reviews, brainstorm pages): never committed
 /.impeccable/
 /.superpowers/
+
+# review triage manifests (.claude/skills/ship-pr/SKILL.md): working notes, never committed
+/.reviews/
+# each person's own Claude Code settings
+/.claude/settings.local.json

@@ -11,6 +11,9 @@ import { apiFailing, formsSummary } from "@/lib/forms/settings";
 import { healthReport } from "@/lib/health/report";
 import { messagesEmailAllowed } from "@/lib/settings/messages";
 import { newestAuditAt } from "@/lib/audit/query";
+import { agentBeat, answering } from "@/lib/backups/status";
+import { lastBackup } from "@/lib/health/backup";
+import { BACKUP_OLD_MS } from "@/lib/health/report";
 import { credentialStanding } from "../secret-expiry-rule";
 import type { IntegrationKey, PageKey, SettingsItem } from "./sections";
 
@@ -190,6 +193,12 @@ export const RAIL_STATUS: Record<PageKey, (items: readonly SettingsItem[]) => Pr
   async health() {
     const attention = await healthCount();
     return attention ? { tone: "due", words: `${attention} need${attention === 1 ? "s" : ""} attention` } : { tone: "done", words: "All working" };
+  },
+  async backups() {
+    const [beat, last] = await Promise.all([agentBeat(), lastBackup()]);
+    if (!answering(beat)) return { tone: "due", words: "Not answering" };
+    if (!last || Date.now() - Date.parse(last.at) > BACKUP_OLD_MS) return { tone: "due", words: "Needs attention" };
+    return { tone: "done", words: "Backed up" };
   },
   async "design-system"() {
     return { tone: "neutral", words: "Samples only" };

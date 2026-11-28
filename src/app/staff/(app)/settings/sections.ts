@@ -59,6 +59,8 @@ export const SETTINGS_ITEMS = [
     see: "Audit.Log.Read", change: null, href: "/staff/settings/audit", owns: ["/staff/settings/audit"] },
   { key: "health", kind: "page", group: "Administration", title: "Health", keywords: ["backup", "worker", "version", "working"],
     see: "Admin.Health.Read", change: null, href: "/staff/settings/health", owns: ["/staff/settings/health"] },
+  { key: "backups", kind: "page", group: "Administration", title: "Backups", keywords: ["backup", "restore", "download", "off-site", "storage", "S3", "schedule", "copy"],
+    see: "Admin.Backups.ReadWrite", change: "Admin.Backups.ReadWrite", href: "/staff/settings/backups", owns: ["/staff/settings/backups"] },
   { key: "design-system", kind: "page", group: "Administration", title: "Design system", keywords: ["gallery", "components", "samples"],
     see: "Settings.Club.Read", change: null, href: "/staff/settings/design-system", owns: ["/staff/settings/design-system"] },
 ] as const satisfies readonly Item[];

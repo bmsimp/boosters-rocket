@@ -85,7 +85,7 @@ function setup(kind: "dev" | "deploy", project: string) {
 
 function copyScripts(dir: string) {
   mkdirSync(path.join(dir, "scripts"), { recursive: true });
-  for (const f of ["move-postgres.sh", "postgres-guard.sh", "backup.sh", "restore.sh", "backup-schedule.sh"]) copyFileSync(path.join(root, "scripts", f), path.join(dir, "scripts", f));
+  for (const f of ["move-postgres.sh", "postgres-guard.sh", "backup.sh", "restore.sh", "backup-schedule.sh", "backup-agent.sh"]) copyFileSync(path.join(root, "scripts", f), path.join(dir, "scripts", f));
 }
 function pullImages(docker: (args: string[], timeout?: number) => { status: number | null }) {
   for (const image of [OLD_IMAGE, NEW_IMAGE]) {

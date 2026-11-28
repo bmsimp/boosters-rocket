@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNotNull, isNull, lt, notExists, notInArray, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { familyMoney, formReminderClaim, formReminderRound, jobRun, messageFile, messageMail, messageVersion, messageVersionFile, parent, parentAuthSession, parentAuthUser, parentAuthVerification, parentDevice, parentEmailChange, parentSigninToken, rateLimitEvent, requirementReminder, setting, signinCode, staffAuthSession, staffAuthVerification, writeQueue } from "@/lib/db/schema";
+import { backupRequest, familyMoney, formReminderClaim, formReminderRound, jobRun, messageFile, messageMail, messageVersion, messageVersionFile, parent, parentAuthSession, parentAuthUser, parentAuthVerification, parentDevice, parentEmailChange, parentSigninToken, rateLimitEvent, requirementReminder, setting, signinCode, staffAuthSession, staffAuthVerification, writeQueue } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { RATE_LIMITS, type RateLimitKind } from "@/lib/parents/rate-limit";
 import { CODE_TTL_MS, RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
@@ -17,6 +17,8 @@ export const FINISHED_WRITES_DAYS = 30;
 export const HELD_MESSAGE_FILE_HOURS = 24;
 /** The mail rows of a message's version (who it was emailed to, and what failed) are kept this long after the version was saved. */
 export const MESSAGE_MAIL_DAYS = 90;
+/** A request to the backup service (back up, a download, a restore, an off-site copy) is kept this long after it finished. */
+export const BACKUP_REQUEST_DAYS = 90;
 const CLEANUP_ACTOR: Actor = { door: "system", id: null, label: "worker" };
 /**
  * Settings whose feature is gone, so nothing reads, writes or expires them any more: their life ended with the feature,
@@ -30,7 +32,7 @@ export const RETIRED_SETTINGS: readonly string[] = [];
 export type CleanupCounts = {
   staffSessions: number; parentSessions: number; signinCodes: number; signinLinks: number; unfinishedAuthenticators: number; spentBackupCodes: number; rememberedDevices: number; rateLimitEvents: number;
   emailChanges: number; familyMoney: number; jobRuns: number; reminderClaims: number; writeQueue: number; verifications: number; retiredSettings: number;
-  heldMessageFiles: number; messageMail: number;
+  heldMessageFiles: number; messageMail: number; backupRequests: number;
 };
 const WORDS: Record<keyof CleanupCounts, [string, string]> = {
   staffSessions: ["expired staff session", "expired staff sessions"], parentSessions: ["expired parent session", "expired parent sessions"],
@@ -48,6 +50,7 @@ const WORDS: Record<keyof CleanupCounts, [string, string]> = {
   retiredSettings: ["setting of a retired feature", "settings of retired features"],
   heldMessageFiles: ["file uploaded for a message and never posted", "files uploaded for messages and never posted"],
   messageMail: ["record of a message emailed over 90 days ago", "records of messages emailed over 90 days ago"],
+  backupRequests: ["request to the backup service finished over 90 days ago", "requests to the backup service finished over 90 days ago"],
 };
 
 /**
@@ -57,7 +60,7 @@ const WORDS: Record<keyof CleanupCounts, [string, string]> = {
  */
 export const CLEANED_TABLES = ["staff_auth_session", "parent_auth_session", "signin_code", "parent_signin_token", "parent_authenticator", "parent_backup_code", "parent_device", "rate_limit_event", "parent_email_change", "family_money", "job_run",
   "form_reminder_claim", "form_reminder_round", "requirement_reminder", "write_queue", "staff_auth_verification", "parent_auth_verification",
-  "message_file", "message_mail"] as const;
+  "message_file", "message_mail", "backup_request"] as const;
 export const KEPT_TABLES: Record<string, string> = {
   staff_auth_user: "Better Auth's staff accounts", staff_auth_account: "Better Auth's staff accounts",
   parent_auth_user: "Better Auth's parent accounts", parent_auth_account: "Better Auth's parent accounts",
@@ -90,6 +93,7 @@ export const KEPT_TABLES: Record<string, string> = {
   message_version: "club messages: every saved state of a message, never changed; an Admin's delete erases them",
   message_version_file: "club messages: which files each version has",
   message_read: "club messages: which messages each parent has read, gone with the person",
+  backup_file: "the backups on the server as the backup service last listed its folder: a mirror it rewrites at each look, never past its life",
 };
 
 export const removedInAll = (c: CleanupCounts): number => Object.values(c).reduce((a, b) => a + b, 0);
@@ -135,6 +139,8 @@ export function describeCleanup(c: CleanupCounts): string {
  *   HELD_MESSAGE_FILE_HOURS: a post or an edit takes up only the files its form holds now. A posted file stays.
  * - The mail rows of a message's version saved more than MESSAGE_MAIL_DAYS ago: staff read who a version was emailed
  *   to, and what failed, while it is news. The message and its versions stay.
+ * - Requests to the backup service finished more than BACKUP_REQUEST_DAYS ago: the page shows only the latest of each
+ *   kind, and the audit log keeps who asked. One not finished stays.
  * - Better Auth's verification rows of both doors (a staff sign-in's state while it is at Microsoft or Google) whose
  *   `expires_at` has passed: Better Auth refuses them already, and leaves them behind.
  *
@@ -222,8 +228,10 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
   const mailGone = n(await tx.delete(messageMail).where(inArray(messageMail.versionId,
     tx.select({ id: messageVersion.id }).from(messageVersion).where(lt(messageVersion.savedAt, new Date(now.getTime() - MESSAGE_MAIL_DAYS * 86_400_000)))))
     .returning({ id: messageMail.id }));
+  const backupRequests = n(await tx.delete(backupRequest).where(lt(backupRequest.finishedAt, new Date(now.getTime() - BACKUP_REQUEST_DAYS * 86_400_000)))
+    .returning({ id: backupRequest.id }));
 
-  return { staffSessions, parentSessions, signinCodes, signinLinks, unfinishedAuthenticators, spentBackupCodes, rememberedDevices, rateLimitEvents, emailChanges, familyMoney: money, jobRuns, reminderClaims, writeQueue: writes, verifications, retiredSettings, heldMessageFiles, messageMail: mailGone };
+  return { staffSessions, parentSessions, signinCodes, signinLinks, unfinishedAuthenticators, spentBackupCodes, rememberedDevices, rateLimitEvents, emailChanges, familyMoney: money, jobRuns, reminderClaims, writeQueue: writes, verifications, retiredSettings, heldMessageFiles, messageMail: mailGone, backupRequests };
 }
 
 /**

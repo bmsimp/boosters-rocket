@@ -1230,6 +1230,13 @@ ul.links-acts li { display: flex; flex-wrap: wrap; align-items: center; justify-
   .links-cmp { grid-template-columns: 1fr; gap: var(--s2); }
   .links-cmp dl { grid-template-columns: 5.5rem minmax(0, 1fr); }
 }
+/* Settings, Backups: a row's two presses never break a word; on a phone each takes its own line, full width. */
+.table .backup-actions .btn { white-space: nowrap; overflow-wrap: normal; max-width: none; }
+@media (max-width: 839.98px) {
+  .table .backup-actions { display: grid; grid-template-columns: minmax(0, 1fr); width: 100%; }
+  .table .backup-actions .confirm { justify-items: stretch; }
+  .table .backup-actions .btn { width: 100%; }
+}
 /* ---- End of Staff pages ---- */
 
 /* ---- Settings and the staff menu: the Settings page and every settings page, the roles checklist, the Staff page and
