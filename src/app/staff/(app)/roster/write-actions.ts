@@ -38,7 +38,7 @@ const op = (ctx: StaffCtx) => ({ actor: { door: "staff" as const, id: ctx.staffU
 const canRead = (ctx: StaffCtx) => can(ctx.effective, "Roster.Read");
 
 async function run(ctx: StaffCtx, ask: WriteAsk, rosterTag: string): Promise<WriteResult> {
-  if (!canRead(ctx)) return NOT_FROM_PAGE;
+  if (!canRead(ctx) || !(await accountingOn())) return NOT_FROM_PAGE;
   const r = await askRosterWrite(ask, rosterTag, op(ctx));
   // A refusal changed nothing; a change, or a change read again from QuickBooks, shows on every staff page and on the
   // parents' pages, which read the same cache.
@@ -99,19 +99,19 @@ async function inPortal(ctx: StaffCtx, ask: PortalChange, rosterTag: string): Pr
 /**
  * A student added to a family, as the club's books add one (howToAdd(): stage 5's slice P2): with QuickBooks, to a
  * family with no link the portal's own record only, and to a linked family the record first, then made in QuickBooks
- * (addStudentToLinked()), the family's link deciding which; with no books, the record alone. Both of the family page's
- * forms send it here, the family's app id, a uuid, never its customer's.
+ * (addStudentToLinked()), the form pressed deciding which, as before; with no books, the record alone. Both of the
+ * family page's forms send it here, the family's app id, a uuid, never its customer's.
  */
-async function addStudent(ctx: StaffCtx, rosterTag: string, familyId: string, newName: string): Promise<WriteResult> {
+async function addStudent(ctx: StaffCtx, rosterTag: string, familyId: string, newName: string, asLinked: boolean): Promise<WriteResult> {
   if (!canRead(ctx) || !tag(rosterTag) || !uuid(familyId) || !name(newName)) return NOT_FROM_PAGE;
-  const r = await (await howToAdd()).student(familyId, newName, rosterTag, { ...op(ctx), mayLink: mayLink(ctx) });
+  const r = await (await howToAdd()).student(familyId, newName, rosterTag, { ...op(ctx), mayLink: mayLink(ctx), asLinked });
   if (r.ok) revalidatePath("/", "layout");
   return r;
 }
 
 /** A student added to a family with no link: the portal's own record only. */
 export const addStudentHereAction = staffAction(P, async (ctx, rosterTag: string, familyId: string, newName: string): Promise<WriteResult> =>
-  addStudent(ctx, rosterTag, familyId, newName));
+  addStudent(ctx, rosterTag, familyId, newName, false));
 
 /** A family with no link, or a student with none, renamed in the portal only. */
 export const renameHereAction = staffAction(P, async (ctx, rosterTag: string, kind: "family" | "student", recordId: string, newName: string): Promise<WriteResult> => {
@@ -134,7 +134,7 @@ export const deactivateHereAction = staffAction(P, async (ctx, rosterTag: string
  * (addStudentToLinked()). The page sends the family's app id, a uuid, never its customer's.
  */
 export const addStudentAction = staffAction(P, async (ctx, rosterTag: string, familyId: string, newName: string): Promise<WriteResult> =>
-  addStudent(ctx, rosterTag, familyId, newName));
+  addStudent(ctx, rosterTag, familyId, newName, true));
 
 /**
  * A linked family, member or student renamed (stage 3's slice 9e): saved in the portal first, then sent to QuickBooks
@@ -224,7 +224,7 @@ export const familyInactiveAction = staffAction(P, async (ctx, rosterTag: string
  */
 type DetailsDone = { ok: true; message: string; status?: "waiting" | "attention"; current: ContactForm; compare: string[] } | { ok: false; errors: string[]; current?: ContactForm };
 export const saveFamilyDetailsAction = staffAction(P, async (ctx, familyId: string, sent: unknown): Promise<DetailsDone> => {
-  if (!canRead(ctx) || !uuid(familyId)) return NOT_FROM_PAGE;
+  if (!canRead(ctx) || !uuid(familyId) || !(await accountingOn())) return NOT_FROM_PAGE;
   const parsed = parseContactForm(sent);
   if (!parsed.ok) return NOT_FROM_PAGE;
   const record = await familyRecordAt(familyId);
@@ -248,7 +248,7 @@ export const saveFamilyDetailsAction = staffAction(P, async (ctx, familyId: stri
 
 /** "Try again now": a family's or member's create, which makes its customer and links it, also takes the linking permission (tryAgainNow()). */
 export const tryAgainAction = staffAction(P, async (ctx, itemId: string): Promise<Done> => {
-  if (!canRead(ctx) || !uuid(itemId)) return NOT_FROM_PAGE;
+  if (!canRead(ctx) || !uuid(itemId) || !(await accountingOn())) return NOT_FROM_PAGE;
   const r = await tryAgainNow(itemId, { ...op(ctx), mayLink: mayLink(ctx) });
   if (r.ok) revalidatePath("/staff", "layout");
   return r;
@@ -260,7 +260,7 @@ export const tryAgainAction = staffAction(P, async (ctx, itemId: string): Promis
  * transaction. The same permissions as "Try again now".
  */
 export const tryAgainManyAction = staffAction(P, async (ctx, itemIds: string[]): Promise<BulkDone> => {
-  const ids = canRead(ctx) ? idsFrom(itemIds, uuid) : null;
+  const ids = canRead(ctx) && (await accountingOn()) ? idsFrom(itemIds, uuid) : null;
   if (ids === null) return NOT_FROM_PAGE;
   const r = await tryAgainEach(ids, { ...op(ctx), mayLink: mayLink(ctx) });
   if (r.rows.some((x) => x.outcome === "done")) revalidatePath("/staff", "layout");
@@ -272,7 +272,7 @@ export const tryAgainManyAction = staffAction(P, async (ctx, itemIds: string[]):
  * (linkStudentMadeAfterGivingUp()). Linking takes the linking permission as well, checked here with the page's Roster.Read.
  */
 export const linkMadeStudentAction = staffAction(P, async (ctx, rosterTag: string, itemId: string): Promise<WriteResult> => {
-  if (!canRead(ctx) || !mayLink(ctx) || !tag(rosterTag) || !uuid(itemId)) return NOT_FROM_PAGE;
+  if (!canRead(ctx) || !mayLink(ctx) || !tag(rosterTag) || !uuid(itemId) || !(await accountingOn())) return NOT_FROM_PAGE;
   const r = await linkStudentMadeAfterGivingUp(itemId, rosterTag, op(ctx));
   if (r.ok) revalidatePath("/", "layout");
   return r;
@@ -284,14 +284,14 @@ export const linkMadeStudentAction = staffAction(P, async (ctx, rosterTag: strin
  * refused.
  */
 export const sendPortalValueAction = staffAction(P, async (ctx, itemId: string, shown: string, stamp: string): Promise<WriteResult> => {
-  if (!canRead(ctx) || !uuid(itemId) || !str(shown, NAME_MAX * 4) || !str(stamp, TAG_MAX)) return NOT_FROM_PAGE;
+  if (!canRead(ctx) || !uuid(itemId) || !str(shown, NAME_MAX * 4) || !str(stamp, TAG_MAX) || !(await accountingOn())) return NOT_FROM_PAGE;
   const r = await sendPortalValue(itemId, shown, stamp, op(ctx));
   revalidatePath("/", "layout");
   return r;
 });
 
 export const giveUpAction = staffAction(P, async (ctx, itemId: string, note: string): Promise<Done> => {
-  if (!canRead(ctx) || !uuid(itemId) || !str(note, NOTE_MAX * 4)) return NOT_FROM_PAGE;
+  if (!canRead(ctx) || !uuid(itemId) || !str(note, NOTE_MAX * 4) || !(await accountingOn())) return NOT_FROM_PAGE;
   const r = await giveUp(itemId, note, op(ctx));
   if (r.ok) revalidatePath("/staff", "layout");
   return r;
@@ -303,7 +303,7 @@ export const giveUpAction = staffAction(P, async (ctx, itemId: string, note: str
  * (giveUpEach()), in its own transaction with the same note. The same permissions as "Give up".
  */
 export const giveUpManyAction = staffAction(P, async (ctx, itemIds: string[], note: string): Promise<BulkDone> => {
-  const ids = canRead(ctx) && str(note, NOTE_MAX * 4) ? idsFrom(itemIds, uuid) : null;
+  const ids = canRead(ctx) && str(note, NOTE_MAX * 4) && (await accountingOn()) ? idsFrom(itemIds, uuid) : null;
   if (ids === null) return NOT_FROM_PAGE;
   const r = await giveUpEach(ids, note, op(ctx));
   if (!r.ok) return r;

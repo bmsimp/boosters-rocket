@@ -10,7 +10,10 @@ WITH "changed" AS (
     AND ("value"->>'requireActiveStudents') = 'true'
     AND NOT EXISTS (
       SELECT 1 FROM "setting" s
-      WHERE s."key" = 'membership.shape' AND s."value"->>'kind' = 'layered' AND jsonb_typeof(s."value"->'studentTypeId') = 'string'
+      WHERE s."key" = 'membership.shape' AND s."value"->>'kind' = 'layered'
+        AND jsonb_typeof(s."value"->'studentTypeId') = 'string' AND length(s."value"->>'studentTypeId') BETWEEN 1 AND 64
+        AND jsonb_typeof(s."value"->'familyTypeId') = 'string' AND length(s."value"->>'familyTypeId') BETWEEN 1 AND 64
+        AND (s."value"->'parentTypeId' = 'null'::jsonb OR (jsonb_typeof(s."value"->'parentTypeId') = 'string' AND length(s."value"->>'parentTypeId') BETWEEN 1 AND 64))
     )
   RETURNING "value"
 )

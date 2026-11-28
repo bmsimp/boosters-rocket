@@ -20,7 +20,7 @@ import { db } from "@/lib/db/client";
 import { auditLog, family, guardian, setting, student, writeQueue } from "@/lib/db/schema";
 import RosterPage from "@/app/staff/(app)/roster/page";
 import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
-import { addStudentAction, addStudentHereAction, createAction, deactivateHereAction, deactivateLinkedAction, moveAction, renameHereAction, renameLinkedAction } from "@/app/staff/(app)/roster/write-actions";
+import { addStudentAction, addStudentHereAction, createAction, createAndLinkAction, deactivateAction, deactivateHereAction, deactivateLinkedAction, giveUpAction, moveAction, renameHereAction, renameLinkedAction, tryAgainAction } from "@/app/staff/(app)/roster/write-actions";
 import { addGuardianAction } from "@/app/staff/(app)/parents/actions";
 import { setRequireStudents } from "@/lib/parents/switches";
 import { addFamilyByHand, BY_HAND_COPY, changeByHand } from "@/lib/families/by-hand";
@@ -146,6 +146,16 @@ describe("with no books, staff", () => {
     expect(await changeByHand({ op: "rename_family", familyId: String(f.id), name: "Changed" }, op)).toEqual({ ok: false, errors: [BY_HAND_COPY.booksOn] });
     expect((await familyNamed("Kim Family")).name).toBe("Kim Family");
     expect(await audits("roster.record.renamed")).toEqual([]);
+  });
+
+  it("are offered none of QuickBooks' own presses, which answer as a press no page offered", async () => {
+    await createAction("none", "family", "Ng Family");
+    const f = await familyNamed("Ng Family");
+    const NOT = { ok: false, errors: ["That didn't go through. Reload the page and try again."] };
+    expect(await createAndLinkAction("none", String(f.id))).toEqual(NOT);
+    expect(await deactivateAction("none", "10", "0")).toEqual(NOT);
+    expect(await tryAgainAction("00000000-0000-4000-8000-000000000000")).toEqual(NOT);
+    expect(await giveUpAction("00000000-0000-4000-8000-000000000000", "note")).toEqual(NOT);
   });
 
   it("are refused for ids that name no record", async () => {

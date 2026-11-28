@@ -28,6 +28,8 @@ describe("migration 0062: the students rule kept as it was in force", () => {
     ["no shape", null],
     ["a flat shape", { kind: "flat", memberTypeIds: ["M"] }],
     ["a layered shape with no student type", { kind: "layered", familyTypeId: "F", studentTypeId: null, parentTypeId: "P" }],
+    // One getShape() can't read (an empty student type, no family type) was no shape at all to the rule.
+    ["a layered shape the portal can't read", { kind: "layered", familyTypeId: "", studentTypeId: "", parentTypeId: null }],
   ] as const) {
     it(`switches it off beside ${what}, where it wasn't in force, and audits that`, async () => {
       await store(PARENTS_KEY, parents(true));

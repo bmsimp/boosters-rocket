@@ -41,6 +41,8 @@ export type AddFamilyAsk = { role: "family" | "member"; name: string; typeQboId:
 /** Who is adding, and whether they may also make the family in the books (the linking permission). */
 export type AddOp = {
   actor: { door: "staff"; id: string; label: string }; ip: string | null; permission: string; staffUserId: string; showAmounts?: boolean; mayLink: boolean;
+  /** For a student: the family page's form pressed was the one for a family linked to the books (the core's way ignores it). */
+  asLinked?: boolean;
 };
 /** What an add answers: the result shape of every staff action. `offer`: a free name, for a name that is taken. */
 export type AddResult =

@@ -52,15 +52,13 @@ export const quickbooks = {
   ],
   slots: {
     // Today's flow (stage 3's slices 9d and 9e): the portal's record first, then made in QuickBooks, for a family by a
-    // staff member who may link families; a student made there under a linked family, or kept in the portal only in a
-    // family with no link, as the family's page has always chosen between them.
+    // staff member who may link families; a student made there under a linked family (the linked form), or kept in the
+    // portal only in a family with no link (the portal's form), each refusing a family whose link changed since.
     "families.howToAdd": {
       family: async (ask, rosterTag, o) => (await import("@/lib/roster/writes")).addFamily(ask, rosterTag, o),
       student: async (familyId, name, rosterTag, o) => {
-        const [writes, links, ids] = await Promise.all([import("@/lib/roster/writes"), import("@/lib/families/links"), import("@/lib/families/ids")]);
-        const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(familyId);
-        const linked = uuid && (await links.familyLinkState(ids.asAppFamilyId(familyId.toLowerCase()))).state === "linked";
-        return linked ? writes.addStudentToLinked(familyId, name, rosterTag, o) : writes.changeInPortal({ op: "add_student", familyId, name }, rosterTag, o);
+        const writes = await import("@/lib/roster/writes");
+        return o.asLinked ? writes.addStudentToLinked(familyId, name, rosterTag, o) : writes.changeInPortal({ op: "add_student", familyId, name }, rosterTag, o);
       },
     },
   },

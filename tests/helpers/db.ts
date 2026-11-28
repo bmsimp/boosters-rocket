@@ -92,8 +92,7 @@ export function childrenFirst(ids: number[], references: { child: number; parent
   return order;
 }
 
-/** Empties every table except the built-in Admin role, removes custom roles, and starts identity columns again from 1. */
-/** resetDb(), then QuickBooks on: the club every test starts with. */
+/** emptyDb(), then QuickBooks on: the club every test starts with. */
 export async function resetDb() {
   await emptyDb();
   // The club the tests build is a QuickBooks club, as every club was before stage 5: QuickBooks is on. A test of the
@@ -101,7 +100,7 @@ export async function resetDb() {
   await db.insert(setting).values({ key: PLUGINS_ON_KEY, value: ["quickbooks"] });
 }
 
-/** Empties every table but the built-in Admin role, leaving no page on disk, with nothing put back. */
+/** Empties every table except the built-in Admin role, removes custom roles, and starts identity columns again from 1. */
 export async function emptyDb() {
   const statements = await emptyEverything();
   // A DO block is one statement and one transaction, whatever protocol the driver speaks.
