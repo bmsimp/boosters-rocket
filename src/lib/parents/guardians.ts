@@ -38,7 +38,8 @@ import { guardianEmail, personName } from "./guardian-input";
 import { familyLinkState } from "@/lib/families/links";
 import { QUICKBOOKS, type AppFamilyId } from "@/lib/families/ids";
 import { recordNameWords } from "@/lib/families/words";
-import { getShape, ROSTER_LOCK } from "@/lib/roster/shape";
+import { getShape } from "@/lib/roster/shape";
+import { RECORDS_LOCK } from "@/lib/families/records-lock";
 import { getRosterSource, ofRosterCompany } from "@/lib/roster/source";
 import { blocksOthers, familyCreateWaiting, familySendingFree, guardianChangeWaiting, guardianCustomerLinked, guardianSentWords, recordSendingFree, sendGuardianSaved, whileGuardiansHeld, type GuardianQueued } from "@/lib/roster/writes";
 import { guardianSaved } from "@/lib/families/guardian-events";
@@ -75,7 +76,7 @@ export async function holdRoster(tx: Tx, w: Waits, exclusive = false): Promise<b
     await tx.transaction(async (sp) => {
       await sp.execute(sql.raw(`set local lock_timeout = '${waitMs}ms'`));
       // Exclusive only for the import's guardian that writes a link (importGuardian(), stage 4's slice M6): every link write holds it so.
-      await sp.execute(exclusive ? sql`select pg_advisory_xact_lock(${ROSTER_LOCK})` : sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`);
+      await sp.execute(exclusive ? sql`select pg_advisory_xact_lock(${RECORDS_LOCK})` : sql`select pg_advisory_xact_lock_shared(${RECORDS_LOCK})`);
       await sp.execute(sql`set local lock_timeout to default`);
     });
     return true;

@@ -9,9 +9,9 @@ import "server-only";
 import type { Tx } from "@/lib/db/client";
 import type { Actor } from "@/lib/audit/log";
 import type { ContactDetails } from "@/lib/db/schema";
-// QuickBooks' handler, the one accounting system there is. Slice P7 moves it into the plugin, which fills the slot from
-// its manifest, and this reads it there (accountingOn()): until then it is this one crossing.
-import { QUICKBOOKS_DETAILS_EVENTS, type DetailsOf, type QueueAs } from "@/lib/parents/contact-queue";
+import type { DetailsOf, QueueAs } from "@/lib/parents/contact-queue";
+// The handler is the slot `records.events` of the accounting plugin that is on (its manifest), read at each event.
+import { accountingOn } from "@/plugins";
 
 /** A person's or a family's phone and mailing address saved: `change` the fields that changed, `was` them before, `now` all of them as saved. */
 export type ContactSaved = { record: "contact"; of: DetailsOf; change: ContactDetails; was: ContactDetails; now: Required<ContactDetails> };
@@ -29,11 +29,15 @@ export type DetailsEventOp<E extends DetailsEvent> = E extends ContactSaved ? Co
 /** What an accounting plugin does with each event: queue its writes in `tx`, answering the new items' ids. */
 export type DetailsEvents = { [E in DetailsEvent as E["record"]]: (tx: Tx, event: E, o: DetailsEventOp<E>) => Promise<string[]> };
 
-/** The handler of the accounting system that is on, read at each event. */
-const books = (): DetailsEvents => QUICKBOOKS_DETAILS_EVENTS;
+/** With no books, nothing is sent on: no handler queues anything. */
+const NO_BOOKS: DetailsEvents = { contact: async () => [], email: async () => [] };
+
+/** The handler of the accounting system that is on, read in the save's transaction at each event. */
+const books = async (tx: Tx): Promise<DetailsEvents> => (await accountingOn(tx))?.slots["records.events"] ?? NO_BOOKS;
 
 /** A person's or a family's details saved, inside the save's own transaction: the ids of what was queued to be sent on. */
 export async function detailsSaved<E extends DetailsEvent>(tx: Tx, event: E, o: DetailsEventOp<E>): Promise<string[]> {
   const e: DetailsEvent = event;
-  return e.record === "contact" ? books().contact(tx, e, o as ContactEventOp) : books().email(tx, e, o as EmailEventOp);
+  const handler = await books(tx);
+  return e.record === "contact" ? handler.contact(tx, e, o as ContactEventOp) : handler.email(tx, e, o as EmailEventOp);
 }

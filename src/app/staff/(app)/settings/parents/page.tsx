@@ -4,7 +4,7 @@ import { can } from "@/lib/permissions/effective";
 import { RESET_PERMISSION, oldAddressPasskeys } from "@/lib/parents/signin-reset";
 import { OLD_PASSKEYS_COPY as OLD } from "@/lib/parents/old-passkeys-copy";
 import { readStoredSettings, type SigninLevel } from "@/lib/parents/settings";
-import { closedForNoStudents, missingForSignins, NO_STUDENTS_IN_SHAPE, setupMailsToOwe, signinCounts, STUDENTS_RULE_NOT_IN_USE, studentsEffect, studentsRuleUsable } from "@/lib/parents/switches";
+import { closedForNoStudents, missingForSignins, setupMailsToOwe, signinCounts, studentsEffect } from "@/lib/parents/switches";
 import { Notice } from "@/app/components/notice";
 import { SwitchButton } from "./forms";
 import { StateWords } from "@/app/components/state-words";
@@ -27,7 +27,7 @@ export default async function ParentSettingsPage() {
   const ctx = await requireStaffPage("Settings.Parents.ReadWrite");
   // Passkeys from an earlier address (slice SI-9b): counted and offered only to a holder of the reset's permission.
   const mayRemoveOld = can(ctx.effective, RESET_PERMISSION);
-  const [{ settings: s, level }, counts, students, missing, usable, closedEarlier, noPassword, old] = await Promise.all([readStoredSettings(), signinCounts(), studentsEffect(), missingForSignins(), studentsRuleUsable(), closedForNoStudents(), setupMailsToOwe(),
+  const [{ settings: s, level }, counts, students, missing, closedEarlier, noPassword, old] = await Promise.all([readStoredSettings(), signinCounts(), studentsEffect(), missingForSignins(), closedForNoStudents(), setupMailsToOwe(),
     mayRemoveOld ? oldAddressPasskeys() : null]);
   // The press's mail, as the worker writes it, for the Admin to read before pressing.
   const sample = s.signin && s.welcome && noPassword > 0 ? await sampleChoosePassword("parent@example.org") : null;
@@ -84,13 +84,10 @@ export default async function ParentSettingsPage() {
 
       <section className="box" aria-labelledby="ps-options-h"><h2 id="ps-options-h">Options</h2>
         <h3>Families with no active student</h3>
-        {s.requireActiveStudents && !usable
-          ? <Notice tone="info" live="none">{STUDENTS_RULE_NOT_IN_USE}</Notice>
-          : <p>{s.requireActiveStudents ? "On: a family with no active student can't sign in. Nobody's sign-in is ended for it: they can sign in again once the family has an active student, or this is switched off."
-            : !usable ? `Off. ${NO_STUDENTS_IN_SHAPE}`
-            : `Off: students don't affect who can sign in. Switching this on would stop ${n(students.people, "person", "people")} signing in, in ${n(students.families, "family", "families")} with no active student, until the family has one.`}</p>}
+        <p>{s.requireActiveStudents ? "On: a family with no active student can't sign in. Nobody's sign-in is ended for it: they can sign in again once the family has an active student, or this is switched off."
+          : `Off: students don't affect who can sign in. Switching this on would stop ${n(students.people, "person", "people")} signing in, in ${n(students.families, "family", "families")} with no active student, until the family has one.`}</p>
         {closedEarlier > 0 && <p>{`${n(closedEarlier, "sign-in", "sign-ins")} an earlier version of the portal ended for this ${closedEarlier === 1 ? "stays" : "stay"} ended, whatever this is set to and whatever students the family has.`}</p>}
-        {(s.requireActiveStudents || usable) && <SwitchButton quiet label={s.requireActiveStudents ? "Let those families sign in" : "Require an active student"} pendingLabel="Saving…" act={setRequireStudentsAction.bind(null, !s.requireActiveStudents)} />}
+        <SwitchButton quiet label={s.requireActiveStudents ? "Let those families sign in" : "Require an active student"} pendingLabel="Saving…" act={setRequireStudentsAction.bind(null, !s.requireActiveStudents)} />
       </section>
     </main>
   );

@@ -84,6 +84,8 @@ async function main() {
           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
   await sql`INSERT INTO setting (key, value) VALUES ('setup.state', ${sql.json({ status: "finished", step: "admin", adminEmail: null, finishedAt: "2026-11-08T00:00:00Z" })})
           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
+  // A QuickBooks club: QuickBooks is on (stage 5's plugins.on). The specs that turn it off put it back.
+  await sql`INSERT INTO setting (key, value) VALUES ('plugins.on', ${sql.json(["quickbooks"])}) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
 
   // An Admin with a live staff session, so the e2e run can open staff pages (tests/e2e/staff-session.ts makes the cookie).
   // resolveStaff finds the staff_user by auth_user_id and needs it active; the Admin role gives every permission.

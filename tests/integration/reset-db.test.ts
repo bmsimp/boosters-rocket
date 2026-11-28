@@ -3,7 +3,7 @@ import { getTableName, isTable, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import * as schema from "@/lib/db/schema";
 import { auditLog, jobRun, qboCustomer, qboCustomerType, role, roleRule, setting } from "@/lib/db/schema";
-import { childrenFirst, resetDb, seedGuardian, seedParent, seedParentSession, seedStaff } from "../helpers/db";
+import { childrenFirst, emptyDb, resetDb, seedGuardian, seedParent, seedParentSession, seedStaff } from "../helpers/db";
 
 /** Row counts for every table in the public schema, read from the database rather than from a list someone keeps. */
 async function rowCounts(): Promise<Record<string, number>> {
@@ -39,9 +39,11 @@ describe("resetDb", () => {
 
     await resetDb();
 
+    // Only the one setting every test's club starts with: QuickBooks on (stage 5's plugins.on).
     const after = await rowCounts();
     const notEmpty = Object.entries(after).filter(([t, n]) => t !== "role" && n > 0).map(([t, n]) => `${t} (${n})`);
-    expect(notEmpty, "tables resetDb left rows in").toEqual([]);
+    expect(notEmpty, "tables resetDb left rows in").toEqual(["setting (1)"]);
+    expect(await db.select({ key: setting.key, value: setting.value }).from(setting)).toEqual([{ key: "plugins.on", value: ["quickbooks"] }]);
     expect(await db.select({ key: role.key, builtin: role.builtin }).from(role)).toEqual([{ key: "admin", builtin: true }]);
   });
 
@@ -75,14 +77,14 @@ describe("resetDb", () => {
     await resetDb();
   }, 60_000);
 
-  it("leaves every table it emptied with no pages on disk, whatever the test wrote", async () => {
-    await resetDb();
+  it("leaves every table it emptied with no pages on disk, whatever the test wrote (emptyDb(), which resetDb() runs first)", async () => {
+    await emptyDb();
     const sized = async () => (await db.execute<{ name: string }>(sql`SELECT relname AS name FROM pg_class
       WHERE relnamespace = 'public'::regnamespace AND relkind = 'r' AND relname <> 'role' AND pg_relation_size(oid) > 0`)).map((t) => t.name);
     expect(await sized()).toEqual([]);
     await db.insert(setting).values({ key: "reset.test", value: 1 });
     expect(await sized()).toEqual(["setting"]);
-    await resetDb();
+    await emptyDb();
     expect(await sized()).toEqual([]);
     expect(await db.select().from(setting)).toEqual([]);
     // A transaction left open keeps the vacuum from taking deleted rows away: the table is truncated instead.
@@ -94,7 +96,7 @@ describe("resetDb", () => {
     const holder = db.transaction(async (tx) => { await tx.execute(sql`SELECT 1`); started(); await held; }, { isolationLevel: "repeatable read" });
     await holding;
     try {
-      await resetDb();
+      await emptyDb();
       expect(await sized()).toEqual([]);
       expect(await db.select().from(setting)).toEqual([]);
     } finally { release(); await holder; }

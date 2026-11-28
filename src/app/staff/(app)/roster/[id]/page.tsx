@@ -12,12 +12,11 @@ import { familyCover, guardianCustomers, guardianStandings, heldCustomerOffered,
 import { endedLinksHeld, type EndedHeld } from "@/lib/accounting/ended-links";
 import { comparableContacts, loadOpenWrites } from "@/lib/roster/queue";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
-import { familyContact, familySignins, type FamilySignin } from "@/lib/parents/directory";
+import { familyContact, familySignins } from "@/lib/parents/directory";
 import { whoseDetails } from "@/lib/parents/my-family";
 import type { ContactForm } from "@/lib/parents/contact-fields";
-import { AddGuardianForm, DetailsForm, ReleaseHoldControl } from "@/app/staff/(app)/parents/forms";
-import { GuardianChange } from "@/app/staff/(app)/parents/guardian-change";
-import { addGuardianAction, releaseSigninHoldAction } from "@/app/staff/(app)/parents/actions";
+import { DetailsForm, ReleaseHoldControl } from "@/app/staff/(app)/parents/forms";
+import { releaseSigninHoldAction } from "@/app/staff/(app)/parents/actions";
 import { signinHoldOf } from "@/lib/parents/guardians";
 import { studentsRuleInForce } from "@/lib/parents/sessions";
 import { DisconnectedNotice, Freshness } from "../freshness";
@@ -26,9 +25,10 @@ import { moveAction, saveFamilyDetailsAction } from "../write-actions";
 import { offers } from "@/lib/roster/operations";
 import { placeWords } from "@/lib/roster/place";
 import type { Cust, Family } from "@/lib/roster/model";
-import { Card, DataTable, EmptyState, KeyValue, List, ListRow, LocalTime, Notice, PageHeader, StatusBadge, type Column, type Tone } from "@/app/components/ui";
-import { accessTone } from "@/app/staff/(app)/parents/access-state";
-import { familyBalancePage, familyBuyoutsPage, familyCreditPage, familyProgressPage } from "@/app/staff/(app)/family-pages";
+import { Card, DataTable, EmptyState, KeyValue, LocalTime, Notice, PageHeader, StatusBadge, type Column, type Tone } from "@/app/components/ui";
+import { Elsewhere, SignIns } from "./family-parts";
+import { accountingOn } from "@/plugins";
+import { FamilyByHand } from "../by-hand";
 
 export const metadata = { title: "Roster" };
 export const dynamic = "force-dynamic";
@@ -84,43 +84,6 @@ function People({ id, title, noun, people, contact, empty }: { id: string; title
 }
 
 /**
- * `links` is for staff with `Parents.ReadWrite`, who may open a person's page. `changes` is for staff with
- * `Roster.Family.ReadWrite`, who change the family: only they get the ways to remove, reinstate and add a guardian
- * (stage 3's slice 7b, in the portal only), which give or end an address's sign-in for it. `addable` says why a
- * guardian can't be added now, or null when one can: the action checks it again, under the roster lock. A family with
- * no link takes guardians too (stage 3's slice 9d).
- */
-function SignIns({ familyId, signins, links, changes, addable, inQuickBooks }: { familyId: AppFamilyId; signins: FamilySignin[]; links: boolean; changes: boolean; addable: string | null;
-  inQuickBooks: Map<string, string> }) {
-  const columns: Column<FamilySignin>[] = [
-    { key: "name", header: "Person", rowHeader: true, cell: (s) => (links ? <Link href={`/staff/parents/${s.parentId}`}>{s.name}</Link> : s.name) },
-    { key: "email", header: "Email", cell: (s) => s.email },
-    { key: "words", header: "Sign-in", cell: (s) => <StatusBadge tone={accessTone(s.kind, s.hasPassword)}>{s.words}</StatusBadge> },
-    // Where QuickBooks stands for the guardian's own Parent customer (stage 3's slice 9h), in words.
-    { key: "quickbooks", header: "In QuickBooks", cell: (s) => inQuickBooks.get(s.guardianId) ?? "Nothing in QuickBooks for this membership." },
-    ...(changes ? [{ key: "change", header: "Change", quiet: true, cell: (s: FamilySignin) => <GuardianChange name={s.name} removeLabel={`Remove ${s.name} from this family`} guardianId={s.guardianId} open={s.open} reinstatable={s.reinstatable} /> }] : []),
-  ];
-  return (
-    <Card title="Portal sign-ins" titleId="entry-signins-h" description={<>The family&apos;s guardians in the portal, and whether each can sign in.</>}>
-      {signins.length === 0 ? <EmptyState title="Nobody can sign in for it yet." /> : (
-        <DataTable caption="Each person, and whether they can sign in" captionHidden rows={signins} rowKey={(s) => s.guardianId} columns={columns} />
-      )}
-      {changes && (
-        <>
-          <h3 className="table-head">Add a guardian</h3>
-          {addable !== null ? <Notice tone="info" live="none">{addable}</Notice> : (
-            <>
-              <p>They sign in with this address and a password they choose from the welcome email, and where the books have parents they get their own Parent customer under the family. If someone in the portal already has this address, you&apos;re asked first whether it&apos;s the same person.</p>
-              <AddGuardianForm act={addGuardianAction.bind(null, String(familyId))} />
-            </>
-          )}
-        </>
-      )}
-    </Card>
-  );
-}
-
-/**
  * A family whose sign-ins a take from the books held (stage 4's slice M4b): who held it and when, why, whether its
  * guardians would count at the gate once let in (`wouldCount`, or why not), and, for staff who may change families
  * (`release`), the one press that lets every open guardian of it sign in at once, with their names and count. Nobody
@@ -163,30 +126,14 @@ function FamilyDetails({ familyId, details, editable }: { familyId: AppFamilyId;
   );
 }
 
-/**
- * The family's other staff pages, each for staff who may open it: the way from the roster to a family's money, its
- * season, its volunteering and its buy-outs, without going back to a list. Each of those pages records its own read.
- */
-function Elsewhere({ familyId, money, season, credit, buyouts }: { familyId: AppFamilyId; money: boolean; season: boolean; credit: boolean; buyouts: boolean }) {
-  if (!money && !season && !credit && !buyouts) return null;
-  return (
-    <Card title="More about this family" titleId="entry-elsewhere-h">
-      <List>
-        {money && <ListRow title={<Link className="link-line" href={familyBalancePage(familyId)}>What it owes</Link>} />}
-        {season && <ListRow title={<Link className="link-line" href={familyProgressPage(familyId)}>Where it stands this season</Link>} />}
-        {credit && <ListRow title={<Link className="link-line" href={familyCreditPage(familyId)}>Its volunteering credit</Link>} />}
-        {buyouts && <ListRow title={<Link className="link-line" href={familyBuyoutsPage(familyId)}>Its volunteer buy-outs</Link>} />}
-      </List>
-    </Card>
-  );
-}
-
 export default async function RosterEntryPage({ params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireStaffPage("Roster.Read");
   const { id } = await params;
   // The app's own family id (stage 3 of the app-owned families spec): anything that isn't a family record's answers 404.
   const familyId = await familyRecordAt(id);
   if (!familyId) notFound();
+  // With no books, the family as the portal keeps it (stage 5's slice P2): nothing below reads QuickBooks.
+  if (!(await accountingOn())) return (await FamilyByHand({ ctx, familyId })) ?? notFound();
   // The tag first: the roster the page then shows is that company's or a later one, never an earlier one.
   const rosterTag = await currentRosterTag();
   const page = await loadRosterPage(); // one load, so the entry and the freshness notes describe the same snapshot

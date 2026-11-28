@@ -30,8 +30,7 @@ import { billingAddressOf, detailKey } from "@/lib/parents/contact-fields";
 import { contactAgeFrom, contactSendsMayGo, contactSendsSince } from "@/lib/parents/take-in-setting";
 import { whoseDetails } from "@/lib/parents/my-family";
 import { CONTACT_REPLACED_NOTE, type DetailsOf } from "@/lib/parents/contact-queue";
-import { formsForMovedStudent } from "@/lib/forms/moved";
-import { volunteerForMovedStudent } from "@/lib/volunteer/moved-student";
+import { followMovedStudent } from "@/lib/families/moved";
 import { buyoutsForMovedStudent } from "@/lib/buyouts/moved";
 import { getShape, missingTypes, ROSTER_LOCK, shapeHolds, shapeTypeIds, type MembershipShape } from "./shape";
 import { buildRoster, type Cust, type Roster } from "./model";
@@ -512,15 +511,12 @@ function auditAfter(w: RosterWrite, answer: Record<string, unknown>) {
  */
 export async function afterStudentMoved(tx: Tx, move: { studentId: AppStudentId; fromFamilyId: AppFamilyId; toFamilyId: AppFamilyId; cause: string },
   o: { actor: Actor; ip: string | null }): Promise<{ tell: () => Promise<unknown>; buyouts: { voiding: number; flagged: number } }> {
-  const who = { studentId: move.studentId, fromFamilyId: move.fromFamilyId, toFamilyId: move.toFamilyId };
-  const forms = await formsForMovedStudent(tx, { ...who, actor: o.actor, ip: o.ip });
-  const volunteer = await volunteerForMovedStudent(tx, who, { actor: o.actor, ip: o.ip });
-  const buyouts = await buyoutsForMovedStudent(tx, who, { actor: o.actor, ip: o.ip });
-  await writeAudit({ actor: { door: "system", id: null, label: "roster" }, action: "roster.student.move.followed", targetType: "student", targetId: String(move.studentId),
-    after: { studentId: String(move.studentId), fromFamilyId: String(move.fromFamilyId), toFamilyId: String(move.toFamilyId), cause: move.cause,
-      formsMoved: forms.moved, formsReset: forms.reset, formsToWithdraw: forms.toWithdraw.length, placesGivenUp: volunteer.cancelled,
-      buyoutsToVoid: buyouts.voiding, buyoutsFlagged: buyouts.flagged } }, tx);
-  return { tell: volunteer.tell, buyouts: { voiding: buyouts.voiding, flagged: buyouts.flagged } };
+  // The core's follow-ups (src/lib/families/moved.ts), with the buy-outs' between the volunteer places and the audit row.
+  const { tell, more } = await followMovedStudent(tx, move, o, async (t, who) => {
+    const b = await buyoutsForMovedStudent(t, who, { actor: o.actor, ip: o.ip });
+    return { buyoutsToVoid: b.voiding, buyoutsFlagged: b.flagged };
+  });
+  return { tell, buyouts: { voiding: more.buyoutsToVoid ?? 0, flagged: more.buyoutsFlagged ?? 0 } };
 }
 
 /**

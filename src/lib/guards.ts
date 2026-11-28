@@ -1,5 +1,5 @@
 import "server-only";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getStaffIdentity, getParentIdentity, getParentState, hasStaffSession, hasParentSession } from "@/lib/auth/identity";
 import type { StaffIdentity, ParentIdentity } from "@/lib/auth/resolve";
 import { effectivePermissions, can, type Effective } from "@/lib/permissions/effective";
@@ -7,6 +7,7 @@ import type { Permission } from "@/lib/permissions/registry";
 import { requestIp } from "@/lib/request";
 import { writeAudit } from "@/lib/audit/log";
 import { withReturnPath } from "@/lib/auth/return-path";
+import { pluginOn } from "@/plugins";
 
 export class AccessDenied extends Error {
   constructor() { super("Not allowed"); } // same message whatever the reason (spec §5.1)
@@ -98,6 +99,16 @@ export async function requireStaffPage(permission?: Permission): Promise<StaffCt
   if (ctx) return ctx;
   // Signed in but refused (unknown, disabled, or missing permission) → the one generic refusal page.
   redirect((await hasStaffSession()) ? "/refused" : "/staff/sign-in");
+}
+
+/**
+ * The guard of a page a plugin brings (docs/superpowers/specs/2026-11-28-accounting-plugin-design.md, section 3,
+ * "Pages"): `notFound()` while the plugin is off, before anything about the visitor is read, so a page of a plugin
+ * that is off is not there for anyone; then requireStaffPage() with the page's permission.
+ */
+export async function requirePluginPage(key: string, permission?: Permission): Promise<StaffCtx> {
+  if (!(await pluginOn(key))) notFound();
+  return requireStaffPage(permission);
 }
 
 /**

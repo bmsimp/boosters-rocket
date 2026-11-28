@@ -252,30 +252,18 @@ describe("the Parent sign-ins settings", () => {
     expect(await view()).toContain("On: a family with no active student can&#x27;t sign in.");
   });
 
-  it("the active-students option says it can't be used, and offers no button, while the shape names no students", async () => {
+  // Students are always the portal's own (stage 5's slice P2): the option is offered, and in force, whatever the shape.
+  it("offers the active-students option, and puts it in force, whatever the shape names", async () => {
     await ready(); await setSigninsAction(true);
     await storeShape({ kind: "flat", memberTypeIds: ["F"] });
-    const html = await view();
-    expect(html).toContain("Off. The membership shape doesn&#x27;t say which customers are students, so this can&#x27;t be used.");
-    expect(html).not.toContain("Require an active student");
-    expect(await setRequireStudentsAction(true)).toEqual({ ok: false, errors: ["The membership shape doesn't say which customers are students, so this can't be used."] });
-  });
-
-  // An installation may hold it on beside such a shape from before stage 3's slice 7a: the page says it is not in use,
-  // counts everyone who can sign in as the gate does (it lets them in), and offers switching it off.
-  it("says the active-students option is on but not in use while the shape names no students, and counts as the gate does", async () => {
-    await ready(); await setSigninsAction(true);
-    await db.update(student).set({ active: false });
-    const html = (await view()).replaceAll("&#x27;", "'");
-    const canSignIn = /<dt>Who can sign in<\/dt><dd>([^<]*)<\/dd>/.exec(html)![1];
-    await setRequireStudentsAction(true);
-    await storeShape({ kind: "flat", memberTypeIds: ["F"] });
-    const stale = (await view()).replaceAll("&#x27;", "'");
-    expect(stale).toContain("On, but not in use: the membership shape doesn't say which customers are students, so students don't affect who can sign in.");
-    expect(stale).not.toContain("On: a family with no active student can't sign in.");
-    expect(/<dt>Who can sign in<\/dt><dd>([^<]*)<\/dd>/.exec(stale)![1]).toBe(canSignIn);
-    expect(stale).toContain("Let those families sign in");
-    expect(await getParentSettings()).toMatchObject({ requireActiveStudents: true });
+    let html = (await view()).replaceAll("&#x27;", "'");
+    expect(html).toContain("Off: students don't affect who can sign in.");
+    expect(html).toContain("Require an active student");
+    expect(html).not.toContain("membership shape doesn't say");
+    expect(await setRequireStudentsAction(true)).toEqual({ ok: true, message: "Saved. Families with no active student can't sign in." });
+    html = (await view()).replaceAll("&#x27;", "'");
+    expect(html).toContain("On: a family with no active student can't sign in.");
+    expect(html).toContain("Let those families sign in");
   });
 
   it("says that sign-ins an earlier version ended for no active student stay ended", async () => {

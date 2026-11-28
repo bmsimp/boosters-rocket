@@ -102,11 +102,15 @@ const ROSTER_LINK = "createInQuickBooksAndLink";
 const MAY_ROSTER_LINK = [ROSTER_WRITER, "src/app/staff/(app)/roster/write-actions.ts"];
 /**
  * Adding a family or member (stage 3's slice 9d): the portal's own record first, then, for a staff member who may link
- * families to accounting, its create sent through the module's own ask. Started only by the module itself and the one
- * staff action, so no other module can send a family's create by way of it.
+ * families to accounting, its create sent through the module's own ask. Started only by the module itself and
+ * QuickBooks' way of adding (its manifest's slot `families.howToAdd`, which the staff actions reach since stage 5's
+ * slice P2), so no other module can send a family's create by way of it.
  */
 const ROSTER_ADD = "addFamily";
-const MAY_ROSTER_ADD = [ROSTER_WRITER, "src/app/staff/(app)/roster/write-actions.ts"];
+const MAY_ROSTER_ADD = [ROSTER_WRITER, "src/plugins/quickbooks/plugin.ts"];
+/** A student added to a linked family (stage 3's slice 9e), saved first: started, as a family's add, only through QuickBooks' slot. */
+const SAVED_FIRST_ADD = "addStudentToLinked";
+const MAY_SAVED_FIRST_ADD = [ROSTER_WRITER, "src/plugins/quickbooks/plugin.ts"];
 /**
  * The changes saved in the portal first (stage 3's slices 9e and 9f): a linked record's rename, a student added to a
  * linked family, a student's move, and "Send the portal's value" for a change QuickBooks refused, each sent through the
@@ -114,7 +118,7 @@ const MAY_ROSTER_ADD = [ROSTER_WRITER, "src/app/staff/(app)/roster/write-actions
  * and its one resend after a stale answer and a live read) is the module's own; a try of a change saved first, which
  * settles its queue item (at once, on a press or by the worker), is the module's and the queue's.
  */
-const SAVED_FIRST = ["renameLinked", "addStudentToLinked", "moveStudent", "sendPortalValue"];
+const SAVED_FIRST = ["renameLinked", "moveStudent", "sendPortalValue"];
 const MAY_SAVED_FIRST = [ROSTER_WRITER, "src/app/staff/(app)/roster/write-actions.ts"];
 const RENAME_TRY = "tryRename";
 const MAY_RENAME_TRY = [ROSTER_WRITER];
@@ -696,6 +700,7 @@ describe("what the portal writes to QuickBooks, and who may send each", () => {
       expect(naming(ROSTER_LINK), `${ROSTER_LINK} sends creates to QuickBooks. A new caller is a decision for a slice brief.`).toEqual([...MAY_ROSTER_LINK].sort());
       expect(naming(ROSTER_ADD), `${ROSTER_ADD} sends a family's create to QuickBooks. A new caller is a decision for a slice brief.`).toEqual([...MAY_ROSTER_ADD].sort());
       for (const name of SAVED_FIRST) expect(naming(name), `${name} sends a change saved in the portal first. A new caller is a decision for a slice brief.`).toEqual([...MAY_SAVED_FIRST].sort());
+      expect(naming(SAVED_FIRST_ADD), `${SAVED_FIRST_ADD} sends a change saved in the portal first. A new caller is a decision for a slice brief.`).toEqual([...MAY_SAVED_FIRST_ADD].sort());
       expect(naming(RENAME_TRY), `${RENAME_TRY} sends a rename, and resends it once after a live read. A new caller is a decision for a slice brief.`).toEqual([...MAY_RENAME_TRY].sort());
       expect(naming(ROSTER_DEACTIVATE), `${ROSTER_DEACTIVATE} makes a linked record inactive in QuickBooks. A new caller is a decision for a slice brief.`).toEqual([...MAY_ROSTER_DEACTIVATE].sort());
       expect(naming(TAKE), `${TAKE} takes the books' value into the portal and sends nothing to QuickBooks. A new caller is a decision for a slice brief.`).toEqual([...MAY_TAKE].sort());

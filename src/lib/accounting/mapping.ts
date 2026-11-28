@@ -782,7 +782,7 @@ export async function loadAccountingLinks(reader: { mayChange?: boolean } = {}):
   const [queue, parentSettings, givenUp] = state === "listed"
     ? await Promise.all([loadOpenWrites(), getParentSettings(), db.transaction((tx) => madeAfterGivingUp(tx))]) : [[], null, []];
   // Whether a family's guardians sign in by its active students (enterableGuardianRows()): a student's take of active may open it.
-  const studentsRule = parentSettings !== null && studentsRuleApplies(parentSettings.requireActiveStudents, shape);
+  const studentsRule = parentSettings !== null && studentsRuleApplies(parentSettings.requireActiveStudents);
   const staffIds = [...new Set([...links.flatMap((l) => (l.linkedBy === null ? [] : [l.linkedBy])), ...[...leftOf.values()].flatMap((m) => (m.by === null ? [] : [m.by]))])];
   const staffNames = new Map(staffIds.length ? (await db.select({ id: staffUser.id, name: staffUser.name }).from(staffUser).where(inArray(staffUser.id, staffIds))).map((s) => [s.id, s.name]) : []);
 

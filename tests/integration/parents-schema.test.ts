@@ -32,7 +32,7 @@ describe("the parents-from-QuickBooks schema", () => {
     expect(await getParentSettings()).toEqual(DEFAULT_PARENT_SETTINGS);
     await db.transaction((tx) => putParentSettings(tx, { ...DEFAULT_PARENT_SETTINGS, signin: true }));
     expect(await getParentSettings()).toMatchObject({ signin: true });
-    expect(await db.select().from(setting)).toEqual([expect.objectContaining({ key: PARENTS_KEY })]);
+    expect((await db.select().from(setting)).map((r) => r.key).sort()).toEqual([PARENTS_KEY, "plugins.on"].sort()); // and the test club's QuickBooks on
   });
 
   it("reads a stored parents setting it can't parse as closed, not as the defaults", async () => {

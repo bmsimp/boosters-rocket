@@ -4,6 +4,7 @@ import { setting } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { normalizeEmail } from "@/lib/email";
 import { parseStaffName } from "@/lib/staff/names";
+import { PLUGINS_ON_KEY } from "@/plugins/types";
 
 /** The club's name and color first (only on a new installation: src/lib/setup/club-step.ts), then sign-in, mail, the first Admin. */
 export const SETUP_STEPS = ["club", "staff", "mail", "admin"] as const;
@@ -57,8 +58,11 @@ export async function finishSetup(o: { staffUserId: string; email: string; ip: s
     if ((await getSetupState(tx)).status === "finished") return;
     await updateSetupState({ status: "finished", finishedAt: new Date().toISOString() }, tx);
     await tx.delete(setting).where(eq(setting.key, SETUP_CODE_KEY));
+    // Setup has no step for the books yet (stage 5's slice P8 adds "Your books"), so a club that finishes it is a
+    // QuickBooks club, as every club has been: QuickBooks is on, unless something is stored already.
+    const on = await tx.insert(setting).values({ key: PLUGINS_ON_KEY, value: ["quickbooks"] }).onConflictDoNothing().returning({ key: setting.key });
     await writeAudit({ actor: { door: "staff", id: o.staffUserId, label: o.email }, action: "setup.finish", targetType: "setting",
-      targetId: SETUP_STATE_KEY, after: { adminEmail: o.email }, ip: o.ip }, tx);
+      targetId: SETUP_STATE_KEY, after: { adminEmail: o.email, ...(on.length ? { pluginsOn: ["quickbooks"] } : {}) }, ip: o.ip }, tx);
   });
   cacheState.cache = null;
 }

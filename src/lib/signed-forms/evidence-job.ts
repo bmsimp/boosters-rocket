@@ -19,7 +19,7 @@ import {
   type DocumensoConfig,
 } from "@/lib/documenso/client";
 import { getRosterSource } from "@/lib/roster/source";
-import { ROSTER_LOCK } from "@/lib/roster/shape";
+import { RECORDS_LOCK } from "@/lib/families/records-lock";
 import { FORMS_WORKER, requestRecords, type FormsFailure } from "@/lib/forms/requests";
 import { customerOfFamily, customerOfStudent, recordsCompany } from "@/lib/families/links";
 import { readDocument } from "@/lib/forms/states";
@@ -133,7 +133,7 @@ export async function storeEvidence(row: RequestRow, got: Evidence, at: Date = n
   return db.transaction(async (tx): Promise<StoreOutcome> => {
     // The roster lock, shared, before the request row: the order a move's follow-ups take (under the roster lock, then
     // the requests), so the two never deadlock; and no link is written while it is held (namesOf()).
-    await tx.execute(sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`);
+    await tx.execute(sql`select pg_advisory_xact_lock_shared(${RECORDS_LOCK})`);
     // The company and the customers as they are now (namesOf() throws while the links can't be read; runEvidenceJob()
     // checks that before fetching anything, and this is the last word). Null with no link: never filled in later.
     const names = await namesOf(tx, row);

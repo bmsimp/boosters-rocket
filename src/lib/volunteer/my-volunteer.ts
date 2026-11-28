@@ -15,7 +15,7 @@ import type { ParentCtx } from "@/lib/guards";
 import { activeFamilyOf, sessionFamily, studentsStillIn, type SessionFamily } from "@/lib/families/session-family";
 import { sendMail } from "@/lib/mail/send";
 import { takeRateLimit } from "@/lib/parents/rate-limit";
-import { ROSTER_LOCK } from "@/lib/roster/shape";
+import { RECORDS_LOCK } from "@/lib/families/records-lock";
 import { isUuid } from "@/lib/seasons/ids";
 import { isCovered, type Requirement, type SubjectId, type SubjectsAsked } from "@/lib/seasons/progress";
 import { loadFacts, toRequirement } from "@/lib/seasons/recorded";
@@ -216,7 +216,7 @@ export async function signUpForShift(ctx: ParentCtx, shiftId: unknown, who: unkn
   const done = await takePlace(async (tx) => {
     // Beside the roster's writers, never between them: a refresh or a change of company holds this lock alone.
     await tx.execute(sql`set local lock_timeout = '10s'`);
-    await tx.execute(sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`);
+    await tx.execute(sql`select pg_advisory_xact_lock_shared(${RECORDS_LOCK})`);
     // Checked again under the lock: the family is still the session's own active record, and the student still in it.
     const familyId = await activeFamilyOf(ctx.familyId, tx);
     if (familyId === null || String(familyId) !== String(mineFamily.familyId)) return { r: no(NOT_FROM_PAGE) };

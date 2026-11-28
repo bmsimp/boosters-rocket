@@ -30,11 +30,17 @@ describe("the core's saves reach the books through their events", () => {
     });
   }
 
-  it("the events' modules import only types and their one handler, and read, write and send nothing themselves", () => {
+  // Since slices P1 and P2 the handler is the accounting plugin's slot `records.events` (its manifest), read through
+  // accountingOn(); with none on, nothing is queued.
+  it("the events' modules import only types and the plugin that is on, and read, write and send nothing themselves", () => {
     const details = code(read("src/lib/families/events.ts")), guardians = code(read("src/lib/families/guardian-events.ts"));
     const imports = (t: string) => [...t.matchAll(/^import\s+(?!type\b)([^;]*?)\s+from\s+"([^"]+)";/gm)].map((m) => `${m[1]} ${m[2]}`);
-    expect(imports(details)).toEqual(["{ QUICKBOOKS_DETAILS_EVENTS, type DetailsOf, type QueueAs } @/lib/parents/contact-queue"]);
-    expect(imports(guardians)).toEqual(["{ QUICKBOOKS_GUARDIAN_EVENTS, type GuardianOp, type GuardianQueued } @/lib/roster/writes"]);
+    expect(imports(details)).toEqual(["{ accountingOn } @/plugins"]);
+    expect(imports(guardians)).toEqual(["{ accountingOn } @/plugins"]);
+    const manifest = code(read("src/plugins/quickbooks/plugin.ts"));
+    expect(manifest).toContain('contact: async (tx, e, o) => (await import("@/lib/parents/contact-queue")).QUICKBOOKS_DETAILS_EVENTS.contact(tx, e, o),');
+    expect(manifest).toContain('email: async (tx, e, o) => (await import("@/lib/parents/contact-queue")).QUICKBOOKS_DETAILS_EVENTS.email(tx, e, o),');
+    expect(manifest).toContain('guardian: async (tx, e, o) => (await import("@/lib/roster/writes")).QUICKBOOKS_GUARDIAN_EVENTS.guardian(tx, e, o),');
     for (const t of [details, guardians]) expect(t).not.toMatch(/\.(insert|update|delete|select|execute)\(|quickbooks\/client|advisory/);
   });
 
