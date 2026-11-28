@@ -45,20 +45,27 @@ app_id() {
     | jq -r --arg host "$HOST" '[.result[] | select(.domain == $host)][0].id // ""'
 }
 record_id() {
-  cf GET "zones/$CF_ZONE_ID/dns_records?type=CNAME&name=$HOST" \
+  # Any type of record at the preview's name, not only the CNAME this makes.
+  cf GET "zones/$CF_ZONE_ID/dns_records?name=$HOST" \
     | jq -r --arg host "$HOST" '[.result[] | select(.name == $host)][0].id // ""'
 }
 
+# Every lookup is assigned before it is tested, so a lookup that fails stops the script (set -e) instead of reading as
+# "not there".
 open_gate() {
   host_of "$1"
-  if [ -z "$(app_id)" ]; then
+  local app record
+  app="$(app_id)"
+  if [ -z "$app" ]; then
     cf POST "accounts/$CF_ACCOUNT_ID/access/apps" "$(jq -nc --arg host "$HOST" --arg policy "$CF_ACCESS_POLICY_ID" \
       '{type: "self_hosted", name: ("Boosters Rocket preview " + $host), domain: $host, session_duration: "168h",
         app_launcher_visible: false, policies: [{id: $policy, precedence: 1}]}')" >/dev/null
     say "Made the Access application for $HOST."
   fi
-  [ -n "$(app_id)" ] || die 5 "The Access application for $HOST isn't there; its DNS name was not made."
-  if [ -z "$(record_id)" ]; then
+  app="$(app_id)"
+  [ -n "$app" ] || die 5 "The Access application for $HOST isn't there; its DNS name was not made."
+  record="$(record_id)"
+  if [ -z "$record" ]; then
     cf POST "zones/$CF_ZONE_ID/dns_records" "$(jq -nc --arg host "$HOST" --arg target "$CF_TUNNEL_ID.cfargotunnel.com" \
       '{type: "CNAME", name: $host, content: $target, proxied: true, comment: "Boosters Rocket preview; removed when its pull request closes"}')" >/dev/null
     say "Made the DNS name $HOST."
@@ -70,17 +77,17 @@ close_gate() {
   local id
   id="$(record_id)"
   [ -z "$id" ] || { cf DELETE "zones/$CF_ZONE_ID/dns_records/$id" >/dev/null; say "Removed the DNS name $HOST."; }
-  [ -z "$(record_id)" ] || die 5 "The DNS name $HOST is still there; its Access application was kept."
+  id="$(record_id)"
+  [ -z "$id" ] || die 5 "The DNS name $HOST is still there; its Access application was kept."
   id="$(app_id)"
   [ -z "$id" ] || { cf DELETE "accounts/$CF_ACCOUNT_ID/access/apps/$id" >/dev/null; say "Removed the Access application for $HOST."; }
 }
 
 list_gates() {
-  local pattern="^pr-([1-9][0-9]{0,5})-br\\.${PREVIEW_DOMAIN//./\\.}$"
-  {
-    cf GET "accounts/$CF_ACCOUNT_ID/access/apps?per_page=1000" | jq -r '.result[].domain // empty'
-    cf GET "zones/$CF_ZONE_ID/dns_records?type=CNAME&per_page=5000" | jq -r '.result[].name'
-  } | sed -nE "s/$pattern/\\1/p" | sort -un
+  local pattern="^pr-([1-9][0-9]{0,5})-br\\.${PREVIEW_DOMAIN//./\\.}$" apps records
+  apps="$(cf GET "accounts/$CF_ACCOUNT_ID/access/apps?per_page=1000")"
+  records="$(cf GET "zones/$CF_ZONE_ID/dns_records?per_page=5000")"
+  { jq -r '.result[].domain // empty' <<<"$apps"; jq -r '.result[].name' <<<"$records"; } | sed -nE "s/$pattern/\\1/p" | sort -un
 }
 
 case "${1:-}" in

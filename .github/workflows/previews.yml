@@ -30,8 +30,9 @@ on:
 
 permissions: {}
 
+# One run at a time for each pull request (and one sweep), so two pull requests closing together each get their run.
 concurrency:
-  group: previews
+  group: previews-${{ inputs.pr || github.event.pull_request.number || 'sweep' }}
   cancel-in-progress: false
 
 jobs:

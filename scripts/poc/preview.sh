@@ -65,7 +65,7 @@ github() {
 github_all() {
   local page=1 got all="[]"
   while [ "$page" -le 10 ]; do
-    got="$(github "$1&page=$page")"
+    got="$(github "$1&page=$page")" || return 5
     [ "$(jq length <<<"$got")" -gt 0 ] || break
     all="$(jq -c --argjson more "$got" '. + $more' <<<"$all")"
     page=$((page + 1))
@@ -120,6 +120,14 @@ init() {
     docker network create --internal "$EDGE_NETWORK" >/dev/null
     say "Created network $EDGE_NETWORK (internal: nothing on it can reach outside this machine)."
   fi
+  # The proxy answers only what reaches it from this network (the tunnel connector), never what a preview sends it
+  # from its own network: it reads the network's addresses once, here.
+  if ! grep -q '^PREVIEW_EDGE_SUBNET=' "$SHARED_ENV"; then
+    local subnet
+    subnet="$(docker network inspect --format '{{(index .IPAM.Config 0).Subnet}}' "$EDGE_NETWORK")"
+    [[ "$subnet" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$ ]] || die 2 "Couldn't read $EDGE_NETWORK's addresses ($subnet)."
+    printf 'PREVIEW_EDGE_SUBNET=%s\n' "$subnet" >> "$SHARED_ENV"
+  fi
   edge up -d >/dev/null
   say "The previews' proxy is up. Next: the owner's steps in the design doc (the tunnel, DNS and the access gate)."
 }
@@ -130,7 +138,7 @@ check_ready() {
     [ "$(stat -c '%a' "$SHARED_ENV")" = "600" ] || die 2 ".env.preview must be private: chmod 600 $SHARED_ENV"
   fi
   local key
-  for key in PREVIEW_DOMAIN PREVIEW_GATE_HEADER PREVIEW_REPO PREVIEW_OWNER PREVIEW_LABEL PREVIEW_MAX PREVIEW_TTL_DAYS; do
+  for key in PREVIEW_DOMAIN PREVIEW_GATE_HEADER PREVIEW_REPO PREVIEW_OWNER PREVIEW_LABEL PREVIEW_MAX PREVIEW_TTL_DAYS PREVIEW_EDGE_SUBNET; do
     grep -Eq "^${key}=.+" "$SHARED_ENV" || die 2 ".env.preview has no $key."
   done
   [ "$(docker network inspect --format '{{.Internal}}' "$EDGE_NETWORK" 2>/dev/null || echo missing)" = "true" ] \
@@ -139,6 +147,8 @@ check_ready() {
 
 lock() {
   command -v flock >/dev/null 2>&1 || return 0
+  # A poll runs each `up` as a child of its own (so set -e holds in it), under the lock the poll already took.
+  [ "${PREVIEW_LOCK_HELD:-}" != "1" ] || return 0
   exec 9>"$BR_PREVIEW_HOME/.preview.lock"
   flock -n 9 || die 2 "Another preview command is running. Try again when it finishes."
   # Two builds at once are too much for this machine: wait for the site's deploy instead of building beside it.
@@ -249,6 +259,11 @@ start_preview() {
   docker network connect "booster-rocket-pr-$PREVIEW_PR-internal" "$PROXY" >/dev/null
 }
 
+mark_failed() {
+  [ "$1" -eq 0 ] && return 0
+  mkdir -p "$PR_HOME" && printf '%s\n' "$PR_SHA" > "$PR_HOME/failed"
+}
+
 up() {
   pr_number "$1"; check_pr
   if [ ! -f "$PR_HOME/current" ]; then
@@ -257,6 +272,11 @@ up() {
   elif [ "$(env_value commit "$PR_HOME/current")" = "$PR_SHA" ] && [ "${2:-}" = "--if-changed" ]; then
     return 0
   fi
+  # A commit that failed once isn't built again by the poll: the next push, or `up` by hand, tries again.
+  if [ "${2:-}" = "--if-changed" ] && [ "$(cat "$PR_HOME/failed" 2>/dev/null || true)" = "$PR_SHA" ]; then
+    return 0
+  fi
+  trap 'mark_failed $?' EXIT
   make_pr_home; fetch_pr
   PREVIEW_REF="#$PREVIEW_PR $PR_BRANCH"; APP_COMMIT="${PR_SHA:0:12}"
   export PREVIEW_REF APP_COMMIT
@@ -265,6 +285,8 @@ up() {
   rm -rf "$BR_PREVIEW_SRC"; mv "$PR_HOME/src.next" "$BR_PREVIEW_SRC"
   start_preview
   printf 'pr=%s\nbranch=%s\ncommit=%s\nat=%s\n' "$PREVIEW_PR" "$PR_BRANCH" "$PR_SHA" "$(date -u +%s)" > "$PR_HOME/current"
+  rm -f "$PR_HOME/failed"
+  trap - EXIT
   say "Preview $PREVIEW_PR is up: $(env_value APP_URL "$PR_ENV")/__preview/ (mail at /__preview/mail/)."
 }
 
@@ -283,11 +305,13 @@ down() {
 # for nothing.
 label_fresh() {
   local at
+  # A GitHub failure stops the script rather than reading as "not labeled", which would take the preview down. This
+  # runs inside an if, where set -e is off, hence the explicit exit.
   at="$(github_all "issues/$1/events?per_page=100" | jq -r --arg label "$(setting PREVIEW_LABEL)" \
     --arg owner "$(setting PREVIEW_OWNER)" --arg bot "github-actions[bot]" \
     '[.[] | select((.event == "labeled" or .event == "unlabeled") and .label.name == $label)] | last
      | if . != null and .event == "labeled" and (.actor.login == $owner or .actor.login == $bot)
-       then (.created_at | fromdateiso8601) else empty end')"
+       then (.created_at | fromdateiso8601) else empty end')" || exit 5
   [ -n "$at" ] && [ $(( $(date -u +%s) - at )) -le $(( $(setting PREVIEW_TTL_DAYS) * 86400 )) ]
 }
 
@@ -295,10 +319,19 @@ labeled_open() {
   github "issues?state=open&labels=$(setting PREVIEW_LABEL)&per_page=30" | jq -r '.[] | select(.pull_request) | .number'
 }
 
+# Every preview with a folder here, up or not (a first build that failed leaves one).
+present() {
+  local d
+  for d in "$BR_PREVIEW_HOME"/pr-*/; do
+    [ -d "$d" ] || continue
+    d="${d%/}"; printf '%s\n' "${d##*/pr-}"
+  done
+}
+
 sweep() {
   local n wanted
   wanted="$(labeled_open)"
-  for n in $(running); do
+  for n in $(present); do
     if grep -qx "$n" <<<"$wanted" && label_fresh "$n"; then continue; fi
     say "Pull request $n is closed, unlabeled, or its label is too old."
     down "$n"
@@ -310,7 +343,7 @@ poll() {
   local n
   for n in $(labeled_open); do
     label_fresh "$n" || continue
-    ( up "$n" --if-changed ) || say "Preview $n wasn't brought up (above)."
+    PREVIEW_LOCK_HELD=1 bash "$BR_DIR/scripts/poc/preview.sh" up "$n" --if-changed || say "Preview $n wasn't brought up (above)."
   done
 }
 
@@ -321,7 +354,7 @@ case "$cmd" in
   list)
     check_ready
     for n in $(running); do cat "$BR_PREVIEW_HOME/pr-$n/current"; echo; done ;;
-  up) check_ready; lock; up "${2:-}" ;;
+  up) check_ready; lock; up "${2:-}" "${3:-}" ;;
   reset)
     check_ready; lock; pr_number "${2:-}"
     [ -f "$PR_HOME/current" ] || die 2 "Preview $PREVIEW_PR isn't running; use up."

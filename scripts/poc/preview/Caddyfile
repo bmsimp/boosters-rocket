@@ -15,8 +15,11 @@
 	# The access gate in front of the tunnel adds this header to every request it lets through. A request without it
 	# did not come through the gate (the gate was left off, or turned off), and gets nothing but a refusal.
 	@gated header_regexp gate {$PREVIEW_GATE_HEADER} .+
-	# Only a host of the one shape names a preview; its number is all that reaches an upstream's name.
+	# Only a host of the one shape names a preview; its number is all that reaches an upstream's name. And only the
+	# tunnel connector, on the edge network, is answered: the proxy is joined to every running preview's network too,
+	# and a preview must never reach another through it (remote_ip is the connection's own address, not a header).
 	@preview {
+		remote_ip {$PREVIEW_EDGE_SUBNET}
 		header_regexp gate {$PREVIEW_GATE_HEADER} .+
 		header_regexp pr Host ^pr-([1-9][0-9]{0,5})-br\.{$PREVIEW_DOMAIN}$
 	}

@@ -103,6 +103,15 @@ The repository is public. The rule: no fork's code ever runs on the test server.
 - Every preview's address is behind Cloudflare Access, allowing only the owner's email. The proxy answers nothing that
   lacks the header Access adds (`Cf-Access-Jwt-Assertion`). No port is published on the host. The door is a sign-in shortcut, so this gate is what keeps
   it private.
+- The proxy checks that Access's header is there, not its signature: the proxy has no way out to fetch Cloudflare's
+  keys. What makes the header trustworthy is that a preview's name resolves only while its Access application exists
+  (the order above), and no port is published, so the only way to the proxy is through Cloudflare for that name.
+- The proxy answers only connections from the edge network, where the tunnel connector is (`remote_ip`, read by
+  `init`), so a preview can't reach another preview, or its door, through the proxy it is joined to.
+- Accepted, inside the write-access boundary: a branch's build and package install run with network access (they can
+  reach the machine's published ports and the local network), and previews are same-site with the owner's other sites
+  on `rhinoautomator.com`, so a branch's code could set cookies for the whole domain. Both need a branch pushed to this
+  repository, which only the owner and his agents can do.
 - The site's and the previews' cookies are host-only (no `Domain`), so a preview's cookie never reaches the site or
   another preview, and each preview signs its sessions with its own secret.
 - The Cloudflare token can edit Access applications and the zone's DNS, nothing else; it lives only in GitHub's

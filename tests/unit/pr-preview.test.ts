@@ -101,6 +101,8 @@ describe("the previews' compose files", () => {
     const caddy = read("scripts/poc/preview/Caddyfile");
     expect(caddy).toMatch(/@gated header_regexp gate \{\$PREVIEW_GATE_HEADER\} \.\+/);
     expect(caddy).toContain("header_regexp pr Host ^pr-([1-9][0-9]{0,5})-br\\.{$PREVIEW_DOMAIN}$");
+    // Only the tunnel connector's network is answered, never a preview's own (the proxy is joined to those too).
+    expect(caddy).toMatch(/@preview \{\s+remote_ip \{\$PREVIEW_EDGE_SUBNET\}/);
     // Every upstream is named by the host's number alone.
     const upstreams = [...caddy.matchAll(/reverse_proxy (\S+)/g)].map((m) => m[1]!);
     expect(upstreams.length).toBe(3);
@@ -167,6 +169,7 @@ if (url.includes("/client/v4/")) {
   } else if (path.includes("access/apps/")) { s.apps = s.apps.filter((a) => a.id !== id); ok({}); }
   else if (path.endsWith("dns_records")) {
     if (method === "POST") { s.records.push({ id: "rec-" + s.records.length, ...JSON.parse(body) }); ok({}); }
+    else if (s.failRecordLookups) out({ success: false, errors: [{ message: "try later" }] });
     else { const name = new URL(url).searchParams.get("name"); ok(s.records.filter((r) => !name || r.name === name)); }
   } else if (path.includes("dns_records/")) { if (!s.stuckRecords) s.records = s.records.filter((r) => r.id !== id); ok({}); }
   else process.exit(22);
@@ -218,9 +221,26 @@ describe("preview.sh", { timeout: 30_000 }, () => {
     spawnSync("git", ["init", "-q", dir]);
     spawnSync("git", ["-C", dir, "remote", "add", "origin", "https://github.com/club/portal.git"]);
     // The edge network is there only once init makes it, and then answers "true" to --format, as an internal one would.
-    f.shim("docker", `if [ "$1 $2" = "network inspect" ]; then [ "$3" = "--format" ] && { echo true; exit 0; }; exit 1; fi\nexit 0`);
+    // Its addresses, asked for by init, are 172.30.9.0/24. A build fails when build-fails exists.
+    f.shim("docker", [
+      `if [ "$1 $2" = "network inspect" ]; then`,
+      `  case "$4" in *Subnet*) echo 172.30.9.0/24; exit 0;; esac`,
+      `  [ "$3" = "--format" ] && { echo true; exit 0; }; exit 1`,
+      `fi`,
+      `case " $* " in *" build "*) [ -e "${slash(path.join(dir, "build-fails"))}" ] && exit 1;; esac`,
+      `exit 0`,
+    ].join("\n"));
     // Cloning and fetching do nothing (and are logged); anything else is git itself.
-    f.shim("git", `case " $* " in *" clone "*) mkdir -p "\${@: -1}/.git"; exit 0;; *" fetch "*) exit 0;; esac\nexec "${slash(realGit)}" "$@"`);
+    // A fetched branch is at the commit GitHub names (aaaa...), and holds nothing.
+    f.shim("git", [
+      `case " $* " in`,
+      `  *" clone "*) mkdir -p "\${@: -1}/.git"; exit 0;;`,
+      `  *" fetch "*) exit 0;;`,
+      `  *" rev-parse refs/preview/"*) echo ${"a".repeat(40)}; exit 0;;`,
+      `  *" archive "*) tar -cf - -T /dev/null; exit 0;;`,
+      `esac`,
+      `exec "${slash(realGit)}" "$@"`,
+    ].join("\n"));
   });
   const run = (...args: string[]) => spawnSync("bash", [path.join(dir, "scripts/poc/preview.sh"), ...args], {
     encoding: "utf8", env: { ...process.env, PATH: `${f.bin}${path.delimiter}${process.env.PATH}`, BR_DIR: dir, BR_PREVIEW_HOME: home },
@@ -236,7 +256,7 @@ describe("preview.sh", { timeout: 30_000 }, () => {
   it("init writes the shared settings, names the repository from the checkout, keeps no Cloudflare token, and changes nothing of the site's", () => {
     init();
     const env = readFileSync(envFile(), "utf8");
-    for (const line of ["PREVIEW_DOMAIN=example.org", "PREVIEW_GATE_HEADER=Cf-Access-Jwt-Assertion", "PREVIEW_REPO=club/portal", "PREVIEW_OWNER=owner-login", "PREVIEW_MAX=2", "PREVIEW_TTL_DAYS=7"]) {
+    for (const line of ["PREVIEW_DOMAIN=example.org", "PREVIEW_GATE_HEADER=Cf-Access-Jwt-Assertion", "PREVIEW_REPO=club/portal", "PREVIEW_OWNER=owner-login", "PREVIEW_MAX=2", "PREVIEW_TTL_DAYS=7", "PREVIEW_EDGE_SUBNET=172.30.9.0/24"]) {
       expect(env.split("\n")).toContain(line);
     }
     expect(env).not.toMatch(/CF_|CLOUDFLARE/);
@@ -289,6 +309,25 @@ describe("preview.sh", { timeout: 30_000 }, () => {
     expect(r.status).toBe(2);
     expect(r.stderr).toContain("2 previews are running already");
     expect(f.calls()).not.toMatch(/compose .*build/);
+  });
+
+  it.skipIf(!hasJq)("sweep takes nothing down when GitHub can't say who labeled a preview", () => {
+    init();
+    running(1);
+    f.github({ "issues": [{ number: 1, pull_request: {} }] });
+    const r = run("sweep");
+    expect(r.status).toBe(5);
+    expect(existsSync(path.join(home, "pr-1", "current"))).toBe(true);
+    expect(f.calls()).not.toContain("volume rm");
+  });
+
+  it.skipIf(!hasJq)("poll builds a labeled pull request's commit once: a build that failed isn't tried again until the branch moves", () => {
+    init();
+    writeFileSync(path.join(dir, "build-fails"), "");
+    f.github({ "issues": [{ number: 7, pull_request: {} }], "issues/7/events": labeledBy("github-actions[bot]", DAY), "pulls/7": pullAnswer("club/portal") });
+    for (let i = 0; i < 2; i++) expect(run("poll").status).toBe(0);
+    expect(f.calls().match(/compose [^\n]* build app/g)).toHaveLength(1);
+    expect(readFileSync(path.join(home, "pr-7", "failed"), "utf8").trim()).toBe("a".repeat(40));
   });
 
   it.skipIf(!hasJq)("sweep keeps a preview the workflow or the owner labeled this week, and takes down every other", () => {
@@ -361,6 +400,14 @@ describe.skipIf(!hasJq)("cloudflare.sh", { timeout: 30_000 }, () => {
     expect(f.cloudflare().records.map((r) => r.name)).toEqual(["portal.example.org"]);
   });
 
+  it("keeps the Access application when it can't look the DNS name up", () => {
+    expect(run("open", "12").status).toBe(0);
+    f.setCloudflare({ failRecordLookups: true });
+    expect(run("close", "12").status).toBe(5);
+    expect(order().filter((l) => l.startsWith("DELETE"))).toEqual([]);
+    expect(f.cloudflare().apps.map((a) => a.domain)).toEqual(["pr-12-br.example.org"]);
+  });
+
   it("lists only the previews' own names, and refuses anything but a number", () => {
     for (const n of ["3", "40"]) expect(run("open", n).status).toBe(0);
     f.setCloudflare({ records: [...f.cloudflare().records, { id: "x", name: "pr-9.example.org" }, { id: "y", name: "pr-7-br.example.org.evil.test" }] });
@@ -428,6 +475,13 @@ describe.skipIf(!hasJq)("workflow.sh", { timeout: 30_000 }, () => {
     expect(r.status, r.stderr).toBe(0);
     expect(steps()).toEqual(["cloudflare close 12", "DELETE issues/12/labels"]);
     expect(f.labels(12)).toEqual([]);
+  });
+
+  it("closes nothing when it can't read which pull requests are labeled", () => {
+    writeFileSync(path.join(dir, "gates.txt"), "1\n2\n");
+    const r = run("github-actions[bot]", "sweep");
+    expect(r.status).toBe(5);
+    expect(steps()).toEqual([]);
   });
 
   it("sweeps closed, stale and stray previews, and keeps a fresh one", () => {

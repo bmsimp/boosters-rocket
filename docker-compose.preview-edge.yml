@@ -14,6 +14,8 @@ services:
     environment:
       PREVIEW_GATE_HEADER: ${PREVIEW_GATE_HEADER:?PREVIEW_GATE_HEADER is required in .env.preview}
       PREVIEW_DOMAIN: ${PREVIEW_DOMAIN:?PREVIEW_DOMAIN is required in .env.preview}
+      # The edge network's addresses (preview.sh init): only the tunnel connector, never a preview, is answered.
+      PREVIEW_EDGE_SUBNET: ${PREVIEW_EDGE_SUBNET:?PREVIEW_EDGE_SUBNET is required in .env.preview}
     volumes:
       - ./scripts/poc/preview/Caddyfile:/etc/caddy/Caddyfile:ro
     networks: [edge]

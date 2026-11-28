@@ -30,8 +30,9 @@ unlabel() { gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/$1/labels/$LABEL" 
 up() {
   number "$1"
   local owner="$GITHUB_REPOSITORY_OWNER"
-  [ "$GITHUB_ACTOR" = "$owner" ] && [ "$GITHUB_TRIGGERING_ACTOR" = "$owner" ] \
-    || die 2 "Only $owner starts a preview."
+  if [ "$GITHUB_ACTOR" != "$owner" ] || [ "$GITHUB_TRIGGERING_ACTOR" != "$owner" ]; then
+    die 2 "Only $owner starts a preview."
+  fi
   local pr
   pr="$(gh_api "repos/$GITHUB_REPOSITORY/pulls/$1")"
   [ "$(jq -r .state <<<"$pr")" = "open" ] || die 2 "Pull request $1 isn't open."
@@ -72,9 +73,12 @@ labeled_at() {
 }
 
 sweep() {
-  local now n state at seen=""
+  local now n state at seen="" prs gates
   now="$(date -u +%s)"
-  for n in $(gh_api --paginate "repos/$GITHUB_REPOSITORY/issues?state=all&labels=$LABEL&per_page=100" --jq '.[] | select(.pull_request) | .number'); do
+  # Assigned before use, so a failure stops the sweep (set -e) instead of reading as "none", which would close every
+  # gate below.
+  prs="$(gh_api --paginate "repos/$GITHUB_REPOSITORY/issues?state=all&labels=$LABEL&per_page=100" --jq '.[] | select(.pull_request) | .number')"
+  for n in $prs; do
     seen="$seen $n"
     state="$(gh_api "repos/$GITHUB_REPOSITORY/pulls/$n" --jq .state)"
     at="$(labeled_at "$n")"
@@ -84,7 +88,8 @@ sweep() {
     fi
   done
   # A gate whose pull request lost its label some other way.
-  for n in $("$HERE/cloudflare.sh" list); do
+  gates="$("$HERE/cloudflare.sh" list)"
+  for n in $gates; do
     [[ " $seen " == *" $n "* ]] || "$HERE/cloudflare.sh" close "$n"
   done
 }
