@@ -419,6 +419,9 @@ footer a { color: var(--primary); }
 @media (hover: hover) { .table tbody tr:not(.t-group):hover > * { background: color-mix(in srgb, var(--on-surface) var(--sl-hover), var(--card)); } }
 .table tbody tr:has(.bulk-check input:checked) > * { background: var(--secondary-container); color: var(--on-secondary-container); }
 .table tbody tr:has(.bulk-check input:checked) .when { color: inherit; }
+/* The row an open Drawer is about (DataTable's `current`) is drawn as a ticked row is. */
+.table tbody tr[aria-current="true"]:not(.t-group) > * { background: var(--secondary-container); color: var(--on-secondary-container); }
+.table tbody tr[aria-current="true"] .when { color: inherit; }
 @media (max-width: 839.98px) {
   .table, .table caption, .table tbody, .table tr, .table th, .table td { display: block; }
   .table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -433,6 +436,8 @@ footer a { color: var(--primary); }
   .table .t-group th { padding-top: 0; background: none; }
   .table tbody tr:has(.bulk-check input:checked) { background: var(--secondary-container); color: var(--on-secondary-container); }
   .table tbody tr:has(.bulk-check input:checked) .t-label { color: inherit; }
+  .table tbody tr[aria-current="true"] { background: var(--secondary-container); color: var(--on-secondary-container); }
+  .table tbody tr[aria-current="true"] .t-label { color: inherit; }
   .table .t-quiet .row-actions, .table .t-quiet .one-button, .table .row-change { justify-content: flex-start; justify-items: start; }
   /* Stacked, a value has only its share of a phone's width: a badge or a time that doesn't fit there, at a larger text
      size or in a wider fallback face, wraps inside its cell rather than pushing the page sideways, and so do a
@@ -1186,9 +1191,10 @@ main.wrap.single > .page-head + p { margin-top: var(--s4); }
 .table tr.t-more:has(> td > .links-more[hidden]) { display: none; }
 .table tr.t-more > td { border-top: 0; padding-top: 0; padding-bottom: var(--s4); height: auto; }
 @media (hover: hover) { .table tbody tr.t-more:hover > * { background: var(--card); } }
-.table tbody tr:has(.bulk-check input:checked) + tr.t-more > * { background: var(--secondary-container); color: var(--on-secondary-container); }
-/* A ticked row is in the secondary container, as a tonal button is: there the button takes the card's fill, so it still reads as one. */
-.links-table tbody tr:has(.bulk-check input:checked) .btn-tonal { --btn-bg: var(--card); --btn-fg: var(--on-surface); }
+.table tbody :is(tr:has(.bulk-check input:checked), tr[aria-current="true"]) + tr.t-more > * { background: var(--secondary-container); color: var(--on-secondary-container); }
+/* A ticked or current row is in the secondary container, as a tonal button is: there the button takes the card's fill,
+   so it still reads as one. Not inside the row's own Review drawer, which has its own surface. */
+.links-table tbody :is(tr:has(.bulk-check input:checked), tr[aria-current="true"]) .btn-tonal:not(dialog *) { --btn-bg: var(--card); --btn-fg: var(--on-surface); }
 .links-more { display: grid; gap: var(--s2); }
 .links-cmp { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
 .links-cmp > section { background: var(--surface); border-radius: var(--shape-l); padding: var(--s3) var(--s4) var(--s4); min-width: 0; }
@@ -1468,6 +1474,7 @@ ul.links-acts li { display: flex; flex-wrap: wrap; align-items: center; justify-
   .sets .track { forced-color-adjust: none; background: GrayText; }
   .sets li.done .track { background: CanvasText; }
   .sets [aria-current="step"] .track { background: Highlight; height: 6px; }
+  .table tbody tr[aria-current="true"] > :first-child { border-left: 4px solid Highlight; } /* the open Drawer's row, by an edge, as its fill is dropped here */
   .sets [aria-current="step"] .n, .sets [aria-current="step"] .label { text-decoration: underline; }
   .on-set i { forced-color-adjust: none; background: Canvas; color: CanvasText; box-shadow: inset 0 0 0 2px CanvasText; }
   .on-set i.done { background: CanvasText; color: Canvas; }
