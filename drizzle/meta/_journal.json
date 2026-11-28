@@ -428,6 +428,13 @@
       "when": 1795803496545,
       "tag": "0060_in_app_backups",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1795845497116,
+      "tag": "0061_plugins_on",
+      "breakpoints": true
     }
   ]
 }
