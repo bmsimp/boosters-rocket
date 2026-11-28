@@ -64,7 +64,7 @@ change of level never needs anyone to rewrite anything.
 - **A fixed part** is one block in the body, drawn as a gray card with its words and a lock ("Fixed: the link to
   choose a password"). It can be moved with cut and paste, not edited or removed: the wrapper's `filterTransaction`
   keeps it, and the server refuses a body that lacks one or has it twice ("Put the reset link back in the email.").
-- The server check is `checkBody()`'s pattern in a new pure module, `src/lib/mail/template-body.ts`: an allowlist of
+- The server check is `checkBody()`'s pattern in a new pure module, `src/lib/email-templates/body.ts`: an allowlist of
   nodes and marks, the email's own fields and fixed parts, the link rule of `safeHref()`, 20 KB of JSON at most.
 - **At each send** a field's value goes in as text, through `esc()` in the HTML; nothing staff write is ever
   HTML. A paragraph whose only field is empty for this send (no Club contact) is left out, as today.
@@ -120,7 +120,7 @@ It saves the default as the next version, so it can be undone from Earlier versi
 - A Settings item `emails` in the group Club, after Messages, titled **Emails**, keywords "templates", "wording",
   "reminders", "sign-in code"; `/staff/settings/emails` (the list) and `/staff/settings/emails/[key]` (one email,
   the key one of a fixed list: anything else is `notFound()`). Rail status "Default words" or "3 changed".
-- Not parent code: the pages, `src/lib/mail/templates.ts` (reads and saves) and the renderer are read by staff pages
+- Not parent code: the pages, `src/lib/email-templates/catalog.ts` (reads and saves) and the renderer are read by staff pages
   and by every sender. The renderer and `template-body.ts` are pure and read no family data; the senders pass the
   values they already pass today.
 
@@ -134,6 +134,15 @@ It saves the default as the next version, so it can be undone from Earlier versi
    senders read the club's current version.
 4. **Send me a test.**
 5. **Earlier versions and Use the default words,** and the start-up check with its Health line.
+
+## As built (2026-11-28)
+
+- The pure parts (catalog, body check and render, the mail's frame) are in `src/lib/email-templates/`, so the
+  editor's page can draw the preview in the browser; the reads and writes stay in `src/lib/mail/`.
+- One table, `email_template_version`, holds every version; an email with no row has its default words.
+- "Family name" is left for later: no sender passes a family's name today. The tests' hourly limit is counted from the
+  person's own `email_template.test` audit rows. Words set aside after a release are said on the list, the email's
+  page and the Settings rail, not yet on Health.
 
 ## The owner's answers (2026-11-28)
 
