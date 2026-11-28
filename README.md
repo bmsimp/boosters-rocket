@@ -122,3 +122,5 @@ icon and banner, outlined and exported for each use, is in [`brand/exports/`](br
 Licensed under [AGPL-3.0](LICENSE). The code is open; the name "Boosters Rocket" and its logos are reserved:
 a fork that changes the software uses its own name and logo, and a club running it unmodified may show
 "Powered by Boosters Rocket". [TRADEMARKS.md](TRADEMARKS.md) has the details.
+
+<!-- preview smoke test: this PR is closed without merging -->
