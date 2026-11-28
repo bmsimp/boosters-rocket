@@ -10,6 +10,7 @@ import { quickbooksProblems } from "@/lib/quickbooks/health";
 import { apiFailing, formsSummary } from "@/lib/forms/settings";
 import { healthReport } from "@/lib/health/report";
 import { messagesEmailAllowed } from "@/lib/settings/messages";
+import { emailStandings } from "@/lib/mail/template-store";
 import { newestAuditAt } from "@/lib/audit/query";
 import { agentBeat, answering } from "@/lib/backups/status";
 import { lastBackup } from "@/lib/health/backup";
@@ -165,6 +166,12 @@ export const RAIL_STATUS: Record<PageKey, (items: readonly SettingsItem[]) => Pr
   },
   async messages() {
     return (await messagesEmailAllowed()) ? { tone: "done", words: "Emailing on" } : { tone: "neutral", words: "Emailing off" };
+  },
+  async emails() {
+    const standings = Object.values(await emailStandings());
+    const look = standings.filter((x) => x === "needs_look").length, changed = standings.filter((x) => x === "club").length;
+    if (look) return { tone: "due", words: `${look} need${look === 1 ? "s" : ""} a look` };
+    return changed ? { tone: "done", words: `${changed} changed` } : { tone: "neutral", words: "Default words" };
   },
   async staff() {
     const people = (await listStaff()).length;

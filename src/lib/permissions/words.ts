@@ -36,6 +36,7 @@ export const PERMISSION_WORDS: Record<Permission, string> = {
   "Messages.Post.ReadWrite": "Post messages to every family, edit your own, and see every message with who it was emailed to",
   "Messages.Delete.ReadWrite": "Delete any message for good, with every earlier version and its files",
   "Settings.Messages.ReadWrite": "Allow messages to be emailed to families, or stop it",
+  "Settings.Emails.ReadWrite": "Change the words of the emails the portal sends to families, and send yourself a test",
   "Admin.Backups.ReadWrite": "See backups, make one, download one, restore one, and set up off-site copies",
 };
 
@@ -47,15 +48,15 @@ export const PERMISSION_AREAS: { area: string; permissions: readonly Permission[
   { area: "Volunteering", permissions: ["Volunteer.Event.Read", "Volunteer.Event.ReadWrite", "Volunteer.Credit.ReadWrite"] },
   { area: "Money", permissions: ["Finance.Balance.Read"] },
   { area: "Messages", permissions: ["Messages.Post.ReadWrite"] },
-  { area: "Staff and club", permissions: ["Staff.Users.Read", "Settings.Club.Read", "Settings.Club.ReadWrite"] },
+  { area: "Staff and club", permissions: ["Staff.Users.Read", "Settings.Club.Read", "Settings.Club.ReadWrite", "Settings.Emails.ReadWrite"] },
 ];
 
 /**
  * A change whose "see" permission has another name: its pages and actions all need that one too, so the checklist
  * brings it (the roster's changes are made from the roster pages, behind Roster.Read; a family is made from a customer
- * on Reconciliation, a Roster.Read page too).
+ * on Reconciliation, a Roster.Read page too; the emails' words are changed on Settings, behind Settings.Club.Read).
  */
-const SEE_WITH: Partial<Record<Permission, Permission>> = { "Roster.Family.ReadWrite": "Roster.Read", "Accounting.Link.ReadWrite": "Roster.Read" };
+const SEE_WITH: Partial<Record<Permission, Permission>> = { "Roster.Family.ReadWrite": "Roster.Read", "Accounting.Link.ReadWrite": "Roster.Read", "Settings.Emails.ReadWrite": "Settings.Club.Read" };
 
 /**
  * The permission a ticked one brings with it: a ReadWrite brings its Read (rules.ts gives X.Read to a role that names

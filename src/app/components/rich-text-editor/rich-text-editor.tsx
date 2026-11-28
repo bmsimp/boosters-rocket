@@ -31,6 +31,8 @@ import "./rich-text-editor.scss";
 
 import { safeHref } from "@/lib/messages/body";
 import { PictureDescription } from "./picture-description";
+import { emailField, emailFixedPart, type EmailEditing } from "./email-nodes";
+import { InsertFieldMenu } from "./insert-field-menu";
 import { UploadedAlt, uploadedName } from "./uploaded-alt";
 
 /*
@@ -82,6 +84,24 @@ export const extensionsFor = (o: { upload?: UploadFunction; onError?: (error: Er
   ImageUploadNode.configure({ accept: o.accept ?? "image/*", maxSize: Number.MAX_SAFE_INTEGER, limit: 1, upload: o.upload, onError: o.onError }),
   // A new picture's description starts empty, not as its file's name (uploaded-alt.ts).
   UploadedAlt.configure({ uploaded: o.uploaded ?? new Map() }),
+];
+
+/**
+ * The extensions for an email template's words (docs/superpowers/specs/2026-11-28-email-templates-design.md): the
+ * template's StarterKit without headings (and without links where the email may hold none), its fields (Tiptap's
+ * Mention) and its fixed parts. No pictures: a mail loads nothing. src/lib/email-templates/body.ts checks what it sends.
+ */
+export const emailExtensionsFor = (email: EmailEditing) => [
+  StarterKit.configure({
+    blockquote: false, code: false, codeBlock: false, horizontalRule: false, strike: false, heading: false,
+    link: email.links ? {
+      openOnClick: false, enableClickSelection: true, autolink: true, defaultProtocol: "https",
+      isAllowedUri: (url: string) => safeHref(url) !== null, HTMLAttributes: { rel: "noopener noreferrer", target: null },
+    } : false,
+  }),
+  Selection,
+  emailField(email.fields),
+  emailFixedPart(email.fixed),
 ];
 
 type Node = JSONContent;
@@ -158,6 +178,31 @@ const MainToolbarContent = ({ onLinkClick, isMobile, pictures }: { onLinkClick: 
   </>
 );
 
+const EmailToolbarContent = ({ onLinkClick, isMobile, email }: { onLinkClick: () => void; isMobile: boolean; email: EmailEditing }) => (
+  <>
+    <ToolbarGroup>
+      <UndoRedoButton action="undo" />
+      <UndoRedoButton action="redo" />
+    </ToolbarGroup>
+
+    <ToolbarSeparator />
+
+    <ToolbarGroup>
+      <ListDropdownMenu modal={false} types={["bulletList", "orderedList"]} />
+      <MarkButton type="bold" />
+      <MarkButton type="italic" />
+      <MarkButton type="underline" />
+      {email.links && (!isMobile ? <LinkPopover /> : <LinkButton onClick={onLinkClick} />)}
+    </ToolbarGroup>
+
+    <ToolbarSeparator />
+
+    <ToolbarGroup>
+      <InsertFieldMenu fields={email.fields} />
+    </ToolbarGroup>
+  </>
+);
+
 const MobileToolbarContent = ({ onBack }: { onBack: () => void }) => (
   <>
     <ToolbarGroup>
@@ -178,8 +223,12 @@ const MobileToolbarContent = ({ onBack }: { onBack: () => void }) => (
  * textbox named by the label. `initial` is the body it opens on (body.ts's shape); the form reads what was written
  * through `ref`. Without `pictures` it offers no picture button.
  */
-export function RichTextEditor({ id, label, hint, initial, pictures, ref }: {
+export function RichTextEditor({ id, label, hint, initial, pictures, email, onChange, ref }: {
   id: string; label: string; hint?: string; initial?: JSONContent | null; pictures?: RichTextPictures; ref?: Ref<RichTextHandle>;
+  /** An email template's words: its fields, fixed parts and whether links are allowed, in place of a message's tools. */
+  email?: EmailEditing;
+  /** Called with the document after each change (an email's live preview). */
+  onChange?: (doc: JSONContent) => void;
 }) {
   const isMobile = useIsBreakpoint();
   const [mobileView, setMobileView] = useState<"main" | "link">("main");
@@ -188,11 +237,14 @@ export function RichTextEditor({ id, label, hint, initial, pictures, ref }: {
   // The schema is made once (a new set of extensions would make a new editor), so the upload it calls is the form's latest.
   const latest = useRef(pictures);
   useEffect(() => { latest.current = pictures; });
+  const changed = useRef(onChange);
+  useEffect(() => { changed.current = onChange; });
   const hasPictures = pictures !== undefined;
   const accept = pictures?.accept;
   // The upload and onError read the ref only when an upload happens, never while drawing.
   /* eslint-disable react-hooks/refs, react-hooks/exhaustive-deps */
   const extensions = useMemo(() => {
+    if (email) return emailExtensionsFor(email);
     const uploaded = new Map<string, string>();
     return extensionsFor({ accept, uploaded, upload: hasPictures ? (file) => uploadVia(latest, uploaded, file) : undefined, onError: hasPictures ? (error) => latest.current?.onError(error) : undefined });
   }, []);
@@ -206,6 +258,7 @@ export function RichTextEditor({ id, label, hint, initial, pictures, ref }: {
       },
     },
     extensions,
+    onUpdate: ({ editor: e }) => changed.current?.(e.getJSON()),
     content: initial && pictures ? fromBody(initial, pictures.fileHref) : (initial ?? null),
   });
 
@@ -240,7 +293,8 @@ export function RichTextEditor({ id, label, hint, initial, pictures, ref }: {
           <Toolbar aria-label="Formatting">
             {/* The link's own view is a phone's alone: wider, the link opens in its popover. */}
             {!isMobile || mobileView === "main"
-              ? <MainToolbarContent onLinkClick={() => setMobileView("link")} isMobile={isMobile} pictures={pictures !== undefined} />
+              ? (email ? <EmailToolbarContent onLinkClick={() => setMobileView("link")} isMobile={isMobile} email={email} />
+                : <MainToolbarContent onLinkClick={() => setMobileView("link")} isMobile={isMobile} pictures={pictures !== undefined} />)
               : <MobileToolbarContent onBack={() => setMobileView("main")} />}
           </Toolbar>
           {pictures && <PictureDescription id={`${id}-alt`} />}

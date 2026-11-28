@@ -37,6 +37,7 @@ const VISITS: Record<string, Visit[]> = {
   "/staff/forms/requests/[id]": [{ from: "/staff/forms", links: ['a[href^="/staff/forms/requests/"]'] }],
   "/staff/messages/[id]": [{ path: `/staff/messages/${E2E_MESSAGE.id}` }],
   "/staff/messages/[id]/edit": [{ path: `/staff/messages/${E2E_MESSAGE.id}/edit` }],
+  "/staff/settings/emails/[key]": ["form_reminder", "signin_code"].map((key) => ({ path: `/staff/settings/emails/${key}` })),
   // A set-up page shows one step at a time: each step is a page of its own.
   "/staff/settings/parents/setup": ["signins", "welcome", "level"].map((step) => ({ path: `/staff/settings/parents/setup?step=${step}` })),
 };

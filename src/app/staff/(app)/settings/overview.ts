@@ -5,6 +5,8 @@ import { signinCounts } from "@/lib/parents/switches";
 import { messageCounts } from "@/lib/messages/staff";
 import { auditCountSince, newestAuditAt } from "@/lib/audit/query";
 import { messagesEmailAllowed } from "@/lib/settings/messages";
+import { emailStandings } from "@/lib/mail/template-store";
+import { EMAILS } from "@/lib/email-templates/catalog";
 import { backupRows } from "@/lib/backups/status";
 import { readOffsite } from "@/lib/backups/offsite";
 import { lastBackup } from "@/lib/health/backup";
@@ -26,7 +28,7 @@ export type OverviewCard = {
 
 const n = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 const WEEK_MS = 7 * 86_400_000;
-const BUTTONS: Partial<Record<PageKey, string>> = { audit: "Open the audit log" };
+const BUTTONS: Partial<Record<PageKey, string>> = { audit: "Open the audit log", emails: "Open the emails" };
 
 const FACTS: Partial<Record<PageKey, (items: readonly SettingsItem[]) => Promise<Fact[]>>> = {
   async club() {
@@ -43,6 +45,13 @@ const FACTS: Partial<Record<PageKey, (items: readonly SettingsItem[]) => Promise
       { key: "posted", label: "Posted", text: n(counts.posted, "message", "messages") },
       counts.latestAt ? { key: "latest", label: "Newest", at: counts.latestAt.toISOString() } : { key: "latest", label: "Newest", text: "None yet" },
       { key: "email", label: "Email to families", text: email ? "On" : "Off" },
+    ];
+  },
+  async emails() {
+    const standings = Object.values(await emailStandings());
+    return [
+      { key: "changed", label: "In the club's words", text: `${standings.filter((x) => x === "club").length} of ${EMAILS.length}` },
+      { key: "default", label: "Default words", text: String(EMAILS.length - standings.filter((x) => x === "club").length) },
     ];
   },
   async staff() {

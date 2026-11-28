@@ -1414,6 +1414,19 @@ ul.links-acts li { display: flex; flex-wrap: wrap; align-items: center; justify-
   .staff-person { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.4fr) auto; align-items: start; }
   .staff-person > [role="alert"], .staff-person > [role="status"] { grid-column: 1 / -1; }
 }
+/* Settings, Emails: one email's words beside its preview and fields from 1200px, stacked below; the preview is the mail's
+   own HTML in a frame that runs nothing, on a light canvas as a mail program draws it, whatever the portal's mode. */
+.email-page > .notice { margin-top: var(--s4); }
+.email-page > .box { margin-top: var(--s4); }
+.email-edit { display: grid; gap: var(--s4); margin-top: var(--s4); }
+.email-edit > * { min-width: 0; }
+.email-edit > .stack > .box { margin: 0; }
+@media (min-width: 1200px) { .email-edit { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); align-items: start; } }
+.email-preview { margin-top: var(--s3); border: 1px solid var(--outline-variant); border-radius: var(--shape-m); overflow: hidden; }
+.email-preview-subject { padding: var(--s3) var(--s4); background: var(--surface-container-high); color: var(--on-surface-variant); font: var(--body-m); overflow-wrap: anywhere; }
+.email-preview-subject b { color: var(--on-surface); font-weight: 600; }
+.email-preview iframe { display: block; width: 100%; height: 34rem; border: 0; color-scheme: light; }
+
 /* ---- End of Settings and the staff menu ---- */
 
 /* ===== 6. Accessibility ===== */

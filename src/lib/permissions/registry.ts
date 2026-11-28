@@ -35,6 +35,7 @@ export const PERMISSIONS = [
   "Messages.Post.ReadWrite",       // see every message staff posted and its mail results, post a message to every family, and edit one's own (club messages; not Admin-only)
   "Messages.Delete.ReadWrite",     // admin-only: delete any message outright, every version's content and files, with no undo
   "Settings.Messages.ReadWrite",   // admin-only: allow messages to be emailed to families, or stop it
+  "Settings.Emails.ReadWrite",     // change the words of the emails the portal sends (email templates; not Admin-only: a secretary's role may hold it), seen with Settings.Club.Read
   "Admin.Backups.ReadWrite",       // admin-only: see the backups on the server, make one, download one, restore one, and set up off-site copies; a backup holds every family's records, staff-only notes, the audit log and sealed secrets
 ] as const;
 

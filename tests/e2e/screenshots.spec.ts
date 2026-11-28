@@ -21,6 +21,10 @@ import { LINKS, seedLinks } from "./links-seed";
  *
  * And the Accounting links redesign (the owner's approval of 2026-11-27): the list with one row's details open and two
  * rows ticked, and a family's Review drawer, at both widths (390: the phone's list and its full-screen drawer).
+ *
+ * And email templates (docs/superpowers/specs/2026-11-28-email-templates-design.md): Settings › Emails, one email open
+ * (Please sign) with its editor, preview and fields, its Insert field menu open, and a sign-in email (Reset your
+ * password), at both widths, the email page in dark too. Nothing is saved.
  */
 const sql = postgres(process.env.DATABASE_URL!);
 test.afterAll(async () => { await sql.end(); });
@@ -284,4 +288,29 @@ test("Settings › Backups, for the owner to look at", async ({ page, browser },
     await sql`DELETE FROM backup_file WHERE backup_at IN ${sql(stamps)}`;
     await sql`DELETE FROM setting WHERE key IN ('backup.agent', 'backup.last_success')`;
   }
+});
+
+test("Settings › Emails and one email open, for the owner to look at", async ({ page }, info) => {
+  await page.goto("/staff/settings/emails");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Emails");
+  await settle(page);
+  await page.screenshot(shot("emails-list", info.project.name));
+  for (const scheme of SCHEMES) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.goto("/staff/settings/emails/form_reminder");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Please sign");
+    await expect(page.locator(".rte .rte-fixed").first()).toBeVisible();
+    await settle(page);
+    await page.screenshot(shot(`email-please-sign-${scheme}`, info.project.name));
+  }
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.getByRole("button", { name: "Insert field" }).click();
+  await expect(page.getByRole("menuitem").first()).toBeVisible();
+  await settle(page);
+  await page.screenshot(shot("email-insert-field", info.project.name));
+  await page.keyboard.press("Escape");
+  await page.goto("/staff/settings/emails/password_reset");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Reset your password");
+  await settle(page);
+  await page.screenshot(shot("email-password-reset", info.project.name));
 });

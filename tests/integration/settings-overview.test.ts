@@ -44,9 +44,9 @@ describe("the Overview's status cards", () => {
   it("gives an Admin a card for each area but the design system, in the list pane's order, each leading to its page", async () => {
     await asAdmin();
     const all = await cards();
-    expect(all.map((c) => c.key)).toEqual(["club", "messages", "staff", "roles", "parents", "integrations", "audit", "health", "backups"]);
+    expect(all.map((c) => c.key)).toEqual(["club", "messages", "emails", "staff", "roles", "parents", "integrations", "audit", "health", "backups"]);
     expect(all.map((c) => `${c.button.words} ${c.button.href}`)).toEqual([
-      "Open Club /staff/settings/club", "Open Messages /staff/settings/messages", "Open Staff /staff/settings/staff", "Open Roles /staff/settings/roles",
+      "Open Club /staff/settings/club", "Open Messages /staff/settings/messages", "Open the emails /staff/settings/emails", "Open Staff /staff/settings/staff", "Open Roles /staff/settings/roles",
       "Open Parent sign-ins /staff/settings/parents", "Open Integrations /staff/settings/integrations", "Open the audit log /staff/settings/audit",
       "Open Health /staff/settings/health", "Open Backups /staff/settings/backups",
     ]);
@@ -54,11 +54,11 @@ describe("the Overview's status cards", () => {
 
   it("shows someone only the cards for what they may open", async () => {
     await staffWith("Settings.Club.Read");
-    expect((await cards()).map((c) => c.key)).toEqual(["club", "messages"]);
+    expect((await cards()).map((c) => c.key)).toEqual(["club", "messages", "emails"]);
     await resetDb();
     // However wide a custom role, Roles, the audit log, Health and Integrations stay an Admin's.
     await staffWith("*", "Settings.*", "Admin.*", "Audit.Log.Read");
-    expect((await cards()).map((c) => c.key)).toEqual(["club", "messages", "staff"]);
+    expect((await cards()).map((c) => c.key)).toEqual(["club", "messages", "emails", "staff"]);
   });
 
   it("gives a card that needs attention a filled button, and one that doesn't a tonal one", async () => {
