@@ -295,6 +295,8 @@ section 3, because they use the staff app. Deploy this version (the one with the
    may show nothing: `deploy.sh` updates itself during its own `git pull`, so that run is still the old copy, which
    recreates only the app. Run `scripts/poc/deploy.sh` once more (or
    `docker compose -f docker-compose.poc.yml --env-file .env.poc up -d worker`); every deploy after that starts it.
+   The backup service is the same: the first deploy that includes it may leave it out, and
+   `docker compose -f docker-compose.poc.yml --env-file .env.poc up -d backup` starts it.
 
 **Switching companies.** A QuickBooks company other than the one the roster was read from is connected only as a
 switch: **Disconnect**, then **Connect a different company** (on the QuickBooks page, or in step 2), which lists what a
@@ -451,9 +453,10 @@ PIN (https://developers.cloudflare.com/cloudflare-one/integrations/identity-prov
    ```
    It refuses if the checkout has local changes, pulls `main`, builds the image, backs up the database into
    `~/booster-rocket-backups` (or `BR_BACKUP_DIR`; `scripts/backup.sh`, keeping the newest 14), runs the database
-   migrations, recreates the app and waits up to 120 seconds for it to become healthy, then starts the worker. The first build
-   takes several minutes. A worker that won't start doesn't fail the deploy: it prints "The worker didn't start. The
-   site is up; check: docker logs booster-rocket-worker".
+   migrations, recreates the app and waits up to 120 seconds for it to become healthy, then starts the worker and the
+   backup service. The first build takes several minutes. A worker that won't start doesn't fail the deploy: it prints
+   "The worker didn't start. The site is up; check: docker logs booster-rocket-worker". Nor does the backup service:
+   "The backup service didn't start. The site is up; check: docker logs booster-rocket-backup".
    On the first deploy that includes the worker, `docker ps --filter name=booster-rocket-worker` may show nothing:
    `deploy.sh` updates itself during its own `git pull`, so that run is still the old copy, which recreates only the
    app. Run `scripts/poc/deploy.sh` once more (or
@@ -481,10 +484,16 @@ PIN (https://developers.cloudflare.com/cloudflare-one/integrations/identity-prov
    image has no worker script). The site is unaffected; stop the worker with
    `docker compose -f docker-compose.poc.yml --env-file .env.poc stop worker`.
 5. **Logs:** `docker logs booster-rocket-app` (add `--tail 100` or `-f`). Database:
-   `docker compose -f docker-compose.poc.yml --env-file .env.poc logs db`.
-6. After the first successful deploy, finish setup at `/setup` (sections 3 and 4), connect QuickBooks and read the
+   `docker compose -f docker-compose.poc.yml --env-file .env.poc logs db`. Backups: `docker logs booster-rocket-backup`.
+6. **Backups.** The `backup` service runs `scripts/backup-agent.sh` as a club's installation does
+   ([backups](backups.md)): the nightly backup at 03:00 club time, or the time saved on **Settings, Backups**, into
+   `~/booster-rocket-backups` (or `BR_BACKUP_DIR`), and what that page asks for (back up now, a download, a restore).
+   It replaces the nightly line `scripts/backup.sh "$HOME/booster-rocket-backups"` in `crontab -e`: once
+   `docker ps --filter name=booster-rocket-backup` shows it `Up`, remove that line, or every night makes two backups.
+   The proof of concept has no Documenso, so its backups hold the portal's database alone.
+7. After the first successful deploy, finish setup at `/setup` (sections 3 and 4), connect QuickBooks and read the
    roster (section 5), then add the test parents (section 6).
-7. **Need a code later?** `scripts/poc/setup-code.sh` prints a new one (the old code stops working) while
+8. **Need a code later?** `scripts/poc/setup-code.sh` prints a new one (the old code stops working) while
    setup is open. **Nobody can sign in** (for example, a certificate or Google client secret expired)?
    `scripts/poc/reopen-setup.sh` reopens setup and prints a code. Stored sign-in values are kept and
    existing Admins stay Admins.
@@ -759,6 +768,16 @@ data was removed: the portal was stopped, the database's container removed, `doc
 `docker compose ... up -d` (not `down`: the tunnel's container is on this project's network), and
 `~/booster-rocket-moving-to-postgres-18` deleted. Going back to Postgres 16 is no longer possible on this host. An
 empty volume named `booster-rocket-pgdata` remains, because the compose file names it for the start check.
+
+2026-11-28: the backup service was tried before it was merged, on the owner's word, from this change's
+`docker-compose.poc.yml` and `scripts/` copied to `~/booster-rocket-backup-trial` (the checkout left clean), after a
+`pg_dump` to `~/booster-rocket-before-backup-agent-20261128T060725Z.sql`. Its heartbeat and the folder's list reached
+the portal; a backup asked for through `backup_request` was made, owned by the deploying user; a download was staged
+in the outbox, readable by the app's user, its dump the same bytes as the backup. A restore was tried only on a
+throwaway project, `booster-rocket-scratch` (its own Postgres, network and folder), loaded from that backup: the
+agent made a fresh backup, ended a held connection, swapped the database, wrote `backup.restore.done`, and putting
+the fresh backup back undid it. Linuxdev runs no Documenso, so whether Documenso copes with its database restored
+underneath it was not tried.
 
 Get the commit with `git -C ~/booster-rocket rev-parse --short HEAD` (the deploy script prints it too).
 
