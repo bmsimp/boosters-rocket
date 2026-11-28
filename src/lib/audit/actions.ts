@@ -231,6 +231,8 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "settings.mail.save": "Mail settings saved",
   "settings.mail.test": "Test email sent",
   "settings.membership.save": "Membership shape saved",
+  "email_template.save": "The words of an email the portal sends to families changed by staff, as a new version (or the default words saved again)",
+  "email_template.test": "A test of an email the portal sends to families, sent by staff to their own address with sample values",
   "settings.messages.change": "Emailing messages to families allowed or stopped",
   "settings.parents.save": "Parent sign-in settings saved",
   "settings.quickbooks.save": "QuickBooks app keys saved",

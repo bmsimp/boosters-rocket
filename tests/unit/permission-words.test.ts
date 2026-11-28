@@ -46,6 +46,15 @@ describe("every permission has words", () => {
     expect(rulesFromChecklist(["Accounting.Link.ReadWrite"])).toEqual({ ok: true, rules: { include: ["Roster.Read", "Accounting.Link.ReadWrite"], exclude: [] } });
   });
 
+  it("has the emails' permission a custom role (a secretary's) may be given, which brings the club settings' view with it", () => {
+    // Email templates, the owner's answer 3 of 2026-11-28: not Admin-only; the page is seen with Settings.Club.Read.
+    expect(ADMIN_ONLY).not.toContain("Settings.Emails.ReadWrite");
+    expect(GRANTABLE).toContain("Settings.Emails.ReadWrite");
+    expect(PERMISSION_AREAS.find((a) => a.permissions.includes("Settings.Emails.ReadWrite"))?.area).toBe("Staff and club");
+    expect(readTwinOf("Settings.Emails.ReadWrite")).toBe("Settings.Club.Read");
+    expect(rulesFromChecklist(["Settings.Emails.ReadWrite"])).toEqual({ ok: true, rules: { include: ["Settings.Club.Read", "Settings.Emails.ReadWrite"], exclude: [] } });
+  });
+
   it("has the club messages permissions: posting a custom role may hold, deleting and the email switch an Admin's alone", () => {
     // Club messages, spec section 10.
     expect(GRANTABLE).toContain("Messages.Post.ReadWrite");

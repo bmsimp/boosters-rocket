@@ -1707,3 +1707,27 @@ export const backupFile = pgTable("backup_file", {
 }, (t) => [
   check("backup_file_backup_at_shape", sql`${t.backupAt} ~ '^[0-9]{8}T[0-9]{6}Z$'`),
 ]);
+
+/**
+ * The club's words for one email the portal sends (email templates, docs/superpowers/specs/2026-11-28-email-templates-
+ * design.md, section 5): one row per save, version 1 the club's first, each save the next, never changed. The current
+ * words are the newest version; an email with no row is sent with its default words, which are in code
+ * (src/lib/email-templates/catalog.ts) and never stored. `email_key` is one of that file's keys; `subject` is null where the
+ * portal writes the subject itself; `body` is the template as checkTemplate() rebuilt it; `reset` marks the default
+ * words saved again ("Use the default words"). Not keyed by a QuickBooks id: a change of company clears nothing here.
+ */
+export const emailTemplateVersion = pgTable("email_template_version", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  emailKey: text("email_key").notNull(),
+  n: integer("n").notNull(),
+  subject: text("subject"),
+  body: jsonb("body").notNull(),
+  reset: boolean("reset").notNull().default(false),
+  savedBy: uuid("saved_by").notNull().references(() => staffUser.id, { onDelete: "restrict" }),
+  savedAt: timestamp("saved_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("email_template_version_n_uq").on(t.emailKey, t.n),
+  check("email_template_version_n_positive", sql`${t.n} >= 1`),
+  check("email_template_version_key_shape", sql`${t.emailKey} ~ '^[a-z_]{1,40}$'`),
+  check("email_template_version_subject_length", sql`${t.subject} is null or char_length(${t.subject}) between 1 and 200`),
+]);

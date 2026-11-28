@@ -9,6 +9,7 @@ the difference read as Tiptap's alone. What is ours lives beside it, in `src/app
   nodes and marks `src/lib/messages/body.ts` keeps, the upload pointed at the form's route, and the body's shape
   converted on the way in and out (`fromBody()`, `toBody()`);
 - `picture-description.tsx`: the selected picture's description, the Image node's own `alt`;
+- `email-nodes.tsx` and `insert-field-menu.tsx`: an email template's fields (Tiptap's own Mention extension, renamed `field`, its trigger `{`) and fixed parts, and Insert field, built from the template's dropdown menu;
 - `rich-text-editor.scss`: the look, mapping the template's variables and classes onto the portal's tokens. It brings in
   `styles/_variables.scss` and `styles/_keyframe-animations.scss`, the global styles the CLI asks a project to import,
   inside a cascade layer, so the portal's own styles win over them.
@@ -27,7 +28,7 @@ the difference read as Tiptap's alone. What is ours lives beside it, in `src/app
 - The CLI's demo page (`app/simple/page.tsx`) and its `scss.d.ts` were not copied in: the first would be a route of the
   portal, and the second isn't needed.
 - The packages it imports are in `package.json`, each pinned: the `@tiptap/*` ones at the portal's Tiptap version
-  (3.33.0), and `@base-ui/react`, `@floating-ui/react`, `@radix-ui/react-dropdown-menu`, `@radix-ui/react-popover`,
+  (3.33.0), `@tiptap/extension-mention` and its peer `@tiptap/suggestion` among them for an email's fields, and `@base-ui/react`, `@floating-ui/react`, `@radix-ui/react-dropdown-menu`, `@radix-ui/react-popover`,
   `class-variance-authority`, `clsx`, `lodash.throttle`, `react-hotkeys-hook`; `sass` and `@types/lodash.throttle` as
   dev dependencies.
 - It is left out of `pnpm lint` (`eslint.config.mjs`); `pnpm typecheck` and every test still read it.

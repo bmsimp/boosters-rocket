@@ -46,6 +46,7 @@ Read the area documents for every area your slice touches before writing code; a
 | `docs/agents/testing.md` | Writing tests: the shared machine, worker databases, e2e, the helpers in depth | `tests/`, whenever you write a test |
 | `docs/agents/tripwires.md` | The tripwire tests a new feature meets | any new page, action, write or table |
 | `docs/agents/messages.md` | Club messages: the tables, versions, files, read state and mail, the club's email switch, a staff member's contact email | `src/lib/messages/`, `src/lib/settings/messages.ts`, `src/lib/staff/contact-email.ts` |
+| `docs/agents/email-templates.md` | The words of the emails the portal sends: the catalog, fixed parts and fields, the club's saved versions, Settings, Emails, the editor's email mode | `src/lib/email-templates/`, `src/lib/mail/` |
 | `docs/agents/ui.md` | The component index (need, component, import, don't), the tokens, `booster.css`'s sections, the gallery, and the installed app | `src/app/booster.css`, `src/app/components/`, `src/lib/theme/`, `src/lib/pwa/` |
 
 ### Privacy rules that are never traded

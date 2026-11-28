@@ -94,6 +94,7 @@ export const KEPT_TABLES: Record<string, string> = {
   message_version_file: "club messages: which files each version has",
   message_read: "club messages: which messages each parent has read, gone with the person",
   backup_file: "the backups on the server as the backup service last listed its folder: a mirror it rewrites at each look, never past its life",
+  email_template_version: "email templates: every saved state of the club's words for an email, never changed, the newest the one sent",
 };
 
 export const removedInAll = (c: CleanupCounts): number => Object.values(c).reduce((a, b) => a + b, 0);

@@ -30,7 +30,7 @@ describe("the Settings items", () => {
     for (const g of SETTINGS_GROUPS) expect(g.slice(1), g).toBe(g.slice(1).toLowerCase());
     const order = railItems(ADMIN).map((s) => SETTINGS_GROUPS.indexOf(s.group));
     expect(order).toEqual([...order].sort((a, b) => a - b));
-    expect(rail(ADMIN)).toEqual(["club", "messages", "staff", "roles", "parents", "integrations", "audit", "health", "backups", "design-system"]);
+    expect(rail(ADMIN)).toEqual(["club", "messages", "emails", "staff", "roles", "parents", "integrations", "audit", "health", "backups", "design-system"]);
     expect(integrationItems(ADMIN).map((s) => s.key)).toEqual(["quickbooks", "forms", "mail", "sign-in"]);
   });
 
@@ -41,21 +41,26 @@ describe("the Settings items", () => {
 
   it("shows each item only to someone holding its permission", () => {
     for (const s of SETTINGS_ITEMS) expect(keys(only(s.see)), s.see).toContain(s.key);
-    expect(keys(only("Settings.Club.Read"))).toEqual(["club", "messages", "design-system"]);
+    expect(keys(only("Settings.Club.Read"))).toEqual(["club", "messages", "emails", "design-system"]);
     expect(keys(only("Staff.Users.Read"))).toEqual(["staff"]);
     expect(keys(only())).toEqual([]);
     expect(keys(only(...GRANTABLE.filter((p) => !p.startsWith("Settings.") && p !== "Staff.Users.Read")))).toEqual([]);
     expect(keys(ADMIN)).toEqual(SETTINGS_ITEMS.map((s) => s.key));
   });
 
-  it("keeps every Admin-only item Admin only: the widest custom role sees the Club, Messages, Staff and the design system", () => {
-    expect(rail(WIDEST)).toEqual(["club", "messages", "staff", "design-system"]);
-    for (const s of SETTINGS_ITEMS.filter((x) => !["club", "messages", "staff", "design-system"].includes(x.key))) expect(ADMIN_ONLY, s.key).toContain(s.see);
+  it("keeps every Admin-only item Admin only: the widest custom role sees the Club, Messages, Emails, Staff and the design system", () => {
+    expect(rail(WIDEST)).toEqual(["club", "messages", "emails", "staff", "design-system"]);
+    for (const s of SETTINGS_ITEMS.filter((x) => !["club", "messages", "emails", "staff", "design-system"].includes(x.key))) expect(ADMIN_ONLY, s.key).toContain(s.see);
     // Messages is seen with the Club's read, but only an Admin may switch emailing on (club messages, spec section 10).
     const messages = SETTINGS_ITEMS.find((x) => x.key === "messages")!;
     expect(messages.see).toBe("Settings.Club.Read");
     expect(ADMIN_ONLY).toContain(messages.change);
     expect(WIDEST.permissions.has("Settings.Messages.ReadWrite")).toBe(false);
+    // Emails' words are changed by a permission a custom role may hold (the owner's answer of 2026-11-28), seen with the Club's read.
+    const emails = SETTINGS_ITEMS.find((x) => x.key === "emails")!;
+    expect(emails.see).toBe("Settings.Club.Read");
+    expect(ADMIN_ONLY).not.toContain(emails.change);
+    expect(WIDEST.permissions.has("Settings.Emails.ReadWrite")).toBe(true);
   });
 
   it("finds QuickBooks by the words of connecting through Boosters Rocket, under its own permission", () => {
@@ -71,9 +76,9 @@ describe("the Settings items", () => {
     for (const s of integrationItems(ADMIN)) expect(ADMIN_ONLY, s.key).toContain(s.see);
   });
 
-  it("splits seeing from changing only for the Club, Messages and Staff", () => {
+  it("splits seeing from changing only for the Club, Messages, Emails and Staff", () => {
     const split = SETTINGS_ITEMS.filter((s) => s.change !== null && s.change !== s.see).map((s) => s.key);
-    expect(split).toEqual(["club", "messages", "staff"]);
+    expect(split).toEqual(["club", "messages", "emails", "staff"]);
     // A role that gives Settings.Club.ReadWrite gives Settings.Club.Read with it.
     expect(expandRules({ include: ["Settings.Club.ReadWrite"], exclude: [] }).has("Settings.Club.Read")).toBe(true);
   });
