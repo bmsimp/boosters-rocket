@@ -3,18 +3,20 @@
 # the e2e seed's test data, for clicking around before a merge (docs/superpowers/specs/2026-11-27-pr-previews-design.md).
 # Never the site's: each preview is its own compose project (booster-rocket-pr-<n>), folder (BR_PREVIEW_HOME/pr-<n>),
 # secrets, database and network. Run only from the site's checkout; the branch supplies its code, never this script.
+# The gate (each preview's Access application and DNS name) is opened and closed by the previews workflow on GitHub
+# (.github/workflows/previews.yml, scripts/poc/preview/cloudflare.sh), which also puts on the label this polls for:
+# no Cloudflare token is kept here.
 #   scripts/poc/preview.sh init <domain> <gate header> <owner login>   once: .env.preview, the edge network, the proxy
-#   scripts/poc/preview.sh up <n>      its Access application, then its DNS name; build pull request <n>'s head,
-#                                      reset and seed its database, start it
+#   scripts/poc/preview.sh up <n>      build pull request <n>'s head, reset and seed its database, start it
 #   scripts/poc/preview.sh reset <n>   the same commit again on a fresh seed, without fetching or building
-#   scripts/poc/preview.sh down <n>    remove its DNS name, then its Access application; stop it and remove its
-#                                      database, image and folder
+#   scripts/poc/preview.sh down <n>    stop it and remove its database, image and folder
 #   scripts/poc/preview.sh list        what is running
-#   scripts/poc/preview.sh sweep       take down every preview whose pull request is closed, or older than the TTL
-#   scripts/poc/preview.sh poll        sweep, then bring up or refresh each open pull request the owner labeled
+#   scripts/poc/preview.sh sweep       take down every preview whose pull request is closed, unlabeled or too old
+#   scripts/poc/preview.sh poll        sweep, then bring up or refresh each open pull request labeled by the workflow
+#                                      or the owner (cron, every five minutes)
 # Exit codes: 0 ok, 2 refused (nothing changed), 3 seed failed (that preview is down), 4 app unhealthy (that preview is
-# down), 5 GitHub or Cloudflare couldn't be asked (nothing more changed), 6 fetch failed (nothing changed), 7 build failed (the running
-# preview untouched).
+# down), 5 GitHub couldn't be asked (nothing more changed), 6 fetch failed (nothing changed), 7 build failed (the
+# running preview untouched).
 set -euo pipefail
 
 BR_DIR="${BR_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
@@ -59,6 +61,18 @@ github() {
     || die 5 "Couldn't ask GitHub for $1. Nothing was changed."
 }
 
+# Every page of a list GitHub answers in pages (at most ten), as one JSON array.
+github_all() {
+  local page=1 got all="[]"
+  while [ "$page" -le 10 ]; do
+    got="$(github "$1&page=$page")"
+    [ "$(jq length <<<"$got")" -gt 0 ] || break
+    all="$(jq -c --argjson more "$got" '. + $more' <<<"$all")"
+    page=$((page + 1))
+  done
+  printf '%s' "$all"
+}
+
 init() {
   local domain="${1:-}" gate="${2:-}" owner="${3:-}"
   [[ "$domain" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]] \
@@ -92,9 +106,6 @@ init() {
       printf 'PREVIEW_TTL_DAYS=7\n'
       printf '# Optional: a fine-grained token with read-only access to this repository alone (pull requests, metadata).\n'
       printf 'GITHUB_TOKEN=\n'
-      printf '# Cloudflare: a token with Access: Apps and Policies Edit (this account) and DNS Edit (this zone) alone; the\n'
-      printf '# account, the zone, the tunnel previews are routed through, and the reusable Access policy (the owner only).\n'
-      printf 'CF_API_TOKEN=\nCF_ACCOUNT_ID=\nCF_ZONE_ID=\nCF_TUNNEL_ID=\nCF_ACCESS_POLICY_ID=\n'
     } > "$tmp"
     chmod 600 "$tmp"
     mv "$tmp" "$SHARED_ENV"
@@ -119,8 +130,7 @@ check_ready() {
     [ "$(stat -c '%a' "$SHARED_ENV")" = "600" ] || die 2 ".env.preview must be private: chmod 600 $SHARED_ENV"
   fi
   local key
-  for key in PREVIEW_DOMAIN PREVIEW_GATE_HEADER PREVIEW_REPO PREVIEW_OWNER PREVIEW_LABEL PREVIEW_MAX PREVIEW_TTL_DAYS \
-    CF_API_TOKEN CF_ACCOUNT_ID CF_ZONE_ID CF_TUNNEL_ID CF_ACCESS_POLICY_ID; do
+  for key in PREVIEW_DOMAIN PREVIEW_GATE_HEADER PREVIEW_REPO PREVIEW_OWNER PREVIEW_LABEL PREVIEW_MAX PREVIEW_TTL_DAYS; do
     grep -Eq "^${key}=.+" "$SHARED_ENV" || die 2 ".env.preview has no $key."
   done
   [ "$(docker network inspect --format '{{.Internal}}' "$EDGE_NETWORK" 2>/dev/null || echo missing)" = "true" ] \
@@ -199,48 +209,6 @@ make_pr_home() {
   fi
 }
 
-# Cloudflare: each preview gets an Access application for its one host name, made before its DNS name exists, and
-# loses its DNS name before its application goes, so the name never answers without the gate. Nothing else of the
-# zone or the account is touched: every lookup and delete is by this preview's own host name.
-cloudflare() {
-  local method="$1" path="$2" body="${3:-}" args=()
-  [ -z "$body" ] || args=(-H "Content-Type: application/json" --data "$body")
-  curl -fsS --max-time 30 -X "$method" -H "Authorization: Bearer $(setting CF_API_TOKEN)" "${args[@]}" \
-    "https://api.cloudflare.com/client/v4/$path" || die 5 "Cloudflare refused $method $path."
-}
-access_app_id() {
-  cloudflare GET "accounts/$(setting CF_ACCOUNT_ID)/access/apps?domain=$PR_HOST" \
-    | jq -r --arg host "$PR_HOST" '[.result[] | select(.domain == $host)][0].id // ""'
-}
-dns_record_id() {
-  cloudflare GET "zones/$(setting CF_ZONE_ID)/dns_records?type=CNAME&name=$PR_HOST" \
-    | jq -r --arg host "$PR_HOST" '[.result[] | select(.name == $host)][0].id // ""'
-}
-open_gate() {
-  need curl; need jq
-  if [ -z "$(access_app_id)" ]; then
-    cloudflare POST "accounts/$(setting CF_ACCOUNT_ID)/access/apps" "$(jq -nc --arg host "$PR_HOST" --arg policy "$(setting CF_ACCESS_POLICY_ID)" \
-      '{type: "self_hosted", name: ("Boosters Rocket preview " + $host), domain: $host, session_duration: "168h",
-        app_launcher_visible: false, policies: [{id: $policy, precedence: 1}]}')" >/dev/null
-    say "Made the Access application for $PR_HOST."
-  fi
-  [ -n "$(access_app_id)" ] || die 5 "The Access application for $PR_HOST isn't there; its DNS name was not made."
-  if [ -z "$(dns_record_id)" ]; then
-    cloudflare POST "zones/$(setting CF_ZONE_ID)/dns_records" "$(jq -nc --arg host "$PR_HOST" --arg target "$(setting CF_TUNNEL_ID).cfargotunnel.com" \
-      '{type: "CNAME", name: $host, content: $target, proxied: true, comment: "Boosters Rocket preview; removed by preview.sh down"}')" >/dev/null
-    say "Made the DNS name $PR_HOST."
-  fi
-}
-close_gate() {
-  need curl; need jq
-  local id
-  id="$(dns_record_id)"
-  [ -z "$id" ] || cloudflare DELETE "zones/$(setting CF_ZONE_ID)/dns_records/$id" >/dev/null
-  [ -z "$(dns_record_id)" ] || die 5 "The DNS name $PR_HOST is still there; its Access application was kept."
-  id="$(access_app_id)"
-  [ -z "$id" ] || cloudflare DELETE "accounts/$(setting CF_ACCOUNT_ID)/access/apps/$id" >/dev/null
-}
-
 running() {
   local d
   for d in "$BR_PREVIEW_HOME"/pr-*/current; do
@@ -289,7 +257,7 @@ up() {
   elif [ "$(env_value commit "$PR_HOME/current")" = "$PR_SHA" ] && [ "${2:-}" = "--if-changed" ]; then
     return 0
   fi
-  make_pr_home; fetch_pr; open_gate
+  make_pr_home; fetch_pr
   PREVIEW_REF="#$PREVIEW_PR $PR_BRANCH"; APP_COMMIT="${PR_SHA:0:12}"
   export PREVIEW_REF APP_COMMIT
   say "Building pull request $PREVIEW_PR ($PR_BRANCH at $APP_COMMIT); a preview already running stays up meanwhile."
@@ -302,45 +270,46 @@ up() {
 
 down() {
   pr_number "$1"
-  close_gate
   stop_preview
   docker volume rm "booster-rocket-pr-$PREVIEW_PR-node-modules" >/dev/null 2>&1 || true
   docker image rm "booster-rocket-preview-app:pr-$PREVIEW_PR" >/dev/null 2>&1 || true
   git -C "$REPO_CLONE" update-ref -d "refs/preview/pr-$PREVIEW_PR" 2>/dev/null || true
   rm -rf "$PR_HOME"
-  say "Preview $PREVIEW_PR is down; its DNS name, Access application, database, image and folder are gone."
+  say "Preview $PREVIEW_PR is down; its database, image and folder are gone."
 }
 
-# Was the label last put on by the owner? Anyone with triage rights can label; only the owner's label counts.
-owner_labeled() {
-  github "issues/$1/events?per_page=100" | jq -e --arg label "$(setting PREVIEW_LABEL)" --arg owner "$(setting PREVIEW_OWNER)" \
+# Does the label count? It must have been put on last by the previews workflow (the Actions bot, which only the owner
+# can start) or by the owner, and less than PREVIEW_TTL_DAYS ago. Anyone with triage rights can label; that counts
+# for nothing.
+label_fresh() {
+  local at
+  at="$(github_all "issues/$1/events?per_page=100" | jq -r --arg label "$(setting PREVIEW_LABEL)" \
+    --arg owner "$(setting PREVIEW_OWNER)" --arg bot "github-actions[bot]" \
     '[.[] | select((.event == "labeled" or .event == "unlabeled") and .label.name == $label)] | last
-     | (.event == "labeled" and .actor.login == $owner)' >/dev/null
+     | if . != null and .event == "labeled" and (.actor.login == $owner or .actor.login == $bot)
+       then (.created_at | fromdateiso8601) else empty end')"
+  [ -n "$at" ] && [ $(( $(date -u +%s) - at )) -le $(( $(setting PREVIEW_TTL_DAYS) * 86400 )) ]
+}
+
+labeled_open() {
+  github "issues?state=open&labels=$(setting PREVIEW_LABEL)&per_page=30" | jq -r '.[] | select(.pull_request) | .number'
 }
 
 sweep() {
-  local n state ttl now at
-  ttl="$(( $(setting PREVIEW_TTL_DAYS) * 86400 ))"; now="$(date -u +%s)"
+  local n wanted
+  wanted="$(labeled_open)"
   for n in $(running); do
-    state="$(github "pulls/$n" | jq -r .state)"
-    at="$(env_value at "$BR_PREVIEW_HOME/pr-$n/current")"
-    if [ "$state" != "open" ]; then say "Pull request $n is $state."; down "$n"
-    elif [ $(( now - ${at:-0} )) -gt "$ttl" ]; then say "Preview $n is older than $(setting PREVIEW_TTL_DAYS) days."; down "$n"
-    fi
+    if grep -qx "$n" <<<"$wanted" && label_fresh "$n"; then continue; fi
+    say "Pull request $n is closed, unlabeled, or its label is too old."
+    down "$n"
   done
 }
 
 poll() {
   sweep
-  local wanted n
-  wanted="$(github "issues?state=open&labels=$(setting PREVIEW_LABEL)&per_page=30" | jq -r '.[] | select(.pull_request) | .number')"
-  for n in $(running); do
-    if grep -qx "$n" <<<"$wanted" && owner_labeled "$n"; then continue; fi
-    say "Pull request $n is no longer labeled by the owner."
-    down "$n"
-  done
-  for n in $wanted; do
-    owner_labeled "$n" || continue
+  local n
+  for n in $(labeled_open); do
+    label_fresh "$n" || continue
     ( up "$n" --if-changed ) || say "Preview $n wasn't brought up (above)."
   done
 }

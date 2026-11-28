@@ -109,56 +109,139 @@ describe("the previews' compose files", () => {
   });
 });
 
+// The scripts read JSON with jq: every Linux runner has it, a Windows desktop may not.
+const hasJq = spawnSync("bash", ["-c", "command -v jq"]).status === 0;
+const slash = (p: string) => p.replace(/\\/g, "/");
+const realGit = spawnSync("bash", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+const DAY = 86_400_000;
+// As GitHub writes them: whole seconds.
+const iso = (ago: number) => new Date(Date.now() - ago).toISOString().replace(/\.\d{3}Z$/, "Z");
+
+/**
+ * Stand-ins for curl and gh, written into a folder put first on PATH. They log every call, answer GitHub from a map of
+ * paths (github.json, kept up to date as labels go on and off) and keep a pretend Cloudflare account (cloudflare.json),
+ * so each test reads both what was asked and in what order.
+ */
+function fakes(dir: string) {
+  const bin = path.join(dir, "bin");
+  mkdirSync(bin, { recursive: true });
+  const log = path.join(dir, "calls.log"), gh = path.join(dir, "github.json"), cf = path.join(dir, "cloudflare.json");
+  writeFileSync(gh, "{}");
+  writeFileSync(cf, JSON.stringify({ apps: [], records: [], ghostApps: false, stuckRecords: false }));
+  const shim = (name: string, body: string) => {
+    writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\necho "${name} $*" >> "${slash(log)}"\n${body}\n`);
+    chmodSync(path.join(bin, name), 0o755);
+  };
+  const node = slash(process.execPath);
+  const http = path.join(dir, "fake-http.mjs");
+  writeFileSync(http, `
+import { readFileSync, writeFileSync, appendFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const [tool, ...args] = process.argv.slice(2);
+const load = (f) => JSON.parse(readFileSync(f, "utf8"));
+let method = "GET", body = "", url = "", jq = "", fields = [];
+for (let i = 0; i < args.length; i++) {
+  const a = args[i];
+  if (a === "-X") method = args[++i];
+  else if (a === "--data") body = args[++i];
+  else if (a === "--jq") jq = args[++i];
+  else if (a === "-f") fields.push(args[++i]);
+  else if (a === "-H" || a === "--max-time") i++;
+  else if (!a.startsWith("-") && a !== "api") url = a;
+}
+const out = (value) => {
+  const text = JSON.stringify(value);
+  if (!jq) return process.stdout.write(text);
+  const r = spawnSync("jq", ["-r", jq], { input: text, encoding: "utf8" });
+  process.stdout.write(r.stdout); process.exit(r.status ?? 1);
+};
+appendFileSync(${JSON.stringify(log)}, \`http \${method} \${url} \${body}\\n\`);
+if (url.includes("/client/v4/")) {
+  const s = load(${JSON.stringify(cf)});
+  const path = url.split("/client/v4/")[1].split("?")[0];
+  const ok = (result) => { writeFileSync(${JSON.stringify(cf)}, JSON.stringify(s)); out({ success: true, result }); };
+  const id = path.split("/").pop();
+  if (path.endsWith("access/apps")) {
+    if (method === "POST") { if (!s.ghostApps) s.apps.push({ id: "app-" + s.apps.length, ...JSON.parse(body) }); ok({}); }
+    else ok(s.apps);
+  } else if (path.includes("access/apps/")) { s.apps = s.apps.filter((a) => a.id !== id); ok({}); }
+  else if (path.endsWith("dns_records")) {
+    if (method === "POST") { s.records.push({ id: "rec-" + s.records.length, ...JSON.parse(body) }); ok({}); }
+    else { const name = new URL(url).searchParams.get("name"); ok(s.records.filter((r) => !name || r.name === name)); }
+  } else if (path.includes("dns_records/")) { if (!s.stuckRecords) s.records = s.records.filter((r) => r.id !== id); ok({}); }
+  else process.exit(22);
+} else {
+  const map = load(${JSON.stringify(gh)});
+  const u = new URL(url, "https://api.github.com/");
+  const key = u.pathname.replace(/^\\/(repos\\/)?club\\/portal\\//, "").replace(/^\\/repos\\/club\\/portal\\//, "");
+  const label = /^issues\\/(\\d+)\\/labels(?:\\/(.+))?$/.exec(key);
+  if (label) {
+    const n = label[1], have = new Set(map["labels/" + n] ?? []);
+    if (method === "POST") fields.forEach((f) => have.add(f.split("=")[1]));
+    if (method === "DELETE") have.delete(label[2]);
+    map["labels/" + n] = [...have];
+    writeFileSync(${JSON.stringify(gh)}, JSON.stringify(map));
+    out([...have].map((name) => ({ name })));
+  } else if (method !== "GET") out({});
+  else if (Number(u.searchParams.get("page") ?? "1") > 1) out([]);
+  else if (key in map) out(map[key]);
+  else { process.stderr.write("no fake answer for " + key + "\\n"); process.exit(22); }
+}
+`);
+  shim("curl", `exec "${node}" "${slash(http)}" curl "$@"`);
+  shim("gh", `exec "${node}" "${slash(http)}" gh "$@"`);
+  return {
+    bin, log,
+    calls: () => (existsSync(log) ? readFileSync(log, "utf8") : ""),
+    github: (answers: Record<string, unknown>) => writeFileSync(gh, JSON.stringify({ ...JSON.parse(readFileSync(gh, "utf8")), ...answers })),
+    labels: (n: number) => (JSON.parse(readFileSync(gh, "utf8"))[`labels/${n}`] ?? []) as string[],
+    cloudflare: () => JSON.parse(readFileSync(cf, "utf8")) as { apps: { id: string; domain: string; policies: unknown }[]; records: { id: string; name: string; content: string; proxied: boolean }[] },
+    setCloudflare: (change: object) => writeFileSync(cf, JSON.stringify({ ...JSON.parse(readFileSync(cf, "utf8")), ...change })),
+    shim,
+  };
+}
+const pullAnswer = (head: string | null, state = "open") => ({
+  state, base: { repo: { full_name: "club/portal" } },
+  head: { repo: head ? { full_name: head } : null, ref: "feature/x", sha: "a".repeat(40) },
+});
+const labeledBy = (login: string, ago: number) => [{ event: "labeled", label: { name: "preview" }, actor: { login }, created_at: iso(ago) }];
+
 describe("preview.sh", { timeout: 30_000 }, () => {
-  const slash = (p: string) => p.replace(/\\/g, "/");
-  const realGit = spawnSync("bash", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
-  let dir: string, home: string, bin: string, log: string, pulls: string;
+  let dir: string, home: string, f: ReturnType<typeof fakes>;
   beforeEach(() => {
     dir = mkdtempSync(path.join(tmpdir(), "br-preview-"));
     home = path.join(dir, "preview-home");
-    bin = path.join(dir, "bin"); mkdirSync(bin);
-    log = path.join(dir, "calls.log");
-    pulls = path.join(dir, "pull.json");
+    f = fakes(dir);
     mkdirSync(path.join(dir, "scripts", "poc"), { recursive: true });
     copyFileSync(path.resolve("scripts/poc/preview.sh"), path.join(dir, "scripts/poc/preview.sh"));
     writeFileSync(path.join(dir, ".env.poc"), "APP_URL=https://portal.example.org\nBETTER_AUTH_SECRET=site-secret-site-secret-site-secret-00\nDB_PASSWORD=site-db\nSETTINGS_ENCRYPTION_KEY=site-key\n");
     spawnSync("git", ["init", "-q", dir]);
     spawnSync("git", ["-C", dir, "remote", "add", "origin", "https://github.com/club/portal.git"]);
-    const fake = (name: string, body: string) => {
-      writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\necho "${name} $*" >> "${slash(log)}"\n${body}\n`);
-      chmodSync(path.join(bin, name), 0o755);
-    };
     // The edge network is there only once init makes it, and then answers "true" to --format, as an internal one would.
-    fake("docker", `if [ "$1 $2" = "network inspect" ]; then [ "$3" = "--format" ] && { echo true; exit 0; }; exit 1; fi\nexit 0`);
-    // GitHub answers with whatever pull.json holds.
-    fake("curl", `cat "${slash(pulls)}"`);
+    f.shim("docker", `if [ "$1 $2" = "network inspect" ]; then [ "$3" = "--format" ] && { echo true; exit 0; }; exit 1; fi\nexit 0`);
     // Cloning and fetching do nothing (and are logged); anything else is git itself.
-    fake("git", `case " $* " in *" clone "*) mkdir -p "\${@: -1}/.git"; exit 0;; *" fetch "*) exit 0;; esac\nexec "${slash(realGit)}" "$@"`);
+    f.shim("git", `case " $* " in *" clone "*) mkdir -p "\${@: -1}/.git"; exit 0;; *" fetch "*) exit 0;; esac\nexec "${slash(realGit)}" "$@"`);
   });
   const run = (...args: string[]) => spawnSync("bash", [path.join(dir, "scripts/poc/preview.sh"), ...args], {
-    encoding: "utf8", env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, BR_DIR: dir, BR_PREVIEW_HOME: home },
+    encoding: "utf8", env: { ...process.env, PATH: `${f.bin}${path.delimiter}${process.env.PATH}`, BR_DIR: dir, BR_PREVIEW_HOME: home },
   });
-  const calls = () => (existsSync(log) ? readFileSync(log, "utf8") : "");
   const envFile = () => path.join(home, ".env.preview");
-  const pull = (head: string) => writeFileSync(pulls, JSON.stringify({
-    state: "open",
-    base: { repo: { full_name: "club/portal" } },
-    head: { repo: head ? { full_name: head } : null, ref: "feature/x", sha: "a".repeat(40) },
-  }));
-  const init = () => {
-    expect(run("init", "example.org", "Cf-Access-Jwt-Assertion", "owner-login").status).toBe(0);
-    // The Cloudflare settings the owner fills in by hand.
-    const filled = readFileSync(envFile(), "utf8").replace(/^(CF_[A-Z_]+)=$/gm, "$1=test-value");
-    writeFileSync(envFile(), filled);
+  const init = () => expect(run("init", "example.org", "Cf-Access-Jwt-Assertion", "owner-login").status).toBe(0);
+  /** A preview that is up, as `up` leaves it. */
+  const running = (n: number) => {
+    mkdirSync(path.join(home, `pr-${n}`), { recursive: true });
+    writeFileSync(path.join(home, `pr-${n}`, "current"), `pr=${n}\nbranch=feature/x\ncommit=${"a".repeat(40)}\nat=0\n`);
   };
 
-  it("init writes the shared settings, names the repository from the checkout, and changes nothing of the site's", () => {
+  it("init writes the shared settings, names the repository from the checkout, keeps no Cloudflare token, and changes nothing of the site's", () => {
     init();
-    const env = readFileSync(envFile(), "utf8").split("\n");
-    for (const line of ["PREVIEW_DOMAIN=example.org", "PREVIEW_GATE_HEADER=Cf-Access-Jwt-Assertion", "PREVIEW_REPO=club/portal", "PREVIEW_OWNER=owner-login", "PREVIEW_MAX=2"]) {
-      expect(env).toContain(line);
+    const env = readFileSync(envFile(), "utf8");
+    for (const line of ["PREVIEW_DOMAIN=example.org", "PREVIEW_GATE_HEADER=Cf-Access-Jwt-Assertion", "PREVIEW_REPO=club/portal", "PREVIEW_OWNER=owner-login", "PREVIEW_MAX=2", "PREVIEW_TTL_DAYS=7"]) {
+      expect(env.split("\n")).toContain(line);
     }
-    expect(calls()).toContain("docker network create --internal booster-rocket-preview-edge");
+    expect(env).not.toMatch(/CF_|CLOUDFLARE/);
+    expect(script).not.toMatch(/CF_API_TOKEN|api\.cloudflare\.com/);
+    expect(f.calls()).toContain("docker network create --internal booster-rocket-preview-edge");
     expect(read(path.join(dir, ".env.poc"))).toContain("DB_PASSWORD=site-db");
   });
 
@@ -171,32 +254,18 @@ describe("preview.sh", { timeout: 30_000 }, () => {
       expect(r.status, args.join(" ")).toBe(2);
       expect(existsSync(envFile()), args.join(" ")).toBe(false);
     }
-    expect(calls()).not.toContain("network create");
+    expect(f.calls()).not.toContain("network create");
   });
 
-  // jq reads GitHub's answers; every Linux runner has it, a Windows desktop may not.
-  const hasJq = spawnSync("bash", ["-c", "command -v jq"]).status === 0;
   it.skipIf(!hasJq)("refuses a fork's pull request, or one whose fork is gone, before it fetches or builds anything", () => {
     init();
-    for (const head of ["someone/portal", ""]) {
-      pull(head);
+    for (const head of ["someone/portal", null]) {
+      f.github({ "pulls/12": pullAnswer(head) });
       const r = run("up", "12");
-      expect(r.status, head).toBe(2);
-      expect(r.stderr, head).toContain("comes from a fork");
+      expect(r.status, String(head)).toBe(2);
+      expect(r.stderr, String(head)).toContain("comes from a fork");
     }
-    expect(calls()).not.toMatch(/git [^\n]*fetch|compose .*build|volume rm/);
-  });
-
-  it("makes a preview's Access application before its DNS name, removes them the other way round, and only its own", () => {
-    const body = (name: string) => { const at = script.indexOf(`${name}() {`); return script.slice(at, script.indexOf("\n}\n", at)); };
-    const open = body("open_gate"), close = body("close_gate");
-    expect(open.indexOf('access/apps"')).toBeGreaterThan(-1);
-    expect(open.indexOf('access/apps"')).toBeLessThan(open.indexOf('dns_records"'));
-    expect(close.indexOf("dns_records/$id")).toBeLessThan(close.indexOf("access/apps/$id"));
-    expect(script).toContain('PR_HOST="pr-$PREVIEW_PR-br.$(setting PREVIEW_DOMAIN)"');
-    expect(script.indexOf("fetch_pr; open_gate")).toBeLessThan(script.indexOf("compose build app"));
-    // Every id it acts on is found by this preview's own host name.
-    expect([...script.matchAll(/select\(\.(?:domain|name) == \$host\)/g)].length).toBe(2);
+    expect(f.calls()).not.toMatch(/git [^\n]*fetch|compose .*build|volume rm/);
   });
 
   it("fetches the branch itself, never the pull request's ref a fork writes", () => {
@@ -206,11 +275,206 @@ describe("preview.sh", { timeout: 30_000 }, () => {
 
   it("takes a pull request's number and nothing else", () => {
     init();
-    pull("club/portal");
     for (const bad of ["", "0", "-1", "12a", "../1", "1234567", "main"]) {
       expect(run("up", bad).status, bad).toBe(2);
     }
-    expect(calls()).not.toMatch(/curl|compose .*build/);
+    expect(f.calls()).not.toMatch(/http |compose .*build/);
+  });
+
+  it.skipIf(!hasJq)("refuses a third preview", () => {
+    init();
+    running(1); running(2);
+    f.github({ "pulls/3": pullAnswer("club/portal") });
+    const r = run("up", "3");
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("2 previews are running already");
+    expect(f.calls()).not.toMatch(/compose .*build/);
+  });
+
+  it.skipIf(!hasJq)("sweep keeps a preview the workflow or the owner labeled this week, and takes down every other", () => {
+    init();
+    for (const n of [1, 2, 3, 4, 5]) running(n);
+    f.github({
+      "issues": [1, 2, 3, 4].map((number) => ({ number, pull_request: {} })),
+      "issues/1/events": labeledBy("github-actions[bot]", DAY),
+      "issues/2/events": labeledBy("owner-login", 2 * DAY),
+      "issues/3/events": labeledBy("someone-with-triage", DAY),
+      "issues/4/events": labeledBy("github-actions[bot]", 8 * DAY),
+    });
+    const r = run("sweep");
+    expect(r.status, r.stderr).toBe(0);
+    // 3: labeled by someone else; 4: too old; 5: closed or unlabeled (not in the open, labeled list).
+    for (const n of [1, 2]) expect(existsSync(path.join(home, `pr-${n}`)), String(n)).toBe(true);
+    for (const n of [3, 4, 5]) {
+      expect(existsSync(path.join(home, `pr-${n}`)), String(n)).toBe(false);
+      expect(f.calls()).toContain(`docker volume rm booster-rocket-pr-${n}-db`);
+    }
+    expect(f.calls()).not.toMatch(/booster-rocket-pr-[12]-db/);
+  });
+});
+
+describe.skipIf(!hasJq)("cloudflare.sh", { timeout: 30_000 }, () => {
+  let dir: string, f: ReturnType<typeof fakes>;
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), "br-preview-cf-"));
+    f = fakes(dir);
+  });
+  const env = { CF_API_TOKEN: "token", CF_ACCOUNT_ID: "acct", CF_ZONE_ID: "zone", CF_TUNNEL_ID: "tunnel-1", CF_ACCESS_POLICY_ID: "policy-1", PREVIEW_DOMAIN: "example.org" };
+  const run = (...args: string[]) => spawnSync("bash", [path.resolve("scripts/poc/preview/cloudflare.sh"), ...args], {
+    encoding: "utf8", env: { ...process.env, ...env, PATH: `${f.bin}${path.delimiter}${process.env.PATH}` },
+  });
+  const order = () => f.calls().split("\n").filter((l) => /^http (POST|DELETE)/.test(l)).map((l) => l.replace(/^http (\w+) \S+\/client\/v4\/(\S+).*$/, "$1 $2"));
+
+  it("opens a preview's gate: its Access application with the owner's policy first, then its DNS name to the tunnel", () => {
+    const r = run("open", "12");
+    expect(r.status, r.stderr).toBe(0);
+    expect(order()).toEqual(["POST accounts/acct/access/apps", "POST zones/zone/dns_records"]);
+    const { apps, records } = f.cloudflare();
+    expect(apps).toMatchObject([{ domain: "pr-12-br.example.org", policies: [{ id: "policy-1" }] }]);
+    expect(records).toMatchObject([{ name: "pr-12-br.example.org", content: "tunnel-1.cfargotunnel.com", proxied: true }]);
+    // A second open finds both and makes nothing.
+    expect(run("open", "12").status).toBe(0);
+    expect(order()).toHaveLength(2);
+  });
+
+  it("never makes the DNS name when the Access application isn't there afterwards", () => {
+    f.setCloudflare({ ghostApps: true });
+    const r = run("open", "12");
+    expect(r.status).toBe(5);
+    expect(f.cloudflare().records).toEqual([]);
+    expect(order()).toEqual(["POST accounts/acct/access/apps"]);
+  });
+
+  it("closes a preview's gate the other way round, keeps the application while the name is still there, and touches nothing else", () => {
+    expect(run("open", "12").status).toBe(0);
+    f.setCloudflare({ records: [...f.cloudflare().records, { id: "other", name: "portal.example.org" }], apps: [...f.cloudflare().apps, { id: "other-app", domain: "portal.example.org" }] });
+    f.setCloudflare({ stuckRecords: true });
+    expect(run("close", "12").status).toBe(5);
+    expect(f.cloudflare().apps.map((a) => a.domain)).toContain("pr-12-br.example.org");
+    f.setCloudflare({ stuckRecords: false });
+    const r = run("close", "12");
+    expect(r.status, r.stderr).toBe(0);
+    const deletes = order().filter((l) => l.startsWith("DELETE"));
+    expect(deletes.at(-2)).toMatch(/^DELETE zones\/zone\/dns_records\//);
+    expect(deletes.at(-1)).toMatch(/^DELETE accounts\/acct\/access\/apps\//);
+    expect(f.cloudflare().apps.map((a) => a.domain)).toEqual(["portal.example.org"]);
+    expect(f.cloudflare().records.map((r) => r.name)).toEqual(["portal.example.org"]);
+  });
+
+  it("lists only the previews' own names, and refuses anything but a number", () => {
+    for (const n of ["3", "40"]) expect(run("open", n).status).toBe(0);
+    f.setCloudflare({ records: [...f.cloudflare().records, { id: "x", name: "pr-9.example.org" }, { id: "y", name: "pr-7-br.example.org.evil.test" }] });
+    expect(run("list").stdout.trim().split("\n")).toEqual(["3", "40"]);
+    for (const bad of ["", "0", "1;x", "../1"]) expect(run("open", bad).status, bad).toBe(2);
+    const missing = spawnSync("bash", [path.resolve("scripts/poc/preview/cloudflare.sh"), "open", "1"], { encoding: "utf8", env: { ...process.env, PATH: `${f.bin}${path.delimiter}${process.env.PATH}` } });
+    expect(missing.status).toBe(2);
+  });
+});
+
+describe.skipIf(!hasJq)("workflow.sh", { timeout: 30_000 }, () => {
+  let dir: string, f: ReturnType<typeof fakes>;
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), "br-preview-wf-"));
+    f = fakes(dir);
+    // workflow.sh beside a stand-in for cloudflare.sh that logs what it is asked and lists the gates in gates.txt.
+    mkdirSync(path.join(dir, "wf"));
+    copyFileSync(path.resolve("scripts/poc/preview/workflow.sh"), path.join(dir, "wf/workflow.sh"));
+    writeFileSync(path.join(dir, "gates.txt"), "");
+    writeFileSync(path.join(dir, "wf/cloudflare.sh"), `#!/usr/bin/env bash\necho "cloudflare $*" >> "${slash(f.log)}"\n[ "$1" = list ] && cat "${slash(path.join(dir, "gates.txt"))}"\nexit 0\n`);
+    chmodSync(path.join(dir, "wf/cloudflare.sh"), 0o755);
+  });
+  const run = (actor: string, ...args: string[]) => spawnSync("bash", [path.join(dir, "wf/workflow.sh"), ...args], {
+    encoding: "utf8",
+    env: {
+      ...process.env, PATH: `${f.bin}${path.delimiter}${process.env.PATH}`, GH_TOKEN: "t", PREVIEW_DOMAIN: "example.org",
+      GITHUB_REPOSITORY: "club/portal", GITHUB_REPOSITORY_OWNER: "owner-login", GITHUB_ACTOR: actor, GITHUB_TRIGGERING_ACTOR: actor,
+    },
+  });
+  const steps = () => f.calls().split("\n").filter((l) => /^cloudflare |^http (POST|DELETE)/.test(l)).map((l) => l.replace(/^http (\w+) \S*?(issues\/\d+\/\w+).*$/, "$1 $2"));
+
+  it("lets only the owner start a preview", () => {
+    f.github({ "pulls/12": pullAnswer("club/portal"), "issues": [] });
+    const r = run("someone-with-write", "up", "12");
+    expect(r.status).toBe(2);
+    expect(steps()).toEqual([]);
+  });
+
+  it("refuses a fork's pull request, a closed one, or a third preview, before it opens anything", () => {
+    for (const [answer, words] of [[pullAnswer("someone/portal"), "comes from a fork"], [pullAnswer(null), "comes from a fork"], [pullAnswer("club/portal", "closed"), "isn't open"]] as const) {
+      f.github({ "pulls/12": answer, "issues": [] });
+      const r = run("owner-login", "up", "12");
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain(words);
+    }
+    f.github({ "pulls/12": pullAnswer("club/portal"), "issues": [{ number: 1, pull_request: {} }, { number: 2, pull_request: {} }] });
+    const third = run("owner-login", "up", "12");
+    expect(third.status).toBe(2);
+    expect(third.stderr).toContain("2 previews are up already");
+    expect(steps()).toEqual([]);
+  });
+
+  it("opens the gate before it labels the pull request, and says where the preview will be", () => {
+    f.github({ "pulls/12": pullAnswer("club/portal"), "issues": [{ number: 1, pull_request: {} }] });
+    const r = run("owner-login", "up", "12");
+    expect(r.status, r.stderr).toBe(0);
+    expect(steps()).toEqual(["cloudflare open 12", "POST issues/12/labels", "POST issues/12/comments"]);
+    expect(f.labels(12)).toEqual(["preview"]);
+    expect(f.calls()).toContain("https://pr-12-br.example.org");
+  });
+
+  it("closes the gate before it takes the label off", () => {
+    f.github({ "labels/12": ["preview"] });
+    const r = run("anyone", "down", "12");
+    expect(r.status, r.stderr).toBe(0);
+    expect(steps()).toEqual(["cloudflare close 12", "DELETE issues/12/labels"]);
+    expect(f.labels(12)).toEqual([]);
+  });
+
+  it("sweeps closed, stale and stray previews, and keeps a fresh one", () => {
+    writeFileSync(path.join(dir, "gates.txt"), "1\n2\n3\n4\n9\n");
+    f.github({
+      "issues": [1, 2, 3, 4].map((number) => ({ number, pull_request: {} })),
+      "pulls/1": pullAnswer("club/portal"), "pulls/2": pullAnswer("club/portal", "closed"),
+      "pulls/3": pullAnswer("club/portal"), "pulls/4": pullAnswer("club/portal"),
+      "issues/1/events": labeledBy("github-actions[bot]", DAY),
+      "issues/2/events": labeledBy("github-actions[bot]", DAY),
+      "issues/3/events": labeledBy("github-actions[bot]", 8 * DAY),
+      "issues/4/events": labeledBy("someone-with-triage", DAY),
+      "labels/1": ["preview"], "labels/2": ["preview"], "labels/3": ["preview"], "labels/4": ["preview"],
+    });
+    const r = run("github-actions[bot]", "sweep");
+    expect(r.status, r.stderr).toBe(0);
+    const closed = steps().filter((l) => l.startsWith("cloudflare close")).map((l) => l.split(" ")[2]).sort();
+    expect(closed).toEqual(["2", "3", "4", "9"]);
+    expect(f.labels(1)).toEqual(["preview"]);
+    for (const n of [2, 3, 4]) expect(f.labels(n), String(n)).toEqual([]);
+  });
+});
+
+describe("the previews workflow", () => {
+  const workflow = read(".github/workflows/previews.yml");
+  const on = block(workflow, "on", 0);
+
+  it("starts only by hand, on a pull request's close, or on its daily schedule", () => {
+    expect([...on.matchAll(/^ {2}([a-z_]+):/gm)].map((m) => m[1])).toEqual(["workflow_dispatch", "pull_request_target", "schedule"]);
+    expect(block(on, "pull_request_target", 2)).toMatch(/types: \[closed\]/);
+  });
+
+  it("never runs a pull request's code: main's checkout, no credentials kept, nothing of the pull request's in a script", () => {
+    expect(workflow).toContain("ref: ${{ github.event.repository.default_branch }}");
+    expect(workflow).toContain("persist-credentials: false");
+    expect(workflow).not.toMatch(/github\.event\.pull_request\.head|github\.head_ref/);
+    const run = workflow.slice(workflow.indexOf("run: |"));
+    expect(run).not.toContain("${{");
+    expect([...workflow.matchAll(/uses: (\S+)/g)].map((m) => m[1]!)).toEqual(["actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"]);
+  });
+
+  it("lets only the owner start it by hand, and only from main, on GitHub's own runners", () => {
+    expect(workflow).toMatch(/github\.event_name == 'workflow_dispatch' && github\.ref == 'refs\/heads\/main'\s+&& github\.actor == github\.repository_owner && github\.triggering_actor == github\.repository_owner/);
+    expect(workflow).toMatch(/github\.event_name == 'pull_request_target' && contains\(github\.event\.pull_request\.labels\.\*\.name, 'preview'\)/);
+    expect(workflow).toMatch(/^ {4}runs-on: ubuntu-latest$/m);
+    expect(workflow).toMatch(/^permissions: \{\}$/m);
+    expect(workflow).toMatch(/^ {4}environment: previews$/m);
   });
 });
 
