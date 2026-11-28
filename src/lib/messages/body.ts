@@ -1,5 +1,5 @@
 import { createElement as h, Fragment, type ReactNode } from "react";
-import { esc } from "@/lib/mail/messages";
+import { esc } from "@/lib/mail/frame";
 
 /**
  * A club message's body (spec section 6): the editor's document JSON, kept in `message_version.body` only as
