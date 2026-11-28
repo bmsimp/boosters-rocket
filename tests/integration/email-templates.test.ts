@@ -1,10 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 type Msg = { to: string; subject: string; text: string; html: string };
-const mail = vi.hoisted(() => ({ outbox: [] as Msg[] }));
+const mail = vi.hoisted(() => ({ outbox: [] as Msg[], down: false }));
 vi.mock("@/lib/mail/senders", async () => ({
   SMTP_PASSWORD_AAD: "mail:smtp-password",
-  buildSender: async () => async (m: Msg) => { mail.outbox.push(m); },
+  buildSender: async () => async (m: Msg) => {
+    if (mail.down) { const { MailSendError } = await import("@/lib/mail/types"); throw new MailSendError("The mail server couldn't be reached. (ECONNREFUSED)"); }
+    mail.outbox.push(m);
+  },
 }));
 
 import { asStaff, pageOutcome, renderPage, revalidatedPaths } from "../helpers/signed-in";
@@ -42,7 +45,7 @@ async function roleWith(staff: Staff, key: string, patterns: string[]) {
 }
 beforeEach(async () => {
   await resetDb();
-  mail.outbox.length = 0;
+  mail.outbox.length = 0; mail.down = false;
   secretary = await seedStaff({ email: "secretary@club.org", name: "Sam Secretary" });
   await roleWith(secretary, "secretary", ["Settings.Club.Read", "Settings.Emails.ReadWrite"]);
   viewer = await seedStaff({ email: "viewer@club.org", name: "Vic Viewer" });
@@ -89,7 +92,23 @@ describe("saving an email's words", () => {
     await expect(saveEmailAction("form_reminder", words("x"))).rejects.toBeInstanceOf(AccessDenied);
     await expect(defaultWordsAction("form_reminder")).rejects.toBeInstanceOf(AccessDenied);
     await expect(testEmailAction("form_reminder", words("x"))).rejects.toBeInstanceOf(AccessDenied);
+    await expect(versionAgainAction("form_reminder", 1)).rejects.toBeInstanceOf(AccessDenied);
     expect(await db.select().from(emailTemplateVersion)).toEqual([]);
+  });
+
+  it("numbers two saves at once one after the other, each with its audit row", async () => {
+    asStaff(secretary);
+    const both = await Promise.all([saveEmailAction("form_reminder", words("One at once.")), saveEmailAction("form_reminder", words("Two at once."))]);
+    expect(both.map((r) => r.ok)).toEqual([true, true]);
+    expect((await versions("form_reminder")).map((v) => v.n)).toEqual([1, 2]);
+    expect((await audits("email_template.save")).map((r) => (r.after as { version: number }).version).sort()).toEqual([1, 2]);
+  });
+
+  it("sends the default words when the club's saved words no longer fit the email", async () => {
+    await db.insert(emailTemplateVersion).values({ emailKey: "form_reminder", n: 1, subject: "Old", body: { type: "doc", content: [{ type: "paragraph" }] }, savedBy: admin.id });
+    const m = formReminderMessage(await currentBrand(), "a@x.org", data);
+    expect(m.subject).toBe("Please sign: Medical release");
+    expect(m.text.startsWith("A friendly reminder: Medical release for Maya still needs your signature.")).toBe(true);
   });
 });
 
@@ -118,8 +137,9 @@ describe("Send me a test", () => {
     expect(mail.outbox[0]!.text).toContain("Not saved yet.");
     expect(await db.select().from(emailTemplateVersion)).toEqual([]);
     const [row] = await audits("email_template.test");
-    expect(row).toMatchObject({ targetId: "form_reminder", after: { ok: true }, actorId: secretary.id });
-    expect(JSON.stringify(row)).not.toContain("secretary@club.org\"}");
+    expect(row).toMatchObject({ targetId: "form_reminder", actorId: secretary.id, permission: "Settings.Emails.ReadWrite" });
+    // What the row records is whether it went, never where.
+    expect([row!.before, row!.after]).toEqual([null, { ok: true }]);
   });
 
   it("is refused while outgoing mail isn't working, and after the hour's limit", async () => {
@@ -129,6 +149,24 @@ describe("Send me a test", () => {
     for (let i = 0; i < TESTS_PER_HOUR; i++) expect(await testEmailAction("form_reminder", words("x"))).toMatchObject({ ok: true });
     expect(await testEmailAction("form_reminder", words("x"))).toMatchObject({ ok: false, errors: [`You've sent ${TESTS_PER_HOUR} tests in the last hour. Try again a little later.`] });
     expect(mail.outbox).toHaveLength(TESTS_PER_HOUR);
+  });
+
+  it("never sends more than the hour's limit, however many presses come at once", async () => {
+    await seedWorkingMail();
+    asStaff(secretary);
+    for (let i = 0; i < TESTS_PER_HOUR - 1; i++) await testEmailAction("form_reminder", words("x"));
+    const at = await Promise.all(Array.from({ length: 4 }, () => testEmailAction("form_reminder", words("x"))));
+    expect(at.filter((r) => r.ok)).toHaveLength(1);
+    expect(mail.outbox).toHaveLength(TESTS_PER_HOUR);
+    expect(await audits("email_template.test")).toHaveLength(TESTS_PER_HOUR);
+  });
+
+  it("audits a test whose mail failed, and counts it toward the limit", async () => {
+    await seedWorkingMail();
+    asStaff(secretary);
+    mail.down = true;
+    expect(await testEmailAction("form_reminder", words("x"))).toEqual({ ok: false, errors: ["The test couldn't be sent. Check Outgoing mail under Settings, Integrations."] });
+    expect((await audits("email_template.test")).map((r) => r.after)).toEqual([{ ok: false }]);
   });
 });
 
@@ -153,6 +191,30 @@ describe("the pages", () => {
     expect(read).not.toContain("Save the email");
     expect(read).toContain("Only someone allowed to change the emails can change them.");
     expect(read).not.toContain("secretary@club.org");
+  });
+
+  it("say when the club's words were set aside, and let them be read", async () => {
+    await db.insert(emailTemplateVersion).values({ emailKey: "form_reminder", n: 1, subject: "Set aside", body: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Old words." }] }] }, savedBy: admin.id });
+    asStaff(secretary);
+    const html = await renderPage(EmailPage, { params: { key: "form_reminder" } });
+    expect(html).toContain("no longer fit it after an update");
+    expect(html).toContain('href="/staff/settings/emails/form_reminder?version=1"');
+    const old = await renderPage(EmailPage, { params: { key: "form_reminder" }, searchParams: { version: "1" } });
+    expect(old).toContain("Version 1");
+    expect(old).toContain("These words no longer fit this email");
+    expect(old).not.toContain("Use these words again");
+    expect(await renderPage(EmailsPage)).toContain("Needs a look");
+  });
+
+  it("show an earlier version read only, with no way to use it again, to someone who may only see the emails", async () => {
+    asStaff(admin);
+    await saveEmailAction("form_reminder", words("First words."));
+    await saveEmailAction("form_reminder", words("Second words."));
+    asStaff(viewer);
+    const html = await renderPage(EmailPage, { params: { key: "form_reminder" }, searchParams: { version: "1" } });
+    expect(html).toContain("Version 1");
+    expect(html).not.toContain("Use these words again");
+    expect(html).not.toContain("Use the default words");
   });
 
   it("answer 404 for an address that names no email", async () => {

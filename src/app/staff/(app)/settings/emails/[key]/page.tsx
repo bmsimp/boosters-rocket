@@ -1,10 +1,12 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { currentBrand } from "@/lib/mail/send";
 import { emailVersion, emailVersions, testAddress } from "@/lib/mail/template-store";
 import { defaultTemplate, emailByKey, sampleEmail, wordsFor } from "@/lib/email-templates/catalog";
-import { Card, ConfirmDialog, LocalTime, Notice, PageHeader } from "@/app/components/ui";
+import { Card, ConfirmDialog, LocalTime, Notice } from "@/app/components/ui";
+import { SettingsHeader } from "../../back-to-settings";
 import { defaultWordsAction } from "../actions";
 import { EmailForm } from "./email-form";
 import { EmailPreview } from "./email-preview";
@@ -29,18 +31,19 @@ export default async function EmailPage({ params, searchParams }: { params: Prom
   const brand = { clubName: full.clubName, color: full.color, portal: full.portal, contact: full.contact ?? null };
   const current = wordsFor(e, full.templates?.[e.key]);
   const asked = ((await searchParams) ?? {}).version;
-  const shownRow = versions.find((v) => typeof asked === "string" && String(v.n) === asked && v.n !== versions[0]?.n) ?? null;
+  // The newest version is the editor's, unless the club's words were set aside: then it is read here like any other.
+  const shownRow = versions.find((v) => typeof asked === "string" && String(v.n) === asked && (v.n !== versions[0]?.n || !current.usable)) ?? null;
   const shownWords = shownRow ? await emailVersion(e.key, shownRow.n) : null;
   const shown = shownRow && shownWords ? wordsFor(e, shownWords) : null;
   const d = defaultTemplate(e);
   const isDefault = current.subject === d.subject && JSON.stringify(current.body) === JSON.stringify(d.body);
-  const back = { href: "/staff/settings/emails", label: "Emails" };
 
   return (
     <main className="wrap single email-page">
-      <PageHeader className="settings-head" back={back} title={e.title} lede={e.sentWhen} />
+      <SettingsHeader effective={ctx.effective} title={e.title} lede={e.sentWhen} />
+      <p className="page-back"><Link href="/staff/settings/emails">Back to Emails</Link></p>
       {!current.usable && (
-        <Notice tone="warning">The club&apos;s words for this email no longer fit it after an update, so it goes with the default words. Save new words to use your own again.</Notice>
+        <Notice tone="warning">The club&apos;s words for this email no longer fit it after an update, so it goes with the default words. Save new words to use your own again.{versions[0] && <> <a href={`/staff/settings/emails/${e.key}?version=${versions[0].n}`}>Read the words that were set aside</a></>}</Notice>
       )}
       {shownRow && shown ? (
         <Card title={`Version ${shownRow.n}`} titleId="version-h"
@@ -58,7 +61,7 @@ export default async function EmailPage({ params, searchParams }: { params: Prom
             <ul className="version-list">
               {versions.map((v, i) => (
                 <li key={v.n}>
-                  {i === 0 && !shownRow
+                  {i === 0 && !shownRow && current.usable
                     ? <span aria-current="true">Version {v.n} (now): {v.savedBy}, <LocalTime iso={v.savedAt.toISOString()} dateOnly /></span>
                     : <a className="link-line" href={i === 0 ? `/staff/settings/emails/${e.key}` : `/staff/settings/emails/${e.key}?version=${v.n}`} aria-current={shownRow?.n === v.n ? "true" : undefined}>
                       Version {v.n}{i === 0 ? " (now)" : ""}: {v.savedBy}, <LocalTime iso={v.savedAt.toISOString()} dateOnly />{v.reset ? ", the default words" : ""}</a>}

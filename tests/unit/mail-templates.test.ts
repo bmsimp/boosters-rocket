@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as now from "@/lib/mail/messages";
 import * as before from "../helpers/legacy-mail-messages";
 import { EMAILS, defaultTemplate, emailByKey, renderEmail, rulesOf, sampleEmail, wordsFor } from "@/lib/email-templates/catalog";
-import { checkTemplate, type TemplateDoc } from "@/lib/email-templates/body";
+import { checkTemplate, NO_ADDRESSES, type TemplateDoc } from "@/lib/email-templates/body";
 
 /*
  * Email templates (docs/superpowers/specs/2026-11-28-email-templates-design.md), slice 1: an email the club never
@@ -113,6 +113,18 @@ describe("the club's words", () => {
   });
 });
 
+describe("a code email whose words leave the code's sentence out", () => {
+  it("still has the code in its plain text, on a line of its own", () => {
+    for (const key of ["signin_code", "change_code"] as const) {
+      const e = emailByKey(key)!;
+      const body = { type: "doc" as const, content: defaultTemplate(e).body.content.filter((b) => b.type === "fixedPart") };
+      const m = renderEmail(e, { ...B, templates: { [key]: { subject: null, body } } }, "a@x.org", { code: "482913", minutes: 10, passwordPage: "https://p/pw", settingsPage: "https://p/s" });
+      expect(m.text.startsWith("Your code is 482913.\n\n"), key).toBe(true);
+      expect(m.html).toContain(">482913</p>");
+    }
+  });
+});
+
 describe("checkTemplate()", () => {
   const signin = rulesOf(emailByKey("password_reset")!);
   const ok = { type: "doc", content: [{ type: "fixedPart", attrs: { id: "link" } }, { type: "fixedPart", attrs: { id: "neverAsks" } }, { type: "fixedPart", attrs: { id: "didNotAsk" } }] };
@@ -148,6 +160,28 @@ describe("checkTemplate()", () => {
     const codeBody = { type: "doc", content: ["bigCode", "life", "notYou"].map((id) => ({ type: "fixedPart", attrs: { id } })) };
     expect(checkTemplate(code, { subject: "anything", body: codeBody })).toMatchObject({ ok: true, subject: null });
   });
+  it("refuses a web or email address typed into a Sign-in email's words or subject, and keeps one in the other emails", () => {
+    const typed = (text: string) => withPara({ type: "paragraph", content: [{ type: "text", text }] });
+    for (const text of ["Reset at https://evil.example/reset", "or go to www.evil.example", "write to help@evil.example", "visit evil-site.com today"]) {
+      expect(checkTemplate(signin, { subject: "x", body: typed(text) }), text).toEqual({ ok: false, errors: [NO_ADDRESSES] });
+    }
+    expect(checkTemplate(signin, { subject: "Reset at https://evil.example {Club name}", body: ok })).toEqual({ ok: false, errors: [NO_ADDRESSES] });
+    expect(checkTemplate(signin, { subject: "Reset your {Club name} password", body: typed("Sign in. Then choose a password, e.g. a long one.") }).ok).toBe(true);
+    const forms = rulesOf(emailByKey("form_reminder")!);
+    const fbody = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Questions? help@club.example" }] }, { type: "fixedPart", attrs: { id: "due" } }, { type: "fixedPart", attrs: { id: "link" } }] };
+    expect(checkTemplate(forms, { subject: "x", body: fbody }).ok).toBe(true);
+  });
+
+  it("drops the marks that turn text around or hide in it, and refuses half a character in words", () => {
+    const r = checkTemplate(signin, { subject: "Reset‮ drowssap​", body: withPara({ type: "paragraph", content: [{ type: "text", text: "a⁦b﻿c" }] }) });
+    expect(r).toMatchObject({ ok: true, subject: "Reset drowssap" });
+    expect(JSON.stringify(r)).toContain("\"abc\"");
+    const broken = "The email has a character that can't be saved. Type that part again and try once more.";
+    expect(checkTemplate(signin, { subject: "x", body: withPara({ type: "paragraph", content: [{ type: "text", text: "a\ud800b" }] }) })).toEqual({ ok: false, errors: [broken] });
+    expect(checkTemplate(signin, { subject: "x\udc00", body: ok })).toEqual({ ok: false, errors: [broken] });
+    expect(checkTemplate(signin, { subject: "Reset 🚀", body: ok }).ok).toBe(true);
+  });
+
   it("refuses a body over its size and drops control characters", () => {
     expect(checkTemplate(signin, { subject: "x", body: withPara({ type: "paragraph", content: [{ type: "text", text: "a".repeat(6000) }] }) }).ok).toBe(false);
     const r = checkTemplate(signin, { subject: "a\u0000b", body: withPara({ type: "paragraph", content: [{ type: "text", text: "x\u0007y" }] }) });

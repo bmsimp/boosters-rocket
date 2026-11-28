@@ -55,7 +55,18 @@ class Refused extends Error {}
 function refuse(why: string): never { throw new Refused(why); }
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 // Text a person typed: control characters but a tab are dropped (jsonb can't hold a NUL; a mail has no use for them).
-const clean = (s: string) => s.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "");
+// So are the marks that turn text around or hide in it (bidirectional controls, zero-width marks): in a mail they
+// could make words read other than they are.
+const clean = (s: string) => s.replace(/[\u0000-\u0008\u000b-\u001f\u007f؜​-‏‪-‮⁠-⁤⁦-⁩﻿]/g, "");
+/** Half of a character that came apart (a lone surrogate): Postgres can't store it, so it is refused in words. */
+const LONE_HALF = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+const BROKEN = "The email has a character that can't be saved. Type that part again and try once more.";
+/**
+ * A web or email address written into the words: a mail program makes it a link, so a Sign-in email, whose one link is
+ * the portal's, refuses one (the owner's answer 1: no links of the club's own there).
+ */
+const ADDRESS = /\b(?:https?:\/\/|www\.)|[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|edu|gov|io|us|co|info|app|biz|me|club|school|team|uk|ca)\b/i;
+export const NO_ADDRESSES = "Sign-in emails can't hold web or email addresses of your own: the portal adds the one link they need. For the club's address, use the Club contact field.";
 
 type State = { rules: TemplateRules; text: number; fixed: Map<string, number> };
 
@@ -86,7 +97,9 @@ function checkInline(v: unknown, s: State): TemplateInline[] {
     if (!isObject(n)) refuse(OFF_LIST);
     if (n.type === "text") {
       if (typeof n.text !== "string") refuse(OFF_LIST);
+      if (LONE_HALF.test(n.text as string)) refuse(BROKEN);
       const text = clean(n.text as string);
+      if (!s.rules.links && ADDRESS.test(text)) refuse(NO_ADDRESSES);
       s.text += text.length;
       if (s.text > TEMPLATE_MAX_TEXT) refuse(TOO_LONG);
       const marks = checkMarks(n.marks, s);
@@ -139,9 +152,11 @@ export function checkTemplate(rules: TemplateRules, input: { subject: unknown; b
   let subject: string | null = null;
   if (!rules.subjectFixed) {
     if (typeof input.subject !== "string") errors.push(NO_SUBJECT);
+    else if (LONE_HALF.test(input.subject)) errors.push(BROKEN);
     else {
       subject = clean(input.subject).replace(/\s+/g, " ").trim();
       if (!subject) errors.push(NO_SUBJECT);
+      else if (!rules.links && ADDRESS.test(subject)) errors.push(NO_ADDRESSES);
       else if (subject.length > SUBJECT_MAX) errors.push(LONG_SUBJECT);
       else for (const [, raw] of subject.matchAll(BRACES)) {
         const name = raw ?? "";

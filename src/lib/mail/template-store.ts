@@ -109,7 +109,8 @@ export async function testAddress(staffUserId: string): Promise<string | null> {
 /**
  * "Send me a test": the words on the page, saved or not, filled with the samples, to the staff member's own address,
  * the subject starting "Test: ". At most TESTS_PER_HOUR an hour each, counted from their own audit rows; refused while
- * outgoing mail isn't working. Audited `email_template.test` with the email and whether it went, never the address.
+ * outgoing mail isn't working. Audited `email_template.test` with the email and whether it went, never the address,
+ * in the transaction that holds the person's lock while it counts and sends.
  */
 export async function sendTemplateTest(key: unknown, input: { subject: unknown; body: unknown }, who: Who): Promise<Result> {
   const e = emailByKey(key);
@@ -117,15 +118,21 @@ export async function sendTemplateTest(key: unknown, input: { subject: unknown; 
   const checked = checkTemplate(rulesOf(e), input);
   if (!checked.ok) return checked;
   if (!(await mailWorking())) return { ok: false, errors: ["Outgoing mail isn't working, so no test can be sent. Check it under Settings, Integrations, Outgoing mail."] };
-  const [tried] = await db.select({ count: sql<number>`count(*)::int` }).from(auditLog).where(and(eq(auditLog.action, "email_template.test"),
-    eq(auditLog.actorId, who.staffUserId), gte(auditLog.at, new Date(Date.now() - 3_600_000))));
-  if ((tried?.count ?? 0) >= TESTS_PER_HOUR) return { ok: false, errors: [`You've sent ${TESTS_PER_HOUR} tests in the last hour. Try again a little later.`] };
   const to = await testAddress(who.staffUserId);
   if (!to) return { ok: false, errors: [NOT_FROM_PAGE] };
   const m = sampleEmail(e, await currentBrand(), to, { subject: checked.subject, body: checked.body });
-  const sent = await sendMail({ ...m, subject: `Test: ${m.subject}` }, { purpose: "template_test", actor: who.actor, ip: who.ip });
-  await writeAudit({ actor: who.actor, action: "email_template.test", permission: PERMISSION, targetType: "email_template", targetId: e.key,
-    after: { ok: sent.ok }, ip: who.ip });
-  return sent.ok ? { ok: true, message: `Sent to ${to}. It has sample values, and its links open nothing.` }
-    : { ok: false, errors: ["The test couldn't be sent. Check Outgoing mail under Settings, Integrations."] };
+  // One test of a person's at a time: the count, the send and its audit row under their own lock, so presses together
+  // can't pass the limit, and every try that went to the mail server counts, sent or not.
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`booster.email_template.test.${who.staffUserId}`}))`);
+    const [tried] = await tx.select({ count: sql<number>`count(*)::int` }).from(auditLog).where(and(eq(auditLog.action, "email_template.test"),
+      eq(auditLog.actorId, who.staffUserId), gte(auditLog.at, new Date(Date.now() - 3_600_000))));
+    if ((tried?.count ?? 0) >= TESTS_PER_HOUR) return { ok: false as const, errors: [`You've sent ${TESTS_PER_HOUR} tests in the last hour. Try again a little later.`] };
+    const sent = await sendMail({ ...m, subject: `Test: ${m.subject}` }, { purpose: "template_test", actor: who.actor, ip: who.ip })
+      .catch((): { ok: false } => ({ ok: false }));
+    await writeAudit({ actor: who.actor, action: "email_template.test", permission: PERMISSION, targetType: "email_template", targetId: e.key,
+      after: { ok: sent.ok }, ip: who.ip }, tx);
+    return sent.ok ? { ok: true as const, message: `Sent to ${to}. It has sample values, and its links open nothing.` }
+      : { ok: false as const, errors: ["The test couldn't be sent. Check Outgoing mail under Settings, Integrations."] };
+  });
 }

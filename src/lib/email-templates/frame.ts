@@ -42,17 +42,28 @@ export function frame(b: Pick<Brand, "clubName" | "color">, inner: string): stri
  * One block of a mail, drawn both ways: its plain text (null where the plain text leaves it out, as the big code is) and
  * its HTML. A mail is its blocks, the text ones joined by a blank line, and the HTML in the frame.
  */
-export type Block = { text: string | null; html: string };
+export type Block = {
+  text: string | null; html: string;
+  /** For a block with no text of its own: a line the plain text takes when no other block's text holds `holds` (the code). */
+  textUnlessHeld?: { line: string; holds: string };
+};
 
 export const lineHtml = (p: Line) => (typeof p === "string" ? `${PARAGRAPH}${esc(p)}</p>` : `${PARAGRAPH}<a href="${esc(p.link)}">${esc(p.link)}</a></p>`);
 /** Lines as blocks: each its own paragraph, a link alone on its line. */
 export const lines = (ls: Line[]): Block[] => ls.map((l) => ({ text: typeof l === "string" ? l : l.link, html: lineHtml(l) }));
-/** A code shown big at the head of the HTML; the plain text has it in its sentence instead. */
-export const bigCode = (code: string): Block => ({ text: null, html: `<p style="margin:0 0 16px;font-size:32px;letter-spacing:6px;font-weight:bold">${esc(code)}</p>` });
+/**
+ * A code shown big at the head of the HTML. The plain text has it in its sentence; where the club's words leave that
+ * sentence out, the plain text takes a line of its own, so the code is never in the subject alone.
+ */
+export const bigCode = (code: string): Block => ({ text: null, textUnlessHeld: { line: `Your code is ${code}.`, holds: code },
+  html: `<p style="margin:0 0 16px;font-size:32px;letter-spacing:6px;font-weight:bold">${esc(code)}</p>` });
 
 /** The plain text of a mail's blocks, then the "Powered by" line. */
-export const mailText = (blocks: Block[]) =>
-  `${blocks.flatMap((b) => (b.text === null ? [] : [b.text])).join("\n\n")}\n\n-- \n${POWERED_BY}\n`;
+export const mailText = (blocks: Block[]) => {
+  const held = (x: string) => blocks.some((b) => b.text?.includes(x));
+  const texts = blocks.flatMap((b) => (b.text !== null ? [b.text] : b.textUnlessHeld && !held(b.textUnlessHeld.holds) ? [b.textUnlessHeld.line] : []));
+  return `${texts.join("\n\n")}\n\n-- \n${POWERED_BY}\n`;
+};
 /** The HTML of a mail's blocks, in the club's frame. */
 export const mailHtml = (b: Pick<Brand, "clubName" | "color">, blocks: Block[]) => frame(b, blocks.map((x) => x.html).join(""));
 
