@@ -17,7 +17,8 @@ import { writeAudit, type Actor } from "@/lib/audit/log";
 import type { ParentCtx } from "@/lib/guards";
 import { getShape } from "@/lib/roster/shape";
 import { fieldErrors, formVersion, parseContactForm, sameAddress, samePhone, type ContactForm, type ContactValues } from "./contact-fields";
-import { queueContactChange, type DetailsOf, type QueueAs } from "./contact-queue";
+import type { DetailsOf, QueueAs } from "./contact-queue";
+import { detailsSaved } from "@/lib/families/events";
 import { readMyDetails, type MyContact, type MyDetails } from "./my-family";
 import { takeRateLimit } from "./rate-limit";
 import { parentActor } from "./sessions";
@@ -121,9 +122,10 @@ export type SaveDetailsOutcome =
  * address is saved as the form held it.
  *
  * The save is one update that matches only while the row's `contact_version` is still the form's, raising it by one,
- * with, in that same transaction, the changes to send on queued for each record the details go to
- * (queueContactChange(), ./contact-queue.ts: the own Parent customer of each of the person's open memberships, or the
- * family's own linked customer), and `parent.details.save` (before and after, only what changed, and the items queued,
+ * with, in that same transaction, the save's event (detailsSaved(), src/lib/families/events.ts: `records.events`), whose
+ * accounting handler queues the changes to send on for each record the details go to (queueContactChange(),
+ * ./contact-queue.ts: the own Parent customer of each of the person's open memberships, or the family's own linked
+ * customer), and `parent.details.save` (before and after, only what changed, and the items queued,
  * `queueIds`). Nothing is sent here, and nothing here waits on QuickBooks or on a lock a sender holds: the write queue's
  * worker sends each at its next wake (a staff member's once its lease has run out, if their at-once try didn't).
  */
@@ -152,7 +154,7 @@ export async function saveDetails(of: DetailsOf, form: ContactForm, o: { actor: 
         .where(and(eq(parent.id, of.parentId), eq(parent.contactVersion, before.version))).returning({ version: parent.contactVersion });
     if (rows.length === 0) return null;
     // Sent on after the save, never before (the lead's decision 1): queued here, in the same transaction.
-    const queueIds = await queueContactChange(tx, of, { change: detailsOf(values, change), was: detailsOf(before.values, change),
+    const queueIds = await detailsSaved(tx, { record: "contact", of, change: detailsOf(values, change), was: detailsOf(before.values, change),
       now: detailsOf(now, { phone: true, address: true }) as Required<ContactDetails> }, o);
     await writeAudit({ actor: o.actor, action: "parent.details.save", permission: o.permission, ...targetOf(of),
       before: auditValues(before.values, change), after: { ...auditValues(values, change), ...(queueIds.length ? { queueIds } : {}) }, ip: o.ip }, tx);

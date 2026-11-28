@@ -2,6 +2,8 @@
 // the core may import it: this file and ./index.ts are the only ones under src/plugins/ the core reads
 // (tests/unit/plugin-boundary.test.ts). It imports nothing from a plugin.
 import type { Permission } from "@/lib/permissions/registry";
+import type { DetailsEvents } from "@/lib/families/events";
+import type { GuardianEvents } from "@/lib/families/guardian-events";
 
 /** The setting that says which installed plugins are on: a list of their keys (read through ./index.ts). */
 export const PLUGINS_ON_KEY = "plugins.on";
@@ -65,6 +67,12 @@ export type Slots = {
     family(ask: AddFamilyAsk, rosterTag: string, o: AddOp): Promise<AddResult>;
     student(familyId: string, name: string, rosterTag: string, o: AddOp): Promise<AddResult>;
   };
+  /**
+   * Every save of a core record (slice P6): a guardian's row (src/lib/families/guardian-events.ts) and a person's or a
+   * family's details (src/lib/families/events.ts), called inside the save's own transaction. The plugin queues its
+   * writes to the books there and answers them; with no plugin on, nothing is queued.
+   */
+  "records.events": DetailsEvents & GuardianEvents;
 };
 
 /**

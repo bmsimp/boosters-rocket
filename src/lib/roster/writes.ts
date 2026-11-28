@@ -44,6 +44,7 @@ import { EMAIL_FIELD_MAX, replaceAddressInField } from "@/lib/parents/email-fiel
 import { parseEmailField } from "@/lib/parents/emails";
 import { sendStampHolds, takeStampHolds } from "@/lib/accounting/stamp";
 import { linkStanding } from "@/lib/accounting/status";
+import type { GuardianEvents } from "@/lib/families/guardian-events";
 
 /**
  * The setting that asks the worker for a roster refresh at its next wake: `{ at }`. One ask for the whole portal,
@@ -5919,6 +5920,17 @@ async function createForRow(tx: Tx, b: Books, guardianId: string, familyId: AppF
   if (keepCode) return { guardianId, familyName, outcome: "kept", code: keepCode, item: await keepSaved(tx, write, b.realmId, { familyId, studentId: null }, keepCode, o), write };
   return { guardianId, familyName, outcome: "queued", item: await queueForRow(tx, write, b.realmId, familyId, o), write };
 }
+
+/**
+ * QuickBooks' handler of the core's guardian events (`records.events`, src/lib/families/guardian-events.ts; slice P6):
+ * each event asks queueForGuardian() below for exactly what the save asked before it had events, in the save's own
+ * transaction.
+ */
+export const QUICKBOOKS_GUARDIAN_EVENTS: GuardianEvents = {
+  guardian: (tx, e, o) => queueForGuardian(tx, e.change === "opened" ? { op: "grant", guardianId: e.guardianId, familyId: e.familyId, name: e.name, email: e.email }
+    : e.change === "closed" ? { op: "remove", guardianId: e.guardianId, familyId: e.familyId }
+    : { op: "rename", rows: e.rows, name: e.name, was: e.was, email: e.email }, o),
+};
 
 /**
  * The Parent customer changes a guardian's change asks for, decided and queued in the guardian's own transaction (the

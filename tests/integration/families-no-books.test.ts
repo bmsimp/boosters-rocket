@@ -135,6 +135,8 @@ describe("with no books, staff", () => {
     const r = await addGuardianAction(String(f.id), "Ana Ortiz", "ana@example.com");
     expect(r.ok).toBe(true);
     expect((await db.select().from(guardian).where(eq(guardian.familyId, f.id)))).toHaveLength(1);
+    // Its save's event (records.events) has no handler with no books: nothing is queued for any books.
+    expect(await db.select().from(writeQueue)).toEqual([]);
   });
 
   it("are refused, changing nothing, once the books were turned on after the page was drawn", async () => {

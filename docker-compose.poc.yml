@@ -40,6 +40,11 @@ services:
     environment:
       DATABASE_URL: postgresql://booster:${DB_PASSWORD}@db:5432/booster
       TZ: America/Chicago
+      BACKUP_OUTBOX: /backup-outbox
+    volumes:
+      # Shared with the backup service: a backup asked for on Settings, Backups waits here for its download or its
+      # off-site copy, and is removed once sent. The app never sees the backups folder.
+      - backup-outbox:/backup-outbox
     depends_on:
       db: { condition: service_healthy }
     networks: [internal, edge]
@@ -61,6 +66,40 @@ services:
     healthcheck:
       disable: true
 
+  backup:
+    # The backup service (scripts/backup-agent.sh), as deploy/compose.yml runs it: the nightly backup (scripts/backup.sh)
+    # at the time saved on Settings, Backups (BACKUP_AT club time until someone saves one), into BR_BACKUP_DIR (default
+    # ~/booster-rocket-backups, the folder deploy.sh backs up into), and what that page asks for: back up now, a
+    # download, a restore, an off-site copy. Its lines: docker compose -f docker-compose.poc.yml --env-file .env.poc
+    # logs backup. The proof of concept has no Documenso, so its database is looked for and left out.
+    image: postgres:18
+    container_name: booster-rocket-backup
+    restart: unless-stopped
+    entrypoint: ["bash", "/opt/booster-rocket/scripts/backup-agent.sh", "/backups"]
+    command: []
+    environment:
+      TZ: America/Chicago
+      BR_BACKUP_AT: ${BACKUP_AT:-03:00}
+      BR_BACKUP_KEEP: ${BACKUP_KEEP:-14}
+      # The folder shared with the app, given to the app's user (node, 1000).
+      BR_OUTBOX: /backup-outbox
+      BR_OUTBOX_OWNER: "1000:1000"
+      # The tools in this container, over the network to the database, as its administrator (booster, here).
+      BR_DB_CONTAINER: ""
+      PGHOST: db
+      PGUSER: booster
+      PGPASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      BR_DB_NAME: booster
+    volumes:
+      - ./scripts:/opt/booster-rocket/scripts:ro
+      - ${BR_BACKUP_DIR:-${HOME}/booster-rocket-backups}:/backups
+      - backup-outbox:/backup-outbox
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [internal]
+    # A backup under way is let finish when the service is stopped.
+    stop_grace_period: 2m
+
   migrate:
     # Same image as app (a separate `build:` here would go stale; profile services aren't rebuilt by `compose build`).
     image: booster-rocket-app:current
@@ -80,6 +119,9 @@ volumes:
   # Postgres 16's data, kept until a person removes it (docs/runbooks/poc-linuxdev.md).
   pgdata:
     name: booster-rocket-pgdata
+  # A backup on its way to a download or an off-site copy, for minutes: shared by the backup service and the app.
+  backup-outbox:
+    name: booster-rocket-backup-outbox
 
 networks:
   internal:

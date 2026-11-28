@@ -158,7 +158,9 @@ parent code (below).
 **Events.** When the core saves a family, student, guardian, contact detail or sign-in email, it calls
 `records.events` inside its own transaction, with the record's app id and what changed. QuickBooks' handler is what
 the roster writes and the contact queue do today: it queues the write, in that transaction. The core never waits on
-the books, and the request sent is the same as today's.
+the books, and the request sent is the same as today's. QuickBooks' own flows that ask the books before they save (the rename, move and make-inactive of a linked
+record, and "Create in QuickBooks and link") are not events: they stay as they are in P6 and move whole into the plugin
+in P7.
 
 ### How its tables, permissions, audit actions and Settings entry hang off it
 
@@ -279,7 +281,7 @@ to stand alone, then the move, then the two screens that change.
 | P4 | **Parent slots.** `parent.tabs`, `parent.homeCards`, `parent.contactSaved`; the "as of" line goes with the money box. | Off: no money anywhere a parent looks. The isolation and parent e2e runs pass on and off. |
 | P5 | **Seasons and volunteering.** The payment kind's source, the buy-out offer and paid buy-outs' credit through their slots. | Off: no buy-out offered; paid buy-outs still count. On: the payment kind as today. |
 | P5b | **Payments by hand.** `payments.byHand`; the requirement's optional amount; the Mark paid Drawer, its bulk form and its undo, audited; parents' paid or owed; "Don't track payments" hiding them. | Both settings, a parent of family A never sees B's mark or any note, and a mark counts toward the step. |
-| P6 | **Events.** `records.events` from every core save; QuickBooks' handlers queue what the roster writes and the contact queue queue now. | The writes tripwire holds: the same requests, in the same order, from the same saves. |
+| P6 | **Events.** `records.events` from the core's saves of a guardian, contact details and a sign-in email; QuickBooks' handlers queue what the roster writes and the contact queue queue now. The four QuickBooks-first flows (`renameLinked`, `moveStudent`, `deactivateLinked`, `createInQuickBooksAndLink`) ask the books before they save, so they move in P7. | The writes tripwire holds: the same requests, in the same order, from the same saves. |
 | P7 | **The move.** The code into `src/plugins/quickbooks/`, in two or three pull requests by area, the lists in `page-guards.test.ts` and AGENTS.md moved with it. | The boundary test's list is empty. Full CI green with no test changed but its imports. |
 | P8 | **The two screens.** Setup's "Your books" step with the payments choice; Integrations' Accounting kind in neutral words, with the choice while none is on; `Settings.Integrations.ReadWrite`. | A new club finishes setup without QuickBooks, either way of payments. The mock's words, at 390 and 1440. |
 | P9 | **Off and on.** `canTurnOff()`, the ConfirmDialog with the payments choice, the carry-over (each family the books last showed as paid marked paid, note "Paid in QuickBooks", one audit row of counts), the disconnect, turning on again with the same or a different company. | Off keeps every core record and every link; with payments by hand, a family that paid in QuickBooks reads paid the moment it is off; on again with the same company shows the same figures. |

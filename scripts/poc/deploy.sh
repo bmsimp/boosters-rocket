@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Deploys (or rolls back) a Boosters Rocket server run with docker compose.
-#   scripts/poc/deploy.sh             pull main, build, back up the database, migrate, recreate app and worker, wait healthy
+#   scripts/poc/deploy.sh             pull main, build, back up the database, migrate, recreate app, worker and the backup
+#                                     service, wait healthy
 #   scripts/poc/deploy.sh --rollback  return to the previous image
 # The backup goes to BR_BACKUP_DIR (default ~/booster-rocket-backups, outside this checkout), keeping the newest
-# BR_BACKUP_KEEP (default 14): scripts/backup.sh. A deploy never migrates a database it could not back up first.
+# BR_BACKUP_KEEP (default 14): scripts/backup.sh. A deploy never migrates a database it could not back up first. The
+# backup service (scripts/backup-agent.sh: the nightly backup and what Settings, Backups asks) writes to the same folder.
 # Exit codes: 0 ok, 2 refused (or another deploy running, or the database must be moved to a new Postgres first:
 # docs/runbooks/poc-linuxdev.md, section 8), 3 migrations failed (app untouched), 4 app unhealthy,
 # 5 nothing to roll back to, 6 git pull failed, 7 build failed (app untouched), 8 backup failed (nothing migrated,
@@ -14,6 +16,8 @@ BR_DIR="${BR_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 BR_HEALTH_TIMEOUT="${BR_HEALTH_TIMEOUT:-120}"
 BR_BACKUP_DIR="${BR_BACKUP_DIR:-$HOME/booster-rocket-backups}"
 BR_BACKUP_KEEP="${BR_BACKUP_KEEP:-14}"
+# docker-compose.poc.yml mounts it into the backup service.
+export BR_BACKUP_DIR
 SCRIPTS_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_IMAGE="booster-rocket-app"
 COMPOSE=(docker compose -f docker-compose.poc.yml --env-file .env.poc)
@@ -74,6 +78,14 @@ recreate_worker() {
   fi
 }
 
+recreate_backup_service() {
+  # The backup service runs the checkout's scripts, so it is recreated to run the ones just pulled. The site runs
+  # without it (Settings, Backups then says it isn't answering), so it never fails a deploy either.
+  if ! "${COMPOSE[@]}" up -d --no-deps --force-recreate backup; then
+    say "The backup service didn't start. The site is up; check: docker logs booster-rocket-backup"
+  fi
+}
+
 if [ "${1:-}" = "--rollback" ]; then
   check_env_file
   docker image inspect "$APP_IMAGE:previous" >/dev/null 2>&1 || die 5 "No previous image to roll back to. Nothing was changed."
@@ -118,6 +130,7 @@ if [ -n "$running" ]; then
 fi
 recreate_app
 recreate_worker
+recreate_backup_service
 if ! "${COMPOSE[@]}" run --rm migrate node tools/scripts/setup-code.mjs --if-open; then
   say "Couldn't check whether setup is finished. If it isn't, run scripts/poc/setup-code.sh for a setup code."
 fi

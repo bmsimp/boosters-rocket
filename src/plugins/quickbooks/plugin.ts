@@ -61,5 +61,11 @@ export const quickbooks = {
         return o.asLinked ? writes.addStudentToLinked(familyId, name, rosterTag, o) : writes.changeInPortal({ op: "add_student", familyId, name }, rosterTag, o);
       },
     },
+    // Today's queueing of what a save sends on (slice P6): the contact queue's and the roster write module's handlers.
+    "records.events": {
+      contact: async (tx, e, o) => (await import("@/lib/parents/contact-queue")).QUICKBOOKS_DETAILS_EVENTS.contact(tx, e, o),
+      email: async (tx, e, o) => (await import("@/lib/parents/contact-queue")).QUICKBOOKS_DETAILS_EVENTS.email(tx, e, o),
+      guardian: async (tx, e, o) => (await import("@/lib/roster/writes")).QUICKBOOKS_GUARDIAN_EVENTS.guardian(tx, e, o),
+    },
   },
 } as const satisfies Plugin;

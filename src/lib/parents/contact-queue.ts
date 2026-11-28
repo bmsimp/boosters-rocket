@@ -15,6 +15,7 @@ import { getShape } from "@/lib/roster/shape";
 import { familyLinkOf, guardianLinksOf, recordsCompany } from "@/lib/families/links";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { whoseDetails } from "./my-family";
+import type { DetailsEvents } from "@/lib/families/events";
 
 /** Whose details a save changes: a person's own (books with a parent type), or an app family's (books with none). */
 export type DetailsOf = { kind: "person"; parentId: string } | { kind: "family"; familyId: AppFamilyId };
@@ -254,3 +255,13 @@ export async function queueEmailChange(tx: Tx, parentId: string, change: { from:
   }
   return ids;
 }
+
+/**
+ * QuickBooks' handler of the core's details events (`records.events`, src/lib/families/events.ts; slice P6): each event
+ * queues exactly what the save queued before it had events, by the two functions above, with the same arguments, in the
+ * save's own transaction.
+ */
+export const QUICKBOOKS_DETAILS_EVENTS: DetailsEvents = {
+  contact: (tx, e, o) => queueContactChange(tx, e.of, { change: e.change, was: e.was, now: e.now }, o),
+  email: (tx, e, o) => queueEmailChange(tx, e.parentId, { from: e.from, to: e.to }, o),
+};
