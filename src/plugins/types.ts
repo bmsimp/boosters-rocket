@@ -36,11 +36,34 @@ export type PluginPage = { path: string; door: "staff" | "parent"; permission: P
 /** A job the worker runs for the plugin, by the name its runs are recorded under (`job_run.job`). */
 export type PluginJob = { name: string; due: string };
 
+/** A new family, as the Families pages send it: `typeQboId`, the member type chosen, in books with several. */
+export type AddFamilyAsk = { role: "family" | "member"; name: string; typeQboId: string | null };
+/** Who is adding, and whether they may also make the family in the books (the linking permission). */
+export type AddOp = {
+  actor: { door: "staff"; id: string; label: string }; ip: string | null; permission: string; staffUserId: string; showAmounts?: boolean; mayLink: boolean;
+};
+/** What an add answers: the result shape of every staff action. `offer`: a free name, for a name that is taken. */
+export type AddResult =
+  | { ok: true; message: string; unlinked?: true; queued?: true; status?: "waiting" | "attention" }
+  | { ok: false; errors: string[]; offer?: string };
+
 /**
- * The places on core screens a plugin fills (section 3, "Slots"). Each takes only what the core gives it, and a slot
- * no plugin fills draws nothing. They join here in the slices that make them (P2 to P6).
+ * The places on core screens a plugin fills (section 3, "Slots"). Each takes only what the core gives it. A slot no
+ * plugin fills draws nothing, or, where the core has a way of its own, takes the core's. They join here in the slices
+ * that make them (P2 to P6).
  */
-export type Slots = Record<never, never>;
+export type Slots = {
+  /**
+   * Add a family, add a student (slice P2): how a new record is made. The core's own way saves the record and sends
+   * nothing (src/lib/families/by-hand.ts); an accounting plugin's is its books' flow, today's for QuickBooks. Every
+   * argument comes from the browser and is checked again inside. `rosterTag`: the tag of the books' company the page was
+   * drawn with, which the core's way doesn't read.
+   */
+  "families.howToAdd": {
+    family(ask: AddFamilyAsk, rosterTag: string, o: AddOp): Promise<AddResult>;
+    student(familyId: string, name: string, rosterTag: string, o: AddOp): Promise<AddResult>;
+  };
+};
 
 /**
  * One manifest per plugin, in src/plugins/<key>/plugin.ts. Slice P1 declares what exists today; the slots, jobs' runs,

@@ -11,6 +11,8 @@ import { familyPage } from "@/app/staff/(app)/family-pages";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { familiesBeingMade } from "@/lib/roster/writes";
 import { endedLinksHeld } from "@/lib/accounting/ended-links";
+import { accountingOn } from "@/plugins";
+import { FamiliesByHand } from "./by-hand";
 
 export const metadata = { title: "Roster" };
 export const dynamic = "force-dynamic";
@@ -32,6 +34,8 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
   const ctx = await requireStaffPage("Roster.Read");
   const sp = await searchParams;
   const typed = (typeof sp.q === "string" ? sp.q : Array.isArray(sp.q) ? sp.q[0] ?? "" : "").trim().slice(0, 100);
+  // With no books, the portal's own families alone (stage 5's slice P2): nothing below reads QuickBooks.
+  if (!(await accountingOn())) return FamiliesByHand({ ctx, typed });
   const q = typed.toLowerCase();
   // The tag first: the roster the page then shows is that company's or a later one, never an earlier one.
   const rosterTag = await currentRosterTag();

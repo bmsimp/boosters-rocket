@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { staffAction, type StaffCtx } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
-import { addFamily, addStudentToLinked, askFamilyInactive, askRosterWrite, changeInPortal, contactSavedWords, createInQuickBooksAndLink, deactivateLinked, linkStudentMadeAfterGivingUp, moveStudent, renameLinked, SAVED_LEASE_MS, sendContactSaved, sendPortalValue, STAFF_DETAILS_COPY,
+import { askFamilyInactive, askRosterWrite, changeInPortal, contactSavedWords, createInQuickBooksAndLink, deactivateLinked, linkStudentMadeAfterGivingUp, moveStudent, renameLinked, SAVED_LEASE_MS, sendContactSaved, sendPortalValue, STAFF_DETAILS_COPY,
   type PortalChange, type WriteAsk, type WriteResult } from "@/lib/roster/writes";
 import { giveUp, giveUpEach, tryAgainEach, tryAgainNow, NOTE_MAX } from "@/lib/roster/queue";
 import { bulkWords, idsFrom, type BulkDone } from "@/lib/bulk";
@@ -12,6 +12,9 @@ import { familyRecordAt } from "@/lib/families/address";
 import { parseContactForm, type ContactForm } from "@/lib/parents/contact-fields";
 import { saveDetails } from "@/lib/parents/contact-edits";
 import { whoseDetails } from "@/lib/parents/my-family";
+import { accountingOn } from "@/plugins";
+import { howToAdd } from "@/lib/families/how-to-add";
+import { changeByHand, moveByHand, type ByHandChange } from "@/lib/families/by-hand";
 
 // Staff changes to the roster in QuickBooks (v1 spec §6.1). Each action needs Roster.Family.ReadWrite, and also
 // Roster.Read, the pages' own permission: the forms show only to staff who hold both. A server action can be called
@@ -43,18 +46,31 @@ async function run(ctx: StaffCtx, ask: WriteAsk, rosterTag: string): Promise<Wri
   return r;
 }
 
+/**
+ * With no books (no accounting plugin on: docs/superpowers/specs/2026-11-28-accounting-plugin-design.md, section 2),
+ * every change below is the portal's own, saved by hand and sent nowhere (src/lib/families/by-hand.ts), whatever
+ * links a record kept: the records stand alone. Null while the club keeps books, and the action goes on as today.
+ */
+async function byHand(ctx: StaffCtx, change: ByHandChange): Promise<WriteResult | null> {
+  if (await accountingOn()) return null;
+  const r = await changeByHand(change, { actor: op(ctx).actor, ip: ctx.ip, permission: P });
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
+}
+
 /** Who may send a family's create to QuickBooks and link it: the linking permission (the owner's decision of 2026-11-18). */
 const mayLink = (ctx: StaffCtx) => can(ctx.effective, "Accounting.Link.ReadWrite");
 
 /**
- * A new family, or a new member in a flat club (`typeQboId`: the member type staff chose, when the club has several):
- * the portal's own record first (stage 3's slice 9d, addFamily()), sent to QuickBooks only for a staff member who may
- * link families to accounting.
+ * A new family, or a new member in a flat club (`typeQboId`: the member type staff chose, when the club has several),
+ * made as the club's books make one (howToAdd(): stage 5's slice P2): with QuickBooks, the portal's own record first
+ * (stage 3's slice 9d, addFamily()), sent to QuickBooks only for a staff member who may link families to accounting;
+ * with no books, the record alone.
  */
 export const createAction = staffAction(P, async (ctx, rosterTag: string, role: "family" | "member", newName: string, typeQboId?: string | null): Promise<WriteResult> => {
   const type = typeQboId ?? null; // a form for a family, bound to fewer arguments, leaves it out
   if (!canRead(ctx) || !tag(rosterTag) || (role !== "family" && role !== "member") || !name(newName) || (type !== null && !id(type))) return NOT_FROM_PAGE;
-  const r = await addFamily({ role, name: newName, typeQboId: type }, rosterTag, { ...op(ctx), mayLink: mayLink(ctx) });
+  const r = await (await howToAdd()).family({ role, name: newName, typeQboId: type }, rosterTag, { ...op(ctx), mayLink: mayLink(ctx) });
   if (r.ok) revalidatePath("/", "layout");
   return r;
 });
@@ -67,6 +83,7 @@ export const createAction = staffAction(P, async (ctx, rosterTag: string, role: 
 export const createAndLinkAction = staffAction(P, async (ctx, rosterTag: string, familyId: string, typeQboId?: string | null): Promise<WriteResult> => {
   const type = typeQboId ?? null;
   if (!canRead(ctx) || !mayLink(ctx) || !tag(rosterTag) || !uuid(familyId) || (type !== null && !id(type))) return NOT_FROM_PAGE;
+  if (!(await accountingOn())) return NOT_FROM_PAGE; // no books to make it in
   const { result, changed } = await createInQuickBooksAndLink(familyId, type, rosterTag, op(ctx));
   if (changed) revalidatePath("/", "layout");
   return result;
@@ -79,21 +96,36 @@ async function inPortal(ctx: StaffCtx, ask: PortalChange, rosterTag: string): Pr
   return r;
 }
 
-/** A student added to a family with no link: the portal's own record only. */
-export const addStudentHereAction = staffAction(P, async (ctx, rosterTag: string, familyId: string, newName: string): Promise<WriteResult> => {
+/**
+ * A student added to a family, as the club's books add one (howToAdd(): stage 5's slice P2): with QuickBooks, to a
+ * family with no link the portal's own record only, and to a linked family the record first, then made in QuickBooks
+ * (addStudentToLinked()), the family's link deciding which; with no books, the record alone. Both of the family page's
+ * forms send it here, the family's app id, a uuid, never its customer's.
+ */
+async function addStudent(ctx: StaffCtx, rosterTag: string, familyId: string, newName: string): Promise<WriteResult> {
   if (!canRead(ctx) || !tag(rosterTag) || !uuid(familyId) || !name(newName)) return NOT_FROM_PAGE;
-  return inPortal(ctx, { op: "add_student", familyId, name: newName }, rosterTag);
-});
+  const r = await (await howToAdd()).student(familyId, newName, rosterTag, { ...op(ctx), mayLink: mayLink(ctx) });
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
+}
+
+/** A student added to a family with no link: the portal's own record only. */
+export const addStudentHereAction = staffAction(P, async (ctx, rosterTag: string, familyId: string, newName: string): Promise<WriteResult> =>
+  addStudent(ctx, rosterTag, familyId, newName));
 
 /** A family with no link, or a student with none, renamed in the portal only. */
 export const renameHereAction = staffAction(P, async (ctx, rosterTag: string, kind: "family" | "student", recordId: string, newName: string): Promise<WriteResult> => {
   if (!canRead(ctx) || !tag(rosterTag) || (kind !== "family" && kind !== "student") || !uuid(recordId) || !name(newName)) return NOT_FROM_PAGE;
+  const here = await byHand(ctx, kind === "family" ? { op: "rename_family", familyId: recordId, name: newName } : { op: "rename_student", studentId: recordId, name: newName });
+  if (here) return here;
   return inPortal(ctx, kind === "family" ? { op: "rename_family", familyId: recordId, name: newName } : { op: "rename_student", studentId: recordId, name: newName }, rosterTag);
 });
 
 /** A family with no link (with its active students), or a student with none, made inactive in the portal only: no balance to read. */
 export const deactivateHereAction = staffAction(P, async (ctx, rosterTag: string, kind: "family" | "student", recordId: string): Promise<WriteResult> => {
   if (!canRead(ctx) || !tag(rosterTag) || (kind !== "family" && kind !== "student") || !uuid(recordId)) return NOT_FROM_PAGE;
+  const here = await byHand(ctx, kind === "family" ? { op: "deactivate_family", familyId: recordId } : { op: "deactivate_student", studentId: recordId });
+  if (here) return here;
   return inPortal(ctx, kind === "family" ? { op: "deactivate_family", familyId: recordId } : { op: "deactivate_student", studentId: recordId }, rosterTag);
 });
 
@@ -101,12 +133,8 @@ export const deactivateHereAction = staffAction(P, async (ctx, rosterTag: string
  * A student added to a linked family (stage 3's slice 9e): the portal's own record first, then made in QuickBooks
  * (addStudentToLinked()). The page sends the family's app id, a uuid, never its customer's.
  */
-export const addStudentAction = staffAction(P, async (ctx, rosterTag: string, familyId: string, newName: string): Promise<WriteResult> => {
-  if (!canRead(ctx) || !tag(rosterTag) || !uuid(familyId) || !name(newName)) return NOT_FROM_PAGE;
-  const r = await addStudentToLinked(familyId, newName, rosterTag, op(ctx));
-  if (r.ok) revalidatePath("/", "layout");
-  return r;
-});
+export const addStudentAction = staffAction(P, async (ctx, rosterTag: string, familyId: string, newName: string): Promise<WriteResult> =>
+  addStudent(ctx, rosterTag, familyId, newName));
 
 /**
  * A linked family, member or student renamed (stage 3's slice 9e): saved in the portal first, then sent to QuickBooks
@@ -114,6 +142,8 @@ export const addStudentAction = staffAction(P, async (ctx, rosterTag: string, fa
  */
 export const renameLinkedAction = staffAction(P, async (ctx, rosterTag: string, kind: "family" | "student", recordId: string, newName: string): Promise<WriteResult> => {
   if (!canRead(ctx) || !tag(rosterTag) || (kind !== "family" && kind !== "student") || !uuid(recordId) || !name(newName)) return NOT_FROM_PAGE;
+  const here = await byHand(ctx, kind === "family" ? { op: "rename_family", familyId: recordId, name: newName } : { op: "rename_student", studentId: recordId, name: newName });
+  if (here) return here;
   const r = await renameLinked({ kind, recordId, name: newName }, rosterTag, op(ctx));
   if (r.ok) revalidatePath("/", "layout");
   return r;
@@ -132,6 +162,11 @@ export const renameParentAction = staffAction(P, async (ctx, rosterTag: string, 
  */
 export const moveAction = staffAction(P, async (ctx, rosterTag: string, studentId: string, toFamilyId: string): Promise<WriteResult> => {
   if (!canRead(ctx) || !tag(rosterTag) || !uuid(studentId) || !uuid(toFamilyId)) return NOT_FROM_PAGE;
+  if (!(await accountingOn())) {
+    const here = await moveByHand(studentId, toFamilyId, { actor: op(ctx).actor, ip: ctx.ip, permission: P });
+    if (here.ok) revalidatePath("/", "layout");
+    return here;
+  }
   const r = await moveStudent(studentId, toFamilyId, rosterTag, op(ctx));
   if (r.ok) revalidatePath("/", "layout");
   return r;
@@ -154,6 +189,8 @@ export const deactivateAction = staffAction(P, async (ctx, rosterTag: string, qb
  */
 export const deactivateLinkedAction = staffAction(P, async (ctx, rosterTag: string, kind: "family" | "student", recordId: string): Promise<WriteResult> => {
   if (!canRead(ctx) || !tag(rosterTag) || (kind !== "family" && kind !== "student") || !uuid(recordId)) return NOT_FROM_PAGE;
+  const here = await byHand(ctx, kind === "family" ? { op: "deactivate_family", familyId: recordId } : { op: "deactivate_student", studentId: recordId });
+  if (here) return here;
   const r = await deactivateLinked({ kind, recordId }, rosterTag, op(ctx));
   if (r.ok) revalidatePath("/", "layout");
   return r;
@@ -170,6 +207,8 @@ const stampOk = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0
  */
 export const familyInactiveAction = staffAction(P, async (ctx, rosterTag: string, familyId: string, stamp: string): Promise<WriteResult> => {
   if (!canRead(ctx) || !tag(rosterTag) || !uuid(familyId) || !stampOk(stamp)) return NOT_FROM_PAGE;
+  const here = await byHand(ctx, { op: "deactivate_family", familyId });
+  if (here) return here;
   const { result, changed } = await askFamilyInactive(familyId, stamp, rosterTag, op(ctx));
   if (changed) revalidatePath("/", "layout");
   return result;

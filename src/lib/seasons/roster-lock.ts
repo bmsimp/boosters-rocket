@@ -6,7 +6,7 @@ import { sql } from "drizzle-orm";
 import { type Tx } from "@/lib/db/client";
 import { env } from "@/env";
 import { getRosterSource } from "@/lib/roster/source";
-import { ROSTER_LOCK } from "@/lib/roster/shape";
+import { RECORDS_LOCK } from "@/lib/families/records-lock";
 
 /** What staff are told when the roster was read from another QuickBooks company after their page was opened. */
 export const ROSTER_MOVED = "The roster has been read from another QuickBooks company since this page was opened, so nothing was changed. Reload the page.";
@@ -30,6 +30,6 @@ export const currentRosterTag = async (tx?: Tx): Promise<string> => rosterTagOf(
  * The caller reads the roster after this, so what it checks is what it writes against.
  */
 export async function lockRosterAs(tx: Tx, tag: string): Promise<boolean> {
-  await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
+  await tx.execute(sql`select pg_advisory_xact_lock(${RECORDS_LOCK})`);
   return (await currentRosterTag(tx)) === tag;
 }

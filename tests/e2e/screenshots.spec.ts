@@ -21,6 +21,8 @@ import { LINKS, seedLinks } from "./links-seed";
  *
  * And the Accounting links redesign (the owner's approval of 2026-11-27): the list with one row's details open and two
  * rows ticked, and a family's Review drawer, at both widths (390: the phone's list and its full-screen drawer).
+ *
+ * And the Families pages with no books (stage 5's slice P2), at both widths.
  */
 const sql = postgres(process.env.DATABASE_URL!);
 test.afterAll(async () => { await sql.end(); });
@@ -81,6 +83,32 @@ test("the QuickBooks pages, for the owner to look at", async ({ page }, info) =>
   } finally {
     await sql`UPDATE setting SET value = ${sql.json({ realmId: REALM })} WHERE key = 'roster.source'`;
     await sql`UPDATE qbo_connection SET realm_id = ${REALM}`;
+  }
+});
+
+/**
+ * The Families pages with no books (stage 5's slice P2): QuickBooks is turned off for the pictures (`plugins.on` empty)
+ * and turned on again after. The roster, a family's page, and its Add a student drawer, at each project's width.
+ */
+test("the Families pages with no books, for the owner to look at", async ({ page }, info) => {
+  const [family] = await sql`SELECT family_id FROM accounting_link WHERE customer_id = 'E2E-FAMILY' AND family_id IS NOT NULL`;
+  await sql`UPDATE setting SET value = ${sql.json([])} WHERE key = 'plugins.on'`;
+  try {
+    await page.goto("/staff/roster");
+    await expect(page.getByRole("heading", { name: "Add a family" })).toBeVisible();
+    await settle(page);
+    await page.screenshot(shot("no-books-roster", info.project.name));
+    await page.goto(`/staff/roster/${family!.family_id as string}`);
+    await expect(page.getByRole("heading", { name: "Change the family" })).toBeVisible();
+    await settle(page);
+    await page.screenshot(shot("no-books-family", info.project.name));
+    await page.goto(`/staff/roster/${family!.family_id as string}?add-student-here=1`);
+    const drawer = page.getByRole("dialog", { name: "Add a student" });
+    await expect(drawer).toBeVisible();
+    await drawer.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+    await page.screenshot({ path: `test-results/screenshots/no-books-add-student-${info.project.name}.png` });
+  } finally {
+    await sql`UPDATE setting SET value = ${sql.json(["quickbooks"])} WHERE key = 'plugins.on'`;
   }
 });
 

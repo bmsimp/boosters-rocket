@@ -1,7 +1,7 @@
 // The QuickBooks Online plugin's manifest (docs/superpowers/specs/2026-11-28-accounting-plugin-design.md, section 3).
 // Slice P1 declares what exists today: its code is still under src/lib (src/lib/quickbooks/, roster/, money/,
-// buyouts/, accounting/) and moves here in slice P7. Plain data: it imports no QuickBooks code, so the core reading
-// the plugin list (src/plugins/index.ts) pulls none in.
+// buyouts/, accounting/) and moves here in slice P7. Plain data, and functions that load QuickBooks' code only when
+// called: it imports none, so the core reading the plugin list (src/plugins/index.ts) pulls none in.
 import { ACTION_NAMES } from "@/lib/audit/actions";
 import { ACCOUNTING_ABILITIES, type Plugin } from "../types";
 
@@ -50,5 +50,18 @@ export const quickbooks = {
     { name: "buyouts.check", due: "daily" },
     { name: "parents.contact_take_in", due: "once, after a roster read that keeps billing addresses" },
   ],
-  slots: {},
+  slots: {
+    // Today's flow (stage 3's slices 9d and 9e): the portal's record first, then made in QuickBooks, for a family by a
+    // staff member who may link families; a student made there under a linked family, or kept in the portal only in a
+    // family with no link, as the family's page has always chosen between them.
+    "families.howToAdd": {
+      family: async (ask, rosterTag, o) => (await import("@/lib/roster/writes")).addFamily(ask, rosterTag, o),
+      student: async (familyId, name, rosterTag, o) => {
+        const [writes, links, ids] = await Promise.all([import("@/lib/roster/writes"), import("@/lib/families/links"), import("@/lib/families/ids")]);
+        const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(familyId);
+        const linked = uuid && (await links.familyLinkState(ids.asAppFamilyId(familyId.toLowerCase()))).state === "linked";
+        return linked ? writes.addStudentToLinked(familyId, name, rosterTag, o) : writes.changeInPortal({ op: "add_student", familyId, name }, rosterTag, o);
+      },
+    },
+  },
 } as const satisfies Plugin;

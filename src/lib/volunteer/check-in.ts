@@ -15,7 +15,7 @@ import { activeFamilyOf, studentsStillIn } from "@/lib/families/session-family";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { takeRateLimit } from "@/lib/parents/rate-limit";
 import { parentActor } from "@/lib/parents/sessions";
-import { ROSTER_LOCK } from "@/lib/roster/shape";
+import { RECORDS_LOCK } from "@/lib/families/records-lock";
 import { isUuid } from "@/lib/seasons/ids";
 import { getClubSettings } from "@/lib/settings/club";
 import { checkInWindow, clockOf, dateWords, instantWords, shiftInstants, shiftMinutes, shiftTimeWords } from "./clock";
@@ -102,7 +102,7 @@ export async function checkIn(ctx: ParentCtx, code: unknown, which: unknown, now
   const zone = (await getClubSettings()).timeZone;
   const done = await takePlace(async (tx): Promise<Result> => {
     await tx.execute(sql`set local lock_timeout = '10s'`);
-    await tx.execute(sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`);
+    await tx.execute(sql`select pg_advisory_xact_lock_shared(${RECORDS_LOCK})`);
     const [row] = await tx.select({ shift: volunteerShift, event: volunteerEvent }).from(volunteerShift).innerJoin(volunteerEvent, eq(volunteerEvent.id, volunteerShift.eventId))
       .where(eq(volunteerShift.checkinCode, code)).for("share", { of: volunteerShift });
     if (!row) return no(NOT_FROM_PAGE);

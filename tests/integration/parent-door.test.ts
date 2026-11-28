@@ -18,8 +18,6 @@ import { chooseFamily, completeParentSignin } from "@/lib/parents/family-choice"
 import { blockPerson } from "@/lib/parents/people";
 import { setRequireStudents } from "@/lib/parents/switches";
 import { endParentSessions, enterableGuardianRows, guardianRowCounts, hasRowThatCounts, renewParentSession, studentsRuleInForce } from "@/lib/parents/sessions";
-import { getParentSettings } from "@/lib/parents/settings";
-import { sendOwedWelcomes } from "@/lib/parents/welcome";
 import { env } from "@/env";
 import { asAppFamilyId, type AppFamilyId } from "@/lib/families/ids";
 // Each person is seeded in a family of the app's own (seedGuardianInFamily()): the gate lets a parent in only through an
@@ -741,11 +739,11 @@ describe("the gate: while the club asks for an active student, a family with non
   // An installation may hold the setting on beside a shape that names no students: before stage 3's slice 7a the
   // setting was in force only while the shape named a student type, and a shape save never switched it off. So it is in
   // force only then still, and nobody gains or loses access at the upgrade; the JavaScript rule and the SQL one agree.
-  it("does not apply the setting stored on while the shape names no students, and applies it again once a shape does", async () => {
+  // Students are always the portal's own (stage 5's slice P2): the setting is in force whatever the shape names.
+  it("applies the setting stored on whatever the shape names, and lets the family in once it has an active student", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
     const g = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1", status: "invited" });   // no active student
     await seedParentSettings({ signin: true, welcome: true, requireActiveStudents: true });
-    await db.update(parent).set({ welcomeOwed: true }).where(eq(parent.id, a.id));
     /** The rule as SQL, as the reminders read a row (guardianRowCounts()) and the welcome a person (hasRowThatCounts()). */
     const sqlSays = async () => {
       const rule = await studentsRuleInForce();
@@ -753,39 +751,17 @@ describe("the gate: while the club asks for an active student, a family with non
       const people = await db.select({ id: parent.id }).from(parent).where(and(eq(parent.id, a.id), hasRowThatCounts(rule)));
       return [rows.length === 1, people.length === 1];
     };
-    const STALE = [{ kind: "flat" as const, memberTypeIds: ["M"] }, { kind: "layered" as const, familyTypeId: "F", studentTypeId: null, parentTypeId: "P" }];
-    for (const [i, stale] of STALE.entries()) {
-      await storeShape(stale);
-      expect(await studentsRuleInForce()).toBe(false);
-      expect((await enterableGuardianRows(a.id)).map((r) => r.id)).toEqual([g.id]);
-      expect(await sqlSays()).toEqual([true, true]);
-      // Welcomed (once), then given a code and signed in.
-      outbox.length = 0;
-      if (i === 0) {
-        expect(await sendOwedWelcomes()).toEqual({ sent: 1, failed: 0 });
-        expect(outbox.map((m) => m.to)).toEqual(["ana@example.com"]);
-        outbox.length = 0;
-      }
-      await ageCodes();
-      const signedIn = await signIn("ana@example.com");
-      expect(signedIn.body).toEqual({ ok: true, next: "/" });
-      expect(await stateOf(signedIn.cookie)).toMatchObject({ status: "ok", identity: { guardianId: g.id } });
+    for (const shape of [{ kind: "flat" as const, memberTypeIds: ["M"] }, { kind: "layered" as const, familyTypeId: "F", studentTypeId: null, parentTypeId: "P" }, undefined]) {
+      await storeShape(shape);
+      expect(await studentsRuleInForce()).toBe(true);
+      expect(await enterableGuardianRows(a.id)).toEqual([]);
+      expect(await sqlSays()).toEqual([false, false]);
     }
-    // A shape that names students: the stored value is in force again, by both rules, and she is sent no code until
-    // the family has an active student. Nothing was switched or closed on the way.
-    await storeShape();
-    expect(await studentsRuleInForce()).toBe(true);
-    expect(await getParentSettings()).toMatchObject({ requireActiveStudents: true });
-    expect(await enterableGuardianRows(a.id)).toEqual([]);
-    expect(await sqlSays()).toEqual([false, false]);
-    outbox.length = 0;
-    await ageCodes();
-    await post("/portal-password/check", { email: "ana@example.com", password: DOOR_PASSWORD });
-    expect(await refusedFor("signin.password_refused", "no_enabled_guardian")).toHaveLength(1);
-    expect(outbox).toEqual([]);
     await giveStudent(g.familyId);
     expect((await enterableGuardianRows(a.id)).map((r) => r.id)).toEqual([g.id]);
     expect(await sqlSays()).toEqual([true, true]);
+    await ageCodes();
+    expect((await signIn("ana@example.com")).body).toEqual({ ok: true, next: "/" });
     expect(await statuses()).toEqual(["active"]);
   });
 

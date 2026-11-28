@@ -213,20 +213,14 @@ describe("the reminders before a due date", () => {
     expect(await sendDueReminders(at(WAKE))).toEqual({ sent: 1, failed: 0 });
     expect(mail.outbox.map((m) => m.to)).toEqual([FAMILY_A.parent.email]);
     expect((await db.select({ status: guardian.status }).from(guardian)).every((g) => g.status !== "disabled")).toBe(true);
-    // Stored on beside a shape that names no students (as one saved before stage 3's slice 7a may be), it is not in
-    // force (studentsRuleInForce()): B is reminded as with it off. The shape is stored alone, bringing nothing into step.
-    const shape = (await db.select({ value: setting.value }).from(setting).where(eq(setting.key, SHAPE_KEY)))[0]!.value;
+    // Whatever the shape names (stage 5's slice P2: students are always the portal's own), it stays in force: B is not
+    // reminded. The shape is stored alone, bringing nothing into step.
     for (const stale of [{ kind: "flat", memberTypeIds: ["F"] }, { ...P_SHAPE, studentTypeId: null }]) {
       await db.delete(requirementReminder); mail.outbox.length = 0;
       await db.update(setting).set({ value: stale }).where(eq(setting.key, SHAPE_KEY));
       await sendDueReminders(at(WAKE));
-      expect(mail.outbox.map((m) => m.to)).toContain(FAMILY_B.parent.email);
+      expect(mail.outbox.map((m) => m.to)).not.toContain(FAMILY_B.parent.email);
     }
-    // A shape with students again: the rule is in force again, and B is not reminded.
-    await db.delete(requirementReminder); mail.outbox.length = 0;
-    await db.update(setting).set({ value: shape }).where(eq(setting.key, SHAPE_KEY));
-    expect(await sendDueReminders(at(WAKE))).toEqual({ sent: 1, failed: 0 });
-    expect(mail.outbox.map((m) => m.to)).toEqual([FAMILY_A.parent.email]);
   });
 
   it("claims each email before sending it, so two wakes at once send it once, and tries a failed one again after 15 minutes", async () => {

@@ -11,6 +11,7 @@ import type { StoredMailConfig } from "@/lib/mail/types";
 import { QUICKBOOKS, type AppFamilyId } from "@/lib/families/ids";
 import { getRosterSource } from "@/lib/roster/source";
 import { recordOfCustomer } from "./app-records";
+import { PLUGINS_ON_KEY } from "@/plugins/types";
 
 /**
  * How to empty the database, worked out once per process from the database itself (the schema doesn't change during a
@@ -92,7 +93,16 @@ export function childrenFirst(ids: number[], references: { child: number; parent
 }
 
 /** Empties every table except the built-in Admin role, removes custom roles, and starts identity columns again from 1. */
+/** resetDb(), then QuickBooks on: the club every test starts with. */
 export async function resetDb() {
+  await emptyDb();
+  // The club the tests build is a QuickBooks club, as every club was before stage 5: QuickBooks is on. A test of the
+  // portal with no books turns it off itself (accountingOff() below).
+  await db.insert(setting).values({ key: PLUGINS_ON_KEY, value: ["quickbooks"] });
+}
+
+/** Empties every table but the built-in Admin role, leaving no page on disk, with nothing put back. */
+export async function emptyDb() {
   const statements = await emptyEverything();
   // A DO block is one statement and one transaction, whatever protocol the driver speaks.
   await db.execute(sql.raw(`DO $reset$ BEGIN ${statements}; END $reset$`));
@@ -107,6 +117,11 @@ export async function resetDb() {
       EXECUTE ${literal(`TRUNCATE ${written.join(", ")} CASCADE`)}; END $reset$`));
   }
   invalidateProviders();
+}
+
+/** The club keeps no books: no accounting plugin on (docs/superpowers/specs/2026-11-28-accounting-plugin-design.md, section 2). */
+export async function accountingOff(): Promise<void> {
+  await db.insert(setting).values({ key: PLUGINS_ON_KEY, value: [] }).onConflictDoUpdate({ target: setting.key, set: { value: [] } });
 }
 
 /**

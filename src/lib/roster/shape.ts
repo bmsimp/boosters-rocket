@@ -5,10 +5,14 @@ import { familyMoney, setting, qboCustomerType, qboCustomer } from "@/lib/db/sch
 import { writeAudit } from "@/lib/audit/log";
 import type { QboOp } from "@/lib/quickbooks/connection";
 import { withdrawAddressesNote } from "@/lib/parents/take-in-setting";
+import { RECORDS_LOCK } from "@/lib/families/records-lock";
 
 export const SHAPE_KEY = "membership.shape";
-/** Postgres advisory lock held for the length of a refresh and of a shape save, so neither overlaps the other (spec §2 Refreshing). */
-export const ROSTER_LOCK = 7461001;
+/**
+ * Postgres advisory lock held for the length of a refresh and of a shape save, so neither overlaps the other (spec §2
+ * Refreshing): the club's records lock, the core's (src/lib/families/records-lock.ts), under QuickBooks' name for it.
+ */
+export const ROSTER_LOCK = RECORDS_LOCK;
 /** The roster cache's billing address columns with nothing in them: a customer whose type the shape doesn't name keeps none. */
 export const NO_ADDRESS_COLUMNS = {
   addressLine1: null, addressLine2: null, addressCity: null, addressRegion: null, addressPostalCode: null, addressCountry: null,

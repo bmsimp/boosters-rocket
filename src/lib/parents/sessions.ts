@@ -4,7 +4,6 @@ import { accountingLink, family, guardian, parent, parentAuthSession, parentAuth
 import type { Actor } from "@/lib/audit/log";
 import { QUICKBOOKS, type AppFamilyId } from "@/lib/families/ids";
 import { recordsCompany } from "@/lib/families/links";
-import { getShape, shapeNamesStudents, type MembershipShape } from "@/lib/roster/shape";
 import { getParentSettings } from "./settings";
 import { unspentLink } from "./link-state";
 
@@ -303,24 +302,19 @@ export const hasActiveStudent = (familyId: typeof family.id): SQL =>
   exists(db.select({ id: student.id }).from(student).where(and(eq(student.familyId, familyId), eq(student.active, true))));
 
 /**
- * Whether "Families with no active student" is in force: stored on, and the stored membership shape names a student
- * type (shapeNamesStudents()). The portal adds a student, moves one and changes a linked one only while the shape
- * names a student type (shapeOperations()'s `noStudents`), and "Create a family from this" makes student records only
- * then, so the shape says whether the club keeps students in the portal; the records a shape saved without one leaves
- * (an unlinked one can still be renamed or made inactive, changeInPortal(), but none added) must not decide who signs
- * in: the rule is in force only while the shape names students, as it was
- * before stage 3's slice 7a, and a value stored on beside a shape without students is not used until a shape with
- * students is saved. This is the one place
- * that decides it: the gate, the code request and check, the chooser, the welcome, the switches' counts, the staff
- * words and the reminders all go through it, through studentsRuleInForce(), which reads both as stored.
+ * Whether "Families with no active student" is in force: stored on. Students are always the portal's own (the owner's
+ * decision 1 of 2026-11-27, docs/superpowers/specs/2026-11-28-accounting-plugin-design.md section 2), so the rule no
+ * longer waits for a membership shape that names a student type, nor for any books at all (stage 5's slice P2; before
+ * it, a value stored on beside a shape without students was not used, and migration 0062 switched such a value off, so
+ * nobody's sign-in changed). This is the one place that decides it: the gate, the code request and check, the
+ * chooser, the welcome, the switches' counts, the staff words and the reminders all go through it, through
+ * studentsRuleInForce(), which reads it as stored.
  */
-export const studentsRuleApplies = (requireActiveStudents: boolean, shape: MembershipShape | null): boolean =>
-  requireActiveStudents && shapeNamesStudents(shape);
+export const studentsRuleApplies = (requireActiveStudents: boolean): boolean => requireActiveStudents;
 
-/** studentsRuleApplies() for the stored setting and shape, read in `tx` when given. */
+/** studentsRuleApplies() for the stored setting, read in `tx` when given. */
 export async function studentsRuleInForce(tx?: Tx): Promise<boolean> {
-  const [{ requireActiveStudents }, shape] = await Promise.all([getParentSettings(tx), getShape(tx)]);
-  return studentsRuleApplies(requireActiveStudents, shape);
+  return studentsRuleApplies((await getParentSettings(tx)).requireActiveStudents);
 }
 
 /**

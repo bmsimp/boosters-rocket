@@ -435,6 +435,13 @@
       "when": 1795845497116,
       "tag": "0061_plugins_on",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1795845974179,
+      "tag": "0062_students_rule_kept",
+      "breakpoints": true
     }
   ]
 }

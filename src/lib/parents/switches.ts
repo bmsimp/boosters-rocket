@@ -3,7 +3,6 @@ import { db, type Tx } from "@/lib/db/client";
 import { family, guardian, parent, parentAuthAccount, parentAuthenticator, parentAuthPasskey, parentAuthSession, parentAuthUser, parentDevice, parentSigninToken, signinCode, student } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { mailWorking } from "@/lib/mail/settings";
-import { getShape, shapeNamesStudents } from "@/lib/roster/shape";
 import type { StaffOp } from "./people";
 import { heldLink, unspentLink } from "./link-state";
 import { hasRowThatCounts, studentsRuleInForce } from "./sessions";
@@ -61,7 +60,7 @@ async function change(patch: Partial<ParentSettings>, o: StaffOp, work: (tx: Tx,
     if (level === null && !("level" in patch)) return { ok: false, errors: [LEVEL_UNREADABLE] };
     const next = { ...before, ...patch };
     // Refused before a patch that changes nothing is answered: a value stored already is refused for the same reason
-    // as one that isn't (the students rule stored on beside a shape that names no students is not in force).
+    // as one that isn't.
     const errors = await refuse?.(before, tx, level);
     if (errors) return { ok: false, errors };
     if (level !== null && (Object.keys(patch) as (keyof ParentSettings)[]).every((k) => before[k] === next[k])) return { ok: true, signinOn: before.signin };
@@ -141,28 +140,15 @@ export async function setSignins(on: boolean, o: StaffOp): Promise<SwitchResult>
   return answered(await change({ signin: true }, o, async (tx, next) => (next.welcome ? { welcomeOwed: await oweWelcomes(tx) } : {})));
 }
 
-/** Why "Families with no active student" can't be switched on, when it can't. */
-export const NO_STUDENTS_IN_SHAPE = "The membership shape doesn't say which customers are students, so this can't be used.";
-/**
- * What the settings page says when "Families with no active student" is stored on beside a shape that names no
- * students (one saved before stage 3's slice 7a, or a shape saved later without students): it is not in force
- * (studentsRuleInForce(), ./sessions.ts).
- */
-export const STUDENTS_RULE_NOT_IN_USE = "On, but not in use: the membership shape doesn't say which customers are students, so students don't affect who can sign in. It is used again once a membership shape that names students is saved.";
-
 /**
  * "Families with no active student": saved and audited, and nothing else. The gate reads it (enterableGuardianRows(),
  * ./sessions.ts) from the app's own student records, so a family with no active student stops counting at once, a
  * session already open in one is sent back on its next request, and switching it off lets them in again. No row is
- * closed or reopened. It is switched on only while the membership shape names a student type (shapeNamesStudents()):
- * only then does the portal add a student, move one or change a linked one (shapeOperations()), so only then may
- * students decide who signs in. That reads the stored shape, never QuickBooks. A shape saved later without students leaves the stored value alone: it is simply not in force
- * while the shape names no students (studentsRuleInForce(), ./sessions.ts), and is again once a shape with students
- * is saved.
+ * closed or reopened. It can always be switched on: students are always the portal's own (stage 5's slice P2), whatever
+ * the books call them, or with no books at all.
  */
 export async function setRequireStudents(on: boolean, o: StaffOp): Promise<SwitchResult> {
-  return answered(await change({ requireActiveStudents: on }, o, async () => ({}),
-    async (_before, tx) => (on && !shapeNamesStudents(await getShape(tx)) ? [NO_STUDENTS_IN_SHAPE] : null)));
+  return answered(await change({ requireActiveStudents: on }, o, async () => ({})));
 }
 
 /**
@@ -173,14 +159,6 @@ export async function setRequireStudents(on: boolean, o: StaffOp): Promise<Switc
 export async function closedForNoStudents(): Promise<number> {
   const rows = await db.select({ id: guardian.id }).from(guardian).where(and(eq(guardian.status, "disabled"), eq(guardian.disabledReason, "no_active_students")));
   return rows.length;
-}
-
-/**
- * Whether "Families with no active student" can be switched on now (setRequireStudents()): while the shape names a
- * student type, the only time the portal adds, moves or changes a linked student (shapeOperations()).
- */
-export async function studentsRuleUsable(): Promise<boolean> {
-  return shapeNamesStudents(await getShape());
 }
 
 /** How many people can sign in now by the gate's rule (a row that counts) and are not blocked, whether or not the parent door is open. */

@@ -383,7 +383,7 @@ describe("the settings of retired features", () => {
     ]);
     expect(RETIRED_SETTINGS).toEqual([]);
     expect(await clean()).toEqual(NOTHING);
-    expect((await db.select({ key: setting.key }).from(setting)).map((r) => r.key).sort()).toEqual(["parents.previous_company", "parents.settings"]);
+    expect((await db.select({ key: setting.key }).from(setting)).map((r) => r.key).sort()).toEqual(["parents.previous_company", "parents.settings", "plugins.on"]);
     expect(describeCleanup({ ...NOTHING, retiredSettings: 2 })).toBe("Removed 2 settings of retired features.");
   });
 });

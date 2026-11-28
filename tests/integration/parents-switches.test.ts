@@ -8,7 +8,7 @@ import { db } from "@/lib/db/client";
 import { eq, sql } from "drizzle-orm";
 import { auditLog, family, guardian, parent, parentAuthSession, parentAuthUser, qboConnection, setting, signinCode, student } from "@/lib/db/schema";
 import { CLOSED_PARENT_SETTINGS, getParentSettings, PARENTS_KEY, putParentSettings, readStoredSettings } from "@/lib/parents/settings";
-import { factorCounts, LEVEL_COUNT_CHANGED, LEVEL_UNREADABLE, missingForSignins, NO_STUDENTS_IN_SHAPE, peopleWithAccess, setLevel, setRequireStudents, setSignins,
+import { factorCounts, LEVEL_COUNT_CHANGED, LEVEL_UNREADABLE, missingForSignins, peopleWithAccess, setLevel, setRequireStudents, setSignins,
   setWelcome, signinCounts, studentsEffect } from "@/lib/parents/switches";
 import { resolveParentSession } from "@/lib/auth/resolve";
 import { asAppFamilyId } from "@/lib/families/ids";
@@ -186,41 +186,28 @@ describe("the parent switches", () => {
     expect((await db.select().from(parentAuthUser).where(eq(parentAuthUser.parentId, ana.id)))).toHaveLength(1);
   });
 
-  // With no student type the app holds no active student, so the setting would keep every parent out: it is never
-  // switched on then, and a shape saved without one leaves it stored but not in force (studentsRuleInForce()).
-  it("the active-students setting is refused while the shape names no students, and a shape saved without them leaves it stored but not in force", async () => {
+  // Students are always the portal's own (stage 5's slice P2): the setting is switched on, and stays in force, whatever
+  // the membership shape says, or with none at all, and a shape save never touches it.
+  it("the active-students setting works whatever the shape names, or with no shape at all, and a shape save leaves it in force", async () => {
     await seedWorkingMail(); await seedAna(); await setSignins(true, admin);
     for (const shape of [null, { kind: "flat" as const, memberTypeIds: ["M"] }, { kind: "layered" as const, familyTypeId: "F", studentTypeId: null, parentTypeId: "P" }]) {
       if (shape) await storeShape(shape);
-      expect(await setRequireStudents(true, admin)).toEqual({ ok: false, errors: [NO_STUDENTS_IN_SHAPE] });
-      expect((await getParentSettings()).requireActiveStudents).toBe(false);
+      expect(await setRequireStudents(true, admin)).toEqual({ ok: true });
+      expect(await studentsRuleInForce()).toBe(true);
+      expect(await setRequireStudents(false, admin)).toEqual({ ok: true });
+      expect(await studentsRuleInForce()).toBe(false);
     }
-    expect((await audits("settings.parents.save")).filter((r) => (r.after as Record<string, unknown>).requireActiveStudents === true)).toEqual([]);
-    // Off always works, and on works once the shape names students.
-    expect(await setRequireStudents(false, admin)).toEqual({ ok: true });
-    await storeShape();
     expect(await setRequireStudents(true, admin)).toEqual({ ok: true });
-    expect(await studentsRuleInForce()).toBe(true);
-    // A shape save never touches the parents' settings: one with students keeps the rule in force; one without leaves
-    // the stored value as it is, not in force; one with students again puts it back in force, with nothing switched.
-    // (Who it then lets in is tests/integration/parent-door.test.ts. A shape save changes no record or guardian row
-    // since stage 3's slice 9c.)
+    // A shape save never touches the parents' settings, nor whether the rule is in force. (Who it then lets in is
+    // tests/integration/parent-door.test.ts. A shape save changes no record or guardian row since stage 3's slice 9c.)
     const saved = (await audits("settings.parents.save")).length;
-    await saveShape({ kind: "layered", familyTypeId: "F", studentTypeId: "S2", parentTypeId: "P" }, { actor: admin.actor, ip: null });
-    expect(await studentsRuleInForce()).toBe(true);
-    for (const shape of [{ kind: "flat" as const, memberTypeIds: ["M"] }, { kind: "layered" as const, familyTypeId: "F", studentTypeId: null, parentTypeId: "P" }]) {
+    for (const shape of [{ kind: "flat" as const, memberTypeIds: ["M"] }, { kind: "layered" as const, familyTypeId: "F", studentTypeId: null, parentTypeId: "P" },
+      { kind: "layered" as const, familyTypeId: "F", studentTypeId: "S", parentTypeId: "P" }]) {
       await saveShape(shape, { actor: admin.actor, ip: null });
       expect(await getParentSettings()).toMatchObject({ signin: true, requireActiveStudents: true });
-      expect(await studentsRuleInForce()).toBe(false);
-      // Pressing "on" again (a stale page) is refused as when it is off, never told it is saved while not in force,
-      // and changes and records nothing.
-      expect(await setRequireStudents(true, admin)).toEqual({ ok: false, errors: [NO_STUDENTS_IN_SHAPE] });
-      expect(await getParentSettings()).toMatchObject({ requireActiveStudents: true });
+      expect(await studentsRuleInForce()).toBe(true);
     }
-    await saveShape({ kind: "layered", familyTypeId: "F", studentTypeId: "S", parentTypeId: "P" }, { actor: admin.actor, ip: null });
-    expect(await studentsRuleInForce()).toBe(true);
     expect(await audits("settings.parents.save")).toHaveLength(saved);
-    expect((await audits("settings.membership.save")).map((r) => r.after)).not.toContainEqual(expect.objectContaining({ requireActiveStudentsSwitchedOff: expect.anything() }));
   });
 
   it("counts the people who can sign in now by the gate's rule: never blocked, never of an inactive family", async () => {

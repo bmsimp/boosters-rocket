@@ -124,33 +124,38 @@ export type HereStudent = { id: string; name: string };
  * spec section 5: "A change to an unlinked family stays in the app"): nothing is sent to QuickBooks and there is no
  * balance to check. `unlinked`: the family itself has no link, so it is renamed, made inactive and given students here;
  * otherwise only `students` (active, with no link of their own) are. Offered only to staff who may change families,
- * for an active family whose own create isn't waiting on the queue; the actions check everything again.
+ * for an active family whose own create isn't waiting on the queue; the actions check everything again. `byHand`: the
+ * club keeps no books (stage 5's slice P2), so there is nothing to link and nothing is said about it: the family is
+ * renamed, made inactive and given students here, and every active student changed.
  */
-export function PortalChanges({ familyId, name, noun, unlinked, addStudents, students, rosterTag }: {
-  familyId: string; name: string; noun: "family" | "member"; unlinked: boolean; addStudents: boolean; students: HereStudent[]; rosterTag: string;
+export function PortalChanges({ familyId, name, noun, unlinked, addStudents, students, rosterTag, byHand = false }: {
+  familyId: string; name: string; noun: "family" | "member"; unlinked: boolean; addStudents: boolean; students: HereStudent[]; rosterTag: string; byHand?: boolean;
 }) {
   if (!unlinked && students.length === 0) return null;
+  const only = byHand ? undefined : "Saved in the portal only.";
   return (
-    <Card title="Change in the portal" titleId="portal-changes-h">
-      <p>{unlinked ? `This ${noun} isn't linked to QuickBooks, so changes are saved here only.`
-        : "These students aren't linked to QuickBooks, so changes to them are saved here only."}</p>
+    <Card title={byHand ? "Change the family" : "Change in the portal"} titleId="portal-changes-h">
+      {!byHand && <p>{unlinked ? `This ${noun} isn't linked to QuickBooks, so changes are saved here only.`
+        : "These students aren't linked to QuickBooks, so changes to them are saved here only."}</p>}
       {unlinked && (
-        <Drawer param="change-here" label={`Change the ${noun} ${name}`} description="Saved in the portal only.">
+        <Drawer param="change-here" label={`Change the ${noun} ${name}`} description={only}>
           <NameForm field="New name" label="Rename" pendingLabel="Renaming…" initial={name} act={renameHereAction.bind(null, rosterTag, "family", familyId)} />
           <DeactivateForm label={`Make ${name} inactive`}
-            warning={`This makes ${name} inactive${noun === "family" ? ", with its students" : ""}, and its guardians can no longer sign in. It can't be made active again, and its page goes away. Its season, forms and volunteering are kept. Nothing is sent to QuickBooks.`}
+            warning={byHand ? `This makes ${name} inactive, with its students, and its guardians can no longer sign in. It can't be made active again. Its season, forms and volunteering are kept.`
+              : `This makes ${name} inactive${noun === "family" ? ", with its students" : ""}, and its guardians can no longer sign in. It can't be made active again, and its page goes away. Its season, forms and volunteering are kept. Nothing is sent to QuickBooks.`}
             act={deactivateHereAction.bind(null, rosterTag, "family", familyId)} />
         </Drawer>
       )}
-      {unlinked && addStudents && (
-        <Drawer param="add-student-here" label="Add a student" description="Saved in the portal only.">
+      {unlinked && (addStudents || byHand) && (
+        <Drawer param="add-student-here" label="Add a student" description={only}>
           <NameForm field="The student's name" label="Add the student" pendingLabel="Adding…" act={addStudentHereAction.bind(null, rosterTag, familyId)} />
         </Drawer>
       )}
       {students.map((s) => (
-        <Drawer key={s.id} param="change-student-here" value={s.id} label={`Change the student ${s.name}`} description="Saved in the portal only.">
+        <Drawer key={s.id} param="change-student-here" value={s.id} label={`Change the student ${s.name}`} description={only}>
           <NameForm field="New name" label="Rename" pendingLabel="Renaming…" initial={s.name} act={renameHereAction.bind(null, rosterTag, "student", s.id)} />
-          <DeactivateForm label={`Make ${s.name} inactive`} warning={`${s.name} is no longer counted in the family's season. Nothing is sent to QuickBooks: they aren't linked to a customer there.`}
+          <DeactivateForm label={`Make ${s.name} inactive`} warning={byHand ? `${s.name} is no longer counted in the family's season.`
+            : `${s.name} is no longer counted in the family's season. Nothing is sent to QuickBooks: they aren't linked to a customer there.`}
             act={deactivateHereAction.bind(null, rosterTag, "student", s.id)} />
         </Drawer>
       ))}
@@ -258,12 +263,15 @@ export type MovableStudent = { id: string; name: string; blocked: string | null 
  * waiting; a student whose own create, or another change, is waiting is offered none (`blocked`, in words). The action
  * checks everything again.
  */
-export function MoveStudents({ students, families, refusedHere, rosterTag, act }: { students: MovableStudent[]; families: { id: string; name: string }[]; refusedHere: string | null;
-  rosterTag: string; act: (rosterTag: string, studentId: string, toFamilyId: string) => Promise<WriteResult> }) {
+export function MoveStudents({ students, families, refusedHere, rosterTag, act, byHand = false }: { students: MovableStudent[]; families: { id: string; name: string }[]; refusedHere: string | null;
+  rosterTag: string; act: (rosterTag: string, studentId: string, toFamilyId: string) => Promise<WriteResult>;
+  /** The club keeps no books (stage 5's slice P2): nothing is sent, and there are no invoices or buy-outs to follow. */
+  byHand?: boolean }) {
   if (students.length === 0) return null;
   return (
     <Card title="Move a student" titleId="move-students-h">
-      <p>A move takes effect here at once, and a linked student&apos;s is then sent to QuickBooks; until QuickBooks has it, the old family still sees their invoices. Completed forms and earned credit stay where they are, unfinished forms start again, places on shifts still to come are given up, and an unpaid buy-out invoice is voided.</p>
+      <p>{byHand ? "A move takes effect at once. Completed forms and earned credit stay where they are, unfinished forms start again, and places on shifts still to come are given up."
+        : "A move takes effect here at once, and a linked student's is then sent to QuickBooks; until QuickBooks has it, the old family still sees their invoices. Completed forms and earned credit stay where they are, unfinished forms start again, places on shifts still to come are given up, and an unpaid buy-out invoice is voided."}</p>
       <p className="hint">If the club asks for an active student to sign in, moving a family&apos;s last one out keeps its guardians out until it has another.</p>
       {refusedHere !== null ? <Notice tone="info" live="none">{refusedHere}</Notice>
         : families.length === 0 ? <Notice tone="info" live="none">No other family can take a student right now: there is none active, or each has a change waiting.</Notice> : students.map((s) => (
