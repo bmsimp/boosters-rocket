@@ -289,6 +289,9 @@ Not decided: Open questions, 21 to 36. Builder detail: Appendix A, Signing in.
 
 ## 7. Money, and the accounting interface
 
+*Overridden for stage 5 by `2026-11-28-accounting-plugin-design.md` (approved 2026-11-28): accounting is a plugin
+outside the core, not an interface inside it; the abilities below stay, declared by the plugin.*
+
 The owner: "We should ensure for QB that we're maintaining the ability to do all of the account updates, invoice
 creation, etc from the app and will determine what is capable for other software in the future". The lead's reading:
 "invoice creation" means what the app creates today, the buy-out invoice; staff raising other invoices is not part of
