@@ -1,13 +1,13 @@
 # Email templates — design
 
-**Status:** draft for the owner, 2026-11-28. The mock is `design/mocks/email-templates/index.html` (open it from a
-checkout). Nothing is built.
-**Asked for by:** the owner: an Admin changes the words of the emails the portal sends, from Settings, in the editor
-club messages already use.
+**Status:** approved by the owner on 2026-11-28, with his answers below (one changed: the permission is not Admin
+only). The mock is `design/mocks/email-templates/index.html` (open it from a checkout).
+**Asked for by:** the owner: staff change the words of the emails the portal sends, from Settings, in the editor club
+messages already use.
 
-Words used here. An **email** is one kind of mail the portal sends (the password reset). Its **template** is what an
-Admin edits: a subject and a body. A **field** is a value filled in at each send ({Form name}). A **fixed part** is
-something the portal always writes itself, which no Admin can change or remove (the link, the code, the security
+Words used here. An **email** is one kind of mail the portal sends (the password reset). Its **template** is what a
+staff member edits: a subject and a body. A **field** is a value filled in at each send ({Form name}). A **fixed part** is
+something the portal always writes itself, which no one can change or remove (the link, the code, the security
 sentences, "Powered by Boosters Rocket").
 
 ## 1. The emails the portal sends today
@@ -47,9 +47,9 @@ portal makes (set-up, reset, confirm, a form, a message) and the words "open thi
 how long they and links work; every sentence about what to do if the reader didn't ask (`DID_NOT_ASK`, the reset and
 change lines); `NEVER_ASKS`; attachments and the lines about them; the lists (what's due, a shift's When and Where);
 and the code emails' subjects, which carry the code. The Strict and Standard wording stays in the fixed parts, so a
-change of level never needs an Admin to rewrite anything.
+change of level never needs anyone to rewrite anything.
 
-## 2. What an Admin edits, and how fields go in
+## 2. What staff edit, and how fields go in
 
 - **The subject**, a `TextInput`, fields written in braces (`Please sign: {Form name}`). An unknown name is refused in
   a sentence naming it. The two code emails' subjects are fixed and shown as text.
@@ -66,7 +66,7 @@ change of level never needs an Admin to rewrite anything.
   keeps it, and the server refuses a body that lacks one or has it twice ("Put the reset link back in the email.").
 - The server check is `checkBody()`'s pattern in a new pure module, `src/lib/mail/template-body.ts`: an allowlist of
   nodes and marks, the email's own fields and fixed parts, the link rule of `safeHref()`, 20 KB of JSON at most.
-- **At each send** a field's value goes in as text, through `esc()` in the HTML; nothing an Admin writes is ever
+- **At each send** a field's value goes in as text, through `esc()` in the HTML; nothing staff write is ever
   HTML. A paragraph whose only field is empty for this send (no Club contact) is left out, as today.
 - **Family name** is offered only in the Forms, Volunteering and Season emails, which are about one family. The
   Sign-in emails name no family, student or person, by rule, so they have no such field.
@@ -111,9 +111,12 @@ It saves the default as the next version, so it can be undone from Earlier versi
 
 ## 6. Permission and place
 
-- A new Admin-only permission, `Settings.Emails.ReadWrite` (`ADMIN_ONLY`, words "Change the emails the portal sends").
-  The page is seen with `Settings.Club.Read`, read only, with "Only an Admin can change this." The recommendation is
-  Admin only: these mails carry sign-in links, and a reworded one is the easiest phishing there is.
+- A new permission, `Settings.Emails.ReadWrite` (words "Change the words of the emails the portal sends", area Staff
+  and club), **not** Admin-only (the owner's answer 3): an Admin holds it and a custom role, a secretary's say, may be
+  given it. Its "see" twin is `Settings.Club.Read` (`SEE_WITH` in `src/lib/permissions/words.ts`), the permission the
+  page is seen with, read only for someone without the change, with "Only someone allowed to change the emails can
+  change them." The fixed parts hold every link and every safety line, so a reworded email can't carry an address of
+  its own in the Sign-in group.
 - A Settings item `emails` in the group Club, after Messages, titled **Emails**, keywords "templates", "wording",
   "reminders", "sign-in code"; `/staff/settings/emails` (the list) and `/staff/settings/emails/[key]` (one email,
   the key one of a fixed list: anything else is `notFound()`). Rail status "Default words" or "3 changed".
@@ -132,11 +135,10 @@ It saves the default as the next version, so it can be undone from Earlier versi
 4. **Send me a test.**
 5. **Earlier versions and Use the default words,** and the start-up check with its Health line.
 
-## Open questions for the owner
+## The owner's answers (2026-11-28)
 
-1. Should the Sign-in emails be editable at all? Recommended: yes, only around their fixed parts and with no links of
-   the Admin's own.
-2. Should saving go live at once, with no draft? Recommended: yes, since Send me a test works on unsaved words.
-3. Who may change the emails? Recommended: Admins only, with everyone who can open Settings able to read them.
-4. May we add Tiptap's own Mention extension, pinned at 3.33.0, for the fields? Recommended: yes, rather than build our
-   own.
+1. The Sign-in emails are editable, only around their fixed parts, with no links of the editor's own.
+2. Saving goes live at once; no drafts.
+3. Changed: the permission is one a custom role may be given (a secretary's role), not Admin only; anyone who can open
+   Settings (`Settings.Club.Read`) can read the emails.
+4. Tiptap's Mention extension is added, `@tiptap/extension-mention` pinned exactly at 3.33.0, our Tiptap's version.
