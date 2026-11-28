@@ -1,6 +1,6 @@
 # Accounting as a plugin — design
 
-**Status:** draft; the owner answered its three questions on 2026-11-28 (section 10). Nothing is built.
+**Status:** approved by the owner on 2026-11-28, with his answers in section 10. Built in the slices of section 7.
 **Stage:** stage 5 of the app-owned families rework (`docs/superpowers/plans/2026-11-07-v1-roadmap.md`, "Not started").
 **Overrides, once built:** section 7 of `2026-11-18-app-owned-families-design.md` ("The accounting interface") and its
 stage 5 lines in sections 9 and Appendix C. Where they speak of an interface in the core, this spec puts a plugin
@@ -282,7 +282,7 @@ to stand alone, then the move, then the two screens that change.
 | P6 | **Events.** `records.events` from every core save; QuickBooks' handlers queue what the roster writes and the contact queue queue now. | The writes tripwire holds: the same requests, in the same order, from the same saves. |
 | P7 | **The move.** The code into `src/plugins/quickbooks/`, in two or three pull requests by area, the lists in `page-guards.test.ts` and AGENTS.md moved with it. | The boundary test's list is empty. Full CI green with no test changed but its imports. |
 | P8 | **The two screens.** Setup's "Your books" step with the payments choice; Integrations' Accounting kind in neutral words, with the choice while none is on; `Settings.Integrations.ReadWrite`. | A new club finishes setup without QuickBooks, either way of payments. The mock's words, at 390 and 1440. |
-| P9 | **Off and on.** `canTurnOff()`, the ConfirmDialog with the payments choice, the marks carried over, the disconnect, turning on again with the same or a different company. | Off keeps every core record and every link, and a family that paid still reads paid; on again with the same company shows the same figures. |
+| P9 | **Off and on.** `canTurnOff()`, the ConfirmDialog with the payments choice, the carry-over (each family the books last showed as paid marked paid, note "Paid in QuickBooks", one audit row of counts), the disconnect, turning on again with the same or a different company. | Off keeps every core record and every link; with payments by hand, a family that paid in QuickBooks reads paid the moment it is off; on again with the same company shows the same figures. |
 | P10 | **The documents.** AGENTS.md (the plugin rules and checklist), the area documents' paths, `PRODUCT.md`'s terms, `docs/agents/ui.md`, the first-install runbook with no accounting, `docs/conformance.md`, the roadmap. | A builder can add the next plugin from AGENTS.md alone. |
 
 P1 to P7 change nothing a club sees, with QuickBooks on. P5b, P8 and P9 are the ones the owner sees. Following the
@@ -315,5 +315,7 @@ different order for adding a family with QuickBooks on (it stays the books first
 3. "Your books" is its own setup step before First Admin, with No accounting system the default, offering QuickBooks,
    or none with the payments choice. **Yes, as recommended.**
 
-Still open, one sentence: when QuickBooks is turned off with "Track payments by hand", should every family the books
-last showed as paid be marked paid at once? **Recommended: yes, so nobody who paid reads "owed" (section 5).**
+4. When QuickBooks is turned off with "Track payments by hand", every family the books last showed as paid is marked
+   paid at once, in the turn-off's transaction (section 5). **Yes, carry over, as recommended.**
+
+He then approved the spec and the mock (2026-11-28).
