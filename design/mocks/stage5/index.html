@@ -18,7 +18,7 @@
 </head>
 <body>
 
-<p class="mock-caption"><b>Screen 1. Setup, step 4: Your books.</b> A new installation only. Choosing records the choice; the first Admin connects QuickBooks after setup, from Settings.</p>
+<p class="mock-caption"><b>Screen 1. Setup, step 4: Your books.</b> A new installation only. With No accounting system chosen, the Payments question shows under it. Choosing records the choice; the first Admin connects QuickBooks after setup, from Settings.</p>
 <main class="wrap single setup-page">
   <h1 class="page-title setup-title">Set up Boosters Rocket</h1>
   <ol class="setup-progress">
@@ -32,6 +32,12 @@
         <div class="choices">
           <label class="choice"><input type="radio" name="books" value="quickbooks"><span><b>QuickBooks Online</b><small>Families see what they owe and pay online. The first Admin connects it after setup.</small></span></label>
           <label class="choice"><input type="radio" name="books" value="none" checked><span><b>No accounting system</b><small>Families, students, forms and volunteering work on their own. Money stays with the treasurer.</small></span></label>
+        </div>
+      </fieldset>
+      <fieldset class="setting" style="--cols:1"><legend>Payments</legend><p class="hint">How the club keeps track of what families pay, without an accounting system.</p>
+        <div class="choices">
+          <label class="choice"><input type="radio" name="pay-setup" value="by-hand" checked><span><b>Track payments by hand</b><small>Staff mark a family paid, with the amount and date. Parents see paid or owed.</small></span></label>
+          <label class="choice"><input type="radio" name="pay-setup" value="none"><span><b>Don&#x27;t track payments</b><small>Payment requirements are hidden from parents and don&#x27;t count toward a step.</small></span></label>
         </div>
       </fieldset>
       <div class="stack"><button class="btn btn-lg" type="button">Next: first Admin</button></div>
@@ -61,7 +67,7 @@
 </main>
 
 <hr class="mock-rule">
-<p class="mock-caption"><b>Screen 2b. Settings, Integrations, with no accounting system.</b> A club that chose none in setup, or turned QuickBooks off. Only the Accounting kind is drawn; the others are as in 2a.</p>
+<p class="mock-caption"><b>Screen 2b. Settings, Integrations, with no accounting system.</b> A club that chose none in setup, or turned QuickBooks off. Only the Accounting kind is drawn; the others are as in 2a. The Payments choice can be changed here.</p>
 <main class="wrap single integrations-page">
   <div class="page-head settings-head"><div><h1 class="page-title">Integrations</h1><p class="lede">The accounting system, forms service, mail service and staff sign-in providers the portal works with. Open one to set it up, change it or check it.</p></div></div>
   <section class="integration-kind" aria-labelledby="kind-b-h">
@@ -70,6 +76,15 @@
     <ul class="list" aria-label="Accounting">
       <li class="list-row"><span class="list-logo"><span class="logo-tile logo-row" aria-hidden="true"><img src="../../../public/integrations/quickbooks/qb-ball.svg" alt="" width="20" height="20"></span></span><div class="list-main"><span class="list-title">QuickBooks Online</span><span class="list-meta">Shows each family its invoices with a Pay button. You connect it next.</span></div><div class="list-trail"><button class="btn btn-tonal btn-sm" type="button">Turn on QuickBooks Online</button></div></li>
     </ul>
+    <form class="box" style="margin-top: var(--s4)">
+      <fieldset class="setting" style="--cols:1"><legend>Payments</legend><p class="hint">How the club keeps track of what families pay, without an accounting system.</p>
+        <div class="choices">
+          <label class="choice"><input type="radio" name="pay-settings" value="by-hand" checked><span><b>Track payments by hand</b><small>Staff mark a family paid, with the amount and date. Parents see paid or owed.</small></span></label>
+          <label class="choice"><input type="radio" name="pay-settings" value="none"><span><b>Don&#x27;t track payments</b><small>Payment requirements are hidden from parents and don&#x27;t count toward a step.</small></span></label>
+        </div>
+      </fieldset>
+      <div class="box-foot"><button class="btn" type="button">Save the payments choice</button></div>
+    </form>
   </section>
 </main>
 
@@ -79,9 +94,34 @@
   <section class="box" aria-labelledby="off-h"><h2 id="off-h">Turn off QuickBooks Online?</h2>
     <p>Families stop seeing invoices and Pay, and the portal stops sending changes to QuickBooks. Families, students, forms and volunteering stay as they are.</p>
     <p>QuickBooks is disconnected. Its links are kept, so turning it on again with the same company picks up where it left off.</p>
+    <fieldset class="setting" style="--cols:1"><legend>Payments</legend><p class="hint">How the club keeps track of what families pay, without an accounting system.</p>
+        <div class="choices">
+          <label class="choice"><input type="radio" name="pay-off" value="by-hand" checked><span><b>Track payments by hand</b><small>Staff mark a family paid, with the amount and date. Parents see paid or owed.</small></span></label>
+          <label class="choice"><input type="radio" name="pay-off" value="none"><span><b>Don&#x27;t track payments</b><small>Payment requirements are hidden from parents and don&#x27;t count toward a step.</small></span></label>
+        </div>
+      </fieldset>
+    <p class="hint">With payments by hand, families QuickBooks shows as paid are marked paid.</p>
     <div class="box-foot"><button class="btn btn-danger btn-lg" type="button">Turn off QuickBooks Online</button><button class="btn btn-text btn-lg" type="button">Keep it on</button></div>
   </section>
   <div class="notice notice-due" role="status"><div class="notice-body"><span class="notice-word">Not yet</span> 2 changes are still being sent to QuickBooks. Wait for them, or give them up on Reconciliation, then try again.</div></div>
+</main>
+
+<hr class="mock-rule">
+<p class="mock-caption"><b>Screen 4. Mark paid, a Drawer from a payment requirement's progress page.</b> Only while payments are tracked by hand. Its own address (<code>?mark=family-id</code>); the server checks the family again. The note is for staff: parents read only "Paid".</p>
+<main class="wrap single">
+  <div class="box sheet-drawer" role="dialog" aria-labelledby="mark-h" aria-describedby="mark-d" style="max-width: 480px">
+    <div class="sheet-head"><h2 id="mark-h">Mark the Rivera family paid</h2><a class="icon-btn sheet-close" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg><span class="visually-hidden">Close</span></a></div>
+    <div class="sheet-body">
+      <p id="mark-d" class="sheet-desc">Spring trip deposit, $150 owed. The family sees it as paid at once.</p>
+      <form class="stack">
+        <div class="field"><label class="field-label" for="mark-amount">Amount received</label><input type="text" inputmode="decimal" id="mark-amount" value="150.00"></div>
+        <div class="field"><label class="field-label" for="mark-date">Date paid</label><input type="date" id="mark-date" value="2026-11-28"></div>
+        <div class="field"><label class="field-label" for="mark-note">Note for staff (optional)</label><input type="text" id="mark-note" value="Check 1042, at the booster table"></div>
+        <p><button type="submit" class="btn btn-lg">Mark paid</button></p>
+      </form>
+    </div>
+  </div>
+  <p class="mock-caption" style="padding: 0; margin-inline: 0">Many at once: select families in the progress table, then <b>Mark 6 families paid</b> opens the same Drawer with one amount and date for all. A mark is undone from the family's row with <b>Undo this payment</b>, behind a confirm dialog.</p>
 </main>
 
 </body>

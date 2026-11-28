@@ -1,11 +1,12 @@
 # Accounting as a plugin — design
 
-**Status:** draft for the owner. Nothing is built.
+**Status:** draft; the owner answered its three questions on 2026-11-28 (section 10). Nothing is built.
 **Stage:** stage 5 of the app-owned families rework (`docs/superpowers/plans/2026-11-07-v1-roadmap.md`, "Not started").
 **Overrides, once built:** section 7 of `2026-11-18-app-owned-families-design.md` ("The accounting interface") and its
 stage 5 lines in sections 9 and Appendix C. Where they speak of an interface in the core, this spec puts a plugin
 outside it. The abilities that section lists stay, declared by the plugin.
-**Mock:** `design/mocks/stage5/index.html` (setup's books step, and Settings → Integrations).
+**Mock:** `design/mocks/stage5/index.html` (setup's books step, Settings → Integrations, the payments choice,
+and Mark paid).
 
 Words used here. The **core** is the portal with nothing added: families, students, guardians, sign-ins, seasons,
 forms, volunteering, messages and backups. A **plugin** is a folder of code that adds to the core and that the core
@@ -22,12 +23,15 @@ never imports. A plugin is **installed** when its code is in the build, and **on
 3. **New screens and copy are provider-neutral.** "Your books", `{accounting.name}`, `{accounting.customerNoun}`.
    No new screen hard-codes QuickBooks.
 
+His answers of 2026-11-28 (section 10): turning QuickBooks off keeps its links and figures; with no accounting
+system the Admin chooses to track payments by hand or not at all (section 2a); "Your books" is a setup step of its own.
+
 ## 2. What the core owns
 
 | The core owns | A plugin adds |
 |---|---|
 | Families, students, guardians, memberships, sign-ins, contact details | Links from those records to the books |
-| Seasons and steps; the form, volunteering and checklist kinds | The payment kind; the buy-out offer on volunteering |
+| Seasons and steps; the form, volunteering and checklist kinds; the payment kind with payments by hand | Payments met by the books; the buy-out offer on volunteering |
 | Forms and signing (Documenso), volunteering, messages, backups | Money: figures, invoices, Pay, Balances |
 | Staff, roles, the audit log, Health, Settings | Writes to the books and their queue; Reconciliation |
 | The club's records lock, the worker, mail | Its own jobs, Health lines, Settings page, permissions |
@@ -36,23 +40,54 @@ Documenso, mail and staff sign-in stay core. They are on the Integrations page, 
 
 ### With no accounting at all
 
-**Setup.** A new step, "Your books", comes after Outgoing mail and before First Admin (mock, screen 1). It asks one
-thing: QuickBooks Online, or No accounting system. Choosing only records the choice. Connecting needs an Admin who is
-signed in, so it happens after setup, from Settings, as today. "No accounting system" is the default.
+**Setup.** A new step, "Your books", comes after Outgoing mail and before First Admin (mock, screen 1). It asks:
+QuickBooks Online, or No accounting system, the default. No accounting system then asks the payments choice
+(section 2a). Choosing only records the choice. Connecting needs an Admin who is signed in, so it happens after
+setup, from Settings, as today.
 
 **Staff see** the Families pages working on the portal's own records: add a family, add a student, rename, move a
 student, make inactive, add and remove guardians. Each saves at once, with its audit row, and sends nothing. They do
 not see Balances, Reconciliation, Accounting links, the Money group or its hub, the staff home's QuickBooks warning,
-or Health's QuickBooks lines. A season step offers forms, volunteering and checklist items. A volunteer requirement
-has no buy-out offer.
+or Health's QuickBooks lines. A season step offers forms, volunteering and checklist items, and payments when the
+club tracks them by hand. A volunteer requirement has no buy-out offer.
 
 **Parents see** Home with their students, forms, season and volunteering, Family, Messages, and their details. There
-is no Payments tab, no money box and no "as of" line. Their saved phone or address says "Saved.", nothing more.
+is no Payments tab, no money box and no "as of" line; a payment tracked by hand shows on the season as paid or
+owed. Their saved phone or address says "Saved.", nothing more.
 They never read "The club hasn't connected your payments": that line is for a family not yet linked while
 accounting is on.
 
 **Families with no active student** (the Admin's sign-in rule, today in force only while the membership shape names
 a student type) is always available, since students are always the portal's own.
+
+### 2a. Payments with no accounting system
+
+The owner, 2026-11-28: with no accounting system, the Admin chooses one of two settings, `payments.byHand`:
+
+- **Track payments by hand.** A payment requirement keeps counting toward its step. Staff mark a family (or, for a
+  per-student requirement, a student) paid with an amount, a date and an optional note, in a Drawer from the
+  requirement's progress page (mock, screen 4), one at a time or many at once with the table's selection. Each mark
+  is audited (`season.payment.marked`, and `season.payment.unmarked` to undo one). Parents see "Paid" or the amount
+  still owed on the season, never the note. The note is a staff note, like a waiver's reason: it is seeded in
+  `seedTwoFamilies()` and the isolation test fails a parent page that shows it.
+- **Don't track payments.** Payment requirements are hidden from parents and count neither for nor against a step.
+  Staff see each as "Not tracked: no accounting system is on". No payment requirement can be added.
+
+How it fits what came before. The app-owned families spec has the owner's "just manually maintain membership"
+(section 4): families kept by hand, without the books. This is the same idea for payments, and it reuses the v1
+spec's checklist item, which staff already tick for a family or student (`requirement_progress`, `docs/agents/seasons.md`).
+A mark by hand is that tick with an amount, a date and a note. It needs no new kind and no plugin: it is core.
+
+**The amount owed.** A payment requirement tracked by hand has an optional amount, set by staff on the requirement
+("$150 per student"). With one, parents read "$150 owed" until marked; without one, "Not paid yet". A mark records
+the amount received; a mark below the amount owed still counts as paid (no part payments: the treasurer decides).
+
+**Where the choice appears.** In setup, under No accounting system (mock, screen 1). In the turn-off dialog, which
+can't be confirmed without it (mock, screen 3). On Integrations, under Accounting while none is on, where an Admin can
+change it later (mock, screen 2b). It is held by `Settings.Integrations.ReadWrite`.
+
+**With accounting on**, payment requirements are met by the books as today and the Drawer is not offered. Marks made
+by hand are kept and still count: a payment the club recorded stays recorded.
 
 ## 3. The plugin boundary
 
@@ -110,7 +145,7 @@ core gives it, and draws nothing when no plugin fills it.
 | `staff.menu` | Staff menu and hubs | Balances, Reconciliation, Accounting links |
 | `staff.homeLines` | Staff home | "QuickBooks needs attention" |
 | `staff.familyPanels(familyId)` | A family's page | Its link, what the books hold, the write forms |
-| `seasons.kinds` | Season steps | The payment kind |
+| `seasons.paymentSource` | The payment kind | Invoices for the requirement's product, in place of marks by hand |
 | `volunteer.creditSources` | Volunteering counts | Paid buy-outs ("Paid instead"); kept while off (section 5) |
 | `volunteer.requirementOffers` | A volunteer requirement | The buy-out offer |
 | `families.howToAdd` | Add a family, add a student | Today's flow: the books first, then the record |
@@ -164,7 +199,7 @@ manifest's abilities and nouns are the line a second package would follow.
 | Contact queue (parent code) | `src/lib/parents/contact-queue.ts` | The plugin's `parent/`, an event handler. Still parent code: in `PARENT_FACING_LIB`. |
 | Money cache, Balances, the money run | `src/lib/money/` | The plugin's `money/`. `cents.ts` and `formatMoney()` go to the core: a money figure is drawn one way. |
 | Buy-outs and their daily check | `src/lib/buyouts/` | The plugin's `buyouts/`, through `volunteer.creditSources` and `requirementOffers`. |
-| The payment kind | In `src/lib/seasons/kinds.ts` | The plugin's `seasons/`, through `seasons.kinds`. |
+| The payment kind | In `src/lib/seasons/kinds.ts` | Core, with marks by hand; the plugin's `seasons/` meets it from the books through `seasons.paymentSource`. |
 | Mapping screen, import, differences | `src/lib/accounting/`, `/staff/links` | The plugin's `links/`. The page stays at `/staff/links`. |
 | `accounting_link`, `accounting_link_ended` | `src/lib/families/links.ts` | The plugin's tables. The core has no column that points at the books. |
 | Reconciliation, customers with no family | `/staff/reconciliation`, `src/lib/roster/no-family.ts` | The plugin's pages. |
@@ -202,8 +237,12 @@ Turning off, in one transaction with its audit row (`plugins.accounting.off`): d
 (the relay's acknowledgement first, where it applies), sets `plugins.on`, and stops the jobs. It keeps every link,
 the money cache, every buy-out and the queue's history. The core's records are not touched.
 
-**While off.** A payment requirement is shown to staff as "Paused while no accounting system is on". Parents do not
-see it, and it counts neither for nor against a step. A paid buy-out still counts toward volunteering: it is a
+The turn-off dialog asks the payments choice (section 2a) and can't be confirmed without one. With "Track payments
+by hand", every family the books showed as having paid a requirement, as last read, is marked paid in the same
+transaction (amount and date from the figures, the note "Paid in QuickBooks"), with one audit row of counts, so
+nobody who paid reads "owed" the next morning.
+
+**While off.** Payment requirements follow the Admin's choice (section 2a). A paid buy-out still counts toward volunteering: it is a
 settled fact in the plugin's own table, read with no call to the books, the one source kept while off. An invoiced
 buy-out not yet paid stays owed in the books, and the portal stops showing it.
 
@@ -238,14 +277,15 @@ to stand alone, then the move, then the two screens that change.
 | P2 | **Core records stand alone.** `RECORDS_LOCK` in the core; the shape out of core decisions; Families with no active student always offered; add a family and a student with no books (`families.howToAdd`, core default). | With accounting off, staff can run the roster by hand, every action audited. With QuickBooks on, adding goes the way it goes today. |
 | P3 | **Staff slots.** `staff.menu`, `staff.homeLines`, `staff.familyPanels`, jobs and Health from the manifest. Balances, Reconciliation and Accounting links fill them. | Off: those pages answer `notFound()`, the menu and hubs leave them out, the jobs don't run. On: as today. |
 | P4 | **Parent slots.** `parent.tabs`, `parent.homeCards`, `parent.contactSaved`; the "as of" line goes with the money box. | Off: no money anywhere a parent looks. The isolation and parent e2e runs pass on and off. |
-| P5 | **Seasons and volunteering.** The payment kind, the buy-out offer and paid buy-outs' credit through their slots; the paused state. | Off: no payment kind offered; an existing one paused and left out of progress; paid buy-outs still count. |
+| P5 | **Seasons and volunteering.** The payment kind's source, the buy-out offer and paid buy-outs' credit through their slots. | Off: no buy-out offered; paid buy-outs still count. On: the payment kind as today. |
+| P5b | **Payments by hand.** `payments.byHand`; the requirement's optional amount; the Mark paid Drawer, its bulk form and its undo, audited; parents' paid or owed; "Don't track payments" hiding them. | Both settings, a parent of family A never sees B's mark or any note, and a mark counts toward the step. |
 | P6 | **Events.** `records.events` from every core save; QuickBooks' handlers queue what the roster writes and the contact queue queue now. | The writes tripwire holds: the same requests, in the same order, from the same saves. |
 | P7 | **The move.** The code into `src/plugins/quickbooks/`, in two or three pull requests by area, the lists in `page-guards.test.ts` and AGENTS.md moved with it. | The boundary test's list is empty. Full CI green with no test changed but its imports. |
-| P8 | **The two screens.** Setup's "Your books" step; Integrations' Accounting kind in neutral words, with "No accounting system" as a row; `Settings.Integrations.ReadWrite`. | A new club finishes setup without QuickBooks. The mock's words, at 390 and 1440. |
-| P9 | **Off and on.** `canTurnOff()`, the ConfirmDialog, the disconnect, turning on again with the same or a different company. | Off keeps every core record and every link; on again with the same company shows the same figures. |
+| P8 | **The two screens.** Setup's "Your books" step with the payments choice; Integrations' Accounting kind in neutral words, with the choice while none is on; `Settings.Integrations.ReadWrite`. | A new club finishes setup without QuickBooks, either way of payments. The mock's words, at 390 and 1440. |
+| P9 | **Off and on.** `canTurnOff()`, the ConfirmDialog with the payments choice, the marks carried over, the disconnect, turning on again with the same or a different company. | Off keeps every core record and every link, and a family that paid still reads paid; on again with the same company shows the same figures. |
 | P10 | **The documents.** AGENTS.md (the plugin rules and checklist), the area documents' paths, `PRODUCT.md`'s terms, `docs/agents/ui.md`, the first-install runbook with no accounting, `docs/conformance.md`, the roadmap. | A builder can add the next plugin from AGENTS.md alone. |
 
-P1 to P7 change nothing a club sees, with QuickBooks on. P8 and P9 are the ones the owner sees. Following the
+P1 to P7 change nothing a club sees, with QuickBooks on. P5b, P8 and P9 are the ones the owner sees. Following the
 owner's "fewer, bigger PRs", P1 to P2, P3 to P5 and P8 to P9 may each go as one pull request.
 
 ## 8. Tests that hold it
@@ -266,11 +306,14 @@ A second accounting package; plugins of other kinds (the slot list makes room, n
 time or from outside the release; more than one accounting system on at once; staff raising other invoices; a
 different order for adding a family with QuickBooks on (it stays the books first).
 
-## 10. Open questions for the owner
+## 10. The owner's answers (2026-11-28)
 
-1. Should turning QuickBooks off keep its links and figures, so turning it on again with the same company picks up
-   where it left off? **Recommended: yes, keep them; a different company still runs today's switch and clear.**
-2. While no accounting system is on, should a payment requirement be paused (hidden from parents, left out of a
-   step's progress) rather than deleted? **Recommended: paused; it comes back as it was when accounting is on again.**
-3. Should a club choose its books in setup, as a step before First Admin, with connecting left for Settings
-   afterwards? **Recommended: yes, as in the mock, with "No accounting system" the default.**
+1. Turning QuickBooks off keeps its links and figures; turning it on again with the same company picks up where it
+   left off. A different company runs today's switch and clear. **Yes, as recommended.**
+2. With no accounting system, the Admin chooses "Track payments by hand" or "Don't track payments" (section 2a), in
+   setup and when accounting is turned off. **Changed from the recommendation**, which was to pause them.
+3. "Your books" is its own setup step before First Admin, with No accounting system the default, offering QuickBooks,
+   or none with the payments choice. **Yes, as recommended.**
+
+Still open, one sentence: when QuickBooks is turned off with "Track payments by hand", should every family the books
+last showed as paid be marked paid at once? **Recommended: yes, so nobody who paid reads "owed" (section 5).**
