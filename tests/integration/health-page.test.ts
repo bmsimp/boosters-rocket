@@ -72,7 +72,7 @@ describe("the health page", () => {
   it("on a portal that was just installed, says in plain words what isn't set up yet", async () => {
     await admin();
     const lines = await healthReport(NOW);
-    expect(lines.map((l) => l.key)).toEqual(["database", "worker", "cleanup", "quickbooks", "money", "buyout_check", "mail", "volunteer_reminders", "forms", "parents", "breach_check", "due_reminders", "backup", "version"]);
+    expect(lines.map((l) => l.key)).toEqual(["database", "worker", "cleanup", "quickbooks", "money", "buyout_check", "mail", "volunteer_reminders", "forms", "parents", "breach_check", "due_reminders", "backup", "backup_agent", "version"]);
     expect(line(lines, "forms")).toMatchObject({ state: "off", word: "Not set up" });
     expect(line(lines, "database")).toMatchObject({ state: "ok", word: "Working" });
     expect(line(lines, "worker")).toMatchObject({ state: "attention", times: [{ label: "Last woke", at: null }] });
@@ -85,11 +85,12 @@ describe("the health page", () => {
     expect(line(lines, "breach_check")).toMatchObject({ state: "off", word: "Not used yet", times: [{ label: "Last answered", at: null }, { label: "Last failed", at: null }] });
     expect(line(lines, "due_reminders")).toMatchObject({ state: "off", word: "Off", fix: { href: "/staff/settings/parents" } });
     expect(line(lines, "backup")).toMatchObject({ state: "attention", word: "None recorded" });
-    expect(line(lines, "backup").says).toMatch(/scripts\/backup\.sh/);
+    expect(line(lines, "backup").says).toMatch(/Back up now on Settings, Backups/);
+    expect(line(lines, "backup_agent")).toMatchObject({ state: "attention", word: "Not answering", fix: { href: "/staff/settings/backups" } });
     expect(line(lines, "version").says).toBe(`Running ${BUILD_VERSION}.`);
 
     const html = await renderPage(HealthPage);
-    expect(html).toContain("3 things need attention.");
+    expect(html).toContain("4 things need attention.");
     expect(html).toContain("The worker has never checked in.");
     expect(html).toContain("Last woke: never");
     expect(html).toContain(`Running ${BUILD_VERSION}.`);
@@ -106,6 +107,8 @@ describe("the health page", () => {
     // Welcome emails on too, which the reminders before a due date need (their line is off without them).
     await seedParentSettings({ ...SIGNINS_ON, welcome: true });
     await put(BACKUP_KEY, { at: ago(3_600_000), file: "booster-rocket-20261115T030000Z.dump", bytes: 3 * 1024 * 1024 });
+    // The backup service on the server answering (tests/integration/backups-staff.test.ts has its line's other states).
+    await put("backup.agent", { at: new Date().toISOString(), version: 1, freeBytes: 40 * 1024 ** 3, nextAt: null, schedule: "03:00", keep: 14, zone: "UTC" });
     // Forms set up, and Documenso answered a call (tests/integration/forms-staff.test.ts has the line's other states).
     await connectForms({ origin: "https://sign.club.example", token: "api_made_up_for_the_health_page" });
     await noteApiOk();

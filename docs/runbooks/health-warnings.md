@@ -336,15 +336,36 @@ the server; the password itself never does.
 
 ## Last backup
 
-- **"None recorded."** No backup has reached the portal. `docker compose ps` should show `backup` as `Up`, and
-  `docker compose logs backup` its nightly lines. Take one now: `docker compose run --rm backup --now`
-  ([backups](backups.md)).
+- **"None recorded."** No backup has reached the portal. Take one now: **Back up now** on Settings, Backups, or
+  `docker compose run --rm backup --now`. If the backup service line says it isn't answering, see
+  [Backup service](#backup-service) ([backups](backups.md)).
 - **"Needs attention"**, "The last backup is more than 2 days old." The nightly backup stopped working:
   `docker compose logs backup` has the reason (exit code 3, a database didn't answer; 2, the folder or a setting is
   wrong; 4, the backup failed and nothing was kept). If the host's own scheduler runs the backups, check its log.
 - **"Documenso's database wasn't part of this backup"**: the backup ran without Documenso's database. With this
   installation that means `BR_DOCUMENSO_DB_NAME` was changed, or the backup ran from somewhere else; with forms signed in
   Documenso, put it back so both are backed up.
+
+## Backup service
+
+- **"Not answering"**, "hasn't answered yet": the installation runs a `backup` service older than Settings, Backups,
+  or none. Update it ([updates](updates.md)); the new `deploy/compose.yml` runs `scripts/backup-agent.sh`.
+- **"Not answering"**, "has stopped answering": `docker compose ps` should show `backup` as `Up`, and `docker compose
+  logs backup` says why not (a database that doesn't answer, a folder that can't be written). `docker compose up -d
+  backup` starts it again.
+- **"Low on space"**: less than 2 GB is free where the backups are kept (`BACKUP_DIR`). Free some space on the
+  machine, or keep fewer backups (Settings, Backups, **Change the schedule**).
+
+## Off-site copies
+
+Shown only while off-site copies are on ([backups](backups.md#off-site-copies)).
+
+- **"None yet"**: they were just turned on; the next backup is copied.
+- **"Needs attention"**, "The last copy to off-site storage failed": press **Test the connection** on Settings,
+  Backups. Its answer says whether the storage refused the key, has no such bucket or couldn't be reached. A new
+  key is entered with **Change off-site storage**.
+- **"Needs attention"**, "No backup has been copied off-site for more than 2 days": the backups themselves stopped
+  (the lines above), or the worker isn't running (its line).
 
 ## Version
 

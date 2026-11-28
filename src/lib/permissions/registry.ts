@@ -35,12 +35,13 @@ export const PERMISSIONS = [
   "Messages.Post.ReadWrite",       // see every message staff posted and its mail results, post a message to every family, and edit one's own (club messages; not Admin-only)
   "Messages.Delete.ReadWrite",     // admin-only: delete any message outright, every version's content and files, with no undo
   "Settings.Messages.ReadWrite",   // admin-only: allow messages to be emailed to families, or stop it
+  "Admin.Backups.ReadWrite",       // admin-only: see the backups on the server, make one, download one, restore one, and set up off-site copies; a backup holds every family's records, staff-only notes, the audit log and sealed secrets
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
 
 /** Never grantable through a custom role; only the built-in Admin holds them. */
-export const ADMIN_ONLY: readonly Permission[] = ["Admin.Roles.ReadWrite", "Staff.Users.ReadWrite", "Settings.SignIn.ReadWrite", "Settings.Mail.ReadWrite", "Settings.QuickBooks.ReadWrite", "Settings.Parents.ReadWrite", "Audit.Log.Read", "Admin.Health.Read", "Settings.Forms.ReadWrite", "Parents.SignInReset.ReadWrite", "Messages.Delete.ReadWrite", "Settings.Messages.ReadWrite"];
+export const ADMIN_ONLY: readonly Permission[] = ["Admin.Roles.ReadWrite", "Staff.Users.ReadWrite", "Settings.SignIn.ReadWrite", "Settings.Mail.ReadWrite", "Settings.QuickBooks.ReadWrite", "Settings.Parents.ReadWrite", "Audit.Log.Read", "Admin.Health.Read", "Settings.Forms.ReadWrite", "Parents.SignInReset.ReadWrite", "Messages.Delete.ReadWrite", "Settings.Messages.ReadWrite", "Admin.Backups.ReadWrite"];
 
 export const GRANTABLE: readonly Permission[] = PERMISSIONS.filter((p) => !ADMIN_ONLY.includes(p));
 
